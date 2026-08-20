@@ -177,9 +177,30 @@ export const CharterDeltaSchema = z
     ]),
     routed_to: z.enum(["remediator", "clarification", "human"]),
     summary: z.string(),
+    /**
+     * The subsystem this delta was mined in. `delta_id` is OPAQUE — the assembler
+     * mints it with a content-derived discriminator when one subsystem carries two
+     * deltas on the same channel pair — so the originating node is carried as its
+     * own field and never recovered by parsing the id.
+     */
+    node_id: z.string().optional(),
+    /** Present when `node_id` is linked into the mined goal graph. */
+    goal_node_id: z.string().optional(),
   })
   .strict();
 export type CharterDelta = z.infer<typeof CharterDeltaSchema>;
+
+/**
+ * A delta as the Phase-C ASSEMBLER emits it — `node_id` required. The identity
+ * fields are optional on `CharterDelta` because the type also describes a delta
+ * mid-assembly (the gate operates on one before the register exists), but every
+ * delta that reaches the persisted register carries its node, so the register
+ * declares this narrower shape and consumers read the field instead of parsing
+ * `delta_id`.
+ */
+export interface StampedCharterDelta extends CharterDelta {
+  node_id: string;
+}
 
 /**
  * One node of a kind's self-organized leveled teleology. The lane organizes its

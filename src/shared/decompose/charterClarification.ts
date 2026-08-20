@@ -49,7 +49,18 @@ export type ClarificationAnswersSubmission = z.infer<
   typeof ClarificationAnswersSubmissionSchema
 >;
 
-/** A routed delta joined to its subsystem + (optional) goal node — the loop input. */
+/**
+ * A routed delta joined to its subsystem + (optional) goal node — the loop input.
+ *
+ * `node_id` is the delta's OWN node identity as Phase C stamped it, supplied by the
+ * caller that performed the join: `delta.delta_id` is an OPAQUE identity here and is
+ * never split to recover a node. Phase C mints it with a content-derived
+ * discriminator when one subsystem carries two deltas on the same channel pair, so
+ * its segment structure carries no recoverable node id — anything keyed on parsing
+ * it silently misjoins the delta to the wrong subsystem's `members`. Both joins this
+ * module performs (`members` here, and the goal graph via `goal_node_id`) stay keyed
+ * on that same node_id space.
+ */
 export interface ClarificationDeltaInput {
   delta: CharterDelta;
   node_id: string;
@@ -129,10 +140,17 @@ export function assembleClarificationRegister(
   );
   const gated = deps.applyRiskGate(questions);
   const split = deps.splitByAttention(gated, attention);
-  // Carry any prior answers onto the re-derived questions — an answered question
-  // stays in `asked` with its `answer` set (so the loop obligation is satisfied and
-  // the queue drains). A user who tapped out mid-loop leaves the rest unanswered;
-  // the next assemble with the interruptible flag would leave-open them.
+  // Carry any prior answers onto the re-derived questions, matched by `request_id`
+  // — an answered question keeps its `answer` across re-assembly, so a round never
+  // loses a decision already recorded. Applied to BOTH sides of the split: a
+  // question the attention dial moves from `asked` to `banked` (or back) between
+  // rounds must not drop its answer for having changed buckets.
+  //
+  // A user who taps out mid-loop leaves the rest unanswered. Nothing is synthesized
+  // here: the caller decides when a submission exists at all, and on that submission
+  // defaults every still-unanswered question it previously asked to `leave_open`
+  // (a first-class decision) so the queue drains and the loop terminates in one
+  // round-trip. Absent a submission the map is empty and every question stays open.
   const applyAnswer = (
     r: CharterClarificationRequest,
   ): CharterClarificationRequest => {

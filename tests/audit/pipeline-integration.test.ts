@@ -24,6 +24,7 @@ import {
 
 import type { AuditTask } from "../../src/audit/types.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
 import { decideNextStep, PRIORITY } from "../../src/audit/orchestrator/nextStep.js";
 import { EXECUTOR_REGISTRY, isHostDelegationExecutor } from "../../src/audit/orchestrator/executors.js";
@@ -110,7 +111,9 @@ function makePostDesignAssessmentBundle(opts: PostDesignAssessmentOptions = {}):
     // obligations these tests target are reachable. Only consulted after the
     // checkpoint is present (charter extraction sits between them).
     charter_register: {
-      schema_version: "charter-register/v2",
+      // The CONSTANT, never a literal: this fixture was the tree's only hardcoded
+      // copy, so a register-schema bump broke it here and nowhere else.
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
       generated_at: "2026-01-01T00:00:00.000Z",
       target: "charter",
       ceiling: { rung: "shallow" },

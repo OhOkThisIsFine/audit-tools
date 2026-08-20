@@ -1,24 +1,37 @@
 import type { Finding } from "../types.js";
 import type {
   CharterSubsystem,
-  CharterDelta,
   ChannelDisagreement,
   GoalGraph,
   Ceiling,
   TriangulatedTelos,
 } from "audit-tools/shared";
+import type { StampedCharterDelta } from "../../shared/types/charter.js";
 
 /**
- * The stamped register schema version. v2 = design resolution 4 (2026-08-05):
- * channel-pure estimator kinds (stated/structural/revealed; `inferred` renamed),
- * per-kind teleologies with file scopes on each subsystem, the miner's
- * `triangulated` teloses + tool-computed `disagreement` density. Read policy is
- * DISCARD (regenerable analysis state): a v1/unstamped register read under v2
- * semantics would silently misroute every persisted `inferred` value, and the
- * content-keyed staleness DAG cannot see a code-taxonomy change — so a stale
- * register degrades to absent and the extraction obligation rebuilds it.
+ * The stamped register schema version.
+ *
+ * v3 = the deltas carry their own identity: every delta is a
+ * {@link StampedCharterDelta} with an explicit `node_id` (and `goal_node_id`
+ * when linked), so no consumer recovers a subsystem by parsing `delta_id`. A v2
+ * register predates the stamping, and its deltas would every one of them be
+ * refused by the clarification join — a silent collapse to zero questions where
+ * v2 semantics joined them all. The version key is what makes that impossible:
+ * the change is in the code taxonomy, which the content-keyed staleness DAG
+ * cannot see, so only the stamp can force re-derivation.
+ *
+ * v2 = design resolution 4 (2026-08-05): channel-pure estimator kinds
+ * (stated/structural/revealed; `inferred` renamed), per-kind teleologies with
+ * file scopes on each subsystem, the miner's `triangulated` teloses +
+ * tool-computed `disagreement` density.
+ *
+ * Read policy is DISCARD (regenerable analysis state): a register stamped with
+ * any earlier version degrades to ABSENT and the extraction obligation rebuilds
+ * it — its upstream inputs all still exist, and the rebuild is what stamps the
+ * deltas. The clarification join's own refusal of an unstamped delta stays as
+ * defense-in-depth for anything that reaches it anyway.
  */
-export const CHARTER_REGISTER_SCHEMA_VERSION = "charter-register/v2";
+export const CHARTER_REGISTER_SCHEMA_VERSION = "charter-register/v3";
 
 /**
  * The `charter_register.json` artifact — the charter LAYER of the conceptual
@@ -70,8 +83,12 @@ export interface CharterRegister {
   subsystems: CharterSubsystem[];
   /** The goal DAG (blast-radius substrate). Empty until the miner supplies one. */
   goal_graph: GoalGraph;
-  /** The routed + gated channel-pair deltas across all subsystems. */
-  deltas: CharterDelta[];
+  /**
+   * The routed + gated channel-pair deltas across all subsystems, each carrying
+   * its own `node_id` (and `goal_node_id` when linked) as an explicit field — the
+   * assembler stamps them, so no consumer parses `delta_id` to recover a node.
+   */
+  deltas: StampedCharterDelta[];
   /** The deltas surfaced as Finding leads for synthesis. */
   findings: Finding[];
   /**

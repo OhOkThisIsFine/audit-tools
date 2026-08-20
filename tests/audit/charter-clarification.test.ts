@@ -24,14 +24,20 @@ import {
 import type { RepoManifest } from "../../src/audit/types.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
-import type {
-  GoalGraph,
-  Ceiling,
-  ClarificationAttention,
-  CharterDelta,
-  CharterClarificationRequest,
-  IntentCheckpoint,
+import {
+  assembleClarificationRegister,
+  discardOnSchemaVersionMismatch,
+  groundDesignFindings,
+  type GoalGraph,
+  type Ceiling,
+  type ClarificationAttention,
+  type CharterDelta,
+  type CharterClarificationAnswer,
+  type CharterClarificationRequest,
+  type IntentCheckpoint,
 } from "audit-tools/shared";
+import type { StampedCharterDelta } from "../../src/shared/types/charter.js";
+import type { CharterClarificationRegister } from "../../src/audit/types/charterClarification.js";
 
 function manifestWithFiles(paths: string[]): RepoManifest {
   return {
@@ -305,8 +311,11 @@ function checkpoint(
 }
 
 function charterRegister(
-  deltas: CharterDelta[] = [],
+  deltas: StampedCharterDelta[] = [],
   goal_graph: GoalGraph = { nodes: [], edges: [] },
+  subsystems: Array<{ node_id: string; members: string[] }> = [
+    { node_id: "n1", members: ["src/a.ts", "src/b.ts"] },
+  ],
 ): CharterRegister {
   return {
     schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
@@ -314,7 +323,7 @@ function charterRegister(
     target: "charter",
     ceiling: { rung: "deep" },
     subsystems: deltas.length
-      ? [{ node_id: "n1", members: ["src/a.ts", "src/b.ts"], charters: [], teleologies: {} }]
+      ? subsystems.map((s) => ({ ...s, charters: [], teleologies: {} }))
       : [],
     goal_graph,
     deltas,
@@ -359,9 +368,9 @@ describe("D3 runCharterClarificationExecutor — omit path", () => {
 });
 
 describe("D3 runCharterClarificationExecutor — run path", () => {
-  const deltas: CharterDelta[] = [
-    { delta_id: "n1:structural-revealed", pair: ["structural", "revealed"], kind: "architecture_betrayal", routed_to: "clarification", summary: "docs vs model" },
-    { delta_id: "n1:stated-true", pair: ["stated", "true"], kind: "wrong_goal", routed_to: "human", summary: "wrong goal" },
+  const deltas: StampedCharterDelta[] = [
+    { delta_id: "n1:structural-revealed", node_id: "n1", pair: ["structural", "revealed"], kind: "architecture_betrayal", routed_to: "clarification", summary: "docs vs model" },
+    { delta_id: "n1:stated-true", node_id: "n1", pair: ["stated", "true"], kind: "wrong_goal", routed_to: "human", summary: "wrong goal" },
   ];
 
   test("attention 0 (autonomous) banks every question as a finding, none interactive", () => {
@@ -396,8 +405,8 @@ describe("D3 runCharterClarificationExecutor — run path", () => {
   test("lower attention threshold allows lower-blast deltas to reach clarification", () => {
     // Test with only architecture_betrayal (lower blast than wrong_goal) to ensure
     // it can pass through the risk gate with lower blast radius.
-    const lowerBlastDeltas: CharterDelta[] = [
-      { delta_id: "n1:structural-revealed", pair: ["structural", "revealed"], kind: "architecture_betrayal", routed_to: "clarification", summary: "docs vs model" },
+    const lowerBlastDeltas: StampedCharterDelta[] = [
+      { delta_id: "n1:structural-revealed", node_id: "n1", pair: ["structural", "revealed"], kind: "architecture_betrayal", routed_to: "clarification", summary: "docs vs model" },
     ];
     const first = runCharterClarificationExecutor({
       intent_checkpoint: checkpoint({ rung: "deep", attention: 1 }),
@@ -414,7 +423,7 @@ describe("D3 runCharterClarificationExecutor — run path", () => {
     const run = runCharterClarificationExecutor({
       intent_checkpoint: checkpoint({ rung: "deep", attention: "all" }),
       charter_register: charterRegister([
-        { delta_id: "n1:stated-revealed", pair: ["stated", "revealed"], kind: "says_does_drift", routed_to: "remediator", summary: "drift" },
+        { delta_id: "n1:stated-revealed", node_id: "n1", pair: ["stated", "revealed"], kind: "says_does_drift", routed_to: "remediator", summary: "drift" },
       ]),
       repo_manifest: manifestWithFiles(["src/a.ts", "src/b.ts"]),
     });
@@ -422,5 +431,405 @@ describe("D3 runCharterClarificationExecutor — run path", () => {
     expect(reg.asked).toHaveLength(0);
     expect(reg.banked).toHaveLength(0);
     expect(reg.validation_issues.some((i) => i.includes("remediator"))).toBe(true);
+  });
+});
+
+// ── D3: node identity, answer ingestion, and the loop-termination guarantee ───
+//
+// The ingestion path carries the guarantee that an ANSWERED clarification round
+// actually terminates: a submission drains the interactive queue in one
+// round-trip. These pin that guarantee, the identity both joins are keyed on, and
+// the three documented failure modes — none of which had any coverage before.
+
+/** A low-blast (intrinsic tier 1) question-sourcing delta — stays `interactive`. */
+function askableDelta(
+  delta_id: string,
+  node_id: string,
+  summary: string,
+): StampedCharterDelta {
+  return {
+    delta_id,
+    node_id,
+    pair: ["stated", "structural"],
+    kind: "doc_rot",
+    routed_to: "clarification",
+    summary,
+  };
+}
+
+function allRequests(reg: CharterClarificationRegister): CharterClarificationRequest[] {
+  return [...reg.asked, ...reg.banked];
+}
+
+function requestById(
+  reg: CharterClarificationRegister,
+  request_id: string,
+): CharterClarificationRequest | undefined {
+  return allRequests(reg).find((r) => r.request_id === request_id);
+}
+
+function askedQuestion(
+  request_id: string,
+  delta_id: string,
+): CharterClarificationRequest {
+  return {
+    request_id,
+    delta_id,
+    node_id: "unit:alpha",
+    pair: ["stated", "structural"],
+    question: "q",
+    value: { blast_radius: 1, cascade_count: 1 },
+    disposition: "interactive",
+  };
+}
+
+function priorRegister(
+  asked: CharterClarificationRequest[],
+): CharterClarificationRegister {
+  return {
+    generated_at: "2026-01-01T00:00:00.000Z",
+    target: "charter_clarification",
+    ceiling: { rung: "deep" },
+    attention: "all",
+    asked,
+    banked: [],
+    findings: [],
+    validation_issues: [],
+  };
+}
+
+describe("D3 node identity is READ from the delta, never parsed from delta_id", () => {
+  test("a colon-bearing discriminator in delta_id does not disturb the subsystem join", () => {
+    // The assembler appends a content-derived discriminator when one subsystem
+    // mines two deltas on the same channel pair, so delta_id is opaque: slicing it
+    // at the last colon would yield "unit:alpha:stated-structural", a node no
+    // subsystem carries.
+    const run = runCharterClarificationExecutor({
+      intent_checkpoint: checkpoint({ rung: "deep", attention: 0 }),
+      charter_register: charterRegister(
+        [askableDelta("unit:alpha:stated-structural:9f2a1c7d", "unit:alpha", "docs vs layout")],
+        { nodes: [], edges: [] },
+        [
+          { node_id: "unit:alpha", members: ["src/a.ts"] },
+          { node_id: "unit:beta", members: ["src/b.ts"] },
+        ],
+      ),
+      repo_manifest: manifestWithFiles(["src/a.ts", "src/b.ts"]),
+    });
+    const reg = run.updated.charter_clarification!;
+    expect(reg.banked).toHaveLength(1);
+    expect(reg.banked[0].node_id).toBe("unit:alpha");
+    expect(reg.findings[0].affected_files.map((f) => f.path)).toEqual(["src/a.ts"]);
+  });
+
+  test("a delta_id whose parsed prefix names a DIFFERENT live subsystem still joins by the stamped field", () => {
+    // The sharp case: a last-colon slice recovers "unit:beta", a REAL subsystem, so
+    // the delta would silently carry the wrong members onto its Finding rather than
+    // merely failing to join.
+    const run = runCharterClarificationExecutor({
+      intent_checkpoint: checkpoint({ rung: "deep", attention: 0 }),
+      charter_register: charterRegister(
+        [askableDelta("unit:beta:stated-structural", "unit:alpha", "docs vs layout")],
+        { nodes: [], edges: [] },
+        [
+          { node_id: "unit:alpha", members: ["src/a.ts"] },
+          { node_id: "unit:beta", members: ["src/b.ts"] },
+        ],
+      ),
+      repo_manifest: manifestWithFiles(["src/a.ts", "src/b.ts"]),
+    });
+    const reg = run.updated.charter_clarification!;
+    expect(reg.banked[0].node_id).toBe("unit:alpha");
+    expect(reg.findings[0].affected_files.map((f) => f.path)).toEqual(["src/a.ts"]);
+  });
+
+  // The goal link is the PRODUCER's decision. Both tests below separate "read the
+  // stamped field" from "look the node up in the graph", which a fixture whose
+  // goal_node_id equals its node_id cannot do — there, a consumer that re-derived
+  // the link locally would agree with one that read it and stay green.
+  test("the stamped goal link wins even when it differs from the delta's node_id", () => {
+    // "unit:alpha" is IN the graph but serves nothing (blast 0); the stamped link
+    // "leaf" reaches 2 parents. Re-deriving from node_id would yield the intrinsic
+    // tier of 1 instead of 2.
+    const goal_graph: GoalGraph = {
+      nodes: [
+        { node_id: "unit:alpha", premise_height: 0, statement: "unlinked" },
+        { node_id: "leaf", premise_height: 2, statement: "leaf" },
+        { node_id: "mid", premise_height: 1, statement: "mid" },
+        { node_id: "telos", premise_height: 0, statement: "telos" },
+      ],
+      edges: [
+        { from: "leaf", to: "mid" },
+        { from: "mid", to: "telos" },
+      ],
+    };
+    const run = runCharterClarificationExecutor({
+      intent_checkpoint: checkpoint({ rung: "deep", attention: 0 }),
+      charter_register: charterRegister(
+        [
+          {
+            ...askableDelta("unit:alpha:stated-structural:9f2a1c7d", "unit:alpha", "docs vs layout"),
+            goal_node_id: "leaf",
+          },
+        ],
+        goal_graph,
+        [{ node_id: "unit:alpha", members: ["src/a.ts"] }],
+      ),
+      repo_manifest: manifestWithFiles(["src/a.ts"]),
+    });
+    expect(run.updated.charter_clarification!.banked[0].value.blast_radius).toBe(2);
+  });
+
+  test("an ABSENT stamped goal link is NOT re-derived from the graph", () => {
+    // The producer decides linkage: it stamps goal_node_id only for a subsystem it
+    // linked. Here "unit:alpha" IS a graph node reaching 2 parents, but the delta
+    // carries no goal link — so the blast radius must stay at the delta kind's
+    // intrinsic tier of 1. A consumer that looked the node up anyway would say 2.
+    const goal_graph: GoalGraph = {
+      nodes: [
+        { node_id: "unit:alpha", premise_height: 2, statement: "leaf" },
+        { node_id: "mid", premise_height: 1, statement: "mid" },
+        { node_id: "telos", premise_height: 0, statement: "telos" },
+      ],
+      edges: [
+        { from: "unit:alpha", to: "mid" },
+        { from: "mid", to: "telos" },
+      ],
+    };
+    const run = runCharterClarificationExecutor({
+      intent_checkpoint: checkpoint({ rung: "deep", attention: 0 }),
+      charter_register: charterRegister(
+        [askableDelta("unit:alpha:stated-structural:9f2a1c7d", "unit:alpha", "docs vs layout")],
+        goal_graph,
+        [{ node_id: "unit:alpha", members: ["src/a.ts"] }],
+      ),
+      repo_manifest: manifestWithFiles(["src/a.ts"]),
+    });
+    const banked = run.updated.charter_clarification!.banked[0];
+    expect(banked.value.blast_radius).toBe(1);
+  });
+
+  test("a stamped node_id matching no subsystem is recorded, not silently emptied", () => {
+    // The field-shaped version of the same failure: the id is well-formed, so the
+    // question is asked — but it cites no files, which reads as a finding about
+    // nothing unless the mismatch is said out loud.
+    const run = runCharterClarificationExecutor({
+      intent_checkpoint: checkpoint({ rung: "deep", attention: 0 }),
+      charter_register: charterRegister(
+        [askableDelta("unit:ghost:stated-structural", "unit:ghost", "docs vs layout")],
+        { nodes: [], edges: [] },
+        [{ node_id: "unit:alpha", members: ["src/a.ts"] }],
+      ),
+      repo_manifest: manifestWithFiles(["src/a.ts"]),
+    });
+    const reg = run.updated.charter_clarification!;
+    expect(reg.banked).toHaveLength(1);
+    expect(reg.findings[0].affected_files).toEqual([]);
+    expect(
+      reg.validation_issues.some(
+        (i) => i.includes("unit:ghost") && i.includes("no members"),
+      ),
+    ).toBe(true);
+    // second net: a finding citing nothing is marked ungrounded, not admitted.
+    expect(reg.findings[0].grounding?.status).toBe("ungrounded");
+  });
+
+  test("a register stamped with a pre-stamping schema version is DISCARDED, not read", () => {
+    // The stamping is a code-taxonomy change the content-keyed staleness DAG cannot
+    // see. Without the version bump a v2 register on disk keeps validating and every
+    // one of its unstamped deltas is refused — zero questions where v2 semantics
+    // joined them all, and nothing forces the re-derivation that would fix it.
+    const legacy = { ...charterRegister(), schema_version: "charter-register/v2" };
+    expect(
+      discardOnSchemaVersionMismatch(legacy, CHARTER_REGISTER_SCHEMA_VERSION),
+    ).toBeUndefined();
+    expect(
+      discardOnSchemaVersionMismatch(charterRegister(), CHARTER_REGISTER_SCHEMA_VERSION),
+    ).toBeDefined();
+  });
+
+  test("a delta carrying no node_id is refused with a validation issue, never parsed", () => {
+    // Only reachable from an artifact no schema validated (charter_register.json is
+    // read as plain JSON). A question joined to a GUESSED subsystem is worse than a
+    // question not asked, so the delta is skipped and the refusal is said out loud.
+    const unstamped = {
+      delta_id: "unit:alpha:stated-structural",
+      pair: ["stated", "structural"],
+      kind: "doc_rot",
+      routed_to: "clarification",
+      summary: "docs vs layout",
+    } as CharterDelta as StampedCharterDelta;
+    const run = runCharterClarificationExecutor({
+      intent_checkpoint: checkpoint({ rung: "deep", attention: 0 }),
+      charter_register: charterRegister([unstamped], { nodes: [], edges: [] }, [
+        { node_id: "unit:alpha", members: ["src/a.ts"] },
+      ]),
+      repo_manifest: manifestWithFiles(["src/a.ts"]),
+    });
+    const reg = run.updated.charter_clarification!;
+    expect(reg.asked).toHaveLength(0);
+    expect(reg.banked).toHaveLength(0);
+    expect(reg.findings).toHaveLength(0);
+    expect(reg.validation_issues.some((i) => i.includes("carries no node_id"))).toBe(true);
+  });
+});
+
+describe("D3 an answers submission drains the interactive queue (loop termination)", () => {
+  const deltas = [
+    askableDelta("unit:alpha:d1", "unit:alpha", "first seam"),
+    askableDelta("unit:alpha:d2", "unit:alpha", "second seam"),
+  ];
+  const subsystems = [{ node_id: "unit:alpha", members: ["src/a.ts"] }];
+  const prior = priorRegister([
+    askedQuestion("unit:alpha:d1:q", "unit:alpha:d1"),
+    askedQuestion("unit:alpha:d2:q", "unit:alpha:d2"),
+  ]);
+
+  function runWithAnswers(
+    answers: Array<{ request_id: string; answer: CharterClarificationAnswer }>,
+  ): CharterClarificationRegister {
+    return runCharterClarificationExecutor(
+      {
+        intent_checkpoint: checkpoint({ rung: "deep", attention: "all" }),
+        charter_register: charterRegister(deltas, { nodes: [], edges: [] }, subsystems),
+        repo_manifest: manifestWithFiles(["src/a.ts"]),
+        charter_clarification: prior,
+      },
+      { answers },
+    ).updated.charter_clarification!;
+  }
+
+  test("an answered question carries the submitted answer verbatim", () => {
+    const reg = runWithAnswers([{ request_id: "unit:alpha:d1:q", answer: "rewrite_both" }]);
+    expect(requestById(reg, "unit:alpha:d1:q")?.answer).toBe("rewrite_both");
+  });
+
+  test("a previously-asked question left unanswered comes back as leave_open", () => {
+    // The interruptible-loop rule: a user who taps out leaves the rest open, and
+    // `leave_open` is a first-class decision — so the queue DRAINS in one
+    // round-trip instead of re-asking forever.
+    const reg = runWithAnswers([{ request_id: "unit:alpha:d1:q", answer: "rewrite_both" }]);
+    expect(requestById(reg, "unit:alpha:d2:q")?.answer).toBe("leave_open");
+    expect(allRequests(reg).every((r) => r.answer !== undefined)).toBe(true);
+  });
+
+  test("an answer for a request_id absent from the asked set neither throws nor corrupts a live answer", () => {
+    // A stale answer from a prior round. OBSERVED behavior, pinned as-is: the
+    // orphan is stored in the prior-answer map, matches no re-derived question, and
+    // is silently discarded — no validation note names it. Whether it SHOULD be
+    // noted is an open triage question this test deliberately does not prejudge.
+    const reg = runWithAnswers([
+      { request_id: "unit:ghost:d9:q", answer: "this_side_wins" },
+      { request_id: "unit:alpha:d1:q", answer: "that_side_wins" },
+    ]);
+    expect(requestById(reg, "unit:alpha:d1:q")?.answer).toBe("that_side_wins");
+    expect(reg.validation_issues).toEqual([]);
+  });
+
+  test("with NO submission, no answer is synthesized onto any question", () => {
+    // The boundary the leave_open fill must not cross: auto-closing a question on
+    // the FIRST pass, before the host could answer, is a worse regression than
+    // never terminating.
+    const run = runCharterClarificationExecutor({
+      intent_checkpoint: checkpoint({ rung: "deep", attention: "all" }),
+      charter_register: charterRegister(deltas, { nodes: [], edges: [] }, subsystems),
+      repo_manifest: manifestWithFiles(["src/a.ts"]),
+      charter_clarification: prior,
+    });
+    const reg = run.updated.charter_clarification!;
+    expect(reg.asked.length).toBeGreaterThan(0);
+    expect(allRequests(reg).every((r) => r.answer === undefined)).toBe(true);
+  });
+});
+
+describe("assembleClarificationRegister carries prior answers onto asked AND banked", () => {
+  test("a prior answer survives re-assembly in whichever bucket the request lands in", () => {
+    // Between rounds the attention dial can move a question from asked to banked;
+    // an answer already recorded must not be lost for having changed buckets.
+    const inputs = [
+      {
+        delta: askableDelta("unit:alpha:d1", "unit:alpha", "first seam"),
+        node_id: "unit:alpha",
+        members: ["src/a.ts"],
+      },
+      {
+        delta: askableDelta("unit:alpha:d2", "unit:alpha", "second seam"),
+        node_id: "unit:alpha",
+        members: ["src/a.ts"],
+      },
+    ];
+    const priorAnswers = new Map<string, CharterClarificationRequest["answer"]>([
+      ["unit:alpha:d1:q", "this_side_wins"],
+      ["unit:alpha:d2:q", "that_side_wins"],
+    ]);
+    // attention 1 => exactly one question is asked, the other banks.
+    const assembled = assembleClarificationRegister(
+      inputs,
+      { nodes: [], edges: [] },
+      1,
+      { partitionDeltasToQuestions, applyRiskGate, splitByAttention },
+      priorAnswers,
+    );
+    expect(assembled.asked).toHaveLength(1);
+    expect(assembled.banked).toHaveLength(1);
+    expect(assembled.asked[0].answer).toBe(priorAnswers.get(assembled.asked[0].request_id));
+    expect(assembled.banked[0].answer).toBe(priorAnswers.get(assembled.banked[0].request_id));
+    expect(assembled.asked[0].answer).toBeDefined();
+    expect(assembled.banked[0].answer).toBeDefined();
+  });
+
+  test("an injected dep's exception propagates — this boundary does no runtime validation", () => {
+    // The D1/D2 primitives arrive by injection with only structural typing as a
+    // guard; a caller supplying a misbehaving deps object is not caught here.
+    expect(() =>
+      assembleClarificationRegister(
+        [
+          {
+            delta: askableDelta("unit:alpha:d1", "unit:alpha", "first seam"),
+            node_id: "unit:alpha",
+            members: ["src/a.ts"],
+          },
+        ],
+        { nodes: [], edges: [] },
+        "all",
+        {
+          partitionDeltasToQuestions,
+          applyRiskGate: () => {
+            throw new Error("deps blew up");
+          },
+          splitByAttention,
+        },
+      ),
+    ).toThrow(/deps blew up/);
+  });
+});
+
+describe("D3 grounded findings are assigned verbatim", () => {
+  test("the executor performs no grounding check of its own", () => {
+    // groundDesignFindings owns the verdict; a regression there must surface here
+    // rather than be masked by a local filter.
+    const manifest = manifestWithFiles(["src/a.ts"]);
+    const deltas = [askableDelta("unit:alpha:d1", "unit:alpha", "first seam")];
+    const members = ["src/gone.ts"];
+    const run = runCharterClarificationExecutor({
+      intent_checkpoint: checkpoint({ rung: "deep", attention: 0 }),
+      charter_register: charterRegister(deltas, { nodes: [], edges: [] }, [
+        { node_id: "unit:alpha", members },
+      ]),
+      repo_manifest: manifest,
+    });
+    const expected = groundDesignFindings(
+      assembleClarificationRegister(
+        [{ delta: deltas[0], node_id: "unit:alpha", members }],
+        { nodes: [], edges: [] },
+        0,
+        { partitionDeltasToQuestions, applyRiskGate, splitByAttention },
+      ).findings,
+      manifest,
+    );
+    const findings = run.updated.charter_clarification!.findings;
+    expect(findings).toEqual(expected);
+    // the ungrounded finding is NOT filtered out locally.
+    expect(findings[0].grounding?.status).toBe("ungrounded");
   });
 });

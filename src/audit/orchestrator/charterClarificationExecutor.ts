@@ -32,34 +32,65 @@ export function resolveClarificationAttention(
 
 /**
  * Join the Phase-C charter register's routed deltas to their subsystem members +
- * (optional) goal node, producing the loop input. A delta's goal node is its
- * `node_id` when that id appears in the goal graph — the subsystem is linked to a
- * goal — otherwise absent (the blast-radius primitive falls back to the delta
- * kind's intrinsic tier).
+ * (optional) goal node, producing the loop input.
+ *
+ * Both joins take the PRODUCER's own decision off the wire: `node_id` and
+ * `goal_node_id` are explicit fields the assembler stamps, so `delta_id` is opaque
+ * here and is never split to recover a node (INV-CCI-NO-DELTA-ID-PARSING). The
+ * assembler mints it with a content-derived discriminator when a subsystem carries
+ * two deltas on one channel pair, so its segment structure holds no recoverable
+ * node id — parsing it would silently join the delta to the wrong subsystem's
+ * members, which ride onto the emitted Finding's affected_files.
+ *
+ * `deltas` is typed `StampedCharterDelta[]`, so an unstamped delta can only arrive
+ * from an artifact no schema validated (`charter_register.json` is read as plain
+ * JSON). That delta is REFUSED with a validation issue rather than guessed at: a
+ * question joined to the wrong subsystem is worse than a question not asked.
  */
-function clarificationInputs(bundle: ArtifactBundle): ClarificationDeltaInput[] {
+function clarificationInputs(bundle: ArtifactBundle): {
+  inputs: ClarificationDeltaInput[];
+  validation_issues: string[];
+} {
   const register = bundle.charter_register;
-  if (!register || register.status === "omitted") return [];
+  if (!register || register.status === "omitted") {
+    return { inputs: [], validation_issues: [] };
+  }
   const membersByNode = new Map<string, string[]>();
   for (const sub of register.subsystems) {
     membersByNode.set(sub.node_id, sub.members);
   }
-  const goalNodeIds = new Set(register.goal_graph.nodes.map((n) => n.node_id));
   const inputs: ClarificationDeltaInput[] = [];
+  const validation_issues: string[] = [];
   for (const delta of register.deltas) {
-    // A delta_id is `${node_id}:${ka}-${kb}` (Phase C assembly); the node id is the
-    // segment before the last `:`. Fall back to the whole id if unsplittable.
-    const node_id = delta.delta_id.includes(":")
-      ? delta.delta_id.slice(0, delta.delta_id.lastIndexOf(":"))
-      : delta.delta_id;
+    // typeof, not `=== undefined`: the field is required by the type, and this
+    // guard exists precisely for data that never passed through it.
+    if (typeof delta.node_id !== "string" || delta.node_id.length === 0) {
+      validation_issues.push(
+        `delta "${delta.delta_id}" carries no node_id — skipped; its subsystem cannot be ` +
+          `recovered from the delta id, which is opaque (regenerate charter_register.json)`,
+      );
+      continue;
+    }
+    // A well-formed node_id that matches no subsystem is the same failure wearing
+    // the right shape: the question still gets asked, but with an empty
+    // affected_files, so it reads as a finding about nothing. Say so — the delta is
+    // kept (the question may still be worth asking), and groundDesignFindings marks
+    // the resulting Finding ungrounded as the second net.
+    const members = membersByNode.get(delta.node_id);
+    if (members === undefined) {
+      validation_issues.push(
+        `delta "${delta.delta_id}" names subsystem "${delta.node_id}", which the register ` +
+          `carries no members for — its question is kept but cites no files`,
+      );
+    }
     inputs.push({
       delta,
-      node_id,
-      members: membersByNode.get(node_id) ?? [],
-      goal_node_id: goalNodeIds.has(node_id) ? node_id : undefined,
+      node_id: delta.node_id,
+      members: members ?? [],
+      goal_node_id: delta.goal_node_id,
     });
   }
-  return inputs;
+  return { inputs, validation_issues };
 }
 
 function omittedRegister(
@@ -130,8 +161,9 @@ export function runCharterClarificationExecutor(
     }
   }
 
+  const { inputs, validation_issues: inputIssues } = clarificationInputs(bundle);
   const assembled = assembleClarificationRegister(
-    clarificationInputs(bundle),
+    inputs,
     register.goal_graph,
     attention,
     { partitionDeltasToQuestions, applyRiskGate, splitByAttention },
@@ -147,8 +179,21 @@ export function runCharterClarificationExecutor(
     asked: assembled.asked,
     banked: assembled.banked,
     findings,
-    validation_issues: assembled.validation_issues,
+    // Refusals from the join come first: a delta that never became a question is
+    // context for the queue that follows, not a footnote to it.
+    validation_issues: [...inputIssues, ...assembled.validation_issues],
   };
+  // Surface each note's MESSAGE, not just a count — mirrors the charter-extraction
+  // pass's gate-drop summary. A refused delta (no node_id, or a node no subsystem
+  // carries) is a QUESTION THAT WILL NEVER BE ASKED; behind a bare "N note(s)" the
+  // operator cannot tell that from a routine remediator-routed skip, and would have
+  // to open charter_clarification.json to find out. The messages are bounded
+  // one-liners, so listing them is cheap.
+  const noteSummary =
+    clarification.validation_issues.length > 0
+      ? `, ${clarification.validation_issues.length} note(s):\n` +
+        clarification.validation_issues.map((m) => `  - ${m}`).join("\n")
+      : ".";
   return {
     updated: { ...bundle, charter_clarification: clarification },
     artifacts_written: ["charter_clarification.json"],
@@ -156,8 +201,6 @@ export function runCharterClarificationExecutor(
       `Charter clarification complete: ${clarification.asked.length} interactive question(s) ` +
       `(attention ${String(attention)}), ${clarification.banked.length} banked → ` +
       `${clarification.findings.length} finding(s)` +
-      (clarification.validation_issues.length > 0
-        ? `, ${clarification.validation_issues.length} note(s).`
-        : "."),
+      noteSummary,
   };
 }
