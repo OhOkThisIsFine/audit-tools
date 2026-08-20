@@ -14,6 +14,21 @@ import type {
 import { FindingSchema, FindingThemeSchema } from "audit-tools/shared";
 export type { Finding };
 
+// `Evidence` is a brand-new export of `src/shared/types/remediationOutcome.ts`
+// (CDC-25/CDC-28), not yet re-exported through the `audit-tools/shared` barrel
+// (`src/shared/index.ts` — outside this module's file_scope and this work
+// item's allowed_files). Imported by its real relative path rather than
+// through the barrel; both resolve the same source file, and
+// `check:depgraph`'s `shared-imports-no-orchestrator` rule only forbids the
+// opposite direction (`src/shared` importing `src/remediate`), so a
+// `src/remediate` module reaching down into `src/shared` this way is exactly
+// the allowed direction.
+import type { Evidence } from "../../shared/types/remediationOutcome.js";
+// Local usage (RemediationItemState.disposition_override below) alongside the
+// existing re-export-only statement further down this file, which does not by
+// itself bring the name into this module's local scope.
+import type { PerFindingDisposition } from "./disposition.js";
+
 export const RemediationBlockSchema = z
   .object({
     block_id: z.string(),
@@ -389,4 +404,41 @@ export interface RemediationItemState {
    * the cap is hit) instead of re-dispatching the same worker indefinitely.
    */
   incomplete_coverage_attempts?: number;
+  /**
+   * CDC-25/CDC-26 — SOURCE-SIDE SHAPE. The per-finding verification-evidence
+   * triple (file/line/mechanism) a producing module RECORDS onto this item at
+   * its OWN phase (INV-COVERAGE's "evidence producer" half) before the single
+   * run-terminal `runClosePhase` PERSISTS it (INV-ISC-EVIDENCE-EMITTED). A
+   * runtime data flow through this already-existing state item, not a
+   * build-phase dependency: no cross-phase artifact token is minted for it.
+   * This field lives here — inside item-status-partition-and-close's own
+   * file_scope — and is therefore owned BY SCOPE, not by a clause 1(c)
+   * declaration (that channel is only for a file outside every module's
+   * file_scope, as `src/shared/types/remediationOutcome.ts` needed one for the
+   * matching widened record shape). No other module edits this file.
+   */
+  evidence?: Evidence;
+  /**
+   * CDC-25 — which module recorded {@link evidence} (and, where set,
+   * {@link disposition_override}) for this finding. Carried byte-exact into the
+   * emitted outcome record's `recorded_by_module` (the ATTRIBUTION ROUND-TRIP)
+   * so the 26 INV-COVERAGE joins' condition (3) can still tell which module
+   * closed which id — the writer must never re-derive this or drop it.
+   */
+  recorded_by_module?: string;
+  /**
+   * CDC-25 — a producing module's own-phase determination that this finding's
+   * true disposition is `verified_already_fixed` or `refuted` rather than the
+   * disposition ordinarily derived from {@link status} alone.
+   * `RemediationItemStatus` stays a closed 12-member enum with no
+   * `verified_already_fixed`/`refuted` values of its own; the two new
+   * `PerFindingDisposition` members are reached ONLY through this explicit
+   * override (see `resolveDisposition` in `itemStatus.ts`), and only honoured
+   * by the writer when this item's {@link status} is terminal and its
+   * {@link evidence} triple is complete (INV-ISC-EVIDENCE-EMITTED) — an
+   * incomplete triple makes the writer refuse the override and fall back to a
+   * non-terminal, force-closed outcome instead of a green close on assertion
+   * alone.
+   */
+  disposition_override?: PerFindingDisposition;
 }

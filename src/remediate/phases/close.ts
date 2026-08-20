@@ -47,12 +47,23 @@ import { intakePaths, type IntakeSourceManifest } from "../intake.js";
 import { isAuditFindingsReport } from "./plan.js";
 import {
   dispositionToOutcomeStatus,
-  isInProgressStatus,
   isSkipStatus,
+  isTerminalStatus,
   isUnsuccessfulEndStatus,
   isVerifiedCompleteStatus,
-  statusToDisposition,
+  requiresVerificationEvidence,
+  resolveDisposition,
 } from "../state/itemStatus.js";
+// Brand-new exports of `src/shared/types/remediationOutcome.ts` (CDC-25/
+// CDC-28), not yet re-exported through the `audit-tools/shared` barrel
+// (outside this module's file_scope and this work item's allowed_files) — see
+// the identical note in `src/remediate/state/types.ts`.
+import {
+  isCompleteEvidence,
+  mechanismContradictsOutcome,
+  missingEvidenceParts,
+  type Evidence,
+} from "../../shared/types/remediationOutcome.js";
 
 // Derived from the single source so the key list can never drift from the
 // RemediationOutcomeStatus contract (A6).
@@ -60,7 +71,16 @@ const OUTCOME_KEYS: RemediationOutcomeStatus[] = [
   ...RemediationOutcomeStatusSchema.options,
 ];
 
-/** Retry-oriented final status per outcome (see RemediationOutcomeFinalStatus). */
+/**
+ * Retry-oriented final status per outcome (see RemediationOutcomeFinalStatus).
+ * `verified_already_fixed` (CDC-25) joins `resolved`/`verified_no_change`
+ * under `fixed` — the code was already correct at HEAD, requiring no diff, the
+ * same shape as a no-change fix. `refuted` joins `inappropriate` under
+ * `skipped` — investigation determined the finding is not a real problem, so
+ * like a deemed-inappropriate finding it needs no retry; the substantive "why"
+ * for both new members lives in the outcome's `evidence` triple, not in this
+ * coarse four-value retry bucket.
+ */
 const FINAL_STATUS_BY_OUTCOME: Record<
   RemediationOutcomeStatus,
   RemediationOutcomeFinalStatus
@@ -70,6 +90,8 @@ const FINAL_STATUS_BY_OUTCOME: Record<
   inappropriate: "skipped",
   ignored: "ignored",
   blocked: "failed",
+  verified_already_fixed: "fixed",
+  refuted: "skipped",
 };
 
 // Skipped and ignored outcomes must always carry a non-empty reason in the
@@ -137,17 +159,57 @@ export function buildRemediationOutcomesReport(
   const outcomes: RemediationOutcome[] = [];
   const closeReason = closingStatusReason(closingResult);
   for (const item of Object.values(state.items ?? {})) {
-    // Derive the outcome from the single status→disposition→outcome authority.
-    // An in-progress status means the run was force-closed while the item was
-    // still mid-flight: record it as a failed (`blocked`) outcome — never drop
-    // it — and preserve the original state so a retry sees where it stood.
+    // Derive the outcome from the single status→disposition→outcome
+    // authority. A non-terminal status — in-progress, `blocked`, or an
+    // unanswered `needs_clarification` — means the run was force-closed while
+    // the item was still non-terminal: record it as a failed (`blocked`)
+    // outcome — never drop it — and preserve the original state so a retry
+    // sees where it stood (every non-terminal status, not only the five
+    // in-progress ones — needs_clarification included).
     let outcome: RemediationOutcomeStatus;
     let originalState: RemediationItemState["status"] | undefined;
-    if (isInProgressStatus(item.status)) {
+    let evidence: Evidence | undefined;
+    let recordedByModule: string | undefined;
+    let evidenceRefusalReason: string | undefined;
+    if (!isTerminalStatus(item.status)) {
       outcome = "blocked";
       originalState = item.status;
     } else {
-      outcome = dispositionToOutcomeStatus(statusToDisposition(item.status));
+      const disposition = resolveDisposition(item.status, item.disposition_override);
+      if (requiresVerificationEvidence(disposition)) {
+        // INV-ISC-EVIDENCE-EMITTED — the writer-side backstop. REFUSE a
+        // `verified_already_fixed`/`refuted` terminal disposition whose
+        // evidence triple is incomplete, or whose complete triple's mechanism
+        // CONTRADICTS the disposition it is meant to establish (RED
+        // condition (4)'s mechanism-contradiction leg, the W4 witness) —
+        // record a non-terminal `blocked` outcome naming the missing or
+        // contradicting part instead of a green close on the audit's
+        // assertion alone.
+        const missing = missingEvidenceParts(item.evidence);
+        if (missing.length > 0 || !isCompleteEvidence(item.evidence)) {
+          outcome = "blocked";
+          evidenceRefusalReason = `incomplete verification evidence for disposition '${disposition}' (missing: ${missing.join(", ")})`;
+        } else {
+          const candidateOutcome = dispositionToOutcomeStatus(disposition);
+          if (mechanismContradictsOutcome(candidateOutcome, item.evidence.mechanism)) {
+            outcome = "blocked";
+            evidenceRefusalReason = `evidence mechanism '${item.evidence.mechanism}' contradicts disposition '${disposition}'`;
+          } else {
+            outcome = candidateOutcome;
+            evidence = item.evidence;
+            recordedByModule = item.recorded_by_module;
+          }
+        }
+      } else {
+        outcome = dispositionToOutcomeStatus(disposition);
+        // Evidence is optional decoration for the original five dispositions,
+        // but when a module DID record it, round-trip it byte-exact (the
+        // ATTRIBUTION ROUND-TRIP) rather than silently dropping it.
+        if (isCompleteEvidence(item.evidence)) {
+          evidence = item.evidence;
+          recordedByModule = item.recorded_by_module;
+        }
+      }
     }
     const finding = findingsById.get(item.finding_id);
     const fileExts = [
@@ -158,13 +220,21 @@ export function buildRemediationOutcomesReport(
       ),
     ].sort();
     const durationMs = durationBetweenMs(item.started_at, item.completed_at);
-    const isNonResolved = outcome !== "resolved" && outcome !== "verified_no_change";
-    let reason = isNonResolved ? item.failure_reason : undefined;
-    if (originalState) {
+    const isSuccessfulOutcome =
+      outcome === "resolved" ||
+      outcome === "verified_no_change" ||
+      outcome === "verified_already_fixed" ||
+      outcome === "refuted";
+    let reason = !isSuccessfulOutcome ? item.failure_reason : undefined;
+    if (evidenceRefusalReason) {
+      reason = `INV-ISC-EVIDENCE-EMITTED refusal: ${evidenceRefusalReason}.${
+        item.failure_reason ? ` ${item.failure_reason}` : ""
+      }`;
+    } else if (originalState) {
       reason = `Force-closed while non-terminal (original state '${originalState}').${
         item.failure_reason ? ` ${item.failure_reason}` : ""
       }`;
-    } else if (isNonResolved && !reason) {
+    } else if (!isSuccessfulOutcome && !reason) {
       reason = DEFAULT_REASON_BY_OUTCOME[outcome];
     }
     const base: RemediationOutcome = {
@@ -182,6 +252,8 @@ export function buildRemediationOutcomesReport(
       ...(item.mechanical_verification
         ? { mechanical_verification: item.mechanical_verification }
         : {}),
+      ...(evidence ? { evidence } : {}),
+      ...(recordedByModule ? { recorded_by_module: recordedByModule } : {}),
     };
     if (!finding) {
       // Degenerate (corrupt state): without the plan finding there is no payload
@@ -779,6 +851,14 @@ export function executeClosingAction(
 }
 
 export interface CombinedTestResult {
+  /**
+   * Whether a suite actually ran. `false` means `plan.test_command` was never
+   * configured — a NEVER-RAN outcome, structurally distinct from `passed`, so
+   * a caller can no longer mistake "nothing ran" for "a real pass" (the
+   * vacuous-pass defect: previously `passed:true` alone claimed a real result
+   * even for an unrun, unconfigured suite).
+   */
+  ran: boolean;
   passed: boolean;
   duration_ms: number;
   suite_name?: string;
@@ -789,15 +869,20 @@ export interface CombinedTestResult {
 /**
  * Run the plan's combined test suite over the fully merged post-remediation
  * state. Returns pass/fail plus the failure-output tail. No test_command =>
- * vacuously passing.
+ * `ran:false` (never-ran, distinct from a real pass) — `passed` still reports
+ * `true` so existing gates that fold `combinedTest.passed` into `fullyGreen`
+ * keep their vacuously-green behavior for a run with no configured suite;
+ * `ran` is what lets a caller (buildVerificationReport's trace) tell the two
+ * apart rather than rendering "combined test suite passed" for a suite that
+ * never executed.
  */
-function runCombinedTestSuite(
+export function runCombinedTestSuite(
   state: RemediationState,
   options: OrchestratorOptions,
 ): CombinedTestResult {
   console.log("Running full test suite on combined post-remediation state...");
   if (!state.plan?.test_command) {
-    return { passed: true, duration_ms: 0, output: "" };
+    return { ran: false, passed: true, duration_ms: 0, output: "" };
   }
   const suiteName = Array.isArray(state.plan.test_command)
     ? state.plan.test_command.join(" ")
@@ -813,14 +898,14 @@ function runCombinedTestSuite(
   });
   const durationMs = Date.now() - startedAt;
   if (result.status === 0) {
-    return { passed: true, suite_name: suiteName, duration_ms: durationMs, output: "" };
+    return { ran: true, passed: true, suite_name: suiteName, duration_ms: durationMs, output: "" };
   }
   const output = (
     (result.stdout?.toString() ?? "") + (result.stderr?.toString() ?? "")
   )
     .trim()
     .slice(-FAILURE_OUTPUT_TAIL_CHARS);
-  return { passed: false, suite_name: suiteName, duration_ms: durationMs, output };
+  return { ran: true, passed: false, suite_name: suiteName, duration_ms: durationMs, output };
 }
 
 /**
@@ -848,12 +933,28 @@ function extractImplicatedPaths(testOutput: string): string[] {
 }
 
 /**
+ * Whether a touched file `tf` and an implicated path `ip` (extracted from test
+ * output, which may be a bare/partial path) refer to the same file: exact
+ * match after normalization, or one is a path-SEPARATOR-anchored suffix of the
+ * other. Never a bare string-suffix test — `"src/myfoo.ts".endsWith("foo.ts")`
+ * is true but the two are unrelated files; anchoring the match to a `/`
+ * boundary (via `normalizeRepoPath`, which also folds case/slash direction) is
+ * what a real path-key join requires and a substring test does not give.
+ */
+function touchedPathMatchesImplicated(tf: string, ip: string): boolean {
+  const a = normalizeRepoPath(tf);
+  const b = normalizeRepoPath(ip);
+  if (a === b) return true;
+  return a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+}
+
+/**
  * On a combined-test failure, selectively re-block items whose touched_files
  * overlap with the failing tests' implicated paths. When attribution is
  * ambiguous (no overlap found), falls back to re-blocking all resolved items.
  * Returns whether any item was blocked — the caller transitions back to triage.
  */
-function blockResolvedItemsOnCombinedFailure(
+export function blockResolvedItemsOnCombinedFailure(
   state: RemediationState,
   testOutput: string,
 ): boolean {
@@ -871,9 +972,7 @@ function blockResolvedItemsOnCombinedFailure(
     for (const item of resolvedItems) {
       const touchedFiles = item.item_spec?.touched_files ?? [];
       const overlaps = touchedFiles.some((tf) =>
-        implicatedPaths.some(
-          (ip) => tf === ip || tf.endsWith(`/${ip}`) || ip.endsWith(`/${tf}`) || tf.endsWith(ip) || ip.endsWith(tf),
-        ),
+        implicatedPaths.some((ip) => touchedPathMatchesImplicated(tf, ip)),
       );
       if (overlaps) attributed.push(item);
     }
@@ -1180,6 +1279,24 @@ function buildRemediationReportMarkdown(
 }
 
 /**
+ * {@link cleanupTempBranchesAndArtifacts}'s result — lets a caller observe a
+ * cleanup residue programmatically rather than only through console/log
+ * output. Absent (`{}`) on a clean removal, a not-fully-green close (nothing
+ * was attempted), or a final-state-persist failure alone.
+ */
+export interface CleanupResult {
+  /**
+   * Set to the artifacts directory path when its recursive removal failed
+   * after an otherwise fully-green close — the caller must remove it
+   * manually. The same fact is also written to the durable structured run log
+   * (`runLogger`) and to the console; this field is what surfaces it in the
+   * function's OWN returned result too, so a caller does not have to parse
+   * log/console output to detect the residue.
+   */
+  artifacts_residue?: string;
+}
+
+/**
  * Persist the completed state and clean up the artifact directory.
  *
  * The artifacts directory is only deleted on a fully-green close (no blocked
@@ -1196,7 +1313,7 @@ export async function cleanupTempBranchesAndArtifacts(
   e2eResult: E2eTestResult,
   closingResult: ClosingResult,
   runLogger?: RunLogger,
-): Promise<void> {
+): Promise<CleanupResult> {
   // Write final state before deleting the artifacts directory so the completion
   // is durable even if cleanup partially fails.
   try {
@@ -1256,7 +1373,7 @@ export async function cleanupTempBranchesAndArtifacts(
       artifact: options.artifactsDir,
       note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, closing=${closingResult.status}, closingAction=${closingResult.action}, anyBlocked=${anyBlocked})`,
     });
-    return;
+    return {};
   }
 
   // Archive the friction close-out record with the promoted deliverables BEFORE
@@ -1283,7 +1400,9 @@ export async function cleanupTempBranchesAndArtifacts(
       artifact: options.artifactsDir,
       note: `Failed to clean up artifacts directory (manual removal may be needed): ${reason}`,
     });
+    return { artifacts_residue: options.artifactsDir };
   }
+  return {};
 }
 
 /**
@@ -1337,16 +1456,25 @@ export function buildVerificationReport(
       continue;
     }
 
-    // Combined test suite trace.
+    // Combined test suite trace. A never-configured suite (`ran:false`) is
+    // NEVER labelled "passed" here — `combinedTest.passed` stays `true` for
+    // that case only so the pre-existing fullyGreen/itemPassed formulas below
+    // keep their vacuously-green behavior; this trace's own evidence/status is
+    // what tells a reader "nothing ran" apart from "it ran and passed"
+    // (`status` stays the file's established "failed" for any non-affirmative
+    // case — see the identical choice on the skipped-item trace above — the
+    // finding-level verdict is driven by `itemPassed`, not by this one trace).
     const suiteLabel = combinedTest.suite_name ?? "combined test suite";
     traces.push({
       trace_id: `${item.finding_id}:combined-tests`,
       kind: "task",
       label: suiteLabel,
-      evidence: combinedTest.passed
-        ? [`${suiteLabel} passed`]
-        : [`${suiteLabel} failed`, ...(combinedTest.output ? [combinedTest.output.slice(-500)] : [])],
-      status: combinedTest.passed ? "passed" : "failed",
+      evidence: !combinedTest.ran
+        ? ["no combined test suite configured for this run"]
+        : combinedTest.passed
+          ? [`${suiteLabel} passed`]
+          : [`${suiteLabel} failed`, ...(combinedTest.output ? [combinedTest.output.slice(-500)] : [])],
+      status: combinedTest.ran && combinedTest.passed ? "passed" : "failed",
     });
 
     const contractGoalId =
@@ -1474,6 +1602,26 @@ export async function runClosePhase(
     );
   }
 
+  // CDC-19 (advisory): a planned finding with no corresponding item in
+  // state.items would be left uncounted by every module's INV-COVERAGE join
+  // — a module that was blocked or never dispatched must not silently vanish
+  // from the coverage set. Diagnostic-only: never throws, and a no-op unless a
+  // runLogger is actually wired, so it changes nothing for a caller that
+  // doesn't ask for it.
+  {
+    const findingIds = new Set((state.plan.findings ?? []).map((f) => f.id));
+    const itemIds = new Set(Object.keys(state.items));
+    const uncounted = [...findingIds].filter((id) => !itemIds.has(id));
+    if (uncounted.length > 0) {
+      runLogger?.event({
+        phase: "close",
+        kind: "error",
+        obligation: "closing",
+        note: `${uncounted.length} planned finding(s) have no corresponding item in state.items and would be left uncounted by every module's coverage join: ${uncounted.slice(0, 10).join(", ")}`,
+      });
+    }
+  }
+
   // 1. Check whether closing action requires user confirmation (preview).
   // When not pre-authorized and action is confirmable, generate the file list +
   // commit message, attach them to closing_plan.closing_action_preview, and
@@ -1481,6 +1629,12 @@ export async function runClosePhase(
   // closing_plan.pre_authorized = true before the next next-step call.
   const preview = checkClosingPreview(state, options);
   if (preview) {
+    runLogger?.event({
+      phase: "close",
+      kind: "state",
+      obligation: "closing",
+      note: `Closing action '${state.closing_plan.action}' requires confirmation before proceeding — preview attached, awaiting pre_authorized.`,
+    });
     const updatedClosingPlan = { ...state.closing_plan, closing_action_preview: preview };
     return { ...state, closing_plan: updatedClosingPlan };
   }
@@ -1490,6 +1644,12 @@ export async function runClosePhase(
   if (!combinedTest.passed) {
     console.log("Full test suite failed. Transitioning back to triage.");
     if (blockResolvedItemsOnCombinedFailure(state, combinedTest.output)) {
+      runLogger?.event({
+        phase: "close",
+        kind: "state",
+        obligation: "closing",
+        note: "Combined test suite failed — re-blocked resolved item(s), transitioning to triage.",
+      });
       return { ...state, status: "triage" };
     }
     console.warn(
@@ -1529,16 +1689,37 @@ export async function runClosePhase(
         `Analyzer lead re-verify: ${analyzerVerify.persisting.length} lead(s) persist ` +
         `(${analyzerVerify.persisting.join(", ")}). Transitioning back to triage.`,
       );
+      runLogger?.event({
+        phase: "close",
+        kind: "state",
+        obligation: "closing",
+        note: `Mechanical re-verify: ${analyzerVerify.persisting.length} analyzer lead(s) persist (${analyzerVerify.persisting.join(", ")}) — transitioning to triage.`,
+      });
       return { ...state, status: "triage" };
     }
   }
 
-  // 3. Run end-to-end tests on the fully merged post-remediation state.
+  // 3. Run end-to-end tests on the fully merged post-remediation state. Mirrors
+  // the combined-test-failure branch's own guard above: a failure transitions
+  // to triage ONLY when something was actually re-blocked for triage to act
+  // on, never unconditionally (a failure with zero verified-complete items has
+  // nothing to re-block, so an unconditional triage transition would enter a
+  // state with no newly-blocked item to drive it forward).
   const e2eResult = runE2eTests(state, options);
   if (!e2eResult.passed) {
     console.log("End-to-end tests failed. Transitioning back to triage.");
-    blockResolvedItemsOnCombinedFailure(state, e2eResult.output);
-    return { ...state, status: "triage" };
+    if (blockResolvedItemsOnCombinedFailure(state, e2eResult.output)) {
+      runLogger?.event({
+        phase: "close",
+        kind: "state",
+        obligation: "closing",
+        note: "End-to-end tests failed — re-blocked resolved item(s), transitioning to triage.",
+      });
+      return { ...state, status: "triage" };
+    }
+    console.warn(
+      "End-to-end tests failed but no resolved items to re-block — completing with e2e failure recorded in report.",
+    );
   }
 
   // 4. Execute the closing action and record exact command outcomes before

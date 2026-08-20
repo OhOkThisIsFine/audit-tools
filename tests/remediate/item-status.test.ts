@@ -59,12 +59,22 @@ describe("itemStatus — statusToDisposition", () => {
 });
 
 describe("itemStatus — dispositionToOutcomeStatus", () => {
+  // CDC-25: `verified_already_fixed` / `refuted` are the two DISTINCT
+  // persisted members added for T's other two disposition kinds — each maps
+  // to its OWN, identically-named RemediationOutcomeStatus member rather than
+  // collapsing onto `verified_no_change`. This Record is typed
+  // `Record<PerFindingDisposition, RemediationOutcomeStatus>`, so widening
+  // PerFindingDisposition without widening this literal is a compile error —
+  // exactly the "compile error at every producer" property CDC-25 mandates,
+  // and this fixture is one such producer.
   const cases: Record<PerFindingDisposition, RemediationOutcomeStatus> = {
     resolved: "resolved",
     resolved_no_change: "verified_no_change",
     ignored: "ignored",
     deemed_inappropriate: "inappropriate",
     abandoned: "blocked",
+    verified_already_fixed: "verified_already_fixed",
+    refuted: "refuted",
   };
   for (const [disposition, outcome] of Object.entries(cases)) {
     it(`${disposition} → ${outcome}`, () => {
@@ -193,6 +203,19 @@ describe("itemStatus — partition coherence", () => {
     expect(isUnsuccessfulEndStatus("blocked")).toBe(true);
     expect(isUnsuccessfulEndStatus("resolved")).toBe(false);
     expect(isUnsuccessfulEndStatus("ignored")).toBe(false);
+  });
+  it("needs_clarification counts as an unsuccessful end (COR-d518cd60) without being terminal", () => {
+    // An unanswered clarification is precisely the "run did not fully
+    // succeed" case isUnsuccessfulEndStatus exists to catch — it must count
+    // toward a close's anyBlocked exactly like blocked/abandoned, while
+    // staying out of every OTHER partition (it is not in-progress, not
+    // verified-complete, not a skip, and not terminal — an answer resolves
+    // it, it does not end the run on its own).
+    expect(isUnsuccessfulEndStatus("needs_clarification")).toBe(true);
+    expect(isTerminalStatus("needs_clarification")).toBe(false);
+    expect(isInProgressStatus("needs_clarification")).toBe(false);
+    expect(isVerifiedCompleteStatus("needs_clarification")).toBe(false);
+    expect(isSkipStatus("needs_clarification")).toBe(false);
   });
 });
 
