@@ -48,9 +48,8 @@ design). `remediate-code next-step` picks it up; if it offers the resume/restart
 
 1. **Finish implementation wave 1.** Landed so far (unpushed, on `main`): CP-NODE-2, 14, 4, 8, 7,
    16, 17, 20, 21, 22 — plus the pre-flight CP-NODE-0 (a `resolved_no_change` decision, no commit).
-   Remaining in the wave: **CP-NODE-23** (lock substrate — in flight at hand-off; check whether its
-   commit and result JSON landed before re-dispatching), **CP-NODE-10** (staleness slice
-   propagation) and **CP-NODE-11** (audit flow + requeue policy). The latter two touch loop-core
+   plus CP-NODE-23 (`ccb72eff`, tip of `main`). Remaining in the wave: **CP-NODE-10** (staleness
+   slice propagation) and **CP-NODE-11** (audit flow + requeue policy). Both touch loop-core
    paths, so each needs an independent review pass and a fresh
    `node .claude/hooks/attest-loop-core-review.mjs` attestation bound to the staged tree before its
    commit — same shape as the coherence lap's landing earlier in this program.
