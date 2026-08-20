@@ -20,13 +20,18 @@ is deleted too.
 |---|---|---|
 | INV-B3 | Repository-path grounding, including dotfile paths and unambiguous basename resolution. | `src/shared/validation/findingGrounding.ts`; `src/remediate/phases/grounding.ts` |
 | INV-CC | Idempotent, sole-writer intent guidance bootstrap. | `src/shared/intake/guidanceBootstrap.ts` |
+| INV-CDI-EXPLICIT-NODE-FIELDS | A charter delta carries its subsystem identity as explicit `node_id`/`goal_node_id` fields rather than encoded inside `delta_id`, so `delta_id` stays an opaque identity no consumer needs to parse. | `src/shared/decompose/charterExtraction.ts` |
 | INV-CK | Deterministic identity, idempotency, and content keys. | `src/shared/contentKey.ts`; `src/shared/stableStringify.ts` |
 | INV-CO | Contract-pipeline obligation and reconciliation derivation. | `src/remediate/validation/contractPipelineGates.ts` |
+| INV-CPGV-OUTCOME-RECORD-OWNER | The cross-artifact gate-outcome record (`evaluated`/`reason`) is owned by `src/remediate/validation/contractPipelineGates.ts` until a later work item relocates its shared shape into `audit-tools/shared`. | `src/remediate/validation/contractPipelineGates.ts` |
 | INV-CVG | Fail-closed contract validation and scoped positive/negative coverage. | `src/remediate/validation/contractPipelineGates.ts` |
 | INV-DA | Analyzer deletion signals remain advisory and never authorize unattended deletion. | `src/remediate/review/autonomousGate.ts` |
 | INV-GND | Missing grounding evidence is treated as ungrounded. | `src/shared/validation/findingGrounding.ts` |
 | INV-ID | Idempotent, content-hash-keyed remediation intake. | `src/remediate/intake.ts` |
 | INV-IR | Item-scoped contract revalidation, empty-delta copy-forward, and semantic-hash reconvergence. | `src/remediate/contractPipeline/derive.ts`; `src/remediate/contractPipeline/artifactStore.ts` |
+| INV-ISC | Every `RemediationItemStatus` belongs to exactly one classification under an exhaustive `Record<RemediationItemStatus, boolean>` for each partition axis (in-progress/terminal/skip/unsuccessful-end), so a new status is a compile error at every unhandled axis rather than a silently-permissive membership test. | `src/remediate/state/itemStatus.ts` |
+| INV-ISC-CLOSE-PHASE-PRECONDITION | The close phase force-closes `blocked`/`needs_clarification` items to `abandoned` so a run can end without livelocking or rendering a non-terminal item as a partial completion. | `src/remediate/state/itemStatus.ts` |
+| INV-ISC-EVIDENCE-EMITTED | A `verified_already_fixed`/`refuted` terminal disposition requires a complete verification-evidence triple (method, mechanism, and confirmation) before the writer may emit it; incomplete or mechanism-contradicting evidence is refused to a non-terminal `blocked` outcome instead. | `src/shared/types/remediationOutcome.ts`; `src/remediate/phases/close.ts`; `src/remediate/state/itemStatus.ts` |
 | INV-O1 | Best-effort, deduplicated, lock-safe friction capture at workflow step boundaries. | `src/shared/friction/captureFrictionEvent.ts`; `src/shared/friction/stepBoundaryCapture.ts` |
 | INV-O2 | Immutable audit-result ledger records plus versioned intent/result baselines. | `src/audit/orchestrator/ledger.ts`; `src/audit/orchestrator/resultBaseline.ts`; `src/audit/orchestrator/intentCheckpointGate.ts`; `src/audit/types/artifactMetadata.ts` |
 | INV-PENDING-SINGLE-SOURCE | One pending-task partition feeds both audit workload emission and completion state. | `src/audit/orchestrator/pendingTasks.ts`; `src/audit/orchestrator/state.ts` |
