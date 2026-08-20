@@ -5,69 +5,94 @@
 
 ## Live state
 
-- Published state: v0.42.0 (the tag, not a sha — a sha here restales on every commit). The
-  zero-adapter retirement is live; audit-tools emits complete provider-neutral host workloads
-  and ingests bound results. Host submissions ride tool-computed sha256-bound paths under
-  `<artifactsDir>/submissions/`; the flat `incoming/` scheme is gone, so anything still writing <!-- doc-citation-exempt: deleted incoming/ scheme narrative (P25) -->
-  to it will be rejected.
-- Promoted audit deliverables are live at `.audit-tools/audit-findings.json` (machine contract)
-  and `.audit-tools/audit-report.md` (render); the remediate phase below consumes them. Run
-  history and measurements live in the decision ledger and project memory, not here.
+- Published state: v0.42.1 (the tag, not a sha — a sha here restales on every commit). Everything
+  below `main`'s tip is pushed; there are unreleased commits, so a publish is available whenever
+  the owner wants one.
+- The zero-adapter retirement is live; audit-tools emits complete provider-neutral host workloads
+  and ingests bound results. Host submissions ride tool-computed sha256-bound paths under the
+  artifacts directory's submissions tree.
+- `remediate-code recover-ingest` is new: the sanctioned repair when a workload's trusted baseline
+  has been orphaned. It is true-orphanhood gated, ledger-marked, and runs every required test
+  before taking the state lock. See the durable trap about amending a landed wave commit.
 
-## Next: resume the remediation run mid-implementation
+## Next: resume the remediation run — six items remain
 
-The run is LIVE and mid-wave — resume it, never restart it (a restart discards the approved
-design). `remediate-code next-step` picks it up; if it offers the resume/restart gate, answer
-`{"choice":"resume"}` in `.audit-tools/remediation/confirm_resume_ack.json`.
+The run is LIVE and mid-wave; resume it, never restart it. `remediate-code next-step` picks it up
+against a fresh binding at the current HEAD.
 
-- **Design phase is closed and approved.** Six contract-repair rounds against five adversarial
-  counterexample rounds (accepted 5 → 3 → 2 → 1 → 0) ended in a judge `approved` verdict:
-  329 obligations satisfied, 0 violated, 26 uncertain (all the ledger generator's always-empty
-  `depends_on` roll-ups — a generator property, not a design defect). The 27-node implementation
-  DAG covers all 355 obligations.
-- **Implementation wave 1 (13 items) is partly landed** — see *Immediate next*. Each item lands
-  as one commit whose changed-file set exactly equals its work item's `allowed_files`, with a
-  result JSON at the item's `result_path`; ingestion re-validates the binding before advancing.
-- **Dispatch protocol that works:** one item in flight at a time (the tree is shared); give the
-  implementer its module's contract + specs as the spec, require red-green by inversion (never
-  `git checkout --`), real exit codes, and a STOP-and-report on any out-of-scope edit rather
-  than scope creep. Every STOP so far was a genuine routing gap worth fixing at the source.
-- **Known routing-gap class:** the DAG's node `output_files` did not inherit the contracts'
-  clause-1(c) declared write targets, so declared files fell out of `allowed_files`. Fixed for
-  CP-NODE-2/24/25/21 by adding the file to the node's `output_files` **and** the derived plan
-  block's `touched_files`, then deleting `state.host_handoff` so the wave re-prepares. Expect the
-  same fix shape if a later item stops on a declared-but-unwritable file.
-- **Carry-forward the judge flagged:** the phantom-drop residual's mitigation was discharged by
-  CP-NODE-0 (374 cited paths / 88 distinct all grounded at `eca6506a`); if planning is ever
-  deferred past a tree-moving pause, re-run that grounding before dispatching more items.
+**Resolved: 21 of 27.** Remaining: **CP-NODE-6** (blocked, see below), then **CP-NODE-3, 5, 15, 24,
+26** down the dependency spine, then the close phase.
+
+### 1. CP-NODE-6 is reviewed and BLOCKED — this is deliberate, not an unfinished edit
+
+The host-handoff ingestion substrate work is preserved on branch **`wip/cp-node-6-blocked`**
+(commit `cdbdd05e`), deliberately **not** on `main`. Its loop-core attestation records a `concerns`
+verdict rather than a clearance. `main` is clean; do not merge that branch as-is.
+
+Two blocking defects, each with a stated fix and each needing a test that reds today — both are
+spelled out in the WIP commit message, and the entry in
+[`open-bugs.md`](backlog/open-bugs.md) carries the same property statements:
+
+- **Security** — the block-contract command scanner treats single-quoted shell metacharacters as
+  inert, but `cmd.exe` does not treat `'` as a quote, so an admitted command can execute a second
+  process at ingest and write outside every declared write scope.
+- **Wedge** — a non-empty block-issue list early-returns before any work item is examined, so one
+  malformed non-level-0 block means no landed result is ever accepted and `next-step` re-emits the
+  same items forever.
+
+Everything else in that branch reviewed clean, including the verified-intact recovery work, so the
+fix is two functions plus two tests, not a rewrite.
+
+### 2. The protocol that works — keep using it
+
+- **One item in flight at a time** (the tree is shared). Give the implementer its module's
+  finalized contract and test specs as the binding spec; require red-green by inversion (never
+  `git checkout --`), real exit codes, and a STOP-and-report on any out-of-scope need.
+- **Every item gets an independent adversarial review before it lands**, and a second delta pass
+  after the fixes. This is not ceremony: every single item this wave had at least one real defect
+  found that way, several of them mechanism-level.
+- **Scope widening is the routing fix, and it was needed nine times.** When an item genuinely
+  needs a file outside `allowed_files`, verify the file is owned by no other module, add it to the
+  plan block's `touched_files`, delete `state.host_handoff`, and re-run `next-step` to re-prepare.
+  A permanent test home earns the same treatment — that is how a red-green transcript becomes a
+  durable test instead of a commit-message artifact.
+- **Land the item, then write its result JSON** at the work item's `result_path` bound to the
+  workload's own `baseline_commit` (not the git parent), then `next-step` to ingest.
+- **A new `INV-*` id must not appear in `src/` comments** unless `docs/glossary-ids.md` is in the
+  item's scope — the glossary gate scans `src/`, and the pre-commit gate does not run that test, so
+  the red lands silently and the next item's worker finds it. It happened twice this wave.
+
+### 3. The close phase is blocked on a contract gap — design-check it before starting
+
+Every module's coverage-join invariant demands a per-finding evidence triple (file + line +
+mechanism) recorded on its remediation item, but **the host-result envelope has no channel for
+dispositions or evidence**, and no remaining node's contract owns adding one. Every landed item's
+triples currently live only in commit messages and the workers' summaries. Before the close phase:
+run `/design-check` on extending the result contract with an optional per-finding disposition block
+validated at ingestion (versus a separate recording verb), then backfill the resolved items'
+triples. The tracked entry is the steward-metadata item in [`open-bugs.md`](backlog/open-bugs.md).
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **2 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `docsN-1` — instruction-file edit: CLAUDE.md describes the DEFAULT analyzer set as admitted without a token, but an operator decline now vetoes it too
+  - `solN-1` — A DAG node's write scope ignores the module contract's declared write targets — four manual recoveries in one wave; approve deriving them instead
+
 <!-- END GENERATED LIVE STATUS -->
 
 ## Immediate next
 
-1. **Finish implementation wave 1.** Landed so far (unpushed, on `main`): CP-NODE-2, 14, 4, 8, 7,
-   16, 17, 20, 21, 22 — plus the pre-flight CP-NODE-0 (a `resolved_no_change` decision, no commit).
-   plus CP-NODE-23 (`ccb72eff`, tip of `main`). Remaining in the wave: **CP-NODE-10** (staleness
-   slice propagation) and **CP-NODE-11** (audit flow + requeue policy). Both touch loop-core
-   paths, so each needs an independent review pass and a fresh
-   `node .claude/hooks/attest-loop-core-review.mjs` attestation bound to the staged tree before its
-   commit — same shape as the coherence lap's landing earlier in this program.
-2. **Nothing is pushed.** Ten-plus commits sit on local `main`. Before pushing: full
-   `npm run build && npm run check && npm test` green, then push `HEAD:main`. Two known reds to
-   clear first, both docs-only: the `id-glossary` contract test (five new `INV-*` ids need rows in
-   `docs/glossary-ids.md` — a cleanup agent was landing exactly this at hand-off, so verify it
-   landed) and whatever `verify:checks` surfaces once the wave completes.
-3. **Deferred-by-design during the wave, worth one consolidated pass afterwards:** several modules
-   had no permanent test home in their `allowed_files`, so their red-green transcripts live only in
-   commit messages (CP-NODE-14, 4, 8, 16, 17, 20, 23). Route those test files and land the durable
-   tests. Also queued: lift `GateOutcome` into `audit-tools/shared` with its adopters (CP-NODE-14's
-   deviation), and decide `intentOrdering`'s orphan disposition (CP-NODE-16's inv-4 — wire a
-   production caller or delete; it is currently fixed-but-orphaned).
-4. Outside-repo residue this repo cannot carry:
-   - Transitional: any live session predating the session registry is child-classified while
-     enforcement is armed; it self-registers from the repo root with
-     `node scripts/shared/sessionRegistry.mjs --register <session-id>`.
+1. **Unblock CP-NODE-6**: fix the two defects on `wip/cp-node-6-blocked`, re-review, re-attest
+   against the final staged tree, then land on `main` and ingest. Its workload binding is already
+   prepared at the current HEAD.
+2. **Then CP-NODE-3 → 5 → 15 → 24 → 26** in dependency order (`next-step` derives the frontier;
+   CP-NODE-26 and 5 unlock together after 6).
+3. **Before the close phase**, resolve the evidence-triple envelope gap above.
+4. **A consolidated pass is queued** in the backlog: the wave's deferred durable tests, the
+   owner-decided registry deletion, the emission-scaffold type lift, and the per-node review
+   residuals — all seven entries are at the top of [`open-bugs.md`](backlog/open-bugs.md).
+5. **Two nightly decisions are waiting** on the owner (see the generated block above); one of them
+   is the mechanical fix for the scope-widening class this wave hit nine times.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
