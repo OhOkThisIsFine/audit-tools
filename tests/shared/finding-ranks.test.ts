@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,26 +51,27 @@ test("severityCompare orders most-severe-first (critical before info)", () => {
 // fails if any src file outside lens.ts open-codes a severity rank literal.
 
 const here = dirname(fileURLToPath(import.meta.url));
-// tests/ -> shared/ -> packages/ -> repo root
+// tests/shared/ -> tests/ -> repo root
 const repoRoot = join(here, "..", "..");
+// The single-package layout (matching the siblings finding-identity-single-source
+// and io-hash-primitives-single-source already scan). These pointed at the
+// retired packages/*/src layout (TST-eb0de44d): readdirSync threw ENOENT, walk()
+// swallowed it, zero files were scanned and the guard passed unconditionally.
 const SRC_DIRS = [
-  join(repoRoot, "packages", "shared", "src"),
-  join(repoRoot, "packages", "audit-code", "src"),
-  join(repoRoot, "packages", "remediate-code", "src"),
+  join(repoRoot, "src", "shared"),
+  join(repoRoot, "src", "audit"),
+  join(repoRoot, "src", "remediate"),
 ];
 const CODE_EXT = /\.(?:ts|mts|cts|js|mjs|cjs)$/u;
 // The single source of truth — the only file allowed to hold a rank literal.
-const CANONICAL_FILE = join(repoRoot, "packages", "shared", "src", "types", "lens.ts");
+const CANONICAL_FILE = join(repoRoot, "src", "shared", "types", "lens.ts");
 
 function walk(dir: string): string[] {
   let out: string[] = [];
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return out;
-  }
-  for (const name of entries) {
+  // Deliberately NOT try/caught: a directory this guard cannot read is a
+  // misconfigured scan root, not an empty one. Swallowing it is exactly how the
+  // guard came to scan nothing while reporting success.
+  for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) out = out.concat(walk(p));
     else if (CODE_EXT.test(name)) out.push(p);
@@ -88,15 +89,22 @@ test("no severity/confidence rank-table literal exists outside the shared single
   const rankLiteral =
     /critical\s*:\s*\d+\s*,\s*high\s*:\s*\d+\s*,\s*medium\s*:\s*\d+\s*,\s*low\s*:\s*\d+\s*,\s*info\s*:\s*\d+/u;
   const hits: string[] = [];
+  let scanned = 0;
   for (const srcDir of SRC_DIRS) {
     for (const file of walk(srcDir)) {
       if (file === CANONICAL_FILE) continue;
+      scanned += 1;
       const text = readFileSync(file, "utf8");
       if (rankLiteral.test(text)) {
         hits.push(file.slice(repoRoot.length + 1));
       }
     }
   }
+  // A scan over zero files reports zero hits forever. Assert the guard reached
+  // real source before believing its empty result, and that the canonical file
+  // it exempts is one of the files it actually walked.
+  expect(scanned > 0, `the rank-literal scan visited no files under ${SRC_DIRS.join(", ")}`).toBeTruthy();
+  expect(existsSync(CANONICAL_FILE), `CANONICAL_FILE does not exist: ${CANONICAL_FILE}`).toBeTruthy();
   expect(hits.length, "Severity rank tables are single-sourced in audit-tools/shared " +
       "(severityRank/confidenceRank/severityCompare, derived from SEVERITIES/CONFIDENCES). " +
       "Do not re-introduce a literal rank table; import the shared functions instead.\n" +

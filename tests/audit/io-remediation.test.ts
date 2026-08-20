@@ -330,54 +330,53 @@ test("io/artifacts remains independent from cli dispatch", async () => {
   expect(!src.includes("../cli/dispatch"), "io/artifacts.ts must not import from ../cli/dispatch").toBeTruthy();
 });
 
+// This test previously asserted on an INLINE REIMPLEMENTATION of the
+// parse/catch/stderr logic written inside the test body (TST-0e3fc2e0,
+// TST-0e3fc2e0-2): production readPackageVersion could be deleted outright and
+// it stayed green. readPackageVersion is now exported and root-parameterized, so
+// the guard calls the real function against a temp directory.
 test("readPackageVersion logs to stderr on JSON parse error and returns null (OBS-9335faf6)", async () => {
+  const { readPackageVersion } = await import("../../src/audit/io/toolingManifest.js");
+
   await withTempDir("audit-code-tooling-manifest-parse-err-", async (tempDir: string) => {
-    // Patch PACKAGE_ROOT by writing a broken package.json into tempDir,
-    // then call buildToolingManifest with a shadow module.
-    // Since PACKAGE_ROOT is resolved at module load time we must exercise the path
-    // indirectly: write a broken package.json at an accessible path and call the
-    // function via a tiny inline reimplementation that points at tempDir.
-    const { readFile: rf } = await import("node:fs/promises");
-    const { stat: st } = await import("node:fs/promises");
-
-    async function pathExistsLocal(p: string) {
-      try { await st(p); return true; } catch { return false; }
-    }
-
     const packageJsonPath = join(tempDir, "package.json");
     await writeFile(packageJsonPath, "{invalid json}", "utf8");
 
     const stderrLines: string[] = [];
     const orig = process.stderr.write.bind(process.stderr);
-    process.stderr.write = (chunk: any, ..._rest: any[]) => {
+    process.stderr.write = ((chunk: unknown): boolean => {
       stderrLines.push(String(chunk));
-      return orig(chunk, ..._rest as [any, any]);
-    };
+      return true;
+    }) as typeof process.stderr.write;
     let result: string | null;
     try {
-      if (!(await pathExistsLocal(packageJsonPath))) {
-        result = null;
-      } else {
-        try {
-          const parsed = JSON.parse(await rf(packageJsonPath, "utf8"));
-          result = typeof parsed.version === "string" ? parsed.version : null;
-        } catch (error) {
-          process.stderr.write(
-            `[audit-code] readPackageVersion: failed to read/parse ${packageJsonPath}: ${error instanceof Error ? error.message : String(error)}\n`,
-          );
-          result = null;
-        }
-      }
+      result = await readPackageVersion(tempDir);
     } finally {
       process.stderr.write = orig;
     }
 
     expect(result, "parse error must return null").toBe(null);
     const matchingLine = stderrLines.find((l: string) => l.includes("readPackageVersion"));
-    expect(matchingLine, "stderr must contain a line mentioning readPackageVersion").toBeTruthy();
+    expect(matchingLine, "the production catch branch must report the failure to stderr").toBeTruthy();
     expect(matchingLine).toMatch(/readPackageVersion/);
-    // The error message from JSON.parse should be present
-    expect(stderrLines.some((l: string) => l.includes("readPackageVersion"))).toBeTruthy();
+    // The offending path is named, so an operator can find the broken manifest.
+    expect(matchingLine).toContain(packageJsonPath);
+  });
+});
+
+test("readPackageVersion returns the version from a well-formed package.json, and null when absent (OBS-9335faf6)", async () => {
+  const { readPackageVersion } = await import("../../src/audit/io/toolingManifest.js");
+
+  await withTempDir("audit-code-tooling-manifest-ok-", async (tempDir: string) => {
+    // Absent package.json — the pre-parse existence branch.
+    expect(await readPackageVersion(tempDir)).toBe(null);
+
+    await writeFile(join(tempDir, "package.json"), JSON.stringify({ version: "9.9.9" }), "utf8");
+    expect(await readPackageVersion(tempDir)).toBe("9.9.9");
+
+    // Present but non-string version — parses cleanly, still no version.
+    await writeFile(join(tempDir, "package.json"), JSON.stringify({ version: 42 }), "utf8");
+    expect(await readPackageVersion(tempDir)).toBe(null);
   });
 });
 

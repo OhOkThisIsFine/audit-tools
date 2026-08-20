@@ -1,23 +1,27 @@
 /**
- * seam-host-only-next-step.test.mjs
+ * seam-host-only-next-step.test.ts
  *
  * Cross-module integration test: host-only-next-step seam
  *
  * Enforces the reconciled interface contract between:
- *   - packages/audit-code/src/cli/nextStepHelpers.ts
- *     (runDeterministicForNextStep return-type discriminated union)
- *   - packages/audit-code/src/cli/nextStepCommand.ts
- *     (cmdNextStep handlers — one branch per kind)
- *   - packages/audit-code/src/cli/steps.ts
+ *   - src/audit/cli/nextStepHelpers.ts
+ *     (runDeterministicForNextStep return-type discriminated union, exposed at
+ *      runtime as NEXT_STEP_RETURN_KINDS)
+ *   - src/audit/cli/nextStepCommand.ts
+ *     (the step-emission dispatch table and the handled-kinds set derived from
+ *      its own keys — NEXT_STEP_EMISSION_TABLE / NEXT_STEP_EMISSION_KINDS)
+ *   - src/audit/cli/steps.ts
  *     (writeCurrentStep, STEP_CONTRACT_VERSION, StepArtifact, StepKind)
  *   - audit-tools/shared
  *     (StepStatus union — the only valid status values)
  *
  * This test fails whenever either side diverges from the shared interface:
  *
- *   A. EXHAUSTIVENESS: every kind exported by runDeterministicForNextStep's
- *      return union has a corresponding handler branch in cmdNextStep.
- *      Neither side may add a kind without updating the other.
+ *   A. EXHAUSTIVENESS: every kind in runDeterministicForNextStep's return union
+ *      is emitted by a row of the dispatch table or by its single documented
+ *      fallback. Both sides are IMPORTED from the production modules, never
+ *      transcribed — a guard that compares two hand-copied sets agrees with
+ *      itself while both drift away from the source it claims to guard.
  *
  *   B. VERSION-IDENTITY: STEP_CONTRACT_VERSION is a stable versioned string
  *      matching the "audit-code-step/vNalphaN" format. writeCurrentStep stamps
@@ -48,6 +52,12 @@ import { join } from "node:path";
 import os from "node:os";
 import type { StepStatus } from "audit-tools/shared";
 import type { StepKind } from "../../src/audit/cli/steps.js";
+import type { NextStepResult } from "../../src/audit/cli/nextStepHelpers.js";
+import { NEXT_STEP_RETURN_KINDS } from "../../src/audit/cli/nextStepHelpers.js";
+import {
+  NEXT_STEP_EMISSION_KINDS,
+  NEXT_STEP_EMISSION_TABLE,
+} from "../../src/audit/cli/nextStepCommand.js";
 
 // ── Module imports ────────────────────────────────────────────────────────────
 
@@ -97,62 +107,85 @@ function baseParams(artifactsDir: string): {
   };
 }
 
-// ── A. EXHAUSTIVENESS — kind union vs cmdNextStep handlers ────────────────────
+// ── A. EXHAUSTIVENESS — return-kind union vs the step-emission table ──────────
 //
-// These are the kind values that runDeterministicForNextStep can return (from
-// the return type in nextStepHelpers.ts) and that cmdNextStep must handle.
-// The test verifies the sets are consistent without importing the function
-// body (which would require a live filesystem and session config).
+// BOTH SIDES ARE IMPORTED. This guard used to declare two hand-transcribed Set
+// literals and assert they agreed with EACH OTHER (MNT-cce68021): adding a kind
+// to the real union or deleting a real handler left both copies equal and all
+// three assertions green, so the contract the header states was enforced only by
+// an author remembering to edit the test.
+//
+//   A side — NEXT_STEP_RETURN_KINDS, derived in nextStepHelpers.ts from a table
+//   typed TOTAL over NextStepResult["kind"] (a kind added to the union with no
+//   row there is a compile error).
+//   B side — NEXT_STEP_EMISSION_KINDS, derived by the shared emission scaffold
+//   from NEXT_STEP_EMISSION_TABLE's OWN KEYS.
 
-// NOTE: "edge_reasoning" here is the INTERNAL fold RESULT kind (the branch
-// nextStepHelpers returns), which survives design resolution 2 — only the
-// inline `edge_reasoning` STEP kind was retired; the handler renders the
-// result kind as an `edge_reasoning_dispatch` step on every host.
-const RETURN_KINDS_FROM_NEXT_STEP_HELPERS = new Set([
-  "complete",
-  "blocked",
+const RETURN_KINDS_FROM_NEXT_STEP_HELPERS: ReadonlySet<string> = new Set(
+  NEXT_STEP_RETURN_KINDS,
+);
+const CMD_NEXT_STEP_HANDLED_KINDS: ReadonlySet<string> = NEXT_STEP_EMISSION_KINDS;
+
+/**
+ * The return kinds the emission table has NO row for, and which therefore reach
+ * the scaffold's single `fallback`. nextStepCommand.ts names exactly one such
+ * kind (its fallback casts the result to `NextStepResultOf<"semantic_review">`),
+ * so this is one name, not a copy of a set — and it is pinned from two sides:
+ *
+ *   • `satisfies readonly FallbackRoutedKind[]` — a compile error the moment the
+ *     table gains a row for this kind (the residual would become `never`);
+ *   • A2 below — a runtime failure the moment the residual is anything else,
+ *     which is what deleting a real table row produces.
+ */
+type FallbackRoutedKind = Exclude<
+  NextStepResult["kind"],
+  keyof typeof NEXT_STEP_EMISSION_TABLE
+>;
+const FALLBACK_ROUTED_KINDS = [
   "semantic_review",
-  "design_review",
-  "design_review_parallel",
-  "design_review_contract",
-  "design_review_conceptual",
-  "confirm_intent",
-  "analyzer_install",
-  "edge_reasoning",
-  "synthesis_narrative",
-]);
+] as const satisfies readonly FallbackRoutedKind[];
 
-// cmdNextStep explicitly checks these kinds via if (result.kind === ...).
-// "semantic_review" falls through to renderSemanticReviewStep at the bottom.
-const CMD_NEXT_STEP_HANDLED_KINDS = new Set([
-  "complete",
-  "blocked",
-  "design_review",
-  "design_review_parallel",
-  "design_review_contract",
-  "design_review_conceptual",
-  "confirm_intent",
-  "analyzer_install",
-  "edge_reasoning",
-  "synthesis_narrative",
-  "semantic_review", // handled as the default fallthrough at the end of cmdNextStep
-]);
-
-test("A1: every kind from runDeterministicForNextStep is handled in cmdNextStep", () => {
-  for (const kind of RETURN_KINDS_FROM_NEXT_STEP_HELPERS) {
-    expect(CMD_NEXT_STEP_HANDLED_KINDS.has(kind), `runDeterministicForNextStep kind "${kind}" has no handler branch in cmdNextStep`).toBeTruthy();
-  }
-});
-
-test("A2: cmdNextStep does not handle phantom kinds absent from runDeterministicForNextStep", () => {
+test("A1: the emission table handles no phantom kind absent from the return union", () => {
   for (const kind of CMD_NEXT_STEP_HANDLED_KINDS) {
-    expect(RETURN_KINDS_FROM_NEXT_STEP_HELPERS.has(kind), `cmdNextStep handles kind "${kind}" but it is not in runDeterministicForNextStep's return union`).toBeTruthy();
+    expect(
+      RETURN_KINDS_FROM_NEXT_STEP_HELPERS.has(kind),
+      `the step-emission table has a row for kind "${kind}", but runDeterministicForNextStep's return union does not carry it`,
+    ).toBeTruthy();
   }
 });
 
-test("A3: both sets have the same cardinality (no hidden divergence)", () => {
-  expect(RETURN_KINDS_FROM_NEXT_STEP_HELPERS.size, `Kind-set size mismatch: runDeterministicForNextStep has ${RETURN_KINDS_FROM_NEXT_STEP_HELPERS.size} kinds, ` +
-      `cmdNextStep handles ${CMD_NEXT_STEP_HANDLED_KINDS.size}`).toBe(CMD_NEXT_STEP_HANDLED_KINDS.size);
+test("A2: every return kind is emitted by a table row or the single documented fallback", () => {
+  const residual = [...RETURN_KINDS_FROM_NEXT_STEP_HELPERS]
+    .filter((kind) => !CMD_NEXT_STEP_HANDLED_KINDS.has(kind))
+    .sort();
+  expect(
+    residual,
+    `the return kinds with no step-emission row must be exactly the documented fallback kind(s). ` +
+      `A kind that appears here unexpectedly lost its handler; one that disappeared gained a row ` +
+      `without this guard being updated.`,
+  ).toEqual([...FALLBACK_ROUTED_KINDS].sort());
+});
+
+test("A3: both imported kind sets are non-empty and account for the whole union", () => {
+  // A guard that scans an empty set passes unconditionally (TST-eb0de44d's
+  // class); assert directly that both imported sides carry real data.
+  expect(
+    CMD_NEXT_STEP_HANDLED_KINDS.size > 0,
+    "the step-emission table exported no kinds — this guard would pass over nothing",
+  ).toBeTruthy();
+  expect(
+    RETURN_KINDS_FROM_NEXT_STEP_HELPERS.size,
+    `kind-set size mismatch: the return union has ${RETURN_KINDS_FROM_NEXT_STEP_HELPERS.size} kinds, ` +
+      `the emission table handles ${CMD_NEXT_STEP_HANDLED_KINDS.size} and the fallback ${FALLBACK_ROUTED_KINDS.length}`,
+  ).toBe(CMD_NEXT_STEP_HANDLED_KINDS.size + FALLBACK_ROUTED_KINDS.length);
+});
+
+test("A4: the exported handled-kinds set IS the emission table's own key set", () => {
+  // Pins the scaffold's construction-time snapshot to the table it was built
+  // from, so the set A1/A2 import can never be a second copy that drifted.
+  expect([...CMD_NEXT_STEP_HANDLED_KINDS].sort()).toEqual(
+    Object.keys(NEXT_STEP_EMISSION_TABLE).sort(),
+  );
 });
 
 // ── B. VERSION-IDENTITY — STEP_CONTRACT_VERSION format ───────────────────────

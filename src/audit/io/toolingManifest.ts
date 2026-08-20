@@ -48,8 +48,20 @@ async function collectFiles(path: string): Promise<string[]> {
   return files;
 }
 
-async function readPackageVersion(): Promise<string | null> {
-  const packageJsonPath = join(PACKAGE_ROOT, "package.json");
+/**
+ * Read `version` from the package.json under `packageRoot`, or `null` when the
+ * file is absent, unreadable, malformed, or carries a non-string version — a
+ * missing tooling version must never abort manifest construction.
+ *
+ * Exported and root-parameterized so its failure branch is reachable from a
+ * test against a temp directory: the regression it guards (a parse failure that
+ * reports to stderr and degrades to `null`) is only actually guarded by a test
+ * that runs THIS function, not a copy of it.
+ */
+export async function readPackageVersion(
+  packageRoot: string,
+): Promise<string | null> {
+  const packageJsonPath = join(packageRoot, "package.json");
   if (!(await pathExists(packageJsonPath))) {
     return null;
   }
@@ -89,7 +101,7 @@ export async function buildToolingManifest(): Promise<ToolingManifest> {
   return {
     generated_at: new Date().toISOString(),
     package_root: PACKAGE_ROOT,
-    package_version: await readPackageVersion(),
+    package_version: await readPackageVersion(PACKAGE_ROOT),
     implementation_hash: hash.digest("hex"),
     inputs: existingInputs,
   };

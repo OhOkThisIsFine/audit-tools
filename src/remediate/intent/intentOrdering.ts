@@ -22,16 +22,8 @@
  */
 
 import type { InterpretedIntent } from "audit-tools/shared";
+import { severityRank } from "audit-tools/shared";
 import type { Finding, RemediationBlock } from "../state/types.js";
-
-/** Severity → base ordering weight (most-severe-first). Higher sorts earlier. */
-const SEVERITY_WEIGHT: Record<string, number> = {
-  critical: 5,
-  high: 4,
-  medium: 3,
-  low: 2,
-  info: 1,
-};
 
 /** Boost added to a finding whose lens the intent emphasised (lensWeights). */
 const LENS_EMPHASIS_BOOST = 10;
@@ -122,7 +114,11 @@ export function findingIntentWeight(
   includeNeedles: string[] = scopeIncludeNeedles(intent),
   excludeNeedles: string[] = scopeExcludeNeedles(intent),
 ): number {
-  let weight = SEVERITY_WEIGHT[finding.severity] ?? 0;
+  // Base ordering weight: the canonical severity rank (critical=5 … info=1),
+  // derived in audit-tools/shared from SEVERITIES. Never a local rank table —
+  // the copies previously drifted (0-based vs 1-based, inverted ordering), and
+  // tests/shared/finding-ranks.test.ts refuses one anywhere under src/.
+  let weight = severityRank(finding.severity);
   const lens = (finding.lens ?? "").trim();
   if (lens.length > 0 && intent.lensWeights[lens as keyof typeof intent.lensWeights] !== undefined) {
     weight += LENS_EMPHASIS_BOOST;

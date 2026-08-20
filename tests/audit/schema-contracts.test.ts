@@ -602,22 +602,60 @@ test("every inline lens enum across generated schemas equals the LensSchema sour
   );
   expect(lensSchema.enum, "lens.schema.json must contain exactly the canonical lens values").toEqual([...CANONICAL]);
 
+  // STRUCTURAL SELECTION, not membership. The selector used to be
+  // `obj.enum.includes("correctness")` (DAT-e5fae179 / REL-e5fae179): an enum
+  // that drifted by DROPPING a lens — "correctness" included — failed that
+  // predicate, was skipped entirely, and reported zero offenders. The exclusion
+  // criterion was derived from the very data under test, so the guard could only
+  // ever catch additions and renames inside enums that happened to keep the
+  // sentinel.
+  //
+  // A lens enum is now selected by its POSITION: a JSON Schema `properties` map
+  // entry keyed `lens`. That scopes the check to lens-shaped structure only —
+  // sibling `severity` / `confidence` / `priority` / `status` / `emit_source`
+  // enums in the same files are deliberately NOT compared to the lens
+  // vocabulary, whatever their contents.
   const offenders: string[] = [];
-  function checkInlineLensEnums(obj: unknown, file: string): void {
-    if (typeof obj !== "object" || obj === null) return;
-    if ("enum" in obj && Array.isArray(obj.enum) && obj.enum.includes("correctness")) {
-      try {
-        expect(obj.enum).toEqual([...CANONICAL]);
-      } catch {
-        offenders.push(file);
+  const sites: string[] = [];
+  function collectLensEnumSites(node: unknown, file: string, path: string): void {
+    if (typeof node !== "object" || node === null) return;
+    if (Array.isArray(node)) {
+      node.forEach((child, index) => collectLensEnumSites(child, file, `${path}[${index}]`));
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    const properties = record.properties;
+    if (typeof properties === "object" && properties !== null && !Array.isArray(properties)) {
+      const lensProperty = (properties as Record<string, unknown>).lens;
+      if (
+        typeof lensProperty === "object" &&
+        lensProperty !== null &&
+        Array.isArray((lensProperty as Record<string, unknown>).enum)
+      ) {
+        const site = `${file}${path}.properties.lens`;
+        sites.push(site);
+        if (
+          JSON.stringify((lensProperty as { enum: unknown[] }).enum) !==
+          JSON.stringify([...CANONICAL])
+        ) {
+          offenders.push(site);
+        }
       }
     }
-    for (const value of Object.values(obj)) checkInlineLensEnums(value, file);
+    for (const [key, value] of Object.entries(record)) {
+      collectLensEnumSites(value, file, `${path}.${key}`);
+    }
   }
 
   for (const file of schemaFiles) {
     const parsed = JSON.parse(await readFile(join(schemasDir, file), "utf8"));
-    checkInlineLensEnums(parsed, file);
+    collectLensEnumSites(parsed, file, "");
   }
+  // A selector that finds nothing reports zero offenders forever; assert it
+  // actually reached the inline enums before trusting the empty result.
+  expect(
+    sites.length > 0,
+    "the structural lens-enum selector matched no schema site — it cannot be reporting a real zero",
+  ).toBeTruthy();
   expect(offenders, `these schemas contain a lens enum that drifted from LensSchema: ${offenders.join(", ")}`).toEqual([]);
 });

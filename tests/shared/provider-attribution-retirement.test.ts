@@ -55,12 +55,52 @@ function collectKeys(value: unknown): string[] {
   return Object.entries(value).flatMap(([key, child]) => [key, ...collectKeys(child)]);
 }
 
-async function optionalImport(specifier: string): Promise<Record<string, unknown> | null> {
+/**
+ * The outcome of probing a module specifier. The three cases are DISTINCT
+ * because collapsing them is a false-retirement generator (TST-248adff9): a
+ * catch-all `null` reported a module that still ships but throws during
+ * evaluation as cleanly gone, and inverted on the expected-present probes, where
+ * an environment/build failure surfaced as "the barrel omits the schema".
+ */
+type ImportProbe =
+  | { readonly status: "loaded"; readonly module: Record<string, unknown> }
+  | { readonly status: "not_found" }
+  | { readonly status: "threw"; readonly detail: string };
+
+/**
+ * Node reports an unresolvable specifier with one of these codes. Anything else
+ * — including an error with no `code` — is the module RESOLVING and then failing
+ * during evaluation, which is not evidence of retirement.
+ */
+const RESOLUTION_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "ERR_MODULE_NOT_FOUND",
+  "MODULE_NOT_FOUND",
+  "ERR_PACKAGE_PATH_NOT_EXPORTED",
+  "ERR_UNSUPPORTED_DIR_IMPORT",
+]);
+
+async function optionalImport(specifier: string): Promise<ImportProbe> {
   try {
-    return (await import(/* @vite-ignore */ specifier)) as Record<string, unknown>;
-  } catch {
-    return null;
+    return {
+      status: "loaded",
+      module: (await import(/* @vite-ignore */ specifier)) as Record<string, unknown>,
+    };
+  } catch (error: unknown) {
+    const code = (error as { code?: unknown } | null)?.code;
+    if (typeof code === "string" && RESOLUTION_FAILURE_CODES.has(code)) {
+      return { status: "not_found" };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      status: "threw",
+      detail: `${typeof code === "string" ? code : "no-code"}: ${message.split("\n")[0]}`,
+    };
   }
+}
+
+/** The module's exports when it loaded, otherwise `undefined` — never a "gone" claim. */
+function loadedExports(probe: ImportProbe): Record<string, unknown> | undefined {
+  return probe.status === "loaded" ? probe.module : undefined;
 }
 
 test("retires provider attribution and preserves a provider-agnostic execution record", async () => {
@@ -82,10 +122,17 @@ test("retires provider attribution and preserves a provider-agnostic execution r
     violations.push("provider-neutral execution fixture is missing");
   }
 
-  const executionModule = await optionalImport(
+  const executionProbe = await optionalImport(
     "../../src/shared/types/executionRecord.js",
   );
-  const schema = executionModule?.ExecutionRecordV1Alpha1Schema as
+  if (executionProbe.status !== "loaded") {
+    violations.push(
+      executionProbe.status === "not_found"
+        ? "execution-record module does not resolve"
+        : `execution-record module failed to evaluate (${executionProbe.detail})`,
+    );
+  }
+  const schema = loadedExports(executionProbe)?.ExecutionRecordV1Alpha1Schema as
     | SchemaLike
     | undefined;
   if (schema === undefined || typeof schema.safeParse !== "function") {
@@ -136,13 +183,21 @@ test("retires provider attribution and preserves a provider-agnostic execution r
     }
   }
 
-  const sharedSource = await optionalImport("../../src/shared/index.js");
-  if (sharedSource?.ExecutionRecordV1Alpha1Schema === undefined) {
-    violations.push("shared source barrel omits the execution-record schema");
-  }
-  const sharedPackage = await optionalImport("audit-tools/shared");
-  if (sharedPackage?.ExecutionRecordV1Alpha1Schema === undefined) {
-    violations.push("built shared package omits the execution-record schema");
+  // Expected-PRESENT probes. An import that fails to resolve or throws is an
+  // environment/build problem and must be reported AS ONE — reporting it as
+  // "omits the schema" is the same collapse in the opposite direction.
+  for (const [label, specifier] of [
+    ["shared source barrel", "../../src/shared/index.js"],
+    ["built shared package", "audit-tools/shared"],
+  ] as const) {
+    const probe = await optionalImport(specifier);
+    if (probe.status === "not_found") {
+      violations.push(`${label} does not resolve: ${specifier}`);
+    } else if (probe.status === "threw") {
+      violations.push(`${label} failed to evaluate (${probe.detail})`);
+    } else if (probe.module.ExecutionRecordV1Alpha1Schema === undefined) {
+      violations.push(`${label} omits the execution-record schema`);
+    }
   }
 
   const retiredPaths = [
@@ -197,11 +252,18 @@ test("retires provider attribution and preserves a provider-agnostic execution r
     );
   }
 
+  // Only a RESOLUTION failure is evidence of retirement. A module that resolves
+  // and then throws is still shipped — reporting it as retired is the false
+  // green TST-248adff9 names.
   const retiredDeepImport = await optionalImport(
     "audit-tools/shared/types/attributionContract",
   );
-  if (retiredDeepImport !== null) {
+  if (retiredDeepImport.status === "loaded") {
     violations.push("retired attribution deep import still resolves");
+  } else if (retiredDeepImport.status === "threw") {
+    violations.push(
+      `retired attribution deep import still resolves but throws during evaluation (${retiredDeepImport.detail})`,
+    );
   }
 
   const packageJson = loadJson(join(process.cwd(), "package.json"));
