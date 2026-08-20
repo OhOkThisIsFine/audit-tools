@@ -7,6 +7,23 @@ export const REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION =
 export const REMEDIATION_WORKER_RESULT_CONTRACT_VERSION =
   "remediate-code-worker-result/v1alpha1" as const;
 
+// ── The LIVE host-handoff wire contracts ────────────────────────────────────
+//
+// Single-sourced here rather than kept private to the host-handoff module,
+// because the artifact validator has to recognize the very documents the
+// handoff mints. While these lived in one module the validator could only scan
+// for names nothing writes, which is precisely how its discovery filters came
+// to match zero files on every live run.
+
+export const REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION =
+  "remediation-host-workload/v1alpha1" as const;
+
+export const REMEDIATION_HOST_RESULT_CONTRACT_VERSION =
+  "remediation-host-result/v1alpha1" as const;
+
+export const REMEDIATION_HOST_DECISION_CONTRACT_VERSION =
+  "remediation-host-decision/v1alpha1" as const;
+
 export type RemediationStepKind =
   | "confirm_intent"
   | "confirm_auto_discovered_input"

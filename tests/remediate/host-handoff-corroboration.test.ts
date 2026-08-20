@@ -7,10 +7,12 @@ import {
   ingestRemediationHostResults,
   precomputeRecoveryTestVerdicts,
   prepareRemediationHostHandoff,
+  runRequiredTest,
   type CurrentRemediationHostState,
   type PreparedRemediationHostHandoff,
   type RemediationHostWorkItem,
   type RemediationRequiredTestVerdicts,
+  type RequiredTestFailure,
 } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 import { recoverIngestHostResults } from "../../src/remediate/steps/nextStep.js";
 import type { RemediationHostHandoffRecord } from "../../src/remediate/state/types.js";
@@ -1055,5 +1057,231 @@ describe("remediation host handoff repository corroboration", () => {
       "no longer dependency/phase eligible",
     );
     expect(await readSubmissionLedger(value.artifactsDir)).toEqual([]);
+  });
+
+  // ── CORROBORATION FAILS CLOSED — both branches, so the skip cannot widen ──
+
+  it("skips corroboration ONLY with neither a trusted binding nor a git repo", async () => {
+    // The documented, bounded skip: nothing to corroborate against, and no
+    // trusted record claiming there was. This is the ONE branch that proceeds
+    // on the declared evidence, and it is pinned so it can never grow.
+    const root = await mkdtemp(join(tmpdir(), "remediation-no-git-"));
+    cleanupRoots.push(root);
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "export const value = 1;\n");
+    const artifactsDir = join(root, ".audit-tools", "remediation");
+    const runId = "no-git-corroboration";
+    const state = {
+      contract_version: "remediate-code-state/v1alpha1",
+      status: "implementing",
+      plan: {
+        plan_id: runId,
+        findings: [
+          {
+            id: "F1",
+            title: "Correct the exported value",
+            category: "correctness",
+            severity: "high",
+            confidence: "high",
+            lens: "correctness",
+            summary: "Change the exported value.",
+            affected_files: [{ path: "src/a.ts" }],
+            evidence: ["src/a.ts:1 returns the stale value"],
+          },
+        ],
+        blocks: [
+          {
+            block_id: "B1",
+            items: ["F1"],
+            parallel_safe: true,
+            dependencies: [],
+            targeted_commands: ['node -e "process.exit(0)"'],
+            touched_files: ["src/a.ts"],
+            phase_ordinal: 0,
+            token_estimate: 1_200,
+          },
+        ],
+        project_type: "typescript",
+        candidate_closing_actions: ["none"],
+      },
+      items: { F1: { finding_id: "F1", block_id: "B1", status: "pending" } },
+    } as unknown as CurrentRemediationHostState;
+    const prepared = await prepareRemediationHostHandoff({
+      root,
+      artifactsDir,
+      runId,
+      baselineCommit: "1".repeat(40),
+      state,
+    });
+    if (prepared === "unsupported_retired_state") throw new Error("state rejected");
+    const item = prepared.workload.work_items[0]!;
+    const resultPath = resolve(root, item.result_path);
+    await mkdir(dirname(resultPath), { recursive: true });
+    await writeFile(
+      resultPath,
+      JSON.stringify({
+        contract_version: "remediation-host-result/v1alpha1",
+        result_id: "result-B1",
+        run_id: runId,
+        work_item_id: item.id,
+        prompt_sha256: item.prompt.sha256,
+        changed_files: ["src/a.ts"],
+        commit_evidence: { before: item.baseline_commit, after: "2".repeat(40) },
+        test_evidence: item.required_tests.map((command) => ({
+          command,
+          status: "passed",
+        })),
+        worktree_evidence: {
+          baseline_commit: item.baseline_commit,
+          changed_files: ["src/a.ts"],
+        },
+        acceptance: { status: "accepted" },
+        merge: { status: "merged" },
+      }),
+      "utf8",
+    );
+
+    const ingested = await ingestRemediationHostResults({
+      root,
+      artifactsDir,
+      runId,
+      state,
+    });
+    if (ingested === "unsupported_retired_state") throw new Error("state rejected");
+    expect(ingested.accepted_count).toBe(1);
+    expect(ingested.issues).toEqual([]);
+  });
+
+  it("refuses a git-backed workload with no trusted binding rather than accepting the claim", async () => {
+    const value = await fixture();
+    const after = await landA(value);
+    await writeResult(value, resultFor(value, after));
+
+    // Same fixture, same byte-correct submission — but the state carries no
+    // host_handoff record. `isGitRepo(root)` is true, so the skip must NOT
+    // apply and the ingest must refuse outright.
+    const refused = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: value.state,
+    });
+    if (refused === "unsupported_retired_state") throw new Error("state rejected");
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.issues.map((issue) => issue.code)).toEqual([
+      "trusted_binding_missing",
+    ]);
+    expect(refused.state.items.F1!.status).toBe("pending");
+  });
+
+  it("keeps corroborating when a binding is present — 'unavailable' never means 'corroborated'", async () => {
+    const value = await fixture();
+    const after = await landA(value);
+    // A real landing, then the object database is made unreadable to git by
+    // claiming a commit that cannot resolve. Corroboration must still refuse
+    // rather than fall through to the host's word.
+    await writeResult(value, resultFor(value, "3".repeat(40)));
+    const refused = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+    });
+    if (refused === "unsupported_retired_state") throw new Error("state rejected");
+    expect(refused.accepted_count).toBe(0);
+    // An UNRESOLVABLE commit is classified as commit_missing — the same code an
+    // absent git binary produces, which is exactly why the failure mode warns a
+    // caller to read a run-wide commit_missing as an environment signal.
+    expect(refused.issues.map((issue) => issue.code)).toEqual(["commit_missing"]);
+    expect(refused.state.items.F1!.status).toBe("pending");
+    // The genuinely landed commit is still there; nothing about it was accepted.
+    expect(isAncestor(value.root, after, "HEAD")).toBe(true);
+  });
+
+  // ── A HUNG REQUIRED TEST IS ITS OWN OUTCOME, NOT AN UNLABELLED RED ────────
+
+  it("classifies a required test that exceeds its deadline, with its output captured", () => {
+    // Deliberately NOT a fixture root: a timed-out child holds its cwd open
+    // until Windows releases the handle, which makes deleting a temp root a
+    // race (EBUSY). The runner's classification has nothing to do with the
+    // repository, so it is exercised against a directory nothing cleans up.
+    const cwd = tmpdir();
+    // The deadline is a parameter for exactly this reason: an outcome only
+    // reachable by waiting ten real minutes is an outcome nothing ever tests.
+    const hanging = `node -e "console.log('starting'); setTimeout(function () {}, 60000)"`;
+    const timedOut = runRequiredTest(cwd, hanging, 1_500);
+    expect(timedOut).not.toBeNull();
+    expect(timedOut!.outcome).toBe("timed_out");
+    expect(timedOut!.command).toBe(hanging);
+    // Captured, not discarded: the old path ran with stdio "ignore" and
+    // returned a joined string, so an operator had nothing to read.
+    expect(timedOut!.stdout).toContain("starting");
+
+    const failed = runRequiredTest(
+      cwd,
+      `node -e "console.error('boom'); process.exit(3)"`,
+    );
+    expect(failed).not.toBeNull();
+    expect(failed!.outcome).toBe("failed");
+    expect(failed!.exit_code).toBe(3);
+    expect(failed!.stderr).toContain("boom");
+
+    expect(runRequiredTest(cwd, `node -e "process.exit(0)"`)).toBeNull();
+  });
+
+  it("reports a hung required test under its own issue code, distinguishable without parsing prose", async () => {
+    const value = await fixture();
+    const landed = await orphanBaselineAndLand(value);
+    await writeResult(value, resultFor(value, landed));
+    const command = value.item.required_tests[0]!;
+
+    // The recovery lane READS a pre-computed verdict table, so a timeout verdict
+    // can be delivered without a ten-minute wait — the same record
+    // `runRequiredTest` would have produced.
+    const verdicts = new Map<string, RequiredTestFailure | null>([
+      [
+        `${String(value.root.length)}:${value.root}:${command}`,
+        {
+          command,
+          outcome: "timed_out",
+          exit_code: null,
+          stdout: "partial suite output",
+          stderr: "",
+        },
+      ],
+    ]);
+    const refused = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+      recovery: { requiredTestVerdicts: verdicts },
+    });
+    if (refused === "unsupported_retired_state") throw new Error("state rejected");
+    expect(refused.accepted_count).toBe(0);
+    // The OUTCOME FIELD alone tells a hang from a genuine red.
+    expect(refused.issues.map((issue) => issue.code)).toEqual([
+      "required_test_timed_out",
+    ]);
+    expect(refused.issues[0]!.message).toContain("timed out");
+    expect(refused.issues[0]!.message).toContain("partial suite output");
+  });
+
+  it("reports a genuine red under required_test_failed, not the timeout code", async () => {
+    const value = await fixture({ requiredTest: 'node -e "process.exit(1)"' });
+    const after = await landA(value);
+    await writeResult(value, resultFor(value, after));
+
+    const refused = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+    });
+    if (refused === "unsupported_retired_state") throw new Error("state rejected");
+    expect(refused.issues.map((issue) => issue.code)).toEqual([
+      "required_test_failed",
+    ]);
+    expect(refused.issues[0]!.message).toContain("exit 1");
   });
 });

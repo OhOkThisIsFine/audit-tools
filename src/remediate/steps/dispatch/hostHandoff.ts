@@ -35,11 +35,13 @@ import {
 } from "../../state/types.js";
 import { ITEM_STATUSES, isVerifiedCompleteStatus } from "../../state/itemStatus.js";
 
+import {
+  REMEDIATION_HOST_DECISION_CONTRACT_VERSION as DECISION_CONTRACT_VERSION,
+  REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_CONTRACT_VERSION,
+  REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION as WORKLOAD_CONTRACT_VERSION,
+} from "../types.js";
+
 const STATE_CONTRACT_VERSION = "remediate-code-state/v1alpha1" as const;
-const WORKLOAD_CONTRACT_VERSION =
-  "remediation-host-workload/v1alpha1" as const;
-const RESULT_CONTRACT_VERSION = "remediation-host-result/v1alpha1" as const;
-const DECISION_CONTRACT_VERSION = "remediation-host-decision/v1alpha1" as const;
 const HANDOFF_RECORD_CONTRACT_VERSION =
   "remediation-host-handoff-record/v1alpha1" as const;
 
@@ -101,6 +103,25 @@ export const REMEDIATION_ISSUE_CODES = [
   "changed_files_mismatch",
   "run_start_dirty_overlap",
   "required_test_failed",
+  /**
+   * A required test exceeded its deadline. DISTINCT from `required_test_failed`
+   * by code alone: a hung suite and a genuine red are different facts about the
+   * work, and telling them apart must not require parsing a joined message.
+   */
+  "required_test_timed_out",
+  /**
+   * A plan block declares a dependency id that exists in NO block of the plan.
+   * The block is unschedulable — never level 0 — and the producer bug is named
+   * rather than absorbed.
+   */
+  "dependency_missing",
+  /**
+   * A block arrived outside the normalized write-scope / declared-command shape
+   * this boundary consumes (artifact:normalized-block-write-scope). Refused, not
+   * silently normalized: a silently sorted, deduped or re-rooted write scope
+   * hides the producer bug and widens what a host may touch.
+   */
+  "block_contract_invalid",
   /**
    * A recovery-mode acceptance could not be marked on the submission ledger, so
    * it was refused. An acceptance that used the relaxation MUST stay
@@ -315,6 +336,172 @@ function normalizeDeclaredPath(root: string, candidate: string, label: string): 
   return repoRelativePath(root, candidate, label);
 }
 
+/**
+ * Does a command leave the declared single-invocation shape?
+ *
+ * A `targeted_command` is executed VERBATIM through `shell: true` in the
+ * repository root, so anything that chains, redirects, substitutes or subshells
+ * turns one declared test into arbitrary execution. A flat regex cannot decide
+ * this: `node -e "process.exit(0)"` is an ordinary test invocation whose parens
+ * are inside quotes, and refusing it would refuse the normal case.
+ *
+ * So the scan is QUOTE-AWARE — a tiny, fully-owned grammar, not a shell parser.
+ * Outside quotes every control character is refused; inside double quotes the
+ * two that still expand there (`$`, backtick) are refused; inside single quotes
+ * nothing expands. An unterminated quote is itself a refusal, because the rest
+ * of the string cannot be classified.
+ *
+ * Bounded deliberately: this is the POSIX-dangerous set, which also covers
+ * cmd.exe's chaining and redirection (`&`, `|`, `<`, `>`); cmd's `%VAR%`
+ * expansion is NOT covered, and the producer-side obligation still owns the
+ * declared shape (artifact:normalized-block-write-scope).
+ */
+function leavesDeclaredCommandShape(command: string): boolean {
+  let quote: "none" | "single" | "double" = "none";
+  for (const character of command) {
+    if (quote === "single") {
+      if (character === "'") quote = "none";
+      continue;
+    }
+    if (quote === "double") {
+      if (character === '"') quote = "none";
+      else if (character === "$" || character === "`") return true;
+      continue;
+    }
+    if (character === "'") quote = "single";
+    else if (character === '"') quote = "double";
+    else if ("&|;<>`$()\n\r".includes(character)) return true;
+  }
+  return quote !== "none";
+}
+
+/**
+ * A block that arrived outside the shape this boundary CONSUMES.
+ *
+ * The producer half of the write-scope contract is owned upstream
+ * (artifact:normalized-block-write-scope). This is the consumer half, and it
+ * exists because absorbing a malformed block is worse than refusing it: an
+ * absolute or escaping `touched_files` entry silently widens what a host may
+ * write, and a shell-chained `targeted_command` is executed verbatim. Both are
+ * producer bugs, and a boundary that normalizes them away means neither ever
+ * surfaces. The refusal is CLASSIFIED (`block_contract_invalid`) and names the
+ * block, so the bug is attributable to the module that wrote it.
+ */
+class BlockContractError extends Error {
+  constructor(
+    readonly blockId: string,
+    readonly detail: string,
+  ) {
+    super(
+      `block '${blockId}' is outside the normalized write-scope contract: ${detail}`,
+    );
+    this.name = "BlockContractError";
+  }
+}
+
+/**
+ * Refuse a block whose declared write scope or commands leave the consumed
+ * shape. Throws {@link BlockContractError}; callers turn it into a classified
+ * issue. Runs BEFORE anything is built from the block, so a refused block never
+ * becomes a work item and its commands never run.
+ */
+function assertBlockContract(root: string, block: RemediationBlock): void {
+  for (const raw of block.touched_files) {
+    if (typeof raw !== "string" || raw.trim().length === 0) {
+      throw new BlockContractError(
+        block.block_id,
+        "touched_files carries an empty entry",
+      );
+    }
+    if (isAbsolute(raw)) {
+      throw new BlockContractError(
+        block.block_id,
+        `touched_files entry ${JSON.stringify(raw)} is absolute, not repository-relative`,
+      );
+    }
+    let normalized: string;
+    try {
+      normalized = repoRelativePath(root, raw, `${block.block_id}.touched_files[]`);
+    } catch {
+      throw new BlockContractError(
+        block.block_id,
+        `touched_files entry ${JSON.stringify(raw)} does not resolve beneath the repository root`,
+      );
+    }
+    if (normalized !== raw) {
+      throw new BlockContractError(
+        block.block_id,
+        `touched_files entry ${JSON.stringify(raw)} is not in normalized repo-relative form ` +
+          `(${JSON.stringify(normalized)})`,
+      );
+    }
+  }
+  for (const command of block.targeted_commands ?? []) {
+    if (typeof command !== "string" || command.trim().length === 0) {
+      throw new BlockContractError(
+        block.block_id,
+        "targeted_commands carries an empty command",
+      );
+    }
+    if (leavesDeclaredCommandShape(command)) {
+      throw new BlockContractError(
+        block.block_id,
+        `targeted_command ${JSON.stringify(command)} leaves the declared shape — it chains, ` +
+          "redirects or substitutes, and this boundary executes commands verbatim through a shell",
+      );
+    }
+  }
+}
+
+/**
+ * Every block of the plan that cannot be scheduled, with the reason, as
+ * classified ingest issues. Two producer bugs live here: a dependency id that
+ * resolves to no block (unschedulable forever — see `hostDependencyLevels`),
+ * and a block outside the consumed write-scope/command shape.
+ *
+ * Only blocks with at least one PENDING item are reported: a settled block's
+ * historical shape is not this ingest's business, and reporting it would turn
+ * every later ingest into a repeat of the same noise.
+ */
+function planBlockIssues(
+  root: string,
+  state: CurrentRemediationHostState,
+): RemediationHostIngestIssue[] {
+  const blockIds = new Set(state.plan.blocks.map((block) => block.block_id));
+  const issues: RemediationHostIngestIssue[] = [];
+  for (const block of state.plan.blocks) {
+    const pending = block.items.some(
+      (findingId) => state.items[findingId]?.status === "pending",
+    );
+    if (!pending) continue;
+    const missing = (block.dependencies ?? []).filter(
+      (dependencyId) => !blockIds.has(dependencyId),
+    );
+    if (missing.length > 0) {
+      issues.push({
+        code: "dependency_missing",
+        work_item_id: block.block_id,
+        message:
+          `block '${block.block_id}' declares ${missing.length === 1 ? "a dependency" : "dependencies"} ` +
+          `${missing.map((id) => `'${id}'`).join(", ")} present in no block of the plan, so it can ` +
+          "never be dependency-verified and is never scheduled",
+      });
+      continue;
+    }
+    try {
+      assertBlockContract(root, block);
+    } catch (error) {
+      if (!(error instanceof BlockContractError)) throw error;
+      issues.push({
+        code: "block_contract_invalid",
+        work_item_id: block.block_id,
+        message: error.message,
+      });
+    }
+  }
+  return issues;
+}
+
 function resolveBoundaryPaths(params: {
   readonly root: string;
   readonly artifactsDir: string;
@@ -447,7 +634,13 @@ export function hostDependencyLevels(
   const permanentlyIneligible = (block: RemediationBlock): boolean => {
     for (const dependencyId of block.dependencies ?? []) {
       const dependency = blockById.get(dependencyId);
-      if (dependency && !isVerifiedNow(dependency) && !isPending(dependency)) {
+      // An id that resolves to NO block is not a harmless declaration — it is a
+      // prerequisite that can never be verified, so the block can never become
+      // eligible. Guarding on `dependency &&` skipped exactly this case, which
+      // is the second half of the same hole as the readiness predicate below:
+      // closing only one leaves the block reaching the host anyway.
+      if (dependency === undefined) return true;
+      if (!isVerifiedNow(dependency) && !isPending(dependency)) {
         return true;
       }
     }
@@ -463,7 +656,12 @@ export function hostDependencyLevels(
         phaseBarrierClear(phaseOf(block)) &&
         (block.dependencies ?? []).every((dependencyId) => {
           const dependency = blockById.get(dependencyId);
-          if (!dependency || isVerifiedNow(dependency)) return true;
+          // DEPENDENCY READINESS REQUIRES EXISTENCE. `!dependency` used to read
+          // as "satisfied", so a plan naming a block that does not exist had its
+          // dependent placed at level 0 and dispatched with the prerequisite
+          // never verified — silently, because no other check looks at it.
+          if (dependency === undefined) return false;
+          if (isVerifiedNow(dependency)) return true;
           return dependency.items.every(
             (findingId) =>
               isVerifiedCompleteStatus(items[findingId]?.status) ||
@@ -540,6 +738,10 @@ function buildWorkItem(
   baselineCommit: string,
   state: CurrentRemediationHostState,
 ): RemediationHostWorkItem {
+  // The consumed-shape gate runs FIRST: a block outside the write-scope /
+  // command contract must never become a work item, so nothing downstream can
+  // dispatch it or execute its commands.
+  assertBlockContract(paths.root, block);
   const allowedFiles = [...new Set(block.touched_files)].map((path) =>
     normalizeDeclaredPath(paths.root, path, `${block.block_id}.touched_files[]`),
   ).sort(compareCodeUnits);
@@ -1026,7 +1228,63 @@ function gitChangedFilesOfCommit(
  * The normal lane passes `null` and stays byte-identical to the pre-recovery
  * behavior — every command spawns once per work item, exactly as before.
  */
-export type RemediationRequiredTestVerdicts = ReadonlyMap<string, string | null>;
+export type RemediationRequiredTestVerdicts = ReadonlyMap<
+  string,
+  RequiredTestFailure | null
+>;
+
+/**
+ * A required-test rerun that did not pass, CLASSIFIED.
+ *
+ * `outcome` is the whole point. A suite that exceeded its deadline and a suite
+ * that returned non-zero are different facts — one is an environment/hang
+ * signal, the other is the work being wrong — and they used to arrive as one
+ * joined string (`"<cmd> (exit 1)"` / `"<cmd> (ETIMEDOUT)"`) that a caller could
+ * only tell apart by parsing prose. Output was not captured at all (`stdio:
+ * "ignore"`), so an operator staring at a red ingest had nothing to read.
+ */
+export interface RequiredTestFailure {
+  readonly command: string;
+  readonly outcome: "failed" | "timed_out" | "spawn_error";
+  readonly exit_code: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/**
+ * Per-command deadline. A required test is host-authored and may legitimately be
+ * a full suite, so the bound is generous; what changed is that hitting it is now
+ * a NAMED outcome instead of an unlabelled failure string.
+ */
+const REQUIRED_TEST_TIMEOUT_MS = 10 * 60 * 1_000;
+
+/**
+ * Captured output is bounded and TAIL-biased: a failing suite's verdict is at
+ * the end, and an unbounded capture would put a whole test log into state and
+ * into every rendered issue.
+ */
+const CAPTURED_OUTPUT_LIMIT = 4_000;
+
+function tail(value: string | undefined): string {
+  const text = value ?? "";
+  return text.length <= CAPTURED_OUTPUT_LIMIT
+    ? text
+    : `…${text.slice(text.length - CAPTURED_OUTPUT_LIMIT)}`;
+}
+
+/** Render one classified failure for a host-facing issue message. */
+function describeRequiredTestFailure(failure: RequiredTestFailure): string {
+  const head =
+    failure.outcome === "timed_out"
+      ? `${failure.command} (timed out)`
+      : failure.outcome === "spawn_error"
+        ? `${failure.command} (could not be started)`
+        : `${failure.command} (exit ${String(failure.exit_code)})`;
+  const captured = [failure.stdout, failure.stderr]
+    .filter((stream) => stream.trim().length > 0)
+    .join("\n");
+  return captured.length > 0 ? `${head}: ${captured}` : head;
+}
 
 /**
  * Length-prefixed so the root/command boundary is unambiguous for any path, and
@@ -1039,18 +1297,59 @@ function requiredTestVerdictKey(root: string, command: string): string {
   return `${String(root.length)}:${root}:${command}`;
 }
 
-/** The ONE place a required-test command is spawned. */
-function runRequiredTest(root: string, command: string): string | null {
+/**
+ * The ONE place a required-test command is spawned.
+ *
+ * `timeoutMs` is a parameter so the deadline is exercisable: a hang is a
+ * first-class outcome of this function, and an outcome that can only be reached
+ * by waiting ten real minutes is an outcome nothing ever tests.
+ */
+export function runRequiredTest(
+  root: string,
+  command: string,
+  timeoutMs: number = REQUIRED_TEST_TIMEOUT_MS,
+): RequiredTestFailure | null {
   const result = spawnSync(command, {
     cwd: root,
     shell: true,
-    stdio: "ignore",
-    timeout: 10 * 60 * 1_000,
+    // Captured, not discarded: without it a red ingest reports that something
+    // failed and nothing about why.
+    encoding: "utf8",
+    maxBuffer: 8 * 1_024 * 1_024,
+    timeout: timeoutMs,
     windowsHide: true,
   });
-  return result.error || result.status !== 0
-    ? `${command} (${result.error?.message ?? `exit ${String(result.status)}`})`
-    : null;
+  const stdout = tail(result.stdout);
+  const stderr = tail(result.stderr);
+  // node sets `signal` (and an ETIMEDOUT-ish error) when the deadline killed the
+  // child. That is the discriminator between a hang and a genuine red — the two
+  // used to be one joined string.
+  const timedOut =
+    result.error !== undefined &&
+    ((result.error as NodeJS.ErrnoException).code === "ETIMEDOUT" ||
+      result.signal !== null);
+  if (timedOut) {
+    return { command, outcome: "timed_out", exit_code: null, stdout, stderr };
+  }
+  if (result.error) {
+    return {
+      command,
+      outcome: "spawn_error",
+      exit_code: null,
+      stdout,
+      stderr: stderr.length > 0 ? stderr : result.error.message,
+    };
+  }
+  if (result.status !== 0) {
+    return {
+      command,
+      outcome: "failed",
+      exit_code: result.status,
+      stdout,
+      stderr,
+    };
+  }
+  return null;
 }
 
 function rerunRequiredTests(
@@ -1058,15 +1357,20 @@ function rerunRequiredTests(
   commands: readonly string[],
   /** `null` on the normal lane — see {@link RemediationRequiredTestVerdicts}. */
   verdicts: RemediationRequiredTestVerdicts | null,
-): readonly string[] {
-  const failures: string[] = [];
+): readonly RequiredTestFailure[] {
+  const failures: RequiredTestFailure[] = [];
   for (const command of commands) {
     if (verdicts) {
       const verdict = verdicts.get(requiredTestVerdictKey(root, command));
       if (verdict === undefined) {
-        failures.push(
-          `${command} (no pre-computed verdict — refusing to spawn a test while the state lock is held)`,
-        );
+        failures.push({
+          command,
+          outcome: "spawn_error",
+          exit_code: null,
+          stdout: "",
+          stderr:
+            "no pre-computed verdict — refusing to spawn a test while the state lock is held",
+        });
       } else if (verdict !== null) {
         failures.push(verdict);
       }
@@ -1076,6 +1380,28 @@ function rerunRequiredTests(
     if (failure !== null) failures.push(failure);
   }
   return failures;
+}
+
+/**
+ * The classified issue for a set of required-test failures. A timeout anywhere
+ * in the set makes the whole issue a timeout: a hung suite is the fact that
+ * explains the ingest, and burying it under a sibling's exit code is exactly the
+ * conflation the code split exists to end.
+ */
+function requiredTestIssue(
+  workItem: RemediationHostWorkItem,
+  failures: readonly RequiredTestFailure[],
+): RemediationHostIngestIssue {
+  return {
+    code: failures.some((failure) => failure.outcome === "timed_out")
+      ? "required_test_timed_out"
+      : "required_test_failed",
+    work_item_id: workItem.id,
+    result_path: workItem.result_path,
+    message: `mechanical required-test rerun failed: ${failures
+      .map(describeRequiredTestFailure)
+      .join("; ")}`,
+  };
 }
 
 /**
@@ -1098,7 +1424,7 @@ export async function precomputeRecoveryTestVerdicts(params: {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
   const paths = resolveBoundaryPaths(params);
-  const verdicts = new Map<string, string | null>();
+  const verdicts = new Map<string, RequiredTestFailure | null>();
 
   const workloadRead = await readSubmissionDocument(paths.workloadPath);
   if (workloadRead.kind !== "value") return verdicts;
@@ -1222,11 +1548,8 @@ function corroborateHostResult(params: {
     verdicts,
   );
   if (failedTests.length > 0) {
-    return {
-      ok: false,
-      code: "required_test_failed",
-      message: `mechanical required-test rerun failed: ${failedTests.join("; ")}`,
-    };
+    const issue = requiredTestIssue(workItem, failedTests);
+    return { ok: false, code: issue.code, message: issue.message };
   }
   return { ok: true, changedFiles: actualFiles, usedRecovery };
 }
@@ -1269,7 +1592,18 @@ export async function prepareRemediationHostHandoff(params: {
       : {}),
   });
   if (workload.work_items.length === 0) {
-    throw new Error("Cannot prepare an empty remediation host workload");
+    // Name the producer defect when it is the cause. An empty level 0 that is
+    // really "every candidate block declares a prerequisite that does not
+    // exist" used to surface as a bare "empty workload", sending the operator
+    // to look at scheduling rather than at the plan.
+    const blocked = planBlockIssues(paths.root, state);
+    throw new Error(
+      blocked.length === 0
+        ? "Cannot prepare an empty remediation host workload"
+        : `Cannot prepare a remediation host workload: ${blocked
+            .map((issue) => issue.message)
+            .join("; ")}`,
+    );
   }
   const workloadDigest = hostWorkloadSha256(workload);
   if (
@@ -1383,6 +1717,22 @@ export async function ingestRemediationHostResults(params: {
       completed_work_item_ids: [],
       pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
       issues,
+      state_changed: false,
+      state: nextState,
+    };
+  }
+
+  // Producer-side plan defects are reported BEFORE the workload is parsed: a
+  // block with an unresolvable dependency or an unnormalized write scope makes
+  // the whole workload fail to re-derive, and `workload_invalid` alone would
+  // name the symptom while hiding which block caused it.
+  const blockIssues = planBlockIssues(paths.root, state);
+  if (blockIssues.length > 0) {
+    return {
+      accepted_count: 0,
+      completed_work_item_ids: [],
+      pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
+      issues: blockIssues,
       state_changed: false,
       state: nextState,
     };
@@ -1517,12 +1867,7 @@ export async function ingestRemediationHostResults(params: {
           requiredTestVerdicts,
         );
         if (failedTests.length > 0) {
-          issues.push({
-            code: "required_test_failed",
-            work_item_id: workItem.id,
-            result_path: workItem.result_path,
-            message: `mechanical required-test rerun failed: ${failedTests.join("; ")}`,
-          });
+          issues.push(requiredTestIssue(workItem, failedTests));
           continue;
         }
       }
