@@ -314,6 +314,15 @@ export interface AllowlistedExecOutcome {
   /** Full combined stdout+stderr (bounded), used to evaluate output matches. */
   output: string;
   /**
+   * True when `output` was cut short by `MAX_CAPTURED_OUTPUT` — the command
+   * produced more combined stdout+stderr than this outcome contains. A caller
+   * must treat `output` as an incomplete prefix, never as proof that missing
+   * text is absent: "the capture was cut off" is a distinct state from "the
+   * command genuinely produced/omitted X" and must not be read as the latter.
+   * Absent (not `false`) on every outcome whose `output` is the full capture.
+   */
+  truncated?: boolean;
+  /**
    * True when the internal allowlist gate refused `command` BEFORE any spawn
    * was attempted (`isAllowedAnchorCommand` returned false) — a structured
    * refusal, never a spawn, never a throw. Distinct from `spawn_error` (which
@@ -375,8 +384,19 @@ export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
       windowsHide: true,
     });
     let output = "";
+    // A chunk that arrives once the cap is already reached is genuinely
+    // DROPPED (never appended) — that is the only condition that makes the
+    // capture an incomplete prefix, so it is the only condition that sets the
+    // signal. A single chunk that pushes `output` past the cap in one shot is
+    // still recorded in full (unchanged cap-application behavior); nothing was
+    // lost in that case, so `truncated` correctly stays unset.
+    let truncated = false;
     const capture = (chunk: unknown) => {
-      if (output.length < MAX_CAPTURED_OUTPUT) output += String(chunk);
+      if (output.length < MAX_CAPTURED_OUTPUT) {
+        output += String(chunk);
+      } else {
+        truncated = true;
+      }
     };
     child.stdout?.on("data", capture);
     child.stderr?.on("data", capture);
@@ -395,11 +415,17 @@ export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
         timed_out: timedOut,
         spawn_error: error.message,
         output,
+        ...(truncated ? { truncated: true } : {}),
       });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolvePromise({ exit_code: code, timed_out: timedOut, output });
+      resolvePromise({
+        exit_code: code,
+        timed_out: timedOut,
+        output,
+        ...(truncated ? { truncated: true } : {}),
+      });
     });
   });
 };

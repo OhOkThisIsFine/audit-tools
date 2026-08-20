@@ -177,6 +177,25 @@ export async function verifyFindingAnchor(
       evidence: tailEvidence(outcome.output),
     };
   }
+  // Truncated output is checked BEFORE evaluateExpectation, and only matters
+  // for the two output-matching kinds — exit_zero/exit_nonzero read exitCode,
+  // never `output`, so a chatty-but-truncated run cannot corrupt an exit-code
+  // verdict. For output_includes/output_excludes, a truncated capture must
+  // never let absence-in-the-captured-prefix decide the verdict in EITHER
+  // direction (a missing "includes" match may be sitting in the dropped tail;
+  // a missing "excludes" match may be too) — so the outcome is inconclusive
+  // regardless of what the truncated prefix happened to contain.
+  if (
+    outcome.truncated &&
+    (anchor.confirm_if.kind === "output_includes" ||
+      anchor.confirm_if.kind === "output_excludes")
+  ) {
+    return {
+      status: "inconclusive",
+      summary: `anchor \`${display}\` output was truncated at the capture cap before ${anchor.confirm_if.kind} could be evaluated — cannot confirm or refute from a partial capture`,
+      evidence: tailEvidence(outcome.output),
+    };
+  }
 
   const verdict = evaluateExpectation(
     anchor.confirm_if,
