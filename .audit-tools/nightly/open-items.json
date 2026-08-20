@@ -1,228 +1,106 @@
 {
-  "generated_at": "2026-08-19T09:34:02.934Z",
+  "generated_at": "2026-08-20T09:22:01.624Z",
   "run": {
-    "date": "2026-08-19",
-    "head": "72498ed2b8d3f4fd235f681b0279a22a5ff8e129"
+    "date": "2026-08-20",
+    "head": "70da005d9d4d8a627b9444afb0ee68fab45bdbb4"
   },
   "items": [
     {
-      "id": "solN-2",
+      "id": "docsN-1",
+      "leg": "docs",
+      "path": "CLAUDE.md",
+      "subject_key": "e406c716c4a17524",
+      "title": "instruction-file edit: CLAUDE.md describes the DEFAULT analyzer set as admitted without a token, but an operator decline now vetoes it too",
+      "eli5": "CLAUDE.md is the file every agent reads to learn how this project decides whether an outside analyzer tool is allowed to run. It says that a small curated DEFAULT set of tools runs without asking anyone, and that every other tool needs the operator to consent first. That was accurate when it was written. The code has since moved. In the function that makes the decision, the very first thing checked is whether the operator has already recorded a refusal for that tool. If they have, the tool is refused — even if it is a member of the DEFAULT set, and even if a consent token was supplied. The code comment states this outright: an operator refusal is a veto for every candidate, and no token can override it. So the doc is not telling a lie, but it is incomplete in a way that matters: an agent reading only CLAUDE.md would conclude that a DEFAULT-set analyzer always runs, which is no longer true. CLAUDE.md is an instruction file, and instruction files are never edited automatically by this routine, so the choice of whether and how to state the veto is yours. Saying yes means the doc gains one clause about the operator veto. Saying no means the doc keeps describing the default set as unconditional, and the veto stays a property you only find by reading the code.",
+      "question": "CLAUDE.md says \"the curated DEFAULT set is admitted WITHOUT a token\". At HEAD, admitSpawn refuses a DEFAULT-set candidate outright when the operator has recorded a \"declined\" decision, and also when the analyzer setting is \"skip\" — both checked before the default-set short-circuit. Should CLAUDE.md state that veto?",
+      "options": [
+        {
+          "label": "Add the veto clause",
+          "answer": "Yes — amend the Own-vs-acquire bullet in CLAUDE.md so it states that a recorded operator \"declined\" decision (and an analyzer setting of \"skip\") refuses a candidate BEFORE the default-set short-circuit, so DEFAULT-set membership is not unconditional admission and no consent token can override an operator refusal."
+        },
+        {
+          "label": "Add veto + ordering",
+          "answer": "Yes, and go further — state the full admission ORDER in CLAUDE.md (declined, then skip, then default set, then recorded grant, then consent token), because the order is the contract and the admitSpawn doc comment already says so."
+        },
+        {
+          "label": "Leave CLAUDE.md as is",
+          "answer": "No — the bullet is about the own-vs-acquire policy, not the full admission algorithm. The sentence is literally true (the default set needs no token), the ordering is documented at admitSpawn itself, and CLAUDE.md should not grow a second copy of it."
+        }
+      ],
+      "evidence": [
+        "CLAUDE.md:284 contains the literal string \"the curated DEFAULT set is admitted WITHOUT a token\"; no clause in that bullet mentions a recorded decline or an analyzer setting of \"skip\".",
+        "src/shared/analyzers/acquisitionEngine.ts, function admitSpawn: the body opens with `if (recordedDecision === \"declined\") return ANALYZER_DENIAL_REASONS.consent_declined;` then `if (setting === \"skip\") return ANALYZER_DENIAL_REASONS.setting_skip;` and only then `if (candidate.defaultRun) return undefined;`. Read directly from the file this run.",
+        "The doc comment above admitSpawn states the intent explicitly: \"ORDER IS THE CONTRACT\" and \"an operator refusal is a veto for EVERY candidate, including a default-set member, and no token can override it.\"",
+        "The behaviour landed at HEAD commit 70da005d, \"remediate: consent-honoring acquisition chokepoint and classified analyzer outcomes (CP-NODE-1)\" — inside this run's evidence window.",
+        "Corroboration was WEAK: codex was quota-blocked, and the free-provider lane answered the ordering question \"YES\" but supplied no quoted body and fabricated a test filename on a prior attempt, so its output was discarded. The evidence above is this session's own direct read of the source."
+      ],
+      "premise_probes": [
+        {
+          "file": "CLAUDE.md",
+          "contains": "the curated DEFAULT set is admitted WITHOUT a token"
+        }
+      ],
+      "first_seen": "2026-08-20",
+      "nights_open": 1
+    },
+    {
+      "id": "solN-1",
       "leg": "solutions",
-      "path": "scripts/check-doc-code-citations.mjs",
-      "subject": "check-doc-code-citations resolves backticked repo-path citations; an un-backticked citation is not a citation as far as the gate is concerned",
-      "title": "The citation gate only sees BACKTICKED citations, and the glossary writes all 45 of its citations as bare table cells — third recurrence of a stale citation the gate structurally cannot see",
-      "eli5": "There is an automatic check that makes sure every time a document points at a code file, that file actually exists. It works by looking for file paths wrapped in backticks. docs/glossary-ids.md is the one document whose whole job is pointing at the code that owns each named invariant — and it writes every one of its 45 pointers as a plain table cell with no backticks. So the check cannot see a single one of them. Yesterday a code file was deleted; this morning the glossary still pointed at it, and all ten automatic checks ran green. It was found by hand-grepping the deleted paths. This is the third time the same shape has happened. Each previous round widened WHICH KIND of path the check understands — a full path, then a directory, then a bare filename — but never changed the fact that it is looking for backticks. The escape is not the kind of path, it is the delimiter. The proposed fix does not add a new check. It puts backticks around the glossary's 45 citations so the check that already exists can see them, plus a small test so the file cannot drift back to bare cells. Answering apply means those 45 pointers start being verified on every commit. Answering do-nothing means the glossary stays a blind spot and the next deleted file goes unnoticed the same way.",
-      "question": "Apply P37 — backtick the 45 code citations in docs/glossary-ids.md and add the contract test that keeps them backticked — so the existing check:doc-code-citations gate covers them? The patch and its red-green-validated test are written out at .audit-tools/nightly/proposals/P37-citation-gate-blind-to-unbackticked/.",
+      "path": "src/remediate/steps/contractPipeline.ts",
+      "subject_key": "e2ada39929a0adb7",
+      "title": "A DAG node's write scope ignores the module contract's declared write targets — four manual recoveries in one wave; approve deriving them instead",
+      "eli5": "When the remediation pipeline hands an implementer a job, it also hands it a list of files that job is allowed to edit. That list is built from the job node's own declared files, falling back to the files belonging to its module. Separately, the contract layer has a rule for a file that sits outside a module's normal file list: the module contract DECLARES it as an output or a side effect. The two halves were never connected. The code that builds the allowed-files list reads one artifact (the module decomposition, which carries only the plain file list) and never opens the artifact that holds the declared targets. It also returns the node's own files immediately when there are any, so even if the declared targets were loaded they would be thrown away in the common case. The result: an implementer is told to change a file it is forbidden to touch. It stops and reports rather than editing out of scope, which is the safe outcome, but a person then has to hand-patch the file into two places in the run state, delete the prepared workload, and re-dispatch. That happened four times in the last wave, to three different implementers. The handoff document now instructs the next operator to expect it and repeat the fix, which is precisely the \"the human will remember\" shape this project treats as a defect. The proposal is to derive the declared targets into the allowed list so the situation cannot arise, retiring both the manual fix and the instruction to remember it. Nothing has been changed — leg 3 only proposes.",
+      "question": "Approve building the durable fix: make the node write-scope resolver read the finalized module contracts and UNION the owning module's declared write targets into the node's scope, instead of returning the node-declared files early?",
       "options": [
         {
-          "label": "Apply P37 as written",
-          "answer": "Apply P37: backtick the 45 citations in docs/glossary-ids.md and land tests/shared/glossary-citations-backticked.test.ts so the existing citation gate covers them."
+          "label": "Build it — union outputs + side_effects",
+          "answer": "Approved. buildNodeWriteScopeResolver reads finalized_module_contracts alongside module_decomposition, and resolve() unions the owning module contract's declared write targets (outputs and side_effects) into the node scope rather than early-returning on the node's own declaration. Only entries that parse as repo-relative paths are unioned; prose side-effect entries are dropped. Land it with the three red-green tests in the proposal, then delete the HANDOFF \"Known routing-gap class\" paragraph and update the memory entry."
         },
         {
-          "label": "Backtick, no new test",
-          "answer": "Backtick the glossary's citations so the gate sees them, but do not add the contract test — the gate going red is enough signal."
+          "label": "Build it — outputs only",
+          "answer": "Approved but narrower: union only the module contract's `outputs`, not `side_effects`. `side_effects` is free prose with an owner and is the more likely source of a bogus path, so it stays out of the write scope. Same tests otherwise."
         },
         {
-          "label": "Widen the gate instead",
-          "answer": "Do not reformat the doc; widen check:doc-code-citations to resolve un-backticked path-shaped tokens in table rows, accepting the false-positive surface."
+          "label": "Guard instead of fix",
+          "answer": "Do not widen the scope. Instead add a gate that fails the DAG-promotion check when a module contract declares a write target that no owning node lists in output_files, so the gap is caught at authoring time and repaired in the DAG rather than at dispatch time."
         },
         {
-          "label": "Do nothing",
-          "answer": "Leave the glossary's citations un-backticked and outside the gate's reach; the nightly hand-grep is sufficient coverage."
+          "label": "Decline — keep the fail-closed stop",
+          "answer": "Decline. The stop-and-report behaviour is working as intended and each stop has surfaced a real routing gap worth looking at by hand. Keep the manual fix shape and leave the HANDOFF paragraph in place."
         }
       ],
       "evidence": [
-        "docs/glossary-ids.md:44 cited src/remediate/steps/dispatch/verifyCommands.ts, deleted the previous day in ab1e9598. All ten mechanical gates ran GREEN, check:doc-code-citations included.",
-        "Measured at HEAD: 59 un-backticked, gate-invisible code citations repo-wide; 45 of them (76%) in docs/glossary-ids.md. Others: docs/nightly-routine.md 5, spec/multi-ide-concurrent-runs-design.md 3, docs/HANDOFF.md 2, and one each in .claude/skills/ship/SKILL.md, .claude/skills/start-lap/SKILL.md, docs/audit-pkg/development.md, docs/backlog.md.",
-        "Recurrence on three distinct dates. The gate's own header records the .mjs-to-.ts conversion stranding 31 citations across 9 docs; nightly sol-4/P29 (2026-08-13) widened it to directory and bare-filename forms; tonight (2026-08-19) the glossary row. Each round widened the path FORM, never the backtick requirement.",
-        "Red-green validated then reverted. RED: vitest exit 1 with the patch unapplied. GREEN: exit 0 after apply-patch.mjs reported 45 citations now backticked, and check:doc-code-citations then printed 400 path + 72 directory + 358 bare-filename citations across 54 tracked docs — the 45 moved inside its reach.",
-        "The stale row itself was fixed separately tonight under leg 1 (commit ad0d51b0). This item is only about the gate's blindness, which remains."
+        "src/remediate/steps/contractPipeline.ts:1381-1382 — `const declared = [...new Set(node.output_files ?? node.files_likely_touched ?? [])]; if (declared.length > 0) return declared;`. The early return discards any module-level contribution whenever the node declared anything.",
+        "src/remediate/steps/contractPipeline.ts:1317-1341 — readDecomposedModules keeps only `name`, `responsibilities` and `file_scope` from the module_decomposition artifact. The declared write targets are not in that artifact.",
+        "src/remediate/contractPipeline/derive.ts:229-232 — the finalized module contract record carries `outputs` and `side_effects`. buildNodeWriteScopeResolver never reads that artifact.",
+        "Recurrence: the same manual fix was applied four times in the 2026-08-19/20 wave (CP-NODE-2, 24, 25, 21) and three separate implementers stopped on it independently (disposition.ts, item-status.test.ts, dispatch-validate.test.ts).",
+        "Recurrence is recorded on two dates in two places: project memory `dag-node-output-files-drop-declared-write-targets`, which already names the durable fix as unbuilt, and docs/HANDOFF.md's \"Known routing-gap class\" paragraph, which tells the operator to \"Expect the same fix shape\".",
+        "That HANDOFF instruction is the CLAUDE.md \"Auditor-agnostic robustness\" violation: correctness resting on the host remembering and noticing.",
+        "Full proposal, mechanism, false-positive surface and the three red-green tests: .audit-tools/nightly/proposals/P38-dag-node-write-scope-drops-declared-targets/proposal.md"
       ],
       "premise_probes": [
         {
-          "file": "docs/glossary-ids.md",
-          "contains": "| src/shared/contentKey.ts; src/shared/stableStringify.ts |"
+          "file": "src/remediate/steps/contractPipeline.ts",
+          "contains": "const declared = [...new Set(node.output_files ?? node.files_likely_touched ?? [])];"
         }
       ],
-      "proposal": "P37 — the citation gate is blind to un-backticked citations",
-      "patch_path": ".audit-tools/nightly/proposals/P37-citation-gate-blind-to-unbackticked/",
-      "subject_key": "587c1796832c5cbc",
-      "first_seen": "2026-08-19",
-      "nights_open": 1
-    },
-    {
-      "id": "backlogN-1",
-      "leg": "backlog",
-      "path": "docs/backlog/open-bugs.md",
-      "subject": "Friction walk (queue-closeout + first .ts-conversion lap, 2026-07-28) — all three items closed, non-actionable, or none-this-lap",
-      "title": "A friction-walk entry has no open work left, but deleting it would orphan the one uncovered property it deliberately states outright",
-      "eli5": "The backlog's own rule is that an entry is deleted once its work ships — a record of what shipped is git's job, not the backlog's. The 2026-07-28 friction-walk entry looks finished by that rule. Item (1) is marked CLOSED with an owner re-decision from yesterday, item (2) is ruled advisory-not-a-defect, and item (3) says none this lap. The automatic sweep classified it already shipped or stale. But the entry does one more thing. It states, on purpose and in the open, that one half of the property has NO mechanical enforcement and is uncovered. The repo's standing rule is that a partly-enforced trap must say so outright, or the covered half reads as a close. Delete the entry and that admission disappears with it. So the question is not whether the work is done — it is — but where the uncovered admission lives now. You can delete anyway and accept the loss, trim the entry down to just the uncovered half, or move the admission into durable-traps and then delete.",
-      "question": "The 2026-07-28 friction-walk entry in docs/backlog/open-bugs.md has no open work, but carries a deliberately-stated uncovered property (the semantic 'record prose says the right thing' half, the unscriptable sol-5 class). Delete it outright, trim it to the uncovered remainder, or move the admission to durable-traps first?",
-      "options": [
-        {
-          "label": "Trim to the uncovered half",
-          "answer": "Trim the entry to just the uncovered semantic property (record PROSE says the right thing — the unscriptable sol-5 class), dropping the closed and non-actionable items."
-        },
-        {
-          "label": "Move to durable-traps, then delete",
-          "answer": "Move the uncovered-half admission into docs/backlog/durable-traps.md as a standing reference, then delete the friction-walk entry from open-bugs.md."
-        },
-        {
-          "label": "Delete outright",
-          "answer": "Delete the whole entry — the measurement record at docs/reviews/record-update-gate-measurement-2026-08-18.md already carries the uncovered-half admission."
-        },
-        {
-          "label": "Keep as is",
-          "answer": "Keep the entry unchanged; it is the readable home for the re-decision and its uncovered remainder."
-        }
-      ],
-      "evidence": [
-        "docs/backlog/open-bugs.md:374 — item (1) 'CLOSED covered-by-neighbors (owner re-decision 2026-08-18)', item (2) 'Advisory imprecision, consistent with the standing triage verdicts are advisory rule', item (3) 'none this lap'.",
-        "The mechanical leg-2 sweep classified it already_shipped_or_stale: 'No open question, no live-run block... the entry is a historical record of a completed friction walk'. Its premise field is 'unprobed' — an advisory lead, not a verdict.",
-        "The entry states the uncovered half in its own words: 'the semantic half (record PROSE says the right thing) is the unscriptable sol-5 class — uncovered, stated here outright'. CLAUDE.md's durable-traps rule: 'A trap enforced only partly is NOT deletable: state the uncovered half outright, or the covered half reads as a close.'",
-        "Escalated rather than auto-deleted because the owner re-decided this entry on 2026-08-18, one day ago, and the deletion would move a deliberate admission rather than remove finished status prose."
-      ],
-      "auto_close": false,
-      "premise_probes": [
-        {
-          "file": "docs/backlog/open-bugs.md",
-          "contains": "the semantic half (record PROSE says the right thing) is the unscriptable"
-        }
-      ],
-      "subject_key": "e7846967872260ea",
-      "first_seen": "2026-08-19",
-      "nights_open": 1
-    },
-    {
-      "id": "backlogN-2",
-      "leg": "backlog",
-      "path": "scripts/nightly/render-inbox.mjs",
-      "subject": "docs/nightly-inbox.md is generator-owned, so inline doc-citation-exempt markers placed in it are deleted on the next render and the citation gate goes red again",
-      "title": "The nightly inbox wipes its own citation-exemption markers on every render — pick the mechanism that makes an exemption survive",
-      "eli5": "The nightly inbox file is machine-generated: every run, a script rewrites the whole thing except your ticked boxes and notes. Separately, there is a check that verifies every code path quoted in a document still exists. Inbox items often quote a path precisely BECAUSE it was deleted — that is the finding — so someone hand-added two little exemption comments to keep the check quiet. Those comments live in the generated part of the file, so the very next run deletes them and the check goes red again on the same quoted paths. It is a loop: the fix gets erased by the thing it was meant to fix. Two ways out. Either the generator itself emits the exemption around quoted item text, so it is regenerated along with everything else, or the inbox is declared out of scope for the citation check entirely — which is defensible, since a work queue quoting broken paths is its normal condition, not a defect. This was logged in the backlog yesterday but never actually put to you as a question. It is live again tonight: this run regenerates the inbox and wipes both markers.",
-      "question": "How should an exemption survive a re-render of docs/nightly-inbox.md: (a) render-inbox.mjs emits the doc-citation-exempt marker around quoted item content, or (b) docs/nightly-inbox.md moves to the doc-manifest excluded row?",
-      "options": [
-        {
-          "label": "(a) Generator emits the marker",
-          "answer": "Change scripts/nightly/render-inbox.mjs to emit a doc-citation-exempt marker around quoted item content, so the exemption is regenerated with the file."
-        },
-        {
-          "label": "(b) Exclude the inbox from the gate",
-          "answer": "Move docs/nightly-inbox.md to the doc-manifest excluded row — a generated work queue that quotes deleted paths by design is not a doc the citation gate should police."
-        },
-        {
-          "label": "Neither — leave it",
-          "answer": "Leave it as is; hand-replace the exempt markers when the gate goes red, accepting the recurrence."
-        }
-      ],
-      "evidence": [
-        "docs/nightly-inbox.md carries 2 hand-placed markers at lines 1028 and 1561; scripts/nightly/render-inbox.mjs contains zero occurrences of doc-citation-exempt, so it cannot reproduce them.",
-        "Live tonight: this run regenerates the inbox, which deletes both markers.",
-        "Logged in docs/backlog/open-bugs.md on 2026-08-19 as 'owner decision pending' with these two options, but recorded as a backlog pointer rather than asked as a question."
-      ],
-      "premise_probes": [
-        {
-          "file": "scripts/nightly/render-inbox.mjs",
-          "contains": "writeFileSync(out, body, 'utf8');"
-        },
-        {
-          "file": "scripts/nightly/render-inbox.mjs",
-          "absent": "doc-citation-exempt"
-        }
-      ],
-      "subject_key": "6959443d8781f8ee",
-      "first_seen": "2026-08-19",
-      "nights_open": 1
-    },
-    {
-      "id": "backlogN-3",
-      "leg": "backlog",
-      "path": "src/audit/cli/nextStepHelpers.ts",
-      "subject": "HOST_GATE_DESCRIPTORS / HOST_GATE_KINDS is a write-only registry — completed by P25, read by nothing in production",
-      "title": "HOST_GATE_DESCRIPTORS is a finished registry that nothing in production reads — wire a reader, or delete it on the next unwired pass",
-      "eli5": "A registry is a list the code keeps so other parts can look things up. This one was built and completed six days ago, but nothing in the shipping code ever reads it — the live registry is a different one called GATE_LANES, and the only two tests over this one compare a hardcoded list to another hardcoded list, which proves nothing about whether it is used. Yesterday's dead-code sweep deliberately kept it rather than deleting it, because it had only just landed and removing a six-day-old investment without asking would have been presumptuous. So it sits in the shape the project has a standing warning about: data that is written and maintained and looks authoritative, but has no reader. Either it gets a real production consumer, or it goes. This was logged in the backlog yesterday but never put to you as a question.",
-      "question": "HOST_GATE_DESCRIPTORS / HOST_GATE_KINDS has no production reader (GATE_LANES is the live registry). Wire a production reader, or delete it on the next tested-but-unwired pass?",
-      "options": [
-        {
-          "label": "Delete it",
-          "answer": "Delete HOST_GATE_DESCRIPTORS / HOST_GATE_KINDS and its hardcoded-vs-hardcoded tests on the next tested-but-unwired pass; GATE_LANES is the live registry."
-        },
-        {
-          "label": "Wire a reader",
-          "answer": "Keep it and wire a real production reader so the expected-set derivation comes from the registry rather than a parallel hardcoded list."
-        },
-        {
-          "label": "Keep as staged",
-          "answer": "Keep it as deliberately-staged work with no reader for now, and re-decide at a later pass."
-        }
-      ],
-      "evidence": [
-        "src/audit/cli/nextStepHelpers.ts:1734 declares 'export const HOST_GATE_DESCRIPTORS'; the dead-code sweep ab1e9598 recorded it as kept with 'zero production readers — owner decision queued'.",
-        "docs/backlog/open-bugs.md:17 states the property: a registry either has a production reader or is deleted; invested-in-but-write-only is the shape the write-only-data-looks-authoritative memory warns about.",
-        "Logged 2026-08-19 as 'owner decision pending' but recorded as a backlog pointer rather than asked."
-      ],
-      "premise_probes": [
-        {
-          "file": "src/audit/cli/nextStepHelpers.ts",
-          "contains": "export const HOST_GATE_DESCRIPTORS"
-        }
-      ],
-      "subject_key": "8d7b9bb8d978307d",
-      "first_seen": "2026-08-19",
-      "nights_open": 1
-    },
-    {
-      "id": "backlogN-4",
-      "leg": "backlog",
-      "path": "src/shared/decompose/contentCoherence.ts",
-      "subject": "Coherence components have no granularity control, so a whole audit collapses into one work block; buildContentCoherenceTrace unions on a disjunctive threshold and then takes the transitive closure",
-      "title": "Work blocks no longer bound anything: 98.3% of one audit's findings landed in a single block — four fixes are characterized and it needs your pick",
-      "eli5": "An audit splits its findings into work blocks so they can be worked in parallel. Blocks are formed by joining findings that are related, then joining anything connected to those, and so on. The problem is that the relatedness test passes far too easily: four different kinds of evidence each clear the bar ON THEIR OWN — sharing a file, sharing a unit, being call-adjacent, or sharing a critical flow. Almost everything is related to almost everything by at least one of those, so the chain-joining swallows nearly the whole audit. Measured: 2,202 of 2,241 findings in one block, 98.3%. It used to be bounded, but for an unrelated reason — the old code sized blocks to fit a model's context window. When that backend-sizing was deliberately removed, the only limit on block size went with it, and nothing replaced it. So a work block currently claims to be a unit of parallel work while bounding nothing. Four fixes have been characterized; this is the highest-severity open item in the backlog and needs your pick before the next audit lap is worth running.",
-      "question": "How should work-block size be bounded now that backend sizing is gone: conjunctive eligibility (require more than one evidence class), a capped merge, clustering, or push bundling to the host and stop claiming work_blocks is a unit of parallel work?",
-      "options": [
-        {
-          "label": "Conjunctive eligibility",
-          "answer": "Require more than one evidence class to join, instead of the current disjunctive threshold where four weights each clear the 60 floor alone."
-        },
-        {
-          "label": "Capped merge",
-          "answer": "Keep the current eligibility but cap component size during the merge, splitting when a component exceeds the bound."
-        },
-        {
-          "label": "Clustering",
-          "answer": "Replace transitive closure with a clustering algorithm that produces content-derived components of bounded size."
-        },
-        {
-          "label": "Host-side bundling",
-          "answer": "Stop bounding here: emit findings with coherence metadata and let the host bundle, so work_blocks stops claiming to be a unit of parallel work."
-        }
-      ],
-      "evidence": [
-        "src/shared/decompose/contentCoherence.ts declares the weights shared_file 100, shared_unit 80, call_import_reference_adjacency 70, shared_critical_flow 60 — four of six each clear the 60 floor alone, so eligibility is disjunctive and membership becomes the connected components of a near-complete graph.",
-        "Measured: 32 components with 2,202 of 2,241 findings (98.3%) in one; no single evidence class whose removal breaks it (three connect 70-91% alone).",
-        "The predecessor's 200 blocks were never a coherence result — partitionWorkItems sized k from capacityTokens, so 467b1e8f removed the only granularity bound there had ever been.",
-        "docs/backlog/open-bugs.md records this as high severity (2026-08-13) with four options characterized in the P25 recon record, components-collapse section. Related input: the unit manifest's 24 units x ~93 files make shared_unit near-vacuous."
-      ],
-      "premise_probes": [
-        {
-          "file": "src/shared/decompose/contentCoherence.ts",
-          "contains": "call_import_reference_adjacency: 70,"
-        }
-      ],
-      "subject_key": "48295eac950efe87",
-      "first_seen": "2026-08-19",
+      "proposal": "Union the owning module contract's declared write targets into the DAG node write scope.",
+      "patch_path": ".audit-tools/nightly/proposals/P38-dag-node-write-scope-drops-declared-targets/proposal.md",
+      "first_seen": "2026-08-20",
       "nights_open": 1
     }
   ],
-  "applied": [
-    "docs/glossary-ids.md — deleted the INV-RSM-VERIFY row. Its owner src/remediate/steps/dispatch/verifyCommands.ts was deleted in ab1e9598; the identifier occurs nowhere in src/ or tests/ at HEAD, and isBuildFreeVerifyCommand / verifyCommandsForEdits / pathTokensInCommand went with it, so the invariant was retired rather than moved. The glossary header rule specifies deletion. Reviewer + independent adversary agreed, uncontested. Commit ad0d51b0.",
-    "docs/backlog/open-bugs.md — trimmed the contract-producer entry to its open remainder (the sanctioned partial-entry class), stripping the shipped-status narration and keeping the property, the doc-manifest data+refusal precedent and both memory cross-references. docs/backlog.md seek index regenerated (line-number shifts only). Commit 72498ed2."
-  ],
+  "applied": [],
   "skipped": [
-    "leg 1 — the per-item semantic review of 53 of the 54 in-scope docs did NOT run. Codex owned that pass and returned a usage-limit refusal (retry at Aug 20th, 2026 2:08 AM); its prompt is preserved at .audit-tools/nightly/codex-leg1-prompt-0819.txt. Only docs/glossary-ids.md was examined item-by-item and stamped. Corpus-wide MECHANICAL coverage did run over all 54 docs (ten gates, all green, plus a hand-written scan for gate-invisible citations).",
-    "leg 1 — perspective 2 (existence review, philosophy-conformance, doc-set condensation) did not run. It is a semantic per-doc and corpus-level pass and went down with the Codex lane.",
-    "leg 2 — 2 of 66 backlog entries could not be classified by the mechanical sweep (finish_reason=length). 64 classified, sweep completed, not aborted.",
-    "second-opinion capability limit — the free-provider lane answered literal read-and-quote questions reliably (it confirmed the trim shipped half with exact line quotes and all three test names) but failed on TWO separate attempts to answer a search-for-absence question, re-describing the file instead. The trimmed entry open-remainder half therefore rests on one verifier; stated in the commit rather than smoothed over.",
-    "carried forward unverified from 2026-08-18 — that run recorded a third copy of the one-bounded-transition claim in docs/audit-pkg/contracts.md to be folded into docs-4. docs-4 has since been answered and landed, so the fold has no live item to ride on, and whether the third copy was corrected was NOT checked this run — it needs the per-doc pass that did not happen."
+    "APPLIED NOTHING — the working tree was dirty at run start (src/audit/orchestrator/charterClarificationExecutor.ts and src/shared/decompose/charterClarification.ts were modified and uncommitted). The clean-tree rule holds: this run reviewed and reported, and wrote no doc, backlog or code edit.",
+    "NOTHING WAS COMMITTED, including this run's own tracked outputs (open-items.json, docs/nightly-inbox.md, the P38 proposal). A CONCURRENT session is working in this shared checkout: the dirty set grew from two unstaged files at run start to five STAGED files during the run (charterClarificationExecutor.ts, charterRegister.ts, charterClarification.ts, charter.ts, charter-clarification.test.ts). Any commit here would sweep that session's staged work into it. The outputs are on disk and will be picked up by the next clean-tree run or by a deliberate scoped commit.",
+    "docs/HANDOFF.md is stale and the fix is unambiguous, but it was NOT applied for the reason above. Two hand-written claims are false at HEAD 70da005d: (1) \"Remaining in the wave: CP-NODE-10 ... and CP-NODE-11\" — both landed, as commits a6b5ff28 and 63fcc0ea, and CP-NODE-1 landed after them at HEAD; (2) \"Nothing is pushed. Ten-plus commits sit on local main\" — HEAD equals the remote main ref, so everything is pushed. The live remediation state now records 15 of 27 nodes resolved and 12 pending. Re-run this leg on a clean tree to apply.",
+    "Leg 1 semantic coverage was PARTIAL. Only docs/HANDOFF.md was examined item-by-item and stamped. The remaining 53 in-scope docs got the full mechanical gate set (all green) plus a corpus-wide status-noise scan, not a per-item semantic walk. Detail and counts: .audit-tools/nightly/leg1-2026-08-20-coverage.json.",
+    "BOTH independent lanes failed, so no second opinion backs tonight's items. Codex returned \"You've hit your usage limit\" and ran nothing. The free-provider lane ran but fabricated evidence twice: it quoted a bullet that was never asked about, invented a claim about session-start-guards.mjs, and misspelled the consent-token test filename as \"consent-token-not-persited.test.ts\". Its output was discarded rather than counted. Every finding tonight rests on this session's own direct read of the source.",
+    "Two subjects remain ANSWERED but NOT RECORDED AS DONE, and were left that way deliberately. 48295eac950efe87 (work-block grouping) reports its interim work as landed and is ready for `answer.mjs --done`, which was not run because the tree is dirty. 8d7b9bb8d978307d (HOST_GATE_DESCRIPTORS) is answered CONDITIONALLY — delete on the next tested-but-unwired pass unless a production reader lands first. Verified at HEAD: the symbol is still read only by its own tests and one comment, so the condition has not yet come due.",
+    "Leg 2 SWEPT the backlog but ESCALATED NOTHING, deliberately. The mechanical sweep covered the corpus — 79 of 79 entries attempted, 68 classified, 11 errored, not aborted (.audit-tools/nightly/triage-2026-08-20-coverage.json). It flagged 17 entries as owner_decision_needed. None was raised, because a leg-2 escalation owes the owner a reviewer+adversary-characterized proposition and BOTH independent lanes were unusable tonight. Seventeen one-sided propositions would be queue noise, not decisions. Re-run leg 2 when a second lane is available.",
+    "Leg 2 applied NO mechanical cleanup. The sweep produced exactly one already_shipped_or_stale lead, forward-tracks#55883634 (\"CI wall-clock: shard balance and the single-file floor\"), and it was REJECTED rather than deleted. The lead's own reasoning is that the entry is a pointer whose work is owned outside this repo — that is not proof a fix shipped. It carries no code_paths and its premise is unprobed, and deletion requires a code anchor. Deleting it would destroy the pointer to docs/reviews/ci-wallclock-plan-critique-2026-08-07.md.",
+    "FRICTION TO LOG on the next clean-tree run (it could not be written to docs/backlog/open-bugs.md tonight, because the tree was dirty): writing the nightly queue DESYNCS docs/HANDOFF.md's generated live-status block, because that block derives from the queue and the decision ledger. The run contract in docs/nightly-routine.md does not list regenerating it as a run step, so the desync is only caught afterwards by the Stop closeout gate. This run hit it and repaired it with `node scripts/shared/generate-handoff-roadmap.mjs`. The durable fix is to make the regeneration a step of writeOpenItems or of the run contract, so the run cannot leave check:handoff-roadmap red.",
+    "The weekly /insights pass was NOT due and is not a skipped leg: the stamp at .audit-tools/nightly/insights-last-run.json reads 2026-08-14T09:07:47Z, under the seven-day threshold."
   ]
 }
