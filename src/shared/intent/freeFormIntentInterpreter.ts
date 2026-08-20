@@ -8,7 +8,12 @@
  * All logic is pure and synchronous — no I/O, no LLM calls.
  */
 
-import { LENS_KEYWORD_MAP, SCOPE_PATTERNS, PRIORITY_PATTERNS } from "./sharedIntentData.js";
+import {
+  LENS_KEYWORD_MAP,
+  SCOPE_PATTERNS,
+  PRIORITY_PATTERNS,
+  scopeClausePolarity,
+} from "./sharedIntentData.js";
 import type { Lens } from "../types/lens.js";
 
 // Re-export shared data so callers that only import from this module keep working.
@@ -28,10 +33,20 @@ export interface InterpretedIntent {
    */
   prioritySignals: string[];
   /**
-   * Clauses that narrow or exclude scope (e.g. "focus on the auth module",
-   * "ignore vendor/").
+   * INCLUSION-polarity clauses that narrow scope IN (e.g. "focus on the auth
+   * module", "only audit src/"). Never carries an exclusion clause — see
+   * {@link scopeExclusions} — so a consumer boosting by scope match cannot
+   * accidentally boost the scope the user asked to avoid (COR-a0648a7d).
    */
   scopeEmphasis: string[];
+  /**
+   * EXCLUSION-polarity clauses that narrow scope OUT (e.g. "ignore vendor/",
+   * "skip tests/"). Kept in a DEDICATED field, never merged into
+   * {@link scopeEmphasis}, so a consumer can tell "the user wants this in
+   * focus" from "the user wants this avoided" without re-parsing the lead-in
+   * verb itself (the sign-convention bug COR-a0648a7d / COR-a0648a7d-2).
+   */
+  scopeExclusions: string[];
   /**
    * Clauses that could not be encoded as a lens weight, scope emphasis, or
    * priority signal. Callers SHOULD promote these to blocking checkpoint
@@ -99,17 +114,6 @@ function matchLenses(clause: string): Lens[] {
   return [...matched];
 }
 
-/** Return the first scope-emphasis string for a clause, or null. */
-function matchScopeEmphasis(clause: string): string | null {
-  for (const pattern of SCOPE_PATTERNS) {
-    const m = pattern.exec(clause);
-    if (m) {
-      return clause.trim();
-    }
-  }
-  return null;
-}
-
 /** Return true if the clause signals urgency/priority. */
 function matchesPriority(clause: string): boolean {
   return PRIORITY_PATTERNS.some((p) => p.test(clause));
@@ -131,6 +135,7 @@ export function interpretFreeFormIntent(input: string): InterpretedIntent {
     lensWeights: {},
     prioritySignals: [],
     scopeEmphasis: [],
+    scopeExclusions: [],
     unencodableClauses: [],
   };
 
@@ -143,15 +148,23 @@ export function interpretFreeFormIntent(input: string): InterpretedIntent {
   for (const clause of clauses) {
     let encoded = false;
 
+    // A clause's polarity gates the lens boost below: an EXCLUSION-polarity
+    // clause (e.g. "ignore performance issues") must never register a
+    // positive lensWeight for a keyword it happens to contain — the user
+    // asked to de-emphasise this clause, not weight it (COR-a0648a7d).
+    const polarity = scopeClausePolarity(clause);
+
     // Lens matching
-    const lenses = matchLenses(clause);
-    if (lenses.length > 0) {
-      for (const lens of lenses) {
-        const current = result.lensWeights[lens] ?? 1.0;
-        // Accumulate boost — repeated mentions increase weight slightly.
-        result.lensWeights[lens] = Math.max(current, DEFAULT_WEIGHT_BOOST);
+    if (polarity !== "exclude") {
+      const lenses = matchLenses(clause);
+      if (lenses.length > 0) {
+        for (const lens of lenses) {
+          const current = result.lensWeights[lens] ?? 1.0;
+          // Accumulate boost — repeated mentions increase weight slightly.
+          result.lensWeights[lens] = Math.max(current, DEFAULT_WEIGHT_BOOST);
+        }
+        encoded = true;
       }
-      encoded = true;
     }
 
     // Priority signal
@@ -160,10 +173,16 @@ export function interpretFreeFormIntent(input: string): InterpretedIntent {
       encoded = true;
     }
 
-    // Scope emphasis
-    const scope = matchScopeEmphasis(clause);
-    if (scope !== null) {
-      result.scopeEmphasis.push(scope);
+    // Scope emphasis — polarity decides the destination field. An INCLUSION
+    // clause lands in `scopeEmphasis` (unchanged from before this fix); an
+    // EXCLUSION clause lands in the dedicated `scopeExclusions` field instead
+    // of being merged in, so a downstream consumer never has to re-derive
+    // polarity from the clause text (COR-a0648a7d / COR-a0648a7d-2).
+    if (polarity === "include") {
+      result.scopeEmphasis.push(clause.trim());
+      encoded = true;
+    } else if (polarity === "exclude") {
+      result.scopeExclusions.push(clause.trim());
       encoded = true;
     }
 

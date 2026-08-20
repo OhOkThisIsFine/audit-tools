@@ -24,25 +24,17 @@ export function pathMatchesPrefix(filePath: string, entryPath: string): boolean 
   return f === p || f.startsWith(`${p}/`);
 }
 
-/** Minimal glob match supporting `*` (within a segment), `**` (across segments), `?`. */
-export function globMatches(filePath: string, glob: string): boolean {
-  const f = normalize(filePath);
-  const g = normalize(glob);
-  if (!g.includes("*") && !g.includes("?")) {
-    return pathMatchesPrefix(f, g);
-  }
-  // Translate the glob to a regex char-by-char so `*` / `**` / `?` are handled
-  // and every other character is escaped — no placeholder substitution.
+/**
+ * Translate one ordinary (non-`**`) glob segment to a regex fragment: `*`
+ * within a segment matches any run of non-separator characters, `?` matches
+ * one, and every other character is escaped — no placeholder substitution.
+ */
+function translateGlobSegment(segment: string): string {
   let re = "";
-  for (let i = 0; i < g.length; i++) {
-    const c = g[i];
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i];
     if (c === "*") {
-      if (g[i + 1] === "*") {
-        re += ".*";
-        i++;
-      } else {
-        re += "[^/]*";
-      }
+      re += "[^/]*";
     } else if (c === "?") {
       re += "[^/]";
     } else if (/[.+^${}()|[\]\\]/.test(c)) {
@@ -51,7 +43,53 @@ export function globMatches(filePath: string, glob: string): boolean {
       re += c;
     }
   }
-  return new RegExp(`^${re}$`).test(f);
+  return re;
+}
+
+/**
+ * Minimal glob match supporting `*` (within a segment), `**` (across
+ * segments, matching ZERO or more whole path segments — conventional glob
+ * semantics), `?`.
+ *
+ * A `**` segment folds its ADJACENT separator into its own regex fragment
+ * (optional) rather than emitting it as a mandatory literal, so a
+ * zero-segment match is possible on either side: `**\/*.env` matches a
+ * repo-root `secrets.env`, `src/**\/*.ts` matches `src/index.ts`, and
+ * `vendor/**` matches the bare `vendor` entry itself (COR-ef7a209d /
+ * COR-ef7a209d-2) — not only paths with an intermediate directory.
+ */
+export function globMatches(filePath: string, glob: string): boolean {
+  const f = normalize(filePath);
+  const g = normalize(glob);
+  if (!g.includes("*") && !g.includes("?")) {
+    return pathMatchesPrefix(f, g);
+  }
+
+  const segments = g.split("/");
+  const pieces: string[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i]!;
+    if (segment === "**") {
+      if (i === 0 && i === segments.length - 1) {
+        // The WHOLE glob is `**` — matches any path, including nested ones.
+        pieces.push(".*");
+      } else if (i === 0) {
+        // Leading `**` — optionally consume any number of leading segments.
+        pieces.push("(?:.*/)?");
+      } else {
+        // Trailing or interior `**` — optionally consume any number of
+        // segments AFTER the preceding one, folding in the boundary `/` so
+        // zero segments (i.e. nothing after) is a valid match too.
+        pieces.push("(?:/.*)?");
+      }
+      continue;
+    }
+    if (i > 0 && segments[i - 1] !== "**") {
+      pieces.push("/");
+    }
+    pieces.push(translateGlobSegment(segment));
+  }
+  return new RegExp(`^${pieces.join("")}$`).test(f);
 }
 
 /**

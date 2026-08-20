@@ -47,14 +47,20 @@ const SCOPE_LEADIN_RE =
   /^(?:focus(?:ing)?\s+on|focused\s+on|prioriti[sz]e?d?|prioriti[sz]ing|ignore|ignoring|skip(?:ping)?|exclude?d?|excluding|concentrate\s+on|look\s+at|check(?:\s+only)?(?:\s+the)?|limit(?:ed)?\s+to|restrict(?:ed)?\s+to|only\s+(?:in|within|for|\w+))\s+/i;
 
 /**
- * Lower-cased path/identifier needles extracted from each scope-emphasis clause.
- * A clause like "focus on src/auth" yields the needle "src/auth" (the directive
- * verb is stripped); multi-target clauses split into one needle per token. These
- * are substring-matched against a finding's file paths.
+ * Lower-cased path/identifier needles extracted from a set of scope-emphasis
+ * clauses. A clause like "focus on src/auth" yields the needle "src/auth" (the
+ * directive verb is stripped); multi-target clauses split into one needle per
+ * token. These are substring-matched against a finding's file paths.
+ *
+ * Shared tokenizer for BOTH polarities — see {@link scopeIncludeNeedles} and
+ * {@link scopeExcludeNeedles}, which call this with the caller's already
+ * polarity-separated clause array (`intent.scopeEmphasis` /
+ * `intent.scopeExclusions`) so a needle's polarity is never re-derived from
+ * clause text here.
  */
-function scopeNeedles(intent: InterpretedIntent): string[] {
+function extractScopeNeedles(clauses: string[]): string[] {
   const needles: string[] = [];
-  for (const clause of intent.scopeEmphasis) {
+  for (const clause of clauses) {
     const target = clause.toLowerCase().replace(SCOPE_LEADIN_RE, "").trim();
     if (target.length === 0) continue;
     for (const token of target.split(/[\s,]+/)) {
@@ -64,6 +70,22 @@ function scopeNeedles(intent: InterpretedIntent): string[] {
     }
   }
   return needles;
+}
+
+/** Needles from INCLUSION-polarity scope clauses (`intent.scopeEmphasis`) — a
+ * match BOOSTS a finding's weight. */
+function scopeIncludeNeedles(intent: InterpretedIntent): string[] {
+  return extractScopeNeedles(intent.scopeEmphasis);
+}
+
+/** Needles from EXCLUSION-polarity scope clauses (`intent.scopeExclusions`) —
+ * a match must never boost a finding's weight (COR-a0648a7d): the user asked
+ * the dispatcher to de-emphasise this scope, not promote it. Tolerates an
+ * absent `scopeExclusions` (`?? []`) — every `InterpretedIntent` produced by
+ * `interpretFreeFormIntent` carries it, but a hand-constructed intent object
+ * that predates this field must degrade to "no exclusions", not throw. */
+function scopeExcludeNeedles(intent: InterpretedIntent): string[] {
+  return extractScopeNeedles(intent.scopeExclusions ?? []);
 }
 
 /** True when any of the finding's affected-file paths contains a scope needle. */
@@ -81,22 +103,33 @@ function matchesScope(finding: Finding, needles: string[]): boolean {
 
 /**
  * The intent-derived ordering weight for a single finding: its severity base
- * plus boosts for an emphasised lens, an emphasised scope path, and any priority
- * signal. Higher weight sorts earlier. When the intent is empty (no lens
- * weights, scope, or priority), this collapses to the severity base, so an
- * absent/empty `free_form_intent` leaves ordering driven purely by severity.
+ * plus boosts for an emphasised lens and any priority signal, PLUS/MINUS a
+ * scope-match adjustment. Higher weight sorts earlier. When the intent is
+ * empty (no lens weights, scope, or priority), this collapses to the severity
+ * base, so an absent/empty `free_form_intent` leaves ordering driven purely by
+ * severity.
+ *
+ * Scope-match sign convention (COR-a0648a7d / COR-a0648a7d-2): a finding
+ * matching an EXCLUSION needle (e.g. "ignore vendor/") is DEBOOSTED — checked
+ * first, and takes precedence over an incidental inclusion match — so a scope
+ * the user asked to avoid can never rank ahead of an unmatched finding, let
+ * alone an included one. A finding matching only an INCLUSION needle is
+ * boosted, unchanged from before this fix.
  */
 export function findingIntentWeight(
   finding: Finding,
   intent: InterpretedIntent,
-  needles: string[] = scopeNeedles(intent),
+  includeNeedles: string[] = scopeIncludeNeedles(intent),
+  excludeNeedles: string[] = scopeExcludeNeedles(intent),
 ): number {
   let weight = SEVERITY_WEIGHT[finding.severity] ?? 0;
   const lens = (finding.lens ?? "").trim();
   if (lens.length > 0 && intent.lensWeights[lens as keyof typeof intent.lensWeights] !== undefined) {
     weight += LENS_EMPHASIS_BOOST;
   }
-  if (matchesScope(finding, needles)) {
+  if (matchesScope(finding, excludeNeedles)) {
+    weight -= SCOPE_EMPHASIS_BOOST;
+  } else if (matchesScope(finding, includeNeedles)) {
     weight += SCOPE_EMPHASIS_BOOST;
   }
   if (intent.prioritySignals.length > 0) {
@@ -105,12 +138,14 @@ export function findingIntentWeight(
   return weight;
 }
 
-/** True when the interpreted intent carries no ordering signal at all. */
+/** True when the interpreted intent carries no ordering signal at all. Tolerates
+ * an absent `scopeExclusions` (`?? []`) — see {@link scopeExcludeNeedles}. */
 function intentIsEmpty(intent: InterpretedIntent): boolean {
   return (
     Object.keys(intent.lensWeights).length === 0 &&
     intent.prioritySignals.length === 0 &&
-    intent.scopeEmphasis.length === 0
+    intent.scopeEmphasis.length === 0 &&
+    (intent.scopeExclusions ?? []).length === 0
   );
 }
 
@@ -141,10 +176,14 @@ export function applyIntentOrdering(
     return { findings, blocks };
   }
 
-  const needles = scopeNeedles(intent);
+  const includeNeedles = scopeIncludeNeedles(intent);
+  const excludeNeedles = scopeExcludeNeedles(intent);
   const weightByFinding = new Map<string, number>();
   for (const finding of findings) {
-    weightByFinding.set(finding.id, findingIntentWeight(finding, intent, needles));
+    weightByFinding.set(
+      finding.id,
+      findingIntentWeight(finding, intent, includeNeedles, excludeNeedles),
+    );
   }
 
   // Stable sort: decorate with original index, compare on (weight desc, index asc).
