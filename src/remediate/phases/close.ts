@@ -1344,11 +1344,15 @@ export async function cleanupTempBranchesAndArtifacts(
   // Only delete artifacts on a fully-green close. When any test or closing
   // action failed, preserve the directory for diagnosis.
   //
-  // CE-003 force-close guard: a `blocked` or `abandoned` item means the run did
-  // NOT fully succeed — the tool-owned final gate (INV-RS-10) coarse-re-blocked
-  // or the bounded backstop abandoned the remaining items. Such a run must never
-  // be "landed green" (artifacts deleted as if complete); a vacuous/unset
-  // plan.test_command (combinedTest vacuously passing) cannot mask it. Preserve
+  // Force-close guard: a `blocked` or `abandoned` item means the run did NOT
+  // fully succeed. It reaches close that way through triage exhausting an item's
+  // retries, an operator halt, or the force-close backstop converting a
+  // still-non-terminal item — NOT through the tool-owned gate, which no longer
+  // mutates item statuses at all (a red pauses the run instead of re-blocking or
+  // abandoning). The guard is unchanged and still needed; only its causes are.
+  // Such a run must never be "landed green" (artifacts deleted as if complete); a
+  // vacuous/unset plan.test_command (combinedTest vacuously passing) cannot mask
+  // it. Preserve
   // the artifacts so the partial outcome is diagnosable. The predicate is
   // single-sourced in itemStatus so this guard cannot drift from the seam that
   // produces the statuses it defends against.

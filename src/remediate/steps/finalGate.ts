@@ -1,13 +1,20 @@
 // ---------------------------------------------------------------------------
-// Tool-owned final completion gate (INV-RS-10) + coarse re-block (INV-RS-09)
+// Tool-owned final completion gate (INV-RS-10)
 // ---------------------------------------------------------------------------
 //
-// Behaviour-preserving extraction from `nextStep.ts` (CP-NODE-1): this is the
-// tool-owned final-gate cluster (the gate runner, its bounded coarse-reblock
-// backstop, and the sidecar counter I/O) lifted into a sibling leaf module so
-// the orchestrator god-module no longer owns it inline. `nextStep.ts` imports
-// and re-exports these symbols, so the public surface and existing test imports
-// are unchanged.
+// The gate runner and its red record. A whole-repo gate red is UNATTRIBUTABLE
+// by construction — nothing here computes which item or path caused it — so the
+// only honest response is to record what failed and PAUSE. It does not mutate
+// item statuses, does not move the run's phase, and does not close: a repeat
+// next-step re-runs the gate and proceeds the moment it is green, which makes
+// the pause resumable by construction rather than by a stored counter.
+//
+// This replaces a coarse backstop that re-opened EVERY non-skip item to
+// `pending` on a red and, after a bounded number of tries, abandoned the whole
+// run. It fired on 2026-08-20 against a suite reddened by an unrelated landed
+// commit and wiped 21 accepted resolutions out of state.json — the failure the
+// "Phase-boundary gate false abandonment" entry predicted, doing maximum damage
+// on a red that had nothing to do with the run.
 //
 // INV-RS-10: the final completion gate is a TOOL-OWNED, NON-VACUOUS suite that
 // is INDEPENDENT of any `plan.test_command`. A run can only land green when this
@@ -32,9 +39,7 @@
 // pass instead of being able to strand the run.
 
 import { join } from "node:path";
-import { readOptionalJsonFile, writeJsonFile, runTracked } from "audit-tools/shared";
-import type { RemediationState } from "../state/store.js";
-import { isSkipStatus } from "../state/itemStatus.js";
+import { writeJsonFile, runTracked } from "audit-tools/shared";
 import {
   isAuditToolsMonorepo,
   toolOwnedFinalGateCommands,
@@ -55,6 +60,16 @@ export interface FinalGateCommandResult {
   package_dir?: string;
   exit_code: number | null;
   passed: boolean;
+  /**
+   * Trailing slice of what the command printed, present only on a FAILING
+   * command. The gate used to capture output and drop it on the floor — a red
+   * arrived as an exit code and nothing to read, so the one artifact that could
+   * explain it never existed. Bounded here at the source
+   * ({@link GATE_OUTPUT_TAIL_LIMIT}): a whole suite log must not ride into a
+   * state artifact, and the tail is where a failing suite puts its verdict.
+   */
+  stdout_tail?: string;
+  stderr_tail?: string;
 }
 
 export interface ToolOwnedFinalGateResult {
@@ -74,12 +89,34 @@ export interface ToolOwnedFinalGateResult {
   runtime_residual: { surface: string; commands: string[] };
 }
 
-/** Injectable runner so the gate is unit-testable without spawning a real build. */
+/**
+ * Injectable runner so the gate is unit-testable without spawning a real build.
+ *
+ * `stdout` / `stderr` are OPTIONAL so an injected runner that only reports a
+ * status stays valid — the gate degrades to "no output captured" rather than
+ * refusing a runner that predates output capture.
+ */
 export type GateRunner = (
   argv: string[],
   cwd: string,
   packageDir?: string,
-) => { status: number | null };
+) => { status: number | null; stdout?: string; stderr?: string };
+
+/**
+ * How much of a failing command's output rides into the persisted record. TAIL,
+ * because a suite prints its verdict last, and BOUNDED because this lands in a
+ * durable artifact — the standing rule against multi-KB tool output riding into
+ * a prompt applies to what a prompt POINTS AT as well.
+ */
+const GATE_OUTPUT_TAIL_LIMIT = 4_000;
+
+function outputTail(value: string | undefined): string | undefined {
+  const text = value ?? "";
+  if (text.length === 0) return undefined;
+  return text.length <= GATE_OUTPUT_TAIL_LIMIT
+    ? text
+    : `…${text.slice(text.length - GATE_OUTPUT_TAIL_LIMIT)}`;
+}
 
 /**
  * Run the tool-owned final gate (INV-RS-10). Each command runs through the
@@ -120,20 +157,31 @@ export async function runToolOwnedFinalGate(
         cwd: effectiveCwd,
         stdio: ["ignore", "pipe", "pipe"],
       });
-      return { status: result.status };
+      // `runTracked` has always returned the captured streams; this used to read
+      // `status` alone and discard them, which is why a red gate persisted
+      // nothing an operator could read.
+      return {
+        status: result.status,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      };
     });
 
   const results: FinalGateCommandResult[] = [];
   let passed = true;
   for (const spec of commands) {
-    const { status } = runner(spec.argv, root, spec.package_dir);
+    const { status, stdout, stderr } = runner(spec.argv, root, spec.package_dir);
     const cmdPassed = status === 0;
+    const stdoutTail = cmdPassed ? undefined : outputTail(stdout);
+    const stderrTail = cmdPassed ? undefined : outputTail(stderr);
     results.push({
       argv: spec.argv,
       layer: spec.layer,
       ...(spec.package_dir ? { package_dir: spec.package_dir } : {}),
       exit_code: status,
       passed: cmdPassed,
+      ...(stdoutTail === undefined ? {} : { stdout_tail: stdoutTail }),
+      ...(stderrTail === undefined ? {} : { stderr_tail: stderrTail }),
     });
     if (!cmdPassed) {
       passed = false;
@@ -144,115 +192,66 @@ export async function runToolOwnedFinalGate(
   return { passed, results, scoped_out: false, runtime_residual };
 }
 
-/**
- * The bound on coarse re-block iterations before the run converges to a terminal
- * `blocked` close (CE-003). Two re-block attempts give a flaky-but-recoverable
- * suite a chance to settle; the third unattributable red terminates
- * deterministically rather than livelocking.
- */
-export const COARSE_REBLOCK_BOUND = 2;
-
 const FINAL_GATE_STATE_FILENAME = "final-gate.json";
 
-interface FinalGateSidecar {
-  coarse_reblock_count: number;
-  /** Set once the bounded backstop terminated; the gate is never re-run after. */
-  terminated?: boolean;
-}
-
-export async function readFinalGateSidecar(
-  artifactsDir: string,
-): Promise<{ count: number; terminated: boolean }> {
-  const sidecar = await readOptionalJsonFile<FinalGateSidecar>(
-    join(artifactsDir, FINAL_GATE_STATE_FILENAME),
-  );
-  const n = sidecar?.coarse_reblock_count;
-  return {
-    count: typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : 0,
-    terminated: sidecar?.terminated === true,
-  };
-}
-
-export async function writeFinalGateSidecar(
-  artifactsDir: string,
-  count: number,
-  terminated: boolean,
-): Promise<void> {
-  await writeJsonFile(join(artifactsDir, FINAL_GATE_STATE_FILENAME), {
-    schema_version: "remediate-code-final-gate/v1alpha1",
-    coarse_reblock_count: count,
-    terminated,
-  });
-}
-
-export type CoarseReblockAction = "reattempt_all" | "terminal_blocked";
-
-export interface CoarseReblockDecision {
-  state: RemediationState;
-  action: CoarseReblockAction;
-  next_count: number;
+/**
+ * Where the failing gate run is recorded, relative to the artifacts dir. The
+ * step prompt carries this PATH and the failing command line — never the tail
+ * itself, which is what keeps a multi-KB suite log out of the prompt while
+ * still leaving it one open away.
+ */
+export function finalGateRecordPath(artifactsDir: string): string {
+  return join(artifactsDir, FINAL_GATE_STATE_FILENAME);
 }
 
 /**
- * Coarse re-block-ALL-non-terminal on an unattributable final-gate red
- * (INV-RS-09) with a bounded, monotonic auto-terminate (CE-003).
+ * What a RED gate leaves behind.
  *
- * The tool-owned gate is whole-repo, so a red is inherently unattributable to a
- * single node. Below the bound, EVERY non-skip item (including `resolved` ones —
- * a resolved item's own change may have caused the red) is re-opened to `pending`
- * and the run re-attempts the whole repo through the rolling scheduler
- * (`reattempt_all` → `implementing`). At or above the bound, the run STOPS
- * re-attempting and converges DETERMINISTICALLY: every non-skip item becomes
- * terminal `blocked` and the run advances to `closing`.
- *
- * CE-003 no-human-host guarantee: the loop is owned entirely by the gate + the
- * rolling scheduler — it NEVER routes through the human triage prompt
- * (`waiting_for_triage`) and is bounded by `bound`, so a permanently-red sibling
- * converges to a terminal `blocked` close deterministically: never livelocking,
- * never stranding on a human prompt, and never force-closed to green (a RED gate
- * always leaves `blocked` items, so close.ts's `!anyBlocked` guard keeps the run
- * out of the fully-green path). User SKIP dispositions (ignored /
- * deemed_inappropriate) are settled decisions and are left alone. Pure (the
- * counter is supplied / returned).
+ * This file used to hold a re-block counter and a `terminated` flag — the state
+ * of a backstop that re-opened every item on an unattributable red and, at its
+ * bound, abandoned the run. Both are gone: an unattributable red now records
+ * what failed and pauses, so there is no count to carry and nothing to
+ * terminate. (`terminated` had to go rather than merely stop being written: it
+ * short-circuited the gate entirely, so a run that once reached the bound would
+ * have skipped the suite check forever after.)
  */
-export function applyCoarseReblock(
-  state: RemediationState,
-  currentCount: number,
-  gateSummary: string,
-  bound: number = COARSE_REBLOCK_BOUND,
-): CoarseReblockDecision {
-  const now = new Date().toISOString();
+export interface FinalGateRedRecord {
+  schema_version: "remediate-code-final-gate/v1alpha1";
+  /** Which gate observed the red — a phase boundary, or the all-terminal funnel. */
+  scope: string;
+  recorded_at: string;
+  failing_command: string;
+  exit_code: number | null;
+  layer: FinalGateCommandSpec["layer"] | null;
+  stdout_tail?: string;
+  stderr_tail?: string;
+}
 
-  if (currentCount >= bound) {
-    // Bounded auto-terminate: converge DETERMINISTICALLY to a terminal close for a
-    // no-human host — never livelock, never a triage prompt, never green.
-    //
-    // `abandoned`, NOT `blocked`: this is the force-close seam, and `blocked` is
-    // deliberately non-terminal (triage retries it). Leaving items non-terminal here
-    // meant the run ended with items that had reached no end state, which the close
-    // phase then rendered as a partial-completion outcome — breaking the invariant
-    // that remediation ends binary. `abandoned` is terminal and says which way it
-    // ended: the tool gave up, as distinct from a settled decision not to act.
-    for (const it of Object.values(state.items ?? {})) {
-      if (isSkipStatus(it.status)) continue; // settled user decision — never overturn
-      it.status = "abandoned";
-      it.started_at ??= now;
-      it.completed_at = now;
-      it.failure_reason =
-        `Tool-owned final gate failed and the coarse re-block backstop reached its ` +
-        `bound (${bound}); abandoning the remaining items (no-human host). ${gateSummary}`;
-    }
-    return { state, action: "terminal_blocked", next_count: currentCount };
-  }
-
-  // Below the bound: re-open every non-skip item to `pending` and re-attempt the
-  // whole repo via the rolling scheduler (NOT the human triage prompt).
-  for (const it of Object.values(state.items ?? {})) {
-    if (isSkipStatus(it.status)) continue;
-    it.status = "pending";
-    it.failure_context =
-      `Re-attempted by the coarse final-gate backstop (unattributable whole-repo red). ${gateSummary}`;
-    delete it.completed_at;
-  }
-  return { state, action: "reattempt_all", next_count: currentCount + 1 };
+/**
+ * Record the failing command of a red gate run. Overwrites: the file describes
+ * the CURRENT reason the run is paused, and a repeat next-step that still finds
+ * the suite red rewrites it rather than accumulating a history nothing reads.
+ */
+export async function writeFinalGateRedRecord(
+  artifactsDir: string,
+  scope: string,
+  failed: FinalGateCommandResult | undefined,
+): Promise<string> {
+  const path = finalGateRecordPath(artifactsDir);
+  const record: FinalGateRedRecord = {
+    schema_version: "remediate-code-final-gate/v1alpha1",
+    scope,
+    recorded_at: new Date().toISOString(),
+    failing_command: failed ? failed.argv.join(" ") : "(command not reported)",
+    exit_code: failed?.exit_code ?? null,
+    layer: failed?.layer ?? null,
+    ...(failed?.stdout_tail === undefined
+      ? {}
+      : { stdout_tail: failed.stdout_tail }),
+    ...(failed?.stderr_tail === undefined
+      ? {}
+      : { stderr_tail: failed.stderr_tail }),
+  };
+  await writeJsonFile(path, record);
+  return path;
 }

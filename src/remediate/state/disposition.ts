@@ -9,9 +9,11 @@
  * nothing else may re-enumerate it.
  *
  * Every value is terminal. `abandoned` is the tool giving up — retry bound
- * exhausted, final gate red, or operator halt — and is deliberately distinct
- * from `ignored` (a settled human decision not to act), because collapsing them
- * would erase which of the two happened.
+ * exhausted, operator halt, or the force-close backstop converting a still
+ * non-terminal item — and is deliberately distinct from `ignored` (a settled
+ * human decision not to act), because collapsing them would erase which of the
+ * two happened. A red tool-owned final gate is NOT one of these routes: it
+ * pauses the run and leaves every item exactly as it was.
  *
  * `verified_already_fixed` and `refuted` (CDC-25) are the two DISTINCT members
  * added for the run's wider terminal-disposition vocabulary T = { fixed,

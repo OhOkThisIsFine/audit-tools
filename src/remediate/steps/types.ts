@@ -44,6 +44,19 @@ export type RemediationStepKind =
   | "input_conflict"
   | "unhandled_state"
   | "zero_documentable_findings"
+  // The tool-owned suite gate came back RED. A THIRD thing, distinct from both
+  // neighbours below, and the distinction is the point: `blocked` means
+  // next-step itself died on an unhandled error, `phase_busy` means a peer
+  // agent holds the phase mutex, and this means the repo's own suite failed
+  // while the run is otherwise healthy. Conflating them is exactly the
+  // attribution defect the 2026-07-30 entry records — a whole-repo red that
+  // says nothing about which run, phase, or item caused it invites a response
+  // aimed at the wrong thing (there, re-attempting every item).
+  //
+  // Persisted contract: an ADDITIVE value. A host that switches on `step_kind`
+  // and does not know this one treats it as informational, which is the correct
+  // reading — the step asks for nothing but a re-run once the suite is green.
+  | "final_gate_red"
   // Terminal-exit backstop (backlog: abnormal-exit no-step-contract): written by
   // the CLI when next-step dies on an unhandled error, so a stale prior step can
   // never read as a live instruction. Mirrors audit-code's "blocked" kind.

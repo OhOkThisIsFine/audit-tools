@@ -94,10 +94,9 @@ import { checkAffectedFileIntegrity } from "../utils/fileIntegrity.js";
 import { resolveIntakeStep } from "./intakeResolver.js";
 import {
   runToolOwnedFinalGate,
-  applyCoarseReblock,
-  readFinalGateSidecar,
-  writeFinalGateSidecar,
+  writeFinalGateRedRecord,
   type GateRunner,
+  type ToolOwnedFinalGateResult,
 } from "./finalGate.js";
 import {
   buildNextContractPipelineStep,
@@ -472,13 +471,12 @@ export function phaseBoundaryToGate(state: RemediationState): number | null {
   return pristine ? dispatchPhase : null;
 }
 
-// Tool-owned final completion gate (INV-RS-10) + coarse re-block (INV-RS-09)
+// Tool-owned final completion gate (INV-RS-10)
 // ---------------------------------------------------------------------------
 //
-// The gate runner, its bounded coarse-reblock backstop, and the sidecar counter
-// I/O were extracted behaviour-preservingly into the sibling leaf module
-// `finalGate.ts` (CP-NODE-1). They are imported below for local use in the
-// completion handler and re-exported to preserve this module's public surface +
+// The gate runner and its red record live in the sibling leaf module
+// `finalGate.ts`. They are imported below for local use in the boundary and
+// completion gates and re-exported to preserve this module's public surface +
 // existing test imports. See `finalGate.ts` for the INV-RS-10 / CE-001 / CE-002
 // documentation.
 
@@ -486,16 +484,12 @@ export {
   isAuditToolsMonorepo,
   toolOwnedFinalGateCommands,
   runToolOwnedFinalGate,
-  applyCoarseReblock,
-  COARSE_REBLOCK_BOUND,
 } from "./finalGate.js";
 export type {
   FinalGateCommandSpec,
   FinalGateCommandResult,
   ToolOwnedFinalGateResult,
   GateRunner,
-  CoarseReblockAction,
-  CoarseReblockDecision,
 } from "./finalGate.js";
 
 function resolvedOrTerminalItems(state: RemediationState): RemediationItemState[] {
@@ -2704,34 +2698,128 @@ function finalGateDisabled(options: NextStepOptions): boolean {
 }
 
 /**
+ * The ONE response to a red tool-owned gate, shared by both gates that run it.
+ *
+ * Records the failing command beneath the artifacts dir and emits a resumable
+ * `final_gate_red` step. It MUTATES NOTHING — no item status, no `state.status`,
+ * no persisted state write at all — because a whole-repo red is unattributable:
+ * nothing in the gate computes which item or path caused it, so every response
+ * that touches items is guessing. The predecessor guessed by re-opening all of
+ * them, and on 2026-08-20 that erased 21 accepted resolutions over a red from an
+ * unrelated landed commit.
+ *
+ * Resumable BY CONSTRUCTION rather than by stored progress: the next next-step
+ * re-runs the gate, and a green one proceeds exactly as if the red never
+ * happened. There is nothing to reset and no counter that can strand the run.
+ *
+ * The prompt carries the failing command line and the PATH to the record — never
+ * the captured output, which stays in the artifact where a multi-KB suite log
+ * costs nothing.
+ *
+ * COST OF THE PAUSE, stated in the prompt rather than discovered: there is no
+ * cached verdict, so EVERY next-step taken while the suite is red re-runs the
+ * whole gate — a full build plus the whole suite, minutes, holding the phase
+ * lock throughout. That is the deliberate price of having no counter to strand
+ * the run on, and it makes polling expensive: the host should re-run once it has
+ * actually fixed something, not on a timer.
+ */
+async function emitFinalGateRedStep(ctx: {
+  root: string;
+  artifactsDir: string;
+  state: RemediationState;
+  scope: string;
+  gate: ToolOwnedFinalGateResult;
+  runLogger: RunLogger;
+}): Promise<RemediateOutcome> {
+  const { root, artifactsDir, state, scope, gate, runLogger } = ctx;
+  const failed = gate.results.find((r) => !r.passed);
+  const recordPath = await writeFinalGateRedRecord(artifactsDir, scope, failed);
+  const failingCommand = failed
+    ? `${failed.argv.join(" ")} (exit ${String(failed.exit_code)})`
+    : "(the gate reported no failing command)";
+  runLogger.event({
+    phase: "next-step",
+    kind: "outcome",
+    obligation: state.status,
+    note: `final_gate_red scope=${scope} command=${failed ? failed.argv.join(" ") : "unknown"}`,
+  });
+  const nextCommand = loaderCommand("next-step");
+  return {
+    kind: "emit",
+    step: await writeCurrentStep({
+      stepKind: "final_gate_red",
+      status: "blocked",
+      runId: stateRunId(state),
+      repoRoot: root,
+      artifactsDir,
+      prompt: `
+# Remediation paused — the repository suite is red
+
+The tool-owned gate (${scope}) ran the repository's own build/typecheck/test
+floor and it FAILED. Nothing about this run has been changed: every item keeps
+the status it had, the run stays in the same phase, and no work was discarded.
+
+Failing command:
+
+\`${failingCommand}\`
+
+The captured output tail is recorded at:
+
+\`${recordPath}\`
+
+A red here is whole-repo and says nothing about which remediation item caused
+it — it may not be this run's doing at all (a commit landed alongside the run is
+enough). So this is a PAUSE, not a verdict on the work.
+
+Fix the failing command — or confirm it was already broken independently of this
+run — then run:
+
+\`${nextCommand}\`
+
+The gate re-runs from scratch. The moment it is green the run continues exactly
+where it left off.
+
+Re-run it DELIBERATELY, not on a timer: there is no cached verdict, so every
+next-step taken while the suite is red re-runs the entire gate — a full build
+plus the whole suite, minutes, holding the run's phase lock the whole time.
+Fix something first, then re-run.
+`,
+      allowedCommands: [nextCommand],
+      stopCondition:
+        "Stop. Make the repository suite green, then re-run next-step to resume the run.",
+      artifactPaths: { final_gate_record: recordPath },
+    }),
+  };
+}
+
+/**
  * Whole-repo test-suite gate at a foundations→consumers PHASE BOUNDARY (T3). Runs
  * the tool-owned final gate (INV-RS-10) INLINE before the next phase dispatches,
  * so an integration break introduced by a just-completed foundations phase is
  * caught — and attributed to that phase — before consumers are built on top of it
  * (strictly earlier + more attributable than the all-terminal gate, whose red is
- * unattributable across every phase). Reuses the all-terminal gate's coarse
- * re-block + bounded auto-terminate machinery (INV-RS-09 / CE-003) and its shared
- * sidecar so a no-human host converges deterministically.
+ * unattributable across every phase).
  *
- * Returns a re-block / terminate transition when the gate is RED, or null when no
- * gate is due this pass OR the gate is GREEN — in which case the caller proceeds
- * to dispatch the phase.
+ * A red RECORDS and PAUSES — see {@link emitFinalGateRedStep}. It mutates no item,
+ * moves no phase, and writes no state. (It used to re-open every item and, at a
+ * bound, abandon the run; that backstop is gone, along with the counter sidecar
+ * that drove it.)
+ *
+ * Returns the pause step when the gate is RED, or null when no gate is due this
+ * pass OR the gate is GREEN — in which case the caller proceeds to dispatch the
+ * phase.
  */
 async function runPhaseBoundaryGate(ctx: {
   root: string;
   artifactsDir: string;
   state: RemediationState;
   options: NextStepOptions;
-  store: StateStore;
   runLogger: RunLogger;
 }): Promise<RemediateOutcome | null> {
-  const { root, artifactsDir, state, options, store, runLogger } = ctx;
+  const { root, artifactsDir, state, options, runLogger } = ctx;
   if (finalGateDisabled(options)) return null;
   const phase = phaseBoundaryToGate(state);
   if (phase == null) return null;
-
-  const sidecar = await readFinalGateSidecar(artifactsDir);
-  if (sidecar.terminated) return null; // bounded backstop already converged
 
   const gateStart = Date.now();
   runLogger.event({
@@ -2750,29 +2838,16 @@ async function runPhaseBoundaryGate(ctx: {
   });
   if (gate.passed) return null; // green → dispatch this phase
 
-  // RED at the boundary: the just-completed lower phases broke the whole-repo
-  // suite. Coarse re-block (INV-RS-09) + bounded auto-terminate (CE-003), exactly
-  // as the all-terminal gate — never the human triage prompt.
-  const failedCmd = gate.results.find((r) => !r.passed);
-  const summary = failedCmd
-    ? `Phase ${phase} boundary gate — failing command: ${failedCmd.argv.join(" ")} (exit ${failedCmd.exit_code}).`
-    : `Phase ${phase} boundary gate failed.`;
-  const decision = applyCoarseReblock(state, sidecar.count, summary);
-  await writeFinalGateSidecar(
+  // RED at the boundary. The next phase does NOT dispatch — but nothing is
+  // re-opened or closed either; the run pauses exactly where it stands.
+  return emitFinalGateRedStep({
+    root,
     artifactsDir,
-    decision.next_count,
-    decision.action === "terminal_blocked",
-  );
-  runLogger.event({
-    phase: "next-step",
-    kind: "outcome",
-    obligation: state.status,
-    note: `phase_boundary_coarse_reblock phase=${phase} action=${decision.action} count=${decision.next_count}`,
+    state,
+    scope: `phase ${phase} boundary`,
+    gate,
+    runLogger,
   });
-  decision.state.status =
-    decision.action === "reattempt_all" ? "implementing" : "closing";
-  await store.saveState(decision.state);
-  return { kind: "transition", state: decision.state };
 }
 
 async function handleAllTerminalTransition(
@@ -2785,16 +2860,16 @@ async function handleAllTerminalTransition(
 ): Promise<RemediateOutcome> {
   const gateDisabled = finalGateDisabled(options);
 
-  const sidecar = await readFinalGateSidecar(artifactsDir);
-
   // The tool-owned final gate (INV-RS-10) runs at the single all-terminal →
-  // closing funnel, exactly once per arrival here. It is skipped when:
+  // closing funnel, on EVERY arrival here. It is skipped only when:
   //  - there is nothing resolved to validate (everything blocked/skipped), or
-  //  - the bounded backstop already terminated (CE-003 — never re-run after), or
   //  - it is explicitly disabled for test hermeticity.
-  // The gate is INDEPENDENT of plan.test_command and runs through the
-  // env-scrubbing runTracked path.
-  if (!gateDisabled && !sidecar.terminated && hasResolvedItems(state)) {
+  // There is deliberately no third "already gave up" skip: the flag that used to
+  // provide one made a run that hit the old backstop's bound skip the suite check
+  // permanently, so the gate it exists to enforce stopped running exactly when it
+  // mattered most. The gate is INDEPENDENT of plan.test_command and runs through
+  // the env-scrubbing runTracked path.
+  if (!gateDisabled && hasResolvedItems(state)) {
     const gateStart = Date.now();
     runLogger.event({
       phase: "next-step",
@@ -2812,31 +2887,18 @@ async function handleAllTerminalTransition(
     });
 
     if (!gate.passed) {
-      // INV-RS-09: a whole-repo gate red is unattributable → coarse re-block.
-      // CE-003: bounded, monotonic auto-terminate to terminal `blocked`.
-      const failedCmd = gate.results.find((r) => !r.passed);
-      const summary = failedCmd
-        ? `Failing command: ${failedCmd.argv.join(" ")} (exit ${failedCmd.exit_code}).`
-        : "Tool-owned final gate failed.";
-      const decision = applyCoarseReblock(state, sidecar.count, summary);
-      await writeFinalGateSidecar(
+      // A whole-repo red at the closing funnel is exactly as unattributable as
+      // one at a phase boundary, so it gets the same answer: record and pause.
+      // The run does NOT advance to `closing` — closing on a red would write a
+      // report claiming an outcome the suite never corroborated.
+      return emitFinalGateRedStep({
+        root,
         artifactsDir,
-        decision.next_count,
-        decision.action === "terminal_blocked",
-      );
-      runLogger.event({
-        phase: "next-step",
-        kind: "outcome",
-        obligation: state.status,
-        note: `coarse_reblock action=${decision.action} count=${decision.next_count}`,
+        state,
+        scope: "all-terminal final gate",
+        gate,
+        runLogger,
       });
-      // reattempt_all → re-open items to pending and re-emit the host workload
-      // (NEVER the human triage prompt — CE-003 no-human-host path); terminal_blocked
-      // → everything non-skip is now blocked, so close writes the partial report.
-      decision.state.status =
-        decision.action === "reattempt_all" ? "implementing" : "closing";
-      await store.saveState(decision.state);
-      return { kind: "transition", state: decision.state };
     }
   }
 
@@ -3690,14 +3752,14 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         const pendingBlocks = implementableBlocks(s);
         if (pendingBlocks.length > 0) {
           // Per-phase boundary gate (T3): before opening a phase P > 0, run the
-          // whole-repo suite once over the just-landed foundations. A red re-blocks
-          // here (transition); green / no-boundary falls through to dispatch.
+          // whole-repo suite once over the just-landed foundations. A red PAUSES
+          // here (an emitted step, no state written); green / no-boundary falls
+          // through to dispatch.
           const gated = await runPhaseBoundaryGate({
             root,
             artifactsDir,
             state: s,
             options,
-            store,
             runLogger,
           });
           if (gated) return gated;
