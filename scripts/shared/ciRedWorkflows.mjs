@@ -10,17 +10,21 @@
 // Two rules the raw run list will fool you on:
 //   • Only the MOST RECENT completed run per workflow counts. An older failure
 //     that a later run turned green is history, not a red main.
-//   • `cancelled` is NOT a failure. A newer push cancels the older run by
-//     concurrency, which is routine; treating it as red trains the override into
-//     a reflex (same reasoning as the constitutional gate's narrowness).
+//   • `cancelled` and `skipped` are NOT failures. A newer push cancels the
+//     older run by concurrency, which is routine; a `skipped` run means the
+//     workflow never ran at all (path filters didn't match, or a conditional
+//     job was skipped), so it carries no failure signal either. Treating
+//     either as red trains the override into a reflex (same reasoning as the
+//     constitutional gate's narrowness).
 //
 // The red/green split below is an EXHAUSTIVE mapping by inversion, not an
 // enumerated allowlist of bad conclusions: PASSING_CONCLUSIONS names the only
 // value that reads as green, so `timed_out` / `startup_failure` /
 // `action_required` / `stale` / `neutral` / `failure` — and any conclusion
 // GitHub adds tomorrow that this file has never heard of — all read red by
-// default, never silently green. `cancelled` is excluded upstream (a
-// superseded run carries no signal either way) and never reaches this set.
+// default, never silently green. `cancelled` and `skipped` are excluded
+// upstream (a superseded or unrun workflow carries no signal either way) and
+// never reach this set.
 
 /**
  * The only GitHub Actions terminal `conclusion` value that means a run
@@ -56,8 +60,8 @@ export function latestFailedWorkflows(runs) {
     if (run.status !== 'completed') continue;
     const conclusion = typeof run.conclusion === 'string' ? run.conclusion : '';
     if (!conclusion) continue;
-    // A superseded run is routine, and carries no signal either way.
-    if (conclusion === 'cancelled') continue;
+    // A superseded or unrun workflow is routine, and carries no signal either way.
+    if (conclusion === 'cancelled' || conclusion === 'skipped') continue;
 
     // An unparseable timestamp must not sort as "newest" (NaN comparisons are
     // false, so it would silently lose every comparison instead).

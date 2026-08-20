@@ -788,6 +788,25 @@ describe('latestFailedWorkflows: reading ONE workflow is not reading CI', () => 
     ).toEqual(['suite']);
   });
 
+  it('treats `skipped` as no-signal, never as red', () => {
+    // A skipped run means the workflow did not run at all (path filters didn't
+    // match, or a conditional job was skipped) — it carries no failure signal,
+    // exactly like `cancelled`.
+    expect(latestFailedWorkflows([run('suite', 'skipped', '2026-07-26T02:00:00Z')])).toEqual([]);
+  });
+
+  it('does not let a NEWER skipped run mask an older failure', () => {
+    // Mirrors the cancelled case: a skipped run must be excluded outright
+    // rather than becoming the workflow's newest verdict, which would
+    // silently clear a red main.
+    expect(
+      latestFailedWorkflows([
+        run('suite', 'failure', '2026-07-26T01:00:00Z'),
+        run('suite', 'skipped', '2026-07-26T02:00:00Z'),
+      ]),
+    ).toEqual(['suite']);
+  });
+
   it('lets an in-flight run neither red nor CLEAR a workflow', () => {
     // The pending run must not launder the older failure into a pass.
     expect(
