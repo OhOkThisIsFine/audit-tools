@@ -43,8 +43,30 @@ function fail(message) {
   process.exit(1);
 }
 
-const state = readOpenItems(ROOT);
-const decisions = readDecisions(ROOT);
+// CFG-7aa5185c — fail-closed at the CLI boundary too: readDecisions now
+// REFUSES (throws) on a malformed ledger rather than degrading to {}, so every
+// branch below — --list, --done, --settled, and the default settle path —
+// must surface that refusal usably instead of letting an uncaught exception
+// (or, before this fix, a silently-empty ledger) stand in for a real answer.
+// CFG-7aa5185c — fail-closed at the CLI boundary too: readDecisions now
+// REFUSES (throws) on a malformed ledger rather than degrading to {}, so every
+// branch below — --list, --done, --settled, and the default settle path —
+// must surface that refusal usably instead of letting an uncaught exception
+// (or, before this fix, a silently-empty ledger) stand in for a real answer.
+let state;
+let decisions;
+try {
+  state = readOpenItems(ROOT);
+  decisions = readDecisions(ROOT);
+} catch (err) {
+  fail(
+    `Cannot proceed: the nightly decisions ledger could not be read.\n` +
+      `  ${err && err.message ? err.message : String(err)}\n` +
+      `This is a REFUSAL, not an empty ledger — recording an answer now would silently overwrite every ` +
+      `prior decision. Recovery is manual: inspect the file named above, repair or restore it (e.g. from ` +
+      `git history or a backup), then retry.`,
+  );
+}
 const { open, resolved } = partitionBySettled(state.items, decisions, ROOT);
 
 if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {

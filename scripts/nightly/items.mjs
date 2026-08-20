@@ -84,8 +84,46 @@ export function decisionsPath(root) {
   return join(root, DECISIONS_RELPATH);
 }
 
+// CFG-7aa5185c — FAIL CLOSED. readDecisions has its OWN read path, deliberately
+// not built on the permissive readJson() above: readJson conflates "the file
+// does not exist" with "the file exists but is not valid JSON", collapsing
+// both to the caller's fallback. That conflation is exactly right for the
+// REGENERABLE files readJson still serves (open-items.json, last-viewed.json —
+// a bad copy of either is simply rebuilt next run), but it is wrong for THIS
+// file: the decisions ledger is the durable, hand-curated record of every
+// owner answer, and a truncated / half-written / merge-conflicted read must
+// never be silently treated as "nothing has ever been recorded" — the next
+// recordDecision/recordReply/recordCompletion call would then persist a map
+// built from that empty fallback straight over the real file, permanently
+// destroying every prior decision. So this function REFUSES (throws) on any
+// read/parse failure OTHER than the file genuinely not existing, and every
+// write path below calls it first with no try/catch of its own: a write
+// attempted over an unreadable ledger throws before it ever reaches its own
+// writeJson call, so the on-disk file is left byte-for-byte untouched.
 export function readDecisions(root) {
-  return readJson(decisionsPath(root), {});
+  const file = decisionsPath(root);
+  let raw;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return {}; // genuinely nothing recorded yet
+    // Any other read failure (permissions, a symlink loop, ...) is refused
+    // too — it cannot be told apart from "nothing recorded" and must not be
+    // guessed at.
+    throw new Error(`readDecisions: could not read ${file}: ${err && err.message ? err.message : err}`);
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `readDecisions: ${file} exists but is not valid JSON (${err && err.message ? err.message : err}). ` +
+        `This is the durable nightly decision ledger — refusing to read it as an empty ledger, which would ` +
+        `let the next recorded answer silently overwrite every prior decision. Recovery is manual: inspect ` +
+        `${file}, repair or restore it (e.g. from git history or a backup), then retry.`,
+    );
+  }
+  return data && typeof data === 'object' ? data : {};
 }
 
 // Record the owner's answer for a subject. Permanent by design — this is the
