@@ -20,6 +20,7 @@ is deleted too.
 |---|---|---|
 | INV-B3 | Repository-path grounding, including dotfile paths and unambiguous basename resolution. | `src/shared/validation/findingGrounding.ts`; `src/remediate/phases/grounding.ts` |
 | INV-CC | Idempotent, sole-writer intent guidance bootstrap. | `src/shared/intake/guidanceBootstrap.ts` |
+| INV-CCI-NO-DELTA-ID-PARSING | A charter delta's originating subsystem is read from `CharterDelta`'s explicit `node_id`/`goal_node_id` fields, never recovered by splitting `delta_id` — a colon-bearing discriminator inside `delta_id` cannot break the recovery. | `src/audit/orchestrator/charterClarificationExecutor.ts` |
 | INV-CDI-EXPLICIT-NODE-FIELDS | A charter delta carries its subsystem identity as explicit `node_id`/`goal_node_id` fields rather than encoded inside `delta_id`, so `delta_id` stays an opaque identity no consumer needs to parse. | `src/shared/decompose/charterExtraction.ts` |
 | INV-CK | Deterministic identity, idempotency, and content keys. | `src/shared/contentKey.ts`; `src/shared/stableStringify.ts` |
 | INV-CO | Contract-pipeline obligation and reconciliation derivation. | `src/remediate/validation/contractPipelineGates.ts` |

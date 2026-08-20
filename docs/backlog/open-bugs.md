@@ -6,6 +6,17 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **A scoped wave item that coins an invariant id in `src/` is structurally unable to
+  satisfy the id-glossary gate (2026-08-20, medium, friction: tool_should_decide).**
+  `docs/glossary-ids.md` is outside every module's `file_scope`, the gate scans `src/` for
+  `INV-*` ids, and the pre-commit gate does not run the glossary test — so the red lands
+  silently and is discovered by the NEXT item's worker (happened twice in one session:
+  `INV-SSP-DEFERRED-SET-REPORTED` at CP-NODE-10, `INV-CCI-NO-DELTA-ID-PARSING` at
+  CP-NODE-18). **Property:** either workload preparation includes `docs/glossary-ids.md` in
+  any scope whose contract declares a new invariant id, or the glossary gate joins the
+  per-item required commands, or new ids stay out of `src/` comments by convention (the gate
+  scans `src/` only — CP-NODE-9 adopted this deliberately).
+
 - **Wave-1 red-green proofs live only in commit messages — route the durable tests
   (2026-08-19, medium).** CP-NODE-14, 4, 8, 16, 17, 20, 23, 10 and 11 had no test home in their
   write scopes; their proofs are ephemeral transcripts in the wave's commit bodies. The
