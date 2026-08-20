@@ -1254,12 +1254,22 @@ describe("remediation host handoff repository corroboration", () => {
 
   it("classifies a command that outran the capture buffer as overflow, never as a hang", async () => {
     const cwd = await runnerCwd();
-    // Exits 0 after printing more than the 8MiB capture buffer holds. node kills
-    // the child with SIGTERM and reports ENOBUFS — and a discriminator that read
-    // `signal !== null` as "the deadline fired" called this a timeout, i.e. an
-    // environment hang, for a command that had already succeeded.
+    // A child that INTENDS a clean exit after printing more than the 8MiB capture
+    // buffer holds — the kill lands first. node terminates it with SIGTERM and
+    // reports ENOBUFS, and a discriminator that read `signal !== null` as "the
+    // deadline fired" called that a timeout, i.e. an environment hang, for a
+    // command whose only sin was being verbose.
+    //
+    // NO `process.exit(0)`, deliberately: on linux a pipe write is ASYNCHRONOUS
+    // and `process.exit` truncates whatever is still pending, so the child emitted
+    // far less than the cap and exited 0 for real — green was the correct reading
+    // of what it actually did, and the fixture never overflowed there at all. Left
+    // to exit naturally, node stays alive until the stream drains, so all 9MiB
+    // must cross the pipe and the cap is hit on every platform. (win32 never
+    // showed this: its pipe writes are synchronous, so the full 9MiB landed either
+    // way.)
     const overflowing =
-      `node -e "process.stdout.write('x'.repeat(9 * 1024 * 1024)); process.exit(0)"`;
+      `node -e "process.stdout.write('x'.repeat(9 * 1024 * 1024))"`;
     const overflowed = runRequiredTest(cwd, overflowing);
     expect(overflowed).not.toBeNull();
     expect(overflowed!.outcome).toBe("output_overflow");

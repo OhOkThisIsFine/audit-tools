@@ -1321,7 +1321,7 @@ export type RemediationRequiredTestVerdicts = ReadonlyMap<
  * `output_overflow` is separate from `timed_out` because node kills BOTH an
  * over-deadline and an over-`maxBuffer` child with a signal: a discriminator
  * that read `signal !== null` as "the deadline fired" reported a command that
- * exited 0 after printing more than the cap as a hang. `output_overflow` does
+ * was running fine and merely verbose as a hang. `output_overflow` does
  * NOT claim the tests were fine — see {@link describeRequiredTestFailure}; the
  * verdict is simply unknown, because a child killed mid-stream may equally have
  * been on its way to exit 3.
@@ -1437,7 +1437,7 @@ export function runRequiredTest(
   // The ERROR CODE discriminates, never `signal`. node kills an over-deadline
   // child AND an over-`maxBuffer` child, and an external `kill` sets `signal`
   // too — so `signal !== null` was true for three unrelated facts and reported
-  // all of them as a hang, including a command that exited 0 after printing more
+  // all of them as a hang, including a command killed purely for printing more
   // than the buffer holds.
   //
   // ASSUMPTION, stated: a deadline miss reports `ETIMEDOUT`. Verified on win32;
