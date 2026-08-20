@@ -51,16 +51,19 @@ fix is two functions plus two tests, not a rewrite.
 - **Every item gets an independent adversarial review before it lands**, and a second delta pass
   after the fixes. This is not ceremony: every single item this wave had at least one real defect
   found that way, several of them mechanism-level.
-- **Scope widening is the routing fix, and it was needed nine times.** When an item genuinely
-  needs a file outside `allowed_files`, verify the file is owned by no other module, add it to the
-  plan block's `touched_files`, delete `state.host_handoff`, and re-run `next-step` to re-prepare.
-  A permanent test home earns the same treatment — that is how a red-green transcript becomes a
-  durable test instead of a commit-message artifact.
+- **Scope widening is the routing workaround — and it is on its way out.** Until the approved
+  resolver fix in section 4 lands, an item needing a file outside `allowed_files` is unblocked by
+  verifying no other module owns it, adding it to the plan block's `touched_files`, deleting
+  `state.host_handoff`, and re-running `next-step`. A permanent test home earns the same treatment,
+  which is how a red-green transcript becomes a durable test rather than a commit-message artifact.
+  Once the resolver reads the contracts directly, this step should stop being needed — if it still
+  is, that is a finding, not a chore.
 - **Land the item, then write its result JSON** at the work item's `result_path` bound to the
   workload's own `baseline_commit` (not the git parent), then `next-step` to ingest.
-- **A new `INV-*` id must not appear in `src/` comments** unless `docs/glossary-ids.md` is in the
-  item's scope — the glossary gate scans `src/`, and the pre-commit gate does not run that test, so
-  the red lands silently and the next item's worker finds it. It happened twice this wave.
+- **Two gate traps bit twice each this wave**; both are written up with their properties in
+  [`open-bugs.md`](backlog/open-bugs.md) and [`durable-traps.md`](backlog/durable-traps.md) rather
+  than restated here — the scoped-item/glossary-id collision, and the untracked link target that
+  refuses every docs commit. Read those two entries before the first commit of the next session.
 
 ### 3. The close phase is blocked on a contract gap — design-check it before starting
 
