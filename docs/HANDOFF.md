@@ -73,12 +73,23 @@ validated at ingestion (versus a separate recording verb), then backfill the res
 triples. The tracked entry is the steward-metadata item in [`open-bugs.md`](backlog/open-bugs.md).
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
-
-- **2 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `docsN-1` — instruction-file edit: CLAUDE.md describes the DEFAULT analyzer set as admitted without a token, but an operator decline now vetoes it too
-  - `solN-1` — A DAG node's write scope ignores the module contract's declared write targets — four manual recoveries in one wave; approve deriving them instead
-
 <!-- END GENERATED LIVE STATUS -->
+
+### 4. Three owner decisions were taken at hand-back — they are recorded, not pending
+
+Do not re-ask these; the ledger and the backlog hold them, and each is work rather than a question:
+
+- **Write-scope routing is approved for the mechanical fix.** The node write-scope resolver should
+  read the finalized module contracts and union the owning module's declared write targets — both
+  `outputs` and `side_effects` — into the node's scope, replacing the early return of node-declared
+  files. That retires the manual widening step described above; the built patch is in the routine's
+  proposals directory.
+- **`CLAUDE.md` gets the analyzer-veto clause.** The own-vs-acquire bullet should state that a
+  recorded operator decline (or a `skip` setting) refuses the spawn even for a curated default-set
+  tool. The full admission ladder stays single-homed in code — do not restate it in prose.
+- **`intentOrdering` is to be WIRED, not deleted.** Call it where the plan's findings and blocks are
+  finalized, reading the interpreted intent already persisted at the checkpoint; that closes a
+  write-only data flow. It lands with CP-NODE-15, whose scope owns the file.
 
 ## Immediate next
 
@@ -91,8 +102,8 @@ triples. The tracked entry is the steward-metadata item in [`open-bugs.md`](back
 4. **A consolidated pass is queued** in the backlog: the wave's deferred durable tests, the
    owner-decided registry deletion, the emission-scaffold type lift, and the per-node review
    residuals — all seven entries are at the top of [`open-bugs.md`](backlog/open-bugs.md).
-5. **Owner decisions are pending in the generated block above** — one of them approves the
-   mechanical fix for the write-scope routing class this wave worked around nine times.
+5. **The three decisions in section 4 are settled and waiting to be built** — the write-scope
+   resolver fix retires the manual widening step, so it is worth doing early.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
