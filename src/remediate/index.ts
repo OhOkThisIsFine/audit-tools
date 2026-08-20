@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { decideNextStep } from "./steps/nextStep.js";
+import { decideNextStep, recoverIngestHostResults } from "./steps/nextStep.js";
 import { validateArtifacts } from "./validation/artifacts.js";
 import {
   CONTRACT_PIPELINE_VALIDATORS,
@@ -29,7 +29,10 @@ import {
   runWithBlockedStepBackstop,
 } from "audit-tools/shared";
 import { writeBlockedStep } from "./steps/stepWriter.js";
-import { remediationSubmissionBinding } from "./steps/dispatch/hostHandoff.js";
+import {
+  remediationSubmissionBinding,
+  type RemediationHostIngestSummary,
+} from "./steps/dispatch/hostHandoff.js";
 
 // src/remediate/index.ts (source) or dist/remediate/index.js (built) → three
 // dirnames up is the package root, holding package.json + skills/ + opencode.json.
@@ -242,6 +245,61 @@ program
         2,
       ),
     );
+  });
+
+program
+  .command("recover-ingest")
+  .description(
+    "Ingest landed host results whose trusted workload baseline was ORPHANED by a history rewrite (every other corroboration check still applies)",
+  )
+  .option("--root <path>", "Repository root", ".")
+  .option(
+    "--artifacts-dir <path>",
+    "Artifacts directory",
+    ".audit-tools/remediation",
+  )
+  .requiredOption("--run-id <id>", "The run whose workload results are ingested")
+  .action(async (options) => {
+    // An operator-explicit verb, exactly like recover-submission: the ordinary
+    // lane needs no command (next-step ingests), so the relaxed evidence bar is
+    // never reachable by a host that merely calls the normal loop.
+    let summary: RemediationHostIngestSummary;
+    try {
+      summary = await recoverIngestHostResults({
+        root: options.root,
+        artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
+        runId: options.runId,
+      });
+    } catch (error) {
+      // An operator at a terminal gets the reason, not a stack trace.
+      console.error(
+        `recover-ingest could not run: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      process.exit(1);
+    }
+    // A run that recovered NOTHING is not a recovery. Saying "recovered" and
+    // exiting 0 over an empty accept set is the one outcome an operator could
+    // mistake for success, so it gets its own status and a non-zero exit — as
+    // does any partial run, since an operator who asked for N items back must
+    // not read a partial ingest as a complete one. The body names what landed.
+    const recoveredNothing =
+      summary.accepted_count === 0 &&
+      summary.completed_work_item_ids.length === 0;
+    console.log(
+      JSON.stringify(
+        {
+          status: recoveredNothing ? "nothing-to-recover" : "recovered",
+          run_id: options.runId,
+          accepted_count: summary.accepted_count,
+          completed_work_item_ids: summary.completed_work_item_ids,
+          pending_work_item_ids: summary.pending_work_item_ids,
+          issues: summary.issues,
+        },
+        null,
+        2,
+      ),
+    );
+    if (recoveredNothing || summary.issues.length > 0) process.exit(1);
   });
 
 program

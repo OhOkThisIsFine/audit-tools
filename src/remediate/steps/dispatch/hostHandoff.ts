@@ -6,11 +6,14 @@ import {
   headCommit,
   FindingSchema,
   SUBMISSION_ISSUE_CODES,
+  SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+  appendSubmissionEvent,
   assertSubmissionRunId,
   hashContent,
   isGitRepo,
   normalizeRepoPath,
   readSubmissionDocument,
+  readSubmissionLedger,
   repoRelativePath,
   resolveContainedPath,
   spawnSyncHidden,
@@ -18,6 +21,7 @@ import {
   submissionPathFor,
   writeJsonFile,
   type SubmissionIssue,
+  type SubmissionLedgerEvent,
 } from "audit-tools/shared";
 import type { RemediationState } from "../../state/store.js";
 import {
@@ -97,6 +101,19 @@ export const REMEDIATION_ISSUE_CODES = [
   "changed_files_mismatch",
   "run_start_dirty_overlap",
   "required_test_failed",
+  /**
+   * A recovery-mode acceptance could not be marked on the submission ledger, so
+   * it was refused. An acceptance that used the relaxation MUST stay
+   * distinguishable from a clean one; an unrecordable mark is a refusal, never
+   * a silent acceptance.
+   */
+  "recovery_unrecorded",
+  /**
+   * The repository HEAD moved between the recovery verb's unlocked test phase
+   * and its locked write phase, so the pre-computed test verdicts describe a
+   * tree that is no longer current. The whole recovery aborts.
+   */
+  "tree_moved_between_phases",
 ] as const;
 
 export type RemediationIssueCode = (typeof REMEDIATION_ISSUE_CODES)[number];
@@ -896,7 +913,16 @@ function parseResult(
 }
 
 type CorroboratedHostResult =
-  | { readonly ok: true; readonly changedFiles: readonly string[] }
+  | {
+      readonly ok: true;
+      readonly changedFiles: readonly string[];
+      /**
+       * True only when the baseline→landed ancestry check was WAIVED under an
+       * orphaned baseline. The caller must record the acceptance on the
+       * submission ledger before it lands.
+       */
+      readonly usedRecovery: boolean;
+    }
   | {
       readonly ok: false;
       readonly code: RemediationHostIngestIssue["code"];
@@ -928,6 +954,34 @@ function gitCommitIsAncestor(
   return !result.error && result.status === 0;
 }
 
+/**
+ * Is this commit ORPHANED — unreachable from anything the repository still
+ * keeps?
+ *
+ * "Not an ancestor of HEAD" is NOT orphanhood. A baseline sitting on an
+ * unmerged `feature` branch while the work landed on trunk fails the ancestry
+ * test exactly like a rewritten-away commit does, and treating that as orphaned
+ * would hand the relaxation to the ordinary cross-branch case — precisely the
+ * stale-worker situation the ancestry check exists to catch.
+ *
+ * So orphanhood is the CONJUNCTION of two probes: `git for-each-ref --contains`
+ * lists every branch/tag/remote ref whose history contains the commit (empty
+ * output = no live ref keeps it), and the HEAD ancestry check rides alongside
+ * it because a detached HEAD is not a ref `for-each-ref` enumerates and would
+ * otherwise scan clean. A failed scan is not evidence of orphanhood — it fails
+ * closed, so a git that cannot answer never unlocks the relaxation.
+ */
+function gitCommitIsOrphaned(root: string, commit: string): boolean {
+  if (gitCommitIsAncestor(root, commit, "HEAD")) return false;
+  const result = spawnSyncHidden(
+    "git",
+    ["for-each-ref", "--contains", commit, "--format=%(refname)"],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  if (result.error || result.status !== 0) return false;
+  return (result.stdout ?? "").trim().length === 0;
+}
+
 function gitChangedFilesOfCommit(
   root: string,
   commit: string,
@@ -951,26 +1005,130 @@ function gitChangedFilesOfCommit(
   );
 }
 
+/**
+ * Pre-computed required-test verdicts, keyed by `root` + command: `null` =
+ * green, a string = the failure detail.
+ *
+ * This is the recovery path's ANSWER TABLE, not a lazy cache. A required-test
+ * rerun is a `spawnSync`, which blocks the event loop for its whole duration —
+ * so running one inside the state lock would starve the lock's own heartbeat
+ * timer and let a second acquirer reclaim the lock as stale mid-hold. The
+ * recovery verb therefore runs every distinct command ONCE, up front and
+ * unlocked ({@link precomputeRecoveryTestVerdicts}), and hands the finished
+ * table to the locked phase, which only ever READS it.
+ *
+ * Two consequences are deliberate. A command absent from the table is treated
+ * as FAILED, never spawned — fail-closed is the only answer that keeps the
+ * no-spawn-under-the-lock property mechanical rather than remembered. And the
+ * table is recovery-only: a `targeted_command` is host-authored and need not be
+ * idempotent (one that appends to a log, bumps a counter, or is flaky produces
+ * a genuinely different second run), so collapsing spawns is a behavior change.
+ * The normal lane passes `null` and stays byte-identical to the pre-recovery
+ * behavior — every command spawns once per work item, exactly as before.
+ */
+export type RemediationRequiredTestVerdicts = ReadonlyMap<string, string | null>;
+
+/**
+ * Length-prefixed so the root/command boundary is unambiguous for any path, and
+ * printable so the source stays text (a raw separator byte would make the file
+ * binary to git and invisible to grep). The root is part of the key because a
+ * verdict is a fact about one command in one working tree, and nothing
+ * guarantees a single process only ever ingests for one root.
+ */
+function requiredTestVerdictKey(root: string, command: string): string {
+  return `${String(root.length)}:${root}:${command}`;
+}
+
+/** The ONE place a required-test command is spawned. */
+function runRequiredTest(root: string, command: string): string | null {
+  const result = spawnSync(command, {
+    cwd: root,
+    shell: true,
+    stdio: "ignore",
+    timeout: 10 * 60 * 1_000,
+    windowsHide: true,
+  });
+  return result.error || result.status !== 0
+    ? `${command} (${result.error?.message ?? `exit ${String(result.status)}`})`
+    : null;
+}
+
 function rerunRequiredTests(
   root: string,
   commands: readonly string[],
+  /** `null` on the normal lane — see {@link RemediationRequiredTestVerdicts}. */
+  verdicts: RemediationRequiredTestVerdicts | null,
 ): readonly string[] {
   const failures: string[] = [];
   for (const command of commands) {
-    const result = spawnSync(command, {
-      cwd: root,
-      shell: true,
-      stdio: "ignore",
-      timeout: 10 * 60 * 1_000,
-      windowsHide: true,
-    });
-    if (result.error || result.status !== 0) {
-      failures.push(
-        `${command} (${result.error?.message ?? `exit ${String(result.status)}`})`,
-      );
+    if (verdicts) {
+      const verdict = verdicts.get(requiredTestVerdictKey(root, command));
+      if (verdict === undefined) {
+        failures.push(
+          `${command} (no pre-computed verdict — refusing to spawn a test while the state lock is held)`,
+        );
+      } else if (verdict !== null) {
+        failures.push(verdict);
+      }
+      continue;
     }
+    const failure = runRequiredTest(root, command);
+    if (failure !== null) failures.push(failure);
   }
   return failures;
+}
+
+/**
+ * Run every required-test command a recovery ingest could need, ONCE each, and
+ * return the finished verdict table. Call this OUTSIDE the state lock — that is
+ * the entire point (see {@link RemediationRequiredTestVerdicts}).
+ *
+ * Candidates are the work items with at least one still-pending finding whose
+ * result file is present and parses as JSON; an item with no result file is
+ * refused before its tests would ever run, so spawning for it is pure cost. The
+ * filter is deliberately generous otherwise — over-inclusion costs one spawn,
+ * while under-inclusion becomes a fail-closed refusal of a good result.
+ */
+export async function precomputeRecoveryTestVerdicts(params: {
+  readonly root: string;
+  readonly artifactsDir: string;
+  readonly runId: string;
+  readonly state: unknown;
+}): Promise<RemediationRequiredTestVerdicts | UnsupportedRetiredRemediationState> {
+  const state = parseCurrentState(params.state);
+  if (!state) return "unsupported_retired_state";
+  const paths = resolveBoundaryPaths(params);
+  const verdicts = new Map<string, string | null>();
+
+  const workloadRead = await readSubmissionDocument(paths.workloadPath);
+  if (workloadRead.kind !== "value") return verdicts;
+  const workload = parseWorkload(workloadRead.value, paths, params.runId, state);
+  if (!workload) return verdicts;
+
+  const commands: string[] = [];
+  for (const workItem of workload.work_items) {
+    const hasPending = workItem.finding_ids.some(
+      (findingId) => state.items[findingId]?.status === "pending",
+    );
+    if (!hasPending) continue;
+    const absoluteResultPath = resolveContainedPath(
+      paths.root,
+      workItem.result_path,
+      `result path for ${workItem.id}`,
+    );
+    const resultRead = await readSubmissionDocument(absoluteResultPath);
+    if (resultRead.kind !== "value") continue;
+    for (const command of workItem.required_tests) {
+      if (!commands.includes(command)) commands.push(command);
+    }
+  }
+  for (const command of commands) {
+    verdicts.set(
+      requiredTestVerdictKey(paths.root, command),
+      runRequiredTest(paths.root, command),
+    );
+  }
+  return verdicts;
 }
 
 function corroborateHostResult(params: {
@@ -978,10 +1136,14 @@ function corroborateHostResult(params: {
   readonly state: CurrentRemediationHostState;
   readonly workItem: RemediationHostWorkItem;
   readonly result: RemediationHostResult;
+  readonly verdicts: RemediationRequiredTestVerdicts | null;
+  /** See `ingestRemediationHostResults`'s `recovery` option. */
+  readonly recovery: boolean;
 }): CorroboratedHostResult {
-  const { root, state, workItem, result } = params;
+  const { root, state, workItem, result, verdicts } = params;
   const baseline = workItem.baseline_commit;
   const landed = result.commit_evidence.after;
+  let usedRecovery = false;
   if (!gitCommitExists(root, baseline) || !gitCommitExists(root, landed)) {
     return {
       ok: false,
@@ -990,11 +1152,33 @@ function corroborateHostResult(params: {
     };
   }
   if (!gitCommitIsAncestor(root, baseline, landed)) {
-    return {
-      ok: false,
-      code: "baseline_not_ancestor",
-      message: "the trusted workload baseline is not an ancestor of the claimed landed commit",
-    };
+    if (!params.recovery) {
+      return {
+        ok: false,
+        code: "baseline_not_ancestor",
+        message: "the trusted workload baseline is not an ancestor of the claimed landed commit",
+      };
+    }
+    // The relaxation is precondition-bound: it applies ONLY when the trusted
+    // baseline is genuinely ORPHANED — contained by no ref AND unreachable from
+    // HEAD (see gitCommitIsOrphaned). That is the one state in which no landed
+    // commit could ever descend from it, so the item is unacceptable under
+    // every preparable binding. A baseline the repository still keeps — on an
+    // unmerged branch, a tag, a remote ref, or HEAD itself — is a HEALTHY
+    // binding, and a landed commit that does not descend from it is exactly the
+    // stale-worker case the ancestry check exists to catch; recovery refuses it
+    // identically to the normal lane.
+    if (!gitCommitIsOrphaned(root, baseline)) {
+      return {
+        ok: false,
+        code: "baseline_not_ancestor",
+        message:
+          "the trusted workload baseline is not an ancestor of the claimed landed commit, " +
+          "and the baseline is NOT orphaned (a ref still contains it, or it is reachable " +
+          "from HEAD), so the stale-worker protection stands and recovery cannot waive it",
+      };
+    }
+    usedRecovery = true;
   }
   if (!gitCommitIsAncestor(root, landed, "HEAD")) {
     return {
@@ -1032,7 +1216,11 @@ function corroborateHostResult(params: {
       message: `landed files overlap pre-existing run-start dirt: ${dirtyOverlap.join(", ")}`,
     };
   }
-  const failedTests = rerunRequiredTests(root, workItem.required_tests);
+  const failedTests = rerunRequiredTests(
+    root,
+    workItem.required_tests,
+    verdicts,
+  );
   if (failedTests.length > 0) {
     return {
       ok: false,
@@ -1040,7 +1228,7 @@ function corroborateHostResult(params: {
       message: `mechanical required-test rerun failed: ${failedTests.join("; ")}`,
     };
   }
-  return { ok: true, changedFiles: actualFiles };
+  return { ok: true, changedFiles: actualFiles, usedRecovery };
 }
 
 export async function prepareRemediationHostHandoff(params: {
@@ -1110,11 +1298,65 @@ export async function prepareRemediationHostHandoff(params: {
   };
 }
 
+/**
+ * Consume the host's landed results for the trusted workload.
+ *
+ * ## The `recovery` option, and what it actually buys
+ *
+ * A trusted binding can be stranded: a post-prepare `git commit --amend` (or
+ * any history rewrite) re-mints the baseline the workload was bound to, leaving
+ * it ORPHANED — contained by no ref and unreachable from HEAD. Every commit the
+ * host then lands sits on the re-minted line, so `baseline → landed` ancestry is
+ * false for all of them, and re-preparing does not help: a fresh binding must be
+ * minted at HEAD, and HEAD is a DESCENDANT of the landed work. The items are
+ * unacceptable under every preparable binding, with real, reachable,
+ * correctly-scoped commits on disk.
+ *
+ * `recovery` waives ONE check — baseline→landed ancestry — and only when
+ * the baseline is genuinely orphaned by BOTH probes in `gitCommitIsOrphaned`: no
+ * branch/tag/remote ref contains it, and it is not reachable from HEAD. A
+ * baseline the repository still keeps (an unmerged feature branch, a tag, a
+ * remote ref) also fails the ancestry test when work lands elsewhere, and that
+ * is the ordinary stale-worker case — recovery refuses it. Every other
+ * corroboration check runs unchanged (the landed commit exists and is reachable
+ * from HEAD; its mechanically derived changed files exactly equal
+ * `changed_files` and lie within the prompt-bound `allowed_files`; no overlap
+ * with run-start dirt; the required tests rerun green), `parseResult` stays
+ * fully strict, and dependency/phase eligibility is enforced exactly as on the
+ * normal lane.
+ *
+ * RESIDUAL RISK, stated plainly: under an orphaned baseline the evidence bar
+ * drops to "the claimed commit is reachable from the current green HEAD and
+ * matches this item's scope exactly". That CANNOT prove the work was built on
+ * the trusted baseline — a commit landed from a stale or unrelated starting
+ * tree satisfies it as long as its own file set stays in scope. Ancestry is the
+ * check that would have caught that, and it is the one being waived. Which is
+ * precisely why the relaxation costs an explicit operator verb, is gated on the
+ * orphan precondition, and is marked `accepted_via_recovery` on the submission
+ * ledger before the item lands — and why the normal lane keeps the full check.
+ *
+ * In recovery mode this function performs NO required-test spawn: the verdicts
+ * arrive pre-computed on the `recovery` option, and a command missing from that
+ * table is treated as failed. Its caller runs the tests first, unlocked — see
+ * `recoverIngestHostResults`.
+ */
 export async function ingestRemediationHostResults(params: {
   readonly root: string;
   readonly artifactsDir: string;
   readonly runId: string;
   readonly state: unknown;
+  /**
+   * Operator-explicit recovery mode (the `recover-ingest` verb). ABSENT on
+   * every normal-lane call, where behavior is unchanged.
+   *
+   * It carries the pre-computed required-test verdicts rather than a bare
+   * boolean so the no-spawn-while-locked property is structural: there is no
+   * way to ask for recovery without having already run the tests outside the
+   * lock. See {@link precomputeRecoveryTestVerdicts}.
+   */
+  readonly recovery?: {
+    readonly requiredTestVerdicts: RemediationRequiredTestVerdicts;
+  };
 }): Promise<RemediationHostIngestSummary | UnsupportedRetiredRemediationState> {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
@@ -1191,6 +1433,15 @@ export async function ingestRemediationHostResults(params: {
   );
   const resultIds = new Set<string>();
   const completed: string[] = [];
+  // Recovery-only answer table; the normal lane gets null and spawns exactly as
+  // it always has. See RemediationRequiredTestVerdicts.
+  const requiredTestVerdicts = params.recovery?.requiredTestVerdicts ?? null;
+  // Lazily loaded on the first recovery-marked acceptance: the recovery marks
+  // the ledger ALREADY carries. A crash between the append and the state write
+  // leaves a mark whose item is still pending, and the natural response is to
+  // re-run the verb — which must converge, not accumulate a second record of
+  // the same acceptance.
+  let recordedRecoveryMarks: SubmissionLedgerEvent[] | null = null;
   const landedFiles = new Set(nextState.applied_edit_surface ?? []);
   const requireRepositoryCorroboration =
     state.host_handoff !== undefined || isGitRepo(paths.root);
@@ -1260,7 +1511,11 @@ export async function ingestRemediationHostResults(params: {
       const result = parsed.result;
       const outcome = result.outcome;
       if (outcome.status === "resolved_no_change") {
-        const failedTests = rerunRequiredTests(paths.root, workItem.required_tests);
+        const failedTests = rerunRequiredTests(
+          paths.root,
+          workItem.required_tests,
+          requiredTestVerdicts,
+        );
         if (failedTests.length > 0) {
           issues.push({
             code: "required_test_failed",
@@ -1313,6 +1568,8 @@ export async function ingestRemediationHostResults(params: {
         state,
         workItem,
         result,
+        verdicts: requiredTestVerdicts,
+        recovery: params.recovery !== undefined,
       });
       if (!corroborated.ok) {
         issues.push({
@@ -1322,6 +1579,61 @@ export async function ingestRemediationHostResults(params: {
           message: corroborated.message,
         });
         continue;
+      }
+      if (corroborated.usedRecovery) {
+        // No acceptance without a record. The mark goes down BEFORE the item is
+        // marked resolved, and an append that throws refuses this item rather
+        // than landing an acceptance the ledger cannot account for — the run
+        // must never read as one that never drifted. The refusal is per item:
+        // an unwritable ledger is not a reason to discard the whole ingest.
+        try {
+          recordedRecoveryMarks ??= (
+            await readSubmissionLedger(paths.artifactsDir)
+          ).filter((event) => event.kind === "accepted_via_recovery");
+          // The mark's identity is (run, item, LANDED COMMIT), not just
+          // (run, item): an item re-opened and later re-accepted from a
+          // DIFFERENT landing is a different relaxed acceptance and earns its
+          // own record. Only a retry of the SAME landing is a duplicate. The
+          // landed sha is matched inside the message because the shared event
+          // contract carries no commit field, and a 40-hex sha this writer
+          // itself emitted is an unambiguous token to match on.
+          const landedCommit = result.commit_evidence.after;
+          const alreadyMarked = recordedRecoveryMarks.some(
+            (event) =>
+              event.run_id === params.runId &&
+              event.submission_id === workItem.id &&
+              (event.message ?? "").includes(landedCommit),
+          );
+          if (!alreadyMarked) {
+            const event: SubmissionLedgerEvent = {
+              contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+              run_id: params.runId,
+              submission_id: workItem.id,
+              lane: workItem.id,
+              kind: "accepted_via_recovery",
+              // Derived from what was actually probed, never asserted: the
+              // baseline was found in no ref and unreachable from HEAD.
+              message:
+                `accepted under recovery: the trusted baseline ${workItem.baseline_commit} is ` +
+                "contained by no ref and unreachable from HEAD, so landed commit " +
+                `${landedCommit} was corroborated against HEAD and this ` +
+                "item's bound scope instead of against baseline ancestry",
+              recorded_at: new Date().toISOString(),
+            };
+            await appendSubmissionEvent(paths.artifactsDir, event);
+            recordedRecoveryMarks.push(event);
+          }
+        } catch (error) {
+          issues.push({
+            code: "recovery_unrecorded",
+            work_item_id: workItem.id,
+            result_path: workItem.result_path,
+            message:
+              "the recovery acceptance could not be recorded on the submission ledger, so it " +
+              `was refused: ${error instanceof Error ? error.message : String(error)}`,
+          });
+          continue;
+        }
       }
       acceptedFiles = corroborated.changedFiles;
     }

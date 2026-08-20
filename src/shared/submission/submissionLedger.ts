@@ -35,6 +35,14 @@ export const SUBMISSION_EVENT_KINDS = [
   "rejected",
   /** An operator re-landed a submission by hand through the recovery lane. */
   "recovered_by_hand",
+  /**
+   * A submission was applied through a recovery verb that RELAXED one of the
+   * normal lane's corroboration checks. Distinct from `recovered_by_hand`
+   * (which re-lands a payload the normal validator still fully accepts) and
+   * from `accepted`: the evidence bar that admitted this one was lower, so the
+   * record must say so rather than let the run read as clean.
+   */
+  "accepted_via_recovery",
 ] as const;
 
 export type SubmissionEventKind = (typeof SUBMISSION_EVENT_KINDS)[number];

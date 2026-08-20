@@ -55,8 +55,10 @@ import {
 import {
   ingestRemediationHostResults,
   hostDependencyLevels,
+  precomputeRecoveryTestVerdicts,
   prepareRemediationHostHandoff,
   type CurrentRemediationHostState,
+  type RemediationHostIngestSummary,
 } from "./dispatch/hostHandoff.js";
 import {
   FileLockTimeoutError,
@@ -806,6 +808,134 @@ function currentHostBoundaryState(
     contract_version: "remediate-code-state/v1alpha1",
     ...state,
   } as CurrentRemediationHostState;
+}
+
+/**
+ * The `recover-ingest` verb's whole body: ingest the host's landed results in
+ * RECOVERY mode and persist through the same file-locked, atomically-writing
+ * store, with the same `contract_version` strip.
+ *
+ * It is a separate verb rather than a flag on `next-step` because the
+ * relaxation it enables must be an operator's explicit act — see
+ * `ingestRemediationHostResults`, which states what is waived and the residual
+ * risk. Nothing else here differs from the normal ingestion: the same workload,
+ * the same contract gates, the same eligibility frontier.
+ *
+ * ## Why this runs in two phases
+ *
+ * A required-test rerun is `spawnSync`, which blocks the event loop for its
+ * whole duration. Run inside the state lock, it would starve the lock's own
+ * heartbeat timer (`setInterval` in the shared fileLock) — the held lock's mtime
+ * would stop being refreshed, a second acquirer would classify it as stale at
+ * ~30s and steal it, and mutual exclusion would be gone precisely during the
+ * longest critical section in the codebase. Holding a lock across a blocking
+ * spawn is therefore not merely slow; it is unsound.
+ *
+ * So:
+ *
+ * - **Phase 1, UNLOCKED.** Snapshot the state, capture HEAD, and run every
+ *   distinct required-test command exactly once
+ *   (`precomputeRecoveryTestVerdicts`). HEAD is captured BEFORE the spawns, not
+ *   after, because a host-authored command that MOVES HEAD would otherwise
+ *   produce verdicts of mixed provenance and go undetected. (The guard compares
+ *   commit shas: it sees HEAD movement, not worktree dirt — a command that only
+ *   dirties files is invisible to it, which is acceptable because phase 2's
+ *   corroboration is commit-based.)
+ * - **Phase 2, LOCKED.** Re-read HEAD and abort the whole recovery if it moved
+ *   (`tree_moved_between_phases`) — the phase-1 verdicts would describe a tree
+ *   that no longer exists, and nothing is accepted or appended. Otherwise ingest
+ *   with the pre-computed verdicts, which the ingest only READS: in recovery
+ *   mode it never spawns, and a command missing from the table fails closed.
+ *
+ * What remains inside the lock is git plumbing (ancestry, ref scan, diff-tree),
+ * the ledger append, and the state write — sub-second work, comfortably inside
+ * heartbeat coverage. The HEAD-unchanged guard closes the gap the phase split
+ * opens; the operational protocol is still one writer at a time, now enforced by
+ * a lock that cannot be stolen mid-hold instead of by convention.
+ *
+ * One accepted cost: `StateStore.mutate` always writes, so a recovery run that
+ * changes nothing rewrites `state.json` with identical content. Expressing a
+ * true no-op means plumbing the locked store's `SKIP_WRITE` sentinel through
+ * `StateStore.mutate`, which is a change to the store's API rather than to this
+ * verb. The `state_changed` flag on the returned summary stays authoritative
+ * for callers either way.
+ */
+export async function recoverIngestHostResults(options: {
+  readonly root: string;
+  readonly artifactsDir: string;
+  readonly runId: string;
+}): Promise<RemediationHostIngestSummary> {
+  const root = resolveRoot(options.root);
+  const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
+  const store = new StateStore(artifactsDir);
+
+  // ── Phase 1: unlocked ────────────────────────────────────────────────────
+  const snapshot = await store.loadState();
+  if (!snapshot) {
+    throw new Error(
+      `No remediation state at ${artifactsDir} — there is nothing to ingest.`,
+    );
+  }
+  const headBeforeTests = headCommit(root);
+  const requiredTestVerdicts = await precomputeRecoveryTestVerdicts({
+    root,
+    artifactsDir,
+    runId: options.runId,
+    state: currentHostBoundaryState(snapshot),
+  });
+  if (requiredTestVerdicts === "unsupported_retired_state") {
+    throw new Error(
+      "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.",
+    );
+  }
+
+  // ── Phase 2: locked, spawn-free ──────────────────────────────────────────
+  let ingested!: RemediationHostIngestSummary;
+  await store.mutate(async (state) => {
+    if (!state) {
+      throw new Error(
+        `No remediation state at ${artifactsDir} — there is nothing to ingest.`,
+      );
+    }
+    const headNow = headCommit(root);
+    if (headNow !== headBeforeTests) {
+      ingested = {
+        accepted_count: 0,
+        completed_work_item_ids: [],
+        pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
+        issues: [
+          {
+            code: "tree_moved_between_phases",
+            message:
+              `HEAD moved from ${headBeforeTests ?? "(none)"} to ${headNow ?? "(none)"} ` +
+              "while the required tests were running, so their verdicts no longer describe " +
+              "this tree. Nothing was accepted; re-run recover-ingest on a settled tree.",
+          },
+        ],
+        state_changed: false,
+        state: currentHostBoundaryState(state),
+      };
+      return state;
+    }
+    const outcome = await ingestRemediationHostResults({
+      root,
+      artifactsDir,
+      runId: options.runId,
+      state: currentHostBoundaryState(state),
+      recovery: { requiredTestVerdicts },
+    });
+    if (outcome === "unsupported_retired_state") {
+      throw new Error(
+        "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.",
+      );
+    }
+    ingested = outcome;
+    if (!outcome.state_changed) return state;
+    const { contract_version: _contractVersion, ...persistableState } =
+      outcome.state;
+    return persistableState;
+  });
+  return ingested;
 }
 
 async function buildImplementDispatchStep(ctx: {
