@@ -13,21 +13,52 @@
   slimdown review). Lands with CP-NODE-15, whose scope owns the finalization file. No open
   question remains, only the wiring.
 
-- **CP-NODE-6 is reviewed and BLOCKED on branch `wip/cp-node-6-blocked` (high).** The
-  host-handoff ingestion substrate work (8 files, 27 obligations, whole suite green) is
-  preserved at commit cdbdd05e, deliberately not on main; its attestation records a
-  `concerns` verdict. Two blocking defects, both with a stated fix and both needing a
-  test that reds today: (a) SECURITY — the block-contract command scanner treats
-  single-quoted shell metacharacters as inert, but cmd.exe does not treat `'` as a
-  quote, so an admitted targeted_command can execute a second process at ingest and
-  write outside every declared write scope (exit 0, stderr empty); (b) WEDGE — a
-  non-empty block-issue list early-returns before any work item is examined, so one
-  malformed non-level-0 block means no landed result is ever accepted and next-step
-  re-emits the same items forever. Property: a refusal is bounded and classified; it
-  never becomes run-terminal. Non-blocking residuals from the same review: a green
-  required test emitting >8MB is misclassified as timed-out via ENOBUFS; the RunLogger
-  clause of the locked-ledger invariant has no production adopter; the normalized-path
-  refusal is a behavior break with no migration path for in-flight plans.
+- **The targeted-command shape gate has one enforcing consumer and two non-adopters
+  (medium; from the CP-NODE-6 landing reviews).** The two-shell scanner in the host-handoff
+  boundary (`leavesDeclaredCommandShape`) is the only enforcement of the command shape.
+  Non-adopter 1: the producer — `SHELL_METACHARACTERS` in `src/remediate/steps/contractPipeline.ts`
+  (`normalizeBlockTargetedCommands`) is quote-blind and admits single-quoted arguments,
+  backslash paths, `^`, `%` and parens the consumer refuses (probed: `pytest -k 'not slow'`,
+  `cargo test -- --exact 'mod::test'`, backslash test paths — producer-admitted,
+  consumer-refused; `echo "a & b"` is the inverse), so a promoted plan can dead-end at a
+  classified `block_contract_invalid` the operator must fix by hand, and the promotion-time
+  "nothing left to refuse" claim near `collectDagWriteScopeRefusals` is false. Empirically
+  safe for the in-flight run (all 27 live blocks clear the consumer gate) but CONDITIONAL
+  on no re-promotion first. Non-adopter 2: `reverifyBlockedItemAgainstTree`
+  (`src/remediate/phases/triage.ts`) spawns the same `block.targeted_commands` with
+  `shell: true` and no shape check at all — reachable for never-dispatched blocked items;
+  the uncovered half is stated at `assertBlockContract`'s doc. **Property:** ONE shape rule,
+  single-sourced; every producer validates against it and every spawn routes through it;
+  a consumer-side refusal surfaces as the same bounded re-emit the producer gate uses.
+
+- **Host-handoff residuals from the CP-NODE-6 landing (low, one entry).** (a) A malformed
+  FRONTIER block at prepare raises a classified aggregate naming the thrower, but still a
+  THROW — the bounded-step-instead-of-throw half needs `src/remediate/steps/nextStep.ts`
+  plumbing; and the
+  free-form path (`normalizeExtractedPlan`) applies no path normalization, so free-form
+  `src\a.ts`-style entries hit that refusal persistently. (b) `validateDispatchArtifacts`
+  and its `validateDispatchPlan`/`validateImplementWorkerResult` family match zero live
+  files, surviving on fixtures in `tests/remediate/artifacts-validation.test.ts` —
+  atomic-replace debt; delete family + fixtures on the consolidated pass. (c) Audit-side
+  `withAcceptedResultsLock` covers the accepted-results pair only: ingest reads the
+  workload/result-map/task-bindings trio before the lock; prepare writes task-bindings
+  entirely outside it. **Property:** one serialization covers the whole binding set.
+  (d) The heartbeat/stale-reclaim logger seam has no production adopter. (e)
+  `evaluateContractPipelineCrossGateOutcomes` / `evaluateContractPipelineCrossGates` are
+  hand-maintained parallels; the drift test covers one 2-payload fixture — collapse the
+  plain variant to a projection. (f) `describeRequiredTestFailure` inlines up to 8KB per
+  failure into the dispatch prompt — bound the excerpt. (g) `recover-ingest` exits 1
+  whenever issues exist even when work WAS accepted — distinguish accepted-with-issues.
+  (h) The ENOBUFS/ETIMEDOUT discriminator is win32-verified only (off-platform timeout
+  degrades to `spawn_error`, still a refusal); the external-signal branch is posix-only
+  and untested; the stale-scan predicate deliberately over-approximates (owned at the
+  comment). (i) The prepare-time digest-mismatch throw is unclassified and has no
+  sanctioned repair verb: when the state legitimately moves under a live binding (hit
+  2026-08-20 — the coarse backstop's item mutation changed prompt-embedded retry
+  context, so the re-derived workload digest no longer matched), prepare throws a raw
+  "no longer matches" and the only repair is hand-deleting `host_handoff` and
+  re-preparing. **Property:** a digest mismatch whose cause is state movement under the
+  binding is classified and offers a sanctioned re-bind, not a raw throw.
 
 - **Analyzer-boundary residuals from the CP-NODE-1 review (low).** (a) Six
   `normalizeGenericExternalResults` call sites in the adapter layer pass no repo root,
@@ -312,16 +343,19 @@
   deterministic graph output is a generation/provenance-bound lead, not an approved finding, until semantic
   confirmation; report promotion must preserve producer, source hash, and evidence lineage.
 
-- **Phase-boundary gate false abandonment (2026-07-30, HIGH).** The whole-repo gate runs on the LIVE
-  tree; during the 2026-07-30 remediation run, driver-side uncommitted dirt failed it twice and the
-  no-human backstop ABANDONED all 13 items, closing the run "complete" with no gate output persisted
-  (`final-gate.json` holds only a count). Three properties failed: (1) the gate attributed dirt it did
-  not cause to the run; (2) no failing output persisted, so abandonment was undiagnosable from the
-  record; (3) an unattributable all-items abandonment got a terminal close rather than a resumable
-  pause. Primary record:
+- **Tool-owned gate reds are unattributed — foreign live-tree dirt pauses the run (2026-07-30,
+  shrunk 2026-08-20; was "Phase-boundary gate false abandonment", HIGH).** The mutation half is
+  RETIRED and test-pinned: a red gate now persists the failing command and a bounded output tail
+  to `final-gate.json` and emits a resumable `final_gate_red` pause — no item status, phase, or
+  state write; the coarse reattempt/terminate machinery is deleted (it wiped 21 resolutions on
+  2026-08-20 when an unrelated landed commit reddened the live-tree suite; the 2026-07-30
+  abandonment of 13 items was the same class). What stays open: the gate runs on the LIVE tree
+  and computes no attribution, so dirt or breakage the run did not cause still pauses it — now
+  bounded, classified, and resumable, but reported as the run's red rather than as environment.
+  Primary records:
   [`meta-review-remediation-run-2026-07-30.md`](../reviews/meta-review-remediation-run-2026-07-30.md).
-  **Property:** attribute a red to the run only for paths it touched; persist the failing output; an
-  unattributable all-items abandonment pauses resumably, never closes terminal.
+  **Property (residual):** a gate red is attributed to run-touched paths where possible, so a
+  foreign red reports as environment, not as the run's failure.
 
 - **Contract-type coverage is derived from where TESTS live, not from the contract (2026-07-25, low,
   friction: inefficient-feeding).** `scripts/` is covered by no tsconfig, so a producer there cannot fail

@@ -15,35 +15,18 @@
   has been orphaned. It is true-orphanhood gated, ledger-marked, and runs every required test
   before taking the state lock. See the durable trap about amending a landed wave commit.
 
-## Next: resume the remediation run — six items remain
+## Next: resume the remediation run — five items remain
 
 The run is LIVE and mid-wave; resume it, never restart it. `remediate-code next-step` picks it up
 against a fresh binding at the current HEAD.
 
-**Resolved: 21 of 27.** Remaining: **CP-NODE-6** (blocked, see below), then **CP-NODE-3, 5, 15, 24,
-26** down the dependency spine, then the close phase.
+**Resolved: 22 of 27** (CP-NODE-6 landed as `cb8acfd5` after a two-lane adversarial review to a
+clear verdict). Remaining: **CP-NODE-3, 5, 15, 24, 26** down the dependency spine (`next-step`
+derives the frontier), then the close phase. The landing's deferred residuals are two entries in
+[`open-bugs.md`](backlog/open-bugs.md) — the targeted-command shape-gate non-adopters (conditional
+on no re-promotion) and the host-handoff residuals bundle.
 
-### 1. CP-NODE-6 is reviewed and BLOCKED — this is deliberate, not an unfinished edit
-
-The host-handoff ingestion substrate work is preserved on branch **`wip/cp-node-6-blocked`**
-(commit `cdbdd05e`), deliberately **not** on `main`. Its loop-core attestation records a `concerns`
-verdict rather than a clearance. `main` is clean; do not merge that branch as-is.
-
-Two blocking defects, each with a stated fix and each needing a test that reds today — both are
-spelled out in the WIP commit message, and the entry in
-[`open-bugs.md`](backlog/open-bugs.md) carries the same property statements:
-
-- **Security** — the block-contract command scanner treats single-quoted shell metacharacters as
-  inert, but `cmd.exe` does not treat `'` as a quote, so an admitted command can execute a second
-  process at ingest and write outside every declared write scope.
-- **Wedge** — a non-empty block-issue list early-returns before any work item is examined, so one
-  malformed non-level-0 block means no landed result is ever accepted and `next-step` re-emits the
-  same items forever.
-
-Everything else in that branch reviewed clean, including the verified-intact recovery work, so the
-fix is two functions plus two tests, not a rewrite.
-
-### 2. The protocol that works — keep using it
+### 1. The protocol that works — keep using it
 
 - **One item in flight at a time** (the tree is shared). Give the implementer its module's
   finalized contract and test specs as the binding spec; require red-green by inversion (never
@@ -52,7 +35,7 @@ fix is two functions plus two tests, not a rewrite.
   after the fixes. This is not ceremony: every single item this wave had at least one real defect
   found that way, several of them mechanism-level.
 - **Scope widening is the routing workaround — and it is on its way out.** Until the approved
-  resolver fix in section 4 lands, an item needing a file outside `allowed_files` is unblocked by
+  resolver fix in section 3 lands, an item needing a file outside `allowed_files` is unblocked by
   verifying no other module owns it, adding it to the plan block's `touched_files`, deleting
   `state.host_handoff`, and re-running `next-step`. A permanent test home earns the same treatment,
   which is how a red-green transcript becomes a durable test rather than a commit-message artifact.
@@ -65,7 +48,7 @@ fix is two functions plus two tests, not a rewrite.
   than restated here — the scoped-item/glossary-id collision, and the untracked link target that
   refuses every docs commit. Read those two entries before the first commit of the next session.
 
-### 3. The close phase is blocked on a contract gap — design-check it before starting
+### 2. The close phase is blocked on a contract gap — design-check it before starting
 
 Every module's coverage-join invariant demands a per-finding evidence triple (file + line +
 mechanism) recorded on its remediation item, but **the host-result envelope has no channel for
@@ -78,7 +61,7 @@ triples. The tracked entry is the steward-metadata item in [`open-bugs.md`](back
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
 
-### 4. Three owner decisions were taken at hand-back — they are recorded, not pending
+### 3. Three owner decisions were taken at hand-back — they are recorded, not pending
 
 Do not re-ask these; the ledger and the backlog hold them, and each is work rather than a question:
 
@@ -96,16 +79,15 @@ Do not re-ask these; the ledger and the backlog hold them, and each is work rath
 
 ## Immediate next
 
-1. **Unblock CP-NODE-6**: fix the two defects on `wip/cp-node-6-blocked`, re-review, re-attest
-   against the final staged tree, then land on `main` and ingest. Its workload binding is already
-   prepared at the current HEAD.
-2. **Then CP-NODE-3 → 5 → 15 → 24 → 26** in dependency order (`next-step` derives the frontier;
-   CP-NODE-26 and 5 unlock together after 6).
-3. **Before the close phase**, resolve the evidence-triple envelope gap above.
-4. **A consolidated pass is queued** in the backlog: the wave's deferred durable tests, the
-   owner-decided registry deletion, the emission-scaffold type lift, and the per-node review
-   residuals — all seven entries are at the top of [`open-bugs.md`](backlog/open-bugs.md).
-5. **The three decisions in section 4 are settled and waiting to be built** — the write-scope
+1. **CP-NODE-3 → 5 → 15 → 24 → 26** in dependency order (`next-step` derives the frontier;
+   CP-NODE-26 and 5 unlocked when 6 landed).
+2. **Before the close phase**, resolve the evidence-triple envelope gap above.
+3. **A consolidated pass is queued** in the backlog: the wave's deferred durable tests, the
+   owner-decided registry deletion, the emission-scaffold type lift, the per-node review
+   residuals, and the CP-NODE-6 landing's two deferred entries (shape-gate non-adopters; the
+   dead `validateDispatchArtifacts` family deletion) — all at the top of
+   [`open-bugs.md`](backlog/open-bugs.md).
+4. **The three decisions in section 3 are settled and waiting to be built** — the write-scope
    resolver fix retires the manual widening step, so it is worth doing early.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
