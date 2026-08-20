@@ -13,6 +13,19 @@
   slimdown review). Lands with CP-NODE-15, whose scope owns the finalization file. No open
   question remains, only the wiring.
 
+- **next-step discards a rejected submission's classified issues (2026-08-20, medium,
+  friction: tool_should_decide).** `buildImplementDispatchStep` consumes
+  `ingestRemediationHostResults` and, when `accepted_count` is 0, falls through to
+  prepare + re-emit without surfacing `issues` anywhere — stdout carries only the
+  re-emitted step. Hit live: a result rejected `submission_contract_invalid`
+  ("commit_evidence must bind the workload baseline to a distinct full commit id" —
+  a stale baseline in the host's result file) was invisible, and diagnosing it took
+  a direct probe of the ingest function. The ingest half reports-and-continues
+  (CP-NODE-6's fix), but its only production caller drops the report on exactly the
+  path where nothing advanced. **Property:** every classified ingest issue reaches
+  the operator through the surface that triggered the ingest — the step contract,
+  stdout, or the step prompt — never only a discarded return value.
+
 - **The targeted-command shape gate has one enforcing consumer and two non-adopters
   (medium; from the CP-NODE-6 landing reviews).** The two-shell scanner in the host-handoff
   boundary (`leavesDeclaredCommandShape`) is the only enforcement of the command shape.
@@ -146,7 +159,12 @@
   + suite-lock-parity / staleness deferred-set + cross-call reach + truncated-body third state /
   flow-policy + `foldPendingRequeueTasks`. Includes TST-d79b2a9f's residual (its grep-zero
   coverage gap is still literally true at HEAD) and dissolving the hand-copied 7-lens
-  `LENS_SET_FOR_FLOW` in `flow-planning.test.ts` (CP-NODE-9's cutover territory).
+  `LENS_SET_FOR_FLOW` in `flow-planning.test.ts` (CP-NODE-9's cutover territory). From the
+  CP-NODE-26 review: the dispatch-barrel export baseline is committed TWICE
+  (`DISPATCH_BARREL_EXPORTS` in `backend-independent-planning.test.ts` and the landed pin in
+  `tests/remediate/host-handoff.test.ts`) — single-source per the one-baseline spec; and
+  `remediate-tests-invariants.test.ts`'s header index still lists INV-remediate-tests-05 as
+  covering `scheduleWave` while the file's own body records it retired.
 
 - **The remediate-side submission ledger has no reader — `accepted_via_recovery` marks are
   write-only (2026-08-19, low-medium).** recover-ingest appends distinguishability events to the

@@ -20,11 +20,13 @@
 The run is LIVE and mid-wave; resume it, never restart it. `remediate-code next-step` picks it up
 against a fresh binding at the current HEAD.
 
-**Resolved: 22 of 27** (CP-NODE-6 landed as `cb8acfd5` after a two-lane adversarial review to a
-clear verdict). Remaining: **CP-NODE-3, 5, 15, 24, 26** down the dependency spine (`next-step`
-derives the frontier), then the close phase. The landing's deferred residuals are two entries in
-[`open-bugs.md`](backlog/open-bugs.md) — the targeted-command shape-gate non-adopters (conditional
-on no re-promotion) and the host-handoff residuals bundle.
+**Resolved: 24 of 27** (CP-NODE-6 landed as `cb8acfd5`, CP-NODE-5 as `598c73d3`, CP-NODE-26 as
+`9d0082a2`, each through a two-lane adversarial review to a clear verdict). Remaining:
+**CP-NODE-3, 15, 24** (`next-step` derives the frontier; 3 is bound now and owns the seam
+obligations CP-NODE-5 deferred — the dropped-array consumers, the all-torn bundle guard, the
+atomic-write widening), then the close phase. The landings' deferred residuals live in
+[`open-bugs.md`](backlog/open-bugs.md) — the targeted-command shape-gate non-adopters, the
+host-handoff residuals bundle, and the next-step issue-discard entry.
 
 ### 1. The protocol that works — keep using it
 
