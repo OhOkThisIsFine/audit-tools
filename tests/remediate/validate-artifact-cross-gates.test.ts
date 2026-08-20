@@ -26,6 +26,7 @@ import {
   runValidateArtifactAction,
 } from "../../src/remediate/index.js";
 import { evaluateContractPipelineCrossGates } from "../../src/remediate/validation/contractPipeline.js";
+import { evaluateContractPipelineCrossGateOutcomes } from "../../src/remediate/validation/contractPipelineGates.js";
 import {
   writeContractArtifact,
   contractPipelineDir,
@@ -228,6 +229,84 @@ describe("evaluateContractPipelineCrossGates", () => {
     result.forEach((gateIssues, i) => {
       expect(gateIssues.length, `gate index ${i} expected to fail`).toBeGreaterThan(0);
     });
+  });
+});
+
+// ── evaluateContractPipelineCrossGateOutcomes — per-gate evaluated/skipped ─────
+
+describe("evaluateContractPipelineCrossGateOutcomes", () => {
+  it("returns 8 outcomes, all skipped with a reason, for an empty payload map (nothing evaluated)", () => {
+    const result = evaluateContractPipelineCrossGateOutcomes({
+      payloads: new Map(),
+      root: "/does/not/matter",
+    });
+    expect(result).toHaveLength(8);
+    for (const outcome of result) {
+      expect(outcome.evaluated).toBe(false);
+      expect(outcome.issues).toEqual([]);
+      expect(typeof outcome.reason).toBe("string");
+      expect(outcome.reason!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("a gate whose input is present and clean records evaluated:true with no issues", () => {
+    const payloads = new Map<ContractPipelineArtifactName, unknown>([
+      ["obligation_ledger", { obligations: [] }],
+    ]);
+    const result = evaluateContractPipelineCrossGateOutcomes({ payloads, root: "/does/not/matter" });
+    const pairedObligations = result.find((o) => o.gate === "paired_obligations")!;
+    expect(pairedObligations.evaluated).toBe(true);
+    expect(pairedObligations.issues).toEqual([]);
+    expect(pairedObligations.reason).toBeUndefined();
+  });
+
+  it("a gate whose input is absent records evaluated:false with a reason (skipped, not passing)", () => {
+    const result = evaluateContractPipelineCrossGateOutcomes({
+      payloads: new Map(),
+      root: "/does/not/matter",
+    });
+    const reconciliation = result.find((o) => o.gate === "reconciliation_derivation")!;
+    expect(reconciliation.evaluated).toBe(false);
+    expect(reconciliation.issues).toEqual([]);
+    expect(reconciliation.reason).toBe(
+      "seam_reconciliation_report payload is absent or malformed (not a record with a mismatches array)",
+    );
+  });
+
+  it("distinguishability: an empty issues array alone cannot tell 'ran clean' from 'never ran' — evaluated does", () => {
+    // Same gate (digest_coverage), same empty `issues`, opposite `evaluated`.
+    const evaluatedClean = evaluateContractPipelineCrossGateOutcomes({
+      payloads: new Map<ContractPipelineArtifactName, unknown>([
+        ["goal_spec", { source_type: "structured_audit" }],
+      ]),
+      findingEnumeration: { is_enumerable: true, findings: [] },
+      root: "/does/not/matter",
+    }).find((o) => o.gate === "digest_coverage")!;
+
+    const neverRan = evaluateContractPipelineCrossGateOutcomes({
+      payloads: new Map<ContractPipelineArtifactName, unknown>([
+        ["goal_spec", { source_type: "conversation" }],
+      ]),
+      root: "/does/not/matter",
+    }).find((o) => o.gate === "digest_coverage")!;
+
+    expect(evaluatedClean.issues).toEqual([]);
+    expect(neverRan.issues).toEqual([]);
+    expect(evaluatedClean.evaluated).toBe(true);
+    expect(neverRan.evaluated).toBe(false);
+    expect(neverRan.reason).toBe(
+      "source not enumerable — source_type is not structured_audit or mixed",
+    );
+  });
+
+  it("is additive: evaluateContractPipelineCrossGates keeps returning the same per-gate issues unchanged", () => {
+    const payloads = new Map<ContractPipelineArtifactName, unknown>([
+      ["obligation_ledger", { obligations: [] }],
+      ["seam_reconciliation_report", { mismatches: [] }],
+    ]);
+    const plain = evaluateContractPipelineCrossGates({ payloads, root: "/does/not/matter" });
+    const outcomes = evaluateContractPipelineCrossGateOutcomes({ payloads, root: "/does/not/matter" });
+    expect(outcomes.map((o) => o.issues)).toEqual(plain);
   });
 });
 
