@@ -6,9 +6,12 @@ import {
   normalizeGenericExternalResults,
   normalizeGenericExternalEdges,
 } from "./normalizeExternal.js";
-import type {
-  ExternalAnalyzerResults,
-  ExternalAnalyzerToolStatus,
+import {
+  readParseOutcome,
+  type ExternalAnalyzerParseOutcome,
+  type ExternalAnalyzerParsedItem,
+  type ExternalAnalyzerResults,
+  type ExternalAnalyzerToolStatus,
 } from "./types.js";
 import {
   resolveBinary,
@@ -104,21 +107,12 @@ export interface ExternalAnalyzerCandidate {
   buildArgv(runnerPrefix: string[], root: string): string[];
   /**
    * Parse the tool's stdout into the generic item shape consumed by
-   * `normalizeGenericExternalResults`. Degrades to `[]` on any parse failure.
+   * `normalizeGenericExternalResults`. NEVER throws — but a degradation must be
+   * REPORTED, not swallowed: return the {@link ExternalAnalyzerParseReport} form
+   * carrying `parse_failed` / `dropped_rows` so the engine can classify the run,
+   * because a bare `[]` is byte-identical to a genuinely clean scan.
    */
-  parse(stdout: string): Array<{
-    id?: string;
-    category?: string;
-    severity?: string;
-    path?: string;
-    line_start?: number;
-    line_end?: number;
-    summary?: string;
-    rule?: string;
-    raw?: unknown;
-    from?: unknown;
-    to?: unknown;
-  }>;
+  parse(stdout: string): ExternalAnalyzerParseOutcome;
   /**
    * For tools that ONLY report to a file (e.g. gitleaks) rather than stdout: the
    * report path the tool was told to write (must match `buildArgv`). When set, the
@@ -205,17 +199,53 @@ export interface AcquisitionRunner {
   (argv: string[], cwd: string): RunTrackedResult;
 }
 
+/** A recorded, durable operator decision for one analyzer. */
+export type AnalyzerConsentDecision = "granted" | "declined";
+
+/** The recorded decisions, keyed by candidate id, as loaded from the durable policy. */
+export type AnalyzerConsentDecisions = Record<string, AnalyzerConsentDecision>;
+
+/**
+ * A consent token SCOPED to the analyzers the operator was actually offered. This is
+ * the form a caller should issue: the grant names its tools, so a grant obtained by
+ * offering one analyzer cannot silently admit an analyzer the operator never saw.
+ */
+export interface AnalyzerConsentTokenGrant {
+  /** Opaque per-run value; never persisted (pinned by the strict AnalyzerPolicy schema). */
+  readonly value: string;
+  /** The candidate ids this grant authorizes, and only those. */
+  readonly tools: readonly string[];
+}
+
+/**
+ * What a caller may present as consent for this run.
+ *
+ * ⚠ The bare-string form is UNSCOPED — it authorizes every undecided candidate in the
+ * run. It remains accepted only because retiring it is a caller-side change owned by
+ * the acquisition entry point's own node; new callers should issue an
+ * {@link AnalyzerConsentTokenGrant}, which the chokepoint enforces per candidate.
+ */
+export type AnalyzerConsentTokenInput = string | AnalyzerConsentTokenGrant;
+
 export interface AcquisitionEngineOptions {
   /**
    * Per-run consent token. REQUIRED to spawn any non-DEFAULT candidate (and any
-   * candidate whose setting is ephemeral/permanent). Absent ⇒ only the DEFAULT
-   * set runs; everything else is reported `skipped` with a consent note.
+   * candidate whose setting is ephemeral/permanent) that has no recorded "granted"
+   * decision. Absent ⇒ only the DEFAULT set runs; everything else is reported
+   * `skipped` with a consent note. A token NEVER overrides a recorded "declined".
    */
-  consentToken?: string;
+  consentToken?: AnalyzerConsentTokenInput;
   /** Per-analyzer settings (auto|ephemeral|permanent|skip|repo). */
   analyzers?: Record<string, AnalyzerSetting>;
-  /** Recorded analyzer consent decisions ("granted" or "declined"). */
-  analyzerConsent?: Record<string, "granted" | "declined">;
+  /**
+   * CALLER OBLIGATION (declared here, not left to prose): the durable analyzer
+   * policy is loaded and BOTH `analyzers` and `analyzerConsent` are passed on EVERY
+   * acquisition call; an unreadable policy blocks the step rather than degrading to
+   * an empty one; and a consent token is never synthesized on the operator's behalf.
+   * Omitting this map leaves a recorded decline UNREPRESENTABLE at the chokepoint —
+   * the decision cannot be enforced because it never arrives.
+   */
+  analyzerConsent?: AnalyzerConsentDecisions;
   /** Injectable command runner; defaults to the shared runTracked. */
   run?: AcquisitionRunner;
   /** Injectable logger; defaults to a no-op (degrade quietly to status records). */
@@ -229,24 +259,81 @@ export interface AcquisitionEngineOptions {
 }
 
 /**
+ * The denial vocabulary. An operator refusal and a tool nobody has decided on are
+ * DIFFERENT causes and must be distinguishable in the persisted status record — a
+ * single conflated string cannot tell an operator that their own decline was the
+ * reason. Every CONSENT-channel reason names "consent"; `setting_skip` deliberately
+ * does not, because it comes from the settings channel (`analyzers.<id> = "skip"`)
+ * and is not a consent decision at all.
+ */
+export const ANALYZER_DENIAL_REASONS = {
+  /** `analyzers.<id> = "skip"` — the settings channel, not the consent record. */
+  setting_skip: "setting=skip",
+  /** A recorded, durable operator refusal. Terminal: no token overrides it. */
+  consent_declined:
+    "consent declined by the operator for this analyzer (recorded decision)",
+  /** No decision recorded and no token presented — nobody has said yes OR no. */
+  consent_not_decided:
+    "consent not recorded for this analyzer (not yet decided; no consent token for this run)",
+  /** A token was presented, but it was issued for a different analyzer. */
+  consent_token_scope:
+    "consent token was not issued for this analyzer (scoped consent covers other tools only)",
+} as const;
+
+/**
+ * Does this consent input authorize THIS candidate?
+ *
+ * A scoped grant authorizes exactly the tools it names — a grant obtained by offering
+ * tool A cannot admit tool B. The legacy bare string carries no scope, so it can only
+ * be read as run-wide; it is accepted for compatibility with the acquisition entry
+ * point that still issues one, and is deliberately reported distinctly here so the
+ * unscoped case is visible rather than indistinguishable from a scoped grant.
+ */
+function consentTokenAdmits(
+  consentToken: AnalyzerConsentTokenInput | undefined,
+  candidateId: string,
+): "admit" | "out_of_scope" | "absent" {
+  if (consentToken === undefined || consentToken === null) return "absent";
+  if (typeof consentToken === "string") {
+    return consentToken.trim().length > 0 ? "admit" : "absent";
+  }
+  if (typeof consentToken.value !== "string" || consentToken.value.trim().length === 0) {
+    return "absent";
+  }
+  if (!Array.isArray(consentToken.tools)) return "out_of_scope";
+  return consentToken.tools.includes(candidateId) ? "admit" : "out_of_scope";
+}
+
+/**
  * Single subprocess-SPAWN admission chokepoint. Returns the reason a spawn is
- * NOT admitted, or `undefined` when admitted. The DEFAULT set is admitted
- * without a token; EVERY other candidate — including `permanent`/`ephemeral`
- * pre-installed tools — requires EITHER a recorded "granted" decision OR a
- * per-run consent token (CE-005, revised with Item B).
+ * NOT admitted, or `undefined` when admitted.
+ *
+ * ORDER IS THE CONTRACT. A recorded `"declined"` is consulted FIRST — before the
+ * settings channel, before the DEFAULT-set short-circuit, and before any consent
+ * token — so an operator refusal is a veto for EVERY candidate, including a
+ * default-set member, and no token can override it. It also outranks
+ * `setting=skip`: both refuse, but only one of them is the operator's own decision,
+ * and the REASON is what tells them so. Only then: `skip`, then the DEFAULT set
+ * runs unprompted, a recorded `"granted"` admits, and finally a consent token
+ * admits the candidate it was issued for.
  */
 export function admitSpawn(
   candidate: ExternalAnalyzerCandidate,
   setting: AnalyzerSetting,
-  consentToken: string | undefined,
-  recordedDecision?: "granted" | "declined",
+  consentToken: AnalyzerConsentTokenInput | undefined,
+  recordedDecision?: AnalyzerConsentDecision,
 ): string | undefined {
-  if (setting === "skip") return "setting=skip";
+  // A recorded refusal is terminal and is read BEFORE anything else — including the
+  // settings channel, which would otherwise mask the operator's own decision behind
+  // a reason that names a config value instead of their decline.
+  if (recordedDecision === "declined") return ANALYZER_DENIAL_REASONS.consent_declined;
+  if (setting === "skip") return ANALYZER_DENIAL_REASONS.setting_skip;
   if (candidate.defaultRun) return undefined;
-  // Admission: default set ∨ recorded "granted" ∨ per-run token
   if (recordedDecision === "granted") return undefined;
-  if (consentToken && consentToken.trim().length > 0) return undefined;
-  return "non-default tool requires consent (declined or not yet decided)";
+  const tokenVerdict = consentTokenAdmits(consentToken, candidate.id);
+  if (tokenVerdict === "admit") return undefined;
+  if (tokenVerdict === "out_of_scope") return ANALYZER_DENIAL_REASONS.consent_token_scope;
+  return ANALYZER_DENIAL_REASONS.consent_not_decided;
 }
 
 /**
@@ -420,9 +507,13 @@ export function runExternalAnalyzer(
     }
   }
 
-  let items: ReturnType<ExternalAnalyzerCandidate["parse"]>;
+  const stderrText = typeof result.stderr === "string" ? result.stderr : "";
+  const stderrSnippet =
+    stderrText.trim().length > 0 ? { stderr_snippet: stderrText.slice(0, 500) } : {};
+
+  let parsed: ReturnType<typeof readParseOutcome>;
   try {
-    items = candidate.parse(parseInput);
+    parsed = readParseOutcome(candidate.parse(parseInput));
   } catch (error) {
     return {
       results: emptyResults(candidate.id),
@@ -434,14 +525,22 @@ export function runExternalAnalyzer(
         exit_code: result.status,
         error: error instanceof Error ? error.message : String(error),
         output_snippet: result.stdout.slice(0, 200),
+        ...stderrSnippet,
         duration_ms: result.duration_ms,
       },
     };
   }
+  const items: ExternalAnalyzerParsedItem[] = parsed.items;
 
-  // readSource: content-anchored lead provenance (item C). Repo-rooted, degrade
-  // to no-provenance on any read failure — never blocks normalization.
+  // readSource: content-anchored lead provenance (item C). Paths are normalized to
+  // repo-relative FIRST (an absolute-path emitter would otherwise make `join(root,
+  // path)` name nothing, silently dropping provenance); a read that still fails is
+  // COUNTED onto the status, so a broken read seam is distinguishable from an item
+  // that legitimately carries no anchor.
+  let sourceReadFailures = 0;
+  let normalizerDroppedItems = 0;
   const normalized = normalizeGenericExternalResults(candidate.id, items, {
+    repoRoot: root,
     readSource: (path) => {
       try {
         return readFileSync(join(root, path), "utf8");
@@ -449,9 +548,80 @@ export function runExternalAnalyzer(
         return undefined;
       }
     },
+    onDiagnostics: (diagnostics) => {
+      sourceReadFailures = diagnostics.source_read_failures;
+      normalizerDroppedItems = diagnostics.dropped_items;
+    },
   });
   const edges = normalizeGenericExternalEdges(items);
   if (edges.length > 0) normalized.graph_edges = edges;
+
+  // Rows the PARSER could not use plus items the NORMALIZER discarded (missing path
+  // or summary) are the same question to a consumer — "how much did this run fail to
+  // report?" — so they land on one field. Counting only the parser's half left a run
+  // whose every item was dropped at normalization reading as a clean scan.
+  const droppedRows = (parsed.dropped_rows ?? 0) + normalizerDroppedItems;
+  const degradationFields = {
+    exit_code: result.status,
+    ...(droppedRows > 0 ? { dropped_rows: droppedRows } : {}),
+    ...(sourceReadFailures > 0 ? { source_read_failures: sourceReadFailures } : {}),
+    ...stderrSnippet,
+    duration_ms: result.duration_ms,
+  };
+
+  // AFFIRMATION, never a success-shaped empty. Zero items is only "success" when the
+  // run itself was clean: the tool exited 0, said nothing on stderr it did not also
+  // say on stdout, parsed, and dropped nothing. Every other zero-item outcome names
+  // its cause — the exit code and stderr are in hand right here, which is exactly
+  // why leaving them unconsulted made a broken analyzer read as a clean repo.
+  if (normalized.results.length === 0) {
+    // A NULL exit status means the child never exited on its own — it was killed by a
+    // signal (SIGKILL/OOM). `RunTrackedResult` carries no signal field, so null is the
+    // only trace of it, and it is emphatically not "exited cleanly". Treating it as
+    // clean also made the classification OS-divergent: win32 surfaces the same kill as
+    // a non-zero status, so the identical event would have been failed there and
+    // success on POSIX.
+    const exitMissing = result.status === null || result.status === undefined;
+    const exitedNonZero = exitMissing || result.status !== 0;
+    const stderrOnly =
+      !exitedNonZero && stderrText.trim().length > 0 && parseInput.trim().length === 0;
+    if (exitedNonZero || stderrOnly) {
+      return {
+        results: emptyResults(candidate.id),
+        status: {
+          tool: candidate.id,
+          command,
+          resolved: true,
+          status: "failed",
+          error: exitMissing
+            ? "analyzer terminated without an exit status (killed by a signal) and produced no parsable findings"
+            : exitedNonZero
+              ? `analyzer exited ${result.status} with no parsable findings`
+              : "analyzer produced no output other than stderr",
+          output_snippet: result.stdout.slice(0, 200),
+          ...degradationFields,
+        },
+      };
+    }
+    if (parsed.parse_failed || droppedRows > 0) {
+      return {
+        results: emptyResults(candidate.id),
+        status: {
+          tool: candidate.id,
+          command,
+          resolved: true,
+          status: "parse_error",
+          error:
+            parsed.note ??
+            (parsed.parse_failed
+              ? "analyzer output could not be parsed"
+              : `analyzer output parsed with ${droppedRows} unusable row(s)`),
+          output_snippet: parseInput.slice(0, 200),
+          ...degradationFields,
+        },
+      };
+    }
+  }
 
   return {
     results: normalized,
@@ -460,8 +630,8 @@ export function runExternalAnalyzer(
       command,
       resolved: true,
       status: normalized.results.length > 0 ? "findings" : "success",
-      exit_code: result.status,
-      duration_ms: result.duration_ms,
+      ...(parsed.note !== undefined ? { error: parsed.note } : {}),
+      ...degradationFields,
     },
   };
 }
@@ -531,10 +701,14 @@ export async function resolveBinaryCandidates(
     if (resolution.command) {
       resolvedBinaries[candidate.id] = resolution.command;
     } else {
+      // A supply-chain event gets its OWN status member: "the release asset did not
+      // match the pinned checksums" must never be flattened into the same record as
+      // "this machine is offline", which is all a shared `not_resolved` could say.
       unresolvedStatuses.push({
         tool: candidate.id,
         resolved: false,
-        status: "not_resolved",
+        status:
+          resolution.reason === "checksum_mismatch" ? "checksum_mismatch" : "not_resolved",
         error: resolution.note ?? "binary unavailable",
       });
     }

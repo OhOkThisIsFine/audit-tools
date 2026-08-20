@@ -1,4 +1,7 @@
 import { test, expect } from "vitest";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 import {
   EXTERNAL_ANALYZER_CANDIDATES,
@@ -26,6 +29,16 @@ import {
   parseLizard,
 } from "../../src/shared/analyzers/candidates.js";
 import { OWNED_TOOL_IDS, registerExternalAnalyzers } from "../../src/shared/analyzers/acquisitionEngine.js";
+import type { ExternalAnalyzerCandidate } from "../../src/shared/analyzers/acquisitionEngine.js";
+import {
+  readParseOutcome,
+  type ExternalAnalyzerParseOutcome,
+} from "../../src/shared/analyzers/types.js";
+
+/** The item list of a parse outcome, whichever form the parser returned. */
+const itemsOf = (outcome: ExternalAnalyzerParseOutcome) => readParseOutcome(outcome).items;
+/** The degradation report of a parse outcome. */
+const reportOf = (outcome: ExternalAnalyzerParseOutcome) => readParseOutcome(outcome);
 
 test("secret scanning is ACQUIRED, not owned — gitleaks is registered and admitted", () => {
   expect(OWNED_TOOL_IDS.has("secrets")).toBe(false);
@@ -66,7 +79,7 @@ test("parseGitleaks maps findings and NEVER carries the raw secret", () => {
       Entropy: 3.4,
     },
   ]);
-  const items = parseGitleaks(report);
+  const items = itemsOf(parseGitleaks(report));
   expect(items.length).toBe(1);
   expect(items[0].id).toBe("fp-1");
   expect(items[0].category).toBe("security");
@@ -78,10 +91,16 @@ test("parseGitleaks maps findings and NEVER carries the raw secret", () => {
   expect(serialized, "raw match must never appear").not.toMatch(/key = AKIA/);
 });
 
-test("parseGitleaks degrades to empty on malformed / empty report", () => {
-  expect(parseGitleaks("")).toEqual([]);
-  expect(parseGitleaks("not json")).toEqual([]);
-  expect(parseGitleaks("{}")).toEqual([]);
+test("parseGitleaks yields no items on an empty report and REPORTS a malformed one", () => {
+  // An empty report is a legitimately clean scan: no items, no degradation claimed.
+  expect(reportOf(parseGitleaks(""))).toEqual({ items: [] });
+  // Malformed / wrong-shape payloads are affirmed as parse failures, never as clean.
+  for (const bad of ["not json", "{}"]) {
+    const report = reportOf(parseGitleaks(bad));
+    expect(report.items).toEqual([]);
+    expect(report.parse_failed, `parseGitleaks(${JSON.stringify(bad)}) must report the failure`).toBe(true);
+    expect(report.note).toMatch(/gitleaks/);
+  }
 });
 
 test("knip is consent-gated like eslint/semgrep, npx runner, no positional/cwd arg", () => {
@@ -117,7 +136,7 @@ test("parseKnip maps unused-export issues across all four report types", () => {
       },
     ],
   });
-  const items = parseKnip(report);
+  const items = itemsOf(parseKnip(report));
   expect(items.length).toBe(4);
   const byRule: Record<string, (typeof items)[number]> = Object.fromEntries(items.map((i) => [i.rule ?? "", i]));
   expect(byRule["knip-exports"].path).toBe("src/foo.ts");
@@ -130,10 +149,16 @@ test("parseKnip maps unused-export issues across all four report types", () => {
   expect(byRule["knip-nsTypes"].path).toBe("src/bar.ts");
 });
 
-test("parseKnip degrades to empty on malformed/empty input", () => {
-  expect(parseKnip("")).toEqual([]);
-  expect(parseKnip("not json")).toEqual([]);
-  expect(parseKnip("{}")).toEqual([]);
+test("parseKnip reports a malformed/shape-drifted payload instead of a clean scan", () => {
+  for (const bad of ["", "not json", "{}"]) {
+    const report = reportOf(parseKnip(bad));
+    expect(report.items).toEqual([]);
+    expect(report.parse_failed, `parseKnip(${JSON.stringify(bad)}) must report the failure`).toBe(true);
+  }
+  // The shape-drift case the finding names: a renamed key, valid JSON, zero items.
+  const drifted = reportOf(parseKnip(JSON.stringify({ problems: [{ file: "a.ts" }] })));
+  expect(drifted.items).toEqual([]);
+  expect(drifted.parse_failed, "renamed top-level key is a parse failure, not a clean repo").toBe(true);
 });
 
 // Whole-file dead code (`files`) and unused manifest dependencies (`dependencies`)
@@ -156,7 +181,7 @@ test("parseKnip surfaces whole-file + dependency dead-code leads alongside expor
       },
     ],
   });
-  const items = parseKnip(report);
+  const items = itemsOf(parseKnip(report));
   const byRule = items.reduce<Record<string, typeof items>>((acc, i) => {
     (acc[i.rule ?? ""] ??= []).push(i);
     return acc;
@@ -184,21 +209,24 @@ test("parseKnip surfaces whole-file + dependency dead-code leads alongside expor
   expect(byRule["knip-exports"][0].path).toBe("src/dead.ts");
 });
 
-test("parseSemgrep + parseEslint degrade to empty on malformed input", () => {
-  expect(semgrepCandidate.parse("nonsense")).toEqual([]);
-  expect(eslintCandidate.parse("nonsense")).toEqual([]);
-  expect(semgrepCandidate.parse(
+test("parseSemgrep + parseEslint report malformed input; map real payloads", () => {
+  for (const [id, candidate] of [["semgrep", semgrepCandidate], ["eslint", eslintCandidate]] as const) {
+    const report = reportOf(candidate.parse("nonsense"));
+    expect(report.items).toEqual([]);
+    expect(report.parse_failed, `${id} must report a malformed payload`).toBe(true);
+  }
+  expect(itemsOf(semgrepCandidate.parse(
       JSON.stringify({
         results: [
           { check_id: "rule.x", path: "a.py", start: { line: 3 }, end: { line: 3 }, extra: { message: "bad", severity: "ERROR" } },
         ],
       }),
-    ).map((i) => [i.rule, i.severity, i.line_start])).toEqual([["rule.x", "high", 3]]);
-  expect(eslintCandidate.parse(
+    )).map((i) => [i.rule, i.severity, i.line_start])).toEqual([["rule.x", "high", 3]]);
+  expect(itemsOf(eslintCandidate.parse(
       JSON.stringify([
         { filePath: "a.js", messages: [{ ruleId: "no-var", line: 2, message: "use const", severity: 2 }] },
       ]),
-    ).map((i) => [i.rule, i.severity, i.line_start])).toEqual([["no-var", "medium", 2]]);
+    )).map((i) => [i.rule, i.severity, i.line_start])).toEqual([["no-var", "medium", 2]]);
 });
 
 test("jscpd is registered, consent-gated like eslint/semgrep/knip, npx runner", () => {
@@ -223,7 +251,7 @@ test("parseJscpd maps duplicates into generic items", () => {
       },
     ],
   });
-  const items = parseJscpd(report);
+  const items = itemsOf(parseJscpd(report));
   expect(items.length).toBe(1);
   expect(items[0].path).toBe("src/a.ts");
   expect(items[0].line_start).toBe(10);
@@ -232,11 +260,12 @@ test("parseJscpd maps duplicates into generic items", () => {
   expect(items[0].summary).toMatch(/src\/b\.ts/);
 });
 
-test("parseJscpd degrades to empty on malformed/empty/missing-duplicates input", () => {
-  expect(parseJscpd("")).toEqual([]);
-  expect(parseJscpd("not json")).toEqual([]);
-  expect(parseJscpd("{}")).toEqual([]);
-  expect(parseJscpd(JSON.stringify({ duplicates: "not-an-array" }))).toEqual([]);
+test("parseJscpd reports malformed/empty/missing-duplicates input", () => {
+  for (const bad of ["", "not json", "{}", JSON.stringify({ duplicates: "not-an-array" })]) {
+    const report = reportOf(parseJscpd(bad));
+    expect(report.items).toEqual([]);
+    expect(report.parse_failed, `parseJscpd(${JSON.stringify(bad)}) must report the failure`).toBe(true);
+  }
 });
 
 test("osv-scanner is registered, consent-gated, binary runner, ecosystem-agnostic (like gitleaks) but raw (non-archived) asset", () => {
@@ -297,7 +326,7 @@ test("parseOsvScanner maps one item per group (alias-collapsed), not per raw vul
       },
     ],
   });
-  const items = parseOsvScanner(report);
+  const items = itemsOf(parseOsvScanner(report));
   expect(items.length).toBe(1);
   expect(items[0].category).toBe("security");
   expect(items[0].severity).toBe("high");
@@ -323,10 +352,10 @@ test("parseOsvScanner maps max_severity to the engine's severity strings and ski
         },
       ],
     });
-  expect(parseOsvScanner(makeReport("CRITICAL"))[0].severity).toBe("high");
-  expect(parseOsvScanner(makeReport("MODERATE"))[0].severity).toBe("medium");
-  expect(parseOsvScanner(makeReport("LOW"))[0].severity).toBe("low");
-  expect(parseOsvScanner(makeReport(""))[0].severity).toBe("medium");
+  expect(itemsOf(parseOsvScanner(makeReport("CRITICAL")))[0].severity).toBe("high");
+  expect(itemsOf(parseOsvScanner(makeReport("MODERATE")))[0].severity).toBe("medium");
+  expect(itemsOf(parseOsvScanner(makeReport("LOW")))[0].severity).toBe("low");
+  expect(itemsOf(parseOsvScanner(makeReport("")))[0].severity).toBe("medium");
 
   const noIds = JSON.stringify({
     results: [
@@ -336,34 +365,44 @@ test("parseOsvScanner maps max_severity to the engine's severity strings and ski
       },
     ],
   });
-  expect(parseOsvScanner(noIds)).toEqual([]);
+  expect(itemsOf(parseOsvScanner(noIds)), "a group with no ids yields no item, and that is not a parse failure").toEqual([]);
 });
 
-test("parseOsvScanner degrades to empty on malformed/empty input", () => {
-  expect(parseOsvScanner("")).toEqual([]);
-  expect(parseOsvScanner("not json")).toEqual([]);
-  expect(parseOsvScanner("{}")).toEqual([]);
-  expect(parseOsvScanner(JSON.stringify({ results: "not-an-array" }))).toEqual([]);
+test("parseOsvScanner reports malformed/empty input", () => {
+  for (const bad of ["", "not json", "{}", JSON.stringify({ results: "not-an-array" })]) {
+    const report = reportOf(parseOsvScanner(bad));
+    expect(report.items).toEqual([]);
+    expect(report.parse_failed, `parseOsvScanner(${JSON.stringify(bad)}) must report the failure`).toBe(true);
+  }
 });
 
 // --- CP-NODE-1: clippy / rubocop / hadolint / actionlint / type-coverage ---
 
-const CONSENT_GATED_ANALYZER_IDS = ["clippy", "rubocop"];
-const DEFAULT_ANALYZER_IDS = ["hadolint", "actionlint", "type-coverage"];
-
-test("all seven external analyzers are registered with correct default status", () => {
-  // Consent-gated (defaultRun:false): clippy, rubocop
-  for (const id of CONSENT_GATED_ANALYZER_IDS) {
-    const c = EXTERNAL_ANALYZER_CANDIDATES.find((x) => x.id === id)!;
-    expect(c, `${id} must be registered`).toBeTruthy();
-    expect(c.defaultRun, `${id} must be consent-gated`).toBe(false);
-  }
-  // Default set (defaultRun:true): hadolint, actionlint, type-coverage (+ gitleaks, lizard)
-  for (const id of DEFAULT_ANALYZER_IDS) {
-    const c = EXTERNAL_ANALYZER_CANDIDATES.find((x) => x.id === id)!;
-    expect(c, `${id} must be registered`).toBeTruthy();
-    expect(c.defaultRun, `${id} must be in default set`).toBe(true);
-  }
+// inv-13: the roster is DERIVED from EXTERNAL_ANALYZER_CANDIDATES. A hand-copied id
+// list cannot assert anything about a candidate registered after it was written —
+// and the stale "all seven" name it used to carry read as coverage of twelve.
+test("every registered candidate is exported as its own named binding", () => {
+  // Deriving the partition (see the inv-13 test further down) only proves things
+  // about ids that reached the registry; this proves the registry is the roster the
+  // module actually exposes, so no candidate can be registered invisibly.
+  const registered = EXTERNAL_ANALYZER_CANDIDATES.map((c) => c.id);
+  const namedExports = [
+    gitleaksCandidate,
+    semgrepCandidate,
+    eslintCandidate,
+    knipCandidate,
+    jscpdCandidate,
+    osvScannerCandidate,
+    clippyCandidate,
+    rubocopCandidate,
+    hadolintCandidate,
+    actionlintCandidate,
+    typeCoverageCandidate,
+    lizardCandidate,
+  ].map((c) => c.id);
+  expect([...registered].sort(), "the registry and the named exports are the same set").toEqual(
+    [...namedExports].sort(),
+  );
 });
 
 test("new analyzers emit ONLY the generic item shape (no classification field)", () => {
@@ -373,7 +412,7 @@ test("new analyzers emit ONLY the generic item shape (no classification field)",
     parseHadolintSample(),
     parseActionlintSample(),
     parseTypeCoverageSample(),
-  ];
+  ].map(itemsOf);
   const allowed = new Set([
     "id",
     "category",
@@ -433,7 +472,7 @@ function parseClippySample() {
 }
 
 test("parseClippy maps compiler-message diagnostics (NDJSON), skips non-diagnostic lines", () => {
-  const items = parseClippySample();
+  const items = itemsOf(parseClippySample());
   expect(items.length).toBe(2);
   const warn = items.find((i) => i.severity === "medium")!;
   const err = items.find((i) => i.severity === "high")!;
@@ -486,7 +525,7 @@ function parseRubocop_shape() {
 }
 
 test("parseRubocop maps files[].offenses[] with severity mapping", () => {
-  const items = parseRubocop_shape();
+  const items = itemsOf(parseRubocop_shape());
   expect(items.length).toBe(2);
   expect(items[0].path).toBe("app/models/user.rb");
   expect(items[0].line_start).toBe(7);
@@ -496,11 +535,17 @@ test("parseRubocop maps files[].offenses[] with severity mapping", () => {
   expect(items[1].line_start).toBe(12);
 });
 
-test("parseRubocop degrades to empty on malformed/empty input", () => {
-  expect(rubocopCandidate.parse("")).toEqual([]);
-  expect(rubocopCandidate.parse("not json")).toEqual([]);
-  expect(rubocopCandidate.parse("{}")).toEqual([]);
-  expect(rubocopCandidate.parse(JSON.stringify({ files: "nope" }))).toEqual([]);
+test("parseRubocop REPORTS a malformed payload — the channel the adapter could never reach", () => {
+  for (const bad of ["", "not json", "{}", JSON.stringify({ files: "nope" })]) {
+    const report = reportOf(rubocopCandidate.parse(bad));
+    expect(report.items).toEqual([]);
+    expect(report.parse_failed, `rubocop parse of ${JSON.stringify(bad)} must report the failure`).toBe(true);
+    expect(report.note).toMatch(/rubocop/);
+  }
+  // A genuinely clean Ruby tree is NOT a parse failure — the two must stay apart.
+  const clean = reportOf(rubocopCandidate.parse(JSON.stringify({ files: [] })));
+  expect(clean.items).toEqual([]);
+  expect(clean.parse_failed).toBe(undefined);
 });
 
 // hadolint — binary runner, RAW (non-archived) asset, per-asset checksum file.
@@ -535,7 +580,7 @@ test("parseHadolint maps the flat array shape; degrades to empty", () => {
     { file: "Dockerfile", line: 3, column: 1, code: "DL3008", level: "warning", message: "Pin versions in apt-get install." },
     { file: "Dockerfile", line: 5, column: 1, code: "DL3002", level: "error", message: "Do not switch to root." },
   ]);
-  const items = parseHadolint(report);
+  const items = itemsOf(parseHadolint(report));
   expect(items.length).toBe(2);
   expect(items[0].path).toBe("Dockerfile");
   expect(items[0].line_start).toBe(3);
@@ -543,9 +588,12 @@ test("parseHadolint maps the flat array shape; degrades to empty", () => {
   expect(items[0].severity).toBe("medium");
   expect(items[0].category).toBe("config_deployment");
   expect(items[1].severity).toBe("high");
-  expect(parseHadolint("")).toEqual([]);
-  expect(parseHadolint("not json")).toEqual([]);
-  expect(parseHadolint("{}")).toEqual([]);
+  for (const bad of ["not json", "{}"]) {
+    const report = reportOf(parseHadolint(bad));
+    expect(report.items).toEqual([]);
+    expect(report.parse_failed, `parseHadolint(${JSON.stringify(bad)}) must report the failure`).toBe(true);
+  }
+  expect(reportOf(parseHadolint("")), "an empty report is a clean Dockerfile, not a failure").toEqual({ items: [] });
 });
 
 function parseHadolintSample() {
@@ -579,15 +627,18 @@ test("parseActionlint maps the array shape; degrades to empty", () => {
   const report = JSON.stringify([
     { message: "shellcheck reported issue", filepath: ".github/workflows/ci.yml", line: 21, column: 9, kind: "shellcheck" },
   ]);
-  const items = parseActionlint(report);
+  const items = itemsOf(parseActionlint(report));
   expect(items.length).toBe(1);
   expect(items[0].path).toBe(".github/workflows/ci.yml");
   expect(items[0].line_start).toBe(21);
   expect(items[0].rule).toBe("shellcheck");
   expect(items[0].category).toBe("config_deployment");
-  expect(parseActionlint("")).toEqual([]);
-  expect(parseActionlint("not json")).toEqual([]);
-  expect(parseActionlint("{}")).toEqual([]);
+  for (const bad of ["not json", "{}"]) {
+    const report = reportOf(parseActionlint(bad));
+    expect(report.items).toEqual([]);
+    expect(report.parse_failed, `parseActionlint(${JSON.stringify(bad)}) must report the failure`).toBe(true);
+  }
+  expect(reportOf(parseActionlint("")), "no workflow findings is a clean run, not a failure").toEqual({ items: [] });
 });
 
 function parseActionlintSample() {
@@ -614,16 +665,18 @@ test("parseTypeCoverage maps anys[] sites; degrades to empty", () => {
       { file: "src/b.ts", line: 8, character: 2, text: "bar" },
     ],
   });
-  const items = parseTypeCoverage(report);
+  const items = itemsOf(parseTypeCoverage(report));
   expect(items.length).toBe(2);
   expect(items[0].path).toBe("src/a.ts");
   expect(items[0].line_start).toBe(4);
   expect(items[0].rule).toBe("type-coverage-any");
   expect(items[0].category).toBe("maintainability");
   expect(items[0].summary).toMatch(/foo/);
-  expect(parseTypeCoverage("")).toEqual([]);
-  expect(parseTypeCoverage("not json")).toEqual([]);
-  expect(parseTypeCoverage("{}")).toEqual([]);
+  for (const bad of ["", "not json", "{}"]) {
+    const report = reportOf(parseTypeCoverage(bad));
+    expect(report.items).toEqual([]);
+    expect(report.parse_failed, `parseTypeCoverage(${JSON.stringify(bad)}) must report the failure`).toBe(true);
+  }
 });
 
 function parseTypeCoverageSample() {
@@ -647,7 +700,7 @@ test("parseLizard: CSV format with quoted fields (function signatures with comma
 250,25,1200,8,300,"src/utils.py:20-280","src/utils.py","def complex_func(x, y, z)"
 50,5,200,2,60,"src/helper.py:1-50","src/helper.py","helper"`;
 
-  const items = parseLizard(report);
+  const items = itemsOf(parseLizard(report));
   // First function: CCN=12 (> 10) + PARAM=6 (> 5) = 2 issues
   // Second function: CCN=25 (> 10) + PARAM=8 (> 5) = 2 issues
   // Third function: all below thresholds = 0 issues
@@ -664,9 +717,644 @@ test("parseLizard: CSV format with quoted fields (function signatures with comma
   expect(helperItems.length).toBe(0); // No issues reported for this function
 });
 
-test("parseLizard: empty input and malformed CSV degrade to empty", () => {
-  expect(parseLizard("")).toEqual([]);
-  expect(parseLizard("header only\n")).toEqual([]);
-  expect(parseLizard("not a csv")).toEqual([]);
-  expect(parseLizard("NLOC,CCN,Token,PARAM,Length,Location,File,Function")).toEqual([]); // header only
+test("parseLizard: an empty/header-only CSV is clean; dropped rows are TALLIED, never silent", () => {
+  // Nothing to parse at all — clean, no degradation claimed.
+  for (const empty of ["", "header only\n", "not a csv", "NLOC,CCN,Token,PARAM,Length,Location,File,Function"]) {
+    const report = reportOf(parseLizard(empty));
+    expect(report.items, `parseLizard(${JSON.stringify(empty)}) yields no items`).toEqual([]);
+    expect(report.dropped_rows ?? 0, "no data rows means nothing was dropped").toBe(0);
+  }
+  // Data rows the CSV shape does not fit are COUNTED. Without the tally these rows
+  // are byte-identical to a repo whose functions are all under threshold.
+  const drifted = reportOf(
+    parseLizard(
+      [
+        "NLOC,CCN,Token,PARAM,Length,Location,File,Function",
+        "150,12,500",
+        "not,a,valid,row,at,all,,",
+        "x,y,500,z,180,loc,src/a.py,fn",
+      ].join("\n"),
+    ),
+  );
+  expect(drifted.items).toEqual([]);
+  expect(drifted.dropped_rows, "every unusable data row must be tallied").toBe(3);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// The acquisition chokepoint: admission, classification, and the status record.
+//
+// `admitSpawn` is the ONE place a recorded operator decision can be enforced, and
+// `runExternalAnalyzer` is the ONE place a run's outcome is classified. Both are
+// exercised here against the real registry rather than only against fixtures.
+// ───────────────────────────────────────────────────────────────────────────
+
+const {
+  admitSpawn,
+  runExternalAnalyzer,
+  ANALYZER_DENIAL_REASONS,
+  detectNodeEcosystem,
+  detectPythonEcosystem,
+  detectRustEcosystem,
+  detectRubyEcosystem,
+  detectDockerEcosystem,
+  detectGithubActionsEcosystem,
+} = await import("../../src/shared/analyzers/acquisitionEngine.js");
+
+const engineCandidate = (
+  overrides: Partial<ExternalAnalyzerCandidate> = {},
+): ExternalAnalyzerCandidate => ({
+  id: "eslint",
+  runner: "npx",
+  spec: "eslint@9",
+  safetyProfile: {
+    config_execution: "executable",
+    network_egress: false,
+    version_pinning: "pinned",
+  },
+  defaultRun: false,
+  detect: () => true,
+  buildArgv: (prefix: string[], root: string) => [...prefix, "--format", "json", root],
+  parse: () => [],
+  ...overrides,
+});
+
+/** A runner whose `--version` probe succeeds and whose tool spawn is scripted. */
+function scriptedRunner(
+  tool: () => { status: number; stdout: string; stderr: string },
+  spawned: string[][] = [],
+) {
+  return (argv: string[]) => {
+    spawned.push(argv);
+    if (argv.includes("--version")) {
+      return { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 };
+    }
+    return { ...tool(), argv, duration_ms: 1 };
+  };
+}
+
+test("inv-1: a recorded 'declined' vetoes the spawn BEFORE the token and BEFORE the default-set short-circuit", () => {
+  // The two cases HEAD could not refuse. A non-default tool with a token: the token
+  // branch admitted it. A DEFAULT-set tool: the defaultRun short-circuit returned
+  // admitted before the recorded decision was ever read.
+  expect(
+    typeof admitSpawn(engineCandidate({ defaultRun: false }), "auto", "tok", "declined"),
+    "a per-run token must NEVER override a recorded decline",
+  ).toBe("string");
+  expect(
+    typeof admitSpawn(engineCandidate({ defaultRun: true }), "auto", undefined, "declined"),
+    "a decline must be enforceable for a DEFAULT-set tool too",
+  ).toBe("string");
+  // …and the positive controls still admit, so the veto is not just "deny everything".
+  expect(admitSpawn(engineCandidate({ defaultRun: true }), "auto", undefined)).toBe(undefined);
+  expect(admitSpawn(engineCandidate({ defaultRun: false }), "auto", undefined, "granted")).toBe(
+    undefined,
+  );
+});
+
+test("inv-2: declined and undecided are DISTINCT reasons, and the reason reaches the status record", () => {
+  const declined = admitSpawn(engineCandidate(), "auto", undefined, "declined");
+  const undecided = admitSpawn(engineCandidate(), "auto", undefined, undefined);
+  expect(declined).toBe(ANALYZER_DENIAL_REASONS.consent_declined);
+  expect(undecided).toBe(ANALYZER_DENIAL_REASONS.consent_not_decided);
+  expect(declined, "an operator refusal must not read the same as 'nobody decided'").not.toBe(
+    undecided,
+  );
+
+  // The cause survives onto the emitted status — the only post-run evidence there is.
+  const spawned: string[][] = [];
+  const outcome = runExternalAnalyzer(engineCandidate(), "/root", {
+    run: scriptedRunner(() => ({ status: 0, stdout: "[]", stderr: "" }), spawned),
+    analyzerConsent: { eslint: "declined" },
+  });
+  expect(outcome.status.status).toBe("skipped");
+  expect(outcome.status.error).toBe(ANALYZER_DENIAL_REASONS.consent_declined);
+  expect(spawned.length, "a declined tool spawns nothing — not even the capability probe").toBe(0);
+});
+
+test("inv-3: a SCOPED consent token issued for tool A denies tool B", () => {
+  const grant = { value: "issued-for-eslint", tools: ["eslint"] };
+  expect(admitSpawn(engineCandidate({ id: "eslint" }), "auto", grant, undefined)).toBe(undefined);
+  expect(
+    admitSpawn(engineCandidate({ id: "semgrep" }), "auto", grant, undefined),
+    "a grant obtained by offering eslint must not admit semgrep",
+  ).toBe(ANALYZER_DENIAL_REASONS.consent_token_scope);
+  // An empty grant value is not a token at all — it falls through to "undecided".
+  expect(admitSpawn(engineCandidate(), "auto", { value: "  ", tools: ["eslint"] })).toBe(
+    ANALYZER_DENIAL_REASONS.consent_not_decided,
+  );
+  // A scoped grant still cannot override a recorded decline.
+  expect(admitSpawn(engineCandidate(), "auto", grant, "declined")).toBe(
+    ANALYZER_DENIAL_REASONS.consent_declined,
+  );
+});
+
+test("inv-7: a non-zero exit with diagnostics on stderr is `failed`, never `success`", () => {
+  const outcome = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+    run: scriptedRunner(() => ({ status: 2, stdout: "", stderr: "config error: bad rule set" })),
+  });
+  expect(outcome.status.status, "a broken analyzer must not read as a clean repo").toBe("failed");
+  expect(outcome.status.exit_code).toBe(2);
+  expect(outcome.status.stderr_snippet, "stderr is the evidence of WHY it failed").toMatch(
+    /bad rule set/,
+  );
+  expect(outcome.results.results.length).toBe(0);
+
+  // The exit code alone is decisive — a silent non-zero exit is still not a clean
+  // scan, so this half must hold with nothing on stderr to fall back on.
+  const silentFailure = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+    run: scriptedRunner(() => ({ status: 3, stdout: "[]", stderr: "" })),
+  });
+  expect(silentFailure.status.status, "exit 3 with parsable-but-empty output is a failure").toBe(
+    "failed",
+  );
+  expect(silentFailure.status.exit_code).toBe(3);
+});
+
+test("inv-7: a run whose only output is stderr is `failed`; a genuinely clean run is `success`", () => {
+  const stderrOnly = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+    run: scriptedRunner(() => ({ status: 0, stdout: "   ", stderr: "warning: no config found" })),
+  });
+  expect(stderrOnly.status.status).toBe("failed");
+  expect(stderrOnly.status.stderr_snippet).toMatch(/no config found/);
+
+  const clean = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+    run: scriptedRunner(() => ({ status: 0, stdout: "[]", stderr: "" })),
+  });
+  expect(clean.status.status, "exit 0 + parsed + nothing on stderr IS a clean scan").toBe("success");
+});
+
+test("inv-8: a reported parse failure classifies `parse_error`, and dropped rows classify too", () => {
+  const parseFailed = runExternalAnalyzer(
+    engineCandidate({
+      defaultRun: true,
+      parse: () => ({ items: [], parse_failed: true, note: "shape drift: renamed key" }),
+    }),
+    "/root",
+    { run: scriptedRunner(() => ({ status: 0, stdout: "{}", stderr: "" })) },
+  );
+  expect(parseFailed.status.status).toBe("parse_error");
+  expect(parseFailed.status.error).toMatch(/shape drift/);
+
+  const dropped = runExternalAnalyzer(
+    engineCandidate({ defaultRun: true, parse: () => ({ items: [], dropped_rows: 4 }) }),
+    "/root",
+    { run: scriptedRunner(() => ({ status: 0, stdout: "rows", stderr: "" })) },
+  );
+  expect(dropped.status.status, "every row dropped is not a clean scan").toBe("parse_error");
+  expect(dropped.status.dropped_rows).toBe(4);
+});
+
+test("inv-10 + inv-11: absolute tool paths persist repo-relative, and an unreadable source is COUNTED", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cp1-paths-"));
+  try {
+    await writeFile(join(root, "a.ts"), "line one\nline two\nline three\n");
+    const outcome = runExternalAnalyzer(
+      engineCandidate({
+        defaultRun: true,
+        parse: () => [
+          {
+            path: join(root, "a.ts"),
+            line_start: 1,
+            line_end: 2,
+            summary: "lead in a.ts",
+            rule: "r1",
+          },
+          {
+            path: join(root, "gone.ts"),
+            line_start: 1,
+            summary: "lead in a missing file",
+            rule: "r2",
+          },
+        ],
+      }),
+      root,
+      { run: scriptedRunner(() => ({ status: 0, stdout: "x", stderr: "" })) },
+    );
+    const [anchored, unreadable] = outcome.results.results;
+    // inv-10: the persisted path is repo-relative — never the operator's absolute path.
+    expect(anchored.path, "an absolute emitter must be normalized at the boundary").toBe("a.ts");
+    expect(unreadable.path).toBe("gone.ts");
+    // …and BECAUSE it was normalized, the provenance read now resolves.
+    expect(anchored.provenance?.path).toBe("a.ts");
+    expect(typeof anchored.provenance?.snippet_hash).toBe("string");
+    // inv-11: the item that HAD an anchor but could not be read is recorded, not silent.
+    expect(unreadable.provenance).toBe(undefined);
+    expect(outcome.status.source_read_failures).toBe(1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("inv-11: an item with no line anchor is NOT counted as a read failure", () => {
+  const outcome = runExternalAnalyzer(
+    engineCandidate({
+      defaultRun: true,
+      parse: () => [{ path: "nowhere.ts", summary: "no anchor at all" }],
+    }),
+    "/root",
+    { run: scriptedRunner(() => ({ status: 0, stdout: "x", stderr: "" })) },
+  );
+  expect(outcome.status.status).toBe("findings");
+  expect(
+    outcome.status.source_read_failures,
+    "no anchor is a benign absence, not a broken read seam",
+  ).toBe(undefined);
+});
+
+test("fail-7: an absent runner degrades to not_resolved carrying the probe reason, never success", () => {
+  const outcome = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+    run: (argv: string[]) => ({
+      status: 127,
+      stdout: "",
+      stderr: "command not found",
+      argv,
+      duration_ms: 1,
+      error: new Error("ENOENT"),
+    }),
+  });
+  expect(outcome.status.status).toBe("not_resolved");
+  expect(outcome.status.error).toMatch(/not available/);
+  expect(outcome.results.results.length).toBe(0);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// inv-12: detect() asserted TRUE against a tree that carries the marker.
+//
+// Asserting only `detect("/repo") === false` against a path that does not exist is
+// vacuous: a detector regressed to always-false passes it, and every acquired
+// analyzer would silently stop running while the suite stayed green.
+// ───────────────────────────────────────────────────────────────────────────
+
+const MARKER_ECOSYSTEMS: ReadonlyArray<{
+  name: string;
+  marker: string;
+  detect: (root: string) => boolean;
+}> = [
+  { name: "node", marker: "package.json", detect: detectNodeEcosystem },
+  { name: "python", marker: "pyproject.toml", detect: detectPythonEcosystem },
+  { name: "rust", marker: "Cargo.toml", detect: detectRustEcosystem },
+  { name: "ruby", marker: "Gemfile", detect: detectRubyEcosystem },
+  { name: "docker", marker: "Dockerfile", detect: detectDockerEcosystem },
+  {
+    name: "github-actions",
+    marker: join(".github", "workflows", "ci.yml"),
+    detect: detectGithubActionsEcosystem,
+  },
+];
+
+for (const ecosystem of MARKER_ECOSYSTEMS) {
+  test(`inv-12: ${ecosystem.name} detect() is TRUE with its marker and FALSE on a sibling without it`, async () => {
+    const withMarker = await mkdtemp(join(tmpdir(), `cp1-${ecosystem.name}-`));
+    const without = await mkdtemp(join(tmpdir(), `cp1-${ecosystem.name}-bare-`));
+    try {
+      await mkdir(dirname(join(withMarker, ecosystem.marker)), { recursive: true });
+      await writeFile(join(withMarker, ecosystem.marker), "\n");
+      expect(
+        ecosystem.detect(withMarker),
+        `${ecosystem.name} must DETECT a tree carrying ${ecosystem.marker}`,
+      ).toBe(true);
+      expect(
+        ecosystem.detect(without),
+        `${ecosystem.name} must not detect a tree without ${ecosystem.marker}`,
+      ).toBe(false);
+    } finally {
+      await rm(withMarker, { recursive: true, force: true });
+      await rm(without, { recursive: true, force: true });
+    }
+  });
+}
+
+test("inv-12: every registered candidate's detect() reports TRUE on a tree carrying every marker", async () => {
+  // Derived from the registry, so a NEW candidate whose detector is always-false is
+  // caught here without anyone remembering to add a case.
+  const root = await mkdtemp(join(tmpdir(), "cp1-allmarkers-"));
+  try {
+    for (const marker of [
+      "package.json",
+      "pyproject.toml",
+      "Cargo.toml",
+      "Gemfile",
+      "Dockerfile",
+    ]) {
+      await writeFile(join(root, marker), marker === "package.json" ? "{}" : "\n");
+    }
+    await mkdir(join(root, ".github", "workflows"), { recursive: true });
+    await writeFile(join(root, ".github", "workflows", "ci.yml"), "\n");
+    // lizard detects SOURCES, not manifests — give the tree one non-JS/TS source.
+    await writeFile(join(root, "main.py"), "print(1)\n");
+    for (const candidate of EXTERNAL_ANALYZER_CANDIDATES) {
+      expect(
+        candidate.detect(root),
+        `${candidate.id}.detect() must be TRUE on a tree carrying every ecosystem marker`,
+      ).toBe(true);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// inv-13: the roster is DERIVED, so a newly registered candidate cannot slip in
+// unasserted behind a hand-copied literal set (and a stale "all seven" name).
+// ───────────────────────────────────────────────────────────────────────────
+
+test("inv-13: every registered candidate is partitioned by its OWN defaultRun flag", () => {
+  const defaultSet = EXTERNAL_ANALYZER_CANDIDATES.filter((c) => c.defaultRun).map((c) => c.id);
+  const consentGated = EXTERNAL_ANALYZER_CANDIDATES.filter((c) => !c.defaultRun).map((c) => c.id);
+
+  expect(defaultSet.length + consentGated.length, "the partition covers the whole registry").toBe(
+    EXTERNAL_ANALYZER_CANDIDATES.length,
+  );
+  expect(defaultSet.length, "the default set is non-empty").toBeGreaterThan(0);
+  expect(consentGated.length, "the consent-gated set is non-empty").toBeGreaterThan(0);
+  expect(new Set(EXTERNAL_ANALYZER_CANDIDATES.map((c) => c.id)).size, "ids are unique").toBe(
+    EXTERNAL_ANALYZER_CANDIDATES.length,
+  );
+
+  // The property that matters per member, asserted over the DERIVED partition: a
+  // default-set member runs unprompted; a consent-gated member does not.
+  for (const candidate of EXTERNAL_ANALYZER_CANDIDATES) {
+    const admitted = admitSpawn(candidate, "auto", undefined, undefined) === undefined;
+    expect(
+      admitted,
+      `${candidate.id} (defaultRun: ${candidate.defaultRun}) must ${
+        candidate.defaultRun ? "run unprompted" : "require consent"
+      }`,
+    ).toBe(candidate.defaultRun);
+    expect(typeof candidate.purpose, `${candidate.id} must carry an operator-facing purpose`).toBe(
+      "string",
+    );
+  }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// inv-18: ONE exported status vocabulary, consumed through an EXHAUSTIVE mapping,
+// and ONE declared merge helper for entries from both producers.
+// ───────────────────────────────────────────────────────────────────────────
+
+const {
+  EXTERNAL_ANALYZER_TOOL_STATUSES,
+  EXTERNAL_ANALYZER_STATUS_CLASSIFICATION,
+  isDegradedExternalAnalyzerStatus,
+  ExternalAnalyzerToolStatusSchema,
+  upsertExternalToolResults,
+} = await import("../../src/shared/analyzers/types.js");
+
+test("inv-18: the status union, the zod enum, and the exhaustive classification map agree", () => {
+  // The schema enum is BUILT from the tuple, so they cannot drift; the classification
+  // map is a Record over the same tuple, so a new member without a row fails `check`.
+  for (const status of EXTERNAL_ANALYZER_TOOL_STATUSES) {
+    expect(
+      ExternalAnalyzerToolStatusSchema.safeParse({ tool: "t", resolved: true, status }).success,
+      `${status} must be accepted by the persisted status schema`,
+    ).toBe(true);
+    expect(
+      EXTERNAL_ANALYZER_STATUS_CLASSIFICATION[status],
+      `${status} must be classified for coverage`,
+    ).toBeTruthy();
+  }
+  // Only the two affirmative members may be read as "this tool produced coverage",
+  // and only on a record carrying no degradation marker.
+  const affirmative = EXTERNAL_ANALYZER_TOOL_STATUSES.filter(
+    (s) => !isDegradedExternalAnalyzerStatus({ status: s, exit_code: 0 }),
+  );
+  expect([...affirmative].sort()).toEqual(["findings", "success"]);
+  // A checksum mismatch is its own member — never flattened into not_resolved.
+  expect(EXTERNAL_ANALYZER_TOOL_STATUSES).toContain("checksum_mismatch");
+  expect(
+    ExternalAnalyzerToolStatusSchema.safeParse({ tool: "t", resolved: true, status: "invented" })
+      .success,
+    "the vocabulary is closed",
+  ).toBe(false);
+});
+
+test("inv-18: upsertExternalToolResults is the single merge helper — same tool replaces, others survive", () => {
+  const first = upsertExternalToolResults(undefined, { tool: "gitleaks", results: [] });
+  const second = upsertExternalToolResults(first, {
+    tool: "eslint",
+    results: [{ id: "e1", category: "c", severity: "low", path: "a.ts", summary: "s" }],
+  });
+  const replaced = upsertExternalToolResults(second, { tool: "eslint", results: [] });
+  expect(
+    replaced.map((entry) => entry.tool),
+    "sorted, one entry per tool",
+  ).toEqual(["eslint", "gitleaks"]);
+  expect(
+    replaced.find((entry) => entry.tool === "eslint")!.results.length,
+    "a fresh run supersedes",
+  ).toBe(0);
+  expect(
+    replaced.find((entry) => entry.tool === "gitleaks"),
+    "the other producer survives",
+  ).toBeTruthy();
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// inv-15 / fail-10 / fail-11: the durable policy merge is lock-guarded and an
+// invalid artifact fails CLOSED. A lost decline is an unenforceable veto — exactly
+// what the admission ladder above exists to enforce.
+// ───────────────────────────────────────────────────────────────────────────
+
+const {
+  loadAnalyzerPolicy,
+  persistAnalyzerConsent,
+  persistAnalyzerSettings,
+  getAnalyzerPolicyPath,
+} = await import("../../src/shared/analyzerPolicy.js");
+
+test("inv-15 / fail-11: concurrent consent + settings writes both land, neither is lost or torn", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cp1-policy-"));
+  try {
+    await mkdir(join(root, ".audit-tools", "audit"), { recursive: true });
+    // Interleave many writers against the one artifact. Without the locked
+    // read-modify-write, a plain write drops whichever decision it did not read.
+    await Promise.all([
+      ...["eslint", "knip", "semgrep", "jscpd"].map((id) =>
+        persistAnalyzerConsent(root, { [id]: "declined" }),
+      ),
+      ...["clippy", "rubocop"].map((id) => persistAnalyzerSettings(root, { [id]: "skip" })),
+    ]);
+    const policy = await loadAnalyzerPolicy(root);
+    for (const id of ["eslint", "knip", "semgrep", "jscpd"]) {
+      expect(
+        policy.analyzer_consent?.[id],
+        `${id}'s decline must survive concurrent writers`,
+      ).toBe("declined");
+    }
+    for (const id of ["clippy", "rubocop"]) {
+      expect(policy.analyzers?.[id], `${id}'s setting must survive concurrent writers`).toBe("skip");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("fail-10: a malformed policy artifact throws — it never degrades to an empty policy", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cp1-policy-bad-"));
+  try {
+    await mkdir(join(root, ".audit-tools", "audit"), { recursive: true });
+    // A value outside the decision vocabulary. Degrading to `{}` here would silently
+    // discard every recorded decline, which the chokepoint could then never enforce.
+    await writeFile(
+      getAnalyzerPolicyPath(root),
+      JSON.stringify({ analyzer_consent: { eslint: "maybe" } }),
+      "utf8",
+    );
+    await expect(loadAnalyzerPolicy(root)).rejects.toThrow(/analyzer_consent/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Adversarial-review fixes (RV-1, RV-3, RV-4, RV-5).
+// ───────────────────────────────────────────────────────────────────────────
+
+test("RV-1: a signal-killed analyzer (null exit status) is `failed`, never a clean scan", () => {
+  // RunTrackedResult carries no signal field, so a null status is the ONLY trace that
+  // the child never exited on its own (SIGKILL / OOM). Reading `typeof status ===
+  // "number" && status !== 0` skipped it entirely — and win32 reports the same kill as
+  // status 1, so the identical event classified differently per OS.
+  const killed = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+    run: (argv: string[]) =>
+      argv.includes("--version")
+        ? { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 }
+        : { status: null, stdout: "", stderr: "", argv, duration_ms: 1 },
+  });
+  expect(killed.status.status, "a killed analyzer produced no coverage").toBe("failed");
+  expect(killed.status.error).toMatch(/exit status|signal/i);
+  expect(
+    isDegradedExternalAnalyzerStatus(killed.status),
+    "and the record answers the coverage question the same way",
+  ).toBe(true);
+});
+
+test("RV-3: items the NORMALIZER drops are counted — an all-dropped run is not clean", () => {
+  // Two items parse fine and both are discarded for a missing summary. Counting only
+  // the parser's own drops left this reading as `success` with no drop count at all.
+  const outcome = runExternalAnalyzer(
+    engineCandidate({
+      defaultRun: true,
+      parse: () => [{ path: "a.ts" }, { path: "b.ts" }],
+    }),
+    "/root",
+    { run: scriptedRunner(() => ({ status: 0, stdout: "[]", stderr: "" })) },
+  );
+  expect(outcome.status.status, "every item dropped is not a clean scan").toBe("parse_error");
+  expect(outcome.status.dropped_rows).toBe(2);
+  expect(isDegradedExternalAnalyzerStatus(outcome.status)).toBe(true);
+});
+
+test("RV-3: parser-dropped and normalizer-dropped counts land on ONE field", () => {
+  const outcome = runExternalAnalyzer(
+    engineCandidate({
+      defaultRun: true,
+      parse: () => ({ items: [{ path: "a.ts" }], dropped_rows: 3 }),
+    }),
+    "/root",
+    { run: scriptedRunner(() => ({ status: 0, stdout: "rows", stderr: "" })) },
+  );
+  expect(outcome.status.dropped_rows, "3 parser rows + 1 normalizer item").toBe(4);
+});
+
+test("RV-4: a partially-crashed run carrying items still classifies as DEGRADED", () => {
+  // The status member lands on `findings` — an affirmative value — because items
+  // survived. Asking the member alone reports a crashed run as trustworthy coverage.
+  const partial = runExternalAnalyzer(
+    engineCandidate({
+      defaultRun: true,
+      parse: () => [{ path: "a.ts", summary: "one surviving lead" }],
+    }),
+    "/root",
+    { run: scriptedRunner(() => ({ status: 2, stdout: "partial", stderr: "crashed midway" })) },
+  );
+  expect(partial.status.status, "items survived, so the member is affirmative").toBe("findings");
+  expect(partial.status.exit_code).toBe(2);
+  expect(
+    isDegradedExternalAnalyzerStatus(partial.status),
+    "…but the RECORD must still answer 'not trustworthy coverage'",
+  ).toBe(true);
+
+  // Same for dropped rows and unresolved provenance alongside surviving items.
+  const dropped = runExternalAnalyzer(
+    engineCandidate({
+      defaultRun: true,
+      parse: () => ({ items: [{ path: "a.ts", summary: "kept" }], dropped_rows: 5 }),
+    }),
+    "/root",
+    { run: scriptedRunner(() => ({ status: 0, stdout: "rows", stderr: "" })) },
+  );
+  expect(dropped.status.status).toBe("findings");
+  expect(isDegradedExternalAnalyzerStatus(dropped.status)).toBe(true);
+
+  // …and a genuinely clean run is NOT degraded, so the predicate still discriminates.
+  const clean = runExternalAnalyzer(
+    engineCandidate({
+      defaultRun: true,
+      parse: () => [{ path: "a.ts", summary: "kept" }],
+    }),
+    "/root",
+    { run: scriptedRunner(() => ({ status: 0, stdout: "[]", stderr: "" })) },
+  );
+  expect(clean.status.status).toBe("findings");
+  expect(isDegradedExternalAnalyzerStatus(clean.status)).toBe(false);
+});
+
+test("D-2: an unresolved provenance anchor is NOT lost coverage — it does not make a run degraded", async () => {
+  // Provenance is optional everywhere on this contract, so an item whose anchor could
+  // not be read is still a fully reported lead: a weaker join key, not a lost finding.
+  // The count stays on the record because it is worth surfacing.
+  const root = await mkdtemp(join(tmpdir(), "cp1-anchor-"));
+  try {
+    const outcome = runExternalAnalyzer(
+      engineCandidate({
+        defaultRun: true,
+        parse: () => [
+          { path: "gone.ts", line_start: 1, summary: "reported, but unanchorable", rule: "r" },
+        ],
+      }),
+      root,
+      { run: scriptedRunner(() => ({ status: 0, stdout: "x", stderr: "" })) },
+    );
+    expect(outcome.status.status).toBe("findings");
+    expect(outcome.status.source_read_failures, "still recorded on the record").toBe(1);
+    expect(outcome.results.results.length, "the lead itself is reported in full").toBe(1);
+    expect(
+      isDegradedExternalAnalyzerStatus(outcome.status),
+      "an optional anchor that did not resolve is not untrustworthy coverage",
+    ).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("RV-5: a recorded decline outranks setting=skip — the reason names the OPERATOR's decision", () => {
+  // Both refuse, so a member-level assertion cannot tell them apart. What matters is
+  // WHICH cause the record names: `setting=skip` points at a config value and would
+  // have masked the operator's own decline behind it.
+  expect(admitSpawn(engineCandidate(), "skip", undefined, "declined")).toBe(
+    ANALYZER_DENIAL_REASONS.consent_declined,
+  );
+  expect(admitSpawn(engineCandidate({ defaultRun: true }), "skip", "tok", "declined")).toBe(
+    ANALYZER_DENIAL_REASONS.consent_declined,
+  );
+  // With no recorded decision, `skip` is still the decisive (and honest) reason.
+  expect(admitSpawn(engineCandidate({ defaultRun: true }), "skip", "tok")).toBe(
+    ANALYZER_DENIAL_REASONS.setting_skip,
+  );
+});
+
+test("RV-5: every CONSENT-channel reason names consent; the settings-channel one does not", () => {
+  // The doc comment used to claim ALL reasons name consent, which `setting=skip` never
+  // did. Out-of-scope suites match denial reasons with /consent/i, and they only ever
+  // exercise consent denials — so the split has to hold in both directions.
+  for (const key of ["consent_declined", "consent_not_decided", "consent_token_scope"] as const) {
+    expect(ANALYZER_DENIAL_REASONS[key], `${key} must name the consent channel`).toMatch(
+      /consent/i,
+    );
+  }
+  expect(
+    ANALYZER_DENIAL_REASONS.setting_skip,
+    "setting=skip comes from the settings channel and must not claim to be a consent decision",
+  ).not.toMatch(/consent/i);
 });

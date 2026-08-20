@@ -1,11 +1,13 @@
 import type {
   ExternalAnalyzerGraphEdge,
+  ExternalAnalyzerParsedItem,
   ExternalAnalyzerResults,
 } from "./types.js";
 import {
   hashAnalyzerSnippet,
   type AnalyzerLeadProvenance,
 } from "./provenance.js";
+import { normalizeRepoPath } from "../validation/findingGrounding.js";
 
 type SeverityEnum = "critical" | "high" | "medium" | "low" | "info";
 
@@ -25,6 +27,55 @@ function normalizeExternalSeverity(value: string | undefined): SeverityEnum {
   }
 }
 
+/**
+ * Separator-normalized, `./`-stripped form. This is `normalizeRepoPath` WITHOUT the
+ * case fold — the fold is correct for membership matching and wrong for a path that
+ * will be persisted and later re-read from a case-sensitive filesystem.
+ */
+function posixify(path: string): string {
+  return path.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+/**
+ * Repo-relative form of an analyzer-reported path, case PRESERVED.
+ *
+ * Seven of the twelve candidates hand their tool the ABSOLUTE repository root as a
+ * positional target, so those tools echo absolute paths back. Persisting one makes
+ * the lead machine-specific, un-joinable against every repo-relative consumer, and
+ * unreadable by the provenance reader (`join(root, "/abs/path")` names nothing).
+ * Containment is decided with the shared {@link normalizeRepoPath} (case- and
+ * separator-folded, so win32 drive-letter and case drift still match); the returned
+ * value is sliced out of the ORIGINAL string so on-disk case survives.
+ *
+ * A path outside the repository root is left as-is: it is not repo-relative, and
+ * silently rewriting it would invent an identity the tool never reported.
+ */
+export function toRepoRelativeAnalyzerPath(
+  repoRoot: string | undefined,
+  rawPath: string,
+): string {
+  const path = posixify(rawPath);
+  if (!repoRoot || path.length === 0) return path;
+  const root = posixify(repoRoot).replace(/\/+$/, "");
+  if (root.length === 0) return path;
+  const foldedRoot = normalizeRepoPath(root);
+  const foldedPath = normalizeRepoPath(path);
+  if (foldedPath === foldedRoot) return "";
+  if (!foldedPath.startsWith(`${foldedRoot}/`)) return path;
+  return path.slice(root.length + 1);
+}
+
+/** A degradation observed while normalizing, reported to the caller rather than swallowed. */
+export interface NormalizeExternalDiagnostics {
+  /** Items dropped for a missing `path` or `summary`. */
+  dropped_items: number;
+  /**
+   * Items that HAD a path + line_start but whose source could not be read, so their
+   * provenance was dropped. Distinct from an item that simply has no anchor.
+   */
+  source_read_failures: number;
+}
+
 export interface NormalizeExternalOptions {
   /**
    * Source reader for content-anchored lead provenance (item C): given a
@@ -34,25 +85,35 @@ export interface NormalizeExternalOptions {
    * failing, items simply carry no provenance (optional everywhere).
    */
   readSource?: (path: string) => string | undefined;
+  /**
+   * Absolute repository root. When supplied, every item path is normalized to its
+   * repo-relative form BEFORE it is persisted and before `readSource` is called, so
+   * an absolute-path emitter cannot leak a machine-specific path into the artifact
+   * or silently lose provenance.
+   */
+  repoRoot?: string;
+  /**
+   * Receives the normalization degradations. The caller (the acquisition engine)
+   * carries them onto the tool's status record, which is the only post-run evidence
+   * that items were lost.
+   */
+  onDiagnostics?: (diagnostics: NormalizeExternalDiagnostics) => void;
 }
 
 export function normalizeGenericExternalResults(
   tool: string,
-  items: Array<{
-    id?: string;
-    category?: string;
-    severity?: string;
-    path?: string;
-    line_start?: number;
-    line_end?: number;
-    summary?: string;
-    rule?: string;
-    raw?: unknown;
-  }>,
+  items: ExternalAnalyzerParsedItem[],
   options: NormalizeExternalOptions = {},
 ): ExternalAnalyzerResults {
-  const valid = items.filter((item) => item.path && item.summary);
-  const dropped = items.length - valid.length;
+  // Repo-relative FIRST: every downstream step — validity, provenance read, and the
+  // persisted `path` — must see the same normalized identity.
+  const normalizedItems = items.map((item) =>
+    typeof item?.path === "string"
+      ? { ...item, path: toRepoRelativeAnalyzerPath(options.repoRoot, item.path) }
+      : item,
+  );
+  const valid = normalizedItems.filter((item) => item.path && item.summary);
+  const dropped = normalizedItems.length - valid.length;
   if (dropped > 0) {
     process.stderr.write(
       JSON.stringify({
@@ -70,6 +131,11 @@ export function normalizeGenericExternalResults(
     if (!sourceCache.has(path)) sourceCache.set(path, options.readSource(path));
     return sourceCache.get(path);
   };
+  // An item with BOTH a path and a line number is anchorable; if its source cannot
+  // be read, provenance is lost for a reason the operator can act on. An item with
+  // no line number simply has no anchor — a different, benign state. Counting only
+  // the first keeps the two apart (they are byte-identical in the results array).
+  let sourceReadFailures = 0;
   const provenanceFor = (item: {
     path?: string;
     line_start?: number;
@@ -78,7 +144,10 @@ export function normalizeGenericExternalResults(
   }): AnalyzerLeadProvenance | undefined => {
     if (!item.path || item.line_start === undefined) return undefined;
     const source = readCached(item.path);
-    if (source === undefined) return undefined;
+    if (source === undefined) {
+      if (options.readSource) sourceReadFailures += 1;
+      return undefined;
+    }
     const snippet_hash = hashAnalyzerSnippet(source, item.line_start, item.line_end);
     if (snippet_hash === undefined) return undefined;
     return {
@@ -88,10 +157,7 @@ export function normalizeGenericExternalResults(
       snippet_hash,
     };
   };
-  return {
-    tool,
-    generated_at: new Date().toISOString(),
-    results: valid.map((item, index) => {
+  const results = valid.map((item, index) => {
       const provenance = provenanceFor(item);
       return {
         id: item.id ?? `${tool}-${index + 1}`,
@@ -105,7 +171,15 @@ export function normalizeGenericExternalResults(
         raw: item.raw,
         ...(provenance !== undefined ? { provenance } : {}),
       };
-    }),
+    });
+  options.onDiagnostics?.({
+    dropped_items: dropped,
+    source_read_failures: sourceReadFailures,
+  });
+  return {
+    tool,
+    generated_at: new Date().toISOString(),
+    results,
   };
 }
 

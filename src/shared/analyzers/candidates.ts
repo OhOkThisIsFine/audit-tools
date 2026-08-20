@@ -12,8 +12,12 @@ import {
   detectGithubActionsEcosystem,
 } from "./acquisitionEngine.js";
 import type { BinarySpec } from "./binaryAcquisition.js";
+import type {
+  ExternalAnalyzerParsedItem,
+  ExternalAnalyzerParseReport,
+} from "./types.js";
 import { parseClippy } from "./clippy.js";
-import { parseRubocop } from "./rubocop.js";
+import { parseRubocopOutcome } from "./rubocop.js";
 
 /**
  * The value-curated EXTERNAL analyzer candidate registry. This is the only place
@@ -29,6 +33,25 @@ import { parseRubocop } from "./rubocop.js";
 // before execution — see binaryAcquisition.ts).
 const GITLEAKS_VERSION = "8.21.2";
 const GITLEAKS_RELEASE_BASE = `https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}`;
+
+/** A clean parse that produced exactly these items and dropped nothing. */
+function items(parsed: ExternalAnalyzerParsedItem[]): ExternalAnalyzerParseReport {
+  return { items: parsed };
+}
+
+/**
+ * A parse that could not read the payload at all. This is the affirmation that
+ * replaces the bare `[]` every parser used to return: an empty item list plus
+ * `parse_failed` is what lets the engine classify the run `parse_error` instead of
+ * labelling upstream schema drift a clean scan.
+ */
+function parseFailure(tool: string, cause: string): ExternalAnalyzerParseReport {
+  return { items: [], parse_failed: true, note: `${tool}: ${cause}` };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
 /**
  * Look up a release-asset name part (os or cpu) in a per-tool naming table.
@@ -82,15 +105,17 @@ function gitleaksReportPath(): string {
  * the engine's generic item shape. The raw secret value is NEVER carried through
  * (Secret/Match are dropped) so the persisted artifact cannot leak a credential.
  */
-function parseGitleaks(report: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+function parseGitleaks(report: string): ExternalAnalyzerParseReport {
   let findings: unknown;
   try {
     findings = JSON.parse(report || "[]");
   } catch {
-    return [];
+    return parseFailure("gitleaks", "report is not valid JSON");
   }
-  if (!Array.isArray(findings)) return [];
-  return findings
+  if (!Array.isArray(findings)) {
+    return parseFailure("gitleaks", "report is not a JSON array of findings");
+  }
+  return items(findings
     .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === "object")
     .map((f) => {
       const ruleId = typeof f.RuleID === "string" ? f.RuleID : "secret";
@@ -118,7 +143,7 @@ function parseGitleaks(report: string): ReturnType<ExternalAnalyzerCandidate["pa
         // the raw credential.
         raw: { rule: ruleId, fingerprint, entropy: f.Entropy },
       };
-    });
+    }));
 }
 
 const gitleaksCandidate: ExternalAnalyzerCandidate = {
@@ -152,18 +177,18 @@ const gitleaksCandidate: ExternalAnalyzerCandidate = {
 };
 
 /** Parse semgrep `--json` stdout into generic items. */
-function parseSemgrep(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+function parseSemgrep(stdout: string): ExternalAnalyzerParseReport {
   let payload: unknown;
   try {
     payload = JSON.parse(stdout || "{}");
   } catch {
-    return [];
+    return parseFailure("semgrep", "output is not valid JSON");
   }
-  const results =
-    payload && typeof payload === "object" && Array.isArray((payload as { results?: unknown }).results)
-      ? ((payload as { results: Record<string, unknown>[] }).results)
-      : [];
-  return results.map((r) => {
+  if (!isRecord(payload) || !Array.isArray(payload.results)) {
+    return parseFailure("semgrep", "output has no `results` array");
+  }
+  const results = payload.results as Record<string, unknown>[];
+  return items(results.map((r) => {
     const extra = (r.extra ?? {}) as Record<string, unknown>;
     const start = (r.start ?? {}) as Record<string, unknown>;
     const end = (r.end ?? {}) as Record<string, unknown>;
@@ -179,7 +204,7 @@ function parseSemgrep(stdout: string): ReturnType<ExternalAnalyzerCandidate["par
       summary: typeof extra.message === "string" ? extra.message : checkId,
       rule: checkId,
     };
-  });
+  }));
 }
 
 const semgrepCandidate: ExternalAnalyzerCandidate = {
@@ -200,15 +225,17 @@ const semgrepCandidate: ExternalAnalyzerCandidate = {
 };
 
 /** Parse eslint `-f json` stdout (array of file results) into generic items. */
-function parseEslint(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+function parseEslint(stdout: string): ExternalAnalyzerParseReport {
   let files: unknown;
   try {
     files = JSON.parse(stdout || "[]");
   } catch {
-    return [];
+    return parseFailure("eslint", "output is not valid JSON");
   }
-  if (!Array.isArray(files)) return [];
-  const items: ReturnType<ExternalAnalyzerCandidate["parse"]> = [];
+  if (!Array.isArray(files)) {
+    return parseFailure("eslint", "output is not a JSON array of file results");
+  }
+  const parsed: ExternalAnalyzerParsedItem[] = [];
   for (const file of files) {
     if (!file || typeof file !== "object") continue;
     const filePath = typeof (file as { filePath?: unknown }).filePath === "string"
@@ -220,7 +247,7 @@ function parseEslint(stdout: string): ReturnType<ExternalAnalyzerCandidate["pars
     for (const m of messages) {
       const ruleId = typeof m.ruleId === "string" ? m.ruleId : "eslint";
       const line = typeof m.line === "number" ? m.line : undefined;
-      items.push({
+      parsed.push({
         id: `${ruleId}:${filePath}:${line ?? 0}`,
         category: "maintainability",
         severity: m.severity === 2 ? "medium" : "low",
@@ -231,7 +258,7 @@ function parseEslint(stdout: string): ReturnType<ExternalAnalyzerCandidate["pars
       });
     }
   }
-  return items;
+  return items(parsed);
 }
 
 const eslintCandidate: ExternalAnalyzerCandidate = {
@@ -267,18 +294,18 @@ const eslintCandidate: ExternalAnalyzerCandidate = {
  */
 const KNIP_EXPORT_ISSUE_TYPES = ["exports", "types", "nsExports", "nsTypes"] as const;
 
-function parseKnip(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+function parseKnip(stdout: string): ExternalAnalyzerParseReport {
   let payload: unknown;
   try {
     payload = JSON.parse(stdout || "{}");
   } catch {
-    return [];
+    return parseFailure("knip", "output is not valid JSON");
   }
-  const issues =
-    payload && typeof payload === "object" && Array.isArray((payload as { issues?: unknown }).issues)
-      ? ((payload as { issues: Record<string, unknown>[] }).issues)
-      : [];
-  const items: ReturnType<ExternalAnalyzerCandidate["parse"]> = [];
+  if (!isRecord(payload) || !Array.isArray(payload.issues)) {
+    return parseFailure("knip", "output has no `issues` array");
+  }
+  const issues = payload.issues as Record<string, unknown>[];
+  const parsed: ExternalAnalyzerParsedItem[] = [];
   for (const row of issues) {
     const file = typeof row.file === "string" ? row.file : "";
     if (!file) continue;
@@ -293,7 +320,7 @@ function parseKnip(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"
         const line = typeof (symbol as { line?: unknown }).line === "number"
           ? (symbol as { line: number }).line
           : undefined;
-        items.push({
+        parsed.push({
           id: `knip-${issueType}:${file}:${name}:${line ?? 0}`,
           category: "maintainability",
           severity: "low",
@@ -307,7 +334,7 @@ function parseKnip(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"
     // Whole-file dead code: a non-empty `files` array on this row means the module
     // itself is imported by nothing. One lead per file (path === the file).
     if (Array.isArray(row.files) && row.files.length > 0) {
-      items.push({
+      parsed.push({
         id: `knip-files:${file}`,
         category: "maintainability",
         severity: "low",
@@ -327,7 +354,7 @@ function parseKnip(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"
         const line = typeof (symbol as { line?: unknown }).line === "number"
           ? (symbol as { line: number }).line
           : undefined;
-        items.push({
+        parsed.push({
           id: `knip-dependencies:${file}:${name}`,
           category: "maintainability",
           severity: "low",
@@ -339,7 +366,7 @@ function parseKnip(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"
       }
     }
   }
-  return items;
+  return items(parsed);
 }
 
 const knipCandidate: ExternalAnalyzerCandidate = {
@@ -472,18 +499,18 @@ function jscpdReportPath(): string {
  * normalization path, not to a candidate's own parse function (same as
  * parseKnip/parseEslint/parseSemgrep above).
  */
-function parseJscpd(report: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+function parseJscpd(report: string): ExternalAnalyzerParseReport {
   let payload: unknown;
   try {
     payload = JSON.parse(report || "{}");
   } catch {
-    return [];
+    return parseFailure("jscpd", "report is not valid JSON");
   }
-  const duplicates =
-    payload && typeof payload === "object" && Array.isArray((payload as { duplicates?: unknown }).duplicates)
-      ? ((payload as { duplicates: Record<string, unknown>[] }).duplicates)
-      : [];
-  return duplicates
+  if (!isRecord(payload) || !Array.isArray(payload.duplicates)) {
+    return parseFailure("jscpd", "report has no `duplicates` array");
+  }
+  const duplicates = payload.duplicates as Record<string, unknown>[];
+  return items(duplicates
     .filter((d): d is Record<string, unknown> => Boolean(d) && typeof d === "object")
     .map((d) => {
       const firstFile = (d.firstFile ?? {}) as Record<string, unknown>;
@@ -505,7 +532,7 @@ function parseJscpd(report: string): ReturnType<ExternalAnalyzerCandidate["parse
         summary: `jscpd: duplicate code block (${lines ?? "?"} lines) shared with ${otherPath || "another file"}`,
         rule: "jscpd-duplicate",
       };
-    });
+    }));
 }
 
 const jscpdCandidate: ExternalAnalyzerCandidate = {
@@ -579,18 +606,18 @@ const OSV_SCANNER_BINARY: BinarySpec = {
  * raw vulnerability id, so CVE/GHSA aliases for the same underlying issue
  * don't fan out into duplicate items.
  */
-function parseOsvScanner(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+function parseOsvScanner(stdout: string): ExternalAnalyzerParseReport {
   let payload: unknown;
   try {
     payload = JSON.parse(stdout || "{}");
   } catch {
-    return [];
+    return parseFailure("osv-scanner", "output is not valid JSON");
   }
-  const results =
-    payload && typeof payload === "object" && Array.isArray((payload as { results?: unknown }).results)
-      ? ((payload as { results: Record<string, unknown>[] }).results)
-      : [];
-  const items: ReturnType<ExternalAnalyzerCandidate["parse"]> = [];
+  if (!isRecord(payload) || !Array.isArray(payload.results)) {
+    return parseFailure("osv-scanner", "output has no `results` array");
+  }
+  const results = payload.results as Record<string, unknown>[];
+  const parsed: ExternalAnalyzerParsedItem[] = [];
   for (const result of results) {
     if (!result || typeof result !== "object") continue;
     const source = (result.source ?? {}) as Record<string, unknown>;
@@ -630,7 +657,7 @@ function parseOsvScanner(stdout: string): ReturnType<ExternalAnalyzerCandidate["
             : primary && typeof primary.details === "string"
               ? primary.details.slice(0, 200)
               : `known vulnerability in ${pkgName}`;
-        items.push({
+        parsed.push({
           id: `osv:${ids.join(",")}:${pkgName}@${pkgVersion}`,
           category: "security",
           severity,
@@ -641,7 +668,7 @@ function parseOsvScanner(stdout: string): ReturnType<ExternalAnalyzerCandidate["
       }
     }
   }
-  return items;
+  return items(parsed);
 }
 
 const osvScannerCandidate: ExternalAnalyzerCandidate = {
@@ -710,7 +737,7 @@ const rubocopCandidate: ExternalAnalyzerCandidate = {
   detect: (root) => detectRubyEcosystem(root),
   // Read-only: NO `--autocorrect`/`-a`/`-A`. `--format json` → single JSON doc.
   buildArgv: (prefix, root) => [...prefix, "--format", "json", root],
-  parse: parseRubocop,
+  parse: parseRubocopOutcome,
 };
 
 // ---------------------------------------------------------------------------
@@ -751,15 +778,17 @@ const HADOLINT_BINARY: BinarySpec = {
  * message }]`. `level` ∈ error|warning|info|style. Degrades to `[]` on
  * empty/malformed/non-array input.
  */
-function parseHadolint(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+function parseHadolint(stdout: string): ExternalAnalyzerParseReport {
   let findings: unknown;
   try {
     findings = JSON.parse(stdout || "[]");
   } catch {
-    return [];
+    return parseFailure("hadolint", "output is not valid JSON");
   }
-  if (!Array.isArray(findings)) return [];
-  return findings
+  if (!Array.isArray(findings)) {
+    return parseFailure("hadolint", "output is not a JSON array of diagnostics");
+  }
+  return items(findings
     .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === "object")
     .map((f) => {
       const file = typeof f.file === "string" ? f.file : "";
@@ -779,7 +808,7 @@ function parseHadolint(stdout: string): ReturnType<ExternalAnalyzerCandidate["pa
         rule: code,
       };
     })
-    .filter((item) => item.path.length > 0);
+    .filter((item) => item.path.length > 0));
 }
 
 const hadolintCandidate: ExternalAnalyzerCandidate = {
@@ -845,15 +874,17 @@ const ACTIONLINT_BINARY: BinarySpec = {
  * against actionlint's template output: `[{ message, filepath, line, column,
  * kind }]`. Degrades to `[]` on empty/malformed/non-array input.
  */
-function parseActionlint(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+function parseActionlint(stdout: string): ExternalAnalyzerParseReport {
   let findings: unknown;
   try {
     findings = JSON.parse(stdout || "[]");
   } catch {
-    return [];
+    return parseFailure("actionlint", "output is not valid JSON");
   }
-  if (!Array.isArray(findings)) return [];
-  return findings
+  if (!Array.isArray(findings)) {
+    return parseFailure("actionlint", "output is not a JSON array of diagnostics");
+  }
+  return items(findings
     .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === "object")
     .map((f) => {
       const path = typeof f.filepath === "string" ? f.filepath : "";
@@ -871,7 +902,7 @@ function parseActionlint(stdout: string): ReturnType<ExternalAnalyzerCandidate["
         rule: kind,
       };
     })
-    .filter((item) => item.path.length > 0);
+    .filter((item) => item.path.length > 0));
 }
 
 const actionlintCandidate: ExternalAnalyzerCandidate = {
@@ -903,18 +934,18 @@ const actionlintCandidate: ExternalAnalyzerCandidate = {
  * line, character, text }] }`. Each `anys` entry is one implicit/explicit `any`
  * site; degrades to `[]` on empty/malformed input or a missing `anys` array.
  */
-function parseTypeCoverage(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+function parseTypeCoverage(stdout: string): ExternalAnalyzerParseReport {
   let payload: unknown;
   try {
     payload = JSON.parse(stdout || "{}");
   } catch {
-    return [];
+    return parseFailure("type-coverage", "output is not valid JSON");
   }
-  const anys =
-    payload && typeof payload === "object" && Array.isArray((payload as { anys?: unknown }).anys)
-      ? ((payload as { anys: Record<string, unknown>[] }).anys)
-      : [];
-  return anys
+  if (!isRecord(payload) || !Array.isArray(payload.anys)) {
+    return parseFailure("type-coverage", "output has no `anys` array");
+  }
+  const anys = payload.anys as Record<string, unknown>[];
+  return items(anys
     .filter((a): a is Record<string, unknown> => Boolean(a) && typeof a === "object")
     .map((a) => {
       const file = typeof a.file === "string" ? a.file : "";
@@ -930,7 +961,7 @@ function parseTypeCoverage(stdout: string): ReturnType<ExternalAnalyzerCandidate
         rule: "type-coverage-any",
       };
     })
-    .filter((item) => item.path.length > 0);
+    .filter((item) => item.path.length > 0));
 }
 
 const typeCoverageCandidate: ExternalAnalyzerCandidate = {
@@ -998,33 +1029,42 @@ function parseCsvLine(line: string): string[] {
  * CSV format: "NLOC,CCN,Token,PARAM,Length,Location,File,Function"
  * Degrades to `[]` on parse failure; reports lead findings for complexity overages.
  */
-function parseLizard(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+function parseLizard(stdout: string): ExternalAnalyzerParseReport {
   if (!stdout || stdout.trim().length === 0) {
-    return [];
+    return items([]);
   }
   const lines = stdout.trim().split("\n");
-  if (lines.length < 2) return []; // CSV header only, no data rows
-  const items: ReturnType<ExternalAnalyzerCandidate["parse"]> = [];
+  if (lines.length < 2) return items([]); // CSV header only, no data rows
+  const parsed: ExternalAnalyzerParsedItem[] = [];
+  // A row the CSV shape does not fit is COUNTED, not silently discarded: a schema
+  // drift that drops every row must not be reportable as a clean scan.
+  let droppedRows = 0;
   // Skip the CSV header (line 0) and process data rows
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
     if (!line.trim()) continue;
     // Parse CSV line, handling quoted fields with embedded commas
     const parts = parseCsvLine(line);
-    if (parts.length < 8) continue;
+    if (parts.length < 8) {
+      droppedRows += 1;
+      continue;
+    }
     const nloc = parseInt(parts[0], 10);
     const ccn = parseInt(parts[1], 10);
     const param = parseInt(parts[3], 10);
     const file = parts[6] || "";
     const func = parts[7] || "unknown";
-    if (!file || isNaN(nloc) || isNaN(ccn) || isNaN(param)) continue;
+    if (!file || isNaN(nloc) || isNaN(ccn) || isNaN(param)) {
+      droppedRows += 1;
+      continue;
+    }
     // Emit leads for complexity overages: CCN > 10, NLOC > 200, PARAM > 5
     const issues: Array<{ rule: string; threshold: number; actual: number }> = [];
     if (ccn > 10) issues.push({ rule: "lizard-ccn", threshold: 10, actual: ccn });
     if (nloc > 200) issues.push({ rule: "lizard-length", threshold: 200, actual: nloc });
     if (param > 5) issues.push({ rule: "lizard-params", threshold: 5, actual: param });
     for (const issue of issues) {
-      items.push({
+      parsed.push({
         id: `${issue.rule}:${file}:${func}`,
         category: "maintainability",
         // Threshold bands (leads only, never verdicts): ≥2× the threshold is a
@@ -1036,7 +1076,7 @@ function parseLizard(stdout: string): ReturnType<ExternalAnalyzerCandidate["pars
       });
     }
   }
-  return items;
+  return { items: parsed, ...(droppedRows > 0 ? { dropped_rows: droppedRows } : {}) };
 }
 
 const lizardCandidate: ExternalAnalyzerCandidate = {

@@ -1,4 +1,8 @@
-import type { ExternalAnalyzerResults } from "./types.js";
+import type {
+  ExternalAnalyzerParsedItem,
+  ExternalAnalyzerParseReport,
+  ExternalAnalyzerResults,
+} from "./types.js";
 import { normalizeGenericExternalResults } from "./normalizeExternal.js";
 
 /**
@@ -47,36 +51,33 @@ function mapRubocopSeverity(severity: string | undefined): string {
 }
 
 /**
- * Parse rubocop's `--format json` stdout into the generic item shape. Degrades
- * to `[]` on empty/malformed input or a missing `files` array.
+ * Parse rubocop's `--format json` stdout, REPORTING a degradation rather than
+ * swallowing it: unparsable JSON or a payload with no `files` array comes back as
+ * `parse_failed`, which the acquisition engine classifies `parse_error`. Before
+ * this, a rubocop invocation that crashed or printed a non-JSON banner produced the
+ * same `{results: []}` as a genuinely clean Ruby tree — the one signal the status
+ * contract was designed to carry was unreachable from this adapter.
  */
-export function parseRubocop(stdout: string): Array<{
-  id?: string;
-  category?: string;
-  severity?: string;
-  path?: string;
-  line_start?: number;
-  line_end?: number;
-  summary?: string;
-  rule?: string;
-}> {
+export function parseRubocopOutcome(stdout: string): ExternalAnalyzerParseReport {
   let payload: RubocopJson;
   try {
     payload = JSON.parse(stdout || "{}") as RubocopJson;
   } catch {
-    return [];
+    return {
+      items: [],
+      parse_failed: true,
+      note: "rubocop: output is not valid JSON",
+    };
   }
-  const files = Array.isArray(payload.files) ? payload.files : [];
-  const items: Array<{
-    id?: string;
-    category?: string;
-    severity?: string;
-    path?: string;
-    line_start?: number;
-    line_end?: number;
-    summary?: string;
-    rule?: string;
-  }> = [];
+  if (!payload || typeof payload !== "object" || !Array.isArray(payload.files)) {
+    return {
+      items: [],
+      parse_failed: true,
+      note: "rubocop: output has no `files` array",
+    };
+  }
+  const files = payload.files;
+  const items: ExternalAnalyzerParsedItem[] = [];
   for (const file of files) {
     if (!file || typeof file !== "object") continue;
     const path = typeof file.path === "string" ? file.path : "";
@@ -112,7 +113,16 @@ export function parseRubocop(stdout: string): Array<{
       });
     }
   }
-  return items;
+  return { items };
+}
+
+/**
+ * The item-list view of {@link parseRubocopOutcome}, for the audit/adapters
+ * normalization seam, which consumes items and reports coverage elsewhere. One
+ * implementation, two views — never two parsers that can drift.
+ */
+export function parseRubocop(stdout: string): ExternalAnalyzerParsedItem[] {
+  return parseRubocopOutcome(stdout).items;
 }
 
 /**
