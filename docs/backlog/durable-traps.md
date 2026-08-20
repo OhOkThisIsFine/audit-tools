@@ -13,6 +13,22 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **A tracked generated doc that links to an UNTRACKED file blocks every docs-touching commit
+  (2026-08-20).** The commit gate materializes the STAGED tree — untracked files vanish — before
+  running `check:doc-links`, so a link from a tracked doc to an untracked target resolves to
+  nothing there while the standalone `npm run check:doc-links` passes every time. Deterministic,
+  not a flake, and the failure names the link rather than the untracked file, so it reads as a
+  broken doc. Hit when the routine's generated inbox linked a freshly-written proposal that had
+  never been `git add`ed: two agents each failed five commits and correctly refused to bypass.
+  Proposals under the routine's proposals directory are tracked BY CONVENTION — add the new one,
+  and the gate clears.
+
+- **`git commit` after `git add <paths>` commits the whole INDEX, not your paths (2026-08-20).**
+  A concurrent agent's already-staged files ride your commit and land under your message. Hit at
+  closeout: a docs agent's three staged backlog files landed inside a one-file handoff fix, which
+  then needed an amend to describe what it actually carried. When any other agent may be staging,
+  scope the commit itself — `git commit -- <pathspec>` — rather than trusting the index.
+
 - **A vitest CLI file filter resurrects same-suffixed test COPIES under stale worktree dirs
   (2026-08-06).** `npx vitest run tests/remediate/x.test.ts` substring-matched — and RAN — the
   copies at `.claude/worktrees/wf_*/tests/remediate/x.test.ts` and
