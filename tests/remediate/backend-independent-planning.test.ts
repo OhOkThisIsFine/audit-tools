@@ -10,13 +10,20 @@ const RED_SIGNATURE =
   "contract:backend-independent-remediation-planning:not-yet-satisfied";
 
 const forbidden = vi.hoisted(() => {
+  // Every channel here must be one a REGRESSION could actually reach. The
+  // context / model / provider / quota channels were mocked onto
+  // resolveContextBudget, resolveModelStatics, resolveFreshSessionProviderName,
+  // createFreshSessionProvider and scheduleWave — all five deleted by the
+  // zero-adapter retirement, so a grep across src/ returns zero hits for each.
+  // A mock on a symbol that no longer exists cannot be called by anything, so
+  // those four counters were pinned at 0 for every possible regression: the
+  // guard read as four channels of protection and was none. They are removed
+  // rather than repointed at a contrived call site — a channel is either
+  // reachable or it does not belong here.
   const counts: Record<string, number> = {
-    context: 0,
-    model: 0,
+    dispatch: 0,
     network: 0,
     process: 0,
-    provider: 0,
-    quota: 0,
     state_store: 0,
   };
   return {
@@ -31,16 +38,10 @@ const forbidden = vi.hoisted(() => {
   };
 });
 
-vi.mock("audit-tools/shared", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return {
-    ...actual,
-    resolveContextBudget: () => forbidden.call("context"),
-    resolveModelStatics: () => forbidden.call("model"),
-    resolveFreshSessionProviderName: () => forbidden.call("provider"),
-    createFreshSessionProvider: () => forbidden.call("provider"),
-  };
-});
+// NOTE: there is deliberately NO `vi.mock("audit-tools/shared", …)` here. Its
+// only overrides were the four retired symbols above; with those gone the mock
+// spread `...actual` over the real module and overrode nothing, i.e. it was an
+// elaborate identity function.
 
 vi.mock("../../src/remediate/state/store.js", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -54,9 +55,37 @@ vi.mock("../../src/remediate/state/store.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../../src/remediate/steps/dispatch.js", () => ({
-  scheduleWave: () => forbidden.call("quota"),
-}));
+// The dispatch barrel, retargeted onto symbols that EXIST at HEAD. Planning
+// must never prepare a host workload or ingest a result — those are the live
+// capabilities a planning-side regression could actually reach, unlike
+// `scheduleWave`, which this mock used to name and which no longer exists.
+//
+// REACHABILITY IS PROVEN, NOT ASSUMED. `src/remediate/steps/dispatch.ts` is not
+// in the current transitive import closure of the planning entry points this
+// suite drives, which reads like a dead channel. It is not: `vi.mock` replaces
+// the module REGISTRY-WIDE, so the substitution is already in force for whatever
+// imports the barrel next. Running this suite with a call to
+// `prepareRemediationHostHandoff` added inside `promoteImplementationDagToExtractedPlan`
+// produced `planning invoked forbidden effects: dispatch=2` — the counter fired
+// and assertOffline() went red. That is the whole point of a tripwire, and it is
+// the same standing as the global fetch / child_process patches, which today's
+// closure also never reaches. The four channels deleted above were different in
+// kind: their symbols no longer exist anywhere in src/, so no regression could
+// call them even in principle.
+//
+// `...actual` is load-bearing. The previous shape was a bare object literal, so
+// every other export of the barrel resolved to `undefined` for any module this
+// test loads — a mock of one symbol silently blanking the rest of a barrel is a
+// failure mode that hides behind a green suite until an unrelated path needs one
+// of them.
+vi.mock("../../src/remediate/steps/dispatch.js", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    prepareRemediationHostHandoff: () => forbidden.call("dispatch"),
+    ingestRemediationHostResults: () => forbidden.call("dispatch"),
+  };
+});
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -434,5 +463,67 @@ describe(RED_SIGNATURE, () => {
     snapshotAffectedFileHashes(root, [missing]);
     requireContract(missing.affected_files[0]?.hash_at_plan_time === undefined, "missing path acquired a trusted baseline hash");
     assertOffline();
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// The dispatch barrel, pinned by TWO separately-derived assertions.
+//
+// One comparison cannot do this job. Deriving both sides from the same live
+// module reduces the predicate to "keys(actual) ∪ overrides ⊇ keys(actual)",
+// which is true for every possible barrel content — removing an export shrinks
+// both sides at once and the assertion cannot change value. So the two
+// properties are split, and they have different subjects:
+//
+//   (a) MOCK COVERAGE — run-time-derived, and REQUIRED to be: does the mock's
+//       `...actual` spread still cover every key the barrel really exports?
+//       This is what catches a mock written as a bare object literal.
+//   (b) EXPORT-SET DRIFT — compared against a COMMITTED baseline that does NOT
+//       move with its subject. A baseline that re-derives from the thing it
+//       guards cannot detect that thing changing, which is the whole defect
+//       class this file exists to close.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * The barrel's value exports, as committed. Updated only by a deliberate edit —
+ * never derived at run time. `src/remediate/steps/dispatch.ts` is a read-only
+ * reference for this module; this list is the pin, and it lives here because
+ * the barrel itself is in no module's write scope.
+ */
+const DISPATCH_BARREL_EXPORTS = [
+  "ingestRemediationHostResults",
+  "prepareRemediationHostHandoff",
+  "readExtractedPlanIfPresent",
+  "remediationHostResultFilePath",
+] as const;
+
+describe("the dispatch barrel mock covers the real surface, and the surface itself is pinned", () => {
+  it("(a) spreads ...actual over every key the live barrel exports", async () => {
+    // `importActual` deliberately, not a plain import: this file MOCKS the
+    // barrel, so a normal import here would return the mock and the assertion
+    // would compare the mock against itself.
+    const live = await vi.importActual<Record<string, unknown>>(
+      "../../src/remediate/steps/dispatch.js",
+    );
+    const mocked = await import("../../src/remediate/steps/dispatch.js");
+
+    const blanked = Object.keys(live).filter(
+      (key) => (mocked as Record<string, unknown>)[key] === undefined,
+    );
+    requireContract(
+      blanked.length === 0,
+      `the barrel mock blanked live exports (no ...actual spread): ${blanked.join(", ")}`,
+    );
+  });
+
+  it("(b) matches the committed export-set baseline", async () => {
+    const live = await vi.importActual<Record<string, unknown>>(
+      "../../src/remediate/steps/dispatch.js",
+    );
+    requireEqual(
+      Object.keys(live).sort(),
+      [...DISPATCH_BARREL_EXPORTS].sort(),
+      "the dispatch barrel's export set drifted from the baseline committed in this file",
+    );
   });
 });

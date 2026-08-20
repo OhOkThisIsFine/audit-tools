@@ -6,6 +6,14 @@ import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 
+// The wrapper's OWN build-attempt signal, imported rather than re-typed. A
+// second copy of the literal here would desync silently the day production
+// renames it — the exact class this file's regression tests exist to catch.
+// (Importing is side-effect-free: the wrapper guards `main()` on
+// `import.meta.url === pathToFileURL(process.argv[1] ?? "").href` —
+// remediate-code.mjs, the `if` immediately above its `main().catch(...)`.)
+import { BUILD_ATTEMPT_MARKER } from "../../remediate-code.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WRAPPER = join(__dirname, "..", "..", "remediate-code.mjs");
 
@@ -52,7 +60,7 @@ describe("shouldBuildDist: sourceRoot absent (published-install path)", () => {
     // Neither src/, tsconfig.json, nor dist/index.js exist → published install.
     // shouldBuildDist() must return false; ensureBuilt skips build;
     // main() then exits 1 with the dist-not-found guard (no build stderr).
-    const tmpDir = mkdtempSync(join(tmpdir(), "remediate-build-test-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "remediate-wrapper-fixture-"));
     try {
       const dst = join(tmpDir, "remediate-code.mjs");
       writeFileSync(dst, readFileSync(WRAPPER, "utf8"), "utf8");
@@ -66,10 +74,11 @@ describe("shouldBuildDist: sourceRoot absent (published-install path)", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toMatch(/dist\/remediate\/index\.js not found/);
       // No build was attempted — shouldBuildDist returned false, so ensureBuilt
-      // never spawned a build. The only stderr is the guard's advisory (which
-      // itself says "Run: npm run build"), so we discriminate on the auto-build
-      // failure marker that ensureBuilt emits only when it actually runs a build.
-      expect(result.stderr).not.toMatch(/auto-build dist/);
+      // never reached its build branch. The guard's own advisory says "Run: npm
+      // run build", so any text search for "build" matches here too; the ONLY
+      // sound discriminator is the wrapper's attempt marker, and its absence is
+      // what "no build was attempted" means.
+      expect(result.stderr).not.toContain(BUILD_ATTEMPT_MARKER);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -81,7 +90,7 @@ describe("shouldBuildDist: sourceRoot exists, tsconfigPath absent, dist absent",
     // src/ exists, tsconfig.json absent, dist/index.js absent →
     // shouldBuildDist() must return true; ensureBuilt runs npm run build;
     // build fails (no tsconfig) and surfaces an error + exits non-zero.
-    const tmpDir = mkdtempSync(join(tmpdir(), "remediate-build-test-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "remediate-wrapper-fixture-"));
     try {
       const dst = join(tmpDir, "remediate-code.mjs");
       writeFileSync(dst, readFileSync(WRAPPER, "utf8"), "utf8");
@@ -95,9 +104,13 @@ describe("shouldBuildDist: sourceRoot exists, tsconfigPath absent, dist absent",
 
       // Should exit non-zero (build failure)
       expect(result.status).not.toBe(0);
-      // Build was attempted — either build output or auto-build error message present
+      // Build was ATTEMPTED — asserted on the wrapper's own marker. The former
+      // /npm run build|auto-build dist|build/i matched none of the real output
+      // (npm's ENOENT text contains no "build"); it passed only because the
+      // fixture directory used to be named "remediate-build-test-…", so the
+      // regex was matching the temp path inside npm's error message.
       const combined = (result.stdout ?? "") + (result.stderr ?? "");
-      expect(combined).toMatch(/npm run build|auto-build dist|build/i);
+      expect(combined).toContain(BUILD_ATTEMPT_MARKER);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -110,7 +123,7 @@ describe("shouldBuildDist: sourceRoot exists, tsconfigPath absent, dist present"
     // shouldBuildDist() must return false; ensureBuilt skips build;
     // main() loads dist/index.js (which will exit non-zero with unknown command,
     // but we only need to confirm no build was attempted).
-    const tmpDir = mkdtempSync(join(tmpdir(), "remediate-build-test-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "remediate-wrapper-fixture-"));
     try {
       const dst = join(tmpDir, "remediate-code.mjs");
       writeFileSync(dst, readFileSync(WRAPPER, "utf8"), "utf8");
@@ -141,7 +154,7 @@ describe("shouldBuildDist: tsconfigPath absent, dist present but STALE (CE-003)"
     // fails loudly here because there is no tsconfig). The pre-CE-003 code
     // returned `!existsSync(distEntry)` on the tsconfig-absent branch, so a
     // stale-but-present dist was silently used.
-    const tmpDir = mkdtempSync(join(tmpdir(), "remediate-build-test-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "remediate-wrapper-fixture-"));
     try {
       const dst = join(tmpDir, "remediate-code.mjs");
       writeFileSync(dst, readFileSync(WRAPPER, "utf8"), "utf8");
@@ -165,11 +178,13 @@ describe("shouldBuildDist: tsconfigPath absent, dist present but STALE (CE-003)"
         encoding: "utf8",
       });
 
-      // A build was attempted (and fails loudly with no tsconfig) → non-zero exit
-      // and build output present. This proves the stale dist triggered a rebuild.
+      // A build was ATTEMPTED (and fails loudly with no tsconfig) → non-zero
+      // exit AND the wrapper's own attempt marker. The marker is what proves the
+      // stale dist triggered a rebuild: a non-zero exit alone is also what the
+      // no-build guard produces, so the exit code cannot discriminate.
       expect(result.status).not.toBe(0);
       const combined = (result.stdout ?? "") + (result.stderr ?? "");
-      expect(combined).toMatch(/npm run build|auto-build dist|build/i);
+      expect(combined).toContain(BUILD_ATTEMPT_MARKER);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

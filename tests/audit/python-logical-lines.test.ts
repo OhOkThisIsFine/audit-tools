@@ -1,5 +1,4 @@
 import { test, expect } from "vitest";
-import assert from "node:assert/strict";
 
 // Internal function exposed for testing via a named export shim. The function
 // is not exported from the module, so we call the module-level
@@ -25,23 +24,45 @@ test("pythonLogicalLines: does not flush on parenDepth underflow from mismatched
     "  .bar)",  // bare ) — mismatched; depth must be clamped to 0, not go to -1
   ].join("\n");
 
-  // The content above will produce a logical line `import foo .bar)` (or
-  // similar). The key assertion is that extractPythonImportEdges does NOT
-  // crash (i.e. it consumes the content safely) and the edge count is 0
-  // because `foo .bar)` is not a valid module specifier.
-  assert.doesNotThrow(() =>
-    extractPythonImportEdges("src/mod.py", content, lookup("src/mod.py", "foo.py")),
+  // The content above assembles into the logical line `import foo .bar)`, which
+  // is not a valid module specifier — so the RESOLVED EDGE SET is the assertion,
+  // not merely that the call survives. `doesNotThrow` alone stayed green under
+  // the very regression this test names: an early flush on negative parenDepth
+  // emits a truncated logical line, which throws nothing and simply produces a
+  // spurious edge. Pinning `length === 0` is what makes that reintroduction red.
+  const edges = extractPythonImportEdges(
+    "src/mod.py",
+    content,
+    lookup("src/mod.py", "foo.py"),
   );
+  expect(
+    edges.length,
+    `a truncated logical line must resolve to nothing, got: ${JSON.stringify(edges)}`,
+  ).toBe(0);
 });
 
 test("pythonLogicalLines: from foo import (bar, baz) is a single logical line", () => {
   const content = "from foo import (bar,\n  baz)";
   const pl = lookup("src/mod.py", "foo.py", "foo/bar.py", "foo/baz.py");
-  // We just verify it does not throw and returns edges (i.e. the import is
-  // parsed correctly as a single logical line, not two truncated ones).
   const edges = extractPythonImportEdges("src/mod.py", content, pl);
-  // baz and bar may or may not resolve, but the call must succeed.
-  expect(Array.isArray(edges)).toBeTruthy();
+  // The SAME assertions the well-formed-multiline sibling below makes. The
+  // "bar and baz may or may not resolve" hedge that used to sit here conceded
+  // exactly the outcome this test exists to pin: once logical-line assembly is
+  // correct, a parenthesized import resolves identically whether it is written
+  // on one line or several, so anything weaker cannot see the regression.
+  expect(
+    edges.length >= 2,
+    `must emit at least 2 edges (bar+baz resolved), got ${edges.length}: ${JSON.stringify(edges)}`,
+  ).toBeTruthy();
+  const tos = edges.map((e) => e.to);
+  expect(
+    tos.some((t) => t.includes("bar")),
+    `expected an edge to foo/bar.py, got: ${JSON.stringify(tos)}`,
+  ).toBeTruthy();
+  expect(
+    tos.some((t) => t.includes("baz")),
+    `expected an edge to foo/baz.py, got: ${JSON.stringify(tos)}`,
+  ).toBeTruthy();
 });
 
 test("pythonLogicalLines: well-formed multiline import is still a single logical line", () => {

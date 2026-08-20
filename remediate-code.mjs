@@ -82,12 +82,27 @@ function runNpmBuild() {
 // run its blocking spawnSync and forward the command against a stale/absent
 // dist before the fallback ever fires (CE-002). The exit-code branch terminates
 // synchronously, so it never reaches the `return false`.
+/**
+ * Emitted on stderr the moment a build is ATTEMPTED, before the build runs.
+ *
+ * Exported so a test can assert "a build was attempted" against the wrapper's
+ * own signal instead of a literal copied into the test. The two signals below it
+ * cannot serve that purpose: the spawn-failure message fires only when the spawn
+ * itself errors (not when a build runs and fails), and the dist-not-found
+ * advisory says "Run: npm run build" on the path where NO build was attempted —
+ * so any regex loose enough to match a real build matched the no-build guard too.
+ */
+export const BUILD_ATTEMPT_MARKER = "remediate-code: auto-building dist";
+
 export function ensureBuilt({
   shouldBuild = shouldBuildDist,
   runBuild = runNpmBuild,
   applyExit = applyWrapperExitAction,
 } = {}) {
   if (!shouldBuild()) return true;
+  // UNCONDITIONAL, and before the build: this marks the ATTEMPT, so it must not
+  // be conditional on the attempt's outcome.
+  process.stderr.write(`${BUILD_ATTEMPT_MARKER}\n`);
   const result = runBuild();
   if (result.stdout) process.stderr.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
