@@ -33,13 +33,19 @@ import {
   type RemediationItemState,
   type RemediationPlan,
 } from "../../state/types.js";
-import { ITEM_STATUSES, isVerifiedCompleteStatus } from "../../state/itemStatus.js";
+import {
+  ITEM_STATUSES,
+  isTerminalStatus,
+  isVerifiedCompleteStatus,
+} from "../../state/itemStatus.js";
+
+import {
+  REMEDIATION_HOST_DECISION_CONTRACT_VERSION as DECISION_CONTRACT_VERSION,
+  REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_CONTRACT_VERSION,
+  REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION as WORKLOAD_CONTRACT_VERSION,
+} from "../types.js";
 
 const STATE_CONTRACT_VERSION = "remediate-code-state/v1alpha1" as const;
-const WORKLOAD_CONTRACT_VERSION =
-  "remediation-host-workload/v1alpha1" as const;
-const RESULT_CONTRACT_VERSION = "remediation-host-result/v1alpha1" as const;
-const DECISION_CONTRACT_VERSION = "remediation-host-decision/v1alpha1" as const;
 const HANDOFF_RECORD_CONTRACT_VERSION =
   "remediation-host-handoff-record/v1alpha1" as const;
 
@@ -101,6 +107,34 @@ export const REMEDIATION_ISSUE_CODES = [
   "changed_files_mismatch",
   "run_start_dirty_overlap",
   "required_test_failed",
+  /**
+   * A required test exceeded its deadline. DISTINCT from `required_test_failed`
+   * by code alone: a hung suite and a genuine red are different facts about the
+   * work, and telling them apart must not require parsing a joined message.
+   */
+  "required_test_timed_out",
+  /**
+   * A required test produced more output than the capture buffer holds, so the
+   * runner killed it. NOT a verdict on the tests: the child was terminated by
+   * the capture cap, and whether the suite would have passed is unknown. It has
+   * its own code because it was previously indistinguishable from a hang — node
+   * kills an over-buffer child with a signal, which the old discriminator read
+   * as a deadline miss.
+   */
+  "required_test_output_overflow",
+  /**
+   * A plan block declares a dependency id that exists in NO block of the plan.
+   * The block is unschedulable — never level 0 — and the producer bug is named
+   * rather than absorbed.
+   */
+  "dependency_missing",
+  /**
+   * A block arrived outside the normalized write-scope / declared-command shape
+   * this boundary consumes (artifact:normalized-block-write-scope). Refused, not
+   * silently normalized: a silently sorted, deduped or re-rooted write scope
+   * hides the producer bug and widens what a host may touch.
+   */
+  "block_contract_invalid",
   /**
    * A recovery-mode acceptance could not be marked on the submission ledger, so
    * it was refused. An acceptance that used the relaxation MUST stay
@@ -315,6 +349,233 @@ function normalizeDeclaredPath(root: string, candidate: string, label: string): 
   return repoRelativePath(root, candidate, label);
 }
 
+/**
+ * Does a command leave the declared single-invocation shape?
+ *
+ * A `targeted_command` is executed VERBATIM through `shell: true` in the
+ * repository root, so anything that chains, redirects, substitutes or subshells
+ * turns one declared test into arbitrary execution. A flat regex cannot decide
+ * this: `node -e "process.exit(0)"` is an ordinary test invocation whose parens
+ * are inside quotes, and refusing it would refuse the normal case.
+ *
+ * So the scan is QUOTE-AWARE — a tiny, fully-owned grammar, not a shell parser.
+ * It is deliberately narrower than EITHER shell's grammar, because `shell: true`
+ * is TWO grammars and no per-grammar state machine is sound for both: `/bin/sh
+ * -c` on posix, `cmd.exe /d /s /c` on win32. Where they disagree, tracking state
+ * under one of them MIS-CLASSIFIES the other:
+ *
+ *   - `'` quotes on sh and is an ORDINARY CHARACTER on cmd.exe, so crediting it
+ *     reads `echo '& evil.exe'` as fully quoted while cmd.exe reads `&` as a
+ *     command separator and starts a second process.
+ *   - `\` escapes a quote on sh, so `echo \" & evil \"` de-syncs any
+ *     double-quote tracking: the scan believes `&` is quoted, sh sees an escaped
+ *     literal quote and a live separator.
+ *   - `%VAR%` is expanded by cmd.exe BEFORE the line is split into commands, and
+ *     expands inside double quotes too, so a `%…%` reference can introduce
+ *     separators that were never in the scanned string.
+ *   - `^` is cmd.exe's escape character and de-syncs quote state the same way.
+ *   - CR and LF are not inert inside cmd.exe's double quotes: LF truncates the
+ *     command there and CR is deleted outright, so what runs is not what was
+ *     scanned. Every control character is refused for that reason.
+ *
+ * What remains is the one construct both shells agree on: a double quote makes
+ * the enclosed metacharacters literal. So `' \ ^ % $` and backtick — plus every
+ * control character — are refused in EVERY position, quoted or not; the
+ * chaining/redirection/grouping set is refused outside double quotes; and an
+ * unterminated double quote is itself a refusal, because the rest of the string
+ * cannot be classified.
+ *
+ * The fail direction is REFUSAL. Over-refusing a legitimate command costs a
+ * producer-side split, and the producer-side obligation still owns the declared
+ * shape (artifact:normalized-block-write-scope); under-admitting one hands a
+ * shell an extra process.
+ */
+function leavesDeclaredCommandShape(command: string): boolean {
+  let inDoubleQuotes = false;
+  for (const character of command) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return true;
+    if ("'\\^%$`".includes(character)) return true;
+    if (character === '"') {
+      inDoubleQuotes = !inDoubleQuotes;
+      continue;
+    }
+    if (inDoubleQuotes) continue;
+    if ("&|;<>()".includes(character)) return true;
+  }
+  return inDoubleQuotes;
+}
+
+/**
+ * A block that arrived outside the shape this boundary CONSUMES.
+ *
+ * The producer half of the write-scope contract is owned upstream
+ * (artifact:normalized-block-write-scope). This is the consumer half, and it
+ * exists because absorbing a malformed block is worse than refusing it: an
+ * absolute or escaping `touched_files` entry silently widens what a host may
+ * write, and a shell-chained `targeted_command` is executed verbatim. Both are
+ * producer bugs, and a boundary that normalizes them away means neither ever
+ * surfaces. The refusal is CLASSIFIED (`block_contract_invalid`) and names the
+ * block, so the bug is attributable to the module that wrote it.
+ */
+class BlockContractError extends Error {
+  constructor(
+    readonly blockId: string,
+    readonly detail: string,
+  ) {
+    super(
+      `block '${blockId}' is outside the normalized write-scope contract: ${detail}`,
+    );
+    this.name = "BlockContractError";
+  }
+}
+
+/**
+ * Refuse a block whose declared write scope or commands leave the consumed
+ * shape. Throws {@link BlockContractError}; callers turn it into a classified
+ * issue. Runs BEFORE anything is built from the block, so a refused block never
+ * becomes a work item and its commands never run.
+ *
+ * COVERS THE HANDOFF BOUNDARY ONLY — state the uncovered half rather than let
+ * the covered half read as a close. `reverifyBlockedItemAgainstTree` in
+ * `src/remediate/phases/triage.ts` spawns the SAME `block.targeted_commands`
+ * through `shell: true` with no gate in front of it, so a command this boundary
+ * would refuse still reaches a shell on the triage path. Routing that spawn
+ * through this gate is tracked as backlog work, not covered here.
+ */
+function assertBlockContract(root: string, block: RemediationBlock): void {
+  for (const raw of block.touched_files) {
+    if (typeof raw !== "string" || raw.trim().length === 0) {
+      throw new BlockContractError(
+        block.block_id,
+        "touched_files carries an empty entry",
+      );
+    }
+    if (isAbsolute(raw)) {
+      throw new BlockContractError(
+        block.block_id,
+        `touched_files entry ${JSON.stringify(raw)} is absolute, not repository-relative`,
+      );
+    }
+    let normalized: string;
+    try {
+      normalized = repoRelativePath(root, raw, `${block.block_id}.touched_files[]`);
+    } catch {
+      throw new BlockContractError(
+        block.block_id,
+        `touched_files entry ${JSON.stringify(raw)} does not resolve beneath the repository root`,
+      );
+    }
+    if (normalized !== raw) {
+      throw new BlockContractError(
+        block.block_id,
+        `touched_files entry ${JSON.stringify(raw)} is not in normalized repo-relative form ` +
+          `(${JSON.stringify(normalized)})`,
+      );
+    }
+  }
+  for (const command of block.targeted_commands ?? []) {
+    if (typeof command !== "string" || command.trim().length === 0) {
+      throw new BlockContractError(
+        block.block_id,
+        "targeted_commands carries an empty command",
+      );
+    }
+    if (leavesDeclaredCommandShape(command)) {
+      throw new BlockContractError(
+        block.block_id,
+        `targeted_command ${JSON.stringify(command)} leaves the declared shape — it chains, ` +
+          "redirects or substitutes, and this boundary executes commands verbatim through a shell",
+      );
+    }
+  }
+}
+
+/**
+ * Every block of the plan that cannot be scheduled, with the reason, as
+ * classified ingest issues. Two producer bugs live here: a dependency id that
+ * resolves to no block (unschedulable forever — see `hostDependencyLevels`),
+ * and a block outside the consumed write-scope/command shape.
+ *
+ * The scanned set is BOUND ∪ UNSETTLED, and it is that union because those are
+ * exactly the blocks something else re-derives:
+ *   - UNSETTLED (any item not terminal) — the blocks still to be scheduled. A
+ *     settled block's historical shape is not this ingest's business, and
+ *     reporting it would turn every later ingest into a repeat of the same noise.
+ *   - BOUND (`block_id` in `host_handoff.work_item_ids`, WHATEVER its items'
+ *     statuses) — because `parseWorkItem` re-derives every bound item through
+ *     `buildWorkItem` regardless of status. A status filter alone therefore
+ *     scanned a DIFFERENT set than the one that can throw: a bound block whose
+ *     items had all reached terminal still failed the workload parse when its
+ *     contract was malformed, and surfaced as a bare `workload_invalid` naming no
+ *     block. Scanning the union is what makes "the block that broke the parse is
+ *     always named" true rather than usually true.
+ */
+function planBlockIssues(
+  root: string,
+  state: CurrentRemediationHostState,
+): RemediationHostIngestIssue[] {
+  const blockIds = new Set(state.plan.blocks.map((block) => block.block_id));
+  const boundIds = new Set(state.host_handoff?.work_item_ids ?? []);
+  const issues: RemediationHostIngestIssue[] = [];
+  for (const block of state.plan.blocks) {
+    const unsettled = block.items.some((findingId) => {
+      const status = state.items[findingId]?.status;
+      return status !== undefined && !isTerminalStatus(status);
+    });
+    if (!unsettled && !boundIds.has(block.block_id)) continue;
+    const missing = (block.dependencies ?? []).filter(
+      (dependencyId) => !blockIds.has(dependencyId),
+    );
+    if (missing.length > 0) {
+      issues.push({
+        code: "dependency_missing",
+        work_item_id: block.block_id,
+        message:
+          `block '${block.block_id}' declares ${missing.length === 1 ? "a dependency" : "dependencies"} ` +
+          `${missing.map((id) => `'${id}'`).join(", ")} present in no block of the plan, so it can ` +
+          "never be dependency-verified and is never scheduled",
+      });
+      continue;
+    }
+    try {
+      assertBlockContract(root, block);
+    } catch (error) {
+      if (!(error instanceof BlockContractError)) throw error;
+      issues.push({
+        code: "block_contract_invalid",
+        work_item_id: block.block_id,
+        message: error.message,
+      });
+    }
+  }
+  return issues;
+}
+
+/**
+ * The classified "cannot prepare" message for a producer defect that reached the
+ * build path as a throw. Aggregates the whole plan scan so an operator sees
+ * EVERY malformed block, not just the first one the builder tripped on.
+ *
+ * The THROWER is attributed by name, not by whether the scan happened to find
+ * anything. Falling back only on an EMPTY scan silently dropped the raised error
+ * whenever the scan named some OTHER block — a plan with one ghost dependency
+ * elsewhere was enough to make the message describe a block that did not throw
+ * and omit the one that did.
+ */
+function cannotPrepareMessage(
+  root: string,
+  state: CurrentRemediationHostState,
+  raised: BlockContractError,
+): string {
+  const scanned = planBlockIssues(root, state);
+  const messages = scanned.map((issue) => issue.message);
+  if (!scanned.some((issue) => issue.work_item_id === raised.blockId)) {
+    messages.push(raised.message);
+  }
+  return `Cannot prepare a remediation host workload: ${messages.join("; ")}`;
+}
+
 function resolveBoundaryPaths(params: {
   readonly root: string;
   readonly artifactsDir: string;
@@ -447,7 +708,13 @@ export function hostDependencyLevels(
   const permanentlyIneligible = (block: RemediationBlock): boolean => {
     for (const dependencyId of block.dependencies ?? []) {
       const dependency = blockById.get(dependencyId);
-      if (dependency && !isVerifiedNow(dependency) && !isPending(dependency)) {
+      // An id that resolves to NO block is not a harmless declaration — it is a
+      // prerequisite that can never be verified, so the block can never become
+      // eligible. Guarding on `dependency &&` skipped exactly this case, which
+      // is the second half of the same hole as the readiness predicate below:
+      // closing only one leaves the block reaching the host anyway.
+      if (dependency === undefined) return true;
+      if (!isVerifiedNow(dependency) && !isPending(dependency)) {
         return true;
       }
     }
@@ -463,7 +730,12 @@ export function hostDependencyLevels(
         phaseBarrierClear(phaseOf(block)) &&
         (block.dependencies ?? []).every((dependencyId) => {
           const dependency = blockById.get(dependencyId);
-          if (!dependency || isVerifiedNow(dependency)) return true;
+          // DEPENDENCY READINESS REQUIRES EXISTENCE. `!dependency` used to read
+          // as "satisfied", so a plan naming a block that does not exist had its
+          // dependent placed at level 0 and dispatched with the prerequisite
+          // never verified — silently, because no other check looks at it.
+          if (dependency === undefined) return false;
+          if (isVerifiedNow(dependency)) return true;
           return dependency.items.every(
             (findingId) =>
               isVerifiedCompleteStatus(items[findingId]?.status) ||
@@ -540,6 +812,10 @@ function buildWorkItem(
   baselineCommit: string,
   state: CurrentRemediationHostState,
 ): RemediationHostWorkItem {
+  // The consumed-shape gate runs FIRST: a block outside the write-scope /
+  // command contract must never become a work item, so nothing downstream can
+  // dispatch it or execute its commands.
+  assertBlockContract(paths.root, block);
   const allowedFiles = [...new Set(block.touched_files)].map((path) =>
     normalizeDeclaredPath(paths.root, path, `${block.block_id}.touched_files[]`),
   ).sort(compareCodeUnits);
@@ -1026,7 +1302,102 @@ function gitChangedFilesOfCommit(
  * The normal lane passes `null` and stays byte-identical to the pre-recovery
  * behavior — every command spawns once per work item, exactly as before.
  */
-export type RemediationRequiredTestVerdicts = ReadonlyMap<string, string | null>;
+export type RemediationRequiredTestVerdicts = ReadonlyMap<
+  string,
+  RequiredTestFailure | null
+>;
+
+/**
+ * A required-test rerun that did not pass, CLASSIFIED.
+ *
+ * `outcome` is the whole point. A suite that exceeded its deadline, a suite that
+ * outran the capture buffer, and a suite that returned non-zero are different
+ * facts — the first two are environment signals, only the last is the work being
+ * wrong — and they used to arrive as one joined string (`"<cmd> (exit 1)"` /
+ * `"<cmd> (ETIMEDOUT)"`) that a caller could only tell apart by parsing prose.
+ * Output was not captured at all (`stdio: "ignore"`), so an operator staring at
+ * a red ingest had nothing to read.
+ *
+ * `output_overflow` is separate from `timed_out` because node kills BOTH an
+ * over-deadline and an over-`maxBuffer` child with a signal: a discriminator
+ * that read `signal !== null` as "the deadline fired" reported a command that
+ * exited 0 after printing more than the cap as a hang. `output_overflow` does
+ * NOT claim the tests were fine — see {@link describeRequiredTestFailure}; the
+ * verdict is simply unknown, because a child killed mid-stream may equally have
+ * been on its way to exit 3.
+ */
+export interface RequiredTestFailure {
+  readonly command: string;
+  readonly outcome: "failed" | "timed_out" | "output_overflow" | "spawn_error";
+  readonly exit_code: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  /**
+   * The signal that killed the child, when one did and the runner's own caps did
+   * not (an operator `kill`, an OOM reaper). Absent on every other outcome —
+   * there is no signal to report — which is why it is optional rather than
+   * `string | null`: a caller that reads it gets a name or nothing, never a
+   * placeholder to special-case.
+   */
+  readonly signal?: string;
+}
+
+/**
+ * Per-command deadline. A required test is host-authored and may legitimately be
+ * a full suite, so the bound is generous; what changed is that hitting it is now
+ * a NAMED outcome instead of an unlabelled failure string.
+ */
+const REQUIRED_TEST_TIMEOUT_MS = 10 * 60 * 1_000;
+
+/**
+ * Captured output is bounded and TAIL-biased: a failing suite's verdict is at
+ * the end, and an unbounded capture would put a whole test log into state and
+ * into every rendered issue.
+ */
+const CAPTURED_OUTPUT_LIMIT = 4_000;
+
+/**
+ * The spawn's raw capture buffer. Exceeding it does not truncate — node KILLS
+ * the child — so the cap is a named constant the `output_overflow` message can
+ * quote, rather than a literal buried in the spawn options.
+ */
+const REQUIRED_TEST_MAX_BUFFER_BYTES = 8 * 1_024 * 1_024;
+
+function tail(value: string | undefined): string {
+  const text = value ?? "";
+  return text.length <= CAPTURED_OUTPUT_LIMIT
+    ? text
+    : `…${text.slice(text.length - CAPTURED_OUTPUT_LIMIT)}`;
+}
+
+/**
+ * Render one classified failure for a host-facing issue message.
+ *
+ * `output_overflow` says the verdict is UNKNOWN, not that the tests were fine: a
+ * child killed at the buffer cap may have been heading for exit 0 or exit 3, and
+ * the runner cannot tell which. Either way the item is refused — the honest
+ * report is "we could not find out", and it fails closed.
+ *
+ * A signal-killed child renders the SIGNAL, not `exit null`: `exit_code` is null
+ * for every non-exit outcome, so printing it there described nothing.
+ */
+function describeRequiredTestFailure(failure: RequiredTestFailure): string {
+  const head =
+    failure.outcome === "timed_out"
+      ? `${failure.command} (timed out)`
+      : failure.outcome === "output_overflow"
+        ? `${failure.command} (killed after exceeding the ${String(REQUIRED_TEST_MAX_BUFFER_BYTES)}-byte ` +
+          "output buffer — the run ended at the capture cap, so whether the tests pass is UNKNOWN)"
+        : failure.outcome === "spawn_error"
+          ? `${failure.command} (could not be started)`
+          : failure.exit_code === null
+            ? `${failure.command} (terminated by ${failure.signal ?? "an unreported signal"})`
+            : `${failure.command} (exit ${String(failure.exit_code)})`;
+  const captured = [failure.stdout, failure.stderr]
+    .filter((stream) => stream.trim().length > 0)
+    .join("\n");
+  return captured.length > 0 ? `${head}: ${captured}` : head;
+}
 
 /**
  * Length-prefixed so the root/command boundary is unambiguous for any path, and
@@ -1039,18 +1410,92 @@ function requiredTestVerdictKey(root: string, command: string): string {
   return `${String(root.length)}:${root}:${command}`;
 }
 
-/** The ONE place a required-test command is spawned. */
-function runRequiredTest(root: string, command: string): string | null {
+/**
+ * The ONE place a required-test command is spawned.
+ *
+ * `timeoutMs` is a parameter so the deadline is exercisable: a hang is a
+ * first-class outcome of this function, and an outcome that can only be reached
+ * by waiting ten real minutes is an outcome nothing ever tests.
+ */
+export function runRequiredTest(
+  root: string,
+  command: string,
+  timeoutMs: number = REQUIRED_TEST_TIMEOUT_MS,
+): RequiredTestFailure | null {
   const result = spawnSync(command, {
     cwd: root,
     shell: true,
-    stdio: "ignore",
-    timeout: 10 * 60 * 1_000,
+    // Captured, not discarded: without it a red ingest reports that something
+    // failed and nothing about why.
+    encoding: "utf8",
+    maxBuffer: REQUIRED_TEST_MAX_BUFFER_BYTES,
+    timeout: timeoutMs,
     windowsHide: true,
   });
-  return result.error || result.status !== 0
-    ? `${command} (${result.error?.message ?? `exit ${String(result.status)}`})`
-    : null;
+  const stdout = tail(result.stdout);
+  const stderr = tail(result.stderr);
+  // The ERROR CODE discriminates, never `signal`. node kills an over-deadline
+  // child AND an over-`maxBuffer` child, and an external `kill` sets `signal`
+  // too — so `signal !== null` was true for three unrelated facts and reported
+  // all of them as a hang, including a command that exited 0 after printing more
+  // than the buffer holds.
+  //
+  // ASSUMPTION, stated: a deadline miss reports `ETIMEDOUT`. Verified on win32;
+  // it is node's documented contract, not a platform quirk this code confirmed
+  // everywhere. On a platform that killed a child at the deadline WITHOUT that
+  // code, the case degrades to `spawn_error` — a less specific refusal, still a
+  // refusal, so the fail direction holds and only the label is lost.
+  const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  if (code === "ETIMEDOUT") {
+    return { command, outcome: "timed_out", exit_code: null, stdout, stderr };
+  }
+  if (code === "ENOBUFS") {
+    return {
+      command,
+      outcome: "output_overflow",
+      exit_code: null,
+      stdout,
+      stderr,
+    };
+  }
+  if (result.error) {
+    return {
+      command,
+      outcome: "spawn_error",
+      exit_code: null,
+      stdout,
+      stderr: stderr.length > 0 ? stderr : result.error.message,
+    };
+  }
+  // Killed by something outside this runner (an operator `kill`, an OOM reaper).
+  // Reported as FAILED with the signal named: the command did not complete, and
+  // calling it a deadline miss would attribute it to a bound this runner set.
+  //
+  // POSIX-ONLY IN PRACTICE, and UNTESTED for that reason: Windows has no signal
+  // delivery to report here — a killed child surfaces as an ordinary non-zero
+  // `status` with `signal` null — so this branch is unreachable on the platform
+  // this repo runs its suites on, and no test exercises it. It is kept because
+  // the runner is OS-agnostic by contract, not because it has been observed.
+  if (result.signal !== null) {
+    return {
+      command,
+      outcome: "failed",
+      exit_code: null,
+      stdout,
+      stderr,
+      signal: result.signal,
+    };
+  }
+  if (result.status !== 0) {
+    return {
+      command,
+      outcome: "failed",
+      exit_code: result.status,
+      stdout,
+      stderr,
+    };
+  }
+  return null;
 }
 
 function rerunRequiredTests(
@@ -1058,15 +1503,20 @@ function rerunRequiredTests(
   commands: readonly string[],
   /** `null` on the normal lane — see {@link RemediationRequiredTestVerdicts}. */
   verdicts: RemediationRequiredTestVerdicts | null,
-): readonly string[] {
-  const failures: string[] = [];
+): readonly RequiredTestFailure[] {
+  const failures: RequiredTestFailure[] = [];
   for (const command of commands) {
     if (verdicts) {
       const verdict = verdicts.get(requiredTestVerdictKey(root, command));
       if (verdict === undefined) {
-        failures.push(
-          `${command} (no pre-computed verdict — refusing to spawn a test while the state lock is held)`,
-        );
+        failures.push({
+          command,
+          outcome: "spawn_error",
+          exit_code: null,
+          stdout: "",
+          stderr:
+            "no pre-computed verdict — refusing to spawn a test while the state lock is held",
+        });
       } else if (verdict !== null) {
         failures.push(verdict);
       }
@@ -1076,6 +1526,32 @@ function rerunRequiredTests(
     if (failure !== null) failures.push(failure);
   }
   return failures;
+}
+
+/**
+ * The classified issue for a set of required-test failures. An ENVIRONMENT fact
+ * anywhere in the set wins over a red sibling, timeout first: a hung or
+ * buffer-killed suite is the fact that explains the ingest, and burying it under
+ * a sibling's exit code is exactly the conflation the code split exists to end.
+ * Only a set where every failure is a genuine non-zero exit reads as
+ * `required_test_failed`.
+ */
+function requiredTestIssue(
+  workItem: RemediationHostWorkItem,
+  failures: readonly RequiredTestFailure[],
+): RemediationHostIngestIssue {
+  return {
+    code: failures.some((failure) => failure.outcome === "timed_out")
+      ? "required_test_timed_out"
+      : failures.some((failure) => failure.outcome === "output_overflow")
+        ? "required_test_output_overflow"
+        : "required_test_failed",
+    work_item_id: workItem.id,
+    result_path: workItem.result_path,
+    message: `mechanical required-test rerun failed: ${failures
+      .map(describeRequiredTestFailure)
+      .join("; ")}`,
+  };
 }
 
 /**
@@ -1098,7 +1574,7 @@ export async function precomputeRecoveryTestVerdicts(params: {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
   const paths = resolveBoundaryPaths(params);
-  const verdicts = new Map<string, string | null>();
+  const verdicts = new Map<string, RequiredTestFailure | null>();
 
   const workloadRead = await readSubmissionDocument(paths.workloadPath);
   if (workloadRead.kind !== "value") return verdicts;
@@ -1222,11 +1698,8 @@ function corroborateHostResult(params: {
     verdicts,
   );
   if (failedTests.length > 0) {
-    return {
-      ok: false,
-      code: "required_test_failed",
-      message: `mechanical required-test rerun failed: ${failedTests.join("; ")}`,
-    };
+    const issue = requiredTestIssue(workItem, failedTests);
+    return { ok: false, code: issue.code, message: issue.message };
   }
   return { ok: true, changedFiles: actualFiles, usedRecovery };
 }
@@ -1259,17 +1732,39 @@ export async function prepareRemediationHostHandoff(params: {
   }
 
   const baselineCommit = existingRecord?.baseline_commit ?? params.baselineCommit;
-  const workload = buildCanonicalWorkload({
-    paths,
-    state,
-    runId: params.runId,
-    baselineCommit,
-    ...(existingRecord
-      ? { workItemIds: existingRecord.work_item_ids }
-      : {}),
-  });
+  let workload: RemediationHostWorkload;
+  try {
+    workload = buildCanonicalWorkload({
+      paths,
+      state,
+      runId: params.runId,
+      baselineCommit,
+      ...(existingRecord
+        ? { workItemIds: existingRecord.work_item_ids }
+        : {}),
+    });
+  } catch (error) {
+    // A malformed block ON the frontier reaches this as a raw BlockContractError
+    // — an uncaught throw whose stack says nothing about which producer wrote the
+    // bad block, and which every retry reproduces. Re-raised in the SAME
+    // classified aggregate form the empty-workload branch below uses, so both
+    // producer-defect exits read alike.
+    if (!(error instanceof BlockContractError)) throw error;
+    throw new Error(cannotPrepareMessage(paths.root, state, error));
+  }
   if (workload.work_items.length === 0) {
-    throw new Error("Cannot prepare an empty remediation host workload");
+    // Name the producer defect when it is the cause. An empty level 0 that is
+    // really "every candidate block declares a prerequisite that does not
+    // exist" used to surface as a bare "empty workload", sending the operator
+    // to look at scheduling rather than at the plan.
+    const blocked = planBlockIssues(paths.root, state);
+    throw new Error(
+      blocked.length === 0
+        ? "Cannot prepare an empty remediation host workload"
+        : `Cannot prepare a remediation host workload: ${blocked
+            .map((issue) => issue.message)
+            .join("; ")}`,
+    );
   }
   const workloadDigest = hostWorkloadSha256(workload);
   if (
@@ -1388,18 +1883,32 @@ export async function ingestRemediationHostResults(params: {
     };
   }
 
+  // Producer-side plan defects are reported BEFORE the workload is parsed: a
+  // block with an unresolvable dependency or an unnormalized write scope makes
+  // the whole workload fail to re-derive, and `workload_invalid` alone would
+  // name the symptom while hiding which block caused it.
+  //
+  // REPORTED, never fatal. A defect in a NON-frontier block says nothing about a
+  // frontier item's landed result, and refusing the whole ingest over one made
+  // the run unadvanceable: every ingest returned zero acceptances, `next-step`
+  // read `state_changed: false` and re-emitted the same items against the same
+  // malformed plan, forever. The frontier's OWN defect is enforced elsewhere and
+  // does not rely on this: `parseWorkItem` re-derives each bound work item
+  // through `buildWorkItem`, whose `assertBlockContract` throws, so a malformed
+  // bound block fails the workload parse and its commands never run.
+  issues.push(...planBlockIssues(paths.root, state));
+
   if (isGitRepo(paths.root) && !state.host_handoff) {
+    issues.push({
+      code: "trusted_binding_missing",
+      message:
+        "a git-backed remediation workload requires the tool-owned host_handoff state binding",
+    });
     return {
       accepted_count: 0,
       completed_work_item_ids: [],
       pending_work_item_ids: [],
-      issues: [
-        {
-          code: "trusted_binding_missing",
-          message:
-            "a git-backed remediation workload requires the tool-owned host_handoff state binding",
-        },
-      ],
+      issues,
       state_changed: false,
       state: nextState,
     };
@@ -1412,17 +1921,19 @@ export async function ingestRemediationHostResults(params: {
     state,
   );
   if (!workload) {
+    // Accumulated, not replaced: when a block-contract defect is WHY the
+    // canonical re-derivation failed, the block-attributed issue is the only
+    // thing that names the cause.
+    issues.push({
+      code: "workload_invalid",
+      message:
+        "the workload does not match its canonical state shape and persisted digest binding",
+    });
     return {
       accepted_count: 0,
       completed_work_item_ids: [],
       pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
-      issues: [
-        {
-          code: "workload_invalid",
-          message:
-            "the workload does not match its canonical state shape and persisted digest binding",
-        },
-      ],
+      issues,
       state_changed: false,
       state: nextState,
     };
@@ -1517,12 +2028,7 @@ export async function ingestRemediationHostResults(params: {
           requiredTestVerdicts,
         );
         if (failedTests.length > 0) {
-          issues.push({
-            code: "required_test_failed",
-            work_item_id: workItem.id,
-            result_path: workItem.result_path,
-            message: `mechanical required-test rerun failed: ${failedTests.join("; ")}`,
-          });
+          issues.push(requiredTestIssue(workItem, failedTests));
           continue;
         }
       }

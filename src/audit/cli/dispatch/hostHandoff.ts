@@ -15,7 +15,9 @@ import {
   stableStringify,
   submissionPathFor,
   verifyFindingGrounding,
+  withFileLock,
   writeJsonFile,
+  type RunLogger,
   type SubmissionIssue,
 } from "audit-tools/shared";
 import { AuditResultSchema, type AuditResult } from "../../types.js";
@@ -154,6 +156,7 @@ interface AuditHostTaskBindings {
 
 interface ResolvedBoundaryPaths {
   readonly root: string;
+  readonly runId: string;
   readonly artifactsDir: string;
   readonly runDir: string;
   readonly resultDir: string;
@@ -162,6 +165,26 @@ interface ResolvedBoundaryPaths {
   readonly taskBindingsPath: string;
   readonly acceptedLedgerPath: string;
   readonly acceptedResultsPath: string;
+  /**
+   * The ONE lock serializing every read-modify-write of the ACCEPTED-RESULTS
+   * PAIR. Both writers — prepare and ingest — acquire it before touching the
+   * ledger, so the read-merge-write race the ledger used to lose is closed for
+   * prepare-against-ingest as well as ingest-against-ingest.
+   *
+   * IT COVERS THE LEDGER ONLY — state the uncovered half rather than let the
+   * covered half read as a close. The rest of the run directory is still
+   * unsynchronized in both directions:
+   *   - `ingestAuditHostResults` reads `host-workload.json`,
+   *     `host-result-map.json` and `host-task-bindings.json` BEFORE taking the
+   *     lock, so a concurrent prepare can rewrite any of the three underneath a
+   *     ledger merge that already parsed them;
+   *   - `prepareAuditHostHandoff` writes `host-task-bindings.json` outside the
+   *     lock entirely (only the workload and result-map writes are inside it),
+   *     so that file has no writer-side serialization at all.
+   * Closing the whole prepare/ingest race — the trio under the same acquisition
+   * as the ledger — is tracked as backlog work, not done here.
+   */
+  readonly acceptedLockPath: string;
 }
 
 function compareCodeUnits(left: string, right: string): number {
@@ -202,6 +225,7 @@ function resolveBoundaryPaths(params: {
   );
   return {
     root,
+    runId: params.runId,
     artifactsDir,
     runDir,
     resultDir: join(runDir, "host-results"),
@@ -210,7 +234,55 @@ function resolveBoundaryPaths(params: {
     taskBindingsPath: join(runDir, "host-task-bindings.json"),
     acceptedLedgerPath: join(runDir, "host-accepted-results-ledger.json"),
     acceptedResultsPath: join(runDir, "host-accepted-results.json"),
+    // Named off the pair's own stem, so the lock is visibly the lock FOR those
+    // two files rather than an independently-invented name. It is transient
+    // infrastructure, not a run artifact anything cites.
+    acceptedLockPath: `${join(runDir, "host-accepted-results")}.lock`,
   };
+}
+
+/**
+ * The accepted-results read-modify-write, SERIALIZED.
+ *
+ * `host-accepted-results.json` and its ledger are one logical record written as
+ * two files, and both prepare and ingest used to load a snapshot, work from it,
+ * and write both files back with a plain atomic replace. Atomic-replace makes
+ * the loss SILENT rather than corrupt: the later writer's snapshot simply
+ * predates the earlier writer's additions, and every duplicate-binding and
+ * duplicate-result_id guard downstream derives from that stale snapshot.
+ *
+ * So the read, the merge and both writes happen inside ONE acquisition of the
+ * shared lock substrate. No backoff, retry or stale-lock logic lives here — all
+ * of it is `withFileLock`'s, and the caller's RunLogger is threaded straight
+ * through so the primitive's heartbeat and stale-lock-reclaim events land in the
+ * run log rather than vanishing.
+ */
+async function withAcceptedResultsLock<T>(
+  paths: ResolvedBoundaryPaths,
+  logger: RunLogger | undefined,
+  mutate: (current: AcceptedResultsLedger) => Promise<T>,
+): Promise<T> {
+  return withFileLock(
+    paths.acceptedLockPath,
+    async () =>
+      mutate(
+        await loadAcceptedResults(paths.acceptedLedgerPath, paths.runId),
+      ),
+    undefined,
+    logger,
+  );
+}
+
+/** Persist the accepted-results pair. Only ever called under the lock above. */
+async function writeAcceptedResults(
+  paths: ResolvedBoundaryPaths,
+  ledger: AcceptedResultsLedger,
+): Promise<void> {
+  await writeJsonFile(
+    paths.acceptedResultsPath,
+    ledger.entries.map((entry) => entry.audit_result),
+  );
+  await writeJsonFile(paths.acceptedLedgerPath, ledger);
 }
 
 /**
@@ -451,6 +523,12 @@ export async function prepareAuditHostHandoff(params: {
   readonly artifactsDir: string;
   readonly runId: string;
   readonly tasks: readonly AuditHostTask[];
+  /**
+   * Threaded into the shared lock substrate so its heartbeat, timeout and
+   * stale-lock-reclaim events are recorded rather than lost. Optional: a caller
+   * with no run log still gets the serialization, just not the telemetry.
+   */
+  readonly logger?: RunLogger;
 }): Promise<PreparedAuditHostHandoff> {
   if (!Array.isArray(params.tasks)) {
     throw new Error("Audit host tasks must be an array");
@@ -467,11 +545,6 @@ export async function prepareAuditHostHandoff(params: {
     taskIds.add(task.task_id);
   }
 
-  const accepted = await loadAcceptedResults(
-    paths.acceptedLedgerPath,
-    params.runId,
-  );
-  const acceptedBindings = new Set(accepted.entries.map(bindingIdentity));
   const allWorkItems = tasks.map((task) => buildWorkItem(paths, task));
   const taskById = new Map(tasks.map((task) => [task.task_id, task]));
   const taskBindings: AuditHostTaskBindings = {
@@ -495,7 +568,17 @@ export async function prepareAuditHostHandoff(params: {
       };
     }),
   };
-  const workItems = allWorkItems.filter(
+
+  await mkdir(paths.resultDir, { recursive: true });
+  await writeJsonFile(paths.taskBindingsPath, taskBindings);
+
+  // The already-satisfied filter READS the ledger and the rewrite WRITES it, so
+  // both sit inside the one acquisition — a prepare that snapshotted before a
+  // concurrent ingest's additions must not replace them with its stale copy, and
+  // it must not re-ask for a lane that ingest has meanwhile satisfied.
+  return withAcceptedResultsLock(paths, params.logger, async (accepted) => {
+    const acceptedBindings = new Set(accepted.entries.map(bindingIdentity));
+    const workItems = allWorkItems.filter(
       (item) =>
         !acceptedBindings.has(
           bindingIdentity({
@@ -504,36 +587,31 @@ export async function prepareAuditHostHandoff(params: {
           }),
         ),
     );
-  const workload: AuditHostWorkload = {
-    contract_version: WORKLOAD_CONTRACT_VERSION,
-    run_id: params.runId,
-    work_items: workItems,
-  };
-  const resultMap: AuditHostResultMap = {
-    contract_version: RESULT_MAP_CONTRACT_VERSION,
-    run_id: params.runId,
-    entries: workItems.map((item) => ({
-      work_item_id: item.id,
-      prompt_sha256: item.prompt.sha256,
-      result_path: item.result_path,
-    })),
-  };
+    const workload: AuditHostWorkload = {
+      contract_version: WORKLOAD_CONTRACT_VERSION,
+      run_id: params.runId,
+      work_items: workItems,
+    };
+    const resultMap: AuditHostResultMap = {
+      contract_version: RESULT_MAP_CONTRACT_VERSION,
+      run_id: params.runId,
+      entries: workItems.map((item) => ({
+        work_item_id: item.id,
+        prompt_sha256: item.prompt.sha256,
+        result_path: item.result_path,
+      })),
+    };
 
-  await mkdir(paths.resultDir, { recursive: true });
-  await writeJsonFile(paths.taskBindingsPath, taskBindings);
-  await writeJsonFile(
-    paths.acceptedResultsPath,
-    accepted.entries.map((entry) => entry.audit_result),
-  );
-  await writeJsonFile(paths.acceptedLedgerPath, accepted);
-  await writeJsonFile(paths.workloadPath, workload);
-  await writeJsonFile(paths.resultMapPath, resultMap);
-  return {
-    workload,
-    result_map: resultMap,
-    workload_path: paths.workloadPath,
-    result_map_path: paths.resultMapPath,
-  };
+    await writeAcceptedResults(paths, accepted);
+    await writeJsonFile(paths.workloadPath, workload);
+    await writeJsonFile(paths.resultMapPath, resultMap);
+    return {
+      workload,
+      result_map: resultMap,
+      workload_path: paths.workloadPath,
+      result_map_path: paths.resultMapPath,
+    };
+  });
 }
 
 function parseWorkItem(value: unknown): AuditHostWorkItem | null {
@@ -956,6 +1034,8 @@ export async function ingestAuditHostResults(params: {
   readonly root: string;
   readonly artifactsDir: string;
   readonly runId: string;
+  /** See {@link prepareAuditHostHandoff}'s `logger`. */
+  readonly logger?: RunLogger;
 }): Promise<AuditHostIngestSummary> {
   const paths = resolveBoundaryPaths(params);
   const accepted = await loadAcceptedResults(
@@ -1056,27 +1136,55 @@ export async function ingestAuditHostResults(params: {
     });
   }
 
-  let ledger = accepted;
-  if (additions.length > 0) {
-    ledger = {
-      contract_version: ACCEPTED_RESULTS_CONTRACT_VERSION,
-      run_id: params.runId,
-      entries: [...accepted.entries, ...additions].sort((left, right) => {
-        const item = compareCodeUnits(left.work_item_id, right.work_item_id);
-        return item !== 0
-          ? item
-          : compareCodeUnits(left.prompt_sha256, right.prompt_sha256);
-      }),
-    };
-    await writeJsonFile(
-      paths.acceptedResultsPath,
-      ledger.entries.map((entry) => entry.audit_result),
-    );
-    await writeJsonFile(paths.acceptedLedgerPath, ledger);
+  // The submission reading, contract checking and grounding re-verification
+  // above run UNLOCKED — they only read. The read-modify-write does not: the
+  // ledger is re-read under the lock and the additions are re-filtered against
+  // that fresh copy, so a concurrent writer's entries are merged rather than
+  // replaced, and a binding or result id it accepted in the meantime is not
+  // accepted a second time here.
+  let landed: AcceptedResultEntry[] = [];
+  const ledger = await withAcceptedResultsLock(
+    paths,
+    params.logger,
+    async (current) => {
+      const currentBindings = new Set(current.entries.map(bindingIdentity));
+      const currentResultIds = new Set(
+        current.entries.map((entry) => entry.result_id),
+      );
+      landed = additions.filter(
+        (addition) =>
+          !currentBindings.has(bindingIdentity(addition)) &&
+          !currentResultIds.has(addition.result_id),
+      );
+      if (landed.length === 0) return current;
+      const next: AcceptedResultsLedger = {
+        contract_version: ACCEPTED_RESULTS_CONTRACT_VERSION,
+        run_id: params.runId,
+        entries: [...current.entries, ...landed].sort((left, right) => {
+          const item = compareCodeUnits(left.work_item_id, right.work_item_id);
+          return item !== 0
+            ? item
+            : compareCodeUnits(left.prompt_sha256, right.prompt_sha256);
+        }),
+      };
+      await writeAcceptedResults(paths, next);
+      return next;
+    },
+  );
+  for (const addition of additions) {
+    if (landed.includes(addition)) continue;
+    issues.push({
+      code: "duplicate_submission_id",
+      message:
+        `work item '${addition.work_item_id}' was already accepted by a concurrent ` +
+        `ingest of this run, so this submission was not accepted a second time`,
+      work_item_id: addition.work_item_id,
+      result_path: addition.result_path,
+    });
   }
 
   return {
-    accepted_count: additions.length,
+    accepted_count: landed.length,
     accepted_results: ledger.entries.map((entry) => entry.audit_result),
     accepted_results_path: paths.acceptedResultsPath,
     completed_work_item_ids: [

@@ -11,7 +11,7 @@
  * it. It replaces the two hand-rolled `resultPathFor` copies that carried the
  * same rule in two places.
  */
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 import { hashContent } from "../hash.js";
 import { stableStringify } from "../stableStringify.js";
@@ -66,12 +66,25 @@ function submissionFilename(submissionId: string): string {
   return `${hashContent(submissionId)}.json`;
 }
 
-/** Absolute on-disk path of one submission payload. */
+/**
+ * Absolute on-disk path of one submission payload.
+ *
+ * The containment of the landing path is CHECKED, never inferred from the fact
+ * that `submissionFilename` happens to hash. Hashing is what makes an escape
+ * impossible today; `resolveContainedPath` is what makes it impossible to
+ * REINTRODUCE one — a future filename derivation that passed the id through
+ * would otherwise steer a write outside `submissionDir` with nothing going red.
+ * The refusal fires here, before any caller has a path to write to.
+ */
 export function absoluteSubmissionPath(
   paths: SubmissionRoots,
   submissionId: string,
 ): string {
-  return join(resolve(paths.submissionDir), submissionFilename(submissionId));
+  return resolveContainedPath(
+    paths.submissionDir,
+    submissionFilename(submissionId),
+    `submission landing path for ${submissionId}`,
+  );
 }
 
 /**
