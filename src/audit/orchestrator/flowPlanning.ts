@@ -63,10 +63,9 @@ export interface FlowReviewBlock {
  * `claimFlowReviewBlocks` reports the post-claim state alongside the claimed
  * blocks: `assigned` is the caller's assigned set plus every newly claimed
  * `lens:path` key, and `pending` is the caller's pending map with every claimed
- * path removed. Both are computed from the arguments and are independent of the
- * in-place mutation the call still performs (see the DEFERRED note on
- * {@link claimFlowReviewBlocks}), so retiring that mutation does not change a
- * single returned value.
+ * path removed. These are the ONLY channel — the call writes nothing back
+ * through its arguments (see {@link claimFlowReviewBlocks}), so a caller cannot
+ * read claim state it never asked for and the two channels cannot drift.
  *
  * The contract rides ON the returned array as non-enumerable properties, so
  * every consumer that iterates the result as `FlowReviewBlock[]` is unchanged.
@@ -103,17 +102,20 @@ function attachClaimContract(
  * every path in `criticalFlows`, in `pendingByLens`, and in the `lens:path`
  * keys of `assigned` is already normalized into ONE key space by the caller.
  * This module does no normalizing of its own — an unnormalized path simply
- * fails to intersect and the flow is silently under-claimed.
+ * fails to intersect and the flow is silently under-claimed. The sole caller,
+ * `buildChunkedAuditTasks`, now SATISFIES that precondition by normalizing every
+ * repo path once at its own boundary, rather than assuming it upstream.
  *
- * DEFERRED (CP-NODE-9): the call still ALSO mutates the caller-supplied
- * `assigned` set in place. `taskBuilder`'s planning pass reads that set after
- * the call to build its remainder blocks; cutting the mutation over to the
- * returned {@link FlowClaimContract} lands with that caller's adoption.
+ * NO WRITE-BACK: the post-claim state is reported ONLY on the returned
+ * {@link FlowClaimContract}. The parameters are `Readonly` collections so
+ * reintroducing an in-place mutation is a compile error, not a convention —
+ * the by-reference channel this used to ALSO write through was a second,
+ * invisible return value that a caller had to know to look for.
  */
 export function claimFlowReviewBlocks(
   criticalFlows: CriticalFlowManifest,
-  pendingByLens: Map<string, Set<string>>,
-  assigned: Set<string>,
+  pendingByLens: ReadonlyMap<string, ReadonlySet<string>>,
+  assigned: ReadonlySet<string>,
 ): FlowClaimResult {
   const candidates: FlowReviewBlock[] = [];
 
@@ -152,7 +154,7 @@ export function claimFlowReviewBlocks(
     return a.flow_id.localeCompare(b.flow_id);
   });
 
-  // Post-claim state, derived from the arguments rather than from the mutation.
+  // Post-claim state, derived from the arguments into fresh collections.
   const claimedKeys = new Set<string>(assigned);
   const remainingPending = new Map<string, Set<string>>(
     [...pendingByLens].map(([lens, paths]) => [lens, new Set(paths)]),
@@ -168,11 +170,8 @@ export function claimFlowReviewBlocks(
     }
 
     for (const path of unclaimedPaths) {
-      const key = lensPathKey(candidate.lens, path);
-      claimedKeys.add(key);
+      claimedKeys.add(lensPathKey(candidate.lens, path));
       remainingPending.get(candidate.lens)?.delete(path);
-      // DEFERRED (CP-NODE-9): retire with the caller's adoption of the contract.
-      assigned.add(key);
     }
 
     blocks.push({

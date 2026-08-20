@@ -138,3 +138,90 @@ describe("autoCompleteTrivialCoverage does not re-exclude already-excluded files
     expect(file.required_lenses).toEqual(["security"]);
   });
 });
+
+// ── An UNMEASURED line count is not a zero line count (DAT-3c07c004) ─────────
+//
+// The line index carries THREE states, not two: a real count, the
+// UNMEASURED_LINE_COUNT sentinel buildLineIndex writes when a file cannot be
+// read, and `undefined` for a key it never carried. Both non-counts resolve
+// through the one shared `isUnmeasuredLineCount` predicate. Withholding the
+// SIZE rules from an unmeasured file must not withhold the PATH rules.
+
+describe("isTrivialAuditPath withholds only the SIZE rules when the count is unmeasured", () => {
+  it("the NaN sentinel is not a zero-line file", () => {
+    expect(isTrivialAuditPath("src/unmeasured.ts", Number.NaN)).toBe(false);
+  });
+
+  it("an absent index entry (undefined) is not a zero-line file either", () => {
+    expect(isTrivialAuditPath("src/unindexed.ts", undefined)).toBe(false);
+  });
+
+  it("a genuinely zero-line file is still trivial — the control", () => {
+    expect(isTrivialAuditPath("src/empty.ts", 0)).toBe(true);
+  });
+
+  it("an unmeasured DOTFILE is still trivial by name", () => {
+    expect(isTrivialAuditPath(".gitignore", Number.NaN)).toBe(true);
+    expect(isTrivialAuditPath("nested/.gitattributes", undefined)).toBe(true);
+  });
+
+  it("an unmeasured __init__.py is NOT trivial — that rule is size-gated", () => {
+    // The <=3-line rule cannot be applied to a file whose size is unknown.
+    expect(isTrivialAuditPath("pkg/__init__.py", Number.NaN)).toBe(false);
+  });
+
+  it("an external signal still overrides everything, measured or not", () => {
+    expect(isTrivialAuditPath(".gitignore", Number.NaN, true)).toBe(false);
+  });
+});
+
+describe("autoCompleteTrivialCoverage leaves an unmeasured file un-excluded", () => {
+  it("the unmeasured file keeps its lenses; a measured empty one and an unmeasured dotfile are excluded", () => {
+    const coverage = {
+      files: [
+        {
+          path: "src/unmeasured.ts",
+          audit_status: "pending",
+          classification_status: "classified",
+          required_lenses: ["security"],
+          completed_lenses: [],
+          unit_ids: ["u1"],
+        },
+        {
+          path: "src/empty.ts",
+          audit_status: "pending",
+          classification_status: "classified",
+          required_lenses: ["security"],
+          completed_lenses: [],
+          unit_ids: ["u1"],
+        },
+        {
+          path: ".gitignore",
+          audit_status: "pending",
+          classification_status: "classified",
+          required_lenses: ["security"],
+          completed_lenses: [],
+          unit_ids: ["u1"],
+        },
+      ],
+    };
+    const lineIndex = {
+      "src/unmeasured.ts": Number.NaN,
+      "src/empty.ts": 0,
+      ".gitignore": Number.NaN,
+    };
+
+    const skipped = autoCompleteTrivialCoverage(coverage, lineIndex);
+
+    expect(
+      skipped.includes("src/unmeasured.ts"),
+      "an unmeasured file must not be excluded — this is the pass that decides its fate",
+    ).toBe(false);
+    expect(skipped.includes("src/empty.ts"), "a measured empty file is still excluded").toBe(true);
+    expect(skipped.includes(".gitignore"), "an unmeasured dotfile is still excluded by name").toBe(true);
+
+    const unmeasured = coverage.files.find((f) => f.path === "src/unmeasured.ts");
+    expect(unmeasured!.audit_status, "it must stay auditable").toBe("pending");
+    expect(unmeasured!.required_lenses, "its lenses must survive so a task can still be built").toEqual(["security"]);
+  });
+});

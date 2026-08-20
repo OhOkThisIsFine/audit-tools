@@ -36,6 +36,11 @@ import { mergeResults } from "../../dispatch/merge-results.mjs";
 import { resolveArtifactsDir } from "../../dispatch/artifacts-dir.mjs";
 import { validateResult } from "../../dispatch/validate.mjs";
 import { validateOneResult, resolveTaskContext } from "../../dispatch/validate-result.mjs";
+import {
+  normalizeCoveragePath,
+  validateAuditResults,
+} from "../../src/audit/validation/auditResults.js";
+import type { AuditTask } from "../../src/audit/types.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..", "..");
@@ -418,5 +423,148 @@ describe("dispatch/validate-result.mjs: resolveTaskContext / validateOneResult",
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+// ── INV-ACP-VALIDATE-RESULTS-SIGNATURE-PIN (audit-coverage-path-keyspace) ───
+//
+// dispatch/validate.mjs consumes validateAuditResults through the BUILT
+// dist/audit/validation/auditResults.js as the sole authority for per-result
+// validity, and merge-results routes accept/reject off that verdict. Two
+// properties therefore have to be pinned at this module's own phase, in source,
+// or a key-space change here silently changes what merge-results accepts:
+//
+//   1. the raw-vs-normalized path regime is INVISIBLE to the caller — a raw and
+//      an already-normalized declared path for the same file yield an identical
+//      verdict AND an identical reported line-count divergence; and
+//   2. the exported SIGNATURE the script binds to — parameter arity 3
+//      (results, tasks, options) and the returned verdict shape (an
+//      AuditResultIssue[] whose entries carry `severity` / `path` / `message`,
+//      the three fields validate.mjs reduces into `{ valid, errors }`).
+describe("validateAuditResults: the signature and path regime dispatch/validate.mjs binds to", () => {
+  const declaredResult = (totalLines: number) => [
+    {
+      task_id: "T-pin",
+      unit_id: "U1",
+      pass_id: "P1",
+      lens: "correctness",
+      file_coverage: [{ path: "src/x.ts", total_lines: totalLines }],
+      findings: [
+        {
+          id: "f-pin",
+          title: "T",
+          category: "correctness",
+          severity: "low",
+          confidence: "high",
+          lens: "correctness",
+          summary: "S",
+          affected_files: [{ path: "src/x.ts", line_start: 2, line_end: 6 }],
+          evidence: ["e"],
+        },
+      ],
+    },
+  ];
+  // The SAME underlying file, declared on the task in two surface forms.
+  const taskWithPaths = (filePaths: string[]): AuditTask => ({
+    task_id: "T-pin",
+    unit_id: "U1",
+    pass_id: "P1",
+    lens: "correctness",
+    file_paths: filePaths,
+    file_line_counts: { "src/x.ts": 10 },
+    rationale: "fixture",
+  });
+  const RAW_TASK = taskWithPaths([String.raw`src\x.ts`]);
+  const NORM_TASK = taskWithPaths(["src/x.ts"]);
+  // Exactly the reduction dispatch/validate.mjs performs over the return value.
+  const verdictOf = (issues: ReturnType<typeof validateAuditResults>) => {
+    const errors = issues
+      .filter((i) => i.severity === "error")
+      .map((i) => `${i.path}: ${i.message}`);
+    return { valid: errors.length === 0, errors };
+  };
+
+  test("a raw and an already-normalized declared path give an IDENTICAL accept verdict", () => {
+    const lineIndex = { "src/x.ts": 10 };
+    const raw = validateAuditResults(declaredResult(10), [RAW_TASK], { lineIndex });
+    const norm = validateAuditResults(declaredResult(10), [NORM_TASK], { lineIndex });
+
+    expect(verdictOf(norm).valid, "the normalized control must accept").toBe(true);
+    expect(
+      verdictOf(raw),
+      `raw and normalized task paths must produce the same verdict; raw was ${JSON.stringify(verdictOf(raw))}`,
+    ).toEqual(verdictOf(norm));
+    expect(raw, "the full issue list must be identical, warnings included").toEqual(norm);
+  });
+
+  test("a raw and an already-normalized declared path report an IDENTICAL line-count divergence", () => {
+    // 40 declared vs 10 measured: past both the absolute floor and the ratio, so
+    // the CE-009 gate is a hard reject in BOTH regimes or in neither.
+    const lineIndex = { "src/x.ts": 10 };
+    const raw = validateAuditResults(declaredResult(40), [RAW_TASK], { lineIndex });
+    const norm = validateAuditResults(declaredResult(40), [NORM_TASK], { lineIndex });
+
+    const divergence = (issues: ReturnType<typeof validateAuditResults>) =>
+      issues.filter((i) => i.field === "file_coverage[0].total_lines");
+    expect(divergence(norm).length, "the normalized control must report the divergence").toBe(1);
+    expect(divergence(norm)[0].severity, "40 vs 10 is a significant divergence (CE-009 hard reject)").toBe("error");
+    expect(
+      divergence(raw),
+      "the divergence report must not depend on the task path's surface form",
+    ).toEqual(divergence(norm));
+    expect(verdictOf(raw)).toEqual(verdictOf(norm));
+    expect(raw, "the full issue list must be identical, warnings included").toEqual(norm);
+  });
+
+  test("normalizeCoveragePath is the one key-space function, and it is idempotent", () => {
+    for (const raw of [String.raw`src\x.ts`, "./src/x.ts", String.raw`.\src\x.ts`, "src/./x.ts"]) {
+      expect(normalizeCoveragePath(raw), `'${raw}' must land in the one key space`).toBe("src/x.ts");
+      expect(
+        normalizeCoveragePath(normalizeCoveragePath(raw)),
+        "normalization must be idempotent — re-normalizing a key cannot move it",
+      ).toBe("src/x.ts");
+    }
+  });
+
+  test("the exported signature dispatch/validate.mjs binds to is unchanged", () => {
+    // Arity: validate.mjs calls validateAuditResults(results, tasks, options).
+    // `Function.length` counts only the parameters before the first defaulted
+    // one, so the two REQUIRED positions are pinned by `.length`...
+    expect(
+      validateAuditResults.length,
+      "validateAuditResults must take (results, tasks) as its required positions",
+    ).toBe(2);
+    // ...and the optional third position is pinned FUNCTIONALLY: dropping it
+    // must lose the line-count check, so a caller that passes it and one that
+    // does not cannot get the same verdict.
+    const withOptions = validateAuditResults(declaredResult(40), [NORM_TASK], {
+      lineIndex: NORM_TASK.file_line_counts ?? {},
+    });
+    const withoutOptions = validateAuditResults(declaredResult(40), [NORM_TASK]);
+    expect(
+      withOptions.some((i) => i.field === "file_coverage[0].total_lines"),
+      "the third (options) parameter must still carry lineIndex into the line-count check",
+    ).toBe(true);
+    expect(
+      withoutOptions.some((i) => i.field === "file_coverage[0].total_lines"),
+      "with no lineIndex there is no expectation to diverge from",
+    ).toBe(false);
+
+    const issues = withOptions;
+    // Verdict shape: an ARRAY of issues, each carrying the three fields the
+    // script reduces over. A shape change here is a silent merge-results break.
+    expect(Array.isArray(issues), "the verdict must be an array of issues").toBe(true);
+    expect(issues.length).toBeGreaterThan(0);
+    for (const issue of issues) {
+      expect(typeof issue.severity, "each issue must carry a string severity").toBe("string");
+      expect(["error", "warning"]).toContain(issue.severity);
+      expect(typeof issue.path, "each issue must carry a string path (validate.mjs prints it)").toBe("string");
+      expect(typeof issue.message, "each issue must carry a string message").toBe("string");
+    }
+    // And the reduction validate.mjs performs still produces its documented shape.
+    const verdict = verdictOf(issues);
+    expect(typeof verdict.valid).toBe("boolean");
+    expect(Array.isArray(verdict.errors)).toBe(true);
+    expect(verdict.errors.every((e) => typeof e === "string")).toBe(true);
   });
 });

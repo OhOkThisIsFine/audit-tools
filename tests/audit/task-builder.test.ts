@@ -1,5 +1,8 @@
 import { test, expect } from "vitest";
 import type { CoverageFileRecord, CoverageMatrix } from "../../src/audit/types.js";
+import type { CriticalFlowManifest } from "audit-tools/shared";
+import { autoCompleteTrivialCoverage } from "../../src/audit/orchestrator/trivialAudit.js";
+import { UNMEASURED_LINE_COUNT } from "../../src/audit/cli/lineIndex.js";
 
 const { buildChunkedAuditTasks } = await import("../../src/audit/orchestrator/taskBuilder.js");
 
@@ -148,4 +151,194 @@ test("intent_priority_boost: unrelated lens not in boost list is unaffected", ()
   const archTask = tasks.find((t) => t.lens === "architecture");
   expect(archTask, "architecture task should exist").toBeTruthy();
   expect(archTask!.priority, "architecture should remain low when not in boost list").toBe("low");
+});
+
+// ---------------------------------------------------------------------------
+// OBL-audit-coverage-path-keyspace-inv-2 / fail-2 / fail-3 — an UNMEASURED line
+// count is not a zero line count, exercised on the REAL pipeline path
+// ---------------------------------------------------------------------------
+
+test("an UNMEASURED file survives the real autoComplete-then-build sequence and earns a tagged task", () => {
+  // THE DECISION SITE IS UPSTREAM. planningExecutors runs
+  // autoCompleteTrivialCoverage BEFORE buildChunkedAuditTasks, and that pass
+  // used its own `lineIndex[path] ?? 0` to mark an unmeasured file
+  // `audit_status: "excluded"`. Any leniency in buildPendingByLens alone is
+  // therefore UNREACHABLE — its own excluded-guard skips the file first. This
+  // test replicates the real sequence on ONE matrix so a fix that only touches
+  // the task builder cannot pass it.
+  //
+  // "Unmeasured" arrives in TWO shapes, and both are covered because they fail
+  // DIFFERENTLY under the old code. The reachable one is the SENTINEL —
+  // buildLineIndex emits an entry for every manifest path and writes
+  // UNMEASURED_LINE_COUNT when the read fails — which a `?? 0` does NOT catch
+  // (NaN is not nullish), so only an unmeasured-aware predicate saves it. The
+  // rarer ABSENT key is precisely what `?? 0` turns into a zero, so it is the
+  // shape that makes each removed coercion load-bearing.
+  // Distinct unit_ids on the two unmeasured files on purpose: the lead tag is
+  // applied per emitted task, so grouping them into ONE task would let either
+  // file's tag satisfy the other's assertion and hide a fix that only handles
+  // one of the two shapes.
+  const coverage = makeCoverage([
+    { ...pendingFile("src/unmeasured-sentinel.ts", ["correctness"]), unit_ids: ["unit-sentinel"] },
+    { ...pendingFile("src/unmeasured-absent.ts", ["correctness"]), unit_ids: ["unit-absent"] },
+    pendingFile("src/genuinely-empty.ts", ["correctness"]),
+    pendingFile(".gitignore", ["correctness"]),
+  ]);
+  const lineIndex = {
+    "src/unmeasured-sentinel.ts": UNMEASURED_LINE_COUNT,
+    // "src/unmeasured-absent.ts" — deliberately no key at all.
+    "src/genuinely-empty.ts": 0,
+    ".gitignore": UNMEASURED_LINE_COUNT,
+  };
+
+  const skipped = autoCompleteTrivialCoverage(coverage, lineIndex);
+
+  for (const path of ["src/unmeasured-sentinel.ts", "src/unmeasured-absent.ts"]) {
+    expect(
+      skipped.includes(path),
+      `'${path}' must NOT be excluded from coverage — nobody measured it, which is not the same as it being empty`,
+    ).toBe(false);
+  }
+  expect(
+    skipped.includes("src/genuinely-empty.ts"),
+    "a MEASURED zero-line file is genuinely trivial and must still be excluded",
+  ).toBe(true);
+  expect(
+    skipped.includes(".gitignore"),
+    "an unmeasured DOTFILE is still trivial by NAME — withholding the size rules must not withhold the path rules",
+  ).toBe(true);
+
+  const tasks = buildChunkedAuditTasks(coverage, lineIndex, {});
+
+  for (const path of ["src/unmeasured-sentinel.ts", "src/unmeasured-absent.ts"]) {
+    const covering = tasks.filter((t) => t.file_paths.includes(path));
+    expect(
+      covering.length,
+      `'${path}' must reach a real task — never a silent, permanent coverage hole`,
+    ).toBeGreaterThan(0);
+    expect(
+      covering.every((t) => (t.tags ?? []).includes("unmeasured_line_count")),
+      `'${path}' must carry the explicit unmeasured lead tag; got tags ${JSON.stringify(covering.map((t) => t.tags))}`,
+    ).toBe(true);
+  }
+  expect(
+    tasks.some((t) => t.file_paths.includes("src/genuinely-empty.ts")),
+    "a measured zero-line file stays excluded",
+  ).toBe(false);
+  expect(
+    tasks.some((t) => t.file_paths.includes(".gitignore")),
+    "an unmeasured dotfile stays excluded",
+  ).toBe(false);
+});
+
+test("an unmeasured file does not poison the line budget or masquerade as a tiny test", () => {
+  // The sentinel is NaN. Letting it into the budget total makes every
+  // `cost > budget` comparison false, so the greedy chunker silently stops
+  // splitting; treating it as 0 in the tiny-test check would batch a file whose
+  // size nobody knows into the tiny-test unit. Neither may happen.
+  const coverage = makeCoverage([
+    pendingFile("tests/unmeasured-sentinel.test.ts", ["tests"]),
+    pendingFile("tests/unmeasured-absent.test.ts", ["tests"]),
+    pendingFile("tests/small.test.ts", ["tests"]),
+  ]);
+  const lineIndex = {
+    "tests/unmeasured-sentinel.test.ts": UNMEASURED_LINE_COUNT,
+    // "tests/unmeasured-absent.test.ts" — deliberately no key at all.
+    "tests/small.test.ts": 10,
+  };
+
+  const tasks = buildChunkedAuditTasks(coverage, lineIndex, {});
+
+  const smallTask = tasks.find((t) => t.file_paths.includes("tests/small.test.ts"));
+  expect(smallTask, "the measured tiny test file must still get a task").toBeTruthy();
+  expect(
+    smallTask!.unit_id,
+    "a MEASURED tiny test file is batched into the tiny-test unit",
+  ).toBe("tests-tiny-files");
+
+  for (const path of [
+    "tests/unmeasured-sentinel.test.ts",
+    "tests/unmeasured-absent.test.ts",
+  ]) {
+    const task = tasks.find((t) => t.file_paths.includes(path));
+    expect(task, `'${path}' must still get a task`).toBeTruthy();
+    expect(
+      task!.unit_id,
+      `'${path}' is not known-small and must not be batched as a tiny test`,
+    ).not.toBe("tests-tiny-files");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// OBL-audit-coverage-path-keyspace-inv-4 — ONE KEY SPACE is satisfied at the
+// VALIDATION join, not by re-keying copies here.
+//
+// There is deliberately NO test asserting that buildChunkedAuditTasks
+// normalizes coverage / line-index / flow paths, because it deliberately does
+// NOT. Those three descend from the same posix-normal repo manifest and are one
+// key space at the source; re-keying copies of them here would leave the
+// PERSISTED matrix, the persisted line index and result ingestion
+// (applyFileCoverage) on the original strings — a second key space with no live
+// route to close. The one genuinely foreign path surface (a worker-supplied
+// string copied into a followup task's file_paths) enters at validation, and
+// the normalization that closes it is pinned there:
+// tests/audit/validation-remediation.test.ts and
+// tests/audit/dispatch-validate.test.ts.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// OBL-audit-coverage-path-keyspace-inv-4 — the flow-claim contract cutover
+// ---------------------------------------------------------------------------
+
+test("flow-claimed paths are excluded from the remainder pass via the RETURNED claim contract, not by-reference mutation", () => {
+  // claimFlowReviewBlocks no longer writes back into the caller's `assigned`
+  // set or `pendingByLens` map (both are ReadonlySet/ReadonlyMap parameters);
+  // buildChunkedAuditTasks must consume `result.assigned` / `result.pending`.
+  // Reading the pre-claim arguments instead re-emits every flow-claimed path as
+  // a remainder task — an observable DOUBLE CLAIM of the same lens:path.
+  const coverage = makeCoverage([
+    pendingFile("src/claimed.ts", ["security"]),
+    pendingFile("src/unclaimed.ts", ["security"]),
+  ]);
+  const lineIndex = { "src/claimed.ts": 80, "src/unclaimed.ts": 80 };
+  const criticalFlows: CriticalFlowManifest = {
+    flows: [
+      {
+        id: "flow-1",
+        name: "Flow 1",
+        paths: ["src/claimed.ts"],
+        entrypoints: ["src/claimed.ts"],
+        concerns: ["security"],
+        confidence: "high",
+      },
+    ],
+    fallback_required: false,
+  };
+
+  const tasks = buildChunkedAuditTasks(coverage, lineIndex, { critical_flows: criticalFlows });
+
+  const claimedTasks = tasks.filter(
+    (t) => t.lens === "security" && t.file_paths.includes("src/claimed.ts"),
+  );
+  expect(
+    claimedTasks.length,
+    `src/claimed.ts must be reviewed under 'security' exactly once; got ${JSON.stringify(claimedTasks.map((t) => t.task_id))}`,
+  ).toBe(1);
+  expect(
+    (claimedTasks[0].tags ?? []).includes("critical_flow"),
+    "the single claim must be the critical-flow block",
+  ).toBe(true);
+
+  // MISSING-CLAIM half: the unclaimed sibling must still reach a remainder task.
+  const unclaimedTasks = tasks.filter(
+    (t) => t.lens === "security" && t.file_paths.includes("src/unclaimed.ts"),
+  );
+  expect(
+    unclaimedTasks.length,
+    "a path no flow claimed must still be emitted by the remainder pass",
+  ).toBe(1);
+  expect(
+    (unclaimedTasks[0].tags ?? []).includes("critical_flow"),
+    "the remainder task must not be tagged as a flow claim",
+  ).toBe(false);
 });

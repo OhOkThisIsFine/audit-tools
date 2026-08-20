@@ -13,6 +13,7 @@ import {
   isTestPath,
   normalizeExtractorPath,
 } from "../extractors/pathPatterns.js";
+import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 
 export interface UnitLineIndex {
   [path: string]: number;
@@ -98,6 +99,32 @@ interface TaskBudgetLimits {
   maxTaskFiles: number;
 }
 
+/**
+ * The file's size when it is genuinely KNOWN, `undefined` when the index carried
+ * no key for it or carried the unmeasured sentinel. Every size CLASSIFICATION in
+ * this module reads through here, so "unmeasured" can never decay into a number
+ * a comparison happens to accept.
+ */
+function measuredLinesOf(
+  unitLineIndex: UnitLineIndex,
+  path: string,
+): number | undefined {
+  const value = unitLineIndex[path];
+  return isUnmeasuredLineCount(value) ? undefined : value;
+}
+
+/**
+ * The file's size for BUDGET ARITHMETIC, where an unknown size contributes
+ * nothing. Distinct from {@link measuredLinesOf} on purpose: the sentinel is
+ * `NaN`, and letting it into a running total poisons the sum, after which every
+ * `cost > budget` comparison is false and the greedy chunker silently stops
+ * splitting. Zero is the right answer for "adds no known weight", and it is a
+ * budgeting answer only — it never reaches a triviality verdict.
+ */
+function budgetLinesOf(unitLineIndex: UnitLineIndex, path: string): number {
+  return measuredLinesOf(unitLineIndex, path) ?? 0;
+}
+
 // Split a flat list of file paths into review-task-sized chunks, bounded by both
 // an aggregate line budget and a max file count. Thin adapter over the shared
 // `chunkByBudget` greedy chunker (extracted alongside chunkPacketTasks in
@@ -121,7 +148,7 @@ function chunkByTaskBudget(
     budget: maxTaskLines > 0 ? maxTaskLines : Number.POSITIVE_INFINITY,
     maxItems: maxTaskFiles > 0 ? maxTaskFiles : undefined,
     costOf: (candidate) =>
-      candidate.reduce((sum, path) => sum + (unitLineIndex[path] ?? 0), 0),
+      candidate.reduce((sum, path) => sum + budgetLinesOf(unitLineIndex, path), 0),
   });
 }
 
@@ -147,14 +174,28 @@ function addTaskBlock(
     unitLineIndex: UnitLineIndex;
     fileSplitThreshold: number;
     budgetLimits: TaskBudgetLimits;
+    unmeasuredPaths: ReadonlySet<string>;
   },
 ): void {
-  const { tasks, seen, unitLineIndex, fileSplitThreshold, budgetLimits } =
+  const { tasks, seen, unitLineIndex, fileSplitThreshold, budgetLimits, unmeasuredPaths } =
     context;
+
+  // Tags for one emitted task. `unmeasured_line_count` is the explicit LEAD an
+  // unmeasured `unitLineIndex` entry earns (see `buildPendingByLens`): the file
+  // is still reviewed, but the task says out loud that its size was never
+  // measured, so a downstream consumer can tell "unmeasured" from "measured and
+  // small".
+  const tagsFor = (chunk: string[], extra: string[]): string[] | undefined => {
+    const lead = chunk.some((path) => unmeasuredPaths.has(path))
+      ? ["unmeasured_line_count"]
+      : [];
+    const merged = [...new Set([...params.tags, ...extra, ...lead])];
+    return merged.length > 0 ? merged : undefined;
+  };
   const oversizedFiles =
     fileSplitThreshold > 0
       ? params.filePaths.filter(
-          (path) => (unitLineIndex[path] ?? 0) > fileSplitThreshold,
+          (path) => budgetLinesOf(unitLineIndex, path) > fileSplitThreshold,
         )
       : [];
   const oversizedSet = new Set(oversizedFiles);
@@ -178,12 +219,7 @@ function addTaskBlock(
         file_paths: chunk,
         rationale: params.rationale(chunk, splitKind),
         priority: params.priority,
-        tags:
-          splitKind === "budget"
-            ? [...new Set([...params.tags, "line_budget_split"])]
-            : params.tags.length > 0
-              ? params.tags
-              : undefined,
+        tags: tagsFor(chunk, splitKind === "budget" ? ["line_budget_split"] : []),
       });
     }
   }
@@ -202,10 +238,7 @@ function addTaskBlock(
       file_paths: [filePath],
       rationale: params.rationale([filePath], "large_file"),
       priority: params.priority,
-      tags:
-        params.tags.length > 0
-          ? [...new Set([...params.tags, "large_file"])]
-          : ["large_file"],
+      tags: tagsFor([filePath], ["large_file"]),
     });
   }
 }
@@ -235,6 +268,28 @@ function getExternalSignalPaths(
  * Resolve option defaults and build the map of pending (file path → lens)
  * pairs from the coverage matrix, filtering out excluded files, completed
  * lenses, lens-filter violations, and trivial audit paths.
+ *
+ * AN UNMEASURED LINE COUNT IS NOT A ZERO LINE COUNT. This resolved size as
+ * `unitLineIndex[file.path] ?? 0` and handed it to `isTrivialAuditPath`, whose
+ * `lineCount === 0` branch then classified the file trivial and `continue`d past
+ * it. Unlike `autoCompleteTrivialCoverage`, which marks a trivial file `excluded`
+ * in the coverage matrix, this loop leaves the record untouched: the file got no
+ * task, kept its non-empty `required_lenses`, and stayed reported outstanding
+ * forever — a silent permanent coverage hole indistinguishable from "still
+ * queued".
+ *
+ * The size question is now answered in ONE place — `isTrivialAuditPath` reads
+ * through the shared `isUnmeasuredLineCount` predicate — so this loop does NOT
+ * gate the triviality call on measuredness: a file that is trivial by NAME stays
+ * trivial when nobody could measure it. What the unmeasured signal buys is the
+ * LEAD: a surviving unmeasured path is collected into `unmeasuredPaths`, and
+ * every task carrying it is tagged `unmeasured_line_count`.
+ *
+ * This is the SECOND of the two sites that decide the fate of an unmeasured
+ * file, and the later one. `autoCompleteTrivialCoverage` runs first
+ * (planningExecutors.ts) and excludes from the coverage matrix; leniency here
+ * alone would be unreachable, because the `audit_status === "excluded"` guard
+ * above would already have skipped the file. Both sites are fixed together.
  */
 function buildPendingByLens(
   coverageMatrix: CoverageMatrix,
@@ -245,14 +300,16 @@ function buildPendingByLens(
     enforceLensFilter: boolean;
     tinyTestFileLines: number;
   },
-): Map<string, Set<string>> {
+): { pendingByLens: Map<string, Set<string>>; unmeasuredPaths: Set<string> } {
   const allowed = new Set(options.limit_lenses ?? []);
   const pendingByLens = new Map<string, Set<string>>();
+  const unmeasuredPaths = new Set<string>();
 
   for (const file of coverageMatrix.files) {
     if (file.audit_status === "excluded") {
       continue;
     }
+    const unmeasured = isUnmeasuredLineCount(unitLineIndex[file.path]);
     for (const lens of file.required_lenses) {
       if (file.completed_lenses.includes(lens)) {
         continue;
@@ -263,18 +320,21 @@ function buildPendingByLens(
       if (
         isTrivialAuditPath(
           file.path,
-          unitLineIndex[file.path] ?? 0,
+          unitLineIndex[file.path],
           externalPaths.has(file.path),
         )
       ) {
         continue;
+      }
+      if (unmeasured) {
+        unmeasuredPaths.add(file.path);
       }
       const pending = pendingByLens.get(lens) ?? new Set<string>();
       pending.add(file.path);
       pendingByLens.set(lens, pending);
     }
   }
-  return pendingByLens;
+  return { pendingByLens, unmeasuredPaths };
 }
 
 /**
@@ -282,8 +342,8 @@ function buildPendingByLens(
  * skipping paths already assigned to a flow block.
  */
 function buildRemainderBlocks(
-  pendingByLens: Map<string, Set<string>>,
-  assigned: Set<string>,
+  pendingByLens: ReadonlyMap<string, ReadonlySet<string>>,
+  assigned: ReadonlySet<string>,
   coverageByPath: Map<string, CoverageMatrix["files"][number]>,
   unitLineIndex: UnitLineIndex,
   externalPaths: Set<string>,
@@ -299,9 +359,12 @@ function buildRemainderBlocks(
       if (assigned.has(`${lens}:${path}`)) {
         continue;
       }
-      const lineCount = unitLineIndex[path] ?? 0;
+      // An UNMEASURED file is not known-small, so it is never batched as a tiny
+      // test: `measuredLinesOf` yields undefined and the comparison is skipped.
+      const lineCount = measuredLinesOf(unitLineIndex, path);
       const isTinyTestReview =
         tinyTestFileLines > 0 &&
+        lineCount !== undefined &&
         lineCount <= tinyTestFileLines &&
         isTestPath(normalizeExtractorPath(path)) &&
         !externalPaths.has(path);
@@ -340,11 +403,16 @@ export function buildChunkedAuditTasks(
   const externalPaths = getExternalSignalPaths(options.external_analyzer_results);
 
   // Phase 1: resolve pending work by lens.
-  const pendingByLens = buildPendingByLens(coverageMatrix, unitLineIndex, externalPaths, {
-    limit_lenses: options.limit_lenses,
-    enforceLensFilter,
-    tinyTestFileLines,
-  });
+  const { pendingByLens, unmeasuredPaths } = buildPendingByLens(
+    coverageMatrix,
+    unitLineIndex,
+    externalPaths,
+    {
+      limit_lenses: options.limit_lenses,
+      enforceLensFilter,
+      tinyTestFileLines,
+    },
+  );
 
   const intentBoostSet =
     options.intent_priority_boost && options.intent_priority_boost.length > 0
@@ -354,13 +422,46 @@ export function buildChunkedAuditTasks(
   const tasks: AuditTask[] = [];
   const seen = new Set<string>();
   const budgetLimits: TaskBudgetLimits = { maxTaskLines, maxTaskFiles };
-  const taskBlockContext = { tasks, seen, unitLineIndex, fileSplitThreshold, budgetLimits };
+  const taskBlockContext = {
+    tasks,
+    seen,
+    unitLineIndex,
+    fileSplitThreshold,
+    budgetLimits,
+    unmeasuredPaths,
+  };
 
   // Phase 2: claim critical-flow review blocks first (highest priority).
-  const assigned = new Set<string>();
-  const flowBlocks = options.critical_flows
-    ? claimFlowReviewBlocks(options.critical_flows, pendingByLens, assigned)
-    : [];
+  //
+  // ONE KEY SPACE, SATISFIED BY CONSTRUCTION — NOT BY RE-KEYING HERE.
+  // `claimFlowReviewBlocks` declares that every path it joins on is already in
+  // one key space. It is, and this call site is where that reading is recorded:
+  //
+  //   - Coverage paths, line-index keys and critical-flow paths all descend from
+  //     the SAME repo manifest, which `fsIntake` emits posix-normal. They are one
+  //     key space at the source; re-normalizing copies of them here would create a
+  //     SECOND one, since the persisted coverage matrix, the persisted line index
+  //     and result ingestion (`applyFileCoverage`) all stay keyed on the original
+  //     strings — a divergence with no live route to close.
+  //   - The one genuinely FOREIGN path surface is a worker-supplied string copied
+  //     into a followup task's `file_paths`. That never enters here; it enters at
+  //     validation, where `validateAuditResults` normalizes both sides of the
+  //     coverage join tolerantly. That is where the key-space fix belongs and
+  //     where it is pinned.
+  //
+  // THE CLAIM CONTRACT IS THE ONLY CHANNEL (`artifact:flow-claim-contract`).
+  // `claimFlowReviewBlocks` writes nothing back through its arguments, so the
+  // post-claim state must be read off the RETURN value: `claim.pending` is the
+  // pending map with every claimed path removed, `claim.assigned` the claim keys.
+  // Reading the pre-claim arguments instead re-emits every flow-claimed path as
+  // a remainder task — the same lens:path reviewed twice.
+  const claim = options.critical_flows
+    ? claimFlowReviewBlocks(options.critical_flows, pendingByLens, new Set<string>())
+    : undefined;
+  const flowBlocks = claim ?? [];
+  const remainingPending: ReadonlyMap<string, ReadonlySet<string>> =
+    claim?.pending ?? pendingByLens;
+  const assigned: ReadonlySet<string> = claim?.assigned ?? new Set<string>();
 
   for (const block of flowBlocks) {
     const hasExternalSignal = block.file_paths.some((path) => externalPaths.has(path));
@@ -384,7 +485,7 @@ export function buildChunkedAuditTasks(
   // Phase 3: group and emit remainder tasks (files not assigned to a flow block).
   const coverageByPath = new Map(coverageMatrix.files.map((file) => [file.path, file]));
   const remainderBlocks = buildRemainderBlocks(
-    pendingByLens,
+    remainingPending,
     assigned,
     coverageByPath,
     unitLineIndex,

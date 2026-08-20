@@ -1,24 +1,32 @@
 import { test, expect } from "vitest";
 import { claimFlowReviewBlocks } from "../../src/audit/orchestrator/flowPlanning.js";
+import { ALL_LENSES } from "../../src/audit/types.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
 
-// The full set of lenses that lensSetForFlow allows.
-const LENS_SET_FOR_FLOW = [
-  "security",
-  "reliability",
-  "correctness",
-  "data_integrity",
-  "operability",
-  "performance",
-  "observability",
-];
+// The lens set flow planning admits — DERIVED from the one lens registry
+// (`ALL_LENSES`, itself derived from `LENS_REGISTRY` in src/audit/types.ts),
+// never hand-copied here. This file previously carried a seven-entry copy named
+// after a `lensSetForFlow` helper that no longer exists: the very hand-copied
+// list whose divergence from `isLens` was the defect `selectFlowLenses` was
+// written to close. A copy here could only re-open it — adding a lens to the
+// registry would leave this suite asserting the OLD set and reporting green.
+const FLOW_LENSES: readonly string[] = ALL_LENSES;
 
-test("DEFAULT_FLOW_LENS_PRIORITY matches the lensSetForFlow allowed set", async () => {
-  // Verify by exercising claimFlowReviewBlocks with all 7 lenses as concerns:
-  // if any lens were absent from DEFAULT_FLOW_LENS_PRIORITY, it would be
-  // silently filtered out and no block would be returned for it.
+test("flow planning admits every canonical lens in the registry, and schedules nothing the flow did not declare", async () => {
+  // Verify by exercising claimFlowReviewBlocks with every canonical lens as a
+  // concern: if any lens were absent from the membership draw (`selectFlowLenses`)
+  // or the ordering map (`FLOW_LENS_ORDER`), it would be silently filtered out
+  // and no block would be returned for it.
+  //
+  // The fixture declares one NON-canonical concern alongside them, which is what
+  // keeps the second assertion meaningful: checking the scheduled set against
+  // `FLOW_LENSES` would be tautological (they are the same list), so the
+  // containment is asserted against the FIXTURE'S OWN declared concerns, and the
+  // non-lens concern must be dropped rather than scheduled.
+  const NON_CANONICAL_CONCERN = "definitely-not-a-lens";
+  const declaredConcerns = [...FLOW_LENSES, NON_CANONICAL_CONCERN];
   const pendingByLens = new Map<string, Set<string>>(
-    LENS_SET_FOR_FLOW.map((lens) => [lens, new Set(["src/a.ts"])]),
+    declaredConcerns.map((lens) => [lens, new Set(["src/a.ts"])]),
   );
   const criticalFlows: CriticalFlowManifest = {
     flows: [
@@ -27,7 +35,7 @@ test("DEFAULT_FLOW_LENS_PRIORITY matches the lensSetForFlow allowed set", async 
         name: "All Lenses Flow",
         paths: ["src/a.ts"],
         entrypoints: ["src/a.ts"],
-        concerns: LENS_SET_FOR_FLOW,
+        concerns: declaredConcerns,
         confidence: "high",
       },
     ],
@@ -37,16 +45,25 @@ test("DEFAULT_FLOW_LENS_PRIORITY matches the lensSetForFlow allowed set", async 
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
   const scheduledLenses = new Set(blocks.map((b) => b.lens));
 
-  for (const lens of LENS_SET_FOR_FLOW) {
+  for (const lens of FLOW_LENSES) {
     expect(scheduledLenses.has(lens), `lens '${lens}' should be scheduled by claimFlowReviewBlocks but was absent`).toBeTruthy();
   }
-  // No extra phantom lenses were scheduled.
+  // Nothing outside what this flow declared was scheduled...
   for (const lens of scheduledLenses) {
-    expect(LENS_SET_FOR_FLOW.includes(lens), `scheduled lens '${lens}' is not in the lensSetForFlow allowed set`).toBeTruthy();
+    expect(
+      declaredConcerns.includes(lens),
+      `scheduled lens '${lens}' was never declared as a concern by the fixture flow`,
+    ).toBeTruthy();
   }
+  // ...and a declared concern that is not a canonical lens is SKIPPED, not
+  // scheduled — one stray concern must neither abort the flow nor invent a lens.
+  expect(
+    scheduledLenses.has(NON_CANONICAL_CONCERN),
+    `'${NON_CANONICAL_CONCERN}' is not a canonical lens and must not be scheduled`,
+  ).toBe(false);
 });
 
-test("claimFlowReviewBlocks schedules blocks for all 7 flow lenses on initial call", () => {
+test("claimFlowReviewBlocks schedules blocks for every declared concern lens on the initial call", () => {
   // Flow has 5 concerns including the 4 new ones; each has a pending path.
   const concerns = [
     "security",
@@ -113,13 +130,16 @@ test("returns a block with matching file_paths, flow_id, and lens", () => {
   const pendingByLens = new Map<string, Set<string>>([["security", new Set(["src/a.ts"])]]);
   const assigned = new Set<string>();
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
+  const result = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
 
-  expect(blocks.length).toBe(1);
-  expect(blocks[0].flow_id).toBe("flow-1");
-  expect(blocks[0].lens).toBe("security");
-  expect(blocks[0].file_paths).toEqual(["src/a.ts"]);
-  expect(assigned.has("security:src/a.ts"), "assigned set should contain security:src/a.ts").toBeTruthy();
+  expect(result.length).toBe(1);
+  expect(result[0].flow_id).toBe("flow-1");
+  expect(result[0].lens).toBe("security");
+  expect(result[0].file_paths).toEqual(["src/a.ts"]);
+  // The claim is reported on the RETURNED contract, not written back into the
+  // caller's set (see the no-mutation test below).
+  expect(result.assigned.has("security:src/a.ts"), "returned claim contract should carry security:src/a.ts").toBeTruthy();
+  expect(assigned.size, "the caller's assigned set must be left untouched").toBe(0);
 });
 
 test("filters out paths not present in pendingByLens for the lens", () => {
@@ -368,7 +388,15 @@ test("drops candidate entirely when all its paths are already assigned", () => {
   expect(blocks).toEqual([]);
 });
 
-test("mutates the assigned set with all returned lens:path keys", () => {
+// INVERTED (CP-NODE-9 cutover): this test previously pinned the by-reference
+// mutation of the caller's `assigned` set. The claim contract is now the ONLY
+// channel — `claimFlowReviewBlocks` reports post-claim state on its return value
+// and writes nothing back through its arguments, so a caller cannot read claim
+// state it never asked for and the two channels cannot drift. The parameter
+// types are `ReadonlySet`/`ReadonlyMap`, which makes reintroducing the write a
+// compile error; this test is the runtime half of that guarantee (a cast would
+// defeat the types but not this assertion).
+test("does NOT mutate the caller's assigned set or pending map; the returned claim contract carries the keys", () => {
   const criticalFlows: CriticalFlowManifest = {
     flows: [
       {
@@ -387,10 +415,22 @@ test("mutates the assigned set with all returned lens:path keys", () => {
   ]);
   const assigned = new Set<string>();
 
-  claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
+  const result = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
 
-  expect(assigned.has("security:src/a.ts"), "assigned should contain security:src/a.ts").toBeTruthy();
-  expect(assigned.has("security:src/b.ts"), "assigned should contain security:src/b.ts").toBeTruthy();
+  // The caller's inputs are untouched.
+  expect([...assigned], "the caller's assigned set must not be written to").toEqual([]);
+  expect(
+    [...(pendingByLens.get("security") ?? [])].sort(),
+    "the caller's pending map must not be written to",
+  ).toEqual(["src/a.ts", "src/b.ts"]);
+
+  // The returned contract carries the post-claim state instead.
+  expect(result.assigned.has("security:src/a.ts"), "returned assigned should contain security:src/a.ts").toBeTruthy();
+  expect(result.assigned.has("security:src/b.ts"), "returned assigned should contain security:src/b.ts").toBeTruthy();
+  expect(
+    [...(result.pending.get("security") ?? [])],
+    "returned pending should have every claimed path removed",
+  ).toEqual([]);
 });
 
 test("a single flow with multiple matching lenses produces one block per lens", () => {

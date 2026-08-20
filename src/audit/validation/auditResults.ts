@@ -4,6 +4,7 @@ import {
   describeValue,
   formatValidationIssues,
   isRecord,
+  normalizeGraphPath,
   VALID_LENSES,
   VALID_SEVERITIES,
   VALID_CONFIDENCES,
@@ -41,8 +42,26 @@ export function isSignificantLineCountDivergence(got: number, expected: number):
   return diff / expected > LINE_COUNT_DIVERGENCE_RATIO;
 }
 
+/**
+ * THE ONE KEY SPACE for every path this module joins on:
+ * coverage entries, affected-finding locations, followup-task file paths, the
+ * line index, and the packet boundary. Delegates to the shared
+ * {@link normalizeGraphPath} — the same normalizer `taskBuilder` applies once at
+ * the coverage/flow-planning boundary — rather than re-deriving the rules here,
+ * because two hand-rolled normalizers ARE two key spaces the moment one of them
+ * learns something the other has not (this one previously stripped only a
+ * LEADING `./`, so an interior `src/./x.ts` was a different key from `src/x.ts`).
+ *
+ * Case is preserved: a repo path is the identity of a real file on disk, and
+ * lowercasing it would make two genuinely different files collide on
+ * case-sensitive filesystems.
+ *
+ * An empty (or whitespace-only) path stays empty rather than becoming posix's
+ * `"."`, so callers can keep testing `length > 0` for "no usable path".
+ */
 export function normalizeCoveragePath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//, "");
+  const trimmed = path.trim();
+  return trimmed.length === 0 ? "" : normalizeGraphPath(trimmed);
 }
 
 export interface AuditResultIssue extends ValidationIssue {
@@ -485,7 +504,11 @@ function validateVerificationFollowupTask(
         });
         continue;
       }
-      if (!allowedPaths.has(path)) {
+      // Join on the one normalized key space (`allowedPaths` is built from the
+      // normalized coverage entries and the normalized boundary); the RAW string
+      // the worker wrote is quoted back in the message so the diagnostic still
+      // names what it actually saw.
+      if (!allowedPaths.has(normalizeCoveragePath(path))) {
         pushIssue(issues, {
           result_index: resultIndex,
           task_id: taskId,
@@ -639,7 +662,15 @@ interface ResultValidationContext {
   task: AuditTask | undefined;
   taskId: string;
   resultIndex: number;
-  taskNormMap: Map<string, string>;
+  /**
+   * The assigned task's `file_paths`, NORMALIZED — a membership set, never a
+   * normalized→raw map. It was the latter, and the raw value it yielded was
+   * then stored as the accepted coverage path while every downstream lookup
+   * (affected_files, the span check, the followup gate) keyed on the normalized
+   * form: one join, two key spaces. The raw `task.file_paths` are still quoted
+   * verbatim in message text, which is the only place a raw path belongs.
+   */
+  taskAssignedPaths: Set<string>;
   normLineIndex: Map<string, number>;
   allTasks: AuditTask[];
   /**
@@ -693,7 +724,7 @@ function validateFileCoverageEntry(
   normalizedFileCoverage: NormalizedFileCoverage[],
   issues: AuditResultIssue[],
 ): void {
-  const { task, taskId, resultIndex, taskNormMap, normLineIndex, normBoundary } = ctx;
+  const { task, taskId, resultIndex, taskAssignedPaths, normLineIndex, normBoundary } = ctx;
   if (!isRecord(entry)) {
     pushIssue(issues, {
       result_index: resultIndex,
@@ -705,19 +736,23 @@ function validateFileCoverageEntry(
   }
 
   const entryNorm = isNonEmptyString(entry.path) ? normalizeCoveragePath(entry.path as string) : "";
-  const canonicalPath = taskNormMap.get(entryNorm);
+  const inAssigned = entryNorm.length > 0 && taskAssignedPaths.has(entryNorm);
   // Widen the hard-reject gate from the per-task assigned set to the packet/unit
   // boundary (union of sibling task file_paths). A coverage path the assigned
   // task didn't list, but a sibling in the packet did, is accepted rather than
-  // hard-rejected. Fail-closed: an empty boundary leaves only assigned paths in
-  // scope. `inBoundary` is the normalized boundary path used downstream so the
-  // span-coverage check can reference in-boundary coverage entries.
+  // hard-rejected. Fail-closed: an empty boundary contributes nothing, leaving
+  // only assigned paths in scope.
   const inBoundary = entryNorm.length > 0 && normBoundary.has(entryNorm);
-  const acceptedPath = canonicalPath ?? (inBoundary ? entryNorm : undefined);
+  // ACCEPTANCE IS A BOOLEAN, NOT A PATH. It used to be the accepted path itself,
+  // which is how a raw form leaked in: the assigned branch yielded the task's
+  // raw string and the boundary branch yielded the normalized one, and whichever
+  // won became the stored coverage key. Everything stored downstream is
+  // `entryNorm` now, so acceptance can never change which key space a path lands in.
+  const accepted = inAssigned || inBoundary;
 
   if (!isNonEmptyString(entry.path)) {
     pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: `file_coverage[${j}].path`, message: "file_coverage entry has an empty path." });
-  } else if (task && !acceptedPath) {
+  } else if (task && !accepted) {
     pushIssue(issues, {
       result_index: resultIndex,
       task_id: taskId,
@@ -730,8 +765,8 @@ function validateFileCoverageEntry(
     seenCoveragePaths.add(entryNorm);
   }
 
-  if (entryNorm.length > 0 && (!task || acceptedPath)) {
-    declaredAssignedCoveragePaths.add(acceptedPath ?? entryNorm);
+  if (entryNorm.length > 0 && (!task || accepted)) {
+    declaredAssignedCoveragePaths.add(entryNorm);
   }
 
   if (!Number.isInteger(entry.total_lines)) {
@@ -773,8 +808,8 @@ function validateFileCoverageEntry(
     });
   }
 
-  if (entryNorm.length > 0 && Number.isInteger(entry.total_lines) && Number(entry.total_lines) >= 0 && (!task || acceptedPath)) {
-    normalizedFileCoverage.push({ path: acceptedPath ?? entryNorm, total_lines: Number(entry.total_lines) });
+  if (entryNorm.length > 0 && Number.isInteger(entry.total_lines) && Number(entry.total_lines) >= 0 && (!task || accepted)) {
+    normalizedFileCoverage.push({ path: entryNorm, total_lines: Number(entry.total_lines) });
   }
 }
 
@@ -944,14 +979,21 @@ function validateSingleAuditResult(
   const taskId = issueTaskId(result, resultIndex);
   const task = taskMap.get(taskId);
 
-  const taskNormMap = new Map<string, string>();
+  // The assigned set enters the join already normalized — an un-normalized
+  // `file_paths` entry (the shape `selectiveDeepening`'s `pathsForFinding`
+  // produces by copying a worker string verbatim into a followup task) is a
+  // surface difference, never a different file.
+  const taskAssignedPaths = new Set<string>();
   if (task) {
     for (const fp of task.file_paths) {
-      taskNormMap.set(normalizeCoveragePath(fp), fp);
+      const norm = normalizeCoveragePath(fp);
+      if (norm.length > 0) {
+        taskAssignedPaths.add(norm);
+      }
     }
   }
 
-  const ctx: ResultValidationContext = { result, task, taskId, resultIndex, taskNormMap, normLineIndex, allTasks, normBoundary };
+  const ctx: ResultValidationContext = { result, task, taskId, resultIndex, taskAssignedPaths, normLineIndex, allTasks, normBoundary };
 
   validateResultIdentityFields(ctx, issues);
 

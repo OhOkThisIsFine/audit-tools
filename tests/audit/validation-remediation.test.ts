@@ -376,6 +376,243 @@ test("validateAuditResults rejects a backslash path that normalizes to an unreco
   expect(pathIssue!.message).toMatch(/not listed in the task file_paths/i);
 });
 
+// ── OBL-audit-coverage-path-keyspace inv-1 / fail-1 AND inv-4: ONE key space
+// through the coverage join. The raw task path is message text, never a join key.
+//
+// This is also where inv-4 (ONE KEY SPACE) is pinned. The task builder does NOT
+// re-key its inputs: coverage paths, line-index keys and critical-flow paths all
+// descend from the same posix-normal repo manifest, so they are one key space by
+// construction, and normalizing copies of them there would leave the persisted
+// artifacts and result ingestion on the original strings. The one genuinely
+// FOREIGN path surface is a worker-supplied string copied verbatim into a
+// followup task's file_paths — it enters HERE, at validation, and these tests are
+// what make that entry tolerant instead of a hard reject. ────────────────────
+
+test("validateAuditResults accepts a correctly-located result when the ASSIGNED task's file_paths entry is un-normalized", () => {
+  // The defect: `taskNormMap` mapped normalized → RAW and the raw form was
+  // stored as the accepted coverage path, while every downstream lookup
+  // (affected_files, the span check, the followup-task gate) keyed on the
+  // NORMALIZED form. A task whose file_paths entry arrives un-normalized — the
+  // shape selectiveDeepening's `pathsForFinding` produces by copying a worker
+  // string verbatim into a followup task — therefore hard-rejected an otherwise
+  // schema-valid, correctly-located result.
+  const tasks: AuditTask[] = [
+    {
+      task_id: "task-raw-assigned",
+      unit_id: "unit-1",
+      pass_id: "pass:correctness",
+      lens: "correctness",
+      // Un-normalized ASSIGNED paths (backslash and ./ prefix).
+      file_paths: ["src\\audit\\foo.ts", "./src/audit/bar.ts"],
+      file_line_counts: { "src/audit/foo.ts": 40, "src/audit/bar.ts": 25 },
+      rationale: "fixture",
+    },
+  ];
+
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-raw-assigned",
+        unit_id: "unit-1",
+        pass_id: "pass:correctness",
+        lens: "correctness",
+        file_coverage: [
+          { path: "src/audit/foo.ts", total_lines: 40 },
+          { path: "src/audit/bar.ts", total_lines: 25 },
+        ],
+        findings: [
+          {
+            id: "f-raw-1",
+            title: "T",
+            category: "correctness",
+            severity: "low",
+            confidence: "high",
+            lens: "correctness",
+            summary: "S",
+            affected_files: [{ path: "src/audit/foo.ts", line_start: 3, line_end: 9 }],
+            evidence: ["e"],
+          },
+        ],
+      },
+    ],
+    tasks,
+    { lineIndex: { "src/audit/foo.ts": 40, "src/audit/bar.ts": 25 } },
+  );
+
+  const errors = issues.filter((i) => i.severity === "error");
+  expect(errors.length, `unexpected errors: ${JSON.stringify(errors)}`).toBe(0);
+  // ...and the finding is IN scope, so it must not be demoted to the
+  // out-of-scope advisory either (that warning is what silently strips a
+  // correctly-located finding).
+  const scopeWarnings = issues.filter((i) => /out-of-scope/.test(i.message));
+  expect(
+    scopeWarnings.length,
+    `a correctly-located finding must not be reported out-of-scope: ${JSON.stringify(scopeWarnings)}`,
+  ).toBe(0);
+});
+
+test("validateAuditResults keeps the RAW path in message text while joining on the normalized form", () => {
+  // Raw only in human-readable text: a genuinely out-of-scope path is still
+  // rejected, and the message still quotes what the worker actually wrote.
+  const tasks: AuditTask[] = [
+    {
+      task_id: "task-raw-msg",
+      unit_id: "unit-1",
+      pass_id: "pass:correctness",
+      lens: "correctness",
+      file_paths: ["src\\audit\\foo.ts"],
+      file_line_counts: { "src/audit/foo.ts": 40 },
+      rationale: "fixture",
+    },
+  ];
+
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-raw-msg",
+        unit_id: "unit-1",
+        pass_id: "pass:correctness",
+        lens: "correctness",
+        file_coverage: [
+          { path: "src/audit/foo.ts", total_lines: 40 },
+          { path: "src\\audit\\nope.ts", total_lines: 5 },
+        ],
+        findings: [],
+        reviewed_clean: true,
+      },
+    ],
+    tasks,
+    { lineIndex: { "src/audit/foo.ts": 40 } },
+  );
+
+  const pathError = issues.find(
+    (i) => i.severity === "error" && i.field === "file_coverage[1].path",
+  );
+  expect(pathError, `expected the unassigned path to still be rejected: ${JSON.stringify(issues)}`).toBeTruthy();
+  expect(pathError!.message).toContain("src\\audit\\nope.ts");
+  expect(pathError!.message).toContain("src\\audit\\foo.ts");
+});
+
+test("validateAuditResults accepts a followup task whose file_paths entry is un-normalized against normalized coverage", () => {
+  // Third arm of the same key space: `verification.followup_tasks[].file_paths`
+  // was compared RAW against a set of coverage paths, so a `./`-prefixed or
+  // backslash followup path hard-rejected against its own declared coverage.
+  const tasks: AuditTask[] = [
+    {
+      task_id: "task-followup-norm",
+      unit_id: "unit-1",
+      pass_id: "pass:correctness",
+      lens: "correctness",
+      file_paths: ["src/audit/foo.ts"],
+      file_line_counts: { "src/audit/foo.ts": 40 },
+      rationale: "fixture",
+      tags: ["lens_verification"],
+    },
+  ];
+
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-followup-norm",
+        unit_id: "unit-1",
+        pass_id: "pass:correctness",
+        lens: "correctness",
+        file_coverage: [{ path: "src/audit/foo.ts", total_lines: 40 }],
+        findings: [],
+        reviewed_clean: true,
+        verification: {
+          verified: true,
+          needs_followup: true,
+          followup_tasks: [
+            {
+              task_id: "followup-1",
+              unit_id: "unit-1",
+              pass_id: "pass:correctness",
+              lens: "correctness",
+              rationale: "deepen",
+              file_paths: ["./src/audit/foo.ts"],
+            },
+          ],
+        },
+      },
+    ],
+    tasks,
+    { lineIndex: { "src/audit/foo.ts": 40 } },
+  );
+
+  const followupErrors = issues.filter(
+    (i) => i.severity === "error" && /followup_tasks/.test(i.field ?? ""),
+  );
+  expect(followupErrors.length, `unexpected followup errors: ${JSON.stringify(followupErrors)}`).toBe(0);
+});
+
+// ── OBL-audit-coverage-path-keyspace inv-3: boundaryPaths widening is
+// FAIL-CLOSED and never substitutes for normalization. ───────────────────────
+
+test("validateAuditResults boundaryPaths widening stays fail-closed and does not widen as a side effect of normalization", () => {
+  const tasks: AuditTask[] = [
+    {
+      task_id: "task-boundary",
+      unit_id: "unit-1",
+      pass_id: "pass:correctness",
+      lens: "correctness",
+      file_paths: ["src/assigned.ts"],
+      file_line_counts: { "src/assigned.ts": 10 },
+      rationale: "fixture",
+    },
+  ];
+  const resultWith = (coveragePath: string) => [
+    {
+      task_id: "task-boundary",
+      unit_id: "unit-1",
+      pass_id: "pass:correctness",
+      lens: "correctness",
+      file_coverage: [
+        { path: "src/assigned.ts", total_lines: 10 },
+        { path: coveragePath, total_lines: 7 },
+      ],
+      findings: [],
+      reviewed_clean: true,
+    },
+  ];
+  const pathErrors = (issues: ReturnType<typeof validateAuditResults>) =>
+    issues.filter((i) => i.severity === "error" && i.field === "file_coverage[1].path");
+
+  // (a) NO boundary → the gate is scoped exactly to the task's assigned set.
+  expect(
+    pathErrors(validateAuditResults(resultWith("src/sibling.ts"), tasks)).length,
+    "an undefined boundary must not widen the gate",
+  ).toBe(1);
+
+  // (b) EMPTY boundary → identical to undefined; an empty list never widens.
+  expect(
+    pathErrors(validateAuditResults(resultWith("src/sibling.ts"), tasks, { boundaryPaths: [] })).length,
+    "an empty boundary must not widen the gate",
+  ).toBe(1);
+
+  // (c) NON-EMPTY boundary → widened for exactly the declared sibling, and the
+  // widening itself joins in the one normalized key space.
+  expect(
+    pathErrors(
+      validateAuditResults(resultWith("src/sibling.ts"), tasks, {
+        boundaryPaths: ["src\\sibling.ts"],
+      }),
+    ).length,
+    "a declared sibling path must be accepted under the normalized key space",
+  ).toBe(0);
+
+  // (d) A path outside BOTH the assigned set and a non-empty boundary is still
+  // rejected — normalizing the accepted path must not widen acceptance.
+  expect(
+    pathErrors(
+      validateAuditResults(resultWith("src/stranger.ts"), tasks, {
+        boundaryPaths: ["src/sibling.ts"],
+      }),
+    ).length,
+    "a non-empty boundary must not admit a path nobody declared",
+  ).toBe(1);
+});
+
 test("validateAuditResults detects duplicates across normalized paths", () => {
   const tasks: AuditTask[] = [
     {
