@@ -270,6 +270,18 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
     expect(r.code).toBe(0);
   });
 
+  // OBL-ci-red-verdict-vocabulary-fail-4: a CORRUPT challenge marker-file
+  // degrades to "treat as first challenge", never a wedge. Pre-writing invalid
+  // JSON where a valid `{count:2}` (at CHALLENGE_CAP) would have suppressed
+  // this call proves the corrupt bytes were NOT read as an already-spent cap.
+  it('a corrupt challenge marker-file degrades to first-challenge, never a silent wedge', () => {
+    const session = sid('corrupt-marker');
+    const markerDir = join(repo, '.claude', 'hooks', '.state', 'closeout-challenge');
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(join(markerDir, `${session}.json`), 'not valid json {{{');
+    expect(runHook(CLOSEOUT_GATE, stop(session), { root: repo }).code).toBe(2);
+  });
+
   // The mid-task misfire class (backlog 2026-08-05/07-28): a stop that is a WAIT
   // on live background work is a turn boundary the harness resumes, not a
   // closeout — challenging there spends the cap before the real close.
@@ -378,6 +390,46 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
         root: repo,
         env: fakeGh(binDir, '', 1),
       });
+      expect(stderr).not.toContain('CI is RED');
+      rmSync(binDir, { recursive: true, force: true });
+    });
+
+    // OBL-ci-red-verdict-vocabulary-inv-2 / fail-1: the vocabulary fix must
+    // actually reach the gate's own CI-red finding, not just the pure
+    // latestFailedWorkflows unit — only 'failure' was covered here before.
+    posixOnly('NAMES a timed_out workflow as red too, not only failure', () => {
+      const binDir = mkdtempSync(join(tmpdir(), 'ghtimedout-'));
+      const json = JSON.stringify([
+        { workflowName: 'ci', status: 'completed', conclusion: 'success', createdAt: '2026-07-26T02:00:00Z' },
+        {
+          workflowName: 'audit-code-test-suite',
+          status: 'completed',
+          conclusion: 'timed_out',
+          createdAt: '2026-07-26T02:00:00Z',
+        },
+      ]);
+      const { code, stderr } = runHook(CLOSEOUT_GATE, stop(sid('citimedout')), {
+        root: repo,
+        env: fakeGh(binDir, json),
+      });
+      expect(code).toBe(2);
+      expect(stderr).toContain('CI is RED on main');
+      expect(stderr).toContain('audit-code-test-suite');
+      rmSync(binDir, { recursive: true, force: true });
+    });
+
+    // fail-1's non-JSON half: `gh` exiting 0 with malformed stdout must also
+    // degrade to silence (JSON.parse throws, the surrounding try/catch
+    // swallows it) rather than an uncaught exception or a false claim.
+    posixOnly('says NOTHING about CI when gh returns malformed (non-JSON) stdout', () => {
+      const binDir = mkdtempSync(join(tmpdir(), 'ghmalformed-'));
+      const { code, stderr } = runHook(CLOSEOUT_GATE, stop(sid('cimalformed')), {
+        root: repo,
+        env: fakeGh(binDir, 'not valid json {{{'),
+      });
+      // The gate must still resolve its own verdict on the rest of the tree
+      // (dirt/HEAD-age), never crash uncaught because of the CI probe alone.
+      expect(code).toBe(2);
       expect(stderr).not.toContain('CI is RED');
       rmSync(binDir, { recursive: true, force: true });
     });
@@ -552,6 +604,66 @@ describe('closeout-challenge-gate: tree-dirt baseline partition (Build 3)', () =
   });
 });
 
+// OBL-ci-red-verdict-vocabulary-inv-4 / fail-3: REL-cfc0b00d's specific
+// reproduction (later cases in the shared-repo describe above depend on the
+// first case's dirty.txt to fire) does NOT hold at HEAD — headMovedRecently,
+// from the shared beforeAll's non-backdated commit, is an independent,
+// dirt-free trigger. These two cases pin that boundary directly and
+// hermetically (their OWN isolated repo each, never the shared describe's
+// mutable fixture), so a future change to the shared beforeAll's commit step
+// cannot silently make the case above pass for the wrong reason. Together
+// they are the red-green PAIR: #1 alone proves headMovedRecently fires;
+// #2 alone proves the SAME fixture stays silent once that trigger is removed
+// (dirt-free, unpushed-free) — without #2, #1 could pass for an unrelated
+// reason (e.g. an accidental default-dirty temp dir).
+describe('closeout-challenge-gate: headMovedRecently is independently sufficient (hermetic, no shared fixture)', () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* windows lock — leave it to the temp reaper */
+      }
+    }
+  });
+
+  function isolatedRepo(backdatedHours: number): string {
+    const root = mkdtempSync(join(tmpdir(), 'closeout-hermetic-'));
+    roots.push(root);
+    const g = (args: string[], env: NodeJS.ProcessEnv = {}) =>
+      spawnSyncHidden('git', args, {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 30_000,
+        env: { ...process.env, ...env },
+      });
+    g(['init', '-q']);
+    g(['config', 'user.email', 'test@example.com']);
+    g(['config', 'user.name', 'test']);
+    g(['config', 'commit.gpgsign', 'false']);
+    writeFileSync(join(root, 'a.txt'), 'one\n');
+    g(['add', '.']);
+    const when = new Date(Date.now() - backdatedHours * 60 * 60 * 1000).toISOString();
+    g(['commit', '-qm', 'initial'], backdatedHours > 0 ? { GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } : {});
+    return root;
+  }
+
+  it('a fresh, non-backdated, dirt-free repo still challenges — headMovedRecently alone triggers it', () => {
+    const root = isolatedRepo(0);
+    const { code, stderr } = runHook(CLOSEOUT_GATE, { hook_event_name: 'Stop', session_id: sid('hermetic-fresh') }, { root });
+    expect(code).toBe(2);
+    expect(stderr).toContain('are you sure that was all taken care of');
+  });
+
+  it('the SAME dirt-free repo stays silent once backdated ~24h — proving test 1 is headMovedRecently, not an accident', () => {
+    const root = isolatedRepo(24);
+    const { code } = runHook(CLOSEOUT_GATE, { hook_event_name: 'Stop', session_id: sid('hermetic-backdated') }, { root });
+    expect(code).toBe(0);
+  });
+});
+
 // The question gate's Build 1 leg: the unregistered-child skip is STOP-LEG ONLY.
 // A child's closing question is part of its returned deliverable — exit-2'ing it
 // hijacks the hand-back (P23). A child that explicitly calls AskUserQuestion is
@@ -694,6 +806,38 @@ describe('latestFailedWorkflows: reading ONE workflow is not reading CI', () => 
     expect(latestFailedWorkflows([null, {}, run('', 'failure', '2026-07-26T02:00:00Z')])).toEqual([]);
     // An unparseable timestamp must not sort as newest.
     expect(latestFailedWorkflows([run('suite', 'failure', 'not-a-date')])).toEqual([]);
+  });
+
+  // OBL-ci-red-verdict-vocabulary-inv-1 / fail-2: the conclusion vocabulary is
+  // EXHAUSTIVE, not an enumerated allowlist of `failure`. Every one of these
+  // reproduces the incident class the module header names — main sitting red
+  // while the check reports green.
+  it('reports red for every non-success, non-cancelled conclusion GitHub can emit', () => {
+    for (const conclusion of ['failure', 'timed_out', 'startup_failure', 'action_required', 'stale', 'neutral']) {
+      expect(
+        latestFailedWorkflows([run('suite', conclusion, '2026-07-26T02:00:00Z')]),
+        `conclusion '${conclusion}' must read red`,
+      ).toEqual(['suite']);
+    }
+  });
+
+  it('does not let a NEWER timed_out run mask an older genuine failure', () => {
+    // The exact shadowing failure mode: a non-'failure' but non-passing newest
+    // run must not clear an older red verdict for the same workflow.
+    expect(
+      latestFailedWorkflows([
+        run('suite', 'failure', '2026-07-26T01:00:00Z'),
+        run('suite', 'timed_out', '2026-07-26T02:00:00Z'),
+      ]),
+    ).toEqual(['suite']);
+  });
+
+  it('treats an unrecognized future conclusion as red too — exhaustive by construction, not by an enumerated list', () => {
+    // A conclusion string this file has never seen (GitHub adding one tomorrow)
+    // must fail toward red by default, never fall through to green.
+    expect(latestFailedWorkflows([run('suite', 'a_future_conclusion_nobody_named_yet', '2026-07-26T02:00:00Z')])).toEqual([
+      'suite',
+    ]);
   });
 });
 

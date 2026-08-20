@@ -13,6 +13,24 @@
 //   • `cancelled` is NOT a failure. A newer push cancels the older run by
 //     concurrency, which is routine; treating it as red trains the override into
 //     a reflex (same reasoning as the constitutional gate's narrowness).
+//
+// The red/green split below is an EXHAUSTIVE mapping by inversion, not an
+// enumerated allowlist of bad conclusions: PASSING_CONCLUSIONS names the only
+// value that reads as green, so `timed_out` / `startup_failure` /
+// `action_required` / `stale` / `neutral` / `failure` — and any conclusion
+// GitHub adds tomorrow that this file has never heard of — all read red by
+// default, never silently green. `cancelled` is excluded upstream (a
+// superseded run carries no signal either way) and never reaches this set.
+
+/**
+ * The only GitHub Actions terminal `conclusion` value that means a run
+ * PASSED. Inverting the check onto this single-member allowlist (rather than
+ * enumerating every failing conclusion) is what makes the mapping exhaustive:
+ * an unrecognized future conclusion falls through to "not passing" — i.e. red
+ * — by construction, instead of silently matching neither an old allowlist
+ * nor a denylist and defaulting to green.
+ */
+const PASSING_CONCLUSIONS = new Set(['success']);
 
 /**
  * Names of workflows whose most recent COMPLETED run concluded in failure.
@@ -53,7 +71,7 @@ export function latestFailedWorkflows(runs) {
   }
 
   return [...newestCompleted.entries()]
-    .filter(([, v]) => v.conclusion === 'failure')
+    .filter(([, v]) => !PASSING_CONCLUSIONS.has(v.conclusion))
     .map(([name]) => name)
     .sort();
 }
