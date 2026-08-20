@@ -1,17 +1,10 @@
-import type { CoverageMatrix, Lens } from "../types.js";
-import { isLens } from "../types.js";
+import type { CoverageMatrix } from "../types.js";
 import type {
   FlowCoverageManifest,
   FlowCoverageStatus,
 } from "../types/flowCoverage.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
-
-function lensSetForFlow(concerns: string[]): Lens[] {
-  // COR-59c25418: use the single-source-of-truth `isLens` guard so all valid
-  // lenses (including maintainability, architecture, tests, config_deployment)
-  // are accepted rather than a hardcoded subset.
-  return concerns.filter((concern): concern is Lens => isLens(concern));
-}
+import { selectFlowLenses } from "./flowPlanning.js";
 
 export function buildFlowCoverage(
   criticalFlows: CriticalFlowManifest,
@@ -24,12 +17,13 @@ export function buildFlowCoverage(
     const flowPaths = Array.isArray(flow.paths)
       ? flow.paths.filter((path): path is string => typeof path === "string")
       : [];
-    const required = lensSetForFlow(
-      Array.isArray(flow.concerns)
-        ? flow.concerns.filter(
-            (concern): concern is string => typeof concern === "string",
-          )
-        : [],
+    // The lenses coverage marks REQUIRED come from the same flow-lens policy
+    // planning claims blocks against and requeue mints follow-ups against —
+    // `selectFlowLenses`, drawn from the one lens registry. A hardcoded subset
+    // here (or there) is what let a flow be required under a lens planning
+    // would never schedule.
+    const required = selectFlowLenses(
+      Array.isArray(flow.concerns) ? flow.concerns : [],
     );
     const completed = new Set<string>();
 

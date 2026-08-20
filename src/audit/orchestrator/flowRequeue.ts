@@ -1,8 +1,8 @@
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { AuditTask, CoverageMatrix, Lens } from "../types.js";
-import { isLens } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
+import { selectFlowLenses } from "./flowPlanning.js";
 import { getExternalSignalPaths } from "./requeueUtils.js";
 
 function taskPriority(
@@ -50,11 +50,13 @@ export function buildFlowRequeueTasks(
       continue;
     }
 
-    const requiredLenses = Array.isArray(record.required_lenses)
-      ? record.required_lenses.filter(
-          (lens): lens is string => typeof lens === "string",
-        )
-      : [];
+    // Requeue follows the SAME flow-lens policy planning claims against and
+    // coverage marks required against — `selectFlowLenses`, drawn from the one
+    // lens registry. A non-canonical lens recorded in flow coverage is skipped
+    // (not thrown on): one stray value must not abort the whole requeue.
+    const requiredLenses = selectFlowLenses(
+      Array.isArray(record.required_lenses) ? record.required_lenses : [],
+    );
     const completedLenses = new Set(
       Array.isArray(record.completed_lenses)
         ? record.completed_lenses.filter(
@@ -70,13 +72,6 @@ export function buildFlowRequeueTasks(
       : [];
 
     for (const lensName of missingLenses) {
-      // Skip (rather than throw on) an unsupported lens value, consistent with
-      // the filter-based lens guards elsewhere in the orchestrator: a stray
-      // non-canonical lens in flow coverage should not abort the whole requeue.
-      if (!isLens(lensName)) {
-        continue;
-      }
-
       for (const path of flowPaths) {
         if (!fileStillNeedsLens(coverageByPath, path, lensName)) {
           continue;

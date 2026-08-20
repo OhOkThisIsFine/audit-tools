@@ -53,6 +53,32 @@ export function selectUncoveredRequeueTasks(
 }
 
 /**
+ * The requeue fold's `file_line_counts` enrichment (INV-PLAN-PERSIST-COMPLETE
+ * half 2) — a MEASURED-ONLY projection of the line index over a task's paths.
+ *
+ * `file_line_counts` is a `Record<string, number>`, schema-constrained downstream
+ * to `z.number().int().min(0)`. A path is therefore either present with a real
+ * count or ABSENT: an absent index key, a `null`, and the unmeasured sentinel
+ * (`UNMEASURED_LINE_COUNT`, NaN — which JSON-serializes as `null`) all drop the
+ * key rather than emit a value the contract cannot hold. This filter is the only
+ * thing standing between the diagnostic index's "unmeasured" concept and a
+ * persisted numeric contract, so it is stated once, here, as its own unit.
+ */
+function measuredLineCounts(
+  filePaths: readonly string[],
+  lineIndex: Record<string, number>,
+): Record<string, number> {
+  return Object.fromEntries(
+    filePaths
+      .filter(
+        (path) =>
+          lineIndex[path] != null && !isUnmeasuredLineCount(lineIndex[path]),
+      )
+      .map((path) => [path, lineIndex[path]]),
+  );
+}
+
+/**
  * Select the genuinely-uncovered requeue tasks and enrich the survivors with
  * line-count hints — the whole fold, so neither draw re-derives half of it.
  *
@@ -72,12 +98,6 @@ export function foldPendingRequeueTasks(params: {
     params.effectiveLenses,
   ).map((task) => ({
     ...task,
-    file_line_counts: Object.fromEntries(
-      task.file_paths
-        // Exclude the unmeasured sentinel (NaN) alongside absent keys: NaN would
-        // JSON-serialize as null and violate the numeric file_line_counts contract.
-        .filter((path) => lineIndex[path] != null && !isUnmeasuredLineCount(lineIndex[path]))
-        .map((path) => [path, lineIndex[path]]),
-    ),
+    file_line_counts: measuredLineCounts(task.file_paths, lineIndex),
   }));
 }
