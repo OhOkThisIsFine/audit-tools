@@ -13,7 +13,7 @@
  * appends `recovered_by_hand`, so a run repaired by an operator stays
  * distinguishable from one the host got right.
  */
-import { unlink } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 
 import { readOptionalJsonFile, writeJsonFile } from "../io/json.js";
 import { discardOnSchemaVersionMismatch } from "../io/schemaVersion.js";
@@ -137,6 +137,41 @@ export async function recoverSubmission(
     return { ok: false, issue };
   }
 
+  // Captured BEFORE the overwrite, as raw bytes, because rollback has to be able
+  // to put back exactly what was there — byte-for-byte, not a re-serialization
+  // of something re-parsed. A rescue attempted over an ALREADY-LANDED submission
+  // is the case that made the old unconditional rollback destructive: deleting
+  // produced "no file", never "the previous file", so a failed rescue destroyed
+  // bytes the run already had.
+  //
+  // ONLY `ENOENT` MEANS ABSENT. Every other read failure — EISDIR, EACCES,
+  // EPERM, EBUSY — says something IS there and could not be read, which is the
+  // opposite fact. Treating them all as "nothing was there" set `priorContent`
+  // to null and routed rollback to `unlink`, so an existing-but-unreadable
+  // payload was DELETED by the recovery meant to protect it. There is no safe
+  // guess to make here: without the prior bytes a rollback can neither restore
+  // nor justify deleting, so the recovery is refused before anything is written.
+  let priorContent: Buffer | null = null;
+  try {
+    priorContent = await readFile(landingPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      return {
+        ok: false,
+        issue: {
+          code: "submission_rejected",
+          message:
+            `the submission already at ${boundPath} could not be read (${code ?? "unknown error"}), ` +
+            "so a failed recovery could not be rolled back without destroying it — " +
+            "resolve what is at that path, then retry the recovery",
+          submission_id: request.submissionId,
+          submission_path: boundPath,
+        },
+      };
+    }
+  }
+
   const lane =
     request.lane ?? (await resolveLane(request.artifactsDir, request.submissionId));
   await writeJsonFile(landingPath, read.value);
@@ -160,8 +195,31 @@ export async function recoverSubmission(
     // failed rescue they can retry rather than a silent falsification.
     const detail = error instanceof Error ? error.message : String(error);
     try {
-      await unlink(landingPath);
+      // RESTORE-OR-DELETE, decided by what was captured above. Deleting is the
+      // right rollback for exactly one case — nothing was there — and it was
+      // being applied to both.
+      if (priorContent === null) {
+        await unlink(landingPath);
+      } else {
+        // UNCOVERED HALF, stated: this restore is a RAW write while the forward
+        // write above is atomic (temp + rename). A crash between truncate and
+        // the last byte therefore leaves a TRUNCATED prior payload — worse than
+        // either outcome this rollback chooses between. Closing it needs
+        // `writeFileAtomic` to accept `string | Buffer` and be exported, which is
+        // the io module's node (CP-NODE-3) and named in its dispatch, not a
+        // change this module may make. Until it lands, the restore is atomic in
+        // intent and not in mechanism.
+        await writeFile(landingPath, priorContent);
+      }
     } catch (rollbackError) {
+      // UNCOVERED HALF, stated: this branch — the append AND the rollback both
+      // failing — has no test. Reaching it requires the landing path to be
+      // writable at T (the forward write succeeded) and unwritable at T+1 (the
+      // rollback did not), which is a genuine race rather than a state a fixture
+      // can seed; every deterministic trigger fails the forward write first and
+      // never arrives here. What IS covered is the message: the operator is told
+      // the payload is on disk, unrecorded, and what to do about it. The branch's
+      // reachability is argued, not demonstrated.
       const rollbackDetail =
         rollbackError instanceof Error
           ? rollbackError.message
@@ -170,13 +228,20 @@ export async function recoverSubmission(
         `hand recovery for '${request.submissionId}' could not record the ledger event ` +
           `(${detail}), and the landed payload could NOT be rolled back (${rollbackDetail}). ` +
           `The payload IS on disk at ${boundPath} with no recovered_by_hand record — ` +
-          "remove it or retry the recovery before the next next-step consumes it.",
+          "remove it or retry the recovery before the next next-step consumes it." +
+          (priorContent === null
+            ? ""
+            : " It OVERWROTE a submission that was already there, which could not be" +
+              " restored — recover that payload before retrying."),
         { cause: error },
       );
     }
     throw new Error(
       `hand recovery for '${request.submissionId}' could not record the ledger event: ` +
-        `${detail}. The payload was NOT landed (rolled back) — retry the recovery.`,
+        `${detail}. The payload was NOT landed (rolled back) — retry the recovery.` +
+        (priorContent === null
+          ? ""
+          : " The submission that was already at that path has been restored byte-for-byte."),
       { cause: error },
     );
   }

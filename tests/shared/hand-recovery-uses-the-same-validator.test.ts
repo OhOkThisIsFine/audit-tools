@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import { recoverSubmission, type HandRecoveryRequest } from "../../src/shared/submission/handRecovery.js";
 import {
@@ -256,5 +257,206 @@ describe("hand recovery — the recovery lane is the normal lane's validator, no
       readFile(landed, "utf8"),
       "a rescue that could not be recorded must leave nothing behind",
     ).rejects.toThrow();
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// ROLLBACK RESTORES; IT DOES NOT JUST DELETE.
+//
+// "Roll back the landing write" was implemented as an unconditional unlink. That
+// is the correct rollback for exactly one case — nothing was at the path before
+// — and it was being applied to both. Attempted over an ALREADY-LANDED
+// submission it produced "no file" rather than "the previous file", so a rescue
+// that merely failed to be RECORDED destroyed bytes the run already had. The
+// distinction is what these tests hold apart.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("hand recovery — a failed rescue never destroys what was already landed", () => {
+  const good = {
+    contract_version: "synthesis-narrative/v1alpha1",
+    executive_summary: "the repo is fine",
+    themes: ["coupling"],
+  };
+
+  /**
+   * A recovery whose ledger append is guaranteed to fail. A directory at the
+   * ledger path is the hermetic, cross-platform stand-in for the lock / EBUSY /
+   * concurrent-writer cases this really happens under.
+   */
+  async function recoveryWithUnwritableLedger(options: {
+    seedLandingWith?: string;
+  }): Promise<{ landed: string; call: () => Promise<unknown> }> {
+    const { root, artifactsDir, request } = await fixture();
+    const submissionId = "synthesis-narrative-lane";
+    const operatorPath = join(root, "operator-fixed.json");
+    await writeFile(operatorPath, JSON.stringify(good), "utf8");
+
+    const landed = absoluteSubmissionPath(
+      { root, submissionDir: submissionsDir(artifactsDir) },
+      submissionId,
+    );
+    if (options.seedLandingWith !== undefined) {
+      await mkdir(dirname(landed), { recursive: true });
+      await writeFile(landed, options.seedLandingWith, "utf8");
+    }
+    await mkdir(submissionLedgerPath(artifactsDir), { recursive: true });
+
+    return {
+      landed,
+      call: () =>
+        recoverSubmission(request(submissionId, operatorPath), validateGateSubmission),
+    };
+  }
+
+  it("restores the pre-existing payload byte-for-byte when the ledger append fails", async () => {
+    // Deliberately NOT a re-serialization of the same object: odd spacing and
+    // key order make "restored the bytes" distinguishable from "wrote something
+    // that parses the same".
+    const prior = '{"prior":true,\n  "note":"do not lose me"}';
+    const { landed, call } = await recoveryWithUnwritableLedger({
+      seedLandingWith: prior,
+    });
+
+    await expect(call()).rejects.toThrow(/ledger/i);
+
+    expect(
+      await readFile(landed, "utf8"),
+      "the submission that was already landed must come back exactly as it was",
+    ).toBe(prior);
+  });
+
+  it("says the prior submission was restored, and does not claim a clean rollback", async () => {
+    const { call } = await recoveryWithUnwritableLedger({
+      seedLandingWith: '{"prior":true}',
+    });
+
+    await expect(call()).rejects.toThrow(/restored byte-for-byte/u);
+  });
+
+  it("deletes the newly-written file when nothing was there before", async () => {
+    const { landed, call } = await recoveryWithUnwritableLedger({});
+
+    // The single-failure message, distinct from the double-failure one below.
+    await expect(call()).rejects.toThrow(/could not record the ledger event/u);
+    expect(
+      existsSync(landed),
+      "with nothing there before, deleting IS the correct rollback",
+    ).toBe(false);
+  });
+
+  it("does not claim a restore when there was nothing to restore", async () => {
+    const { call } = await recoveryWithUnwritableLedger({});
+
+    // ONE recovery, and its rejection pinned directly: re-running a
+    // side-effecting operation to make a second assertion tests a different
+    // call than the first, and `rejects.not.toThrow` is vacuously green if the
+    // promise ever resolves.
+    const error = await call().then(
+      () => {
+        throw new Error("expected the recovery to reject, but it resolved");
+      },
+      (reason: unknown) => reason as Error,
+    );
+
+    expect(error.message).toContain("NOT landed (rolled back)");
+    expect(
+      error.message,
+      "nothing was there, so there is nothing to claim restored",
+    ).not.toContain("restored byte-for-byte");
+  });
+
+  it("refuses up front when the prior payload exists but cannot be read", async () => {
+    // A DIRECTORY at the landing path: `readFile` fails with EISDIR on both
+    // win32 and linux, so the probe hits a non-ENOENT failure deterministically
+    // on either platform. That is the fact "something IS there and I cannot read
+    // it" — the opposite of "nothing is there", and the old bare catch collapsed
+    // the two, routing rollback to unlink and DELETING what it could not read.
+    const { root, artifactsDir, request } = await fixture();
+    const submissionId = "synthesis-narrative-lane";
+    const operatorPath = join(root, "operator-fixed.json");
+    await writeFile(operatorPath, JSON.stringify(good), "utf8");
+
+    const landed = absoluteSubmissionPath(
+      { root, submissionDir: submissionsDir(artifactsDir) },
+      submissionId,
+    );
+    await mkdir(landed, { recursive: true });
+    await writeFile(join(landed, "witness.txt"), "untouched", "utf8");
+
+    const outcome = await recoverSubmission(
+      request(submissionId, operatorPath),
+      validateGateSubmission,
+    );
+
+    expect(outcome.ok, "an unreadable prior state is a refusal, not a guess").toBe(
+      false,
+    );
+    if (outcome.ok) throw new Error("expected a refusal");
+    expect(outcome.issue.code).toBe("submission_rejected");
+    expect(outcome.issue.message).toContain("EISDIR");
+    expect(outcome.issue.submission_id).toBe(submissionId);
+
+    // Nothing was written, nothing was deleted, nothing was recorded.
+    expect(
+      await readFile(join(landed, "witness.txt"), "utf8"),
+      "the unreadable prior state must be left exactly as found",
+    ).toBe("untouched");
+    expect(existsSync(submissionLedgerPath(artifactsDir))).toBe(false);
+  });
+
+  it("writes nothing and records nothing when the validator rejects", async () => {
+    const { root, artifactsDir, request } = await fixture();
+    const submissionId = "synthesis-narrative-lane";
+    const operatorPath = join(root, "operator-fixed.json");
+    // Rejected by the gate schema: `themes` is the wrong type.
+    await writeFile(
+      operatorPath,
+      JSON.stringify({ ...good, themes: "nope" }),
+      "utf8",
+    );
+
+    const outcome = await recoverSubmission(
+      request(submissionId, operatorPath),
+      validateGateSubmission,
+    );
+    expect(outcome.ok).toBe(false);
+
+    const landed = absoluteSubmissionPath(
+      { root, submissionDir: submissionsDir(artifactsDir) },
+      submissionId,
+    );
+    expect(existsSync(landed), "a refusal writes nothing").toBe(false);
+    expect(
+      existsSync(submissionLedgerPath(artifactsDir)),
+      "a run must never look hand-repaired because a repair was ATTEMPTED",
+    ).toBe(false);
+  });
+
+  it("refuses a missing source, and a malformed one, without touching either surface", async () => {
+    for (const [contents, code] of [
+      [null, "submission_missing"],
+      ["not json at all", "submission_malformed"],
+    ] as const) {
+      const { root, artifactsDir, request } = await fixture();
+      const submissionId = "synthesis-narrative-lane";
+      const operatorPath = join(root, "operator-fixed.json");
+      if (contents !== null) await writeFile(operatorPath, contents, "utf8");
+
+      const outcome = await recoverSubmission(
+        request(submissionId, operatorPath),
+        validateGateSubmission,
+      );
+      expect(outcome.ok, code).toBe(false);
+      if (outcome.ok) throw new Error("expected a refusal");
+      expect(outcome.issue.code).toBe(code);
+      expect(outcome.issue.submission_id).toBe(submissionId);
+
+      const landed = absoluteSubmissionPath(
+        { root, submissionDir: submissionsDir(artifactsDir) },
+        submissionId,
+      );
+      expect(existsSync(landed), code).toBe(false);
+      expect(existsSync(submissionLedgerPath(artifactsDir)), code).toBe(false);
+    }
   });
 });

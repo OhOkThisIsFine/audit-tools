@@ -72,6 +72,60 @@ export async function appendSubmissionEvent(
   await appendNdjsonFile(submissionLedgerPath(artifactsDir), event);
 }
 
+/** Why one ledger line did not become an event. */
+export type SubmissionLedgerDropReason =
+  /** The line is not JSON — a torn write, typically a crash mid-append. */
+  | "unparsable"
+  /** The line parsed but carries another release's contract version. */
+  | "schema_version_mismatch";
+
+/** One line the reader skipped, with enough to find it in the file. */
+export interface SubmissionLedgerDrop {
+  /** 1-based physical line number in the ledger file. */
+  readonly line: number;
+  readonly reason: SubmissionLedgerDropReason;
+}
+
+/**
+ * What {@link readSubmissionLedger} returns: the events AND what it could not
+ * read.
+ *
+ * SHAPE, and why it is this shape. The contract calls for a record carrying
+ * both `events` and `dropped`. It is also still the events ARRAY, because the
+ * consumers that adapt to the record — the audit bundle's `submission_ledger`,
+ * promotion-time archiving, the remediate ingest's recovery-mark scan — adapt
+ * in their OWN nodes, not this one, and a bare `{events, dropped}` would break
+ * every one of them at once. So `events` and `dropped` are non-enumerable
+ * properties on the array itself: `result.events` and `result.dropped` read as
+ * the contract names them, while `for…of`, `.filter`, `.map` and a deep-equal
+ * against a plain array keep working unchanged for a caller that has not been
+ * updated yet. Non-enumerable specifically so `toEqual([])` still holds — a
+ * drop signal must not change what an unrelated assertion sees.
+ */
+export type SubmissionLedgerRead = readonly SubmissionLedgerEvent[] & {
+  readonly events: readonly SubmissionLedgerEvent[];
+  readonly dropped: readonly SubmissionLedgerDrop[];
+};
+
+function ledgerRead(
+  events: SubmissionLedgerEvent[],
+  dropped: SubmissionLedgerDrop[],
+): SubmissionLedgerRead {
+  Object.defineProperty(events, "events", {
+    value: events,
+    enumerable: false,
+  });
+  Object.defineProperty(events, "dropped", {
+    value: dropped,
+    enumerable: false,
+  });
+  // Through `unknown`: the two properties are installed by `defineProperty`,
+  // which the type system cannot follow, so this is the one place the shape is
+  // asserted rather than inferred. It is asserted immediately after the
+  // properties are set, in the only function that builds this value.
+  return events as unknown as SubmissionLedgerRead;
+}
+
 /**
  * Read the ledger in arrival order. An absent ledger reads as empty — a run
  * that never drifted has nothing to say — and a partially-written tail is
@@ -87,29 +141,50 @@ export async function appendSubmissionEvent(
  * those field semantics is how a run gets MISreported; skipping it degrades to
  * the same shape as a ledger that had not recorded that event yet. The skip is
  * per line, so the current release's events on either side of it still load.
+ *
+ * EVERY SKIP IS REPORTED. Skipping used to be silent — no counter, no warning,
+ * nothing in the return value — which made a `rejected` or `recovered_by_hand`
+ * event that was dropped indistinguishable from one that was never recorded at
+ * all, defeating the single thing the ledger exists to guarantee: that a
+ * drifted-and-repaired run stays distinguishable after the fact. Each skipped
+ * line now lands in `dropped` with its 1-based line number and a classified
+ * reason, so no caller can be handed a ledger cleaner than the run actually
+ * was.
  */
 export async function readSubmissionLedger(
   artifactsDir: string,
-): Promise<readonly SubmissionLedgerEvent[]> {
+): Promise<SubmissionLedgerRead> {
   let content: string;
   try {
     content = await readFile(submissionLedgerPath(artifactsDir), "utf8");
   } catch {
-    return [];
+    return ledgerRead([], []);
   }
   const events: SubmissionLedgerEvent[] = [];
+  const dropped: SubmissionLedgerDrop[] = [];
+  // Physical, 1-based, counting blank lines: the number has to send a reader to
+  // the right line of the actual file, so it cannot be an index over the
+  // non-blank subset.
+  let lineNumber = 0;
   for (const line of content.split(/\r?\n/u)) {
+    lineNumber += 1;
     if (line.trim().length === 0) continue;
+    let parsed: SubmissionLedgerEvent;
     try {
-      const event = discardOnSchemaVersionMismatch(
-        JSON.parse(line) as SubmissionLedgerEvent,
-        SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
-      );
-      if (event !== undefined) events.push(event);
+      parsed = JSON.parse(line) as SubmissionLedgerEvent;
     } catch {
-      // A torn final line (crash mid-append) drops; every complete event before
-      // it stays readable, which is the whole point of an append-only record.
+      dropped.push({ line: lineNumber, reason: "unparsable" });
+      continue;
     }
+    const event = discardOnSchemaVersionMismatch(
+      parsed,
+      SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+    );
+    if (event === undefined) {
+      dropped.push({ line: lineNumber, reason: "schema_version_mismatch" });
+      continue;
+    }
+    events.push(event);
   }
-  return events;
+  return ledgerRead(events, dropped);
 }
