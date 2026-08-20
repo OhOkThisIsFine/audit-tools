@@ -289,9 +289,8 @@ agent-owns-ship-pipeline)*
 
 Every sprint-end (pause/handoff/milestone): verify green on a clean pushed tree → scan the diff for dead
 code/debug/TODO → no half-done broken state (call out deliberate intermediate) → trim HANDOFF → update
-backlog → sync memory + index → **state remaining steps and name each one's home doc** ("nothing pending"
-or an explicit list: immediate-next → HANDOFF; bugs/tracks → backlog; durable design → memory+index;
-how-to → `CLAUDE.md`). *(home: `CLAUDE.md` → Conventions; global `~/.claude/CLAUDE.md`; memory:
+backlog → sync memory + index → **state remaining steps and name each one's home doc** (an explicit list: immediate-next → HANDOFF; bugs/tracks → backlog; durable design → memory+index;
+how-to → `CLAUDE.md`; a section with nothing to report is omitted, not written out as "none"). *(home: `CLAUDE.md` → Conventions; global `~/.claude/CLAUDE.md`; memory:
 end-of-sprint-cleanup-standing-step)*
 
 ## B5. Documentation governance
