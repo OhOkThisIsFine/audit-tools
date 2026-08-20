@@ -6,6 +6,18 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Wave-1 red-green proofs live only in commit messages — route the durable tests
+  (2026-08-19, medium).** CP-NODE-14, 4, 8, 16, 17, 20, 23, 10 and 11 had no test home in their
+  write scopes; their proofs are ephemeral transcripts in the wave's commit bodies. The
+  consolidated routing pass owns landing permanent coverage — per-node homes already mapped in
+  the coordinator's recon: validate-artifact-cross-gates / nightly-completion-ledger /
+  anchor-grounding + allowlisted-exec-runner-internals / `freeFormIntentInterpreter` + a new
+  `pathScope` suite / charter-extraction / conceptual-reuse-notice or fanout-lanes / `fileLock`
+  + suite-lock-parity / staleness deferred-set + cross-call reach + truncated-body third state /
+  flow-policy + `foldPendingRequeueTasks`. Includes TST-d79b2a9f's residual (its grep-zero
+  coverage gap is still literally true at HEAD) and dissolving the hand-copied 7-lens
+  `LENS_SET_FOR_FLOW` in `flow-planning.test.ts` (CP-NODE-9's cutover territory).
+
 - **The remediate-side submission ledger has no reader — `accepted_via_recovery` marks are
   write-only (2026-08-19, low-medium).** recover-ingest appends distinguishability events to the
   submission ledger NDJSON under the artifacts dir, but no remediate surface reads them: not
