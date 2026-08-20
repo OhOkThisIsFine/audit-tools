@@ -21,6 +21,7 @@
 // IO): provenance-on-disk grounding is the ingest's concern, not this module's.
 
 import { z } from "zod";
+import { hashContent } from "../hash.js";
 import {
   CharterSchema,
   CharterKindSchema,
@@ -181,6 +182,26 @@ export interface AssembledCharters {
 }
 
 /**
+ * A CharterDelta with its subsystem identity carried as EXPLICIT fields
+ * (INV-CDI-EXPLICIT-NODE-FIELDS) — `delta_id` is therefore an OPAQUE identity,
+ * free to gain a per-delta discriminator (see `assembleDeltas` below) without
+ * any consumer, INCLUDING this module's own disagreement-density computation,
+ * needing to parse it apart. Declared here as an extension of `CharterDelta`
+ * rather than by widening `CharterDeltaSchema` itself
+ * (src/shared/types/charter.ts, outside this module's write scope) — this is
+ * the assembler's own return shape; the wire schema's `.strict()` boundary is
+ * a separate, differently-owned concern (the seam
+ * charter-clarification-ingestion--charter-delta-identity--node-id-recovery
+ * names charter-clarification-ingestion as the consumer that reads these
+ * fields once it stops parsing delta_id).
+ */
+export interface CharterDeltaWithIdentity extends CharterDelta {
+  node_id: string;
+  /** Present when `node_id` is linked into the mined goal graph. */
+  goal_node_id?: string;
+}
+
+/**
  * The assembled delta layer (Phase C.2): the routed+gated deltas across all
  * units, the deltas surfaced as Finding leads, the triangulated teloses, the
  * tool-computed disagreement density, the (possibly True-augmented) subsystems,
@@ -188,7 +209,7 @@ export interface AssembledCharters {
  */
 export interface AssembledDeltas {
   subsystems: CharterSubsystem[];
-  deltas: CharterDelta[];
+  deltas: CharterDeltaWithIdentity[];
   findings: Finding[];
   triangulated: TriangulatedTelos[];
   disagreement: ChannelDisagreement[];
@@ -504,12 +525,22 @@ export interface AssembleDeltasParams {
  * charter kind, is dropped with an issue; so is a triangulated telos or True
  * nomination naming an unknown unit.
  */
+/** A draft delta that survived pass-1 validation/routing, grouped by canonical
+ * pair in pass 2 to decide bare-vs-discriminated delta_id minting. */
+interface SurvivingDelta {
+  pair: [CharterKind, CharterKind];
+  route: DeltaRoute;
+  charterA: Charter;
+  charterB: Charter;
+  summary: string;
+}
+
 export function assembleDeltas(
   submission: CharterDeltaSubmission,
   subsystems: CharterSubsystem[],
   params: AssembleDeltasParams,
 ): AssembledDeltas {
-  const deltas: CharterDelta[] = [];
+  const deltas: CharterDeltaWithIdentity[] = [];
   const findings: Finding[] = [];
   const validation_issues: string[] = [];
   const augmented = subsystems.map((s) => ({
@@ -517,6 +548,12 @@ export function assembleDeltas(
     charters: [...s.charters],
   }));
   const byNode = new Map(augmented.map((s) => [s.node_id, s]));
+  // Every goal-graph node id the miner reported — a delta's subsystem is
+  // "linked" exactly when its node_id appears here (mirrors the existing
+  // out-of-scope consumer's own derivation, now computed once here instead).
+  const goalNodeIds = new Set(
+    (submission.goal_graph?.nodes ?? []).map((n) => n.node_id),
+  );
 
   // True nominations first (deepest only): survivors join the unit's charters
   // and are pair-eligible for this same submission's deltas.
@@ -577,6 +614,10 @@ export function assembleDeltas(
     const kept = subsystem.charters;
     const keptByKind = new Map<CharterKind, Charter>(kept.map((c) => [c.kind, c]));
 
+    // Pass 1: validate + route every draft delta (identical checks/drop
+    // reasons/order to before), grouping the SURVIVORS by canonical pair —
+    // the grouping key delta_id minting (pass 2) discriminates on.
+    const survivorsByPairKey = new Map<string, SurvivingDelta[]>();
     for (const draft of sub.deltas) {
       const [ka, kb] = canonicalPair(draft.pair);
       if (ka === kb) {
@@ -603,27 +644,55 @@ export function assembleDeltas(
         );
         continue;
       }
+      const pairKey = `${ka}|${kb}`;
+      const list = survivorsByPairKey.get(pairKey) ?? [];
+      list.push({ pair: [ka, kb], route, charterA, charterB, summary: draft.summary });
+      survivorsByPairKey.set(pairKey, list);
+    }
 
-      const baseDelta: CharterDelta = {
-        delta_id: `${sub.node_id}:${ka}-${kb}`,
-        pair: [ka, kb],
-        kind: route.kind,
-        routed_to: route.routed_to,
-        summary: draft.summary,
-      };
-      // Phase-A low-confidence gate: a shaky side forces the human channel.
-      const gated = gateCharterDelta(baseDelta, kept);
-      deltas.push(gated);
+    // Pass 2: mint delta_id per group. A subsystem mining exactly ONE delta on
+    // a channel pair — the common case — keeps the bare, pre-existing
+    // `node_id:ka-kb` shape (identity was already unique; no discriminator
+    // needed or added). A subsystem mining MORE THAN ONE delta on the SAME
+    // canonical pair (COR-6b924995 / COR-d8089caf: `[stated,revealed]` and
+    // `[revealed,stated]` collide into this same group via canonicalPair
+    // above, so pair order can never dodge this) gets each member a
+    // content-derived discriminator — a hash of its own summary, never a
+    // submission-array index — so identity is stable and order-independent
+    // regardless of which order the miner happened to list them in.
+    for (const group of survivorsByPairKey.values()) {
+      for (const surv of group) {
+        const [ka, kb] = surv.pair;
+        const delta_id =
+          group.length === 1
+            ? `${sub.node_id}:${ka}-${kb}`
+            : `${sub.node_id}:${ka}-${kb}:${hashContent(surv.summary, { length: 8 })}`;
+        const baseDelta: CharterDeltaWithIdentity = {
+          delta_id,
+          pair: surv.pair,
+          kind: surv.route.kind,
+          routed_to: surv.route.routed_to,
+          summary: surv.summary,
+          node_id: sub.node_id,
+          ...(goalNodeIds.has(sub.node_id) ? { goal_node_id: sub.node_id } : {}),
+        };
+        // Phase-A low-confidence gate: a shaky side forces the human channel.
+        // gateCharterDelta either returns `delta` unchanged or spreads it
+        // (`{ ...delta, routed_to: "human" }`), so node_id/goal_node_id
+        // survive the call; the cast reflects that read, not an assumption.
+        const gated = gateCharterDelta(baseDelta, kept) as CharterDeltaWithIdentity;
+        deltas.push(gated);
 
-      findings.push(
-        deltaToFinding(
-          gated,
-          sub.node_id,
-          subsystem.members,
-          route.severity,
-          weakerConfidence(charterA, charterB),
-        ),
-      );
+        findings.push(
+          deltaToFinding(
+            gated,
+            sub.node_id,
+            subsystem.members,
+            surv.route.severity,
+            weakerConfidence(surv.charterA, surv.charterB),
+          ),
+        );
+      }
     }
   }
 
@@ -654,13 +723,15 @@ export function assembleDeltas(
   // clarification."
   const densityByKey = new Map<string, ChannelDisagreement>();
   for (const delta of deltas) {
-    const key = `${delta.delta_id.slice(0, delta.delta_id.lastIndexOf(":"))}|${delta.pair[0]}|${delta.pair[1]}`;
-    const nodeId = delta.delta_id.slice(0, delta.delta_id.lastIndexOf(":"));
+    // Read the explicit field (INV-CDI-EXPLICIT-NODE-FIELDS) — never parse
+    // delta_id, which is opaque and, since the fix above, may carry a
+    // discriminator suffix a naive last-colon split would misread.
+    const key = `${delta.node_id}|${delta.pair[0]}|${delta.pair[1]}`;
     const existing = densityByKey.get(key);
     if (existing) {
       densityByKey.set(key, { ...existing, count: existing.count + 1 });
     } else {
-      densityByKey.set(key, { node_id: nodeId, pair: delta.pair, count: 1 });
+      densityByKey.set(key, { node_id: delta.node_id, pair: delta.pair, count: 1 });
     }
   }
   const disagreement = [...densityByKey.values()].sort(
