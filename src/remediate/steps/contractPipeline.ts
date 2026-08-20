@@ -20,8 +20,8 @@
  * non-converging judge can never oscillate forever.
  */
 import { existsSync } from "node:fs";
-import { mkdir, rename, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, rename, rm } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 import {
   writeJsonFile,
   readOptionalJsonFile,
@@ -38,7 +38,15 @@ import {
   type WorkBlockSeam,
   projectApprovedFindings,
   captureStepBoundaryFriction,
+  climbOutOfAuditTools,
+  estimateTokensFromBytes,
+  normalizeRepoPath,
+  repoRelativePath,
 } from "audit-tools/shared";
+import {
+  createStepEmissionScaffold,
+  type StepGateHandler,
+} from "../../shared/steps/stepEmissionScaffold.js";
 import { counterexampleFingerprint } from "../contractPipeline/counterexampleFingerprint.js";
 import {
   CP_ARTIFACT_NAMES,
@@ -74,7 +82,8 @@ import {
 import { ensurePhaseCutArtifact, readPhaseCutArtifact } from "../contractPipeline/phaseCutArtifact.js";
 import {
   detectCyclicSeamObligations,
-  validateCycleBreak,
+  validateAuthoredCycleBreak,
+  type AuthoredCycleBreak,
   type SeamObligationNode,
 } from "../contractPipeline/cyclicSeamResolution.js";
 import {
@@ -104,20 +113,32 @@ import {
   CONTRACT_PIPELINE_PHASE_ORDER,
   PHASE_TO_ARTIFACT,
 } from "./contractPipelinePrompts.js";
+// The seven cross-artifact validators this module used to call one by one are
+// gone from this list on purpose: every one of them is now reached through
+// `evaluateContractPipelineCrossGateOutcomes`, so a call site cannot read a
+// gate's issue array without also seeing whether the gate RAN
+// (the branch-on-evaluated rule). What remains here are the checks that are not
+// part of that eight-gate set.
 import {
   CONTRACT_PIPELINE_VALIDATORS,
   CP_MODULE_CONTRACTS_VERSION,
-  validateDesignSpecGates,
   validateGoalIdConsistency,
-  validateImplementationDAGIntegrity,
-  validatePairedObligations,
-  validateEvidenceThreaded,
-  validateDigestCoverage,
   validateWorkBlockSeamPreparation,
-  validateReconciliationDerivation,
   validateContractCitationGrounding,
-  validateFinalizedModuleSetPreserved,
 } from "../validation/contractPipeline.js";
+// Imported from the gate module DIRECTLY (as derive.ts does), not through the
+// validation barrel: the barrel re-exports the older flattened cross-gate
+// runner, and re-exporting the outcome vocabulary through it would mean editing
+// a file outside this work item's write scope.
+import {
+  evaluateContractPipelineCrossGateOutcomes,
+  enumerateRepoTreePaths,
+  isInsideGitWorkTree,
+  isTestablePhaseObligation,
+  TESTABLE_OBLIGATION_KINDS,
+  type ContractPipelineCrossGateInputs,
+  type GateOutcome,
+} from "../validation/contractPipelineGates.js";
 import type { Finding } from "audit-tools/shared";
 import { compareCodeUnits } from "../../shared/affinityArtifacts.js";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
@@ -262,8 +283,18 @@ async function writeRepairState(
 
 export interface CyclicSeamRepairState {
   schema_version: "remediate-code-contract-pipeline/cyclic-seam-repair-state/v1alpha1";
-  /** Each attempt to resolve the detected cycles (keyed by obligation_ledger hash). */
-  attempts: { ledger_hash: string; at: string; recheck_passed: boolean }[];
+  /**
+   * Each attempt to resolve the detected cycles (keyed by obligation_ledger
+   * hash). `recheck_reason` records WHY the re-check rejected an attempt, so the
+   * next resolution prompt can state it instead of re-asking for the same claim
+   * and burning the attempt cap on an unexplained retry.
+   */
+  attempts: {
+    ledger_hash: string;
+    at: string;
+    recheck_passed: boolean;
+    recheck_reason?: string;
+  }[];
   /** Whether a user-decision step has been emitted. */
   user_decision_emitted: boolean;
 }
@@ -605,6 +636,15 @@ export interface ContractPipelineStepOptions {
   artifactsDir: string;
   runId: string;
   sourcePaths?: string[];
+  /**
+   * The same DI seam {@link archiveContractArtifact} already exposes, lifted to
+   * the entry point so a FAILED history move is reachable from an end-to-end
+   * test. Undefined uses `node:fs/promises` rename, so production behavior is
+   * unchanged. It exists because the archive-failure branch (COR-114e4941) is a
+   * correctness gate whose whole point is what the pipeline does when the move
+   * does not succeed — a branch no fixture can reach by arranging files.
+   */
+  renameFn?: (from: string, to: string) => Promise<void>;
 }
 
 // ── Path-A seed ───────────────────────────────────────────────────────────────
@@ -623,6 +663,21 @@ export interface PathASeed {
   work_blocks: WorkBlock[];
   /** Explicit cross-block overlaps; required seams must be prepared before refactors. */
   work_block_seams: WorkBlockSeam[];
+  /**
+   * Seed source-digest binding. One sha256 per source path the seed was built
+   * FROM, recorded at seed-build time: the audit-findings file itself plus every
+   * `affected_files` path that existed on disk. `buildNextContractPipelineStep`
+   * re-hashes each on entry and refuses when one no longer matches, instead of
+   * spending a whole design pipeline on content that no longer holds the
+   * findings the seed enumerates.
+   *
+   * OPTIONAL for READING, always written for WRITING: a seed persisted before
+   * this field existed carries none, and an absent list binds nothing rather
+   * than blocking a run mid-flight. Paths are stored exactly as the seed knows
+   * them — the findings path absolute, `affected_files` repo-relative — and the
+   * verifier resolves a relative entry against the repo root it is handed.
+   */
+  source_digests?: Array<{ path: string; sha256: string }>;
   created_at: string;
 }
 
@@ -680,19 +735,110 @@ export async function writePathASeedFromFindings(
     }))
     .sort((a, b) => compareCodeUnits(a.id, b.id));
 
+  const affectedFiles = [...affectedFilesSet].sort();
+
   const seed: PathASeed = {
     schema_version: "remediate-code-contract-pipeline/path-a-seed/v1alpha2",
     audit_findings_path: auditFindingsPath,
     finding_count: findings.length,
     findings_summary: findingsSummary,
-    affected_files: [...affectedFilesSet].sort(),
+    affected_files: affectedFiles,
     work_blocks: workBlocks,
     work_block_seams: workBlockSeams,
+    source_digests: await hashSeedSourcePaths(
+      seedRepoRoot(artifactsDir),
+      auditFindingsPath,
+      affectedFiles,
+    ),
     created_at: new Date().toISOString(),
   };
 
   await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
   await writeJsonFile(seedPath, seed);
+}
+
+/**
+ * The repository root that owns `artifactsDir`, for resolving the seed's
+ * repo-relative `affected_files`. Derived through the shared
+ * `climbOutOfAuditTools` rather than a hand-rolled `../..`, so the one
+ * `.audit-tools` layout rule stays single-sourced (and a caller that hands us a
+ * dir outside the tree simply gets that dir back, which resolves relative paths
+ * against it — the same thing every other artifact path in this module does).
+ */
+function seedRepoRoot(artifactsDir: string): string {
+  return climbOutOfAuditTools(artifactsDir);
+}
+
+/** Absolute form of a seed-recorded path (absolute entries pass through). */
+function resolveSeedSourcePath(root: string, path: string): string {
+  return isAbsolute(path) ? path : resolve(root, path);
+}
+
+/**
+ * sha256 every seed source path that EXISTS at seed-build time. A path that is
+ * absent is not recorded at all — the seed binds what it actually read, and a
+ * finding citing a file that does not exist yet (a new-file remediation) must
+ * not mint a digest that can never match.
+ */
+async function hashSeedSourcePaths(
+  root: string,
+  auditFindingsPath: string,
+  affectedFiles: readonly string[],
+): Promise<Array<{ path: string; sha256: string }>> {
+  const digests: Array<{ path: string; sha256: string }> = [];
+  // Content-derived order (path-sorted, deduped): an incidentally-ordered array
+  // would churn the seed's content hash on every re-derivation.
+  const candidates = [...new Set([auditFindingsPath, ...affectedFiles])].sort(
+    (left, right) => compareCodeUnits(left, right),
+  );
+  for (const path of candidates) {
+    const absolute = resolveSeedSourcePath(root, path);
+    let content: Buffer;
+    try {
+      content = await readFile(absolute);
+    } catch {
+      continue; // Not readable at seed time — nothing to bind.
+    }
+    digests.push({ path, sha256: hashContent(content) });
+  }
+  return digests;
+}
+
+/** One seed-recorded source path whose content no longer matches its digest. */
+export interface SeedSourceDigestMismatch {
+  path: string;
+  expected: string;
+  /** The path's current sha256, or `null` when it is no longer readable. */
+  actual: string | null;
+}
+
+/**
+ * Seed source-digest binding — re-hash every path the path_a seed recorded and
+ * report the ones that moved. Pure over (root, seed): the caller decides what a
+ * mismatch means, so this is directly red-green testable without a pipeline.
+ *
+ * A seed with no `source_digests` (written before the field existed) binds
+ * nothing and yields no mismatches.
+ */
+export async function detectSeedSourceDigestMismatches(
+  root: string,
+  seed: PathASeed | undefined,
+): Promise<SeedSourceDigestMismatch[]> {
+  const mismatches: SeedSourceDigestMismatch[] = [];
+  for (const entry of seed?.source_digests ?? []) {
+    if (typeof entry?.path !== "string" || typeof entry?.sha256 !== "string") continue;
+    const absolute = resolveSeedSourcePath(root, entry.path);
+    let actual: string | null = null;
+    try {
+      actual = hashContent(await readFile(absolute));
+    } catch {
+      actual = null;
+    }
+    if (actual !== entry.sha256) {
+      mismatches.push({ path: entry.path, expected: entry.sha256, actual });
+    }
+  }
+  return mismatches;
 }
 
 // ── Repair target inference ───────────────────────────────────────────────────
@@ -1056,57 +1202,26 @@ export interface ContractObligationsGateResult {
 
 /**
  * Run the fail-closed contract-obligation gates against the persisted contract
- * artifacts. Aggregates:
- *   - validatePairedObligations  (obligation_ledger × test_validator_plan)
- *   - validateEvidenceThreaded   (assessment × judge × implementation_dag)
- *   - validateDigestCoverage     (goal_spec.source_type × finding-enumeration × ledger)
- *   - validateReconciliationDerivation (seam report × finalized contracts)
+ * artifacts: paired obligations, evidence threading, source-scoped digest
+ * coverage, and INV-CO-12 reconciliation derivation.
  *
- * Only error-severity issues fail the gate. Each gate is individually tolerant
- * of an absent input artifact (the upstream phase order guarantees presence by
- * the time this runs, except the source-scoped digest-coverage check which is
- * vacuous for non-enumerable sources).
+ * Branch on `evaluated` before trusting emptiness. This no longer flattens four `ValidationIssue[]`
+ * into one array, where a gate that never RAN and a gate that ran CLEAN both
+ * contributed nothing and were indistinguishable. It consumes the shared
+ * gate-outcome record and branches on `evaluated` first: at this boundary every
+ * phase artifact exists, so a skipped gate is a violation, not a pass. See
+ * {@link consumeGateOutcomes} for the per-boundary `required` policy and the one
+ * declared exception (`digest_coverage`).
  */
 export async function evaluateContractObligationsPromotionGate(
   artifactsDir: string,
+  root: string = climbOutOfAuditTools(artifactsDir),
+  inputs?: ContractPipelineCrossGateInputs,
 ): Promise<ContractObligationsGateResult> {
-  const obligationLedger = envelopePayload(
-    await readContractArtifact(artifactsDir, "obligation_ledger"),
+  const outcomes = evaluateContractPipelineCrossGateOutcomes(
+    inputs ?? (await readCrossGateInputs(artifactsDir, root)),
   );
-  const testValidatorPlan = envelopePayload(
-    await readContractArtifact(artifactsDir, "test_validator_plan"),
-  );
-  const assessment = envelopePayload(
-    await readContractArtifact(artifactsDir, "contract_assessment_report"),
-  );
-  const judge = envelopePayload(await readContractArtifact(artifactsDir, "judge_report"));
-  const dag = envelopePayload(await readContractArtifact(artifactsDir, "implementation_dag"));
-  const seamReport = envelopePayload(
-    await readContractArtifact(artifactsDir, "seam_reconciliation_report"),
-  );
-  const finalizedContracts = envelopePayload(
-    await readContractArtifact(artifactsDir, "finalized_module_contracts"),
-  );
-  const goalSpec = envelopePayload(await readContractArtifact(artifactsDir, "goal_spec"));
-  const sourceType =
-    isRecord(goalSpec) && typeof goalSpec.source_type === "string"
-      ? goalSpec.source_type
-      : undefined;
-  const findingEnumeration = await readOptionalJsonFile<unknown>(
-    intakePaths(artifactsDir).findingEnumeration,
-  );
-
-  const issues = [
-    ...validatePairedObligations(obligationLedger, testValidatorPlan),
-    ...validateEvidenceThreaded(assessment, judge, dag),
-    ...validateDigestCoverage(sourceType, findingEnumeration, obligationLedger),
-    ...validateReconciliationDerivation(seamReport, finalizedContracts),
-  ].filter((issue) => issue.severity === "error");
-
-  return {
-    ok: issues.length === 0,
-    violations: issues.map((issue) => `[${issue.path}] ${issue.message}`),
-  };
+  return consumeGateOutcomes(outcomes, PROMOTION_GATES, PROMOTION_REQUIRED_GATES);
 }
 
 /**
@@ -1123,55 +1238,46 @@ export async function evaluateContractObligationsPromotionGate(
  * at promotion as the fail-closed backstop; this gate never replaces it.
  *
  * Returns the first failing gate's responsible phase + rendered error lines, or
- * null when the structural floor is clean. Each underlying validator is tolerant
- * of an absent input, so this is safe to call at the critic boundary.
+ * null when the structural floor is clean. Branches on each outcome's
+ * `evaluated` before its empty issue list is allowed to mean clean
+ * (the branch-on-evaluated rule); `contract_finalization`, `seam_reconciliation`
+ * and `test_validator_plan` all precede `critic` in the phase order, so a
+ * skipped gate here is a malformed payload rather than an absent one.
  */
 export async function evaluatePreCriticStructuralGate(
   artifactsDir: string,
+  root: string = climbOutOfAuditTools(artifactsDir),
+  inputs?: ContractPipelineCrossGateInputs,
 ): Promise<{ phase: "contract_finalization" | "test_validator_plan"; errorLines: string[] } | null> {
-  const obligationLedger = envelopePayload(
-    await readContractArtifact(artifactsDir, "obligation_ledger"),
-  );
-  const testValidatorPlan = envelopePayload(
-    await readContractArtifact(artifactsDir, "test_validator_plan"),
-  );
-  const seamReport = envelopePayload(
-    await readContractArtifact(artifactsDir, "seam_reconciliation_report"),
-  );
-  const finalizedContracts = envelopePayload(
-    await readContractArtifact(artifactsDir, "finalized_module_contracts"),
-  );
-  const goalSpec = envelopePayload(await readContractArtifact(artifactsDir, "goal_spec"));
-  const sourceType =
-    isRecord(goalSpec) && typeof goalSpec.source_type === "string"
-      ? goalSpec.source_type
-      : undefined;
-  const findingEnumeration = await readOptionalJsonFile<unknown>(
-    intakePaths(artifactsDir).findingEnumeration,
+  const outcomes = evaluateContractPipelineCrossGateOutcomes(
+    inputs ?? (await readCrossGateInputs(artifactsDir, root)),
   );
 
   // Upstream-owned checks first: a derivation/coverage gap is fixed in the
   // finalized contracts (the obligation ledger is derived from them).
-  const designErrors = [
-    ...validateReconciliationDerivation(seamReport, finalizedContracts),
-    ...validateDigestCoverage(sourceType, findingEnumeration, obligationLedger),
-  ].filter((issue) => issue.severity === "error");
-  if (designErrors.length > 0) {
+  const design = consumeGateOutcomes(
+    outcomes,
+    ["reconciliation_derivation", "digest_coverage"],
+    PRE_CRITIC_REQUIRED_GATES,
+  );
+  if (!design.ok) {
     return {
       phase: "contract_finalization",
-      errorLines: designErrors.map((issue) => `- [${issue.path}] ${issue.message}`),
+      errorLines: design.violations.map((violation) => `- ${violation}`),
     };
   }
 
   // A testable obligation without a paired spec is fixed in the test plan
   // (skeleton-scaffolded from the derived ledger).
-  const testErrors = validatePairedObligations(obligationLedger, testValidatorPlan).filter(
-    (issue) => issue.severity === "error",
+  const tests = consumeGateOutcomes(
+    outcomes,
+    ["paired_obligations"],
+    PRE_CRITIC_REQUIRED_GATES,
   );
-  if (testErrors.length > 0) {
+  if (!tests.ok) {
     return {
       phase: "test_validator_plan",
-      errorLines: testErrors.map((issue) => `- [${issue.path}] ${issue.message}`),
+      errorLines: tests.violations.map((violation) => `- ${violation}`),
     };
   }
 
@@ -1586,115 +1692,184 @@ async function resolveAdversarialDepth(
   };
 }
 
+// ── The gate walk: named units on the ONE shared step-emission scaffold ───────
+//
+// `buildNextContractPipelineStep` used to be a ~1,360-line body holding fourteen
+// gates under a decimal-insertion numbering scheme (2, 2a, 2.5, 2.55, 2.6, 2.7,
+// 2.8, 2.9, 2.10, 3, 4, 4a, 4c, 4d, 5a, 5b, 5) in which section "5" executed
+// AFTER the sections labelled "5a"/"5b", and the label "5a" named two unrelated
+// blocks. Execution order was unrecoverable from the labels, and every gate was
+// a closure over the entry point's locals, so none could be exercised on its own.
+//
+// It is now ONE ORDERED TABLE of named gates. Three drift classes die by
+// construction rather than by comment discipline:
+//   • order — the walk order IS the table's own key order (`handledKeys`), so a
+//     comment cannot disagree with execution, and a gate named in the walk but
+//     absent from the table is a loud refusal, not a silent skip;
+//   • uniqueness — duplicate object keys are a compile error, so two gates can
+//     never share a label the way "5a" once did;
+//   • emission — every gate returns a PLAN and never writes; the shared
+//     `createStepEmissionScaffold` (the scaffold-adopter invariant, consumed from
+//     `audit-tools/shared`, never forked into a second scaffold of this
+//     module's own) owns the single call site that turns a plan into a written
+//     step.
+//
+// A gate still performs the DOMAIN work its decision needs (ingesting payloads,
+// archiving a rejected artifact, deriving a deterministic artifact). What it
+// never does is write or log the step — that is the scaffold's one job.
+
 /**
- * Build and write the next contract-pipeline step.
- * Returns null when the pipeline is complete and the extracted plan is ready.
+ * Everything a gate is handed. Assembled once per invocation, then passed to
+ * every gate in the walk, so each gate is a module-level function that can be
+ * called and tested on its own.
+ *
+ * Two fields are deliberately MUTABLE, each written by exactly one gate:
+ *   • `artifactsSettled` — set by the staleness gate once this invocation's own
+ *     ingestion + archive pass has run. {@link readCrossGatePayloads} REFUSES
+ *     before it is set, which is how the branch-on-evaluated invariant's freshness
+ *     half is enforced mechanically instead of by a caller remembering to
+ *     re-read: a payload cached from before the pass is unrepresentable.
+ *   • `nextPhase` — the phase frontier, resolved AFTER the archive pass because
+ *     archiving a stale artifact re-opens its producing phase.
  */
-export async function buildNextContractPipelineStep(
-  options: ContractPipelineStepOptions,
-): Promise<RemediationStep | null> {
-  const { root, artifactsDir, runId, sourcePaths } = options;
-  const paths = intakePaths(artifactsDir);
+export interface ContractGateContext {
+  readonly options: ContractPipelineStepOptions;
+  readonly root: string;
+  readonly artifactsDir: string;
+  readonly runId: string;
+  readonly sourcePaths?: string[];
+  readonly paths: ReturnType<typeof intakePaths>;
+  readonly artifactPaths: Partial<Record<ContractPipelineArtifactName, string>>;
+  /** Present only for structured_audit (path-A) runs. */
+  readonly pathASeedPath?: string;
+  readonly riskSignal: Awaited<ReturnType<typeof readIntakeRiskSignal>>;
+  readonly adversarialDepth: AdversarialDepth | undefined;
+  artifactsSettled: boolean;
+  nextPhase: string | null;
+}
 
-  // Adversarial-depth dial (T1 slices 3/4): derive the depth for the critique /
-  // critic phases from the intake risk signal, escalating on decomposition
-  // evidence. Extracted to resolveAdversarialDepth (behavior-preserving). The
-  // (possibly raised) riskSignal is also consumed by the granularity-collapse
-  // gate below, so it is returned alongside the depth.
-  const { riskSignal, adversarialDepth } = await resolveAdversarialDepth(artifactsDir);
+/**
+ * WHAT to emit — never how to write it. Five writers exist (phase step, bare
+ * prompt step, blocked step, per-module wave, collapsed framing round-trip),
+ * plus the two non-writing outcomes the pipeline also has to express: re-derive
+ * after writing a deterministic artifact, and complete.
+ */
+type ContractStepPlan =
+  | { via: "phase"; phase: string; extraSection?: string }
+  | { via: "step"; prompt: string; outputPath: string; stopCondition: string }
+  | { via: "blocked"; prompt: string; stopCondition: string }
+  | { via: "module_wave"; phase: ParallelModulePhase }
+  | { via: "collapsed_framing"; phases: string[] }
+  | { via: "rederive" }
+  | { via: "pipeline_complete" };
 
-  // Detect the path-A seed file: present only for structured_audit runs.
-  const seedPath = pathASeedFilePath(artifactsDir);
-  const pathASeedPath = existsSync(seedPath) ? seedPath : undefined;
+/** A contract-pipeline gate: the plan to emit, or `null` to hand on to the next. */
+type ContractGate = StepGateHandler<ContractGateContext, ContractStepPlan>;
 
-  // Resolve artifact paths for the prompt renderers. The host's world is the
-  // plain INPUT files (D3): every host-facing path — both where a role WRITES its
-  // output and where it READS its upstreams — is `<name>.input.json`. The tool's
-  // canonical envelopes (`<name>.json`) are derived at ingest and never named to
-  // the host.
-  const artifactPaths: Partial<Record<ContractPipelineArtifactName, string>> = {};
-  for (const name of CP_ARTIFACT_NAMES) {
-    artifactPaths[name] = contractInputFilePath(artifactsDir, name);
+// ── Writers ───────────────────────────────────────────────────────────────────
+
+/** The artifact-path map every emitted step carries (existing artifacts only). */
+function contractStepArtifactPaths(
+  ctx: ContractGateContext,
+  outputPath?: string,
+): Record<string, string> {
+  const stepArtifactPaths: Record<string, string> = {};
+  if (outputPath) stepArtifactPaths.output = outputPath;
+  for (const [key, value] of Object.entries(ctx.artifactPaths)) {
+    if (value && existsSync(value)) stepArtifactPaths[key] = value;
   }
+  if (ctx.sourcePaths) {
+    stepArtifactPaths.source_manifest = ctx.paths.sourceManifest;
+    stepArtifactPaths.remediation_brief = ctx.paths.brief;
+  }
+  return stepArtifactPaths;
+}
 
-  const buildStep = (params: {
-    prompt: string;
-    outputPath: string;
-    stopCondition: string;
-  }): Promise<RemediationStep> => {
-    const nextCommand = loaderCommand("next-step");
-    const prompt = `${params.prompt}
+function writeContractPromptStep(
+  ctx: ContractGateContext,
+  params: { prompt: string; outputPath: string; stopCondition: string },
+): Promise<RemediationStep> {
+  const nextCommand = loaderCommand("next-step");
+  const prompt = `${params.prompt}
 
 After writing the output file, run:
 
 \`${nextCommand}\`
 `;
-    const stepArtifactPaths: Record<string, string> = {
-      output: params.outputPath,
-    };
-    for (const [k, v] of Object.entries(artifactPaths)) {
-      if (v && existsSync(v)) {
-        stepArtifactPaths[k] = v;
-      }
-    }
-    if (sourcePaths) {
-      stepArtifactPaths.source_manifest = paths.sourceManifest;
-      stepArtifactPaths.remediation_brief = paths.brief;
-    }
-    return writeCurrentStep({
-      stepKind: CONTRACT_STEP_KIND,
-      status: "ready",
-      runId,
-      repoRoot: root,
-      artifactsDir,
-      prompt,
-      allowedCommands: [nextCommand],
-      stopCondition: params.stopCondition,
-      artifactPaths: stepArtifactPaths,
-    });
-  };
+  return writeCurrentStep({
+    stepKind: CONTRACT_STEP_KIND,
+    status: "ready",
+    runId: ctx.runId,
+    repoRoot: ctx.root,
+    artifactsDir: ctx.artifactsDir,
+    prompt,
+    allowedCommands: [nextCommand],
+    stopCondition: params.stopCondition,
+    artifactPaths: contractStepArtifactPaths(ctx, params.outputPath),
+  });
+}
 
-  const buildPhaseStep = (
-    phase: string,
-    extraSection?: string,
-  ): Promise<RemediationStep> => {
-    const rendered = renderContractPipelinePrompt({
+function writeContractPhaseStep(
+  ctx: ContractGateContext,
+  phase: string,
+  extraSection?: string,
+): Promise<RemediationStep> {
+  const rendered = renderContractPipelinePrompt({
+    role: phase,
+    artifactPaths: ctx.artifactPaths,
+    sourcePaths: ctx.sourcePaths,
+    repoRoot: ctx.root,
+    pathASeedPath: ctx.pathASeedPath,
+    adversarialDepth: ctx.adversarialDepth,
+  });
+  return writeContractPromptStep(ctx, {
+    prompt: extraSection ? `${rendered.prompt}\n${extraSection}` : rendered.prompt,
+    outputPath: rendered.outputPath,
+    stopCondition: `Stop after writing the contract-pipeline output for phase "${phase}" and running next-step.`,
+  });
+}
+
+function writeContractBlockedStep(
+  ctx: ContractGateContext,
+  params: { prompt: string; stopCondition: string },
+): Promise<RemediationStep> {
+  return writeCurrentStep({
+    stepKind: CONTRACT_STEP_KIND,
+    status: "blocked",
+    runId: ctx.runId,
+    repoRoot: ctx.root,
+    artifactsDir: ctx.artifactsDir,
+    prompt: params.prompt,
+    allowedCommands: [],
+    stopCondition: params.stopCondition,
+  });
+}
+
+/**
+ * T1 slice 4b: ONE round-trip whose prompt concatenates the rendered specs of
+ * several consecutive authoring phases. The worker writes every named artifact
+ * top-down (each later phase's inputs are the files it wrote in the earlier
+ * sections of the same round-trip), then runs next-step once. The group header
+ * overrides the per-section "stop after writing" lines so they are not read as
+ * three separate stop points.
+ */
+function writeCollapsedFramingStep(
+  ctx: ContractGateContext,
+  phases: string[],
+): Promise<RemediationStep> {
+  const sections = phases.map((phase) => ({
+    phase,
+    rendered: renderContractPipelinePrompt({
       role: phase,
-      artifactPaths,
-      sourcePaths,
-      repoRoot: root,
-      pathASeedPath,
-      adversarialDepth,
-    });
-    return buildStep({
-      prompt: extraSection ? `${rendered.prompt}\n${extraSection}` : rendered.prompt,
-      outputPath: rendered.outputPath,
-      stopCondition: `Stop after writing the contract-pipeline output for phase "${phase}" and running next-step.`,
-    });
-  };
-
-  // T1 slice 4b: emit ONE round-trip whose prompt concatenates the rendered
-  // specs of several consecutive authoring phases. The worker writes every
-  // named artifact top-down (each later phase's inputs are the files it wrote in
-  // the earlier sections of the same round-trip), then runs next-step once. The
-  // group header overrides the per-section "stop after writing" lines so they are
-  // not read as three separate stop points.
-  const buildCollapsedFramingStep = (
-    phases: string[],
-  ): Promise<RemediationStep> => {
-    const sections = phases.map((phase) => {
-      const rendered = renderContractPipelinePrompt({
-        role: phase,
-        artifactPaths,
-        sourcePaths,
-        repoRoot: root,
-        pathASeedPath,
-        adversarialDepth,
-      });
-      return { phase, rendered };
-    });
-    const outputPaths = sections.map((s) => s.rendered.outputPath);
-    const header = `# Collapsed Authoring Round-Trip — ${phases.length} Phases
+      artifactPaths: ctx.artifactPaths,
+      sourcePaths: ctx.sourcePaths,
+      repoRoot: ctx.root,
+      pathASeedPath: ctx.pathASeedPath,
+      adversarialDepth: ctx.adversarialDepth,
+    }),
+  }));
+  const outputPaths = sections.map((s) => s.rendered.outputPath);
+  const header = `# Collapsed Authoring Round-Trip — ${phases.length} Phases
 
 This is a low-complexity change, so these ${phases.length} coherent authoring phases are combined into a SINGLE round-trip. Complete EVERY section below — author them top-down, writing each artifact to its named path (each later section's inputs are the files you write in the earlier sections of this same round-trip). Then run next-step ONCE.
 
@@ -1704,47 +1879,48 @@ If you cannot complete a section (an artifact would be malformed), write the one
 
 Artifacts to produce (in order):
 ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
-    const body = sections
-      .map((s) => `\n---\n\n${s.rendered.prompt}`)
-      .join("\n");
-    return buildStep({
-      prompt: `${header}\n${body}`,
-      outputPath: outputPaths[outputPaths.length - 1],
-      stopCondition: `Stop after writing all ${phases.length} collapsed-framing artifacts (${phases.join(", ")}) and running next-step once.`,
-    });
-  };
+  const body = sections.map((s) => `\n---\n\n${s.rendered.prompt}`).join("\n");
+  return writeContractPromptStep(ctx, {
+    prompt: `${header}\n${body}`,
+    outputPath: outputPaths[outputPaths.length - 1],
+    stopCondition: `Stop after writing all ${phases.length} collapsed-framing artifacts (${phases.join(", ")}) and running next-step once.`,
+  });
+}
 
-  const buildParallelModuleWaveStep = async (
-    phase: ParallelModulePhase,
-  ): Promise<RemediationStep> => {
-    // Fan the phase out to one bounded item per module. The host owns grouping,
-    // concurrency, and execution choices; this tool supplies only the complete
-    // coherent workload. Each item writes a per-module shard, and the next
-    // next-step merges every shard into the aggregated artifact before any
-    // downstream derivation. A degenerate decomposition (zero or one module)
-    // falls back to the single aggregated step.
-    const modules = await readDecomposedModules(artifactsDir);
-    if (modules.length <= 1) {
-      return buildPhaseStep(phase);
-    }
+/**
+ * DC-3: fan a parallel phase out to one bounded item per module. The host owns
+ * grouping, concurrency, and execution choices; this tool supplies only the
+ * complete coherent workload. Each item writes a per-module shard, and the next
+ * next-step merges every shard into the aggregated artifact before any
+ * downstream derivation. A degenerate decomposition (zero or one module) falls
+ * back to the single aggregated step.
+ */
+async function writeParallelModuleWaveStep(
+  ctx: ContractGateContext,
+  phase: ParallelModulePhase,
+): Promise<RemediationStep> {
+  const modules = await readDecomposedModules(ctx.artifactsDir);
+  if (modules.length <= 1) {
+    return writeContractPhaseStep(ctx, phase);
+  }
 
-    const inputArtifact = "module_decomposition";
-    const inputPaths = (
-      ["goal_spec", "context_bundle", "module_decomposition"] as const
-    ).map((key) => `- \`${artifactPaths[key]}\` (${key})`);
+  const inputArtifact = "module_decomposition";
+  const inputPaths = (
+    ["goal_spec", "context_bundle", "module_decomposition"] as const
+  ).map((key) => `- \`${ctx.artifactPaths[key]}\` (${key})`);
 
-    const moduleLines = modules
-      .map((mod, i) => {
-        const shardPath = moduleShardPath(artifactsDir, phase, mod.name);
-        const scope =
-          mod.file_scope.length > 0
-            ? mod.file_scope.map((p) => `\`${p}\``).join(", ")
-            : "_(no declared file scope)_";
-        return `${i + 1}. **${mod.name}** — file scope: ${scope}\n   - Write this module's contract to exactly: \`${shardPath}\``;
-      })
-      .join("\n");
+  const moduleLines = modules
+    .map((mod, i) => {
+      const shardPath = moduleShardPath(ctx.artifactsDir, phase, mod.name);
+      const scope =
+        mod.file_scope.length > 0
+          ? mod.file_scope.map((p) => `\`${p}\``).join(", ")
+          : "_(no declared file scope)_";
+      return `${i + 1}. **${mod.name}** — file scope: ${scope}\n   - Write this module's contract to exactly: \`${shardPath}\``;
+    })
+    .join("\n");
 
-    const perModuleSchema = `{
+  const perModuleSchema = `{
   "name": "<module-name — must equal the assigned module>",
   "inputs": ["<what this module receives>"],
   "outputs": ["<what this module produces>"],
@@ -1755,11 +1931,10 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
   "neighbor_needs": [{ "neighbor": "<module-name>", "needs": "<what this module needs>" }]
 }`;
 
-    const taskVerb = "draft its module contract";
-
-    const cwdNote = `\n> Set the shell/tool working directory to \`${root}\` before running any commands.\n`;
-    const nextCommand = loaderCommand("next-step");
-    const prompt = `# Per-Module Contract Drafting (${modules.length} modules)
+  const taskVerb = "draft its module contract";
+  const cwdNote = `\n> Set the shell/tool working directory to \`${ctx.root}\` before running any commands.\n`;
+  const nextCommand = loaderCommand("next-step");
+  const prompt = `# Per-Module Contract Drafting (${modules.length} modules)
 
 This phase publishes one bounded item per module. Complete all ${modules.length} items below; the host owns how they are grouped or executed. Each item reads only its module's file scope, then writes ONLY that module's contract shard — no item owns both sides of a seam, and no item writes the aggregated artifact.
 ${cwdNote}
@@ -1790,113 +1965,318 @@ The orchestrator verifies every module shard is present, merges them into \`${PH
 **Stop after the per-module shards are written and you run next-step.** Do not edit source files. Do not write the aggregated artifact. Do not advance further.
 `;
 
-    const stepArtifactPaths: Record<string, string> = {};
-    for (const [k, v] of Object.entries(artifactPaths)) {
-      if (v && existsSync(v)) {
-        stepArtifactPaths[k] = v;
-      }
-    }
-    if (sourcePaths) {
-      stepArtifactPaths.source_manifest = paths.sourceManifest;
-      stepArtifactPaths.remediation_brief = paths.brief;
-    }
-    return writeCurrentStep({
-      stepKind: CONTRACT_STEP_KIND,
-      status: "ready",
-      runId,
-      repoRoot: root,
-      artifactsDir,
-      prompt,
-      allowedCommands: [nextCommand],
-      stopCondition: `Stop after writing every per-module shard for phase "${phase}" and running next-step.`,
-      artifactPaths: stepArtifactPaths,
-    });
-  };
+  return writeCurrentStep({
+    stepKind: CONTRACT_STEP_KIND,
+    status: "ready",
+    runId: ctx.runId,
+    repoRoot: ctx.root,
+    artifactsDir: ctx.artifactsDir,
+    prompt,
+    allowedCommands: [nextCommand],
+    stopCondition: `Stop after writing every per-module shard for phase "${phase}" and running next-step.`,
+    artifactPaths: contractStepArtifactPaths(ctx),
+  });
+}
 
-  /**
-   * DC-3 merge intercept: when a parallel phase's aggregated artifact is still
-   * missing, merge the per-module shards into it once they are ALL present. A
-   * missing shard re-emits the wave (never promotes a partial aggregate). After
-   * a complete merge the artifact is written enveloped and the pipeline
-   * re-derives; the existing seam_reconciliation / critique pass downstream
-   * stays the consistency gate over the merged contracts.
-   */
-  const tryMergeModuleShards = async (
-    phase: ParallelModulePhase,
-  ): Promise<RemediationStep | "merged" | "incomplete"> => {
-    const modules = await readDecomposedModules(artifactsDir);
-    // Degenerate decompositions never used the shard path — let the normal
-    // single-agent aggregate step handle them.
-    if (modules.length <= 1) return "incomplete";
+/**
+ * The ONE writer dispatch behind the scaffold's single emission call site. Each
+ * underlying writer is reached from exactly here.
+ */
+async function writeContractStepPlan(
+  ctx: ContractGateContext,
+  plan: ContractStepPlan,
+): Promise<RemediationStep | null> {
+  switch (plan.via) {
+    case "phase":
+      return await writeContractPhaseStep(ctx, plan.phase, plan.extraSection);
+    case "step":
+      return await writeContractPromptStep(ctx, plan);
+    case "blocked":
+      return await writeContractBlockedStep(ctx, plan);
+    case "module_wave":
+      return await writeParallelModuleWaveStep(ctx, plan.phase);
+    case "collapsed_framing":
+      return await writeCollapsedFramingStep(ctx, plan.phases);
+    case "rederive":
+      // A deterministic artifact was just written; the frontier moved, so the
+      // whole walk re-runs against the new state rather than guessing the phase.
+      return await buildNextContractPipelineStep(ctx.options);
+    case "pipeline_complete":
+      return null;
+  }
+}
 
-    const scan = await scanModuleShards(artifactsDir, phase, modules);
-    if (scan.missing.length > 0) {
-      // Completeness not met → re-emit the wave for the missing modules.
-      return buildParallelModuleWaveStep(phase);
-    }
+// ── Branch on `evaluated`: consuming the shared gate-outcome record ─────
 
-    // goal_id: the upstream module_decomposition is authoritative (every artifact
-    // shares one goal_id; the goal-ID consistency gate enforces it). Fall back to
-    // a shard's goal_id only if the decomposition somehow lacks one.
-    const decompositionGoalId = await readDecompositionGoalId(artifactsDir);
-    const goalId =
-      decompositionGoalId ||
-      [...scan.present.values()]
-        .map((c) => (typeof c.goal_id === "string" ? c.goal_id : undefined))
-        .find((g): g is string => Boolean(g)) ||
-      "";
+/**
+ * Read every contract-pipeline payload from disk, plus the intake
+ * finding-enumeration, in the shape the shared cross-gate evaluator consumes.
+ * Always a fresh read — there is no payload cache to go stale.
+ */
+async function readCrossGateInputs(
+  artifactsDir: string,
+  root: string,
+): Promise<ContractPipelineCrossGateInputs> {
+  const payloads = new Map<ContractPipelineArtifactName, unknown>();
+  for (const name of CP_ARTIFACT_NAMES) {
+    const envelope = await readContractArtifact(artifactsDir, name);
+    if (envelope) payloads.set(name, envelopePayload(envelope));
+  }
+  const findingEnumeration = await readOptionalJsonFile<unknown>(
+    intakePaths(artifactsDir).findingEnumeration,
+  );
+  return { payloads, findingEnumeration, root };
+}
 
-    const merged = mergeModuleShards(modules, scan.present, goalId);
-    await writeDerivedContractArtifact(
-      artifactsDir,
-      PARALLEL_MODULE_PHASES[phase],
-      merged,
+/**
+ * Read every contract-pipeline payload FRESH for the shared cross-gates.
+ *
+ * REFUSES before this invocation's ingestion + staleness-archive pass has run.
+ * EVERY in-pipeline cross-gate read goes through here — including the two
+ * exported helpers, which take the payloads this reader produced rather than
+ * reading again — so there is no in-pipeline path to a payload that skipped the
+ * check.
+ * That is the freshness half of The branch-on-evaluated freshness rule, made mechanical: a
+ * gate cannot be handed a payload snapshot taken before its own step archived
+ * the stale copy, because the only way to obtain payloads declines to produce
+ * them until `artifactsSettled` is set.
+ */
+async function readCrossGatePayloads(
+  ctx: ContractGateContext,
+): Promise<ContractPipelineCrossGateInputs> {
+  if (!ctx.artifactsSettled) {
+    throw new Error(
+      "contract pipeline: cross-gate payloads were requested before this invocation's " +
+        "ingestion + staleness-archive pass ran. A gate must read artifact payloads AFTER " +
+        "the archive pass, never from a snapshot taken before it.",
     );
-    return "merged";
-  };
+  }
+  return await readCrossGateInputs(ctx.artifactsDir, ctx.root);
+}
 
-  // 1. Ingest raw worker outputs into validated envelopes. An output that
-  //    fails validation is archived and its producing phase re-emitted with
-  //    the validation errors — LLM output is untrusted until validated.
-  const ingestion = await ingestContractArtifacts(artifactsDir);
-  if (ingestion.invalid.length > 0) {
-    const first = ingestion.invalid[0];
-    const archived = await archiveContractArtifact(artifactsDir, first.name, "invalid");
-    const phase = ARTIFACT_TO_PHASE[first.name] ?? "goal_normalization";
-    return buildPhaseStep(
-      phase,
-      `## Validation Errors From the Previous Attempt
+/** The verdict a call site derives from a subset of the shared gate outcomes. */
+export interface CrossGateVerdict {
+  ok: boolean;
+  violations: string[];
+}
+
+/**
+ * Consume a subset of the shared cross-gate outcomes, branching on `evaluated`
+ * BEFORE an empty `issues` array is allowed to mean "clean".
+ *
+ * `required` is DECLARED PER CALL SITE, as data, because "did not run" means
+ * different things at different boundaries. At a boundary whose upstream phase
+ * order guarantees the gate's input exists, a skip is a refusal — its empty
+ * issue list is proof of nothing. Earlier in the pipeline the same skip means
+ * "not applicable yet", and the gate is simply not required there.
+ *
+ * THE UNCOVERED HALF, stated rather than implied: `digest_coverage` is the one
+ * gate of the eight whose skip is a DOMAIN non-applicability (a source that is
+ * not finding-enumerable) rather than a missing payload, so no boundary lists
+ * it as required and a genuinely absent finding-enumeration file for an
+ * enumerable source still skips silently. Closing that needs the gate module to
+ * expose its enumerability predicate — an edit outside this work item's write
+ * scope.
+ */
+export function consumeGateOutcomes(
+  outcomes: readonly GateOutcome[],
+  selected: readonly GateOutcome["gate"][],
+  required: ReadonlySet<GateOutcome["gate"]>,
+): CrossGateVerdict {
+  const violations: string[] = [];
+  for (const gate of selected) {
+    const outcome = outcomes.find((candidate) => candidate.gate === gate);
+    if (!outcome) {
+      violations.push(
+        `[${gate}] produced no outcome record; the gate set changed without this call site.`,
+      );
+      continue;
+    }
+    if (!outcome.evaluated) {
+      if (required.has(gate)) {
+        violations.push(
+          `[${gate}] did not run (${outcome.reason ?? "no reason recorded"}). Its empty ` +
+            `issue list is not proof of a clean gate at this boundary.`,
+        );
+      }
+      continue;
+    }
+    for (const issue of outcome.issues) {
+      if (issue.severity === "error") violations.push(`[${issue.path}] ${issue.message}`);
+    }
+  }
+  return { ok: violations.length === 0, violations };
+}
+
+/** Locate one gate's outcome in the canonical-order outcome list. */
+function gateOutcomeOf(
+  outcomes: readonly GateOutcome[],
+  gate: GateOutcome["gate"],
+): GateOutcome | undefined {
+  return outcomes.find((candidate) => candidate.gate === gate);
+}
+
+/**
+ * The gates the PROMOTION boundary requires to have actually run. Every phase
+ * artifact exists by the time `nextPhase` is null, so a skip here can only mean
+ * a payload went missing or malformed — never "too early".
+ */
+const PROMOTION_REQUIRED_GATES: ReadonlySet<GateOutcome["gate"]> = new Set([
+  "paired_obligations",
+  "evidence_threaded",
+  "reconciliation_derivation",
+]);
+
+/** The subset of gates the promotion boundary consumes. */
+const PROMOTION_GATES: readonly GateOutcome["gate"][] = [
+  "paired_obligations",
+  "evidence_threaded",
+  "digest_coverage",
+  "reconciliation_derivation",
+];
+
+/**
+ * The gates the PRE-CRITIC structural floor requires. `contract_finalization`,
+ * `seam_reconciliation` and `test_validator_plan` all precede `critic` in the
+ * phase order, so their artifacts exist by the time this boundary is reached.
+ */
+const PRE_CRITIC_REQUIRED_GATES: ReadonlySet<GateOutcome["gate"]> = new Set([
+  "paired_obligations",
+  "reconciliation_derivation",
+]);
+
+// ── Gates, in execution order ─────────────────────────────────────────────────
+
+/**
+ * Seed source-digest binding. Re-hash every source path the path_a seed
+ * recorded, against the digest it recorded at seed-build time, and refuse with
+ * a classified blocked step on a mismatch — rather than spending the whole
+ * design pipeline on content that no longer holds the findings the seed
+ * enumerates. Runs first, before anything is ingested or derived.
+ */
+const seedSourceDigestGate: ContractGate = async (ctx) => {
+  if (!ctx.pathASeedPath) return null;
+  const seed = await readOptionalJsonFile<PathASeed>(ctx.pathASeedPath);
+  const mismatches = await detectSeedSourceDigestMismatches(ctx.root, seed);
+  if (mismatches.length === 0) return null;
+  const lines = mismatches
+    .map(
+      (mismatch) =>
+        `- \`${mismatch.path}\` — recorded \`${mismatch.expected.slice(0, 12)}…\`, ` +
+        `now ${mismatch.actual ? `\`${mismatch.actual.slice(0, 12)}…\`` : "**unreadable**"}`,
+    )
+    .join("\n");
+  return {
+    via: "blocked",
+    prompt: `# Source Content Changed Since the Audit Seed Was Built
+
+The path-A seed records a sha256 for every source it was built from. The following no longer match, so the findings this pipeline is designing against may no longer describe the code:
+
+${lines}
+
+The findings this pipeline is designing against were derived from the recorded content, so re-deriving them is the only thing that makes the design sound again. Decide with the user:
+
+1. **Re-run the audit extraction** against the current tree, so the findings describe the code as it now stands; or
+2. **Restore the drifted sources** to the content the audit read, if the change was unintended.
+
+Only as an explicit LAST resort — an accepted, recorded decision to design against findings that no longer match the code — delete \`${ctx.pathASeedPath}\` and re-run next-step. That rebuilds the seed from the CURRENT sources while keeping the OLD findings, which clears this alarm without re-deriving anything.`,
+    stopCondition:
+      "Stop — the contract pipeline is blocked on a source whose content no longer matches the audit seed.",
+  };
+};
+
+/**
+ * Ingest raw worker outputs into validated envelopes. An output that fails
+ * validation is archived and its producing phase re-emitted with the validation
+ * errors — LLM output is untrusted until validated.
+ */
+const invalidIngestionGate: ContractGate = async (ctx) => {
+  const ingestion = await ingestContractArtifacts(ctx.artifactsDir);
+  if (ingestion.invalid.length === 0) return null;
+  const first = ingestion.invalid[0];
+  const archived = await archiveContractArtifact(
+    ctx.artifactsDir,
+    first.name,
+    "invalid",
+    ctx.options.renameFn,
+  );
+  return {
+    via: "phase",
+    phase: ARTIFACT_TO_PHASE[first.name] ?? "goal_normalization",
+    extraSection: `## Validation Errors From the Previous Attempt
 
 The previous \`${first.name}\` output failed validation and was archived. Fix every issue below in the rewritten output:
 
 ${formatValidationIssues(first.issues)}
 ${rejectionRewriteInstruction(archived)}`,
-    );
-  }
+  };
+};
 
-  // 2. Archive stale artifacts so the staleness DAG re-derives everything
-  //    downstream of a repaired (re-ingested) upstream artifact.
-  const staleness = await detectStaleArtifacts(artifactsDir);
+/**
+ * Archive stale artifacts so the staleness DAG re-derives everything downstream
+ * of a repaired (re-ingested) upstream artifact — and ABORT when an archive
+ * fails.
+ *
+ * COR-114e4941: the returned ArchiveOutcome used to be discarded here, alone
+ * among the four archive call sites. `originalFree: false` means the move
+ * failed and the stale file is STILL at its canonical path, where
+ * `contractArtifactExists` (a bare `existsSync`) reports it as present — so the
+ * producing phase was never re-emitted and every downstream derivation (the
+ * obligation ledger, the phase cut, the DAG) was built on content the staleness
+ * DAG had already declared invalid. Refusing here is the only ordering that
+ * keeps that impossible: the frontier is not resolved until every stale
+ * artifact is genuinely out of the way.
+ */
+const staleArchiveGate: ContractGate = async (ctx) => {
+  const staleness = await detectStaleArtifacts(ctx.artifactsDir);
   for (const name of staleness.stale) {
-    await archiveContractArtifact(artifactsDir, name, "stale");
+    const archived = await archiveContractArtifact(
+      ctx.artifactsDir,
+      name,
+      "stale",
+      ctx.options.renameFn,
+    );
+    if (archived.originalFree) continue;
+    const phase = ARTIFACT_TO_PHASE[name];
+    if (phase) {
+      return {
+        via: "phase",
+        phase,
+        extraSection: `## A Stale \`${name}\` Could Not Be Archived
+
+\`${name}\` is stale (an upstream it depends on changed) but the tool could not move it into the contract history directory, so the stale content is still at its canonical path. The pipeline will not derive anything downstream of it.
+
+Rewrite \`${name}\` from its current upstreams.
+${rejectionRewriteInstruction(archived)}`,
+      };
+    }
+    return {
+      via: "blocked",
+      prompt: `# A Stale Derived Artifact Could Not Be Archived
+
+\`${name}\` is stale but could not be moved into the contract history directory, and it is tool-derived — no authoring phase owns it, so it cannot simply be re-emitted.
+
+Remove or unlock \`${contractArtifactFilePath(ctx.artifactsDir, name)}\` (and its \`.input.json\` sibling if present), then re-run next-step so the pipeline re-derives it from the current upstreams. Proceeding on the stale copy would build the obligation ledger, phase cut and implementation DAG on content the staleness DAG has already declared invalid.`,
+      stopCondition:
+        "Stop — the contract pipeline is blocked on a stale artifact that could not be archived.",
+    };
   }
 
-  // 2a. OBL-m-friction-inv-5 (post_repair_rederive): when a judge needs_repair →
-  //     regenerate-target landed, the re-ingested target makes its downstream
-  //     artifacts stale and they are archived above — the REAL remediate
-  //     post-repair re-derive site (judge → repair target → back-half re-derive).
-  //     Route this backend-observed step-boundary fact through the single CE-005
-  //     chokepoint. Discriminator = repair target artifact id + repair iteration
-  //     count (there is no RepairOutcome.attempt in remediate), so re-recording
-  //     the same re-derive is a collision-free no-op (CE-006).
+  // OBL-m-friction-inv-5 (post_repair_rederive): when a judge needs_repair →
+  // regenerate-target landed, the re-ingested target makes its downstream
+  // artifacts stale and they are archived above — the REAL remediate
+  // post-repair re-derive site. Route this backend-observed step-boundary fact
+  // through the single CE-005 chokepoint. Discriminator = repair target
+  // artifact id + repair iteration count, so re-recording the same re-derive is
+  // a collision-free no-op (CE-006).
   if (staleness.stale.length > 0) {
-    const repairState = await readRepairState(artifactsDir);
+    const repairState = await readRepairState(ctx.artifactsDir);
     const lastRepair = repairState.repairs[repairState.repairs.length - 1];
     if (lastRepair) {
       const iteration = repairState.repairs.length;
       await captureStepBoundaryFriction(
-        artifactsDir,
-        runId,
+        ctx.artifactsDir,
+        ctx.runId,
         {
           eventType: "post_repair_rederive",
           discriminator: `${lastRepair.target}:${iteration}`,
@@ -1911,189 +2291,205 @@ ${rejectionRewriteInstruction(archived)}`,
     }
   }
 
-  const nextPhase = nextMissingContractPhase(artifactsDir);
+  // Ingestion + archiving are done: payloads read from here on are this
+  // invocation's own view. Nothing downstream may read them before this point.
+  ctx.artifactsSettled = true;
+  return null;
+};
 
-  // 2.5. Goal-ID consistency gate (ARC-86b18f1b): every persisted artifact that
-  //      carries a goal_id must agree on the same value. A mismatch means two
-  //      runs were interleaved; re-emit the earliest mismatched phase so the
-  //      worker can correct it.
-  {
-    const goalIdArtifacts: Record<string, unknown> = {};
-    for (const name of CP_ARTIFACT_NAMES) {
-      const env = await readContractArtifact(artifactsDir, name);
-      if (env) goalIdArtifacts[name] = envelopePayload(env);
-    }
-    const goalIdIssues = validateGoalIdConsistency(goalIdArtifacts);
-    const goalIdErrors = goalIdIssues.filter((i) => i.severity === "error");
-    if (goalIdErrors.length > 0) {
-      // Re-emit the producing phase of the first mismatched artifact.
-      // issue.path is "<artifact_name>.goal_id"; extract the artifact name.
-      const firstPath = goalIdErrors[0]?.path ?? "";
-      const mismatchedArtifact = firstPath.replace(/\.goal_id$/, "") as ContractPipelineArtifactName;
-      const phase = ARTIFACT_TO_PHASE[mismatchedArtifact] ?? "goal_normalization";
-      const archived = await archiveContractArtifact(artifactsDir, mismatchedArtifact, "invalid");
-      return buildPhaseStep(
-        phase,
-        `## Goal-ID Consistency Error
+/**
+ * Resolve the phase frontier — the one gate that never emits. It sits HERE, and
+ * not at the top, because archiving a stale artifact re-opens its producing
+ * phase: computing the frontier before the archive pass would read a phase as
+ * satisfied by a file the pipeline has just declared invalid.
+ */
+const phaseFrontierGate: ContractGate = (ctx) => {
+  ctx.nextPhase = nextMissingContractPhase(ctx.artifactsDir);
+  return null;
+};
+
+/**
+ * Goal-ID consistency (ARC-86b18f1b): every persisted artifact that carries a
+ * goal_id must agree on the same value. A mismatch means two runs were
+ * interleaved; re-emit the earliest mismatched phase so the worker can correct
+ * it. Deliberately phase-independent.
+ */
+const goalIdConsistencyGate: ContractGate = async (ctx) => {
+  const goalIdArtifacts: Record<string, unknown> = {};
+  for (const name of CP_ARTIFACT_NAMES) {
+    const envelope = await readContractArtifact(ctx.artifactsDir, name);
+    if (envelope) goalIdArtifacts[name] = envelopePayload(envelope);
+  }
+  const goalIdErrors = validateGoalIdConsistency(goalIdArtifacts).filter(
+    (issue) => issue.severity === "error",
+  );
+  if (goalIdErrors.length === 0) return null;
+  // issue.path is "<artifact_name>.goal_id"; extract the artifact name.
+  const firstPath = goalIdErrors[0]?.path ?? "";
+  const mismatchedArtifact = firstPath.replace(
+    /\.goal_id$/,
+    "",
+  ) as ContractPipelineArtifactName;
+  const archived = await archiveContractArtifact(
+    ctx.artifactsDir,
+    mismatchedArtifact,
+    "invalid",
+    ctx.options.renameFn,
+  );
+  return {
+    via: "phase",
+    phase: ARTIFACT_TO_PHASE[mismatchedArtifact] ?? "goal_normalization",
+    extraSection: `## Goal-ID Consistency Error
 
 Every contract-pipeline artifact must share the same goal_id. The following mismatch was detected:
 
-${goalIdErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
+${goalIdErrors.map((issue) => `- [${issue.path}] ${issue.message}`).join("\n")}
 
 Rewrite the output so its goal_id matches the goal_id established in goal_spec.json.
 ${rejectionRewriteInstruction(archived)}`,
-      );
-    }
-  }
+  };
+};
 
-  // 2.55. Finalized-module-SET gate (INV-CO-13). `deriveFinalizedModuleContracts`
-  //      maps the drafts 1:1, so the deterministic path can never violate this —
-  //      but it is not the only writer: a judge repair or a critique repair
-  //      re-emits contract_finalization as an LLM step, and that rewrite is
-  //      ingested under a SHAPE-ONLY validator that structurally cannot see the
-  //      drafts. A rewrite that merges modules under an invented name and drops
-  //      another is therefore accepted, and the phase cut, the derived obligation
-  //      ids and the DAG write-scope join are all then built on a module set that
-  //      has already lost a module.
-  //
-  //      DELIBERATELY PHASE-INDEPENDENT, like the goal-ID gate above, rather than
-  //      hung off `nextPhase === "critic"`. Rewriting finalized_module_contracts
-  //      stales its declared dependent conceptual_design_critique, which is
-  //      archived at step 2 BEFORE nextPhase is computed — so the phase right
-  //      after a corrupting rewrite is `critique`, not `critic`. Gating at the
-  //      critic boundary would not fire until critique, obligation_ledger,
-  //      cyclic_seam_resolution, test_validator_plan and assessment had all been
-  //      re-spent on the collapsed set. Here it refuses on the same invocation
-  //      that ingests the rewrite — before the phase cut, before the DAG, and
-  //      before any dispatch.
-  //
-  //      The corrupted artifact is archived rather than repaired in place: the
-  //      re-emitted phase is the one that OWNS the finalized contracts, and if
-  //      the host simply re-runs next-step instead, the now-absent artifact makes
-  //      nextPhase `contract_finalization`, whose deterministic derive rebuilds
-  //      the correct set from the drafts. Both exits are valid states; neither is
-  //      the collapsed one.
-  {
-    const draftedContracts = envelopePayload(
-      await readContractArtifact(artifactsDir, "module_contracts"),
-    );
-    const finalizedContracts = envelopePayload(
-      await readContractArtifact(artifactsDir, "finalized_module_contracts"),
-    );
-    const moduleSetErrors = validateFinalizedModuleSetPreserved(
-      draftedContracts,
-      finalizedContracts,
-    ).filter((issue) => issue.severity === "error");
-    if (moduleSetErrors.length > 0) {
-      const archived = await archiveContractArtifact(
-        artifactsDir,
-        "finalized_module_contracts",
-        "invalid",
-      );
-      return buildPhaseStep(
-        "contract_finalization",
-        `## Finalized Module Set Does Not Match the Drafted Contracts
+/**
+ * Finalized-module-SET gate (INV-CO-13). `deriveFinalizedModuleContracts` maps
+ * the drafts 1:1, so the deterministic path can never violate this — but it is
+ * not the only writer: a judge or critique repair re-emits contract_finalization
+ * as an LLM step, ingested under a SHAPE-ONLY validator that structurally cannot
+ * see the drafts. A rewrite that merges modules under an invented name and drops
+ * another would otherwise be accepted, and the phase cut, the derived obligation
+ * ids and the DAG write-scope join would all then be built on a module set that
+ * has already lost a module.
+ *
+ * DELIBERATELY PHASE-INDEPENDENT, like the goal-ID gate: rewriting
+ * finalized_module_contracts stales its declared dependent
+ * conceptual_design_critique, which the staleness gate archives BEFORE the
+ * frontier is resolved — so the phase right after a corrupting rewrite is
+ * `critique`, not `critic`. Gating at the critic boundary would not fire until
+ * critique, obligation_ledger, cyclic_seam_resolution, test_validator_plan and
+ * assessment had all been re-spent on the collapsed set.
+ *
+ * The gate is NOT in `PRE_CRITIC_REQUIRED_GATES` / `PROMOTION_REQUIRED_GATES`
+ * because at this phase-independent position a not-evaluated outcome genuinely
+ * means "the drafted or finalized contracts do not exist yet" — the branch on
+ * `evaluated` is taken, and its declared meaning here is "not yet applicable".
+ */
+const finalizedModuleSetGate: ContractGate = async (ctx) => {
+  const outcomes = evaluateContractPipelineCrossGateOutcomes(
+    await readCrossGatePayloads(ctx),
+  );
+  const outcome = gateOutcomeOf(outcomes, "finalized_module_set_preserved");
+  if (!outcome?.evaluated) return null;
+  const moduleSetErrors = outcome.issues.filter((issue) => issue.severity === "error");
+  if (moduleSetErrors.length === 0) return null;
+  const archived = await archiveContractArtifact(
+    ctx.artifactsDir,
+    "finalized_module_contracts",
+    "invalid",
+    ctx.options.renameFn,
+  );
+  return {
+    via: "phase",
+    phase: "contract_finalization",
+    extraSection: `## Finalized Module Set Does Not Match the Drafted Contracts
 
 Finalization carries every drafted module contract through — it may incorporate seam-reconciliation decisions into a module's interface, but it may never drop, merge, rename, or invent a module. The following mismatches were detected:
 
 ${moduleSetErrors.map((issue) => `- [${issue.path}] ${issue.message}`).join("\n")}
 ${rejectionRewriteInstruction(archived)}`,
-      );
-    }
-  }
+  };
+};
 
-  // 2.6. Path-A overlap topology gate. A required audit seam is not advisory:
-  //      decomposition must name exactly one seam-preparation module and keep
-  //      distinct implementation modules for the participating work blocks.
-  //      This is checked before module contracts fan out, so the seam is shaped
-  //      once and downstream authors can work in parallel against it.
-  if (contractArtifactExists(artifactsDir, "module_decomposition")) {
-    const seedPath = pathASeedFilePath(artifactsDir);
-    const seed = await readOptionalJsonFile<unknown>(seedPath);
-    if (seed) {
-      const decomposition = envelopePayload(
-        await readContractArtifact(artifactsDir, "module_decomposition"),
-      );
-      const seamIssues = validateWorkBlockSeamPreparation(seed, decomposition).filter(
-        (issue) => issue.severity === "error",
-      );
-      if (seamIssues.length > 0) {
-        const archived = await archiveContractArtifact(
-          artifactsDir,
-          "module_decomposition",
-          "invalid",
-        );
-        return buildPhaseStep(
-          "decomposition",
-          `## Audit Work-Block Seam Errors
+/**
+ * Path-A overlap topology gate. A required audit seam is not advisory:
+ * decomposition must name exactly one seam-preparation module and keep distinct
+ * implementation modules for the participating work blocks. Checked before
+ * module contracts fan out, so the seam is shaped once and downstream authors
+ * can work in parallel against it.
+ */
+const workBlockSeamGate: ContractGate = async (ctx) => {
+  if (!contractArtifactExists(ctx.artifactsDir, "module_decomposition")) return null;
+  const seed = await readOptionalJsonFile<unknown>(pathASeedFilePath(ctx.artifactsDir));
+  if (!seed) return null;
+  const decomposition = envelopePayload(
+    await readContractArtifact(ctx.artifactsDir, "module_decomposition"),
+  );
+  const seamIssues = validateWorkBlockSeamPreparation(seed, decomposition).filter(
+    (issue) => issue.severity === "error",
+  );
+  if (seamIssues.length === 0) return null;
+  const archived = await archiveContractArtifact(
+    ctx.artifactsDir,
+    "module_decomposition",
+    "invalid",
+    ctx.options.renameFn,
+  );
+  return {
+    via: "phase",
+    phase: "decomposition",
+    extraSection: `## Audit Work-Block Seam Errors
 
 The module decomposition dropped or blurred required audit work-block seams. Fix every issue below. Keep implementation work blocks distinct, add exactly one seam-preparation module per required seam (one module may prepare several seams), and list the corresponding source_work_block_ids / prepares_seam_ids:
 
 ${seamIssues.map((issue) => `- [${issue.path}] ${issue.message}`).join("\n")}
 ${rejectionRewriteInstruction(archived)}`,
-        );
-      }
-    }
-  }
+  };
+};
 
-  // 2.7. Conceptual-design-critique gate (A1). Once the critique exists, a
-  //      blocking concern routes a design repair BEFORE any downstream artifact
-  //      is derived — closing the gap where a `blocking` item inside a
-  //      non-`rejected` verdict (and even a bare `rejected` verdict) silently
-  //      proceeded because only the judge verdict was ever consumed. The signal
-  //      is mechanical (any blocking item), so the author's verdict label can't
-  //      wave a blocking concern through. Convergence-terminated: repairing the
-  //      finalized contracts re-stales + re-emits the critique, a clean
-  //      re-critique proceeds, a stalled loop escalates to the user.
-  if (contractArtifactExists(artifactsDir, "conceptual_design_critique")) {
-    const gate = await evaluateCritiqueGate(artifactsDir);
-    if (gate.kind === "repair") {
-      const repairState = await readRepairState(artifactsDir);
-      const critiqueRepairs = repairState.critique_repairs ?? [];
-      if (!critiqueRepairs.some((r) => r.critique_hash === gate.critiqueHash)) {
-        critiqueRepairs.push({
-          critique_hash: gate.critiqueHash,
-          at: new Date().toISOString(),
-          blocking_ids: gate.blockingIds,
-        });
-        repairState.critique_repairs = critiqueRepairs;
-        await writeRepairState(artifactsDir, repairState);
-      }
-      const rendered = renderContractRepairPrompt({
-        target: "finalized_module_contracts",
-        instruction:
-          "Revise the design to resolve every BLOCKING concern in the conceptual design critique " +
-          `(${gate.blockingIds.join(", ")}). Read conceptual_design_critique.json for each concern's ` +
-          "description, then rewrite the finalized module contracts so the blocking concerns no longer apply.",
-        artifactPaths,
-        repoRoot: root,
+/**
+ * Conceptual-design-critique gate (A1). Once the critique exists, a blocking
+ * concern routes a design repair BEFORE any downstream artifact is derived. The
+ * signal is mechanical (any blocking item), so the author's verdict label can't
+ * wave a blocking concern through. Convergence-terminated: repairing the
+ * finalized contracts re-stales + re-emits the critique, a clean re-critique
+ * proceeds, a stalled loop escalates to the user.
+ */
+const conceptualCritiqueGate: ContractGate = async (ctx) => {
+  if (!contractArtifactExists(ctx.artifactsDir, "conceptual_design_critique")) return null;
+  const gate = await evaluateCritiqueGate(ctx.artifactsDir);
+  if (gate.kind === "repair") {
+    const repairState = await readRepairState(ctx.artifactsDir);
+    const critiqueRepairs = repairState.critique_repairs ?? [];
+    if (!critiqueRepairs.some((repair) => repair.critique_hash === gate.critiqueHash)) {
+      critiqueRepairs.push({
+        critique_hash: gate.critiqueHash,
+        at: new Date().toISOString(),
+        blocking_ids: gate.blockingIds,
       });
-      return buildStep({
-        prompt: rendered.prompt,
-        outputPath: rendered.outputPath,
-        stopCondition:
-          "Stop after rewriting finalized_module_contracts to resolve the blocking critique concerns and running next-step.",
-      });
+      repairState.critique_repairs = critiqueRepairs;
+      await writeRepairState(ctx.artifactsDir, repairState);
     }
-    if (gate.kind === "escalate") {
-      await captureStepBoundaryFriction(
-        artifactsDir,
-        runId,
-        {
-          eventType: "repair_round",
-          discriminator: `critique_nonconvergence:${gate.reason}`,
-          note: `Conceptual-design critique↔repair loop escalated (${gate.reason}): ${gate.note}`,
-          category: "trap",
-        },
-        "remediate-code",
-      );
-      return writeCurrentStep({
-        stepKind: CONTRACT_STEP_KIND,
-        status: "blocked",
-        runId,
-        repoRoot: root,
-        artifactsDir,
-        prompt: `# Conceptual-Design Critique Did Not Converge
+    const rendered = renderContractRepairPrompt({
+      target: "finalized_module_contracts",
+      instruction:
+        "Revise the design to resolve every BLOCKING concern in the conceptual design critique " +
+        `(${gate.blockingIds.join(", ")}). Read conceptual_design_critique.json for each concern's ` +
+        "description, then rewrite the finalized module contracts so the blocking concerns no longer apply.",
+      artifactPaths: ctx.artifactPaths,
+      repoRoot: ctx.root,
+    });
+    return {
+      via: "step",
+      prompt: rendered.prompt,
+      outputPath: rendered.outputPath,
+      stopCondition:
+        "Stop after rewriting finalized_module_contracts to resolve the blocking critique concerns and running next-step.",
+    };
+  }
+  if (gate.kind === "escalate") {
+    await captureStepBoundaryFriction(
+      ctx.artifactsDir,
+      ctx.runId,
+      {
+        eventType: "repair_round",
+        discriminator: `critique_nonconvergence:${gate.reason}`,
+        note: `Conceptual-design critique↔repair loop escalated (${gate.reason}): ${gate.note}`,
+        category: "trap",
+      },
+      "remediate-code",
+    );
+    return {
+      via: "blocked",
+      prompt: `# Conceptual-Design Critique Did Not Converge
 
 ${gate.note}
 
@@ -2102,138 +2498,141 @@ ${gate.note}
 ${gate.blocking.map((id) => `- ${id}`).join("\n")}
 
 Read conceptual_design_critique.json, decide with the user how to resolve each blocking concern (revise the contract design and re-run, or downgrade it to advisory), then re-run next-step.`,
-        allowedCommands: [],
-        stopCondition:
-          "Stop — the contract pipeline is blocked on a non-converging conceptual-design critique pending a user decision.",
-      });
-    }
-    // gate.kind === "proceed": fall through.
+      stopCondition:
+        "Stop — the contract pipeline is blocked on a non-converging conceptual-design critique pending a user decision.",
+    };
   }
+  return null;
+};
 
-  // 2.8. Deterministic artifact derivation (S1, contract-authoring determinism).
-  //      The obligation ledger is a pure function of the finalized module
-  //      contracts (every invariant/failure mode/module → an obligation), so it
-  //      is generated by the tool rather than authored by an LLM phase: the
-  //      structure can never be malformed, no judgment is spent on a mechanical
-  //      restructuring, and a weak model is never asked to emit it from scratch.
-  //      Mirrors the cyclic_seam no-cycles fast path — write the artifact, then
-  //      re-derive the next phase.
-  if (nextPhase === "obligation_ledger") {
-    const finalizedPayload = envelopePayload(
-      await readContractArtifact(artifactsDir, "finalized_module_contracts"),
-    );
-    const ledger = deriveObligationLedger(finalizedPayload);
-    await writeDerivedContractArtifact(artifactsDir, "obligation_ledger", ledger);
-    return buildNextContractPipelineStep(options);
-  }
+/**
+ * Deterministic obligation-ledger derivation (S1). The ledger is a pure function
+ * of the finalized module contracts (every invariant/failure mode/module → an
+ * obligation), so the tool generates it rather than an LLM phase: the structure
+ * can never be malformed, no judgment is spent on a mechanical restructuring,
+ * and a weak model is never asked to emit it from scratch.
+ */
+const obligationLedgerDerivationGate: ContractGate = async (ctx) => {
+  if (ctx.nextPhase !== "obligation_ledger") return null;
+  const finalizedPayload = envelopePayload(
+    await readContractArtifact(ctx.artifactsDir, "finalized_module_contracts"),
+  );
+  await writeDerivedContractArtifact(
+    ctx.artifactsDir,
+    "obligation_ledger",
+    deriveObligationLedger(finalizedPayload),
+  );
+  return { via: "rederive" };
+};
 
-  // 2.9. Degenerate seam_reconciliation collapse. A single-module decomposition
-  //      has NO inter-module seams, so seam_reconciliation is a structural no-op:
-  //      write an empty seam report deterministically (no host round-trip),
-  //      mirroring the obligation_ledger / cyclic_seam no-op fast paths. The empty
-  //      report makes validateReconciliationDerivation pass vacuously. A
-  //      multi-module decomposition falls through to the LLM seam_reconciliation
-  //      step (which mismatches exist is a judgment call).
-  if (nextPhase === "seam_reconciliation") {
-    const modules = await readDecomposedModules(artifactsDir);
-    if (modules.length <= 1) {
-      const drafted = envelopePayload(
-        await readContractArtifact(artifactsDir, "module_contracts"),
-      );
-      const goalId =
-        isRecord(drafted) && typeof drafted.goal_id === "string" ? drafted.goal_id : "";
-      await writeDerivedContractArtifact(artifactsDir, "seam_reconciliation_report", {
-        contract_version:
-          "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
-        goal_id: goalId,
-        mismatches: [],
-        created_at: new Date().toISOString(),
-      });
-      return buildNextContractPipelineStep(options);
-    }
-  }
+/**
+ * Degenerate seam_reconciliation collapse. A single-module decomposition has NO
+ * inter-module seams, so seam_reconciliation is a structural no-op: write an
+ * empty seam report deterministically (no host round-trip). The empty report
+ * makes validateReconciliationDerivation pass vacuously. A multi-module
+ * decomposition falls through to the LLM seam_reconciliation step (which
+ * mismatches exist is a judgment call).
+ */
+const degenerateSeamReconciliationGate: ContractGate = async (ctx) => {
+  if (ctx.nextPhase !== "seam_reconciliation") return null;
+  const modules = await readDecomposedModules(ctx.artifactsDir);
+  if (modules.length > 1) return null;
+  const drafted = envelopePayload(
+    await readContractArtifact(ctx.artifactsDir, "module_contracts"),
+  );
+  const goalId =
+    isRecord(drafted) && typeof drafted.goal_id === "string" ? drafted.goal_id : "";
+  await writeDerivedContractArtifact(ctx.artifactsDir, "seam_reconciliation_report", {
+    contract_version:
+      "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
+    goal_id: goalId,
+    mismatches: [],
+    created_at: new Date().toISOString(),
+  });
+  return { via: "rederive" };
+};
 
-  // 2.10. Deterministic contract_finalization (all module counts). Finalization is
-  //      a mechanical merge, not fresh authoring: carry each drafted module
-  //      contract verbatim (preserving neighbor_needs for the ordering derivation)
-  //      and attach the agreed_interface of every seam that touches the module as a
-  //      seam_adjustment. The tool derives it instead of dispatching a per-module
-  //      LLM wave — the judgment already happened at seam_reconciliation. Attaching
-  //      each agreed interface verbatim guarantees the INV-CO-12 reconciliation-
-  //      derivation gate passes. A downstream gate that still finds the merge
-  //      inadequate (e.g. a draft with empty inputs/outputs, or a seam naming a
-  //      module out of scope) re-emits contract_finalization as an LLM step via
-  //      buildPhaseStep — the only path that still needs judgment.
-  if (nextPhase === "contract_finalization") {
-    const drafted = envelopePayload(
-      await readContractArtifact(artifactsDir, "module_contracts"),
-    );
-    const seamReport = envelopePayload(
-      await readContractArtifact(artifactsDir, "seam_reconciliation_report"),
-    );
-    const finalized = deriveFinalizedModuleContracts(drafted, seamReport);
-    await writeDerivedContractArtifact(
-      artifactsDir,
-      "finalized_module_contracts",
-      finalized,
-    );
-    return buildNextContractPipelineStep(options);
-  }
+/**
+ * Deterministic contract_finalization (all module counts). Finalization is a
+ * mechanical merge, not fresh authoring: carry each drafted module contract
+ * verbatim (preserving neighbor_needs for the ordering derivation) and attach
+ * the agreed_interface of every seam that touches the module as a
+ * seam_adjustment. The judgment already happened at seam_reconciliation.
+ * Attaching each agreed interface verbatim guarantees the INV-CO-12
+ * reconciliation-derivation gate passes. A downstream gate that still finds the
+ * merge inadequate re-emits contract_finalization as an LLM step — the only path
+ * that still needs judgment.
+ */
+const contractFinalizationDerivationGate: ContractGate = async (ctx) => {
+  if (ctx.nextPhase !== "contract_finalization") return null;
+  const drafted = envelopePayload(
+    await readContractArtifact(ctx.artifactsDir, "module_contracts"),
+  );
+  const seamReport = envelopePayload(
+    await readContractArtifact(ctx.artifactsDir, "seam_reconciliation_report"),
+  );
+  await writeDerivedContractArtifact(
+    ctx.artifactsDir,
+    "finalized_module_contracts",
+    deriveFinalizedModuleContracts(drafted, seamReport),
+  );
+  return { via: "rederive" };
+};
 
-  // 3. Judge gate: implementation planning is reachable only through an approved
-  //    verdict (the fixpoint) or a convergent targeted repair. A stalled /
-  //    non-converging repair loop escalates to the user (blocked) instead of
-  //    silently proceeding with residual risk.
-  if (nextPhase === "implementation_planning") {
-    const gate = await evaluateJudgeGate(artifactsDir);
-    if (gate.kind === "repair") {
-      const repairTarget = gate.directive.target;
-      const repairState = await readRepairState(artifactsDir);
-      if (!repairState.repairs.some((r) => r.judge_hash === gate.judgeHash)) {
-        repairState.repairs.push({
-          judge_hash: gate.judgeHash,
-          target: repairTarget,
-          at: new Date().toISOString(),
-          accepted_ce_ids: gate.acceptedCeIds,
-          addressed_ce_fingerprints: gate.addressedCeFingerprints,
-        });
-        await writeRepairState(artifactsDir, repairState);
-      }
-      const rendered = renderContractRepairPrompt({
+/**
+ * Judge gate: implementation planning is reachable only through an approved
+ * verdict (the fixpoint) or a convergent targeted repair. A stalled /
+ * non-converging repair loop escalates to the user (blocked) instead of silently
+ * proceeding with residual risk.
+ */
+const judgeRepairGate: ContractGate = async (ctx) => {
+  if (ctx.nextPhase !== "implementation_planning") return null;
+  const gate = await evaluateJudgeGate(ctx.artifactsDir);
+  if (gate.kind === "repair") {
+    const repairTarget = gate.directive.target;
+    const repairState = await readRepairState(ctx.artifactsDir);
+    if (!repairState.repairs.some((repair) => repair.judge_hash === gate.judgeHash)) {
+      repairState.repairs.push({
+        judge_hash: gate.judgeHash,
         target: repairTarget,
-        instruction: gate.directive.instruction,
-        artifactPaths,
-        repoRoot: root,
+        at: new Date().toISOString(),
+        accepted_ce_ids: gate.acceptedCeIds,
+        addressed_ce_fingerprints: gate.addressedCeFingerprints,
       });
-      return buildStep({
-        prompt: rendered.prompt,
-        outputPath: rendered.outputPath,
-        stopCondition: `Stop after rewriting "${repairTarget}" per the judge repair directive and running next-step.`,
-      });
+      await writeRepairState(ctx.artifactsDir, repairState);
     }
-    if (gate.kind === "escalate") {
-      // Non-convergence (stall or runaway backstop): surface it to the user
-      // loudly rather than promoting a plan over an un-converged contract. The
-      // outstanding accepted counterexamples are named so the user can resolve
-      // them (revise the contract design or accept them as known limitations).
-      await captureStepBoundaryFriction(
-        artifactsDir,
-        runId,
-        {
-          eventType: "repair_round",
-          discriminator: `judge_nonconvergence:${gate.reason}`,
-          note: `Judge↔repair loop escalated (${gate.reason}): ${gate.note}`,
-          category: "trap",
-        },
-        "remediate-code",
-      );
-      return writeCurrentStep({
-        stepKind: CONTRACT_STEP_KIND,
-        status: "blocked",
-        runId,
-        repoRoot: root,
-        artifactsDir,
-        prompt: `# Judge↔Repair Loop Did Not Converge
+    const rendered = renderContractRepairPrompt({
+      target: repairTarget,
+      instruction: gate.directive.instruction,
+      artifactPaths: ctx.artifactPaths,
+      repoRoot: ctx.root,
+    });
+    return {
+      via: "step",
+      prompt: rendered.prompt,
+      outputPath: rendered.outputPath,
+      stopCondition: `Stop after rewriting "${repairTarget}" per the judge repair directive and running next-step.`,
+    };
+  }
+  if (gate.kind === "escalate") {
+    // Non-convergence (stall or runaway backstop): surface it to the user loudly
+    // rather than promoting a plan over an un-converged contract. The
+    // outstanding accepted counterexamples are named so the user can resolve
+    // them (revise the contract design or accept them as known limitations).
+    await captureStepBoundaryFriction(
+      ctx.artifactsDir,
+      ctx.runId,
+      {
+        eventType: "repair_round",
+        discriminator: `judge_nonconvergence:${gate.reason}`,
+        note: `Judge↔repair loop escalated (${gate.reason}): ${gate.note}`,
+        category: "trap",
+      },
+      "remediate-code",
+    );
+    return {
+      via: "blocked",
+      prompt: `# Judge↔Repair Loop Did Not Converge
 
 ${gate.note}
 
@@ -2246,316 +2645,284 @@ ${
 }
 
 Read the judge_report and counterexample artifacts, decide with the user how to resolve each outstanding counterexample (revise the contract design and re-run, or accept it as a known limitation), then re-run next-step.`,
-        allowedCommands: [],
-        stopCondition:
-          "Stop — the contract pipeline is blocked on a non-converging judge↔repair loop pending a user decision.",
-      });
-    }
-    // gate.kind === "proceed": fall through to the normal phase step below.
+      stopCondition:
+        "Stop — the contract pipeline is blocked on a non-converging judge↔repair loop pending a user decision.",
+    };
+  }
+  return null;
+};
+
+/** Bounded re-emit of implementation_planning, then blocked — the shared shape
+ *  of the four promotion rejections (integrity, traceability, obligation gates,
+ *  citation grounding). Single-sourced so the four cannot drift into four
+ *  different recovery contracts. */
+async function dagRegenerationPlan(
+  ctx: ContractGateContext,
+  params: { heading: string; blockedBody: string; reEmitBody: string; violations: string[] },
+): Promise<ContractStepPlan> {
+  const repairState = await readRepairState(ctx.artifactsDir);
+  if (repairState.dag_regenerations.length >= MAX_DAG_REGENERATION_ATTEMPTS) {
+    return {
+      via: "blocked",
+      prompt: `# ${params.heading} ${repairState.dag_regenerations.length + 1} Times
+
+${params.blockedBody}
+
+${params.violations.map((violation) => `- ${violation}`).join("\n")}
+`,
+      stopCondition: `Stop after reporting the failure to the user.`,
+    };
+  }
+  repairState.dag_regenerations.push({
+    violations: params.violations,
+    at: new Date().toISOString(),
+  });
+  await writeRepairState(ctx.artifactsDir, repairState);
+  const archived = await archiveContractArtifact(
+    ctx.artifactsDir,
+    "implementation_dag",
+    "invalid",
+    ctx.options.renameFn,
+  );
+  return {
+    via: "phase",
+    phase: "implementation_planning",
+    extraSection: `${params.reEmitBody}
+
+${params.violations.map((violation) => `- ${violation}`).join("\n")}
+${rejectionRewriteInstruction(archived)}`,
+  };
+}
+
+/**
+ * All phases exist: enforce referential integrity, traceability and the
+ * fail-closed contract-obligation gates, then convert the implementation_dag
+ * into an extracted plan and ground its citations.
+ */
+const implementationPlanPromotionGate: ContractGate = async (ctx) => {
+  if (ctx.nextPhase) return null;
+
+  // DAG referential integrity + bidirectional coverage (ARC-86b18f1b-2), run
+  // before the traceability check so specific referential violations are
+  // reported first (traceability is a superset check).
+  const outcomes = evaluateContractPipelineCrossGateOutcomes(
+    await readCrossGatePayloads(ctx),
+  );
+  const integrity = gateOutcomeOf(outcomes, "implementation_dag_integrity");
+  if (!integrity?.evaluated) {
+    return await dagRegenerationPlan(ctx, {
+      heading: "Implementation DAG Could Not Be Checked",
+      blockedBody:
+        "The implementation_dag integrity gate could not run, so its empty issue list proves nothing:",
+      reEmitBody: `## The Implementation DAG Could Not Be Checked
+
+The referential-integrity gate could not run against the previous output, so it was never shown to be sound. Rewrite a complete implementation_dag:`,
+      violations: [integrity?.reason ?? "no outcome record was produced for the gate"],
+    });
+  }
+  const integrityErrors = integrity.issues.filter((issue) => issue.severity === "error");
+  if (integrityErrors.length > 0) {
+    return await dagRegenerationPlan(ctx, {
+      heading: "Implementation DAG Failed Referential Integrity",
+      blockedBody:
+        "The implementation_dag repeatedly contains referential integrity or coverage violations:",
+      reEmitBody: `## Referential Integrity Errors From the Previous Attempt
+
+The previous implementation_dag was rejected and archived due to referential integrity violations. Fix every issue below:`,
+      violations: integrityErrors.map((issue) => `[${issue.path}] ${issue.message}`),
+    });
   }
 
-  // 4. All phases exist: enforce traceability + referential integrity, then
-  //    convert the implementation_dag to an extracted plan.
-  if (!nextPhase) {
-    // 4a. DAG referential integrity + bidirectional coverage (ARC-86b18f1b-2).
-    //     Run before the traceability check so specific referential violations
-    //     are reported first (traceability is a superset check).
-    const dagPayload = envelopePayload(
-      await readContractArtifact(artifactsDir, "implementation_dag"),
-    );
-    const ledgerPayload = envelopePayload(
-      await readContractArtifact(artifactsDir, "obligation_ledger"),
-    );
-    const cePayload = envelopePayload(
-      await readContractArtifact(artifactsDir, "counterexample"),
-    );
-    const judgePayload = envelopePayload(
-      await readContractArtifact(artifactsDir, "judge_report"),
-    );
-    const integrityIssues = validateImplementationDAGIntegrity(
-      dagPayload,
-      ledgerPayload,
-      cePayload,
-      judgePayload,
-    );
-    const integrityErrors = integrityIssues.filter((i) => i.severity === "error");
-    if (integrityErrors.length > 0) {
-      const repairState = await readRepairState(artifactsDir);
-      if (repairState.dag_regenerations.length >= MAX_DAG_REGENERATION_ATTEMPTS) {
-        return writeCurrentStep({
-          stepKind: CONTRACT_STEP_KIND,
-          status: "blocked",
-          runId,
-          repoRoot: root,
-          artifactsDir,
-          prompt: `# Implementation DAG Failed Referential Integrity ${repairState.dag_regenerations.length + 1} Times
+  const traceability = await validateImplementationDagTraceability(ctx.artifactsDir);
+  if (!traceability.ok) {
+    return await dagRegenerationPlan(ctx, {
+      heading: "Implementation DAG Failed Traceability",
+      blockedBody:
+        "The implementation_dag repeatedly contains nodes that trace to no obligation and no judge-accepted counterexample:",
+      reEmitBody: `## Traceability Errors From the Previous Attempt
 
-The implementation_dag repeatedly contains referential integrity or coverage violations:
-
-${integrityErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
-
-Report this to the user and stop. The contract pipeline cannot promote a plan with integrity violations; the run needs a corrected implementation_dag or obligation_ledger.
-`,
-          allowedCommands: [],
-          stopCondition: "Stop after reporting the integrity failure to the user.",
-        });
-      }
-      repairState.dag_regenerations.push({
-        violations: integrityErrors.map((i) => i.message),
-        at: new Date().toISOString(),
-      });
-      await writeRepairState(artifactsDir, repairState);
-      const archived = await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
-      return buildPhaseStep(
-        "implementation_planning",
-        `## Referential Integrity Errors From the Previous Attempt
-
-The previous implementation_dag was rejected and archived due to referential integrity violations. Fix every issue below:
-
-${integrityErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
-${rejectionRewriteInstruction(archived)}`,
-      );
-    }
-
-    const traceability = await validateImplementationDagTraceability(artifactsDir);
-    if (!traceability.ok) {
-      const repairState = await readRepairState(artifactsDir);
-      if (repairState.dag_regenerations.length >= MAX_DAG_REGENERATION_ATTEMPTS) {
-        return writeCurrentStep({
-          stepKind: CONTRACT_STEP_KIND,
-          status: "blocked",
-          runId,
-          repoRoot: root,
-          artifactsDir,
-          prompt: `# Implementation DAG Failed Traceability ${repairState.dag_regenerations.length + 1} Times
-
-The implementation_dag repeatedly contains nodes that trace to no obligation and no judge-accepted counterexample:
-
-${traceability.violations.map((v) => `- ${v}`).join("\n")}
-
-Report this to the user and stop. The contract pipeline cannot promote an untraceable plan; the run needs a corrected goal/design or manual intervention.
-`,
-          allowedCommands: [],
-          stopCondition: "Stop after reporting the traceability failure to the user.",
-        });
-      }
-      repairState.dag_regenerations.push({
-        violations: traceability.violations,
-        at: new Date().toISOString(),
-      });
-      await writeRepairState(artifactsDir, repairState);
-      const archived = await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
-      return buildPhaseStep(
-        "implementation_planning",
-        `## Traceability Errors From the Previous Attempt
-
-The previous implementation_dag was rejected and archived. Every node must trace to at least one obligation from the obligation ledger or one judge-accepted counterexample:
-
-${traceability.violations.map((v) => `- ${v}`).join("\n")}
-${rejectionRewriteInstruction(archived)}`,
-      );
-    }
-
-    // 4c. Contract-obligations promotion gates (CP-BLOCK-N-contract-obligations):
-    //     fail-closed cross-artifact checks that must pass before a plan is
-    //     promoted — paired obligations, evidence threading, source-scoped
-    //     digest coverage, and INV-CO-12 reconciliation derivation. Reuses the
-    //     dag_regenerations cap: bounded re-emit of implementation_planning, then
-    //     blocked. These are the invariants that keep the workflow correct
-    //     regardless of host strength, so they are enforced here, never left to
-    //     host discretion.
-    const obligationGate = await evaluateContractObligationsPromotionGate(artifactsDir);
-    if (!obligationGate.ok) {
-      const repairState = await readRepairState(artifactsDir);
-      if (repairState.dag_regenerations.length >= MAX_DAG_REGENERATION_ATTEMPTS) {
-        return writeCurrentStep({
-          stepKind: CONTRACT_STEP_KIND,
-          status: "blocked",
-          runId,
-          repoRoot: root,
-          artifactsDir,
-          prompt: `# Contract-Obligation Gates Failed ${repairState.dag_regenerations.length + 1} Times
-
-The contract-obligation promotion gates repeatedly failed and the plan cannot be promoted:
-
-${obligationGate.violations.map((v) => `- ${v}`).join("\n")}
-
-Report this to the user and stop. The contract pipeline cannot promote a plan that drops obligation coverage, evidence, or a reconciled seam; the run needs a corrected obligation_ledger, test_validator_plan, finalized_module_contracts, or implementation_dag.
-`,
-          allowedCommands: [],
-          stopCondition: "Stop after reporting the contract-obligation gate failure to the user.",
-        });
-      }
-      repairState.dag_regenerations.push({
-        violations: obligationGate.violations,
-        at: new Date().toISOString(),
-      });
-      await writeRepairState(artifactsDir, repairState);
-      const archived = await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
-      return buildPhaseStep(
-        "implementation_planning",
-        `## Contract-Obligation Gate Errors From the Previous Attempt
-
-The previous implementation_dag (and/or upstream contract artifacts) failed the fail-closed contract-obligation gates. Fix every issue below before the plan can be promoted:
-
-${obligationGate.violations.map((v) => `- ${v}`).join("\n")}
-${rejectionRewriteInstruction(archived)}`,
-      );
-    }
-
-    await promoteImplementationDagToExtractedPlan(artifactsDir);
-
-    // 4d. M-B3 source-grounded citation gate (promotion backstop): ground every
-    //     promoted extracted-plan finding's citations against the working tree.
-    //     A finding citing only a non-existent path and no real symbol is a
-    //     hallucinated citation; re-emit implementation_planning (bounded by the
-    //     same dag_regenerations cap). Fail-closed only on an unreadable tree.
-    const citationGate = await evaluatePromotedPlanCitationGrounding(artifactsDir, root);
-    if (citationGate) {
-      // Grounding failed: the plan was promoted to extracted-plan.json BEFORE this
-      // gate ran, so the ungrounded marker is now on disk. Remove it before any
-      // return — otherwise a subsequent next-step reads the promoted plan via
-      // readExtractedPlanIfPresent and hands it straight to handlePendingExtractedPlan,
-      // bypassing the re-emit and completing the pipeline on hallucinated citations.
-      // No pipelineComplete unless the promoted plan grounds.
-      await rm(intakePaths(artifactsDir).extractedPlan, { force: true });
-      const repairState = await readRepairState(artifactsDir);
-      if (repairState.dag_regenerations.length >= MAX_DAG_REGENERATION_ATTEMPTS) {
-        return writeCurrentStep({
-          stepKind: CONTRACT_STEP_KIND,
-          status: "blocked",
-          runId,
-          repoRoot: root,
-          artifactsDir,
-          prompt: `# Citation Grounding Failed ${repairState.dag_regenerations.length + 1} Times
-
-The promoted plan repeatedly cites components that do not exist in the working tree:
-
-${citationGate.violations.map((v) => `- ${v}`).join("\n")}
-
-Report this to the user and stop. The contract pipeline cannot promote a plan whose findings cite non-existent files or symbols; the run needs a corrected implementation_dag.
-`,
-          allowedCommands: [],
-          stopCondition: "Stop after reporting the citation-grounding failure to the user.",
-        });
-      }
-      repairState.dag_regenerations.push({
-        violations: citationGate.violations,
-        at: new Date().toISOString(),
-      });
-      await writeRepairState(artifactsDir, repairState);
-      const archived = await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
-      // The grounding-driven re-emit is a backend-observed step-boundary fact:
-      // route it through the single CE-005 chokepoint as phase_reemit.
-      await captureStepBoundaryFriction(
-        artifactsDir,
-        runId,
-        {
-          eventType: "phase_reemit",
-          discriminator: "implementation_planning:citation_grounding:promotion",
-          note:
-            "implementation_planning re-emitted: a promoted plan finding cited a " +
-            "component that does not exist in the working tree (M-B3 citation grounding).",
-          category: "trap",
-        },
-        "remediate-code",
-      );
-      return buildPhaseStep(
-        "implementation_planning",
-        `## Source-Grounded Citation Gate Errors From the Previous Attempt
-
-The previous implementation_dag produced findings that cite components not present in the working tree. Every cited path or symbol must point at something real:
-
-${citationGate.violations.map((v) => `- ${v}`).join("\n")}
-${rejectionRewriteInstruction(archived)}`,
-      );
-    }
-
-    return null;
+The previous implementation_dag was rejected and archived. Every node must trace to at least one obligation from the obligation ledger or one judge-accepted counterexample:`,
+      violations: traceability.violations,
+    });
   }
 
-  // 5a. Cyclic-seam resolution gate: runs after obligation_ledger is present and
-  //     before assessment. Detects circular interface-definition obligations in
-  //     the DAG of module contracts, then routes to an LLM resolution step when
-  //     cycles are found. The resolution is re-checked by the same detector
-  //     before being accepted. Cap: MAX_CYCLIC_SEAM_RESOLUTION_ATTEMPTS; on
-  //     exhaustion, route to a user-decision step (then blocked if unresolved).
-  if (nextPhase === "cyclic_seam_resolution") {
-    const obligationLedgerPayload = envelopePayload(
-      await readContractArtifact(artifactsDir, "obligation_ledger"),
-    ) as ObligationLedger | undefined;
+  // Contract-obligations promotion gates: fail-closed cross-artifact checks that
+  // must pass before a plan is promoted. These are the invariants that keep the
+  // workflow correct regardless of host strength, so they are enforced here,
+  // never left to host discretion.
+  const obligationGate = await evaluateContractObligationsPromotionGate(
+    ctx.artifactsDir,
+    ctx.root,
+    await readCrossGatePayloads(ctx),
+  );
+  if (!obligationGate.ok) {
+    return await dagRegenerationPlan(ctx, {
+      heading: "Contract-Obligation Gates Failed",
+      blockedBody:
+        "The contract-obligation promotion gates repeatedly failed and the plan cannot be promoted:",
+      reEmitBody: `## Contract-Obligation Gate Errors From the Previous Attempt
 
-    // Build seam-obligation graph from obligation ledger: each obligation whose
-    // depends_on references other obligation IDs forms a seam-obligation node.
-    const obligationIds = new Set(
-      (obligationLedgerPayload?.obligations ?? []).map((o) => o.id),
+The previous implementation_dag (and/or upstream contract artifacts) failed the fail-closed contract-obligation gates. Fix every issue below before the plan can be promoted:`,
+      violations: obligationGate.violations,
+    });
+  }
+
+  // Write-scope + command SHAPE, before anything is promoted. These refusals
+  // used to throw out of the promoter — an unclassified stack that wedged every
+  // subsequent next-step, reachable from an LLM form as ordinary as a
+  // leading-slash "repo-relative" path. They take the same bounded re-emit as
+  // every other promotion rejection now.
+  const scopeRefusals = await collectDagWriteScopeRefusals(ctx.artifactsDir, ctx.root);
+  if (scopeRefusals.length > 0) {
+    return await dagRegenerationPlan(ctx, {
+      heading: "Block Write Scope Failed",
+      blockedBody:
+        "The implementation_dag repeatedly declares a write scope or targeted command the plan cannot carry:",
+      reEmitBody: `## Write-Scope and Command Errors From the Previous Attempt
+
+Each node's declared write scope becomes the block \`touched_files\` a host binds an implementer to and re-checks against the landed diff, and each targeted command is executed verbatim through a shell. Fix every entry below:`,
+      violations: scopeRefusals,
+    });
+  }
+
+  await promoteImplementationDagToExtractedPlan(ctx.artifactsDir, ctx.root);
+
+  // M-B3 source-grounded citation gate (promotion backstop): ground every
+  // promoted extracted-plan finding's citations against the working tree.
+  const citationGate = await evaluatePromotedPlanCitationGrounding(
+    ctx.artifactsDir,
+    ctx.root,
+  );
+  if (citationGate) {
+    // The plan was promoted to extracted-plan.json BEFORE this gate ran, so the
+    // ungrounded marker is now on disk. Remove it before any return — otherwise
+    // a subsequent next-step reads the promoted plan and hands it straight to
+    // handlePendingExtractedPlan, bypassing the re-emit and completing the
+    // pipeline on hallucinated citations.
+    await rm(ctx.paths.extractedPlan, { force: true });
+    // The grounding-driven re-emit is a backend-observed step-boundary fact:
+    // route it through the single CE-005 chokepoint as phase_reemit.
+    await captureStepBoundaryFriction(
+      ctx.artifactsDir,
+      ctx.runId,
+      {
+        eventType: "phase_reemit",
+        discriminator: "implementation_planning:citation_grounding:promotion",
+        note:
+          "implementation_planning re-emitted: a promoted plan finding cited a " +
+          "component that does not exist in the working tree (M-B3 citation grounding).",
+        category: "trap",
+      },
+      "remediate-code",
     );
-    const seamNodes: SeamObligationNode[] = (
-      obligationLedgerPayload?.obligations ?? []
-    ).map((obl) => ({
-      id: obl.id,
-      needs: (obl.depends_on ?? []).filter((dep) => obligationIds.has(dep)),
-    }));
+    return await dagRegenerationPlan(ctx, {
+      heading: "Citation Grounding Failed",
+      blockedBody:
+        "The promoted plan repeatedly cites components that do not exist in the working tree:",
+      reEmitBody: `## Source-Grounded Citation Gate Errors From the Previous Attempt
 
-    const detectedCycles = detectCyclicSeamObligations(seamNodes);
-    const ledgerEnvelope = await readContractArtifact(artifactsDir, "obligation_ledger");
-    const ledgerHash = ledgerEnvelope?.content_hash ?? "unknown";
+The previous implementation_dag produced findings that cite components not present in the working tree. Every cited path or symbol must point at something real:`,
+      violations: citationGate.violations,
+    });
+  }
 
-    if (detectedCycles.length === 0) {
-      // No cycles — write the no_cycles artifact and let the pipeline proceed.
-      await writeDerivedContractArtifact(artifactsDir, "cyclic_seam_resolution", {
-        contract_version:
-          "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
-        goal_id: obligationLedgerPayload?.goal_id ?? "",
-        cycles: [],
-        status: "no_cycles",
-        created_at: new Date().toISOString(),
-      });
-      // Re-derive next phase now that the artifact is written.
-      return buildNextContractPipelineStep(options);
-    }
+  // Normalized block write scope, tracked-tree half. Runs AFTER the
+  // citation gate because the two overlap but neither contains the other: a
+  // finding grounds on any real path OR symbol, so a node with plausible prose
+  // can ground while the write scope a host would bind a worker to is still
+  // fabricated. Same bounded recovery, same plan removal.
+  const writeScopeGate = await evaluatePromotedPlanWriteScope(ctx.artifactsDir, ctx.root);
+  if (writeScopeGate) {
+    await rm(ctx.paths.extractedPlan, { force: true });
+    return await dagRegenerationPlan(ctx, {
+      heading: "Block Write Scope Failed",
+      blockedBody:
+        "The promoted plan repeatedly declares a block write scope that does not exist in the working tree:",
+      reEmitBody: `## Block Write-Scope Errors From the Previous Attempt
 
-    // Cycles detected — check repair state.
-    const repairState = await readCyclicSeamRepairState(artifactsDir);
-    const attemptsForLedger = repairState.attempts.filter(
-      (a) => a.ledger_hash === ledgerHash,
-    );
+Each node's declared write scope becomes the block \`touched_files\` a host binds an implementer to and re-checks against the landed diff. The following entries name a directory that does not exist:`,
+      violations: writeScopeGate.violations,
+    });
+  }
 
-    // Check whether the existing cyclic_seam_resolution artifact (if any) has
-    // a re-check that passed — in that case the cycle is resolved; write the
-    // resolved artifact and proceed.
-    const existingResolution = envelopePayload(
-      await readContractArtifact(artifactsDir, "cyclic_seam_resolution"),
-    ) as Record<string, unknown> | undefined;
-    if (
-      existingResolution &&
-      (existingResolution.status === "resolved" ||
-        existingResolution.status === "no_cycles")
-    ) {
-      // The cyclic_seam_resolution artifact is already present and marked
-      // resolved/no_cycles — this branch should not normally be reached (the
-      // artifact exists so nextMissingContractPhase skips it), but guard anyway.
-      return buildNextContractPipelineStep(options);
-    }
+  return { via: "pipeline_complete" };
+};
 
-    if (
-      attemptsForLedger.length >= MAX_CYCLIC_SEAM_RESOLUTION_ATTEMPTS &&
-      !repairState.user_decision_emitted
-    ) {
-      // Cap exhausted — emit user-decision step.
+/** Render the detected cycles for a prompt. */
+function renderCycleDescriptions(cycles: readonly { members: string[] }[]): string {
+  return cycles
+    .map((cycle, index) => `Cycle ${index + 1}: [${cycle.members.join(", ")}]`)
+    .join("\n");
+}
+
+/** Build the seam-obligation graph from the obligation ledger AS IT STANDS NOW. */
+async function readSeamObligationGraph(
+  artifactsDir: string,
+): Promise<{ nodes: SeamObligationNode[]; goalId: string; ledgerHash: string }> {
+  const envelope = await readContractArtifact(artifactsDir, "obligation_ledger");
+  const ledger = envelopePayload(envelope) as ObligationLedger | undefined;
+  const obligationIds = new Set((ledger?.obligations ?? []).map((o) => o.id));
+  return {
+    nodes: (ledger?.obligations ?? []).map((obligation) => ({
+      id: obligation.id,
+      needs: (obligation.depends_on ?? []).filter((dep) => obligationIds.has(dep)),
+    })),
+    goalId: ledger?.goal_id ?? "",
+    ledgerHash: envelope?.content_hash ?? "unknown",
+  };
+}
+
+/**
+ * Cyclic-seam resolution gate: runs after obligation_ledger is present and
+ * before assessment. Detects circular interface-definition obligations, then
+ * routes to an LLM resolution step when cycles are found. Cap:
+ * MAX_CYCLIC_SEAM_RESOLUTION_ATTEMPTS; on exhaustion, route to a user-decision
+ * step (then blocked if still unresolved).
+ */
+const cyclicSeamResolutionGate: ContractGate = async (ctx) => {
+  if (ctx.nextPhase !== "cyclic_seam_resolution") return null;
+  const graph = await readSeamObligationGraph(ctx.artifactsDir);
+  const detectedCycles = detectCyclicSeamObligations(graph.nodes);
+
+  if (detectedCycles.length === 0) {
+    await writeDerivedContractArtifact(ctx.artifactsDir, "cyclic_seam_resolution", {
+      contract_version:
+        "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+      goal_id: graph.goalId,
+      cycles: [],
+      status: "no_cycles",
+      created_at: new Date().toISOString(),
+    });
+    return { via: "rederive" };
+  }
+
+  const repairState = await readCyclicSeamRepairState(ctx.artifactsDir);
+  const attemptsForLedger = repairState.attempts.filter(
+    (attempt) => attempt.ledger_hash === graph.ledgerHash,
+  );
+
+  // Guard: the artifact exists and is already marked resolved/no_cycles. This
+  // branch should not normally be reached (the artifact exists, so the frontier
+  // skips it), but re-deriving is the safe answer.
+  const existingResolution = envelopePayload(
+    await readContractArtifact(ctx.artifactsDir, "cyclic_seam_resolution"),
+  ) as Record<string, unknown> | undefined;
+  if (
+    existingResolution &&
+    (existingResolution.status === "resolved" ||
+      existingResolution.status === "no_cycles")
+  ) {
+    return { via: "rederive" };
+  }
+
+  const cycleDescriptions = renderCycleDescriptions(detectedCycles);
+
+  if (attemptsForLedger.length >= MAX_CYCLIC_SEAM_RESOLUTION_ATTEMPTS) {
+    if (!repairState.user_decision_emitted) {
       repairState.user_decision_emitted = true;
-      await writeCyclicSeamRepairState(artifactsDir, repairState);
-
-      const cycleDescriptions = detectedCycles
-        .map((c, i) => `Cycle ${i + 1}: [${c.members.join(", ")}]`)
-        .join("\n");
-
-      return writeCurrentStep({
-        stepKind: CONTRACT_STEP_KIND,
-        status: "blocked",
-        runId,
-        repoRoot: root,
-        artifactsDir,
+      await writeCyclicSeamRepairState(ctx.artifactsDir, repairState);
+      return {
+        via: "blocked",
         prompt: `# Cyclic Seam Resolution — User Decision Required
 
 The automatic cycle-break resolution reached its cap (${MAX_CYCLIC_SEAM_RESOLUTION_ATTEMPTS} attempt(s)) without producing a valid cycle-free obligation graph. The following obligation cycles remain unresolved:
@@ -2567,32 +2934,18 @@ ${cycleDescriptions}
 1. **Mediator module** — Introduce a third obligation/module that both sides depend on. The mediator owns the shared primitive; neither original module defines an interface for the other.
 2. **Single authority** — Designate one obligation/module as the definitive owner of the co-defined interface. The other becomes a consumer only. This is recorded as a named, scoped exception.
 
-To proceed, manually rewrite \`${contractInputFilePath(artifactsDir, "obligation_ledger")}\` so that no circular \`depends_on\` references exist, then delete \`${contractInputFilePath(artifactsDir, "cyclic_seam_resolution")}\` and \`${cyclicSeamRepairStatePath(artifactsDir)}\` and re-run next-step.
+To proceed, manually rewrite \`${contractInputFilePath(ctx.artifactsDir, "obligation_ledger")}\` so that no circular \`depends_on\` references exist, then delete \`${contractInputFilePath(ctx.artifactsDir, "cyclic_seam_resolution")}\` and \`${cyclicSeamRepairStatePath(ctx.artifactsDir)}\` and re-run next-step.
 
 If you choose to stop instead, this run will remain blocked.
 `,
-        allowedCommands: [],
         stopCondition:
           "Stop after presenting the user-decision prompt. Do not attempt further resolution.",
-      });
+      };
     }
-
-    if (
-      attemptsForLedger.length >= MAX_CYCLIC_SEAM_RESOLUTION_ATTEMPTS &&
-      repairState.user_decision_emitted
-    ) {
-      // User decision was emitted but cycles are still present — blocked.
-      const cycleDescriptions = detectedCycles
-        .map((c, i) => `Cycle ${i + 1}: [${c.members.join(", ")}]`)
-        .join("\n");
-
-      return writeCurrentStep({
-        stepKind: CONTRACT_STEP_KIND,
-        status: "blocked",
-        runId,
-        repoRoot: root,
-        artifactsDir,
-        prompt: `# Cyclic Seam Resolution — Blocked
+    // The user decision was emitted and cycles are still present — blocked.
+    return {
+      via: "blocked",
+      prompt: `# Cyclic Seam Resolution — Blocked
 
 Cycles in the obligation graph remain unresolved after the automatic cap and a user-decision step. The run cannot proceed without manual intervention.
 
@@ -2600,51 +2953,57 @@ ${cycleDescriptions}
 
 Manually rewrite the obligation_ledger to remove circular depends_on references, delete the cyclic_seam_resolution artifact and cyclic-seam-repair-state.json, and re-run next-step.
 `,
-        allowedCommands: [],
-        stopCondition: "Stop — the run is blocked on cyclic seam resolution.",
-      });
-    }
+      stopCondition: "Stop — the run is blocked on cyclic seam resolution.",
+    };
+  }
 
-    // Emit the LLM cyclic-seam-resolution step.
-    const cycleDescriptions = detectedCycles
-      .map((c, i) => `Cycle ${i + 1}: [${c.members.join(", ")}]`)
-      .join("\n");
+  // Emit the LLM cyclic-seam-resolution step.
+  const outputPath = contractInputFilePath(ctx.artifactsDir, "cyclic_seam_resolution");
+  const ledgerInputPath = contractInputFilePath(ctx.artifactsDir, "obligation_ledger");
+  const priorRejection = [...repairState.attempts]
+    .reverse()
+    .find(
+      (attempt) =>
+        attempt.ledger_hash === graph.ledgerHash && attempt.recheck_reason,
+    )?.recheck_reason;
+  const rejectionSection = priorRejection
+    ? `\n## Why the Previous Attempt Was Rejected\n\n${priorRejection}\n`
+    : "";
 
-    const outputPath = contractInputFilePath(artifactsDir, "cyclic_seam_resolution");
-    const nextCommand = loaderCommand("next-step");
+  repairState.attempts.push({
+    ledger_hash: graph.ledgerHash,
+    at: new Date().toISOString(),
+    recheck_passed: false,
+  });
+  await writeCyclicSeamRepairState(ctx.artifactsDir, repairState);
 
-    repairState.attempts.push({
-      ledger_hash: ledgerHash,
-      at: new Date().toISOString(),
-      recheck_passed: false,
-    });
-    await writeCyclicSeamRepairState(artifactsDir, repairState);
+  return {
+    via: "step",
+    prompt: `# Cyclic Seam Resolution
 
-    return buildStep({
-      prompt: `# Cyclic Seam Resolution
-
-Circular interface-definition obligations were detected in the obligation ledger. You must resolve every cycle using one of the two sanctioned strategies below, then write the resolution record.
+Circular interface-definition obligations were detected in the obligation ledger. You must resolve every cycle using one of the two sanctioned strategies below, then REWRITE THE LEDGER and write the resolution record.
 
 ## Detected Cycles
 
 ${cycleDescriptions}
-
+${rejectionSection}
 ## Sanctioned Break Strategies
 
 For each cycle, choose one:
 
-1. **Mediator module** — Introduce a third obligation/module that both sides depend on. The mediator owns the shared primitive; neither original module defines an interface for the other.
-2. **Single authority** — Designate one side as the definitive owner of the interface. The other becomes a consumer only. Record this as an explicit, scoped exception.
+1. **Mediator module** — Introduce a third obligation/module that both sides depend on. The mediator owns the shared primitive; neither original module defines an interface for the other. The mediator must be an obligation that EXISTS in the ledger and is NOT a member of the cycle.
+2. **Single authority** — Designate one of the cycle's own obligations as the definitive owner of the interface. The others become consumers only. Record this as an explicit, scoped exception.
 
 ## Required Inputs
 
-- \`${contractInputFilePath(artifactsDir, "obligation_ledger")}\` (obligation_ledger)
+- \`${ledgerInputPath}\` (obligation_ledger)
 
 ## Your Task
 
-Read the obligation_ledger. For each detected cycle, decide which break strategy to apply, verify mentally that the break does not re-introduce a cycle, then write the resolution record to exactly:
+Two files, both required — the record alone is not a break:
 
-\`${outputPath}\`
+1. **Rewrite \`${ledgerInputPath}\`** so the cycle's \`depends_on\` edges actually route through the obligation you designate. The re-check re-runs cycle detection over the ledger you leave behind; a resolution record whose ledger still carries the cycle is rejected, not accepted.
+2. **Write the resolution record** to exactly \`${outputPath}\`, naming for each cycle the obligation id you designated:
 
 \`\`\`json
 {
@@ -2654,6 +3013,7 @@ Read the obligation_ledger. For each detected cycle, decide which break strategy
     {
       "members": ["<obligation-id>", "..."],
       "break_strategy": "mediator | single_authority",
+      "designated_obligation_id": "<the mediating obligation, or the single authority — must exist in the rewritten ledger>",
       "resolution_description": "<what was changed and why>",
       "exception_registration": "<if single_authority: the named scoped exception; otherwise null>"
     }
@@ -2664,300 +3024,505 @@ Read the obligation_ledger. For each detected cycle, decide which break strategy
 
 If after analysis you find the cycles are already broken (e.g. upon re-reading the ledger the depends_on edges do not actually form a cycle), set status to "no_cycles" and cycles to [].
 
-**Stop after writing the output file.** Do not edit source files. Do not advance to the next pipeline step.
-
-After writing the output file, run:
-
-\`${nextCommand}\`
+**Stop after writing the two files.** Do not edit source files. Do not advance to the next pipeline step.
 `,
-      outputPath,
-      stopCondition:
-        'Stop after writing the cyclic_seam_resolution output file and running next-step.',
-    });
+    outputPath,
+    stopCondition:
+      "Stop after rewriting the obligation_ledger, writing the cyclic_seam_resolution output file, and running next-step.",
+  };
+};
+
+/**
+ * Cyclic-seam RE-CHECK. The worker has written a `resolved` record; verify the
+ * break it actually authored against the obligation graph as it actually
+ * stands, and archive + loop back when it does not hold.
+ *
+ * TST-61cff370 / TST-114e4941: this check used to be vacuous. It fabricated a
+ * synthetic node per cycle — `{ id: "_mediator_A_B", needs: [] }` or
+ * `{ id: "_authority_A_B", needs: [] }` — and asked whether redirecting the
+ * cycle's edges at that edge-free sink would be acyclic, against the SAME
+ * unmodified ledger. For any single detected cycle the answer is yes by
+ * construction, so the re-check could never reject: a worker could claim
+ * `status: "resolved"` while changing nothing, and the pipeline advanced. It
+ * now reads the designated obligation off the record and validates it against
+ * the live graph — see `validateAuthoredCycleBreak`.
+ */
+const cyclicSeamRecheckGate: ContractGate = async (ctx) => {
+  const resolutionEnvelope = await readContractArtifact(
+    ctx.artifactsDir,
+    "cyclic_seam_resolution",
+  );
+  if (!resolutionEnvelope) return null;
+  const resolution = envelopePayload(resolutionEnvelope) as
+    | Record<string, unknown>
+    | undefined;
+  if (
+    !resolution ||
+    resolution.status !== "resolved" ||
+    !Array.isArray(resolution.cycles) ||
+    resolution.cycles.length === 0
+  ) {
+    return null;
   }
 
-  // 5b. Cyclic-seam re-check: after the LLM writes the cyclic_seam_resolution
-  //     artifact (status=resolved or no_cycles), verify the proposed break does
-  //     not re-introduce a cycle. If it does, archive and re-emit the resolution
-  //     step. This check runs as part of the ingestion/staleness pass — the
-  //     artifact is validated structurally by the validator; here we run the
-  //     graph re-check on the cycles array to confirm the break is sound.
-  //     (Note: this pass runs only when cyclic_seam_resolution already exists
-  //     and nextPhase is NOT cyclic_seam_resolution — i.e. the artifact was just
-  //     ingested. We do a soft re-check here; if the break re-introduces a cycle,
-  //     archive and loop back.)
-  {
-    const resolutionEnvelope = await readContractArtifact(
-      artifactsDir,
-      "cyclic_seam_resolution",
+  const graph = await readSeamObligationGraph(ctx.artifactsDir);
+  let rejection: string | undefined;
+  for (const cycleRecord of resolution.cycles as Array<Record<string, unknown>>) {
+    if (!Array.isArray(cycleRecord.members)) continue;
+    const members = (cycleRecord.members as unknown[]).filter(
+      (member): member is string => typeof member === "string",
     );
-    if (resolutionEnvelope) {
-      const resolution = envelopePayload(resolutionEnvelope) as
-        | Record<string, unknown>
-        | undefined;
-      if (
-        resolution &&
-        resolution.status === "resolved" &&
-        Array.isArray(resolution.cycles) &&
-        resolution.cycles.length > 0
-      ) {
-        // Re-check: build the patched graph and verify no cycles remain.
-        const obligationLedgerPayload = envelopePayload(
-          await readContractArtifact(artifactsDir, "obligation_ledger"),
-        ) as ObligationLedger | undefined;
-        const obligationIds = new Set(
-          (obligationLedgerPayload?.obligations ?? []).map((o) => o.id),
-        );
-        const seamNodes: SeamObligationNode[] = (
-          obligationLedgerPayload?.obligations ?? []
-        ).map((obl) => ({
-          id: obl.id,
-          needs: (obl.depends_on ?? []).filter((dep) => obligationIds.has(dep)),
-        }));
-
-        // For each cycle in the resolution, apply the stated break and re-check.
-        let recheckFailed = false;
-        for (const cycleRecord of resolution.cycles as Array<
-          Record<string, unknown>
-        >) {
-          if (!Array.isArray(cycleRecord.members)) continue;
-          const members = cycleRecord.members as string[];
-          const mediatorId =
-            cycleRecord.break_strategy === "mediator"
-              ? `_mediator_${members.join("_")}`
-              : null;
-          const validationResult = validateCycleBreak(
-            { members },
-            seamNodes,
-            mediatorId
-              ? { id: mediatorId, needs: [] }
-              : // single_authority: the designated owner keeps all edges;
-                // non-owner loses edges to cycle members — model as mediator=no-op.
-                { id: `_authority_${members.join("_")}`, needs: [] },
-          );
-          if (!validationResult.accepted) {
-            recheckFailed = true;
-            break;
-          }
-        }
-
-        if (recheckFailed) {
-          const ledgerEnvelope = await readContractArtifact(
-            artifactsDir,
-            "obligation_ledger",
-          );
-          const ledgerHash = ledgerEnvelope?.content_hash ?? "unknown";
-          const repairState = await readCyclicSeamRepairState(artifactsDir);
-          // Mark the last attempt as recheck_failed.
-          const last = repairState.attempts.at(-1);
-          if (last && last.ledger_hash === ledgerHash) {
-            last.recheck_passed = false;
-          }
-          await writeCyclicSeamRepairState(artifactsDir, repairState);
-          await archiveContractArtifact(
-            artifactsDir,
-            "cyclic_seam_resolution",
-            "invalid",
-          );
-          // Re-enter to emit the next attempt or cap.
-          return buildNextContractPipelineStep(options);
-        }
-      }
+    const strategy = cycleRecord.break_strategy;
+    if (strategy !== "mediator" && strategy !== "single_authority") {
+      rejection =
+        `Cycle [${members.join(", ")}] declares break_strategy ` +
+        `${JSON.stringify(strategy ?? null)}, which is neither "mediator" nor "single_authority".`;
+      break;
+    }
+    const authored: AuthoredCycleBreak = {
+      strategy,
+      designatedId:
+        typeof cycleRecord.designated_obligation_id === "string"
+          ? cycleRecord.designated_obligation_id
+          : undefined,
+    };
+    const validation = validateAuthoredCycleBreak({ members }, graph.nodes, authored);
+    if (!validation.accepted) {
+      rejection = validation.reason ?? `Cycle [${members.join(", ")}] was not resolved.`;
+      break;
     }
   }
 
-  // 5. Design-spec structural gates: run deterministic checks on the
-  //    finalized_module_contracts (the "design" artifact) and obligation_ledger
-  //    before emitting the adversarial critic phase. Error-severity gate failures
-  //    re-emit the contract_finalization (design) phase so the worker can fix the
-  //    structural issues before adversarial review begins. Warning-only results
-  //    (e.g. circular obligation dependencies → N-R21) are appended as an
-  //    advisory section to the critic prompt so the critic can take them into account.
-  if (nextPhase === "critic") {
-    // 5a. Design-spec structural gates on the finalized_module_contracts (the
-    //     "design" artifact) + obligation_ledger run first: a malformed design
-    //     artifact (error) re-emits the design phase, and a circular-obligation
-    //     dependency (warning) is appended to the critic prompt as advisory.
-    const finalizedModuleContractsPayload = envelopePayload(
-      await readContractArtifact(artifactsDir, "finalized_module_contracts"),
-    );
-    const obligationLedgerPayload = envelopePayload(
-      await readContractArtifact(artifactsDir, "obligation_ledger"),
-    );
-    const gateIssues = validateDesignSpecGates(
-      finalizedModuleContractsPayload,
-      obligationLedgerPayload,
-    );
-    const gateErrors = gateIssues.filter((issue) => issue.severity === "error");
-    const gateWarnings = gateIssues.filter((issue) => issue.severity === "warning");
+  if (!rejection) return null;
 
-    if (gateErrors.length > 0) {
-      // Re-emit the contract_finalization (design) phase with gate errors appended.
-      const errorLines = gateErrors
-        .map((issue) => `- [${issue.path}] ${issue.message}`)
-        .join("\n");
-      return buildPhaseStep(
-        "contract_finalization",
-        `## Design Structural Gate Errors
+  const repairState = await readCyclicSeamRepairState(ctx.artifactsDir);
+  const last = repairState.attempts.at(-1);
+  // Carry the reason forward so the NEXT resolution prompt says what failed,
+  // instead of re-asking for the same claim and burning the attempt cap on an
+  // unexplained retry. A record that appeared without a matching emitted
+  // attempt (a resumed run, a hand-written artifact) still gets its rejection
+  // recorded — the outcome is the attempt.
+  if (last && last.ledger_hash === graph.ledgerHash) {
+    last.recheck_passed = false;
+    last.recheck_reason = rejection;
+  } else {
+    repairState.attempts.push({
+      ledger_hash: graph.ledgerHash,
+      at: new Date().toISOString(),
+      recheck_passed: false,
+      recheck_reason: rejection,
+    });
+  }
+  await writeCyclicSeamRepairState(ctx.artifactsDir, repairState);
+  const archived = await archiveContractArtifact(
+    ctx.artifactsDir,
+    "cyclic_seam_resolution",
+    "invalid",
+    ctx.options.renameFn,
+  );
+  if (!archived.originalFree) {
+    // The rejected record is STILL at its canonical path, and re-deriving would
+    // read the same record, reject it again, fail to archive it again — an
+    // unbounded loop with no cap to stop it: the attempt ledger updates the
+    // same entry in place (one ledger hash), and `rederive` carries no depth
+    // bound. This branch is what makes the re-check's new ability to REJECT
+    // safe; before the re-check could reject, the failure was unreachable.
+    return {
+      via: "blocked",
+      prompt: `# A Rejected Cyclic-Seam Resolution Could Not Be Archived
+
+The cycle-break re-check rejected the resolution record:
+
+${rejection}
+
+The record could not be moved into the contract history directory, so it is still at its canonical path. Re-running would read the same rejected record and loop without bound, so the run stops here instead.
+
+Remove or unlock \`${contractArtifactFilePath(ctx.artifactsDir, "cyclic_seam_resolution")}\` (and its \`.input.json\` sibling if present), then re-run next-step so the resolution phase is re-emitted with the rejection above.`,
+      stopCondition:
+        "Stop — a rejected cyclic-seam resolution could not be archived and would otherwise loop.",
+    };
+  }
+  // Re-enter to emit the next attempt or the cap.
+  return { via: "rederive" };
+};
+
+/**
+ * Design-spec structural gates before the adversarial critic phase, in the order
+ * they run: the design artifact's own structure, then the cheap cross-artifact
+ * floor, then citation grounding. Error-severity gate failures re-emit the
+ * responsible phase; warning-only results (e.g. circular obligation
+ * dependencies) ride the critic prompt as advisory.
+ */
+const preCriticStructuralGate: ContractGate = async (ctx) => {
+  if (ctx.nextPhase !== "critic") return null;
+
+  const outcomes = evaluateContractPipelineCrossGateOutcomes(
+    await readCrossGatePayloads(ctx),
+  );
+
+  // (a) The design artifact itself. `contract_finalization` precedes `critic`,
+  //     so a not-evaluated outcome here means the payload is malformed, not
+  //     absent — its empty issue list is not proof of a clean design.
+  const designSpec = gateOutcomeOf(outcomes, "design_spec");
+  if (!designSpec?.evaluated) {
+    return {
+      via: "phase",
+      phase: "contract_finalization",
+      extraSection: `## Design Structural Gates Could Not Run
+
+The finalized module contracts could not be checked before adversarial review: ${
+        designSpec?.reason ?? "no outcome record was produced for the design gate"
+      }. Rewrite a complete, well-formed finalized_module_contracts artifact.
+`,
+    };
+  }
+  const gateErrors = designSpec.issues.filter((issue) => issue.severity === "error");
+  if (gateErrors.length > 0) {
+    return {
+      via: "phase",
+      phase: "contract_finalization",
+      extraSection: `## Design Structural Gate Errors
 
 The contract_finalization output failed deterministic structural gates. Fix every issue below before adversarial review can begin:
 
-${errorLines}
+${gateErrors.map((issue) => `- [${issue.path}] ${issue.message}`).join("\n")}
 `,
-      );
-    }
-
-    if (gateWarnings.length > 0) {
-      const warningLines = gateWarnings
-        .map((issue) => `- [${issue.path}] ${issue.message}`)
-        .join("\n");
-      return buildPhaseStep(
-        "critic",
-        `## Advisory: Design Structural Warnings
+    };
+  }
+  const gateWarnings = designSpec.issues.filter((issue) => issue.severity === "warning");
+  if (gateWarnings.length > 0) {
+    return {
+      via: "phase",
+      phase: "critic",
+      extraSection: `## Advisory: Design Structural Warnings
 
 The following structural issues were detected and should inform your adversarial review. They do not block the pipeline but may indicate areas of design fragility:
 
-${warningLines}
+${gateWarnings.map((issue) => `- [${issue.path}] ${issue.message}`).join("\n")}
 `,
-      );
-    }
+    };
+  }
 
-    // 5b. Pre-adversarial structural floor (S5): once the design artifact itself
-    //     is clean, run the cheap cross-artifact checks whose inputs all exist by
-    //     the critic phase (paired-obligation coverage, source-scoped digest
-    //     coverage, seam reconciliation derivation) so the adversarial loop only
-    //     ever sees structurally-sound obligations/tests/contracts, and a gap is
-    //     re-emitted to the precise responsible phase instead of being discovered
-    //     at promotion after the adversarial budget is spent. evaluateContract
-    //     ObligationsPromotionGate stays the fail-closed backstop at promotion.
-    const preCriticGate = await evaluatePreCriticStructuralGate(artifactsDir);
-    if (preCriticGate) {
-      return buildPhaseStep(
-        preCriticGate.phase,
-        `## Pre-Adversarial Structural Gate Errors
+  // (b) Pre-adversarial structural floor (S5): the cheap cross-artifact checks
+  //     whose inputs all exist by the critic phase, so the adversarial loop only
+  //     ever sees structurally-sound obligations/tests/contracts and a gap is
+  //     re-emitted to the precise responsible phase instead of being discovered
+  //     at promotion after the adversarial budget is spent.
+  const preCriticGate = await evaluatePreCriticStructuralGate(
+    ctx.artifactsDir,
+    ctx.root,
+    await readCrossGatePayloads(ctx),
+  );
+  if (preCriticGate) {
+    return {
+      via: "phase",
+      phase: preCriticGate.phase,
+      extraSection: `## Pre-Adversarial Structural Gate Errors
 
 The ${preCriticGate.phase} output failed deterministic structural gates. Fix every issue below before adversarial review begins:
 
 ${preCriticGate.errorLines.join("\n")}
 `,
-      );
-    }
+    };
+  }
 
-    // 5c. M-B3 source-grounded citation gate (pre-critic boundary): ground the
-    //     module_decomposition's file_scope citations against the working tree
-    //     before the adversarial loop. A module citing only a non-existent path
-    //     and no real symbol is re-emitted to the `decomposition` phase — the
-    //     phase that OWNS file_scope (the finalized contracts carry interface
-    //     fields, not paths, so re-emitting contract_finalization could never
-    //     change file_scope and an ungrounded scope would loop forever). The
-    //     grounding-driven re-emit is a backend-observed step-boundary fact routed
-    //     through the single CE-005 chokepoint as phase_reemit.
-    const preCriticCitationGate = await evaluatePreCriticCitationGrounding(
-      artifactsDir,
-      root,
+  // (c) M-B3 source-grounded citation gate at the pre-critic boundary: ground
+  //     the module_decomposition's file_scope citations against the working tree
+  //     before the adversarial loop. A module citing only a non-existent path and
+  //     no real symbol is re-emitted to the `decomposition` phase — the phase that
+  //     OWNS file_scope (the finalized contracts carry interface fields, not
+  //     paths, so re-emitting contract_finalization could never change file_scope
+  //     and an ungrounded scope would loop forever).
+  const preCriticCitationGate = await evaluatePreCriticCitationGrounding(
+    ctx.artifactsDir,
+    ctx.root,
+  );
+  if (preCriticCitationGate) {
+    await captureStepBoundaryFriction(
+      ctx.artifactsDir,
+      ctx.runId,
+      {
+        eventType: "phase_reemit",
+        discriminator: "decomposition:citation_grounding:pre_critic",
+        note:
+          "decomposition re-emitted: a module's file_scope cited a component " +
+          "that does not exist in the working tree (M-B3 citation grounding).",
+        category: "trap",
+      },
+      "remediate-code",
     );
-    if (preCriticCitationGate) {
-      await captureStepBoundaryFriction(
-        artifactsDir,
-        runId,
-        {
-          eventType: "phase_reemit",
-          discriminator: "decomposition:citation_grounding:pre_critic",
-          note:
-            "decomposition re-emitted: a module's file_scope cited a component " +
-            "that does not exist in the working tree (M-B3 citation grounding).",
-          category: "trap",
-        },
-        "remediate-code",
-      );
-      return buildPhaseStep(
-        "decomposition",
-        `## Source-Grounded Citation Gate Errors
+    return {
+      via: "phase",
+      phase: "decomposition",
+      extraSection: `## Source-Grounded Citation Gate Errors
 
 A module's file_scope cites a component that does not exist in the working tree. file_scope lives in the module decomposition (the finalized contracts carry interface fields, not paths), so fix the offending path(s) in the decomposition — every cited path or symbol must point at something real before adversarial review begins:
 
 ${preCriticCitationGate.errorLines.join("\n")}
 `,
-      );
-    }
+    };
   }
 
-  // Parallel-capable phase (DC-3): module_contract_drafting fans out to one agent
-  // per module. The aggregated `module_contracts` artifact is missing here, so
-  // first try to merge per-module shards (the worker may have just written them) —
-  // a COMPLETE shard set merges into the aggregated artifact and the pipeline
-  // re-derives; an incomplete set re-emits the wave; a degenerate (≤1 module)
-  // decomposition falls through to a single aggregated step. The seam_reconciliation
-  // / contract_finalization / critique pass downstream remains the consistency gate
-  // over the merged contracts.
-  if (isParallelModulePhase(nextPhase)) {
-    const mergeOutcome = await tryMergeModuleShards(nextPhase);
-    if (mergeOutcome === "merged") {
-      return buildNextContractPipelineStep(options);
-    }
-    if (mergeOutcome !== "incomplete") {
-      // A re-emitted wave step (missing shards).
-      return mergeOutcome;
-    }
-    return buildParallelModuleWaveStep(nextPhase);
-  }
+  return null;
+};
 
-  // Auto-phasing (T3): at the conceptual-design critique, hand the critic the
-  // tool-DERIVED phase cut so it assesses design quality WITHIN a mechanically
-  // dependency-ordered foundations→consumers phasing, instead of rejecting an
-  // arbitrary N-goal change as "over-scoped" and forcing the host to re-scope by
-  // hand at intake. The cut is derived deterministically from the finalized module
-  // contracts' directional neighbor_needs edges (present by the critique phase) and
-  // PERSISTED as the `phase_cut.json` sidecar here, so the cut the critic sees and
-  // the cut the implementation-DAG promotion enforces are one source. Only injected
-  // into the prompt when there is a genuine multi-phase cut to communicate.
-  if (nextPhase === "critique") {
-    const cut = await ensurePhaseCutArtifact(artifactsDir);
-    if (cut && cut.phases.length > 1) {
-      const reReview = await buildReReviewSection(nextPhase, artifactsDir);
-      const phaseCutSection = renderPhaseCutSection(cut);
-      return buildPhaseStep(
-        "critique",
-        reReview ? `${phaseCutSection}\n${reReview}` : phaseCutSection,
-      );
-    }
-  }
+/**
+ * DC-3 merge intercept: when a parallel phase's aggregated artifact is still
+ * missing, merge the per-module shards into it once they are ALL present.
+ * Returns true when the aggregate was written. A missing shard (or a degenerate
+ * ≤1-module decomposition, which never used the shard path) returns false, and
+ * the caller re-emits the wave — never a partial aggregate. After a complete
+ * merge the artifact is written enveloped and the pipeline re-derives; the
+ * seam_reconciliation / critique pass downstream stays the consistency gate over
+ * the merged contracts.
+ */
+async function tryMergeModuleShards(
+  artifactsDir: string,
+  phase: ParallelModulePhase,
+): Promise<boolean> {
+  const modules = await readDecomposedModules(artifactsDir);
+  if (modules.length <= 1) return false;
 
-  // Granularity collapse (T1 slice 4b): for low-complexity work, fold the framing
-  // suffix [nextPhase..decomposition] into ONE round-trip producing several
-  // artifacts, instead of one gated step per phase. Reads the POST-escalation
-  // riskSignal (slice 4a may have already raised the tier above), so the dial is
-  // never frozen at run start — `fine` for medium/high keeps full per-phase
-  // isolation. Only collapses a genuine multi-phase suffix; a single trailing
-  // framing phase falls through to the normal per-phase dispatch below.
+  const scan = await scanModuleShards(artifactsDir, phase, modules);
+  if (scan.missing.length > 0) return false;
+
+  // goal_id: the upstream module_decomposition is authoritative (every artifact
+  // shares one goal_id; the goal-ID consistency gate enforces it). Fall back to
+  // a shard's goal_id only if the decomposition somehow lacks one.
+  const decompositionGoalId = await readDecompositionGoalId(artifactsDir);
+  const goalId =
+    decompositionGoalId ||
+    [...scan.present.values()]
+      .map((contract) => (typeof contract.goal_id === "string" ? contract.goal_id : undefined))
+      .find((candidate): candidate is string => Boolean(candidate)) ||
+    "";
+
+  await writeDerivedContractArtifact(
+    artifactsDir,
+    PARALLEL_MODULE_PHASES[phase],
+    mergeModuleShards(modules, scan.present, goalId),
+  );
+  return true;
+}
+
+/**
+ * Parallel-capable phase (DC-3): `module_contract_drafting` fans out to one
+ * agent per module. The aggregated `module_contracts` artifact is missing here,
+ * so first try to merge per-module shards (the worker may have just written
+ * them) — a COMPLETE shard set merges into the aggregated artifact and the
+ * pipeline re-derives; anything else re-emits the wave (which itself falls back
+ * to the single aggregated step for a degenerate ≤1-module decomposition).
+ */
+const parallelModuleWaveGate: ContractGate = async (ctx) => {
+  const phase = ctx.nextPhase;
+  if (phase === null || !isParallelModulePhase(phase)) return null;
+  const merged = await tryMergeModuleShards(ctx.artifactsDir, phase);
+  return merged ? { via: "rederive" } : { via: "module_wave", phase };
+};
+
+/**
+ * Auto-phasing (T3): at the conceptual-design critique, hand the critic the
+ * tool-DERIVED phase cut so it assesses design quality WITHIN a mechanically
+ * dependency-ordered foundations→consumers phasing, instead of rejecting an
+ * arbitrary N-goal change as "over-scoped" and forcing the host to re-scope by
+ * hand at intake. The cut is derived from the finalized module contracts'
+ * directional neighbor_needs edges and PERSISTED as `phase_cut.json`, so the cut
+ * the critic sees and the cut the implementation-DAG promotion enforces are one
+ * source. Only injected when there is a genuine multi-phase cut to communicate.
+ */
+const phaseCutCritiqueGate: ContractGate = async (ctx) => {
+  if (ctx.nextPhase !== "critique") return null;
+  const cut = await ensurePhaseCutArtifact(ctx.artifactsDir);
+  if (!cut || cut.phases.length <= 1) return null;
+  const reReview = await buildReReviewSection("critique", ctx.artifactsDir);
+  const phaseCutSection = renderPhaseCutSection(cut);
+  return {
+    via: "phase",
+    phase: "critique",
+    extraSection: reReview ? `${phaseCutSection}\n${reReview}` : phaseCutSection,
+  };
+};
+
+/**
+ * Granularity collapse (T1 slice 4b): for low-complexity work, fold the framing
+ * suffix [nextPhase..decomposition] into ONE round-trip producing several
+ * artifacts, instead of one gated step per phase. Reads the POST-escalation
+ * riskSignal (the escalate-on-evidence intercept may have already raised the
+ * tier), so the dial is never frozen at run start — `fine` for medium/high keeps
+ * full per-phase isolation. Only collapses a genuine multi-phase suffix.
+ */
+const collapsedFramingGate: ContractGate = (ctx) => {
+  const phase = ctx.nextPhase;
   if (
-    nextPhase &&
-    roundTripGranularityForTier(riskSignal?.tier) === "collapsed" &&
-    (FRAMING_COLLAPSE_GROUP as readonly string[]).includes(nextPhase)
+    phase === null ||
+    roundTripGranularityForTier(ctx.riskSignal?.tier) !== "collapsed" ||
+    !(FRAMING_COLLAPSE_GROUP as readonly string[]).includes(phase)
   ) {
-    const startIdx = FRAMING_COLLAPSE_GROUP.indexOf(
-      nextPhase as (typeof FRAMING_COLLAPSE_GROUP)[number],
+    return null;
+  }
+  const startIdx = FRAMING_COLLAPSE_GROUP.indexOf(
+    phase as (typeof FRAMING_COLLAPSE_GROUP)[number],
+  );
+  const suffix = FRAMING_COLLAPSE_GROUP.slice(startIdx);
+  if (suffix.length <= 1) return null;
+  return { via: "collapsed_framing", phases: [...suffix] };
+};
+
+/**
+ * Skeleton-scaffolded phases (S3): the tool pre-fills structure/ids from the
+ * derived obligation ledger so the worker fills only the judgment slots.
+ */
+const scaffoldedPhaseGate: ContractGate = async (ctx) => {
+  const phase = ctx.nextPhase;
+  if (phase !== "test_validator_plan" && phase !== "implementation_planning") {
+    return null;
+  }
+  return {
+    via: "phase",
+    phase,
+    extraSection: await buildScaffoldSection(phase, ctx.artifactsDir),
+  };
+};
+
+/**
+ * The fallback: the ordinary per-phase step. Diff-based re-review (B2) rides it
+ * — when a verdict-bearing review phase is re-emitted because an upstream
+ * changed, the worker gets its prior verdict plus the precise
+ * changed-since-last-review delta, so it re-affirms cheaply or revises only the
+ * affected items rather than running blind.
+ *
+ * Reached only when every gate declined, which by construction means
+ * `nextPhase` is a real phase: the promotion gate above never declines when the
+ * frontier is null.
+ */
+const ordinaryPhaseStep = async (
+  ctx: ContractGateContext,
+): Promise<ContractStepPlan> => {
+  const phase = ctx.nextPhase;
+  if (phase === null) {
+    throw new Error(
+      "contract pipeline: the gate walk reached the fallback with no next phase — " +
+        "the promotion gate must handle a null frontier.",
     );
-    const suffix = FRAMING_COLLAPSE_GROUP.slice(startIdx);
-    if (suffix.length > 1) {
-      return buildCollapsedFramingStep([...suffix]);
-    }
+  }
+  return {
+    via: "phase",
+    phase,
+    extraSection: await buildReReviewSection(phase, ctx.artifactsDir),
+  };
+};
+
+/**
+ * THE ORDERED GATE TABLE. Insertion order IS execution order (the walk consumes
+ * the scaffold's derived `handledKeys`), names are unique by construction (a
+ * duplicate object key is a compile error), and no gate can emit a step of its
+ * own — the scaffold owns the single emission site.
+ */
+const CONTRACT_PIPELINE_GATES: Readonly<Record<string, ContractGate>> = {
+  seed_source_digest_bound: seedSourceDigestGate,
+  ingested_artifact_invalid: invalidIngestionGate,
+  stale_artifact_archived: staleArchiveGate,
+  phase_frontier_resolved: phaseFrontierGate,
+  goal_id_consistent: goalIdConsistencyGate,
+  finalized_module_set_preserved: finalizedModuleSetGate,
+  work_block_seam_prepared: workBlockSeamGate,
+  conceptual_critique_converged: conceptualCritiqueGate,
+  obligation_ledger_derived: obligationLedgerDerivationGate,
+  degenerate_seam_reconciliation_collapsed: degenerateSeamReconciliationGate,
+  contract_finalization_derived: contractFinalizationDerivationGate,
+  judge_repair_converged: judgeRepairGate,
+  implementation_plan_promoted: implementationPlanPromotionGate,
+  cyclic_seam_resolved: cyclicSeamResolutionGate,
+  cyclic_seam_rechecked: cyclicSeamRecheckGate,
+  pre_critic_structural: preCriticStructuralGate,
+  parallel_module_wave: parallelModuleWaveGate,
+  phase_cut_critique: phaseCutCritiqueGate,
+  collapsed_framing_round_trip: collapsedFramingGate,
+  scaffolded_phase: scaffoldedPhaseGate,
+};
+
+/**
+ * Bind the ONE shared step-emission scaffold to an invocation's context.
+ *
+ * Scaffold ADOPTER, never a second scaffold: this consumes `createStepEmissionScaffold` from
+ * `audit-tools/shared` — the same scaffold the audit orchestrator entry point
+ * drives — rather than a second one of this module's own. The pipeline's
+ * numbered early-return-and-re-emit shape is `emitFirstApplicable`, a row shape
+ * in that table, not a fork of it.
+ */
+function createContractPipelineEmission(ctx: ContractGateContext) {
+  return createStepEmissionScaffold<
+    ContractGateContext,
+    ContractStepPlan,
+    RemediationStep | null
+  >({
+    table: CONTRACT_PIPELINE_GATES,
+    fallback: ordinaryPhaseStep,
+    write: (plan) => writeContractStepPlan(ctx, plan),
+    // The pipeline's externally-observable emission is the PERSISTED step
+    // contract, which `write` has just produced; the CLI renders it to the host.
+    // There is deliberately no second stdout announcement here.
+    log: () => {},
+  });
+}
+
+/**
+ * The gate walk order, exported so a drift guard reads the real set instead of
+ * reconstructing one by reflecting over a chain of `if` statements.
+ *
+ * This and the scaffold's `handledKeys` are BOTH `Object.keys` of the SAME
+ * object literal, and the walk consumes `handledKeys` directly — so the two
+ * agree by construction, not by a test that compares them. No such test exists,
+ * and none is needed: there is no second list to drift from.
+ */
+export const CONTRACT_PIPELINE_GATE_ORDER: readonly string[] = Object.freeze(
+  Object.keys(CONTRACT_PIPELINE_GATES),
+);
+
+/**
+ * Build and write the next contract-pipeline step.
+ * Returns null when the pipeline is complete and the extracted plan is ready.
+ */
+export async function buildNextContractPipelineStep(
+  options: ContractPipelineStepOptions,
+): Promise<RemediationStep | null> {
+  const { root, artifactsDir, runId, sourcePaths } = options;
+
+  // Adversarial-depth dial (T1 slices 3/4): derive the depth for the critique /
+  // critic phases from the intake risk signal, escalating on decomposition
+  // evidence. The (possibly raised) riskSignal is also consumed by the
+  // granularity-collapse gate, so it is carried on the context alongside it.
+  const { riskSignal, adversarialDepth } = await resolveAdversarialDepth(artifactsDir);
+
+  // Resolve artifact paths for the prompt renderers. The host's world is the
+  // plain INPUT files (D3): every host-facing path — both where a role WRITES
+  // its output and where it READS its upstreams — is `<name>.input.json`. The
+  // tool's canonical envelopes (`<name>.json`) are derived at ingest and never
+  // named to the host.
+  const artifactPaths: Partial<Record<ContractPipelineArtifactName, string>> = {};
+  for (const name of CP_ARTIFACT_NAMES) {
+    artifactPaths[name] = contractInputFilePath(artifactsDir, name);
   }
 
-  // Skeleton-scaffolded phases (S3): the tool pre-fills structure/ids from the
-  // derived obligation ledger so the worker fills only the judgment slots.
-  if (nextPhase === "test_validator_plan" || nextPhase === "implementation_planning") {
-    const scaffold = await buildScaffoldSection(nextPhase, artifactsDir);
-    return buildPhaseStep(nextPhase, scaffold);
-  }
+  const seedPath = pathASeedFilePath(artifactsDir);
+  const ctx: ContractGateContext = {
+    options,
+    root,
+    artifactsDir,
+    runId,
+    sourcePaths,
+    paths: intakePaths(artifactsDir),
+    artifactPaths,
+    // Present only for structured_audit runs.
+    pathASeedPath: existsSync(seedPath) ? seedPath : undefined,
+    riskSignal,
+    adversarialDepth,
+    artifactsSettled: false,
+    nextPhase: null,
+  };
 
-  // Diff-based re-review (B2): when a verdict-bearing review phase is re-emitted
-  // because an upstream changed, hand the worker its prior verdict + the precise
-  // changed-since-last-review delta so it re-affirms cheaply or revises only the
-  // affected items — never a blind full re-run. The section appears only when a
-  // prior snapshot exists (i.e. this is a re-review, not first authoring).
-  const reReviewSection = await buildReReviewSection(nextPhase, artifactsDir);
-  return buildPhaseStep(nextPhase, reReviewSection);
+  const emission = createContractPipelineEmission(ctx);
+  return await emission.emitFirstApplicable([...emission.handledKeys], ctx);
 }
 
 /**
@@ -2982,17 +3547,64 @@ async function buildReReviewSection(
 
 // ── Obligation-kind → lens/severity mappings ──────────────────────────────────
 
-type ObligationKind = "invariant" | "behavioral" | "structural" | "test";
-
-/** Priority order: higher index = higher priority (invariant is highest). */
-const OBLIGATION_KIND_PRIORITY: ObligationKind[] = [
+/**
+ * The obligation-kind vocabulary, in priority order (higher index = higher
+ * priority; `invariant` is highest).
+ *
+ * MNT-114e4941-3: this used to be a THIRD independent copy of the vocabulary —
+ * a local `type ObligationKind` union beside derive.ts's `TESTABLE_KINDS` and
+ * contractPipelineGates.ts's `TESTABLE_OBLIGATION_KINDS`, with nothing forcing
+ * the three to agree, while the ledger's own `obligation.kind` is typed as a
+ * bare `string`. The consequence was not theoretical: an unrecognized kind was
+ * CAST to this union, scored -1 by `indexOf`, and then indexed the lens map to
+ * `undefined` — so a ledger kind outside these four promoted a finding with
+ * `lens: undefined`.
+ *
+ * It is now single-sourced two ways at once:
+ *   • MEMBERSHIP — {@link obligationKindVocabularyDivergence} reconciles this
+ *     list against the gate module's exported `TESTABLE_OBLIGATION_KINDS`, so a
+ *     kind added there and not here is a red contract test rather than a silent
+ *     misclassification;
+ *   • SEMANTICS — an unrecognized kind is not dropped or cast. It is routed
+ *     through the gate module's own `isTestablePhaseObligation` predicate, so
+ *     the two modules answer "is this kind testable?" with ONE implementation.
+ */
+export const OBLIGATION_KIND_PRIORITY = [
   "test",
   "structural",
   "behavioral",
   "invariant",
-];
+] as const;
 
-function deriveObligationLensAndSeverity(kinds: ObligationKind[]): {
+export type ObligationKind = (typeof OBLIGATION_KIND_PRIORITY)[number];
+
+const OBLIGATION_KIND_SET: ReadonlySet<string> = new Set(OBLIGATION_KIND_PRIORITY);
+
+/**
+ * Classify a raw ledger `kind` string (which the ledger types as a bare
+ * `string`) into this module's vocabulary. A recognized kind maps to itself; an
+ * unrecognized one is classified by the SHARED testability predicate rather
+ * than guessed here — testable ⇒ `behavioral` (the testable default, so it
+ * carries a real lens and a mid severity), otherwise ⇒ `structural`.
+ */
+export function classifyObligationKind(kind: string): ObligationKind {
+  if (OBLIGATION_KIND_SET.has(kind)) return kind as ObligationKind;
+  return isTestablePhaseObligation(kind) ? "behavioral" : "structural";
+}
+
+/**
+ * Kinds the gate module declares TESTABLE that this module's vocabulary does
+ * not carry — the drift MNT-114e4941-3 names, reported as data so a contract
+ * test can go red on it instead of a reviewer having to notice.
+ * Empty when the two agree.
+ */
+export function obligationKindVocabularyDivergence(): string[] {
+  return [...TESTABLE_OBLIGATION_KINDS]
+    .filter((kind) => !OBLIGATION_KIND_SET.has(kind))
+    .sort();
+}
+
+function deriveObligationLensAndSeverity(kinds: readonly ObligationKind[]): {
   lens: string;
   severity: Finding["severity"];
 } {
@@ -3024,12 +3636,230 @@ function deriveObligationLensAndSeverity(kinds: ObligationKind[]): {
   return { lens: lensMap[topKind], severity: severityMap[topKind] };
 }
 
+// ── Normalized block write scope + declared command shape ─────────────────────────────────────
+//
+// `touched_files` is the PROMPT-BOUND WRITE SCOPE the host-handoff substrate
+// enforces against the landed diff, and `targeted_commands` are executed
+// verbatim through a shell in the repository root. That consumer can check the
+// SHAPE of what it is handed; it can never check whether the shape is CORRECT
+// for this repository. So the producer normalizes here: an absolute or
+// separator-inconsistent path becomes one canonical repo-relative form, a path
+// that escapes the repository is refused outright, and a command carrying shell
+// chaining or substitution is refused rather than handed to a shell.
+
+/** Shell metacharacters a declared package-script / test invocation never needs. */
+const SHELL_METACHARACTERS = /[&|;<>`$\n\r\0]/;
+
+/**
+ * The tracked-path corpus for write-scope checking, or null when the tree
+ * cannot be read. Null degrades to "shape-only normalization" exactly as the
+ * M-B3 citation gate degrades on an unreadable tree — a fixture directory or a
+ * fresh checkout must not be bricked, only an unsound path in a REAL tree is
+ * refused.
+ */
+function readTrackedWriteScopeCorpus(root: string): {
+  files: ReadonlySet<string>;
+  directories: ReadonlySet<string>;
+} | null {
+  if (!isInsideGitWorkTree(root)) return null;
+  const files = enumerateRepoTreePaths(root);
+  if (files.size === 0) return null;
+  const directories = new Set<string>();
+  for (const path of files) {
+    const segments = path.split("/");
+    for (let i = 1; i < segments.length; i += 1) {
+      directories.add(segments.slice(0, i).join("/"));
+    }
+  }
+  return { files, directories };
+}
+
+/**
+ * Normalize one block's declared write scope into repo-relative, forward-slashed,
+ * unique, sorted paths, refusing outright anything that leaves the repository.
+ *
+ * Case is PRESERVED (`repoRelativePath`, not the lowercasing
+ * `normalizeRepoPath`): this string is the write scope a host enforces against a
+ * landed diff on a case-sensitive filesystem, so lowercasing it would make a
+ * legitimate edit look out of scope. Lowercasing is used only as a MATCH key,
+ * never as the stored value.
+ *
+ * The tracked-tree half is NOT here: see
+ * {@link evaluatePromotedPlanWriteScope}, which runs at this same promotion
+ * boundary with a bounded re-emit instead of an unrecoverable throw.
+ */
+export interface BlockWriteScopeNormalization {
+  /** The entries that normalized cleanly, repo-relative, unique and sorted. */
+  touched_files: string[];
+  /** One line per REFUSED entry. Non-empty ⇒ the caller must not promote. */
+  refusals: string[];
+}
+
+export function normalizeBlockTouchedFiles(
+  root: string,
+  files: readonly string[],
+  blockId: string,
+): BlockWriteScopeNormalization {
+  const normalized = new Set<string>();
+  const refusals: string[] = [];
+  for (const raw of files) {
+    const candidate = typeof raw === "string" ? raw.trim() : "";
+    if (candidate.length === 0) {
+      refusals.push(`Block "${blockId}" declares an empty touched_files entry.`);
+      continue;
+    }
+    const absolute = isAbsolute(candidate) ? candidate : resolve(root, candidate);
+    try {
+      normalized.add(
+        repoRelativePath(root, absolute, `block "${blockId}" touched_files entry`),
+      );
+    } catch {
+      refusals.push(
+        `Block "${blockId}" declares the touched_files entry ${JSON.stringify(raw)}, which ` +
+          `does not resolve to a path beneath the repository root. A POSIX-absolute form ` +
+          `("/src/x.ts") is read as absolute, not repo-relative — drop the leading slash. The ` +
+          `write scope is re-checked against the landed diff, so it may only name paths ` +
+          `beneath ${root}.`,
+      );
+    }
+  }
+  // Content-derived order: an incidentally-ordered write scope would churn the
+  // plan's content hash on every re-promotion.
+  return {
+    touched_files: [...normalized].sort((left, right) => compareCodeUnits(left, right)),
+    refusals,
+  };
+}
+
+/**
+ * The tracked-tree half of The normalized-write-scope invariant, run against
+ * the PROMOTED plan so a violation takes the same bounded re-emit path the M-B3
+ * citation gate takes, rather than throwing out of the promotion.
+ *
+ * It exists because the citation gate is NOT a superset: a finding grounds if
+ * ANY cited path OR SYMBOL is real, so a node whose prose names a real symbol
+ * can ground while its declared write scope is still fabricated — and the write
+ * scope is what a host binds a worker to.
+ *
+ * A path that is not tracked but whose parent directory IS stays legal: a
+ * remediation block legitimately creates new files, and dropping a declared
+ * write target is the failure mode that strands an implementer with an
+ * obligation it has no scope to discharge. Fail-open on an unreadable tree, as
+ * the citation gate does.
+ */
+export async function evaluatePromotedPlanWriteScope(
+  artifactsDir: string,
+  root: string,
+): Promise<{ violations: string[] } | null> {
+  const corpus = readTrackedWriteScopeCorpus(root);
+  if (!corpus) return null;
+  const plan = await readOptionalJsonFile<{
+    blocks?: Array<{ block_id?: unknown; touched_files?: unknown }>;
+  }>(intakePaths(artifactsDir).extractedPlan);
+  const violations: string[] = [];
+  for (const block of Array.isArray(plan?.blocks) ? plan.blocks : []) {
+    const blockId = typeof block.block_id === "string" ? block.block_id : "(unnamed block)";
+    const touched = Array.isArray(block.touched_files) ? block.touched_files : [];
+    for (const path of touched) {
+      if (typeof path !== "string") continue;
+      const key = normalizeRepoPath(path);
+      const parent = key.includes("/") ? key.slice(0, key.lastIndexOf("/")) : "";
+      if (corpus.files.has(key) || parent === "" || corpus.directories.has(parent)) {
+        continue;
+      }
+      violations.push(
+        `Block "${blockId}" declares the write-scope path "${path}", whose directory does ` +
+          `not exist in the tracked tree.`,
+      );
+    }
+  }
+  return violations.length > 0 ? { violations } : null;
+}
+
+/**
+ * Refuse a targeted command that leaves the declared shape — a single
+ * invocation with no shell chaining, substitution or redirection. Deliberately
+ * ecosystem-neutral: this module never asserts WHICH runner is legitimate
+ * (language-neutral by contract), only that the string handed to a shell cannot
+ * do more than invoke one command.
+ *
+ * Refusals are RETURNED, never thrown: the promotion boundary turns them into
+ * the same bounded re-emit every other promotion rejection takes, so a
+ * malformed command re-emits implementation_planning instead of wedging every
+ * subsequent next-step with an unclassified stack.
+ */
+export interface BlockCommandNormalization {
+  targeted_commands: string[];
+  /** One line per REFUSED command. Non-empty ⇒ the caller must not promote. */
+  refusals: string[];
+}
+
+export function normalizeBlockTargetedCommands(
+  commands: readonly string[],
+  blockId: string,
+): BlockCommandNormalization {
+  const normalized: string[] = [];
+  const refusals: string[] = [];
+  for (const raw of commands) {
+    const command = typeof raw === "string" ? raw.trim() : "";
+    if (command.length === 0) {
+      refusals.push(`Block "${blockId}" declares an empty targeted_commands entry.`);
+      continue;
+    }
+    if (SHELL_METACHARACTERS.test(command)) {
+      refusals.push(
+        `Block "${blockId}" declares the targeted_commands entry ${JSON.stringify(raw)}, ` +
+          `which carries shell chaining, substitution or redirection. A targeted command is ` +
+          `executed verbatim through a shell, so it must be one invocation — split it into ` +
+          `separate entries.`,
+      );
+      continue;
+    }
+    normalized.push(command);
+  }
+  return { targeted_commands: normalized, refusals };
+}
+
+/**
+ * Collect every write-scope and command refusal the promotion WOULD hit, before
+ * a plan is written. Runs the same two normalizers over the same derived node
+ * scope the promoter uses, so this pre-check and the promotion cannot disagree
+ * about what is refusable — and the refusal reaches the host as the bounded
+ * `implementation_planning` re-emit every other promotion rejection takes,
+ * rather than as a thrown stack that wedges every subsequent next-step.
+ */
+export async function collectDagWriteScopeRefusals(
+  artifactsDir: string,
+  root: string,
+): Promise<string[]> {
+  const dag = envelopePayload(
+    await readContractArtifact(artifactsDir, "implementation_dag"),
+  ) as ImplementationDAG | undefined;
+  const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
+  if (nodes.length === 0) return [];
+  const { resolve: deriveNodeFiles } = await buildNodeWriteScopeResolver(artifactsDir);
+  const refusals: string[] = [];
+  for (const [index, node] of nodes.entries()) {
+    const blockId = toBlockId(ensureNodeId(node.id, index));
+    refusals.push(
+      ...normalizeBlockTouchedFiles(root, deriveNodeFiles(node), blockId).refusals,
+      ...normalizeBlockTargetedCommands(node.targeted_commands ?? [], blockId).refusals,
+    );
+  }
+  return refusals;
+}
+
 /**
  * Convert a completed ImplementationDAG into the extracted-plan.json format
  * that the existing handlePendingExtractedPlan/applyPlanPipeline path consumes.
+ *
+ * `root` defaults to the repository that owns `artifactsDir`, so the existing
+ * one-argument callers keep working while the pipeline passes the run's real
+ * root for write-scope normalization.
  */
 export async function promoteImplementationDagToExtractedPlan(
   artifactsDir: string,
+  root: string = climbOutOfAuditTools(artifactsDir),
 ): Promise<void> {
   const paths = intakePaths(artifactsDir);
   const dagEnvelope = await readContractArtifact(artifactsDir, "implementation_dag");
@@ -3073,7 +3903,9 @@ export async function promoteImplementationDagToExtractedPlan(
   const obligationMap = new Map<string, ObligationKind>();
   if (ledgerPayload?.obligations) {
     for (const obl of ledgerPayload.obligations) {
-      obligationMap.set(obl.id, obl.kind as ObligationKind);
+      // Classified, never cast: an unrecognized kind used to index the lens map
+      // to `undefined` and promote a lens-less finding (MNT-114e4941-3).
+      obligationMap.set(obl.id, classifyObligationKind(String(obl.kind ?? "")));
     }
   }
 
@@ -3288,7 +4120,28 @@ export async function promoteImplementationDagToExtractedPlan(
     // Same derivation as the finding's affected_files: declared write scope, else
     // the module file_scope inherited via the node's obligations — so the block's
     // file-ownership scheduler never sees an empty (undispatchable) touched set.
-    const touchedFiles = deriveNodeFiles(node);
+    // Normalized before it leaves this producer: the host-handoff substrate binds
+    // this list as the write scope and can validate its shape but never its
+    // correctness.
+    // Refusals are collected, not thrown: `collectDagWriteScopeRefusals` runs
+    // these same two normalizers at the promotion gate and re-emits, so by the
+    // time promotion runs there is nothing left to refuse. The throw below is a
+    // BACKSTOP for a caller that skipped that gate — never the operator-facing
+    // path.
+    const scope = normalizeBlockTouchedFiles(root, deriveNodeFiles(node), toBlockId(nodeId));
+    const commands = normalizeBlockTargetedCommands(
+      node.targeted_commands ?? [],
+      toBlockId(nodeId),
+    );
+    const refusals = [...scope.refusals, ...commands.refusals];
+    if (refusals.length > 0) {
+      throw new Error(
+        `implementation_dag node "${nodeId}" has an unpromotable write scope, which the ` +
+          `promotion gate should have refused first: ${refusals.join(" | ")}`,
+      );
+    }
+    const touchedFiles = scope.touched_files;
+    const targetedCommands = commands.targeted_commands;
     // Phase ordinal from the union of this node's obligations (max → fail-toward-
     // later). Only stamped when there is a genuine multi-phase cut, so a single-
     // phase change carries no ordinal and the scheduler runs no barrier.
@@ -3313,9 +4166,7 @@ export async function promoteImplementationDagToExtractedPlan(
       // declared write scope so the file-ownership scheduler can read it.
       touched_files: touchedFiles,
       ...(phaseOrdinal !== undefined ? { phase_ordinal: phaseOrdinal } : {}),
-      ...(node.targeted_commands && node.targeted_commands.length > 0
-        ? { targeted_commands: [...node.targeted_commands] }
-        : {}),
+      ...(targetedCommands.length > 0 ? { targeted_commands: targetedCommands } : {}),
     };
   });
 
@@ -3332,6 +4183,109 @@ export async function promoteImplementationDagToExtractedPlan(
   };
 
   await writeJsonFile(paths.extractedPlan, extractedPlan);
+}
+
+// ── artifact:contract-pipeline-planning-outputs (pinned planning outputs) ──
+
+/**
+ * The PINNED shape of everything this module's two planning producers decide —
+ * `promoteImplementationDagToExtractedPlan`'s canonical block membership and
+ * normalized write scope, and `writePathASeedFromFindings`' sha256 baselines —
+ * exported as ONE record so the regression guard that pins them imports a real
+ * contract instead of re-deriving the plan's internals from JSON by hand.
+ *
+ * CDC-03: the guard consumes this token, so the phase deriver places it adjacent
+ * to this module rather than four phases later, and a change to block membership
+ * goes red in the phase immediately after this one.
+ *
+ * `estimated_tokens` is byte-derived and LOCAL (`estimateTokensFromBytes`) — it
+ * describes content size only and is never a backend-fit claim; audit-tools does
+ * not route.
+ */
+export interface ContractPipelinePlanningOutputs {
+  /** Canonical membership + normalized write scope, in block-id order. */
+  block_membership: Array<{
+    block_id: string;
+    items: string[];
+    touched_files: string[];
+    targeted_commands: string[];
+  }>;
+  /** Every promoted finding id, and whether each is claimed by exactly one block. */
+  coverage: { finding_ids: string[]; exhaustive_once: boolean };
+  /** Byte-derived per-block estimate over the findings the block claims. */
+  token_estimates: Array<{ block_id: string; estimated_tokens: number }>;
+  /** The path_a seed's recorded per-path sha256 baselines, path-sorted. */
+  seed_source_digests: Array<{ path: string; sha256: string }>;
+}
+
+/**
+ * Read the pinned planning outputs for a run, or null when no plan has been
+ * promoted yet.
+ */
+export async function readContractPipelinePlanningOutputs(
+  artifactsDir: string,
+): Promise<ContractPipelinePlanningOutputs | null> {
+  const plan = await readOptionalJsonFile<{
+    findings?: Array<{ id?: unknown; summary?: unknown; title?: unknown }>;
+    blocks?: Array<{
+      block_id?: unknown;
+      items?: unknown;
+      touched_files?: unknown;
+      targeted_commands?: unknown;
+    }>;
+  }>(intakePaths(artifactsDir).extractedPlan);
+  if (!plan) return null;
+
+  const stringsOf = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+
+  const blocks = (Array.isArray(plan.blocks) ? plan.blocks : [])
+    .map((block) => ({
+      block_id: typeof block.block_id === "string" ? block.block_id : "",
+      items: stringsOf(block.items),
+      touched_files: stringsOf(block.touched_files),
+      targeted_commands: stringsOf(block.targeted_commands),
+    }))
+    .sort((left, right) => compareCodeUnits(left.block_id, right.block_id));
+
+  const findingBytes = new Map<string, number>();
+  for (const finding of Array.isArray(plan.findings) ? plan.findings : []) {
+    if (typeof finding.id !== "string") continue;
+    const text = `${String(finding.title ?? "")}\n${String(finding.summary ?? "")}`;
+    findingBytes.set(finding.id, Buffer.byteLength(text, "utf8"));
+  }
+
+  const claimCounts = new Map<string, number>();
+  for (const block of blocks) {
+    for (const item of block.items) {
+      claimCounts.set(item, (claimCounts.get(item) ?? 0) + 1);
+    }
+  }
+  const findingIds = [...findingBytes.keys()].sort((left, right) =>
+    compareCodeUnits(left, right),
+  );
+
+  return {
+    block_membership: blocks,
+    coverage: {
+      finding_ids: findingIds,
+      exhaustive_once:
+        findingIds.length > 0 &&
+        findingIds.every((id) => claimCounts.get(id) === 1) &&
+        [...claimCounts.keys()].every((id) => findingBytes.has(id)),
+    },
+    token_estimates: blocks.map((block) => ({
+      block_id: block.block_id,
+      estimated_tokens: estimateTokensFromBytes(
+        block.items.reduce((total, item) => total + (findingBytes.get(item) ?? 0), 0),
+      ),
+    })),
+    seed_source_digests: [
+      ...((
+        await readOptionalJsonFile<PathASeed>(pathASeedFilePath(artifactsDir))
+      )?.source_digests ?? []),
+    ].sort((left, right) => compareCodeUnits(left.path, right.path)),
+  };
 }
 
 // ── Lean-path extracted plan (the `low` risk tier's plan emission) ────────────

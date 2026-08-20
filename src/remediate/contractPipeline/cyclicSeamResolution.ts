@@ -45,6 +45,24 @@ export interface CycleBreakValidation {
   reason?: string;
 }
 
+/**
+ * The break a worker ACTUALLY authored, read off the `cyclic_seam_resolution`
+ * record rather than fabricated by the re-checker.
+ *
+ * Both sanctioned strategies designate a REAL node: `mediator` names a third
+ * obligation that now owns the shared primitive, `single_authority` names the
+ * one cycle member that keeps the interface. A record that designates nothing
+ * cannot be validated against the real graph at all — see
+ * {@link validateAuthoredCycleBreak}, which refuses it rather than inventing a
+ * placeholder.
+ */
+export interface AuthoredCycleBreak {
+  /** `break_strategy` from the resolution record. */
+  strategy: "mediator" | "single_authority";
+  /** The obligation id the record designates, when it named one. */
+  designatedId?: string;
+}
+
 // ── Cycle detection ───────────────────────────────────────────────────────────
 
 /**
@@ -196,6 +214,155 @@ export function validateCycleBreak(
       accepted: false,
       reason: `Proposed mediator "${proposedMediator.id}" still leaves cycle(s) involving: [${affectedIds}].`,
     };
+  }
+
+  return { accepted: true };
+}
+
+/**
+ * Re-check a cycle-break AS AUTHORED, against the REAL obligation graph.
+ *
+ * The distinction from {@link validateCycleBreak} is the whole point: that
+ * function asks a HYPOTHETICAL — "if the intra-cycle edges were redirected to
+ * this proposed node, would the graph be acyclic?" — and its caller used to
+ * answer it with a node it had fabricated itself (`{ id: "_mediator_A_B",
+ * needs: [] }`) against the UNMODIFIED ledger. An edge-free sink absorbs every
+ * redirected edge, so for a single detected cycle that question is acyclic BY
+ * CONSTRUCTION and the re-check could never reject — a worker could claim
+ * `status: "resolved"` while leaving the ledger's cycle edges exactly as they
+ * were, and the pipeline advanced.
+ *
+ * This function asks the REAL question instead: does the graph the pipeline
+ * will actually consume still carry the cycle? The break is accepted only when
+ *
+ *   1. the record designates a node (a break with no designated owner is not a
+ *      break, it is a claim), and that node EXISTS in the live graph;
+ *   2. the strategy and the designated node agree — a mediator is a THIRD node
+ *      outside the cycle, a single authority is one of the cycle's own members;
+ *   3. the live graph no longer contains a cycle touching the original members
+ *      — i.e. the break is reflected in the edges, not just asserted in prose;
+ *   4. and, for the mediator strategy, redirecting the cycle's edges at the
+ *      mediator's REAL `needs` (never a fabricated empty set) stays acyclic, so
+ *      a mediator that itself depends back into the cycle is refused.
+ *
+ * `currentNodes` must be built from the obligation ledger as it stands NOW, on
+ * this invocation, after ingestion and the staleness-archive pass — a stale
+ * snapshot would reintroduce exactly the vacuity this closes.
+ */
+export function validateAuthoredCycleBreak(
+  originalCycle: DetectedCycle,
+  currentNodes: SeamObligationNode[],
+  authored: AuthoredCycleBreak,
+): CycleBreakValidation {
+  const members = originalCycle.members;
+  const cycleSet = new Set(members);
+  const designatedId = authored.designatedId?.trim();
+
+  if (!designatedId) {
+    return {
+      accepted: false,
+      reason:
+        `The ${authored.strategy} break for cycle [${members.join(", ")}] names no obligation. ` +
+        `A mediator break must name the mediating obligation and a single_authority break must ` +
+        `name the owning obligation, or there is nothing to re-check against the ledger.`,
+    };
+  }
+
+  const designated = currentNodes.find((node) => node.id === designatedId);
+  if (!designated) {
+    return {
+      accepted: false,
+      reason:
+        `The ${authored.strategy} break for cycle [${members.join(", ")}] names "${designatedId}", ` +
+        `which is not an obligation in the ledger. The break must be recorded in the ledger the ` +
+        `pipeline reads, not only in the resolution record.`,
+    };
+  }
+
+  if (authored.strategy === "mediator" && cycleSet.has(designatedId)) {
+    return {
+      accepted: false,
+      reason:
+        `Mediator "${designatedId}" is itself a member of cycle [${members.join(", ")}]. A mediator ` +
+        `is a THIRD obligation that both sides depend on; designating a participant is a ` +
+        `single_authority break, not a mediator break.`,
+    };
+  }
+
+  if (authored.strategy === "single_authority" && !cycleSet.has(designatedId)) {
+    return {
+      accepted: false,
+      reason:
+        `Single authority "${designatedId}" is not a member of cycle [${members.join(", ")}]. The ` +
+        `authority must be one of the co-defining obligations; the others become consumers.`,
+    };
+  }
+
+  // (3) The designated obligation must be a member of THE BROKEN CYCLE'S OWN
+  // node set — the cycle members plus what they now need. Existing in the
+  // ledger is not enough: a mediator that no cycle member depends on mediates
+  // nothing, so an arbitrary unrelated obligation could otherwise be named and
+  // the break would pass on the strength of a graph that is acyclic for
+  // reasons having nothing to do with the claim.
+  const brokenCycleNodeSet = new Set<string>(members);
+  for (const node of currentNodes) {
+    if (!cycleSet.has(node.id)) continue;
+    for (const dep of node.needs) brokenCycleNodeSet.add(dep);
+  }
+  if (!brokenCycleNodeSet.has(designatedId)) {
+    return {
+      accepted: false,
+      reason:
+        `The ${authored.strategy} break names "${designatedId}", which no member of cycle ` +
+        `[${members.join(", ")}] depends on. The designated obligation must be part of the broken ` +
+        `cycle's own node set — a mediator no cycle member needs is not mediating the cycle.`,
+    };
+  }
+
+  // (4) The live edges, not the claim: any remaining cycle that still touches
+  // the original members means the ledger was never actually rewritten.
+  const allRemaining = detectCyclicSeamObligations(currentNodes);
+  const remaining = allRemaining.filter((cycle) =>
+    cycle.members.some((id) => cycleSet.has(id)),
+  );
+  if (remaining.length > 0) {
+    const affectedIds = [...new Set(remaining.flatMap((c) => c.members))].join(", ");
+    return {
+      accepted: false,
+      reason:
+        `Cycle [${members.join(", ")}] is still present in the obligation ledger after the claimed ` +
+        `${authored.strategy} break via "${designatedId}" — the depends_on edges involving ` +
+        `[${affectedIds}] were not changed. Rewrite the ledger so the cycle's edges actually route ` +
+        `through the designated obligation.`,
+    };
+  }
+
+  // (5) SYMMETRIC across both strategies: the break must not have introduced a
+  // cycle ELSEWHERE either. Step (4) only looks at cycles touching the original
+  // members, so a brand-new cycle among untouched obligations would pass it —
+  // and a single_authority break used to reach the accept with no whole-graph
+  // check at all.
+  if (allRemaining.length > 0) {
+    const affectedIds = [...new Set(allRemaining.flatMap((c) => c.members))].join(", ");
+    return {
+      accepted: false,
+      reason:
+        `The ${authored.strategy} break via "${designatedId}" leaves the obligation graph cyclic ` +
+        `elsewhere: [${affectedIds}]. Breaking one cycle may not introduce another.`,
+    };
+  }
+
+  // (6) The mediator's REAL needs — the check the fabricated `needs: []` node
+  // could never fail. Deliberately NOT run for single_authority: that strategy
+  // designates a cycle MEMBER, and `validateCycleBreak` redirects a member's
+  // intra-cycle edges at the designated node, which for the authority itself
+  // would manufacture a self-edge and reject a sound break. Step (5) is the
+  // whole-graph guarantee both strategies share.
+  if (authored.strategy === "mediator") {
+    return validateCycleBreak(originalCycle, currentNodes, {
+      id: designated.id,
+      needs: designated.needs,
+    });
   }
 
   return { accepted: true };

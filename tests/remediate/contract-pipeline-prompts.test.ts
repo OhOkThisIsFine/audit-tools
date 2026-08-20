@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   renderContractPipelinePrompt,
@@ -6,8 +9,14 @@ import {
   CONTRACT_PIPELINE_PHASE_ORDER,
 } from "../../src/remediate/steps/contractPipelinePrompts.js";
 import {
+  buildNextContractPipelineStep,
+  writePathASeedFromFindings,
+} from "../../src/remediate/steps/contractPipeline.js";
+import { buildAuditFindingsDeliverable, type Finding } from "audit-tools/shared";
+import {
   DEPENDENCY_MAP,
   contractPipelineDir,
+  writeContractArtifact,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 
 const FAKE_ARTIFACTS_DIR = "/project/.audit-tools/remediation";
@@ -437,4 +446,150 @@ describe("contract pipeline — mandatory independent critic (lane-class-conditi
       expect(result.prompt).not.toContain("explicitly-degraded fallback");
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// CP-NODE-13 — the prompts the contract-pipeline GATES emit inline.
+//
+// Two prompts in the pipeline are not rendered by the role renderer above: the
+// cyclic-seam resolution step and the seed-digest refusal, both built inside
+// the gate that emits them. They carry contract obligations of their own, so
+// they are pinned here alongside the rendered roles.
+// ---------------------------------------------------------------------------
+describe("CP-NODE-13: inline gate prompts", () => {
+  const CREATED_AT = "2026-01-01T00:00:00.000Z";
+  let tmpDir: string;
+  let artifactsDir: string;
+
+  const cyclicLedger = {
+    contract_version: "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
+    goal_id: "goal-test",
+    obligations: [
+      { id: "OBL-A", description: "A", kind: "invariant", depends_on: ["OBL-B"], status: "pending" },
+      { id: "OBL-B", description: "B", kind: "behavioral", depends_on: ["OBL-A"], status: "pending" },
+    ],
+    created_at: CREATED_AT,
+  };
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "cp-node-13-prompts-"));
+    artifactsDir = join(tmpDir, ".audit-tools", "remediation");
+    await mkdir(artifactsDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  async function seedThroughCritique(): Promise<void> {
+    const base = { goal_id: "goal-test", created_at: CREATED_AT };
+    const moduleContract = {
+      name: "mod-a",
+      inputs: ["x"],
+      outputs: ["y"],
+      invariants: ["inv"],
+      side_effects: [],
+      validation_boundary: "validates x",
+      failure_modes: [],
+    };
+    for (const [name, payload] of [
+      ["goal_spec", { contract_version: "remediate-code-contract-pipeline/goal-spec/v1alpha1", ...base, objective: "o", non_goals: [], success_criteria: ["s"], source_type: "conversation" }],
+      ["context_bundle", { contract_version: "remediate-code-contract-pipeline/context-bundle/v1alpha1", ...base, entries: [], context_summary: "c" }],
+      ["module_decomposition", { contract_version: "remediate-code-contract-pipeline/module-decomposition/v1alpha1", ...base, modules: [{ name: "mod-a", responsibilities: "does A", file_scope: [] }] }],
+      ["module_contracts", { contract_version: "remediate-code-contract-pipeline/module-contracts/v1alpha1", ...base, module_contracts: [moduleContract] }],
+      ["seam_reconciliation_report", { contract_version: "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1", ...base, mismatches: [] }],
+      ["finalized_module_contracts", { contract_version: "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1", ...base, module_contracts: [moduleContract] }],
+      ["conceptual_design_critique", { contract_version: "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1", ...base, items: [], verdict: "approved" }],
+      ["obligation_ledger", cyclicLedger],
+    ] as const) {
+      await writeContractArtifact(artifactsDir, name, payload);
+    }
+  }
+
+  it("the cyclic-seam resolution prompt demands BOTH the ledger rewrite and the designated obligation", async () => {
+    await seedThroughCritique();
+    const step = await buildNextContractPipelineStep({
+      root: tmpDir,
+      artifactsDir,
+      runId: "prompt-test",
+    });
+    const prompt = await readFile(step!.prompt_path, "utf8");
+
+    expect(prompt).toContain("Cyclic Seam Resolution");
+    // The record alone is not a break: HEAD's prompt said "Do not edit source
+    // files" and never asked for the ledger rewrite the re-check now validates.
+    expect(prompt).toContain("Rewrite");
+    expect(prompt).toContain("obligation_ledger.input.json");
+    expect(prompt).toContain("designated_obligation_id");
+    expect(prompt).toMatch(/re-check re-runs cycle detection over the ledger/);
+
+  });
+
+  it("PINS the renderer's known-STALE copy of the same record schema by content hash", () => {
+    // The role renderer carries a SECOND, older copy of the cyclic-seam record
+    // schema — it has no `designated_obligation_id`, so it describes a record
+    // the re-check now rejects. It is NOT the prompt the pipeline dispatches for
+    // this phase (the gate above is), and `contractPipelinePrompts.ts` is
+    // outside CP-NODE-13's write scope, so it survives as stale documentation.
+    //
+    // Pinned by CONTENT HASH, deliberately, rather than by asserting the field
+    // is absent: an absence assertion is GREEN while the copy is wrong and goes
+    // RED the moment someone repairs it — it defends the drift. A hash is red on
+    // ANY change in either direction, which is what routes the decision to the
+    // file's owner instead of to whoever happens to touch it next.
+    const rendered = renderContractPipelinePrompt({
+      role: "cyclic_seam_resolution",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    const schema = rendered.prompt.match(
+      /```json\n([\s\S]*?cyclic-seam-resolution\/v1alpha1[\s\S]*?)\n```/,
+    )?.[1];
+    expect(schema, "the renderer must still emit a cyclic-seam record schema").toBeDefined();
+    expect(
+      createHash("sha256").update(schema!, "utf8").digest("hex"),
+      [
+        "The renderer's cyclic_seam_resolution schema changed.",
+        "This copy is KNOWN-STALE: it omits `designated_obligation_id`, which the",
+        "cycle-break re-check requires, so it documents a record that is rejected.",
+        "It is not dispatched (the gate's inline prompt is), and it was outside",
+        "CP-NODE-13's write scope.",
+        "If you REPAIRED it: good — re-record the hash here and delete this note.",
+        "If you changed it for another reason: the staleness above is still open,",
+        "so fix it in the same edit rather than re-pinning around it.",
+      ].join(" "),
+    ).toBe("3eef044a17d85d8eeef02290b30dd02e443102e124731d5cd054d32d7ef4d3a5");
+  });
+
+  it("the seed-digest refusal names the mismatched path and the recovery", async () => {
+    const report = buildAuditFindingsDeliverable([
+      {
+        id: "F-1",
+        title: "t",
+        category: "General",
+        severity: "medium",
+        confidence: "high",
+        lens: "correctness",
+        summary: "s",
+        affected_files: [{ path: "src/seeded.ts" }],
+      } as Finding,
+    ]);
+    await mkdir(join(tmpDir, "src"), { recursive: true });
+    await writeFile(join(tmpDir, "src", "seeded.ts"), "before\n", "utf8");
+    const reportPath = join(tmpDir, "audit-findings.json");
+    await writeFile(reportPath, JSON.stringify(report), "utf8");
+    await writePathASeedFromFindings(artifactsDir, reportPath, report);
+    await writeFile(join(tmpDir, "src", "seeded.ts"), "after\n", "utf8");
+
+    const step = await buildNextContractPipelineStep({
+      root: tmpDir,
+      artifactsDir,
+      runId: "prompt-test",
+    });
+    expect(step?.status).toBe("blocked");
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).toContain("Source Content Changed Since the Audit Seed Was Built");
+    expect(prompt).toContain("src/seeded.ts");
+    expect(prompt).toContain("path_a_seed.json");
+  });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,7 +7,27 @@ import {
   shouldEnterContractPipeline,
   nextMissingContractPhase,
   promoteImplementationDagToExtractedPlan,
+  buildNextContractPipelineStep,
+  classifyObligationKind,
+  consumeGateOutcomes,
+  detectSeedSourceDigestMismatches,
+  evaluateContractObligationsPromotionGate,
+  evaluatePromotedPlanWriteScope,
+  normalizeBlockTargetedCommands,
+  normalizeBlockTouchedFiles,
+  obligationKindVocabularyDivergence,
+  readContractPipelinePlanningOutputs,
+  writePathASeedFromFindings,
+  CONTRACT_PIPELINE_GATE_ORDER,
+  OBLIGATION_KIND_PRIORITY,
 } from "../../src/remediate/steps/contractPipeline.js";
+import { validateAuthoredCycleBreak } from "../../src/remediate/contractPipeline/cyclicSeamResolution.js";
+import { TESTABLE_OBLIGATION_KINDS } from "../../src/remediate/validation/contractPipelineGates.js";
+import {
+  contractInputFilePath,
+  contractArtifactFilePath,
+  pathASeedFilePath,
+} from "../../src/remediate/contractPipeline/artifactStore.js";
 import {
   renderContractPipelinePrompt,
   CONTRACT_PIPELINE_PHASE_ORDER,
@@ -23,6 +44,8 @@ import {
   CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
   CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
+  buildAuditFindingsDeliverable,
+  type Finding,
 } from "audit-tools/shared";
 import {
   validateTestValidatorPlan,
@@ -1012,3 +1035,812 @@ describe("contract-pipeline validators — shared envelope guard (MNT-86b18f1b)"
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// CP-NODE-13 — contract-pipeline-orchestration.
+//
+// The gate chain is decomposed onto the ONE shared step-emission scaffold, the
+// cyclic-seam re-check validates the break the worker actually authored, a
+// failed stale-archive aborts instead of proceeding on stale content, the
+// obligation-kind vocabulary is single-sourced with the gate module's, gate
+// call sites branch on `evaluated`, the block write scope is normalized, the
+// seed binds its sources by digest, and the planning outputs are pinned.
+// ---------------------------------------------------------------------------
+
+describe("CP-NODE-13 inv-8: the numbered gates run on the ONE shared scaffold", () => {
+  const REPO_ROOT = join(__dirname, "..", "..");
+  const PIPELINE_SOURCE = join(
+    REPO_ROOT,
+    "src",
+    "remediate",
+    "steps",
+    "contractPipeline.ts",
+  );
+
+  /**
+   * The same NAME-FAMILY + SHAPE detector the shared scaffold's own contract
+   * test uses, applied here so this module's adoption is checkable in its own
+   * home: a module that exports a `…EmissionScaffold` factory, or a
+   * `create…Scaffold` carrying a handler table plus a write+log emission member,
+   * IS a step-emission scaffold whatever it calls itself.
+   */
+  function definesAScaffold(source: string): boolean {
+    if (/export\s+(?:async\s+)?function\s+\w*EmissionScaffold\w*\b/.test(source)) {
+      return true;
+    }
+    return (
+      /export\s+function\s+create\w*Scaffold\b/.test(source) &&
+      /\btable\s*[:?]/.test(source) &&
+      /\bwrite\s*[:(]/.test(source) &&
+      /\blog\s*[:(]/.test(source)
+    );
+  }
+
+  it("POSITIVE: contractPipeline.ts IMPORTS the shared scaffold and defines none of its own", async () => {
+    const source = await readFile(PIPELINE_SOURCE, "utf8");
+    expect(source).toMatch(
+      /import \{\s*createStepEmissionScaffold,[\s\S]*?\} from "\.\.\/\.\.\/shared\/steps\/stepEmissionScaffold\.js";/,
+    );
+    expect(
+      definesAScaffold(source),
+      "the pipeline must ADOPT the one shared scaffold, never fork a second one",
+    ).toBe(false);
+  });
+
+  it("NEGATIVE: the same detector FLAGS a local emit scaffold (red-green by inversion)", () => {
+    // Invert the fix in a copy of the source rather than on disk: introducing a
+    // local scaffold factory with a table + write + log is exactly the second
+    // emission site the single-scaffold contract refuses.
+    const forked = `
+      export function createGateEmissionScaffold(options: {
+        table: Record<string, unknown>;
+        write: (plan: unknown) => unknown;
+        log: (step: unknown) => void;
+      }) { return options; }
+    `;
+    expect(definesAScaffold(forked)).toBe(true);
+  });
+});
+
+describe("CP-NODE-13 inv-4: named, ordered gate units — no label can collide or drift", () => {
+  const PIPELINE_SOURCE = join(
+    __dirname,
+    "..",
+    "..",
+    "src",
+    "remediate",
+    "steps",
+    "contractPipeline.ts",
+  );
+
+  it("POSITIVE: every gate label is unique and the walk order is the declared order", () => {
+    expect(CONTRACT_PIPELINE_GATE_ORDER.length).toBeGreaterThan(10);
+    expect(new Set(CONTRACT_PIPELINE_GATE_ORDER).size).toBe(
+      CONTRACT_PIPELINE_GATE_ORDER.length,
+    );
+    // The frontier must be resolved after the archive pass and before every
+    // phase-conditional gate — the ordering the decimal labels used to hide.
+    const orderOf = (gate: string) => CONTRACT_PIPELINE_GATE_ORDER.indexOf(gate);
+    expect(orderOf("stale_artifact_archived")).toBeGreaterThan(
+      orderOf("ingested_artifact_invalid"),
+    );
+    expect(orderOf("phase_frontier_resolved")).toBeGreaterThan(
+      orderOf("stale_artifact_archived"),
+    );
+    expect(orderOf("obligation_ledger_derived")).toBeGreaterThan(
+      orderOf("phase_frontier_resolved"),
+    );
+    expect(orderOf("cyclic_seam_rechecked")).toBeGreaterThan(
+      orderOf("cyclic_seam_resolved"),
+    );
+  });
+
+  it("NEGATIVE: the decimal-insertion label scheme is gone from the source", async () => {
+    const source = await readFile(PIPELINE_SOURCE, "utf8");
+    // `// 2.55.` / `// 5a.` / `// 4c.` style gate labels — the decimal-insertion
+    // scheme in which section 5 executed after 5a/5b and "5a" named two
+    // unrelated blocks. A plain `// 1.` enumeration inside a doc comment is not
+    // that scheme, so the suffix is required.
+    const numberedGateLabels = source.match(/^\s*\/\/\s*\d+(?:\.\d+|[a-z])+\.\s/gm) ?? [];
+    expect(numberedGateLabels).toEqual([]);
+  });
+
+  it("POSITIVE: the earliest applicable gate wins — an invalid ingestion beats a later cycle gate", async () => {
+    await writeChainThrough("conceptual_design_critique");
+    // A cyclic ledger (a LATER gate) plus a malformed input (an EARLIER gate).
+    await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
+      ...CHAIN_PAYLOADS.obligation_ledger,
+      obligations: [
+        { id: "OBL-A", description: "A", kind: "invariant", depends_on: ["OBL-B"], status: "pending" },
+        { id: "OBL-B", description: "B", kind: "behavioral", depends_on: ["OBL-A"], status: "pending" },
+      ],
+    });
+    await writeJson(contractInputFilePath(ARTIFACTS_DIR, "test_validator_plan"), {
+      contract_version: "wrong-version",
+    });
+
+    const step = await buildNextContractPipelineStep({
+      root: TEST_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "gate-order",
+    });
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).toContain("Validation Errors From the Previous Attempt");
+    expect(prompt).not.toContain("Cyclic Seam Resolution");
+  });
+});
+
+describe("CP-NODE-13 inv-2: a failed stale archive ABORTS the step", () => {
+  /** Make the obligation_ledger stale by rewriting its upstream. */
+  async function seedStaleObligationLedger(): Promise<void> {
+    await writeChainThrough("obligation_ledger");
+    await writeContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts", {
+      ...CHAIN_PAYLOADS.finalized_module_contracts,
+      module_contracts: [
+        {
+          ...CHAIN_PAYLOADS.finalized_module_contracts.module_contracts[0],
+          outputs: ["y", "z-changed"],
+        },
+      ],
+    });
+  }
+
+  it("POSITIVE: archiving succeeds, so the pipeline proceeds past the stale artifact", async () => {
+    await seedStaleObligationLedger();
+    const step = await buildNextContractPipelineStep({
+      root: TEST_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "stale-ok",
+    });
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).not.toContain("Could Not Be Archived");
+  });
+
+  it("NEGATIVE: a renameFn that throws makes the step refuse instead of deriving downstream", async () => {
+    await seedStaleObligationLedger();
+    const step = await buildNextContractPipelineStep({
+      root: TEST_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "stale-fail",
+      renameFn: async () => {
+        throw new Error("history move refused");
+      },
+    });
+    expect(step).not.toBeNull();
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).toMatch(/Could Not Be Archived/);
+    // The stale artifact is still on disk — which is exactly why proceeding
+    // would have derived the back half from content already declared invalid.
+    expect(
+      existsSync(contractArtifactFilePath(ARTIFACTS_DIR, "obligation_ledger")),
+    ).toBe(true);
+  });
+});
+
+describe("CP-NODE-13 inv-1: the cyclic-seam re-check validates the AUTHORED break", () => {
+  const CYCLIC_NODES = [
+    { id: "OBL-A", needs: ["OBL-B"] },
+    { id: "OBL-B", needs: ["OBL-A"] },
+  ];
+  const BROKEN_NODES = [
+    { id: "OBL-A", needs: ["OBL-M"] },
+    { id: "OBL-B", needs: ["OBL-M"] },
+    { id: "OBL-M", needs: [] },
+  ];
+
+  it("NEGATIVE: a 'resolved' claim over an UNCHANGED ledger is refused", () => {
+    // HEAD fabricated `{ id: "_mediator_OBL-A_OBL-B", needs: [] }` and asked
+    // whether redirecting the cycle at that edge-free sink was acyclic — yes by
+    // construction, so this exact case was ACCEPTED.
+    const result = validateAuthoredCycleBreak({ members: ["OBL-A", "OBL-B"] }, CYCLIC_NODES, {
+      strategy: "single_authority",
+      designatedId: "OBL-A",
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toMatch(/still present in the obligation ledger/);
+  });
+
+  it("NEGATIVE: a break that designates nothing, or names an obligation off the ledger, is refused", () => {
+    expect(
+      validateAuthoredCycleBreak({ members: ["OBL-A", "OBL-B"] }, BROKEN_NODES, {
+        strategy: "mediator",
+      }).reason,
+    ).toMatch(/names no obligation/);
+    expect(
+      validateAuthoredCycleBreak({ members: ["OBL-A", "OBL-B"] }, BROKEN_NODES, {
+        strategy: "mediator",
+        designatedId: "OBL-GHOST",
+      }).reason,
+    ).toMatch(/not an obligation in the ledger/);
+  });
+
+  it("NEGATIVE: a mediator that is itself in the cycle, or an authority that is not, is refused", () => {
+    expect(
+      validateAuthoredCycleBreak({ members: ["OBL-A", "OBL-B"] }, BROKEN_NODES, {
+        strategy: "mediator",
+        designatedId: "OBL-A",
+      }).reason,
+    ).toMatch(/itself a member of cycle/);
+    expect(
+      validateAuthoredCycleBreak({ members: ["OBL-A", "OBL-B"] }, BROKEN_NODES, {
+        strategy: "single_authority",
+        designatedId: "OBL-M",
+      }).reason,
+    ).toMatch(/not a member of cycle/);
+  });
+
+  it("NEGATIVE: a mediator whose REAL needs point back into the cycle is refused", () => {
+    // The check the fabricated `needs: []` node could never fail.
+    const result = validateAuthoredCycleBreak(
+      { members: ["OBL-A", "OBL-B"] },
+      [
+        { id: "OBL-A", needs: ["OBL-M"] },
+        { id: "OBL-B", needs: ["OBL-M"] },
+        { id: "OBL-M", needs: ["OBL-A"] },
+      ],
+      { strategy: "mediator", designatedId: "OBL-M" },
+    );
+    expect(result.accepted).toBe(false);
+  });
+
+  it("NEGATIVE: an UNRELATED obligation cannot serve as the mediator (F4)", () => {
+    // OBL-Z exists and is not in the cycle, and the graph is acyclic — but no
+    // cycle member depends on it, so it mediates nothing.
+    const result = validateAuthoredCycleBreak(
+      { members: ["OBL-A", "OBL-B"] },
+      [...BROKEN_NODES, { id: "OBL-Z", needs: [] }],
+      { strategy: "mediator", designatedId: "OBL-Z" },
+    );
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toMatch(/no member of cycle .* depends on/);
+  });
+
+  it("NEGATIVE: a single_authority break over a still-cyclic graph is refused (F5)", () => {
+    // The named cycle IS broken, but the break left a cycle elsewhere. The
+    // single_authority path used to reach the accept with no whole-graph check.
+    const result = validateAuthoredCycleBreak(
+      { members: ["OBL-A", "OBL-B"] },
+      [
+        { id: "OBL-A", needs: ["OBL-B"] },
+        { id: "OBL-B", needs: [] },
+        { id: "OBL-P", needs: ["OBL-Q"] },
+        { id: "OBL-Q", needs: ["OBL-P"] },
+      ],
+      { strategy: "single_authority", designatedId: "OBL-A" },
+    );
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toMatch(/cyclic elsewhere/);
+  });
+
+  it("POSITIVE: a single_authority break over a genuinely acyclic graph is accepted", () => {
+    expect(
+      validateAuthoredCycleBreak(
+        { members: ["OBL-A", "OBL-B"] },
+        [
+          { id: "OBL-A", needs: ["OBL-B"] },
+          { id: "OBL-B", needs: [] },
+        ],
+        { strategy: "single_authority", designatedId: "OBL-A" },
+      ).accepted,
+    ).toBe(true);
+  });
+
+  it("POSITIVE: a mediator break actually reflected in the ledger is accepted", () => {
+    expect(
+      validateAuthoredCycleBreak({ members: ["OBL-A", "OBL-B"] }, BROKEN_NODES, {
+        strategy: "mediator",
+        designatedId: "OBL-M",
+      }).accepted,
+    ).toBe(true);
+  });
+
+  it("NEGATIVE end-to-end: the pipeline does NOT advance past a vacuous 'resolved' record", async () => {
+    await writeChainThrough("conceptual_design_critique");
+    await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
+      ...CHAIN_PAYLOADS.obligation_ledger,
+      obligations: [
+        { id: "OBL-A", description: "A", kind: "invariant", depends_on: ["OBL-B"], status: "pending" },
+        { id: "OBL-B", description: "B", kind: "behavioral", depends_on: ["OBL-A"], status: "pending" },
+      ],
+    });
+    await writeContractArtifact(ARTIFACTS_DIR, "cyclic_seam_resolution", {
+      contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+      goal_id: "G1",
+      status: "resolved",
+      cycles: [
+        {
+          members: ["OBL-A", "OBL-B"],
+          break_strategy: "single_authority",
+          designated_obligation_id: "OBL-A",
+          resolution_description: "A owns the interface.",
+        },
+      ],
+      created_at: CREATED_AT,
+    });
+
+    const step = await buildNextContractPipelineStep({
+      root: TEST_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "recheck-vacuous",
+    });
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    // The claim was rejected, the record archived, and the resolution phase
+    // re-emitted — never advanced to test_validator_plan.
+    expect(prompt).toContain("Cyclic Seam Resolution");
+    expect(prompt).not.toContain("Test and Validator Plan");
+    expect(prompt).toContain("Why the Previous Attempt Was Rejected");
+  });
+
+  it("POSITIVE end-to-end: a ledger the worker genuinely rewrote advances past the gate", async () => {
+    await writeChainThrough("conceptual_design_critique");
+    await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
+      ...CHAIN_PAYLOADS.obligation_ledger,
+      obligations: [
+        { id: "OBL-A", description: "A", kind: "invariant", depends_on: ["OBL-M"], status: "pending" },
+        { id: "OBL-B", description: "B", kind: "behavioral", depends_on: ["OBL-M"], status: "pending" },
+        { id: "OBL-M", description: "M", kind: "structural", depends_on: [], status: "pending" },
+      ],
+    });
+    await writeContractArtifact(ARTIFACTS_DIR, "cyclic_seam_resolution", {
+      contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+      goal_id: "G1",
+      status: "resolved",
+      cycles: [
+        {
+          members: ["OBL-A", "OBL-B"],
+          break_strategy: "mediator",
+          designated_obligation_id: "OBL-M",
+          resolution_description: "M owns the shared primitive.",
+        },
+      ],
+      created_at: CREATED_AT,
+    });
+
+    const step = await buildNextContractPipelineStep({
+      root: TEST_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "recheck-real",
+    });
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).toContain("Test and Validator Plan");
+  });
+});
+
+describe("CP-NODE-13 F1: a rejected resolution that cannot be archived does not loop", () => {
+  it("NEGATIVE: a failing renameFn blocks instead of re-deriving into an unbounded loop", async () => {
+    await writeChainThrough("conceptual_design_critique");
+    await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
+      ...CHAIN_PAYLOADS.obligation_ledger,
+      obligations: [
+        { id: "OBL-A", description: "A", kind: "invariant", depends_on: ["OBL-B"], status: "pending" },
+        { id: "OBL-B", description: "B", kind: "behavioral", depends_on: ["OBL-A"], status: "pending" },
+      ],
+    });
+    await writeContractArtifact(ARTIFACTS_DIR, "cyclic_seam_resolution", {
+      contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+      goal_id: "G1",
+      status: "resolved",
+      cycles: [
+        {
+          members: ["OBL-A", "OBL-B"],
+          break_strategy: "single_authority",
+          designated_obligation_id: "OBL-A",
+          resolution_description: "A owns the interface.",
+        },
+      ],
+      created_at: CREATED_AT,
+    });
+
+    const step = await buildNextContractPipelineStep({
+      root: TEST_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "recheck-archive-fail",
+      renameFn: async () => {
+        throw new Error("history move refused");
+      },
+    });
+    expect(step?.status).toBe("blocked");
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).toContain("Could Not Be Archived");
+    expect(prompt).toMatch(/loop without bound/);
+    // The rejected record is still where it was — which is exactly why
+    // re-deriving would have read it again.
+    expect(
+      existsSync(contractArtifactFilePath(ARTIFACTS_DIR, "cyclic_seam_resolution")),
+    ).toBe(true);
+  });
+});
+
+describe("CP-NODE-13 inv-3: ONE obligation-kind vocabulary", () => {
+  it("POSITIVE: every kind the gate module calls testable is in this module's vocabulary", () => {
+    expect(obligationKindVocabularyDivergence()).toEqual([]);
+    for (const kind of TESTABLE_OBLIGATION_KINDS) {
+      expect(OBLIGATION_KIND_PRIORITY).toContain(kind);
+      expect(classifyObligationKind(kind)).toBe(kind);
+    }
+  });
+
+  it("NEGATIVE: a kind added to the SHARED testable set alone turns the cross-check red", () => {
+    // Red-green by inversion, at runtime: widen the gate module's set, confirm
+    // the divergence check names the new kind, then invert the edit.
+    TESTABLE_OBLIGATION_KINDS.add("operational");
+    try {
+      expect(obligationKindVocabularyDivergence()).toEqual(["operational"]);
+    } finally {
+      TESTABLE_OBLIGATION_KINDS.delete("operational");
+    }
+    expect(obligationKindVocabularyDivergence()).toEqual([]);
+  });
+
+  it("NEGATIVE: an unrecognized ledger kind never promotes a lens-less finding", async () => {
+    // HEAD cast the raw string to the local union, scored it -1, and indexed
+    // the lens map to `undefined`.
+    await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
+      ...CHAIN_PAYLOADS.obligation_ledger,
+      obligations: [
+        { id: "OBL-1", description: "d", kind: "operational", depends_on: [], status: "pending" },
+      ],
+    });
+    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
+      ...CHAIN_PAYLOADS.implementation_dag,
+      nodes: [
+        {
+          id: "N1",
+          title: "N1",
+          description: "d",
+          satisfies_obligations: ["OBL-1"],
+          depends_on: [],
+          verification_obligation_ids: [],
+          targeted_commands: [],
+          status: "pending",
+        },
+      ],
+    });
+    await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR);
+    const plan = JSON.parse(
+      await readFile(intakePaths(ARTIFACTS_DIR).extractedPlan, "utf8"),
+    );
+    expect(plan.findings[0].lens).toBeDefined();
+    // Unrecognized ⇒ routed through the SHARED testability predicate, which
+    // fails open ⇒ behavioral.
+    expect(plan.findings[0].lens).toBe("correctness");
+  });
+});
+
+describe("CP-NODE-13 inv-5: gate call sites branch on `evaluated`", () => {
+  const issue = (message: string) =>
+    ({ path: "p", message, severity: "error" }) as const;
+
+  it("NEGATIVE: a REQUIRED gate that did not run is a violation, not a clean pass", () => {
+    const verdict = consumeGateOutcomes(
+      [{ gate: "paired_obligations", evaluated: false, issues: [], reason: "payload absent" }],
+      ["paired_obligations"],
+      new Set(["paired_obligations"]),
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.violations[0]).toMatch(/did not run \(payload absent\)/);
+  });
+
+  it("POSITIVE: an EVALUATED gate with zero issues is genuinely clean", () => {
+    const verdict = consumeGateOutcomes(
+      [{ gate: "paired_obligations", evaluated: true, issues: [] }],
+      ["paired_obligations"],
+      new Set(["paired_obligations"]),
+    );
+    expect(verdict).toEqual({ ok: true, violations: [] });
+  });
+
+  it("POSITIVE: a gate NOT required at this boundary may skip — the branch is taken, not skipped", () => {
+    const verdict = consumeGateOutcomes(
+      [{ gate: "digest_coverage", evaluated: false, issues: [], reason: "source not enumerable" }],
+      ["digest_coverage"],
+      new Set(),
+    );
+    expect(verdict.ok).toBe(true);
+  });
+
+  it("NEGATIVE: an evaluated gate's error issues still surface", () => {
+    const verdict = consumeGateOutcomes(
+      [{ gate: "evidence_threaded", evaluated: true, issues: [issue("evidence dropped")] }],
+      ["evidence_threaded"],
+      new Set(["evidence_threaded"]),
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.violations[0]).toContain("evidence dropped");
+  });
+
+  it("NEGATIVE: the promotion gate re-reads payloads FRESH — a cached verdict would go stale", async () => {
+    await writeChainThrough("implementation_dag");
+    const before = await evaluateContractObligationsPromotionGate(ARTIFACTS_DIR, TEST_DIR);
+    expect(before.violations.join("\n")).not.toMatch(/reconciliation_derivation/);
+    // Break the seam report AFTER the first call. A call site holding a payload
+    // (or a verdict) cached from before would still report this gate clean.
+    await writeContractArtifact(ARTIFACTS_DIR, "seam_reconciliation_report", {
+      ...CHAIN_PAYLOADS.seam_reconciliation_report,
+      mismatches: "not-an-array",
+    });
+    const after = await evaluateContractObligationsPromotionGate(ARTIFACTS_DIR, TEST_DIR);
+    expect(after.ok).toBe(false);
+    expect(after.violations.join("\n")).toMatch(
+      /\[reconciliation_derivation\] did not run/,
+    );
+  });
+});
+
+describe("CP-NODE-13 inv-6: block write scope + targeted commands are normalized", () => {
+  const REPO_ROOT = join(__dirname, "..", "..");
+
+  it("POSITIVE: already-clean paths pass through repo-relative, unique and sorted", () => {
+    const scope = normalizeBlockTouchedFiles(
+      REPO_ROOT,
+      ["src/b.ts", "src/a.ts", "src/a.ts"],
+      "B-1",
+    );
+    expect(scope.touched_files).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(scope.refusals).toEqual([]);
+  });
+
+  it("POSITIVE: an ABSOLUTE in-repo path is NORMALIZED to its repo-relative form, case preserved", () => {
+    expect(
+      normalizeBlockTouchedFiles(REPO_ROOT, [join(REPO_ROOT, "src", "Shared", "X.ts")], "B-1")
+        .touched_files,
+    ).toEqual(["src/Shared/X.ts"]);
+  });
+
+  it("NEGATIVE: an escaping path is REFUSED as DATA — never as a throw out of the pipeline", () => {
+    const escaping = normalizeBlockTouchedFiles(REPO_ROOT, ["../outside/evil.ts"], "B-1");
+    expect(escaping.touched_files).toEqual([]);
+    expect(escaping.refusals[0]).toMatch(/beneath the repository root/);
+    expect(normalizeBlockTouchedFiles(REPO_ROOT, ["   "], "B-1").refusals[0]).toMatch(
+      /empty touched_files entry/,
+    );
+  });
+
+  it("NEGATIVE: a leading-slash 'repo-relative' path is refused with the drop-the-slash reason", () => {
+    // The very common LLM form. It reads as POSIX-ABSOLUTE, so it resolves
+    // outside the repo — and used to throw an unclassified stack that wedged
+    // every subsequent next-step.
+    const refusals = normalizeBlockTouchedFiles(REPO_ROOT, ["/src/a.ts"], "B-1").refusals;
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatch(/drop the leading slash/);
+  });
+
+  it("POSITIVE: a bare package-script / test invocation is emitted verbatim", () => {
+    const commands = normalizeBlockTargetedCommands(
+      ["npm run check:tests", "npx vitest run tests/remediate/x.test.ts"],
+      "B-1",
+    );
+    expect(commands.targeted_commands).toEqual([
+      "npm run check:tests",
+      "npx vitest run tests/remediate/x.test.ts",
+    ]);
+    expect(commands.refusals).toEqual([]);
+  });
+
+  it("NEGATIVE: a shell-chained or substituting command is REFUSED as data", () => {
+    for (const command of [
+      "npm run build && npm run check",
+      "npm test; rm -rf /",
+      "echo `whoami`",
+      "npm test | tee out.log",
+      "npm test > out.log",
+    ]) {
+      const result = normalizeBlockTargetedCommands([command], "B-1");
+      expect(result.targeted_commands).toEqual([]);
+      expect(result.refusals[0]).toMatch(/shell chaining, substitution or redirection/);
+    }
+  });
+
+  it("NEGATIVE end-to-end: a leading-slash write scope produces a BOUNDED re-emit, not a throw", async () => {
+    await writeChainThrough("implementation_dag");
+    // The chain's one-assertion test plan fails the paired-obligation gate,
+    // which archives the DAG before promotion is ever reached. Pair it so the
+    // walk actually gets as far as the write-scope check under test.
+    await writeContractArtifact(ARTIFACTS_DIR, "test_validator_plan", {
+      ...CHAIN_PAYLOADS.test_validator_plan,
+      test_specs: [
+        {
+          obligation_id: "O-1",
+          name: "behavior holds test",
+          kind: "unit",
+          assertions: ["POSITIVE: O-1 returns the record on success", "NEGATIVE: O-1 rejects an invalid record"],
+        },
+      ],
+    });
+    // Re-write the downstream artifacts after that edit so their recorded
+    // dependency hashes are current — otherwise the staleness pass archives
+    // them and the walk stops at `assessment`, upstream of the gate under test.
+    for (const name of [
+      "contract_assessment_report",
+      "counterexample",
+      "judge_report",
+    ] as const) {
+      await writeContractArtifact(ARTIFACTS_DIR, name, CHAIN_PAYLOADS[name]);
+    }
+    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
+      ...CHAIN_PAYLOADS.implementation_dag,
+      nodes: [
+        {
+          ...CHAIN_PAYLOADS.implementation_dag.nodes[0],
+          output_files: ["/src/a.ts"],
+        },
+      ],
+    });
+    const step = await buildNextContractPipelineStep({
+      root: TEST_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "leading-slash",
+    });
+    expect(step).not.toBeNull();
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).toMatch(/Write-Scope and Command Errors|Block Write Scope Failed/);
+    expect(prompt).toMatch(/drop the leading slash/);
+    // No plan was promoted on the back of an unpromotable scope.
+    expect(existsSync(intakePaths(ARTIFACTS_DIR).extractedPlan)).toBe(false);
+  });
+
+  it("NEGATIVE: a promoted block whose write scope names a fabricated directory is refused", async () => {
+    await writeJson(intakePaths(ARTIFACTS_DIR).extractedPlan, {
+      blocks: [
+        { block_id: "CP-BLOCK-N1", touched_files: ["ghost-dir-xyz/ghost.ts"] },
+        { block_id: "CP-BLOCK-N2", touched_files: ["src/remediate/steps/new-file.ts"] },
+      ],
+    });
+    const gate = await evaluatePromotedPlanWriteScope(ARTIFACTS_DIR, REPO_ROOT);
+    expect(gate).not.toBeNull();
+    expect(gate!.violations).toHaveLength(1);
+    expect(gate!.violations[0]).toContain("ghost-dir-xyz/ghost.ts");
+  });
+
+  it("POSITIVE: a NEW file under a real tracked directory is legal write scope", async () => {
+    await writeJson(intakePaths(ARTIFACTS_DIR).extractedPlan, {
+      blocks: [
+        { block_id: "CP-BLOCK-N1", touched_files: ["src/remediate/steps/brand-new.ts"] },
+      ],
+    });
+    expect(await evaluatePromotedPlanWriteScope(ARTIFACTS_DIR, REPO_ROOT)).toBeNull();
+  });
+});
+
+describe("CP-NODE-13 inv-7: the path_a seed binds its sources by digest", () => {
+  const REPORT = buildAuditFindingsDeliverable([
+    {
+      id: "F-1",
+      title: "t",
+      category: "General",
+      severity: "medium",
+      confidence: "high",
+      lens: "correctness",
+      summary: "s",
+      affected_files: [{ path: "src/seeded.ts" }],
+    } as Finding,
+  ]);
+
+  async function seedFrom(reportPath: string): Promise<void> {
+    await writeJson(reportPath, REPORT);
+    await writePathASeedFromFindings(ARTIFACTS_DIR, reportPath, REPORT);
+  }
+
+  it("POSITIVE: the seed records a sha256 per readable source, and an unchanged tree yields no mismatch", async () => {
+    const reportPath = join(TEST_DIR, "audit-findings.json");
+    await mkdir(join(TEST_DIR, "src"), { recursive: true });
+    await writeFile(join(TEST_DIR, "src", "seeded.ts"), "export const a = 1;\n", "utf8");
+    await seedFrom(reportPath);
+
+    const seed = JSON.parse(
+      await readFile(pathASeedFilePath(ARTIFACTS_DIR), "utf8"),
+    );
+    expect(seed.source_digests.map((d: { path: string }) => d.path)).toContain(
+      "src/seeded.ts",
+    );
+    expect(await detectSeedSourceDigestMismatches(TEST_DIR, seed)).toEqual([]);
+  });
+
+  it("NEGATIVE: mutating a seeded source is detected, and the entry refuses with a blocked step", async () => {
+    const reportPath = join(TEST_DIR, "audit-findings.json");
+    await mkdir(join(TEST_DIR, "src"), { recursive: true });
+    await writeFile(join(TEST_DIR, "src", "seeded.ts"), "export const a = 1;\n", "utf8");
+    await seedFrom(reportPath);
+    await writeFile(join(TEST_DIR, "src", "seeded.ts"), "export const a = 2;\n", "utf8");
+
+    const seed = JSON.parse(
+      await readFile(pathASeedFilePath(ARTIFACTS_DIR), "utf8"),
+    );
+    const mismatches = await detectSeedSourceDigestMismatches(TEST_DIR, seed);
+    expect(mismatches.map((m) => m.path)).toEqual(["src/seeded.ts"]);
+
+    const step = await buildNextContractPipelineStep({
+      root: TEST_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "seed-digest",
+    });
+    expect(step?.status).toBe("blocked");
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).toContain("Source Content Changed Since the Audit Seed Was Built");
+    expect(prompt).toContain("src/seeded.ts");
+  });
+
+  it("POSITIVE: a seed with no recorded digests binds nothing (back-compat)", async () => {
+    expect(
+      await detectSeedSourceDigestMismatches(TEST_DIR, {
+        schema_version: "remediate-code-contract-pipeline/path-a-seed/v1alpha2",
+        audit_findings_path: "x",
+        finding_count: 0,
+        findings_summary: [],
+        affected_files: [],
+        work_blocks: [],
+        work_block_seams: [],
+        created_at: CREATED_AT,
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("CP-NODE-13 inv-9: the planning outputs are a PINNED shape", () => {
+  async function promoteTwoBlocks(): Promise<void> {
+    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
+      ...CHAIN_PAYLOADS.implementation_dag,
+      nodes: [
+        {
+          id: "N1",
+          title: "one",
+          description: "first",
+          satisfies_obligations: [],
+          depends_on: [],
+          verification_obligation_ids: [],
+          targeted_commands: ["npm run check"],
+          status: "pending",
+          files_likely_touched: ["src/one.ts"],
+        },
+        {
+          id: "N2",
+          title: "two",
+          description: "second",
+          satisfies_obligations: [],
+          depends_on: ["N1"],
+          verification_obligation_ids: [],
+          targeted_commands: [],
+          status: "pending",
+          files_likely_touched: ["src/two.ts"],
+        },
+      ],
+    });
+    await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR, TEST_DIR);
+  }
+
+  it("POSITIVE: membership, coverage, estimates and digests are all exported together", async () => {
+    await promoteTwoBlocks();
+    const pinned = await readContractPipelinePlanningOutputs(ARTIFACTS_DIR);
+    expect(pinned).not.toBeNull();
+    expect(pinned!.block_membership.map((b) => b.block_id)).toEqual([
+      "CP-BLOCK-N1",
+      "CP-BLOCK-N2",
+    ]);
+    expect(pinned!.block_membership[0].items).toEqual(["N1"]);
+    expect(pinned!.block_membership[0].touched_files).toEqual(["src/one.ts"]);
+    expect(pinned!.block_membership[0].targeted_commands).toEqual(["npm run check"]);
+    expect(pinned!.coverage).toEqual({
+      finding_ids: ["N1", "N2"],
+      exhaustive_once: true,
+    });
+    expect(pinned!.token_estimates.every((e) => e.estimated_tokens > 0)).toBe(true);
+    expect(pinned!.seed_source_digests).toEqual([]);
+  });
+
+  it("NEGATIVE: moving one finding into another block's membership turns the pinned coverage red", async () => {
+    await promoteTwoBlocks();
+    const planPath = intakePaths(ARTIFACTS_DIR).extractedPlan;
+    const plan = JSON.parse(await readFile(planPath, "utf8"));
+    // Invert the canonical membership: N2 is now claimed twice, N1 not at all.
+    plan.blocks[0].items = ["N2"];
+    await writeJson(planPath, plan);
+
+    const pinned = await readContractPipelinePlanningOutputs(ARTIFACTS_DIR);
+    expect(pinned!.coverage.exhaustive_once).toBe(false);
+    expect(pinned!.block_membership[0].items).toEqual(["N2"]);
+  });
+
+  it("POSITIVE: no promoted plan yields null rather than a fabricated shape", async () => {
+    expect(await readContractPipelinePlanningOutputs(ARTIFACTS_DIR)).toBeNull();
+  });
+});
