@@ -6,6 +6,53 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The remediate-side submission ledger has no reader — `accepted_via_recovery` marks are
+  write-only (2026-08-19, low-medium).** recover-ingest appends distinguishability events to the
+  submission ledger NDJSON under the artifacts dir, but no remediate surface reads them: not
+  `remediation-report.md`, not `remediation-outcomes.json`, not `validate-artifacts` (the only
+  reader is the audit-side bundle loader). **Property:** a recovered run must be distinguishable
+  from a clean one in a rendered surface, not only in raw NDJSON — surface recovered items at the
+  close-phase report. [[write-only-data-looks-authoritative]]
+
+- **recover-ingest / recover-submission leave the last step contract on disk after mutating state
+  (2026-08-19, low).** A recovery that resolves items (or clears `host_handoff`) leaves the last
+  persisted step contract and prompt document — current-step.json plus current-prompt.md — as a
+  live-looking instruction for work that no longer exists; next-step has
+  `runWithBlockedStepBackstop` for the class. **Property:** any verb that mutates run state either
+  refreshes or invalidates the persisted step contract.
+
+- **`StateStore.mutate` cannot skip the write — a no-op recovery rewrites an identical state file
+  (2026-08-19, low).** The locked store's `SKIP_WRITE` sentinel (`lockedJsonStore.ts`) is not
+  plumbed through `StateStore.mutate`, so a nothing-to-recover run still replaces the file.
+  **Property:** a mutation that returns the input unchanged writes nothing.
+
+- **Recovery phase-binding residuals from the adversarial review (2026-08-19, low, one entry —
+  three verified residuals):** (1) the two recovery phases are bound by HEAD, not state identity —
+  a concurrent state writer between phases yields a spurious `required_test_failed` (safe
+  degradation: refuse, never spawn, never accept); the symmetric fix is comparing the phase-1
+  pending-id set / workload sha like HEAD is compared. (2) `recovery.requiredTestVerdicts` enforces
+  table-SUPPLIED, not tests-RAN — an untyped JS caller can fabricate a table; a `typeof` narrow
+  and/or minting the table type from `precomputeRecoveryTestVerdicts` would close it. (3)
+  `gitCommitIsOrphaned` cannot see a detached HEAD in a LINKED worktree (`for-each-ref` does not
+  enumerate it) — such a baseline misreports orphaned. All three documented in code comments at the
+  guard sites.
+
+- **recover-ingest's commander action branch is untested (2026-08-19, low).** The entry-point test
+  reaches `recoverIngestHostResults`; `recoveredNothing`, the two `process.exit(1)` sites, and
+  `resolveArtifactsDirOption` are covered only by a manual smoke log.
+
+- **CP-NODE-10 residuals (2026-08-19, low, one entry):** (1) the staleness third-state (`partial`)
+  check exempts the 9 map-declared leaves — including `audit-findings.json` — so a truncated leaf
+  body is caught only via dependents (choice-vs-forced split documented at
+  `classifyArtifactPresence`); (2) `StaleArtifactSet`'s `instanceof` discriminator is dropped by
+  `Set.prototype.union`/`structuredClone` (no caller does either today); (3)
+  `computeArtifactMetadata`'s producer-side affinity hash is unguarded — a malformed affinity body
+  dies loudly at restamp (pre-existing, loud, not a livelock).
+
+- **recover-ingest exits 1 when the only issues are `submission_missing` for genuinely-pending
+  work items (2026-08-19, low).** An expected-pending item is not a recovery failure; the exit
+  code should distinguish expected-pending from a real issue so operators can script on it.
+
 - **The pre-commit round-trip journal is not bound to the HEAD it was captured under, so crash
   recovery can time-travel the tree backward (2026-08-19, high).** Observed live: a `git rebase` call's
   gate took the round-trip path (a background task's untracked log made the tree diverge), the hook

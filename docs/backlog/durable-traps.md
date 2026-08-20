@@ -623,4 +623,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   partly-enforced-trap rule, since `check:backlog-status` bans status fields so there is no field
   a gate could even demand.
 
+- **Never amend or rebase a landed wave commit after the remediation workload prepare
+  (2026-08-19).** The prepared binding pins `baseline_commit` = HEAD-at-prepare; an amend re-mints
+  that commit and orphans the baseline, after which EVERY acceptance fails
+  `baseline_not_ancestor` — and no re-prepare can fix it (a fresh baseline is a descendant of the
+  landed commits). The sanctioned repair is `remediate-code recover-ingest` (true-orphanhood-gated,
+  ledger-marked, spawn-free under the state lock). Cost when it happened: 12 landed items pending
+  in state, a full design-check + three review rounds to build the verb.
+
 ## Doc-set hygiene (enforced)
