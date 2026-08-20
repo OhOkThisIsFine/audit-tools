@@ -6,7 +6,7 @@
  * These are deterministic, in-process tests — no LLM calls.
  */
 import { test, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -586,4 +586,332 @@ test("ARC-27aceb61: buildGraphBundle does NOT extract template-literal dynamic i
   // limitation. If this assertion ever fails, it means the extractor was upgraded
   // to handle template literals (e.g. via TS compiler API) — update accordingly.
   expect(edge, "buildGraphBundle must NOT extract a template-literal dynamic import (known regex limitation — ARC-27aceb61)").toBe(undefined);
+});
+
+// ── COR-743d2837 / COR-11e067ab: the deterministic-extraction failure surface ──
+//
+// The eslint runner, the tsc runner, and the fs-backed graph build all degrade
+// rather than throw. These tests pin WHICH degradation each produces, because the
+// status a run lands on is the only thing a caller can read.
+
+const ORCHESTRATOR_SRC = join(PACKAGE_ROOT, "src", "audit", "orchestrator");
+
+const {
+  eslintCommandArgs,
+  resolveEslintConfigState,
+  runSyntaxResolutionExecutor,
+}: typeof import("../../src/audit/orchestrator/syntaxResolutionExecutor.js") =
+  await import("../../src/audit/orchestrator/syntaxResolutionExecutor.js");
+
+const JS_BUNDLE = {
+  file_disposition: { files: [{ path: "src/app.js", status: "included" as const }] },
+};
+
+/** A repo-local fake eslint: emits one finding, or fails the way ESLint 9 fails on `--ext`. */
+async function writeFakeEslint(root: string, version: string): Promise<void> {
+  const eslintDir = join(root, "node_modules", "eslint");
+  await mkdir(join(eslintDir, "bin"), { recursive: true });
+  await writeFile(join(eslintDir, "package.json"), JSON.stringify({ name: "eslint", version }));
+  await writeFile(
+    join(eslintDir, "bin", "eslint.js"),
+    [
+      "const { writeFileSync } = require('node:fs');",
+      "const path = require('node:path');",
+      "const argv = process.argv.slice(2);",
+      "writeFileSync(path.join(process.cwd(), 'eslint-argv.json'), JSON.stringify(argv));",
+      // ESLint 9+ rejects --ext outright: nothing but an error on stderr.
+      "if (argv.includes('--ext')) {",
+      "  process.stderr.write(\"Invalid option '--ext'\\n\");",
+      "  process.exit(2);",
+      "}",
+      "process.stdout.write(JSON.stringify([{",
+      "  filePath: path.join(process.cwd(), 'src', 'app.js'),",
+      "  messages: [{ severity: 2, line: 1, message: 'fixture lint error', ruleId: 'fixture/rule' }]",
+      "}]));",
+      "",
+    ].join("\n"),
+  );
+}
+
+async function writeJsFixture(root: string): Promise<void> {
+  await mkdir(join(root, "src"), { recursive: true });
+  await writeFile(join(root, "src", "app.js"), "console.log('fixture');\n");
+}
+
+function eslintStatus(result: {
+  updated: { external_analyzer_results?: Array<{ tool_statuses?: unknown[] }> };
+}): { tool: string; status: string; error?: string; output_snippet?: string } {
+  const statuses = (result.updated.external_analyzer_results?.[0]?.tool_statuses ??
+    []) as Array<{ tool: string; status: string; error?: string; output_snippet?: string }>;
+  return statuses.find((status) => status.tool === "eslint")!;
+}
+
+// inv-3: the eslint flag surface must match the INSTALLED major.
+test("inv-3: eslint is invoked WITHOUT --ext under a flat-config eslint, so the run parses", async () => {
+  await withTempDir("audit-code-eslint-ext-", async (root) => {
+    await writeJsFixture(root);
+    await writeFakeEslint(root, "9.24.0");
+    await writeFile(join(root, "eslint.config.js"), "module.exports = [];\n");
+
+    const result = runSyntaxResolutionExecutor(JS_BUNDLE, root);
+    const status = eslintStatus(result);
+
+    const argv = JSON.parse(readFileSync(join(root, "eslint-argv.json"), "utf8")) as string[];
+    expect(
+      argv.includes("--ext"),
+      `--ext must not be passed to a flat-config eslint; got ${JSON.stringify(argv)}`,
+    ).toBe(false);
+    expect(status.status, "the run must parse, not land on parse_error").toBe("findings");
+    expect(result.updated.external_analyzer_results![0].results.length).toBe(1);
+  });
+});
+
+test("inv-3: eslintCommandArgs carries --ext only for a pre-flat-config major", () => {
+  expect(eslintCommandArgs(9).includes("--ext"), "ESLint 9 removed --ext").toBe(false);
+  expect(eslintCommandArgs(10).includes("--ext")).toBe(false);
+  expect(eslintCommandArgs(undefined).includes("--ext"), "unknown major is treated as modern").toBe(false);
+  expect(eslintCommandArgs(8).includes("--ext"), "ESLint 8 still needs --ext to reach .ts").toBe(true);
+  expect(eslintCommandArgs(9)).toEqual([".", "--format", "json"]);
+});
+
+// inv-4: config discovery is era-aware — a config nothing reads is not a config.
+test("inv-4: a legacy-only .eslintrc under a flat-config eslint is a REASONED skip, not a silent zero-findings run", async () => {
+  await withTempDir("audit-code-eslint-legacy-", async (root) => {
+    await writeJsFixture(root);
+    await writeFakeEslint(root, "9.24.0");
+    await writeFile(join(root, ".eslintrc.json"), JSON.stringify({ rules: {} }));
+
+    const state = resolveEslintConfigState(root);
+    expect(state.runnable, "eslint 9 does not read .eslintrc*").toBe(false);
+    expect(
+      state.skip_reason !== undefined && state.skip_reason.length > 0,
+      "the skip must say why",
+    ).toBeTruthy();
+
+    const result = runSyntaxResolutionExecutor(JS_BUNDLE, root);
+    const status = eslintStatus(result);
+    expect(status.status, "never 'success' — the tool did not run").toBe("skipped");
+    expect(status.error, "the record distinguishes this from 'no config at all'").toMatch(/legacy/i);
+    expect(existsSync(join(root, "eslint-argv.json")), "eslint must not be spawned at all").toBe(false);
+  });
+});
+
+test("inv-4: the same legacy config IS runnable under an eslint major that still reads it", async () => {
+  await withTempDir("audit-code-eslint-legacy8-", async (root) => {
+    await writeJsFixture(root);
+    await writeFakeEslint(root, "8.57.0");
+    await writeFile(join(root, ".eslintrc.json"), JSON.stringify({ rules: {} }));
+
+    const state = resolveEslintConfigState(root);
+    expect(state.runnable, "eslint 8 reads .eslintrc*").toBe(true);
+    expect(state.major).toBe(8);
+
+    // And a flat config is runnable whatever the major is.
+    await writeFile(join(root, "eslint.config.js"), "module.exports = [];\n");
+    expect(resolveEslintConfigState(root).runnable).toBe(true);
+  });
+});
+
+test("inv-4: no configuration at all is a skip with its OWN reason", async () => {
+  await withTempDir("audit-code-eslint-noconfig-", async (root) => {
+    await writeJsFixture(root);
+    await writeFakeEslint(root, "9.24.0");
+
+    const state = resolveEslintConfigState(root);
+    expect(state.runnable).toBe(false);
+    expect(state.skip_reason).toMatch(/no eslint configuration/i);
+    expect(eslintStatus(runSyntaxResolutionExecutor(JS_BUNDLE, root)).status).toBe("skipped");
+  });
+});
+
+// inv-7: the diagnostic count is derived from the ONE exported status
+// classification, so every member of the union is accounted for — including the
+// members a hand-copied list omitted.
+test("inv-7: a tool that never ran counts as an analyzer diagnostic (classification-derived)", async () => {
+  await withTempDir("audit-code-diagnostic-count-", async (root) => {
+    await writeJsFixture(root);
+    await writeFakeEslint(root, "9.24.0");
+
+    // No config → 'skipped' → classification 'not_run' → no coverage was produced.
+    const result = runSyntaxResolutionExecutor(JS_BUNDLE, root);
+    expect(eslintStatus(result).status).toBe("skipped");
+    expect(
+      result.progress_summary,
+      "a tool that never ran must not read as a clean scan",
+    ).toMatch(/1 analyzer diagnostic/);
+  });
+});
+
+test("inv-7: syntaxResolutionExecutor keeps no private copy of the status vocabulary", () => {
+  const src = readFileSync(join(ORCHESTRATOR_SRC, "syntaxResolutionExecutor.ts"), "utf8");
+  expect(
+    src.includes("EXTERNAL_ANALYZER_STATUS_CLASSIFICATION"),
+    "the shared exhaustive classification must be the consumed vocabulary",
+  ).toBeTruthy();
+  const members = [
+    "skipped",
+    "success",
+    "findings",
+    "not_resolved",
+    "spawn_error",
+    "parse_error",
+    "failed",
+    "checksum_mismatch",
+  ];
+  for (const member of members) {
+    expect(
+      new RegExp(`\\[\\s*"${member}"\\s*,`).test(src),
+      `a status-string ARRAY starting with "${member}" is a second copy of the union`,
+    ).toBe(false);
+  }
+});
+
+// F5: "did this run produce trustworthy coverage?" is ONE member-level question
+// with ONE home, not a comparison re-typed at each consumer.
+test("inv-7: the non-clean coverage question is single-sourced and exhaustive", async () => {
+  const { isNonCleanAnalyzerCoverage, EXTERNAL_ANALYZER_STATUS_CLASSIFICATION } = await import(
+    "../../src/shared/analyzers/types.js"
+  );
+
+  expect(isNonCleanAnalyzerCoverage("clean")).toBe(false);
+  expect(isNonCleanAnalyzerCoverage("findings")).toBe(false);
+  expect(isNonCleanAnalyzerCoverage("degraded")).toBe(true);
+  expect(isNonCleanAnalyzerCoverage("not_run")).toBe(true);
+
+  // Every status member resolves through the same helper — no member is left to
+  // a consumer's own judgement.
+  expect(isNonCleanAnalyzerCoverage(EXTERNAL_ANALYZER_STATUS_CLASSIFICATION.checksum_mismatch)).toBe(true);
+  expect(isNonCleanAnalyzerCoverage(EXTERNAL_ANALYZER_STATUS_CLASSIFICATION.skipped)).toBe(true);
+  expect(isNonCleanAnalyzerCoverage(EXTERNAL_ANALYZER_STATUS_CLASSIFICATION.success)).toBe(false);
+
+  // …and neither consumer keeps its own copy of the comparison.
+  const consumer = readFileSync(join(ORCHESTRATOR_SRC, "syntaxResolutionExecutor.ts"), "utf8");
+  const owner = readFileSync(
+    join(PACKAGE_ROOT, "src", "shared", "analyzers", "types.ts"),
+    "utf8",
+  );
+  // Assert about CODE, not prose — a doc comment may quote the comparison it
+  // replaced without being a second copy of it.
+  const stripComments = (source: string): string =>
+    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  for (const [label, source] of [["consumer", consumer], ["owner", owner]] as const) {
+    const code = stripComments(source);
+    expect(
+      /===\s*"degraded"/.test(code) || /===\s*"not_run"/.test(code),
+      `${label} must ask isNonCleanAnalyzerCoverage, not re-type the coverage comparison`,
+    ).toBe(false);
+  }
+});
+
+// fail-2: command resolution failure is a status, never a throw.
+test("fail-2: an unresolvable tool yields not_resolved with zero results, and the run still completes", async () => {
+  await withTempDir("audit-code-tsc-unresolved-", async (root) => {
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "app.ts"), "export const value = 1;\n");
+    await writeFile(join(root, "tsconfig.json"), "{}\n");
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = "";
+    try {
+      const result = runSyntaxResolutionExecutor(
+        { file_disposition: { files: [{ path: "src/app.ts", status: "included" }] } },
+        root,
+      );
+      const tsc = (result.updated.external_analyzer_results![0].tool_statuses ?? []).find(
+        (status) => status.tool === "tsc",
+      )!;
+      expect(tsc.status).toBe("not_resolved");
+      expect(tsc.resolved).toBe(false);
+      expect(result.updated.external_analyzer_results![0].results).toEqual([]);
+      expect(typeof result.progress_summary, "the run completes and still reports").toBe("string");
+      expect(result.progress_summary).toMatch(/analyzer diagnostic/i);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+});
+
+// fail-3: unparsable output degrades to parse_error — and NOTHING in the status
+// distinguishes a malformed payload from a rejected-flag run. Pinned as the
+// documented gap: only `output_snippet` carries the difference.
+test("fail-3: malformed output and a rejected-flag run are both parse_error, told apart only by the snippet", async () => {
+  const runWithFakeEslintOutput = async (
+    label: string,
+    body: string,
+  ): Promise<{ status: string; output_snippet?: string }> =>
+    withTempDir(`audit-code-eslint-${label}-`, async (root) => {
+      await writeJsFixture(root);
+      await writeFakeEslint(root, "9.24.0");
+      await writeFile(join(root, "eslint.config.js"), "module.exports = [];\n");
+      await writeFile(join(root, "node_modules", "eslint", "bin", "eslint.js"), body);
+      return eslintStatus(runSyntaxResolutionExecutor(JS_BUNDLE, root));
+    });
+
+  const malformed = await runWithFakeEslintOutput(
+    "malformed",
+    "process.stdout.write('not json from eslint');\n",
+  );
+  const rejectedFlag = await runWithFakeEslintOutput(
+    "flagreject",
+    'process.stderr.write("Invalid option \'--ext\'\\n");\nprocess.exit(2);\n',
+  );
+
+  expect(malformed.status).toBe("parse_error");
+  expect(rejectedFlag.status, "a flag rejection is indistinguishable at the status field").toBe(
+    "parse_error",
+  );
+  expect(malformed.output_snippet).toMatch(/not json from eslint/);
+  expect(rejectedFlag.output_snippet, "only the snippet carries the difference").toMatch(
+    /Invalid option/,
+  );
+});
+
+// fail-1: an unreadable file degrades the graph, never the build.
+test("fail-1: buildGraphBundleFromFs skips an unreadable file, logs it, and still returns a bundle", async () => {
+  const { buildGraphBundleFromFs } = await importSourceModule("src/extractors/graph.ts");
+
+  await withTempDir("audit-code-graph-unreadable-", async (root) => {
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(
+      join(root, "src", "a.ts"),
+      "import { b } from './b';\nexport const a = () => b();\n",
+    );
+    await writeFile(join(root, "src", "b.ts"), "export const b = () => 1;\n");
+    // Present in the manifest, absent from disk — the mid-scan ENOENT case.
+    const repoManifest = {
+      repository: { name: "unreadable-fixture" },
+      generated_at: "2026-01-01T00:00:00.000Z",
+      files: ["src/a.ts", "src/b.ts", "src/vanished.ts"].map((path) => ({
+        path,
+        size_bytes: 128,
+        language: "typescript",
+        excluded: false,
+      })),
+    };
+
+    const stderrLines: string[] = [];
+    const origWrite = process.stderr.write;
+    process.stderr.write = (...args: [chunk: string | Uint8Array, ...rest: unknown[]]): boolean => {
+      stderrLines.push(String(args[0]));
+      return Reflect.apply(origWrite, process.stderr, args);
+    };
+    let bundle;
+    try {
+      bundle = await buildGraphBundleFromFs(repoManifest, root, undefined, {});
+    } finally {
+      process.stderr.write = origWrite;
+    }
+
+    const imports = (bundle.graphs.imports ?? []) as GraphEdge[];
+    expect(
+      imports.some((e) => e.from === "src/a.ts" && e.to === "src/b.ts"),
+      "the readable files still contribute their edges",
+    ).toBeTruthy();
+    expect(
+      stderrLines.some(
+        (line) => line.includes("unreadable file(s)") && line.includes("src/vanished.ts"),
+      ),
+      `the skip must be observable on stderr; got ${JSON.stringify(stderrLines)}`,
+    ).toBeTruthy();
+  });
 });

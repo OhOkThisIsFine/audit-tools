@@ -87,9 +87,38 @@ export type ExternalAnalyzerToolStatusValue =
  * {@link EXTERNAL_ANALYZER_TOOL_STATUSES} without adding its row here fails
  * `npm run check`, so a new status can never default into `clean`.
  */
+/**
+ * What a status says about coverage. Named as a type so the vocabulary has ONE
+ * home and every consumer of the classification speaks it by name.
+ */
+export type ExternalAnalyzerCoverage = "clean" | "findings" | "degraded" | "not_run";
+
+/**
+ * Which coverage classes may be read as "this tool produced trustworthy
+ * coverage". Exhaustive by construction: a new coverage class without a row here
+ * fails `npm run check` rather than defaulting into either answer.
+ */
+const COVERAGE_IS_TRUSTWORTHY: Record<ExternalAnalyzerCoverage, boolean> = {
+  clean: true,
+  findings: true,
+  degraded: false,
+  not_run: false,
+};
+
+/**
+ * True when a coverage class means NO trustworthy coverage was produced — the
+ * single member-level answer. Both consumers ask it here rather than each
+ * re-typing `=== "degraded" || === "not_run"`, so widening the coverage
+ * vocabulary is one edit guarded by a compile error, never a silent divergence
+ * between two copies of the same comparison.
+ */
+export function isNonCleanAnalyzerCoverage(coverage: ExternalAnalyzerCoverage): boolean {
+  return !COVERAGE_IS_TRUSTWORTHY[coverage];
+}
+
 export const EXTERNAL_ANALYZER_STATUS_CLASSIFICATION: Record<
   ExternalAnalyzerToolStatusValue,
-  "clean" | "findings" | "degraded" | "not_run"
+  ExternalAnalyzerCoverage
 > = {
   skipped: "not_run",
   success: "clean",
@@ -128,7 +157,7 @@ export function isDegradedExternalAnalyzerStatus(
   record: Pick<ExternalAnalyzerToolStatus, "status" | "exit_code" | "dropped_rows">,
 ): boolean {
   const classification = EXTERNAL_ANALYZER_STATUS_CLASSIFICATION[record.status];
-  if (classification === "degraded" || classification === "not_run") return true;
+  if (isNonCleanAnalyzerCoverage(classification)) return true;
   if (record.exit_code === null) return true;
   if (typeof record.exit_code === "number" && record.exit_code !== 0) return true;
   if ((record.dropped_rows ?? 0) > 0) return true;

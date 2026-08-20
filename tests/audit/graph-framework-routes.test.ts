@@ -2,6 +2,8 @@ import { test, expect } from "vitest";
 import { buildGraphBundle } from "../../src/audit/extractors/graph.js";
 import {
   extractConventionalRouteEvidence,
+  extractFrameworkRouteEvidence,
+  extractRegisteredRouteEvidence,
   fallbackRouteEdge,
   uniqueSortedRoutes,
 } from "../../src/audit/extractors/graphRoutes.js";
@@ -210,6 +212,194 @@ test("framework route detection is language-gated (no NestJS patterns in Python,
   });
   expect(!routes.some((r) => r.path === "/nope"), "NestJS decorators are not detected in .py files").toBeTruthy();
   expect(!routes.some((r) => r.path === "/no"), "FastAPI comments in .ts files are not detected as Python routes").toBeTruthy();
+});
+
+// COR-74363fa8 / inv-1: EVERY framework branch is gated on a positive marker in
+// the file's content. The Python decorator pattern matches `@<object>.<verb>("s")`,
+// which is also the shape of the ubiquitous test idiom `@mock.patch("...")`, so a
+// bare `.py` extension fabricated routes out of patched tests.
+test("inv-1: Python route detection requires a framework marker, not a .py extension", () => {
+  const unmarked = extractFrameworkRouteEvidence(
+    "tests/test_x.py",
+    '@mock.patch("os.environ")\ndef test_x():\n    pass\n',
+    new Map(),
+  );
+  expect(unmarked.routes, "@mock.patch is not a route decorator").toEqual([]);
+  expect(unmarked.calls, "no handler edge either").toEqual([]);
+
+  // A decorator that only LOOKS like a route, in a file with no framework import.
+  const unmarkedRoute = extractFrameworkRouteEvidence(
+    "scripts/tasks.py",
+    '@celery.route("/not-a-web-route")\ndef task():\n    pass\n',
+    new Map(),
+  );
+  expect(unmarkedRoute.routes, "an unmarked file is never pattern-matched").toEqual([]);
+
+  // Positive control: the same decorator shape under a FastAPI marker IS a route.
+  const marked = extractFrameworkRouteEvidence(
+    "app/main.py",
+    [
+      "from fastapi import FastAPI",
+      "app = FastAPI()",
+      '@app.get("/x")',
+      "def read_x():",
+      "    return 1",
+    ].join("\n"),
+    new Map(),
+  );
+  expect(marked.routes).toEqual([
+    { path: "/x", handler: "app/main.py", method: "GET" },
+  ]);
+
+  // A Flask marker qualifies the same way.
+  const flask = extractFrameworkRouteEvidence(
+    "webapp/views.py",
+    'import flask\n@app.route("/health")\ndef health():\n    return None\n',
+    new Map(),
+  );
+  expect(flask.routes).toEqual([
+    { path: "/health", handler: "webapp/views.py", method: "GET" },
+  ]);
+});
+
+test("inv-1: an unmarked .py test file contributes no fabricated route to the graph", () => {
+  const routes = routesOf({
+    "tests/test_env.py": [
+      "from unittest import mock",
+      '@mock.patch("os.environ")',
+      "def test_env(patched):",
+      "    assert patched is not None",
+    ].join("\n"),
+  });
+  expect(routes, "a patched test must produce no route edge").toEqual([]);
+});
+
+// The marker gate is FILE-scoped, so a framework's OWN test file passes it: it
+// imports the framework AND is full of `@mock.patch("dotted.target")`, which the
+// decorator pattern reads as a PATCH route once normalizeRoutePath manufactures
+// a leading slash. The path literal is the per-decorator discriminator.
+test("inv-1: a marker-carrying framework TEST file fabricates no route from @mock.patch", () => {
+  const content = [
+    "from fastapi.testclient import TestClient",
+    "from unittest import mock",
+    "from app.main import app",
+    "",
+    "client = TestClient(app)",
+    "",
+    '@mock.patch("app.service.get_user")',
+    '@mock.patch("os.environ")',
+    '@mock.patch("a.b.c")',
+    "def test_get_user(abc, environ, get_user):",
+    '    assert client.get("/users/1").status_code == 200',
+  ].join("\n");
+
+  const { routes, calls } = extractFrameworkRouteEvidence(
+    "tests/test_users.py",
+    content,
+    new Map(),
+  );
+  expect(
+    routes,
+    "no /app.service.get_user, /os.environ or /a.b.c may be fabricated from a patched test",
+  ).toEqual([]);
+  expect(calls).toEqual([]);
+});
+
+test("inv-1: a relative decorator literal is not a route even under a framework marker", () => {
+  // The method-decorator branch (@app.get / @router.post / @router.websocket).
+  const methodDecorator = extractFrameworkRouteEvidence(
+    "app/tasks.py",
+    'from fastapi import FastAPI\napp = FastAPI()\n@app.get("items")\ndef items():\n    return []\n',
+    new Map(),
+  );
+  expect(methodDecorator.routes, "a real FastAPI/Flask/Starlette route path is absolute").toEqual([]);
+
+  // …and the route/api_route branch, which reads a DIFFERENT pattern and so
+  // needs its own gate. `@celery.route("cleanup", methods=[...])` in a file that
+  // happens to import flask is the shape that reaches it.
+  const routeDecorator = extractFrameworkRouteEvidence(
+    "app/jobs.py",
+    [
+      "from flask import Blueprint",
+      'bp = Blueprint("bp", __name__)',
+      '@scheduler.route("cleanup", methods=["GET"])',
+      "def cleanup():",
+      "    return None",
+    ].join("\n"),
+    new Map(),
+  );
+  expect(routeDecorator.routes, "the route/api_route branch is gated too").toEqual([]);
+
+  // Positive control for that same branch.
+  const absolute = extractFrameworkRouteEvidence(
+    "app/views.py",
+    [
+      "from flask import Blueprint",
+      'bp = Blueprint("bp", __name__)',
+      '@bp.route("/cleanup", methods=["POST"])',
+      "def cleanup():",
+      "    return None",
+    ].join("\n"),
+    new Map(),
+  );
+  expect(absolute.routes).toEqual([
+    { path: "/cleanup", handler: "app/views.py", method: "POST" },
+  ]);
+});
+
+// F1-CLASS: the same fabrication class in extractRegisteredRouteEvidence, which
+// was gated by neither language nor path shape.
+test("inv-1 class: registered-route detection is gated by source extension AND an absolute path literal", () => {
+  // Prose in a markdown file is not a route registration.
+  const prose = extractRegisteredRouteEvidence(
+    "docs/api.md",
+    'Call `router.post("/users", createUser)` to register the handler.\n',
+    new Map(),
+  );
+  expect(prose.routes, "documentation is not a route table").toEqual([]);
+  expect(prose.calls).toEqual([]);
+
+  // A relative literal in a real source file is not a route path either.
+  const relative = extractRegisteredRouteEvidence(
+    "src/queue.ts",
+    'router.post("users", createUser);\n',
+    new Map(),
+  );
+  expect(relative.routes).toEqual([]);
+
+  // Positive control: a genuine registration in a source file still lands.
+  const real = extractRegisteredRouteEvidence(
+    "src/routes/users.ts",
+    'router.post("/users", createUser);\n',
+    new Map(),
+  );
+  expect(real.routes).toEqual([
+    { path: "/users", handler: "src/routes/users.ts", method: "POST" },
+  ]);
+});
+
+test("inv-1 class: a markdown file contributes no fabricated route to the graph", () => {
+  const routes = routesOf({
+    "docs/api.md": '# API\n\n`app.get("/health", healthHandler)` returns 200.\n',
+  });
+  expect(routes, "no route edge may come out of prose").toEqual([]);
+});
+
+// inv-6: the extractor array-order invariant — output is derived from CONTENT, so
+// permuting the input array cannot move it.
+test("inv-6: uniqueSortedRoutes output is independent of input order", () => {
+  const input: RouteEdge[] = [
+    { method: "GET", path: "/b", handler: "h2" },
+    { method: "POST", path: "/a", handler: "h1" },
+    { method: "GET", path: "/a", handler: "h1" },
+    { method: "GET", path: "/a", handler: "h1" },
+    { path: "/c", handler: "h3" },
+  ];
+  const expected = JSON.stringify(uniqueSortedRoutes(input));
+
+  expect(JSON.stringify(uniqueSortedRoutes([...input].reverse())), "reversed input").toBe(expected);
+  expect(JSON.stringify(uniqueSortedRoutes([input[4], input[1], input[3], input[0], input[2]])), "shuffled input").toBe(expected);
+  expect(JSON.stringify(uniqueSortedRoutes([input[2], input[4], input[0], input[3], input[1]])), "another permutation").toBe(expected);
 });
 
 test("uniqueSortedRoutes dedupes by signature and sorts by path/handler/method", () => {

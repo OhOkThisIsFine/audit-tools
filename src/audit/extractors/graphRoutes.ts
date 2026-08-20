@@ -37,6 +37,14 @@ function routeSignature(route: RouteEdge): string {
   return `${route.method ?? ""}\0${route.path}\0${route.handler}`;
 }
 
+/**
+ * Dedupe by content signature, then sort by it. Both halves are content-derived,
+ * so a shuffled input array yields byte-identical output (the extractor
+ * array-order invariant). `routeSignature` covers EVERY field of `RouteEdge`, so
+ * two routes sharing a signature are equal and it does not matter which survives
+ * — a field added to `RouteEdge` must join the signature, or the survivor becomes
+ * a function of push order again.
+ */
 export function uniqueSortedRoutes(routes: RouteEdge[]): RouteEdge[] {
   const deduped = new Map<string, RouteEdge>();
   for (const route of routes) {
@@ -48,6 +56,30 @@ export function uniqueSortedRoutes(routes: RouteEdge[]): RouteEdge[] {
       a.handler.localeCompare(b.handler) ||
       (a.method ?? "").localeCompare(b.method ?? ""),
   );
+}
+
+const TS_LIKE_EXTENSION_PATTERN = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+
+/**
+ * Whether a decorator / registration argument is a ROUTE PATH literal at all.
+ *
+ * Every framework read through {@link addRouteEvidence} and the Python decorator
+ * branch writes an ABSOLUTE path — `"/users"` — or the wildcard form.
+ * {@link normalizeRoutePath} MANUFACTURES a leading slash, because the two
+ * frameworks whose sub-paths are legitimately relative (NestJS method decorators
+ * under an `@Controller` prefix, Angular route objects) need it — and that
+ * manufacture is exactly what disguised non-routes as routes: `@mock.patch(
+ * "os.environ")` became `/os.environ`, and prose `router.post("users", …)` became
+ * `/users`. So the decision is made on the RAW literal, before normalization.
+ */
+function isAbsoluteRoutePathLiteral(
+  literal: string | undefined,
+): literal is string {
+  if (literal === undefined) {
+    return false;
+  }
+  const trimmed = literal.trim();
+  return trimmed.startsWith("/") || trimmed === "*";
 }
 
 function normalizeRoutePath(routePath: string): string {
@@ -179,6 +211,14 @@ function addRouteEvidence(params: {
   handlerExpression?: string;
   bindings: Map<string, ImportBinding>;
 }): void {
+  // A registration argument that is not an absolute path is not a route: the
+  // `<object>.<verb>("literal", handler)` shape is common prose and common
+  // non-HTTP API (COR-74363fa8's class), and only the leading slash separates
+  // them mechanically.
+  if (!isAbsoluteRoutePathLiteral(params.routePath)) {
+    return;
+  }
+
   const method = params.method ? normalizeHttpMethod(params.method) : undefined;
   if (method && !ROUTE_METHODS.has(method)) {
     return;
@@ -215,9 +255,20 @@ export function extractRegisteredRouteEvidence(
   content: string,
   pathLookup: Map<string, string>,
 ): { calls: GraphEdge[]; routes: RouteEdge[] } {
-  const bindings = extractImportBindings(fromPath, content, pathLookup);
   const calls: GraphEdge[] = [];
   const routes: RouteEdge[] = [];
+
+  // The registration patterns below are JS/TS syntax — `app.get(…)`,
+  // `router.route({…})`. Read over any file at all, they fire on PROSE: a
+  // `router.post("/users", createUser)` line in docs/api.md became a route edge
+  // with the markdown file as its handler. Extension is the marker that fits
+  // this branch's semantics; the path-literal gate in `addRouteEvidence` is the
+  // other half.
+  if (!TS_LIKE_EXTENSION_PATTERN.test(normalizeGraphPath(fromPath).toLowerCase())) {
+    return { calls, routes };
+  }
+
+  const bindings = extractImportBindings(fromPath, content, pathLookup);
 
   ROUTE_REGISTRATION_PATTERN.lastIndex = 0;
   for (const match of content.matchAll(ROUTE_REGISTRATION_PATTERN)) {
@@ -366,6 +417,25 @@ const PY_ROUTE_DECORATOR_PATTERN =
   /@\s*[A-Za-z_]\w*\s*\.\s*(api_route|route)\s*\(\s*["']([^"']+)["']([\s\S]{0,200}?)\)/g;
 const PY_METHODS_LIST_PATTERN = /methods\s*=\s*\[([^\]]*)\]/;
 const PY_METHOD_LITERAL_PATTERN = /["']([A-Za-z]+)["']/g;
+/**
+ * Positive Python web-framework marker — the gate the two decorator patterns
+ * above run behind. `@<object>.<verb>("literal")` is not a route shape on its
+ * own: the ubiquitous test idiom `@mock.patch("os.environ")` matches it exactly,
+ * so scanning every `.py` file fabricated a route (and a route node) out of every
+ * patched test in a repo (COR-74363fa8). A file therefore qualifies only by
+ * importing a web framework or by constructing one of its app/router objects —
+ * the same positive-marker rule the NestJS and Angular branches already use.
+ * Extension alone is never a marker.
+ *
+ * This gate is FILE-scoped, so it cannot separate a framework's routes from a
+ * framework's own tests; {@link isAbsoluteRoutePathLiteral} is the per-decorator
+ * half that does. KNOWN FALSE NEGATIVE, accepted: a routes module that imports
+ * its router from a sibling (`from .deps import router`) carries no marker, so
+ * its real routes are dropped — the leads-not-verdicts trade, missing evidence
+ * over fabricated evidence.
+ */
+const PY_FRAMEWORK_MARKER_PATTERN =
+  /\b(?:from|import)\s+(?:fastapi|flask|starlette|quart|sanic|litestar|falcon|bottle|tornado|aiohttp|django)\b|\b(?:FastAPI|APIRouter|Flask|Blueprint|Starlette|Quart|Sanic|Litestar)\s*\(/;
 const ANGULAR_FILE_MARKER_PATTERN =
   /\b(?:RouterModule|provideRouter|loadChildren|loadComponent)\b|:\s*Routes\b/;
 const ANGULAR_ROUTE_OBJECT_PATTERN =
@@ -376,7 +446,6 @@ const ANGULAR_COMPONENT_PATTERN =
   /\b(?:component|loadComponent)\s*:\s*([A-Za-z_$][\w$]*)/;
 const ANGULAR_LAZY_IMPORT_PATTERN =
   /\b(?:loadChildren|loadComponent)\s*:[\s\S]*?import\s*\(\s*["']([^"']+)["']\s*\)/;
-const TS_LIKE_EXTENSION_PATTERN = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 
 /** Join route segments (controller prefix + method path) into one clean path. */
 function joinRouteSegments(...segments: string[]): string {
@@ -448,12 +517,19 @@ function collectPythonFrameworkRoutes(
   content: string,
   routes: RouteEdge[],
 ): void {
+  if (!PY_FRAMEWORK_MARKER_PATTERN.test(content)) {
+    return;
+  }
+
   // FastAPI / Starlette: @app.get("/x"), @router.post("/y"), @router.websocket("/ws")
   PY_DECORATOR_METHOD_PATTERN.lastIndex = 0;
   for (const match of content.matchAll(PY_DECORATOR_METHOD_PATTERN)) {
     const verb = match[1];
     const routePath = match[2];
-    if (!verb || !routePath) continue;
+    // The marker gate is FILE-scoped, so a framework's own TEST file passes it
+    // while still being full of `@mock.patch("app.service.get_user")`. The path
+    // literal is the per-DECORATOR discriminator: a real route path is absolute.
+    if (!verb || !isAbsoluteRoutePathLiteral(routePath)) continue;
     const method = verb.toUpperCase();
     routes.push({
       path: normalizeRoutePath(routePath),
@@ -466,7 +542,7 @@ function collectPythonFrameworkRoutes(
   PY_ROUTE_DECORATOR_PATTERN.lastIndex = 0;
   for (const match of content.matchAll(PY_ROUTE_DECORATOR_PATTERN)) {
     const routePath = match[2];
-    if (!routePath) continue;
+    if (!isAbsoluteRoutePathLiteral(routePath)) continue;
     const methods = pythonRouteMethods(match[3] ?? "");
     const path = normalizeRoutePath(routePath);
     if (methods.length === 0) {

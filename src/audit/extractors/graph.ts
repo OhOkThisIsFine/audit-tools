@@ -68,7 +68,9 @@ export interface BuildGraphBundleOptions {
    * cached contribution is reused only while BOTH the global `path_lookup_hash`
    * still matches (no file added/removed/disposition-changed → import resolution and
    * the cross-file heuristics are unaffected) AND that file's `content_key` is
-   * unchanged. Any drift falls back to a fresh extraction (fail-safe).
+   * unchanged — the key covers the content hash, whether content was AVAILABLE, and
+   * the cache-format version (see {@link graphEdgeCacheKey}). Any drift, or an entry
+   * whose shape does not validate, falls back to a fresh extraction (fail-safe).
    */
   priorEdgeCache?: GraphEdgeCache;
   /**
@@ -90,7 +92,12 @@ export interface PerFileGraphContribution {
   metrics?: NodeMetrics[string];
 }
 
-/** A cache entry: the file's content key + its per-file contribution. */
+/**
+ * A cache entry: the file's content key + its per-file contribution. The key is
+ * minted by {@link graphEdgeCacheKey} and is the ONLY thing reuse is decided on
+ * (beyond the cache-wide `path_lookup_hash`), so everything that changes what a
+ * contribution contains must be encoded in it.
+ */
 export interface GraphEdgeCacheEntry {
   content_key: string;
   contribution: PerFileGraphContribution;
@@ -195,11 +202,47 @@ function clampConfidence(value: unknown, fallback: number): number {
     : fallback;
 }
 
-function uniqueSortedEdges(edges: GraphEdge[]): GraphEdge[] {
+/** A stated confidence, or 0 for an edge that never stated one. */
+function edgeConfidence(edge: GraphEdge): number {
+  return typeof edge.confidence === "number" ? edge.confidence : 0;
+}
+
+/**
+ * Which of two edges sharing a signature survives dedupe. STRONGEST FIRST —
+ * the merge seam must never absorb downward, or a high-confidence analyzer
+ * contribution would be silently replaced by a weak heuristic that happens to
+ * name the same (from, to, kind). Canonical serialization breaks a genuine tie
+ * and nothing else, so the result stays independent of input order.
+ */
+function survivesDedupe(candidate: GraphEdge, incumbent: GraphEdge): boolean {
+  const candidateConfidence = edgeConfidence(candidate);
+  const incumbentConfidence = edgeConfidence(incumbent);
+  if (candidateConfidence !== incumbentConfidence) {
+    return candidateConfidence > incumbentConfidence;
+  }
+  return stableStringify(candidate) < stableStringify(incumbent);
+}
+
+/**
+ * Dedupe by content signature, then sort by it — both halves content-derived, so
+ * a shuffled input array yields byte-identical output (the extractor array-order
+ * invariant).
+ *
+ * The signature is (from, to, kind), which does NOT cover `direction` /
+ * `confidence` / `reason`: two extractors can contribute the same edge with
+ * different provenance. Keeping "whichever arrived last" made the surviving
+ * payload a function of PUSH ORDER; {@link survivesDedupe} decides it by content
+ * instead. Serialization runs only on a collision.
+ */
+export function uniqueSortedEdges(edges: GraphEdge[]): GraphEdge[] {
   const deduped = new Map<string, GraphEdge>();
   for (const edge of edges) {
     if (edge.from === edge.to) continue;
-    deduped.set(edgeSignature(edge), edge);
+    const signature = edgeSignature(edge);
+    const incumbent = deduped.get(signature);
+    if (incumbent === undefined || survivesDedupe(edge, incumbent)) {
+      deduped.set(signature, edge);
+    }
   }
   return [...deduped.values()].sort(
     (a, b) =>
@@ -708,7 +751,7 @@ function extractPerFileContribution(
 
   const fileRoutes: RouteEdge[] = [];
   let metrics: NodeMetrics[string] | undefined;
-  if (content) {
+  if (hasExtractableContent(content)) {
     extractContentEdgesForFile(filePath, content, pathLookup, local, fileRoutes);
     metrics = computeNodeMetricsForFile(filePath, content);
   }
@@ -730,6 +773,95 @@ function extractPerFileContribution(
     routes: local.routes,
     metrics,
   };
+}
+
+/**
+ * Version tag carried inside every cache key. Bump it whenever the MEANING of a
+ * key or of a cached contribution changes: an entry written under an older tag can
+ * never equal a key minted now, so a stale cache degrades to a full re-extraction
+ * (fail-safe) instead of replaying contributions built under different rules.
+ */
+export const GRAPH_EDGE_CACHE_KEY_VERSION = "v2";
+
+/**
+ * The ONE definition of "this file's content was available to the extractors".
+ * The cache key and `extractPerFileContribution`'s own branch must agree on it:
+ * two predicates that merely happen to coincide (`content !== undefined` beside
+ * `if (content)`) would disagree for an empty file, keying a degraded
+ * contribution as a content-ful one.
+ */
+function hasExtractableContent(content: string | undefined): content is string {
+  return content !== undefined && content.length > 0;
+}
+
+/**
+ * The per-file cache key: the file's content hash AND whether its content was
+ * actually available when the contribution was built.
+ *
+ * `extractPerFileContribution` silently degrades to heuristics + a fallback route
+ * when content is undefined, and a build can be content-free for a whole tree (no
+ * `fileContents` at all) or for one file (unreadable, oversized, or filtered out
+ * of the read pass). Keyed on the content hash alone, that degraded contribution
+ * was indistinguishable from the real one and was replayed against a later build
+ * that DID have the content — permanently dropping that file's import / reference
+ * / call edges and its node metrics, with no signal (COR-11e067ab). Availability
+ * is part of the key, so the two can never be mistaken for each other and each is
+ * reused only by a build in the same state.
+ */
+function graphEdgeCacheKey(contentHash: string, contentAvailable: boolean): string {
+  return `${GRAPH_EDGE_CACHE_KEY_VERSION}:${contentAvailable ? "content" : "no-content"}:${contentHash}`;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** An array in which EVERY element carries the fields the build will read. */
+function isArrayOf(value: unknown, isElement: (item: unknown) => boolean): boolean {
+  return Array.isArray(value) && value.every(isElement);
+}
+
+function isGraphEdgeShape(value: unknown): boolean {
+  return isPlainObject(value) && typeof value.from === "string" && typeof value.to === "string";
+}
+
+function isRouteEdgeShape(value: unknown): boolean {
+  return (
+    isPlainObject(value) &&
+    typeof value.path === "string" &&
+    typeof value.handler === "string"
+  );
+}
+
+/**
+ * Whether a prior entry may be replayed for `expectedKey`. The cache is read back
+ * from a JSON file that nothing schema-validates, so its shape is untrusted: a
+ * truncated, hand-edited, or older-format entry must fall back to a fresh
+ * extraction rather than corrupt the build.
+ *
+ * The check reaches per ELEMENT, not just per array, because that is where the
+ * damage lands: a `null` inside `references` crashes the dedupe pass reading
+ * `edge.from`, and a non-object `metrics` is copied verbatim into the persisted
+ * `node_metrics` artifact, where it becomes a downstream consumer's problem
+ * rather than this build's.
+ */
+function isReusableCacheEntry(
+  entry: GraphEdgeCacheEntry | undefined,
+  expectedKey: string,
+): boolean {
+  if (!entry || typeof entry !== "object" || entry.content_key !== expectedKey) {
+    return false;
+  }
+  const contribution = entry.contribution as PerFileGraphContribution | undefined;
+  return (
+    isPlainObject(contribution) &&
+    isArrayOf(contribution.imports, isGraphEdgeShape) &&
+    isArrayOf(contribution.calls, isGraphEdgeShape) &&
+    isArrayOf(contribution.references, isGraphEdgeShape) &&
+    isArrayOf(contribution.heuristics, isGraphEdgeShape) &&
+    isArrayOf(contribution.routes, isRouteEdgeShape) &&
+    (contribution.metrics === undefined || isPlainObject(contribution.metrics))
+  );
 }
 
 /**
@@ -902,17 +1034,21 @@ export function buildGraphBundle(
     }
 
     const content = options.fileContents?.[file.path];
-    // content_key is a REAL content hash only. A size-based fallback would treat
-    // equal-byte-length-but-different content as a cache hit (an equal-size edit
-    // would be falsely reused), so a file with no content hash is NEVER cached or
-    // reused — it always re-extracts (fail-safe). The cache thus stays sound
+    // The key is built from a REAL content hash only. A size-based fallback would
+    // treat equal-byte-length-but-different content as a cache hit (an equal-size
+    // edit would be falsely reused), so a file with no content hash is NEVER cached
+    // or reused — it always re-extracts (fail-safe). The cache thus stays sound
     // regardless of whether the upstream manifest enabled hashing (auditor-agnostic
     // robustness: never rely on the caller having passed hash_files).
     const contentHash = file.hash;
-    const cached = contentHash !== undefined ? reusableEntries?.[file.path] : undefined;
+    const cacheKey =
+      contentHash === undefined
+        ? undefined
+        : graphEdgeCacheKey(contentHash, hasExtractableContent(content));
+    const cached = cacheKey !== undefined ? reusableEntries?.[file.path] : undefined;
     const contribution =
-      cached && cached.content_key === contentHash
-        ? cached.contribution
+      cacheKey !== undefined && isReusableCacheEntry(cached, cacheKey)
+        ? cached!.contribution
         : extractPerFileContribution(file.path, content, pathLookup);
 
     acc.imports.push(...contribution.imports);
@@ -923,8 +1059,8 @@ export function buildGraphBundle(
     if (contribution.metrics) {
       nodeMetrics[file.path] = contribution.metrics;
     }
-    if (options.edgeCacheSink && contentHash !== undefined) {
-      freshEntries[file.path] = { content_key: contentHash, contribution };
+    if (options.edgeCacheSink && cacheKey !== undefined) {
+      freshEntries[file.path] = { content_key: cacheKey, contribution };
     }
   }
 

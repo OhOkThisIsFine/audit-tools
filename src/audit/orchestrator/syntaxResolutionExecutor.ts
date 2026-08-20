@@ -6,17 +6,26 @@ import {
   type ExternalAnalyzerResultItem,
   type ExternalAnalyzerToolStatus,
 } from "audit-tools/shared";
+import {
+  EXTERNAL_ANALYZER_STATUS_CLASSIFICATION,
+  isNonCleanAnalyzerCoverage,
+} from "../../shared/analyzers/types.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveNodeTool, runFirstAvailableCommand } from "./localCommands.js";
 
-const ESLINT_CONFIG_FILES = [
+/** Flat config — the only form ESLint 9+ discovers, and readable by 8.21+ as well. */
+const FLAT_ESLINT_CONFIG_FILES = [
   "eslint.config.js",
   "eslint.config.mjs",
   "eslint.config.cjs",
   "eslint.config.ts",
   "eslint.config.mts",
   "eslint.config.cts",
+];
+
+/** Legacy `.eslintrc*` config — NOT read by ESLint 9+, whatever the file says. */
+const LEGACY_ESLINT_CONFIG_FILES = [
   ".eslintrc",
   ".eslintrc.js",
   ".eslintrc.cjs",
@@ -24,6 +33,13 @@ const ESLINT_CONFIG_FILES = [
   ".eslintrc.yml",
   ".eslintrc.yaml",
 ];
+
+/**
+ * The major in which flat config became the default: ESLint 9 stopped reading
+ * `.eslintrc*` and removed `--ext` (flat config discovers its own files, and the
+ * flag is rejected as an unrecognized option).
+ */
+const FLAT_CONFIG_ESLINT_MAJOR = 9;
 
 const TSCONFIG_FILES = [
   "tsconfig.json",
@@ -35,16 +51,56 @@ function hasTypeScriptConfig(root: string): boolean {
   return TSCONFIG_FILES.some((file) => existsSync(join(root, file)));
 }
 
-function hasEslintConfig(root: string): boolean {
-  if (ESLINT_CONFIG_FILES.some((file) => existsSync(join(root, file)))) {
-    return true;
+/**
+ * The major version of the eslint the AUDITED repo actually installs, read from
+ * its own `node_modules/eslint/package.json`. `undefined` when no repo-local
+ * eslint is installed (the run would fall back to whatever is on PATH, whose
+ * version is unknowable without spawning it).
+ */
+function readInstalledEslintMajor(root: string): number | undefined {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(join(root, "node_modules", "eslint", "package.json"), "utf8"),
+    ) as { version?: unknown };
+    if (typeof manifest.version !== "string") {
+      return undefined;
+    }
+    const major = Number.parseInt(manifest.version.replace(/^\D*/, ""), 10);
+    return Number.isFinite(major) ? major : undefined;
+  } catch {
+    return undefined;
   }
+}
 
+/**
+ * Whether the installed eslint still reads legacy `.eslintrc*` config and accepts
+ * `--ext`. An UNKNOWN major is treated as modern: omitting `--ext` on an old
+ * eslint merely narrows the scanned file set, while passing it to a modern one
+ * produces no output at all, and believing a legacy config is live under a modern
+ * eslint reports a lint run that never happened.
+ */
+function readsLegacyEslintConfig(major: number | undefined): boolean {
+  return major !== undefined && major < FLAT_CONFIG_ESLINT_MAJOR;
+}
+
+/**
+ * The eslint argv for the installed major. `--ext` was removed in ESLint 9 and is
+ * a hard "unrecognized option" there, which kills the whole JSON run and lands it
+ * on `parse_error` — i.e. lint extraction failed on every flat-config repo,
+ * including this one (COR-743d2837).
+ */
+export function eslintCommandArgs(major: number | undefined): string[] {
+  return readsLegacyEslintConfig(major)
+    ? [".", "--ext", ".ts,.js,.tsx,.jsx", "--format", "json"]
+    : [".", "--format", "json"];
+}
+
+/** Whether the repo's `package.json` carries a legacy inline `eslintConfig` key. */
+function hasPackageJsonEslintConfig(root: string): boolean {
   const packageJsonPath = join(root, "package.json");
   if (!existsSync(packageJsonPath)) {
     return false;
   }
-
   try {
     const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
       eslintConfig?: unknown;
@@ -53,6 +109,51 @@ function hasEslintConfig(root: string): boolean {
   } catch {
     return false;
   }
+}
+
+export interface EslintConfigState {
+  /** True only when a config the INSTALLED eslint actually reads is present. */
+  runnable: boolean;
+  /** Why no run is possible. Always set, and non-empty, when `runnable` is false. */
+  skip_reason?: string;
+  /** The repo-local eslint major, when one is installed. */
+  major?: number;
+}
+
+/**
+ * Decide whether eslint can produce coverage for this repo, era-aware.
+ *
+ * A legacy `.eslintrc*` (or an inline `package.json#eslintConfig`) is a config
+ * file, but under ESLint 9+ it is one nothing reads — treating its presence as
+ * "lint is runnable" invokes a tool that cannot possibly report findings, which
+ * is the success-shaped-empty failure this contract forbids. The skip carries a
+ * reason so "no config at all" and "config the installed eslint ignores" are
+ * distinguishable at the status record, never both silently zero findings.
+ */
+export function resolveEslintConfigState(root: string): EslintConfigState {
+  const major = readInstalledEslintMajor(root);
+  const base = major === undefined ? {} : { major };
+
+  if (FLAT_ESLINT_CONFIG_FILES.some((file) => existsSync(join(root, file)))) {
+    return { ...base, runnable: true };
+  }
+
+  const hasLegacyConfig =
+    LEGACY_ESLINT_CONFIG_FILES.some((file) => existsSync(join(root, file))) ||
+    hasPackageJsonEslintConfig(root);
+  if (!hasLegacyConfig) {
+    return { ...base, runnable: false, skip_reason: "no eslint configuration found" };
+  }
+
+  return readsLegacyEslintConfig(major)
+    ? { ...base, runnable: true }
+    : {
+        ...base,
+        runnable: false,
+        skip_reason:
+          `only legacy .eslintrc-style config found; the installed eslint ` +
+          `(major ${major ?? "unknown"}) reads flat eslint.config.* only`,
+      };
 }
 
 function snippet(value: string): string {
@@ -163,29 +264,29 @@ function runEslint(root: string): {
   status: ExternalAnalyzerToolStatus;
 } {
   const results: ExternalAnalyzerResultItem[] = [];
-  if (!hasEslintConfig(root)) {
+  const configState = resolveEslintConfigState(root);
+  if (!configState.runnable) {
     return {
       results,
       status: {
         tool: "eslint",
         resolved: false,
         status: "skipped",
+        error: configState.skip_reason,
       },
     };
   }
 
+  const args = eslintCommandArgs(configState.major);
+  const display = ["eslint", ...args].join(" ");
   const command = runFirstAvailableCommand(root, [
     ...resolveNodeTool(
       root,
       join("node_modules", "eslint", "bin", "eslint.js"),
-      [".", "--ext", ".ts,.js,.tsx,.jsx", "--format", "json"],
-      "eslint . --ext .ts,.js,.tsx,.jsx --format json",
+      args,
+      display,
     ),
-    {
-      command: "eslint",
-      args: [".", "--ext", ".ts,.js,.tsx,.jsx", "--format", "json"],
-      display: "eslint . --ext .ts,.js,.tsx,.jsx --format json",
-    },
+    { command: "eslint", args, display },
   ]);
   if (!command || command.error) {
     return commandErrorResult("eslint", command, results);
@@ -302,8 +403,14 @@ export function runSyntaxResolutionExecutor(
     results: deduped,
     tool_statuses: toolStatuses,
   };
+  // A diagnostic is any tool run that produced no trustworthy coverage. That
+  // question is answered by the SINGLE exported status classification, never by a
+  // second hand-copied list of status strings here: a member added to the shared
+  // vocabulary (`checksum_mismatch` was) silently fell outside a private copy and
+  // was read as "the run was fine". Widening the union without classifying the new
+  // member is a compile error at the shared map, so this consumer cannot drift.
   const diagnosticCount = toolStatuses.filter((status) =>
-    ["not_resolved", "spawn_error", "parse_error", "failed"].includes(status.status),
+    isNonCleanAnalyzerCoverage(EXTERNAL_ANALYZER_STATUS_CLASSIFICATION[status.status]),
   ).length;
 
   return {
