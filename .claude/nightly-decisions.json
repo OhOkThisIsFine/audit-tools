@@ -1464,5 +1464,19 @@
     "subject": "Work blocks no longer bound anything: 98.3% of one audit's findings landed in a single block — four fixes are characterized and it needs your pick",
     "path": "src/shared/decompose/contentCoherence.ts",
     "decided_at": "2026-08-19T20:07:48.927Z"
+  },
+  "e2ada39929a0adb7": {
+    "disposition": "settled",
+    "answer": "Approved — build the durable fix: buildNodeWriteScopeResolver reads finalized_module_contracts alongside module_decomposition, and resolve() unions the owning module contract's declared write targets (both outputs and side_effects) into the node's scope instead of returning the node-declared files early. Nine manual widenings in one wave is the bug signal; the manual step goes away.",
+    "subject": "A DAG node's write scope ignores the module contract's declared write targets — four manual recoveries in one wave; approve deriving them instead",
+    "path": "src/remediate/steps/contractPipeline.ts",
+    "decided_at": "2026-08-20T17:27:05.027Z"
+  },
+  "e406c716c4a17524": {
+    "disposition": "settled",
+    "answer": "Add the veto clause — amend the own-vs-acquire bullet in CLAUDE.md so it states that a recorded operator 'declined' decision (and an analyzer setting of 'skip') refuses the spawn even for a curated DEFAULT-set tool, both checked before the default-set short-circuit. Do not restate the full admission ladder; that algorithm stays single-homed in code.",
+    "subject": "instruction-file edit: CLAUDE.md describes the DEFAULT analyzer set as admitted without a token, but an operator decline now vetoes it too",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-08-20T17:27:05.129Z"
   }
 }

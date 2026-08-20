@@ -6,6 +6,13 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **`intentOrdering` is settled: WIRE it, not delete (owner decision 2026-08-20).** Call
+  `applyIntentOrdering` where the plan's findings and blocks are finalized, reading the
+  interpreted intent already persisted at the checkpoint — closes a write-only data flow
+  (`src/remediate/intent/intentOrdering.ts`, flagged as a dead-code lead in the 2026-07-28
+  slimdown review). Lands with CP-NODE-15, whose scope owns the finalization file. No open
+  question remains, only the wiring.
+
 - **CP-NODE-6 is reviewed and BLOCKED on branch `wip/cp-node-6-blocked` (high).** The
   host-handoff ingestion substrate work (8 files, 27 obligations, whole suite green) is
   preserved at commit cdbdd05e, deliberately not on main; its attestation records a
@@ -30,10 +37,14 @@
   created with default modes; the privilege-boundary reasoning now written into the
   binary-acquisition module applies verbatim. (c) Three end-to-end CLI suites drive
   real acquisition with no cache dir pinned, so they write to the real home directory —
-  the single-point fix is pinning both cache env overrides in the vitest setup helper
-  `state-dir-setup.mjs` rather than per-suite discretion. (d) The bare-string consent
-  token is retired only additively; the scoped grant has no production producer until
-  the caller-side node lands.
+  same family as `tests/remediate/postinstall.test.ts` and
+  `tests/remediate/postinstall-contract.test.ts` (9 failures at hand-back, both green
+  alone: they install an OpenCode global command + permission scopes into home-based
+  config). Property: a suite's verdict must not depend on the real user home
+  directory's state — single-point fix is pinning the relevant home-rooted paths in
+  the vitest setup helper `state-dir-setup.mjs`, never per-suite discretion. (d) The
+  bare-string consent token is retired only additively; the scoped grant has no
+  production producer until the caller-side node lands.
 
 - **Staleness third-state residuals from the CP-NODE-10 review (low).** The `partial`
   presence classification exempts the nine map-declared leaves, including the
