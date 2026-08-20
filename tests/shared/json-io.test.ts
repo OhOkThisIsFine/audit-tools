@@ -149,3 +149,44 @@ test('NDJSON appender stays single-line per record (not reformatted)', async () 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// ── writeFileAtomic accepts Buffer as well as string, and is exported ─────────
+//
+// Exported because a rollback that restores bytes it captured earlier needs the
+// same atomicity every writer in this module already gets: a raw writeFile there
+// can be interrupted between truncate and the last byte, turning a rollback into
+// a truncation. Buffer rather than string so the restore is byte-for-byte and
+// never round-trips through an encoding.
+
+const { writeFileAtomic } = await import('../../src/shared/io/json.js');
+
+test('writeFileAtomic writes Buffer content byte-for-byte', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'json-io-atomic-'));
+  try {
+    const path = join(dir, 'restored.json');
+    // Bytes that do NOT survive a naive string round-trip: a lone high byte is
+    // not valid UTF-8, so a Buffer→string→Buffer path would replace it with
+    // U+FFFD. Byte-for-byte is the property, not "parses the same".
+    const bytes = Buffer.from([0x7b, 0x22, 0x61, 0x22, 0x3a, 0x31, 0x7d, 0x0a, 0xff]);
+    await writeFileAtomic(path, bytes);
+    expect(Buffer.compare(await readFile(path), bytes)).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('writeFileAtomic still writes string content as utf8, and replaces in place', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'json-io-atomic-'));
+  try {
+    const path = join(dir, 'replaced.json');
+    await writeFileAtomic(path, 'first\n');
+    await writeFileAtomic(path, 'second — with a non-ascii dash\n');
+    expect(await readFile(path, 'utf8')).toBe('second — with a non-ascii dash\n');
+    // The temp file is cleaned up: an atomic write must not leave debris beside
+    // its destination.
+    const { readdir } = await import('node:fs/promises');
+    expect((await readdir(dir)).sort()).toEqual(['replaced.json']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

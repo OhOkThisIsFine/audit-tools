@@ -83,13 +83,34 @@ export async function withFsRetry<T>(
   }
 }
 
-async function writeFileAtomic(path: string, content: string): Promise<void> {
+/**
+ * Write a file so a reader never observes a half-written one: temp file, then
+ * rename over the destination.
+ *
+ * `Buffer` as well as `string`, and EXPORTED, because a caller restoring bytes
+ * it captured earlier — a rollback putting back exactly what was there — needs
+ * the same atomicity every writer in this module already gets. A raw
+ * `writeFile` in that position can be interrupted between truncate and the last
+ * byte, which turns a rollback into a truncation: strictly worse than either
+ * outcome it was choosing between. Buffer rather than string specifically so the
+ * restore is byte-for-byte and never round-trips through an encoding.
+ */
+export async function writeFileAtomic(
+  path: string,
+  content: string | Buffer,
+): Promise<void> {
   await ensureParentDirectory(path);
   const temp = join(
     dirname(path),
     `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`,
   );
   try {
+    // The encoding applies to a string only; a Buffer is written verbatim, which
+    // is the whole point of accepting one.
+    // No string/Buffer branch: `fs.writeFile` ignores the encoding for a Buffer
+    // and writes its bytes verbatim, so one call serves both and a branch here
+    // would be decorative (a probe confirmed the byte-for-byte pin passes with
+    // and without it).
     await writeFile(temp, content, "utf8");
     // The temp name is unique per process+uuid, so only the final rename-over-
     // existing-destination is exposed to transient Windows lock errors.

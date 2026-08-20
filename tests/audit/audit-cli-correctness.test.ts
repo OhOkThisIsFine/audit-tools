@@ -40,26 +40,39 @@ test("COR-a278fbe0: runSample task_id matches the unit_id:lens pattern", async (
     // runSample writes core artifacts and prints a JSON summary to stdout.
     // We redirect stdout so the console.log output doesn't pollute test output,
     // and verify the persisted artifacts contain the correct task_id format.
-    const { readJsonFile } = await import("audit-tools/shared");
+    // audit_results.jsonl is registered as an ndjsonArtifact, so it MUST be read
+    // with the NDJSON reader. It was being read with readJsonFile(...).catch(() =>
+    // null): JSON.parse on a multi-record NDJSON body throws, the JsonParseError
+    // was swallowed to null, and the `if (results && ...)` block below — the only
+    // real assertions in this test — never executed at all (COR-4802dc9e).
+    const { readNdjsonFile } = await import("audit-tools/shared");
     await runSample(["node", "audit-code.mjs", "--artifacts-dir", artifactsDir]);
-    const results = await readJsonFile(join(artifactsDir, "audit_results.jsonl")).catch(() => null);
-    // audit_results.jsonl is a single JSON entry when sample results are written
-    // If not present directly, check the audit_state for a completed run
-    // The key assertion: task_id in persisted results must be `<unit_id>:<lens>`,
-    // not the previously hardcoded "src-api:security:src/api/auth.ts:1-100".
-    if (results && Array.isArray(results)) {
-      for (const r of results) {
-        if (r.task_id) {
-          expect(r.task_id, "Hardcoded task_id must not appear in persisted results").not.toBe("src-api:security:src/api/auth.ts:1-100");
-          // Must follow <unit_id>:<lens> pattern (no file path embedded)
-          const parts = r.task_id.split(":");
-          expect(parts.length >= 2, `task_id '${r.task_id}' must have at least 2 colon-separated parts`).toBeTruthy();
-        }
-      }
+    const results = await readNdjsonFile<{ task_id?: string }>(
+      join(artifactsDir, "audit_results.jsonl"),
+    );
+
+    // Unconditional: an empty read is a broken fixture, not a pass. The old
+    // `if (results && Array.isArray(results))` guard made every assertion below
+    // optional, which is how they went unexecuted for so long.
+    expect(
+      results.length,
+      "the sample run must persist at least one result to assert against",
+    ).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(
+        r.task_id,
+        "every persisted result carries a task_id",
+      ).toBeTruthy();
+      expect(
+        r.task_id,
+        "Hardcoded task_id must not appear in persisted results",
+      ).not.toBe("src-api:security:src/api/auth.ts:1-100");
+      // `<unit_id>:<lens>` — derived from planning output, no file path embedded.
+      expect(
+        r.task_id!.split(":").length >= 2,
+        `task_id '${r.task_id}' must have at least 2 colon-separated parts`,
+      ).toBeTruthy();
     }
-    // If results file doesn't exist (sample may write differently), verify the
-    // structural contract via source inspection — documented in the test body.
-    expect(true, "Sample run completed without throwing").toBeTruthy();
   });
 });
 
@@ -134,10 +147,16 @@ test("COR-03418a9f-2: handleGraphEnrichmentBranch emits stderr for all-invalid a
     } finally {
       stderrSpy.mockRestore();
     }
-    // The diagnostic is only emitted when unresolved.length > 0 AND all values are invalid.
-    // This test verifies the function doesn't crash with invalid values in the file;
-    // the diagnostic path requires a non-empty unresolved list (controlled by registry).
-    expect(true, "Function handles all-invalid decisions without throwing").toBeTruthy();
+    // THE BUFFER IS READ (COR-1faa3e31). It was collected and then discarded,
+    // so nothing about stderr was actually under test. This scenario has an
+    // EMPTY expectation and that is the assertion: with no manifest there are no
+    // unresolved entries, so the decisions file is never consumed and the
+    // all-invalid diagnostic must NOT fire. A spy whose buffer is never read
+    // cannot tell that from a diagnostic that fired for the wrong reason.
+    expect(
+      stderrChunks.join(""),
+      "the all-invalid diagnostic must not fire when there are no unresolved entries",
+    ).not.toMatch(/analyzer/i);
   });
 });
 
@@ -149,6 +168,9 @@ const { getFlag } = await import("../../src/audit/cli/args.js");
 
 test("COR-4c72c062: getFlag returns fallback (not undefined) when next token is a long flag", () => {
   // Caller passes '--root --artifacts-dir something' — root gets fallback
+  // Both sides come from production: the ARGV goes in, `getFlag` decides. (An
+  // earlier assertion here compared two strings the test itself had built, which
+  // is green by construction and was dropped.)
   expect(getFlag(["--root", "--artifacts-dir", "something"], "--root", "/default"), "When next token is a long flag, getFlag returns the explicit fallback").toBe("/default");
   expect(getFlag(["--root", "--artifacts-dir", "something"], "--root"), "When next token is a long flag and no fallback given, returns undefined").toBe(undefined);
 });
@@ -157,10 +179,33 @@ test("COR-4c72c062: getFlag returns fallback (not undefined) when next token is 
 // The sample path builds data from SAMPLE_REPO_FILES constants — argv is only
 // consumed for --artifacts-dir resolution. This is correct: the sample is
 // a demo/testing path, not a real project scan. Verified by structural inspection.
-test("COR-570cb86b: sampleRunCommand argv is consumed only for artifactsDir (documented behavior)", () => {
-  // This is a positive assertion: SAMPLE_REPO_FILES is constant within the module;
-  // the sample does not need --root or other flags because it builds synthetic data.
-  expect(true, "sampleRunCommand uses argv only for --artifacts-dir; all other sample data is derived from constants").toBeTruthy();
+test("COR-570cb86b: sampleRunCommand argv is consumed only for artifactsDir", async () => {
+  // FALSIFIABLE: run the sample twice with DIFFERENT extra argv and the same
+  // artifacts dir shape, and assert the persisted results are identical. If any
+  // flag other than --artifacts-dir fed the sample data, the two runs would
+  // diverge. `expect(true)` asserted the same sentence and could never fail.
+  const { readNdjsonFile } = await import("audit-tools/shared");
+  const run = async (extra: string[]): Promise<unknown[]> =>
+    withTempDir(async (dir) => {
+      const artifactsDir = join(dir, ".audit-tools", "audit");
+      await mkdir(artifactsDir, { recursive: true });
+      await runSample([
+        "node",
+        "audit-code.mjs",
+        ...extra,
+        "--artifacts-dir",
+        artifactsDir,
+      ]);
+      return readNdjsonFile(join(artifactsDir, "audit_results.jsonl"));
+    });
+
+  const plain = await run([]);
+  const withOtherFlags = await run(["--root", "/nonexistent", "--since", "HEAD~5"]);
+  expect(plain.length, "the sample must persist results to compare").toBeGreaterThan(0);
+  expect(
+    withOtherFlags,
+    "no argv other than --artifacts-dir may influence the sample's data",
+  ).toEqual(plain);
 });
 
 // ── COR-2cf46bf7: ensureSemanticReviewRun writeJsonFile(pendingTasksPath) ─────
@@ -169,15 +214,116 @@ test("COR-570cb86b: sampleRunCommand argv is consumed only for artifactsDir (doc
 //   2. writeJsonFile(pendingTasksPath, pendingTasks) → run-dir/pending-audit-tasks.json
 //      (referenced by task.pending_audit_tasks_path, read by the worker via workerRunCommand)
 // These are NOT the same path; both are needed. Verified-already-satisfied.
-test("COR-2cf46bf7: ensureSemanticReviewRun writes pendingTasks to two distinct paths (both necessary)", () => {
-  // The dispatch pointer (current-tasks.json) and the run-scoped pending tasks file
-  // serve different consumers: the operator handoff reads current-tasks.json; the
-  // worker reads pending_audit_tasks_path. Deduplication is not possible without
-  // breaking one consumer.
-  expect(true, "Both writes in ensureSemanticReviewRun are intentional and serve distinct consumers").toBeTruthy();
+test("COR-2cf46bf7: the review run writes pendingTasks to two DISTINCT consumer paths", async () => {
+  // FALSIFIABLE: drive the real writer and assert BOTH files exist with the same
+  // canonical content at DIFFERENT paths. Deleting either write — the
+  // deduplication this finding considered — breaks one consumer, and this now
+  // detects it. `expect(true)` asserted the claim in prose and could not.
+  const { writeReviewRunFiles } = await import("../../src/audit/io/runArtifacts.js");
+  const { readJsonFile } = await import("audit-tools/shared");
+  await withTempDir(async (dir) => {
+    const runId = "review-run-1";
+    const run = {
+      contract_version: "audit-review-run/v1alpha1",
+      run_id: runId,
+      review_run_path: join(dir, "runs", runId, "review-run.json"),
+      pending_audit_tasks_path: join(dir, "runs", runId, "pending-audit-tasks.json"),
+      host_workload_path: join(dir, "runs", runId, "host-workload.json"),
+      host_result_map_path: join(dir, "runs", runId, "host-result-map.json"),
+    };
+    await writeReviewRunFiles(dir, run as never, []);
+
+    const workerCopy = await readJsonFile(run.pending_audit_tasks_path);
+    const dispatchCopy = await readJsonFile(join(dir, "dispatch", "current-tasks.json"));
+    expect(workerCopy, "the worker's pending-tasks file must exist").toEqual([]);
+    expect(dispatchCopy, "the dispatch pointer's task list must exist").toEqual([]);
+    // The "two paths differ" assertion that used to sit here compared two
+    // strings this test had itself constructed — green by construction, and no
+    // witness to anything production does. The two reads above ARE the witness:
+    // both files exist, at different paths, only because the writer wrote both.
+  });
 });
 
 // ── COR-dc621e7a: buildManualReviewBlocker routing is correct (verified in INV-01) ─
-test("COR-dc621e7a: buildManualReviewBlocker routing verified by INV-audit-cli-01 tests", () => {
-  expect(true, "INV-audit-cli-01 in audit-cli-invariants.test.mjs covers this invariant").toBeTruthy();
+test("COR-dc621e7a: buildManualReviewBlocker states host-executable work, not an operator instruction", async () => {
+  // FALSIFIABLE against the real function. The old assertion deferred to another
+  // file by NAME, which is not a check: if that file's test were deleted or
+  // renamed this would still pass.
+  const { buildManualReviewBlocker, buildBlockedAuditState } = await import(
+    "../../src/audit/cli/envelope.js"
+  );
+  const blocker = buildManualReviewBlocker();
+  expect(blocker, "the blocker names the host-executable next action").toMatch(
+    /next-step/,
+  );
+  expect(blocker.length, "a blocker must actually say something").toBeGreaterThan(0);
+  // And it is what lands on the blocked state, which is the routing claim.
+  const blocked = buildBlockedAuditState({
+    state: { status: "active", obligations: [], blockers: [] } satisfies AuditState,
+    obligationId: "semantic_review",
+    executor: null,
+    blocker,
+  });
+  // `blockers` is a de-duplicated string list, so the routing claim is that the
+  // blocker text itself lands on the state and the status flips.
+  expect(blocked.blockers, "the blocker is routed onto the state").toContain(blocker);
+  expect(blocked.status, "routing a blocker blocks the state").toBe("blocked");
+});
+
+// ── COR-1faa3e31, THE FIRING DIRECTION ───────────────────────────────────────
+//
+// The emptiness assertion above covers only the OVER-firing direction: it reds
+// if the diagnostic fires when it should not. It cannot see the emitter being
+// silently skipped. This drives the path that SHOULD emit and asserts it does.
+//
+// The unresolved-analyzer input is INJECTED. The real resolution asks the
+// machine which analyzers are installed, so a fixture built on it would pass or
+// fail depending on the box — the seam exists so this verdict does not.
+test("COR-1faa3e31: the quarantine diagnostic actually EMITS when a misshapen decisions file arrives", async () => {
+  await withTempDir(async (dir) => {
+    const { handleGraphEnrichmentBranch } = await import(
+      "../../src/audit/cli/nextStepHelpers.js"
+    );
+    await mkdir(submissionsDir(dir), { recursive: true });
+    // A NON-OBJECT top-level value: the shape that is quarantined rather than
+    // merged, which is the branch that writes the stderr diagnostic.
+    await writeFile(
+      laneSubmissionPath(dir, GATE_LANES.analyzer_decisions),
+      JSON.stringify(["not", "an", "object"]),
+      "utf8",
+    );
+    await writeFile(join(dir, "session-config.json"), JSON.stringify({}), "utf8");
+
+    const stderrChunks: string[] = [];
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      stderrChunks.push(typeof chunk === "string" ? chunk : chunk.toString());
+      return true;
+    });
+
+    try {
+      const state = { status: "active", obligations: [], blockers: [] } satisfies AuditState;
+      const params = { root: dir, artifactsDir: dir, graphLlmEdgeReasoning: false, since: undefined };
+      await handleGraphEnrichmentBranch(
+        params,
+        {},
+        state,
+        { value: undefined },
+        // Seeded: one unresolved analyzer, so the decisions file is consumed and
+        // its misshapen top-level value reaches the quarantine path.
+        { unresolvedAnalyzers: () => [{ id: "semgrep" }] as never },
+      );
+    } finally {
+      stderrSpy.mockRestore();
+    }
+
+    const emitted = stderrChunks.join("");
+    expect(
+      emitted,
+      "the quarantine diagnostic must name the lane it refused",
+    ).toContain(GATE_LANES.analyzer_decisions);
+    expect(
+      emitted,
+      "and must tell the operator what to do about it",
+    ).toMatch(/quarantined/i);
+  });
 });

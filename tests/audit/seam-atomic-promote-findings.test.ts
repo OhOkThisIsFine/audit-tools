@@ -336,3 +336,262 @@ test("F: promoteFinalAuditReport is a function accepting { artifactsDir } param"
   // Arity: params object is first arg; options is second (optional)
   expect(promoteFinalAuditReport.length <= 2, "promoteFinalAuditReport must accept at most 2 arguments").toBeTruthy();
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H. NOTHING IS DELETED THAT WAS NOT FIRST ARCHIVED.
+//
+// The recursive delete used to be unconditional: a failed audit-findings.json
+// copy was a warn() with no effect on the result, so the machine contract could
+// be destroyed while the call returned { promoted: true, cleaned: true }. A
+// caller had no way to tell a clean promotion from a lossy one.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Seed a complete artifacts dir: report, findings, feedback, ledger. */
+async function seedArtifacts(root: string): Promise<string> {
+  const artifactsDir = join(root, "audit");
+  await mkdir(join(artifactsDir, "submissions"), { recursive: true });
+  await writeFile(join(artifactsDir, AUDIT_REPORT_FILENAME), "# Audit Report\n", "utf8");
+  await writeFile(
+    join(artifactsDir, AUDIT_FINDINGS_FILENAME),
+    JSON.stringify({ contract_version: "audit-findings/v1" }),
+    "utf8",
+  );
+  await writeFile(
+    join(artifactsDir, "agent-feedback.jsonl"),
+    JSON.stringify({ kind: "friction", note: "worker said something" }) + "\n",
+    "utf8",
+  );
+  return artifactsDir;
+}
+
+test("H1: agent-feedback.jsonl is archived, and a complete promotion still reports clean", async () => {
+  await withTempDir("seam-promote-H1-", async (root) => {
+    const artifactsDir = await seedArtifacts(root);
+
+    const result = await promoteFinalAuditReport({ artifactsDir });
+
+    // POLARITY ONE: nothing failed, so the run is clean and says so.
+    expect(result.cleaned, "a complete archive still cleans up").toBe(true);
+    expect(result.unarchived, "a clean promotion names no loss").toBeUndefined();
+    // Worker-owned, append-only, and inside artifactsDir — so the rm destroys
+    // it. It had no archive step at all while the friction records and the
+    // ledger beside it both had one (DAT-4802dc9e).
+    expect(
+      await readFile(join(root, "audit-agent-feedback.jsonl"), "utf8"),
+      "the archived copy must carry the worker's records",
+    ).toContain("worker said something");
+  });
+});
+
+test("H2: a failed findings archive ABORTS the delete and reports the loss", async () => {
+  await withTempDir("seam-promote-H2-", async (root) => {
+    const artifactsDir = await seedArtifacts(root);
+    const warnings: string[] = [];
+
+    const result = await promoteFinalAuditReport(
+      { artifactsDir },
+      {
+        // Only the findings copy fails; everything else archives normally.
+        copy: (async (from: string, to: string, opts: unknown) => {
+          if (String(from).endsWith(AUDIT_FINDINGS_FILENAME)) {
+            throw new Error("simulated findings copy failure");
+          }
+          const { cp } = await import("node:fs/promises");
+          return cp(from as never, to as never, opts as never);
+        }) as never,
+        warn: (message: string) => warnings.push(message),
+      },
+    );
+
+    // POLARITY TWO. The source directory survives, because the only copy of the
+    // machine contract is still inside it.
+    expect(
+      (await stat(artifactsDir)).isDirectory(),
+      "the directory holding the unarchived file must NOT be deleted",
+    ).toBe(true);
+    expect(
+      await readFile(join(artifactsDir, AUDIT_FINDINGS_FILENAME), "utf8"),
+      "the unarchived machine contract must still be on disk",
+    ).toContain("audit-findings/v1");
+
+    // And the RESULT says so — { promoted: true, cleaned: true } would be a lie.
+    expect(result.cleaned).toBe(false);
+    expect(result.unarchived, "the loss must be nameable by the caller").toEqual([
+      expect.stringContaining(AUDIT_FINDINGS_FILENAME),
+    ]);
+    expect(result.warning).toContain(AUDIT_FINDINGS_FILENAME);
+    expect(warnings.join(" | ")).toContain(AUDIT_FINDINGS_FILENAME);
+  });
+});
+
+test("H3: the ledger is archived byte-for-byte and its unreadable lines are named", async () => {
+  await withTempDir("seam-promote-H3-", async (root) => {
+    const artifactsDir = await seedArtifacts(root);
+    // A valid event, a torn line, and a foreign-version line. The archive must
+    // be the BYTES — a re-serialization of the parsed events would silently drop
+    // the two lines the reader could not use, producing an archive cleaner than
+    // the run actually was.
+    const ledgerBody =
+      JSON.stringify({
+        contract_version: "submission-ledger-event/v1alpha1",
+        run_id: "r",
+        submission_id: "s",
+        lane: "l",
+        kind: "accepted",
+        recorded_at: "2026-08-20T00:00:00.000Z",
+      }) +
+      "\n" +
+      '{"contract_version":"submission-ledger-ev\n' +
+      JSON.stringify({ contract_version: "submission-ledger-event/v0", kind: "rejected" }) +
+      "\n";
+    await writeFile(
+      join(artifactsDir, "submissions", "submission-ledger.jsonl"),
+      ledgerBody,
+      "utf8",
+    );
+
+    const result = await promoteFinalAuditReport({ artifactsDir });
+
+    expect(
+      await readFile(join(root, "audit-submission-ledger.jsonl"), "utf8"),
+      "the archive is a byte copy, torn lines included",
+    ).toBe(ledgerBody);
+    expect(
+      result.ledger_dropped,
+      "a result that did not name the drops would describe a cleaner record than the bytes hold",
+    ).toEqual([
+      { line: 2, reason: "unparsable" },
+      { line: 3, reason: "schema_version_mismatch" },
+    ]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// I. AN ALL-DROPPED LEDGER STILL REACHES THE BUNDLE.
+//
+// `bundle.submission_ledger` was set only when `events.length > 0`. A ledger
+// whose every line is torn has events empty and dropped non-empty, so the field
+// was never set and the drop signal died on precisely the worst case: the run
+// whose record is least trustworthy looked identical to one that never drifted.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const { loadArtifactBundle } = await import("../../src/audit/io/artifacts.js");
+
+test("I1: a ledger of nothing but torn lines surfaces its drops in the bundle", async () => {
+  await withTempDir("seam-promote-I1-", async (root) => {
+    const artifactsDir = join(root, "audit");
+    await mkdir(join(artifactsDir, "submissions"), { recursive: true });
+    await writeFile(
+      join(artifactsDir, "submissions", "submission-ledger.jsonl"),
+      '{"contract_version":"submission-ledger-ev\n{"also torn\n',
+      "utf8",
+    );
+
+    const bundle = await loadArtifactBundle(artifactsDir);
+
+    // events is empty — correctly, nothing parsed — but that is NOT the same
+    // fact as "this run never drifted".
+    expect(bundle.submission_ledger).toBeUndefined();
+    expect(
+      bundle.submission_ledger_dropped,
+      "an unreadable ledger must not read as an absent one",
+    ).toEqual([
+      { line: 1, reason: "unparsable" },
+      { line: 2, reason: "unparsable" },
+    ]);
+  });
+});
+
+test("I2: a clean ledger sets the events field and leaves no drop field", async () => {
+  await withTempDir("seam-promote-I2-", async (root) => {
+    const artifactsDir = join(root, "audit");
+    await mkdir(join(artifactsDir, "submissions"), { recursive: true });
+    await writeFile(
+      join(artifactsDir, "submissions", "submission-ledger.jsonl"),
+      JSON.stringify({
+        contract_version: "submission-ledger-event/v1alpha1",
+        run_id: "r",
+        submission_id: "s",
+        lane: "l",
+        kind: "accepted",
+        recorded_at: "2026-08-20T00:00:00.000Z",
+      }) + "\n",
+      "utf8",
+    );
+
+    const bundle = await loadArtifactBundle(artifactsDir);
+    expect(bundle.submission_ledger).toHaveLength(1);
+    expect(bundle.submission_ledger_dropped).toBeUndefined();
+  });
+});
+
+test("H4: a failed LEDGER archive also aborts the delete (the archive set is one class)", async () => {
+  await withTempDir("seam-promote-H4-", async (root) => {
+    const artifactsDir = await seedArtifacts(root);
+    await writeFile(
+      join(artifactsDir, "submissions", "submission-ledger.jsonl"),
+      "{}\n",
+      "utf8",
+    );
+
+    const result = await promoteFinalAuditReport(
+      { artifactsDir },
+      {
+        copy: (async (from: string, to: string, opts: unknown) => {
+          if (String(from).endsWith("submission-ledger.jsonl")) {
+            const failure = new Error("EACCES: permission denied") as NodeJS.ErrnoException;
+            failure.code = "EACCES";
+            throw failure;
+          }
+          const { cp } = await import("node:fs/promises");
+          return cp(from as never, to as never, opts as never);
+        }) as never,
+        warn: () => {},
+      },
+    );
+
+    // The ledger is the ONE durable statement that a run drifted and was
+    // repaired. It used to warn and fall through, so the rm destroyed it.
+    expect(
+      (await stat(artifactsDir)).isDirectory(),
+      "the directory holding the unarchived ledger must NOT be deleted",
+    ).toBe(true);
+    expect(result.cleaned).toBe(false);
+    expect(result.unarchived?.join(" ")).toContain("submission ledger");
+  });
+});
+
+test("H5: a friction record that cannot be archived also aborts the delete", async () => {
+  await withTempDir("seam-promote-H5-", async (root) => {
+    const artifactsDir = await seedArtifacts(root);
+    const frictionDir = join(artifactsDir, "friction");
+    await mkdir(frictionDir, { recursive: true });
+
+    // TWO entries. One is a real record; the other is a DIRECTORY wearing a
+    // .json name. `cp` of a directory without `recursive` fails on both win32
+    // and linux, so the per-file archive failure is produced by ordinary
+    // filesystem semantics — no stub, and nothing patched in
+    // src/shared/io/frictionCapture.ts, which this module does not own.
+    await writeFile(
+      join(frictionDir, "good.json"),
+      JSON.stringify({ kind: "friction", note: "real record" }),
+      "utf8",
+    );
+    await mkdir(join(frictionDir, "poisoned.json"), { recursive: true });
+
+    const result = await promoteFinalAuditReport({ artifactsDir });
+
+    // archiveFrictionRecords warns per failed file and omits it from its return.
+    // Dropping that return meant this record was destroyed by the rm with
+    // nothing gating it — the same class as the findings and ledger archives.
+    expect(
+      (await stat(artifactsDir)).isDirectory(),
+      "the directory holding the unarchived friction record must NOT be deleted",
+    ).toBe(true);
+    expect(result.cleaned).toBe(false);
+    expect(
+      result.unarchived?.join(" "),
+      "the friction shortfall must be nameable by the caller",
+    ).toContain("friction record");
+  });
+});

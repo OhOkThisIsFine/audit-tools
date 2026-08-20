@@ -433,7 +433,18 @@ export async function handleGraphEnrichmentBranch(
   bundle: ArtifactBundle,
   state: AuditState,
   analyzersRef: { value: Record<string, AnalyzerSetting> | undefined },
-  deps: { runStep?: typeof runAuditStep } = {},
+  deps: {
+    runStep?: typeof runAuditStep;
+    /**
+     * Injectable so the analyzer-decisions branch is testable at all. The real
+     * resolution asks the MACHINE which analyzers are installed, so a fixture
+     * that needs `unresolved.length > 0` would pass or fail depending on the box
+     * it runs on — a suite verdict must not depend on that. Same shape as the
+     * final gate's injected runner: absent on every production call, where the
+     * behavior is byte-identical to calling the real resolver directly.
+     */
+    unresolvedAnalyzers?: typeof graphEnrichmentUnresolvedAnalyzers;
+  } = {},
 ): Promise<GraphEnrichmentBranchResult> {
   const runStep = deps.runStep ?? runAuditStep;
   // Fold-level pause detection is single-sourced in `hostInputPause` so the drain
@@ -444,7 +455,10 @@ export async function handleGraphEnrichmentBranch(
     analyzers: analyzersRef.value,
     graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
   };
-  const unresolved = graphEnrichmentUnresolvedAnalyzers(bundle, pauseInputs);
+  const unresolved = (deps.unresolvedAnalyzers ?? graphEnrichmentUnresolvedAnalyzers)(
+    bundle,
+    pauseInputs,
+  );
   if (unresolved.length > 0) {
     const incoming = await consumeEnumMapSubmission<AnalyzerSetting>(
       params.artifactsDir,

@@ -6,7 +6,7 @@ import type {
   ArtifactMetadataManifest,
 } from "../../src/audit/types/artifactMetadata.js";
 
-const { computeArtifactMetadata, computeArtifactStateSignature } =
+const { computeArtifactMetadata, computeArtifactStateSignature, present } =
   await import("../../src/audit/orchestrator/artifactMetadata.js");
 const { computeStaleArtifacts } =
   await import("../../src/audit/orchestrator/staleness.js");
@@ -1127,4 +1127,55 @@ test("F1 fail-2 [CP-NODE-13]: per-element verdict never keyed on the bare groupi
   // Distinct keys: the discriminator is part of identity, not the bare coordinate.
   expect(base.content_key, "discriminator distinguishes the contentKey").not.toBe(redispatch.content_key);
   expect(base.idempotency_key, "discriminator distinguishes the idempotencyKey").not.toBe(redispatch.idempotency_key);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INV 10 (audit-artifact-promotion-lifecycle): a PARTIAL artifact is a third
+// state — neither fully-fresh-and-present nor absent.
+//
+// promoteFinalAuditReport can now report partial loss (an archive failed while
+// the human report promoted, so the cleanup was aborted). The bundle produced
+// from that state holds an artifact whose body no longer matches the
+// content_hash recorded for it. It must classify as STALE — present-with-loss —
+// because both alternatives are wrong: "fresh and present" would let a
+// downstream reuse a truncated body, and "absent" would lose the fact that a
+// partially-written copy is sitting on disk.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("INV 10: an artifact whose body no longer matches its recorded hash is stale, not fresh and not absent", () => {
+  const bundle = makeBaseBundle();
+  const metadata = computeArtifactMetadata(bundle);
+
+  // The partial-archive state: the artifact is STILL PRESENT (a truncated copy
+  // survived) but its body diverged from what the manifest recorded.
+  const partialBundle: ArtifactBundle = {
+    ...bundle,
+    file_disposition: {
+      files: [{ path: "src/api/auth.ts", status: "included" }, { path: "truncated", status: "included" }],
+    },
+    artifact_metadata: metadata,
+  };
+
+  const stale = computeStaleArtifacts(partialBundle);
+
+  // NOT fresh-and-present.
+  expect(
+    stale.has("file_disposition.json"),
+    "a body that diverged from its recorded hash must not read as fresh",
+  ).toBeTruthy();
+  // NOT absent — the value is still there to be seen, which is what makes this a
+  // THIRD state rather than a re-run of the absent case.
+  // Asserted through the PRESENCE PREDICATE production uses, not by re-reading
+  // the literal this test just built — that would be true however staleness
+  // classified it, which is the whole point of the third state.
+  expect(
+    present(partialBundle, "file_disposition.json"),
+    "the partial artifact is still PRESENT — that is what makes this a third state, not the absent case",
+  ).toBe(true);
+  // And the loss propagates: a downstream of the partial artifact is stale too,
+  // so nothing consumes the diverged body as if it were intact.
+  expect(
+    stale.has("audit-report.md"),
+    "a downstream must not be built on a partial upstream",
+  ).toBeTruthy();
 });

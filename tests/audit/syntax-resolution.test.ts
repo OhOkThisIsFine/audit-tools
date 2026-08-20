@@ -323,3 +323,19 @@ test("eslint parse-error log includes root and exit_code", async () => {
     expect(parseLine!.match(/ts=\d{4}-\d{2}-\d{2}T/), `stderr line should include ISO timestamp: ${parseLine}`).toBeTruthy();
   });
 });
+
+// INV 11 (audit-artifact-promotion-lifecycle): pinned at the consumer for the
+// same reason as structure-decomposition — the typechecker cannot see a bundle
+// written in one phase and read back in another.
+test("INV 11: syntaxResolutionExecutor resolves external_analyzer_results by name", async () => {
+  await withTempRepo(async (root) => {
+    const result = runSyntaxResolutionExecutor(createBundle(), root);
+    // This executor's entire output rides on the external_analyzer_results field
+    // name; a rename would leave it silently writing nothing a consumer can find.
+    expect(
+      result.updated.external_analyzer_results,
+      "syntaxResolutionExecutor reads and writes bundle.external_analyzer_results by name",
+    ).toBeDefined();
+    expect(Array.isArray(result.updated.external_analyzer_results)).toBe(true);
+  });
+});

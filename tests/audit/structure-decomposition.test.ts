@@ -261,6 +261,27 @@ describe("buildStructureDecomposition + executor — end to end", () => {
     expect(result.progress_summary).toContain("Structure decomposition");
   });
 
+  // INV 11 (audit-artifact-promotion-lifecycle): this executor reads bundle
+  // fields BY NAME across a persist/reload boundary, which the typechecker
+  // cannot see — it covers a rename within one build, not a bundle written in
+  // one phase and read back in another. Pinned here, at the consumer, alongside
+  // the field-set pin in io-remediation.test.ts.
+  it("INV 11: resolves the bundle fields it reads by name", async () => {
+    const result = await runStructureDecompositionExecutor(bundle);
+    // The executor cannot produce its artifact without resolving its named inputs.
+    expect(result.updated.structure_decomposition).toBeDefined();
+    // Asserted through the EXECUTOR'S OWN OUTPUT, not through the fixture this
+    // test just built: re-reading the literal would pass no matter what the
+    // executor did with it. `result.updated` is the bundle the executor returns,
+    // so the field names it carries forward are the ones it actually resolved.
+    for (const field of ["repo_manifest", "file_disposition"] as const) {
+      expect(
+        (result.updated as Record<string, unknown>)[field],
+        `structureExecutors must carry bundle.${field} through — a rename breaks it silently across a reload`,
+      ).toBeDefined();
+    }
+  });
+
   it("throws without the required structure artifacts", async () => {
     await expect(
       runStructureDecompositionExecutor({ repo_manifest: bundle.repo_manifest }),
