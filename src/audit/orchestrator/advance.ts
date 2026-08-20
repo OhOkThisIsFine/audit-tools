@@ -15,6 +15,7 @@ import {
   isMetadataMigrationStaleness,
   resetStalenessDedup,
 } from "./staleness.js";
+import { DEPENDENCY_SLICE_PROJECTIONS } from "./dependencySlices.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import {
   AGENT_FEEDBACK_FILENAME,
@@ -46,13 +47,208 @@ export type { AdvanceAuditOptions, AdvanceAuditResult } from "./advanceTypes.js"
  * precedent of keeping cycle/step-count bookkeeping in the local `Ctx` rather
  * than in the engine's own transition counter.
  */
-const MAX_DRAIN_STEPS = 64;
+export const MAX_DRAIN_STEPS = 64;
+
+/**
+ * Headroom between the graceful local cap and the engine's THROWING
+ * `maxTransitions` backstop. Named once and consumed by `engineMaxTransitions`
+ * so the two bounds can never be set independently: the cap emits on the step
+ * that spends the last slot, so the engine sees at most `MAX_DRAIN_STEPS`
+ * transitions and its throw is unreachable in practice.
+ */
+const ENGINE_TRANSITION_HEADROOM = 2;
+
+/**
+ * The engine bound, DERIVED from the graceful cap rather than written as a
+ * literal at the call site. Raising `MAX_DRAIN_STEPS` therefore can never
+ * silently convert the graceful stop into an engine throw — there is no second
+ * number to remember to re-derive.
+ */
+export function engineMaxTransitions(cap: number = MAX_DRAIN_STEPS): number {
+  return cap + ENGINE_TRANSITION_HEADROOM;
+}
+
+// ── The PRIORITY-ordering guarantee (owned here, as a caller precondition) ────
+//
+// The staleness pass DEFERS a downstream whose edge from a stale-and-pending
+// upstream is guarded by a dependency-slice projection: the decision is
+// postponed until the upstream has actually re-derived and the per-edge slice
+// compare can run. That deferral is only safe because of something the
+// staleness pass does not control and deliberately does not police — the ORDER
+// this module drains obligations in. The precondition is therefore stated,
+// owned and tested HERE, on the caller side of that edge:
+//
+//   for every registered slice-projected edge, EVERY obligation that can
+//   (re)write the upstream artifact is scheduled — and its artifact_metadata
+//   persisted — strictly BEFORE the first obligation that can write the
+//   downstream; and the drain re-derives obligation state after every step
+//   (see deriveObligationState: the memo is keyed on bundle IDENTITY, which
+//   changes at every transition), so a slice moved by the upstream's
+//   re-derivation still fires the per-edge compare while the deferred set is
+//   non-empty, rather than after the downstream has already been selected.
+
+/**
+ * Every PRIORITY obligation whose executor can (re)write an artifact that takes
+ * part in a registered dependency-slice projection.
+ *
+ * DECLARED DATA, RECONCILED — not a general artifact→obligation map and not a
+ * list anyone is asked to remember to update: `findPriorityOrderingViolations`
+ * REPORTS a projection participant that has no entry here, so registering a new
+ * slice-projected edge without declaring its producers is a loud failure rather
+ * than a silent hole in the guarantee.
+ */
+const SLICE_PARTICIPANT_PRODUCERS: Readonly<Record<string, readonly string[]>> = {
+  // Written by the extraction pass and again by the independent delta-miner.
+  "charter_register.json": ["charter_extraction_current", "charter_delta_current"],
+  "structure_decomposition.json": ["structure_decomposition_current"],
+  "repo_manifest.json": ["repo_manifest"],
+  // Written by the structure pass and again by graph enrichment.
+  "graph_bundle.json": ["structure_artifacts", "graph_enrichment_current"],
+};
+
+export interface PriorityOrderingViolation {
+  /** The slice-projected downstream artifact. */
+  downstream: string;
+  /** The upstream artifact whose edge into it is slice-projected. */
+  upstream: string;
+  reason: string;
+}
+
+/**
+ * Check the ordering guarantee above against a priority order. Empty ⇒ the
+ * guarantee holds. Defaults to the live `PRIORITY`; a caller may pass a
+ * candidate order (which is how the guarantee is red-green validated: an order
+ * that puts a downstream's obligation ahead of its slice-projected upstream's
+ * must come back non-empty).
+ */
+export function findPriorityOrderingViolations(
+  priority: readonly string[] = PRIORITY,
+): PriorityOrderingViolation[] {
+  const violations: PriorityOrderingViolation[] = [];
+  const positions = (artifact: string): number[] | string => {
+    const producers = SLICE_PARTICIPANT_PRODUCERS[artifact];
+    if (!producers) {
+      return `no producing obligation is declared for ${artifact} in SLICE_PARTICIPANT_PRODUCERS`;
+    }
+    const indexes: number[] = [];
+    for (const producer of producers) {
+      const index = priority.indexOf(producer);
+      if (index < 0) {
+        return `producing obligation "${producer}" of ${artifact} is absent from the priority order`;
+      }
+      indexes.push(index);
+    }
+    return indexes;
+  };
+
+  for (const [downstream, upstreams] of Object.entries(
+    DEPENDENCY_SLICE_PROJECTIONS,
+  )) {
+    const downstreamPositions = positions(downstream);
+    for (const upstream of Object.keys(upstreams ?? {})) {
+      const upstreamPositions = positions(upstream);
+      if (typeof downstreamPositions === "string") {
+        violations.push({ downstream, upstream, reason: downstreamPositions });
+        continue;
+      }
+      if (typeof upstreamPositions === "string") {
+        violations.push({ downstream, upstream, reason: upstreamPositions });
+        continue;
+      }
+      const lastUpstream = Math.max(...upstreamPositions);
+      const firstDownstream = Math.min(...downstreamPositions);
+      if (lastUpstream >= firstDownstream) {
+        violations.push({
+          downstream,
+          upstream,
+          reason: `the slice-projected upstream ${upstream} is regenerated at priority index ${lastUpstream}, at or after the downstream ${downstream} at index ${firstDownstream} — the deferred staleness decision would never fire before the downstream is selected`,
+        });
+      }
+    }
+  }
+  return violations;
+}
+
+/**
+ * Load-time enforcement, mirroring the executor-registry coverage assertion the
+ * priority scan itself carries: a priority order that breaks the guarantee
+ * throws loudly at import rather than silently under-staling a downstream at
+ * runtime.
+ */
+function assertPriorityOrderingGuarantee(): void {
+  const violations = findPriorityOrderingViolations();
+  if (violations.length === 0) return;
+  throw new Error(
+    `PRIORITY ordering violates the dependency-slice deferral precondition:\n` +
+      violations
+        .map((v) => `  - ${v.downstream} <- ${v.upstream}: ${v.reason}`)
+        .join("\n"),
+  );
+}
+
+assertPriorityOrderingGuarantee();
 
 function cloneState(state: AuditState): AuditState {
   return {
     ...state,
     blockers: [...(state.blockers ?? [])],
     obligations: state.obligations.map((obligation) => ({ ...obligation })),
+  };
+}
+
+/**
+ * The ONE {phase:"advance", kind:"obligation"} event. Both the dispatching path
+ * and the zero-dispatch path emit exactly this shape, and they emit it from
+ * here — a second hand-written copy is what let the two drift apart in the
+ * first place.
+ */
+function logObligationSelection(
+  log: RunLogger,
+  correlationId: string,
+  obligation: string | null,
+  reason: string,
+): void {
+  log.event({
+    phase: "advance",
+    kind: "obligation",
+    correlationId,
+    obligation: obligation ?? undefined,
+    note: reason,
+  });
+}
+
+/**
+ * The ONE construction of the zero-dispatch "no actionable obligation" result.
+ *
+ * Two independently-editable copies used to exist — the early return inside a
+ * single bounded step and the post-engine reconstruction for a drain where no
+ * `execute` ever ran. They were semantically equal by inspection only: nothing
+ * made a field added to `AdvanceAuditResult` reach both. One constructor makes
+ * the equality structural, so "both paths agree" is not a property anyone has
+ * to re-verify.
+ */
+function noActionableObligationResult(params: {
+  bundle: ArtifactBundle;
+  decision: ReturnType<typeof decideNextStep>;
+  selectedObligation: string | null;
+  selectedExecutor: string | null;
+}): AdvanceAuditResult {
+  const { bundle, decision } = params;
+  const state = cloneState(decision.state);
+  state.last_executor = bundle.audit_state?.last_executor ?? state.last_executor;
+  state.last_obligation =
+    params.selectedObligation ??
+    bundle.audit_state?.last_obligation ??
+    state.last_obligation;
+  return {
+    audit_state: state,
+    selected_obligation: params.selectedObligation,
+    selected_executor: params.selectedExecutor,
+    progress_made: false,
+    artifacts_written: ["audit_state.json"],
+    progress_summary: decision.reason,
+    next_likely_step: null,
+    updated_bundle: { ...bundle, audit_state: state },
   };
 }
 
@@ -190,31 +386,15 @@ async function runSingleAdvanceStep(
     : decision.selected_obligation;
   options.heartbeat?.setLabel(selectedObligation ?? "derive");
 
-  log.event({
-    phase: "advance",
-    kind: "obligation",
-    correlationId,
-    obligation: selectedObligation ?? undefined,
-    note: decision.reason,
-  });
+  logObligationSelection(log, correlationId, selectedObligation, decision.reason);
 
   if (!selectedExecutor) {
-    const state = cloneState(decision.state);
-    state.last_executor = bundle.audit_state?.last_executor ?? state.last_executor;
-    state.last_obligation =
-      selectedObligation ??
-      bundle.audit_state?.last_obligation ??
-      state.last_obligation;
-    return {
-      audit_state: state,
-      selected_obligation: selectedObligation,
-      selected_executor: selectedExecutor,
-      progress_made: false,
-      artifacts_written: ["audit_state.json"],
-      progress_summary: decision.reason,
-      next_likely_step: null,
-      updated_bundle: { ...bundle, audit_state: state },
-    };
+    return noActionableObligationResult({
+      bundle,
+      decision,
+      selectedObligation,
+      selectedExecutor,
+    });
   }
 
   const executorStartedAt = Date.now();
@@ -370,11 +550,13 @@ function advanceHasRunner(executor: string): boolean {
 // re-decides rather than trusting the closed-over id).
 //
 // The engine's own `advance(..., opts.maxTransitions)` throw-on-exceeded
-// backstop is set explicitly to MAX_DRAIN_STEPS + 2 at the call site (never
-// the engine default) so the coupling is self-maintaining: `runDrainStep`
-// enforces the tighter graceful MAX_DRAIN_STEPS cap itself (see the constant's
-// doc comment) and always stops the fold strictly before the engine's throwing
-// counter could trip, no matter what value MAX_DRAIN_STEPS is raised to.
+// backstop is passed explicitly (never the engine default) and DERIVED from the
+// graceful cap by `engineMaxTransitions()` — there is no second number written
+// at the call site to keep in step. That is what makes the coupling
+// self-maintaining: `runDrainStep` enforces the tighter graceful
+// MAX_DRAIN_STEPS cap itself (see the constant's doc comment) and always stops
+// the fold strictly before the engine's throwing counter could trip, no matter
+// what value MAX_DRAIN_STEPS is raised to.
 //
 // Semantics preserved vs the hand-rolled loop (adversarially reviewed):
 //   - zero-dispatch path (nothing actionable on entry): the reconstruction
@@ -395,7 +577,12 @@ function advanceHasRunner(executor: string): boolean {
 interface DrainCtx {
   options: AdvanceAuditOptions;
   pauseInputs: HostInputPauseInputs;
-  /** Total steps actually dispatched this `advanceAudit` call (bounds MAX_DRAIN_STEPS). */
+  /**
+   * Dispatch slots spent this `advanceAudit` call. Incremented BEFORE the
+   * dispatch it authorizes (see `runDrainStep`), so it is never less than the
+   * number of steps already dispatched — which is what makes MAX_DRAIN_STEPS a
+   * hard ceiling rather than a bound checked one step too late.
+   */
   stepsRun: { value: number };
   /** First-seen-order-deduplicated artifact list accumulated across the whole drain. */
   artifactsAcc: { value: string[] };
@@ -426,7 +613,7 @@ type DrainOutcome = ObligationOutcome<ArtifactBundle, AdvanceAuditResult>;
  * derived is unchanged, and `deriveAuditState` itself is deterministic in the
  * bundle (no time/randomness inputs).
  */
-function deriveObligationState(
+export function deriveObligationState(
   id: string,
   cache: WeakMap<ArtifactBundle, AuditState>,
 ): (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied" {
@@ -491,13 +678,19 @@ async function runDrainStep(
   bundle: ArtifactBundle,
   ctx: DrainCtx,
 ): Promise<DrainOutcome> {
+  // HARD DISPATCH CEILING. The slot is spent BEFORE the dispatch it authorizes
+  // and the fold stops once the last slot is spent, so one call can never
+  // dispatch more than MAX_DRAIN_STEPS steps. The counter used to be bumped
+  // AFTER the step and compared with `>`, which let the 65th step run to
+  // completion before a "64" cap tripped — a silent one-step overrun of a bound
+  // stated as a maximum.
+  ctx.stepsRun.value += 1;
   const result = await runSingleAdvanceStep(bundle, ctx.options);
   const merged = mergeDrainStep(result, ctx);
   if (!result.progress_made) {
     return { kind: "emit", step: merged };
   }
-  ctx.stepsRun.value += 1;
-  if (ctx.stepsRun.value > MAX_DRAIN_STEPS) {
+  if (ctx.stepsRun.value >= MAX_DRAIN_STEPS) {
     // Belt-and-braces cap (see MAX_DRAIN_STEPS doc) — never trips on a healthy
     // run; stop gracefully and hand back the last good result rather than
     // throwing, so the host simply resumes the drain on its next call.
@@ -599,13 +792,11 @@ async function advanceAuditInner(
       ctx,
       // INVARIANT: the local graceful cap (MAX_DRAIN_STEPS, enforced inside
       // runDrainStep) must always fire strictly before the engine's THROWING
-      // maxTransitions backstop. Deriving the engine bound from the same
-      // constant (+2 headroom: the cap emits on the step whose stepsRun first
-      // exceeds MAX_DRAIN_STEPS, so the engine sees at most MAX_DRAIN_STEPS
-      // transitions) keeps the coupling self-maintaining — raising
-      // MAX_DRAIN_STEPS can never silently convert the graceful stop into an
-      // engine throw.
-      { maxTransitions: MAX_DRAIN_STEPS + 2 },
+      // maxTransitions backstop. The engine bound is DERIVED from the same
+      // constant (see engineMaxTransitions), never written as a literal here,
+      // so raising MAX_DRAIN_STEPS can never silently convert the graceful stop
+      // into an engine throw.
+      { maxTransitions: engineMaxTransitions() },
     );
     if (outcome.step) {
       result = outcome.step;
@@ -623,30 +814,18 @@ async function advanceAuditInner(
       const log = options.runLogger ?? RunLogger.disabled();
       const correlationId = createCorrelationId();
       const decision = decideNextStep(outcome.state, { emitStaleness: false });
-      log.event({
-        phase: "advance",
-        kind: "obligation",
+      logObligationSelection(
+        log,
         correlationId,
-        obligation: decision.selected_obligation ?? undefined,
-        note: decision.reason,
+        decision.selected_obligation,
+        decision.reason,
+      );
+      result = noActionableObligationResult({
+        bundle: outcome.state,
+        decision,
+        selectedObligation: decision.selected_obligation,
+        selectedExecutor: decision.selected_executor,
       });
-      const state = cloneState(decision.state);
-      state.last_executor =
-        outcome.state.audit_state?.last_executor ?? state.last_executor;
-      state.last_obligation =
-        decision.selected_obligation ??
-        outcome.state.audit_state?.last_obligation ??
-        state.last_obligation;
-      result = {
-        audit_state: state,
-        selected_obligation: decision.selected_obligation,
-        selected_executor: decision.selected_executor,
-        progress_made: false,
-        artifacts_written: ["audit_state.json"],
-        progress_summary: decision.reason,
-        next_likely_step: null,
-        updated_bundle: { ...outcome.state, audit_state: state },
-      };
     }
   }
 

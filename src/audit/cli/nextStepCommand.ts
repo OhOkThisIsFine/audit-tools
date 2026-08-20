@@ -10,6 +10,11 @@ import {
   renderFanoutExecutionLines,
   writeTextFile,
 } from "audit-tools/shared";
+import type { AnalyzerPolicy } from "audit-tools/shared";
+// The ONE shared table-driven step-emission scaffold. Imported by relative path
+// like every other cross-area shared module this area reaches for.
+import { createStepEmissionScaffold } from "../../shared/steps/stepEmissionScaffold.js";
+import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import { cleanupStaleArtifactsDir } from "./cleanup.js";
 import { materializeFanoutLanes } from "./fanoutLanes.js";
 import {
@@ -86,6 +91,7 @@ import {
   renderDesignReviewRejectionNotice,
   renderEdgeReasoningRejectionNotice,
 } from "./nextStepHelpers.js";
+import type { NextStepResult } from "./nextStepHelpers.js";
 export {
   tryConsumeSubmission,
   consumeArraySubmission,
@@ -291,7 +297,7 @@ async function cmdNextStepBody(
     applyGuidanceFile(artifactsDir, guidanceFile);
   }
 
-  let analyzerPolicy: Awaited<ReturnType<typeof loadAnalyzerPolicy>>;
+  let analyzerPolicy: AnalyzerPolicy;
   try {
     // The canonical session artifact contains intent only. Loading it here is
     // deliberately validation-only: review_mode and observability describe the
@@ -305,21 +311,18 @@ async function cmdNextStepBody(
       artifactsDir,
       progressSummary: reason,
     });
+    // The ONE emission that is not a table row, and deliberately so: it runs
+    // BEFORE dispatch, so no result kind exists to dispatch on. An unreadable
+    // or invalid analyzer policy blocks the step rather than degrading to an
+    // empty policy (which would silently drop every recorded consent decision)
+    // — and it still goes through the scaffold's single emission site, so the
+    // "write the step, log it, exactly once" shape is not re-implemented here.
     // Shared blocked-step assembly: the step JSON says WHY on its own via
     // progress.summary — an automated consumer (release smoke, CI) sees only this
     // contract, not the prompt file.
-    const step = await writeBlockedStepContract({
-      tool: "audit-code",
-      contractVersion: STEP_CONTRACT_VERSION,
-      artifactsDir,
-      repoRoot: root,
-      runId: null,
-      reason,
-      artifactPaths: {
-        operator_handoff: join(artifactsDir, "operator-handoff.json"),
-      },
-    });
-    console.log(JSON.stringify(step, null, 2));
+    await NEXT_STEP_EMISSION.emitPlan(
+      blockedStepPlan(operatorHandoffBlock(root, artifactsDir, reason)),
+    );
     return;
   }
 
@@ -334,20 +337,183 @@ async function cmdNextStepBody(
     // session config can opt out). The executor builds its own global-`fetch`
     // adapter when no fetcher is injected. The unit/integration suite never reaches
     // here, so acquisition stays a hermetic no-op in tests.
-    externalAcquisition: {
-      enabled: true,
-      analyzers: analyzerPolicy.analyzers,
-      // Item B: recorded consent decisions ride into admission (granted admits
-      // without a token) and into the consent fold's pending computation.
-      analyzerConsent: analyzerPolicy.analyzer_consent,
-    },
+    externalAcquisition: buildExternalAcquisitionOptions(analyzerPolicy),
     since: getFlag(argv, "--since"),
   });
 
-  if (result.kind === "complete") {
+  // The single dispatch: one table row per result kind, one emission site. A
+  // kind the table does not carry is the semantic-review dispatch (the
+  // scaffold's fallback), exactly as the old fallthrough branch was.
+  await NEXT_STEP_EMISSION.emit(result.kind, {
+    argv,
+    root,
+    artifactsDir,
+    analyzerPolicy,
+    result,
+  });
+}
+
+// ── Step emission: one table, one emission site ───────────────────────────────
+//
+// Every host-actionable `result.kind` used to own a hand-repeated copy of the
+// same four-part scaffold — resolve a lane submission path, build a prompt
+// array, call writeCurrentStep with the same key set, log and return. A change
+// to that emit contract had to be applied in sixteen places by hand, with no
+// compiler signal when one was missed. Below, a kind contributes only a HANDLER
+// that returns a PLAN; the shared scaffold (audit-tools/shared) owns the one
+// call site that writes the step and logs it exactly once.
+
+/** What an emission row is given: the invocation's bindings plus its own result. */
+interface NextStepEmitContext {
+  argv: string[];
+  root: string;
+  artifactsDir: string;
+  /**
+   * The durable analyzer policy, loaded before any dispatch decision. Present
+   * on every table-dispatched emission; the acquisition-bearing rows state that
+   * dependence explicitly (see `requireLoadedAnalyzerPolicy`) instead of
+   * assuming a caller loaded it.
+   */
+  analyzerPolicy: AnalyzerPolicy | null;
+  result: NextStepResult;
+}
+
+/**
+ * What to emit, never how to write it. Three writers exist (the step-contract
+ * writer, the blocked-step writer, and the semantic-review renderer that
+ * publishes the host workload), and each is called from exactly ONE place —
+ * `writeAuditStep` — so the emit contract has a single edit site per writer.
+ */
+type AuditStepPlan =
+  | { via: "current"; params: Parameters<typeof writeCurrentStep>[0] }
+  | { via: "blocked"; params: Parameters<typeof writeBlockedStepContract>[0] }
+  | { via: "semantic_review"; params: Parameters<typeof renderSemanticReviewStep>[0] };
+
+type EmittedAuditStep =
+  | Awaited<ReturnType<typeof writeCurrentStep>>
+  | Awaited<ReturnType<typeof writeBlockedStepContract>>;
+
+function currentStepPlan(
+  params: Parameters<typeof writeCurrentStep>[0],
+): AuditStepPlan {
+  return { via: "current", params };
+}
+
+function blockedStepPlan(
+  params: Parameters<typeof writeBlockedStepContract>[0],
+): AuditStepPlan {
+  return { via: "blocked", params };
+}
+
+function semanticReviewPlan(
+  params: Parameters<typeof renderSemanticReviewStep>[0],
+): AuditStepPlan {
+  return { via: "semantic_review", params };
+}
+
+/**
+ * The blocked-step shape both blocked paths share — the pre-dispatch config
+ * failure and the `blocked` result kind. Single-sourced so the two cannot drift
+ * into two different operator-handoff contracts.
+ */
+function operatorHandoffBlock(
+  root: string,
+  artifactsDir: string,
+  reason: string,
+): Parameters<typeof writeBlockedStepContract>[0] {
+  return {
+    tool: "audit-code",
+    contractVersion: STEP_CONTRACT_VERSION,
+    artifactsDir,
+    repoRoot: root,
+    runId: null,
+    reason,
+    artifactPaths: {
+      operator_handoff: join(artifactsDir, "operator-handoff.json"),
+    },
+  };
+}
+
+/** The ONE writer dispatch. Each underlying writer is called exactly once here. */
+async function writeAuditStep(plan: AuditStepPlan): Promise<EmittedAuditStep> {
+  switch (plan.via) {
+    case "current":
+      return await writeCurrentStep(plan.params);
+    case "blocked":
+      return await writeBlockedStepContract(plan.params);
+    case "semantic_review":
+      return await renderSemanticReviewStep(plan.params);
+  }
+}
+
+type NextStepEmissionKind = Exclude<NextStepResult["kind"], "semantic_review">;
+type NextStepResultOf<K extends NextStepResult["kind"]> = Extract<
+  NextStepResult,
+  { kind: K }
+>;
+type NextStepEmissionRow = (ctx: NextStepEmitContext) => Promise<AuditStepPlan>;
+
+/**
+ * Bind one row to its own result variant. The table is keyed BY the result
+ * kind, so the row that runs is by construction the row for `ctx.result.kind`;
+ * the narrowing is stated once here rather than re-checked in every body.
+ */
+function emissionRow<K extends NextStepEmissionKind>(
+  handle: (
+    ctx: NextStepEmitContext,
+    result: NextStepResultOf<K>,
+  ) => Promise<AuditStepPlan>,
+): NextStepEmissionRow {
+  return (ctx) => handle(ctx, ctx.result as NextStepResultOf<K>);
+}
+
+/**
+ * The caller-side precondition the analyzer-acquisition chokepoint declares:
+ * an acquisition-bearing step is only emitted for a run whose durable analyzer
+ * policy actually loaded. Refusing here (the terminal backstop turns the throw
+ * into a written blocked step) keeps the alternative — emitting a consent or
+ * install step against no policy — impossible: those steps collect decisions
+ * that have nothing to merge into, and admission would see no recorded
+ * decision at all, making an operator's recorded decline unrepresentable
+ * rather than merely unenforced.
+ */
+function requireLoadedAnalyzerPolicy(
+  policy: AnalyzerPolicy | null,
+  stepKind: string,
+): void {
+  if (policy) return;
+  throw new Error(
+    `audit-code next-step: the ${stepKind} step is acquisition-bearing and requires the durable analyzer policy, which was not loaded. Refusing to emit it rather than proceeding with no recorded consent decisions.`,
+  );
+}
+
+/**
+ * The acquisition chokepoint's declared caller obligation, discharged in ONE
+ * place: BOTH halves of the loaded policy ride every acquisition call — the
+ * per-analyzer settings AND the recorded consent decisions. Dropping the
+ * decisions leaves a recorded decline unrepresentable at admission (the
+ * chokepoint would see `undefined` and read it as "not yet decided"), and no
+ * consent token is synthesized here on the operator's behalf: the field is
+ * absent, never an empty string.
+ */
+export function buildExternalAcquisitionOptions(
+  policy: AnalyzerPolicy,
+): ExternalAcquisitionAdvanceOptions {
+  return {
+    enabled: true,
+    analyzers: policy.analyzers,
+    // Item B: recorded consent decisions ride into admission (granted admits
+    // without a token) and into the consent fold's pending computation.
+    analyzerConsent: policy.analyzer_consent,
+  };
+}
+
+
+const emitComplete = emissionRow<"complete">(
+  async ({ root, artifactsDir }, result) => {
     const triage = result.triage;
     const frictionPending = triage?.action === "dispose";
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "present_report",
       status: frictionPending ? "ready" : "complete",
@@ -369,28 +535,19 @@ async function cmdNextStepBody(
       },
       prompt: renderPresentReportPrompt(result.finalReportPath, triage),
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "blocked") {
-    // Same diagnosability contract as the config-blocked step above.
-    const step = await writeBlockedStepContract({
-      tool: "audit-code",
-      contractVersion: STEP_CONTRACT_VERSION,
-      artifactsDir,
-      repoRoot: root,
-      runId: null,
-      reason: result.reason,
-      artifactPaths: {
-        operator_handoff: join(artifactsDir, "operator-handoff.json"),
-      },
-    });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+const emitBlocked = emissionRow<"blocked">(
+  async ({ root, artifactsDir }, result) => {
+    // The SAME operator-handoff blocked contract the pre-dispatch config
+    // failure emits — built from the one home, never re-typed here.
+    return blockedStepPlan(operatorHandoffBlock(root, artifactsDir, result.reason));
+  },
+);
 
-  if (result.kind === "design_review_parallel") {
+const emitDesignReviewParallel = emissionRow<"design_review_parallel">(
+  async ({ root, artifactsDir }, result) => {
     // Both passes are unsatisfied — dispatch the contract pass and the
     // conceptual pass simultaneously. The conceptual pass is shallow (one agent)
     // or deep (N independent perspective subagents + an independent judge),
@@ -428,7 +585,7 @@ async function cmdNextStepBody(
       "",
     ].join("\n");
 
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "design_review_parallel",
       status: "ready",
@@ -448,11 +605,11 @@ async function cmdNextStepBody(
       },
       submissionShortfall: shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "design_review_contract") {
+const emitDesignReviewContract = emissionRow<"design_review_contract">(
+  async ({ root, artifactsDir }, result) => {
     // Only the contract pass remains — dispatched exactly as in the parallel
     // branch. This branch is reached whenever the conceptual pass is already
     // done, i.e. late in a run the host itself drove, which is precisely when
@@ -477,7 +634,7 @@ async function cmdNextStepBody(
       "",
     ].join("\n");
 
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "design_review_contract",
       status: "ready",
@@ -494,11 +651,11 @@ async function cmdNextStepBody(
       },
       submissionShortfall: contract.shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "design_review_conceptual") {
+const emitDesignReviewConceptual = emissionRow<"design_review_conceptual">(
+  async ({ root, artifactsDir }, result) => {
     // Only the conceptual pass remains — shallow (one agent) or deep (N
     // independent perspective subagents + an independent judge), resolved JIT
     // from the user-confirmed checkpoint / session config.
@@ -522,7 +679,7 @@ async function cmdNextStepBody(
       "",
     ].join("\n");
 
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "design_review_conceptual",
       status: "ready",
@@ -543,11 +700,11 @@ async function cmdNextStepBody(
       },
       submissionShortfall: conceptual.shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "charter_extraction") {
+const emitCharterExtraction = emissionRow<"charter_extraction">(
+  async ({ root, artifactsDir }, result) => {
     // Phase C charter layer (conceptual, teleological): one blind, materialized
     // LANE per charter kind (design resolution 2 — independence is the shape of
     // the artifacts, not a merge instruction); the tool merges the per-kind
@@ -593,7 +750,7 @@ async function cmdNextStepBody(
       lanes: laneSpecs,
     });
     const completedLanes = fanout.lanes.filter((lane) => lane.resultExists);
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "charter_extraction",
       status: "ready",
@@ -640,11 +797,11 @@ async function cmdNextStepBody(
       },
       submissionShortfall: fanout.shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "charter_delta") {
+const emitCharterDelta = emissionRow<"charter_delta">(
+  async ({ root, artifactsDir }, result) => {
     // Phase C.2 charter delta-mining (conceptual, teleological): an INDEPENDENT
     // delta-miner reads the assembled charters (authored by a different pass, blind
     // to the gaps) and mines the pairwise deltas + the goal DAG; the tool routes +
@@ -666,7 +823,7 @@ async function cmdNextStepBody(
         },
       ],
     });
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "charter_delta",
       status: "ready",
@@ -709,11 +866,11 @@ async function cmdNextStepBody(
       },
       submissionShortfall: fanout.shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "charter_clarification") {
+const emitCharterClarification = emissionRow<"charter_clarification">(
+  async ({ root, artifactsDir }, result) => {
     // Phase D triangulation loop: the tool has already run the deterministic loop
     // (partition → VOI-rank → risk-gate → split by attention) and surfaces the
     // interactive queue here. The host relays each SYMMETRIC question and writes the
@@ -736,7 +893,7 @@ async function cmdNextStepBody(
       AUDIT_GATE_SUBMISSION_SCOPE,
       [{ lane: GATE_LANES.charter_clarification, promptText: clarificationPrompt }],
     );
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "charter_clarification",
       status: "ready",
@@ -758,11 +915,11 @@ async function cmdNextStepBody(
       },
       submissionShortfall: shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "systemic_challenge") {
+const emitSystemicChallenge = emissionRow<"systemic_challenge">(
+  async ({ root, artifactsDir }, result) => {
     // Phase E second-order adversary (loop-until-dry): the tool has opened the loop
     // and computed the language-neutral aggregate-metrics digest. The host dispatches
     // a SEPARATE adversary agent whose mandate is optimization/better-way; it writes
@@ -795,7 +952,7 @@ async function cmdNextStepBody(
         },
       ],
     });
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "systemic_challenge",
       status: "ready",
@@ -840,11 +997,11 @@ async function cmdNextStepBody(
       },
       submissionShortfall: fanout.shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "confirm_intent") {
+const emitConfirmIntent = emissionRow<"confirm_intent">(
+  async ({ root, artifactsDir, argv }, result) => {
     const intentCheckpointPath = join(artifactsDir, "intent_checkpoint.json");
     const continueCommand = nextStepCommand(root, artifactsDir);
     const preDigest = computeScopePreDigest(
@@ -852,7 +1009,7 @@ async function cmdNextStepBody(
       root,
       getFlag(argv, "--since"),
     );
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "confirm_intent",
       status: "ready",
@@ -872,11 +1029,13 @@ async function cmdNextStepBody(
         ),
       }),
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "analyzer_consent") {
+const emitAnalyzerConsent = emissionRow<"analyzer_consent">(
+  async ({ root, artifactsDir, analyzerPolicy }, result) => {
+    // Acquisition-bearing row: the durable policy must have loaded.
+    requireLoadedAnalyzerPolicy(analyzerPolicy, "analyzer_consent");
     const decisionsPath = laneSubmissionPath(
       artifactsDir,
       GATE_LANES.analyzer_consent,
@@ -892,7 +1051,7 @@ async function cmdNextStepBody(
       AUDIT_GATE_SUBMISSION_SCOPE,
       [{ lane: GATE_LANES.analyzer_consent, promptText: consentPrompt }],
     );
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "analyzer_consent",
       status: "ready",
@@ -907,11 +1066,13 @@ async function cmdNextStepBody(
       prompt: [...renderLaneShortfallLines(shortfall), consentPrompt].join("\n"),
       submissionShortfall: shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "analyzer_install") {
+const emitAnalyzerInstall = emissionRow<"analyzer_install">(
+  async ({ root, artifactsDir, analyzerPolicy }, result) => {
+    // Acquisition-bearing row: the durable policy must have loaded.
+    requireLoadedAnalyzerPolicy(analyzerPolicy, "analyzer_install");
     const decisionsPath = laneSubmissionPath(
       artifactsDir,
       GATE_LANES.analyzer_decisions,
@@ -927,7 +1088,7 @@ async function cmdNextStepBody(
       AUDIT_GATE_SUBMISSION_SCOPE,
       [{ lane: GATE_LANES.analyzer_decisions, promptText: installPrompt }],
     );
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "analyzer_install",
       status: "ready",
@@ -942,11 +1103,11 @@ async function cmdNextStepBody(
       prompt: [...renderLaneShortfallLines(shortfall), installPrompt].join("\n"),
       submissionShortfall: shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "edge_reasoning") {
+const emitEdgeReasoning = emissionRow<"edge_reasoning">(
+  async ({ root, artifactsDir }, result) => {
     const edgeReasoningResultsPath = laneSubmissionPath(
       artifactsDir,
       GATE_LANES.edge_reasoning,
@@ -981,7 +1142,7 @@ async function cmdNextStepBody(
     });
     const edgeReasoningPromptPath = fanout.lanes[0]!.promptPath;
     const shortfallLines = renderLaneShortfallLines(fanout.shortfall);
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "edge_reasoning_dispatch",
       status: "ready",
@@ -1007,11 +1168,11 @@ async function cmdNextStepBody(
       },
       submissionShortfall: fanout.shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "intent_equivalence") {
+const emitIntentEquivalence = emissionRow<"intent_equivalence">(
+  async ({ root, artifactsDir }, result) => {
     const verdictPath = laneSubmissionPath(
       artifactsDir,
       GATE_LANES.intent_equivalence,
@@ -1075,7 +1236,7 @@ async function cmdNextStepBody(
       AUDIT_GATE_SUBMISSION_SCOPE,
       [{ lane: GATE_LANES.intent_equivalence, promptText: fullPrompt }],
     );
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "intent_equivalence",
       status: "ready",
@@ -1094,11 +1255,11 @@ async function cmdNextStepBody(
       },
       submissionShortfall: shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "critical_flow_fallback") {
+const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
+  async ({ root, artifactsDir }, result) => {
     const fallbackResultsPath = laneSubmissionPath(
       artifactsDir,
       GATE_LANES.critical_flow_fallback,
@@ -1123,7 +1284,7 @@ async function cmdNextStepBody(
         },
       ],
     });
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "critical_flow_fallback",
       status: "ready",
@@ -1161,11 +1322,11 @@ async function cmdNextStepBody(
       },
       submissionShortfall: fanout.shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  if (result.kind === "synthesis_narrative") {
+const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
+  async ({ root, artifactsDir }, result) => {
     const narrativeResultsPath = laneSubmissionPath(
       artifactsDir,
       GATE_LANES.synthesis_narrative,
@@ -1191,7 +1352,7 @@ async function cmdNextStepBody(
         },
       ],
     });
-    const step = await writeCurrentStep({
+    return currentStepPlan({
       artifactsDir,
       stepKind: "synthesis_narrative",
       status: "ready",
@@ -1229,17 +1390,74 @@ async function cmdNextStepBody(
       },
       submissionShortfall: fanout.shortfall,
     });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
+  },
+);
 
-  const step = await renderSemanticReviewStep({
-    root,
-    artifactsDir,
-    activeReviewRun: result.activeReviewRun,
-    selectedExecutor: result.selectedExecutor,
-    inProcessMadeProgress: result.inProcessMadeProgress,
-    ingestIssues: result.ingestIssues,
-  });
-  console.log(JSON.stringify(step, null, 2));
-}
+/**
+ * The step-emission dispatch table: exactly one row per host-actionable result
+ * kind. Typed as a TOTAL record over the kind union, so a kind added upstream
+ * with no row here is a compile error rather than a step that silently falls
+ * through to the semantic-review dispatch.
+ *
+ * Exported together with the handled-kinds set below so a drift guard imports
+ * the real thing instead of reconstructing it by reading a branch chain.
+ */
+export const NEXT_STEP_EMISSION_TABLE: Readonly<
+  Record<NextStepEmissionKind, NextStepEmissionRow>
+> = {
+  complete: emitComplete,
+  blocked: emitBlocked,
+  design_review_parallel: emitDesignReviewParallel,
+  design_review_contract: emitDesignReviewContract,
+  design_review_conceptual: emitDesignReviewConceptual,
+  charter_extraction: emitCharterExtraction,
+  charter_delta: emitCharterDelta,
+  charter_clarification: emitCharterClarification,
+  systemic_challenge: emitSystemicChallenge,
+  confirm_intent: emitConfirmIntent,
+  analyzer_consent: emitAnalyzerConsent,
+  analyzer_install: emitAnalyzerInstall,
+  edge_reasoning: emitEdgeReasoning,
+  intent_equivalence: emitIntentEquivalence,
+  critical_flow_fallback: emitCriticalFlowFallback,
+  synthesis_narrative: emitSynthesisNarrative,
+};
+
+/**
+ * The one emission site for `audit-code next-step`. Rows return plans; this
+ * writes and logs exactly once, whichever row (or the fallback) produced it.
+ */
+const NEXT_STEP_EMISSION = createStepEmissionScaffold<
+  NextStepEmitContext,
+  AuditStepPlan,
+  EmittedAuditStep
+>({
+  table: NEXT_STEP_EMISSION_TABLE,
+  // `semantic_review` is deliberately the FALLBACK rather than a row: the
+  // validation boundary here has always been "anything unmatched is a
+  // semantic-review dispatch", never an error on an unrecognized kind.
+  fallback: (ctx) => {
+    const result = ctx.result as NextStepResultOf<"semantic_review">;
+    return semanticReviewPlan({
+      root: ctx.root,
+      artifactsDir: ctx.artifactsDir,
+      activeReviewRun: result.activeReviewRun,
+      selectedExecutor: result.selectedExecutor,
+      inProcessMadeProgress: result.inProcessMadeProgress,
+      ingestIssues: result.ingestIssues,
+    });
+  },
+  write: writeAuditStep,
+  // The tool's only externally-observable per-invocation contract.
+  log: (step) => {
+    console.log(JSON.stringify(step, null, 2));
+  },
+});
+
+/**
+ * The handled-kinds set, DERIVED from the table's own keys — never a second,
+ * hand-listed copy that could disagree with the table it describes. A drift
+ * guard consumes this as the real B side of its seam assertion.
+ */
+export const NEXT_STEP_EMISSION_KINDS: ReadonlySet<string> =
+  NEXT_STEP_EMISSION.handledKeys;

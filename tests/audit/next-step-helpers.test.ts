@@ -1260,3 +1260,338 @@ for (const gate of OMITTABLE_GATES) {
     });
   });
 }
+
+// ── The step-emission table and its single emission site ─────────────────────
+//
+// Obligations pinned here:
+//   - the table-driven emit (every result kind emits through ONE call site,
+//     never a per-branch hand-repeated copy of the same scaffold);
+//   - INV-AOE-HANDLED-KINDS-EXPORT (the handled-kinds set is the table's own
+//     keys — this test is the A side of that drift seam, the export is the B);
+//   - INV-AOE-ANALYZER-CONSENT-PRECONDITION (the acquisition-bearing rows carry
+//     the analyzer-policy load as an explicit precondition, and both halves of
+//     the policy ride every acquisition call).
+
+const {
+  NEXT_STEP_EMISSION_TABLE,
+  NEXT_STEP_EMISSION_KINDS,
+  buildExternalAcquisitionOptions,
+} = await import("../../src/audit/cli/nextStepCommand.js");
+// The denial vocabulary is not on the shared barrel; the chokepoint module is
+// the authority for it, so this reads the callee's own constant rather than
+// re-spelling the reason string.
+const { admitSpawn, ANALYZER_DENIAL_REASONS } = await import(
+  "../../src/shared/analyzers/acquisitionEngine.js"
+);
+const { EXTERNAL_ANALYZER_CANDIDATES, writeBlockedStepContract } = await import(
+  "audit-tools/shared"
+);
+
+const NEXT_STEP_SOURCE = await readFile(
+  new URL("../../src/audit/cli/nextStepCommand.ts", import.meta.url),
+  "utf8",
+);
+
+/** Every host-actionable result kind the emission table must carry a row for. */
+const EXPECTED_EMISSION_KINDS = [
+  "analyzer_consent",
+  "analyzer_install",
+  "blocked",
+  "charter_clarification",
+  "charter_delta",
+  "charter_extraction",
+  "complete",
+  "confirm_intent",
+  "critical_flow_fallback",
+  "design_review_conceptual",
+  "design_review_contract",
+  "design_review_parallel",
+  "edge_reasoning",
+  "intent_equivalence",
+  "synthesis_narrative",
+  "systemic_challenge",
+];
+
+test("the emission table carries exactly one row per host-actionable result kind", () => {
+  expect(Object.keys(NEXT_STEP_EMISSION_TABLE).sort()).toEqual(
+    EXPECTED_EMISSION_KINDS,
+  );
+  // `semantic_review` is deliberately NOT a row: it is the fallback, which is
+  // what preserves "anything unmatched is a semantic-review dispatch".
+  expect(Object.keys(NEXT_STEP_EMISSION_TABLE)).not.toContain("semantic_review");
+});
+
+test("the handled-kinds export is DERIVED from the table's own keys", () => {
+  expect([...NEXT_STEP_EMISSION_KINDS].sort()).toEqual(
+    Object.keys(NEXT_STEP_EMISSION_TABLE).sort(),
+  );
+  expect([...NEXT_STEP_EMISSION_KINDS].sort()).toEqual(EXPECTED_EMISSION_KINDS);
+  // A hand-listed literal beside the table is exactly what this forbids: the
+  // export must read the table, not restate it.
+  expect(NEXT_STEP_SOURCE).toMatch(
+    /NEXT_STEP_EMISSION_KINDS: ReadonlySet<string> =\s*NEXT_STEP_EMISSION\.handledKeys;/,
+  );
+});
+
+test("cmdNextStepBody emits through ONE call site — no per-kind hand-repeated write", () => {
+  const writeCurrentStepCalls =
+    NEXT_STEP_SOURCE.match(/\bwriteCurrentStep\(/g) ?? [];
+  expect(
+    writeCurrentStepCalls.length,
+    "sixteen branches each calling the writer is the duplication the table removes",
+  ).toBe(1);
+
+  const logCalls = NEXT_STEP_SOURCE.match(/console\.log\(/g) ?? [];
+  expect(logCalls.length, "one step is logged, from one place").toBe(1);
+
+  // The old shape: a per-branch `if (result.kind === "…") {` chain.
+  expect(/if \(result\.kind === "/.test(NEXT_STEP_SOURCE)).toBe(false);
+});
+
+test("every row returns a PLAN — a row cannot write or log a step itself", async () => {
+  await withTempDir(async (artifactsDir) => {
+    const state: AuditState = { status: "active", obligations: [] };
+    const bundle: ArtifactBundle = {};
+    const extras: Record<string, Record<string, unknown>> = {
+      complete: { finalReportPath: join(artifactsDir, "audit-report.md") },
+      blocked: { reason: "a stated cause" },
+      analyzer_install: { unresolved: [] },
+      analyzer_consent: { pending: [] },
+      edge_reasoning: { candidates: [] },
+    };
+
+    for (const kind of Object.keys(NEXT_STEP_EMISSION_TABLE)) {
+      const row =
+        NEXT_STEP_EMISSION_TABLE[kind as keyof typeof NEXT_STEP_EMISSION_TABLE];
+      const plan = await row({
+        argv: ["node", "audit-code", "--root", artifactsDir],
+        root: artifactsDir,
+        artifactsDir,
+        analyzerPolicy: { analyzers: {}, analyzer_consent: {} },
+        result: { kind, state, bundle, ...(extras[kind] ?? {}) },
+      } as Parameters<typeof row>[0]);
+
+      const via = (plan as unknown as { via: string }).via;
+      expect(["current", "blocked", "semantic_review"], `${kind} plan`).toContain(
+        via,
+      );
+      // No step file can exist yet: rows produce plans, the scaffold writes.
+      expect(
+        await fileExists(join(artifactsDir, "steps", "current-step.json")),
+        `${kind} must not have written a step from inside its row`,
+      ).toBe(false);
+    }
+  });
+});
+
+// ── The analyzer-policy precondition on the acquisition-bearing rows ─────────
+
+test("BOTH halves of the loaded analyzer policy ride every acquisition call, and no consent token is synthesized", () => {
+  const options = buildExternalAcquisitionOptions({
+    analyzers: { typescript: "skip" },
+    analyzer_consent: { semgrep: "declined" },
+  });
+
+  expect(options.enabled).toBe(true);
+  expect(options.analyzers).toEqual({ typescript: "skip" });
+  expect(
+    options.analyzerConsent,
+    "dropping the decisions leaves a recorded decline unrepresentable at admission",
+  ).toEqual({ semgrep: "declined" });
+  expect(
+    Object.prototype.hasOwnProperty.call(options, "consentToken"),
+    "a consent token is never synthesized on the operator's behalf",
+  ).toBe(false);
+});
+
+test("the pass-through reaches admission: a recorded decline vetoes even a DEFAULT-set candidate", () => {
+  const options = buildExternalAcquisitionOptions({
+    analyzer_consent: { gitleaks: "declined" },
+  });
+  const gitleaks = EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.id === "gitleaks");
+  assert.ok(gitleaks, "gitleaks is the default-set candidate this pins");
+  expect(gitleaks.defaultRun).toBe(true);
+
+  // Exactly the arguments the acquisition engine forms from these options.
+  const denied = admitSpawn(
+    gitleaks,
+    "auto",
+    options.consentToken,
+    options.analyzerConsent?.[gitleaks.id],
+  );
+  expect(denied).toBe(ANALYZER_DENIAL_REASONS.consent_declined);
+
+  // Drop the pass-through and the operator's decline simply never arrives.
+  const withoutPassThrough = admitSpawn(gitleaks, "auto", undefined, undefined);
+  expect(withoutPassThrough).toBe(undefined);
+});
+
+test("an acquisition-bearing row REFUSES to emit when the analyzer policy did not load", async () => {
+  await withTempDir(async (artifactsDir) => {
+    const state: AuditState = { status: "active", obligations: [] };
+    const ctx = {
+      argv: ["node", "audit-code"],
+      root: artifactsDir,
+      artifactsDir,
+      analyzerPolicy: null,
+    };
+
+    const acquisitionRows: Array<
+      ["analyzer_consent" | "analyzer_install", Record<string, unknown>]
+    > = [
+      ["analyzer_consent", { pending: [] }],
+      ["analyzer_install", { unresolved: [] }],
+    ];
+    for (const [kind, extra] of acquisitionRows) {
+      const row = NEXT_STEP_EMISSION_TABLE[kind];
+      await assert.rejects(
+        () =>
+          row({
+            ...ctx,
+            result: { kind, state, bundle: {}, ...extra },
+          } as Parameters<typeof row>[0]),
+        /acquisition-bearing/,
+        `${kind} must not emit against an unloaded policy`,
+      );
+    }
+
+    // A row that is NOT acquisition-bearing states no such dependence.
+    const complete = NEXT_STEP_EMISSION_TABLE.complete;
+    await assert.doesNotReject(() =>
+      complete({
+        ...ctx,
+        result: {
+          kind: "complete",
+          state,
+          bundle: {},
+          finalReportPath: join(artifactsDir, "audit-report.md"),
+        },
+      } as Parameters<typeof complete>[0]),
+    );
+  });
+});
+
+test("an unreadable analyzer policy blocks the step instead of degrading to an empty policy", async () => {
+  await withTempDir(async (root) => {
+    await mkdir(join(root, ".audit-tools", "audit"), { recursive: true });
+    await writeFile(
+      join(root, ".audit-tools", "audit", "analyzer-policy.json"),
+      "{ this is not json",
+      "utf8",
+    );
+
+    const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
+    const logged: string[] = [];
+    const originalLog = console.log;
+    console.log = (value: unknown) => {
+      logged.push(String(value));
+    };
+    try {
+      await cmdNextStep(["node", "audit-code", "--root", root]);
+    } finally {
+      console.log = originalLog;
+    }
+
+    expect(logged.length, "exactly one step is announced").toBe(1);
+    const step = JSON.parse(logged[0]) as {
+      status: string;
+      artifact_paths: Record<string, string>;
+    };
+    expect(step.status).toBe("blocked");
+    expect(step.artifact_paths.operator_handoff).toMatch(
+      /operator-handoff\.json$/,
+    );
+    // The run did NOT proceed with an empty policy: no dispatch happened.
+    expect(
+      await fileExists(
+        join(root, ".audit-tools", "audit", "repo_manifest.json"),
+      ),
+    ).toBe(false);
+  });
+});
+
+test("BOTH blocked paths carry the same operator-handoff contract, built from ONE home", async () => {
+  // The `blocked` result kind and the pre-dispatch config-load failure emit the
+  // same contract. Asserting only `via === "blocked"` would let the row re-type
+  // the shape and drift: a field added to the single home would reach one path
+  // and not the other. So both paths are DRIVEN and their written contracts
+  // compared.
+  await withTempDir(async (root) => {
+    await mkdir(join(root, ".audit-tools", "audit"), { recursive: true });
+    await writeFile(
+      join(root, ".audit-tools", "audit", "analyzer-policy.json"),
+      "{ this is not json",
+      "utf8",
+    );
+
+    // Path B (pre-dispatch config failure), end to end through cmdNextStep.
+    const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
+    const logged: string[] = [];
+    const originalLog = console.log;
+    console.log = (value: unknown) => {
+      logged.push(String(value));
+    };
+    try {
+      await cmdNextStep(["node", "audit-code", "--root", root]);
+    } finally {
+      console.log = originalLog;
+    }
+    const stepB = JSON.parse(logged[0]) as Record<string, unknown> & {
+      artifacts_dir: string;
+      artifact_paths: Record<string, string>;
+    };
+
+    // Path A (the `blocked` result kind), written through the same shared writer
+    // the scaffold uses, into the SAME artifacts dir so every path-valued field
+    // is comparable.
+    const row = NEXT_STEP_EMISSION_TABLE.blocked;
+    const plan = (await row({
+      argv: ["node", "audit-code", "--root", root],
+      root,
+      artifactsDir: stepB.artifacts_dir,
+      analyzerPolicy: { analyzers: {}, analyzer_consent: {} },
+      result: {
+        kind: "blocked",
+        state: { status: "active", obligations: [] },
+        bundle: {},
+        reason: "a stated cause",
+      },
+    } as Parameters<typeof row>[0])) as unknown as {
+      params: Parameters<typeof writeBlockedStepContract>[0];
+    };
+
+    // The whole home shape rides the row — not a subset it happened to re-type.
+    expect(Object.keys(plan.params).sort()).toEqual([
+      "artifactPaths",
+      "artifactsDir",
+      "contractVersion",
+      "reason",
+      "repoRoot",
+      "runId",
+      "tool",
+    ]);
+
+    const stepA = JSON.parse(
+      JSON.stringify(await writeBlockedStepContract(plan.params)),
+    ) as Record<string, unknown> & { artifact_paths: Record<string, string> };
+
+    // Same contract on both paths, modulo the reason each states.
+    expect(Object.keys(stepA).sort()).toEqual(Object.keys(stepB).sort());
+    expect(stepA.artifact_paths).toEqual(stepB.artifact_paths);
+    expect(stepA.artifact_paths.operator_handoff).toMatch(
+      /operator-handoff\.json$/,
+    );
+    for (const field of [
+      "contract_version",
+      "step_kind",
+      "status",
+      "run_id",
+      "repo_root",
+      "artifacts_dir",
+    ]) {
+      expect(stepA[field], `${field} must match across both blocked paths`).toEqual(
+        stepB[field],
+      );
+    }
+  });
+});
