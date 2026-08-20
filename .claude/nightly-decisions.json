@@ -1435,10 +1435,10 @@
   },
   "8d7b9bb8d978307d": {
     "disposition": "settled",
-    "answer": "Delete HOST_GATE_DESCRIPTORS / HOST_GATE_KINDS and its hardcoded-vs-hardcoded tests on the next tested-but-unwired pass unless a production reader lands first — owner decision already recorded 2026-08-19 in docs/backlog/open-bugs.md (commit a764f423); this settle records that existing decision, it is not a new answer.",
+    "answer": "Owner decision (2026-08-19, recorded in docs/backlog/open-bugs.md): delete HOST_GATE_DESCRIPTORS / HOST_GATE_KINDS and their hardcoded-vs-hardcoded tests on the next tested-but-unwired pass unless a production reader lands first — the invested-in-but-write-only shape does not earn a keep. GATE_LANES stays the live registry.",
     "subject": "HOST_GATE_DESCRIPTORS is a finished registry that nothing in production reads — wire a reader, or delete it on the next unwired pass",
     "path": "src/audit/cli/nextStepHelpers.ts",
-    "decided_at": "2026-08-19T16:21:09.892Z"
+    "decided_at": "2026-08-20T04:27:04.714Z"
   },
   "587c1796832c5cbc": {
     "disposition": "settled",
