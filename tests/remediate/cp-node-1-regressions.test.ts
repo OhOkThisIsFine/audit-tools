@@ -66,7 +66,6 @@ import {
   ITEM_STATUSES,
   isInProgressStatus,
   isSkipStatus,
-  isTerminalStatus,
   isUnsuccessfulEndStatus,
   isVerifiedCompleteStatus,
   requiresVerificationEvidence,
