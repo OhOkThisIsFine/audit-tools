@@ -21,7 +21,7 @@
 // the OS temp dir, never in the tree — a lock file in the repo would dirty the
 // working tree, which is the very defect this cluster exists to remove.
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -95,15 +95,20 @@ export function liveHolders(repoRoot: string): SuiteHolder[] {
   return live;
 }
 
-/** Register this process as a running suite. */
+/**
+ * Register this process as a running suite. Writes temp-file-then-rename
+ * within the same holder directory (same volume ⇒ atomic on POSIX and NTFS):
+ * a reader (`liveHolders`) never observes a partially-written holder file, so
+ * it cannot mistake a live suite's in-flight registration for an unreadable
+ * (and therefore sweepable) entry and delete it out from under a real holder.
+ */
 export function registerSuite(repoRoot: string): void {
   const dir = suiteLockDir(repoRoot);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    join(dir, `${process.pid}.json`),
-    JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
-    "utf8",
-  );
+  const finalPath = join(dir, `${process.pid}.json`);
+  const tmpPath = join(dir, `${process.pid}.json.tmp-${process.hrtime.bigint()}`);
+  writeFileSync(tmpPath, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }), "utf8");
+  renameSync(tmpPath, finalPath);
 }
 
 /** Deregister this process. Only ever removes OUR entry. */

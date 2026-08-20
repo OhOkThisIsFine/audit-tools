@@ -193,15 +193,31 @@ function startLockHeartbeat(
   ownerToken: string,
   now: Clock,
   intervalMs: number,
+  logger?: RunLogger,
 ): () => void {
   const timer = setInterval(() => {
     void (async () => {
       try {
-        if ((await readFile(lockPath, "utf8")) !== ownerToken) return;
+        const current = await readFile(lockPath, "utf8");
+        if (current !== ownerToken) {
+          // Someone else now owns this lock path (stolen after staleness).
+          // Distinct from an IO failure: the heartbeat is correctly stopping
+          // itself rather than refreshing a lock it no longer holds.
+          logger?.event({ kind: "error", note: "lock_heartbeat_stolen", lock_path: lockPath } as never);
+          return;
+        }
         const stamp = new Date(now());
         await utimes(lockPath, stamp, stamp);
-      } catch {
-        // best-effort: lock briefly contended or already released
+      } catch (err) {
+        // IO failure (contention, transient FS error, lock removed underneath
+        // us): classified and recorded rather than silently swallowed, so a
+        // loss of freshness is visible instead of invisible.
+        logger?.event({
+          kind: "error",
+          note: "lock_heartbeat_failed",
+          lock_path: lockPath,
+          error: err instanceof Error ? err.message : String(err),
+        } as never);
       }
     })();
   }, intervalMs);
@@ -312,6 +328,7 @@ export async function withFileLock<T>(
     token,
     options.now ?? defaultClock,
     options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+    logger,
   );
   let hasFnError = false;
   try {
@@ -330,4 +347,44 @@ export async function withFileLock<T>(
       if (!hasFnError) throw releaseErr;
     }
   }
+}
+
+async function readJsonIfExists(path: string): Promise<unknown> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw err;
+  }
+  return JSON.parse(raw);
+}
+
+/**
+ * Locked read-mutate-write over a JSON artifact: `mutate` receives the current
+ * parsed value (`undefined` when the file does not yet exist) and returns the
+ * next value, which is written back under the same file lock — closing the
+ * TOCTOU window between reading a JSON artifact and writing it back that a
+ * caller doing its own read + lock + write can reintroduce. Uses the same
+ * atomic acquire/heartbeat/release machinery as {@link withFileLock}.
+ */
+export async function lockedJsonMutate<T>(
+  lockPath: string,
+  jsonPath: string,
+  mutate: (current: unknown) => T,
+  options: { timeoutMs?: number; logger?: RunLogger } & LockOptions = {},
+): Promise<T> {
+  return withFileLock(
+    lockPath,
+    async () => {
+      const current = await readJsonIfExists(jsonPath);
+      const next = mutate(current);
+      await mkdir(dirname(jsonPath), { recursive: true });
+      await writeFile(jsonPath, JSON.stringify(next, null, 2), "utf8");
+      return next;
+    },
+    options.timeoutMs,
+    options.logger,
+    options,
+  );
 }
