@@ -5,12 +5,13 @@
 // an empty section is omitted from the report (short), but omitting it requires
 // stating "none" in the input (intentional). A test, not prose, because the
 // prose version of this rule is exactly what decayed twice.
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+
+import { spawnSyncHidden } from '../helpers/spawn.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const SCRIPT = join(REPO_ROOT, 'scripts', 'render-closeout.mjs');
@@ -22,10 +23,9 @@ function render(input: unknown): { code: number; stdout: string; stderr: string 
   // CLAUDE_PROJECT_DIR points at the temp dir on purpose: the renderer writes a
   // HEAD-bound record the closeout Stop gate reads, and a test run must not
   // forge one for the real repo.
-  const r = spawnSync(process.execPath, [SCRIPT, '--in', file], {
+  const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
-    windowsHide: true,
     env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
   });
   return { code: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
