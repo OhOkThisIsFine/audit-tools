@@ -21,6 +21,15 @@ if (verbose || report.status !== 'ok') {
   console.log(JSON.stringify(report, null, 2));
 }
 
+for (const check of report.general_checks ?? []) {
+  if (check.status === 'ok') {
+    console.log(`verify:remediate-hosts: ${check.id} ok`);
+    continue;
+  }
+  console.error(`verify:remediate-hosts: ${check.id} FAILED`);
+  console.error(`  - ${check.summary}`);
+}
+
 for (const host of report.hosts) {
   const failed = host.checks.filter((check) => check.status === 'error');
   if (failed.length === 0) {

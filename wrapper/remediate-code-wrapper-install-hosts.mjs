@@ -739,12 +739,29 @@ export async function runHostVerifyChecks(hostKey, { root, assetPaths, hostEntry
   };
 }
 
+// A fixture that matches looksLikeRemediateCodePrompt (legacy.mjs) — seeded
+// into the isolated root below so removeLegacyRemediateCodeSurfaceFiles's
+// unlink branch is actually exercised by this gate, not just by the deploy's
+// own no-op path over an empty root. CP-NODE-21/22: before this fixture, the
+// ONLY automated caller of removeLegacyRemediateCodeSurfaceFiles always
+// deployed into a brand-new root where no legacy surface could exist, so the
+// destructive branch had zero reach from any gate (TST-4c1e8a96 family).
+const LEGACY_SURFACE_FIXTURE_RELATIVE_PATH = join('.claude', 'commands', 'remediate-code.md');
+const LEGACY_SURFACE_FIXTURE_CONTENT =
+  '# `/remediate-code`\n\n' +
+  'Conversation-first remediation fixture seeded by verifyHostsIsolated to prove ' +
+  'removeLegacyRemediateCodeSurfaceFiles actually deletes a matching legacy surface ' +
+  'inside this isolated gate, not only in a unit test.\n';
+
 /**
  * Deploy every host's assets into an ISOLATED throwaway repo root under a
  * redirected `$HOME`/`USERPROFILE` (so the real user config is never touched),
  * then re-run each host's `verify()` handler from the SAME INSTALL_HOST_DEFINITIONS
  * table that drives the deploy. The set of hosts verified is derived from
  * INSTALL_HOST_ORDER, so adding a host to the table auto-extends verification.
+ * Also seeds one legacy-surface fixture before the deploy so the deploy's own
+ * call to removeLegacyRemediateCodeSurfaceFiles has something real to delete —
+ * see `general_checks` in the returned report.
  *
  * Returns a structured report; callers (the `verify:hosts` script, tests) decide
  * how to surface it. Never mutates the caller's environment beyond restoring the
@@ -758,6 +775,7 @@ export async function runHostVerifyChecks(hostKey, { root, assetPaths, hostEntry
  *   home_dir: string,
  *   repo_root: string,
  *   hosts: { host: string, status: 'ok' | 'error', checks: object[] }[],
+ *   general_checks: { id: string, status: 'ok' | 'error', summary?: string }[],
  * }>}
  */
 export async function verifyHostsIsolated(options = {}) {
@@ -773,8 +791,28 @@ export async function verifyHostsIsolated(options = {}) {
 
   try {
     await mkdir(isolatedRepoRoot, { recursive: true });
+
+    const legacyFixturePath = join(isolatedRepoRoot, LEGACY_SURFACE_FIXTURE_RELATIVE_PATH);
+    await writeGeneratedMarkdown(legacyFixturePath, LEGACY_SURFACE_FIXTURE_CONTENT);
+
     // Deploy every host surface into the throwaway root from the canonical assets.
+    // writeCoreInstallAssets (inside installBootstrap) calls
+    // removeLegacyRemediateCodeSurfaceFiles as its last step, so the fixture
+    // seeded above is what makes that call's destructive branch fire here.
     await installBootstrap(['--host', 'all', '--root', isolatedRepoRoot], { quiet: true });
+
+    const generalChecks = [];
+    await collectVerifyCheck(generalChecks, 'legacy_surface_cleanup', async () => {
+      if (await fileExists(legacyFixturePath)) {
+        throw new Error(
+          `Seeded legacy-surface fixture was not removed by removeLegacyRemediateCodeSurfaceFiles: ${legacyFixturePath}`,
+        );
+      }
+      return {
+        summary: 'The seeded legacy-surface fixture was removed by the deploy, as looksLikeRemediateCodePrompt requires.',
+        path: legacyFixturePath,
+      };
+    });
 
     // Derive expectations from the SAME table the deploy uses: profile → asset
     // paths → per-host verify(). INSTALL_HOST_ORDER is the source of truth for the
@@ -798,10 +836,12 @@ export async function verifyHostsIsolated(options = {}) {
       );
     }
 
-    const issueCount = hosts.reduce(
-      (sum, host) => sum + host.checks.filter((check) => check.status === 'error').length,
-      0,
-    );
+    const issueCount =
+      generalChecks.filter((check) => check.status === 'error').length +
+      hosts.reduce(
+        (sum, host) => sum + host.checks.filter((check) => check.status === 'error').length,
+        0,
+      );
 
     return {
       status: issueCount > 0 ? 'error' : 'ok',
@@ -810,6 +850,7 @@ export async function verifyHostsIsolated(options = {}) {
       home_dir: homeDir,
       repo_root: isolatedRepoRoot,
       hosts,
+      general_checks: generalChecks,
     };
   } finally {
     if (previousHome === undefined) delete process.env.HOME;

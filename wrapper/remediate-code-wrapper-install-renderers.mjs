@@ -5,8 +5,18 @@
  * shared `renderHostAsset` helper (`audit-tools/shared`). These functions are
  * thin wrappers that pass the canonical body through with the right `kind` and
  * `toolName`; they do NOT re-author per-host loader prose. That makes it
- * impossible for a host asset to drift out of sync with the canonical body or
- * to embed a wrong in-repo entrypoint. A no-drift guard test enforces this.
+ * structurally impossible for an asset RENDERED THIS WAY to drift out of sync
+ * with the canonical body or to embed a wrong in-repo entrypoint —
+ * renderHostAsset is the single source, never a per-host copy.
+ *
+ * A no-drift guard test enforces that the COMMITTED assets stay in sync with a
+ * fresh render of that body, but today it exists only for the audit-code twin
+ * (tests/audit/host-asset-renderer-drift.test.ts, which imports
+ * wrapper/audit-code-wrapper-install-renderers.mjs — never this file). No
+ * equivalent committed-asset drift guard exists yet on the remediate-code side
+ * (CP-NODE-22 / OBL-remediate-wrapper-test-reach-inv-3): the render-time
+ * structural guarantee above holds regardless, but nothing yet re-checks a
+ * committed remediate-code host asset against a fresh render of it.
  */
 
 import { renderHostAsset } from 'audit-tools/shared';
