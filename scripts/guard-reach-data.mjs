@@ -561,6 +561,8 @@ export const REACH = [
       'scripts/gate-enumeration-data.mjs',
       'scripts/shared/generate-*.mjs',
       'scripts/attest-constitutional-doc-change.mjs',
+      'scripts/render-closeout.mjs',
+      'scripts/closeout-sections-data.mjs',
     ],
     guardedBy: [
       'check:guard-reach',
@@ -580,7 +582,10 @@ export const REACH = [
     uncovered:
       'scripts/ is reached by no tsconfig — deliberate (validate at the construction site; check:lint ' +
       'gives an untyped no-undef/no-unused-vars floor, not a typecheck); ' +
-      'attest-constitutional-doc-change is invoked per constitutional override, wired into no verify gate',
+      'attest-constitutional-doc-change is invoked per constitutional override, wired into no verify gate; ' +
+      'render-closeout is invoked per hand-back, wired into no verify gate either — its enforcement is ' +
+      'the closeout-challenge Stop gate reading the record it writes, so a session that never renders is ' +
+      'challenged, not blocked',
   },
   {
     area: 'pipeline, smoke & release scripts',

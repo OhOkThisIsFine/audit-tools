@@ -200,6 +200,33 @@ try {
   /* script missing / spawn fault → skip this check */
 }
 
+// The hand-back itself: rendered through scripts/render-closeout.mjs, which
+// REFUSES to render until every section carries a value or an explicit "none",
+// then omits the silent ones. Without a record bound to this HEAD, the report
+// was hand-written — and a hand-written report is exactly where a skipped
+// section hides as a short one.
+try {
+  const rec = JSON.parse(
+    readFileSync(join(ROOT, '.claude', 'hooks', '.state', 'closeout-render', 'latest.json'), 'utf8'),
+  );
+  const head = git(['rev-parse', 'HEAD']).out;
+  if (head && rec?.head && rec.head !== head) {
+    findings.push(
+      `the closeout render on record is for ${String(rec.head).slice(0, 8)}, not the current ` +
+        `${head.slice(0, 8)} — re-render it so the report describes the tree being handed off ` +
+        '(`node scripts/render-closeout.mjs --in <closeout.json>`).',
+    );
+  }
+} catch {
+  findings.push(
+    'no rendered closeout on record for this tree. Write the section inputs and render the ' +
+      'hand-back with `node scripts/render-closeout.mjs --in <closeout.json>` ' +
+      '(`--template` prints a blank one): it refuses until every section states content or an ' +
+      'explicit "none", then omits the silent ones. A hand-written report can drop a section ' +
+      'without anyone noticing; a rendered one cannot.',
+  );
+}
+
 // A memory file that never reached MEMORY.md is invisible to the next session:
 // the index is what gets loaded, not the directory.
 try {

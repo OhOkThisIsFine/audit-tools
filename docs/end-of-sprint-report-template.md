@@ -1,89 +1,74 @@
 # End-of-sprint report — template
 
-The markdown scheme for the closeout hand-back at the end of every sprint (see the
-*End-of-sprint cleanup* step in [`CLAUDE.md`](../CLAUDE.md)). The report is **rendered in
-chat** as the hand-back; its durable pieces are simultaneously written to their permanent
-homes (`docs/HANDOFF.md`, `docs/backlog.md`, project memory). This template is **timeless
-structure, not a persisted instance** — do NOT commit a dated, filled-in copy into the tree
-(that would be the changelog/status-doc creep the [documentation philosophy](documentation-philosophy.md)
-forbids).
+The closeout hand-back at the end of every sprint (see the *End-of-sprint cleanup* step in
+[`CLAUDE.md`](../CLAUDE.md)) is **rendered, not hand-written**:
 
-**Section order is bottom-weighted on purpose.** The owner reads the END of the message first,
-so the sections run from routine mechanics to the decisions and next steps that need attention.
-Keep that order.
-
-**Nothing to report means the line is not written.** Omit an empty bullet, and omit a whole
-section when every bullet in it would be empty. Never write `none` on its own line, and never
-explain the emptiness — an explanatory paragraph under a "none" is the failure this rule exists
-to stop. Two exceptions, because there the absence is itself the message: **Verification** always
-reports, and **Landed this sprint** always states what the sprint did, even if the answer is
-"investigation/docs only".
-
-```markdown
-## Sprint closeout
-
-### Verification
-- Build + typecheck: <green/red> (`npm run build && npm run check`)
-- Tests: <suite(s) run> → <pass/fail counts>, on a clean, fully-pushed tree at `<commit>`
-
-### Cleanup
-- Diff scanned for dead code / orphaned helpers / stray debug·TODO: <removed …>
-- Deliberate intermediate state (NOT a bug): <called out …>
-
-### Friction this sprint
-> Categories are the single-sourced friction vocabulary (`FRICTION_CATEGORIES`,
-> `src/shared/friction/frictionRecord.ts`) — one taxonomy for sprint retros and the
-> product's mechanical capture. Named prompts are seeds, NOT an exhaustive schema — the
-> open-ended line is load-bearing whenever it has content. Write only the lines that do.
-- ambiguous_direction (instructions/docs/specs pointed the wrong way, or contradicted each other): <…>
-- tool_should_decide (a human/agent had to remember, notice, or decide something the tool should enforce): <…>
-- inefficient_feeding (context/tokens wasted moving information in or out — re-derivation, dumps, re-loops): <…>
-- **Open-ended (anything else that caused friction, fit no category above):** <…>
-- Logged to: <docs/backlog.md entry | friction record>
-
-### Docs synced
-- HANDOFF: <updated → …>
-- backlog: <added/removed …>
-- memory + index: <updated …>
-
-### Landed this sprint
-- <one line: what this sprint did + outcome (e.g. shipped audit-tools@X.Y.Z)>
-- <change> — `<commit>` / shipped in `<version>`
-- … (or "nothing — investigation/docs only")
-
-### Decisions needed from you
-> Omit this heading entirely when no decision is live.
-> Otherwise every decision only the owner can make MUST be posed here as an actual answerable
-> question — the question stated, the options spelled out, via AskUserQuestion where the harness
-> offers it. "Your decision: see queue X / run command Y" is a pointer, not a question, and does
-> not satisfy this section. Record each answer in its durable home (e.g. `answer.mjs <id>`, the
-> named doc) once given.
-- <the question, options included> → recorded at <answer.mjs id | doc | backlog entry>
-
-### Remaining next steps, and where each lives
-> Omit this heading entirely when nothing remains.
-> Otherwise list every remaining item with its document home. Never leave a step implied or
-> living only in chat.
-- <next step> → `docs/HANDOFF.md` (immediate next)
-- <open bug> → `docs/backlog/open-bugs.md`; <forward track> → `docs/backlog/forward-tracks.md`
-- <durable design / status> → project memory + `~/.claude/…/memory/MEMORY.md`
-- <durable how-to> → `CLAUDE.md`
+```bash
+node scripts/render-closeout.mjs --in closeout.json
 ```
+
+`--template` prints a blank input. The rendered markdown is the hand-back, pasted into chat; the
+durable pieces are simultaneously written to their permanent homes (`docs/HANDOFF.md`,
+`docs/backlog.md`, project memory).
+
+## Why a renderer and not a template to copy
+
+Two properties of the report pull against each other, and no hand-written version holds both:
+
+- **The report must be short.** A section with nothing to report is omitted — not written out as
+  `none`, and never as a `none` followed by a paragraph explaining the `none`. Long closeouts are
+  the ones that stop being read.
+- **Silence must be intentional.** If empty sections simply vanish, a *skipped* obligation and a
+  genuine *nothing to report* look identical, and the closeout stops being evidence of anything.
+
+The renderer separates them by moving the disposition off the page and into an input it refuses to
+guess. Every section declared in [`scripts/closeout-sections-data.mjs`](../scripts/closeout-sections-data.mjs)
+must carry a value — content, or the literal `"none"` — or the render fails and names what is
+missing. Only the sections with content render. So an omission in the report is always a decision
+that was stated, and the report is still short.
+
+Two sections are `required: true` and may not be `"none"`: **Verification** and **Landed this
+sprint**. There an absence is not "nothing to say", it is "nobody looked".
+
+Section order is the registry's order, and it is bottom-weighted on purpose: chat shows the end of
+a long message first, so mechanics come first and what the owner must act on comes last.
+
+The refusal is backed by the `closeout-challenge-gate` Stop hook, which reads the HEAD-bound record
+the renderer writes: a sprint that ends with no render for the current tree is challenged, so
+hand-writing the report instead is not a quiet way around the check. The behavior is pinned by
+[`tests/shared/closeout-render.test.ts`](../tests/shared/closeout-render.test.ts).
+
+## What each section is for
+
+- **Verification** (always renders) — what was run, what it returned, and the clean pushed commit it
+  ran on.
+- **Cleanup** — dead code / orphaned helpers / stray debug·TODO removed, and any *deliberate*
+  intermediate state called out so it does not read as a bug.
+- **Friction this sprint** — bullets keyed by the single-sourced friction vocabulary
+  (`FRICTION_CATEGORIES`, `src/shared/friction/frictionRecord.ts`), one taxonomy for sprint retros
+  and the product's mechanical capture. The named categories are seeds, not an exhaustive schema —
+  the open-ended bullet is load-bearing whenever it has content.
+- **Docs synced** — HANDOFF / backlog / memory + index, only the ones that actually changed.
+- **Landed this sprint** (always renders) — what this sprint did and its outcome, with
+  commits/versions. "nothing — investigation/docs only" is a real answer; an empty section is not.
+- **Decisions needed from you** — every decision only the owner can make, posed as an actual
+  answerable question with its options spelled out, via AskUserQuestion where the harness offers it.
+  "Your decision: see queue X / run command Y" is a pointer, not a question, and does not satisfy
+  this section. Record each answer in its durable home once given.
+- **Remaining next steps, and where each lives** — every remaining step WITH the document that will
+  hold it after the session ends: immediate-next → `docs/HANDOFF.md`; open bugs →
+  `docs/backlog/open-bugs.md`; forward tracks → `docs/backlog/forward-tracks.md`; durable
+  design/status → project memory + its index; durable how-to → `CLAUDE.md`. A step living only in
+  chat is lost.
 
 ## Notes
 
-- **Essential last.** The reading order is inverted in chat, so decisions and remaining steps sit
-  at the bottom where the owner lands first. Mechanics (verification, cleanup, friction) sit above.
-- **Silence is the empty value.** A bullet or a section with nothing to report is not written at
-  all — no `none`, no explanation of the `none`. Only the two sections named above always report.
-  The cost is accepted deliberately: an omission and a genuine nothing now look alike, and the
-  guard against a dropped obligation is the next section, not a written-out `none`.
-- **Next steps + doc homes is mandatory when any remain.** The closeout exists partly so a
-  remaining obligation is never lost to chat-only memory. Every remaining step is written WITH the
-  document that will hold it after the session ends.
-- **Owner decisions are asked, not referenced.** The recurring failure this section exists to
-  stop: hand-backs that say "your decision — item X" while the actual question (which the agent
-  holds, options and all) never reaches the owner. If the owner would have to open a file or run
-  a command to find out what is being asked, the closeout has not asked it.
+- **Adding or removing a section is a registry edit**, not a prose edit — the renderer, the refusal
+  message, and this document's list all follow from `closeout-sections-data.mjs`.
+- **Owner decisions are asked, not referenced.** The recurring failure that section exists to stop:
+  hand-backs that say "your decision — item X" while the actual question (which the agent holds,
+  options and all) never reaches the owner. If the owner would have to open a file or run a command
+  to find out what is being asked, the closeout has not asked it.
 - **One home per fact.** The report points at where durable content lives; it does not duplicate it.
-  Immediate-next → HANDOFF; open work → backlog; durable concepts/status → memory; how-to → CLAUDE.md.
+- **Never commit a filled, dated copy** of a rendered report into the tree — that is the
+  changelog/status-doc creep the [documentation philosophy](documentation-philosophy.md) forbids.

@@ -52,6 +52,7 @@
     "verify:release": "npm run verify:checks && node scripts/shared/run-vitest-gate.mjs && npm run smoke:linked-audit-code && npm run smoke:linked-remediate-code",
     "check:control-bytes": "node scripts/check-control-bytes.mjs",
     "check:guard-reach": "node scripts/check-guard-reach.mjs",
+    "closeout": "node scripts/render-closeout.mjs",
     "check:ci-trigger-paths": "node scripts/shared/generate-ci-trigger-paths.mjs --check",
     "check:deadcode": "knip --no-config-hints",
     "check:lint": "eslint .",
