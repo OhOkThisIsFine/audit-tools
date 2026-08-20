@@ -631,4 +631,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   ledger-marked, spawn-free under the state lock). Cost when it happened: 12 landed items pending
   in state, a full design-check + three review rounds to build the verb.
 
+- **A subagent's Read tool can serve STALE pre-edit content for a file another agent is
+  concurrently editing (2026-08-20).** Hit twice in one session: Read returned a file's
+  pre-edit content at pre-edit line numbers while ripgrep and direct disk reads showed
+  the post-edit tree, so a reviewer using Read alone would have reviewed the wrong
+  file. When Read contradicts a grep, trust the disk read and re-verify. Suspect the
+  proxy's tool-result interception first (its own documentation says to drop that flag
+  when an agent acts on file content that does not match disk).
+
 ## Doc-set hygiene (enforced)

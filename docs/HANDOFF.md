@@ -91,8 +91,8 @@ triples. The tracked entry is the steward-metadata item in [`open-bugs.md`](back
 4. **A consolidated pass is queued** in the backlog: the wave's deferred durable tests, the
    owner-decided registry deletion, the emission-scaffold type lift, and the per-node review
    residuals — all seven entries are at the top of [`open-bugs.md`](backlog/open-bugs.md).
-5. **Two nightly decisions are waiting** on the owner (see the generated block above); one of them
-   is the mechanical fix for the scope-widening class this wave hit nine times.
+5. **Owner decisions are pending in the generated block above** — one of them approves the
+   mechanical fix for the write-scope routing class this wave worked around nine times.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 

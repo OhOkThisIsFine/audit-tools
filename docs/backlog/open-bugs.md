@@ -6,6 +6,83 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **CP-NODE-6 is reviewed and BLOCKED on branch `wip/cp-node-6-blocked` (high).** The
+  host-handoff ingestion substrate work (8 files, 27 obligations, whole suite green) is
+  preserved at commit cdbdd05e, deliberately not on main; its attestation records a
+  `concerns` verdict. Two blocking defects, both with a stated fix and both needing a
+  test that reds today: (a) SECURITY — the block-contract command scanner treats
+  single-quoted shell metacharacters as inert, but cmd.exe does not treat `'` as a
+  quote, so an admitted targeted_command can execute a second process at ingest and
+  write outside every declared write scope (exit 0, stderr empty); (b) WEDGE — a
+  non-empty block-issue list early-returns before any work item is examined, so one
+  malformed non-level-0 block means no landed result is ever accepted and next-step
+  re-emits the same items forever. Property: a refusal is bounded and classified; it
+  never becomes run-terminal. Non-blocking residuals from the same review: a green
+  required test emitting >8MB is misclassified as timed-out via ENOBUFS; the RunLogger
+  clause of the locked-ledger invariant has no production adopter; the normalized-path
+  refusal is a behavior break with no migration path for in-flight plans.
+
+- **Analyzer-boundary residuals from the CP-NODE-1 review (low).** (a) Six
+  `normalizeGenericExternalResults` call sites in the adapter layer pass no repo root,
+  so eslint/semgrep/npmAudit/coverageSummary/clippy/rubocop adapters still persist
+  absolute paths — `toRepoRelativeAnalyzerPath` is exported and adoption is cheap. (b)
+  The sibling analyzer cache under the user's home holds executable npm packages
+  created with default modes; the privilege-boundary reasoning now written into the
+  binary-acquisition module applies verbatim. (c) Three end-to-end CLI suites drive
+  real acquisition with no cache dir pinned, so they write to the real home directory —
+  the single-point fix is pinning both cache env overrides in the vitest setup helper
+  `state-dir-setup.mjs` rather than per-suite discretion. (d) The bare-string consent
+  token is retired only additively; the scoped grant has no production producer until
+  the caller-side node lands.
+
+- **Staleness third-state residuals from the CP-NODE-10 review (low).** The `partial`
+  presence classification exempts the nine map-declared leaves, including the
+  pipeline's primary machine contract, so a truncated leaf body is caught only through
+  its dependents; the stale-artifact set's subclass discriminator is dropped by
+  `Set.prototype.union` and `structuredClone` (no caller does either today); and the
+  producer-side affinity hash in the artifact-metadata module is unguarded, so a
+  malformed body dies loudly at restamp.
+
+- **Emission-scaffold and gate residuals from the CP-NODE-12/13 reviews (low).** The
+  loop-core path patterns do not cover `src/shared/steps/`, so the one write-and-log
+  site for the host-facing step contract sits outside the attestation gate (a one-line
+  pattern addition plus a guard-reach data sync, safety-monotone). The drain's
+  re-derivation half is pinned as a unit property of the obligation-state memo, not a
+  drain-level one, and nothing keys continuation on the deferred set — the drain-level
+  assertion needs a deferred-nonempty fixture that does not exist. The cycle-break
+  mediator check requires that SOME member depends on the designated node where the
+  prompt says BOTH sides must; the promotion gate reads its cross-gate payloads twice;
+  and the stale prompt-schema copy's content pin covers the schema block only.
+
+- **Charter and route residuals from the CP-NODE-18/19 reviews (low).**
+  `spec/audit/artifact-contract.md` and a test NAME in the charter-packets suite still
+  say the pre-bump charter-register version (one-token fixes; dated review records
+  under docs/reviews stay untouched). The stamped-delta type collapse is unfinished —
+  the required-on-the-register type and the extraction module's own identity type both
+  survive, along with a missing barrel export. A subsystem present with an empty
+  members array gets no clarification note although the message would be true, and
+  refusals print undifferentiated from routine remediator-routed skips. On the route
+  side, a routes module importing a shared router from a sibling has no framework
+  marker so its real routes are dropped (documented at the gate, leads-not-verdicts),
+  and route registration inside `.vue`/`.svelte`/`.astro` script blocks is now skipped
+  by the source-extension gate.
+
+- **Drift-guard residuals from the CP-NODE-25 review (low).** The schema guard's
+  anti-inert floor is a bare greater-than-zero check, so coverage can drop from eight
+  structural sites to one and still report green — pin the site set, not the count.
+  The rank guard's canonical-file exemption is inert (it asserts existence, not
+  membership in the walked set) and its rank-literal regex is key-order-locked, so a
+  re-inlined table in any other order goes undetected. The retirement guard's failure
+  message asserts a resolution fact its probe did not establish for codes outside its
+  known set (fail-direction is safe). The `statSync` beside the now-uncaught
+  `readdirSync` is still uncaught, so a file that disappears mid-walk kills the guard.
+
+- **`fixture-generator-drift-guard` is not hermetic (low, friction).** All three cases
+  failed on a missing built entry point that existed on disk throughout, and the suite
+  passes alone and on re-run — consistent with a concurrent dist clean/rebuild rather
+  than a regression. Property: a guard suite's verdict must not depend on another
+  process's build timing.
+
 - **A scoped wave item that coins an invariant id in `src/` is structurally unable to
   satisfy the id-glossary gate (2026-08-20, medium, friction: tool_should_decide).**
   `docs/glossary-ids.md` is outside every module's `file_scope`, the gate scans `src/` for
