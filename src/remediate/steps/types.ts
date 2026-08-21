@@ -1,12 +1,6 @@
 export const REMEDIATION_STEP_CONTRACT_VERSION =
   "remediate-code-step/v1alpha1" as const;
 
-export const REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION =
-  "remediate-code-dispatch-plan/v1alpha1" as const;
-
-export const REMEDIATION_WORKER_RESULT_CONTRACT_VERSION =
-  "remediate-code-worker-result/v1alpha1" as const;
-
 // ── The LIVE host-handoff wire contracts ────────────────────────────────────
 //
 // Single-sourced here rather than kept private to the host-handoff module,
