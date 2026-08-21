@@ -1455,11 +1455,104 @@ interface DagScopeNode {
 }
 
 /**
- * Single source for "which files may this DAG node write". Declared scope wins
- * (`output_files`, else `files_likely_touched`); a node that declared neither
- * inherits the `file_scope` of the module(s) its obligations belong to, resolved
- * by longest-`OBL-<slug>-` prefix so a short slug never mis-claims a longer
- * module's files.
+ * Characters that disqualify a finalized-contract entry from being read as a
+ * repo-relative write target: any whitespace (prose), `:` (the `artifact:<name>`
+ * ordering token and the Windows drive form), and the glob/redirect set no
+ * legal declared path carries.
+ */
+const NON_WRITE_TARGET_CHARS = /[\s:*?"<>|]/u;
+
+/**
+ * A finalized module contract's `outputs` / `side_effects` are FREE PROSE that
+ * may name a file ("src/foo.ts") or may describe an effect ("writes the run
+ * ledger under .audit-tools") or carry an ordering token
+ * ("artifact:validated-roster" — see ARTIFACT_TOKEN_PATTERN in phaseCut.ts).
+ * Only the first kind is a write target, so this is a deliberately CONSERVATIVE
+ * parse: an entry qualifies only when it reads unambiguously as a repo-relative
+ * path, and everything else is silently dropped — prose stays prose. A false
+ * positive here would widen a worker's write scope on the strength of a
+ * sentence, which is strictly worse than the manual widening this replaces.
+ *
+ * Returns the forward-slashed path, or null when the entry is not one.
+ */
+function contractDeclaredWriteTarget(entry: unknown): string | null {
+  if (typeof entry !== "string") return null;
+  const trimmed = entry.trim();
+  if (trimmed.length === 0) return null;
+  if (NON_WRITE_TARGET_CHARS.test(trimmed)) return null;
+  // Absolute (POSIX or Windows-UNC) forms are not repo-relative.
+  if (trimmed.startsWith("/") || trimmed.startsWith("\\")) return null;
+  const normalized = trimmed.replace(/\\/gu, "/");
+  if (normalized.split("/").includes("..")) return null;
+  // A bare word ("session") is an interface name, not a path. Require either a
+  // path separator or a file extension.
+  if (!normalized.includes("/") && !/\.[a-z0-9]{1,6}$/iu.test(normalized)) return null;
+  return normalized;
+}
+
+/**
+ * The path-parseable write targets each finalized module contract declares,
+ * keyed by `moduleSlug(name)` — the SAME identity the obligation ids encode, so
+ * this map joins to the decomposition's modules without a second name space.
+ *
+ * Degrades to an empty map when the artifact is absent or malformed: this
+ * resolver runs on the VALIDATOR's refusal path, so a bad contracts file must
+ * cost the widening, never wedge every subsequent next-step with a throw.
+ */
+async function readModuleContractWriteTargets(
+  artifactsDir: string,
+): Promise<Map<string, string[]>> {
+  let finalized: unknown;
+  try {
+    finalized = envelopePayload(
+      await readContractArtifact(artifactsDir, "finalized_module_contracts"),
+    );
+  } catch {
+    return new Map();
+  }
+  const entries =
+    isRecord(finalized) && Array.isArray(finalized.module_contracts)
+      ? finalized.module_contracts
+      : [];
+  const bySlug = new Map<string, string[]>();
+  for (const entry of entries) {
+    if (!isRecord(entry) || typeof entry.name !== "string") continue;
+    const slug = moduleSlug(entry.name);
+    if (slug.length === 0) continue;
+    const targets = bySlug.get(slug) ?? [];
+    const declared = [
+      ...(Array.isArray(entry.outputs) ? entry.outputs : []),
+      ...(Array.isArray(entry.side_effects) ? entry.side_effects : []),
+    ];
+    for (const raw of declared) {
+      const target = contractDeclaredWriteTarget(raw);
+      if (target !== null && !targets.includes(target)) targets.push(target);
+    }
+    bySlug.set(slug, targets);
+  }
+  return bySlug;
+}
+
+/**
+ * Single source for "which files may this DAG node write". The scope is the
+ * UNION of two declarations, never one overriding the other:
+ *
+ *  - the node's own declared files (`output_files`, else `files_likely_touched`);
+ *  - the path-parseable write targets (`outputs` + `side_effects`) declared by
+ *    the finalized contract of the module(s) the node's obligations belong to,
+ *    resolved by longest-`OBL-<slug>-` prefix so a short slug never mis-claims a
+ *    longer module's targets.
+ *
+ * A node that declared NO files of its own additionally inherits the
+ * `file_scope` of those same modules — that inheritance is the scope-less
+ * FALLBACK only, and is deliberately not unioned into a node that did declare.
+ *
+ * ⚠ The declared-files-win EARLY RETURN this used to perform is deliberately
+ * superseded (owner decision, nightly ledger 2026-08-20). The module contract is
+ * where a module's write targets are declared, and they never reached the node
+ * scope — so an implementer was handed an obligation whose declared target file
+ * was missing from `allowed_files`, and a human widened it by hand (four
+ * recoveries in one wave). Union, not precedence.
  *
  * ⚠ Shared by the PROMOTER (which derives the scope) and the VALIDATOR (which
  * refuses when it resolves to nothing) on purpose. Two copies of this resolution
@@ -1480,22 +1573,39 @@ async function buildNodeWriteScopeResolver(artifactsDir: string): Promise<{
   availableSlugs: string[];
 }> {
   const decomposedModules = await readDecomposedModules(artifactsDir);
+  const contractTargetsBySlug = await readModuleContractWriteTargets(artifactsDir);
   const moduleScopesBySlug = decomposedModules
-    .map((m) => ({ slug: moduleSlug(m.name), files: m.file_scope }))
+    .map((m) => ({
+      slug: moduleSlug(m.name),
+      files: m.file_scope,
+      targets: contractTargetsBySlug.get(moduleSlug(m.name)) ?? [],
+    }))
     .sort((a, b) => b.slug.length - a.slug.length);
   const resolve = (node: DagScopeNode): string[] => {
     const declared = [...new Set(node.output_files ?? node.files_likely_touched ?? [])];
-    if (declared.length > 0) return declared;
     const obligationIds = [
       ...(node.satisfies_obligations ?? []),
       ...(node.verification_obligation_ids ?? []),
     ];
     const inherited = new Set<string>();
+    const ownedTargets = new Set<string>();
     for (const id of obligationIds) {
       const owner = moduleScopesBySlug.find((m) => id.startsWith(`OBL-${m.slug}-`));
-      if (owner) for (const f of owner.files) inherited.add(f);
+      if (!owner) continue;
+      // file_scope inheritance is the scope-less fallback ONLY; the contract's
+      // declared targets are unioned in either way.
+      if (declared.length === 0) for (const f of owner.files) inherited.add(f);
+      for (const t of owner.targets) ownedTargets.add(t);
     }
-    return [...inherited];
+    // Content-derived order: the node's own declarations first, in the order
+    // they were declared, then the added targets path-sorted — so the resolved
+    // scope (which reaches the plan's content hash through affected_files)
+    // never churns on module ordering.
+    const base = declared.length > 0 ? declared : [...inherited];
+    const added = [...ownedTargets]
+      .filter((t) => !base.includes(t))
+      .sort((left, right) => compareCodeUnits(left, right));
+    return [...base, ...added];
   };
   return { resolve, availableSlugs: moduleScopesBySlug.map((m) => m.slug) };
 }
@@ -3936,9 +4046,10 @@ export async function promoteImplementationDagToExtractedPlan(
   // the module decomposition instead of trusting the host to have filled it: each
   // node's obligations are `OBL-<moduleSlug>-…`, and every module declares its
   // `file_scope`, so a node that declared no files inherits the file_scope of the
-  // module(s) its obligations belong to. (Declared files still win when present.)
-  // Single-sourced with the DAG validator, which refuses a node this resolves to
-  // nothing for — see buildNodeWriteScopeResolver.
+  // module(s) its obligations belong to. A node that DID declare files still gains
+  // those modules' finalized-contract write targets (P38) — the scope is a UNION,
+  // not a precedence. Single-sourced with the DAG validator, which refuses a node
+  // this resolves to nothing for — see buildNodeWriteScopeResolver.
   const { resolve: deriveNodeFiles } = await buildNodeWriteScopeResolver(artifactsDir);
 
   const nodes = (Array.isArray(dag?.nodes) ? [...dag.nodes] : []).sort((left, right) =>
@@ -4029,8 +4140,9 @@ export async function promoteImplementationDagToExtractedPlan(
       confidence: "high",
       lens,
       summary: node.description ?? node.title ?? "",
-      // output_files (declared write scope) takes priority over files_likely_touched;
-      // when the node declared neither, inherit the module file_scope (deriveNodeFiles)
+      // output_files (declared write scope) takes priority over files_likely_touched,
+      // unioned with the owning module contract's declared write targets; when the
+      // node declared neither, it inherits the module file_scope (deriveNodeFiles)
       // so the finding is never scope-less. Map each path to the { path } shape that
       // Finding.affected_files expects.
       affected_files: deriveNodeFiles(node).map((p) => ({ path: p })),

@@ -822,6 +822,149 @@ describe("N-R12: promoteImplementationDagToExtractedPlan — propagates files_li
   });
 });
 
+// ---------------------------------------------------------------------------
+// P38 — the DAG node write scope UNIONS the owning module contract's declared
+// write targets. `finalized_module_contracts` carries each module's declared
+// `outputs` / `side_effects`; the resolver used to early-return the node's own
+// declared files, so a target the module contract declared never reached
+// allowed_files and every implementer had to be widened by hand.
+// ---------------------------------------------------------------------------
+describe("P38: node write scope unions the owning module contract's declared write targets", () => {
+  /** decomposition + finalized contracts for `mod-a`, plus a one-node DAG. */
+  async function writeP38Fixture(options: {
+    outputs?: unknown[];
+    side_effects?: unknown[];
+    nodeObligations: string[];
+    outputFiles?: string[];
+  }): Promise<void> {
+    await writeContractArtifact(
+      ARTIFACTS_DIR,
+      "module_decomposition",
+      CHAIN_PAYLOADS.module_decomposition,
+    );
+    await writeContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts", {
+      ...CHAIN_PAYLOADS.finalized_module_contracts,
+      module_contracts: [
+        {
+          ...CHAIN_PAYLOADS.finalized_module_contracts.module_contracts[0],
+          outputs: options.outputs ?? [],
+          side_effects: options.side_effects ?? [],
+        },
+      ],
+    });
+    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
+      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+      goal_id: "G1",
+      nodes: [
+        {
+          id: "N-p38",
+          title: "Implement mod-a",
+          description: "d",
+          satisfies_obligations: options.nodeObligations,
+          depends_on: [],
+          verification_obligation_ids: [],
+          targeted_commands: [],
+          status: "pending",
+          ...(options.outputFiles ? { output_files: options.outputFiles } : {}),
+        },
+      ],
+      edges: [],
+      created_at: CREATED_AT,
+    });
+  }
+
+  async function promotedPlan(): Promise<any> {
+    await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR);
+    return JSON.parse(
+      await readFile(intakePaths(ARTIFACTS_DIR).extractedPlan, "utf8"),
+    );
+  }
+
+  it("P38-1: a node that DECLARED its files still gains the owning module contract's declared write targets", async () => {
+    // The node declares src/a.ts; mod-a's finalized contract declares it also
+    // writes src/b.ts. Both must reach the write scope — handing the implementer
+    // only src/a.ts is the defect (four manual widenings in one wave).
+    await writeP38Fixture({
+      outputs: ["src/b.ts"],
+      nodeObligations: ["OBL-mod-a-contract"],
+      outputFiles: ["src/a.ts"],
+    });
+    const plan = await promotedPlan();
+    expect(plan.findings[0].affected_files).toEqual([
+      { path: "src/a.ts" },
+      { path: "src/b.ts" },
+    ]);
+    expect(plan.blocks[0].touched_files).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("P38-2: prose and artifact-token entries are NOT unioned into the write scope", async () => {
+    // `outputs`/`side_effects` are free prose that MAY carry a path. Only entries
+    // that parse as a repo-relative path qualify: prose stays prose, and the
+    // `artifact:<name>` ordering token is not a file.
+    await writeP38Fixture({
+      outputs: ["artifact:validated-roster", "src/b.ts", "session"],
+      side_effects: ["writes the run ledger under .audit-tools"],
+      nodeObligations: ["OBL-mod-a-contract"],
+      outputFiles: ["src/a.ts"],
+    });
+    const plan = await promotedPlan();
+    expect(plan.blocks[0].touched_files).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("P38-3: obligation ids matching NO module slug leave the declared files exactly as declared", async () => {
+    await writeP38Fixture({
+      outputs: ["src/b.ts"],
+      side_effects: ["src/c.ts"],
+      nodeObligations: ["OBL-not-a-module-contract"],
+      outputFiles: ["src/a.ts"],
+    });
+    const plan = await promotedPlan();
+    expect(plan.findings[0].affected_files).toEqual([{ path: "src/a.ts" }]);
+    expect(plan.blocks[0].touched_files).toEqual(["src/a.ts"]);
+  });
+
+  it("P38-4: a scope-less node inherits the module file_scope AND the contract's declared targets", async () => {
+    await writeP38Fixture({
+      outputs: ["src/b.ts"],
+      nodeObligations: ["OBL-mod-a-contract"],
+    });
+    const plan = await promotedPlan();
+    expect(plan.findings[0].affected_files).toEqual([
+      { path: "src/a.ts" },
+      { path: "src/b.ts" },
+    ]);
+  });
+
+  it("P38-5: an ABSENT finalized_module_contracts degrades to the declared files (never throws)", async () => {
+    await writeContractArtifact(
+      ARTIFACTS_DIR,
+      "module_decomposition",
+      CHAIN_PAYLOADS.module_decomposition,
+    );
+    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
+      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+      goal_id: "G1",
+      nodes: [
+        {
+          id: "N-p38-absent",
+          title: "Implement mod-a",
+          description: "d",
+          satisfies_obligations: ["OBL-mod-a-contract"],
+          depends_on: [],
+          verification_obligation_ids: [],
+          targeted_commands: [],
+          status: "pending",
+          output_files: ["src/a.ts"],
+        },
+      ],
+      edges: [],
+      created_at: CREATED_AT,
+    });
+    const plan = await promotedPlan();
+    expect(plan.findings[0].affected_files).toEqual([{ path: "src/a.ts" }]);
+  });
+});
+
 describe("N-R12: promoteImplementationDagToExtractedPlan — propagates preconditions and expected_changes", () => {
   it("node with preconditions and expected_changes produces those in the finding", async () => {
     await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
