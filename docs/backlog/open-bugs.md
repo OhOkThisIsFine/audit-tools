@@ -33,6 +33,14 @@
   silently mandates event-BEFORE-write ordering — a legitimate write-then-log pairing would
   false-red with a misleading message; state the mandate in the comment and failure text.
 
+- **Writing the nightly queue desyncs HANDOFF's generated live-status block (2026-08-20, low,
+  friction: tool_should_decide).** The block derives from the queue and the decision ledger, but the
+  nightly run contract does not list regenerating it as a run step, so the desync is caught only
+  afterwards by the Stop closeout gate (hit and repaired 2026-08-20 via
+  `node scripts/shared/generate-handoff-roadmap.mjs`). **Property:** a run that writes the queue leaves
+  `check:handoff-roadmap` green — the regeneration belongs to `writeOpenItems` or the run contract,
+  not to the operator noticing.
+
 - **next-step discards a rejected submission's classified issues (2026-08-20, medium,
   friction: tool_should_decide).** `buildImplementDispatchStep` consumes
   `ingestRemediationHostResults` and, when `accepted_count` is 0, falls through to
@@ -46,46 +54,25 @@
   the operator through the surface that triggered the ingest — the step contract,
   stdout, or the step prompt — never only a discarded return value.
 
-- **The targeted-command shape gate has one enforcing consumer and two non-adopters
-  (medium; from the CP-NODE-6 landing reviews).** The two-shell scanner in the host-handoff
-  boundary (`leavesDeclaredCommandShape`) is the only enforcement of the command shape.
-  Non-adopter 1: the producer — `SHELL_METACHARACTERS` in `src/remediate/steps/contractPipeline.ts`
-  (`normalizeBlockTargetedCommands`) is quote-blind and admits single-quoted arguments,
-  backslash paths, `^`, `%` and parens the consumer refuses (probed: `pytest -k 'not slow'`,
-  `cargo test -- --exact 'mod::test'`, backslash test paths — producer-admitted,
-  consumer-refused; `echo "a & b"` is the inverse), so a promoted plan can dead-end at a
-  classified `block_contract_invalid` the operator must fix by hand, and the promotion-time
-  "nothing left to refuse" claim near `collectDagWriteScopeRefusals` is false. Empirically
-  safe for the in-flight run (all 27 live blocks clear the consumer gate) but CONDITIONAL
-  on no re-promotion first. Non-adopter 2: `reverifyBlockedItemAgainstTree`
-  (`src/remediate/phases/triage.ts`) spawns the same `block.targeted_commands` with
-  `shell: true` and no shape check at all — reachable for never-dispatched blocked items;
-  the uncovered half is stated at `assertBlockContract`'s doc. **Property:** ONE shape rule,
-  single-sourced; every producer validates against it and every spawn routes through it;
-  a consumer-side refusal surfaces as the same bounded re-emit the producer gate uses.
-
 - **Host-handoff residuals from the CP-NODE-6 landing (low, one entry).** (a) A malformed
   FRONTIER block at prepare raises a classified aggregate naming the thrower, but still a
   THROW — the bounded-step-instead-of-throw half needs `src/remediate/steps/nextStep.ts`
   plumbing; and the
   free-form path (`normalizeExtractedPlan`) applies no path normalization, so free-form
-  `src\a.ts`-style entries hit that refusal persistently. (b) `validateDispatchArtifacts`
-  and its `validateDispatchPlan`/`validateImplementWorkerResult` family match zero live
-  files, surviving on fixtures in `tests/remediate/artifacts-validation.test.ts` —
-  atomic-replace debt; delete family + fixtures on the consolidated pass. (c) Audit-side
+  `src\a.ts`-style entries hit that refusal persistently. (b) Audit-side
   `withAcceptedResultsLock` covers the accepted-results pair only: ingest reads the
   workload/result-map/task-bindings trio before the lock; prepare writes task-bindings
   entirely outside it. **Property:** one serialization covers the whole binding set.
-  (d) The heartbeat/stale-reclaim logger seam has no production adopter. (e)
+  (c) The heartbeat/stale-reclaim logger seam has no production adopter. (d)
   `evaluateContractPipelineCrossGateOutcomes` / `evaluateContractPipelineCrossGates` are
   hand-maintained parallels; the drift test covers one 2-payload fixture — collapse the
-  plain variant to a projection. (f) `describeRequiredTestFailure` inlines up to 8KB per
-  failure into the dispatch prompt — bound the excerpt. (g) `recover-ingest` exits 1
+  plain variant to a projection. (e) `describeRequiredTestFailure` inlines up to 8KB per
+  failure into the dispatch prompt — bound the excerpt. (f) `recover-ingest` exits 1
   whenever issues exist even when work WAS accepted — distinguish accepted-with-issues.
-  (h) The ENOBUFS/ETIMEDOUT discriminator is win32-verified only (off-platform timeout
+  (g) The ENOBUFS/ETIMEDOUT discriminator is win32-verified only (off-platform timeout
   degrades to `spawn_error`, still a refusal); the external-signal branch is posix-only
   and untested; the stale-scan predicate deliberately over-approximates (owned at the
-  comment). (i) The prepare-time digest-mismatch throw is unclassified and has no
+  comment). (h) The prepare-time digest-mismatch throw is unclassified and has no
   sanctioned repair verb: when the state legitimately moves under a live binding (hit
   2026-08-20 — the coarse backstop's item mutation changed prompt-embedded retry
   context, so the re-derived workload digest no longer matched), prepare throws a raw
@@ -169,23 +156,6 @@
   per-item required commands, or new ids stay out of `src/` comments by convention (the gate
   scans `src/` only — CP-NODE-9 adopted this deliberately).
 
-- **Wave-1 red-green proofs live only in commit messages — route the durable tests
-  (2026-08-19, medium).** CP-NODE-14, 4, 8, 16, 17, 20, 23, 10 and 11 had no test home in their
-  write scopes; their proofs are ephemeral transcripts in the wave's commit bodies. The
-  consolidated routing pass owns landing permanent coverage — per-node homes already mapped in
-  the coordinator's recon: validate-artifact-cross-gates / nightly-completion-ledger /
-  anchor-grounding + allowlisted-exec-runner-internals / `freeFormIntentInterpreter` + a new
-  `pathScope` suite / charter-extraction / conceptual-reuse-notice or fanout-lanes / `fileLock`
-  + suite-lock-parity / staleness deferred-set + cross-call reach + truncated-body third state /
-  flow-policy + `foldPendingRequeueTasks`. Includes TST-d79b2a9f's residual (its grep-zero
-  coverage gap is still literally true at HEAD) and dissolving the hand-copied 7-lens
-  `LENS_SET_FOR_FLOW` in `flow-planning.test.ts` (CP-NODE-9's cutover territory). From the
-  CP-NODE-26 review: the dispatch-barrel export baseline is committed TWICE
-  (`DISPATCH_BARREL_EXPORTS` in `backend-independent-planning.test.ts` and the landed pin in
-  `tests/remediate/host-handoff.test.ts`) — single-source per the one-baseline spec; and
-  `remediate-tests-invariants.test.ts`'s header index still lists INV-remediate-tests-05 as
-  covering `scheduleWave` while the file's own body records it retired.
-
 - **The remediate-side submission ledger has no reader — `accepted_via_recovery` marks are
   write-only (2026-08-19, low-medium).** recover-ingest appends distinguishability events to the
   submission ledger NDJSON under the artifacts dir, but no remediate surface reads them: not
@@ -265,14 +235,6 @@
   `subject` it is computed from. **Property:** the writer either derives `subject_key` from
   `subject` itself or refuses at write; a persisted item missing it is unreachable for
   [[settled-subject-slips-through-a-reword]] and cannot be re-asked correctly.
-
-- **`HOST_GATE_DESCRIPTORS` / `HOST_GATE_KINDS` is a write-only registry — completed by P25, read by
-  nothing in production (2026-08-19, low, owner-decided: DELETE).** The dead-code sweep kept it as
-  deliberately-staged (landed six days prior), but `GATE_LANES` is the live registry and the two
-  tests over it compare hardcoded lists to hardcoded lists. **Owner decision (2026-08-19): delete it
-  and its tests on the next tested-but-unwired pass unless a production reader lands first** — the
-  invested-in-but-write-only shape [[write-only-data-looks-authoritative]] warns about does not earn
-  a keep.
 
 - **Modularity refinement is superlinear on one large component and unpinned at scale (2026-08-19,
   low).** Measured 78ms at 200 members → 726ms at 800, with Louvain's pass bound at `n + 8`; the

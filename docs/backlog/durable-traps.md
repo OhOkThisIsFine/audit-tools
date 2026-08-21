@@ -574,8 +574,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 
 - **A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).**
   CDC-T1 said to widen a module's `file_scope`, but `file_scope` lives in the module decomposition —
-  *"the finalized contracts carry interface fields, not paths"*
-  (`src/remediate/steps/contractPipeline.ts`) — and the only route back to the
+  finalized-contract interface prose remains prose, though since P38 path-parseable `outputs` /
+  `side_effects` entries are unioned into node write scope by `buildNodeWriteScopeResolver` — and the
+  only route back to the
   decomposition is the pre-critic citation-grounding gate, which fires on a non-existent cited path,
   never on a critique repair. So the repair step could not do what its own critique asked. Nothing
   validates that a critique's remedy is reachable from the phase it is dispatched to; when one is not,

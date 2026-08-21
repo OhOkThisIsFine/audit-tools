@@ -1438,7 +1438,9 @@
     "answer": "Owner decision (2026-08-19, recorded in docs/backlog/open-bugs.md): delete HOST_GATE_DESCRIPTORS / HOST_GATE_KINDS and their hardcoded-vs-hardcoded tests on the next tested-but-unwired pass unless a production reader lands first — the invested-in-but-write-only shape does not earn a keep. GATE_LANES stays the live registry.",
     "subject": "HOST_GATE_DESCRIPTORS is a finished registry that nothing in production reads — wire a reader, or delete it on the next unwired pass",
     "path": "src/audit/cli/nextStepHelpers.ts",
-    "decided_at": "2026-08-20T04:27:04.714Z"
+    "decided_at": "2026-08-20T04:27:04.714Z",
+    "completed_at": "2026-08-21T03:23:35.871Z",
+    "completed_ref": "landed in 0054202b — the registry, its types, and both registry-only tests are deleted; no production reader ever landed"
   },
   "587c1796832c5cbc": {
     "disposition": "settled",
@@ -1463,14 +1465,18 @@
     "answer": "Interim: file+lens eligibility + constant-free modularity-peak refinement + per-file aggregated seams landed (this commit); no in-tool ceiling - sizing is host-side and dynamic. FINAL grouping combination deliberately open pending the owner-directed metric-pool empirical program (metrics-lab dataset, forward-tracks entry).",
     "subject": "Work blocks no longer bound anything: 98.3% of one audit's findings landed in a single block — four fixes are characterized and it needs your pick",
     "path": "src/shared/decompose/contentCoherence.ts",
-    "decided_at": "2026-08-19T20:07:48.927Z"
+    "decided_at": "2026-08-19T20:07:48.927Z",
+    "completed_at": "2026-08-21T03:23:35.932Z",
+    "completed_ref": "interim work landed earlier (file+lens eligibility, modularity-peak refinement, per-file aggregated seams); the FINAL grouping combination stays deliberately open in forward-tracks pending the metric-pool empirical program"
   },
   "e2ada39929a0adb7": {
     "disposition": "settled",
     "answer": "Approved — build the durable fix: buildNodeWriteScopeResolver reads finalized_module_contracts alongside module_decomposition, and resolve() unions the owning module contract's declared write targets (both outputs and side_effects) into the node's scope instead of returning the node-declared files early. Nine manual widenings in one wave is the bug signal; the manual step goes away.",
     "subject": "A DAG node's write scope ignores the module contract's declared write targets — four manual recoveries in one wave; approve deriving them instead",
     "path": "src/remediate/steps/contractPipeline.ts",
-    "decided_at": "2026-08-20T17:27:05.027Z"
+    "decided_at": "2026-08-20T17:27:05.027Z",
+    "completed_at": "2026-08-21T03:27:42.596Z",
+    "completed_ref": "built and landed in e515f48b — the resolver unions the finalized contract's path-parseable outputs/side_effects into every node scope; red-green validated; the manual widening class is retired"
   },
   "e406c716c4a17524": {
     "disposition": "settled",
