@@ -6,13 +6,6 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **`intentOrdering` is settled: WIRE it, not delete (owner decision 2026-08-20).** Call
-  `applyIntentOrdering` where the plan's findings and blocks are finalized, reading the
-  interpreted intent already persisted at the checkpoint — closes a write-only data flow
-  (`src/remediate/intent/intentOrdering.ts`, flagged as a dead-code lead in the 2026-07-28
-  slimdown review). Lands with CP-NODE-15, whose scope owns the finalization file. No open
-  question remains, only the wiring.
-
 - **Promotion and close residuals from the CP-NODE-3/15 reviews (low, one entry).** (a) The
   friction shortfall gate reads `readdir(...).catch(() => [])`, and `archiveFrictionRecords`
   degrades to `[]` on the same failure — a friction directory that exists but cannot be
