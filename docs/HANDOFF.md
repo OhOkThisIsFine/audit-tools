@@ -17,6 +17,11 @@
    retirement, now unblocked.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **2 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `backlogN-1` — Backlog disambiguation: "one run identity" is the stated property, but the adversary says the gap is LINKAGE, not identity — decide which the entry means
+  - `solN-1` — A generator-parity gate registered preCommit:false lets a stale tracked render land — approve the reach fix plus the contract test that forbids the shape
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

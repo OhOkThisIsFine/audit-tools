@@ -22,37 +22,34 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-20 at `70da005d9d4d8a627b9444afb0ee68fab45bdbb4`.*
-
-
-> **2 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+*Last run: 2026-08-21 at `01595a4c3742bb0faabf12cc0e5ee7a49c3e046c`.*
 
 
 ---
 
 
-# Documentation
+# Backlog disambiguation
 
 
-<!-- nightly:item key=e406c716c4a17524 -->
+<!-- nightly:item key=dd47a7ac66507930 -->
 
-## `docsN-1` — instruction-file edit: CLAUDE.md describes the DEFAULT analyzer set as admitted without a token, but an operator decline now vetoes it too <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `backlogN-1` — Backlog disambiguation: "one run identity" is the stated property, but the adversary says the gap is LINKAGE, not identity — decide which the entry means <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `CLAUDE.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-CLAUDE.md is the file every agent reads to learn how this project decides whether an outside analyzer tool is allowed to run. It says that a small curated DEFAULT set of tools runs without asking anyone, and that every other tool needs the operator to consent first. That was accurate when it was written. The code has since moved. In the function that makes the decision, the very first thing checked is whether the operator has already recorded a refusal for that tool. If they have, the tool is refused — even if it is a member of the DEFAULT set, and even if a consent token was supplied. The code comment states this outright: an operator refusal is a veto for every candidate, and no token can override it. So the doc is not telling a lie, but it is incomplete in a way that matters: an agent reading only CLAUDE.md would conclude that a DEFAULT-set analyzer always runs, which is no longer true. CLAUDE.md is an instruction file, and instruction files are never edited automatically by this routine, so the choice of whether and how to state the veto is yours. Saying yes means the doc gains one clause about the operator veto. Saying no means the doc keeps describing the default set as unconditional, and the veto stays a property you only find by reading the code.
+Three parts of this tool each have their own idea of what a "run" is. The step envelope — the small record written each time the tool advances — has a run_id field that is allowed to be empty, and in practice it is empty. The dispatch artifacts, which describe work handed to the host, use a run id built from a timestamp. The friction record, which collects the annoyances found during a run, names its own file after a cleaned-up run id. Because these three do not agree, a friction close-out that was written under one id was invisible to the part of the tool that reads the other, and it had to be rewritten by hand. The backlog entry that records this says the property to hold is "one run identity across all three". An independent adversary pass pushed back on exactly that wording. Its argument is that the three genuinely have different lifetimes — a step envelope is one advance, a dispatch run is one handoff to the host, and a friction record spans many of both — so forcing one shared id inverts the relationship and also throws away the timestamp meaning the dispatch ids carry for free. Its counter-proposal is cheaper: leave the three ids alone and add explicit pointer fields on the friction record naming the step envelope and dispatch run it belongs to. That fixes the invisibility, which was the actual symptom, without a migration. This is a decision only you can make, because the two answers lead to very different amounts of work and to a different shape for the tool. The entry cannot be turned into a task until it is settled, which is why it has sat as prose.
 
 ### The question
 
-CLAUDE.md says "the curated DEFAULT set is admitted WITHOUT a token". At HEAD, admitSpawn refuses a DEFAULT-set candidate outright when the operator has recorded a "declined" decision, and also when the analyzer setting is "skip" — both checked before the default-set short-circuit. Should CLAUDE.md state that veto?
+docs/backlog/open-bugs.md states the property as "one run identity across step envelope, dispatch artifacts, and friction record". The adversary pass argues the three have genuinely different lifecycles and that the observed defect was a LINKAGE gap, not an identity gap, and proposes nullable foreign keys on the friction record instead. Which does the entry mean — unify the identity, or link the three ids?
 
 ### Your answer
 
-- [ ] **1. Add the veto clause** — Yes — amend the Own-vs-acquire bullet in CLAUDE.md so it states that a recorded operator "declined" decision (and an analyzer setting of "skip") refuses a candidate BEFORE the default-set short-circuit, so DEFAULT-set membership is not unconditional admission and no consent token can override an operator refusal.
-- [ ] **2. Add veto + ordering** — Yes, and go further — state the full admission ORDER in CLAUDE.md (declined, then skip, then default set, then recorded grant, then consent token), because the order is the contract and the admitSpawn doc comment already says so.
-- [ ] **3. Leave CLAUDE.md as is** — No — the bullet is about the own-vs-acquire policy, not the full admission algorithm. The sentence is literally true (the default set needs no token), the ordering is documented at admitSpawn itself, and CLAUDE.md should not grow a second copy of it.
+- [ ] **1. Unify the identity** — Keep the entry as written: one run identity across step envelope, dispatch artifacts and friction record. The step envelope run_id stops being nullable and is minted from the same source the dispatch artifacts and the friction substrate use. Accept the migration cost and the loss of the timestamp semantics carried implicitly by the current dispatch ids.
+- [ ] **2. Link, do not unify** — Rewrite the entry's property: the three run notions stay distinct because their lifecycles genuinely differ, and the friction record gains explicit nullable foreign keys naming the step envelope run and the dispatch run it relates to. The defect to close is the invisibility, not the multiplicity of ids.
+- [ ] **3. Neither — the envelope field goes** — The step envelope's run_id is nullable and null in practice, which makes it a field nothing relies on. Delete it rather than either unifying or linking, and let the dispatch artifacts and the friction record be the only two run notions. Rewrite the entry to that scope.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -62,13 +59,14 @@ CLAUDE.md says "the curated DEFAULT set is admitted WITHOUT a token". At HEAD, a
 ```
 
 <details>
-<summary>Evidence (5) — what was verified against code, and how</summary>
+<summary>Evidence (6) — what was verified against code, and how</summary>
 
-- CLAUDE.md:284 contains the literal string "the curated DEFAULT set is admitted WITHOUT a token"; no clause in that bullet mentions a recorded decline or an analyzer setting of "skip".
-- src/shared/analyzers/acquisitionEngine.ts, function admitSpawn: the body opens with `if (recordedDecision === "declined") return ANALYZER_DENIAL_REASONS.consent_declined;` then `if (setting === "skip") return ANALYZER_DENIAL_REASONS.setting_skip;` and only then `if (candidate.defaultRun) return undefined;`. Read directly from the file this run. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- The doc comment above admitSpawn states the intent explicitly: "ORDER IS THE CONTRACT" and "an operator refusal is a veto for EVERY candidate, including a default-set member, and no token can override it."
-- The behaviour landed at HEAD commit 70da005d, "remediate: consent-honoring acquisition chokepoint and classified analyzer outcomes (CP-NODE-1)" — inside this run's evidence window.
-- Corroboration was WEAK: codex was quota-blocked, and the free-provider lane answered the ordering question "YES" but supplied no quoted body and fabricated a test filename on a prior attempt, so its output was discarded. The evidence above is this session's own direct read of the source.
+- src/audit/cli/steps.ts:76 — the step envelope schema declares `run_id: z.string().nullable(),`. The nullable half of the divergence still holds at HEAD 01595a4c. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- src/shared/friction/frictionRecord.ts:165-212 — the friction record and its lock are keyed by a sanitized run id (`frictionLockPath`, `frictionCapturePath`, `sanitizeRunId`), a separate identity from the envelope field. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Leg 2's mechanical sweep classified this entry owner_decision_needed with the action "Owner needs to decide on the canonical run-id scheme and the migration scope before any concrete code change is derivable" (.audit-tools/nightly/triage-2026-08-21.jsonl, open-bugs#da502b77).
+- Adversary characterization from the independent free-provider lane (.audit-tools/nightly/free-adv2-0821.log): different lifecycles per notion; a step envelope can fail without invalidating an already-emitted dispatch run; the timestamped dispatch ids carry temporal semantics a unified opaque id loses; friction is cross-cutting rather than hierarchical, so one parent id inverts the relationship; and the cheapest alternative is nullable foreign keys on the friction record.
+- The adversary reasoned from the proposal text only and did not read source — its lifecycle claims are argument, not verified fact, and are offered as the counter-case rather than as evidence.
+- Related durable memory: renaming-a-persisted-field-is-not-a-rename, identity-change-must-audit-its-filters, prefix-join-between-two-name-spaces-fails-empty — all three describe the cost of changing a persisted identity, which is what option 1 commits to.
 
 </details>
 
@@ -78,26 +76,25 @@ CLAUDE.md says "the curated DEFAULT set is admitted WITHOUT a token". At HEAD, a
 # Recurring-problem solutions
 
 
-<!-- nightly:item key=e2ada39929a0adb7 -->
+<!-- nightly:item key=51c20f54edd9aafb -->
 
-## `solN-1` — A DAG node's write scope ignores the module contract's declared write targets — four manual recoveries in one wave; approve deriving them instead <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `solN-1` — A generator-parity gate registered preCommit:false lets a stale tracked render land — approve the reach fix plus the contract test that forbids the shape <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `src/remediate/steps/contractPipeline.ts`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · open 1 night · `scripts/guard-reach-data.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-When the remediation pipeline hands an implementer a job, it also hands it a list of files that job is allowed to edit. That list is built from the job node's own declared files, falling back to the files belonging to its module. Separately, the contract layer has a rule for a file that sits outside a module's normal file list: the module contract DECLARES it as an output or a side effect. The two halves were never connected. The code that builds the allowed-files list reads one artifact (the module decomposition, which carries only the plain file list) and never opens the artifact that holds the declared targets. It also returns the node's own files immediately when there are any, so even if the declared targets were loaded they would be thrown away in the common case. The result: an implementer is told to change a file it is forbidden to touch. It stops and reports rather than editing out of scope, which is the safe outcome, but a person then has to hand-patch the file into two places in the run state, delete the prepared workload, and re-dispatch. That happened four times in the last wave, to three different implementers. The handoff document now instructs the next operator to expect it and repeat the fix, which is precisely the "the human will remember" shape this project treats as a defect. The proposal is to derive the declared targets into the allowed list so the situation cannot arise, retiring both the manual fix and the instruction to remember it. Nothing has been changed — leg 3 only proposes.
+Several files in this repo are not written by hand. A script reads some source files and writes a tracked file from them, so the tracked file is a copy that must be kept in step. For each of those, there is a check whose whole job is to say "this copy is out of date, regenerate it". A check like that only protects you if it runs at the moment the copy goes stale, which is when you commit. The registry that lists every check records, per check, whether it runs at commit time. Nine of these regeneration checks are registered to run at commit. One is not: check:runtime-artifact-names is registered as not running at commit at all, so it only fires later, at release time. That is exactly what happened on 2026-08-20. A deletion in the source moved the derived set, the tracked copy was left behind, the commit passed every gate, and the problem surfaced only when the full suite ran before tagging. It cost one failed suite run and a follow-up regeneration commit. The proposal has two halves. The first flips that one check to run at commit, and derives the list of files that trigger it from the list the generator already publishes about itself, so the trigger list cannot drift away from what the generator actually reads. The second half is a test that fails the build if anyone ever again registers a regeneration check as not-at-commit, so the mistake becomes impossible rather than merely fixed once. Saying yes means both halves get built and red-green validated. Saying yes to the first half only means the instance is fixed but the shape can come back. Saying no means the check stays a release-time check and a stale render can keep landing green.
 
 ### The question
 
-Approve building the durable fix: make the node write-scope resolver read the finalized module contracts and UNION the owning module's declared write targets into the node's scope, instead of returning the node-declared files early?
+scripts/guard-reach-data.mjs registers check:runtime-artifact-names with preCommit:false, while every other generator-parity gate is preCommit:'reach'. It is the only gate row whose fix text is regenerate-shaped AND whose preCommit is false. Should the routine build the two-part fix — flip that row to 'reach' with a REACH row derived from the generator's exported RUNTIME_NAME_SOURCES, and add a contract test that forbids a regenerate-shaped fix on a preCommit:false gate?
 
 ### Your answer
 
-- [ ] **1. Build it — union outputs + side_effects** — Approved. buildNodeWriteScopeResolver reads finalized_module_contracts alongside module_decomposition, and resolve() unions the owning module contract's declared write targets (outputs and side_effects) into the node scope rather than early-returning on the node's own declaration. Only entries that parse as repo-relative paths are unioned; prose side-effect entries are dropped. Land it with the three red-green tests in the proposal, then delete the HANDOFF "Known routing-gap class" paragraph and update the memory entry.
-- [ ] **2. Build it — outputs only** — Approved but narrower: union only the module contract's `outputs`, not `side_effects`. `side_effects` is free prose with an owner and is the more likely source of a bogus path, so it stays out of the write scope. Same tests otherwise. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- [ ] **3. Guard instead of fix** — Do not widen the scope. Instead add a gate that fails the DAG-promotion check when a module contract declares a write target that no owning node lists in output_files, so the gap is caught at authoring time and repaired in the DAG rather than at dispatch time.
-- [ ] **4. Decline — keep the fail-closed stop** — Decline. The stop-and-report behaviour is working as intended and each stop has surfaced a real routing gap worth looking at by hand. Keep the manual fix shape and leave the HANDOFF paragraph in place.
+- [ ] **1. Build both halves** — Approved — build both. Flip check:runtime-artifact-names to preCommit:'reach' and add a REACH row whose files are DERIVED from the generator's exported RUNTIME_NAME_SOURCES (plus the generator and its render), so the reach cannot drift narrower than what the generator reads. Then add tests/shared/generator-gates-run-at-commit.test.ts asserting no gate with a regenerate-shaped fix is registered preCommit:false. Red-green validate: the test must be RED at HEAD naming check:runtime-artifact-names before the flip lands.
+- [ ] **2. Fix the instance only** — Flip check:runtime-artifact-names to preCommit:'reach' with the derived REACH row, but do not add the contract test. Accept that a future generator-parity gate can be registered outside the commit gate again; the regenerate-shaped predicate keys on fix prose and is not worth the false-negative surface.
+- [ ] **3. Leave it at release time** — Leave check:runtime-artifact-names as preCommit:false. The 13 layout-source paths are loop-core adjacent and change often, so the leg would fire regularly; catching the stale render at verify:checks before the tag is a good enough backstop and does not slow every commit.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -106,18 +103,19 @@ Approve building the durable fix: make the node write-scope resolver read the fi
 
 ```
 
-Full proposal: [`.audit-tools/nightly/proposals/P38-dag-node-write-scope-drops-declared-targets/proposal.md`](../.audit-tools/nightly/proposals/P38-dag-node-write-scope-drops-declared-targets/proposal.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
+Full proposal: [`.audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PATCH.md`](../.audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PATCH.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 <details>
-<summary>Evidence (7) — what was verified against code, and how</summary>
+<summary>Evidence (8) — what was verified against code, and how</summary>
 
-- src/remediate/steps/contractPipeline.ts:1381-1382 — `const declared = [...new Set(node.output_files ?? node.files_likely_touched ?? [])]; if (declared.length > 0) return declared;`. The early return discards any module-level contribution whenever the node declared anything. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- src/remediate/steps/contractPipeline.ts:1317-1341 — readDecomposedModules keeps only `name`, `responsibilities` and `file_scope` from the module_decomposition artifact. The declared write targets are not in that artifact. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- src/remediate/contractPipeline/derive.ts:229-232 — the finalized module contract record carries `outputs` and `side_effects`. buildNodeWriteScopeResolver never reads that artifact. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- Recurrence: the same manual fix was applied four times in the 2026-08-19/20 wave (CP-NODE-2, 24, 25, 21) and three separate implementers stopped on it independently (disposition.ts, item-status.test.ts, dispatch-validate.test.ts).
-- Recurrence is recorded on two dates in two places: project memory `dag-node-output-files-drop-declared-write-targets`, which already names the durable fix as unbuilt, and docs/HANDOFF.md's "Known routing-gap class" paragraph, which tells the operator to "Expect the same fix shape". <!-- doc-citation-exempt: quoted item prose, not citations -->
-- That HANDOFF instruction is the CLAUDE.md "Auditor-agnostic robustness" violation: correctness resting on the host remembering and noticing.
-- Full proposal, mechanism, false-positive surface and the three red-green tests: .audit-tools/nightly/proposals/P38-dag-node-write-scope-drops-declared-targets/proposal.md
+- scripts/guard-reach-data.mjs — the check:runtime-artifact-names gate row reads `impl: 'check:runtime-artifact-names', preCommit: false,` with a regenerate-shaped fix ('runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs'). <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Enumerated every GUARDS row with kind:'gate' — 33 rows. check:runtime-artifact-names is the ONLY one whose fix matches /regenerat|generate-|--write|is stale/i AND whose preCommit is false. The nine comparable generator-parity gates (doc-manifest, doc-links, gate-enumeration, philosophy-brief, nightly-routine-prompt, handoff-roadmap, backlog-index, ci-trigger-paths, memory-citations, offload-lanes) are all 'reach', 'final' or 'always'.
+- Independently confirmed by the free-provider lane, which enumerated all 33 gate rows from source and returned CONFIRMED on the count and the id (.audit-tools/nightly/free-adv-0821.log).
+- Independently reached a third time by leg 2's mechanical backlog sweep, which classified the corresponding open-bugs entry actionable_now with the action 'Add check:runtime-artifact-names to the commit gate's triggered checks' (.audit-tools/nightly/triage-2026-08-21.jsonl).
+- scripts/shared/generate-runtime-artifact-names.mjs exports RUNTIME_NAME_SOURCES, a declared 13-entry list of the source files the generator reads — so the REACH row can be derived rather than hand-listed. Its CLI body is guarded by an import.meta.url check, so importing the module never writes.
+- Recurrence, counted: docs/backlog/open-bugs.md carries two 2026-08-20 entries of this class (the runtime-artifact-names render, and the nightly-queue/HANDOFF live-status desync); P19 is the same class on three earlier dates and is why scripts/shared/derived-file-preflight.mjs exists at all. The mechanism was built; this row was left outside it.
+- Cost of the 2026-08-20 instance: one failed full-suite run plus the follow-up regeneration commit 85609eb7.
+- Full proposal, mechanism, false-positive surface and the stated enforcement limit: .audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PROPOSAL.md; the exact edits and the red-green ordering: .../PATCH.md
 
 </details>
 
@@ -128,25 +126,25 @@ Full proposal: [`.audit-tools/nightly/proposals/P38-dag-node-write-scope-drops-d
 <summary>What the last run could NOT cover</summary>
 
 
-- APPLIED NOTHING — the working tree was dirty at run start (src/audit/orchestrator/charterClarificationExecutor.ts and src/shared/decompose/charterClarification.ts were modified and uncommitted). The clean-tree rule holds: this run reviewed and reported, and wrote no doc, backlog or code edit.
+- Leg 1 semantic coverage was PARTIAL. Five docs were examined item-by-item and stamped at HEAD 01595a4c (docs/HANDOFF.md, docs/nightly-routine.md, docs/nightly-routine-prompt.md, spec/cross-tool-alignment.md, spec/mechanical-analyzer-layer-design.md — 219 items). The remaining 49 in-scope docs got the FULL mechanical gate set (all 16 green), a corpus-wide status-noise scan, and a corpus-wide command/path resolution scan (every `npm run <x>` and `node scripts/...` named in any tracked doc resolves), but not a per-item semantic walk. Counts: .audit-tools/nightly/leg1-2026-08-21-coverage.json. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- NOTHING WAS COMMITTED, including this run's own tracked outputs (open-items.json, docs/nightly-inbox.md, the P38 proposal). A CONCURRENT session is working in this shared checkout: the dirty set grew from two unstaged files at run start to five STAGED files during the run (charterClarificationExecutor.ts, charterRegister.ts, charterClarification.ts, charter.ts, charter-clarification.test.ts). Any commit here would sweep that session's staged work into it. The outputs are on disk and will be picked up by the next clean-tree run or by a deliberate scoped commit.
+- THE CODEX REVIEWER LANE FAILED THREE TIMES ON OPEN-ENDED REVIEW, exit code 0 each time — a masked failure. Batches A (three remediate specs), B (six audit specs) and C (nine package docs/READMEs) each ran 45+ minutes, produced 400KB-900KB of tool output, and ended WITHOUT a final answer: A died on "code-mode host closed its stdout", B and C ended on the literal line "collab: Wait". No CLEAN verdict and no finding was emitted by any of the three. Their output was discarded rather than counted, and leg 1 fell back to this session's own direct reads plus the mechanical gates.
 
-- docs/HANDOFF.md is stale and the fix is unambiguous, but it was NOT applied for the reason above. Two hand-written claims are false at HEAD 70da005d: (1) "Remaining in the wave: CP-NODE-10 ... and CP-NODE-11" — both landed, as commits a6b5ff28 and 63fcc0ea, and CP-NODE-1 landed after them at HEAD; (2) "Nothing is pushed. Ten-plus commits sit on local main" — HEAD equals the remote main ref, so everything is pushed. The live remediation state now records 15 of 27 nodes resolved and 12 pending. Re-run this leg on a clean tree to apply.
+- THE SAME LANE SUCCEEDED when the task was narrowed and forced to finish. A retry scoped to three named files, forbidden from running shell commands, and told explicitly that its final message must be the answer, returned a usable verdict in ~4 minutes ("A) none  B) none"). The discriminator is scope plus a forced-finish turn, not lane health — Codex was probed live and healthy at run start.
 
-- Leg 1 semantic coverage was PARTIAL. Only docs/HANDOFF.md was examined item-by-item and stamped. The remaining 53 in-scope docs got the full mechanical gate set (all green) plus a corpus-wide status-noise scan, not a per-item semantic walk. Detail and counts: .audit-tools/nightly/leg1-2026-08-20-coverage.json.
+- The free-provider lane was USABLE tonight and was used twice: once as an independent adversary confirming the leg-3 premise by enumerating all 33 gate rows from source (CONFIRMED), and once for the leg-2 adversary characterization. It made one minor error in the first pass (it read check:handoff-roadmap's fix as not matching the regenerate-shaped regex when it does contain "generate-"); the error did not change the verdict, and it is noted rather than hidden.
 
-- BOTH independent lanes failed, so no second opinion backs tonight's items. Codex returned "You've hit your usage limit" and ran nothing. The free-provider lane ran but fabricated evidence twice: it quoted a bullet that was never asked about, invented a claim about session-start-guards.mjs, and misspelled the consent-token test filename as "consent-token-not-persited.test.ts". Its output was discarded rather than counted. Every finding tonight rests on this session's own direct read of the source.
+- A LEG-1 FALSE POSITIVE WAS CAUGHT AND DISCARDED, recorded so it is not re-derived: a mechanical comparison of the spec docs against the PRIORITY array in src/audit/orchestrator/nextStep.ts appeared to show `friction_capture_current` documented but absent from PRIORITY. It is present, as the constant FRICTION_CAPTURE_OBLIGATION_ID rather than a string literal, so the regex could not see it. Independently confirmed clean by the Codex retry. No drift exists. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- Two subjects remain ANSWERED but NOT RECORDED AS DONE, and were left that way deliberately. 48295eac950efe87 (work-block grouping) reports its interim work as landed and is ready for `answer.mjs --done`, which was not run because the tree is dirty. 8d7b9bb8d978307d (HOST_GATE_DESCRIPTORS) is answered CONDITIONALLY — delete on the next tested-but-unwired pass unless a production reader lands first. Verified at HEAD: the symbol is still read only by its own tests and one comment, so the condition has not yet come due. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Leg 2 SWEPT the whole backlog: 89 of 89 entries attempted, 71 classified, 18 errored, NOT aborted (.audit-tools/nightly/triage-2026-08-21-coverage.json). 28 entries came back probes_unusable, which is high and bounds how much of the sweep can auto-close.
 
-- Leg 2 SWEPT the backlog but ESCALATED NOTHING, deliberately. The mechanical sweep covered the corpus — 79 of 79 entries attempted, 68 classified, 11 errored, not aborted (.audit-tools/nightly/triage-2026-08-20-coverage.json). It flagged 17 entries as owner_decision_needed. None was raised, because a leg-2 escalation owes the owner a reviewer+adversary-characterized proposition and BOTH independent lanes were unusable tonight. Seventeen one-sided propositions would be queue noise, not decisions. Re-run leg 2 when a second lane is available.
+- Leg 2 applied NO mechanical cleanup, and both already_shipped_or_stale leads were REJECTED with reasons. open-bugs#b3e71bd5 ("Top gate optimization") is NOT fully shipped — it carries an open remainder ("possibly splitting the 100s+ files across more shards (verify per-file...)"), so deleting it would destroy live open work; the lead also carries no code_paths and its premise is unprobed. forward-tracks#55883634 ("CI wall-clock") was rejected for the same reason as on 2026-08-20: it is a pointer whose work is owned outside this repo, which is not proof a fix shipped, and deleting it would destroy the pointer to docs/reviews/ci-wallclock-plan-critique-2026-08-07.md.
 
-- Leg 2 applied NO mechanical cleanup. The sweep produced exactly one already_shipped_or_stale lead, forward-tracks#55883634 ("CI wall-clock: shard balance and the single-file floor"), and it was REJECTED rather than deleted. The lead's own reasoning is that the entry is a pointer whose work is owned outside this repo — that is not proof a fix shipped. It carries no code_paths and its premise is unprobed, and deletion requires a code anchor. Deleting it would destroy the pointer to docs/reviews/ci-wallclock-plan-critique-2026-08-07.md.
+- Leg 2 flagged 12 entries owner_decision_needed and raised exactly ONE of them (open-bugs#da502b77, the run-id identity question). The other 11 were not raised: raising twelve one-at-a-time propositions in a single night is queue noise, and the disambiguate-backlog rubric this leg reuses works one item at a time. The 11 are listed in .audit-tools/nightly/triage-2026-08-21.jsonl and stay available to the next run.
 
-- FRICTION TO LOG on the next clean-tree run (it could not be written to docs/backlog/open-bugs.md tonight, because the tree was dirty): writing the nightly queue DESYNCS docs/HANDOFF.md's generated live-status block, because that block derives from the queue and the decision ledger. The run contract in docs/nightly-routine.md does not list regenerating it as a run step, so the desync is only caught afterwards by the Stop closeout gate. This run hit it and repaired it with `node scripts/shared/generate-handoff-roadmap.mjs`. The durable fix is to make the regeneration a step of writeOpenItems or of the run contract, so the run cannot leave check:handoff-roadmap red. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- The weekly /insights pass WAS due (stamp read 2026-08-14T09:07:47Z, over seven days) and RAN. 15 suggestions triaged against HEAD: 9 already shipped, 5 debatable, 1 genuinely open. The single open one — mechanically enforcing red-green per commit — is ALREADY TRACKED in docs/backlog/open-bugs.md with an owner decision recorded 2026-07-25 to build it with a diff-derived site list, so no new item was raised for it. Two of the five debatable ones are RETIREMENT COLLISIONS and were dropped rather than escalated: the report recommends a per-lane cost ledger with a model-tier ladder and quota budgets inside this repo, which is exactly the execution/quota substrate deliberately retired in the zero-adapter cut. Full triage: .audit-tools/nightly/insights-2026-08-21.txt.
 
-- The weekly /insights pass was NOT due and is not a skipped leg: the stamp at .audit-tools/nightly/insights-last-run.json reads 2026-08-14T09:07:47Z, under the seven-day threshold.
+- One insights suggestion could NOT be raised as an item and is stated here instead: it proposes that "audit"/"read-only"/"do not edit" should forbid creating report files, which conflicts with the standing global rule that findings always land in a file. Its premise lives in ~/.claude/CLAUDE.md, which is outside this repo and not git-tracked, so no probe form can carry it and writeOpenItems would refuse the item. Recurrence is also weak — one cited session.
 
 
 </details>

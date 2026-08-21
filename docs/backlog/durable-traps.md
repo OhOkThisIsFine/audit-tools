@@ -58,7 +58,16 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   into its transcript before wedging; the run that assumed a wedge meant no output would have
   discarded them. Redirect to a file, and on a wedge `awk '/^FINDING:/,0'` the trace. Mitigation is
   the standing one ([[nim-offload-reliable-unit-is-one-entry]]): one bounded scope per dispatch, not
-  seven files in one prompt.
+  seven files in one prompt. ⚠ **A bounded scope is NOT sufficient — the prompt must also FORCE THE
+  FINISH (2026-08-21, three more deaths in one night).** Three doc-review batches of 3, 6 and 9 files
+  each ran 45+ minutes, emitted 400KB-900KB of tool trace, and ended with NO answer at **exit code 0**
+  — a masked failure that reads as success. Two ended on `collab: Wait`; one on `ERROR
+  codex_core::tools::router: code-mode host closed its stdout`. Contrary to the clause above, those
+  traces held nothing salvageable: not one finding, only tool output — so grep the trace, but do not
+  assume it is populated either. The retry that WORKED added two clauses to a three-file scope: *do
+  not run shell commands, do not explore the repo* and *your final message must be the answer itself;
+  do not end your turn on a tool call*. It returned a usable verdict in ~4 minutes. Lane health is not
+  the discriminator — Codex was probed live and answered `CODEX_OK` at run start.
 
 - **A PreToolUse block kills the WHOLE chained command — the earlier statements never ran (2026-07-25).**
   A refused `git add <files> && git commit …` is refused at the tool call, before any statement executes, so
