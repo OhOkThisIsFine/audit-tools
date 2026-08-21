@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
+import { scratchDir } from "../helpers/scratch.js";
 import {
   FRICTION_CAPTURE_SCHEMA_VERSION,
   FRICTION_CATEGORIES,
@@ -30,8 +29,16 @@ function coverAllCategories(record: TriagedFrictionArtifact): void {
 import { decideAuditFrictionCloseout } from "../../src/audit/orchestrator/nextStep.js";
 import { decideRemediateFrictionCloseout } from "../../src/remediate/steps/nextStep.js";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(HERE, ".test-friction-capture-closeout");
+// OFF-TREE, per invocation. This suite used to root its scratch tree at
+// `join(dirname(fileURLToPath(import.meta.url)), ".test-friction-capture-closeout")`
+// — inside tests/remediate/ — which is the exact hazard `nextStepHarness.ts`
+// documents and every other suite in this directory already avoids: the INV-WH
+// raw-spawn scanner (tests/shared/shared-tests-invariants.test.mjs) WALKS the
+// tests/ tree, and this suite's per-test rm+mkdir churn raced that walk into a
+// mid-scan ENOENT. `scratchDir` roots it under the per-invocation
+// AUDIT_TOOLS_TEST_RUN_ROOT instead, so the churn is invisible to the scanner
+// and two concurrent vitest invocations cannot share the directory.
+const TEST_DIR = scratchDir(".test-friction-capture-closeout");
 
 async function readArtifact(path: string): Promise<TriagedFrictionArtifact> {
   return JSON.parse(await readFile(path, "utf8")) as TriagedFrictionArtifact;
@@ -379,5 +386,321 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     expect(auditArtifact.schema_version).toBe(remArtifact.schema_version);
     expect(auditArtifact.tool).toBe("audit-code");
     expect(remArtifact.tool).toBe("remediate-code");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CP-NODE-24 (test-harness-hermeticity). The harness is a helper module with no
+// suite of its own, so its contract assertions live here — beside the suite
+// whose scratch root this module moved off-tree.
+// ---------------------------------------------------------------------------
+
+describe("CP-NODE-24 inv-1: this suite's scratch root is OFF the repo tree", () => {
+  it("TEST_DIR does not resolve under tests/, and IS the per-invocation root", async () => {
+    const { dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    // Locating the repo to assert against is NOT a scratch root: this joins to
+    // "..", never to a `.test-*` name — exactly the distinction the structural
+    // guard in tests/shared/test-scratch-root-guard.test.ts draws.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const testsPrefix = join(here, "..");
+    expect(
+      TEST_DIR.startsWith(testsPrefix),
+      `TEST_DIR (${TEST_DIR}) must not live under tests/ — a tree the INV-WH ` +
+        "raw-spawn scanner walks while this suite rm -rf's it on every test",
+    ).toBe(false);
+    const { TEST_RUN_ROOT_ENV } = await import("../helpers/scratch.js");
+    const runRoot = process.env[TEST_RUN_ROOT_ENV];
+    expect(runRoot, "the per-invocation root must be set under vitest").toBeTruthy();
+    expect(TEST_DIR.startsWith(runRoot!)).toBe(true);
+  });
+});
+
+describe("CP-NODE-24 inv-4: the harness threads the injectable final-gate runner", () => {
+  /** Make a scratch repo audit-tools-shaped, or the gate scopes out. */
+  async function makeMonorepoShaped(root: string): Promise<void> {
+    for (const dir of ["src/shared", "src/audit", "src/remediate"]) {
+      await mkdir(join(root, dir), { recursive: true });
+    }
+    for (const file of ["audit-code.mjs", "remediate-code.mjs"]) {
+      await writeFile(join(root, file), "// fixture\n", "utf8");
+    }
+    await mkdir(join(root, "scripts", "shared"), { recursive: true });
+    await writeFile(
+      join(root, "scripts", "shared", "run-vitest-gate.mjs"),
+      "// fixture gate script\n",
+      "utf8",
+    );
+  }
+
+  it("exposes the runner as a member, so no suite needs the environment skip", async () => {
+    const { createNextStepHarness, HARNESS_GATE_RUNNER } = await import(
+      "./helpers/nextStepHarness.js"
+    );
+    const harness = createNextStepHarness(".test-thh-gate-runner-member");
+    expect(typeof harness.finalGateRunner).toBe("function");
+    expect(harness.finalGateRunner).toBe(HARNESS_GATE_RUNNER);
+    expect(typeof harness.runFinalGate).toBe("function");
+  });
+
+  it("runFinalGate runs the REAL gate through the injected runner", async () => {
+    const { createNextStepHarness } = await import("./helpers/nextStepHarness.js");
+    const { toolOwnedFinalGateCommands } = await import(
+      "../../src/remediate/steps/finalGate.js"
+    );
+    const harness = createNextStepHarness(".test-thh-run-final-gate");
+    await harness.resetTestRepo();
+    try {
+      await makeMonorepoShaped(harness.REPO_DIR);
+      let injectedCalls = 0;
+      const gate = await harness.runFinalGate(harness.REPO_DIR, () => {
+        injectedCalls += 1;
+        return { status: 0 };
+      });
+      const expected = toolOwnedFinalGateCommands(harness.REPO_DIR).length;
+      expect(expected).toBeGreaterThan(0);
+      expect(gate.outcome, "a real gate outcome, not a skipped step").toBe("executed");
+      expect(gate.scoped_out).toBe(false);
+      expect(gate.passed).toBe(true);
+      expect(gate.results).toHaveLength(expected);
+      expect(injectedCalls, "the injected runner services every command").toBe(
+        expected,
+      );
+    } finally {
+      await harness.cleanupTestRepo();
+    }
+  });
+
+  it("NEGATIVE: suppressing the gate records a NOT-RUN outcome, never one the run produced", async () => {
+    // The contrast the invariant is about. `skipFinalGate` — single-sourced with
+    // the environment skip — bypasses the gate entirely: the run still advances,
+    // but nothing executed, so the recorded outcome carries NO verdict. Injecting
+    // the harness runner lets the gate execute for real. That is why the harness
+    // supplies a runner instead of a skip.
+    const { createNextStepHarness } = await import("./helpers/nextStepHarness.js");
+    const { decideNextStep } = await import("../../src/remediate/steps/nextStep.js");
+    const { finalGateOutcomePath } = await import(
+      "../../src/remediate/steps/finalGate.js"
+    );
+    const harness = createNextStepHarness(".test-thh-skip-vs-inject");
+
+    const finding = (id: string, path: string) => ({
+      id,
+      title: `Finding ${id}`,
+      category: "correctness",
+      severity: "high",
+      confidence: "high",
+      lens: "correctness",
+      summary: `Fix ${id}.`,
+      affected_files: [{ path }],
+      evidence: [`${path}:1 evidence`],
+    });
+
+    async function driveBoundaryRun(
+      options: Record<string, unknown>,
+    ): Promise<Record<string, unknown> | undefined> {
+      await harness.resetTestRepo();
+      await makeMonorepoShaped(harness.REPO_DIR);
+      await harness.saveState({
+        status: "implementing",
+        plan: {
+          plan_id: "PLAN-THH",
+          findings: [finding("F-000", "src/a.ts"), finding("F-001", "src/b.ts")],
+          blocks: [
+            {
+              block_id: "B-000",
+              items: ["F-000"],
+              parallel_safe: true,
+              touched_files: ["src/a.ts"],
+              dependencies: [],
+              phase_ordinal: 0,
+            },
+            {
+              block_id: "B-001",
+              items: ["F-001"],
+              parallel_safe: true,
+              touched_files: ["src/b.ts"],
+              dependencies: ["B-000"],
+              phase_ordinal: 1,
+            },
+          ],
+          project_type: "unknown",
+          candidate_closing_actions: ["none"],
+        },
+        items: {
+          "F-000": { finding_id: "F-000", status: "resolved", block_id: "B-000" },
+          "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
+        },
+        closing_plan: { action: "none" },
+      } as never);
+      await harness.writeIntentCheckpoint();
+      await harness.acknowledgeResume();
+      await decideNextStep({ root: harness.REPO_DIR, ...options } as never);
+      const recordPath = finalGateOutcomePath(harness.ARTIFACTS_DIR);
+      return existsSync(recordPath)
+        ? (JSON.parse(await readFile(recordPath, "utf8")) as Record<string, unknown>)
+        : undefined;
+    }
+
+    try {
+      const injected = await driveBoundaryRun({
+        finalGateRunner: harness.finalGateRunner,
+      });
+      expect(injected?.outcome, "the harness runner lets the gate RUN").toBe(
+        "executed",
+      );
+      expect(injected?.passed).toBe(true);
+      expect(injected?.commands_run as number).toBeGreaterThan(0);
+
+      const suppressed = await driveBoundaryRun({ skipFinalGate: true });
+      expect(suppressed?.outcome).not.toBe("executed");
+      expect(
+        suppressed?.passed,
+        "a suppressed gate produces no verdict — the whole cost of the skip",
+      ).toBeNull();
+      expect(suppressed?.commands_run).toBe(0);
+    } finally {
+      await harness.cleanupTestRepo();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CP-NODE-24 inv-5: INV-COVERAGE — this module owns the terminal disposition of
+// exactly 2 approved finding ids. The join reads the PERSISTED outcome-status
+// layer, never a disposition-layer literal.
+// ---------------------------------------------------------------------------
+
+describe("CP-NODE-24 inv-5: INV-COVERAGE — this module's 2 owned ids", () => {
+  const OWNED_IDS = ["MNT-03deb087", "MNT-03deb087-2"];
+  const TERMINAL_PERSISTED = new Set([
+    "resolved",
+    "verified_no_change",
+    "verified_already_fixed",
+    "refuted",
+  ]);
+  const MODULE = "test-harness-hermeticity";
+  const OWNED_FILE = "tests/remediate/helpers/nextStepHarness.ts";
+
+  async function buildReport(items: Record<string, unknown>) {
+    const { buildRemediationOutcomesReport } = await import(
+      "../../src/remediate/phases/close.js"
+    );
+    return buildRemediationOutcomesReport(
+      {
+        status: "closing",
+        plan: {
+          plan_id: "PLAN-THH-COV",
+          findings: OWNED_IDS.map((id) => ({
+            id,
+            title: `Finding ${id}`,
+            category: "maintainability",
+            severity: "medium",
+            confidence: "high",
+            lens: "maintainability",
+            summary: `Fix ${id}.`,
+            affected_files: [{ path: OWNED_FILE }],
+            evidence: [`${OWNED_FILE}:1 evidence`],
+          })),
+          blocks: [
+            {
+              block_id: "B-1",
+              items: OWNED_IDS,
+              parallel_safe: true,
+              touched_files: [],
+            },
+          ],
+          project_type: "unknown",
+          candidate_closing_actions: ["none"],
+        },
+        items,
+      } as never,
+      {
+        contract_version: "remediate-code-closing-result/v1alpha1",
+        action: "none",
+        status: "skipped",
+        commands: [],
+      } as never,
+    );
+  }
+
+  function coveredItem(id: string, index: number): Record<string, unknown> {
+    const disposition = index === 0 ? "verified_already_fixed" : undefined;
+    return {
+      finding_id: id,
+      status: "resolved_no_change",
+      block_id: "B-1",
+      ...(disposition ? { disposition_override: disposition } : {}),
+      evidence: {
+        file: OWNED_FILE,
+        line: `${String(140 + index)}`,
+        mechanism:
+          disposition === "verified_already_fixed"
+            ? "read_at_head_verification"
+            : "red_green_test",
+      },
+      recorded_by_module: MODULE,
+    };
+  }
+
+  it("POSITIVE: both owned ids under T, with complete evidence, join GREEN with attribution intact", async () => {
+    const items: Record<string, unknown> = {};
+    OWNED_IDS.forEach((id, index) => {
+      items[id] = coveredItem(id, index);
+    });
+    const built = await buildReport(items);
+    expect(built.outcomes).toHaveLength(OWNED_IDS.length);
+    for (const id of OWNED_IDS) {
+      const outcome = built.outcomes.find((o) => o.finding_id === id)!;
+      expect(
+        TERMINAL_PERSISTED.has(outcome.outcome),
+        `${id} must persist a member of T, got '${outcome.outcome}'`,
+      ).toBe(true);
+      expect(outcome.evidence?.file.length).toBeGreaterThan(0);
+      expect(outcome.evidence?.line.length).toBeGreaterThan(0);
+      expect(outcome.evidence?.mechanism.length).toBeGreaterThan(0);
+      expect(outcome.recorded_by_module).toBe(MODULE);
+    }
+  });
+
+  it("NEGATIVE (condition 4): both ids blocked WITH a reason is still RED", async () => {
+    const items: Record<string, unknown> = {};
+    for (const id of OWNED_IDS) {
+      items[id] = {
+        finding_id: id,
+        status: "blocked",
+        block_id: "B-1",
+        failure_reason: "still open",
+      };
+    }
+    const built = await buildReport(items);
+    for (const id of OWNED_IDS) {
+      const outcome = built.outcomes.find((o) => o.finding_id === id)!;
+      expect(
+        TERMINAL_PERSISTED.has(outcome.outcome),
+        `${id}: a non-empty reason does not make a non-terminal disposition terminal`,
+      ).toBe(false);
+    }
+  });
+
+  it("NEGATIVE (condition 5): stripping any ONE evidence part leaves the id uncovered", async () => {
+    for (const part of ["file", "line", "mechanism"] as const) {
+      const items: Record<string, unknown> = {};
+      OWNED_IDS.forEach((id, index) => {
+        const item = coveredItem(id, index) as Record<string, unknown> & {
+          evidence: Record<string, unknown>;
+        };
+        if (id === OWNED_IDS[0]) item.evidence = { ...item.evidence, [part]: "" };
+        items[id] = item;
+      });
+      const built = await buildReport(items);
+      const outcome = built.outcomes.find((o) => o.finding_id === OWNED_IDS[0])!;
+      const complete =
+        outcome.evidence !== undefined &&
+        outcome.evidence.file.length > 0 &&
+        outcome.evidence.line.length > 0 &&
+        outcome.evidence.mechanism.length > 0;
+      expect(complete, `missing evidence.${part} must not read as covered`).toBe(false);
+    }
   });
 });

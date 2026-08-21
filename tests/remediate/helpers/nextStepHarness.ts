@@ -38,6 +38,14 @@ import {
   CP_CYCLIC_SEAM_RESOLUTION_VERSION,
 } from "../../../src/remediate/validation/contractPipeline.js";
 import { scratchDir } from "../../helpers/scratch.js";
+// The gate seam is PRODUCTION code owned by remediate-nextstep-and-final-gate;
+// the harness consumes it, never reimplements it (the seam edge runs this way
+// only).
+import {
+  runToolOwnedFinalGate,
+  type GateRunner,
+  type ToolOwnedFinalGateResult,
+} from "../../../src/remediate/steps/finalGate.js";
 
 const HELPERS_DIR = dirname(fileURLToPath(import.meta.url));
 const TESTS_DIR = dirname(HELPERS_DIR);
@@ -113,6 +121,29 @@ export function makePlanningState(
   };
 }
 
+/**
+ * The hermetic gate runner every harness-driven run gets.
+ *
+ * INV-THH-THREADS-GATE-RUNNER. The tool-owned final gate spawns the repository's
+ * whole build/typecheck/test floor, so a suite that drives `decideNextStep` to a
+ * gate has to do something about it. There are two ways, and only one of them is
+ * honest:
+ *
+ *   - the ENVIRONMENT SKIP (the final-gate env var `finalGateDisabledReason` in
+ *     nextStep.ts reads — deliberately not spelled here, because the guard in
+ *     final-gate-extraction-equivalence.test.ts scans tests/ for that literal
+ *     and a commented mention is one uncomment away from a use) or
+ *     `skipFinalGate` suppresses the gate, and a suppressed gate produces NO
+ *     verdict — the run transitions as if a floor had passed while nothing ran;
+ *   - this INJECTED RUNNER lets the gate execute its real command list and
+ *     record a real outcome, with the spawn replaced.
+ *
+ * The harness supplies the second so no suite needs the first. `status: 0` by
+ * default (a green floor); a suite wanting a red one passes its own runner to
+ * {@link NextStepHarness.runFinalGate} or to `decideNextStep`.
+ */
+export const HARNESS_GATE_RUNNER: GateRunner = () => ({ status: 0 });
+
 /** Directory-bound helpers + path constants for one next-step test file. */
 export interface NextStepHarness {
   TEST_DIR: string;
@@ -126,6 +157,23 @@ export interface NextStepHarness {
   writeReadyStructuredAuditIntake(inputPath: string): Promise<void>;
   approveReviewGate(): Promise<void>;
   writeCompleteContractPipelineDag(): Promise<void>;
+  /**
+   * The injectable final-gate runner (`artifact:injectable-final-gate-runner`,
+   * a PRODUCTION seam owned by remediate-nextstep-and-final-gate) this harness
+   * threads into harness-driven runs. Pass it as `decideNextStep`'s
+   * `finalGateRunner` — never set the environment skip, which is the one path
+   * that records no gate outcome at all.
+   */
+  finalGateRunner: GateRunner;
+  /**
+   * Run the real tool-owned final gate against `root` (default: this harness's
+   * REPO_DIR) through the injected runner, returning the real
+   * `ToolOwnedFinalGateResult`. Spawns nothing.
+   */
+  runFinalGate(
+    root?: string,
+    runner?: GateRunner,
+  ): Promise<ToolOwnedFinalGateResult>;
 }
 
 /**
@@ -469,5 +517,8 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
     writeReadyStructuredAuditIntake,
     approveReviewGate,
     writeCompleteContractPipelineDag,
+    finalGateRunner: HARNESS_GATE_RUNNER,
+    runFinalGate: (root = REPO_DIR, runner = HARNESS_GATE_RUNNER) =>
+      runToolOwnedFinalGate(root, { runner }),
   };
 }
