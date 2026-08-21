@@ -606,7 +606,7 @@ test("INV 7: the canonical write path archives and VERIFIES before replacing", a
     const { writeCanonicalAuditDeliverables } = await import(
       "../../src/audit/io/artifacts.js"
     );
-    const { readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { readFile, mkdir } = await import("node:fs/promises");
     const artifactsDir = join(tempDir, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
     const root = join(tempDir, ".audit-tools");

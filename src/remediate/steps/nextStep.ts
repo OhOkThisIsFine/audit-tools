@@ -70,7 +70,6 @@ import {
   auditArtifactsDir,
   auditFindingsPath,
   auditReportPath,
-  auditToolsDir,
   promotedAuditFindingsPath,
   promotedAuditReportPath,
   remediationArtifactsDir,
