@@ -378,6 +378,7 @@ const DECLARED_OUTCOMES_TOP_LEVEL_KEYS = new Set([
   "e2e_result",
   "closing_result",
   "plan_coverage",
+  "final_gate",
 ]);
 
 describe("remediation-outcomes round-trip (OBL-018)", () => {

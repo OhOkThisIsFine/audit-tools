@@ -1,6 +1,6 @@
 import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
 import { existsSync, statSync } from "node:fs";
-import { mkdir, readFile, rename } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { StateStore, type RemediationState } from "../state/store.js";
 import type {
@@ -91,10 +91,13 @@ import {
   fixupBlocksAfterDedup,
 } from "../dedup/crossLensDedup.js";
 import { checkAffectedFileIntegrity } from "../utils/fileIntegrity.js";
+import { applyIntentOrdering } from "../intent/intentOrdering.js";
 import { resolveIntakeStep } from "./intakeResolver.js";
 import {
   runToolOwnedFinalGate,
   writeFinalGateRedRecord,
+  writeFinalGateOutcomeRecord,
+  type FinalGateOutcomeKind,
   type GateRunner,
   type ToolOwnedFinalGateResult,
 } from "./finalGate.js";
@@ -228,7 +231,33 @@ function stateRunId(state: RemediationState | null): string {
   return state?.plan?.plan_id ?? "run";
 }
 
-function defaultInputCandidates(root: string): string[] {
+/**
+ * Where an autonomous run's LEFTOVER deliverable pair lands.
+ *
+ * REMEDIATION-OWNED, deliberately. This module used to write the canonical
+ * `.audit-tools/audit-findings.json` + `audit-report.md` pair directly and
+ * unarchived, which destroys the audit source `defaultInputCandidates` resolves
+ * FIRST — the original contract becomes unrecoverable for any external consumer
+ * (INV-RNF-NO-CANONICAL-PAIR-WRITE). The canonical pair belongs to
+ * audit-artifact-promotion-lifecycle, whose exported write-with-archive is the
+ * only sanctioned way to replace it.
+ */
+export function autonomousLeftoverFindingsPath(root: string): string {
+  return join(remediationArtifactsDir(root), "autonomous-leftovers-findings.json");
+}
+
+export function autonomousLeftoverReportPath(root: string): string {
+  return join(remediationArtifactsDir(root), "autonomous-leftovers-report.md");
+}
+
+/**
+ * The intake sources a bare `next-step` discovers, IN PRIORITY ORDER — index 0
+ * wins. Exported so the ordering can be asserted by CALLING it: the property
+ * that matters ("a real audit always beats this run's own leftovers") is a fact
+ * about the returned array, and a test that reads it out of the source text is
+ * asserting the prose, not the order.
+ */
+export function defaultInputCandidates(root: string): string[] {
   // Prefer the canonical machine contract (audit-findings.json) over its
   // human-facing render (audit-report.md). The JSON is the source of truth on
   // both sides of the audit -> remediate pipeline, and feeding it triggers the
@@ -242,6 +271,13 @@ function defaultInputCandidates(root: string): string[] {
     promotedAuditReportPath(auditDir),
     auditReportPath(auditDir),
     join(root, AUDIT_REPORT_FILENAME),
+    // LAST, so a real audit always wins. The autonomous leftover pair moved off
+    // the canonical paths (it may no longer overwrite them), and without a
+    // candidate entry the next unattended run would stop round-tripping its own
+    // leftovers back through intake — the behaviour the old canonical write was
+    // there to provide, kept without the destructive overwrite.
+    autonomousLeftoverFindingsPath(root),
+    autonomousLeftoverReportPath(root),
   ];
 }
 
@@ -484,11 +520,15 @@ export {
   isAuditToolsMonorepo,
   toolOwnedFinalGateCommands,
   runToolOwnedFinalGate,
+  finalGateOutcomePath,
+  writeFinalGateOutcomeRecord,
 } from "./finalGate.js";
 export type {
   FinalGateCommandSpec,
   FinalGateCommandResult,
   ToolOwnedFinalGateResult,
+  FinalGateOutcomeKind,
+  FinalGateOutcomeRecord,
   GateRunner,
 } from "./finalGate.js";
 
@@ -501,6 +541,35 @@ function resolvedOrTerminalItems(state: RemediationState): RemediationItemState[
 function allItemsTerminal(state: RemediationState): boolean {
   const items = Object.values(state.items ?? {});
   return items.length > 0 && resolvedOrTerminalItems(state).length === items.length;
+}
+
+/**
+ * Reorder a finalized plan by the checkpoint's interpreted intent.
+ *
+ * The checkpoint persists the operator's `free_form_intent` verbatim; the
+ * structured `InterpretedIntent` is derived from it by the single shared
+ * interpreter. INV-S04: the raw directive is never read past this line — only
+ * the derived lens-weight / priority / scope signals reach the ordering, so the
+ * verbatim string cannot leak into a worker prompt through this path.
+ *
+ * Absent checkpoint, absent intent, or an intent that interprets to nothing all
+ * return the plan untouched.
+ */
+async function applyCheckpointIntentOrdering(
+  artifactsDir: string,
+  plan: RemediationPlan,
+): Promise<RemediationPlan> {
+  const checkpoint = await readOptionalJsonFile<IntentCheckpoint>(
+    join(artifactsDir, "intent_checkpoint.json"),
+  ).catch(() => undefined);
+  const freeForm = checkpoint?.free_form_intent;
+  if (typeof freeForm !== "string" || freeForm.trim().length === 0) return plan;
+  const ordered = applyIntentOrdering(
+    plan.findings,
+    plan.blocks,
+    interpretFreeFormIntent(freeForm),
+  );
+  return { ...plan, findings: ordered.findings, blocks: ordered.blocks };
 }
 
 function normalizeExtractedPlan(value: unknown): {
@@ -636,7 +705,20 @@ function stripPlanTimeBookkeeping(value: unknown): unknown {
   return stripped;
 }
 
-function findingCarryForwardKey(finding: Finding): string {
+/**
+ * The re-plan carry-forward identity of a finding: canonical JSON with the
+ * plan-time bookkeeping keys stripped, so a re-plan whose only delta is a
+ * recomputed file hash or a re-evaluated grounding flag carries the prior item
+ * (and its `item_spec`) forward, while a real change to the finding does not.
+ *
+ * EXPORTED so the invariant suite can call THIS function. It was module-internal,
+ * and the suite claiming to cover the invariant declared its own copy of the key
+ * set, the strip and the key builder — so dropping `evidence_grounded` from the
+ * production set, or widening it with a real field like `severity`, left the
+ * block green while carry-forward regressed. A test asserting against its own
+ * re-implementation pins nothing about shipped behaviour.
+ */
+export function findingCarryForwardKey(finding: Finding): string {
   return JSON.stringify(stripPlanTimeBookkeeping(finding));
 }
 
@@ -716,6 +798,7 @@ async function forceReplanFromExistingIntake(
   artifactsDir: string,
   previous: RemediationState,
   store: StateStore,
+  runLogger: RunLogger,
 ): Promise<RemediationState | null> {
   const pendingState: RemediationState = {
     status: "pending",
@@ -745,6 +828,7 @@ async function forceReplanFromExistingIntake(
     artifactsDir,
     pendingState,
     extractedPlan,
+    runLogger,
   );
   if (!replanned) {
     return null;
@@ -938,8 +1022,9 @@ async function buildImplementDispatchStep(ctx: {
   state: RemediationState;
   options: NextStepOptions;
   store: StateStore;
+  runLogger: RunLogger;
 }): Promise<RemediateOutcome> {
-  const { root, artifactsDir, state, store } = ctx;
+  const { root, artifactsDir, state, store, runLogger } = ctx;
   const runId = stateRunId(state);
   const boundaryState = currentHostBoundaryState(state);
   const ingested = await ingestRemediationHostResults({
@@ -983,6 +1068,23 @@ async function buildImplementDispatchStep(ctx: {
     await store.saveState({
       ...state,
       host_handoff: handoff.handoff_record,
+    });
+  }
+
+  // Ingest issues reached the PROMPT and nothing else — a channel that survives
+  // exactly as long as the host reads that one step. They are also the durable
+  // record of which submitted results were rejected and why, so they are logged
+  // as well as rendered.
+  for (const issue of ingested.issues) {
+    runLogger.event({
+      phase: "next-step",
+      kind: "outcome",
+      obligation: "host_ingest",
+      note:
+        `host_ingest_issue code=${issue.code}` +
+        (issue.work_item_id ? ` work_item=${issue.work_item_id}` : "") +
+        (issue.result_path ? ` result=${issue.result_path}` : "") +
+        ` message=${issue.message}`,
     });
   }
 
@@ -1116,11 +1218,50 @@ export async function decideRemediateFrictionCloseout(
   return decideFrictionTriage(artifactsDir, stateRunId(state), "remediate-code");
 }
 
+/**
+ * Copy an unusable extracted plan somewhere recoverable and PROVE the copy
+ * landed, returning the archive path. Read back and compared byte-for-byte:
+ * "the write did not throw" is not evidence a file exists, and this is the last
+ * moment the plan is recoverable at all.
+ *
+ * THROWS rather than returning when the copy cannot be made or verified, so the
+ * caller's unlink is unreachable on that path — an irreversible delete never
+ * runs before its archive is written and verified.
+ */
+async function archiveExtractedPlan(extractedPlanPath: string): Promise<string> {
+  // BYTES, compared with Buffer.compare — the bar CP-NODE-3 set for the
+  // verified-archive promotion path. A utf8-string compare is a weaker claim
+  // than the one an archive has to make: it silently equates byte sequences that
+  // decode alike (a BOM, a lone surrogate, an invalid sequence replaced by
+  // U+FFFD on BOTH sides), so a corrupt copy can read as verified.
+  const original = await readFile(extractedPlanPath);
+  const archivePath = join(
+    dirname(extractedPlanPath),
+    "archive",
+    `extracted-plan-${Date.now()}.json`,
+  );
+  await mkdir(dirname(archivePath), { recursive: true });
+  await writeFile(archivePath, original);
+  const readBack = await readFile(archivePath);
+  if (Buffer.compare(original, readBack) !== 0) {
+    throw new Error(
+      `Extracted-plan archive at ${archivePath} does not match the original bytes.`,
+    );
+  }
+  return archivePath;
+}
+
 async function handlePendingExtractedPlan(
   root: string,
   artifactsDir: string,
   existing: RemediationState,
   extractedPlan: unknown,
+  // The plan path's high-consequence events — findings dropped by grounding, and
+  // the plan being destroyed — are DURABLE, so the logger is a parameter rather
+  // than a module-level singleton reached for at the point of use. stderr is not
+  // captured into the artifact dir; before this, the durable tree held no trace
+  // that a plan had been destroyed or that findings had been dropped.
+  runLogger: RunLogger,
 ): Promise<RemediationState | null> {
   // The discard-and-re-extract recovery below covers EXACTLY the region whose
   // failures mean the extracted PLAN is unusable: normalization and grounding.
@@ -1142,6 +1283,15 @@ async function handlePendingExtractedPlan(
   try {
     ({ plan, sourceFindings, mergeMap } = normalizeExtractedPlan(extractedPlan));
 
+    // INTENT ORDERING, applied where the plan's findings and blocks are
+    // FINALIZED. `applyIntentOrdering` existed with no production caller at all:
+    // the checkpoint's interpreted intent was written and never read back, so
+    // "the work the user emphasised is dispatched first" was a property the code
+    // could state but not deliver. Ordering ONLY — it never drops or mutates a
+    // finding; every input is present in the output with a different order, so a
+    // plan whose checkpoint carries no intent is returned unchanged.
+    plan = await applyCheckpointIntentOrdering(artifactsDir, plan);
+
     // Deterministic grounding for the LLM-extracted plan (this path never sees
     // structured audit findings): strip phantom affected_files paths, drop
     // findings whose every cited path was phantom, and classify evidence. No
@@ -1155,6 +1305,22 @@ async function handlePendingExtractedPlan(
       evidenceGrounding: plan.source !== "contract_pipeline",
     });
     if (grounding.dropped.length > 0) {
+      // DROPPED-ID BOOKKEEPING, durable. A caller reading a finding count across
+      // the plan boundary must never receive the submitted count when findings
+      // were dropped, so the ids, the dropped count and the surviving grounded
+      // count all land in the run log — not only on stderr, which no artifact
+      // captures.
+      const droppedIds = grounding.dropped.map((d) => d.finding.id);
+      runLogger.event({
+        phase: "next-step",
+        kind: "outcome",
+        obligation: "plan_grounding",
+        note:
+          `grounding_dropped_findings dropped=${String(droppedIds.length)} ` +
+          `grounded=${String(grounding.findings.length)} ` +
+          `submitted=${String(plan.findings.length)} ` +
+          `ids=${droppedIds.join(",")}`,
+      });
       process.stderr.write(
         `[remediate-code] Grounding dropped ${grounding.dropped.length} extracted finding(s) whose cited paths do not exist: ${grounding.dropped.map((d) => `${d.finding.id} (${d.phantomPaths.join(", ")})`).join("; ")}\n`,
       );
@@ -1171,12 +1337,47 @@ async function handlePendingExtractedPlan(
     }
   } catch (error) {
     const paths = intakePaths(artifactsDir);
-    try {
+    const reason = error instanceof Error ? error.message : String(error);
+    // ARCHIVE, VERIFY, THEN destroy — in that order, with the delete unreachable
+    // if the archive did not land. This recovery used to unlink the plan
+    // outright, unarchived and unverified, leaving a line on stderr as the only
+    // record; the plan the run was built from was simply gone.
+    let archivePath: string | undefined;
+    if (existsSync(paths.extractedPlan)) {
+      try {
+        archivePath = await archiveExtractedPlan(paths.extractedPlan);
+      } catch (archiveError) {
+        const detail =
+          archiveError instanceof Error
+            ? archiveError.message
+            : String(archiveError);
+        runLogger.event({
+          phase: "next-step",
+          kind: "error",
+          obligation: "extracted_plan_recovery",
+          note: `extracted_plan_archive_failed reason=${reason} archive_error=${detail}`,
+        });
+        // NOT a re-emitted extraction step. Returning null here would report a
+        // routine "re-extract, please" while the plan was destroyed and nothing
+        // held a copy of it.
+        throw new Error(
+          `Extracted plan at ${paths.extractedPlan} is unusable (${reason}) but could ` +
+            `not be archived (${detail}); it was left in place rather than destroyed.`,
+        );
+      }
       const { unlink } = await import("node:fs/promises");
       await unlink(paths.extractedPlan);
-    } catch { /* already gone */ }
+    }
+    runLogger.event({
+      phase: "next-step",
+      kind: "outcome",
+      obligation: "extracted_plan_recovery",
+      note:
+        `extracted_plan_removed reason=${reason} ` +
+        `archive=${archivePath ?? "(nothing on disk to archive)"}`,
+    });
     process.stderr.write(
-      `[remediate-code] Unusable extracted-plan.json removed (${error instanceof Error ? error.message : String(error)}). Re-emitting extraction step.\n`,
+      `[remediate-code] Unusable extracted-plan.json removed (${reason}); archived at ${archivePath ?? "(nothing on disk to archive)"}. Re-emitting extraction step.\n`,
     );
     return null;
   }
@@ -1678,15 +1879,34 @@ async function emitAutonomousLeftoverDeliverable(
       "fail-closed non-destructiveness allowlist (or not tier-safe), so not auto-fixed. " +
       "They carry NO declined disposition — re-run remediation to re-evaluate them.",
   });
-  // Prefer the canonical `.audit-tools/` location (defaultInputCandidates[0]);
-  // fall back to the artifacts dir's parent when artifactsDir is non-standard.
-  const canonicalOutDir = auditToolsDir(root);
-  const outDir = existsSync(canonicalOutDir) ? canonicalOutDir : dirname(artifactsDir);
-  await mkdir(outDir, { recursive: true });
+  // REMEDIATION-OWNED PATH. This used to write the canonical
+  // `.audit-tools/audit-findings.json` + `audit-report.md` pair directly, with
+  // no archive: the audit source that `defaultInputCandidates` resolves first
+  // was silently replaced by a remediation-authored render, and the original
+  // contract was unrecoverable. The canonical pair is
+  // audit-artifact-promotion-lifecycle's; anything that must replace it goes
+  // through its exported write-with-archive
+  // (artifact:canonical-audit-deliverable-write-path), never a raw write here.
+  const findingsPath = autonomousLeftoverFindingsPath(root);
+  const reportPath = autonomousLeftoverReportPath(root);
+  await mkdir(dirname(findingsPath), { recursive: true });
   await Promise.all([
-    writeJsonFile(join(outDir, AUDIT_FINDINGS_FILENAME), pair.findings_report),
-    writeTextFile(join(outDir, AUDIT_REPORT_FILENAME), pair.report_markdown),
+    writeJsonFile(findingsPath, pair.findings_report),
+    writeTextFile(reportPath, pair.report_markdown),
   ]);
+  // NAMED IN THE DURABLE LOG. A leftover emit that left no event was invisible
+  // after the fact: an operator could not tell an emit from a silent no-op.
+  // The run log is opened here rather than threaded down: the two frames above
+  // this one carry no logger, and widening both signatures to pass one through
+  // would touch call paths this change has no other business in.
+  new RunLogger(join(artifactsDir, "run.log.jsonl"), { enabled: true }).event({
+    phase: "next-step",
+    kind: "outcome",
+    obligation: "autonomous_leftovers",
+    note:
+      `autonomous_leftover_deliverable findings=${String(leftovers.length)} ` +
+      `path=${findingsPath}`,
+  });
 }
 
 // ── Path-A filter dispositions (persisted for the coverage ledger) ──────────────
@@ -1731,6 +1951,7 @@ async function handleReadyIntakeContractPipeline(
   root: string,
   artifactsDir: string,
   options: NextStepOptions,
+  runLogger: RunLogger,
 ): Promise<RemediationStep | RemediationState | null> {
   // Fast path: if an extracted-plan.json already exists (pipeline complete or
   // promoted from a previous contract pipeline run), consume it directly without
@@ -1743,6 +1964,7 @@ async function handleReadyIntakeContractPipeline(
       artifactsDir,
       { status: "pending" },
       earlyExtractedPlan,
+      runLogger,
     );
   }
 
@@ -1893,6 +2115,14 @@ async function handleReadyIntakeContractPipeline(
               reason: `lean light review surfaced a concern: ${review.concerns.join("; ")}`,
             }),
           );
+          runLogger.event({
+            phase: "next-step",
+            kind: "outcome",
+            obligation: "lean_fast_path",
+            note:
+              `lean_fast_path_escalated concerns=${String(review.concerns.length)} ` +
+              `detail=${review.concerns.join("; ")}`,
+          });
           process.stderr.write(
             `[remediate-code] Lean light review escalated (${review.concerns.join("; ")}); routing to the full contract pipeline.\n`,
           );
@@ -1906,6 +2136,14 @@ async function handleReadyIntakeContractPipeline(
             intakePaths(artifactsDir).extractedPlan,
             leanPlan,
           );
+          runLogger.event({
+            phase: "next-step",
+            kind: "outcome",
+            obligation: "lean_fast_path",
+            note:
+              `lean_fast_path_routed findings=${String(gate.approved.length)} ` +
+              `rationale=${riskSignal.rationale.join("; ")}`,
+          });
           process.stderr.write(
             `[remediate-code] Lean fast path (risk tier low): ${riskSignal.rationale.join("; ")}; light review clear. Routing to plan→implement.\n`,
           );
@@ -1914,6 +2152,7 @@ async function handleReadyIntakeContractPipeline(
             artifactsDir,
             { status: "pending" },
             leanPlan,
+            runLogger,
           );
           if (planned) {
             return planned;
@@ -1922,6 +2161,12 @@ async function handleReadyIntakeContractPipeline(
           // normalize. If it somehow didn't, handlePendingExtractedPlan removed
           // the file; fall through to the full pipeline (the safety net) rather
           // than stalling the run.
+          runLogger.event({
+            phase: "next-step",
+            kind: "outcome",
+            obligation: "lean_fast_path",
+            note: "lean_fast_path_fallback plan failed to materialize; routing to the contract pipeline",
+          });
           process.stderr.write(
             "[remediate-code] Lean fast-path plan failed to materialize; falling back to the contract pipeline.\n",
           );
@@ -1990,6 +2235,7 @@ async function handleReadyIntakeContractPipeline(
     artifactsDir,
     { status: "pending" },
     extractedPlan,
+    runLogger,
   );
 }
 
@@ -1997,6 +2243,7 @@ async function handlePendingIntake(
   root: string,
   artifactsDir: string,
   options: NextStepOptions,
+  runLogger: RunLogger,
 ): Promise<RemediationStep | RemediationState | null> {
   // Short-circuit: if an extracted-plan.json already exists (promoted from the
   // contract pipeline), consume it directly without requiring intake artifacts.
@@ -2004,7 +2251,12 @@ async function handlePendingIntake(
   // full intake artifact set is no longer present.
   const earlyExtractedPlan = await readExtractedPlanIfPresent(artifactsDir);
   if (earlyExtractedPlan) {
-    return handleReadyIntakeContractPipeline(root, artifactsDir, options);
+    return handleReadyIntakeContractPipeline(
+      root,
+      artifactsDir,
+      options,
+      runLogger,
+    );
   }
 
   const inputResolution = resolveInputPaths(root, options.input);
@@ -2023,7 +2275,12 @@ async function handlePendingIntake(
     return intakeResult.step;
   }
   // Intake is complete — route both paths through the contract pipeline.
-  return handleReadyIntakeContractPipeline(root, artifactsDir, options);
+  return handleReadyIntakeContractPipeline(
+    root,
+    artifactsDir,
+    options,
+    runLogger,
+  );
 }
 
 async function handleNoState(
@@ -2685,16 +2942,79 @@ function hasResolvedItems(state: RemediationState): boolean {
 }
 
 /**
- * The tool-owned final gate (INV-RS-10) is disabled for this run — explicitly via
- * `skipFinalGate` (test hermeticity) or `REMEDIATE_SKIP_FINAL_GATE`. Single-sourced
- * so the all-terminal gate and the per-phase boundary gate agree.
+ * WHICH suppression disabled the tool-owned final gate (INV-RS-10) for this run —
+ * `skipFinalGate` (test hermeticity) or `REMEDIATE_SKIP_FINAL_GATE` — or null when
+ * it is live. Single-sourced so the all-terminal gate and the per-phase boundary
+ * gate agree, and so both RECORD the same reason.
+ *
+ * The reason is carried into the outcome record rather than collapsed to a
+ * boolean: the environment skip is the quietest not-run in the system (it needs
+ * no option, no argument and no code change to fire), so a record that says only
+ * "disabled" would leave an operator unable to tell a deliberate test-hermeticity
+ * run from a stray exported variable.
  */
-function finalGateDisabled(options: NextStepOptions): boolean {
-  return (
-    options.skipFinalGate === true ||
+function finalGateDisabledReason(options: NextStepOptions): string | null {
+  if (options.skipFinalGate === true) return "skipFinalGate option";
+  if (
     process.env.REMEDIATE_SKIP_FINAL_GATE === "1" ||
     process.env.REMEDIATE_SKIP_FINAL_GATE === "true"
-  );
+  ) {
+    return "REMEDIATE_SKIP_FINAL_GATE environment variable";
+  }
+  return null;
+}
+
+/**
+ * The ONE way a gate evaluation is recorded, shared by BOTH gate families (the
+ * phase-boundary gate and the all-terminal funnel), so neither can grow a second
+ * executed/scoped-out/disabled vocabulary of its own.
+ *
+ * Writes the durable {@link writeFinalGateOutcomeRecord} artifact AND the run-log
+ * event from the same values, so the two can never disagree about which of the
+ * three happened.
+ *
+ * This is the affirmation the gate lacked. The floor's control flow was already
+ * right — a scoped-out gate is deliberately NON-BLOCKING, a declared scope rather
+ * than a vacuous pass — but the only thing either consumer wrote was
+ * `passed=<bool>`, which is `true` for an executed green floor, for a scoped-out
+ * target that ran nothing, and for a suppressed gate that was never reached. All
+ * three produced byte-identical records, so "the suite passed" and "no suite ran"
+ * were indistinguishable after the fact.
+ */
+async function recordFinalGateOutcome(ctx: {
+  artifactsDir: string;
+  state: RemediationState;
+  scope: string;
+  gateKey: string;
+  runLogger: RunLogger;
+  outcome: FinalGateOutcomeKind;
+  passed: boolean;
+  commandsRun: number;
+  reason?: string;
+  durationMs?: number;
+}): Promise<void> {
+  const ran = ctx.outcome === "executed";
+  await writeFinalGateOutcomeRecord(ctx.artifactsDir, {
+    scope: ctx.scope,
+    outcome: ctx.outcome,
+    passed: ctx.passed,
+    commands_run: ctx.commandsRun,
+    ...(ctx.reason === undefined ? {} : { reason: ctx.reason }),
+  });
+  ctx.runLogger.event({
+    phase: "next-step",
+    kind: "executor_end",
+    obligation: ctx.state.status,
+    note:
+      `${ctx.gateKey} outcome=${ctx.outcome} ` +
+      // "n/a", never "true": a gate that ran nothing has no verdict, and the
+      // durable record it is written beside carries `passed: null` for the
+      // same reason.
+      `passed=${ran ? String(ctx.passed) : "n/a"} ` +
+      `commands=${ran ? String(ctx.commandsRun) : "0"}` +
+      (ctx.reason === undefined ? "" : ` reason=${ctx.reason}`),
+    ...(ctx.durationMs === undefined ? {} : { duration_ms: ctx.durationMs }),
+  });
 }
 
 /**
@@ -2817,9 +3137,28 @@ async function runPhaseBoundaryGate(ctx: {
   runLogger: RunLogger;
 }): Promise<RemediateOutcome | null> {
   const { root, artifactsDir, state, options, runLogger } = ctx;
-  if (finalGateDisabled(options)) return null;
+  // Whether a gate is DUE is decided BEFORE whether it is suppressed. The old
+  // order asked the suppression first and returned, so a disabled run could not
+  // tell "no gate was due this pass" from "a gate was due and skipped" — and the
+  // second is the one worth recording.
   const phase = phaseBoundaryToGate(state);
   if (phase == null) return null;
+  const scope = `phase ${phase} boundary`;
+  const disabledReason = finalGateDisabledReason(options);
+  if (disabledReason !== null) {
+    await recordFinalGateOutcome({
+      artifactsDir,
+      state,
+      scope,
+      gateKey: `phase_boundary_gate phase=${phase}`,
+      runLogger,
+      outcome: "disabled",
+      passed: false,
+      commandsRun: 0,
+      reason: disabledReason,
+    });
+    return null;
+  }
 
   const gateStart = Date.now();
   runLogger.event({
@@ -2829,14 +3168,21 @@ async function runPhaseBoundaryGate(ctx: {
     note: `phase_boundary_gate phase=${phase}`,
   });
   const gate = await runToolOwnedFinalGate(root, { runner: options.finalGateRunner });
-  runLogger.event({
-    phase: "next-step",
-    kind: "executor_end",
-    obligation: state.status,
-    note: `phase_boundary_gate phase=${phase} passed=${gate.passed}`,
-    duration_ms: Date.now() - gateStart,
+  await recordFinalGateOutcome({
+    artifactsDir,
+    state,
+    scope,
+    gateKey: `phase_boundary_gate phase=${phase}`,
+    runLogger,
+    outcome: gate.outcome,
+    passed: gate.passed,
+    commandsRun: gate.results.length,
+    ...(gate.outcome === "scoped_out"
+      ? { reason: "target is not the audit-tools monorepo" }
+      : {}),
+    durationMs: Date.now() - gateStart,
   });
-  if (gate.passed) return null; // green → dispatch this phase
+  if (gate.passed) return null; // green (or declared-out-of-scope) → dispatch
 
   // RED at the boundary. The next phase does NOT dispatch — but nothing is
   // re-opened or closed either; the run pauses exactly where it stands.
@@ -2844,7 +3190,7 @@ async function runPhaseBoundaryGate(ctx: {
     root,
     artifactsDir,
     state,
-    scope: `phase ${phase} boundary`,
+    scope,
     gate,
     runLogger,
   });
@@ -2858,7 +3204,9 @@ async function handleAllTerminalTransition(
   options: NextStepOptions,
   runLogger: RunLogger,
 ): Promise<RemediateOutcome> {
-  const gateDisabled = finalGateDisabled(options);
+  const disabledReason = finalGateDisabledReason(options);
+  const gateDisabled = disabledReason !== null;
+  const scope = "all-terminal final gate";
 
   // The tool-owned final gate (INV-RS-10) runs at the single all-terminal →
   // closing funnel, on EVERY arrival here. It is skipped only when:
@@ -2878,12 +3226,19 @@ async function handleAllTerminalTransition(
       note: "tool_owned_final_gate",
     });
     const gate = await runToolOwnedFinalGate(root, { runner: options.finalGateRunner });
-    runLogger.event({
-      phase: "next-step",
-      kind: "executor_end",
-      obligation: state.status,
-      note: `tool_owned_final_gate passed=${gate.passed}`,
-      duration_ms: Date.now() - gateStart,
+    await recordFinalGateOutcome({
+      artifactsDir,
+      state,
+      scope,
+      gateKey: "tool_owned_final_gate",
+      runLogger,
+      outcome: gate.outcome,
+      passed: gate.passed,
+      commandsRun: gate.results.length,
+      ...(gate.outcome === "scoped_out"
+        ? { reason: "target is not the audit-tools monorepo" }
+        : {}),
+      durationMs: Date.now() - gateStart,
     });
 
     if (!gate.passed) {
@@ -2895,11 +3250,29 @@ async function handleAllTerminalTransition(
         root,
         artifactsDir,
         state,
-        scope: "all-terminal final gate",
+        scope,
         gate,
         runLogger,
       });
     }
+  } else {
+    // The gate was DUE at the closing funnel and did not run. Recorded, with
+    // WHICH suppression did it — the run is about to transition to `closing`
+    // and write a completion report, and without this the report would be
+    // byte-identical to one produced after a green floor.
+    await recordFinalGateOutcome({
+      artifactsDir,
+      state,
+      scope,
+      gateKey: "tool_owned_final_gate",
+      runLogger,
+      outcome: "disabled",
+      passed: false,
+      commandsRun: 0,
+      reason:
+        disabledReason ??
+        "no verified-complete items to validate (nothing resolved)",
+    });
   }
 
   state.status = "closing";
@@ -3321,6 +3694,10 @@ export interface PersistedIntentInterpretation {
 export async function interpretConfirmedCheckpointIntent(
   artifactsDir: string,
   checkpoint: IntentCheckpoint | undefined,
+  // Optional so the exported helper stays callable standalone; the decide loop
+  // always supplies it, because an unencodable clause is an operator-visible
+  // loss of intent and belongs in the durable log, not only on stderr.
+  runLogger?: RunLogger,
 ): Promise<PersistedIntentInterpretation | null> {
   if (!checkpoint || checkpoint.confirmed_by !== "host") return null;
   const raw = checkpoint.free_form_intent;
@@ -3342,6 +3719,14 @@ export async function interpretConfirmedCheckpointIntent(
     // Best-effort sidecar: a write failure must never block the decide loop.
   }
   if (interpreted.unencodableClauses.length > 0) {
+    runLogger?.event({
+      phase: "next-step",
+      kind: "outcome",
+      obligation: "interpret_intent",
+      note:
+        `intent_unencodable_clauses count=${String(interpreted.unencodableClauses.length)} ` +
+        `clauses=${interpreted.unencodableClauses.join("; ")}`,
+    });
     process.stderr.write(
       `[remediate-code] free_form_intent: ${interpreted.unencodableClauses.length} ` +
         `clause(s) could not be encoded as lens/priority/scope signals and are ` +
@@ -3554,8 +3939,12 @@ function buildPreIntakeObligations(
         !existsSync(interpretationPath)
           ? "missing"
           : "satisfied",
-      execute: async (state) => {
-        await interpretConfirmedCheckpointIntent(artifactsDir, existingCheckpoint);
+      execute: async (state, c) => {
+        await interpretConfirmedCheckpointIntent(
+          artifactsDir,
+          existingCheckpoint,
+          c.runLogger,
+        );
         return { kind: "transition", state };
       },
     },
@@ -3614,6 +4003,7 @@ function buildPreIntakeObligations(
           c.root,
           c.artifactsDir,
           c.options,
+          c.runLogger,
         );
         if (outcome && "step_kind" in outcome) {
           return { kind: "emit", step: outcome };
@@ -3769,6 +4159,7 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
             state: s,
             options,
             store,
+            runLogger,
           });
         }
         // Dead-end pending nodes whose dependency never reached verified-complete
@@ -3863,6 +4254,21 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
   ];
 }
 
+/**
+ * ONE mutex for the WHOLE advance.
+ *
+ * The pre-intake segment used to run OUTSIDE the lock, with only the main
+ * advance inside it — and the pre-intake segment is where the review-approval
+ * gate and the autonomous leftover emit live, so two concurrent next-step calls
+ * could both take the autonomous branch. Serializing only the second half made
+ * the mutex a statement about which code was easy to wrap, not about which work
+ * is serial: the entire state-machine advance is serial, so the entire advance
+ * is guarded.
+ *
+ * The state is loaded once here (outside) purely to name the run in the
+ * `phase_busy` step; the advance re-loads under the lock, so a peer that
+ * persisted between the two is never clobbered.
+ */
 async function decideNextStepLoop(
   options: NextStepOptions,
   runLogger: RunLogger,
@@ -3871,12 +4277,46 @@ async function decideNextStepLoop(
   const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
   await mkdir(artifactsDir, { recursive: true });
   const store = new StateStore(artifactsDir);
-  let state = await store.loadState();
+  const entryState = await store.loadState();
   runLogger.event({
     phase: "next-step",
     kind: "state",
-    obligation: state?.status ?? "pending",
+    obligation: entryState?.status ?? "pending",
   });
+  try {
+    return await withFileLock(
+      join(artifactsDir, "phase.lock"),
+      () => advanceUnderPhaseLock({ root, artifactsDir, store, options, runLogger }),
+      PHASE_LOCK_TIMEOUT_MS,
+    );
+  } catch (error) {
+    if (error instanceof FileLockTimeoutError) {
+      return buildPhaseBusyStep({
+        root,
+        artifactsDir,
+        runId: stateRunId(entryState),
+      });
+    }
+    throw error;
+  }
+}
+
+/**
+ * The serial state-machine advance itself — pre-intake gates, then the main
+ * obligation fold. Runs with `<artifactsDir>/phase.lock` HELD for its whole
+ * duration; never call it without that lock.
+ */
+async function advanceUnderPhaseLock(deps: {
+  root: string;
+  artifactsDir: string;
+  store: StateStore;
+  options: NextStepOptions;
+  runLogger: RunLogger;
+}): Promise<RemediationStep> {
+  const { root, artifactsDir, store, options, runLogger } = deps;
+  // Loaded FRESH under the mutex: a peer may have advanced and persisted state
+  // between the entry read and this process winning the lock.
+  let state = await store.loadState();
   // step_count is incremented once per host invocation. The `counted` flag guards
   // the shared `countStep` closure so the forceReplan preamble, the pre-intake
   // obligation executors, and the post-intake count point can never double-count
@@ -3900,7 +4340,13 @@ async function decideNextStepLoop(
   // transitions, never a recursive decideNextStepLoop), so this fires at most once.
   if (options.forceReplan && state != null) {
     await countStep(state);
-    state = await forceReplanFromExistingIntake(root, artifactsDir, state, store);
+    state = await forceReplanFromExistingIntake(
+      root,
+      artifactsDir,
+      state,
+      store,
+      runLogger,
+    );
   }
 
   // Pre-read the once-async signals the pre-intake derive()s consume
@@ -3961,37 +4407,17 @@ async function decideNextStepLoop(
 
   await countStep(state);
 
-  // One generic filesystem mutex serializes the in-process MAIN advance so two
-  // joining peers cannot run the same serial phase and clobber state.json. It is
-  // coordination only: host execution, grouping, and concurrency stay outside
-  // audit-tools.
-  const phaseRunId = stateRunId(state);
-  try {
-    const main = await withFileLock(
-      join(artifactsDir, "phase.lock"),
-      async () => {
-        // Re-load fresh under the mutex: a peer may have advanced and persisted
-        // state between our initial load and winning the lock.
-        const advanceState = (await store.loadState()) ?? state;
-        return {
-          advanceState,
-          outcome: await advance(
-            { priority: MAIN_PRIORITY, obligations: buildMainObligations(ctx) },
-            advanceState,
-            ctx,
-          ),
-        };
-      },
-      PHASE_LOCK_TIMEOUT_MS,
-    );
-    if (main.outcome.step) return main.outcome.step;
-    // The unhandled catch-all always emits on a non-null state, so a null step
-    // here is unreachable; keep an explicit fallback rather than a non-null assert.
-    return handleUnhandledState(root, artifactsDir, main.advanceState);
-  } catch (error) {
-    if (error instanceof FileLockTimeoutError) {
-      return buildPhaseBusyStep({ root, artifactsDir, runId: phaseRunId });
-    }
-    throw error;
-  }
+  // Re-read between the two folds: a pre-intake executor may persist through the
+  // store without returning the persisted value, so the main fold reads from disk
+  // exactly as it did when it owned its own lock acquisition.
+  const advanceState = (await store.loadState()) ?? state;
+  const main = await advance(
+    { priority: MAIN_PRIORITY, obligations: buildMainObligations(ctx) },
+    advanceState,
+    ctx,
+  );
+  if (main.step) return main.step;
+  // The unhandled catch-all always emits on a non-null state, so a null step
+  // here is unreachable; keep an explicit fallback rather than a non-null assert.
+  return handleUnhandledState(root, artifactsDir, advanceState);
 }

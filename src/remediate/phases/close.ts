@@ -59,11 +59,19 @@ import {
 // (outside this module's file_scope and this work item's allowed_files) — see
 // the identical note in `src/remediate/state/types.ts`.
 import {
+  ABSENT_FINAL_GATE_REPORT,
+  FinalGateReportSchema,
   isCompleteEvidence,
   mechanismContradictsOutcome,
   missingEvidenceParts,
   type Evidence,
+  type FinalGateReport,
 } from "../../shared/types/remediationOutcome.js";
+// The gate record's PATH is single-sourced by the module that writes it. Leaf
+// import (finalGate.ts imports only gateCommands.ts + shared), so this adds no
+// cycle — and the alternative, a second `"final-gate-outcome.json"` literal
+// here, is exactly the drift the layout registry exists to prevent.
+import { finalGateOutcomePath } from "../steps/finalGate.js";
 
 // Derived from the single source so the key list can never drift from the
 // RemediationOutcomeStatus contract (A6).
@@ -146,9 +154,54 @@ function durationBetweenMs(
   return completed - started;
 }
 
+/**
+ * Read the run's tool-owned gate outcome for the report.
+ *
+ * The gate WRITES `final-gate-outcome.json` on every evaluation; until this
+ * reader existed, nothing consumed it — so a scoped-out or suppressed run
+ * produced a completion report byte-identical to one written after a green
+ * floor, which is the whole defect the record was added to close. A record that
+ * is missing, unreadable, or fails its schema degrades to
+ * {@link ABSENT_FINAL_GATE_REPORT}: stated as absent, never as green.
+ */
+export async function readFinalGateReport(
+  artifactsDir: string,
+): Promise<FinalGateReport> {
+  const raw = await readOptionalJsonFile<unknown>(
+    finalGateOutcomePath(artifactsDir),
+  ).catch(() => undefined);
+  if (raw === undefined || raw === null || typeof raw !== "object") {
+    return ABSENT_FINAL_GATE_REPORT;
+  }
+  // The on-disk record carries its own `schema_version`; the REPORT field does
+  // not (the outcomes contract has one of its own). Drop that key and keep the
+  // schema `.strict()` for everything else, so an unknown field is still a
+  // refusal rather than something that rides silently into the contract.
+  const { schema_version: _recordVersion, ...body } = raw as Record<string, unknown>;
+  const parsed = FinalGateReportSchema.safeParse(body);
+  if (!parsed.success) {
+    return {
+      ...ABSENT_FINAL_GATE_REPORT,
+      reason:
+        "a gate outcome record exists but does not match the outcome contract; " +
+        "treated as no verdict",
+    };
+  }
+  // Defense in depth against a hand-edited or older record: only an EXECUTED
+  // gate may carry a verdict. A not-run kind asserting `passed: true` is
+  // normalized away here rather than reprinted into the report.
+  return parsed.data.outcome === "executed"
+    ? parsed.data
+    : { ...parsed.data, passed: null, commands_run: 0 };
+}
+
 export function buildRemediationOutcomesReport(
   state: RemediationState,
   closingResult: ClosingResult,
+  // Defaults to ABSENT so every existing caller keeps compiling AND keeps
+  // telling the truth: a caller that supplies no gate outcome is a run with no
+  // gate outcome, which the contract now states outright.
+  finalGate: FinalGateReport = ABSENT_FINAL_GATE_REPORT,
 ): RemediationOutcomesReport {
   const findingsById = new Map(
     (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
@@ -355,6 +408,7 @@ export function buildRemediationOutcomesReport(
     ...(aggregateStarted ? { started_at: aggregateStarted.value } : {}),
     ...(aggregateCompleted ? { completed_at: aggregateCompleted.value } : {}),
     ...(aggregateDuration !== undefined ? { duration_ms: aggregateDuration } : {}),
+    final_gate: finalGate,
     outcomes,
   };
 }
@@ -1235,6 +1289,22 @@ function buildRemediationReportMarkdown(
     }
   }
 
+  // The tool-owned repository gate, ALWAYS rendered. A run whose gate was
+  // scoped out, suppressed, or never reached used to produce a report identical
+  // to one written after a green floor — "the suite passed" and "no suite ran"
+  // were the same document. Every branch below names which happened.
+  const gate = outcomesReport.final_gate;
+  reportContent += `\n## Repository Gate\n\n`;
+  if (gate.outcome === "executed") {
+    reportContent += `Outcome: executed — the repository build/typecheck/test floor RAN (${gate.commands_run} command(s)) and ${gate.passed ? "PASSED" : "FAILED"}.\n`;
+  } else if (gate.outcome === "absent") {
+    reportContent += `Outcome: absent — NO gate outcome was recorded for this run, so nothing here corroborates it. This is not a pass.\n`;
+  } else {
+    reportContent += `Outcome: ${gate.outcome} — the repository floor did NOT run (0 commands), so nothing here corroborates this run. This is not a pass.\n`;
+  }
+  if (gate.reason) reportContent += `Reason: ${gate.reason}\n`;
+  if (gate.scope) reportContent += `Scope: ${gate.scope}\n`;
+
   if (e2ePassed !== undefined) {
     reportContent += `\n## End-to-End Tests\n\nResult: ${e2ePassed ? "passed" : "failed"}\n`;
   }
@@ -1738,11 +1808,19 @@ export async function runClosePhase(
   // 4. Generate remediation-report.md and remediation-report.json
   const entries = collectReportEntries(state, options);
 
-  // Phase 7B: capture per-finding outcomes (surface only).
+  // Phase 7B: capture per-finding outcomes (surface only), carrying the run's
+  // tool-owned gate outcome so the report can say which of executed / scoped-out
+  // / disabled / absent this run actually was.
+  const finalGate = await readFinalGateReport(options.artifactsDir);
   const outcomesReport = buildRemediationOutcomesReport(
     state,
     closingResult,
+    finalGate,
   );
+  // No run-log line for the gate here ON PURPOSE: the gate already records its
+  // own outcome at evaluation time (`recordFinalGateOutcome`), so a second line
+  // at close would be a duplicate — and `kind: "outcome"` at close means "one
+  // per finding", which a run-level line would quietly break.
   // One run-log line per outcome, plus a summary line for the artifact write.
   for (const outcome of outcomesReport.outcomes) {
     runLogger?.event({

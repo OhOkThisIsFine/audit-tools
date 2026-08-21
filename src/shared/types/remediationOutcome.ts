@@ -124,6 +124,69 @@ export function mechanismContradictsOutcome(
   return false;
 }
 
+// ── The ONE tool-owned gate-outcome vocabulary ───────────────────────────────
+//
+// Declared HERE, in the shared base layer, so every gate family names the three
+// outcomes with the same words and the close/report path can consume one of
+// them without importing a gate implementation. `src/remediate/steps/finalGate.ts`
+// imports `FinalGateOutcomeKind` from this module rather than declaring a second
+// copy — a gate that ran nothing was previously indistinguishable from a green
+// floor precisely because the only thing recorded was a boolean, and two
+// vocabularies for the same three outcomes would reintroduce that by another
+// route.
+
+/**
+ * How a gate EVALUATION ended.
+ *
+ * `executed`   — the command list ran; `passed` is a real verdict.
+ * `scoped_out` — the suite does not apply to this target; zero commands ran.
+ * `disabled`   — a gate was DUE but did not run.
+ */
+export const FinalGateOutcomeKindSchema = z.enum([
+  "executed",
+  "scoped_out",
+  "disabled",
+]);
+export type FinalGateOutcomeKind = z.infer<typeof FinalGateOutcomeKindSchema>;
+
+/**
+ * What the outcomes contract says about the run's tool-owned gate.
+ *
+ * `outcome` widens the three gate kinds with `absent` — which is NOT a fourth
+ * gate kind but the report's own statement that no gate record existed for this
+ * run. It is stated rather than inferred: the alternative is silence, and
+ * silence about a gate reads as "fine".
+ *
+ * `passed` is `boolean | null`. Only an `executed` gate carries a verdict; the
+ * other three carry `null`, so no consumer of this contract can read a gate
+ * that did not run as a green floor.
+ */
+export const FinalGateReportSchema = z
+  .object({
+    outcome: z.union([FinalGateOutcomeKindSchema, z.literal("absent")]),
+    passed: z.boolean().nullable(),
+    commands_run: z.number(),
+    /** Which gate produced it — a phase boundary, or the all-terminal funnel. */
+    scope: z.string().optional(),
+    /** Why a gate that did not run did not run, or why the record is absent. */
+    reason: z.string().optional(),
+    recorded_at: z.string().optional(),
+  })
+  .strict();
+export type FinalGateReport = z.infer<typeof FinalGateReportSchema>;
+
+/**
+ * The report's statement when no gate record exists. A run that never reached a
+ * gate, and a run whose gate record could not be read, both land here — never on
+ * a green-shaped default.
+ */
+export const ABSENT_FINAL_GATE_REPORT: FinalGateReport = {
+  outcome: "absent",
+  passed: null,
+  commands_run: 0,
+  reason: "no tool-owned gate outcome was recorded for this run",
+};
+
 /**
  * Item C — result of the close-gate mechanical re-verify of an analyzer-born
  * finding. `verified_mechanically`: the finding's content-anchored lead
@@ -219,6 +282,15 @@ export const RemediationOutcomesReportSchema = z.object({
   completed_at: z.string().optional(),
   /** Milliseconds between aggregate completed_at and started_at. */
   duration_ms: z.number().optional(),
+  /**
+   * The run's tool-owned gate outcome. REQUIRED, and never omitted on a run
+   * that had no gate: the absent case is written as `{ outcome: "absent" }`, so
+   * a reader can distinguish "the floor ran green" from "nothing ran" from "we
+   * do not know" — which the outcomes contract previously could not express at
+   * all, making a scoped-out or suppressed run's report byte-identical to an
+   * executed-green one.
+   */
+  final_gate: FinalGateReportSchema,
   outcomes: z.array(RemediationOutcomeSchema),
 });
 export type RemediationOutcomesReport = z.infer<
