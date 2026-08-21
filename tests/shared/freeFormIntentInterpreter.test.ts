@@ -1,6 +1,7 @@
 import { test, expect } from "vitest";
 
 const { interpretFreeFormIntent } = await import("../../src/shared/intent/freeFormIntentInterpreter.js");
+const { scopeClausePolarity, SCOPE_PATTERNS } = await import("../../src/shared/intent/sharedIntentData.js");
 
 // ---------------------------------------------------------------------------
 // Empty / blank input
@@ -109,6 +110,75 @@ test("interpretFreeFormIntent — 'focus on the auth module' captured in scopeEm
   // The clause contains 'auth' keyword which also maps to security lens, so
   // unencodableClauses may be empty (clause is partially encodable).
   // The key guarantee is scopeEmphasis is non-empty.
+});
+
+// ---------------------------------------------------------------------------
+// Scope-clause POLARITY (CP-NODE-16 / COR-a0648a7d): an exclusion clause must be
+// tagged "exclude" and land in the dedicated scopeExclusions field, never merged
+// into scopeEmphasis, and must never register a positive lens weight.
+// ---------------------------------------------------------------------------
+
+test("scopeClausePolarity — exclusion lead-in verbs are tagged 'exclude'", () => {
+  for (const clause of ["ignore vendor/", "skip tests/", "exclude generated code", "ignoring node_modules"]) {
+    expect(scopeClausePolarity(clause), `expected 'exclude' polarity for: ${clause}`).toBe("exclude");
+  }
+});
+
+test("scopeClausePolarity — inclusion lead-in verbs are tagged 'include'", () => {
+  for (const clause of ["focus on the auth module", "prioritise src/api", "only audit src/", "limited to packages/core"]) {
+    expect(scopeClausePolarity(clause), `expected 'include' polarity for: ${clause}`).toBe("include");
+  }
+});
+
+test("scopeClausePolarity — a non-scope clause has no polarity", () => {
+  expect(scopeClausePolarity("freeze the public API of PackageX")).toBeNull();
+});
+
+test("scopeClausePolarity agrees with SCOPE_PATTERNS on which clauses are scope clauses", () => {
+  // SCOPE_PATTERNS is DERIVED from the polarity-tagged entry list, so the
+  // polarity-blind view and the polarity-aware view can never disagree.
+  const clauses = [
+    "ignore vendor/",
+    "focus on the auth module",
+    "only audit src/",
+    "freeze the public API of PackageX",
+    "urgent",
+  ];
+  for (const clause of clauses) {
+    const blindMatch = SCOPE_PATTERNS.some((p) => p.test(clause));
+    expect(scopeClausePolarity(clause) !== null, `polarity/SCOPE_PATTERNS disagree on: ${clause}`).toBe(blindMatch);
+  }
+});
+
+test("interpretFreeFormIntent — 'ignore vendor/' lands in scopeExclusions, not scopeEmphasis", () => {
+  const r = interpretFreeFormIntent("ignore vendor/");
+  expect(r.scopeExclusions.some((s) => /vendor/i.test(s)), `expected scopeExclusions to reference 'vendor', got: ${JSON.stringify(r.scopeExclusions)}`).toBeTruthy();
+  expect(r.scopeEmphasis, "an exclusion clause must never be merged into scopeEmphasis").toEqual([]);
+});
+
+test("interpretFreeFormIntent — an inclusion clause stays out of scopeExclusions", () => {
+  const r = interpretFreeFormIntent("focus on the auth module");
+  expect(r.scopeExclusions, "an inclusion clause must never land in scopeExclusions").toEqual([]);
+  expect(r.scopeEmphasis.length > 0, "expected the inclusion clause in scopeEmphasis").toBeTruthy();
+});
+
+test("interpretFreeFormIntent — an exclusion clause records NO positive lens weight", () => {
+  // "performance" is a lens keyword, but "ignore performance issues" asks for it
+  // to be de-emphasised — a polarity-blind keyword scan boosted it instead.
+  const r = interpretFreeFormIntent("ignore performance issues");
+  expect(r.lensWeights.performance, `an exclusion clause must not boost its lens, got ${JSON.stringify(r.lensWeights)}`).toBeUndefined();
+  expect(r.scopeExclusions.length > 0, "the exclusion clause must still be captured as a scope exclusion").toBeTruthy();
+
+  // The inclusion counterpart is unchanged — the guard is polarity-gated, not a blanket off-switch.
+  const included = interpretFreeFormIntent("check performance");
+  expect((included.lensWeights.performance ?? 0) >= 1.5, `expected performance >= 1.5, got ${included.lensWeights.performance}`).toBeTruthy();
+});
+
+test("interpretFreeFormIntent — mixed intent splits inclusion and exclusion into their own fields", () => {
+  const r = interpretFreeFormIntent("focus on src/api. ignore vendor/");
+  expect(r.scopeEmphasis.some((s) => /src\/api/i.test(s)), `scopeEmphasis: ${JSON.stringify(r.scopeEmphasis)}`).toBeTruthy();
+  expect(r.scopeExclusions.some((s) => /vendor/i.test(s)), `scopeExclusions: ${JSON.stringify(r.scopeExclusions)}`).toBeTruthy();
+  expect(r.scopeEmphasis.some((s) => /vendor/i.test(s)), "the excluded scope must not appear in scopeEmphasis").toBeFalsy();
 });
 
 // ---------------------------------------------------------------------------

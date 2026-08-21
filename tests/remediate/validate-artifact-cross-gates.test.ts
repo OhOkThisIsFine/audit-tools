@@ -139,6 +139,68 @@ describe("evaluateContractPipelineCrossGates", () => {
     }
   });
 
+  it("gate 5 (design_spec invariant-coverage): a RegExp-metacharacter invariant id does not throw and reports coverage correctly (COR-cca3801c)", () => {
+    // Before the fix, invId was interpolated into `new RegExp(...)` unescaped.
+    // "INV-(1" is an unbalanced group-open — as a literal RegExp fragment it
+    // throws a SyntaxError, which previously aborted the WHOLE
+    // evaluateContractPipelineCrossGates array literal (losing all 8 gates'
+    // results for the call), not just this one gate.
+    const metaCharId = "INV-(1";
+
+    // The obligation id deliberately does NOT match invId exactly, so
+    // coverage must be decided by the word-boundary REGEX branch — the exact
+    // mechanism this fix touches — rather than short-circuiting on the
+    // `oblId === invId` exact-match check.
+    const covered = new Map<ContractPipelineArtifactName, unknown>([
+      [
+        "finalized_module_contracts",
+        { invariants: [{ id: metaCharId }] },
+      ],
+      [
+        "obligation_ledger",
+        {
+          obligations: [
+            {
+              id: "OBL-1",
+              description: `covers invariant ${metaCharId} explicitly`,
+              kind: "invariant",
+            },
+          ],
+        },
+      ],
+    ]);
+    // Must not throw — this call itself is the red/green pin.
+    const coveredResult = evaluateContractPipelineCrossGates({ payloads: covered, root: "/does/not/matter" });
+    expect(coveredResult).toHaveLength(8);
+    const [, , , , designSpecCovered] = coveredResult;
+    expect(designSpecCovered).toEqual([]); // description reference via regex → covered, no issue
+
+    const uncovered = new Map<ContractPipelineArtifactName, unknown>([
+      [
+        "finalized_module_contracts",
+        { invariants: [{ id: metaCharId }] },
+      ],
+      [
+        "obligation_ledger",
+        {
+          obligations: [
+            { id: "OBL-UNRELATED", description: "talks about something else entirely", kind: "invariant" },
+          ],
+        },
+      ],
+    ]);
+    const uncoveredResult = evaluateContractPipelineCrossGates({ payloads: uncovered, root: "/does/not/matter" });
+    expect(uncoveredResult).toHaveLength(8);
+    const [, , , , designSpecUncovered, ...restUncovered] = uncoveredResult;
+    expect(designSpecUncovered.length).toBeGreaterThan(0);
+    expect(designSpecUncovered.some((i) => i.message.includes(metaCharId))).toBe(true);
+    // The SyntaxError previously aborted the array literal entirely; pin that
+    // every OTHER gate still ran (empty, not thrown-away) alongside this one.
+    for (const gateIssues of restUncovered) {
+      expect(gateIssues).toEqual([]);
+    }
+  });
+
   it("an 8-failing-inputs matrix fails all 8 gates, in the fixed canonical order", async () => {
     const root = await makeTempDir(); // plain dir, no git init → gate 7 fails closed
 

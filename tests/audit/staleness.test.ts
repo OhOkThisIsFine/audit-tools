@@ -8,7 +8,7 @@ import type {
 
 const { computeArtifactMetadata, computeArtifactStateSignature, present } =
   await import("../../src/audit/orchestrator/artifactMetadata.js");
-const { computeStaleArtifacts } =
+const { computeStaleArtifacts, resetStalenessDedup } =
   await import("../../src/audit/orchestrator/staleness.js");
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.js");
 const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP, invertDependencyMap } = await import("../../src/audit/orchestrator/dependencyMap.js");
@@ -1178,4 +1178,339 @@ test("INV 10: an artifact whose body no longer matches its recorded hash is stal
     stale.has("audit-report.md"),
     "a downstream must not be built on a partial upstream",
   ).toBeTruthy();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CP-NODE-10 (staleness-slice-propagation): the permanent coverage the fix
+// commit a6b5ff28 could only land as a red-green transcript (its allowed_files
+// carried no test file). Four properties of
+// src/audit/orchestrator/staleness.ts:
+//
+//  * inv-4  — a slice-protected deferral is REPORTED, never silent: the result
+//             carries `deferred` and the emitted record NAMES the artifacts.
+//  * inv-1  — and the deferral is EVENTUALLY REACHED: the per-edge slice
+//             recompute in loop 1 decides on a LATER call what the closure
+//             declined to decide on this one.
+//  * fail-4 — a present-but-truncated body classifies `partial`, not `intact`.
+//  * fail-safe — an UNHASHABLE body classifies too; the affinity
+//             canonicalizer's throw must never escape the presence pass.
+//
+// Unrelated to the archive-promotion "partial" wording of INV 10 above — this
+// section pins `classifyArtifactPresence`'s third state itself.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const { CHARTER_REGISTER_SCHEMA_VERSION } = await import(
+  "../../src/audit/types/charterRegister.js"
+);
+type CharterRegister =
+  import("../../src/audit/types/charterRegister.js").CharterRegister;
+type StructureDecomposition =
+  import("../../src/audit/types/structureDecomposition.js").StructureDecomposition;
+type TaskAffinityGraph =
+  import("../../src/audit/orchestrator/taskAffinityGraph.js").TaskAffinityGraph;
+
+/** Collect the JSONL records `computeStaleArtifacts` writes to stderr while `run` executes. */
+function captureStalenessRecords(run: () => void): Array<Record<string, unknown>> {
+  const chunks: string[] = [];
+  const stderr = process.stderr as unknown as {
+    write: (chunk: string) => boolean;
+  };
+  const original = stderr.write;
+  stderr.write = (chunk: string) => {
+    chunks.push(String(chunk));
+    return true;
+  };
+  try {
+    run();
+  } finally {
+    stderr.write = original;
+  }
+  return chunks
+    .join("")
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+/**
+ * A charter-layer bundle: the ONE registered slice-projected downstream
+ * (`charter_register.json`) present over its projected upstreams, so the
+ * transitive closure's slice-protected branch is reachable at all.
+ */
+function makeCharterBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
+  const structure: StructureDecomposition = {
+    generated_at: "2026-07-23T00:00:00Z",
+    target: "structure",
+    node_universe_size: 5,
+    source_ids: ["source-a"],
+    consensus: [
+      {
+        node_id: "src/a.ts",
+        members: ["src/a.ts", "src/b.ts"],
+        agreed_across_source: 1,
+        stable_across_scale: 1,
+        contested: false,
+      },
+    ],
+    contested: [],
+    findings: [],
+  };
+  const charter: CharterRegister = {
+    schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
+    generated_at: "2026-07-23T00:00:00Z",
+    target: "charter",
+    ceiling: { rung: "deep" },
+    status: "omitted",
+    subsystems: [],
+    goal_graph: { nodes: [], edges: [] },
+    deltas: [],
+    findings: [],
+    triangulated: [],
+    disagreement: [],
+    validation_issues: [],
+  };
+  return {
+    repo_manifest: {
+      repository: { name: "fixture" },
+      generated_at: "2026-07-23T00:00:00Z",
+      files: [
+        { path: "src/a.ts", language: "ts", size_bytes: 10, hash: "hash-a" },
+        { path: "src/b.ts", language: "ts", size_bytes: 20, hash: "hash-b" },
+        // Neither a consensus member nor a doc: its content churn moves
+        // repo_manifest's whole hash while leaving the charter slice fixed.
+        { path: "src/zz.ts", language: "ts", size_bytes: 9, hash: "hash-zz" },
+      ],
+    },
+    file_disposition: {
+      files: [
+        { path: "src/a.ts", status: "included" },
+        { path: "src/b.ts", status: "included" },
+        { path: "src/zz.ts", status: "included" },
+      ],
+    },
+    structure_decomposition: structure,
+    charter_register: charter,
+    ...over,
+  };
+}
+
+/**
+ * Drive the fixture into the deferral state: an out-of-slice manifest churn
+ * that stales `structure_decomposition.json` (whole-hash edge) while the
+ * charter register's recorded slice for that edge is untouched — so the
+ * closure reaches charter across a slice-projected edge from a
+ * stale-and-PENDING upstream.
+ */
+function makeDeferralFixture(): {
+  bundle: ArtifactBundle;
+  manifest: ArtifactMetadataManifest;
+} {
+  const base = makeCharterBundle();
+  const stamped = computeArtifactMetadata(
+    base,
+    { metadata_schema_version: METADATA_SCHEMA_VERSION, artifacts: {} },
+    [
+      "repo_manifest.json",
+      "file_disposition.json",
+      "structure_decomposition.json",
+      "charter_register.json",
+    ],
+  );
+  // The recorded slice is what makes this edge slice-protected at all.
+  expect(
+    stamped.artifacts["charter_register.json"]!.dependency_slices![
+      "structure_decomposition.json"
+    ],
+    "the fixture only exercises the slice branch if a slice was recorded",
+  ).toBeDefined();
+
+  const churned: ArtifactBundle = {
+    ...base,
+    repo_manifest: {
+      ...base.repo_manifest!,
+      files: base.repo_manifest!.files.map((file) =>
+        file.path === "src/zz.ts" ? { ...file, hash: "hash-zz-CHANGED" } : file,
+      ),
+    },
+  };
+  // repo_manifest re-derives (listed) — structure_decomposition is now the
+  // stale-and-pending upstream, and charter's recorded slice is unmoved.
+  const manifest = computeArtifactMetadata(churned, stamped, [
+    "repo_manifest.json",
+  ]);
+  return { bundle: { ...churned, artifact_metadata: manifest }, manifest };
+}
+
+test("CP-NODE-10 inv-4: a slice-protected deferral is reported on the result AND named in the emitted record", () => {
+  const { bundle } = makeDeferralFixture();
+
+  resetStalenessDedup();
+  let stale!: ReturnType<typeof computeStaleArtifacts>;
+  const records = captureStalenessRecords(() => {
+    stale = computeStaleArtifacts(bundle);
+  });
+
+  // The walk really did reach the slice-protected edge: the upstream is stale
+  // and pending, and the downstream is present.
+  expect(
+    stale.has("structure_decomposition.json"),
+    "the fixture must present a stale-and-pending slice-projected upstream",
+  ).toBe(true);
+  expect(present(bundle, "charter_register.json")).toBe(true);
+
+  // The downstream is HELD BACK — not staled...
+  expect(stale.has("charter_register.json")).toBe(false);
+  // ...and the holding back is visible, which is the whole point: a deferral is
+  // "not decided yet", never "decided clean".
+  expect([...stale.deferred]).toContain("charter_register.json");
+  expect(
+    [...stale.deferred].some((name) => stale.has(name)),
+    "deferred and stale are disjoint",
+  ).toBe(false);
+
+  const stalenessRecords = records.filter((record) => record.kind === "staleness");
+  expect(stalenessRecords).toHaveLength(1);
+  expect(
+    stalenessRecords[0]!.deferred_artifacts,
+    "the emitted record must NAME the deferred downstream — an unnamed deferral is exactly the silent under-report",
+  ).toEqual(["charter_register.json"]);
+});
+
+test("CP-NODE-10 inv-1: a deferred downstream is REACHED on a later call once its upstream re-derives", () => {
+  const { bundle: call1Bundle, manifest } = makeDeferralFixture();
+
+  // Call 1: the decision is postponed.
+  const call1 = computeStaleArtifacts(call1Bundle, { emit: false });
+  expect(call1.has("charter_register.json")).toBe(false);
+  expect([...call1.deferred]).toContain("charter_register.json");
+
+  // The pending upstream now re-derives, and its re-derivation MOVES the slice
+  // charter consumes (consensus membership changed).
+  const rederived: ArtifactBundle = {
+    ...call1Bundle,
+    structure_decomposition: {
+      ...call1Bundle.structure_decomposition!,
+      consensus: [
+        {
+          ...call1Bundle.structure_decomposition!.consensus[0]!,
+          members: ["src/a.ts", "src/b.ts", "src/zz.ts"],
+        },
+      ],
+    },
+  };
+  const restamped = computeArtifactMetadata(rederived, manifest, [
+    "structure_decomposition.json",
+  ]);
+
+  // Call 2: the per-edge slice recompute decides what call 1 declined to decide.
+  const call2 = computeStaleArtifacts(
+    { ...rederived, artifact_metadata: restamped },
+    { emit: false },
+  );
+  expect(
+    call2.has("charter_register.json"),
+    "the deferral must eventually be reached — a permanently deferred downstream is a suppressed obligation",
+  ).toBe(true);
+  expect(
+    [...call2.deferred],
+    "a decided downstream is no longer deferred",
+  ).not.toContain("charter_register.json");
+});
+
+test("CP-NODE-10 fail-4: a present-but-truncated body classifies partial (stale), never intact", () => {
+  const base = makeBaseBundle();
+  const metadata = computeArtifactMetadata(base);
+
+  // Control: nothing moved — the same body reads as intact.
+  const intact = computeStaleArtifacts(
+    { ...base, artifact_metadata: metadata },
+    { emit: false },
+  );
+  expect(intact.has("audit-report.md")).toBe(false);
+
+  // A terminal artifact: it has declared upstreams (so it is not a map-declared
+  // leaf) and no dependents, and NONE of its upstreams moved — so neither the
+  // dependency compare nor the transitive closure can explain its staleness.
+  // Only the presence classification can.
+  expect(ARTIFACT_DEPENDS_ON_MAP["audit-report.md"]!.length).toBeGreaterThan(0);
+  expect(ARTIFACT_DEPENDENTS_MAP["audit-report.md"] ?? []).toEqual([]);
+
+  const truncatedBundle: ArtifactBundle = {
+    ...base,
+    audit_report: "# Audit Rep",
+    artifact_metadata: metadata,
+  };
+  const stale = computeStaleArtifacts(truncatedBundle, { emit: false });
+
+  expect(
+    stale.has("audit-report.md"),
+    "a body that no longer hashes to its recorded content_hash must re-fire its OWN obligation",
+  ).toBe(true);
+  // The third state, not the absent case: the truncated copy is still there.
+  expect(present(truncatedBundle, "audit-report.md")).toBe(true);
+  // And nothing else was disturbed — the classification is about this body.
+  expect(stale.has("repo_manifest.json")).toBe(false);
+  expect(stale.has("unit_manifest.json")).toBe(false);
+});
+
+test("CP-NODE-10 fail-safe: a malformed affinity body classifies partial instead of killing the walk", () => {
+  const intactGraph: TaskAffinityGraph = {
+    schema_version: "task-affinity-graph/v1",
+    nodes: [
+      {
+        task_id: "t1",
+        unit_id: "src-api-auth",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        token_estimate: 10,
+        risk_estimate: 0.5,
+      },
+      {
+        task_id: "t2",
+        unit_id: "src-api-auth",
+        lens: "correctness",
+        file_paths: ["src/api/auth.ts"],
+        token_estimate: 10,
+        risk_estimate: 0.5,
+      },
+    ],
+    edges: [{ from: "t1", to: "t2", kind: "shared_file", weight: 0.5 }],
+  };
+  const base = makeBaseBundle({ task_affinity_graph: intactGraph });
+  const metadata = computeArtifactMetadata(base);
+
+  // Control: the intact body is not stale.
+  const intactStale = computeStaleArtifacts(
+    { ...base, artifact_metadata: metadata },
+    { emit: false },
+  );
+  expect(intactStale.has("task_affinity_graph.json")).toBe(false);
+
+  // A truncated copy: the edge's target node did not survive the write. The
+  // affinity canonicalizer THROWS on this shape, and the presence pass reaches
+  // every tracked artifact unconditionally, so without the fail-safe this takes
+  // down the whole staleness computation.
+  const malformedBundle: ArtifactBundle = {
+    ...base,
+    task_affinity_graph: { ...intactGraph, nodes: [intactGraph.nodes[0]!] },
+    artifact_metadata: metadata,
+  };
+  // The premise: this body genuinely is unhashable.
+  assert.throws(
+    () =>
+      hashArtifactValue(
+        "task_affinity_graph.json",
+        malformedBundle.task_affinity_graph,
+      ),
+    /Dangling task-affinity edge/,
+  );
+
+  let stale!: ReturnType<typeof computeStaleArtifacts>;
+  assert.doesNotThrow(() => {
+    stale = computeStaleArtifacts(malformedBundle, { emit: false });
+  });
+  expect(
+    stale.has("task_affinity_graph.json"),
+    "an unhashable body is definitionally not what the manifest describes — it must classify partial, i.e. stale",
+  ).toBe(true);
 });

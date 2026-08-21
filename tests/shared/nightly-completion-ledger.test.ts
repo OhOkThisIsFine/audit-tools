@@ -98,6 +98,40 @@ describe("answeredNotDone — the class the ledger used to hide", () => {
   });
 });
 
+describe("readDecisions — fail-closed on a malformed ledger (CP-NODE-4)", () => {
+  it("a missing ledger file returns {} — nothing has ever been recorded", () => {
+    // No seed() call at all: the ledger file itself does not exist yet.
+    expect(readDecisions(root)).toEqual({});
+  });
+
+  it("a malformed-JSON ledger THROWS instead of degrading to {}", () => {
+    writeFileSync(join(root, ".claude/nightly-decisions.json"), "{ not valid json", "utf8");
+    expect(() => readDecisions(root)).toThrow(/not valid JSON/);
+  });
+
+  it("a truncated-JSON ledger also throws (same JSON.parse failure path)", () => {
+    // A half-written file: an object that never got its closing brace.
+    writeFileSync(
+      join(root, ".claude/nightly-decisions.json"),
+      '{"k1": {"disposition": "settled", "answer": "do it"',
+      "utf8",
+    );
+    expect(() => readDecisions(root)).toThrow(/not valid JSON/);
+  });
+
+  it("a malformed ledger blocks recordDecision from silently overwriting it", () => {
+    writeFileSync(join(root, ".claude/nightly-decisions.json"), "{ not valid json", "utf8");
+    expect(() =>
+      recordDecision(root, "k1", { answer: "v", disposition: "settled", subject: "s", path: "p" }),
+    ).toThrow(/not valid JSON/);
+  });
+
+  it("a malformed ledger blocks recordCompletion the same way", () => {
+    writeFileSync(join(root, ".claude/nightly-decisions.json"), "{ not valid json", "utf8");
+    expect(() => recordCompletion(root, "k1", "ref")).toThrow(/not valid JSON/);
+  });
+});
+
 describe("recordCompletion — landing is separate from answering", () => {
   it("refuses a key that was never settled, rather than inventing an entry", () => {
     seed({});

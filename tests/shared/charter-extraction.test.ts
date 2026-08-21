@@ -12,6 +12,7 @@ import type {
   GoalGraph,
 } from "../../src/shared/types/charter.js";
 import { CharterKindSchema } from "../../src/shared/types/charter.js";
+import { hashContent } from "../../src/shared/hash.js";
 
 type NodeInput = CharterSubmission["nodes"][number];
 
@@ -382,6 +383,69 @@ describe("assembleDeltas — deltas surface as Finding leads", () => {
       stated: "medium",
     });
     expect(out.findings[0].confidence).toBe("medium");
+  });
+});
+
+describe("assembleDeltas — content-derived delta_id identity (CP-NODE-17)", () => {
+  test("a lone delta on a channel pair keeps the bare node_id:ka-kb id (no suffix)", () => {
+    const out = mineOne(["stated", "revealed"], ["stated", "revealed"]);
+    expect(out.deltas).toHaveLength(1);
+    expect(out.deltas[0].delta_id).toBe("a.ts:stated-revealed");
+  });
+
+  test("two deltas colliding on the same canonical pair get distinct ids, discriminated by an 8-char hash of each delta's own summary", () => {
+    const out = assembleDeltas(
+      {
+        subsystems: [
+          {
+            node_id: "a.ts",
+            deltas: [
+              { pair: ["stated", "revealed"], summary: "gap one" },
+              { pair: ["revealed", "stated"], summary: "gap two" },
+            ],
+          },
+        ],
+        triangulated: [],
+        true_nominations: [],
+      },
+      assembled(["stated", "revealed"]),
+      { allowTrueNominations: false },
+    );
+    expect(out.deltas).toHaveLength(2);
+    const ids = out.deltas.map((d) => d.delta_id);
+    // Distinct — the collision no longer collapses onto one delta_id.
+    expect(new Set(ids).size).toBe(2);
+    const expectedSuffixOne = hashContent("gap one", { length: 8 });
+    const expectedSuffixTwo = hashContent("gap two", { length: 8 });
+    const byId = new Map(out.deltas.map((d) => [d.summary, d.delta_id]));
+    expect(byId.get("gap one")).toBe(`a.ts:stated-revealed:${expectedSuffixOne}`);
+    expect(byId.get("gap two")).toBe(`a.ts:stated-revealed:${expectedSuffixTwo}`);
+    // The collision reaches Finding.id too (deltaToFinding copies delta_id verbatim).
+    const findingIds = out.findings.map((f) => f.id);
+    expect(new Set(findingIds).size).toBe(2);
+  });
+
+  test("every delta carries explicit node_id, and goal_node_id only when linked into the mined goal graph", () => {
+    const gg: GoalGraph = {
+      nodes: [{ node_id: "a.ts", premise_height: 0, statement: "linked" }],
+      edges: [],
+    };
+    const linked = assembleDeltas(
+      {
+        subsystems: [{ node_id: "a.ts", deltas: [{ pair: ["stated", "revealed"], summary: "gap" }] }],
+        triangulated: [],
+        true_nominations: [],
+        goal_graph: gg,
+      },
+      assembled(["stated", "revealed"]),
+      { allowTrueNominations: false },
+    );
+    expect(linked.deltas[0].node_id).toBe("a.ts");
+    expect(linked.deltas[0].goal_node_id).toBe("a.ts");
+
+    const unlinked = mineOne(["stated", "revealed"], ["stated", "revealed"]);
+    expect(unlinked.deltas[0].node_id).toBe("a.ts");
+    expect(unlinked.deltas[0].goal_node_id).toBeUndefined();
   });
 });
 

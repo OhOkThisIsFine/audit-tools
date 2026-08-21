@@ -16,6 +16,7 @@ import {
   withFileLock,
   FileLockTimeoutError,
   isTransientPermissionContention,
+  lockedJsonMutate,
 } from "../../src/shared/io/fileLock.js";
 import { RunLogger } from "../../src/shared/observability/runLog.js";
 
@@ -621,6 +622,145 @@ test("concurrent acquirers racing a stale lock keep strict mutual exclusion (max
     expect(maxConcurrent, "at most one holder at any instant, even through a concurrent stale-steal").toBe(1);
     expect(new Set(tokens).size, "every acquirer must obtain a distinct token").toBe(N);
     await rmFs(lockPath, { force: true }); // best-effort cleanup
+  });
+});
+
+// CP-NODE-23: a heartbeat beat that fails is CLASSIFIED, not swallowed. The two
+// causes are operationally different and must never collapse into one signal:
+// the lock being stolen out from under us (token mismatch — the heartbeat is
+// correctly standing down) versus a real IO failure (the lock vanished or the
+// refresh errored — freshness was lost while we still believe we hold it).
+//
+// Poll the NDJSON run log until an event with `note` appears, or fail on
+// timeout. Bounded poll rather than a fixed sleep, matching INV-SCC-08 above.
+async function waitForLoggedNote(
+  logPath: string,
+  note: string,
+  timeoutMs = 5_000,
+): Promise<Record<string, unknown>[]> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const events = await readLoggedEvents(logPath);
+    if (events.some((ev) => ev.note === note)) return events;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return readLoggedEvents(logPath);
+}
+
+test("CP-NODE-23: a heartbeat beat that finds ANOTHER holder's token is classified lock_heartbeat_stolen", async () => {
+  await withTempDir(async (dir: string) => {
+    const lockPath = tmpLockPath(dir);
+    const logPath = join(dir, `run-${randomUUID()}.jsonl`);
+    const logger = new RunLogger(logPath);
+
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const held = withFileLock(
+      lockPath,
+      async () => {
+        // Steal the lock out from under the live holder: the lock path now
+        // carries a FOREIGN token, so the next beat must stand down and say so.
+        await writeFile(lockPath, `foreign-token-${randomUUID()}`, "utf8");
+        await gate;
+        return "done";
+      },
+      10_000,
+      logger,
+      { heartbeatIntervalMs: 25 },
+    );
+
+    const events = await waitForLoggedNote(logPath, "lock_heartbeat_stolen");
+    release!();
+    expect(await held).toBe("done");
+
+    const stolen = events.filter((ev) => ev.kind === "error" && ev.note === "lock_heartbeat_stolen");
+    expect(
+      stolen.length >= 1,
+      "a token mismatch during the critical section must be recorded as lock_heartbeat_stolen",
+    ).toBe(true);
+    expect(stolen[0].lock_path, "the stolen event must name the lock path").toBe(lockPath);
+    // The whole point of the classification: a theft must NOT read as an IO
+    // failure. Collapsing the two branches back together flips this red.
+    expect(
+      events.filter((ev) => ev.note === "lock_heartbeat_failed"),
+      "a stolen lock must never be misclassified as an IO failure",
+    ).toEqual([]);
+
+    await rm(lockPath, { force: true });
+  });
+});
+
+test("CP-NODE-23: a heartbeat beat whose refresh fails is classified lock_heartbeat_failed, with the error attached", async () => {
+  await withTempDir(async (dir: string) => {
+    const lockPath = tmpLockPath(dir);
+    const logPath = join(dir, `run-${randomUUID()}.jsonl`);
+    const logger = new RunLogger(logPath);
+
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const held = withFileLock(
+      lockPath,
+      async () => {
+        // Remove the lock underneath the live holder: the beat's read throws
+        // ENOENT, which is an IO failure, not a theft.
+        await rm(lockPath, { force: true });
+        await gate;
+        return "done";
+      },
+      10_000,
+      logger,
+      { heartbeatIntervalMs: 25 },
+    );
+
+    const events = await waitForLoggedNote(logPath, "lock_heartbeat_failed");
+    release!();
+    expect(await held).toBe("done");
+
+    const failed = events.filter((ev) => ev.kind === "error" && ev.note === "lock_heartbeat_failed");
+    expect(
+      failed.length >= 1,
+      "a failed refresh must be recorded, not swallowed by a bare catch",
+    ).toBe(true);
+    expect(failed[0].lock_path, "the failure event must name the lock path").toBe(lockPath);
+    expect(
+      String(failed[0].error),
+      "the underlying error must be attached so the cause is diagnosable",
+    ).toMatch(/ENOENT/u);
+    // An IO failure is not a theft: the two notes stay disjoint.
+    expect(
+      events.filter((ev) => ev.note === "lock_heartbeat_stolen"),
+      "an IO failure must never be misclassified as a stolen lock",
+    ).toEqual([]);
+  });
+});
+
+test("CP-NODE-23: lockedJsonMutate reads-mutates-writes under the lock, passing undefined for a missing file", async () => {
+  await withTempDir(async (dir: string) => {
+    const lockPath = tmpLockPath(dir);
+    const jsonPath = join(dir, "nested", `artifact-${randomUUID()}.json`);
+
+    const seen: unknown[] = [];
+    const first = await lockedJsonMutate(lockPath, jsonPath, (current) => {
+      seen.push(current);
+      return { count: 1 };
+    });
+    expect(first).toEqual({ count: 1 });
+
+    const second = await lockedJsonMutate(lockPath, jsonPath, (current) => {
+      seen.push(current);
+      return { count: (current as { count: number }).count + 1 };
+    });
+
+    expect(seen[0], "a missing artifact is presented as undefined, not a throw").toBe(undefined);
+    expect(seen[1], "the second mutate must see the value the first wrote").toEqual({ count: 1 });
+    expect(second).toEqual({ count: 2 });
+    expect(JSON.parse(await readFile(jsonPath, "utf8"))).toEqual({ count: 2 });
+    // The lock is released once the mutate completes.
+    await assert.rejects(() => stat(lockPath), { code: "ENOENT" });
   });
 });
 

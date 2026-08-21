@@ -115,6 +115,33 @@ test("verifyFindingAnchor is inconclusive on spawn error, timeout, or malformed 
   expect((await verifyFindingAnchor("/repo", bad, fixedRunner({ exit_code: 0, timed_out: false, output: "x" })))!.status).toBe("inconclusive");
 });
 
+test("verifyFindingAnchor is inconclusive for output_includes/output_excludes when the outcome is truncated (CP-NODE-8)", async () => {
+  const inc = findingWithAnchor({ command: ["grep", "x", "f"], confirm_if: { kind: "output_includes", text: "needle" } });
+  // Truncated + the needle absent from the captured prefix must NOT read
+  // "refuted" — the needle may be sitting in the dropped tail.
+  expect(
+    (await verifyFindingAnchor("/repo", inc, fixedRunner({ exit_code: 0, timed_out: false, output: "nope", truncated: true })))!
+      .status,
+  ).toBe("inconclusive");
+
+  const exc = findingWithAnchor({ command: ["grep", "x", "f"], confirm_if: { kind: "output_excludes", text: "needle" } });
+  // Truncated + the needle absent from the captured prefix must NOT read
+  // "confirmed" — the excluded text may be sitting in the dropped tail.
+  expect(
+    (await verifyFindingAnchor("/repo", exc, fixedRunner({ exit_code: 0, timed_out: false, output: "clean", truncated: true })))!
+      .status,
+  ).toBe("inconclusive");
+
+  // exit_zero/exit_nonzero read exitCode, never `output` — truncation must
+  // NOT be checked for these kinds, so a truncated-but-exit-0 run still
+  // confirms normally.
+  const exitAnchor = findingWithAnchor({ command: ["madge", "src"], confirm_if: { kind: "exit_zero" } });
+  expect(
+    (await verifyFindingAnchor("/repo", exitAnchor, fixedRunner({ exit_code: 0, timed_out: false, output: "x", truncated: true })))!
+      .status,
+  ).toBe("confirmed");
+});
+
 test("verifyFindingAnchor skips off-allowlist and disabled anchors without running them", async () => {
   const offlist = findingWithAnchor({ command: ["node", "-e", "1"], confirm_if: { kind: "exit_zero" } });
   expect((await verifyFindingAnchor("/repo", offlist, throwRunner))!.status).toBe("skipped");
