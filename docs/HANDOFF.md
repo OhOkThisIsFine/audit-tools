@@ -5,9 +5,9 @@
 
 ## Live state
 
-- Published state: v0.43.0 (the tag). Local main carries the consolidated pass — the mechanical
-  deletions, the P38 write-scope union, the single-sourced command-shape rule, and the wave-1 durable
-  tests — unpublished until the next /ship.
+- Published state: v0.44.0 (the tag — it carries the consolidated pass: the mechanical deletions,
+  the P38 write-scope union, the single-sourced command-shape rule, and the wave-1 durable tests).
+  Everything below `main`'s tip is pushed; release CI is green and the global bins are reinstalled.
 - The remediation run remediate-2026-08-18-… is COMPLETE (27/27); promoted deliverables at
   .audit-tools/remediation-report.md / .audit-tools/remediation-outcomes.json.
 
@@ -15,7 +15,6 @@
 
 1. A fresh dogfood lap on the new architecture — the standing next step from the zero-adapter
    retirement, now unblocked.
-2. Publish — /ship when the owner wants the release.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
