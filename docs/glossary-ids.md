@@ -41,6 +41,7 @@ is deleted too.
 | INV-PLAN-PERSIST-COMPLETE | Audit planning persists the complete merged task set used by later workload emission. | `src/audit/orchestrator/planningExecutors.ts` |
 | INV-RCI | The generated OpenCode permission ceiling is the deterministic union of agent rules. | `src/shared/opencodePermissions.ts` |
 | INV-READY-STEP-CONTINUATION | A ready audit step that requests another advance carries the executable continuation command. | `src/audit/cli/nextStepCommand.ts` |
+| INV-RNF-NO-CANONICAL-PAIR-WRITE | The remediate next-step module writes the canonical `.audit-tools/audit-findings.json` + `audit-report.md` pair nowhere; autonomous leftover deliverables land on remediation-owned paths, so a remediation run can never destructively overwrite the audit deliverables it consumes. | `src/remediate/steps/nextStep.ts` |
 | INV-RPS | Remediation-plan deduplication preserves distinct structural identities. | `src/remediate/phases/triage.ts` |
 | INV-RS | Remediation state-machine ordering and fail-closed completion. | `src/remediate/steps/nextStep.ts`; `src/remediate/phases/close.ts` |
 | INV-RSM-RESOLUTION | Resolution requests have run-unique ids. | `src/remediate/steps/nextStep.ts` |
