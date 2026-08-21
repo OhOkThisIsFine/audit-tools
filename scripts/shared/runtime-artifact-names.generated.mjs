@@ -37,7 +37,6 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "current-prompt.md",
   "current-step.json",
   "design_assessment.json",
-  "dispatch-plan.json",
   "docs_digest.json",
   "expected-submissions.json",
   "external_analyzer_acquisition.json",
