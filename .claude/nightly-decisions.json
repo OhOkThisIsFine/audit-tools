@@ -1477,6 +1477,8 @@
     "answer": "Add the veto clause — amend the own-vs-acquire bullet in CLAUDE.md so it states that a recorded operator 'declined' decision (and an analyzer setting of 'skip') refuses the spawn even for a curated DEFAULT-set tool, both checked before the default-set short-circuit. Do not restate the full admission ladder; that algorithm stays single-homed in code.",
     "subject": "instruction-file edit: CLAUDE.md describes the DEFAULT analyzer set as admitted without a token, but an operator decline now vetoes it too",
     "path": "CLAUDE.md",
-    "decided_at": "2026-08-20T17:27:05.129Z"
+    "decided_at": "2026-08-20T17:27:05.129Z",
+    "completed_at": "2026-08-21T02:14:25.755Z",
+    "completed_ref": "landed in d755f0b1 — CLAUDE.md own-vs-acquire bullet now states the operator-decline/skip veto ahead of the default-set short-circuit, constitutional attestation recorded"
   }
 }
