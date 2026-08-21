@@ -29,7 +29,7 @@
 2. **Build the approved write-scope resolver fix** (P38, owner-approved: union the module
    contract's declared write targets into the node scope). This run paid nine manual
    delete-binding-and-re-prepare widening cycles; the fix retires the class. The built patch is
-   in the nightly routine's proposals directory.
+   in the routine's proposals directory.
 3. **Publish decision** — the owner's call; everything is landed and green.
 4. **A fresh dogfood lap** on the new architecture (the standing next step from the zero-adapter
    retirement, now unblocked by the completed run).
