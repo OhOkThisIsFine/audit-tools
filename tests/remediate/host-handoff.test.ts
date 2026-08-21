@@ -13,6 +13,8 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { DISPATCH_BARREL_EXPORTS } from "../helpers/dispatchBarrelBaseline.js";
+
 const FAILURE_SIGNATURE =
   "contract:remediation-zero-adapter-boundary:not-yet-satisfied";
 const CURRENT_STATE_VERSION = "remediate-code-state/v1alpha1";
@@ -1386,12 +1388,9 @@ describe("the dispatch barrel's published export surface", () => {
     // A mock written without an `...actual` spread drifts from this the moment
     // the barrel gains or loses an export.
     const barrel = await import("../../src/remediate/steps/dispatch.js");
-    expect(Object.keys(barrel).sort()).toEqual([
-      "ingestRemediationHostResults",
-      "prepareRemediationHostHandoff",
-      "readExtractedPlanIfPresent",
-      "remediationHostResultFilePath",
-    ]);
+    expect(Object.keys(barrel).sort()).toEqual(
+      [...DISPATCH_BARREL_EXPORTS].sort(),
+    );
     // hostDependencyLevels and remediationSubmissionBinding are re-exported
     // elsewhere, NOT by this barrel; a pin claiming either would be wrong.
     expect(Object.keys(barrel)).not.toContain("hostDependencyLevels");

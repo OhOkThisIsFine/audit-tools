@@ -331,8 +331,8 @@ export function findInTreeScratchRoots(source: string): ScratchRootOffense[] {
     const mentionsOwnDir =
       // Inline, either spelling: a path call taking the own-directory token
       // DIRECTLY as an argument has no binding at all, so the name set below
-      // would never see it. (Spelling the shape out here would trip
-      // INV-shared-tests-08, which scans comments too — deliberately.)
+      // would never see it. Synthetic fixtures below assemble the forbidden
+      // shape from fragments because this guard scans its own source.
       mentionsOwnDirToken(args) ||
       [...ownDirs].some((name) =>
         new RegExp(`(?:^|[^\\w$.])${name}(?![\\w$])`).test(args),

@@ -6,6 +6,8 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
 
+import { DISPATCH_BARREL_EXPORTS } from "../helpers/dispatchBarrelBaseline.js";
+
 const RED_SIGNATURE =
   "contract:backend-independent-remediation-planning:not-yet-satisfied";
 
@@ -483,19 +485,6 @@ describe(RED_SIGNATURE, () => {
 //       guards cannot detect that thing changing, which is the whole defect
 //       class this file exists to close.
 // ───────────────────────────────────────────────────────────────────────────
-
-/**
- * The barrel's value exports, as committed. Updated only by a deliberate edit —
- * never derived at run time. `src/remediate/steps/dispatch.ts` is a read-only
- * reference for this module; this list is the pin, and it lives here because
- * the barrel itself is in no module's write scope.
- */
-const DISPATCH_BARREL_EXPORTS = [
-  "ingestRemediationHostResults",
-  "prepareRemediationHostHandoff",
-  "readExtractedPlanIfPresent",
-  "remediationHostResultFilePath",
-] as const;
 
 describe("the dispatch barrel mock covers the real surface, and the surface itself is pinned", () => {
   it("(a) spreads ...actual over every key the live barrel exports", async () => {

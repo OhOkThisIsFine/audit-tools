@@ -4,7 +4,7 @@
  *                         tests must import CONTRACT_PIPELINE_*_VERSION constants
  * INV-remediate-tests-03: duplicated scaffold helpers extracted to a shared module (structural check)
  * INV-remediate-tests-04: no either-or set-membership assertions where a single deterministic outcome is expected
- * INV-remediate-tests-05: quota-scheduler.test.ts covers dispatch.ts scheduleWave (not only shared scheduleWave)
+ * INV-remediate-tests-05: retired with the tool-owned quota scheduler (host execution policy is outside the remediation contract)
  * INV-remediate-tests-06: retired (A6 — contracts single-sourced as zod; no JSON schema files)
  * INV-remediate-tests-07: validation.test.ts covers all contract-pipeline validators
  * INV-remediate-tests-08: ESM-correct __dirname derivation (fileURLToPath(import.meta.url))

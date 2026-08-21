@@ -24,11 +24,9 @@ import {
 } from "audit-tools/shared";
 import {
   REMEDIATION_CLOSING_RESULT_CONTRACT_VERSION,
-  REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   REMEDIATION_HOST_DECISION_CONTRACT_VERSION,
   REMEDIATION_HOST_RESULT_CONTRACT_VERSION,
   REMEDIATION_STEP_CONTRACT_VERSION,
-  REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
 } from "../steps/types.js";
 import {
   CONTRACT_PIPELINE_VALIDATORS,
@@ -158,117 +156,6 @@ function validateCurrentStep(value: unknown, path: string): ValidationIssue[] {
   return issues;
 }
 
-function validateDispatchPlan(
-  value: unknown,
-  path: string,
-): { issues: ValidationIssue[]; phase?: "document" | "implement"; resultPaths: string[] } {
-  const issues: ValidationIssue[] = [];
-  const resultPaths: string[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return { issues, resultPaths };
-  }
-  if (value.contract_version !== REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION) {
-    pushValidationIssue(issues, `${path}.contract_version`, `${path} has unsupported contract_version.`);
-  }
-  const phase =
-    value.phase === "implement" || value.phase === "document"
-      ? (value.phase as "document" | "implement")
-      : undefined;
-  if (!phase) {
-    pushValidationIssue(issues, `${path}.phase`, `${path}.phase must be "document" or "implement".`);
-  }
-  for (const key of ["run_id", "repo_root", "artifacts_dir"]) {
-    if (typeof value[key] !== "string") {
-      pushValidationIssue(issues, `${path}.${key}`, `${path}.${key} must be a string.`);
-    }
-  }
-  if (!Array.isArray(value.items)) {
-    pushValidationIssue(issues, `${path}.items`, `${path}.items must be an array.`);
-    return { issues, phase, resultPaths };
-  }
-  for (const [index, item] of value.items.entries()) {
-    const itemPath = `${path}.items[${index}]`;
-    if (!isRecord(item)) {
-      pushValidationIssue(issues, itemPath, `${itemPath} must be an object.`);
-      continue;
-    }
-    for (const key of ["task_id", "prompt_path", "result_path"]) {
-      if (typeof item[key] !== "string") {
-        pushValidationIssue(issues, `${itemPath}.${key}`, `${itemPath}.${key} must be a string.`);
-      }
-    }
-    if (phase === "implement" && typeof item.block_id !== "string") {
-      pushValidationIssue(issues, `${itemPath}.block_id`, `${itemPath}.block_id must be a string for implement dispatch.`);
-    }
-    // The fit gates read this off the item and deliberately do not default it, so
-    // a plan that omits it would strand the node rather than mis-size it. Refuse
-    // it here, where the producer bug is still attributable to the producer.
-    if (
-      phase === "implement" &&
-      (typeof item.estimated_input_tokens !== "number" ||
-        !Number.isFinite(item.estimated_input_tokens) ||
-        item.estimated_input_tokens <= 0)
-    ) {
-      pushValidationIssue(
-        issues,
-        `${itemPath}.estimated_input_tokens`,
-        `${itemPath}.estimated_input_tokens must be a positive number for implement dispatch.`,
-      );
-    }
-    if (phase === "document" && typeof item.finding_id !== "string") {
-      pushValidationIssue(issues, `${itemPath}.finding_id`, `${itemPath}.finding_id must be a string for document dispatch.`);
-    }
-    if (typeof item.prompt_path === "string" && !existsSync(item.prompt_path)) {
-      pushValidationIssue(issues, `${itemPath}.prompt_path`, `${itemPath}.prompt_path points to a missing file: ${item.prompt_path}.`);
-    }
-    if (typeof item.result_path === "string") {
-      resultPaths.push(item.result_path);
-    }
-  }
-  return { issues, phase, resultPaths };
-}
-
-export function validateImplementWorkerResult(
-  value: unknown,
-  path: string,
-): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} implement worker result must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== REMEDIATION_WORKER_RESULT_CONTRACT_VERSION) {
-    pushValidationIssue(issues, `${path}.contract_version`, `${path} implement worker result has unsupported contract_version.`);
-  }
-  if (value.phase !== "implement") {
-    pushValidationIssue(issues, `${path}.phase`, `${path} implement worker result phase must be implement.`);
-  }
-  if (!Array.isArray(value.item_results)) {
-    pushValidationIssue(issues, `${path}.item_results`, `${path} implement worker result item_results must be an array.`);
-    return issues;
-  }
-  for (const [index, result] of value.item_results.entries()) {
-    const resultPath = `${path}.item_results[${index}]`;
-    if (!isRecord(result)) {
-      pushValidationIssue(issues, resultPath, `${resultPath} must be an object.`);
-      continue;
-    }
-    if (typeof result.finding_id !== "string") {
-      pushValidationIssue(issues, `${resultPath}.finding_id`, `${resultPath}.finding_id must be a string.`);
-    }
-    if (
-      result.status !== "resolved" &&
-      result.status !== "resolved_no_change" &&
-      result.status !== "blocked" &&
-      result.status !== "needs_clarification"
-    ) {
-      pushValidationIssue(issues, `${resultPath}.status`, `${resultPath}.status must be resolved, resolved_no_change, blocked, or needs_clarification.`);
-    }
-  }
-  return issues;
-}
-
 function validateClosingResult(value: unknown, path: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   if (!isRecord(value)) {
@@ -305,48 +192,9 @@ function validateClosingResult(value: unknown, path: string): ValidationIssue[] 
   return issues;
 }
 
-async function validateDispatchArtifacts(
-  artifactsDir: string,
-  issues: string[],
-): Promise<void> {
-  const runsDir = join(artifactsDir, "runs");
-  const files = await collectFiles(runsDir);
-  const dispatchPlanPaths = files.filter((file) => file.endsWith("dispatch-plan.json"));
-  const resultFiles = files.filter((file) => file.endsWith(".result.json"));
-  const referencedResults = new Map<string, "document" | "implement">();
-
-  for (const dispatchPlanPath of dispatchPlanPaths) {
-    const plan = await readJsonForValidation(dispatchPlanPath, issues);
-    if (!plan) continue;
-    const { issues: planIssues, phase, resultPaths } = validateDispatchPlan(plan, dispatchPlanPath);
-    pushErrorIssues(issues, planIssues);
-    if (!phase) continue;
-    for (const resultPath of resultPaths) {
-      referencedResults.set(resultPath, phase);
-      if (!existsSync(resultPath)) continue;
-      const result = await readJsonForValidation(resultPath, issues);
-      if (!result) continue;
-      pushErrorIssues(issues, validateImplementWorkerResult(result, resultPath));
-    }
-  }
-
-  for (const resultFile of resultFiles) {
-    if (!referencedResults.has(resultFile)) {
-      issues.push(`Stale worker result is not referenced by any dispatch plan: ${resultFile}.`);
-    }
-  }
-}
-
 /**
  * The ONE filename rule a host submission lands under: the sha256 of the
  * submission id. This is the join the discovery scan needs.
- *
- * It exists BESIDE the `dispatch-plan.json` / `*.result.json` filters in
- * `validateDispatchArtifacts` above, which are still wired and still run on
- * every call — they are not a previous version of this scan. No production
- * module writes either of those filenames, so that family matches zero files on
- * every live run and can only ever report nothing; deleting it is tracked as
- * backlog work and deliberately not done here.
  */
 const HOST_SUBMISSION_FILENAME = /^[0-9a-f]{64}\.json$/u;
 
@@ -662,7 +510,6 @@ export async function validateArtifacts(
     pushErrorIssues(issues, validateCurrentStep(currentStep, "current-step.json"));
   }
 
-  await validateDispatchArtifacts(artifactsDir, issues);
   const submissionScan = await validateHostSubmissions(
     artifactsDir,
     root,
