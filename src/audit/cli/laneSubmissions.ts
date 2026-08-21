@@ -16,8 +16,8 @@
  *
  * 2. **The lane id is the only join key.** The emitter and the gate reader
  *    never meet; they agree because both derive the id from the lane id
- *    through this module. A lane id is declared once in
- *    `HOST_GATE_DESCRIPTORS` and used verbatim on both sides.
+ *    through this module. A lane id is declared once in this module's
+ *    `GATE_LANES` table and used verbatim on both sides.
  *
  * The bound path is DERIVED, not looked up. The persisted expected set states
  * what is owed (and feeds the diff and the ledger), but a gate that could only

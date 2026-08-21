@@ -10,16 +10,14 @@
  *
  * The property this file pins is the one that makes that class impossible:
  *
- *   1. the gate registry (`HOST_GATE_DESCRIPTORS`) enumerates lanes, not
- *      host-typed filenames;
- *   2. no host-facing prompt or worker packet contains a literal submission
+ *   1. no host-facing prompt or worker packet contains a literal submission
  *      filename or an `incoming/` path;
- *   3. the emitted step's declared write paths are the tool-computed
+ *   2. the emitted step's declared write paths are the tool-computed
  *      `submissions/<sha256>.json` names;
- *   4. mechanically, across the whole of `src/`: no `join(..., "incoming", ...)`
+ *   3. mechanically, across the whole of `src/`: no `join(..., "incoming", ...)`
  *      construction and no rendered `incoming/` literal survives.
  *
- * (4) is the guard that keeps (1)–(3) from being re-introduced one call site at a
+ * (3) is the guard that keeps (1)–(2) from being re-introduced one call site at a
  * time — *durable traps are mechanically enforced, not remembered*.
  *
  * NOTE: the emitted step contract is read as RAW JSON on purpose. `StepArtifactSchema`
@@ -64,7 +62,6 @@ import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.js");
 const { buildAdvancedBundle } = await import("../audit/helpers/advancedBundle.mjs");
-const { HOST_GATE_DESCRIPTORS } = await import("../../src/audit/cli/nextStepHelpers.js");
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -136,26 +133,6 @@ async function persistSoloDesignReviewState(root: string, artifactsDir: string):
 }
 
 describe("the submission path is tool-owned", () => {
-  it("the host-gate registry enumerates lanes, not host-typed filenames", () => {
-    const offenders: string[] = [];
-    for (const [kind, descriptor] of Object.entries(HOST_GATE_DESCRIPTORS)) {
-      const serialized = JSON.stringify(descriptor);
-      // A host-typed `<name>.json` in the registry IS the guessable path: it is
-      // the string the tool prints and the host retypes. Post-P25 a descriptor
-      // names lanes; the filename is computed from the tool-minted submission id.
-      for (const match of serialized.match(/[A-Za-z0-9_-]+\.json/g) ?? []) {
-        offenders.push(`${kind}: ${match}`);
-      }
-      if (serialized.includes("incoming")) {
-        offenders.push(`${kind}: references the retired incoming/ directory`);
-      }
-    }
-    expect(
-      offenders,
-      "HOST_GATE_DESCRIPTORS must enumerate gate lanes, never host-typed submission filenames",
-    ).toEqual([]);
-  });
-
   it(
     "a driven design-review emission renders no submission filename into any host-facing prompt",
     { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS },

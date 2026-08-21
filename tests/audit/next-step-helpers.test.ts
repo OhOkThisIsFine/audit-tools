@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditState } from "../../src/audit/types/auditState.js";
-import type { HostGateKind, NextStepParams } from "../../src/audit/cli/nextStepHelpers.js";
+import type { NextStepParams } from "../../src/audit/cli/nextStepHelpers.js";
 import type { RejectedDesignReviewSubmission } from "../../src/audit/types/designAssessment.js";
 import type { AdvanceAuditResult } from "../../src/audit/orchestrator/advance.js";
 import type { RunAuditStepOptions } from "../../src/audit/cli/auditStep.js";
@@ -25,12 +25,7 @@ const {
   renderEdgeReasoningRejectionNotice,
 } = await import("../../src/audit/cli/nextStepCommand.js");
 
-// HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS are internal to the Tier C2
-// consolidation (not re-exported through nextStepCommand.ts), so import them
-// directly from nextStepHelpers.ts.
 const {
-  HOST_GATE_KINDS,
-  HOST_GATE_DESCRIPTORS,
   handleSynthesisNarrativeBranch,
   handleCriticalFlowFallbackBranch,
   handleCharterExtractionBranch,
@@ -501,56 +496,6 @@ await test("tryConsumeSubmission still re-throws genuine IO errors (directory in
       "should re-throw non-ENOENT, non-parse IO errors",
     );
   });
-});
-
-// ── HOST_GATE_DESCRIPTORS coverage (Tier C2 consolidation) ────────────────────
-
-await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 10 audit host-gate kinds", () => {
-  const expected: HostGateKind[] = [
-    // P25 added `analyzer_consent`: it is a real gate with a real submission
-    // and the registry did not name it, so the registry could not be the
-    // complete enumeration it is documented to be.
-    "analyzer_consent",
-    "graph_enrichment",
-    "critical_flow_fallback",
-    "intent_equivalence",
-    "design_review",
-    "synthesis_narrative",
-    "charter_extraction",
-    "charter_delta",
-    "charter_clarification",
-    "systemic_challenge",
-  ];
-  expect([...HOST_GATE_KINDS].sort()).toEqual([...expected].sort());
-  expect(Object.keys(HOST_GATE_DESCRIPTORS).sort()).toEqual([...expected].sort());
-
-  // The 5 gates driven by the shared runOmittableGate engine vs. the 4 that
-  // keep bespoke bodies (graph_enrichment, design_review, intent_equivalence,
-  // and the per-kind multi-lane charter_extraction gate) because their shape
-  // genuinely deviates from the common one.
-  const generic = expected.filter((k) => HOST_GATE_DESCRIPTORS[k].driven === "generic");
-  const custom = expected.filter((k) => HOST_GATE_DESCRIPTORS[k].driven === "custom");
-  expect(generic.sort()).toEqual(
-    ["critical_flow_fallback", "synthesis_narrative", "charter_delta", "charter_clarification", "systemic_challenge"].sort(),
-  );
-  expect(custom.sort()).toEqual(
-    [
-      "analyzer_consent",
-      "graph_enrichment",
-      "design_review",
-      "intent_equivalence",
-      "charter_extraction",
-    ].sort(),
-  );
-
-  // Every descriptor enumerates LANES, never a host-typed filename — the
-  // registry is what an expected-submission set is derived from.
-  for (const kind of expected) {
-    expect(HOST_GATE_DESCRIPTORS[kind].lanes.length).toBeGreaterThan(0);
-    for (const lane of HOST_GATE_DESCRIPTORS[kind].lanes) {
-      expect(lane).not.toMatch(/\.json$/u);
-    }
-  }
 });
 
 // ── handleDesignReviewBranch — malformed-submission quarantine ───────────────
