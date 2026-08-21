@@ -39,6 +39,7 @@ import {
   projectApprovedFindings,
   captureStepBoundaryFriction,
   climbOutOfAuditTools,
+  partitionCommandsByDeclaredShape,
   estimateTokensFromBytes,
   normalizeRepoPath,
   repoRelativePath,
@@ -3757,9 +3758,6 @@ function deriveObligationLensAndSeverity(kinds: readonly ObligationKind[]): {
 // that escapes the repository is refused outright, and a command carrying shell
 // chaining or substitution is refused rather than handed to a shell.
 
-/** Shell metacharacters a declared package-script / test invocation never needs. */
-const SHELL_METACHARACTERS = /[&|;<>`$\n\r\0]/;
-
 /**
  * The tracked-path corpus for write-scope checking, or null when the tree
  * cannot be read. Null degrades to "shape-only normalization" exactly as the
@@ -3893,6 +3891,15 @@ export async function evaluatePromotedPlanWriteScope(
  * (language-neutral by contract), only that the string handed to a shell cannot
  * do more than invoke one command.
  *
+ * The RULE is not here. It is `commandLeavesDeclaredShape`
+ * (`audit-tools/shared`), the one predicate the host-handoff consumer and the
+ * triage re-verification spawn also ask. This function owns only the WORDING and
+ * the refusals-as-data contract. It used to own a second, quote-BLIND regex
+ * instead, and the two disagreed in both directions: `pytest -k 'not slow'`
+ * cleared promotion and then dead-ended at the consumer as
+ * `block_contract_invalid`, while `echo "a & b"` was refused here though the
+ * consumer admits it.
+ *
  * Refusals are RETURNED, never thrown: the promotion boundary turns them into
  * the same bounded re-emit every other promotion rejection takes, so a
  * malformed command re-emits implementation_planning instead of wedging every
@@ -3908,26 +3915,15 @@ export function normalizeBlockTargetedCommands(
   commands: readonly string[],
   blockId: string,
 ): BlockCommandNormalization {
-  const normalized: string[] = [];
-  const refusals: string[] = [];
-  for (const raw of commands) {
-    const command = typeof raw === "string" ? raw.trim() : "";
-    if (command.length === 0) {
-      refusals.push(`Block "${blockId}" declares an empty targeted_commands entry.`);
-      continue;
-    }
-    if (SHELL_METACHARACTERS.test(command)) {
-      refusals.push(
-        `Block "${blockId}" declares the targeted_commands entry ${JSON.stringify(raw)}, ` +
-          `which carries shell chaining, substitution or redirection. A targeted command is ` +
-          `executed verbatim through a shell, so it must be one invocation — split it into ` +
-          `separate entries.`,
-      );
-      continue;
-    }
-    normalized.push(command);
-  }
-  return { targeted_commands: normalized, refusals };
+  const partitioned = partitionCommandsByDeclaredShape(commands, (kind, raw) =>
+    kind === "empty"
+      ? `Block "${blockId}" declares an empty targeted_commands entry.`
+      : `Block "${blockId}" declares the targeted_commands entry ${JSON.stringify(raw)}, ` +
+        `which carries shell chaining, substitution or redirection. A targeted command is ` +
+        `executed verbatim through a shell, so it must be one invocation — split it into ` +
+        `separate entries.`,
+  );
+  return { targeted_commands: partitioned.commands, refusals: partitioned.refusals };
 }
 
 /**
@@ -4240,6 +4236,12 @@ export async function promoteImplementationDagToExtractedPlan(
     // time promotion runs there is nothing left to refuse. The throw below is a
     // BACKSTOP for a caller that skipped that gate — never the operator-facing
     // path.
+    //
+    // "Nothing left to refuse" is now TRUE BY CONSTRUCTION, not by hope: the
+    // command half asks the ONE shared `commandLeavesDeclaredShape` predicate
+    // that the host-handoff consumer asks, so a command this gate admits cannot
+    // be refused downstream (and vice versa). It used to be a claim about two
+    // independent implementations that disagreed in both directions.
     const scope = normalizeBlockTouchedFiles(root, deriveNodeFiles(node), toBlockId(nodeId));
     const commands = normalizeBlockTargetedCommands(
       node.targeted_commands ?? [],

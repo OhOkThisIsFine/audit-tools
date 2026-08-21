@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from "node:path";
 
 import {
   headCommit,
+  commandLeavesDeclaredShape,
   FindingSchema,
   SUBMISSION_ISSUE_CODES,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
@@ -350,63 +351,6 @@ function normalizeDeclaredPath(root: string, candidate: string, label: string): 
 }
 
 /**
- * Does a command leave the declared single-invocation shape?
- *
- * A `targeted_command` is executed VERBATIM through `shell: true` in the
- * repository root, so anything that chains, redirects, substitutes or subshells
- * turns one declared test into arbitrary execution. A flat regex cannot decide
- * this: `node -e "process.exit(0)"` is an ordinary test invocation whose parens
- * are inside quotes, and refusing it would refuse the normal case.
- *
- * So the scan is QUOTE-AWARE — a tiny, fully-owned grammar, not a shell parser.
- * It is deliberately narrower than EITHER shell's grammar, because `shell: true`
- * is TWO grammars and no per-grammar state machine is sound for both: `/bin/sh
- * -c` on posix, `cmd.exe /d /s /c` on win32. Where they disagree, tracking state
- * under one of them MIS-CLASSIFIES the other:
- *
- *   - `'` quotes on sh and is an ORDINARY CHARACTER on cmd.exe, so crediting it
- *     reads `echo '& evil.exe'` as fully quoted while cmd.exe reads `&` as a
- *     command separator and starts a second process.
- *   - `\` escapes a quote on sh, so `echo \" & evil \"` de-syncs any
- *     double-quote tracking: the scan believes `&` is quoted, sh sees an escaped
- *     literal quote and a live separator.
- *   - `%VAR%` is expanded by cmd.exe BEFORE the line is split into commands, and
- *     expands inside double quotes too, so a `%…%` reference can introduce
- *     separators that were never in the scanned string.
- *   - `^` is cmd.exe's escape character and de-syncs quote state the same way.
- *   - CR and LF are not inert inside cmd.exe's double quotes: LF truncates the
- *     command there and CR is deleted outright, so what runs is not what was
- *     scanned. Every control character is refused for that reason.
- *
- * What remains is the one construct both shells agree on: a double quote makes
- * the enclosed metacharacters literal. So `' \ ^ % $` and backtick — plus every
- * control character — are refused in EVERY position, quoted or not; the
- * chaining/redirection/grouping set is refused outside double quotes; and an
- * unterminated double quote is itself a refusal, because the rest of the string
- * cannot be classified.
- *
- * The fail direction is REFUSAL. Over-refusing a legitimate command costs a
- * producer-side split, and the producer-side obligation still owns the declared
- * shape (artifact:normalized-block-write-scope); under-admitting one hands a
- * shell an extra process.
- */
-function leavesDeclaredCommandShape(command: string): boolean {
-  let inDoubleQuotes = false;
-  for (const character of command) {
-    const code = character.codePointAt(0) ?? 0;
-    if (code < 0x20 || code === 0x7f) return true;
-    if ("'\\^%$`".includes(character)) return true;
-    if (character === '"') {
-      inDoubleQuotes = !inDoubleQuotes;
-      continue;
-    }
-    if (inDoubleQuotes) continue;
-    if ("&|;<>()".includes(character)) return true;
-  }
-  return inDoubleQuotes;
-}
-
-/**
  * A block that arrived outside the shape this boundary CONSUMES.
  *
  * The producer half of the write-scope contract is owned upstream
@@ -481,7 +425,11 @@ function assertBlockContract(root: string, block: RemediationBlock): void {
         "targeted_commands carries an empty command",
       );
     }
-    if (leavesDeclaredCommandShape(command)) {
+    // THE declared-command-shape rule (`audit-tools/shared`), not a local copy:
+    // the producer that promotes these commands and the triage path that also
+    // spawns them ask the same predicate, so a command cannot clear one boundary
+    // and dead-end at another.
+    if (commandLeavesDeclaredShape(command)) {
       throw new BlockContractError(
         block.block_id,
         `targeted_command ${JSON.stringify(command)} leaves the declared shape — it chains, ` +

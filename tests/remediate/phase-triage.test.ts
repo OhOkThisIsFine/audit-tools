@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runTriagePhase } from "../../src/remediate/phases/triage.js";
 import { rm, mkdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -707,6 +708,50 @@ describe("runTriagePhase", () => {
       await readFile(join(TEST_DIR, "triage_batch.json"), "utf8"),
     ) as { items: { finding_id: string }[] };
     expect(batch.items.map((i) => i.finding_id)).toEqual(["F2"]);
+  });
+
+  it("NEVER spawns a targeted_command that leaves the declared shape — it reports indeterminate instead", async () => {
+    // A blocked item persists its block's `targeted_commands`, and that block may
+    // predate the declared-command-shape rule. Re-verification hands the string to
+    // a REAL shell (`spawnSync(..., { shell: true })`), so it must answer the same
+    // one shape rule the producer and the host-handoff consumer answer — before it
+    // spawns anything. The sentinel is the proof: it only exists if a shell ran.
+    const sentinel = join(TEST_DIR, "triage-shell-sentinel.txt");
+    const state = makeBaseState({
+      status: "triage",
+      plan: planWithBlocks([
+        {
+          block_id: "B1",
+          items: ["F1"],
+          // Single quotes — the shape rule refuses them in EVERY position (they
+          // quote on /bin/sh and are ordinary characters on cmd.exe). It writes
+          // the sentinel and exits 0, so reaching a shell would ALSO
+          // false-reconcile the item to `resolved_no_change`.
+          targeted_commands: [
+            `node -e "require('fs').writeFileSync('triage-shell-sentinel.txt','x')"`,
+          ],
+        },
+      ]),
+      items: {
+        F1: {
+          finding_id: "F1",
+          status: "blocked",
+          failure_reason: "test assertion failed",
+          block_id: "B1",
+          rework_count: 99,
+        },
+      },
+    }) as RemediationState;
+
+    const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
+    expect(
+      existsSync(sentinel),
+      "a command outside the declared shape must never reach a shell",
+    ).toBe(false);
+    // Indeterminate ⇒ nothing ran ⇒ no reconciliation; the budget-exhausted item
+    // stays blocked and routes to human triage.
+    expect(state.items!.F1.status).toBe("blocked");
+    expect(next.status).toBe("waiting_for_triage");
   });
 
   it("stops auto-retrying an item that has hit the rework cap and routes to human triage", async () => {

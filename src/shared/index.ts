@@ -568,6 +568,15 @@ export {
 export type { ProjectCommands } from "./tooling/testCommand.js";
 export { discoverProjectCommands } from "./tooling/testCommand.js";
 
+// Tooling: THE declared single-invocation command shape. One rule, asked by
+// every boundary that produces, consumes, or spawns a declared command — the
+// producer's promotion normalizer, the host-handoff consumer, and the triage
+// re-verification spawn.
+export {
+  commandLeavesDeclaredShape,
+  partitionCommandsByDeclaredShape,
+} from "./tooling/commandShape.js";
+
 // Tooling: project-test admission gate (CP-NODE-4 obligation 3) — a SECOND,
 // separately-owned admission mechanism anchored to discoverProjectCommands,
 // distinct from the model-authored anchor allowlist above. Produced here;

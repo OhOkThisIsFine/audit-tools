@@ -1774,6 +1774,34 @@ describe("CP-NODE-13 inv-6: block write scope + targeted commands are normalized
     }
   });
 
+  // ── ONE declared-command-shape rule, producer and consumer ─────────────────
+  // The producer used a quote-BLIND regex while the host-handoff consumer walked
+  // double-quote state, so the two disagreed in BOTH directions: a single-quoted
+  // argument cleared promotion and then dead-ended at the consumer as
+  // `block_contract_invalid`, and a metacharacter safely inside double quotes was
+  // refused here though the consumer admits it. Both now answer the same rule.
+
+  it("NEGATIVE: a single-quoted argument is refused HERE, not dead-ended at the consumer", () => {
+    // `'` quotes on /bin/sh and is an ORDINARY character on cmd.exe, so it can
+    // never be credited as a quote — the consumer has always refused it.
+    const result = normalizeBlockTargetedCommands(["pytest -k 'not slow'"], "B-1");
+    expect(result.targeted_commands).toEqual([]);
+    expect(result.refusals).toHaveLength(1);
+    expect(result.refusals[0]).toMatch(/shell chaining, substitution or redirection/);
+  });
+
+  it("POSITIVE: a metacharacter INSIDE double quotes is admitted — the shared rule is quote-aware", () => {
+    const result = normalizeBlockTargetedCommands(
+      ['echo "a & b"', `node -e "process.exit(0)"`],
+      "B-1",
+    );
+    expect(result.targeted_commands).toEqual([
+      'echo "a & b"',
+      `node -e "process.exit(0)"`,
+    ]);
+    expect(result.refusals).toEqual([]);
+  });
+
   it("NEGATIVE end-to-end: a leading-slash write scope produces a BOUNDED re-emit, not a throw", async () => {
     await writeChainThrough("implementation_dag");
     // The chain's one-assertion test plan fails the paired-obligation gate,

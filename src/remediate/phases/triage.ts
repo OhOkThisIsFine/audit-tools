@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { rename } from "node:fs/promises";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, withFsRetry } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, withFsRetry, commandLeavesDeclaredShape } from "audit-tools/shared";
 import { validateTriageResolution } from "../validation/remediationState.js";
 import { rationaleAsksForRetry } from "../steps/stepUtils.js";
 import { remediationHostResultFilePath } from "../steps/dispatch/hostHandoff.js";
@@ -101,7 +101,8 @@ function retryBlockedItem(
  * open keeps retrying as before. Returns:
  *   - `"satisfied"`     — commands present and ALL pass (already fixed in tree)
  *   - `"unsatisfied"`   — commands present and at least one fails (still open)
- *   - `"indeterminate"` — no `targeted_commands` to check, so we cannot tell
+ *   - `"indeterminate"` — no `targeted_commands` to check, or at least one of
+ *                         them leaves the declared shape, so we cannot tell
  *                         (caller falls back to the normal retry path)
  */
 function reverifyBlockedItemAgainstTree(
@@ -126,6 +127,17 @@ function reverifyBlockedItemAgainstTree(
   }
   const commands = block?.targeted_commands;
   if (!commands || commands.length === 0) return "indeterminate";
+  // These strings reach a REAL shell below, so this path asks the same declared
+  // command-shape rule the producer and the host-handoff consumer ask — BEFORE
+  // spawning anything. A blocked item persists its block's commands and may
+  // predate the rule, so a refused shape is possible here even though promotion
+  // would refuse it today. Not spawning is the safe direction, and
+  // "indeterminate" is the honest verdict: nothing ran, so nothing was learned —
+  // the caller falls through to the normal retry/triage path rather than
+  // reconciling the item on a command it never executed.
+  if (commands.some((command) => commandLeavesDeclaredShape(command))) {
+    return "indeterminate";
+  }
   for (const command of commands) {
     const result = spawnSync(command, {
       cwd: options.root,
