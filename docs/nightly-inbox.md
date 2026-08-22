@@ -22,8 +22,262 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-21 at `01595a4c3742bb0faabf12cc0e5ee7a49c3e046c`.*
+*Last run: 2026-08-22 at `5e1d92c097cb00ed39c02b28348984e9bac7cee1`.*
 
+
+---
+
+
+# Documentation
+
+
+<!-- nightly:item key=240e467dfd7a8ac9 -->
+
+## `docs-1` — A10 says analyzer consent is "per-run", but the code also admits a DURABLE recorded grant — settle which the project means before either side is changed <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `docs/project-philosophy.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+Before this tool runs an outside analyzer program on your code, it asks permission. There are two ways permission can be given. One is a token that authorises a single run and is thrown away afterwards. The other is a recorded "granted" decision that is saved to a file on disk and keeps admitting that analyzer on every future run. The code does both: the admission function checks the saved decision first, and only then falls back to the single-run token. The full rule is written correctly in CLAUDE.md, which names both routes. But the one-line summary in project-philosophy.md names only the single-run route, so a reader of the map learns a stricter rule than the tool actually applies. Normally the repair would be obvious, because the map is a pointer and a pointer that disagrees with its home is simply wrong. What makes this your decision is that the newest commit on this branch opens a backlog item arguing the opposite: that per-run choices, analyzer consent among them, should never be persisted at all. If that argument wins, the map is already right and the CODE is what has to change. The same divergence therefore has two opposite repairs, and only you know which direction the project is going.
+
+### The question
+
+docs/project-philosophy.md states the analyzer gate as "mechanical run-safety + curated default set + per-run consent, NOT a maintained allowlist". CLAUDE.md and admitSpawn both also admit a durable recorded `granted` decision persisted to .audit-tools/audit/analyzer-policy.json. Which is the intent? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### Your answer
+
+- [ ] **1. Fix the map** — The durable recorded grant is intended. Correct project-philosophy.md A10 to name both routes, matching CLAUDE.md and admitSpawn.
+- [ ] **2. Fix the code** — Per-run only is intended, as the map says and as the newest backlog item argues. The durable `granted` path in admitSpawn is what should go, and CLAUDE.md follows the code once it changes. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **3. Wait for the backlog item** — Do not touch either side yet. The divergence is a live design question already tracked in the backlog; re-raise it only once that item is decided.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- src/shared/analyzers/acquisitionEngine.ts — admitSpawn: `if (recordedDecision === "granted") return undefined;` sits ahead of the consent-token branch, and its doc comment states that order is the contract. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- CLAUDE.md states the disjunction correctly: "either a durable recorded `granted` decision in `.audit-tools/audit/analyzer-policy.json`, or the per-run consent token". <!-- doc-citation-exempt: quoted item prose, not citations -->
+- src/shared/analyzerPolicy.ts persists the decision, so the grant genuinely survives the run.
+- HEAD tip commit 5e1d92c0 "backlog: per-run choices must not be persisted — analyzer consent and review depth" argues the code is the wrong side.
+- Verified independently this run by reading admitSpawn from source, not from the reviewing agent summary.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=7ff5e4661b46ebf5 -->
+
+## `docs-2` — Apply the de-status rule uniformly to the concept docs still carrying measurements, lap narratives and migration markers — or name the sites that keep them deliberately <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/self-scaling-pipeline-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+This project has a written rule that a concept document explains an idea which stays true, and never records what happened on a particular day or what something measured at one moment. Several documents break that rule while explicitly claiming to follow it. One design spec opens by saying it contains no dated status, then refers to "laps 1-3" and quotes a token cost. A README says a piece of code moved as part of a numbered work item that no longer exists anywhere in the tree. The shipping how-to quotes a percentage and two release versions as evidence for rules that hold regardless of the numbers. In every case the surrounding point is durable and worth keeping; only the number or the date is the problem. This is your call rather than an automatic cleanup because removing text is a judgment about what a future reader needs, and at least one site may carry its index on purpose as a way to find things. The cost of leaving it is quieter than it looks: no tool can check any of these values, so they never visibly go stale — they simply become wrong while still reading as authoritative.
+
+### The question
+
+Several concept docs carry pinned measurements, lap narratives, or shipped-migration markers while declaring themselves status-free. Apply the de-status rule uniformly across them, and is any site a deliberate exception?
+
+### Your answer
+
+- [ ] **1. Sweep them all** — Apply the de-status rule uniformly: strip the measurement, lap reference, or migration marker at every site, keeping the durable sentence around it. No exceptions.
+- [ ] **2. Sweep, keep the location index** — Strip the measurements, lap narratives and migration markers, but keep the "Where the shipped mechanisms live" index in spec/mechanical-analyzer-layer-design.md as a deliberate seek-aid.
+- [ ] **3. Leave them** — The values earn their place as evidence for the rules they justify. Leave every site as written and stop raising them.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- spec/self-scaling-pipeline-design.md declares "Durable conceptual design; no dated status here." and then carries "(laps 1–3)" plus a hand-typed token range.
+- src/audit/adapters/README.md carries "(item-C relocation)". The end state is true — the analyzers do live in src/shared/analyzers/ — so only the migration marker is at issue.
+- .claude/skills/ship/SKILL.md carries two release-version incident markers plus a percentage and timing set; the profiler measures those durations every run, so any fixed number is a snapshot of a moving value.
+- .claude/skills/design-check/SKILL.md carries a per-subagent token cost for a rationale that stands without it.
+- spec/mechanical-analyzer-layer-design.md carries "Where the shipped mechanisms live:" — every path resolves today, which is precisely why it will rot silently.
+- No probe can track any of these values, so per the routine contract the only admissible action is removal, never correction. This item asks for the rule, not for corrected numbers.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=d37581ceaceb366b -->
+
+## `docs-3` — Decide what audit-tools ships to npm consumers — the tarball carries a contributor guide and a maintainer release runbook, and their pointers dangle there <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `README.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+When this package is published to npm, only some of the repository goes into the download. The list of what goes in is in package.json. Three documents that DO go in point at documents that do NOT. The main README ends by sending the reader to CLAUDE.md and to the specs folder; neither is published, so on the npm page both links lead nowhere. A contributor guide about running the test suite and adding language analyzers is published, and it links to the handoff and backlog files, which are not. A maintainer release runbook is published too, complete with the GitHub account name and the steps for triggering a release workflow — none of which a consumer of the package can use or should need. Nothing here is broken inside the repository; every link works when you have the whole checkout. The question is only about the published copy, and it has more than one reasonable answer: publish fewer documents, publish more of them, or rewrite the pointers to full web addresses. That choice is about who the package page is for, which is yours to make.
+
+### The question
+
+The npm tarball ships README.md, docs/audit-pkg/development.md and docs/audit-pkg/release.md, while CLAUDE.md, spec/, docs/HANDOFF.md and docs/backlog.md are absent. Should the shipped doc set shrink, grow, or should the pointers become absolute URLs?
+
+### Your answer
+
+- [ ] **1. Ship less** — Narrow the published doc set to consumer-facing pages. Drop the contributor guide and the maintainer release runbook from the tarball, and rewrite any surviving pointer that leaves the shipped set.
+- [ ] **2. Keep the set, fix the links** — Keep shipping all three, and rewrite every pointer that leaves the tarball as an absolute GitHub URL so it resolves on the npm page.
+- [ ] **3. Ship more** — Add the pointed-at paths to package.json files so the published set is self-contained.
+- [ ] **4. Leave it** — The npm page is not a supported reading surface. Accept the dangling links and stop raising them.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- Premise verified EMPIRICALLY, not inferred from files semantics: npm pack --dry-run at HEAD lists README.md, docs/audit-pkg/development.md and docs/audit-pkg/release.md as present, and CLAUDE.md, spec/, docs/HANDOFF.md and docs/backlog.md as absent.
+- There is no .npmignore, so npm’s always-include set (package.json, README, LICENSE) covers none of the dangling targets.
+- README.md closes by pointing at CLAUDE.md and spec/.
+- docs/audit-pkg/development.md sits under an Agent handoff heading and links ../HANDOFF.md and ../backlog.md.
+- docs/audit-pkg/release.md carries the trusted-publisher owner name and GitHub Actions workflow-dispatch steps.
+- check:doc-links passes because it resolves against the working tree, so no existing gate sees this.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=283f545fb4a904b8 -->
+
+## `docs-4` — Four facts are kept in two hand-written homes each and three have already drifted — single-source them, or accept the copies deliberately <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `docs/audit-pkg/product.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The same fact is written down twice in several places in this project, by hand, with nothing checking that the two copies agree. Three of the four pairs have already come apart. One page lists the commands a user can run and presents the list as complete; it is missing two of them, and a different page lists one of the missing ones. A folder of example files has a README that lists the files in that folder, which the folder itself already tells you. The instruction about passing a target directory is written twice across two files that both ship to users, and the two wordings have already diverged on a word. An open piece of work is recorded both in a design spec and in the backlog, so finishing it means remembering to delete it twice. None of these is wrong today in a way that breaks anything; the point is that each pair can only drift further, and the drift is silent because no check compares them. The decision is whether to generate the second copy from the first, delete it, or keep it on purpose.
+
+### The question
+
+Four facts live in two hand-maintained homes each, three already divergent. Should each be single-sourced (generated or reduced to a pointer), or are any of the copies deliberate?
+
+### Your answer
+
+- [ ] **1. Single-source all four** — Derive or delete the second copy in every case: generate the CLI-surface list from installer-verb-help.mjs, drop the examples inventory, single-source the target-directory instruction across the two shipped loader assets, and leave the open-work item only in the backlog.
+- [ ] **2. Fix the CLI surface list only** — The user-facing command list is the one that matters — make it complete and single-sourced. Leave the examples inventory, the loader wording, and the duplicated open-work entry as they are.
+- [ ] **3. Leave them** — The copies are cheap and readable where they sit. Accept the drift risk and stop raising these.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- docs/audit-pkg/product.md introduces its list as the supported user-facing surfaces and then omits verify-install AND install-host. The wrapper dispatches five verbs: prompt-path, ensure, install, install-host, verify-install. docs/audit-pkg/operator-guide.md names verify-install but not install-host, so both hand-written copies are incomplete and they disagree with each other.
+- examples/README.md hand-lists the files in examples/, which the directory listing already provides; its durable content is the two config-home paragraphs, which survive without the inventory.
+- The target-directory instruction is duplicated across skills/audit-code/SKILL.md and skills/audit-code/audit-code.prompt.md, BOTH of which ship in the tarball, and the two wordings have already diverged on the adjective.
+- spec/contract-authoring-determinism-design.md carries an open-work line whose item is already tracked in docs/backlog/open-bugs.md, giving one open item two homes.
+- spec/audit-workflow-design.md restates the structure-decomposition and charter-layer design at length, then defers those same three items to spec/conceptual-design-review-design.md — a copy where a pointer already exists.
+- Refuted and NOT included: the claim that spec/audit/dependency-map.md has no doc-reading parity gate. tests/audit/staleness.test.ts reads that markdown and asserts bidirectional parity against ARTIFACT_DEPENDS_ON_MAP. The gate is real, though scoped to one artifact’s edges.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=c2f8a24fcedba792 -->
+
+## `docs-5` — CONSTITUTIONAL: the audit spec documents an executor-to-artifact producer relation that no registry encodes, and its cross-reference bounces the reader — decide the home <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/audit/dependency-map.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The audit specification tells you which internal step produces which output file. It presents that table as a readable rendering of a machine-readable source, which is the project’s usual safety argument: the table cannot go wrong because the code is the real list. In this one case there is no such list. Both registries the table names record other things — one records what each step is for, the other records each file’s name and phase — and neither records who writes what. The real answer is scattered across the individual step implementations. A second document compounds this by sending readers to a third document for the same mapping, and that third document says explicitly that it deliberately does not carry it, so the reader is bounced without ever arriving. Separately, a list of files that participate in the run without being registered is missing two entries whose own source comments say in the strongest terms that they must never be registered — exactly the readers that list exists to protect. These files are constitutional, meaning nothing may edit them without your decision, which is why this comes to you rather than being fixed.
+
+### The question
+
+The spec/audit corpus documents an executor-to-artifact producer relation with no machine-readable source, a cross-reference that bounces, and an incomplete not-a-registry-entry enumeration. Where should the producer relation live?
+
+### Your answer
+
+- [ ] **1. Give it a machine source** — Add the producer relation to a registry (an artifacts_written declaration on ExecutorDefinition, or an equivalent), then generate the table from it and fix the cross-reference to point at the real home.
+- [ ] **2. Keep it hand-maintained, say so** — Leave the table hand-maintained but stop claiming it renders a machine-readable ground truth. Fix the bouncing cross-reference and complete the not-a-registry-entry enumeration.
+- [ ] **3. Fix the pointers only** — Correct the cross-reference and add the two missing entries to the enumeration. Leave the derivation claim as written.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (7) — what was verified against code, and how</summary>
+
+- ExecutorDefinition in src/audit/orchestrator/executors.ts carries id, kind and obligation_ids. ArtifactDefinition in src/audit/io/artifacts.ts carries fileName, phase, read and write. Neither encodes a producer relation.
+- The relation lives in each runner’s artifacts_written array, which is a runtime result rather than a declarative registry.
+- spec/audit/artifact-contract.md defers the executor-to-artifact mapping to spec/audit/executor-catalog.md, which states the mapping is authoritative in dependency-map.md and that the catalog deliberately does not re-list producers.
+- artifact-contract.md’s enumeration of members that participate in state without being registry entries omits submission_ledger and submission_ledger_dropped, whose ArtifactBundle comment says the ledger must never become an ARTIFACT_DEFINITIONS entry, and omits expected-submissions.json, marked Deliberately UNREGISTERED in src/shared/io/auditToolsPaths.ts.
+- Partial mechanical grounding does exist: tests/audit/seam-dependency-map-executor-writeset-parity.test.ts checks write-sets against the dependency map. It does not cover the named registry pair.
+- Escalate-only: every spec/audit doc is constitutional per src/shared/constitutionalDocPaths.ts.
+- Two sibling findings were REFUTED this run and are excluded: the intent-equivalence-verdict.json row carries an explicit exemption marker stating the real path and pre-empting the objection, and the abstract priority list is a policy layer above the PRIORITY array rather than a competing ordering.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=e15d0c1d1880d695 -->
+
+## `docs-6` — CONSTITUTIONAL: the entrypoint contract calls the shipped slash workflow an interim precursor, while the standing decision says that workflow IS the product <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/audit/entrypoint-contract.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+This project has a settled conviction, written in its instruction file, that the product is the slash-command workflow the user runs inside a conversation, and that the command-line tool exists to serve it. The audit entrypoint specification says something different. It describes the shipped slash command and its command-line equivalent as an interim precursor, and states that the current commands should be treated as steps toward internal machinery rather than as the final way people will interact with the tool. So the specification that defines the product boundary is written as though today’s product were a way-station. Worth separating from a related non-issue: the same document is written against a future entrypoint name that exists nowhere in the code, and an independent check found that this is fine, because the document declares that choice openly in its opening paragraphs and explains why. The precursor framing is different — it is not declared anywhere as a deliberate departure, and it contradicts the conviction rather than restating it. This document is constitutional, so nothing may change it without your decision.
+
+### The question
+
+spec/audit/entrypoint-contract.md describes the shipped /audit-code slash workflow as an interim precursor and says the current CLI commands should be treated as precursors, not the final public interaction model. CLAUDE.md states the slash workflow IS the product. Which stands?
+
+### Your answer
+
+- [ ] **1. The conviction stands** — Conversation-first is settled: the slash workflow is the product. Rewrite the precursor framing so the contract describes the shipped surface as the interaction model, keeping the aspirational entrypoint name if it is still wanted.
+- [ ] **2. The contract stands** — The internal-executor direction is still intended and the shipped surface really is interim. Leave the contract and reconcile CLAUDE.md instead.
+- [ ] **3. Both, at different layers** — They describe different layers and do not conflict. Add a sentence to the contract saying so, and stop raising it.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- spec/audit/entrypoint-contract.md calls the conversation-first CLI and slash command the interim precursor surface, and states that the current CLI commands should be treated as precursors to internal executors, not as the final public interaction model.
+- CLAUDE.md states: Conversation-first. Product is the slash workflow inside host conversation; CLI is backend/fallback.
+- This was raised by the independent adversary pass as a false negative, after it REFUTED the related surface finding: the doc openly declares that it is written against an aspirational entrypoint name and explains why, so code-absence of that name is the doc working as designed. The precursor framing carries no such declaration.
+- Escalate-only: spec/audit/* is constitutional per src/shared/constitutionalDocPaths.ts.
+
+</details>
 
 ---
 
@@ -35,7 +289,7 @@ records them in the tracked ledger, and does the work.
 
 ## `backlogN-1` — Backlog disambiguation: "one run identity" is the stated property, but the adversary says the gap is LINKAGE, not identity — decide which the entry means <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Backlog disambiguation · open 2 nights · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -80,7 +334,7 @@ docs/backlog/open-bugs.md states the property as "one run identity across step e
 
 ## `solN-1` — A generator-parity gate registered preCommit:false lets a stale tracked render land — approve the reach fix plus the contract test that forbids the shape <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `scripts/guard-reach-data.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · open 2 nights · `scripts/guard-reach-data.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -122,29 +376,73 @@ Full proposal: [`.audit-tools/nightly/proposals/P39-generator-gate-outside-the-c
 ---
 
 
+<!-- nightly:item key=412767804febffc4 -->
+
+## `sol-1` — P40: approve rendering a prompt output contract FROM the contract — two live sites, one already fixed this way, red-green proof attached <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `src/audit/cli/charterExtractionPrompt.ts`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+When this tool hands work to a worker, the instructions it sends describe the shape of the answer it wants back. That description is typed by hand. The check that judges the returned answer is written separately, also by hand. When the two disagree, a worker that follows the instructions exactly produces an answer the tool then rejects — the tool blames the worker for obeying it. This has now happened on both halves of the project and cost real time: one charter submission was thrown away after a thirty-four-minute run, because the instructions showed a list of allowed values ending in three dots, which invited a value the checker does not accept. The audit half already fixed its own version of this properly, by generating the description from the very schema the checker uses, so the two cannot drift apart. Two places never got that treatment and are still wrong today. The proposal is to give them the same fix and add a test that refuses the shape in future. One thing is worth knowing before you decide: a related claim in the backlog is wrong, and acting on it would break working code — a field the instructions leave out is left out on purpose, because the tool fills it in itself.
+
+### The question
+
+Approve P40 — render the charter provenance enum from CharterProvenanceSchema, state the excluded_scope element shape in both branches of the confirm-intent template, and add the contract test that forbids both shapes?
+
+### Your answer
+
+- [ ] **1. Approve as proposed** — Land P40: both prompt fixes plus tests/shared/prompt-renders-its-contract.test.ts, with the charter list RENDERED from CharterProvenanceSchema rather than retyped, and a guard-reach registry row declaring the uncovered half.
+- [ ] **2. Fixes only, no test** — Land the two prompt fixes but not the contract test, accepting that a third site introduced later goes uncaught.
+- [ ] **3. Decline** — Leave both sites as written. Trim the refuted created_at claim out of the 2026-08-19 backlog entry either way, since acting on it would corrupt working code.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P40-prompt-renders-its-contract/proposal.md`](../.audit-tools/nightly/proposals/P40-prompt-renders-its-contract/proposal.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+<details>
+<summary>Evidence (8) — what was verified against code, and how</summary>
+
+- Recurrence: 3 backlog entries across 2 distinct dates (2026-08-19, 2026-08-21), spanning both orchestrators.
+- Measured cost: one submission quarantined after a 34-minute lane run; one run wedged with no supported recovery path.
+- The audit half already shipped this exact mechanism — findingContractPromptLines() in src/audit/cli/dispatch/hostHandoff.ts, whose comment reads "The finding contract is CARRIED, not referenced: it is rendered from the very schema ingestion enforces".
+- Site 1 LIVE at HEAD: src/audit/cli/charterExtractionPrompt.ts renders the closed provenance enum as an open alternation ending in an ellipsis.
+- Site 2 LIVE at HEAD: src/remediate/steps/nextStep.ts renders a bare excluded_scope array in the pre-drafted branch, while the fallback branch of the SAME function renders the correct path/reason element shape.
+- Red-green validated this run: 2 tests failed at HEAD for the intended reasons, 2 passed with both fixes applied, then the edits were INVERTED — nothing landed.
+- REFUTED, do not act on it: the created_at claim in the 2026-08-19 entry. All 15 contract-pipeline sketches omit created_at CORRECTLY, because src/remediate/steps/contractPipeline.ts stamps it tool-side ("The host has no clock"). A field-set reconciliation test would be red on 15 correct sites.
+- Full proposal, the two verbatim edits, and the test: .audit-tools/nightly/proposals/P40-prompt-renders-its-contract/
+
+</details>
+
+---
+
+
 <details>
 <summary>What the last run could NOT cover</summary>
 
 
-- Leg 1 semantic coverage was PARTIAL. Five docs were examined item-by-item and stamped at HEAD 01595a4c (docs/HANDOFF.md, docs/nightly-routine.md, docs/nightly-routine-prompt.md, spec/cross-tool-alignment.md, spec/mechanical-analyzer-layer-design.md — 219 items). The remaining 49 in-scope docs got the FULL mechanical gate set (all 16 green), a corpus-wide status-noise scan, and a corpus-wide command/path resolution scan (every `npm run <x>` and `node scripts/...` named in any tracked doc resolves), but not a per-item semantic walk. Counts: .audit-tools/nightly/leg1-2026-08-21-coverage.json. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- APPLIED NOTHING — the working tree was dirty at run start (untracked `high.json`, present before this run began). Per the clean-tree rule the routine reviewed and reported in full but wrote no doc edit. Ten verified stale-factual fixes are therefore NOT landed and are listed below rather than escalated, because they are auto-apply class and not the owner's decision to make. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- THE CODEX REVIEWER LANE FAILED THREE TIMES ON OPEN-ENDED REVIEW, exit code 0 each time — a masked failure. Batches A (three remediate specs), B (six audit specs) and C (nine package docs/READMEs) each ran 45+ minutes, produced 400KB-900KB of tool output, and ended WITHOUT a final answer: A died on "code-mode host closed its stdout", B and C ended on the literal line "collab: Wait". No CLEAN verdict and no finding was emitted by any of the three. Their output was discarded rather than counted, and leg 1 fell back to this session's own direct reads plus the mechanical gates.
+- Blocked auto-apply (leg 1, docs/glossary-ids.md) — verified mechanically this run: the INV-ID and INV-RSM-SPLIT rows cite identifiers that occur in zero source files; the INV-IR owner column names derive.ts and artifactStore.ts but only changeClassification.ts cites it; the N-R21 owner column names steps/contractPipeline.ts but only validation/contractPipelineGates.ts cites it; the INV-RS owner column names phases/close.ts, which carries only INV-COVERAGE and INV-ISC-EVIDENCE-EMITTED; the INV-O2 owner column names orchestrator/ledger.ts, which carries only the file-local INV-1/2/3; and the live-counterexample sentence omits CE-P3-001 (src/remediate/phases/triage.ts).
 
-- THE SAME LANE SUCCEEDED when the task was narrowed and forced to finish. A retry scoped to three named files, forbidden from running shell commands, and told explicitly that its final message must be the answer, returned a usable verdict in ~4 minutes ("A) none  B) none"). The discriminator is scope plus a forced-finish turn, not lane health — Codex was probed live and healthy at run start.
+- Blocked auto-apply (leg 1, docs/audit-pkg/development.md) — it credits src/audit/README.md with the PRIORITY-is-authoritative disclaimer, which is a 22-line module index; the disclaimer is in the root README.md.
 
-- The free-provider lane was USABLE tonight and was used twice: once as an independent adversary confirming the leg-3 premise by enumerating all 33 gate rows from source (CONFIRMED), and once for the leg-2 adversary characterization. It made one minor error in the first pass (it read check:handoff-roadmap's fix as not matching the regenerate-shaped regex when it does contain "generate-"); the error did not change the verdict, and it is noted rather than hidden.
+- Blocked auto-apply (leg 1, .claude/skills/disambiguate-backlog/SKILL.md) — the backlog-rename parenthetical in the Scope list opens a parenthesis that is never closed, and is migration residue that the current file names immediately precede.
 
-- A LEG-1 FALSE POSITIVE WAS CAUGHT AND DISCARDED, recorded so it is not re-derived: a mechanical comparison of the spec docs against the PRIORITY array in src/audit/orchestrator/nextStep.ts appeared to show `friction_capture_current` documented but absent from PRIORITY. It is present, as the constant FRICTION_CAPTURE_OBLIGATION_ID rather than a string literal, so the regex could not see it. Independently confirmed clean by the Codex retry. No drift exists. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Blocked mechanical cleanup (leg 2) — the same clean-tree rule blocks the backlog's shipped-entry deletions and status-noise trims. The classification sweep ran to completion and its verdicts are recorded, but nothing was deleted or trimmed.
 
-- Leg 2 SWEPT the whole backlog: 89 of 89 entries attempted, 71 classified, 18 errored, NOT aborted (.audit-tools/nightly/triage-2026-08-21-coverage.json). 28 entries came back probes_unusable, which is high and bounds how much of the sweep can auto-close.
+- Codex lane UNAVAILABLE — `codex exec` returned 'You've hit your usage limit … try again at Aug 27th, 2026'. Its share of the work was re-routed to independent reviewer and adversary lanes plus the free-provider session, so no leg-1 coverage was lost. Recorded because the lane is dead until 2026-08-27 and the next several runs must route around it. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- Leg 2 applied NO mechanical cleanup, and both already_shipped_or_stale leads were REJECTED with reasons. open-bugs#b3e71bd5 ("Top gate optimization") is NOT fully shipped — it carries an open remainder ("possibly splitting the 100s+ files across more shards (verify per-file...)"), so deleting it would destroy live open work; the lead also carries no code_paths and its premise is unprobed. forward-tracks#55883634 ("CI wall-clock") was rejected for the same reason as on 2026-08-20: it is a pointer whose work is owned outside this repo, which is not proof a fix shipped, and deleting it would destroy the pointer to docs/reviews/ci-wallclock-plan-critique-2026-08-07.md.
+- Leg 2 sweep — 94 of 96 backlog entries classified after one retry pass; 2 entries still errored (the lane returned no parseable JSON object). Those 2 are unclassified this run. Coverage read from .audit-tools/nightly/triage-2026-08-22-coverage.json, not eyeballed.
 
-- Leg 2 flagged 12 entries owner_decision_needed and raised exactly ONE of them (open-bugs#da502b77, the run-id identity question). The other 11 were not raised: raising twelve one-at-a-time propositions in a single night is queue noise, and the disambiguate-backlog rubric this leg reuses works one item at a time. The 11 are listed in .audit-tools/nightly/triage-2026-08-21.jsonl and stay available to the next run.
+- Leg 2 premise probes — 5 of the retried entries came back `probes_unusable`, meaning the lane's quoted fragments could not be evaluated against the tree. Those verdicts carry no premise confirmation and must be re-verified against HEAD before any of them is worked. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- The weekly /insights pass WAS due (stamp read 2026-08-14T09:07:47Z, over seven days) and RAN. 15 suggestions triaged against HEAD: 9 already shipped, 5 debatable, 1 genuinely open. The single open one — mechanically enforcing red-green per commit — is ALREADY TRACKED in docs/backlog/open-bugs.md with an owner decision recorded 2026-07-25 to build it with a diff-derived site list, so no new item was raised for it. Two of the five debatable ones are RETIREMENT COLLISIONS and were dropped rather than escalated: the report recommends a per-lane cost ledger with a model-tier ladder and quota budgets inside this repo, which is exactly the execution/quota substrate deliberately retired in the zero-adapter cut. Full triage: .audit-tools/nightly/insights-2026-08-21.txt.
-
-- One insights suggestion could NOT be raised as an item and is stated here instead: it proposes that "audit"/"read-only"/"do not edit" should forbid creating report files, which conflicts with the standing global rule that findings always land in a file. Its premise lives in ~/.claude/CLAUDE.md, which is outside this repo and not git-tracked, so no probe form can carry it and writeOpenItems would refuse the item. Recurrence is also weak — one cited session.
+- The /insights weekly pass was NOT due (stamp `ran_at` 2026-08-21, under seven days old), so it did not run. Recorded for completeness only — being not-due is not a skipped leg. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 
 </details>
