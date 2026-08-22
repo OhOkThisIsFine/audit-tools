@@ -25,6 +25,9 @@ records them in the tracked ledger, and does the work.
 *Last run: 2026-08-22 at `ad9bb882b213dcf4bbed52b5d302e857c28e5b81`.*
 
 
+> **2 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+
+
 ---
 
 
@@ -363,101 +366,6 @@ docs/backlog/open-bugs.md states the property as "one run identity across step e
 - Adversary characterization from the independent free-provider lane (.audit-tools/nightly/free-adv2-0821.log): different lifecycles per notion; a step envelope can fail without invalidating an already-emitted dispatch run; the timestamped dispatch ids carry temporal semantics a unified opaque id loses; friction is cross-cutting rather than hierarchical, so one parent id inverts the relationship; and the cheapest alternative is nullable foreign keys on the friction record.
 - The adversary reasoned from the proposal text only and did not read source — its lifecycle claims are argument, not verified fact, and are offered as the counter-case rather than as evidence.
 - Related durable memory: renaming-a-persisted-field-is-not-a-rename, identity-change-must-audit-its-filters, prefix-join-between-two-name-spaces-fails-empty — all three describe the cost of changing a persisted identity, which is what option 1 commits to.
-
-</details>
-
----
-
-
-# Recurring-problem solutions
-
-
-<!-- nightly:item key=412767804febffc4 -->
-
-## `sol-1` — P40: approve rendering a prompt output contract FROM the contract — two live sites, one already fixed this way, red-green proof attached <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Recurring-problem solutions · open 1 night · `src/audit/cli/charterExtractionPrompt.ts`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-When this tool hands work to a worker, the instructions it sends describe the shape of the answer it wants back. That description is typed by hand. The check that judges the returned answer is written separately, also by hand. When the two disagree, a worker that follows the instructions exactly produces an answer the tool then rejects — the tool blames the worker for obeying it. This has now happened on both halves of the project and cost real time: one charter submission was thrown away after a thirty-four-minute run, because the instructions showed a list of allowed values ending in three dots, which invited a value the checker does not accept. The audit half already fixed its own version of this properly, by generating the description from the very schema the checker uses, so the two cannot drift apart. Two places never got that treatment and are still wrong today. The proposal is to give them the same fix and add a test that refuses the shape in future. One thing is worth knowing before you decide: a related claim in the backlog is wrong, and acting on it would break working code — a field the instructions leave out is left out on purpose, because the tool fills it in itself.
-
-### The question
-
-Approve P40 — render the charter provenance enum from CharterProvenanceSchema, state the excluded_scope element shape in both branches of the confirm-intent template, and add the contract test that forbids both shapes?
-
-### Your answer
-
-- [x] **1. Approve as proposed** — Land P40: both prompt fixes plus tests/shared/prompt-renders-its-contract.test.ts, with the charter list RENDERED from CharterProvenanceSchema rather than retyped, and a guard-reach registry row declaring the uncovered half.
-- [ ] **2. Fixes only, no test** — Land the two prompt fixes but not the contract test, accepting that a third site introduced later goes uncaught.
-- [ ] **3. Decline** — Leave both sites as written. Trim the refuted created_at claim out of the 2026-08-19 backlog entry either way, since acting on it would corrupt working code.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-Full proposal: [`.audit-tools/nightly/proposals/P40-prompt-renders-its-contract/proposal.md`](../.audit-tools/nightly/proposals/P40-prompt-renders-its-contract/proposal.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-<details>
-<summary>Evidence (8) — what was verified against code, and how</summary>
-
-- Recurrence: 3 backlog entries across 2 distinct dates (2026-08-19, 2026-08-21), spanning both orchestrators.
-- Measured cost: one submission quarantined after a 34-minute lane run; one run wedged with no supported recovery path.
-- The audit half already shipped this exact mechanism — findingContractPromptLines() in src/audit/cli/dispatch/hostHandoff.ts, whose comment reads "The finding contract is CARRIED, not referenced: it is rendered from the very schema ingestion enforces".
-- Site 1 LIVE at HEAD: src/audit/cli/charterExtractionPrompt.ts renders the closed provenance enum as an open alternation ending in an ellipsis.
-- Site 2 LIVE at HEAD: src/remediate/steps/nextStep.ts renders a bare excluded_scope array in the pre-drafted branch, while the fallback branch of the SAME function renders the correct path/reason element shape.
-- Red-green validated this run: 2 tests failed at HEAD for the intended reasons, 2 passed with both fixes applied, then the edits were INVERTED — nothing landed.
-- REFUTED, do not act on it: the created_at claim in the 2026-08-19 entry. All 15 contract-pipeline sketches omit created_at CORRECTLY, because src/remediate/steps/contractPipeline.ts stamps it tool-side ("The host has no clock"). A field-set reconciliation test would be red on 15 correct sites.
-- Full proposal, the two verbatim edits, and the test: .audit-tools/nightly/proposals/P40-prompt-renders-its-contract/
-
-</details>
-
----
-
-
-<!-- nightly:item key=51c20f54edd9aafb -->
-
-## `solN-1` — A generator-parity gate registered preCommit:false lets a stale tracked render land — approve the reach fix plus the contract test that forbids the shape <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Recurring-problem solutions · open 2 nights · `scripts/guard-reach-data.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-Several files in this repo are not written by hand. A script reads some source files and writes a tracked file from them, so the tracked file is a copy that must be kept in step. For each of those, there is a check whose whole job is to say "this copy is out of date, regenerate it". A check like that only protects you if it runs at the moment the copy goes stale, which is when you commit. The registry that lists every check records, per check, whether it runs at commit time. Nine of these regeneration checks are registered to run at commit. One is not: check:runtime-artifact-names is registered as not running at commit at all, so it only fires later, at release time. That is exactly what happened on 2026-08-20. A deletion in the source moved the derived set, the tracked copy was left behind, the commit passed every gate, and the problem surfaced only when the full suite ran before tagging. It cost one failed suite run and a follow-up regeneration commit. The proposal has two halves. The first flips that one check to run at commit, and derives the list of files that trigger it from the list the generator already publishes about itself, so the trigger list cannot drift away from what the generator actually reads. The second half is a test that fails the build if anyone ever again registers a regeneration check as not-at-commit, so the mistake becomes impossible rather than merely fixed once. Saying yes means both halves get built and red-green validated. Saying yes to the first half only means the instance is fixed but the shape can come back. Saying no means the check stays a release-time check and a stale render can keep landing green.
-
-### The question
-
-scripts/guard-reach-data.mjs registers check:runtime-artifact-names with preCommit:false, while every other generator-parity gate is preCommit:'reach'. It is the only gate row whose fix text is regenerate-shaped AND whose preCommit is false. Should the routine build the two-part fix — flip that row to 'reach' with a REACH row derived from the generator's exported RUNTIME_NAME_SOURCES, and add a contract test that forbids a regenerate-shaped fix on a preCommit:false gate?
-
-### Your answer
-
-- [x] **1. Build both halves** — Approved — build both. Flip check:runtime-artifact-names to preCommit:'reach' and add a REACH row whose files are DERIVED from the generator's exported RUNTIME_NAME_SOURCES (plus the generator and its render), so the reach cannot drift narrower than what the generator reads. Then add tests/shared/generator-gates-run-at-commit.test.ts asserting no gate with a regenerate-shaped fix is registered preCommit:false. Red-green validate: the test must be RED at HEAD naming check:runtime-artifact-names before the flip lands.
-- [ ] **2. Fix the instance only** — Flip check:runtime-artifact-names to preCommit:'reach' with the derived REACH row, but do not add the contract test. Accept that a future generator-parity gate can be registered outside the commit gate again; the regenerate-shaped predicate keys on fix prose and is not worth the false-negative surface.
-- [ ] **3. Leave it at release time** — Leave check:runtime-artifact-names as preCommit:false. The 13 layout-source paths are loop-core adjacent and change often, so the leg would fire regularly; catching the stale render at verify:checks before the tag is a good enough backstop and does not slow every commit.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-Full proposal: [`.audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PATCH.md`](../.audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PATCH.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-<details>
-<summary>Evidence (8) — what was verified against code, and how</summary>
-
-- scripts/guard-reach-data.mjs — the check:runtime-artifact-names gate row reads `impl: 'check:runtime-artifact-names', preCommit: false,` with a regenerate-shaped fix ('runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs'). <!-- doc-citation-exempt: quoted item prose, not citations -->
-- Enumerated every GUARDS row with kind:'gate' — 33 rows. check:runtime-artifact-names is the ONLY one whose fix matches /regenerat|generate-|--write|is stale/i AND whose preCommit is false. The nine comparable generator-parity gates (doc-manifest, doc-links, gate-enumeration, philosophy-brief, nightly-routine-prompt, handoff-roadmap, backlog-index, ci-trigger-paths, memory-citations, offload-lanes) are all 'reach', 'final' or 'always'.
-- Independently confirmed by the free-provider lane, which enumerated all 33 gate rows from source and returned CONFIRMED on the count and the id (.audit-tools/nightly/free-adv-0821.log).
-- Independently reached a third time by leg 2's mechanical backlog sweep, which classified the corresponding open-bugs entry actionable_now with the action 'Add check:runtime-artifact-names to the commit gate's triggered checks' (.audit-tools/nightly/triage-2026-08-21.jsonl).
-- scripts/shared/generate-runtime-artifact-names.mjs exports RUNTIME_NAME_SOURCES, a declared 13-entry list of the source files the generator reads — so the REACH row can be derived rather than hand-listed. Its CLI body is guarded by an import.meta.url check, so importing the module never writes.
-- Recurrence, counted: docs/backlog/open-bugs.md carries two 2026-08-20 entries of this class (the runtime-artifact-names render, and the nightly-queue/HANDOFF live-status desync); P19 is the same class on three earlier dates and is why scripts/shared/derived-file-preflight.mjs exists at all. The mechanism was built; this row was left outside it.
-- Cost of the 2026-08-20 instance: one failed full-suite run plus the follow-up regeneration commit 85609eb7.
-- Full proposal, mechanism, false-positive surface and the stated enforcement limit: .audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PROPOSAL.md; the exact edits and the red-green ordering: .../PATCH.md
 
 </details>
 
