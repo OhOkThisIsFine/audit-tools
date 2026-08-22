@@ -56,6 +56,10 @@ import {
   type SubmissionReadOutcome,
   type SubmissionRoots,
 } from "audit-tools/shared";
+import type {
+  AuditHostIngestIssue,
+  AuditIngestIssueCode,
+} from "../validation/ingestIssueCodes.js";
 
 /**
  * Gate lane ids — the single join key between an emitter and its gate reader.
@@ -528,7 +532,7 @@ export async function recordHostResultOutcomes(
   artifactsDir: string,
   runId: string,
   outcomes: {
-    readonly issues: readonly SubmissionIssue[];
+    readonly issues: readonly AuditHostIngestIssue[];
     /** Work items whose results this run has accepted (ingest's completed set). */
     readonly acceptedIds: readonly string[];
   },
@@ -544,7 +548,7 @@ export async function recordHostResultOutcomes(
   const append = async (
     submissionId: string,
     event: Omit<
-      SubmissionLedgerEvent,
+      SubmissionLedgerEvent<AuditIngestIssueCode>,
       "contract_version" | "run_id" | "submission_id" | "lane" | "recorded_at"
     >,
   ): Promise<void> => {

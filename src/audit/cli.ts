@@ -32,6 +32,7 @@ import { cmdResynthesize } from "./cli/resynthesizeCommand.js";
 import { cmdCleanup } from "./cli/cleanupCommand.js";
 import { cmdScoreAudit } from "./cli/scoreAuditCommand.js";
 import { cmdRecoverSubmission } from "./cli/recoverSubmissionCommand.js";
+import { cmdUnacceptResults } from "./cli/unacceptResultsCommand.js";
 
 export { runSample };
 
@@ -62,6 +63,35 @@ export const cliTestUtils = {
  */
 const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set();
 
+/**
+ * The ONE route table for the audit CLI. Each row is [verb, handler]; the
+ * dispatch below walks it and the unknown-command listing is DERIVED from it —
+ * never a second hand-maintained copy that drifts when a verb is added.
+ */
+export const COMMAND_ROUTES: ReadonlyArray<
+  readonly [string, (argv: string[]) => Promise<void>]
+> = [
+  ["sample-run", runSample],
+  ["next-step", cmdNextStep],
+  ["import-external-analyzer", cmdImportExternalAnalyzer],
+  ["intake", cmdIntake],
+  ["plan", cmdPlan],
+  ["ingest-results", cmdIngestResults],
+  ["explain-task", cmdExplainTask],
+  ["update-runtime-validation", cmdUpdateRuntimeValidation],
+  ["validate", cmdValidate],
+  ["validate-results", cmdValidateResults],
+  ["requeue", cmdRequeue],
+  ["synthesize", cmdSynthesize],
+  ["force-synthesis", cmdForceSynthesis],
+  ["resynthesize", cmdResynthesize],
+  ["cleanup", cmdCleanup],
+  ["status", cmdStatus],
+  ["score-audit", cmdScoreAudit],
+  ["recover-submission", cmdRecoverSubmission],
+  ["unaccept-results", cmdUnacceptResults],
+];
+
 async function main(argv: string[]): Promise<void> {
   const command = argv[2] ?? "sample-run";
   assertCliCommandAllowedFromCwd({
@@ -72,68 +102,16 @@ async function main(argv: string[]): Promise<void> {
     // worktree evidence, so the guard must see the unanchored value.
     rawRoot: getFlag(argv, "--root"),
   });
-  switch (command) {
-    case "sample-run":
-      await runSample(argv);
-      return;
-    case "next-step":
-      await cmdNextStep(argv);
-      return;
-    case "import-external-analyzer":
-      await cmdImportExternalAnalyzer(argv);
-      return;
-    case "intake":
-      await cmdIntake(argv);
-      return;
-    case "plan":
-      await cmdPlan(argv);
-      return;
-    case "ingest-results":
-      await cmdIngestResults(argv);
-      return;
-    case "explain-task":
-      await cmdExplainTask(argv);
-      return;
-    case "update-runtime-validation":
-      await cmdUpdateRuntimeValidation(argv);
-      return;
-    case "validate":
-      await cmdValidate(argv);
-      return;
-    case "validate-results":
-      await cmdValidateResults(argv);
-      return;
-    case "requeue":
-      await cmdRequeue(argv);
-      return;
-    case "synthesize":
-      await cmdSynthesize(argv);
-      return;
-    case "force-synthesis":
-      await cmdForceSynthesis(argv);
-      return;
-    case "resynthesize":
-      await cmdResynthesize(argv);
-      return;
-    case "cleanup":
-      await cmdCleanup(argv);
-      return;
-    case "status":
-      await cmdStatus(argv);
-      return;
-    case "score-audit":
-      await cmdScoreAudit(argv);
-      return;
-    case "recover-submission":
-      await cmdRecoverSubmission(argv);
-      return;
-    default:
-      console.error(`Unknown command: ${command}`);
-      console.error(
-        "Available commands: sample-run, next-step, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, force-synthesis, resynthesize, cleanup, status, score-audit, recover-submission",
-      );
-      process.exitCode = 1;
+  const route = COMMAND_ROUTES.find(([verb]) => verb === command);
+  if (!route) {
+    console.error(`Unknown command: ${command}`);
+    console.error(
+      `Available commands: ${COMMAND_ROUTES.map(([verb]) => verb).join(", ")}`,
+    );
+    process.exitCode = 1;
+    return;
   }
+  await route[1](argv);
 }
 
 export async function runCli(argv: string[]): Promise<void> {

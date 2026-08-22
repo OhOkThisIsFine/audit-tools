@@ -7,6 +7,7 @@
  */
 export { buildPendingAuditTasks } from "./dispatch/packetFilter.js";
 export {
+  dropAcceptedResults,
   ingestAuditHostResults,
   prepareAuditHostHandoff,
   type AuditHostIngestSummary,

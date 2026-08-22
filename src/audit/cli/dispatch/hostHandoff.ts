@@ -5,6 +5,8 @@ import {
   FindingSchema,
   createMemoizedSourceReader,
   findingContractPromptLines,
+  appendSubmissionEvent,
+  SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   assertSubmissionRunId,
   hashContent,
   isFileMissingError,
@@ -16,11 +18,17 @@ import {
   submissionPathFor,
   verifyFindingGrounding,
   withFileLock,
+  writeBlockedStepContract,
   writeJsonFile,
   type RunLogger,
   type SubmissionIssue,
 } from "audit-tools/shared";
-import { AuditResultSchema, type AuditResult } from "../../types.js";
+import { AuditResultSchema, type AuditResult, type AuditTask } from "../../types.js";
+import {
+  validateOneAuditResult,
+  formatAuditResultIssues,
+} from "../../validation/auditResults.js";
+import type { AuditHostIngestIssue } from "../../validation/ingestIssueCodes.js";
 
 const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha1" as const;
 const RESULT_MAP_CONTRACT_VERSION = "audit-host-result-map/v1alpha1" as const;
@@ -88,6 +96,18 @@ export interface PreparedAuditHostHandoff {
   readonly result_map_path: string;
 }
 
+/**
+ * One ADVISORY validation finding on an ACCEPTED result. Deliberately not a
+ * {@link SubmissionIssue}: an accepted result was never refused, so it must
+ * never ride (or be recorded through) the rejection-classified channel — see
+ * {@link AuditHostIngestSummary.validation_warnings}.
+ */
+export interface AuditHostValidationWarning {
+  readonly work_item_id: string;
+  readonly result_path: string;
+  readonly message: string;
+}
+
 export interface AuditHostIngestSummary {
   readonly accepted_count: number;
   readonly accepted_results: readonly AuditResult[];
@@ -103,7 +123,15 @@ export interface AuditHostIngestSummary {
    * garbage were indistinguishable to every caller, which is exactly the
    * measured drift P25 exists to make visible.
    */
-  readonly issues: readonly SubmissionIssue[];
+  readonly issues: readonly AuditHostIngestIssue[];
+  /**
+   * Advisory validation findings on results that WERE accepted — a small
+   * coverage-stat divergence, verification metadata on a non-verification
+   * task. Never a refusal: they ride this separate channel precisely so the
+   * rejection list stays rejections only, and no ledger records an acceptance
+   * as one.
+   */
+  readonly validation_warnings: readonly AuditHostValidationWarning[];
 }
 
 interface HostCoverage {
@@ -1034,6 +1062,22 @@ export async function ingestAuditHostResults(params: {
   readonly root: string;
   readonly artifactsDir: string;
   readonly runId: string;
+  /**
+   * The active audit-task manifest, REQUIRED: every task-known result is put
+   * through the SAME per-result rules `validateAuditResults` applies to the
+   * batch BEFORE it is written to the accepted pair; a task-unknown (orphan)
+   * result passes through unvalidated, mirroring the batch gate's retention of
+   * orphans. Requiring it here means no caller can silently regain
+   * accept-without-validation by forgetting to pass the manifest.
+   */
+  readonly auditTasks: readonly AuditTask[];
+  /**
+   * Normalized path → actual line count, built from the repo manifest exactly as
+   * {@link runAuditStep} builds it. Threads the line-count rules of the batch
+   * gate into the accept decision; absent means those checks degrade to skips,
+   * never to errors.
+   */
+  readonly lineIndex?: Record<string, number>;
   /** See {@link prepareAuditHostHandoff}'s `logger`. */
   readonly logger?: RunLogger;
 }): Promise<AuditHostIngestSummary> {
@@ -1063,9 +1107,11 @@ export async function ingestAuditHostResults(params: {
   const acceptedBindings = new Set(accepted.entries.map(bindingIdentity));
   const resultIds = new Set(accepted.entries.map((entry) => entry.result_id));
   const additions: AcceptedResultEntry[] = [];
-  const issues: SubmissionIssue[] = [];
+  const issues: AuditHostIngestIssue[] = [];
+  const validation_warnings: AuditHostValidationWarning[] = [];
   // One memoized reader for the whole ingest: N findings citing one file read it once.
   const readSource = createMemoizedSourceReader();
+  const activeTaskIds = new Set(params.auditTasks.map((task) => task.task_id));
 
   for (const entry of resultMap.entries) {
     if (acceptedBindings.has(bindingIdentity(entry))) continue;
@@ -1112,6 +1158,62 @@ export async function ingestAuditHostResults(params: {
       });
       continue;
     }
+
+    // VALIDATE BEFORE ACCEPT. The conversion above proves only the envelope
+    // contract (`FindingSchema` admits an evidence-less finding); these are the
+    // per-result rules the downstream batch gate applies, applied HERE so an
+    // error-severity issue never reaches the accepted pair. A rejected item is
+    // simply never in the ledger, so the corrected file at the same bound path
+    // is re-read on the next fold — acceptance used to be terminal instead, and
+    // a failed batch gate then wedged the run permanently.
+    //
+    // Orphans (task pruned by a re-plan) pass through UNVALIDATED with the same
+    // stderr notice the batch gate uses — never newly rejected: refusing one
+    // here would strand it outside the append-only ledger entirely.
+    if (!activeTaskIds.has(entry.work_item_id)) {
+      process.stderr.write(
+        `audit host-handoff ingest: result for '${entry.work_item_id}' is not in the ` +
+          `active task manifest (orphaned by re-planning); retained in the accepted pair ` +
+          `but skipped at the validation gate\n`,
+      );
+    } else {
+      const validationIssues = validateOneAuditResult(converted.auditResult, [
+        ...params.auditTasks,
+      ], {
+        lineIndex: params.lineIndex,
+      });
+      const errors = validationIssues.filter((issue) => issue.severity === "error");
+      if (errors.length > 0) {
+        issues.push({
+          code: "result_validation_failed",
+          message:
+            `work item '${entry.work_item_id}' failed audit-results validation ` +
+            `(${errors.length} error(s)); fix the result file at its bound path and call next-step again: ` +
+            formatAuditResultIssues(errors),
+          work_item_id: entry.work_item_id,
+          result_path: entry.result_path,
+        });
+        continue;
+      }
+      // Warnings are NOT rejections: an accepted result never refused anything,
+      // so a warning must never reach the rejection-classified issue list — the
+      // ONE ledger recorder would otherwise record kind:'rejected' for a result
+      // that was accepted, manufacturing a repair story that never happened.
+      // They ride the separate advisory channel instead (rendered for the
+      // operator; never counted as a submission that could not be accepted).
+      validation_warnings.push(
+        ...validationIssues
+          .filter((issue) => issue.severity === "warning")
+          .map(
+            (warning): AuditHostValidationWarning => ({
+              work_item_id: entry.work_item_id,
+              result_path: entry.result_path,
+              message: `${warning.message} (${warning.field})`,
+            }),
+          ),
+      );
+    }
+
     // S7 quote-and-verify: the tool re-reads each cited span from disk and
     // stamps the verdict. It NEVER rejects — a quote that does not re-verify
     // rides through as `ungrounded` and synthesis surfaces it under "Ungrounded
@@ -1183,13 +1285,117 @@ export async function ingestAuditHostResults(params: {
     });
   }
 
+  // Ledger recording is NOT done here. The shared submission ledger is written
+  // by the ONE recorder, `recordHostResultOutcomes`, at this ingest's only
+  // production caller — fed these very `issues` and `completed_work_item_ids` —
+  // so every rejection below already lands there in arrival order. A second
+  // writer inside the boundary would double-record the same fact.
+
   return {
     accepted_count: landed.length,
     accepted_results: ledger.entries.map((entry) => entry.audit_result),
     accepted_results_path: paths.acceptedResultsPath,
+    validation_warnings,
     completed_work_item_ids: [
       ...new Set(ledger.entries.map((entry) => entry.work_item_id)),
     ].sort(compareCodeUnits),
     issues,
   };
+}
+
+/**
+ * Remove accepted entries — the supported way back out of an acceptance.
+ *
+ * An accepted binding is skipped forever by {@link ingestAuditHostResults}, so
+ * before this verb existed the only exit from a poisoned acceptance was editing
+ * both files of the pair by hand. This runs under the SAME lock the writers use,
+ * rewrites BOTH files together (they are one logical record), refuses a ledger
+ * that fails the strict loader rather than truncating what it cannot validate,
+ * records each removal on the shared submission ledger so a repaired run stays
+ * distinguishable from a clean one, and invalidates the persisted step contract
+ * — a stale live instruction may not survive a verb that mutates run state.
+ */
+export async function dropAcceptedResults(params: {
+  readonly root: string;
+  readonly artifactsDir: string;
+  readonly runId: string;
+  /** Work items to drop. Required unless {@link dropAcceptedResults.all}. */
+  readonly workItemIds?: readonly string[];
+  /** Drop EVERY entry. */
+  readonly all?: boolean;
+  /** See {@link prepareAuditHostHandoff}'s `logger`. */
+  readonly logger?: RunLogger;
+}): Promise<{ readonly dropped_work_item_ids: readonly string[] }> {
+  if (params.all !== true && (params.workItemIds ?? []).length === 0) {
+    throw new Error(
+      "unaccept-results requires --work-item <id> (repeatable) or --all",
+    );
+  }
+  const paths = resolveBoundaryPaths(params);
+  const targets =
+    params.all === true ? undefined : new Set(params.workItemIds ?? []);
+  let droppedWorkItemIds: string[] = [];
+
+  await withAcceptedResultsLock(paths, params.logger, async (current) => {
+    if (current.entries.length === 0) return current;
+    const isTarget = (workItemId: string) =>
+      params.all === true ? true : (targets?.has(workItemId) ?? false);
+    const kept = current.entries.filter(
+      (entry) => !isTarget(entry.work_item_id),
+    );
+    droppedWorkItemIds = current.entries
+      .filter((entry) => isTarget(entry.work_item_id))
+      .map((entry) => entry.work_item_id);
+    if (droppedWorkItemIds.length === 0) return current;
+    await writeAcceptedResults(paths, {
+      contract_version: ACCEPTED_RESULTS_CONTRACT_VERSION,
+      run_id: params.runId,
+      entries: kept,
+    });
+    return { ...current, entries: kept };
+  });
+
+  // Record each removal AFTER the pair is rewritten: the withdrawal must be on
+  // the record even though the accepted pair no longer mentions the item.
+  // Best-effort, like every other ledger write.
+  try {
+    for (const workItemId of droppedWorkItemIds) {
+      await appendSubmissionEvent(paths.artifactsDir, {
+        contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+        run_id: params.runId,
+        submission_id: workItemId,
+        lane: workItemId,
+        kind: "removed_by_operator",
+        message: "removed from the accepted results pair by unaccept-results",
+        recorded_at: new Date().toISOString(),
+      });
+    }
+  } catch (error) {
+    params.logger?.event?.({
+      phase: "advance",
+      kind: "error",
+      note: `submission-ledger removal record failed (non-fatal): ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    });
+  }
+
+  // Refresh-or-invalidate the persisted step contract: after mutating run state
+  // there must be no stale live instruction left on disk. The next `next-step`
+  // derives the real step fresh; until then the contract says blocked — through
+  // the ONE shared blocked-step assembly, never a hand-built writer here.
+  const reason =
+    droppedWorkItemIds.length > 0
+      ? `unaccept-results removed ${droppedWorkItemIds.length} accepted result(s) (${[...droppedWorkItemIds].sort().join(", ")}); run next-step to re-dispatch or re-ingest them`
+      : "unaccept-results ran but no accepted entry matched; run next-step to continue";
+  await writeBlockedStepContract({
+    tool: "audit-code",
+    contractVersion: "audit-code-step/v1alpha1",
+    artifactsDir: paths.artifactsDir,
+    repoRoot: paths.root,
+    runId: null,
+    reason,
+  });
+
+  return { dropped_work_item_ids: droppedWorkItemIds };
 }

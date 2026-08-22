@@ -58,6 +58,7 @@ import {
 import { writeFixtureRepo } from "../audit/helpers/fixture.mjs";
 import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
+import type { AuditTask } from "../../src/audit/types.js";
 
 const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.js");
@@ -302,6 +303,22 @@ async function auditFixture(taskIds: readonly string[] = ["T1"]): Promise<AuditF
   };
 }
 
+/**
+ * The AUDIT-SIDE manifest for {@link ingestAuditHostResults}: the same identity
+ * fields `auditTask` publishes through prepare, shaped as the `AuditTask` the
+ * per-result validator joins on.
+ */
+function auditManifest(taskIds: readonly string[]): AuditTask[] {
+  return taskIds.map((taskId) => ({
+    task_id: taskId,
+    unit_id: `${taskId}-unit`,
+    pass_id: "pass-1",
+    lens: "correctness",
+    file_paths: [AUDITED_FILE],
+    rationale: `review ${AUDITED_FILE}`,
+  }));
+}
+
 function auditSubmission(
   item: AuditFixture["items"][number],
   overrides: Readonly<Record<string, unknown>> = {},
@@ -389,7 +406,7 @@ describe("path containment is the tool's, not the caller's", () => {
       }),
     ).rejects.toThrow(/artifactsDir must remain beneath/u);
     await expect(
-      ingestAuditHostResults({ root, artifactsDir: escaping, runId: AUDIT_RUN_ID }),
+      ingestAuditHostResults({ root, artifactsDir: escaping, runId: AUDIT_RUN_ID, auditTasks: auditManifest(["T1"]) }),
     ).rejects.toThrow(/artifactsDir must remain beneath/u);
     // The refusal fires BEFORE any filesystem effect: nothing was created.
     expect(existsSync(escaping)).toBe(false);
@@ -412,6 +429,7 @@ describe("path containment is the tool's, not the caller's", () => {
         root: fixture.root,
         artifactsDir: fixture.artifactsDir,
         runId: AUDIT_RUN_ID,
+      auditTasks: auditManifest(fixture.items.map((item) => item.id)),
       }),
     ).rejects.toThrow(/Invalid audit host result binding/u);
   });
@@ -478,7 +496,7 @@ describe("the one filename rule and the run-id grammar", () => {
         prepareAuditHostHandoff({ root, artifactsDir, runId, tasks: [auditTask("T1")] }),
       ).rejects.toThrow(/Invalid audit host run id/u);
       await expect(
-        ingestAuditHostResults({ root, artifactsDir, runId }),
+        ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: auditManifest(["T1"]) }),
       ).rejects.toThrow(/Invalid audit host run id/u);
     }
     // No run directory — not even the artifacts dir — was created on the way out.
@@ -496,7 +514,8 @@ describe("the audit accepted-results ledger", () => {
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
-    });
+    auditTasks: auditManifest(fixture.items.map((item) => item.id)),
+      });
     expect(summary.accepted_count).toBe(1);
     expect(summary.issues).toEqual([]);
     expect(summary.completed_work_item_ids).toEqual([item.id]);
@@ -517,14 +536,16 @@ describe("the audit accepted-results ledger", () => {
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
-    });
+    auditTasks: auditManifest(fixture.items.map((item) => item.id)),
+      });
     const first = await readFile(fixture.ledgerPath, "utf8");
 
     const second = await ingestAuditHostResults({
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
-    });
+    auditTasks: auditManifest(fixture.items.map((item) => item.id)),
+      });
     expect(second.accepted_count).toBe(0);
     // Accepted-count 0 is not "nothing is done" — the completed set persists.
     expect(second.completed_work_item_ids).toEqual([item.id]);
@@ -540,7 +561,8 @@ describe("the audit accepted-results ledger", () => {
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
-    });
+    auditTasks: auditManifest(fixture.items.map((item) => item.id)),
+      });
 
     const next = await prepareAuditHostHandoff({
       root: fixture.root,
@@ -560,7 +582,8 @@ describe("the audit accepted-results ledger", () => {
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
-    });
+    auditTasks: auditManifest(fixture.items.map((item) => item.id)),
+      });
     expect(summary.accepted_count).toBe(0);
     expect(summary.issues.length).toBe(2);
     expect([...summary.issues].map((issue) => issue.code).sort()).toEqual([
@@ -584,7 +607,8 @@ describe("the audit accepted-results ledger", () => {
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
-    });
+    auditTasks: auditManifest(fixture.items.map((item) => item.id)),
+      });
     const invalid = coverage.issues.find(
       (issue) => issue.code === "submission_contract_invalid",
     );
@@ -607,7 +631,8 @@ describe("the audit accepted-results ledger", () => {
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
-    });
+    auditTasks: auditManifest(fixture.items.map((item) => item.id)),
+      });
     expect(summary.accepted_count).toBe(1);
     expect(summary.issues.map((issue) => issue.code)).toEqual(["duplicate_submission_id"]);
     expect(summary.completed_work_item_ids).toEqual([first!.id]);
@@ -641,7 +666,8 @@ describe("the audit accepted-results ledger", () => {
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
-    });
+    auditTasks: auditManifest(fixture.items.map((item) => item.id)),
+      });
     expect(summary.accepted_count).toBe(0);
     const issue = summary.issues[0];
     expect(issue?.code).toBe("submission_contract_invalid");
@@ -661,7 +687,8 @@ describe("the audit accepted-results ledger", () => {
           root: fixture.root,
           artifactsDir: fixture.artifactsDir,
           runId: AUDIT_RUN_ID,
-        }),
+        auditTasks: auditManifest(fixture.items.map((item) => item.id)),
+      }),
       () =>
         prepareAuditHostHandoff({
           root: fixture.root,
@@ -753,6 +780,7 @@ describe("the audit accepted-results ledger", () => {
         root: fixture.root,
         artifactsDir: fixture.artifactsDir,
         runId: AUDIT_RUN_ID,
+      auditTasks: auditManifest(fixture.items.map((item) => item.id)),
       }),
     ).rejects.toThrow("Invalid audit host result map");
   });

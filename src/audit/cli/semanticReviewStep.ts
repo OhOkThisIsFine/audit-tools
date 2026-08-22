@@ -1,12 +1,14 @@
 import { resolve } from "node:path";
 
-import { readJsonFile, type SubmissionIssue } from "audit-tools/shared";
+import { readJsonFile } from "audit-tools/shared";
 
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AuditTask } from "../types.js";
+import type { AuditHostIngestIssue } from "../validation/ingestIssueCodes.js";
 import {
   prepareAuditHostHandoff,
   type AuditHostTask,
+  type AuditHostValidationWarning,
 } from "./dispatch/hostHandoff.js";
 import { nextStepCommand } from "./prompts.js";
 import { writeCurrentStep } from "./steps.js";
@@ -43,7 +45,7 @@ function toHostTask(task: AuditTask): AuditHostTask {
  * in an identical workload.
  */
 function renderIngestIssueLines(
-  issues: readonly SubmissionIssue[],
+  issues: readonly AuditHostIngestIssue[],
 ): string[] {
   if (issues.length === 0) return [];
   return [
@@ -65,6 +67,28 @@ function renderIngestIssueLines(
 }
 
 /**
+ * The ADVISORY half of the ingest report: validation warnings on results that
+ * WERE accepted. Deliberately a separate renderer from {@link renderIngestIssueLines}
+ * — these need no repair, so they must not share a section (or a count) with
+ * items that could not be accepted, or an accepted-with-warning result reads as
+ * a refusal that never happened.
+ */
+function renderValidationWarningLines(
+  warnings: readonly AuditHostValidationWarning[],
+): string[] {
+  if (warnings.length === 0) return [];
+  return [
+    "## Advisory notes on accepted results",
+    "",
+    ...warnings.map(
+      (warning) =>
+        `- \`${warning.work_item_id}\` was ACCEPTED; advisory: ${warning.message}`,
+    ),
+    "",
+  ];
+}
+
+/**
  * Publish the complete provider-neutral semantic-review workload. The host owns
  * every execution choice; audit-tools only binds prompts/results and ingests
  * validated AuditResult objects on the next invocation.
@@ -76,7 +100,9 @@ export async function renderSemanticReviewStep(params: {
   selectedExecutor?: string | null;
   inProcessMadeProgress?: boolean;
   /** Failures the ingest that preceded this emission classified. */
-  ingestIssues?: readonly SubmissionIssue[];
+  ingestIssues?: readonly AuditHostIngestIssue[];
+  /** Advisory validation findings on results the SAME ingest accepted. */
+  validationWarnings?: readonly AuditHostValidationWarning[];
 }): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
   const { root, artifactsDir, activeReviewRun } = params;
   if (!activeReviewRun.pending_audit_tasks_path) {
@@ -99,6 +125,7 @@ export async function renderSemanticReviewStep(params: {
     resolve(root, item.result_path),
   );
   const issues = params.ingestIssues ?? [];
+  const validationWarnings = params.validationWarnings ?? [];
 
   return writeCurrentStep({
     artifactsDir,
@@ -130,6 +157,7 @@ export async function renderSemanticReviewStep(params: {
       "# audit-code semantic review",
       "",
       ...renderIngestIssueLines(issues),
+      ...renderValidationWarningLines(validationWarnings),
       `Read the complete provider-neutral workload at: ${handoff.workload_path}`,
       "",
       "Execute every work item using the host facilities available in this conversation.",

@@ -75,6 +75,8 @@ interface HostBoundary {
     readonly root: string;
     readonly artifactsDir: string;
     readonly runId: string;
+    /** The same manifest prepareAuditHostHandoff published. */
+    readonly auditTasks: readonly HostTask[];
   }) => Promise<IngestSummary>;
 }
 
@@ -163,7 +165,12 @@ describe(FAILURE_SIGNATURE, () => {
 
     // (a) Malformed bytes at the bound path.
     await writeFile(resultPath, "{ malformed", "utf8");
-    const malformed = await boundary.ingestAuditHostResults({ root, artifactsDir, runId });
+    const malformed = await boundary.ingestAuditHostResults({
+      root,
+      artifactsDir,
+      runId,
+      auditTasks: [task("audit-task-a", "correctness", "src/a.ts")],
+    });
     expect(malformed.completed_work_item_ids).toEqual([]);
     expect(issueCodes(malformed)).toContain("submission_malformed");
     const malformedIssue = issueFor(malformed, "submission_malformed");
@@ -177,7 +184,12 @@ describe(FAILURE_SIGNATURE, () => {
 
     // (b) Nothing at the bound path at all — a distinct code, not the same silence.
     await rm(resultPath, { force: true });
-    const missing = await boundary.ingestAuditHostResults({ root, artifactsDir, runId });
+    const missing = await boundary.ingestAuditHostResults({
+      root,
+      artifactsDir,
+      runId,
+      auditTasks: [task("audit-task-a", "correctness", "src/a.ts")],
+    });
     expect(missing.completed_work_item_ids).toEqual([]);
     expect(issueCodes(missing)).toContain("submission_missing");
     const missingIssue = issueFor(missing, "submission_missing");

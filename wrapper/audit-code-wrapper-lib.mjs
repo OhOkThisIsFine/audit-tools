@@ -194,6 +194,7 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '- validate-results --results FILE validates AuditResult payloads against the active task manifest without ingesting them',
     '- explain-task <task_id> prints the resolved file coverage and current status for a task id',
     '- ingest-results --results FILE validates and ingests canonical AuditResult payloads',
+    '- unaccept-results --work-item <id> (repeatable) or --all removes entries from the accepted host-results pair so a poisoned acceptance can be re-ingested after repair',
     '- status summarizes deterministic audit state and pending review work',
     '',
     'Defaults:',

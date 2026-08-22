@@ -81,6 +81,8 @@ interface HostBoundary {
     readonly root: string;
     readonly artifactsDir: string;
     readonly runId: string;
+    /** The same manifest prepareAuditHostHandoff published. */
+    readonly auditTasks: readonly HostTask[];
   }) => Promise<IngestSummary>;
 }
 
@@ -178,6 +180,7 @@ async function submitFinding(
     root: published.root,
     artifactsDir: published.artifactsDir,
     runId: published.runId,
+    auditTasks: [task("audit-task-a", "correctness", "src/a.ts")],
   });
 }
 

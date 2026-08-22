@@ -85,6 +85,8 @@ interface HostBoundary {
     readonly root: string;
     readonly artifactsDir: string;
     readonly runId: string;
+    /** The same manifest prepareAuditHostHandoff published. */
+    readonly auditTasks: readonly HostTask[];
   }) => Promise<IngestSummary>;
 }
 
@@ -333,6 +335,7 @@ describe(FAILURE_SIGNATURE, () => {
       root,
       artifactsDir,
       runId,
+      auditTasks: tasks,
     });
     expect(malformedIngest.completed_work_item_ids).toEqual([]);
 
@@ -344,6 +347,7 @@ describe(FAILURE_SIGNATURE, () => {
       root,
       artifactsDir,
       runId,
+      auditTasks: tasks,
     });
     expect(unboundIngest.completed_work_item_ids).toEqual([]);
 
@@ -361,6 +365,7 @@ describe(FAILURE_SIGNATURE, () => {
         root,
         artifactsDir,
         runId,
+        auditTasks: tasks,
       });
       expect(rejected.completed_work_item_ids).toEqual([]);
       const pending = await boundary.prepareAuditHostHandoff({
@@ -380,6 +385,7 @@ describe(FAILURE_SIGNATURE, () => {
       root,
       artifactsDir,
       runId,
+      auditTasks: tasks,
     });
     expect(accepted.accepted_count).toBe(2);
     expect([...accepted.completed_work_item_ids].sort()).toEqual(expectedIds);
@@ -389,6 +395,7 @@ describe(FAILURE_SIGNATURE, () => {
       root,
       artifactsDir,
       runId,
+      auditTasks: tasks,
     });
     expect([...replay.completed_work_item_ids].sort()).toEqual(expectedIds);
     expect(await snapshotTree(artifactsDir)).toEqual(beforeReplay);

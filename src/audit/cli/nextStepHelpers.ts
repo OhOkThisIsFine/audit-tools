@@ -95,7 +95,12 @@ import {
   loadCurrentActiveReviewRun,
 } from "./reviewRun.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
-import { ingestAuditHostResults } from "./dispatch/hostHandoff.js";
+import { buildLineIndex } from "./lineIndex.js";
+import {
+  ingestAuditHostResults,
+  type AuditHostValidationWarning,
+} from "./dispatch/hostHandoff.js";
+import type { AuditHostIngestIssue } from "../validation/ingestIssueCodes.js";
 import {
   CHARTER_EXTRACTION_MERGED_FILENAME,
   GATE_LANES,
@@ -188,7 +193,14 @@ export type NextStepResult =
        * emitted step so the host is TOLD which items to repair instead of
        * receiving an identical workload with no statement of what went wrong.
        */
-      ingestIssues?: readonly SubmissionIssue[];
+      ingestIssues?: readonly AuditHostIngestIssue[];
+      /**
+       * Advisory validation findings on results that WERE accepted. Sibling of
+       * {@link ingestIssues}: informational only — an accepted-with-warning
+       * result needs no repair and must not read as one that could not be
+       * accepted.
+       */
+      validationWarnings?: readonly AuditHostValidationWarning[];
     }
   | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
@@ -2388,20 +2400,30 @@ async function runHostDelegationObligation(
   // accepted ledger written before core ingestion is retried, while results
   // already reflected in coverage are not replayed.
   const currentRun = await loadCurrentActiveReviewRun(ctx.params.artifactsDir);
-  let ingestIssues: readonly SubmissionIssue[] = [];
+  let ingestIssues: readonly AuditHostIngestIssue[] = [];
+  let validationWarnings: readonly AuditHostValidationWarning[] = [];
   if (currentRun) {
     let acceptedResults: Awaited<
       ReturnType<typeof ingestAuditHostResults>
     >["accepted_results"] = [];
     let completedIds: readonly string[] = [];
+    // The line index is built HERE (once per fold) rather than inside the ingest
+    // so the accept decision sees the same disk truth `runAuditStep`'s batch gate
+    // validates against; the audit-task manifest comes from the same bundle.
+    const lineIndexForIngest = bundle.repo_manifest
+      ? await buildLineIndex(ctx.params.root, bundle.repo_manifest)
+      : undefined;
     try {
       const ingested = await ingestAuditHostResults({
         root: ctx.params.root,
         artifactsDir: ctx.params.artifactsDir,
         runId: currentRun.run_id,
+        auditTasks: bundle.audit_tasks ?? [],
+        lineIndex: lineIndexForIngest,
       });
       acceptedResults = ingested.accepted_results;
       ingestIssues = ingested.issues;
+      validationWarnings = ingested.validation_warnings;
       completedIds = ingested.completed_work_item_ids;
     } catch (error) {
       // No handoff exists on the first visit, or prepare was interrupted before
@@ -2453,6 +2475,7 @@ async function runHostDelegationObligation(
       selectedExecutor: decision.selected_executor,
       ...review,
       ...(ingestIssues.length > 0 ? { ingestIssues } : {}),
+      ...(validationWarnings.length > 0 ? { validationWarnings } : {}),
     },
   };
 }

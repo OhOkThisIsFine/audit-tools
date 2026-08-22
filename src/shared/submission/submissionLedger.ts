@@ -43,17 +43,35 @@ export const SUBMISSION_EVENT_KINDS = [
    * record must say so rather than let the run read as clean.
    */
   "accepted_via_recovery",
+  /**
+   * An operator-facing verb REMOVED an already-accepted submission (the
+   * audit host-handoff's `unaccept-results`). Without this kind, a dropped
+   * entry was indistinguishable from one never accepted — exactly the
+   * clean-vs-repaired collapse the ledger exists to prevent, on the removal
+   * side. A later re-acceptance of the same work item then reads as what it
+   * is: a second event after a recorded withdrawal.
+   */
+  "removed_by_operator",
 ] as const;
 
 export type SubmissionEventKind = (typeof SUBMISSION_EVENT_KINDS)[number];
 
-export interface SubmissionLedgerEvent {
+/**
+ * One ledger event. Generic over the DRAW's issue-code vocabulary: the base
+ * parameterization carries the shared submission codes, and a draw extending
+ * the vocabulary on its own side (`RemediationIssueCode`,
+ * `AuditIngestIssueCode`) parameterizes rather than widening the shared union
+ * — the same direction {@link SubmissionIssue} takes.
+ */
+export interface SubmissionLedgerEvent<
+  TIssueCode extends string = SubmissionIssueCode,
+> {
   readonly contract_version: typeof SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION;
   readonly run_id: string;
   readonly submission_id: string;
   readonly lane: string;
   readonly kind: SubmissionEventKind;
-  readonly issue_code?: SubmissionIssueCode;
+  readonly issue_code?: TIssueCode;
   readonly message?: string;
   /** ISO-8601. A faithful event record is allowed to say when. */
   readonly recorded_at: string;
@@ -65,10 +83,9 @@ export function submissionLedgerPath(artifactsDir: string): string {
 }
 
 /** Append one event. The parent directory is created on demand. */
-export async function appendSubmissionEvent(
-  artifactsDir: string,
-  event: SubmissionLedgerEvent,
-): Promise<void> {
+export async function appendSubmissionEvent<
+  TIssueCode extends string = SubmissionIssueCode,
+>(artifactsDir: string, event: SubmissionLedgerEvent<TIssueCode>): Promise<void> {
   await appendNdjsonFile(submissionLedgerPath(artifactsDir), event);
 }
 

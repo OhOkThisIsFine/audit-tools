@@ -6,28 +6,16 @@ import { captureConsole } from "./helpers/captureConsole.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 const distCliUrl = pathToFileURL(join(repoRoot, "dist", "audit", "cli.js")).href;
-const { runCli } = await import(distCliUrl);
+const { runCli, COMMAND_ROUTES } = await import(distCliUrl);
 
-// All command names that the switch statement in cli.ts must handle.
-const KNOWN_COMMANDS = [
-  "sample-run",
-  "next-step",
-  "import-external-analyzer",
-  "intake",
-  "plan",
-  "ingest-results",
-  "explain-task",
-  "update-runtime-validation",
-  "validate",
-  "validate-results",
-  "requeue",
-  "synthesize",
-  "force-synthesis",
-  "resynthesize",
-  "cleanup",
-  "status",
-  "score-audit",
-];
+// The roster is DERIVED from the CLI's own route table — never a second,
+// hand-maintained copy that drifts when a verb is added (the defect this file
+// previously reproduced: `unaccept-results` and `recover-submission` were
+// missing here while shipping).
+const KNOWN_COMMANDS = COMMAND_ROUTES.map(
+  // Route rows arrive untyped through the dist import — destructure explicitly.
+  ([verb]: readonly string[]) => verb,
+);
 
 // ── unknown command sets exitCode=1 and lists valid commands ──────────────────
 
@@ -56,29 +44,34 @@ test("unknown command error lists all known commands", async () => {
 
 // ── each extracted command module exports the expected function ───────────────
 
-// Verify each command module is importable and exports the expected function.
-// This ensures no extracted module was accidentally left as a stub or removed.
+/**
+ * Module file + export name per route row. Derived from the SAME table that
+ * drives dispatch: a verb registered without a module row (or vice versa) fails
+ * the pairing check below instead of silently escaping both rosters.
+ */
 const cmdModuleMap = [
-  ["importExternalAnalyzerCommand.js", "cmdImportExternalAnalyzer"],
-  ["intakeCommand.js", "cmdIntake"],
-  ["planCommand.js", "cmdPlan"],
-  ["ingestResultsCommand.js", "cmdIngestResults"],
-  ["explainTaskCommand.js", "cmdExplainTask"],
-  ["updateRuntimeValidationCommand.js", "cmdUpdateRuntimeValidation"],
-  ["validateCommand.js", "cmdValidate"],
-  ["validateResultsCommand.js", "cmdValidateResults"],
-  ["requeueCommand.js", "cmdRequeue"],
-  ["synthesizeCommand.js", "cmdSynthesize"],
-  ["forceSynthesisCommand.js", "cmdForceSynthesis"],
-  ["resynthesizeCommand.js", "cmdResynthesize"],
-  ["cleanupCommand.js", "cmdCleanup"],
-  ["scoreAuditCommand.js", "cmdScoreAudit"],
-  ["sampleRunCommand.js", "runSample"],
-  ["nextStepCommand.js", "cmdNextStep"],
-  ["statusCommand.js", "cmdStatus"],
+  ["sample-run", "sampleRunCommand.js", "runSample"],
+  ["next-step", "nextStepCommand.js", "cmdNextStep"],
+  ["import-external-analyzer", "importExternalAnalyzerCommand.js", "cmdImportExternalAnalyzer"],
+  ["intake", "intakeCommand.js", "cmdIntake"],
+  ["plan", "planCommand.js", "cmdPlan"],
+  ["ingest-results", "ingestResultsCommand.js", "cmdIngestResults"],
+  ["explain-task", "explainTaskCommand.js", "cmdExplainTask"],
+  ["update-runtime-validation", "updateRuntimeValidationCommand.js", "cmdUpdateRuntimeValidation"],
+  ["validate", "validateCommand.js", "cmdValidate"],
+  ["validate-results", "validateResultsCommand.js", "cmdValidateResults"],
+  ["requeue", "requeueCommand.js", "cmdRequeue"],
+  ["synthesize", "synthesizeCommand.js", "cmdSynthesize"],
+  ["force-synthesis", "forceSynthesisCommand.js", "cmdForceSynthesis"],
+  ["resynthesize", "resynthesizeCommand.js", "cmdResynthesize"],
+  ["cleanup", "cleanupCommand.js", "cmdCleanup"],
+  ["status", "statusCommand.js", "cmdStatus"],
+  ["score-audit", "scoreAuditCommand.js", "cmdScoreAudit"],
+  ["recover-submission", "recoverSubmissionCommand.js", "cmdRecoverSubmission"],
+  ["unaccept-results", "unacceptResultsCommand.js", "cmdUnacceptResults"],
 ];
 
-for (const [moduleFile, exportName] of cmdModuleMap) {
+for (const [, moduleFile, exportName] of cmdModuleMap) {
   await test(`cli/${moduleFile} exports ${exportName}`, async () => {
     const mod = await import(
       pathToFileURL(join(repoRoot, "src", "audit", "cli", moduleFile)).href
@@ -86,3 +79,9 @@ for (const [moduleFile, exportName] of cmdModuleMap) {
     expect(typeof mod[exportName], `${moduleFile} should export a function named '${exportName}'`).toBe("function");
   });
 }
+
+test("every routed verb pairs with exactly one module row", () => {
+  const routed = [...KNOWN_COMMANDS].sort();
+  const paired = cmdModuleMap.map(([verb]) => verb).sort();
+  expect(paired).toEqual(routed);
+});

@@ -1445,6 +1445,7 @@ const NEXT_STEP_EMISSION = createStepEmissionScaffold<
       selectedExecutor: result.selectedExecutor,
       inProcessMadeProgress: result.inProcessMadeProgress,
       ingestIssues: result.ingestIssues,
+      validationWarnings: result.validationWarnings,
     });
   },
   write: writeAuditStep,

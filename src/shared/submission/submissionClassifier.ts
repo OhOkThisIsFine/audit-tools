@@ -32,7 +32,10 @@ export type SubmissionIssueCode = (typeof SUBMISSION_ISSUE_CODES)[number];
 
 /**
  * One classified failure. `TCode` widens for a draw that adds its own domain
- * codes; the base parameterization is the shared vocabulary above.
+ * codes; the base parameterization is the shared vocabulary above — see
+ * `RemediationIssueCode` and the audit ingest's `AuditIngestIssueCode`, each of
+ * which extends this union on its own side rather than pulling its vocabulary
+ * in here.
  *
  * Two optional locators, because a submission is identified differently on the
  * two lanes it can arrive through: an expected-set member is named by

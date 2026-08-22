@@ -70,6 +70,8 @@ interface HostBoundary {
     readonly root: string;
     readonly artifactsDir: string;
     readonly runId: string;
+    /** The same manifest prepareAuditHostHandoff published. */
+    readonly auditTasks: readonly HostTask[];
   }) => Promise<IngestSummary>;
 }
 
@@ -179,6 +181,7 @@ describe(FAILURE_SIGNATURE, () => {
       root: published.root,
       artifactsDir: published.artifactsDir,
       runId: published.runId,
+      auditTasks: [task("audit-task-a", "correctness", "src/a.ts")],
     });
     expect(ingest.completed_work_item_ids).toEqual([]);
     const issue = (ingest.issues ?? []).find(

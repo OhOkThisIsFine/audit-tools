@@ -67,6 +67,7 @@ audit-code validate-results
 audit-code requeue
 audit-code synthesize
 audit-code resynthesize
+audit-code unaccept-results --work-item <id>   # repeatable, or --all
 audit-code cleanup --dry-run
 ```
 
@@ -74,6 +75,13 @@ Lower-level `intake`, `plan`, `ingest-results`,
 `import-external-analyzer`, and `update-runtime-validation` commands exist for
 debugging and artifact recovery. Normal conversation use should stay on
 `next-step`.
+
+`audit-code unaccept-results` removes entries from the run's accepted
+host-results pair — the supported way back out of an acceptance that turned out
+bad (for example a result accepted before a validator change). It refuses a
+pair it cannot validate, records each removal so a repaired run stays
+distinguishable from a clean one, invalidates the persisted step contract, and
+the next `next-step` re-reads the bound result files for the dropped items.
 
 `audit-code cleanup` removes `.audit-tools/audit/` only when the persisted run
 is complete or not started. Active, blocked, or missing-state runs are refused

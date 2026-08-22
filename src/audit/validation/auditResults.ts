@@ -124,12 +124,12 @@ function isNonEmptyString(value: unknown): value is string {
 
 function issueTaskId(
   record: Record<string, unknown>,
-  resultIndex: number,
+  fallback: string,
 ): string {
   const taskId = record.task_id;
   return typeof taskId === "string" && taskId.trim().length > 0
     ? taskId
-    : `result[${resultIndex}]`;
+    : fallback;
 }
 
 function validateRequiredStringField(
@@ -956,10 +956,89 @@ function validateResultFindings(
   return true;
 }
 
-/** Validate a single result record; push issues into `issues`. */
+/** The options-normalization every entry into this module shares. */
+interface NormalizedValidationInputs {
+  taskMap: Map<string, AuditTask>;
+  normLineIndex: Map<string, number>;
+  normBoundary: Set<string>;
+}
+
+/**
+ * Normalize `tasks` + {@link ValidateAuditResultOptions} into the joined key
+ * spaces the rule walk reads. ONE preamble for both entries — the batch walk
+ * ({@link validateAuditResults}) and the per-result gate
+ * ({@link validateOneAuditResult}) — so an option added to one cannot be
+ * forgotten in the other.
+ */
+function normalizeValidationInputs(
+  tasks: AuditTask[],
+  options: ValidateAuditResultOptions,
+): NormalizedValidationInputs {
+  const taskMap = new Map(tasks.map((task) => [task.task_id, task]));
+  const normLineIndex = new Map<string, number>();
+  if (options.lineIndex) {
+    for (const [k, v] of Object.entries(options.lineIndex)) {
+      normLineIndex.set(normalizeCoveragePath(k), v);
+    }
+  }
+  const normBoundary = new Set<string>();
+  for (const path of options.boundaryPaths ?? []) {
+    if (isNonEmptyString(path)) {
+      normBoundary.add(normalizeCoveragePath(path));
+    }
+  }
+  return { taskMap, normLineIndex, normBoundary };
+}
+
+/**
+ * The PER-RESULT half of {@link validateAuditResults}, exported for callers
+ * that must apply exactly the same rules to ONE result before admitting it —
+ * the host-handoff ingest validates each converted result BEFORE writing it to
+ * the accepted pair, so a result the batch gate would later reject is never
+ * accepted in the first place. One rule body: this delegates to the same
+ * internal `validateSingleAuditResult` the batch walk uses, so the two cannot
+ * drift.
+ *
+ * Returns the issues (possibly empty); it never throws and never writes the
+ * batch summary to stderr — a single-result caller surfaces outcomes in its own
+ * vocabulary.
+ */
+export function validateOneAuditResult(
+  result: unknown,
+  tasks: AuditTask[],
+  options: ValidateAuditResultOptions = {},
+): AuditResultIssue[] {
+  const { taskMap, normLineIndex, normBoundary } = normalizeValidationInputs(
+    tasks,
+    options,
+  );
+  const issues: AuditResultIssue[] = [];
+  // Per-result LABEL MODE: there is no enclosing batch, so field paths carry no
+  // synthetic `results[0]` index — the task id disambiguates.
+  validateSingleAuditResult(
+    result,
+    0,
+    "result",
+    taskMap,
+    tasks,
+    normLineIndex,
+    normBoundary,
+    issues,
+  );
+  return issues;
+}
+
+/**
+ * Validate a single result record; push issues into `issues`.
+ *
+ * `rootLabel` is the field-path prefix for errors about the record ITSELF:
+ * the batch walk passes `results[i]`; a per-result caller passes `result` —
+ * there is no batch index for an operator to resolve.
+ */
 function validateSingleAuditResult(
   result: unknown,
   resultIndex: number,
+  rootLabel: string,
   taskMap: Map<string, AuditTask>,
   allTasks: AuditTask[],
   normLineIndex: Map<string, number>,
@@ -969,14 +1048,14 @@ function validateSingleAuditResult(
   if (!isRecord(result)) {
     pushIssue(issues, {
       result_index: resultIndex,
-      task_id: `result[${resultIndex}]`,
-      field: `results[${resultIndex}]`,
+      task_id: rootLabel,
+      field: rootLabel,
       message: `Each audit result must be an object, got ${describeValue(result)}.`,
     });
     return;
   }
 
-  const taskId = issueTaskId(result, resultIndex);
+  const taskId = issueTaskId(result, rootLabel);
   const task = taskMap.get(taskId);
 
   // The assigned set enters the join already normalized — an un-normalized
@@ -1022,25 +1101,13 @@ export function validateAuditResults(
     return issues;
   }
 
-  const taskMap = new Map(tasks.map((task) => [task.task_id, task]));
-  const normLineIndex = new Map<string, number>();
-  if (options.lineIndex) {
-    for (const [k, v] of Object.entries(options.lineIndex)) {
-      normLineIndex.set(normalizeCoveragePath(k), v);
-    }
-  }
-
-  // Packet/unit boundary (union of sibling task file_paths) for widening the
-  // two hard-reject evidence gates. Fail-closed: undefined/empty → no widening.
-  const normBoundary = new Set<string>();
-  for (const path of options.boundaryPaths ?? []) {
-    if (isNonEmptyString(path)) {
-      normBoundary.add(normalizeCoveragePath(path));
-    }
-  }
+  const { taskMap, normLineIndex, normBoundary } = normalizeValidationInputs(
+    tasks,
+    options,
+  );
 
   for (let i = 0; i < results.length; i++) {
-    validateSingleAuditResult(results[i], i, taskMap, tasks, normLineIndex, normBoundary, issues);
+    validateSingleAuditResult(results[i], i, `results[${i}]`, taskMap, tasks, normLineIndex, normBoundary, issues);
   }
 
   if (issues.length > 0) {

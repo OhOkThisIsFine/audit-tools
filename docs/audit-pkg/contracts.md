@@ -58,6 +58,12 @@ top-level fields and verifies:
 Malformed, fabricated, stale, or replayed-with-different-bytes records do not
 advance the run. A byte-identical accepted replay is a no-op.
 
+Per-result audit-results validation runs at acceptance, before the accepted
+pair is written: a failing result is classified-rejected (warnings ride a
+separate advisory channel, never the rejection list) and is re-read from its
+bound path on the next `next-step`; `unaccept-results` removes an accepted
+entry so its result is re-ingested from scratch.
+
 ## AuditResult
 
 The normalized ingested form follows `schemas/audit_result.schema.json`.
