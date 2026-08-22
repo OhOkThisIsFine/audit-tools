@@ -53,9 +53,21 @@ async function fakeCheckout() {
   await writeFile(join(root, "README.md"), "# fake\n");
   // Age every input so a tarball packed "now" is unambiguously newer — otherwise a
   // same-millisecond tie decides the test instead of the rule under test.
+  //
+  // `newestInputMtimeMs` stats DIRECTORIES as well as files (so a deletion counts), so the
+  // directories must be aged too: writing the files above left `dist/`, `src/` and the root
+  // itself stamped "now", which made them — not the files — the newest input, and the reuse
+  // rule (`tarball > newestInput`) then turned on whether the tarball's write landed in a
+  // strictly later filesystem tick than a directory written a millisecond earlier. That is a
+  // coin flip on any filesystem with coarse mtime granularity, and CI lost it.
+  // Directories are aged AFTER the files: writing a file bumps its parent's mtime, while
+  // `utimes` on a file does not, so the parents must be stamped last.
   const aged = new Date(Date.now() - 60_000);
   for (const rel of ["package.json", "tsconfig.json", "dist/index.js", "src/index.ts", "README.md"]) {
     await utimes(join(root, ...rel.split("/")), aged, aged);
+  }
+  for (const rel of ["dist", "src", ""]) {
+    await utimes(rel ? join(root, rel) : root, aged, aged);
   }
   return { root, cacheDir };
 }
