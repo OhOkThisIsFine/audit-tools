@@ -1,92 +1,10 @@
 {
-  "generated_at": "2026-08-22T09:26:05.217Z",
+  "generated_at": "2026-08-22T09:35:35.702Z",
   "run": {
     "date": "2026-08-22",
-    "head": "5e1d92c097cb00ed39c02b28348984e9bac7cee1"
+    "head": "ad9bb882b213dcf4bbed52b5d302e857c28e5b81"
   },
   "items": [
-    {
-      "id": "backlogN-1",
-      "leg": "backlog",
-      "path": "docs/backlog/open-bugs.md",
-      "subject_key": "dd47a7ac66507930",
-      "title": "Backlog disambiguation: \"one run identity\" is the stated property, but the adversary says the gap is LINKAGE, not identity — decide which the entry means",
-      "eli5": "Three parts of this tool each have their own idea of what a \"run\" is. The step envelope — the small record written each time the tool advances — has a run_id field that is allowed to be empty, and in practice it is empty. The dispatch artifacts, which describe work handed to the host, use a run id built from a timestamp. The friction record, which collects the annoyances found during a run, names its own file after a cleaned-up run id. Because these three do not agree, a friction close-out that was written under one id was invisible to the part of the tool that reads the other, and it had to be rewritten by hand. The backlog entry that records this says the property to hold is \"one run identity across all three\". An independent adversary pass pushed back on exactly that wording. Its argument is that the three genuinely have different lifetimes — a step envelope is one advance, a dispatch run is one handoff to the host, and a friction record spans many of both — so forcing one shared id inverts the relationship and also throws away the timestamp meaning the dispatch ids carry for free. Its counter-proposal is cheaper: leave the three ids alone and add explicit pointer fields on the friction record naming the step envelope and dispatch run it belongs to. That fixes the invisibility, which was the actual symptom, without a migration. This is a decision only you can make, because the two answers lead to very different amounts of work and to a different shape for the tool. The entry cannot be turned into a task until it is settled, which is why it has sat as prose.",
-      "question": "docs/backlog/open-bugs.md states the property as \"one run identity across step envelope, dispatch artifacts, and friction record\". The adversary pass argues the three have genuinely different lifecycles and that the observed defect was a LINKAGE gap, not an identity gap, and proposes nullable foreign keys on the friction record instead. Which does the entry mean — unify the identity, or link the three ids?",
-      "options": [
-        {
-          "label": "Unify the identity",
-          "answer": "Keep the entry as written: one run identity across step envelope, dispatch artifacts and friction record. The step envelope run_id stops being nullable and is minted from the same source the dispatch artifacts and the friction substrate use. Accept the migration cost and the loss of the timestamp semantics carried implicitly by the current dispatch ids."
-        },
-        {
-          "label": "Link, do not unify",
-          "answer": "Rewrite the entry's property: the three run notions stay distinct because their lifecycles genuinely differ, and the friction record gains explicit nullable foreign keys naming the step envelope run and the dispatch run it relates to. The defect to close is the invisibility, not the multiplicity of ids."
-        },
-        {
-          "label": "Neither — the envelope field goes",
-          "answer": "The step envelope's run_id is nullable and null in practice, which makes it a field nothing relies on. Delete it rather than either unifying or linking, and let the dispatch artifacts and the friction record be the only two run notions. Rewrite the entry to that scope."
-        }
-      ],
-      "evidence": [
-        "src/audit/cli/steps.ts:76 — the step envelope schema declares `run_id: z.string().nullable(),`. The nullable half of the divergence still holds at HEAD 01595a4c.",
-        "src/shared/friction/frictionRecord.ts:165-212 — the friction record and its lock are keyed by a sanitized run id (`frictionLockPath`, `frictionCapturePath`, `sanitizeRunId`), a separate identity from the envelope field.",
-        "Leg 2's mechanical sweep classified this entry owner_decision_needed with the action \"Owner needs to decide on the canonical run-id scheme and the migration scope before any concrete code change is derivable\" (.audit-tools/nightly/triage-2026-08-21.jsonl, open-bugs#da502b77).",
-        "Adversary characterization from the independent free-provider lane (.audit-tools/nightly/free-adv2-0821.log): different lifecycles per notion; a step envelope can fail without invalidating an already-emitted dispatch run; the timestamped dispatch ids carry temporal semantics a unified opaque id loses; friction is cross-cutting rather than hierarchical, so one parent id inverts the relationship; and the cheapest alternative is nullable foreign keys on the friction record.",
-        "The adversary reasoned from the proposal text only and did not read source — its lifecycle claims are argument, not verified fact, and are offered as the counter-case rather than as evidence.",
-        "Related durable memory: renaming-a-persisted-field-is-not-a-rename, identity-change-must-audit-its-filters, prefix-join-between-two-name-spaces-fails-empty — all three describe the cost of changing a persisted identity, which is what option 1 commits to."
-      ],
-      "premise_probes": [
-        {
-          "file": "src/audit/cli/steps.ts",
-          "contains": "run_id: z.string().nullable(),"
-        }
-      ],
-      "first_seen": "2026-08-21",
-      "nights_open": 2
-    },
-    {
-      "id": "solN-1",
-      "leg": "solutions",
-      "path": "scripts/guard-reach-data.mjs",
-      "subject_key": "51c20f54edd9aafb",
-      "title": "A generator-parity gate registered preCommit:false lets a stale tracked render land — approve the reach fix plus the contract test that forbids the shape",
-      "eli5": "Several files in this repo are not written by hand. A script reads some source files and writes a tracked file from them, so the tracked file is a copy that must be kept in step. For each of those, there is a check whose whole job is to say \"this copy is out of date, regenerate it\". A check like that only protects you if it runs at the moment the copy goes stale, which is when you commit. The registry that lists every check records, per check, whether it runs at commit time. Nine of these regeneration checks are registered to run at commit. One is not: check:runtime-artifact-names is registered as not running at commit at all, so it only fires later, at release time. That is exactly what happened on 2026-08-20. A deletion in the source moved the derived set, the tracked copy was left behind, the commit passed every gate, and the problem surfaced only when the full suite ran before tagging. It cost one failed suite run and a follow-up regeneration commit. The proposal has two halves. The first flips that one check to run at commit, and derives the list of files that trigger it from the list the generator already publishes about itself, so the trigger list cannot drift away from what the generator actually reads. The second half is a test that fails the build if anyone ever again registers a regeneration check as not-at-commit, so the mistake becomes impossible rather than merely fixed once. Saying yes means both halves get built and red-green validated. Saying yes to the first half only means the instance is fixed but the shape can come back. Saying no means the check stays a release-time check and a stale render can keep landing green.",
-      "question": "scripts/guard-reach-data.mjs registers check:runtime-artifact-names with preCommit:false, while every other generator-parity gate is preCommit:'reach'. It is the only gate row whose fix text is regenerate-shaped AND whose preCommit is false. Should the routine build the two-part fix — flip that row to 'reach' with a REACH row derived from the generator's exported RUNTIME_NAME_SOURCES, and add a contract test that forbids a regenerate-shaped fix on a preCommit:false gate?",
-      "options": [
-        {
-          "label": "Build both halves",
-          "answer": "Approved — build both. Flip check:runtime-artifact-names to preCommit:'reach' and add a REACH row whose files are DERIVED from the generator's exported RUNTIME_NAME_SOURCES (plus the generator and its render), so the reach cannot drift narrower than what the generator reads. Then add tests/shared/generator-gates-run-at-commit.test.ts asserting no gate with a regenerate-shaped fix is registered preCommit:false. Red-green validate: the test must be RED at HEAD naming check:runtime-artifact-names before the flip lands."
-        },
-        {
-          "label": "Fix the instance only",
-          "answer": "Flip check:runtime-artifact-names to preCommit:'reach' with the derived REACH row, but do not add the contract test. Accept that a future generator-parity gate can be registered outside the commit gate again; the regenerate-shaped predicate keys on fix prose and is not worth the false-negative surface."
-        },
-        {
-          "label": "Leave it at release time",
-          "answer": "Leave check:runtime-artifact-names as preCommit:false. The 13 layout-source paths are loop-core adjacent and change often, so the leg would fire regularly; catching the stale render at verify:checks before the tag is a good enough backstop and does not slow every commit."
-        }
-      ],
-      "evidence": [
-        "scripts/guard-reach-data.mjs — the check:runtime-artifact-names gate row reads `impl: 'check:runtime-artifact-names', preCommit: false,` with a regenerate-shaped fix ('runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs').",
-        "Enumerated every GUARDS row with kind:'gate' — 33 rows. check:runtime-artifact-names is the ONLY one whose fix matches /regenerat|generate-|--write|is stale/i AND whose preCommit is false. The nine comparable generator-parity gates (doc-manifest, doc-links, gate-enumeration, philosophy-brief, nightly-routine-prompt, handoff-roadmap, backlog-index, ci-trigger-paths, memory-citations, offload-lanes) are all 'reach', 'final' or 'always'.",
-        "Independently confirmed by the free-provider lane, which enumerated all 33 gate rows from source and returned CONFIRMED on the count and the id (.audit-tools/nightly/free-adv-0821.log).",
-        "Independently reached a third time by leg 2's mechanical backlog sweep, which classified the corresponding open-bugs entry actionable_now with the action 'Add check:runtime-artifact-names to the commit gate's triggered checks' (.audit-tools/nightly/triage-2026-08-21.jsonl).",
-        "scripts/shared/generate-runtime-artifact-names.mjs exports RUNTIME_NAME_SOURCES, a declared 13-entry list of the source files the generator reads — so the REACH row can be derived rather than hand-listed. Its CLI body is guarded by an import.meta.url check, so importing the module never writes.",
-        "Recurrence, counted: docs/backlog/open-bugs.md carries two 2026-08-20 entries of this class (the runtime-artifact-names render, and the nightly-queue/HANDOFF live-status desync); P19 is the same class on three earlier dates and is why scripts/shared/derived-file-preflight.mjs exists at all. The mechanism was built; this row was left outside it.",
-        "Cost of the 2026-08-20 instance: one failed full-suite run plus the follow-up regeneration commit 85609eb7.",
-        "Full proposal, mechanism, false-positive surface and the stated enforcement limit: .audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PROPOSAL.md; the exact edits and the red-green ordering: .../PATCH.md"
-      ],
-      "premise_probes": [
-        {
-          "file": "scripts/guard-reach-data.mjs",
-          "contains": "impl: 'check:runtime-artifact-names',\n    preCommit: false,"
-        }
-      ],
-      "proposal": "Derive check:runtime-artifact-names' commit-gate reach from the generator's own declared source list, and forbid the preCommit:false shape with a contract test.",
-      "patch_path": ".audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PATCH.md",
-      "first_seen": "2026-08-21",
-      "nights_open": 2
-    },
     {
       "id": "docs-1",
       "leg": "docs",
@@ -385,6 +303,132 @@
       ],
       "first_seen": "2026-08-22",
       "nights_open": 1
+    },
+    {
+      "id": "docs-7",
+      "leg": "docs",
+      "path": "docs/HANDOFF.md",
+      "subject_key": "3a1921907f478d41",
+      "auto_close": false,
+      "title": "HANDOFF Live state carries nine hand-typed run counts no probe can track, plus a parenthetical narrating what already shipped — trim, or keep them deliberately",
+      "eli5": "The handoff document exists to tell the next person the current state and the next action, and nothing else. Its Live state section currently does two things beyond that. First, it quotes nine numbers from the audit run of 2026-08-21 — how many findings, how they split by severity, how many themes, how many work blocks, how many re-verified. Those numbers come from files that git does not track, so no automatic check can ever notice when they stop being true. The next run silently replaces all of them while the sentence keeps reading as authoritative. Second, the line naming the published version adds a bracket listing four pieces of work that already shipped, which is a small changelog living in the one document whose own rules say it must not be one — and a list like that can only grow with each release. Neither is wrong today. The reason this comes to you rather than being cleaned up is that removing text from the rolling handoff is a judgment about how much context the next person needs, and the run tally may be there on purpose as a pointer to the deliverables. A rule matters here: because no probe can track a hand-typed number, the only action ever allowed is removing it, never correcting it — so this is not a request to update the figures.",
+      "question": "docs/HANDOFF.md Live state carries nine hand-typed counts from the 2026-08-21 dogfood run, and a parenthetical enumerating four workstreams v0.44.0 already carried. Should both be trimmed to the durable half?",
+      "options": [
+        {
+          "label": "Trim both",
+          "answer": "Cut the nine counts and the shipped-work parenthetical. Keep that the 2026-08-21 dogfood run is complete, where its deliverables live, and that v0.44.0 is the published state."
+        },
+        {
+          "label": "Trim the parenthetical only",
+          "answer": "Cut the shipped-work list from the version line. Keep the run tally as a deliberate pointer at the deliverables, accepting that no gate can tell when it goes stale."
+        },
+        {
+          "label": "Leave both",
+          "answer": "The context earns its place in the rolling handoff. Leave Live state as written and stop raising it."
+        }
+      ],
+      "evidence": [
+        "The tally is drawn from .audit-tools/audit-findings.json and .audit-tools/audit-report.md, which git does not track. Per the routine contract every probe target must be a git-TRACKED source file, so no admissible probe exists for any of the nine numbers.",
+        "The routine contract also forbids raising a finding that asks the owner to CORRECT a hand-typed computed value, so removal is the only action available. This item does not ask for updated figures.",
+        "docs/documentation-philosophy.md lists HANDOFF as explicitly not a changelog narrating what already shipped, and the version line carries exactly that shape.",
+        "The version claim itself is true and belongs there: package.json is 0.44.0 and the v0.44.0 tag exists. Only the parenthetical is at issue.",
+        "Verified directly at HEAD ad9bb882 by reading docs/HANDOFF.md and confirming both artifact paths are untracked.",
+        "Provenance note: this finding came from the leg-1 reviewer lane covering the instruction and philosophy docs. That lane's findings were verified mechanically by the routine itself rather than by a separate adversary agent — see the run's coverage note. The two claims here are existence facts rather than judgments, so a grep-level check is equivalent; the escalation is about what to DO, which is the owner's either way."
+      ],
+      "premise_probes": [
+        {
+          "file": "docs/HANDOFF.md",
+          "contains": "2,712 findings"
+        },
+        {
+          "file": "docs/HANDOFF.md",
+          "contains": "the P38 write-scope union, the single-sourced command-shape rule"
+        }
+      ],
+      "first_seen": "2026-08-22",
+      "nights_open": 1
+    },
+    {
+      "id": "backlogN-1",
+      "leg": "backlog",
+      "path": "docs/backlog/open-bugs.md",
+      "subject_key": "dd47a7ac66507930",
+      "title": "Backlog disambiguation: \"one run identity\" is the stated property, but the adversary says the gap is LINKAGE, not identity — decide which the entry means",
+      "eli5": "Three parts of this tool each have their own idea of what a \"run\" is. The step envelope — the small record written each time the tool advances — has a run_id field that is allowed to be empty, and in practice it is empty. The dispatch artifacts, which describe work handed to the host, use a run id built from a timestamp. The friction record, which collects the annoyances found during a run, names its own file after a cleaned-up run id. Because these three do not agree, a friction close-out that was written under one id was invisible to the part of the tool that reads the other, and it had to be rewritten by hand. The backlog entry that records this says the property to hold is \"one run identity across all three\". An independent adversary pass pushed back on exactly that wording. Its argument is that the three genuinely have different lifetimes — a step envelope is one advance, a dispatch run is one handoff to the host, and a friction record spans many of both — so forcing one shared id inverts the relationship and also throws away the timestamp meaning the dispatch ids carry for free. Its counter-proposal is cheaper: leave the three ids alone and add explicit pointer fields on the friction record naming the step envelope and dispatch run it belongs to. That fixes the invisibility, which was the actual symptom, without a migration. This is a decision only you can make, because the two answers lead to very different amounts of work and to a different shape for the tool. The entry cannot be turned into a task until it is settled, which is why it has sat as prose.",
+      "question": "docs/backlog/open-bugs.md states the property as \"one run identity across step envelope, dispatch artifacts, and friction record\". The adversary pass argues the three have genuinely different lifecycles and that the observed defect was a LINKAGE gap, not an identity gap, and proposes nullable foreign keys on the friction record instead. Which does the entry mean — unify the identity, or link the three ids?",
+      "options": [
+        {
+          "label": "Unify the identity",
+          "answer": "Keep the entry as written: one run identity across step envelope, dispatch artifacts and friction record. The step envelope run_id stops being nullable and is minted from the same source the dispatch artifacts and the friction substrate use. Accept the migration cost and the loss of the timestamp semantics carried implicitly by the current dispatch ids."
+        },
+        {
+          "label": "Link, do not unify",
+          "answer": "Rewrite the entry's property: the three run notions stay distinct because their lifecycles genuinely differ, and the friction record gains explicit nullable foreign keys naming the step envelope run and the dispatch run it relates to. The defect to close is the invisibility, not the multiplicity of ids."
+        },
+        {
+          "label": "Neither — the envelope field goes",
+          "answer": "The step envelope's run_id is nullable and null in practice, which makes it a field nothing relies on. Delete it rather than either unifying or linking, and let the dispatch artifacts and the friction record be the only two run notions. Rewrite the entry to that scope."
+        }
+      ],
+      "evidence": [
+        "src/audit/cli/steps.ts:76 — the step envelope schema declares `run_id: z.string().nullable(),`. The nullable half of the divergence still holds at HEAD 01595a4c.",
+        "src/shared/friction/frictionRecord.ts:165-212 — the friction record and its lock are keyed by a sanitized run id (`frictionLockPath`, `frictionCapturePath`, `sanitizeRunId`), a separate identity from the envelope field.",
+        "Leg 2's mechanical sweep classified this entry owner_decision_needed with the action \"Owner needs to decide on the canonical run-id scheme and the migration scope before any concrete code change is derivable\" (.audit-tools/nightly/triage-2026-08-21.jsonl, open-bugs#da502b77).",
+        "Adversary characterization from the independent free-provider lane (.audit-tools/nightly/free-adv2-0821.log): different lifecycles per notion; a step envelope can fail without invalidating an already-emitted dispatch run; the timestamped dispatch ids carry temporal semantics a unified opaque id loses; friction is cross-cutting rather than hierarchical, so one parent id inverts the relationship; and the cheapest alternative is nullable foreign keys on the friction record.",
+        "The adversary reasoned from the proposal text only and did not read source — its lifecycle claims are argument, not verified fact, and are offered as the counter-case rather than as evidence.",
+        "Related durable memory: renaming-a-persisted-field-is-not-a-rename, identity-change-must-audit-its-filters, prefix-join-between-two-name-spaces-fails-empty — all three describe the cost of changing a persisted identity, which is what option 1 commits to."
+      ],
+      "premise_probes": [
+        {
+          "file": "src/audit/cli/steps.ts",
+          "contains": "run_id: z.string().nullable(),"
+        }
+      ],
+      "first_seen": "2026-08-21",
+      "nights_open": 2
+    },
+    {
+      "id": "solN-1",
+      "leg": "solutions",
+      "path": "scripts/guard-reach-data.mjs",
+      "subject_key": "51c20f54edd9aafb",
+      "title": "A generator-parity gate registered preCommit:false lets a stale tracked render land — approve the reach fix plus the contract test that forbids the shape",
+      "eli5": "Several files in this repo are not written by hand. A script reads some source files and writes a tracked file from them, so the tracked file is a copy that must be kept in step. For each of those, there is a check whose whole job is to say \"this copy is out of date, regenerate it\". A check like that only protects you if it runs at the moment the copy goes stale, which is when you commit. The registry that lists every check records, per check, whether it runs at commit time. Nine of these regeneration checks are registered to run at commit. One is not: check:runtime-artifact-names is registered as not running at commit at all, so it only fires later, at release time. That is exactly what happened on 2026-08-20. A deletion in the source moved the derived set, the tracked copy was left behind, the commit passed every gate, and the problem surfaced only when the full suite ran before tagging. It cost one failed suite run and a follow-up regeneration commit. The proposal has two halves. The first flips that one check to run at commit, and derives the list of files that trigger it from the list the generator already publishes about itself, so the trigger list cannot drift away from what the generator actually reads. The second half is a test that fails the build if anyone ever again registers a regeneration check as not-at-commit, so the mistake becomes impossible rather than merely fixed once. Saying yes means both halves get built and red-green validated. Saying yes to the first half only means the instance is fixed but the shape can come back. Saying no means the check stays a release-time check and a stale render can keep landing green.",
+      "question": "scripts/guard-reach-data.mjs registers check:runtime-artifact-names with preCommit:false, while every other generator-parity gate is preCommit:'reach'. It is the only gate row whose fix text is regenerate-shaped AND whose preCommit is false. Should the routine build the two-part fix — flip that row to 'reach' with a REACH row derived from the generator's exported RUNTIME_NAME_SOURCES, and add a contract test that forbids a regenerate-shaped fix on a preCommit:false gate?",
+      "options": [
+        {
+          "label": "Build both halves",
+          "answer": "Approved — build both. Flip check:runtime-artifact-names to preCommit:'reach' and add a REACH row whose files are DERIVED from the generator's exported RUNTIME_NAME_SOURCES (plus the generator and its render), so the reach cannot drift narrower than what the generator reads. Then add tests/shared/generator-gates-run-at-commit.test.ts asserting no gate with a regenerate-shaped fix is registered preCommit:false. Red-green validate: the test must be RED at HEAD naming check:runtime-artifact-names before the flip lands."
+        },
+        {
+          "label": "Fix the instance only",
+          "answer": "Flip check:runtime-artifact-names to preCommit:'reach' with the derived REACH row, but do not add the contract test. Accept that a future generator-parity gate can be registered outside the commit gate again; the regenerate-shaped predicate keys on fix prose and is not worth the false-negative surface."
+        },
+        {
+          "label": "Leave it at release time",
+          "answer": "Leave check:runtime-artifact-names as preCommit:false. The 13 layout-source paths are loop-core adjacent and change often, so the leg would fire regularly; catching the stale render at verify:checks before the tag is a good enough backstop and does not slow every commit."
+        }
+      ],
+      "evidence": [
+        "scripts/guard-reach-data.mjs — the check:runtime-artifact-names gate row reads `impl: 'check:runtime-artifact-names', preCommit: false,` with a regenerate-shaped fix ('runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs').",
+        "Enumerated every GUARDS row with kind:'gate' — 33 rows. check:runtime-artifact-names is the ONLY one whose fix matches /regenerat|generate-|--write|is stale/i AND whose preCommit is false. The nine comparable generator-parity gates (doc-manifest, doc-links, gate-enumeration, philosophy-brief, nightly-routine-prompt, handoff-roadmap, backlog-index, ci-trigger-paths, memory-citations, offload-lanes) are all 'reach', 'final' or 'always'.",
+        "Independently confirmed by the free-provider lane, which enumerated all 33 gate rows from source and returned CONFIRMED on the count and the id (.audit-tools/nightly/free-adv-0821.log).",
+        "Independently reached a third time by leg 2's mechanical backlog sweep, which classified the corresponding open-bugs entry actionable_now with the action 'Add check:runtime-artifact-names to the commit gate's triggered checks' (.audit-tools/nightly/triage-2026-08-21.jsonl).",
+        "scripts/shared/generate-runtime-artifact-names.mjs exports RUNTIME_NAME_SOURCES, a declared 13-entry list of the source files the generator reads — so the REACH row can be derived rather than hand-listed. Its CLI body is guarded by an import.meta.url check, so importing the module never writes.",
+        "Recurrence, counted: docs/backlog/open-bugs.md carries two 2026-08-20 entries of this class (the runtime-artifact-names render, and the nightly-queue/HANDOFF live-status desync); P19 is the same class on three earlier dates and is why scripts/shared/derived-file-preflight.mjs exists at all. The mechanism was built; this row was left outside it.",
+        "Cost of the 2026-08-20 instance: one failed full-suite run plus the follow-up regeneration commit 85609eb7.",
+        "Full proposal, mechanism, false-positive surface and the stated enforcement limit: .audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PROPOSAL.md; the exact edits and the red-green ordering: .../PATCH.md"
+      ],
+      "premise_probes": [
+        {
+          "file": "scripts/guard-reach-data.mjs",
+          "contains": "impl: 'check:runtime-artifact-names',\n    preCommit: false,"
+        }
+      ],
+      "proposal": "Derive check:runtime-artifact-names' commit-gate reach from the generator's own declared source list, and forbid the preCommit:false shape with a contract test.",
+      "patch_path": ".audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PATCH.md",
+      "first_seen": "2026-08-21",
+      "nights_open": 2
     }
   ],
   "applied": [],

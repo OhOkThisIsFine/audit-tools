@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-22 at `5e1d92c097cb00ed39c02b28348984e9bac7cee1`.*
+*Last run: 2026-08-22 at `ad9bb882b213dcf4bbed52b5d302e857c28e5b81`.*
 
 
 ---
@@ -282,6 +282,48 @@ spec/audit/entrypoint-contract.md describes the shipped /audit-code slash workfl
 ---
 
 
+<!-- nightly:item key=3a1921907f478d41 -->
+
+## `docs-7` — HANDOFF Live state carries nine hand-typed run counts no probe can track, plus a parenthetical narrating what already shipped — trim, or keep them deliberately <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `docs/HANDOFF.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The handoff document exists to tell the next person the current state and the next action, and nothing else. Its Live state section currently does two things beyond that. First, it quotes nine numbers from the audit run of 2026-08-21 — how many findings, how they split by severity, how many themes, how many work blocks, how many re-verified. Those numbers come from files that git does not track, so no automatic check can ever notice when they stop being true. The next run silently replaces all of them while the sentence keeps reading as authoritative. Second, the line naming the published version adds a bracket listing four pieces of work that already shipped, which is a small changelog living in the one document whose own rules say it must not be one — and a list like that can only grow with each release. Neither is wrong today. The reason this comes to you rather than being cleaned up is that removing text from the rolling handoff is a judgment about how much context the next person needs, and the run tally may be there on purpose as a pointer to the deliverables. A rule matters here: because no probe can track a hand-typed number, the only action ever allowed is removing it, never correcting it — so this is not a request to update the figures.
+
+### The question
+
+docs/HANDOFF.md Live state carries nine hand-typed counts from the 2026-08-21 dogfood run, and a parenthetical enumerating four workstreams v0.44.0 already carried. Should both be trimmed to the durable half?
+
+### Your answer
+
+- [ ] **1. Trim both** — Cut the nine counts and the shipped-work parenthetical. Keep that the 2026-08-21 dogfood run is complete, where its deliverables live, and that v0.44.0 is the published state.
+- [ ] **2. Trim the parenthetical only** — Cut the shipped-work list from the version line. Keep the run tally as a deliberate pointer at the deliverables, accepting that no gate can tell when it goes stale.
+- [ ] **3. Leave both** — The context earns its place in the rolling handoff. Leave Live state as written and stop raising it.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- The tally is drawn from .audit-tools/audit-findings.json and .audit-tools/audit-report.md, which git does not track. Per the routine contract every probe target must be a git-TRACKED source file, so no admissible probe exists for any of the nine numbers.
+- The routine contract also forbids raising a finding that asks the owner to CORRECT a hand-typed computed value, so removal is the only action available. This item does not ask for updated figures.
+- docs/documentation-philosophy.md lists HANDOFF as explicitly not a changelog narrating what already shipped, and the version line carries exactly that shape.
+- The version claim itself is true and belongs there: package.json is 0.44.0 and the v0.44.0 tag exists. Only the parenthetical is at issue.
+- Verified directly at HEAD ad9bb882 by reading docs/HANDOFF.md and confirming both artifact paths are untracked.
+- Provenance note: this finding came from the leg-1 reviewer lane covering the instruction and philosophy docs. That lane's findings were verified mechanically by the routine itself rather than by a separate adversary agent — see the run's coverage note. The two claims here are existence facts rather than judgments, so a grep-level check is equivalent; the escalation is about what to DO, which is the owner's either way.
+
+</details>
+
+---
+
+
 # Backlog disambiguation
 
 
@@ -330,52 +372,6 @@ docs/backlog/open-bugs.md states the property as "one run identity across step e
 # Recurring-problem solutions
 
 
-<!-- nightly:item key=51c20f54edd9aafb -->
-
-## `solN-1` — A generator-parity gate registered preCommit:false lets a stale tracked render land — approve the reach fix plus the contract test that forbids the shape <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Recurring-problem solutions · open 2 nights · `scripts/guard-reach-data.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-Several files in this repo are not written by hand. A script reads some source files and writes a tracked file from them, so the tracked file is a copy that must be kept in step. For each of those, there is a check whose whole job is to say "this copy is out of date, regenerate it". A check like that only protects you if it runs at the moment the copy goes stale, which is when you commit. The registry that lists every check records, per check, whether it runs at commit time. Nine of these regeneration checks are registered to run at commit. One is not: check:runtime-artifact-names is registered as not running at commit at all, so it only fires later, at release time. That is exactly what happened on 2026-08-20. A deletion in the source moved the derived set, the tracked copy was left behind, the commit passed every gate, and the problem surfaced only when the full suite ran before tagging. It cost one failed suite run and a follow-up regeneration commit. The proposal has two halves. The first flips that one check to run at commit, and derives the list of files that trigger it from the list the generator already publishes about itself, so the trigger list cannot drift away from what the generator actually reads. The second half is a test that fails the build if anyone ever again registers a regeneration check as not-at-commit, so the mistake becomes impossible rather than merely fixed once. Saying yes means both halves get built and red-green validated. Saying yes to the first half only means the instance is fixed but the shape can come back. Saying no means the check stays a release-time check and a stale render can keep landing green.
-
-### The question
-
-scripts/guard-reach-data.mjs registers check:runtime-artifact-names with preCommit:false, while every other generator-parity gate is preCommit:'reach'. It is the only gate row whose fix text is regenerate-shaped AND whose preCommit is false. Should the routine build the two-part fix — flip that row to 'reach' with a REACH row derived from the generator's exported RUNTIME_NAME_SOURCES, and add a contract test that forbids a regenerate-shaped fix on a preCommit:false gate?
-
-### Your answer
-
-- [ ] **1. Build both halves** — Approved — build both. Flip check:runtime-artifact-names to preCommit:'reach' and add a REACH row whose files are DERIVED from the generator's exported RUNTIME_NAME_SOURCES (plus the generator and its render), so the reach cannot drift narrower than what the generator reads. Then add tests/shared/generator-gates-run-at-commit.test.ts asserting no gate with a regenerate-shaped fix is registered preCommit:false. Red-green validate: the test must be RED at HEAD naming check:runtime-artifact-names before the flip lands.
-- [ ] **2. Fix the instance only** — Flip check:runtime-artifact-names to preCommit:'reach' with the derived REACH row, but do not add the contract test. Accept that a future generator-parity gate can be registered outside the commit gate again; the regenerate-shaped predicate keys on fix prose and is not worth the false-negative surface.
-- [ ] **3. Leave it at release time** — Leave check:runtime-artifact-names as preCommit:false. The 13 layout-source paths are loop-core adjacent and change often, so the leg would fire regularly; catching the stale render at verify:checks before the tag is a good enough backstop and does not slow every commit.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-Full proposal: [`.audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PATCH.md`](../.audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PATCH.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-<details>
-<summary>Evidence (8) — what was verified against code, and how</summary>
-
-- scripts/guard-reach-data.mjs — the check:runtime-artifact-names gate row reads `impl: 'check:runtime-artifact-names', preCommit: false,` with a regenerate-shaped fix ('runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs'). <!-- doc-citation-exempt: quoted item prose, not citations -->
-- Enumerated every GUARDS row with kind:'gate' — 33 rows. check:runtime-artifact-names is the ONLY one whose fix matches /regenerat|generate-|--write|is stale/i AND whose preCommit is false. The nine comparable generator-parity gates (doc-manifest, doc-links, gate-enumeration, philosophy-brief, nightly-routine-prompt, handoff-roadmap, backlog-index, ci-trigger-paths, memory-citations, offload-lanes) are all 'reach', 'final' or 'always'.
-- Independently confirmed by the free-provider lane, which enumerated all 33 gate rows from source and returned CONFIRMED on the count and the id (.audit-tools/nightly/free-adv-0821.log).
-- Independently reached a third time by leg 2's mechanical backlog sweep, which classified the corresponding open-bugs entry actionable_now with the action 'Add check:runtime-artifact-names to the commit gate's triggered checks' (.audit-tools/nightly/triage-2026-08-21.jsonl).
-- scripts/shared/generate-runtime-artifact-names.mjs exports RUNTIME_NAME_SOURCES, a declared 13-entry list of the source files the generator reads — so the REACH row can be derived rather than hand-listed. Its CLI body is guarded by an import.meta.url check, so importing the module never writes.
-- Recurrence, counted: docs/backlog/open-bugs.md carries two 2026-08-20 entries of this class (the runtime-artifact-names render, and the nightly-queue/HANDOFF live-status desync); P19 is the same class on three earlier dates and is why scripts/shared/derived-file-preflight.mjs exists at all. The mechanism was built; this row was left outside it.
-- Cost of the 2026-08-20 instance: one failed full-suite run plus the follow-up regeneration commit 85609eb7.
-- Full proposal, mechanism, false-positive surface and the stated enforcement limit: .audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PROPOSAL.md; the exact edits and the red-green ordering: .../PATCH.md
-
-</details>
-
----
-
-
 <!-- nightly:item key=412767804febffc4 -->
 
 ## `sol-1` — P40: approve rendering a prompt output contract FROM the contract — two live sites, one already fixed this way, red-green proof attached <!-- doc-citation-exempt: quoted item prose, not citations -->
@@ -416,6 +412,52 @@ Full proposal: [`.audit-tools/nightly/proposals/P40-prompt-renders-its-contract/
 - Red-green validated this run: 2 tests failed at HEAD for the intended reasons, 2 passed with both fixes applied, then the edits were INVERTED — nothing landed.
 - REFUTED, do not act on it: the created_at claim in the 2026-08-19 entry. All 15 contract-pipeline sketches omit created_at CORRECTLY, because src/remediate/steps/contractPipeline.ts stamps it tool-side ("The host has no clock"). A field-set reconciliation test would be red on 15 correct sites.
 - Full proposal, the two verbatim edits, and the test: .audit-tools/nightly/proposals/P40-prompt-renders-its-contract/
+
+</details>
+
+---
+
+
+<!-- nightly:item key=51c20f54edd9aafb -->
+
+## `solN-1` — A generator-parity gate registered preCommit:false lets a stale tracked render land — approve the reach fix plus the contract test that forbids the shape <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 2 nights · `scripts/guard-reach-data.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+Several files in this repo are not written by hand. A script reads some source files and writes a tracked file from them, so the tracked file is a copy that must be kept in step. For each of those, there is a check whose whole job is to say "this copy is out of date, regenerate it". A check like that only protects you if it runs at the moment the copy goes stale, which is when you commit. The registry that lists every check records, per check, whether it runs at commit time. Nine of these regeneration checks are registered to run at commit. One is not: check:runtime-artifact-names is registered as not running at commit at all, so it only fires later, at release time. That is exactly what happened on 2026-08-20. A deletion in the source moved the derived set, the tracked copy was left behind, the commit passed every gate, and the problem surfaced only when the full suite ran before tagging. It cost one failed suite run and a follow-up regeneration commit. The proposal has two halves. The first flips that one check to run at commit, and derives the list of files that trigger it from the list the generator already publishes about itself, so the trigger list cannot drift away from what the generator actually reads. The second half is a test that fails the build if anyone ever again registers a regeneration check as not-at-commit, so the mistake becomes impossible rather than merely fixed once. Saying yes means both halves get built and red-green validated. Saying yes to the first half only means the instance is fixed but the shape can come back. Saying no means the check stays a release-time check and a stale render can keep landing green.
+
+### The question
+
+scripts/guard-reach-data.mjs registers check:runtime-artifact-names with preCommit:false, while every other generator-parity gate is preCommit:'reach'. It is the only gate row whose fix text is regenerate-shaped AND whose preCommit is false. Should the routine build the two-part fix — flip that row to 'reach' with a REACH row derived from the generator's exported RUNTIME_NAME_SOURCES, and add a contract test that forbids a regenerate-shaped fix on a preCommit:false gate?
+
+### Your answer
+
+- [ ] **1. Build both halves** — Approved — build both. Flip check:runtime-artifact-names to preCommit:'reach' and add a REACH row whose files are DERIVED from the generator's exported RUNTIME_NAME_SOURCES (plus the generator and its render), so the reach cannot drift narrower than what the generator reads. Then add tests/shared/generator-gates-run-at-commit.test.ts asserting no gate with a regenerate-shaped fix is registered preCommit:false. Red-green validate: the test must be RED at HEAD naming check:runtime-artifact-names before the flip lands.
+- [ ] **2. Fix the instance only** — Flip check:runtime-artifact-names to preCommit:'reach' with the derived REACH row, but do not add the contract test. Accept that a future generator-parity gate can be registered outside the commit gate again; the regenerate-shaped predicate keys on fix prose and is not worth the false-negative surface.
+- [ ] **3. Leave it at release time** — Leave check:runtime-artifact-names as preCommit:false. The 13 layout-source paths are loop-core adjacent and change often, so the leg would fire regularly; catching the stale render at verify:checks before the tag is a good enough backstop and does not slow every commit.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PATCH.md`](../.audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PATCH.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+<details>
+<summary>Evidence (8) — what was verified against code, and how</summary>
+
+- scripts/guard-reach-data.mjs — the check:runtime-artifact-names gate row reads `impl: 'check:runtime-artifact-names', preCommit: false,` with a regenerate-shaped fix ('runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs'). <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Enumerated every GUARDS row with kind:'gate' — 33 rows. check:runtime-artifact-names is the ONLY one whose fix matches /regenerat|generate-|--write|is stale/i AND whose preCommit is false. The nine comparable generator-parity gates (doc-manifest, doc-links, gate-enumeration, philosophy-brief, nightly-routine-prompt, handoff-roadmap, backlog-index, ci-trigger-paths, memory-citations, offload-lanes) are all 'reach', 'final' or 'always'.
+- Independently confirmed by the free-provider lane, which enumerated all 33 gate rows from source and returned CONFIRMED on the count and the id (.audit-tools/nightly/free-adv-0821.log).
+- Independently reached a third time by leg 2's mechanical backlog sweep, which classified the corresponding open-bugs entry actionable_now with the action 'Add check:runtime-artifact-names to the commit gate's triggered checks' (.audit-tools/nightly/triage-2026-08-21.jsonl).
+- scripts/shared/generate-runtime-artifact-names.mjs exports RUNTIME_NAME_SOURCES, a declared 13-entry list of the source files the generator reads — so the REACH row can be derived rather than hand-listed. Its CLI body is guarded by an import.meta.url check, so importing the module never writes.
+- Recurrence, counted: docs/backlog/open-bugs.md carries two 2026-08-20 entries of this class (the runtime-artifact-names render, and the nightly-queue/HANDOFF live-status desync); P19 is the same class on three earlier dates and is why scripts/shared/derived-file-preflight.mjs exists at all. The mechanism was built; this row was left outside it.
+- Cost of the 2026-08-20 instance: one failed full-suite run plus the follow-up regeneration commit 85609eb7.
+- Full proposal, mechanism, false-positive surface and the stated enforcement limit: .audit-tools/nightly/proposals/P39-generator-gate-outside-the-commit-gate/PROPOSAL.md; the exact edits and the red-green ordering: .../PATCH.md
 
 </details>
 
