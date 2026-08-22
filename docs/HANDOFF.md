@@ -8,13 +8,24 @@
 - Published state: v0.44.0 (the tag — it carries the consolidated pass: the mechanical deletions,
   the P38 write-scope union, the single-sourced command-shape rule, and the wave-1 durable tests).
   Everything below `main`'s tip is pushed; release CI is green and the global bins are reinstalled.
-- The remediation run remediate-2026-08-18-… is COMPLETE (27/27); promoted deliverables at
-  .audit-tools/remediation-report.md / .audit-tools/remediation-outcomes.json.
+- The dogfood self-audit of 2026-08-21 is COMPLETE. Promoted deliverables at
+  .audit-tools/audit-report.md / .audit-tools/audit-findings.json: 2,712 findings
+  (40 high / 1,164 medium / 1,405 low / 103 info), 12 root-cause themes, 6 top risks, 1,590 work
+  blocks. Of the 1,813 findings carrying a quote, 1,805 re-verified against disk at ingest.
+  The seven defects the run hit in the tool ITSELF are in docs/backlog/open-bugs.md; the two
+  standing lane/transport gotchas are in docs/backlog/durable-traps.md.
 
 ## Immediate next
 
-1. A fresh dogfood lap on the new architecture — the standing next step from the zero-adapter
-   retirement, now unblocked.
+1. Remediate from the fresh findings — `.audit-tools/audit-findings.json` is clean input to
+   `/remediate-code`. The 40 high-severity findings and the 6 top risks are the obvious first draw;
+   several are self-inflicted on the tool's own loop (synchronous spawns starving the lock
+   heartbeat, `sameLensDedupe` dropping absorbed findings, write-scope collapsing to host
+   attestation on non-git roots).
+2. Two audit-side defects the lap hit are worth fixing BEFORE the next audit run, because they cost
+   a wedged ingest and a hand-repair each: the generated worker prompt omitting `evidence`, and the
+   absence of any un-accept verb once a result is accepted and then fails validation. Both in
+   docs/backlog/open-bugs.md.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
