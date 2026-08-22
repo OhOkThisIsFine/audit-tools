@@ -383,6 +383,13 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   command in `src/audit/cli/forceSynthesisCommand.ts` runs synthesis from evidence already accepted
   by the ledger; it does not invent completion, and uncovered tasks remain visible as uncovered.
 
+- **A scratch file written into the repository root is tree dirt for the nightly clean-tree rule (2026-08-22, low).**
+  An untracked file at the repo root counts as dirt exactly like an uncommitted tracked edit, so a
+  one-off digest/diagnostic script whose output path DEFAULTS TO CWD blocks the nightly routine's fix
+  leg ("ten fixes the dirty tree blocked", 2026-08-22) before it starts. Scratch output belongs in the
+  session scratchpad — never the repo root. A tool that defaults its output path to cwd is the trap;
+  pass the path explicitly.
+
 - **A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).** `dist/`, `.claude/*` and `.audit-tools/*/*` are gitignored, so `rg` and `git grep` — the project's default search tools — provably cannot see a worktree's or a build tree's output. `grep -r` and PowerShell `Select-String -Recurse` honour no ignore file, so they hit `dist/**` and report deleted code as still referenced. Verified twice by probe. When checking whether a symbol is truly dead, use the ignore-aware tool; a `grep -r` hit inside `dist/` is the compiled copy of the very code you deleted, not a caller.
 
 - **A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.**
