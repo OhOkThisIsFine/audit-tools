@@ -24,13 +24,22 @@
 
 ## Immediate next
 
-1. Answer the two run-blocking questions (asked at hand-back): (a) waive MNT-c2dc7f9c for this run
-   (recorded host decision; remediate it in a later draw once the systemic lane emits evidence) or
-   re-admit it; (b) downgrade the judge's structured-field demands for this run, or pause the run
-   and fix the tool first (a `depends_on`/write-scope field on the finalized contract that the
-   scheduler and ingestion read; one ordering graph, not two). Then resume per the memory.
-2. Ship a release for the landed main (`/ship`): the shipped defect fixes are only on `main`.
-3. The 10 nightly decisions in docs/nightly-inbox.md (asked at hand-back).
+1. Resume the remediation run with the OWNER'S ANSWERS (given 2026-08-22 at hand-back): (a)
+   MNT-c2dc7f9c is WAIVED for this run — record it as a host decision (goal_spec non_goal / the
+   contracts' out-of-scope note already says so) and remediate it in a later draw; (b) the judge's
+   structured-field demands are DOWNGRADED for this run — the `artifact:` token graph is the
+   structured form; proceed to implementation dispatch. Mechanically: from the main checkout,
+   resolve the six accepted counterexamples in
+   `.audit-tools/remediation/intake/contract/judge_report.input.json` as downgraded/waived with that
+   rationale (use the tool's own downgrade path if its block prompt names one; otherwise edit the
+   classifications), `node remediate-code.mjs next-step`, then relaunch the driver described in memory
+   `remediation-first-draw-2026-08-22`. Implementation dispatch follows; items ship per dependency
+   level, results are `host-results/<sha256(item)>.json`, landed commits must be reachable from
+   HEAD, and the tool reruns the required tests.
+2. Nightly decisions: P39 (`solN-1`) and P40 (`sol-1`) are APPROVED (ticked in
+   docs/nightly-inbox.md — build both halves / approve as proposed); the other eight items in
+   docs/nightly-inbox.md are still open and must be asked at the next session start.
+3. Ship a release for the landed main (`/ship`): the shipped defect fixes are only on `main`.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 

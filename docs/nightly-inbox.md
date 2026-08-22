@@ -388,7 +388,7 @@ Approve P40 — render the charter provenance enum from CharterProvenanceSchema,
 
 ### Your answer
 
-- [ ] **1. Approve as proposed** — Land P40: both prompt fixes plus tests/shared/prompt-renders-its-contract.test.ts, with the charter list RENDERED from CharterProvenanceSchema rather than retyped, and a guard-reach registry row declaring the uncovered half.
+- [x] **1. Approve as proposed** — Land P40: both prompt fixes plus tests/shared/prompt-renders-its-contract.test.ts, with the charter list RENDERED from CharterProvenanceSchema rather than retyped, and a guard-reach registry row declaring the uncovered half.
 - [ ] **2. Fixes only, no test** — Land the two prompt fixes but not the contract test, accepting that a third site introduced later goes uncaught.
 - [ ] **3. Decline** — Leave both sites as written. Trim the refuted created_at claim out of the 2026-08-19 backlog entry either way, since acting on it would corrupt working code.
 - [ ] **Other** — record what I write in Notes below.
@@ -434,7 +434,7 @@ scripts/guard-reach-data.mjs registers check:runtime-artifact-names with preComm
 
 ### Your answer
 
-- [ ] **1. Build both halves** — Approved — build both. Flip check:runtime-artifact-names to preCommit:'reach' and add a REACH row whose files are DERIVED from the generator's exported RUNTIME_NAME_SOURCES (plus the generator and its render), so the reach cannot drift narrower than what the generator reads. Then add tests/shared/generator-gates-run-at-commit.test.ts asserting no gate with a regenerate-shaped fix is registered preCommit:false. Red-green validate: the test must be RED at HEAD naming check:runtime-artifact-names before the flip lands.
+- [x] **1. Build both halves** — Approved — build both. Flip check:runtime-artifact-names to preCommit:'reach' and add a REACH row whose files are DERIVED from the generator's exported RUNTIME_NAME_SOURCES (plus the generator and its render), so the reach cannot drift narrower than what the generator reads. Then add tests/shared/generator-gates-run-at-commit.test.ts asserting no gate with a regenerate-shaped fix is registered preCommit:false. Red-green validate: the test must be RED at HEAD naming check:runtime-artifact-names before the flip lands.
 - [ ] **2. Fix the instance only** — Flip check:runtime-artifact-names to preCommit:'reach' with the derived REACH row, but do not add the contract test. Accept that a future generator-parity gate can be registered outside the commit gate again; the regenerate-shaped predicate keys on fix prose and is not worth the false-negative surface.
 - [ ] **3. Leave it at release time** — Leave check:runtime-artifact-names as preCommit:false. The 13 layout-source paths are loop-core adjacent and change often, so the leg would fire regularly; catching the stale render at verify:checks before the tag is a good enough backstop and does not slow every commit.
 - [ ] **Other** — record what I write in Notes below.
