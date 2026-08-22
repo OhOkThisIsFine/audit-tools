@@ -236,7 +236,8 @@ describe("contract:unaccept-results-drops-an-accepted-entry", () => {
   });
 
   it("is registered as the audit-code `unaccept-results` command", async () => {
-    const { runCli } = await import("../../dist/audit/cli.js");
+    // src, not dist: the release-checks CI job typechecks the test tree without a build.
+    const { runCli } = await import("../../src/audit/cli.js");
     const { captureConsole } = await import("./helpers/captureConsole.mjs");
     const result = await captureConsole(() =>
       runCli([process.execPath, "cli.js", "this-is-not-a-command"]),

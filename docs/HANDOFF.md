@@ -36,9 +36,9 @@
    `remediation-first-draw-2026-08-22`. Implementation dispatch follows; items ship per dependency
    level, results are `host-results/<sha256(item)>.json`, landed commits must be reachable from
    HEAD, and the tool reruns the required tests.
-2. Nightly decisions: P39 (`solN-1`) and P40 (`sol-1`) are APPROVED (ticked in
-   docs/nightly-inbox.md — build both halves / approve as proposed); the other eight items in
-   docs/nightly-inbox.md are still open and must be asked at the next session start.
+2. Decision queue: P39 (`solN-1`) and P40 (`sol-1`) are APPROVED (ticked in the inbox the
+   generated block below points at — build both halves / approve as proposed); eight queue items
+   are still open and must be asked at the next session start.
 3. Ship a release for the landed main (`/ship`): the shipped defect fixes are only on `main`.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
