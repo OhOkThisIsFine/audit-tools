@@ -24,7 +24,6 @@ import type {
   AnalyzerSetting,
   CriticalFlowFallbackResult,
   GraphEdge,
-  SubmissionIssue,
   SynthesisNarrative,
 } from "audit-tools/shared";
 import {
@@ -1979,10 +1978,97 @@ export async function checkFinalizationCycle(ctx: {
  * block, and the cycle-guard bookkeeping (transition counter + the no-progress /
  * finalization-cycle sets the two guards mutate).
  */
+/**
+ * The advisory payload one fold iteration classified but could not render: an
+ * ingest that ends in a `transition` (accepted results for still-pending
+ * tasks) returns before any emission, so its `validation_warnings` and
+ * classified ingest `issues` would otherwise die with the outcome. The carry is
+ * fold-local (a `{ value }` ref on {@link AuditNextStepCtx}), never persisted —
+ * the ledger (`recordHostResultOutcomes`) remains the only durable record, and
+ * this only defers the PROMPT statement of what it already recorded to the next
+ * emission within the same call.
+ */
+interface FoldAdvisories {
+  ingestIssues: AuditHostIngestIssue[];
+  validationWarnings: AuditHostValidationWarning[];
+}
+
+const EMPTY_FOLD_ADVISORIES: FoldAdvisories = {
+  ingestIssues: [],
+  validationWarnings: [],
+};
+
+/**
+ * Append one fold iteration's advisories to the pending carry. Dedupe by
+ * identity signature keeps an issue the SAME ingest re-classifies on a later
+ * iteration (it will, while the submission stays broken) from rendering twice;
+ * the consuming drain ({@link takeFoldAdvisories}) is the once-per-emit half.
+ */
+function mergeFoldAdvisoriesInto(
+  carried: FoldAdvisories,
+  fresh: {
+    readonly issues: readonly AuditHostIngestIssue[];
+    readonly validationWarnings: readonly AuditHostValidationWarning[];
+  },
+): void {
+  for (const issue of fresh.issues) {
+    const signature = advisorySignature(issue);
+    if (
+      carried.ingestIssues.some((existing) => advisorySignature(existing) === signature)
+    ) {
+      continue;
+    }
+    carried.ingestIssues.push(issue);
+  }
+  for (const warning of fresh.validationWarnings) {
+    const signature = advisorySignature(warning);
+    if (
+      carried.validationWarnings.some(
+        (existing) => advisorySignature(existing) === signature,
+      )
+    ) {
+      continue;
+    }
+    carried.validationWarnings.push(warning);
+  }
+}
+
+/** Drain the carry: what the NEXT emission must state, now consumed. */
+function takeFoldAdvisories(ref: { value: FoldAdvisories }): FoldAdvisories {
+  const taken: FoldAdvisories = {
+    ingestIssues: ref.value.ingestIssues,
+    validationWarnings: ref.value.validationWarnings,
+  };
+  ref.value = {
+    ingestIssues: [...EMPTY_FOLD_ADVISORIES.ingestIssues],
+    validationWarnings: [...EMPTY_FOLD_ADVISORIES.validationWarnings],
+  };
+  return taken;
+}
+
+/** Content identity of one advisory, across both channels. */
+function advisorySignature(
+  advisory: AuditHostIngestIssue | AuditHostValidationWarning,
+): string {
+  const workItemId =
+    "work_item_id" in advisory ? (advisory.work_item_id ?? "") : "";
+  const code = "code" in advisory ? advisory.code : "warning";
+  return `${code}|${workItemId}|${advisory.message}`;
+}
+
 interface AuditNextStepCtx {
   params: NextStepParams;
   analyzersRef: { value: Record<string, AnalyzerSetting> | undefined };
   lastSummaryRef: { value: string };
+  /**
+   * Advisories an ingest classified on a fold iteration that ended in a
+   * `transition` (see {@link runHostDelegationObligation}): the transition
+   * returns before any emission, and the next ingest skips already-accepted
+   * bindings, so without this carry the warnings and that fold's classified
+   * issues never reach the emitted prompt. The next semantic-review emit
+   * merges + consumes them (once — see {@link mergeFoldAdvisories}).
+   */
+  foldAdvisoriesRef: { value: FoldAdvisories };
   /**
    * 0-based fold position == the hand loop's `index`. Incremented AFTER each
    * `transition` outcome (see `countTransitions`), so during any `execute` it
@@ -2455,6 +2541,15 @@ async function runHostDelegationObligation(
         preferredExecutor: "result_ingestion_executor",
         auditResultsData: [...pendingAccepted],
       });
+      // The transition returns before any emission, and the NEXT ingest skips
+      // already-accepted bindings — so this fold's advisories would be a
+      // one-shot loss. Carry them in the ctx ref; the semantic-review emit
+      // below (this call or a later iteration of the same drain) merges and
+      // consumes them exactly once.
+      mergeFoldAdvisoriesInto(ctx.foldAdvisoriesRef.value, {
+        issues: ingestIssues,
+        validationWarnings,
+      });
       return { kind: "transition", state: ingested.updated_bundle };
     }
   }
@@ -2468,15 +2563,33 @@ async function runHostDelegationObligation(
     selfCliPath: ctx.params.selfCliPath,
     timeoutMs: ctx.params.timeoutMs,
   });
+  // Consume whatever earlier fold iterations of THIS call carried: each
+  // advisory is stated on exactly one emitted step (never duplicated on later
+  // folds), and an emit with nothing carried renders only what THIS ingest saw.
+  const carried = takeFoldAdvisories(ctx.foldAdvisoriesRef);
+  const emitted = {
+    kind: "semantic_review" as const,
+    selectedExecutor: decision.selected_executor,
+    ...review,
+    ...(ingestIssues.length > 0 ? { ingestIssues } : {}),
+    ...(validationWarnings.length > 0 ? { validationWarnings } : {}),
+  };
   return {
     kind: "emit",
-    step: {
-      kind: "semantic_review",
-      selectedExecutor: decision.selected_executor,
-      ...review,
-      ...(ingestIssues.length > 0 ? { ingestIssues } : {}),
-      ...(validationWarnings.length > 0 ? { validationWarnings } : {}),
-    },
+    step:
+      carried.ingestIssues.length > 0 || carried.validationWarnings.length > 0
+        ? {
+            ...emitted,
+            ingestIssues: [
+              ...(ingestIssues as AuditHostIngestIssue[]),
+              ...carried.ingestIssues,
+            ],
+            validationWarnings: [
+              ...(validationWarnings as AuditHostValidationWarning[]),
+              ...carried.validationWarnings,
+            ],
+          }
+        : emitted,
   };
 }
 
@@ -2583,6 +2696,12 @@ export async function runDeterministicForNextStep(
     params,
     analyzersRef,
     lastSummaryRef: { value: "" },
+    foldAdvisoriesRef: {
+      value: {
+        ingestIssues: [...EMPTY_FOLD_ADVISORIES.ingestIssues],
+        validationWarnings: [...EMPTY_FOLD_ADVISORIES.validationWarnings],
+      },
+    },
     iterationRef: { value: 0 },
     dispatchedSignatures: new Set<string>(),
     seenStateSignatures: new Set<string>(),

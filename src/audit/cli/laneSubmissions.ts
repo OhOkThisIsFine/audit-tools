@@ -50,7 +50,6 @@ import {
   type CharterKind,
   type ExpectedSubmission,
   type ExpectedSubmissionSet,
-  type SubmissionIssue,
   type SubmissionIssueCode,
   type SubmissionLedgerEvent,
   type SubmissionReadOutcome,

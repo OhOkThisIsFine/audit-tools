@@ -22,7 +22,6 @@ import {
 } from "../../src/audit/cli/dispatch.js";
 import { readSubmissionLedger } from "../../src/shared/submission/submissionLedger.js";
 import { currentStepPath } from "../../src/shared/io/stepContractWriter.js";
-import { runAuditStep } from "../../src/audit/cli/auditStep.js";
 import type { AuditTask } from "../../src/audit/types.js";
 
 const cleanupRoots: string[] = [];
