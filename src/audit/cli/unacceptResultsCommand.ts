@@ -17,6 +17,9 @@ import { loadCurrentActiveReviewRun } from "./reviewRun.js";
  * distinguishable from a clean one, and invalidating the persisted step
  * contract. After dropping, the next fold re-reads the bound result files.
  *
+ * Argument validation lives in {@link dropAcceptedResults} — the ONE copy of
+ * the "requires --work-item or --all" refusal; this command parses argv only.
+ *
  * The run id resolves from the persisted review-run manifest, not an argv flag:
  * the operator names WHAT to drop, never WHERE the state lives.
  */
@@ -29,12 +32,6 @@ export async function cmdUnacceptResults(argv: string[]): Promise<void> {
       token === "--work-item" ? [argv[index + 1]] : [],
     )
     .filter((value): value is string => typeof value === "string");
-
-  if (!all && workItemIds.length === 0) {
-    throw new Error(
-      "unaccept-results requires --work-item <id> (repeatable) or --all",
-    );
-  }
 
   // Canonical run resolution: the same manifest `next-step`'s ingest fold reads.
   // A hand-supplied run id would be a second way to be wrong about which state

@@ -56,7 +56,7 @@ export const FINDING_LINE_START_INTEGER_RULE =
 export const FINDING_LINE_END_INTEGER_RULE =
   "affected_files[].line_end must be an integer >= 1.";
 export const FINDING_LINE_ORDER_RULE =
-  "affected_files line_start must be less than or equal to line_end.";
+  "affected_files: when both ends are cited, line_start must be less than or equal to line_end.";
 
 /** One violated line-span rule, naming the field that violates it. */
 export interface FindingLocationLineIssue {

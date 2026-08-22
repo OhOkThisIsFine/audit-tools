@@ -113,7 +113,12 @@ export function findingContractPromptLines(): readonly string[] {
     "These fields are JSON arrays whenever present, never a bare string or object: " +
       arrayFields.join(", ") +
       ". A finding that fails this contract rejects the whole submission.",
-    `Closed vocabularies — severity must be one of ${SEVERITIES.join("|")}; confidence one of ${CONFIDENCES.join("|")}; lens one of ${LENSES.join("|")}.`,
+    // `lens` is an OPTIONAL finding field (the enclosing AuditResult supplies
+    // the default), so its vocabulary clause is scoped to findings that supply
+    // one — stated two lines above as "lens is optional" — while severity and
+    // confidence are required on every finding. Still derived: the value list
+    // comes from LENSES, never a hand-typed copy.
+    `Closed vocabularies — severity must be one of ${SEVERITIES.join("|")}; confidence one of ${CONFIDENCES.join("|")}; lens, when supplied, one of ${LENSES.join("|")}.`,
     ...optionalFields
       .filter(([, node]) => typeof node.description === "string")
       .map(
