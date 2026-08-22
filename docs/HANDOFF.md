@@ -10,7 +10,8 @@
   each result BEFORE accepting, with an `unaccept-results` verb and an advisory warning channel
   (`1a34e60f`, follow-ups `02521579`, `e72a06bb`), and the worker prompt and ingestion share ONE
   finding contract rendered from the strict worker projection plus the validator's rule registry
-  (`20bba526`). Release CI has not run on these (no tag); the global bins are still v0.44.0.
+  (`20bba526`). Both CI workflows are green on the pushed tip; no release tag yet, so the global
+  bins are still v0.44.0.
 - The dogfood self-audit of 2026-08-21 is complete; its promoted deliverables are
   .audit-tools/audit-report.md / .audit-tools/audit-findings.json. Its tool defects live in
   docs/backlog/open-bugs.md (the 2026-08-21 and 2026-08-22 entries).
@@ -24,8 +25,6 @@
 
 ## Immediate next
 
-0. Confirm CI is green for the pushed tip (`gh run list --branch main`): the two red jobs were
-   resolved to named files and fixed in `4d02f25c`; the runs were still in progress at hand-back.
 1. Resume the remediation run with the OWNER'S ANSWERS (given 2026-08-22 at hand-back): (a)
    MNT-c2dc7f9c is WAIVED for this run — record it as a host decision (goal_spec non_goal / the
    contracts' out-of-scope note already says so) and remediate it in a later draw; (b) the judge's
