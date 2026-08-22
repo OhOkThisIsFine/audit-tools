@@ -248,7 +248,9 @@ test("a zero-finding result must AFFIRM it was reviewed, and cannot affirm along
     reviewed_clean: true,
   });
   expect(contradictory).toHaveLength(1);
-  expect(contradictory[0].message).toMatch(/contradicts 1 reported finding/i);
+  // The message is the REGISTRY statement (the same sentence the dispatch
+  // prompt carries), not a per-branch paraphrase.
+  expect(contradictory[0].message).toMatch(/reviewed_clean must never be set when findings are reported/iu);
 
   // 4. Findings without the flag → the ordinary path, unaffected.
   expect(affirmationIssues({ ...base, findings: [finding] })).toEqual([]);

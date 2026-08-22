@@ -103,7 +103,7 @@
                 "config_deployment",
                 "observability"
               ],
-              "description": "Optional: defaults from the enclosing AuditResult lens when omitted."
+              "description": "defaults from the enclosing AuditResult lens when omitted."
             },
             "summary": {
               "type": "string"

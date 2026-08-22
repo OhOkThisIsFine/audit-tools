@@ -155,11 +155,13 @@ test("validateAuditResults treats total_lines as advisory (S7) but still flags s
         issue.severity === "warning" &&
         /does not match the current line count/i.test(issue.message),
     )).toBeTruthy();
-  // The cited-span-within-declared-coverage check is unchanged (still an error).
+  // The cited-span-within-declared-coverage check is unchanged (still an error);
+  // the message is the REGISTRY statement (the same sentence the dispatch prompt
+  // carries), not a per-site paraphrase.
   expect(issues.some(
       (issue) =>
         issue.field === "findings[0].affected_files[0]" &&
-        /falls outside the declared file_coverage/i.test(issue.message),
+        /must fall inside the declared file_coverage/i.test(issue.message),
     )).toBeTruthy();
 });
 

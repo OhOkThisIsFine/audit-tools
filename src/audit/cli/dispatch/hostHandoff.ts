@@ -2,9 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import {
-  FindingSchema,
   createMemoizedSourceReader,
-  findingContractPromptLines,
   appendSubmissionEvent,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   assertSubmissionRunId,
@@ -23,6 +21,8 @@ import {
   type RunLogger,
   type SubmissionIssue,
 } from "audit-tools/shared";
+import { findingContractPromptLines } from "../../contracts/findingContractPrompt.js";
+import { WorkerFindingSchema, type WorkerFinding } from "../../contracts/workerSchemas.js";
 import { AuditResultSchema, type AuditResult, type AuditTask } from "../../types.js";
 import {
   validateOneAuditResult,
@@ -147,7 +147,8 @@ interface AuditHostResult {
   readonly work_item_id: string;
   readonly prompt_sha256: string;
   readonly file_coverage: readonly HostCoverage[];
-  readonly findings: readonly unknown[];
+  /** The findings AS THE STRICT PROJECTION PARSED THEM (see {@link parseFindings}). */
+  readonly findings: readonly WorkerFinding[];
 }
 
 interface AcceptedResultEntry {
@@ -846,30 +847,45 @@ function issueLocation(
   return [prefix, ...path.map((segment) => String(segment))].join(".");
 }
 
-function parseFindings(findings: readonly unknown[]): HostResultParse | null {
+function parseFindings(
+  findings: readonly unknown[],
+):
+  | { readonly ok: true; readonly findings: readonly WorkerFinding[] }
+  | { readonly ok: false; readonly detail: string } {
+  const parsedFindings: WorkerFinding[] = [];
   for (const [index, finding] of findings.entries()) {
     // S7: `grounding` is the TOOL's re-check of the worker's own quote — the one
     // bit ingestion exists to compute. A submission that supplies it is
     // self-certifying that bit, so it is REFUSED (never silently overwritten):
-    // the host must see that the field is not its to send.
+    // the host must see that the field is not its to send. Stated ahead of the
+    // schema check because this message names the field as the WORKER's mistake;
+    // the strict schema would report it only as an unrecognized key.
     if (isRecord(finding) && "grounding" in finding) {
-      return refuse(
-        `findings[${index}].grounding: grounding is tool-computed at ingest and must not be supplied`,
-      );
+      return {
+        ok: false,
+        detail: `findings[${index}].grounding: grounding is tool-computed at ingest and must not be supplied`,
+      };
     }
-    const parsed = FindingSchema.safeParse(finding);
-    if (parsed.success) continue;
-    const issue = parsed.error.issues[0];
-    const location =
-      issue === undefined
-        ? `findings[${index}]`
-        : issueLocation(`findings[${index}]`, issue.path);
-    const reason = issue === undefined ? "invalid" : issue.message;
-    return refuse(
-      `findings failed the audit finding contract at ${location}: ${reason}`,
-    );
+    // The STRICT WORKER PROJECTION — the same contract the dispatch prompt
+    // renders (`findingContractPromptLines`). Parsing the lenient base schema
+    // here accepted a prompt-obedient submission that downstream validation
+    // then failed (evidence missing), which is exactly the two-sources defect.
+    const parsed = WorkerFindingSchema.safeParse(finding);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const location =
+        issue === undefined
+          ? `findings[${index}]`
+          : issueLocation(`findings[${index}]`, issue.path);
+      const reason = issue === undefined ? "invalid" : issue.message;
+      return {
+        ok: false,
+        detail: `findings failed the audit finding contract at ${location}: ${reason}`,
+      };
+    }
+    parsedFindings.push(parsed.data);
   }
-  return null;
+  return { ok: true, findings: parsedFindings };
 }
 
 function parseHostResult(
@@ -915,8 +931,11 @@ function parseHostResult(
   if (!Array.isArray(value.findings)) {
     return refuse("findings failed the audit finding contract: findings must be an array");
   }
-  const findingRefusal = parseFindings(value.findings);
-  if (findingRefusal !== null) return findingRefusal;
+  // The parsed findings ride ON the result, so `toAuditResult` never has to
+  // re-parse them (one parse, one door).
+  const findingsParse = parseFindings(value.findings);
+  if (!findingsParse.ok) return refuse(findingsParse.detail);
+  const { findings } = findingsParse;
   const coveragePaths = new Set<string>();
   for (const coverage of value.file_coverage) {
     if (
@@ -960,10 +979,13 @@ function parseHostResult(
         : "file coverage: entries do not match the assigned scope exactly",
     );
   }
-  return {
-    ok: true,
-    result: JSON.parse(stableStringify(value)) as AuditHostResult,
-  };
+  const result = JSON.parse(
+    stableStringify({
+      ...value,
+      findings,
+    }),
+  ) as AuditHostResult;
+  return { ok: true, result };
 }
 
 /** The conversion to the persisted `AuditResult`, or the field that refused it. */
@@ -975,6 +997,15 @@ function toAuditResult(
   result: AuditHostResult,
   binding: AuditHostTaskBinding,
 ): AuditResultConversion {
+  // Findings arrive already parsed against the strict worker projection
+  // (`parseFindings`, threaded through `AuditHostResult.findings`) — this is a
+  // mapping, not a second validation. `lens` defaults from the enclosing
+  // AuditResult — the binding's lens, which IS this result's lens — exactly as
+  // the projection's `.describe()` states.
+  const findings = result.findings.map((finding) => ({
+    ...finding,
+    lens: finding.lens ?? binding.lens,
+  }));
   const parsed = AuditResultSchema.safeParse({
     task_id: binding.work_item_id,
     unit_id: binding.unit_id,
@@ -986,7 +1017,7 @@ function toAuditResult(
         total_lines: coverage.total_lines,
       }))
       .sort((left, right) => compareCodeUnits(left.path, right.path)),
-    findings: result.findings,
+    findings,
     reviewed_clean: result.findings.length === 0,
     run_id: result.run_id,
   });

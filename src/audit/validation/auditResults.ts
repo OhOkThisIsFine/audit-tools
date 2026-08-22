@@ -2,6 +2,7 @@ import type { AuditTask, Finding } from "../types.js";
 import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 import {
   describeValue,
+  findingLocationLineIssues,
   formatValidationIssues,
   isRecord,
   normalizeGraphPath,
@@ -12,6 +13,46 @@ import {
 } from "audit-tools/shared";
 
 export type IssueSeverity = "error" | "warning";
+
+/**
+ * THE one statement of each finding/result rule that is NOT expressible as a
+ * per-finding zod refinement — it needs cross-record context (the declared
+ * coverage, the zero/positive finding count) or the assigned task. The dispatch
+ * prompt's contract block renders every `statement` verbatim
+ * (`findingContractPromptLines`), and each validator site below emits its issue
+ * message FROM its registry entry, so the prompt the tool generates states
+ * exactly what the validator enforces: one source, not two.
+ *
+ * Rules expressible IN the schemas are not here — they live where they are
+ * enforced (the finding/location contracts in `audit-tools/shared`, which the
+ * prompt renders from `WorkerFindingSchema`).
+ */
+export const AUDIT_RESULT_RULES = [
+  {
+    id: "affected_span_within_coverage",
+    statement:
+      "Every affected_files line span must fall inside the declared file_coverage for its file.",
+  },
+  {
+    id: "reviewed_clean_affirmation",
+    statement:
+      "A result with zero findings must set reviewed_clean: true; reviewed_clean must never be set when findings are reported.",
+  },
+  {
+    id: "finding_lens_matches_task",
+    statement:
+      "Each finding's lens must match the assigned task lens (or be omitted to default from it).",
+  },
+] as const;
+
+/** Look up one registry entry by id (validator sites emit FROM this text). */
+export function auditResultRule(
+  id: (typeof AUDIT_RESULT_RULES)[number]["id"],
+): string {
+  const found = AUDIT_RESULT_RULES.find((rule) => rule.id === id);
+  if (!found) throw new Error(`Unknown audit result rule id: ${id}`);
+  return found.statement;
+}
 
 // CE-009 semantic-validity gate — significant line-count divergence.
 //
@@ -278,38 +319,18 @@ function validateAffectedFiles(
         message: "affected_files entry has an empty path.",
       });
     }
-    if (
-      item.line_start !== undefined &&
-      !Number.isInteger(item.line_start)
-    ) {
+    // The line-span rules are evaluated by the ONE shared predicate
+    // (`findingLocationLineIssues`) whose statements the dispatch prompt also
+    // renders and whose zod wrapper the host-handoff door parses with. This
+    // walk is not redundant with that parse: the batch lane reaches this
+    // validator WITHOUT a worker-projection parse, so the check must live here
+    // too or that door silently accepts an inverted span.
+    for (const lineIssue of findingLocationLineIssues(item)) {
       pushIssue(issues, {
         result_index: resultIndex,
         task_id: taskId,
-        field: `${label}.affected_files[${k}].line_start`,
-        message: `affected_files[${k}].line_start must be an integer, got ${describeValue(item.line_start)}.`,
-      });
-    }
-    if (
-      item.line_end !== undefined &&
-      !Number.isInteger(item.line_end)
-    ) {
-      pushIssue(issues, {
-        result_index: resultIndex,
-        task_id: taskId,
-        field: `${label}.affected_files[${k}].line_end`,
-        message: `affected_files[${k}].line_end must be an integer, got ${describeValue(item.line_end)}.`,
-      });
-    }
-    if (
-      Number.isInteger(item.line_start) &&
-      Number.isInteger(item.line_end) &&
-      Number(item.line_start) > Number(item.line_end)
-    ) {
-      pushIssue(issues, {
-        result_index: resultIndex,
-        task_id: taskId,
-        field: `${label}.affected_files[${k}]`,
-        message: "affected_files line_start must be less than or equal to line_end.",
+        field: `${label}.affected_files[${k}].${lineIssue.field}`,
+        message: lineIssue.message,
       });
     }
   }
@@ -877,9 +898,11 @@ function validateResultFindings(
       result_index: resultIndex,
       task_id: taskId,
       field: "reviewed_clean",
+      // Emitted FROM the registry entry (the same sentence the dispatch prompt
+      // carries), with the repair guidance appended.
       message:
-        "a result with zero findings must set reviewed_clean: true to affirm the scope WAS reviewed and is genuinely clean. " +
-        "If the review did not complete (error, truncation, empty completion), do not submit the result at all — an unaffirmed " +
+        auditResultRule("reviewed_clean_affirmation") +
+        " If the review did not complete (error, truncation, empty completion), do not submit the result at all — an unaffirmed " +
         "empty result is indistinguishable from a failed one.",
     });
   } else if (findings.length > 0 && result.reviewed_clean === true) {
@@ -887,7 +910,7 @@ function validateResultFindings(
       result_index: resultIndex,
       task_id: taskId,
       field: "reviewed_clean",
-      message: `reviewed_clean: true contradicts ${findings.length} reported finding(s). Set it only on a zero-finding result.`,
+      message: auditResultRule("reviewed_clean_affirmation"),
     });
   }
 
@@ -915,7 +938,7 @@ function validateResultFindings(
         result_index: resultIndex,
         task_id: taskId,
         field: `${label}.lens`,
-        message: `${label}.lens must match the assigned task lens (expected '${expectedFindingLens}', got '${finding.lens}').`,
+        message: `${auditResultRule("finding_lens_matches_task")} (expected '${expectedFindingLens}', got '${finding.lens}').`,
       });
     }
 
@@ -946,8 +969,8 @@ function validateResultFindings(
           task_id: taskId,
           field: `${label}.affected_files[${k}]`,
           message:
-            `affected_files line span ${affected.path}:${start}-${end} falls outside the declared file_coverage. ` +
-            "Fix the affected_files location or correct file_coverage.total_lines.",
+            auditResultRule("affected_span_within_coverage") +
+            ` Cited span ${affected.path}:${start}-${end}.`,
         });
       }
     }

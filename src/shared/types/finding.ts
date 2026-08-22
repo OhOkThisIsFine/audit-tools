@@ -11,7 +11,6 @@
 // hand-written JSON schema to drift from these types.
 
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { AnalyzerLeadProvenanceSchema } from "../analyzers/provenance.js";
 import { ContentCoherenceTraceSchema } from "../decompose/contentCoherence.js";
 
@@ -29,10 +28,10 @@ export type FindingSeverity = z.infer<typeof FindingSeveritySchema>;
 export const FindingConfidenceSchema = z.enum(["high", "medium", "low"]);
 export type FindingConfidence = z.infer<typeof FindingConfidenceSchema>;
 
-export const FindingLocationSchema = z.object({
+export const FindingLocationObjectSchema = z.object({
   path: z.string(),
-  line_start: z.number().int().optional(),
-  line_end: z.number().int().optional(),
+  line_start: z.number().int().min(1).optional(),
+  line_end: z.number().int().min(1).optional(),
   symbol: z.string().optional(),
   /**
    * Verbatim text copied from this span, exactly as it appears in the cited
@@ -45,6 +44,97 @@ export const FindingLocationSchema = z.object({
   /** Content hash of the file when the finding was planned (remediator). */
   hash_at_plan_time: z.string().optional(),
 });
+
+/**
+ * THE one statement of each line-span rule (every draw, audit and remediate).
+ * Exported so the dispatch prompt's contract block renders the very sentences
+ * the schema enforces — {@link findingLocationLineIssues} emits these exact
+ * strings, so wording cannot drift between the check and the prompt.
+ */
+export const FINDING_LINE_START_INTEGER_RULE =
+  "affected_files[].line_start must be an integer >= 1.";
+export const FINDING_LINE_END_INTEGER_RULE =
+  "affected_files[].line_end must be an integer >= 1.";
+export const FINDING_LINE_ORDER_RULE =
+  "affected_files line_start must be less than or equal to line_end.";
+
+/** One violated line-span rule, naming the field that violates it. */
+export interface FindingLocationLineIssue {
+  field: "line_start" | "line_end";
+  message: string;
+}
+
+/**
+ * THE one evaluation of the line-span rules: when a location cites lines at
+ * all, the span is 1-based integers with `line_start <= line_end`. Returns
+ * every violated rule with its statement.
+ *
+ * Consumed by BOTH ingestion doors so neither can drift from the other: the
+ * zod refinement ({@link refineFindingLocationLines}) turns these into schema
+ * issues at parse time, and the downstream audit-results validator walks the
+ * same function over its raw per-location records — the batch lane reaches
+ * that validator WITHOUT a worker-projection parse, so the check has to live
+ * there too, not only behind the parse.
+ *
+ * The fields stay `unknown`: callers hold everything from fully-parsed
+ * locations to raw JSON payloads, and the guards below are exactly what makes
+ * that honest.
+ */
+export function findingLocationLineIssues(location: {
+  line_start?: unknown;
+  line_end?: unknown;
+}): readonly FindingLocationLineIssue[] {
+  const issues: FindingLocationLineIssue[] = [];
+  if (
+    location.line_start !== undefined &&
+    !Number.isInteger(location.line_start)
+  ) {
+    issues.push({
+      field: "line_start",
+      message: FINDING_LINE_START_INTEGER_RULE,
+    });
+  }
+  if (location.line_end !== undefined && !Number.isInteger(location.line_end)) {
+    issues.push({
+      field: "line_end",
+      message: FINDING_LINE_END_INTEGER_RULE,
+    });
+  }
+  if (
+    Number.isInteger(location.line_start) &&
+    Number.isInteger(location.line_end) &&
+    Number(location.line_start) > Number(location.line_end)
+  ) {
+    issues.push({
+      field: "line_start",
+      message: FINDING_LINE_ORDER_RULE,
+    });
+  }
+  return issues;
+}
+
+/**
+ * Applies {@link findingLocationLineIssues} as a zod refinement. Exported so
+ * every projection applies the SAME refinement — `.superRefine` wraps in
+ * ZodEffects, which cannot be re-`extend`ed, so each projection composes
+ * object + refinement itself rather than this file baking them together and
+ * freezing the shape.
+ */
+export const refineFindingLocationLines = (
+  location: z.infer<typeof FindingLocationObjectSchema>,
+  context: z.RefinementCtx,
+): void => {
+  for (const issue of findingLocationLineIssues(location)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [issue.field],
+      message: issue.message,
+    });
+  }
+};
+
+export const FindingLocationSchema =
+  FindingLocationObjectSchema.superRefine(refineFindingLocationLines);
 export type FindingLocation = z.infer<typeof FindingLocationSchema>;
 
 /**
@@ -169,75 +259,6 @@ export const FindingSchema = z.object({
   ),
 });
 export type Finding = z.infer<typeof FindingSchema>;
-
-/** The JSON-Schema shape this renderer reads. Narrow by design — nothing else is consulted. */
-interface FindingSchemaNode {
-  type?: string | string[];
-  enum?: unknown[];
-  properties?: Record<string, FindingSchemaNode>;
-  required?: string[];
-  items?: FindingSchemaNode;
-}
-
-function describeFindingField(node: FindingSchemaNode | undefined): string {
-  if (node === undefined) return "value";
-  if (Array.isArray(node.enum)) {
-    return `one of ${node.enum.map((value) => String(value)).join("|")}`;
-  }
-  if (node.type === "array") {
-    const item = node.items;
-    if (item?.type === "object") {
-      const required = [...(item.required ?? [])].sort();
-      return required.length > 0
-        ? `array of objects, each requiring ${required.join(" + ")}`
-        : "array of objects";
-    }
-    return typeof item?.type === "string" ? `array of ${item.type}s` : "array";
-  }
-  return typeof node.type === "string" ? node.type : "value";
-}
-
-let renderedFindingContract: readonly string[] | undefined;
-
-/**
- * The finding contract as prompt lines, DERIVED from `FindingSchema` — the same
- * schema result ingestion enforces, so the statement can never drift from the
- * check.
- *
- * A dispatch prompt that says only "findings must satisfy the audit finding
- * contract" leaves the host to remember or fetch the contract, and a measured
- * lap lost four complete results to exactly that: findings missing the required
- * per-finding `lens`, and `evidence`/`reproduction` submitted as a string where
- * an array is required. Both classes are stated here.
- *
- * Memoized: the derivation is pure and the result is embedded in every work-item
- * prompt (and therefore in every prompt hash), so it must be both cheap and
- * byte-stable across a run.
- */
-export function findingContractPromptLines(): readonly string[] {
-  if (renderedFindingContract !== undefined) return renderedFindingContract;
-  const schema = zodToJsonSchema(FindingSchema, {
-    $refStrategy: "none",
-    target: "jsonSchema7",
-  }) as FindingSchemaNode;
-  const properties = schema.properties ?? {};
-  const required = [...(schema.required ?? [])].sort();
-  const arrayFields = Object.entries(properties)
-    .filter(([, node]) => node.type === "array")
-    .map(([name]) => name)
-    .sort();
-  renderedFindingContract = [
-    "Finding contract — every entry of `findings` must carry these required fields: " +
-      required
-        .map((name) => `${name} (${describeFindingField(properties[name])})`)
-        .join(", ") +
-      ".",
-    "These fields are JSON arrays whenever present, never a bare string or object: " +
-      arrayFields.join(", ") +
-      ". A finding that fails this contract rejects the whole submission.",
-  ];
-  return renderedFindingContract;
-}
 
 /** Report-level grouping of findings into parallelizable units of work. */
 export const WorkBlockSchema = z.object({

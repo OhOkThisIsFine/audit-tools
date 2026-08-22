@@ -99,11 +99,18 @@ export type {
   AuditFindingsSummary,
   AuditFindingsReport,
 } from "./types/finding.js";
-export { findingIdentity, findingContractPromptLines } from "./types/finding.js";
+export { findingIdentity } from "./types/finding.js";
+export type { FindingLocationLineIssue } from "./types/finding.js";
 // Zod schemas (A6 single source) — type inferred above, JSON schema generated.
 export {
   FindingSeveritySchema,
   FindingConfidenceSchema,
+  FindingLocationObjectSchema,
+  FINDING_LINE_START_INTEGER_RULE,
+  FINDING_LINE_END_INTEGER_RULE,
+  FINDING_LINE_ORDER_RULE,
+  refineFindingLocationLines,
+  findingLocationLineIssues,
   FindingLocationSchema,
   FindingGroundingSchema,
   AnchorExpectationSchema,

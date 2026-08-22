@@ -49,12 +49,14 @@ const AUDIT_TASK: AuditTask = {
 };
 
 /**
- * Passes FindingSchema (`evidence` is optional there) yet fails the
- * audit-results validator, whose `validateEvidence` errors on a finding whose
- * evidence is missing or empty. Exactly the live-lap shape: a worker obeying the
- * tool's own prompt produces this.
+ * Passes the worker finding contract at ingest (every schema-expressed rule
+ * holds: evidence present, vocabularies valid, span ordered) yet fails the
+ * audit-results validator on a rule only IT enforces — the affected_files span
+ * (1-9) falls outside the declared file_coverage (total_lines 2). Exactly the
+ * live-lap shape: a worker obeying the tool's own prompt can still produce a
+ * result that the content gate must refuse.
  */
-const FINDING_WITHOUT_EVIDENCE = {
+const FINDING_OUT_OF_COVERAGE = {
   id: "F-1",
   title: "Variable overwritten before use",
   category: "correctness",
@@ -62,7 +64,8 @@ const FINDING_WITHOUT_EVIDENCE = {
   confidence: "medium",
   lens: "correctness",
   summary: "x is reassigned before the prior value is read.",
-  affected_files: [{ path: "src/a.ts" }],
+  evidence: ["src/a.ts:1 - x overwritten"],
+  affected_files: [{ path: "src/a.ts", line_start: 1, line_end: 9 }],
 };
 
 async function setup() {
@@ -143,9 +146,9 @@ async function setup() {
 }
 
 describe("contract:host-handoff-validates-before-it-accepts", () => {
-  it("an evidence-less result is classified-rejected, not accepted-and-wedged", async () => {
+  it("a content-invalid result (span outside declared coverage) is classified-rejected, not accepted-and-wedged", async () => {
     const ctx = await setup();
-    await ctx.writeResult(FINDING_WITHOUT_EVIDENCE);
+    await ctx.writeResult(FINDING_OUT_OF_COVERAGE);
 
     const first = await ctx.ingest();
     expect(first.accepted_count).toBe(0);
@@ -154,7 +157,7 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     );
     expect(issue, `the rejection must be classified: ${JSON.stringify(first.issues)}`).toBeDefined();
     expect(issue?.code).toBe("result_validation_failed");
-    expect(issue?.message).toMatch(/evidence/u);
+    expect(issue?.message).toMatch(/inside the declared file_coverage/u);
 
     // Nothing poisoned: the accepted pair holds no entry for the work item.
     const pairAfterReject = await ctx.acceptedPair();
@@ -162,7 +165,7 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     expect(pairAfterReject.ledgerEntries).toEqual([]);
 
     // The operator fixes the SAME bound file; the next fold re-reads it.
-    await ctx.writeResult({ ...FINDING_WITHOUT_EVIDENCE, evidence: ["src/a.ts:1 - x overwritten"] });
+    await ctx.writeResult({ ...FINDING_OUT_OF_COVERAGE, affected_files: [{ path: "src/a.ts", line_start: 1, line_end: 2 }] });
     const second = await ctx.ingest();
     expect(second.accepted_count).toBe(1);
     expect(second.completed_work_item_ids).toEqual([AUDIT_TASK.task_id]);
@@ -200,8 +203,10 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     // so the whole result carries only warning-severity validation issues and
     // passes every error rule including the envelope's bound-count check.
     await ctx.writeResult({
-      ...FINDING_WITHOUT_EVIDENCE,
-      evidence: ["src/a.ts:1 - x overwritten"],
+      ...FINDING_OUT_OF_COVERAGE,
+      // A span-free location: every error rule holds, so only the ±1-line
+      // coverage delta below can surface — as a warning.
+      affected_files: [{ path: "src/a.ts" }],
     });
 
     const ingested = await ctx.ingest({ "src/a.ts": 3 });
@@ -228,11 +233,11 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
   it("a task-unknown (orphan) result passes through UNVALIDATED with the stderr notice", async () => {
     const ctx = await setup();
 
-    // Evidence-less: would be REJECTED if the orphan were validated. It is an
-    // evidence-less shape on purpose — the passthrough must hold even for the
-    // worst-shaped result, because refusing an orphan strands it outside the
-    // append-only ledger entirely.
-    await ctx.writeResult(FINDING_WITHOUT_EVIDENCE);
+    // Span outside the declared coverage: would be REJECTED if the orphan were
+    // validated. It is a content-invalid shape on purpose — the passthrough must
+    // hold even for the worst-shaped result, because refusing an orphan strands
+    // it outside the append-only ledger entirely.
+    await ctx.writeResult(FINDING_OUT_OF_COVERAGE);
 
     const stderrChunks: string[] = [];
     const originalWrite = process.stderr.write.bind(process.stderr);

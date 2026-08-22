@@ -4,6 +4,9 @@ import { isAbsolute, join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { validateAuditResults } from "../../src/audit/validation/auditResults.js";
+import type { AuditTask } from "../../src/audit/types.js";
+
 // The dogfood lap's four `submission_contract_invalid` rejections were ALL
 // finding-schema failures (a missing per-finding `lens`, an `evidence` string
 // where an array is required) — yet the issue message named "identity, prompt
@@ -55,6 +58,7 @@ interface IngestIssue {
 
 interface IngestSummary {
   readonly accepted_count: number;
+  readonly accepted_results?: readonly Record<string, unknown>[];
   readonly completed_work_item_ids: readonly string[];
   readonly issues?: readonly IngestIssue[];
 }
@@ -165,11 +169,17 @@ describe(FAILURE_SIGNATURE, () => {
         findings: [
           {
             id: "F-1",
-            title: "Missing lens",
+            title: "Off-vocabulary lens",
             category: "correctness",
             severity: "medium",
             confidence: "medium",
-            summary: "The finding omits the required per-finding lens.",
+            evidence: ["src/a.ts:1 - boundary"],
+            summary: "The finding cites a lens outside the closed vocabulary.",
+            // An OMITTED lens is legal under the worker projection (it defaults
+            // from the enclosing AuditResult); a WRONG lens — outside the
+            // closed LensSchema vocabulary — is what the schema refuses here,
+            // and the refusal must name findings[0].lens.
+            lens: "vibes",
             affected_files: [{ path: "src/a.ts" }],
           },
         ],
@@ -205,7 +215,7 @@ describe(FAILURE_SIGNATURE, () => {
     ).not.toMatch(/identity, prompt binding, or file coverage/u);
   });
 
-  it("states the finding contract inline in the work item's dispatch prompt", async () => {
+  it("states every finding-level rule the downstream validator enforces", async () => {
     const published = await publishOneWorkItem();
     const prompt = published.item.prompt.text;
 
@@ -216,12 +226,17 @@ describe(FAILURE_SIGNATURE, () => {
       .filter((line) => /finding/iu.test(line) && !line.startsWith("Assignment:"))
       .join("\n");
 
-    // Derived from the enforced schema, so this list cannot drift from it.
-    const { FindingSchema } = await import("../../src/shared/types/finding.js");
-    const required = Object.entries(FindingSchema.shape)
+    // Derived from the schema INGESTION enforces, so this list cannot drift
+    // from it. The base FindingSchema is the shared core (remediate draws on it
+    // too); the audit draw's strictness lives in the worker projection.
+    const { WorkerFindingSchema } = await import(
+      "../../src/audit/contracts/workerSchemas.js"
+    );
+    const required = Object.entries(WorkerFindingSchema.shape)
       .filter(([, field]) => !field.isOptional())
       .map(([name]) => name);
-    expect(required.length, "FindingSchema must have required fields").toBeGreaterThan(0);
+    expect(required.length, "WorkerFindingSchema must have required fields").toBeGreaterThan(0);
+    expect(required, "evidence is required of the audit draw").toContain("evidence");
     for (const field of required) {
       expect(
         contractBlock,
@@ -239,5 +254,267 @@ describe(FAILURE_SIGNATURE, () => {
     expect(contractBlock, "the prompt must name the array shape explicitly").toMatch(
       /array/iu,
     );
+
+    // Every min(1) constraint the projection enforces — required or optional,
+    // array or string — is stated in the prompt, detected FROM the schema node
+    // (zodToJsonSchema emits minItems/minLength) rather than a hand list.
+    const { zodToJsonSchema } = await import("zod-to-json-schema");
+    const schema = (zodToJsonSchema as (s: unknown, o: object) => { properties: Record<string, { type?: string; minItems?: number; minLength?: number }> })(
+      WorkerFindingSchema,
+      { $refStrategy: "none", target: "jsonSchema7" },
+    );
+    const constrained = Object.entries(schema.properties)
+      .filter(([, node]) => (node.minItems ?? 0) >= 1 || (node.minLength ?? 0) >= 1)
+      .map(([name]) => name);
+    expect(constrained, "the schema must constrain some fields to non-empty").toContain("evidence");
+    expect(constrained).toContain("reproduction");
+    expect(constrained).toContain("related_findings");
+    expect(constrained).toContain("category");
+    for (const field of constrained) {
+      expect(
+        contractBlock,
+        `the prompt must state that '${field}' is non-empty — it carries a min(1) constraint`,
+      ).toMatch(new RegExp(`${field}[^\\n]*non-empty`, "u"));
+    }
+
+    // The line-span rules are enforced by the shared location refinement; the
+    // exported rule constants ARE their statements, so each must appear in the
+    // rendered contract block read from those constants (no hand-typed text).
+    const {
+      FINDING_LINE_START_INTEGER_RULE,
+      FINDING_LINE_END_INTEGER_RULE,
+      FINDING_LINE_ORDER_RULE,
+    } = await import("../../src/shared/types/finding.js");
+    for (const rule of [
+      FINDING_LINE_START_INTEGER_RULE,
+      FINDING_LINE_END_INTEGER_RULE,
+      FINDING_LINE_ORDER_RULE,
+    ]) {
+      expect(prompt, `the dispatch prompt must state the line-span rule: ${rule}`).toContain(rule);
+    }
+
+    // The non-schema rules live in ONE registry; the prompt carries each
+    // statement verbatim and the validator emits it verbatim.
+    const { AUDIT_RESULT_RULES } = await import(
+      "../../src/audit/validation/auditResults.js"
+    );
+    expect(AUDIT_RESULT_RULES.length, "the rule registry must be non-empty").toBeGreaterThan(0);
+    for (const rule of AUDIT_RESULT_RULES as readonly { id: string; statement: string }[]) {
+      expect(
+        prompt,
+        `the dispatch prompt must carry rule '${rule.id}' verbatim`,
+      ).toContain(rule.statement);
+    }
+  });
+
+  it("refuses a submission carrying exactly what today's prompt demanded (no evidence)", async () => {
+    const published = await publishOneWorkItem();
+    // Schema-required fields only — no `evidence`. This is what a worker that
+    // OBEYS the old prompt produces: accepted by ingestion, then failed by
+    // validateEvidence downstream. Ingestion parses the same projection the
+    // prompt renders, so an evidence-less finding must be refused HERE.
+    await writeFile(
+      published.resultPath,
+      JSON.stringify({
+        contract_version: "audit-host-result/v1alpha1",
+        result_id: "result-audit-task-a",
+        run_id: published.runId,
+        work_item_id: published.item.id,
+        prompt_sha256: published.item.prompt.sha256,
+        file_coverage: [{ path: "src/a.ts", reviewed_lines: 2, total_lines: 2 }],
+        findings: [
+          {
+            id: "F-1",
+            title: "Obeys the old prompt",
+            category: "correctness",
+            severity: "medium",
+            confidence: "medium",
+            lens: "correctness",
+            summary: "A finding with every base-required field but no evidence.",
+            affected_files: [{ path: "src/a.ts", line_start: 1, line_end: 2 }],
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const ingest = await published.boundary.ingestAuditHostResults({
+      root: published.root,
+      artifactsDir: published.artifactsDir,
+      runId: published.runId,
+      auditTasks: [task("audit-task-a", "correctness", "src/a.ts")],
+    });
+    expect(ingest.completed_work_item_ids).toEqual([]);
+    expect(ingest.accepted_count).toBe(0);
+    const issue = (ingest.issues ?? []).find(
+      (entry) => entry.work_item_id === "audit-task-a",
+    );
+    expect(issue, `an evidence-less finding must be refused: ${JSON.stringify(ingest.issues)}`)
+      .toBeDefined();
+    expect((issue as IngestIssue).message).toMatch(/findings\[0\][^\s]*evidence/u);
+
+    // A corrected submission that carries evidence IS accepted, and the
+    // downstream audit-results validation over it yields zero errors.
+    await writeFile(
+      published.resultPath,
+      JSON.stringify({
+        contract_version: "audit-host-result/v1alpha1",
+        result_id: "result-audit-task-a-2",
+        run_id: published.runId,
+        work_item_id: published.item.id,
+        prompt_sha256: published.item.prompt.sha256,
+        file_coverage: [{ path: "src/a.ts", reviewed_lines: 2, total_lines: 2 }],
+        findings: [
+          {
+            id: "F-2",
+            title: "Carries its evidence",
+            category: "correctness",
+            severity: "medium",
+            confidence: "medium",
+            lens: "correctness",
+            summary: "A complete finding under the one-source contract.",
+            affected_files: [{ path: "src/a.ts", line_start: 1, line_end: 2 }],
+            evidence: ["src/a.ts:1 - variable overwritten before use"],
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const accepted = await published.boundary.ingestAuditHostResults({
+      root: published.root,
+      artifactsDir: published.artifactsDir,
+      runId: published.runId,
+      auditTasks: [task("audit-task-a", "correctness", "src/a.ts")],
+    });
+    expect(accepted.accepted_count).toBe(1);
+    expect(accepted.completed_work_item_ids).toEqual(["audit-task-a"]);
+    const auditTask: AuditTask = {
+      task_id: "audit-task-a",
+      unit_id: "unit-audit-task-a",
+      pass_id: "pass:correctness",
+      lens: "correctness",
+      file_paths: ["src/a.ts"],
+      rationale: "Review src/a.ts",
+    };
+    const issues = validateAuditResults(accepted.accepted_results, [auditTask], {});
+    const errors = issues.filter((entry) => entry.severity === "error");
+    expect(errors, `a prompt-obedient submission must validate clean: ${JSON.stringify(issues)}`).toEqual([]);
+  });
+
+  it("refuses an inverted or non-integer line span with the one rule wording", async () => {
+    const published = await publishOneWorkItem();
+    for (const affectedFiles of [
+      [{ path: "src/a.ts", line_start: 3, line_end: 1 }],
+      [{ path: "src/a.ts", line_start: 1.5 }],
+    ]) {
+      await writeFile(
+        published.resultPath,
+        JSON.stringify({
+          contract_version: "audit-host-result/v1alpha1",
+          result_id: `result-audit-task-a-${JSON.stringify(affectedFiles)}`,
+          run_id: published.runId,
+          work_item_id: published.item.id,
+          prompt_sha256: published.item.prompt.sha256,
+          file_coverage: [{ path: "src/a.ts", reviewed_lines: 2, total_lines: 2 }],
+          findings: [
+            {
+              id: "F-span",
+              title: "Bad span",
+              category: "correctness",
+              severity: "medium",
+              confidence: "medium",
+              lens: "correctness",
+              summary: "The cited line span violates a stated rule.",
+              affected_files: affectedFiles,
+              evidence: ["src/a.ts:1 - boundary"],
+            },
+          ],
+        }),
+        "utf8",
+      );
+      const ingest = await published.boundary.ingestAuditHostResults({
+        root: published.root,
+        artifactsDir: published.artifactsDir,
+        runId: published.runId,
+        auditTasks: [task("audit-task-a", "correctness", "src/a.ts")],
+      });
+      expect(
+        ingest.completed_work_item_ids,
+        `an invalid span must be refused: ${JSON.stringify(affectedFiles)}`,
+      ).toEqual([]);
+      const issue = (ingest.issues ?? []).find(
+        (entry) => entry.work_item_id === "audit-task-a",
+      );
+      expect(issue, `the rejection must be classified: ${JSON.stringify(ingest.issues)}`).toBeDefined();
+      const message = (issue as IngestIssue).message;
+      expect(message).toMatch(/findings\[0\]\.affected_files\.0/u);
+      expect(message, `one wording per rule: ${message}`).toMatch(/line_start/u);
+    }
+  });
+
+  it("refuses an inverted span through the BATCH door with the same rule wording", async () => {
+    // The batch lane (`ingest-results`) feeds raw payloads to
+    // `validateAuditResults` WITHOUT a worker-projection parse, so deleting the
+    // validator's span checks left that door weaker than the host door. The
+    // validator must enforce the line rules itself via the ONE shared predicate.
+    const task: AuditTask = {
+      task_id: "audit-task-a",
+      unit_id: "unit-audit-task-a",
+      pass_id: "pass:correctness",
+      lens: "correctness",
+      file_paths: ["src/a.ts"],
+      rationale: "Review src/a.ts",
+    };
+    for (const affectedFiles of [
+      [{ path: "src/a.ts", line_start: 3, line_end: 1 }],
+      [{ path: "src/a.ts", line_start: 1.5 }],
+    ]) {
+      const issues = validateAuditResults(
+        [
+          {
+            task_id: "audit-task-a",
+            unit_id: "unit-audit-task-a",
+            pass_id: "pass:correctness",
+            lens: "correctness",
+            file_coverage: [{ path: "src/a.ts", total_lines: 2 }],
+            findings: [
+              {
+                id: "F-batch",
+                title: "Bad span through batch",
+                category: "correctness",
+                severity: "medium",
+                confidence: "medium",
+                lens: "correctness",
+                summary: "An inverted span must error on the batch lane too.",
+                affected_files: affectedFiles,
+                evidence: ["src/a.ts:1 - boundary"],
+              },
+            ],
+          },
+        ],
+        [task],
+        {},
+      );
+      const spanIssues = issues.filter((entry) =>
+        /affected_files\[0\]\.line_(start|end)$/.test(entry.field),
+      );
+      expect(
+        spanIssues,
+        `an invalid span must yield a location-line issue through the batch door: ${JSON.stringify(affectedFiles)}`,
+      ).not.toEqual([]);
+      expect(spanIssues.every((entry) => entry.severity === "error")).toBe(true);
+      const {
+        FINDING_LINE_START_INTEGER_RULE,
+        FINDING_LINE_END_INTEGER_RULE,
+        FINDING_LINE_ORDER_RULE,
+      } = await import("../../src/shared/types/finding.js");
+      const statements = [FINDING_LINE_START_INTEGER_RULE, FINDING_LINE_END_INTEGER_RULE, FINDING_LINE_ORDER_RULE];
+      for (const issue of spanIssues) {
+        expect(
+          statements.some((statement) => issue.message.includes(statement)),
+          `the issue message must carry the shared rule wording verbatim: ${issue.message}`,
+        ).toBe(true);
+      }
+    }
   });
 });

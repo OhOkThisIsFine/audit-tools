@@ -4,8 +4,9 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   FindingSchema,
-  FindingLocationSchema,
+  FindingLocationObjectSchema,
   LensSchema,
+  refineFindingLocationLines,
 } from "audit-tools/shared";
 import {
   AuditTaskSchema,
@@ -13,10 +14,8 @@ import {
   AuditVerificationSchema,
 } from "../types.js";
 
-export const WorkerFindingLocationSchema = FindingLocationSchema.extend({
-  line_start: z.number().int().min(1).optional(),
-  line_end: z.number().int().min(1).optional(),
-}).strict();
+export const WorkerFindingLocationSchema =
+  FindingLocationObjectSchema.strict().superRefine(refineFindingLocationLines);
 
 // `grounding` is OMITTED, not merely left un-extended: it is the tool's own
 // re-check of the worker's quote (computed at ingest by `ingestAuditHostResults`),
@@ -26,8 +25,10 @@ export const WorkerFindingLocationSchema = FindingLocationSchema.extend({
 export const WorkerFindingSchema = FindingSchema.omit({ grounding: true })
   .extend({
     category: z.string().min(1),
+    // Optionality itself is stated by the prompt renderer (`… is optional:`);
+    // the describe text states only WHAT happens when omitted.
     lens: LensSchema.describe(
-      "Optional: defaults from the enclosing AuditResult lens when omitted.",
+      "defaults from the enclosing AuditResult lens when omitted.",
     ).optional(),
     affected_files: z.array(WorkerFindingLocationSchema).min(1),
     evidence: z.array(z.string()).min(1),
@@ -35,6 +36,9 @@ export const WorkerFindingSchema = FindingSchema.omit({ grounding: true })
     related_findings: z.array(z.string()).min(1).optional(),
   })
   .strict();
+
+/** One finding as the strict projection parses it (ingestion's parse output). */
+export type WorkerFinding = z.infer<typeof WorkerFindingSchema>;
 
 export const WorkerAuditTaskSchema = AuditTaskSchema.extend({
   lens: LensSchema,
