@@ -24,6 +24,8 @@
 
 ## Immediate next
 
+0. Confirm CI is green for the pushed tip (`gh run list --branch main`): the two red jobs were
+   resolved to named files and fixed in `4d02f25c`; the runs were still in progress at hand-back.
 1. Resume the remediation run with the OWNER'S ANSWERS (given 2026-08-22 at hand-back): (a)
    MNT-c2dc7f9c is WAIVED for this run — record it as a host decision (goal_spec non_goal / the
    contracts' out-of-scope note already says so) and remediate it in a later draw; (b) the judge's
