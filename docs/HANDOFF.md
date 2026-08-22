@@ -5,27 +5,32 @@
 
 ## Live state
 
-- Published state: v0.44.0 (the tag — it carries the consolidated pass: the mechanical deletions,
-  the P38 write-scope union, the single-sourced command-shape rule, and the wave-1 durable tests).
-  Everything below `main`'s tip is pushed; release CI is green and the global bins are reinstalled.
-- The dogfood self-audit of 2026-08-21 is COMPLETE. Promoted deliverables at
-  .audit-tools/audit-report.md / .audit-tools/audit-findings.json: 2,712 findings
-  (40 high / 1,164 medium / 1,405 low / 103 info), 12 root-cause themes, 6 top risks, 1,590 work
-  blocks. Of the 1,813 findings carrying a quote, 1,805 re-verified against disk at ingest.
-  The seven defects the run hit in the tool ITSELF are in docs/backlog/open-bugs.md; the two
-  standing lane/transport gotchas are in docs/backlog/durable-traps.md.
+- Published state: v0.44.0 is the last tag. `main` is ahead of it and pushed (not yet released):
+  the two audit-side defects the 2026-08-21 dogfood lap hit are SHIPPED — host-handoff validates
+  each result BEFORE accepting, with an `unaccept-results` verb and an advisory warning channel
+  (`1a34e60f`, follow-ups `02521579`, `e72a06bb`), and the worker prompt and ingestion share ONE
+  finding contract rendered from the strict worker projection plus the validator's rule registry
+  (`20bba526`). Release CI has not run on these (no tag); the global bins are still v0.44.0.
+- The dogfood self-audit of 2026-08-21 is complete; its promoted deliverables are
+  .audit-tools/audit-report.md / .audit-tools/audit-findings.json. Its tool defects live in
+  docs/backlog/open-bugs.md (the 2026-08-21 and 2026-08-22 entries).
+- A first-draw REMEDIATION RUN (all high findings + the top risks' medium ones) is IN FLIGHT in
+  `.audit-tools/remediation/` and is BLOCKED inside the contract pipeline on an owner decision:
+  the adversarial judge demands adding a module for MNT-c2dc7f9c (dropped at intake, no evidence
+  array) or an owner-level goal_spec waiver, plus structured dependency/scope fields the finalized
+  contract schema does not have. The run, every host decision taken, the drivers, and how to
+  resume are in project memory `remediation-first-draw-2026-08-22`; the tool defects it exposed are
+  the 2026-08-22 high entries in docs/backlog/open-bugs.md.
 
 ## Immediate next
 
-1. Remediate from the fresh findings — `.audit-tools/audit-findings.json` is clean input to
-   `/remediate-code`. The 40 high-severity findings and the 6 top risks are the obvious first draw;
-   several are self-inflicted on the tool's own loop (synchronous spawns starving the lock
-   heartbeat, `sameLensDedupe` dropping absorbed findings, write-scope collapsing to host
-   attestation on non-git roots).
-2. Two audit-side defects the lap hit are worth fixing BEFORE the next audit run, because they cost
-   a wedged ingest and a hand-repair each: the generated worker prompt omitting `evidence`, and the
-   absence of any un-accept verb once a result is accepted and then fails validation. Both in
-   docs/backlog/open-bugs.md.
+1. Answer the two run-blocking questions (asked at hand-back): (a) waive MNT-c2dc7f9c for this run
+   (recorded host decision; remediate it in a later draw once the systemic lane emits evidence) or
+   re-admit it; (b) downgrade the judge's structured-field demands for this run, or pause the run
+   and fix the tool first (a `depends_on`/write-scope field on the finalized contract that the
+   scheduler and ingestion read; one ordering graph, not two). Then resume per the memory.
+2. Ship a release for the landed main (`/ship`): the shipped defect fixes are only on `main`.
+3. The 10 nightly decisions in docs/nightly-inbox.md (asked at hand-back).
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
