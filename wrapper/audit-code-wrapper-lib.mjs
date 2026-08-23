@@ -45,24 +45,84 @@ function hasLeadingFlag(argv, name) {
   return false;
 }
 
-function getFlag(argv, name) {
-  const index = argv.indexOf(name);
-  if (index < 0) return undefined;
-  return argv[index + 1];
+// Every occurrence of a flag in an argv, classified by the SAME grammar
+// src/audit/cli/args.ts reads with: an equals token (`--root=/x`) carries its
+// value inline; a bare token (`--root /x`) consumes the FOLLOWING token as its
+// value only when that token exists and is not itself a flag (the mirror of
+// args.ts's isLongFlagToken guard). Reading the dist grammar here is what makes
+// the wrapper's view of "what did the caller pass" agree with what the child
+// will actually act on. Ordered by ascending index; spans never overlap.
+function flagOccurrences(argv, name) {
+  const prefix = `${name}=`;
+  const occurrences = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index].startsWith(prefix)) {
+      occurrences.push({ index, span: 1, inline: true });
+    } else if (argv[index] === name) {
+      const consumesValue =
+        argv[index + 1] !== undefined && !argv[index + 1].startsWith("--");
+      occurrences.push({ index, span: consumesValue ? 2 : 1, inline: false });
+      if (consumesValue) index += 1;
+    }
+  }
+  return occurrences;
 }
 
-// Overwrite an existing flag's value (or append when absent). A fill-only-if-
-// missing default would forward a user-supplied RELATIVE --root/--artifacts-dir
-// raw, re-resolved against the child's cwd (repoRoot), not the caller's cwd —
-// e.g. `--root .` pointed at the package dir (CE-001). Normalizing to an
-// absolute path here makes the forwarded value cwd-stable.
+// The caller's LAST occurrence is their final word for the flag.
+function lastFlagEntry(argv, name) {
+  const occurrences = flagOccurrences(argv, name);
+  return occurrences[occurrences.length - 1];
+}
+
+function getFlag(argv, name) {
+  const entry = lastFlagEntry(argv, name);
+  if (!entry) return undefined;
+  return entry.inline ? argv[entry.index].slice(name.length + 1) : argv[entry.index + 1];
+}
+
+// Overwrite an existing flag's value or append when absent, ALWAYS emitting the
+// bare two-token form (`--name value`) — the only spelling
+// src/audit/cli/args.ts parses (argv.indexOf, no '=' handling anywhere in
+// src/audit), so forwarding an equals-form token verbatim means dist silently
+// drops it and the CLI default wins — explicit loses, the exact failure class
+// this guards. Every OTHER occurrence (either spelling, including each bare
+// occurrence's consumed value token) is removed, so exactly one canonical
+// occurrence reaches the child and dist's first-match parse cannot land on a
+// stale one. A fill-only-if-missing default would otherwise forward a
+// user-supplied RELATIVE --root/--artifacts-dir raw, re-resolved against the
+// child's cwd (repoRoot), not the caller's cwd — e.g. `--root .` pointed at the
+// package dir (CE-001). Normalizing to an absolute path here makes the
+// forwarded value cwd-stable.
 function setFlag(argv, name, value) {
-  const index = argv.indexOf(name);
-  if (index < 0) {
-    argv.push(name, value);
-  } else {
-    argv[index + 1] = value;
+  const occurrences = flagOccurrences(argv, name);
+  const kept = occurrences[occurrences.length - 1];
+
+  // Drop the superseded occurrences, highest index first, together with the
+  // value token each bare one consumed.
+  for (let occ = occurrences.length - 2; occ >= 0; occ -= 1) {
+    argv.splice(occurrences[occ].index, occurrences[occ].span);
   }
+
+  if (!kept) {
+    argv.push(name, value);
+    return;
+  }
+
+  // Removed occurrences shifted the kept one left; recompute its index.
+  const removedBefore = occurrences.reduce(
+    (span, occ) => (occ.index < kept.index ? span + occ.span : span),
+    0,
+  );
+  const index = kept.index - removedBefore;
+  if (kept.span === 2) {
+    // Bare with a value slot: overwrite the value in place.
+    argv[index + 1] = value;
+    return;
+  }
+  // Inline (`--name=x`) or dangling bare: collapse the token to the bare flag
+  // and insert the value after it.
+  argv[index] = name;
+  argv.splice(index + 1, 0, value);
 }
 
 export { hasLeadingFlag, setFlag };
