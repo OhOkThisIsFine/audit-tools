@@ -1517,7 +1517,9 @@
     "answer": "Add the producer relation to a registry (an artifacts_written declaration on ExecutorDefinition, or an equivalent), then generate the table from it and fix the cross-reference to point at the real home.",
     "subject": "",
     "path": "spec/audit/dependency-map.md",
-    "decided_at": "2026-08-23T15:58:26.270Z"
+    "decided_at": "2026-08-23T15:58:26.270Z",
+    "completed_at": "2026-08-23T19:40:31.209Z",
+    "completed_ref": "e27502b0 — producer relation declared on EXECUTOR_REGISTRY; spec/audit/executor-producers.generated.md generated from it"
   },
   "e15d0c1d1880d695": {
     "disposition": "settled",
