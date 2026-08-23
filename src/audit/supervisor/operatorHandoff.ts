@@ -7,6 +7,7 @@ import {
   writeJsonFile,
 } from "audit-tools/shared";
 import { type ArtifactBundle, AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
+import { AUDIT_FRICTION_RUN_ID } from "../orchestrator/nextStep.js";
 import type {
   AuditState,
   AuditTopLevelStatus,
@@ -228,7 +229,6 @@ export function buildAuditCodeHandoff(params: {
   progressSummary: string;
   isConfigError?: boolean;
   activeReviewRun?: ActiveReviewRun;
-  runId?: string;
 }): AuditCodeHandoff {
   const isConfigError = params.isConfigError ?? false;
   const blocked = params.state.status === BLOCKED_STATUS;
@@ -253,7 +253,7 @@ export function buildAuditCodeHandoff(params: {
     runtime_validation_tasks: params.bundle.runtime_validation_tasks
       ? join(params.artifactsDir, RUNTIME_VALIDATION_TASKS_FILENAME)
       : null,
-    friction_record: frictionCapturePath(params.artifactsDir, params.runId ?? "run"),
+    friction_record: frictionCapturePath(params.artifactsDir, AUDIT_FRICTION_RUN_ID),
   };
   const suggestedInputs = buildSuggestedInputs(
     params.artifactsDir,

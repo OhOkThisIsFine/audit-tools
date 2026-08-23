@@ -55,7 +55,7 @@ actual friction triage fires from the `present_report` terminal step
 |---|---|---|---|
 | `external_analyzer_acquisition_executor` | deterministic | `external_analyzers_current` | acquires the analyzer set and records the acquisition marker |
 | `structure_executor` | deterministic | `structure_artifacts` | emits all structure artifacts in one call, merging any persisted host flow enrichment |
-| `critical_flow_fallback_executor` | host_delegation | `critical_flow_fallback_current` | the durable host-authored flow enrichment. Fires ONLY when the deterministic flow inference set `critical_flows.fallback_required`; emits a host step to author the enrichment, otherwise self-satisfies. Persisting the submission re-stales `critical_flows.json` so the structure phase merges it |
+| `critical_flow_fallback_executor` | host_delegation | `critical_flow_fallback_current` | the durable host-authored flow enrichment. Fires ONLY when the deterministic flow inference asked for a fallback; emits a host step to author the enrichment, otherwise self-satisfies. Persisting the submission re-stales the deterministic flow artifact so the structure phase merges it |
 | `graph_enrichment_executor` | deterministic | `graph_enrichment_current` | records the graph-enrichment marker; merges analyzer edges into the graph when there are any |
 | `design_assessment_executor` | deterministic | `design_assessment_current` | deterministic design pass |
 | `structure_decomposition_executor` | deterministic | `structure_decomposition_current` | overlay-and-delta structure operator |

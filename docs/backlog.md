@@ -100,29 +100,29 @@
 - `open-bugs.md:633` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
 - `open-bugs.md:649` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
 - `open-bugs.md:651` — Friction walk (niggle-fix lap, 2026-08-07):
-- `open-bugs.md:667` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
-- `open-bugs.md:679` — Friction walk (nightly-determinations lap, 2026-07-26):
-- `open-bugs.md:691` — Friction walk (contract-sweep producer lap, 2026-07-26):
-- `open-bugs.md:703` — Friction walk (touched_files load-gate lap, 2026-07-25):
-- `open-bugs.md:709` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:722` — Friction walk (second backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:731` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
-- `open-bugs.md:757` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:769` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:775` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:783` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
-- `open-bugs.md:792` — `StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.
-- `open-bugs.md:798` — systemic_challenge findings ids are adversary-invented and round-colliding.
-- `open-bugs.md:805` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
-- `open-bugs.md:812` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:817` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:822` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `.audit-tools/audit/analyzer-policy.json` (2026-08-12, nightly, low).
-- `open-bugs.md:831` — `check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling (2026-08-14, nightly, low).
-- `open-bugs.md:842` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
-- `open-bugs.md:852` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
-- `open-bugs.md:859` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
-- `open-bugs.md:870` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
-- `open-bugs.md:889` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
+- `open-bugs.md:669` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
+- `open-bugs.md:681` — Friction walk (nightly-determinations lap, 2026-07-26):
+- `open-bugs.md:693` — Friction walk (contract-sweep producer lap, 2026-07-26):
+- `open-bugs.md:705` — Friction walk (touched_files load-gate lap, 2026-07-25):
+- `open-bugs.md:711` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:724` — Friction walk (second backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:733` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
+- `open-bugs.md:759` — External shared-logic audit V1–V7 residuals
+- `open-bugs.md:771` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:777` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:785` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:794` — `StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.
+- `open-bugs.md:800` — systemic_challenge findings ids are adversary-invented and round-colliding.
+- `open-bugs.md:807` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
+- `open-bugs.md:814` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:819` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `open-bugs.md:824` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `.audit-tools/audit/analyzer-policy.json` (2026-08-12, nightly, low).
+- `open-bugs.md:833` — `check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling (2026-08-14, nightly, low).
+- `open-bugs.md:844` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
+- `open-bugs.md:854` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
+- `open-bugs.md:861` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
+- `open-bugs.md:872` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
+- `open-bugs.md:891` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

@@ -654,7 +654,9 @@
   result is missing should surface as explicit partial progress, never disappear as null.
   (2) **tool-should-decide (low):** both implement agents left ~16 stray `*.log` files in the repo
   ROOT despite prompts directing output elsewhere — the recorded offloaded-diff-scope class
-  ([[parallel-dispatch-bounded-current-verified]]); driver swept them before commit.
+  ([[parallel-dispatch-bounded-current-verified]]); driver swept them before commit. The
+  `*.log` ignore rule now keeps such a log from reddening `check:doc-code-citations`, but it
+  also removes `git status` as the signal that surfaced this — a stray log is now invisible.
   (3) **ambiguous-direction: none** — the two backlog entries stated their properties precisely
   enough that both fixes landed against them verbatim.
   (4) **tool-should-decide (low, observed post-fix):** the closeout-challenge gate cannot

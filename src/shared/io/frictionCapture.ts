@@ -241,6 +241,22 @@ export async function frictionCaptured(
 }
 
 /**
+ * Every per-run friction record filename under `<artifactsDir>/friction/`, sorted by
+ * name — a stable, content-derived order, never `readdir` order. A missing friction
+ * dir yields `[]` (nothing captured yet is not an error). Single-sourced here, where
+ * the dir itself is owned, so every reader of the dir applies the same `.json` filter.
+ */
+export async function listFrictionRecordFilenames(artifactsDir: string): Promise<string[]> {
+  try {
+    return (await readdir(frictionCaptureDir(artifactsDir)))
+      .filter((name) => name.endsWith(".json"))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Archive every per-run friction record out of `<artifactsDir>/friction/` into
  * `destDir` as `<prefix>-<basename>` (e.g. `audit-friction-run.json`), returning
  * the archived destination paths. The friction record must outlive terminal
@@ -262,12 +278,7 @@ export async function archiveFrictionRecords(params: {
   const copyFile = params.copyFile ?? cp;
   const warn = params.warn ?? ((message) => process.stderr.write(`${message}\n`));
   const dir = frictionCaptureDir(params.artifactsDir);
-  let names: string[];
-  try {
-    names = (await readdir(dir)).filter((name) => name.endsWith(".json"));
-  } catch {
-    return []; // no friction dir → nothing to archive
-  }
+  const names = await listFrictionRecordFilenames(params.artifactsDir);
   const archived: string[] = [];
   for (const name of names) {
     const destination = join(params.destDir, `${params.prefix}-${name}`);

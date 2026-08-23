@@ -544,7 +544,9 @@ export const REACH = [
       'A `no-writes` site is checked in the writes-appeared direction only when it names a file+scope: ' +
       'intent_equivalence_executor does, semantic_review_executor CANNOT (no deterministic runner exists — the ' +
       'host returns results through the submission ledger), so if that executor ever started writing an artifact ' +
-      'nothing would extract it and its declared-⊇-extracted pin would stay vacuous',
+      'nothing would extract it and its declared-⊇-extracted pin would stay vacuous. Within a `produces` entry only ' +
+      'the artifact name is checked against the code: the `role` (primary vs refresh) and `note` fields are ' +
+      'hand-authored and mechanically unchecked, so a wrong role or a stale note renders faithfully',
   },
   {
     area: 'source',

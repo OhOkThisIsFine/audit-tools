@@ -794,6 +794,7 @@ export {
   frictionCaptureDir,
   frictionCapturePath,
   frictionCaptured,
+  listFrictionRecordFilenames,
   sanitizeRunId,
 } from "./io/frictionCapture.js";
 

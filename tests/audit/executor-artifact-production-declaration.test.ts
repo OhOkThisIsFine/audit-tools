@@ -27,6 +27,10 @@
  *   DECL-8: the tracked render matches a fresh render of the declaration.
  *   DECL-9: every declaration array is in its documented content-derived order,
  *           so re-authoring one cannot churn the render's inputs.
+ *  DECL-10: an ambiguous top-level name refuses only when a write site REQUESTS
+ *           it, and both literal spellings of the friction record path (the
+ *           runner's `artifacts_written` and the registry's `produces[].artifact`)
+ *           equal the path derived from `AUDIT_FRICTION_RUN_ID`.
  */
 
 import { describe, it, expect } from "vitest";
@@ -38,7 +42,9 @@ import { ARTIFACT_DEFINITIONS } from "../../src/audit/io/artifacts.js";
 import {
   DYNAMIC_WRITE_CONTRIBUTORS,
   EXECUTOR_WRITE_SITES,
+  buildScopeIndexFromText,
   extractExecutorWriteSets,
+  resolveScopeNode,
 } from "../../scripts/shared/executor-write-sites.mjs";
 import {
   RENDER_FILE,
@@ -48,6 +54,8 @@ import {
 } from "../../scripts/shared/generate-executor-producers.mjs";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { FRICTION_CAPTURE_DIRNAME } from "../../src/shared/io/frictionCapture.js";
+import { AUDIT_FRICTION_RUN_ID } from "../../src/audit/orchestrator/nextStep.js";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 
@@ -251,11 +259,17 @@ describe("executor→artifact production declaration", () => {
       parseProducerDeclaration(
         scratch('artifact: "graph_bundle.json", role: "refresh", note: "merges analyzer " + "edges"'),
       ),
-    ).toThrow(/property "note" is not a string or array literal/);
+    ).toThrow(/property "note" is not a readable literal/);
 
     expect(() =>
       parseProducerDeclaration(scratch('artifact: AUDIT_REPORT_FILENAME, role: "primary"')),
-    ).toThrow(/property "artifact" is not a string or array literal/);
+    ).toThrow(/property "artifact" is not a readable literal/);
+
+    // A backtick string with no substitution reads like a plain literal but is a
+    // different node kind, so the refusal has to be pinned rather than assumed.
+    expect(() =>
+      parseProducerDeclaration(scratch('artifact: `repo_manifest.json`, role: "primary"')),
+    ).toThrow(/property "artifact" is not a readable literal/);
   });
 
   it("DECL-8: the tracked producer table matches a fresh render of the declaration", () => {
@@ -297,5 +311,54 @@ describe("executor→artifact production declaration", () => {
       "These arrays declare a stable content-derived order; an incidentally-ordered one churns " +
         "the rendered table's inputs on every re-authoring.",
     ).toEqual([]);
+  });
+});
+
+describe("DECL-10: scope ambiguity refuses only where it is REQUESTED", () => {
+  const scratch = [
+    "export function runWanted() {",
+    '  return { artifacts_written: ["wanted.json"] };',
+    "}",
+    "export const dup = 1;",
+    "export const dup2 = { dup: 2 };",
+    "",
+  ].join("\n");
+  const site = (scope: string) => ({ executor: "scratch_executor", file: "scratch.ts", scope });
+
+  it("an unrelated duplicate top-level name does NOT refuse a site naming another scope", () => {
+    const scopes = buildScopeIndexFromText("scratch.ts", scratch);
+    expect(() => resolveScopeNode(scopes, site("runWanted"))).not.toThrow();
+  });
+
+  it("a site that REQUESTS the duplicated name refuses", () => {
+    const scopes = buildScopeIndexFromText("scratch.ts", scratch);
+    expect(() => resolveScopeNode(scopes, site("dup"))).toThrow(
+      /names scope "dup" in scratch\.ts, which more than one/,
+    );
+  });
+
+  it("a site naming no scope at all still refuses", () => {
+    const scopes = buildScopeIndexFromText("scratch.ts", scratch);
+    expect(() => resolveScopeNode(scopes, site("missing"))).toThrow(
+      /which no top-level function, variable, or object property defines/,
+    );
+  });
+});
+
+describe("DECL-10: both literal spellings of the friction path are the derived one", () => {
+  // The record path is spelled as a literal in exactly two source sites, each
+  // forced there by a mechanical reader: the runner's `artifacts_written` (the
+  // write-site extractor reads it structurally) and the registry's
+  // `produces[].artifact` (the producer generator refuses a non-literal
+  // initializer). Both are pinned against the constant so neither can drift.
+  const derived = [FRICTION_CAPTURE_DIRNAME, `${AUDIT_FRICTION_RUN_ID}.json`].join("/");
+
+  it("the runner's artifacts_written names exactly the derived path", () => {
+    expect([...(EXTRACTED.get("friction_capture_executor") ?? [])]).toEqual([derived]);
+  });
+
+  it("the registry's produces[].artifact names exactly the derived path", () => {
+    const entry = EXECUTOR_REGISTRY.find((e) => e.id === "friction_capture_executor");
+    expect(entry?.produces.map((p) => p.artifact)).toEqual([derived]);
   });
 });

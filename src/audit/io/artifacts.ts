@@ -1,10 +1,10 @@
-import { cp, readdir, readFile, rm, unlink } from "node:fs/promises";
+import { cp, readFile, rm, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
   AUDIT_REPORT_FILENAME,
   AUDIT_FINDINGS_FILENAME,
   archiveFrictionRecords,
-  frictionCaptureDir,
+  listFrictionRecordFilenames,
   auditReportPath,
   auditFindingsPath,
   promotedAuditReportPath,
@@ -684,9 +684,9 @@ export async function promoteFinalAuditReport(params: {
   // below with nothing gating it - the same class as the findings and ledger
   // archives beside it. Comparing the archived count against what is on disk
   // surfaces a per-file failure without reaching into that module's internals.
-  const frictionNames = await readdir(frictionCaptureDir(params.artifactsDir))
-    .then((names) => names.filter((name) => name.endsWith(".json")))
-    .catch(() => [] as string[]);
+  // The listing is the SAME helper `archiveFrictionRecords` walks, so the two
+  // counts cannot drift into under-reporting a destroyed record.
+  const frictionNames = await listFrictionRecordFilenames(params.artifactsDir);
   const archivedFriction = await archiveFrictionRecords({
     artifactsDir: params.artifactsDir,
     destDir: dirname(destination),

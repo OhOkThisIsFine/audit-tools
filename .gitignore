@@ -109,6 +109,11 @@ skills-lock.json
 # Dev-wrapper auto-rebuild lock (wrapper/audit-code-wrapper-build.mjs)
 .audit-code-build.lock
 
+# Gate/tool run logs written inside the tree. check:doc-code-citations
+# (scripts/check-doc-code-citations.mjs) folds untracked-but-unignored files into
+# its universe, so a stray log turns that gate red.
+*.log
+
 # External-analyzer sweep droppings (owner-run or dev-side runs): raw run
 # output only — conclusions land in docs/reviews/; the raw dir is disposable.
 analysis-results-*/

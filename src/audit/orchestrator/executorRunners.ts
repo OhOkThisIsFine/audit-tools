@@ -200,6 +200,10 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     const decision = await decideAuditFrictionCloseout(artifactsDir, AUDIT_FRICTION_RUN_ID);
     return {
       updated: bundle,
+      // A literal, not `frictionCapturePath(artifactsDir, AUDIT_FRICTION_RUN_ID)`: the
+      // write-site extractor (scripts/shared/executor-write-sites.mjs, runnerWriteSet)
+      // reads artifact names out of this array as string literals. DECL-10 pins this
+      // literal against the derived path.
       artifacts_written: ["friction/run.json"],
       progress_summary:
         decision.action === "disposed"

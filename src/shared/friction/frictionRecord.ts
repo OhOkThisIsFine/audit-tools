@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { readdir } from "node:fs/promises";
 import {
   type FrictionCaptureArtifact,
   type FrictionItem,
@@ -8,6 +7,7 @@ import {
   FRICTION_CAPTURE_SCHEMA_VERSION,
   frictionCaptureDir,
   frictionCapturePath,
+  listFrictionRecordFilenames,
   sanitizeRunId,
 } from "../io/frictionCapture.js";
 import { readOptionalJsonFile, writeJsonFile } from "../io/json.js";
@@ -316,12 +316,7 @@ export async function findFrictionRecordsByRunLink(
   const wantDispatch = normalizeRunRefs(link.dispatch_run_ids);
   if (wantStep.length === 0 && wantDispatch.length === 0) return [];
   const dir = frictionCaptureDir(artifactsDir);
-  let names: string[];
-  try {
-    names = (await readdir(dir)).filter((name) => name.endsWith(".json"));
-  } catch {
-    return []; // no friction dir → nothing to join against
-  }
+  const names = await listFrictionRecordFilenames(artifactsDir);
   const found: FrictionRecordReference[] = [];
   for (const name of names) {
     const path = join(dir, name);

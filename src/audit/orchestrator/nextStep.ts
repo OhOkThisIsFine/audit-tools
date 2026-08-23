@@ -158,7 +158,13 @@ export function decideNextStep(
  * The audit friction record's own key. Audit keeps ONE friction record per artifacts
  * dir — its step envelopes carry no per-run id — so the key is a fixed literal rather
  * than a minted run id. Single-sourced here beside the close-out that reads it, so the
- * capture seams, the close-out, and the run-linkage writers cannot spell it differently.
+ * capture seams, the close-out, the run-linkage writers, and the operator handoff's
+ * `friction_record` path cannot spell it differently. Two source sites still write the
+ * derived record path out as a literal, each because a mechanical reader requires one
+ * there: `friction_capture_executor`'s `artifacts_written` (executorRunners.ts), read
+ * structurally by the write-site extractor, and the same executor's
+ * `produces[].artifact` in EXECUTOR_REGISTRY (executors.ts), whose producer generator
+ * refuses any non-string-literal initializer. DECL-10 pins BOTH against this constant.
  */
 export const AUDIT_FRICTION_RUN_ID = "run";
 

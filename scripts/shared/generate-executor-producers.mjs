@@ -76,8 +76,12 @@ function readObject(node, context) {
       // still render a plausible row — the silent-drop shape this module's
       // header bans. Refuse instead, like the three refusals above.
       throw new Error(
-        `${context} property "${key}" is not a string or array literal — the render would ` +
-          `silently drop it; keep producer declarations literal`,
+        `${context} property "${key}" is not a readable literal — the render would silently ` +
+          `drop it. Accepted forms: a plain double- or single-quoted string, an array of such ` +
+          `strings, or an array of object literals whose properties are themselves such ` +
+          `values. Anything else — a template literal, a ` +
+          `concatenation, an identifier such as a *_FILENAME constant, a call — refuses; keep ` +
+          `producer declarations literal`,
       );
     }
   }

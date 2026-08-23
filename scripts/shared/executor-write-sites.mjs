@@ -314,6 +314,42 @@ function collectLiterals(node, out, constants) {
 }
 
 /**
+ * Sentinel recorded for a top-level name more than one node defines. Held in the
+ * index rather than thrown at index time so an ambiguity in a name NO write site
+ * requests costs nothing — the refusal fires at resolution, where it is real.
+ */
+const AMBIGUOUS_SCOPE = Symbol("ambiguous write-site scope");
+
+/**
+ * Index a source TEXT's addressable scopes. Separate from the file-reading path so
+ * the ambiguity/missing refusals can be exercised against a scratch source.
+ */
+export function buildScopeIndexFromText(fileName, sourceText) {
+  return buildScopeIndex(
+    ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true),
+  );
+}
+
+/**
+ * One site's scope node, or a REFUSAL: an unknown name, and an ambiguous one the
+ * site actually requests, are both unresolvable.
+ */
+export function resolveScopeNode(scopes, site) {
+  const scopeNode = scopes.get(site.scope);
+  if (scopeNode === AMBIGUOUS_SCOPE) {
+    throw new Error(
+      `write site for ${site.executor} names scope "${site.scope}" in ${site.file}, which more than one top-level function, variable, or object property defines — a scope name must address exactly one node`,
+    );
+  }
+  if (!scopeNode) {
+    throw new Error(
+      `write site for ${site.executor} names scope "${site.scope}" in ${site.file}, which no top-level function, variable, or object property defines`,
+    );
+  }
+  return scopeNode;
+}
+
+/**
  * Index a source file's addressable scopes: top-level function declarations by
  * name, top-level variable declarations by name (which is how a runner defined
  * as `const emitX = wrapper(...)` is addressed), and properties of top-level
@@ -322,12 +358,7 @@ function collectLiterals(node, out, constants) {
 function buildScopeIndex(sourceFile) {
   const scopes = new Map();
   const add = (name, node) => {
-    if (scopes.has(name)) {
-      throw new Error(
-        `ambiguous write-site scope "${name}" in ${sourceFile.fileName} — a scope name must address exactly one node`,
-      );
-    }
-    scopes.set(name, node);
+    scopes.set(name, scopes.has(name) ? AMBIGUOUS_SCOPE : node);
   };
   for (const statement of sourceFile.statements) {
     if (ts.isFunctionDeclaration(statement) && statement.name) {
@@ -419,13 +450,7 @@ export function extractExecutorWriteSets(root = repoRoot) {
         ),
       );
     }
-    const scopeNode = scopeCache.get(site.file).get(site.scope);
-    if (!scopeNode) {
-      throw new Error(
-        `write site for ${site.executor} names scope "${site.scope}" in ${site.file}, which no top-level function, variable, or object property defines`,
-      );
-    }
-    return scopeNode;
+    return resolveScopeNode(scopeCache.get(site.file), site);
   };
 
   const byExecutor = new Map();
