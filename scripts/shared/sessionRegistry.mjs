@@ -63,21 +63,28 @@ export const PORCELAIN_STATUS_ARGS = [
 // core.quotepath sensitivity). No further normalization is applied: identity is
 // exact-string equality of these root-relative paths. A path containing \r or
 // \n is carried verbatim (records are NUL-separated). The trailing empty token
-// from the final NUL is dropped. Malformed input → [].
-export function parsePorcelainZ(stdout) {
-  if (typeof stdout !== 'string' || stdout.length === 0) return [];
+// from the final NUL is dropped.
+//
+// One scan, two mappings. `scanPorcelainZ` — the core — returns null when any
+// record fails the shape check, so a caller can tell MALFORMED from EMPTY
+// (empty stdout is a well-formed zero-record stream, i.e. a clean tree).
+// `parsePorcelainZ` is the standalone fail-soft view: malformed input → [],
+// the neutral value, never a throw.
+function scanPorcelainZ(stdout) {
+  if (typeof stdout !== 'string') return null;
+  if (stdout.length === 0) return [];
   const tokens = stdout.split('\0');
   if (tokens[tokens.length - 1] === '') tokens.pop();
   const entries = [];
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
-    if (token.length < 4 || token[2] !== ' ') return [];
+    if (token.length < 4 || token[2] !== ' ') return null;
     const xy = token.slice(0, 2);
     const paths = [token.slice(3)];
     if (/[RC]/.test(xy)) {
       i += 1;
       const origin = tokens[i];
-      if (origin === undefined || origin.length === 0) return [];
+      if (origin === undefined || origin.length === 0) return null;
       paths.push(origin);
     }
     entries.push({
@@ -87,6 +94,11 @@ export function parsePorcelainZ(stdout) {
     });
   }
   return entries;
+}
+
+export function parsePorcelainZ(stdout) {
+  const entries = scanPorcelainZ(stdout);
+  return entries ?? [];
 }
 
 // The baseline value stored in a record: every path named by any entry (both
@@ -106,6 +118,14 @@ export function baselineFromEntries(entries) {
 // ` M path` record — an unstaged tracked modification, the modal closeout
 // dirt — and slice a phantom path out of the very identity the partition
 // compares.
+//
+// `ok` means "this read is trustworthy": git exited zero AND the stream
+// parsed. A malformed stream from a SUCCESSFUL git run is a GATE FAULT
+// (ok:false), not a clean tree — collapsing it into ok:true + [] reads
+// unparseable status as zero dirt and silences every session gate, the exact
+// fail-open this module bans. Consumers report clean ONLY on ok AND empty
+// entries; a fault degrades each gate to its pre-partition whole-tree behavior
+// (over-fire), never silence.
 export function runPorcelainStatus(root) {
   try {
     const r = spawnSync('git', PORCELAIN_STATUS_ARGS, {
@@ -116,7 +136,9 @@ export function runPorcelainStatus(root) {
       windowsHide: true,
     });
     if (r.error || r.status !== 0) return { ok: false, entries: [] };
-    return { ok: true, entries: parsePorcelainZ(r.stdout ?? '') };
+    const entries = scanPorcelainZ(r.stdout ?? '');
+    if (entries === null) return { ok: false, entries: [] };
+    return { ok: true, entries };
   } catch {
     return { ok: false, entries: [] };
   }
