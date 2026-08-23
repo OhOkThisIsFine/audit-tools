@@ -1,9 +1,12 @@
 // A6 — the audit-code wrapper CLI response envelope, single-sourced as zod.
 //
-// `audit-code next-step` (the .mjs wrapper) emits this JSON contract to the host
-// agent. It has no other TypeScript producer, so the schema lives here as the
-// single source of truth and the wrapper contract test validates against it
-// directly (replacing the former hand-authored audit-code-v1alpha1.schema.json).
+// `audit-code next-step` (the .mjs wrapper) emits this JSON contract to the
+// host agent. This module is its single source of truth: the wrapper contract
+// test (tests/audit/wrapper-response-contract.test.ts) validates real
+// builder-assembled envelopes against it, the review-run loader derives its
+// `ActiveReviewRun` runtime guard from `ActiveReviewRunSchema`, and
+// `WORKER_SCHEMA_SOURCES` renders it as the GENERATED
+// schemas/audit-code-v1alpha1.schema.json projection.
 
 import { z } from "zod";
 
@@ -45,7 +48,7 @@ const SuggestedInputSchema = z
   })
   .strict();
 
-const ActiveReviewRunSchema = z
+export const ActiveReviewRunSchema = z
   .object({
     contract_version: z.literal("audit-review-run/v1alpha1"),
     run_id: z.string(),
@@ -55,6 +58,9 @@ const ActiveReviewRunSchema = z
     host_result_map_path: z.string(),
   })
   .strict();
+
+/** The persisted review-run manifest shape, derived from its zod source. */
+export type ActiveReviewRun = z.infer<typeof ActiveReviewRunSchema>;
 
 const HandoffArtifactPathsSchema = z
   .object({

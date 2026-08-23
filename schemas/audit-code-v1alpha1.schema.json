@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audit-code-v1alpha1.schema.json",
+  "title": "Audit Code Response",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "audit-code/v1alpha1"
+    },
+    "audit_state": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_started",
+            "active",
+            "blocked",
+            "complete"
+          ]
+        },
+        "last_executor": {
+          "type": "string"
+        },
+        "last_obligation": {
+          "type": "string"
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "obligations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "missing",
+                  "present",
+                  "stale",
+                  "blocked",
+                  "satisfied"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "status",
+        "obligations"
+      ],
+      "additionalProperties": false
+    },
+    "selected_obligation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selected_executor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "progress_made": {
+      "type": "boolean"
+    },
+    "artifacts_written": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "progress_summary": {
+      "type": "string"
+    },
+    "next_likely_step": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "handoff": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_started",
+            "active",
+            "blocked",
+            "complete"
+          ]
+        },
+        "repo_root": {
+          "type": "string"
+        },
+        "artifacts_dir": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "pending_obligations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "suggested_inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "flag": {
+                "type": "string",
+                "enum": [
+                  "--results",
+                  "--batch-results",
+                  "--updates",
+                  "--external-analyzer-results"
+                ]
+              },
+              "suggested_path": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "flag",
+              "suggested_path",
+              "description"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "suggested_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "active_review_run": {
+          "type": "object",
+          "properties": {
+            "contract_version": {
+              "type": "string",
+              "const": "audit-review-run/v1alpha1"
+            },
+            "run_id": {
+              "type": "string"
+            },
+            "review_run_path": {
+              "type": "string"
+            },
+            "pending_audit_tasks_path": {
+              "type": "string"
+            },
+            "host_workload_path": {
+              "type": "string"
+            },
+            "host_result_map_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "contract_version",
+            "run_id",
+            "review_run_path",
+            "pending_audit_tasks_path",
+            "host_workload_path",
+            "host_result_map_path"
+          ],
+          "additionalProperties": false
+        },
+        "artifact_paths": {
+          "type": "object",
+          "properties": {
+            "operator_inputs_dir": {
+              "type": "string"
+            },
+            "operator_handoff_json": {
+              "type": "string"
+            },
+            "operator_handoff_markdown": {
+              "type": "string"
+            },
+            "session_config": {
+              "type": "string"
+            },
+            "run_ledger": {
+              "type": "string"
+            },
+            "current_review_run": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "current_prompt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "current_tasks": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audit_tasks": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "runtime_validation_tasks": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "friction_record": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "operator_inputs_dir",
+            "operator_handoff_json",
+            "operator_handoff_markdown",
+            "session_config",
+            "run_ledger",
+            "current_review_run",
+            "current_prompt",
+            "current_tasks",
+            "audit_tasks",
+            "runtime_validation_tasks",
+            "friction_record"
+          ],
+          "additionalProperties": false
+        },
+        "quick_start": {
+          "type": "string"
+        },
+        "file_map": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "status",
+        "repo_root",
+        "artifacts_dir",
+        "summary",
+        "pending_obligations",
+        "suggested_inputs",
+        "suggested_commands",
+        "artifact_paths"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "contract_version",
+    "audit_state",
+    "selected_obligation",
+    "selected_executor",
+    "progress_made",
+    "artifacts_written",
+    "progress_summary",
+    "next_likely_step"
+  ],
+  "additionalProperties": false
+}

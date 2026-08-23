@@ -22,23 +22,14 @@ import {
   buildAuditCodeHandoff,
   writeAuditCodeHandoffArtifacts,
   CURRENT_TASK_FILENAME,
-  type ActiveReviewRun,
 } from "../supervisor/operatorHandoff.js";
+import { ActiveReviewRunSchema, type ActiveReviewRun } from "../contracts/wrapperResponse.js";
 import { addFileLineCountHints } from "./lineIndex.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
 import { buildBlockedAuditState, buildManualReviewBlocker } from "./envelope.js";
 
 function isActiveReviewRun(value: unknown): value is ActiveReviewRun {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const run = value as Record<string, unknown>;
-  return (
-    run.contract_version === "audit-review-run/v1alpha1" &&
-    typeof run.run_id === "string" &&
-    typeof run.review_run_path === "string" &&
-    typeof run.pending_audit_tasks_path === "string" &&
-    typeof run.host_workload_path === "string" &&
-    typeof run.host_result_map_path === "string"
-  );
+  return ActiveReviewRunSchema.safeParse(value).success;
 }
 
 export async function loadCurrentActiveReviewRun(

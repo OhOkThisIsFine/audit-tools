@@ -13,6 +13,7 @@ import {
   AuditResultSchema,
   AuditVerificationSchema,
 } from "../types.js";
+import { AuditCodeResponseSchema } from "./wrapperResponse.js";
 
 export const WorkerFindingLocationSchema =
   FindingLocationObjectSchema.strict().superRefine(refineFindingLocationLines);
@@ -104,6 +105,11 @@ export const WORKER_SCHEMA_SOURCES: Record<
   "audit_results.schema.json": {
     schema: WorkerAuditResultsSchema,
     title: "Audit Results",
+  },
+  // The audit-code/v1alpha1 wrapper CLI response envelope (wrapperResponse.ts).
+  "audit-code-v1alpha1.schema.json": {
+    schema: AuditCodeResponseSchema,
+    title: "Audit Code Response",
   },
 };
 
