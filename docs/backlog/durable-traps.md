@@ -92,6 +92,19 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   during the 2026-07-19 classification pass. Delete by matching the entry's TEXT, and after any scripted
   edit scan for orphans — lines not starting with `-`, `>`, `#`, a space, `|`, or a backtick.
 
+- **A long multi-line prompt passed INLINE to a peer-CLI lane arrives truncated, and the lane then
+  offers to work from whatever file it can find (2026-08-23).** A nightly adversary dispatch sent
+  nine numbered claims through `claude.ps1 -p "<payload>"`; the lane received the framing sentence
+  and none of the claims, said so, and proposed verifying against an unrelated proposals file it had
+  located by itself. It did not error. Re-sending the identical claims as a repo-relative PATH — the
+  lane reads the file itself — worked first try. **Always write a long lane prompt to a file and send
+  the path**; the lane already has repo tools, so a path is strictly more reliable than a payload.
+  Not yet mechanically enforced: a prompt-length refusal in `shell-trap-guard.mjs` would catch it at
+  the call, and that is the fix if this recurs — one occurrence is under the recurrence bar, so it is
+  recorded rather than proposed. Sibling of the workspace-trust trap below (same fabrication hazard,
+  reached through the caller's transport instead), and of the wider caller-not-callee class in
+  memory: `offload-lane-failures-are-usually-the-caller`.
+
 - **A Claude lane whose isolated `CLAUDE_CONFIG_DIR` has not TRUSTED the workspace answers from
   nothing rather than failing (2026-08-15).** The dir is trusted per-project and trust is NOT
   inherited from a parent path, so `C:/Code` being listed does not cover `C:/Code/audit-tools`. The
