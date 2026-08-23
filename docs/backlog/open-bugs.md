@@ -23,8 +23,6 @@
 
 - **The friction close-out walk must be written twice under two different names (2026-08-21, low, friction: tool_should_decide).** The Stop backstop (`.claude/hooks/friction-stop-gate.mjs`) scans every `*.json` under `<artifacts>/friction` and accepts the run-id-keyed record, while the close step demands the walk specifically at `<artifacts>/friction/run.json`. A complete walk recorded against the real run id satisfies the backstop and still leaves the close gate reporting all three categories MISSING. **Property:** one run has one friction record path, and both gates read it.
 
-- **The charter-extraction lane prompt shows an OPEN provenance-kind list where the validator is CLOSED (2026-08-21, low).** The lane prompt's example reads `"kind": "doc|code|comment|inferred|..."`; the trailing ellipsis invited a coined value, the structural lane emitted `kind: "structural"`, and the whole submission was quarantined after a 34-minute lane run. The enum is closed (`doc | intent_checkpoint | user_feedback | code | comment | inferred`). **Property:** a prompt that names an enum names it exhaustively.
-
 - **The systemic-challenge lane prompt withholds the banked findings it asks the adversary to beat (2026-08-21, medium).** The prompt states only a COUNT of prior improvements, and `systemicChallengeLoop` computes newness by exact identity over adversary-minted ids. An adversary therefore cannot tell what it must not repeat, and a paraphrase registers as new: round 3 of the 2026-08-21 lap re-emitted round 2's `mapWithConcurrency` item under a fresh id, and the lane raised both halves as findings itself. **Property:** the adversary sees the banked set, and convergence dedups on content rather than on a worker-minted id. Related: the no-ceiling entry — together they are why that lap's loop had to be stopped by a hand-written empty submission.
 
 - **Acquisition of `actionlint` fails on extract (2026-08-21, low).** `external_analyzer_acquisition.json` recorded `actionlint` as `not_resolved` with `extract failed: tar exit 128`, so the workflow linter silently never ran although `.github/workflows` exists. **Property:** a tool that resolves and then fails to unpack is distinguishable from one that is not applicable to the repo.
@@ -805,17 +803,15 @@
   as text), so a contract-valid finding can never produce a tracked file the byte gate refuses.
 
 - **remediate-code step prompts drift from the validators that read their output (2026-08-19, low,
-  friction: tool_should_decide).** Three instances in one run: the `confirm_intent` prompt renders
-  `excluded_scope` as a bare `[]` while the reader (`fileExclusionReason` in
-  `src/shared/intent/pathScope.ts`) requires `{path, reason}` objects — prose strings crash
-  `normalize()` deep in path matching because the checkpoint read path is an unvalidated cast
-  (`readOptionalJsonFile<IntentCheckpoint>` in `src/remediate/steps/nextStep.ts`, ~line 3718)
-  though `IntentCheckpointSchema` is `.strict()`; the `synthesize_intake` prompt mandates
-  checkpoint fields (`pre_draft_questions`, `closing_action`, `intent_interpretation`) the
-  `.strict()` schema does not admit; the `goal_normalization` prompt's schema sketch omits
-  `created_at` which `validateGoalSpec` requires. **Property:** a step prompt's schema sketch is
-  derived from the same contract its reader enforces, and the checkpoint read path validates
-  before use instead of casting.
+  friction: tool_should_decide).** Remaining instance (the `confirm_intent` `excluded_scope` shape
+  is closed by P40's contract test, 2026-08-23; the `created_at` claim was REFUTED — the tool stamps
+  it, so the sketches omit it correctly): the `synthesize_intake` prompt mandates checkpoint fields
+  (`pre_draft_questions`, `closing_action`, `intent_interpretation`) the `.strict()`
+  `IntentCheckpointSchema` does not admit, and the checkpoint read path is an unvalidated cast
+  (`readOptionalJsonFile<IntentCheckpoint>` in `src/remediate/steps/nextStep.ts`) so prose strings
+  crash `normalize()` deep in path matching. **Property:** a step prompt's schema sketch is derived
+  from the same contract its reader enforces, and the checkpoint read path validates before use
+  instead of casting.
 
 - **The commit gate's doc-contract leg did not run check:doc-code-citations for a staged
   docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying
