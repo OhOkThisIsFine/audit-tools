@@ -38,14 +38,19 @@ export { stableStringifyProjection };
 const UNIVERSAL_NON_SEMANTIC_FIELDS: readonly string[] = ["created_at", "generated_at"];
 
 /**
- * The finalized-module-contract fields that are load-bearing for ALL of its
- * downstreams. These are exactly the fields `deriveObligationLedger` consumes
- * (`contractPipeline/derive.ts`): the obligation set, the test plan, the
- * conceptual critique, and the contract assessment all reason about the module
- * boundaries, interfaces, invariants, and failure modes — never the surrounding
- * rationale/narrative/seam prose. Projecting to these fields means a pure-prose
- * edit to the finalized contracts leaves the whole obligation-bearing chain
- * fresh, while a changed interface or a new invariant correctly re-stales it.
+ * The module-contract fields that are load-bearing for ALL downstreams, at BOTH
+ * layers (the intermediate `module_contracts` draft and the
+ * `finalized_module_contracts`). These are the fields the deterministic
+ * consumers read: `deriveObligationLedger` derives the obligation set and
+ * test-plan premises from them, and `buildBaselineSymbolCorpus`
+ * (`contractPipeline/changeClassification.ts`) additionally builds the
+ * change-vs-addition corpus from the declared interface surface — `inputs`,
+ * `outputs`, `side_effects`, `validation_boundary` — so a side_effects-only
+ * edit is exactly as load-bearing as an interface edit and re-stales the
+ * obligation_ledger like any other consumed field (CP-NODE-19). Never the
+ * surrounding rationale/narrative/seam prose: a pure-prose edit leaves the
+ * whole obligation-bearing chain fresh, while a changed interface, a new
+ * invariant, or a changed side effect correctly re-stales it.
  */
 const DERIVABLE_MODULE_CONTRACT_FIELDS: readonly string[] = [
   "name",
@@ -53,6 +58,7 @@ const DERIVABLE_MODULE_CONTRACT_FIELDS: readonly string[] = [
   "outputs",
   "invariants",
   "failure_modes",
+  "side_effects",
   "validation_boundary",
 ];
 
@@ -65,21 +71,6 @@ function stripFields(
     Object.entries(record).filter(([key]) => !drop.has(key)),
   );
 }
-
-/**
- * The FINALIZED contracts additionally expose `side_effects` as load-bearing:
- * `buildBaselineSymbolCorpus` (`contractPipeline/changeClassification.ts`) draws
- * the baseline symbol corpus from inputs / outputs / side_effects, so the corpus
- * — and therefore every obligation's deterministic change-vs-addition verdict
- * and its CE-006 scope anchors — is a function of the finalized `side_effects`
- * too. Narrowing it away meant a side_effects-only edit projected identically,
- * left the obligation_ledger fresh, and carried stale classification inputs
- * forward (OBL-seam-prep-remediate-core-inv-4 / MNT-4baae04e).
- */
-const FINALIZED_MODULE_CONTRACT_FIELDS: readonly string[] = [
-  ...DERIVABLE_MODULE_CONTRACT_FIELDS,
-  "side_effects",
-];
 
 function projectModuleContract(
   value: unknown,
@@ -120,10 +111,11 @@ function normalizeWhitespaceDeep(value: unknown): unknown {
 /**
  * Project a contract-pipeline artifact payload to only its load-bearing
  * structure for downstream-staleness purposes. The universal provenance strip
- * applies to every artifact; `finalized_module_contracts` additionally projects
- * its `module_contracts` to the derivable fields. Artifacts with no special case
- * fall back to the provenance-stripped payload (conservative: behaves like the
- * raw payload minus stamps).
+ * applies to every artifact; both module-contract artifacts
+ * (`module_contracts` and `finalized_module_contracts`) additionally project
+ * their `module_contracts` entries to the derivable fields. Artifacts with no
+ * special case fall back to the provenance-stripped payload (conservative:
+ * behaves like the raw payload minus stamps).
  *
  * Non-object payloads pass through unchanged.
  */
@@ -135,27 +127,19 @@ export function semanticProjection(
   const stripped = stripFields(payload, UNIVERSAL_NON_SEMANTIC_FIELDS);
 
   // Both the intermediate `module_contracts` and the `finalized_module_contracts`
-  // carry the same module-entry shape; narrow each entry to its derivable fields —
-  // plus, at the FINALIZED layer only, `side_effects`, which the baseline symbol
-  // corpus reads (see FINALIZED_MODULE_CONTRACT_FIELDS). A reworded per-module
-  // rationale / a tweaked non-derivable array (seam_adjustments / neighbor_needs)
-  // projects identically while a changed interface / new invariant / side effect
-  // does not. Keep every top-level field
+  // carry the same module-entry shape; narrow each entry to the derivable fields —
+  // including `side_effects`, which the baseline symbol corpus reads at both
+  // layers. A reworded per-module rationale / a tweaked non-derivable array
+  // (seam_adjustments / neighbor_needs) projects identically while a changed
+  // interface / new invariant / side effect does not. Keep every top-level field
   // (contract_version, goal_id, …): the narrowing is per-entry, so any top-level
   // field a downstream might read still participates in staleness.
   if (name === "finalized_module_contracts" || name === "module_contracts") {
-    // `side_effects` participates ONLY at the finalized layer (the corpus reads
-    // the finalized contracts; the intermediate draft's side_effects is still
-    // non-derivable prose — see the pinned narrowing tests).
-    const fields =
-      name === "finalized_module_contracts"
-        ? FINALIZED_MODULE_CONTRACT_FIELDS
-        : DERIVABLE_MODULE_CONTRACT_FIELDS;
     if (Array.isArray(stripped.module_contracts)) {
       return normalizeWhitespaceDeep({
         ...stripped,
         module_contracts: stripped.module_contracts.map((entry) =>
-          projectModuleContract(entry, fields),
+          projectModuleContract(entry, DERIVABLE_MODULE_CONTRACT_FIELDS),
         ),
       });
     }

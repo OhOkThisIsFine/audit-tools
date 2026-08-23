@@ -38,13 +38,22 @@ import { obligationId } from "./idRegistry.js";
 import { CP_FINALIZED_MODULE_CONTRACTS_VERSION } from "../validation/contractPipeline.js";
 import { isTestablePhaseObligation } from "../validation/contractPipelineGates.js";
 
-/** The finalized-module-contract fields the obligation deriver reads. */
+/**
+ * The finalized-module-contract fields the obligation deriver reads. This is the
+ * SAME field set the semantic projection keeps (`semanticProjection.ts`'s
+ * `DERIVABLE_MODULE_CONTRACT_FIELDS`) — including `side_effects`, which
+ * `buildBaselineSymbolCorpus` folds into the change-vs-addition corpus even
+ * though the ledger loop below does not name it. Carrying it here keeps the
+ * deriver's narrowed view from silently dropping a field the classification
+ * depends on (CP-NODE-19).
+ */
 interface DerivableModuleContract {
   name: string;
   inputs: string[];
   outputs: string[];
   invariants: string[];
   failure_modes: string[];
+  side_effects: string[];
   validation_boundary: string;
 }
 
@@ -592,6 +601,7 @@ function readFinalizedContracts(payload: unknown): DerivableFinalizedContracts {
       outputs: strArray(mr.outputs),
       invariants: strArray(mr.invariants),
       failure_modes: strArray(mr.failure_modes),
+      side_effects: strArray(mr.side_effects),
       validation_boundary:
         typeof mr.validation_boundary === "string" ? mr.validation_boundary : "",
     };

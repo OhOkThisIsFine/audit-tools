@@ -184,33 +184,75 @@ describe("B3 semantic staleness — projection + envelope", () => {
     );
   });
 
-  it("the intermediate module_contracts artifact narrows per-entry non-derivable fields too", () => {
-    const make = (sideEffects: string[]) => ({
-      contract_version: "remediate-code-contract-pipeline/module-contracts/v1alpha1",
-      goal_id: GOAL,
-      module_contracts: [
-        {
-          name: "mod-a",
-          inputs: ["x"],
-          outputs: ["y"],
-          invariants: [],
-          failure_modes: [],
-          validation_boundary: "v",
-          side_effects: sideEffects,
-          neighbor_needs: ["needs mod-b"],
-        },
-      ],
-      created_at: "2026-06-18T00:00:00.000Z",
-    });
-    const projected = semanticProjection("module_contracts", make(["logs"])) as {
-      module_contracts: Array<Record<string, unknown>>;
-    };
-    expect(projected.module_contracts[0]).not.toHaveProperty("side_effects");
-    expect(projected.module_contracts[0]).not.toHaveProperty("neighbor_needs");
-    // A non-derivable per-entry edit projects identically — no downstream churn.
-    expect(semanticProjection("module_contracts", make(["logs"]))).toEqual(
-      semanticProjection("module_contracts", make(["writes a file"])),
-    );
+  it("side_effects is load-bearing at BOTH layers of the module-contract projection", () => {
+    const make = (sideEffects: string[], layer: "intermediate" | "finalized") =>
+      layer === "intermediate"
+        ? {
+            contract_version: "remediate-code-contract-pipeline/module-contracts/v1alpha1",
+            goal_id: GOAL,
+            module_contracts: [
+              {
+                name: "mod-a",
+                inputs: ["x"],
+                outputs: ["y"],
+                invariants: [],
+                failure_modes: [],
+                validation_boundary: "v",
+                side_effects: sideEffects,
+                neighbor_needs: ["needs mod-b"],
+              },
+            ],
+            created_at: "2026-06-18T00:00:00.000Z",
+          }
+        : {
+            contract_version:
+              "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+            goal_id: GOAL,
+            module_contracts: [
+              {
+                name: "mod-a",
+                inputs: ["x"],
+                outputs: ["y"],
+                invariants: [],
+                failure_modes: [],
+                validation_boundary: "v",
+                side_effects: sideEffects,
+                seam_adjustments: [],
+                rationale: "prose the projection drops",
+              },
+            ],
+            created_at: "2026-06-18T00:00:00.000Z",
+          };
+
+    for (const layer of ["intermediate", "finalized"] as const) {
+      const name = layer === "intermediate" ? "module_contracts" : "finalized_module_contracts";
+      const projected = semanticProjection(name, make(["writes a file"], layer)) as {
+        module_contracts: Array<Record<string, unknown>>;
+      };
+      // Load-bearing at both layers: buildBaselineSymbolCorpus draws the
+      // change-vs-addition corpus from the declared interface surface including
+      // side_effects, so a dropped side_effects left stale classification inputs
+      // behind a fresh-looking ledger (CP-NODE-19).
+      expect(projected.module_contracts[0]).toHaveProperty("side_effects");
+
+      // A side_effects-only edit is a LOAD-BEARING edit → re-projects.
+      expect(semanticProjection(name, make(["writes a file"], layer))).not.toEqual(
+        semanticProjection(name, make(["appends a log line"], layer)),
+      );
+    }
+
+    // Still narrowed: the truly non-derivable per-entry fields drop.
+    const intermediate = semanticProjection(
+      "module_contracts",
+      make(["writes a file"], "intermediate"),
+    ) as { module_contracts: Array<Record<string, unknown>> };
+    expect(intermediate.module_contracts[0]).not.toHaveProperty("neighbor_needs");
+    const finalized = semanticProjection(
+      "finalized_module_contracts",
+      make(["writes a file"], "finalized"),
+    ) as { module_contracts: Array<Record<string, unknown>> };
+    expect(finalized.module_contracts[0]).not.toHaveProperty("rationale");
+    expect(finalized.module_contracts[0]).not.toHaveProperty("seam_adjustments");
   });
 
   it("a changed interface on the intermediate module_contracts still re-projects (load-bearing)", () => {
