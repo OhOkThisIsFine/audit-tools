@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readdir, stat, rm } from "node:fs/promises";
+import { mkdir, writeFile, readFile, readdir, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { stepsDir } from "./auditToolsPaths.js";
 import { writeJsonFile } from "./json.js";
@@ -66,10 +66,68 @@ export function processAgentId(): string {
 }
 
 // Best-effort GC of stale per-agent step slots so they don't accumulate across
-// many next-step processes. Removes `steps/<id>/` subdirs whose `current-step.json`
-// is older than the TTL; never touches the shared `current-*` files (they live
-// directly in `steps/`, not a subdir) and never throws.
+// many next-step processes. Age is necessary but NOT sufficient: a slot whose
+// owner process is still alive is NEVER removed, however old its mtime (an idle
+// peer's slot is old and live). Removal requires BOTH past-TTL age AND a dead
+// or unidentifiable owner. Every decision is logged with its reason; never throws.
 const STEP_SLOT_TTL_MS = 60 * 60_000;
+/** Liveness marker written into every per-agent slot: `{ "pid": <owner pid> }`. */
+const SLOT_OWNER_FILE = "owner.json";
+type SlotGcReason =
+  | "stale_and_owner_dead"
+  | "kept_live_peer"
+  | "unreadable_marker"
+  | "steps_dir_unreadable";
+/**
+ * Every non-trivial GC decision (removal, live-peer keep, unreadable skip) is
+ * reported with its reason — best-effort observability on stderr, never fatal.
+ */
+function emitSlotGc(event: { slot: string; reason: SlotGcReason; detail?: string }): void {
+  console.warn(
+    `[step-contract] agent-slot gc ${event.reason}: ${event.slot}${event.detail ? ` (${event.detail})` : ""}`,
+  );
+}
+
+/** Parse `a-<pid>-<ts>-<rand>` back to its pid; null when not our grammar. */
+function parseAgentIdPid(agentId: string): number | null {
+  if (!agentId.startsWith("a-")) return null;
+  const pidPart = agentId.slice(2).split("-")[0];
+  if (!/^\d+$/.test(pidPart)) return null;
+  const pid = Number.parseInt(pidPart, 10);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
+/**
+ * Liveness probe for a slot's owning process. `kill(pid, 0)` sends no signal;
+ * it reports deliverability, so an EPERM host still learns the peer EXISTS.
+ */
+function isProcessLive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Resolve a slot's owner pid from its LIVENESS SIGNAL — the `owner.json`
+ * marker written when the slot is created — falling back to the pid embedded
+ * in the slot name. Null when neither yields a usable pid.
+ */
+async function resolveOwnerPid(slot: string, agentName: string): Promise<number | null> {
+  try {
+    const raw = await readFile(join(slot, SLOT_OWNER_FILE), "utf8");
+    const parsed = JSON.parse(raw) as { pid?: unknown };
+    if (typeof parsed.pid === "number" && Number.isSafeInteger(parsed.pid) && parsed.pid > 0) {
+      return parsed.pid;
+    }
+  } catch {
+    /* absent/corrupt marker — fall through to the id grammar */
+  }
+  return parseAgentIdPid(agentName);
+}
+
 async function gcStaleAgentSlots(stepsDirPath: string, keepAgentId: string): Promise<void> {
   try {
     const entries = await readdir(stepsDirPath, { withFileTypes: true });
@@ -81,16 +139,45 @@ async function gcStaleAgentSlots(stepsDirPath: string, keepAgentId: string): Pro
           const slot = join(stepsDirPath, e.name);
           try {
             const st = await stat(join(slot, "current-step.json"));
-            if (now - st.mtimeMs > STEP_SLOT_TTL_MS) {
-              await rm(slot, { recursive: true, force: true });
+            // Young slots are the common case: silently kept, never spammed.
+            if (now - st.mtimeMs <= STEP_SLOT_TTL_MS) {
+              return;
             }
-          } catch {
-            /* missing marker / race — leave it, next pass may collect it */
+            // Past-TTL age alone never removes a slot: confirm the owner is
+            // actually gone first. An idle-but-live peer keeps its slot.
+            const ownerPid = await resolveOwnerPid(slot, e.name);
+            if (ownerPid !== null && isProcessLive(ownerPid)) {
+              emitSlotGc({
+                slot,
+                reason: "kept_live_peer",
+                detail: `owner pid ${ownerPid} alive past TTL`,
+              });
+              return;
+            }
+            await rm(slot, { recursive: true, force: true });
+            emitSlotGc({
+              slot,
+              reason: "stale_and_owner_dead",
+              detail:
+                ownerPid === null
+                  ? "past TTL, no identifiable live owner"
+                  : `past TTL, owner pid ${ownerPid} not running`,
+            });
+          } catch (error) {
+            emitSlotGc({
+              slot,
+              reason: "unreadable_marker",
+              detail: error instanceof Error ? error.message : String(error),
+            });
           }
         }),
     );
-  } catch {
-    /* steps dir unreadable — nothing to collect */
+  } catch (error) {
+    emitSlotGc({
+      slot: stepsDirPath,
+      reason: "steps_dir_unreadable",
+      detail: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -182,6 +269,15 @@ export async function writeStepContract<
   const agentId = processAgentId();
   const agentSlotDir = join(stepsDirPath, agentId);
   await mkdir(agentSlotDir, { recursive: true });
+  // Liveness signal for the GC (and any external reaper): the owning pid. The
+  // id grammar already embeds it, but the marker is explicit, survives a rename
+  // of the id grammar, and is what makes "is this peer still running?" a read
+  // instead of an inference.
+  await writeFile(
+    join(agentSlotDir, SLOT_OWNER_FILE),
+    `${JSON.stringify({ pid: process.pid })}\n`,
+    "utf8",
+  );
 
   // The returned/canonical paths are the PER-AGENT slot so a concurrent peer
   // never reads this step from a shared file another peer has clobbered.
