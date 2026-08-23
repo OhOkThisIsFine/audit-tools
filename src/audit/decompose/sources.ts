@@ -26,13 +26,26 @@ function toPosix(path: string): string {
   return path.replace(/\\/g, "/");
 }
 
+// U+001F (unit separator): paths never contain it, so joining on it is
+// injective — unlike a space join, where ("a b.ts", "c.ts") and ("a",
+// "b.ts c.ts") collapse into one phantom pair.
+const PAIR_SEP = String.fromCharCode(31);
+
+/**
+ * Canonical undirected-pair map key. Endpoints ride the VALUE structurally;
+ * nothing is ever parsed back out of the key.
+ */
+function pairKey(lo: string, hi: string): string {
+  return `${lo}${PAIR_SEP}${hi}`;
+}
+
 /** Aggregate undirected edges over the universe into a WeightedGraph. */
 function weightedGraph(
   universe: string[],
   edges: CouplingEdge[],
 ): { nodes: string[]; edges: CouplingEdge[] } {
   const inScope = new Set(universe);
-  const byPair = new Map<string, number>();
+  const byPair = new Map<string, { lo: string; hi: string; weight: number }>();
   for (const edge of edges) {
     const a = toPosix(edge.a);
     const b = toPosix(edge.b);
@@ -40,13 +53,16 @@ function weightedGraph(
     if (!(edge.weight > 0)) continue;
     const lo = a.localeCompare(b) <= 0 ? a : b;
     const hi = a.localeCompare(b) <= 0 ? b : a;
-    const key = `${lo} ${hi}`;
-    byPair.set(key, (byPair.get(key) ?? 0) + edge.weight);
+    const key = pairKey(lo, hi);
+    const agg = byPair.get(key);
+    if (agg) agg.weight += edge.weight;
+    else byPair.set(key, { lo, hi, weight: edge.weight });
   }
   const aggregated: CouplingEdge[] = [];
-  for (const [key, weight] of byPair) {
-    const idx = key.indexOf(" ");
-    aggregated.push({ a: key.slice(0, idx), b: key.slice(idx + 1), weight });
+  // First-appearance order, as before — inputs arrive pre-sorted, so this stays
+  // content-derived and stable.
+  for (const { lo, hi, weight } of byPair.values()) {
+    aggregated.push({ a: lo, b: hi, weight });
   }
   return { nodes: universe, edges: aggregated };
 }
