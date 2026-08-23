@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { buildRepoManifest } from "../extractors/fileInventory.js";
 import { buildFileDisposition } from "../extractors/disposition.js";
 import { buildCriticalFlowManifest } from "../extractors/flows.js";
@@ -14,7 +16,7 @@ import {
 } from "../reporting/synthesis.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import type { AuditResult } from "../types.js";
-import { getArtifactsDir } from "./args.js";
+import { getArtifactsDir, hasFlag } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
 
 const SAMPLE_REPO_FILES = [
@@ -103,6 +105,19 @@ export async function runSample(argv: string[] = process.argv): Promise<void> {
     audit_report: auditReport,
   });
   const artifactsDir = getArtifactsDir(argv);
+  // A live bundle (audit_state.json present) is real run state — fabricated
+  // sample artifacts must never overwrite it. `--force` is the explicit
+  // disposable-target override, mirroring the cleanup verb.
+  if (
+    existsSync(join(artifactsDir, "audit_state.json")) &&
+    !hasFlag(argv, "--force")
+  ) {
+    console.error(
+      `Refusing to write sample artifacts into '${artifactsDir}': an audit state file is present. Pass --force to overwrite a disposable target.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
   await mkdir(artifactsDir, { recursive: true });
   await writeCoreArtifacts(artifactsDir, {
     repo_manifest: repoManifest,
