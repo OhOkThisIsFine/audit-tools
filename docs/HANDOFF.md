@@ -5,13 +5,13 @@
 
 ## Live state
 
-- Published state: v0.44.0 is the last tag. `main` is ahead of it and pushed (not yet released):
-  the two audit-side defects the 2026-08-21 dogfood lap hit are SHIPPED — host-handoff validates
+- Published state: v0.45.0 is the last tag and is published to npm. `main` is ahead of it and
+  pushed. The two audit-side defects the 2026-08-21 dogfood lap hit are SHIPPED — host-handoff validates
   each result BEFORE accepting, with an `unaccept-results` verb and an advisory warning channel
   (`1a34e60f`, follow-ups `02521579`, `e72a06bb`), and the worker prompt and ingestion share ONE
   finding contract rendered from the strict worker projection plus the validator's rule registry
-  (`20bba526`). Both CI workflows are green on the pushed tip; no release tag yet, so the global
-  bins are still v0.44.0.
+  (`20bba526`), and all four are ancestors of v0.45.0. Both CI workflows are green on the pushed
+  tip; the work landed since v0.45.0 is not yet released, so the global bins are v0.45.0.
 - The dogfood self-audit of 2026-08-21 is complete; its promoted deliverables are
   .audit-tools/audit-report.md / .audit-tools/audit-findings.json. Its tool defects live in
   docs/backlog/open-bugs.md (the 2026-08-21 and 2026-08-22 entries).
@@ -40,7 +40,7 @@
 2. Decision queue: P39 (`solN-1`) and P40 (`sol-1`) are APPROVED (ticked in the inbox the
    generated block below points at — build both halves / approve as proposed); eight queue items
    are still open and must be asked at the next session start.
-3. Ship a release for the landed main (`/ship`): the shipped defect fixes are only on `main`.
+3. Ship a release for the work landed on `main` since v0.45.0 (`/ship`).
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 

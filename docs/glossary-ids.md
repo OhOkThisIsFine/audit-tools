@@ -28,13 +28,12 @@ is deleted too.
 | INV-CVG | Fail-closed contract validation and scoped positive/negative coverage. | `src/remediate/validation/contractPipelineGates.ts` |
 | INV-DA | Analyzer deletion signals remain advisory and never authorize unattended deletion. | `src/remediate/review/autonomousGate.ts` |
 | INV-GND | Missing grounding evidence is treated as ungrounded. | `src/shared/validation/findingGrounding.ts` |
-| INV-ID | Idempotent, content-hash-keyed remediation intake. | `src/remediate/intake.ts` |
-| INV-IR | Item-scoped contract revalidation, empty-delta copy-forward, and semantic-hash reconvergence. | `src/remediate/contractPipeline/derive.ts`; `src/remediate/contractPipeline/artifactStore.ts` |
+| INV-IR | Item-scoped contract revalidation, empty-delta copy-forward, and semantic-hash reconvergence. | `src/remediate/contractPipeline/changeClassification.ts` |
 | INV-ISC | Every `RemediationItemStatus` belongs to exactly one classification under an exhaustive `Record<RemediationItemStatus, boolean>` for each partition axis (in-progress/terminal/skip/unsuccessful-end), so a new status is a compile error at every unhandled axis rather than a silently-permissive membership test. | `src/remediate/state/itemStatus.ts` |
 | INV-ISC-CLOSE-PHASE-PRECONDITION | The close phase force-closes `blocked`/`needs_clarification` items to `abandoned` so a run can end without livelocking or rendering a non-terminal item as a partial completion. | `src/remediate/state/itemStatus.ts` |
 | INV-ISC-EVIDENCE-EMITTED | A `verified_already_fixed`/`refuted` terminal disposition requires a complete verification-evidence triple (method, mechanism, and confirmation) before the writer may emit it; incomplete or mechanism-contradicting evidence is refused to a non-terminal `blocked` outcome instead. | `src/shared/types/remediationOutcome.ts`; `src/remediate/phases/close.ts`; `src/remediate/state/itemStatus.ts` |
 | INV-O1 | Best-effort, deduplicated, lock-safe friction capture at workflow step boundaries. | `src/shared/friction/captureFrictionEvent.ts`; `src/shared/friction/stepBoundaryCapture.ts` |
-| INV-O2 | Immutable audit-result ledger records plus versioned intent/result baselines. | `src/audit/orchestrator/ledger.ts`; `src/audit/orchestrator/resultBaseline.ts`; `src/audit/orchestrator/intentCheckpointGate.ts`; `src/audit/types/artifactMetadata.ts` |
+| INV-O2 | Immutable audit-result ledger records plus versioned intent/result baselines. | `src/audit/orchestrator/resultBaseline.ts`; `src/audit/orchestrator/intentCheckpointGate.ts`; `src/audit/types/artifactMetadata.ts` |
 | INV-PENDING-SINGLE-SOURCE | One pending-task partition feeds both audit workload emission and completion state. | `src/audit/orchestrator/pendingTasks.ts`; `src/audit/orchestrator/state.ts` |
 | INV-PHASE | Lower remediation phases complete before higher phases become ready. | `src/remediate/steps/nextStep.ts` |
 | INV-PLAN-FROZEN-ESTIMATES | Planned audit tasks persist provider-neutral token and risk estimates. | `src/audit/orchestrator/planningExecutors.ts` |
@@ -43,10 +42,9 @@ is deleted too.
 | INV-READY-STEP-CONTINUATION | A ready audit step that requests another advance carries the executable continuation command. | `src/audit/cli/nextStepCommand.ts` |
 | INV-RNF-NO-CANONICAL-PAIR-WRITE | The remediate next-step module writes the canonical `.audit-tools/audit-findings.json` + `audit-report.md` pair nowhere; autonomous leftover deliverables land on remediation-owned paths, so a remediation run can never destructively overwrite the audit deliverables it consumes. | `src/remediate/steps/nextStep.ts` |
 | INV-RPS | Remediation-plan deduplication preserves distinct structural identities. | `src/remediate/phases/triage.ts` |
-| INV-RS | Remediation state-machine ordering and fail-closed completion. | `src/remediate/steps/nextStep.ts`; `src/remediate/phases/close.ts` |
+| INV-RS | Remediation state-machine ordering and fail-closed completion. | `src/remediate/steps/nextStep.ts`; `src/remediate/phases/triage.ts` |
 | INV-RSM-RESOLUTION | Resolution requests have run-unique ids. | `src/remediate/steps/nextStep.ts` |
 | INV-RSM-RESOLUTION-CORRELATE | Review and triage answers must match the requesting run and plan. | `src/remediate/review/reviewGate.ts`; `src/remediate/phases/triage.ts` |
-| INV-RSM-SPLIT | Splitting a remediation block preserves phase, dependency, scope, and verification semantics. | `src/remediate/phases/plan.ts` |
 | INV-RSM-STATE-COMPLETE | Persisted remediation state contains every field implied by its status. | `src/remediate/state/store.ts`; `src/remediate/phases/triage.ts` |
 | INV-S04 | Verbatim free-form intent is never copied into a host workload or output; only interpreted signals cross the boundary. | `src/shared/intent/freeFormIntentInterpreter.ts`; `src/shared/intent/pathScope.ts` |
 | INV-SCC | Portable run-id path encoding and live-holder file-lock freshness. | `src/shared/io/frictionCapture.ts`; `src/shared/io/fileLock.ts`; `src/shared/friction/triage.ts` |
@@ -60,7 +58,8 @@ namespace.
 
 ## Live counterexample ids
 
-The source currently cites CE-001 (plus the variant CE-001b) through CE-011, plus CE-013 and CE-206.
+The source currently cites CE-001 (plus the variant CE-001b) through CE-011, plus CE-013, CE-206 and
+CE-P3-001.
 Their meanings are local to the validator, ledger, intent, analyzer, worktree, or scoring code that
 cites them. Reuse of a number in another subsystem does not imply shared identity.
 
@@ -69,7 +68,7 @@ cites them. Reuse of a number in another subsystem does not imply shared identit
 | Id | Meaning | Live owner |
 |---|---|---|
 | N-R13 | The former document phase remains dissolved; an existing item specification carries forward. | `src/remediate/steps/nextStep.ts` |
-| N-R21 | Circular interface-definition dependencies route to explicit resolution. | `src/remediate/validation/contractPipelineGates.ts`; `src/remediate/steps/contractPipeline.ts` |
+| N-R21 | Circular interface-definition dependencies route to explicit resolution. | `src/remediate/validation/contractPipelineGates.ts` |
 | N-X06 | Deterministic free-form intent interpretation seam. | `src/audit/orchestrator/intentInterpreter.ts` |
 
 ## Live finding citations
