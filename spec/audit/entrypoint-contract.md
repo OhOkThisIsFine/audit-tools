@@ -2,11 +2,12 @@
 
 ## Public product surface
 
-The intended public product surface is a single logical skill call, `advance_audit` — the
-aspirational entrypoint name this contract is written against, the logical call every executor sits
-behind. The interim precursor surface is the conversation-first `audit-code next-step` CLI /
-`/audit-code` slash command; the concrete command names live in the entrypoint/CLI reference, so this
-contract stays written against the durable `advance_audit` surface rather than narrating current wiring.
+The public product surface is the conversation-first `audit-code next-step` CLI / `/audit-code`
+slash command — that is the shipped interaction model: the host agent invokes it inside the
+conversation and calls back for the next step. This contract is written against `advance_audit`, the
+name of the single logical invocation every executor sits behind; the concrete command names live in
+the entrypoint/CLI reference, so this contract stays written against that durable logical surface
+rather than narrating current wiring.
 
 Everything else in the repository should be treated as internal support for that entrypoint unless explicitly documented otherwise.
 
@@ -117,6 +118,9 @@ The entrypoint may report `complete` only when the completion criteria in
 
 ## Internal mapping
 
-The current CLI commands should be treated as precursors to internal executors, not as the final public interaction model.
+The CLI commands are the realization of `advance_audit`: each invocation of `audit-code next-step` /
+`/audit-code` drives the internal executors described above and returns the execution summary this
+contract defines.
 
-The implementation goal is that those internal executors eventually sit behind `advance_audit`.
+Everything internal to that invocation — executor selection, artifact persistence, drain
+bookkeeping — is implementation detail behind the CLI commands, not a separate surface.
