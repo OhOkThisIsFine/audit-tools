@@ -102,6 +102,8 @@
   "dependencies": {
     "commander": "^13.0.0",
     "smol-toml": "^1.6.1",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.25.10",
     "yaml": "^2.9.0",
     "zod": "^3.25.76",
     "zod-to-json-schema": "^3.24.6"
@@ -117,11 +119,9 @@
     "jscpd": "^5.0.14",
     "knip": "^6.23.0",
     "linguist-languages": "^9.3.2",
-    "tree-sitter-wasms": "^0.1.13",
     "tsx": "^4.19.0",
     "typescript": "^5.9.2",
-    "vitest": "^3.0.0",
-    "web-tree-sitter": "^0.25.10"
+    "vitest": "^3.0.0"
   },
   "repository": {
     "type": "git",
