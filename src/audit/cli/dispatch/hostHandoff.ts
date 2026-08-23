@@ -1,19 +1,32 @@
 import { mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import {
   createMemoizedSourceReader,
   appendSubmissionEvent,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
-  assertSubmissionRunId,
-  hashContent,
+  bindingIdentity,
+  compareCodeUnits,
+  contentSha256,
+  firstDuplicateIdentity,
+  hasExactKeys,
+  hostHandoffResultPath,
   isFileMissingError,
+  isRecord,
+  isSha256,
+  parseAllWorkloadItems,
+  parseWorkloadEnvelope,
+  promptSha256,
   readJsonFile,
   readSubmissionDocument,
   repoRelativePath,
+  requireNonEmptyString,
   resolveContainedPath,
+  resolveHostHandoffPaths,
+  resultMapIdentity,
+  siblingLockPath,
+  sameStrings,
   stableStringify,
-  submissionPathFor,
   verifyFindingGrounding,
   withFileLock,
   writeBlockedStepContract,
@@ -216,57 +229,35 @@ interface ResolvedBoundaryPaths {
   readonly acceptedLockPath: string;
 }
 
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasExactKeys(
-  value: Record<string, unknown>,
-  expected: readonly string[],
-): boolean {
-  const actual = Object.keys(value).sort(compareCodeUnits);
-  return (
-    actual.length === expected.length &&
-    actual.every((key, index) => key === [...expected].sort(compareCodeUnits)[index])
-  );
-}
-
-function isSha256(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
-}
-
-function resolveBoundaryPaths(params: {
-  readonly root: string;
-  readonly artifactsDir: string;
-  readonly runId: string;
-}): ResolvedBoundaryPaths {
-  assertSubmissionRunId(params.runId, "audit host run id");
-  const root = resolve(params.root);
-  const artifactsDir = resolveContainedPath(root, params.artifactsDir, "artifactsDir");
-  const runDir = resolveContainedPath(
-    artifactsDir,
-    join("runs", params.runId),
-    "audit host run directory",
-  );
+/**
+ * The audit draw's boundary paths: the SHARED resolution (run-id grammar,
+ * containment, `runs/<id>`), plus the four files this boundary persists beyond
+ * the workload — the result map, the trusted task bindings, and the
+ * accepted-results pair with its one serializing lock.
+ */
+function resolveBoundaryPaths(
+  params: Parameters<typeof resolveHostHandoffPaths>[0],
+): ResolvedBoundaryPaths {
+  const core = resolveHostHandoffPaths({
+    ...params,
+    runDirSegments: [],
+    runIdLabel: "audit host run id",
+  });
   return {
-    root,
+    root: core.root,
     runId: params.runId,
-    artifactsDir,
-    runDir,
-    resultDir: join(runDir, "host-results"),
-    workloadPath: join(runDir, "host-workload.json"),
-    resultMapPath: join(runDir, "host-result-map.json"),
-    taskBindingsPath: join(runDir, "host-task-bindings.json"),
-    acceptedLedgerPath: join(runDir, "host-accepted-results-ledger.json"),
-    acceptedResultsPath: join(runDir, "host-accepted-results.json"),
+    artifactsDir: core.artifactsDir,
+    runDir: core.runDir,
+    resultDir: core.resultDir,
+    workloadPath: core.workloadPath,
+    resultMapPath: join(core.runDir, "host-result-map.json"),
+    taskBindingsPath: join(core.runDir, "host-task-bindings.json"),
+    acceptedLedgerPath: join(core.runDir, "host-accepted-results-ledger.json"),
+    acceptedResultsPath: join(core.runDir, "host-accepted-results.json"),
     // Named off the pair's own stem, so the lock is visibly the lock FOR those
     // two files rather than an independently-invented name. It is transient
     // infrastructure, not a run artifact anything cites.
-    acceptedLockPath: `${join(runDir, "host-accepted-results")}.lock`,
+    acceptedLockPath: siblingLockPath(join(core.runDir, "host-accepted-results")),
   };
 }
 
@@ -326,25 +317,14 @@ async function writeAcceptedResults(
 
 /**
  * The bound path for one work item's submission — the SHARED rule, not a local
- * copy of it. The audit and remediate handoffs both derived
- * `<resultDir>/<sha256(id)>.json` in their own private helpers; a divergence
- * between the two would have been silent on both sides.
+ * copy of it. This and the remediate twin were byte-equivalent private helpers;
+ * a divergence between them would have been silent on both sides.
  */
-function resultPathFor(
-  paths: ResolvedBoundaryPaths,
-  workItemId: string,
-): string {
-  return submissionPathFor(
-    { root: paths.root, submissionDir: paths.resultDir },
+function resultPathFor(paths: ResolvedBoundaryPaths, workItemId: string): string {
+  return hostHandoffResultPath(
+    { root: paths.root, artifactsDir: paths.artifactsDir, runDir: paths.runDir, resultDir: paths.resultDir, workloadPath: paths.workloadPath },
     workItemId,
   );
-}
-
-function requireNonEmptyString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
 }
 
 function normalizeTask(
@@ -467,7 +447,7 @@ function buildWorkItem(
       token_estimate: task.token_estimate,
     },
     prompt: {
-      sha256: hashContent(promptText),
+      sha256: promptSha256(promptText),
       text: promptText,
     },
     scope: {
@@ -502,7 +482,7 @@ function validateAcceptedEntry(
     typeof value.result_id === "string" &&
     isSha256(value.result_sha256) &&
     isRecord(value.result) &&
-    value.result_sha256 === hashContent(stableStringify(value.result)) &&
+    value.result_sha256 === contentSha256(value.result) &&
     value.result.work_item_id === value.work_item_id &&
     value.result.prompt_sha256 === value.prompt_sha256 &&
     value.result.result_id === value.result_id &&
@@ -539,22 +519,11 @@ async function loadAcceptedResults(
   ) {
     throw new Error(`Invalid accepted audit host results ledger: ${path}`);
   }
-  const identities = new Set<string>();
-  for (const entry of value.entries) {
-    const identity = `${entry.work_item_id}\u0000${entry.prompt_sha256}`;
-    if (identities.has(identity)) {
-      throw new Error(`Duplicate accepted audit host result binding: ${entry.work_item_id}`);
-    }
-    identities.add(identity);
+  const duplicate = firstDuplicateIdentity(value.entries, bindingIdentity);
+  if (duplicate !== null) {
+    throw new Error(`Duplicate accepted audit host result binding: ${duplicate.work_item_id}`);
   }
   return value as unknown as AcceptedResultsLedger;
-}
-
-function bindingIdentity(entry: {
-  readonly work_item_id: string;
-  readonly prompt_sha256: string;
-}): string {
-  return `${entry.work_item_id}\u0000${entry.prompt_sha256}`;
 }
 
 export async function prepareAuditHostHandoff(params: {
@@ -676,7 +645,7 @@ function parseWorkItem(value: unknown): AuditHostWorkItem | null {
     !hasExactKeys(value.prompt, ["sha256", "text"]) ||
     !isSha256(value.prompt.sha256) ||
     typeof value.prompt.text !== "string" ||
-    hashContent(value.prompt.text) !== value.prompt.sha256 ||
+    promptSha256(value.prompt.text) !== value.prompt.sha256 ||
     !isRecord(value.scope) ||
     !hasExactKeys(value.scope, ["files", "unit_ids"]) ||
     !Array.isArray(value.scope.files) ||
@@ -690,17 +659,17 @@ function parseWorkItem(value: unknown): AuditHostWorkItem | null {
 }
 
 function parseWorkload(value: unknown, runId: string): AuditHostWorkload {
-  if (
-    !isRecord(value) ||
-    !hasExactKeys(value, ["contract_version", "run_id", "work_items"]) ||
-    value.contract_version !== WORKLOAD_CONTRACT_VERSION ||
-    value.run_id !== runId ||
-    !Array.isArray(value.work_items)
-  ) {
+  // Envelope + all-items parsing is the CORE's scaffolding; the audit draw
+  // selects only its own contract version and item parser.
+  const envelope = parseWorkloadEnvelope(value, {
+    contractVersion: WORKLOAD_CONTRACT_VERSION,
+    runId,
+  });
+  if (!envelope.ok) {
     throw new Error("Invalid audit host workload");
   }
-  const workItems = value.work_items.map(parseWorkItem);
-  if (workItems.some((entry) => entry === null)) {
+  const workItems = parseAllWorkloadItems(envelope.rawItems, parseWorkItem);
+  if (workItems === null) {
     throw new Error("Invalid audit host work item");
   }
   return value as unknown as AuditHostWorkload;
@@ -805,28 +774,26 @@ function validateHandoffBinding(
       binding.lens !== item.lens ||
       item.scope.unit_ids.length !== 1 ||
       binding.unit_id !== item.scope.unit_ids[0] ||
-      Object.keys(binding.file_line_counts).sort(compareCodeUnits).join("\u0000") !==
-        [...item.scope.files].sort(compareCodeUnits).join("\u0000")
+      !sameStrings(
+        Object.keys(binding.file_line_counts).sort(compareCodeUnits),
+        [...item.scope.files].sort(compareCodeUnits),
+      )
     ) {
       throw new Error(`Invalid audit host task binding: ${item.id}`);
     }
     items.set(item.id, item);
   }
-  if (resultMap.entries.length !== items.size) {
-    throw new Error("Audit host result map does not cover the workload exactly");
-  }
-  const mapped = new Set<string>();
-  for (const entry of resultMap.entries) {
-    const item = items.get(entry.work_item_id);
-    if (
-      item === undefined ||
-      mapped.has(entry.work_item_id) ||
-      entry.prompt_sha256 !== item.prompt.sha256 ||
-      entry.result_path !== item.result_path
-    ) {
-      throw new Error(`Invalid audit host result binding: ${entry.work_item_id}`);
-    }
-    mapped.add(entry.work_item_id);
+  // The result-map identity half is the CORE's check, with its failure
+  // CLASSIFIED: a coverage miss says the MAP is wrong; an identity miss names
+  // the entry whose prompt digest or bound path broke. Both of the audit
+  // draw's original refusals survive — they are not collapsed into one.
+  const identity = resultMapIdentity([...items.values()], resultMap.entries);
+  if (!identity.ok) {
+    throw new Error(
+      identity.reason === "coverage"
+        ? "Audit host result map does not cover the workload exactly"
+        : `Invalid audit host result binding: ${identity.workItemId ?? "unknown"}`,
+    );
   }
   return items;
 }
@@ -1273,7 +1240,7 @@ export async function ingestAuditHostResults(params: {
       prompt_sha256: entry.prompt_sha256,
       result_path: entry.result_path,
       result_id: result.result_id,
-      result_sha256: hashContent(stableStringify(result)),
+      result_sha256: contentSha256(result),
       result,
       audit_result: converted.auditResult,
     });

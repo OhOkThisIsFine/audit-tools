@@ -1,5 +1,9 @@
 import { withFileLock, STALE_LOCK_MS } from "./fileLock.js";
-import { readOptionalJsonFile, writeJsonFile } from "./json.js";
+import {
+  isJsonParseError,
+  readOptionalJsonFile,
+  writeJsonFile,
+} from "./json.js";
 
 // Acquire timeout for a locked JSON store, DERIVED to stay safely below shared
 // fileLock's STALE_LOCK_MS rather than hardcoded — tying them programmatically so
@@ -44,6 +48,16 @@ export interface LockedJsonStoreOptions<T> {
    * a {@link SKIP_WRITE} no-op.
    */
   validate?: (next: T) => void;
+  /**
+   * Degrade-not-throw for a corrupt file (CP-NODE-5's recorded design for the
+   * expected-submission set): a read that fails because the file exists but
+   * does not PARSE resolves as if the file were absent — `parse` receives
+   * `undefined`, so the caller's absent-path (rebuild / merge-from-nothing /
+   * skip) IS the degrade. Infrastructure IO errors still propagate, as does a
+   * `parse` that throws on its own judgment of the content. Off by default: the
+   * loud-fail stores (analyzer policy, remediate state) keep their refusal.
+   */
+  tolerateCorruptRead?: boolean;
 }
 
 export interface LockedJsonStore<T> {
@@ -78,24 +92,37 @@ export interface LockedJsonStore<T> {
 /**
  * A JSON file guarded by the shared {@link withFileLock}: read-under-lock →
  * domain parse/validate → atomic write, with the below-stale lock timeout
- * derived in one place. Owns only what its two real consumers share (audit
- * `analyzer-policy.json`, remediate `state.json`); domain validation and
- * public API shape stay with the thin adapters.
+ * derived in one place. Owns only what its consumers share (the analyzer-policy
+ * store, the remediate state store, and — with
+ * {@link LockedJsonStoreOptions.tolerateCorruptRead} — the audit expected-
+ * submission set, whose corrupt read degrades to absent per CP-NODE-5);
+ * domain validation and public API shape stay with the thin adapters.
  */
 export function createLockedJsonStore<T>(
   options: LockedJsonStoreOptions<T>,
 ): LockedJsonStore<T> {
-  const { path, lockPath, parse, validate } = options;
+  const { path, lockPath, parse, validate, tolerateCorruptRead } = options;
 
-  const read = async (): Promise<T> =>
-    parse(await readOptionalJsonFile<unknown>(path));
+  const read = async (): Promise<T> => {
+    let raw: unknown | undefined;
+    try {
+      raw = await readOptionalJsonFile<unknown>(path);
+    } catch (error) {
+      if (!(tolerateCorruptRead && isJsonParseError(error))) throw error;
+      // Degrade: a corrupt file reads as absent (see the option's note), so
+      // the caller's absent-path is the recovery — and the next write replaces
+      // the corrupt bytes wholesale.
+      raw = undefined;
+    }
+    return parse(raw);
+  };
 
   const persist = async (next: T): Promise<void> => {
     validate?.(next);
     await writeJsonFile(path, next);
   };
 
-  return {
+  const store: LockedJsonStore<T> = {
     read,
     async mutate(fn) {
       let result!: T;
@@ -125,4 +152,18 @@ export function createLockedJsonStore<T>(
       );
     },
   };
+
+  return store;
+}
+
+/**
+ * The sibling lock path for one store/ledger file: `<file>.lock`, named off the
+ * file's own stem so the lock is visibly the lock FOR that file rather than an
+ * independently invented name. Consumers that already hold an established lock
+ * name declare `lockPath` explicitly instead (see {@link LockedJsonStoreOptions});
+ * this is for the ones that own their file outright — the submission ledger,
+ * which appends under exactly this derivation.
+ */
+export function siblingLockPath(targetPath: string): string {
+  return `${targetPath}.lock`;
 }

@@ -501,6 +501,40 @@ export type {
 } from "./submission/handRecovery.js";
 export { recoverSubmission } from "./submission/handRecovery.js";
 
+// The ONE host-handoff boundary both orchestrators draw from: run-scoped path
+// resolution, the bound submission-path rule, envelope/item/binding validation,
+// result-map identity, and the exact-key/commit/sha256 predicates both ingests
+// refused on. Each orchestrator's hostHandoff module is now a thin
+// policy-selecting adapter over this core.
+export {
+  absoluteHostHandoffResultPath,
+  bindingIdentity,
+  compareCodeUnits,
+  contentSha256,
+  firstDuplicateIdentity,
+  hasExactKeys,
+  hostHandoffResultPath,
+  idsAreStrictlyAscending,
+  idsAreUnique,
+  isCommit,
+  isSha256,
+  parseAllWorkloadItems,
+  parseWorkloadEnvelope,
+  requireNonEmptyString,
+  resolveHostHandoffPaths,
+  resultIdentityIsBound,
+  resultMapIdentity,
+  promptSha256,
+  sameStrings,
+  stringArray,
+} from "./submission/hostHandoffCore.js";
+export type {
+  HostHandoffPaths,
+  ResultMapEntry,
+  ResultMappedItem,
+  WorkloadEnvelopeParse,
+} from "./submission/hostHandoffCore.js";
+
 // Content-key seam (O2 ↔ F1): tool-owned task-content signature + discriminator,
 // grouping identityKey, signature-stable idempotencyKey, signature-sensitive
 // contentKey, per-record instance id. See src/shared/contentKey.ts.
@@ -685,6 +719,7 @@ export {
   createLockedJsonStore,
   SKIP_WRITE,
   LOCKED_JSON_STORE_TIMEOUT_MS,
+  siblingLockPath,
 } from "./io/lockedJsonStore.js";
 export type { Clock, LockOptions } from "./io/fileLock.js";
 export {

@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 
 import { appendNdjsonFile } from "../io/json.js";
+import { siblingLockPath } from "../io/lockedJsonStore.js";
 import { withFileLock } from "../io/fileLock.js";
 import { discardOnSchemaVersionMismatch } from "../io/schemaVersion.js";
 import { submissionsDir } from "../io/auditToolsPaths.js";
@@ -88,9 +89,11 @@ export function submissionLedgerPath(artifactsDir: string): string {
 // is not what the runtime actually performs) they can interleave so one event's
 // line lands INSIDE the other's, and both lines are then torn — the ledger
 // silently loses an event, which is precisely the clean-vs-repaired collapse it
-// exists to prevent. Same sibling pattern the locked JSON stores use.
+// exists to prevent. The name is the locked-JSON-store module's OWN derivation
+// (`siblingLockPath`), so the ledger's lock is the same rule the stores use
+// rather than a second spelling of it.
 function ledgerLockPath(ledgerPath: string): string {
-  return `${ledgerPath}.lock`;
+  return siblingLockPath(ledgerPath);
 }
 
 /**

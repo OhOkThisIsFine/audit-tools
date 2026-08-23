@@ -31,6 +31,7 @@ import {
   CharterKindSchema,
   absoluteSubmissionPath,
   buildExpectedSubmissionSet,
+  createLockedJsonStore,
   diffExpectedSet,
   discardOnSchemaVersionMismatch,
   expectedSubmissionsPath,
@@ -38,12 +39,12 @@ import {
   mergeExpectedSets,
   mintSubmissionId,
   outputDirFor,
-  readOptionalJsonFile,
   readSubmissionDocument,
   readSubmissionLedger,
+  siblingLockPath,
+  SKIP_WRITE,
   submissionsDir,
   withoutExpectedSubmissions,
-  writeJsonFile,
   EXPECTED_SET_CONTRACT_VERSION,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   appendSubmissionEvent,
@@ -201,6 +202,35 @@ export function laneSubmissionPath(
 }
 
 /**
+ * The locked store over the expected-submission set (CP-NODE-6).
+ *
+ * The read side keeps CP-NODE-5's recorded DEGRADE-NOT-THROW design — a corrupt
+ * set degrades to "nothing owed", never failing the emission it records — while
+ * the WRITE side now runs through `createLockedJsonStore`, so two concurrent
+ * emissions' read-merge-write cycles can no longer interleave their merges and
+ * silently drop a lane declaration.
+ */
+const expectedSetStore = (artifactsDir: string) =>
+  createLockedJsonStore<ExpectedSubmissionSet | undefined>({
+    path: expectedSubmissionsPath(artifactsDir),
+    lockPath: siblingLockPath(expectedSubmissionsPath(artifactsDir)),
+    // CP-NODE-5's recorded degrade-not-throw design, now MECHANICAL in the
+    // store rather than a try/catch this module had to remember: a corrupt set
+    // degrades to absent, so `parse` sees `undefined` and the emission's
+    // merge-from-nothing path is exactly its absent-file behavior.
+    tolerateCorruptRead: true,
+    parse: (raw) => {
+      if (raw === undefined) return undefined;
+      // A set left by another release is DISCARDED, not reinterpreted under
+      // this release's field semantics (the regenerate-on-emit design).
+      return discardOnSchemaVersionMismatch(
+        raw as ExpectedSubmissionSet,
+        EXPECTED_SET_CONTRACT_VERSION,
+      );
+    },
+  });
+
+/**
  * The current statement of what is owed, or `undefined` when there isn't one.
  *
  * REGENERABLE state: the set is rewritten at every emit from the lanes the
@@ -213,23 +243,6 @@ export function laneSubmissionPath(
  * release ever asked for, so the emission is first-emission-silent instead of
  * accusing the host of dropping lanes it was never coherently asked for.
  */
-async function loadExpectedSet(
-  artifactsDir: string,
-): Promise<ExpectedSubmissionSet | undefined> {
-  try {
-    return discardOnSchemaVersionMismatch(
-      await readOptionalJsonFile<ExpectedSubmissionSet>(
-        expectedSubmissionsPath(artifactsDir),
-      ),
-      EXPECTED_SET_CONTRACT_VERSION,
-    );
-  } catch {
-    // Corrupt bookkeeping must never fail the emission it is recording; the
-    // merge below simply starts from nothing.
-    return undefined;
-  }
-}
-
 /** One lane an emission owes, as the emitter knows it. */
 export interface DeclaredLane {
   readonly lane: string;
@@ -330,11 +343,16 @@ export async function recordExpectedLanes(
       promptSha256: hashContent(lane.promptText),
     })),
   });
-  const { set, addedIds } = mergeExpectedSets(
-    await loadExpectedSet(artifactsDir),
-    declared,
-  );
-  await writeJsonFile(expectedSubmissionsPath(artifactsDir), set);
+  // Read-merge-write under ONE lock acquisition: two concurrent emissions
+  // could previously interleave their merges, the later writer's snapshot
+  // predating the earlier one's additions, and a lane declaration was silently
+  // lost — exactly the bookkeeping the expected set exists to preserve.
+  let addedIds: readonly string[] = [];
+  const set = (await expectedSetStore(artifactsDir).mutate((current) => {
+    const merged = mergeExpectedSets(current, declared);
+    addedIds = merged.addedIds;
+    return merged.set;
+  }))!;
   const added = new Set(addedIds);
   for (const entry of set.entries) {
     if (!added.has(entry.submission_id)) continue;
@@ -490,11 +508,12 @@ export async function recordLaneOutcome(
     recorded_at: new Date().toISOString(),
   });
   if (outcome.kind !== "accepted") return;
-  const set = await loadExpectedSet(artifactsDir);
-  if (!set) return;
-  await writeJsonFile(
-    expectedSubmissionsPath(artifactsDir),
-    withoutExpectedSubmissions(set, [submissionId]),
+  // The drop runs under the store's lock, so it cannot race a concurrent
+  // emission's merge (which would otherwise re-add the lane being closed out).
+  await expectedSetStore(artifactsDir).mutate((current) =>
+    current === undefined
+      ? SKIP_WRITE
+      : withoutExpectedSubmissions(current, [submissionId]),
   );
 }
 

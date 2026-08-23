@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute } from "node:path";
 
 import {
   headCommit,
@@ -9,17 +9,29 @@ import {
   SUBMISSION_ISSUE_CODES,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   appendSubmissionEvent,
-  assertSubmissionRunId,
-  hashContent,
+  compareCodeUnits,
+  contentSha256,
+  hasExactKeys,
+  hostHandoffResultPath,
+  idsAreStrictlyAscending,
+  isCommit,
   isGitRepo,
+  isRecord,
+  isSha256,
   normalizeRepoPath,
+  parseAllWorkloadItems,
+  parseWorkloadEnvelope,
+  promptSha256,
   readSubmissionDocument,
   readSubmissionLedger,
   repoRelativePath,
   resolveContainedPath,
+  resolveHostHandoffPaths,
+  resultIdentityIsBound,
+  sameStrings,
+  stringArray,
   spawnSyncHidden,
   stableStringify,
-  submissionPathFor,
   writeJsonFile,
   type SubmissionIssue,
   type SubmissionLedgerEvent,
@@ -242,34 +254,6 @@ const CURRENT_ITEM_KEYS = new Set([
   "started_at",
   "status",
 ]);
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasExactKeys(
-  value: Record<string, unknown>,
-  expected: readonly string[],
-): boolean {
-  const actual = Object.keys(value).sort(compareCodeUnits);
-  const canonicalExpected = [...expected].sort(compareCodeUnits);
-  return (
-    actual.length === canonicalExpected.length &&
-    actual.every((key, index) => key === canonicalExpected[index])
-  );
-}
-
-function isCommit(value: unknown): value is string {
-  return typeof value === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(value);
-}
-
-function isSha256(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
-}
 
 function hasOnlyKnownKeys(
   value: Record<string, unknown>,
@@ -524,24 +508,22 @@ function cannotPrepareMessage(
   return `Cannot prepare a remediation host workload: ${messages.join("; ")}`;
 }
 
-function resolveBoundaryPaths(params: {
-  readonly root: string;
-  readonly artifactsDir: string;
-  readonly runId: string;
-}): BoundaryPaths {
-  assertSubmissionRunId(params.runId, "remediation host run id");
-  const root = resolve(params.root);
-  const artifactsDir = resolveContainedPath(root, params.artifactsDir, "artifactsDir");
-  const runDir = resolveContainedPath(
-    artifactsDir,
-    join("runs", params.runId, "implement"),
-    "remediation host run directory",
-  );
+function resolveBoundaryPaths(
+  params: Parameters<typeof resolveHostHandoffPaths>[0],
+): BoundaryPaths {
+  // The remediate draw's run dir carries the `implement` lane segment — its
+  // runs directory also holds triage/closing lanes — which the core takes as a
+  // parameter rather than a fork.
+  const core = resolveHostHandoffPaths({
+    ...params,
+    runDirSegments: ["implement"],
+    runIdLabel: "remediation host run id",
+  });
   return {
-    root,
-    artifactsDir,
-    workloadPath: join(runDir, "host-workload.json"),
-    resultDir: join(runDir, "host-results"),
+    root: core.root,
+    artifactsDir: core.artifactsDir,
+    workloadPath: core.workloadPath,
+    resultDir: core.resultDir,
   };
 }
 
@@ -551,8 +533,14 @@ function resolveBoundaryPaths(params: {
  * divergence between them would have been silent on both sides.
  */
 function resultPathFor(paths: BoundaryPaths, workItemId: string): string {
-  return submissionPathFor(
-    { root: paths.root, submissionDir: paths.resultDir },
+  return hostHandoffResultPath(
+    {
+      root: paths.root,
+      artifactsDir: paths.artifactsDir,
+      runDir: paths.workloadPath.slice(0, paths.workloadPath.length - "host-workload.json".length - 1),
+      resultDir: paths.resultDir,
+      workloadPath: paths.workloadPath,
+    },
     workItemId,
   );
 }
@@ -784,15 +772,11 @@ function buildWorkItem(
     finding_ids: [...block.items],
     allowed_files: allowedFiles,
     baseline_commit: baselineCommit,
-    prompt: { text: promptText, sha256: hashContent(promptText) },
+    prompt: { text: promptText, sha256: promptSha256(promptText) },
     required_tests: requiredTests,
     result_path: resultPath,
     token_estimate: block.token_estimate ?? 0,
   };
-}
-
-function hostWorkloadSha256(workload: RemediationHostWorkload): string {
-  return hashContent(stableStringify(workload));
 }
 
 function buildCanonicalWorkload(params: {
@@ -860,7 +844,7 @@ function parseWorkItem(
     !hasExactKeys(value.prompt, ["sha256", "text"]) ||
     typeof value.prompt.text !== "string" ||
     !isSha256(value.prompt.sha256) ||
-    hashContent(value.prompt.text) !== value.prompt.sha256
+    promptSha256(value.prompt.text) !== value.prompt.sha256
   ) {
     return null;
   }
@@ -889,50 +873,35 @@ function parseWorkload(
   runId: string,
   state: CurrentRemediationHostState,
 ): RemediationHostWorkload | null {
-  if (
-    !isRecord(value) ||
-    !hasExactKeys(value, ["contract_version", "run_id", "work_items"]) ||
-    value.contract_version !== WORKLOAD_CONTRACT_VERSION ||
-    value.run_id !== runId ||
-    !Array.isArray(value.work_items)
-  ) {
-    return null;
-  }
+  // Envelope (keys, contract version, run id, items array) is the CORE's check.
+  const envelope = parseWorkloadEnvelope(value, {
+    contractVersion: WORKLOAD_CONTRACT_VERSION,
+    runId,
+  });
+  if (!envelope.ok) return null;
   const binding = state.host_handoff;
   if (
     binding &&
     (binding.run_id !== runId ||
-      hostWorkloadSha256(value as unknown as RemediationHostWorkload) !==
+      contentSha256(value as unknown as RemediationHostWorkload) !==
         binding.workload_sha256)
   ) {
     return null;
   }
-  const workItems = value.work_items.map((item) =>
+  const workItems = parseAllWorkloadItems(envelope.rawItems, (item) =>
     parseWorkItem(item, paths, state, binding?.baseline_commit),
   );
-  if (workItems.some((item) => item === null)) return null;
-  const ids = workItems.map((item) => item!.id);
+  if (workItems === null) return null;
+  const ids = workItems.map((item) => item.id);
+  // Strictly ascending covers BOTH "sorted" and "duplicate-free" — the two
+  // properties the byte-for-byte re-derivation comparison needs.
   if (
-    new Set(ids).size !== ids.length ||
-    ids.some((id, index) => index > 0 && compareCodeUnits(ids[index - 1]!, id) >= 0) ||
+    !idsAreStrictlyAscending(ids) ||
     (binding !== undefined && !sameStrings(ids, binding.work_item_ids))
   ) {
     return null;
   }
   return value as unknown as RemediationHostWorkload;
-}
-
-function stringArray(value: unknown): readonly string[] | null {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
-    ? value
-    : null;
-}
-
-function sameStrings(left: readonly string[], right: readonly string[]): boolean {
-  return (
-    left.length === right.length &&
-    left.every((entry, index) => entry === right[index])
-  );
 }
 
 type ParsedHostResult =
@@ -967,11 +936,11 @@ function parseResult(
         "prompt_sha256",
         "outcome",
       ]) ||
-      typeof value.result_id !== "string" ||
-      value.result_id.length === 0 ||
-      value.run_id !== runId ||
-      value.work_item_id !== workItem.id ||
-      value.prompt_sha256 !== workItem.prompt.sha256 ||
+      !resultIdentityIsBound(value, {
+        runId,
+        workItemId: workItem.id,
+        promptSha256: workItem.prompt.sha256,
+      }) ||
       !isRecord(value.outcome) ||
       typeof value.outcome.status !== "string"
     ) {
@@ -1043,11 +1012,11 @@ function parseResult(
       "worktree_evidence",
     ]) ||
     value.contract_version !== RESULT_CONTRACT_VERSION ||
-    typeof value.result_id !== "string" ||
-    value.result_id.length === 0 ||
-    value.run_id !== runId ||
-    value.work_item_id !== workItem.id ||
-    value.prompt_sha256 !== workItem.prompt.sha256
+    !resultIdentityIsBound(value, {
+      runId,
+      workItemId: workItem.id,
+      promptSha256: workItem.prompt.sha256,
+    })
   ) {
     return invalidResult(
       "result must match the exact current contract, run, work-item, and prompt binding",
@@ -1714,7 +1683,7 @@ export async function prepareRemediationHostHandoff(params: {
             .join("; ")}`,
     );
   }
-  const workloadDigest = hostWorkloadSha256(workload);
+  const workloadDigest = contentSha256(workload);
   if (
     existingRecord &&
     existingRecord.workload_sha256 !== workloadDigest
