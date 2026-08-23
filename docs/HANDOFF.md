@@ -17,8 +17,8 @@
   checkout; it lands items serially on `main`, writes the bound result docs, re-runs `next-step` per
   round, and stops on any pause it cannot answer). The runner, its logs, how to watch/stop/resume it,
   and the pauses it hits are in project memory `remediation-host-runner-2026-08-23`; the run's
-  decisions are in `remediation-first-draw-2026-08-22`. P39 and P40 (the two approved nightly
-  proposals) are built and landed.
+  decisions are in `remediation-first-draw-2026-08-22`. P39 and P40 (the two approved
+  queue proposals) are built and landed.
 
 ## Immediate next
 
@@ -27,7 +27,7 @@
    `node .audit-tools/remediation/host-runner/impl-runner.mjs --concurrency 10` from the main checkout.
    When every item is terminal the tool enters closing (final gate): run `node remediate-code.mjs next-step`
    until the report is promoted (`.audit-tools/remediation-report.md` / `remediation-outcomes.json`).
-2. Ask the owner the waiting nightly decisions (generated list below; plain-language forms for
+2. Ask the owner the waiting decisions (generated list below; plain-language forms for
    `docs-1..7` and `backlogN-1` are in `.audit-tools/remediation/host-runner/inbox-questions.json`).
 3. Ship a release once the run closes (`/ship`): `main` carries 24 remediation landings, P39, P40
    and four follow-up fixes since v0.45.0.
