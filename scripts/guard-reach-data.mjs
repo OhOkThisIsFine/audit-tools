@@ -20,6 +20,8 @@
 // Glob grammar is check-doc-manifest.mjs's: `*` within a segment, `**/` across
 // segments, `?` one character.
 
+import { RUNTIME_NAME_SOURCES } from "./shared/generate-runtime-artifact-names.mjs";
+
 /**
  * @typedef {object} GuardRow
  * @property {string} id
@@ -144,7 +146,7 @@ export const GUARDS = [
     id: 'check:runtime-artifact-names',
     kind: 'gate',
     impl: 'check:runtime-artifact-names',
-    preCommit: false,
+    preCommit: 'reach',
     fix: 'runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs',
   },
   {
@@ -479,6 +481,17 @@ export const GUARDS = [
 
 /** @type {ReachRow[]} */
 export const REACH = [
+  {
+    area: 'runtime artifact-name layout sources',
+    // DERIVED from the generator's declared input set — never hand-listed. A path
+    // added to RUNTIME_NAME_SOURCES joins the commit gate's reach in the same edit.
+    files: [
+      ...RUNTIME_NAME_SOURCES.map((s) => s.file),
+      'scripts/shared/generate-runtime-artifact-names.mjs',
+      'scripts/shared/runtime-artifact-names.generated.mjs',
+    ],
+    guardedBy: ['check:runtime-artifact-names'],
+  },
   {
     area: 'source',
     files: ['src/**'],
