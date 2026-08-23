@@ -25,51 +25,13 @@ records them in the tracked ledger, and does the work.
 *Last run: 2026-08-23 at `a5a673e8`.*
 
 
+> **4 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+
+
 ---
 
 
 # Documentation
-
-
-<!-- nightly:item key=240e467dfd7a8ac9 -->
-
-## `docs-1` — A10 says analyzer consent is "per-run", but the code also admits a DURABLE recorded grant — settle which the project means before either side is changed <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 2 nights · `docs/project-philosophy.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-Before this tool runs an outside analyzer program on your code, it asks permission. There are two ways permission can be given. One is a token that authorises a single run and is thrown away afterwards. The other is a recorded "granted" decision that is saved to a file on disk and keeps admitting that analyzer on every future run. The code does both: the admission function checks the saved decision first, and only then falls back to the single-run token. The full rule is written correctly in CLAUDE.md, which names both routes. But the one-line summary in project-philosophy.md names only the single-run route, so a reader of the map learns a stricter rule than the tool actually applies. Normally the repair would be obvious, because the map is a pointer and a pointer that disagrees with its home is simply wrong. What makes this your decision is that the newest commit on this branch opens a backlog item arguing the opposite: that per-run choices, analyzer consent among them, should never be persisted at all. If that argument wins, the map is already right and the CODE is what has to change. The same divergence therefore has two opposite repairs, and only you know which direction the project is going.
-
-### The question
-
-docs/project-philosophy.md states the analyzer gate as "mechanical run-safety + curated default set + per-run consent, NOT a maintained allowlist". CLAUDE.md and admitSpawn both also admit a durable recorded `granted` decision persisted to .audit-tools/audit/analyzer-policy.json. Which is the intent? <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### Your answer
-
-- [ ] **1. Fix the map** — The durable recorded grant is intended. Correct project-philosophy.md A10 to name both routes, matching CLAUDE.md and admitSpawn.
-- [ ] **2. Fix the code** — Per-run only is intended, as the map says and as the newest backlog item argues. The durable `granted` path in admitSpawn is what should go, and CLAUDE.md follows the code once it changes. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- [ ] **3. Wait for the backlog item** — Do not touch either side yet. The divergence is a live design question already tracked in the backlog; re-raise it only once that item is decided.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (5) — what was verified against code, and how</summary>
-
-- src/shared/analyzers/acquisitionEngine.ts — admitSpawn: `if (recordedDecision === "granted") return undefined;` sits ahead of the consent-token branch, and its doc comment states that order is the contract. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- CLAUDE.md states the disjunction correctly: "either a durable recorded `granted` decision in `.audit-tools/audit/analyzer-policy.json`, or the per-run consent token". <!-- doc-citation-exempt: quoted item prose, not citations -->
-- src/shared/analyzerPolicy.ts persists the decision, so the grant genuinely survives the run.
-- HEAD tip commit 5e1d92c0 "backlog: per-run choices must not be persisted — analyzer consent and review depth" argues the code is the wrong side.
-- Verified independently this run by reading admitSpawn from source, not from the reviewing agent summary.
-
-</details>
-
----
 
 
 <!-- nightly:item key=7ff5e4661b46ebf5 -->
@@ -199,89 +161,6 @@ Four facts live in two hand-maintained homes each, three already divergent. Shou
 ---
 
 
-<!-- nightly:item key=c2f8a24fcedba792 -->
-
-## `docs-5` — CONSTITUTIONAL: the audit spec documents an executor-to-artifact producer relation that no registry encodes, and its cross-reference bounces the reader — decide the home <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 2 nights · `spec/audit/dependency-map.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-The audit specification tells you which internal step produces which output file. It presents that table as a readable rendering of a machine-readable source, which is the project’s usual safety argument: the table cannot go wrong because the code is the real list. In this one case there is no such list. Both registries the table names record other things — one records what each step is for, the other records each file’s name and phase — and neither records who writes what. The real answer is scattered across the individual step implementations. A second document compounds this by sending readers to a third document for the same mapping, and that third document says explicitly that it deliberately does not carry it, so the reader is bounced without ever arriving. Separately, a list of files that participate in the run without being registered is missing two entries whose own source comments say in the strongest terms that they must never be registered — exactly the readers that list exists to protect. These files are constitutional, meaning nothing may edit them without your decision, which is why this comes to you rather than being fixed.
-
-### The question
-
-The spec/audit corpus documents an executor-to-artifact producer relation with no machine-readable source, a cross-reference that bounces, and an incomplete not-a-registry-entry enumeration. Where should the producer relation live?
-
-### Your answer
-
-- [ ] **1. Give it a machine source** — Add the producer relation to a registry (an artifacts_written declaration on ExecutorDefinition, or an equivalent), then generate the table from it and fix the cross-reference to point at the real home.
-- [ ] **2. Keep it hand-maintained, say so** — Leave the table hand-maintained but stop claiming it renders a machine-readable ground truth. Fix the bouncing cross-reference and complete the not-a-registry-entry enumeration.
-- [ ] **3. Fix the pointers only** — Correct the cross-reference and add the two missing entries to the enumeration. Leave the derivation claim as written.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (7) — what was verified against code, and how</summary>
-
-- ExecutorDefinition in src/audit/orchestrator/executors.ts carries id, kind and obligation_ids. ArtifactDefinition in src/audit/io/artifacts.ts carries fileName, phase, read and write. Neither encodes a producer relation.
-- The relation lives in each runner’s artifacts_written array, which is a runtime result rather than a declarative registry.
-- spec/audit/artifact-contract.md defers the executor-to-artifact mapping to spec/audit/executor-catalog.md, which states the mapping is authoritative in dependency-map.md and that the catalog deliberately does not re-list producers.
-- artifact-contract.md’s enumeration of members that participate in state without being registry entries omits submission_ledger and submission_ledger_dropped, whose ArtifactBundle comment says the ledger must never become an ARTIFACT_DEFINITIONS entry, and omits expected-submissions.json, marked Deliberately UNREGISTERED in src/shared/io/auditToolsPaths.ts.
-- Partial mechanical grounding does exist: tests/audit/seam-dependency-map-executor-writeset-parity.test.ts checks write-sets against the dependency map. It does not cover the named registry pair.
-- Escalate-only: every spec/audit doc is constitutional per src/shared/constitutionalDocPaths.ts.
-- Two sibling findings were REFUTED this run and are excluded: the intent-equivalence-verdict.json row carries an explicit exemption marker stating the real path and pre-empting the objection, and the abstract priority list is a policy layer above the PRIORITY array rather than a competing ordering.
-
-</details>
-
----
-
-
-<!-- nightly:item key=e15d0c1d1880d695 -->
-
-## `docs-6` — CONSTITUTIONAL: the entrypoint contract calls the shipped slash workflow an interim precursor, while the standing decision says that workflow IS the product <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 2 nights · `spec/audit/entrypoint-contract.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-This project has a settled conviction, written in its instruction file, that the product is the slash-command workflow the user runs inside a conversation, and that the command-line tool exists to serve it. The audit entrypoint specification says something different. It describes the shipped slash command and its command-line equivalent as an interim precursor, and states that the current commands should be treated as steps toward internal machinery rather than as the final way people will interact with the tool. So the specification that defines the product boundary is written as though today’s product were a way-station. Worth separating from a related non-issue: the same document is written against a future entrypoint name that exists nowhere in the code, and an independent check found that this is fine, because the document declares that choice openly in its opening paragraphs and explains why. The precursor framing is different — it is not declared anywhere as a deliberate departure, and it contradicts the conviction rather than restating it. This document is constitutional, so nothing may change it without your decision.
-
-### The question
-
-spec/audit/entrypoint-contract.md describes the shipped /audit-code slash workflow as an interim precursor and says the current CLI commands should be treated as precursors, not the final public interaction model. CLAUDE.md states the slash workflow IS the product. Which stands?
-
-### Your answer
-
-- [ ] **1. The conviction stands** — Conversation-first is settled: the slash workflow is the product. Rewrite the precursor framing so the contract describes the shipped surface as the interaction model, keeping the aspirational entrypoint name if it is still wanted.
-- [ ] **2. The contract stands** — The internal-executor direction is still intended and the shipped surface really is interim. Leave the contract and reconcile CLAUDE.md instead.
-- [ ] **3. Both, at different layers** — They describe different layers and do not conflict. Add a sentence to the contract saying so, and stop raising it.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (4) — what was verified against code, and how</summary>
-
-- spec/audit/entrypoint-contract.md calls the conversation-first CLI and slash command the interim precursor surface, and states that the current CLI commands should be treated as precursors to internal executors, not as the final public interaction model.
-- CLAUDE.md states: Conversation-first. Product is the slash workflow inside host conversation; CLI is backend/fallback.
-- This was raised by the independent adversary pass as a false negative, after it REFUTED the related surface finding: the doc openly declares that it is written against an aspirational entrypoint name and explains why, so code-absence of that name is the doc working as designed. The precursor framing carries no such declaration.
-- Escalate-only: spec/audit/* is constitutional per src/shared/constitutionalDocPaths.ts.
-
-</details>
-
----
-
-
 <!-- nightly:item key=6759f1304bccb490 -->
 
 ## `docs-8` — The ship skill anchors two preflight checks to the releases they burned (v0.34.17, v0.39.7) — keep the version stamps as incident anchors, or drop them and keep the mechanism sentence <!-- doc-citation-exempt: quoted item prose, not citations -->
@@ -357,51 +236,6 @@ docs/glossary-ids.md says it is "the lookup table for opaque identifiers that st
 - The glossary family table lists exactly five families: INV-, CE-, N-, the lens-prefix finding ids, and FND-. No row matches F- or item-C.
 - The glossary states its own contract as occurrence-based: "The source tree is the authority: when the final occurrence of an identifier or family is deleted, its glossary entry is deleted too." That contract makes the gap a real mismatch rather than a stylistic gap, which is why it is asked rather than ignored.
 - Surfaced independently by a separate reviewer lane this run while reviewing src/audit/adapters/README.md, which cites F5 and F6 in prose.
-
-</details>
-
----
-
-
-# Backlog disambiguation
-
-
-<!-- nightly:item key=dd47a7ac66507930 -->
-
-## `backlogN-1` — Backlog disambiguation: "one run identity" is the stated property, but the adversary says the gap is LINKAGE, not identity — decide which the entry means <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Backlog disambiguation · open 3 nights · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-Three parts of this tool each have their own idea of what a "run" is. The step envelope — the small record written each time the tool advances — has a run_id field that is allowed to be empty, and in practice it is empty. The dispatch artifacts, which describe work handed to the host, use a run id built from a timestamp. The friction record, which collects the annoyances found during a run, names its own file after a cleaned-up run id. Because these three do not agree, a friction close-out that was written under one id was invisible to the part of the tool that reads the other, and it had to be rewritten by hand. The backlog entry that records this says the property to hold is "one run identity across all three". An independent adversary pass pushed back on exactly that wording. Its argument is that the three genuinely have different lifetimes — a step envelope is one advance, a dispatch run is one handoff to the host, and a friction record spans many of both — so forcing one shared id inverts the relationship and also throws away the timestamp meaning the dispatch ids carry for free. Its counter-proposal is cheaper: leave the three ids alone and add explicit pointer fields on the friction record naming the step envelope and dispatch run it belongs to. That fixes the invisibility, which was the actual symptom, without a migration. This is a decision only you can make, because the two answers lead to very different amounts of work and to a different shape for the tool. The entry cannot be turned into a task until it is settled, which is why it has sat as prose.
-
-### The question
-
-docs/backlog/open-bugs.md states the property as "one run identity across step envelope, dispatch artifacts, and friction record". The adversary pass argues the three have genuinely different lifecycles and that the observed defect was a LINKAGE gap, not an identity gap, and proposes nullable foreign keys on the friction record instead. Which does the entry mean — unify the identity, or link the three ids?
-
-### Your answer
-
-- [ ] **1. Unify the identity** — Keep the entry as written: one run identity across step envelope, dispatch artifacts and friction record. The step envelope run_id stops being nullable and is minted from the same source the dispatch artifacts and the friction substrate use. Accept the migration cost and the loss of the timestamp semantics carried implicitly by the current dispatch ids.
-- [ ] **2. Link, do not unify** — Rewrite the entry's property: the three run notions stay distinct because their lifecycles genuinely differ, and the friction record gains explicit nullable foreign keys naming the step envelope run and the dispatch run it relates to. The defect to close is the invisibility, not the multiplicity of ids.
-- [ ] **3. Neither — the envelope field goes** — The step envelope's run_id is nullable and null in practice, which makes it a field nothing relies on. Delete it rather than either unifying or linking, and let the dispatch artifacts and the friction record be the only two run notions. Rewrite the entry to that scope.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (6) — what was verified against code, and how</summary>
-
-- src/audit/cli/steps.ts:76 — the step envelope schema declares `run_id: z.string().nullable(),`. The nullable half of the divergence still holds at HEAD 01595a4c. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- src/shared/friction/frictionRecord.ts:165-212 — the friction record and its lock are keyed by a sanitized run id (`frictionLockPath`, `frictionCapturePath`, `sanitizeRunId`), a separate identity from the envelope field. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- Leg 2's mechanical sweep classified this entry owner_decision_needed with the action "Owner needs to decide on the canonical run-id scheme and the migration scope before any concrete code change is derivable" (.audit-tools/nightly/triage-2026-08-21.jsonl, open-bugs#da502b77).
-- Adversary characterization from the independent free-provider lane (.audit-tools/nightly/free-adv2-0821.log): different lifecycles per notion; a step envelope can fail without invalidating an already-emitted dispatch run; the timestamped dispatch ids carry temporal semantics a unified opaque id loses; friction is cross-cutting rather than hierarchical, so one parent id inverts the relationship; and the cheapest alternative is nullable foreign keys on the friction record.
-- The adversary reasoned from the proposal text only and did not read source — its lifecycle claims are argument, not verified fact, and are offered as the counter-case rather than as evidence.
-- Related durable memory: renaming-a-persisted-field-is-not-a-rename, identity-change-must-audit-its-filters, prefix-join-between-two-name-spaces-fails-empty — all three describe the cost of changing a persisted identity, which is what option 1 commits to.
 
 </details>
 

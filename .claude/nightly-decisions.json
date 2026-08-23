@@ -1504,5 +1504,33 @@
     "decided_at": "2026-08-22T23:59:09.058Z",
     "completed_at": "2026-08-23T09:19:24.448Z",
     "completed_ref": "594071ff — check:runtime-artifact-names now preCommit:'reach' plus tests/shared/generator-gates-run-at-commit.test.ts forbidding the shape; both halves verified at HEAD fa66bd8c"
+  },
+  "240e467dfd7a8ac9": {
+    "disposition": "settled",
+    "answer": "Per-run only is intended, as the map says and as the newest backlog item argues. The durable `granted` path in admitSpawn is what should go, and CLAUDE.md follows the code once it changes.",
+    "subject": "",
+    "path": "docs/project-philosophy.md",
+    "decided_at": "2026-08-23T15:58:26.267Z"
+  },
+  "c2f8a24fcedba792": {
+    "disposition": "settled",
+    "answer": "Add the producer relation to a registry (an artifacts_written declaration on ExecutorDefinition, or an equivalent), then generate the table from it and fix the cross-reference to point at the real home.",
+    "subject": "",
+    "path": "spec/audit/dependency-map.md",
+    "decided_at": "2026-08-23T15:58:26.270Z"
+  },
+  "e15d0c1d1880d695": {
+    "disposition": "settled",
+    "answer": "Conversation-first is settled: the slash workflow is the product. Rewrite the precursor framing so the contract describes the shipped surface as the interaction model, keeping the aspirational entrypoint name if it is still wanted.",
+    "subject": "",
+    "path": "spec/audit/entrypoint-contract.md",
+    "decided_at": "2026-08-23T15:58:26.272Z"
+  },
+  "dd47a7ac66507930": {
+    "disposition": "settled",
+    "answer": "Rewrite the entry's property: the three run notions stay distinct because their lifecycles genuinely differ, and the friction record gains explicit nullable foreign keys naming the step envelope run and the dispatch run it relates to. The defect to close is the invisibility, not the multiplicity of ids.",
+    "subject": "",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-08-23T15:58:26.274Z"
   }
 }
