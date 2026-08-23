@@ -180,56 +180,14 @@ always-updated when computing metadata (the same pattern as `tooling_manifest.js
 a reflection appended after synthesis bumps its revision and re-stales the report
 exactly once; an unchanged file keeps its revision, so finalization converges.
 
-## Which executor produces each artifact (authoritative)
+## Which executor produces each artifact
 
-This is the single declarative home for the executor→artifact production mapping
-(the by-artifact view). [`executor-catalog.md`](executor-catalog.md) is the
-by-executor reference and points here rather than re-listing producers, so the
-relation is hand-maintained in exactly one place. The machine-readable ground
-truth remains the pair of registries — `EXECUTOR_REGISTRY`
-(`src/audit/orchestrator/executors.ts`) and `ARTIFACT_DEFINITIONS`
-(`src/audit/io/artifacts.ts`); this table is their declarative render.
-
-"Primary" = the executor that authoritatively writes the artifact; "refreshed by"
-= executors that rewrite it later in the pipeline (staleness-driven).
-
-| Artifact | Primary producer | Also written / refreshed by |
-|---|---|---|
-| `repo_manifest.json` | `intake_executor` | — |
-| `file_disposition.json` | `intake_executor` | `structure_executor` |
-| `intent_checkpoint.json` | `intent_checkpoint_executor` | — |
-| `auto_fixes_applied.json` | `auto_fix_executor` | — |
-| `external_analyzer_acquisition.json` | `external_analyzer_acquisition_executor` | — |
-| `unit_manifest.json` | `structure_executor` | — |
-| `surface_manifest.json` | `structure_executor` | — |
-| `graph_bundle.json` | `structure_executor` | `graph_enrichment_executor` (merges analyzer edges) |
-| `critical_flows.json` | `structure_executor` | — (merges persisted `critical-flow-fallback.json`) |
-| `risk_register.json` | `structure_executor` | — |
-| `git_history.json` | `structure_executor` | — |
-| `critical-flow-fallback.json` | `critical_flow_fallback_executor` | — (durable host input) |
-| `analyzer_capability.json` | `graph_enrichment_executor` | — |
-| `design_assessment.json` | `design_assessment_executor` | `design_review_contract`, `design_review_conceptual` |
-| `docs_digest.json` | `docs_digest_executor` | — |
-| `structure_decomposition.json` | `structure_decomposition_executor` | — |
-| `charter_register.json` | `charter_extraction_executor` | `charter_delta_executor` |
-| `charter_clarification.json` | `charter_clarification_executor` | — |
-| `systemic_challenge.json` | `systemic_challenge_executor` | — |
-| `external_analyzer_results.json` | `syntax_resolution_executor` | `external_analyzer_acquisition_executor` (upserts each tool's normalized findings; declares the artifact ONLY when a tool actually contributed, so an unchanged results array never churns its downstreams), `external_analyzer_import_executor` (`preferredExecutor` only) |
-| `syntax_resolution_status.json` | `syntax_resolution_executor` | — |
-| `scope.json` | `planning_executor` | — |
-| `coverage_matrix.json` | `planning_executor` | `result_ingestion_executor` |
-| `flow_coverage.json` | `planning_executor` | `result_ingestion_executor` |
-| `runtime_validation_tasks.json` | `planning_executor` | `result_ingestion_executor` |
-| `runtime_validation_report.json` | `runtime_validation_executor` | `planning_executor` (when tasks exist), `result_ingestion_executor`, `runtime_validation_update_executor` (`preferredExecutor` only) |
-| `audit_tasks.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening) |
-| `audit_plan_metrics.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening) |
-| `task_affinity_graph.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening) |
-| `requeue_tasks.json` | `planning_executor` | `result_ingestion_executor` |
-| `audit_results.jsonl` | `result_ingestion_executor` (appends validated results returned through `semantic_review_executor`) | — |
-| `access_memory.json` | `result_ingestion_executor` | — |
-| `audit-report.md` | `synthesis_executor` | `synthesis_narrative_executor` (re-render with narrative) |
-| `audit-findings.json` | `synthesis_executor` | `synthesis_narrative_executor` (re-render with narrative) |
-| `synthesis-narrative.json` | `synthesis_narrative_executor` | — |
+The producer relation is DECLARED in code, on `EXECUTOR_REGISTRY[].produces`
+(`src/audit/orchestrator/executors.ts`), with `LIFECYCLE_PRODUCTIONS` in the same
+module covering the artifacts the run lifecycle writes outside every executor.
+The by-artifact view is generated from that declaration into
+[`executor-producers.generated.md`](executor-producers.generated.md); a producer
+edge is added by editing the registry, never a table.
 
 ## Staleness policy examples
 

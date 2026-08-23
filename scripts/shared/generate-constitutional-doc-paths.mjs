@@ -39,6 +39,20 @@ export function extractConstitutionalPaths(tsSource) {
   if (paths.length === 0) {
     throw new Error("CONSTITUTIONAL_DOC_PATHS parsed as empty — refusing to generate an empty refusal");
   }
+  // A whole-file `*.generated.md` render is a projection of code, not a
+  // normative statement. The derivation rule in the source sweeps in "the rest
+  // of spec/audit/*", so a render landing there reads as constitutional — and
+  // listing one would make every routine edit to the registry it renders demand
+  // an owner override at commit. The rule states the exception; this enforces it.
+  const generated = paths.filter((p) => p.endsWith(".generated.md"));
+  if (generated.length > 0) {
+    throw new Error(
+      `CONSTITUTIONAL_DOC_PATHS lists generated render(s): ${generated.join(", ")}. ` +
+        "A generated doc is edited by re-running its generator, never by hand, so the constitutional " +
+        "refusal buys nothing and costs an owner override on every edit to its source registry. " +
+        "Protect the SOURCE the generator reads instead.",
+    );
+  }
   return paths;
 }
 

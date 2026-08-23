@@ -31,6 +31,13 @@
 //     *normative goals docs* ("never silently rewritten to match code").
 //   • the rest of `spec/audit/*` — the manifest's *package docs (audit)* row
 //     calls them "the normative `spec/audit/*`".
+//     EXCEPT `spec/audit/*.generated.md`: a whole-file generator render (e.g.
+//     `scripts/shared/generate-executor-producers.mjs`) is a projection of code,
+//     never a normative statement. It is edited by re-running its generator, so
+//     the refusal buys nothing and would demand an owner override on every edit
+//     to the registry it renders. Protect that registry, not its render — and
+//     the generator REFUSES a `*.generated.md` entry, so this is not a rule
+//     someone has to remember.
 // The list is deliberately NOT padded out to cover `spec/` wholesale: an
 // over-broad refusal trains the override into a reflex, and an override that is
 // always used has stopped signalling anything.

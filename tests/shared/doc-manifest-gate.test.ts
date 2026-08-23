@@ -39,7 +39,10 @@ import {
   CONSTITUTIONAL_DOC_PATHS,
   isConstitutionalDocPath,
 } from '../../src/shared/constitutionalDocPaths.js';
-import { renderConstitutionalModule } from '../../scripts/shared/generate-constitutional-doc-paths.mjs';
+import {
+  extractConstitutionalPaths,
+  renderConstitutionalModule,
+} from '../../scripts/shared/generate-constitutional-doc-paths.mjs';
 import { readFileSync } from 'node:fs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
@@ -269,6 +272,28 @@ describe('constitutional doc paths — single-sourced and parity-pinned', () => 
     const arr = [...CONSTITUTIONAL_DOC_PATHS];
     expect(arr).toEqual([...new Set(arr)]);
     expect(arr).toEqual([...arr].sort());
+  });
+
+  it('excludes whole-file generated renders — listing one escalates every edit to the code they render', () => {
+    // The derivation rule reads "the rest of `spec/audit/*`", and a
+    // `*.generated.md` render sits there. It is a projection of code, not a
+    // normative statement: listing one would make every routine edit to the
+    // registry it renders demand an owner override at commit.
+    expect(CONSTITUTIONAL_DOC_PATHS.filter((p) => p.endsWith('.generated.md'))).toEqual([]);
+  });
+
+  it('the generator REFUSES a generated render rather than propagating it to the hooks', () => {
+    const source =
+      'export const CONSTITUTIONAL_DOC_PATHS: readonly string[] = [\n' +
+      '  "CLAUDE.md",\n' +
+      '  "spec/audit/executor-producers.generated.md",\n' +
+      '];';
+    expect(() => extractConstitutionalPaths(source)).toThrow(/executor-producers\.generated\.md/);
+    expect(() =>
+      extractConstitutionalPaths(
+        'export const CONSTITUTIONAL_DOC_PATHS: readonly string[] = [\n  "CLAUDE.md",\n];',
+      ),
+    ).not.toThrow();
   });
 
   it('the generated hook-side copy is byte-identical to a fresh render', () => {

@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 172 entr(y/ies) indexed.
+> and at commit). 171 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -131,14 +131,13 @@
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
 - `forward-tracks.md:34` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:60` — Generate the executor↔artifact mapping from the registries (anti-drift).
-- `forward-tracks.md:67` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:75` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:90` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:97` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:109` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:123` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
-- `forward-tracks.md:132` — One-core dissolution lap — unify the host-handoff substrate and converge remediate on the obligation walk (owner-routed 2026-08-19).
+- `forward-tracks.md:58` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:66` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:81` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:88` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:100` — Wave-friendly host dispatch: run identity survives partial ingest.
+- `forward-tracks.md:114` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:123` — One-core dissolution lap — unify the host-handoff substrate and converge remediate on the obligation walk (owner-routed 2026-08-19).
 
 ### [`deferred.md`](backlog/deferred.md)
 

@@ -60,7 +60,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 
 <!-- BEGIN gate-enumeration — generated from package.json by scripts/check-gate-enumeration.mjs -->
 
-`verify:checks` = `check:control-bytes` + `check:version-gates` + `check:guard-reach` + `check:ci-trigger-paths` + `check:offload-lanes` + `check:loop-core-patterns` + `check:constitutional-doc-paths` + `check:runtime-artifact-names` + `check:deadcode` + `check:lint` + `check:dup` + `check:depgraph` + `check:doc-manifest` + `check:doc-links` + `check:doc-code-citations` + `check:gate-enumeration` + `check:philosophy-brief` + `check:nightly-routine-prompt` + `check:handoff-roadmap` + `check:backlog-index` + `check:memory-citations` + `check:backlog-budget` + `check:backlog-status` + `check:backlog-line-numbers` + `check:tests` + `build` + `verify:hosts` + `verify:remediate-hosts` + `pack:smoke` + `smoke:packaged-audit-code` + `smoke:packaged-remediate-code`
+`verify:checks` = `check:control-bytes` + `check:version-gates` + `check:guard-reach` + `check:ci-trigger-paths` + `check:offload-lanes` + `check:loop-core-patterns` + `check:constitutional-doc-paths` + `check:runtime-artifact-names` + `check:executor-producers` + `check:deadcode` + `check:lint` + `check:dup` + `check:depgraph` + `check:doc-manifest` + `check:doc-links` + `check:doc-code-citations` + `check:gate-enumeration` + `check:philosophy-brief` + `check:nightly-routine-prompt` + `check:handoff-roadmap` + `check:backlog-index` + `check:memory-citations` + `check:backlog-budget` + `check:backlog-status` + `check:backlog-line-numbers` + `check:tests` + `build` + `verify:hosts` + `verify:remediate-hosts` + `pack:smoke` + `smoke:packaged-audit-code` + `smoke:packaged-remediate-code`
 
 <!-- END gate-enumeration -->
 

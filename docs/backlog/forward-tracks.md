@@ -55,15 +55,6 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   over 1000+ components and deepening) stays validated by dogfood runs. The re-dogfood
   run's hand-label is optional large-target calibration, never a blocker for this.
 
-
-
-- **Generate the executor↔artifact mapping from the registries (anti-drift).** `executor-catalog.md` +
-  `dependency-map.md` both render the executor→artifact relation, hand-maintained over `EXECUTOR_REGISTRY`
-  (`src/audit/orchestrator/executors.ts`) + `ARTIFACT_DEFINITIONS` (`src/audit/io/artifacts.ts`) — it drifted
-  once. The mapping is now consolidated to one hand-maintained home (`dependency-map.md`), but the durable fix
-  per "never hand-maintain a table someone else could generate" is to GENERATE the mapping from the two
-  registries at doc-build/check time. Forward track.
-
 - **End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).** The
   node:test-gate bug ([[remediate-gate-nodetest-runner-bug]], fixed v0.32.61) blocked EVERY remediate run
   yet no gate/release check caught it: the gate command only runs in a live remediate *run*, and the unit

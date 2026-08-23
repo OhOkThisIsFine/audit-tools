@@ -129,7 +129,7 @@ export const DOC_MANIFEST = [
     files: [
       [
         "spec/**/*.md",
-        "the normative design corpus — workflow designs, contracts, goals docs; routed by pattern, so a new spec is registered the moment it lands",
+        "the normative design corpus — workflow designs, contracts, goals docs; routed by pattern, so a new spec is registered the moment it lands. A `*.generated.md` sibling is NOT part of that corpus — see the check column",
       ],
     ],
     check:
@@ -137,8 +137,12 @@ export const DOC_MANIFEST = [
       "`> **Status:** <type-declaration>` preamble identifying the kind of design artifact is permitted; a " +
       "dated/versioned status string in it is still status-noise → escalate. The goals docs and the " +
       "`spec/audit/*` contracts are **normative** — see *Normative goals docs* above and the constitutional-doc " +
-      "refusal in `src/shared/constitutionalDocPaths.ts`: a change to one is a design-decision → escalate.",
-    autoApply: "factual-stale → yes (except the constitutional subset — escalate-only)",
+      "refusal in `src/shared/constitutionalDocPaths.ts`: a change to one is a design-decision → escalate. " +
+      "A `spec/**/*.generated.md` file is a whole-file generator render (its banner names the generator) — " +
+      "never hand-edit it; a stale claim there is a stale SOURCE, fixed by editing the source and re-running " +
+      "the generator, and its `check:` gate refuses the commit otherwise.",
+    autoApply:
+      "factual-stale → yes (except the constitutional subset — escalate-only; `*.generated.md` — generator only)",
   },
   {
     type: "excluded",

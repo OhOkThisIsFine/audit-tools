@@ -9,21 +9,21 @@ This document defines the bounded executable steps available to the orchestrator
 The canonical, machine-readable registry is `EXECUTOR_REGISTRY` in
 `src/audit/orchestrator/executors.ts` — one entry per executor, each declaring an `id`, a
 `kind` (`deterministic` runs inline; `host_delegation` pauses the pipeline and
-asks the active LLM/host agent to do the work), and the `obligation_ids` it
-satisfies. The `src/audit/orchestrator/nextStep.ts` priority chain (see `CLAUDE.md` → audit-code
+asks the active LLM/host agent to do the work), the `obligation_ids` it
+satisfies, and the artifacts it `produces`. The `src/audit/orchestrator/nextStep.ts` priority chain (see `CLAUDE.md` → audit-code
 architecture) picks the highest-priority unsatisfied obligation and dispatches
 to whichever executor's `obligation_ids` includes it. This document is the
 declarative reference; that table is authoritative. For each artifact's exact
 filename/format/staleness, see [`artifact-contract.md`](artifact-contract.md)
 and [`dependency-map.md`](dependency-map.md) — not duplicated here.
 
-**Executor → artifact mapping lives in one place.** Which executor produces which
-artifact is hand-maintained authoritatively in
-[`dependency-map.md`](dependency-map.md) → *"Which executor produces each
-artifact"* (the by-artifact home). This catalog is the by-executor view and
-deliberately does **not** re-list producers, so the relation can't drift between
-two docs — consult dependency-map.md for the producing/refreshing executors of any
-artifact.
+**Executor → artifact mapping is declared in code.** Which executor produces
+which artifact is the `produces` field on each `EXECUTOR_REGISTRY` entry; the
+by-artifact view is generated from it into
+[`executor-producers.generated.md`](executor-producers.generated.md). This
+catalog is the by-executor view and deliberately does **not** re-list producers,
+so the relation cannot drift between homes — consult the generated table for the
+producing/refreshing executors of any artifact.
 
 Two executors carry `obligation_ids: []` and are never selected by the priority
 scan — they run only via an explicit `preferredExecutor` override:
@@ -53,10 +53,10 @@ actual friction triage fires from the `present_report` terminal step
 
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
-| `external_analyzer_acquisition_executor` | deterministic | `external_analyzers_current` | acquisition marker; triggers `external_analyzer_results.json` |
-| `structure_executor` | deterministic | `structure_artifacts` | emits all structure artifacts in one call (merges any persisted `critical-flow-fallback.json` host enrichment into `critical_flows.json`) |
+| `external_analyzer_acquisition_executor` | deterministic | `external_analyzers_current` | acquires the analyzer set and records the acquisition marker |
+| `structure_executor` | deterministic | `structure_artifacts` | emits all structure artifacts in one call, merging any persisted host flow enrichment |
 | `critical_flow_fallback_executor` | host_delegation | `critical_flow_fallback_current` | the durable host-authored flow enrichment. Fires ONLY when the deterministic flow inference set `critical_flows.fallback_required`; emits a host step to author the enrichment, otherwise self-satisfies. Persisting the submission re-stales `critical_flows.json` so the structure phase merges it |
-| `graph_enrichment_executor` | deterministic | `graph_enrichment_current` | records the graph-enrichment marker (+ refreshes `graph_bundle.json` when analyzer edges merge in) |
+| `graph_enrichment_executor` | deterministic | `graph_enrichment_current` | records the graph-enrichment marker; merges analyzer edges into the graph when there are any |
 | `design_assessment_executor` | deterministic | `design_assessment_current` | deterministic design pass |
 | `structure_decomposition_executor` | deterministic | `structure_decomposition_current` | overlay-and-delta structure operator |
 | `docs_digest_executor` | deterministic | `docs_digest_current` | bounded telos extraction over the doc universe (change 3); renders into the confirm-intent prompt |
@@ -75,9 +75,9 @@ actual friction triage fires from the `present_report` terminal step
 | `planning_executor` | deterministic | `planning_artifacts` | emits all planning artifacts in one call |
 | `semantic_review_executor` | host_delegation | `audit_tasks_completed` | emits a complete provider-neutral host workload and ingests prompt-bound results; performs no backend launch or routing |
 | `external_analyzer_import_executor` | deterministic | *(none — `preferredExecutor` only)* | imported normalized external-analyzer results |
-| `result_ingestion_executor` | deterministic | `audit_results_ingested` | ingests into `audit_results.jsonl` and refreshes the downstream planning/coverage artifacts |
-| `runtime_validation_executor` | deterministic | `runtime_validation_current` | produces the initial runtime-validation report (+ adds tasks/metrics when selective deepening applies) |
-| `runtime_validation_update_executor` | deterministic | *(none — `preferredExecutor` only)* | refreshes the runtime-validation report from imported evidence (+ adds tasks/metrics when selective deepening applies) |
+| `result_ingestion_executor` | deterministic | `audit_results_ingested` | ingests prompt-bound host results and refreshes the downstream planning/coverage view |
+| `runtime_validation_executor` | deterministic | `runtime_validation_current` | the first runtime-validation pass; applies selective deepening |
+| `runtime_validation_update_executor` | deterministic | *(none — `preferredExecutor` only)* | re-runs that pass over imported evidence |
 
 ### Reporting
 

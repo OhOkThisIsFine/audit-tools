@@ -37,6 +37,7 @@ export const STEP_GLOSS = {
   "check:loop-core-patterns": "loop-core pattern-list drift check",
   "check:constitutional-doc-paths": "constitutional-doc-path parity",
   "check:runtime-artifact-names": "runtime artifact-name set parity",
+  "check:executor-producers": "executor→artifact producer-table parity",
   "check:deadcode": "dead-code export gate",
   "check:lint": "curated lint gate (eslint, zero-tolerance)",
   "check:dup": "duplication ratchet (jscpd)",

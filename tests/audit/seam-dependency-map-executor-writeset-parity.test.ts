@@ -1,6 +1,4 @@
 /**
- * seam-dependency-map-executor-writeset-parity.test.mjs
- *
  * Cross-module seam test: dependency-map-executor-writeset-parity
  *
  * Verifies that ARTIFACT_DEPENDENTS_MAP (dependencyMap.ts) and the executor
@@ -10,13 +8,13 @@
  * Seam contract (N-TEST-SEAM-dependency-map-executor-writeset-parity):
  *
  *   PARITY-1: Every artifact filename in any executor's artifacts_written is a
- *             known filename (present in ARTIFACT_DEFINITIONS or one of the two
- *             special-cased lifecycle files). Typos or stale names are caught
+ *             known filename (present in ARTIFACT_DEFINITIONS, or declared
+ *             lifecycle-written / side-channel). Typos or stale names are caught
  *             at test time rather than silently writing unknown artifacts.
  *
  *   PARITY-2: Every artifact referenced as an upstream in ARTIFACT_DEPENDS_ON_MAP
  *             (the canonical hand-authored DAG) is writable — by a named executor
- *             or by the two lifecycle paths. A stale upstream name means consumers
+ *             or by a declared lifecycle path. A stale upstream name means consumers
  *             silently never re-stale. Overlaps with PARITY-3 to provide independent
  *             verification from the canonical-direction source.
  *
@@ -27,10 +25,16 @@
  *
  *   PARITY-3: Every KEY in ARTIFACT_DEPENDENTS_MAP that has at least one
  *             downstream dependent must be writable — either by a named
- *             executor or by the two special lifecycle paths (advance.ts
- *             directly: tooling_manifest.json, agent-feedback.jsonl).
- *             Dead keys (with non-empty dependents but no writer) indicate
- *             a stale rename or deletion.
+ *             executor or by a declared lifecycle path. Dead keys (with
+ *             non-empty dependents but no writer) indicate a stale rename or
+ *             deletion.
+ *
+ * The lifecycle and side-channel exemptions are NOT enumerated here: they are
+ * derived from LIFECYCLE_PRODUCTIONS and the registry's `side_channel`
+ * declarations (src/audit/orchestrator/executors.ts), so a member list in this
+ * header would be a second home that decays. A lifecycle entry an executor
+ * actually writes is refused by
+ * tests/audit/executor-artifact-production-declaration.test.ts.
  *
  *   PARITY-4: All filenames appearing as VALUES in ARTIFACT_DEPENDENTS_MAP
  *             (the downstream dependents) are known filenames. A stale value
@@ -41,18 +45,14 @@
  */
 
 import { test, expect } from "vitest";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const here = dirname(fileURLToPath(import.meta.url));
-const auditCodeRoot = join(here, "..", "..");
 
 // ── Import live modules ───────────────────────────────────────────────────────
 
 const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP } = await import("../../src/audit/orchestrator/dependencyMap.js");
 const { ARTIFACT_DEFINITIONS, AUDIT_REPORT_FILENAME } = await import("../../src/audit/io/artifacts.js");
+const { EXECUTOR_REGISTRY, LIFECYCLE_PRODUCTIONS } = await import("../../src/audit/orchestrator/executors.js");
 const { AGENT_FEEDBACK_FILENAME } = await import("audit-tools/shared");
+const { extractExecutorWriteSets } = await import("../../scripts/shared/executor-write-sites.mjs");
 
 // ── Canonical known filenames ─────────────────────────────────────────────────
 
@@ -64,140 +64,47 @@ const KNOWN_FILENAMES = new Set([
 ]);
 
 /**
- * Files whose writes are managed OUTSIDE named executor return values:
- *   - tooling_manifest.json  → written by the environment probe / advanceAudit
- *   - intent_checkpoint.json → written by the conversation host at confirmation
- *   - agent-feedback.jsonl   → appended by workers, never by an executor
- * Both appear as keys in ARTIFACT_DEPENDENTS_MAP but must not be required
- * to appear in any executor's artifacts_written.
+ * Files whose writes are managed OUTSIDE named executor return values — the
+ * environment probe, worker appends, and advanceAudit's own supervisor pair.
+ * They appear as keys in ARTIFACT_DEPENDENTS_MAP but must not be required to
+ * appear in any executor's artifacts_written. Declared once as
+ * LIFECYCLE_PRODUCTIONS on the executor registry, so this test and the generated
+ * producer table read the same list.
  */
-const LIFECYCLE_WRITTEN_FILES = new Set([
-  "tooling_manifest.json",
-  "intent_checkpoint.json",
-  AGENT_FEEDBACK_FILENAME,
-]);
+const LIFECYCLE_WRITTEN_FILES = new Set(
+  LIFECYCLE_PRODUCTIONS.map((entry) => entry.artifact),
+);
 
 /**
  * Side-channel host-facing files that executors may write to disk as an
  * informational channel but which are NOT tracked in ARTIFACT_DEFINITIONS
  * or the dependency DAG. They are intentionally excluded from bundle tracking
- * and staleness propagation. PARITY-1 must not flag these as unknown.
- *
- *   - scope_summary.json: written by runIntakeExecutor when artifactsDir is
- *     provided; hosts read it directly. The in-process channel is the typed
- *     scope_summary field on ExecutorRunResult. Never in ARTIFACT_DEFINITIONS.
+ * and staleness propagation. PARITY-1 must not flag these as unknown. Declared
+ * on the executor registry (role "side_channel"), each carrying the reason it
+ * sits outside the DAG.
  */
-const SIDE_CHANNEL_FILES = new Set([
-  "scope_summary.json",
-]);
-
-// ── Source paths for all executor modules ────────────────────────────────────
-
-const EXECUTOR_SOURCE_FILES = [
-  join(auditCodeRoot, "src", "audit", "orchestrator", "intakeExecutors.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "structureExecutors.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "criticalFlowFallbackExecutor.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "charterExtractionExecutor.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "charterClarificationExecutor.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "systemicChallengeExecutor.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "planningExecutors.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "ingestionExecutors.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "synthesisExecutors.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "graphEnrichmentExecutor.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "acquisitionExecutor.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "intentCheckpointExecutor.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "autoFixExecutor.ts"),
-  join(auditCodeRoot, "src", "audit", "orchestrator", "syntaxResolutionExecutor.ts"),
-];
-
-/**
- * Extract the set of artifact filenames from all artifacts_written arrays and
- * local variables that are subsequently assigned to artifacts_written in a
- * TypeScript source file.
- *
- * Two extraction passes:
- *   1. Inline literals:  artifacts_written: ["x.json", "y.json"]
- *   2. Variable pattern: const artifactsWritten = ["x.json", "y.json"];
- *                        ... artifacts_written: artifactsWritten (or push()s)
- *      For this pattern we collect every string literal that appears in the
- *      same source between the array initializer and the end of the file.
- */
-async function extractArtifactsWritten(filePath: string): Promise<Set<string>> {
-  const src = await readFile(filePath, "utf8");
-  const results = new Set<string>();
-
-  // Pass 1: inline `artifacts_written: [...]` literals.
-  let searchFrom = 0;
-  while (true) {
-    const startIdx = src.indexOf("artifacts_written:", searchFrom);
-    if (startIdx === -1) break;
-
-    const bracketIdx = src.indexOf("[", startIdx);
-    if (bracketIdx === -1) break;
-
-    // Find matching close bracket.
-    let depth = 0;
-    let endIdx = bracketIdx;
-    for (let i = bracketIdx; i < src.length; i++) {
-      if (src[i] === "[") depth++;
-      else if (src[i] === "]") {
-        depth--;
-        if (depth === 0) {
-          endIdx = i;
-          break;
-        }
-      }
-    }
-
-    const block = src.slice(bracketIdx, endIdx + 1);
-    // Extract all double-quoted string literals from the block.
-    for (const m of block.matchAll(/"([^"]+)"/g)) {
-      results.add(m[1]);
-    }
-
-    searchFrom = endIdx + 1;
-  }
-
-  // Pass 2: variable assignment pattern.
-  // Match `const <name> = [...]` where <name> is later referenced by
-  // `artifacts_written: <name>`. Heuristic: if the source contains a line
-  // declaring an array variable that holds JSON filenames AND a subsequent
-  // line that uses it as the value of `artifacts_written`, collect every
-  // string literal from the variable's initializer and any .push() calls.
-  const varPattern = /const\s+(\w+)\s*=\s*\[([^\]]*)\]/g;
-  for (const varMatch of src.matchAll(varPattern)) {
-    const varName = varMatch[1];
-    const arrayContent = varMatch[2];
-    // Check whether `artifacts_written: <varName>` exists in the file.
-    if (new RegExp(`artifacts_written:\\s*${varName}\\b`).test(src)) {
-      for (const m of arrayContent.matchAll(/"([^"]+)"/g)) {
-        results.add(m[1]);
-      }
-      // Also collect any .push() calls: artifactsWritten.push("x.json")
-      const pushPattern = new RegExp(`${varName}\\.push\\(["']([^"']+)["']\\)`, "g");
-      for (const m of src.matchAll(pushPattern)) {
-        results.add(m[1]);
-      }
-    }
-  }
-
-  return results;
-}
+const SIDE_CHANNEL_FILES = new Set(
+  EXECUTOR_REGISTRY.flatMap((executor) =>
+    executor.produces
+      .filter((production) => production.role === "side_channel")
+      .map((production) => production.artifact),
+  ),
+);
 
 // ── Build the combined executor write-set ────────────────────────────────────
 
-async function buildAllExecutorWritesets(): Promise<Set<string>> {
-  const all = new Set<string>();
-  for (const filePath of EXECUTOR_SOURCE_FILES) {
-    const written = await extractArtifactsWritten(filePath);
-    for (const name of written) {
-      all.add(name);
-    }
-  }
-  return all;
-}
-
-const ALL_EXECUTOR_WRITTEN = await buildAllExecutorWritesets();
+/**
+ * The write-set extraction lives in `scripts/shared/executor-write-sites.mjs` —
+ * one home, keyed per EXECUTOR rather than per source file, so the four executors
+ * sharing `structureExecutors.ts` and the CLI-site writes of the host-delegation
+ * executors are attributed individually. That extraction is pinned against the
+ * registry's `produces` declaration by
+ * `tests/audit/executor-artifact-production-declaration.test.ts`; this seam test
+ * consumes its union to check the dependency DAG.
+ */
+const ALL_EXECUTOR_WRITTEN = new Set<string>(
+  [...extractExecutorWriteSets().values()].flatMap((written) => [...written]),
+);
 
 // ── Pre-compute useful sets for the tests ────────────────────────────────────
 
@@ -330,7 +237,7 @@ test("PARITY-5e: intake executor writes repo_manifest.json AND repo_manifest.jso
   // repo_manifest.json is written via a local variable in intakeExecutors.ts
   // (not an inline literal). This test verifies our extraction caught it.
   expect(ALL_EXECUTOR_WRITTEN.has("repo_manifest.json"), "intake executor must list repo_manifest.json in artifacts_written " +
-      "(extraction may have missed the local-variable pattern — check extractArtifactsWritten)").toBeTruthy();
+      "(extraction may have missed the local-variable pattern — check extractExecutorWriteSets)").toBeTruthy();
   const repoDeps = ARTIFACT_DEPENDENTS_MAP["repo_manifest.json"];
   expect(Array.isArray(repoDeps) && repoDeps.includes("file_disposition.json"), "repo_manifest.json → file_disposition.json edge must exist").toBeTruthy();
 });

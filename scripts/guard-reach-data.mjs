@@ -150,6 +150,15 @@ export const GUARDS = [
     fix: 'runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs',
   },
   {
+    id: 'check:executor-producers',
+    kind: 'gate',
+    impl: 'check:executor-producers',
+    preCommit: 'reach',
+    fix:
+      'spec/audit/executor-producers.generated.md is stale — run `node scripts/shared/generate-executor-producers.mjs`, ' +
+      'then re-stage it. The producer relation is declared on EXECUTOR_REGISTRY[].produces; never hand-edit the render',
+  },
+  {
     id: 'check:handoff-roadmap',
     kind: 'gate',
     impl: 'check:handoff-roadmap',
@@ -439,6 +448,15 @@ export const GUARDS = [
       'textual extraction against the runtime-layout sources and cross-checks ARTIFACT_DEFINITIONS directly',
   },
   {
+    id: 'executor-producer-declaration-test',
+    kind: 'contract-test',
+    impl: 'tests/audit/executor-artifact-production-declaration.test.ts',
+    note:
+      'pins EXECUTOR_REGISTRY[].produces against what the executor sources actually write, in both ' +
+      'directions (declared ⊇ extracted, and extracted ∪ data-declared dynamic contributors ⊇ declared), ' +
+      'plus one primary producer per registry artifact and drift of the generated render',
+  },
+  {
     id: 'offload-lane-probe-test',
     kind: 'contract-test',
     impl: 'tests/shared/offload-lane-probe.test.ts',
@@ -505,6 +523,28 @@ export const REACH = [
       'scripts/shared/runtime-artifact-names.generated.mjs',
     ],
     guardedBy: ['check:runtime-artifact-names'],
+  },
+  {
+    area: 'executor→artifact producer relation',
+    files: [
+      'src/audit/orchestrator/executors.ts',
+      'scripts/shared/executor-write-sites.mjs',
+      'scripts/shared/generate-executor-producers.mjs',
+      'spec/audit/executor-producers.generated.md',
+    ],
+    guardedBy: ['check:executor-producers', 'executor-producer-declaration-test'],
+    uncovered:
+      'the extraction reads DECLARED write sites (scopes and CLI rules in executor-write-sites.mjs) — a ' +
+      'SOME-of-the-set relocation into a helper the site does not name is invisible to it, and the ' +
+      'declared-⊇-extracted direction then passes vacuously for the moved artifact (the declared side is ' +
+      'still caught by DECL-4). A renamed scope, and a relocation that empties the scope, both refuse loudly. ' +
+      'Separately, design_review_contract and design_review_conceptual share ONE whole-file artifactsDirWrites ' +
+      'rule over src/audit/cli/nextStepHelpers.ts, so the two cannot be told apart: a CLI-site write added there ' +
+      'for only one of them forces BOTH to declare it and the render credits an executor that never writes it. ' +
+      'A `no-writes` site is checked in the writes-appeared direction only when it names a file+scope: ' +
+      'intent_equivalence_executor does, semantic_review_executor CANNOT (no deterministic runner exists — the ' +
+      'host returns results through the submission ledger), so if that executor ever started writing an artifact ' +
+      'nothing would extract it and its declared-⊇-extracted pin would stay vacuous',
   },
   {
     area: 'source',
