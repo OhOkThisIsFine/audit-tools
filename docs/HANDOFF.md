@@ -43,17 +43,6 @@
    P40, three executed queue items and the follow-up fixes since v0.45.0.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
-
-- **8 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `docs-2` — Apply the de-status rule uniformly to the concept docs still carrying measurements, lap narratives and migration markers — or name the sites that keep them deliberately
-  - `docs-3` — Decide what audit-tools ships to npm consumers — the tarball carries a contributor guide and a maintainer release runbook, and their pointers dangle there
-  - `docs-4` — Four facts are kept in two hand-written homes each and three have already drifted — single-source them, or accept the copies deliberately
-  - `docs-8` — The ship skill anchors two preflight checks to the releases they burned (v0.34.17, v0.39.7) — keep the version stamps as incident anchors, or drop them and keep the mechanism sentence
-  - `docs-9` — The glossary promises to cover every opaque identifier in src, but the F-series phase labels and item-C have no family row — register them, or narrow the promise
-  - `sol-2` — P41: approve a registry-driven prompt-contract test that reconciles against every prompt builder — 12 records across 7 dates, and guard-reach already declares the class open
-  - `sol-3` — P42: approve deleting the advance command from the worker-facing prompt, so a delegated executor cannot advance the run — a design change, not a guard
-  - `sol-4` — P43: approve a configDirTrust row so a lane that cannot read the repo is refused before it is spent on — 10 records across 8 dates, and the trap is marked UNENFORCED
-
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

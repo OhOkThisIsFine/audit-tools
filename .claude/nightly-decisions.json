@@ -1538,5 +1538,61 @@
     "decided_at": "2026-08-23T15:58:26.274Z",
     "completed_at": "2026-08-23T19:13:32.258Z",
     "completed_ref": "71acd115 — friction record carries nullable step_run_ids/dispatch_run_ids reference keys; read seam tolerates a malformed sibling; persistFrictionCapture deleted"
+  },
+  "7ff5e4661b46ebf5": {
+    "disposition": "settled",
+    "answer": "Apply the de-status rule uniformly: strip the measurement, lap reference, or migration marker at every site, keeping the durable sentence around it. No exceptions.",
+    "subject": "",
+    "path": "spec/self-scaling-pipeline-design.md",
+    "decided_at": "2026-08-23T23:16:48.273Z"
+  },
+  "d37581ceaceb366b": {
+    "disposition": "settled",
+    "answer": "Narrow the published doc set to consumer-facing pages. Drop the contributor guide and the maintainer release runbook from the tarball, and rewrite any surviving pointer that leaves the shipped set.",
+    "subject": "",
+    "path": "README.md",
+    "decided_at": "2026-08-23T23:16:48.276Z"
+  },
+  "283f545fb4a904b8": {
+    "disposition": "settled",
+    "answer": "Derive or delete the second copy in every case: generate the CLI-surface list from installer-verb-help.mjs, drop the examples inventory, single-source the target-directory instruction across the two shipped loader assets, and leave the open-work item only in the backlog.",
+    "subject": "",
+    "path": "docs/audit-pkg/product.md",
+    "decided_at": "2026-08-23T23:16:48.278Z"
+  },
+  "6759f1304bccb490": {
+    "disposition": "settled",
+    "answer": "Drop \"burned v0.34.17\" and \"burned v0.39.7\" and keep the sentences explaining what each check catches. The mechanism carries the force on its own, and the version numbers are exactly the dated status the documentation philosophy bans.",
+    "subject": "",
+    "path": ".claude/skills/ship/SKILL.md",
+    "decided_at": "2026-08-23T23:16:48.280Z"
+  },
+  "5acf2e262ebd7ab0": {
+    "disposition": "settled",
+    "answer": "F5, F6 and item-C are historical program-phase noise in source comments. Remove them from the comments rather than documenting them, which makes the glossary correct without growing it.",
+    "subject": "",
+    "path": "docs/glossary-ids.md",
+    "decided_at": "2026-08-23T23:16:48.282Z"
+  },
+  "db629de141ee6414": {
+    "disposition": "settled",
+    "answer": "Build the registry with the reconciliation leg (a prompt builder under src that no row claims is a red build) and both escapes — projection rows and declared-gap rows.",
+    "subject": "",
+    "path": "tests/shared/prompt-renders-its-contract.test.ts",
+    "decided_at": "2026-08-23T23:16:48.284Z"
+  },
+  "26e2d10e4569b448": {
+    "disposition": "settled",
+    "answer": "Remove the advance command from the worker-facing prompt at all seven sites; it lives in the driver-facing step contract only.",
+    "subject": "",
+    "path": "src/remediate/steps/prompts.ts",
+    "decided_at": "2026-08-23T23:16:48.286Z"
+  },
+  "ffaa77551e147264": {
+    "disposition": "settled",
+    "answer": "Add the configDirTrust row and let the session-start lane leg report an untrusted lane as unusable, with unprobeable lanes marked so they do not red falsely.",
+    "subject": "",
+    "path": "scripts/shared/offload-lane-data.mjs",
+    "decided_at": "2026-08-23T23:16:48.288Z"
   }
 }
