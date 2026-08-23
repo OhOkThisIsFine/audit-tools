@@ -1,16 +1,18 @@
 import { existsSync } from "node:fs";
 import { basename, dirname, parse, resolve } from "node:path";
+import { AUDIT_TOOLS_DIRNAME, auditArtifactsDir } from "audit-tools/shared";
 import { getArtifactsDir, hasFlag } from "./args.js";
 import { cleanupStaleArtifactsDir } from "./cleanup.js";
 
-// The structural identity of an audit artifacts directory, spelled here because
-// the `cleanup` verb is the component that has to PROVE a target looks like one
-// before recursively deleting it (CP-NODE-16). These mirror the layout literals
-// `auditArtifactsDir` builds from in audit-tools/shared; they are restated
-// locally because the shared subpath export does not re-export them and the
-// guard below must stay decidable from this file alone.
-const AUDIT_TOOLS_DIRNAME = ".audit-tools";
-const AUDIT_AREA_DIRNAME = "audit";
+// The structural identity of an audit artifacts directory, which the `cleanup`
+// verb has to PROVE a target carries before recursively deleting it
+// (CP-NODE-16). Both segments come from the single-sourced layout in
+// audit-tools/shared (src/shared/io/auditToolsPaths.ts): the dirname constant
+// directly, the area segment derived from the helper that builds it — so a
+// layout change moves this guard with it instead of silently disarming it.
+const AUDIT_AREA_DIRNAME = basename(auditArtifactsDir("."));
+// The supervisor state marker; audit-tools/shared exposes no constant for it yet
+// (the literal is spelled at every producer/consumer site), so it is named here.
 const AUDIT_STATE_FILENAME = "audit_state.json";
 
 export type CleanupTargetValidation =

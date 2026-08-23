@@ -713,6 +713,7 @@ export {
   auditFindingsPath,
   promotedAuditReportPath,
   promotedAuditFindingsPath,
+  AUDIT_TOOLS_DIRNAME,
   AUDIT_REPORT_FILENAME,
   AUDIT_FINDINGS_FILENAME,
   REMEDIATION_REPORT_FILENAME,
