@@ -12,13 +12,16 @@
  * in each twin is its DRAW — the contract versions and shapes it persists, the
  * domain validation it applies on top, the state it mutates.
  */
+// Sibling modules imported DIRECTLY, never through ../index.js: the barrel
+// re-exports this module, so importing the barrel here would close a cycle
+// (index → hostHandoffCore → index) that check:depgraph refuses.
+import { hashContent } from "../hash.js";
+import { stableStringify } from "../stableStringify.js";
 import {
   assertSubmissionRunId,
-  hashContent,
   resolveContainedPath,
-  stableStringify,
   submissionPathFor,
-} from "../index.js";
+} from "./submissionIdentity.js";
 import { join, resolve } from "node:path";
 
 /** Code-unit lexical order — the shared comparator for every id sort here. */
