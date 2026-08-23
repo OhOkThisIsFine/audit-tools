@@ -73,7 +73,11 @@ export const WorkerAuditResultSchema = AuditResultSchema.extend({
   file_coverage: z
     .array(
       z
-        .object({ path: z.string(), total_lines: z.number().int().min(0) })
+        .object({
+          path: z.string(),
+          total_lines: z.number().int().min(0),
+          reviewed_lines: z.number().int().min(0).optional(),
+        })
         .strict(),
     )
     .min(1),
