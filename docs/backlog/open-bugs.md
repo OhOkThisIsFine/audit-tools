@@ -251,14 +251,17 @@
   change which citations are examined. [[a-gate-must-not-ask-the-local-disk]]
 
 - **`writeOpenItems` accepts an item with no `subject_key` and persists it; the refusal lands two
-  steps later in the HANDOFF generator (2026-08-19, low, friction: tool_should_decide).** The writer
-  validates probes exhaustively — four distinct refusals — but never checks the field the whole
-  durable-answer mechanism keys on, so a missing `subject_key` is written to
-  `.audit-tools/nightly/open-items.json` and only `generate-handoff-roadmap.mjs` refuses it, naming `items[0]` rather
-  than the authoring mistake. The writer already imports `subjectKey`, and every item carries the
-  `subject` it is computed from. **Property:** the writer either derives `subject_key` from
-  `subject` itself or refuses at write; a persisted item missing it is unreachable for
-  [[settled-subject-slips-through-a-reword]] and cannot be re-asked correctly.
+  steps later in the HANDOFF generator (2026-08-14, re-hit 2026-08-19, low, friction:
+  tool_should_decide).** `scripts/nightly/items.mjs` consumes `item.subject_key` for carry-forward
+  and settled-lookup, and the writer validates probes exhaustively — four distinct refusals — yet
+  never checks the field the whole durable-answer mechanism keys on. A missing `subject_key` is
+  written to `.audit-tools/nightly/open-items.json`, and only `generate-handoff-roadmap.mjs` refuses
+  it, as a BLOCKED COMMIT naming `items[N]` and HANDOFF rather than the item that is malformed. The
+  writer already imports `subjectKey`, and every item carries the `subject` it is computed from.
+  **Property:** the writer that reads a field either derives it or refuses at write, so the refusal
+  names the real defect where it is introduced ([[validator-guards-every-field-caller-reads]]); a
+  persisted item missing it is unreachable for [[settled-subject-slips-through-a-reword]] and cannot
+  be re-asked correctly.
 
 - **Modularity refinement is superlinear on one large component and unpinned at scale (2026-08-19,
   low).** Measured 78ms at 200 members → 726ms at 800, with Louvain's pass bound at `n + 8`; the
@@ -763,16 +766,6 @@
   identical claim was corrected in `spec/mechanical-analyzer-layer-design.md` (`4d5987bf`); this is
   its code-comment sibling, left because the nightly's autonomy covers docs only.
   **Property to hold:** doc and code name the same persistence home for consent.
-
-- **`writeOpenItems` reads `subject_key` but never computes or requires it; the HANDOFF generator
-  hard-requires it (2026-08-14, nightly, low).** `scripts/nightly/items.mjs` consumes
-  `item.subject_key` for carry-forward and settled-lookup (lines 596/600/639) yet accepts a batch
-  without it, so a hand-authored item persists fine — and the failure surfaces two steps later as a
-  BLOCKED COMMIT from `generate-handoff-roadmap.mjs` reporting `items[N] must carry a canonical id
-  ... and subject_key`, which names HANDOFF rather than the item that is actually malformed. Hit
-  tonight; cost a restore-and-rewrite of the queue. **Property to hold:** the writer that reads a
-  field validates or derives it, so the refusal names the real defect at the point it is introduced
-  ([[validator-guards-every-field-caller-reads]]).
 
 - **`check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling
   (2026-08-14, nightly, low).** The gate matches only the `memory: <name>` prose form in tracked
