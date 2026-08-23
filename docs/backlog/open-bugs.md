@@ -21,6 +21,73 @@
 
 - **A transition that ends the call drops the fold's carried advisories (2026-08-22, low).** After e72a06bb, a fold's validation warnings and classified ingest issues survive the result-ingestion transition and reach the NEXT emission within the same `next-step` call — but a transition that ENDS the call still drops them: the carry is fold-local state on the ctx ref and is never persisted, so nothing survives into the next call. Advisory-only (the ledger record is unaffected); what is lost is the prompt statement of what the ledger already recorded. **Property:** every classified ingest issue and validation warning is stated on exactly one emitted step, whichever call emits it.
 
+- **The DAG-derived write scope omits the companion files a fix needs, so the host hand-widens
+  `touched_files` (2026-08-23, high, friction: tool_should_decide).** In the first-draw run 8 of 30
+  work items stopped with `needs_clarification` asking for exactly this: the test file a "pin X with
+  direct tests" node must CREATE, the zod source a generated JSON schema mirrors, the shared module a
+  "one core, two draws" extraction needs, the manifest a dependency swap touches. P38 did not cover it
+  because the DAG author never listed those outputs. A clarification answer cannot widen scope (the
+  resolution only re-opens the item with context), so `state.plan.blocks[].touched_files` was edited
+  by hand before each re-mint. **Property:** a node whose obligations are tests / snapshots / generated
+  artifacts / new shared modules declares those paths as `output_files` (validator-enforced) or the
+  planner derives them; the clarification contract carries an explicit scope delta; the host never
+  edits the plan.
+
+- **An empty dispatch frontier THROWS instead of pausing (2026-08-23, high, friction:
+  tool_should_decide).** With every dispatchable block resolved and the rest `needs_clarification`
+  (or one `blocked` item holding a phase barrier), `next-step` died with "Cannot prepare an empty
+  remediation host workload" (`prepareRemediationHostHandoff`) — three times in one run. Recovery
+  was hand-setting `state.status` to `waiting_for_clarification` / `waiting_for_triage` so the tool's
+  own obligation consumed the resolution. **Property:** an empty frontier with unanswered
+  clarifications emits `collect_clarifications`, with blocked dependents emits `collect_triage`, and
+  never an exception; a worker's lane-corruption report is a distinct outcome from a genuine block.
+
+- **The Implementation DAG prompt does not state the one-invocation rule for `targeted_commands`
+  (2026-08-23, medium, friction: tool_should_decide).** The worker emitted `npm run build && npm run
+  check` on 23 nodes; the promotion gate rejected the whole DAG twice (`MAX_DAG_REGENERATION_ATTEMPTS`
+  = 2, one more would have blocked the pipeline) for a defect the tool can normalize by splitting on
+  `&&`. **Property:** a mechanically-normalizable violation never spends a regeneration attempt — the
+  tool splits, or the prompt states the rule and the validator reports a targeted repair.
+
+- **A release version bump trips the path-A seed-drift alarm (2026-08-23, low, friction:
+  tool_should_decide).** `package.json` changed only its `version` and the contract pipeline blocked
+  until the seed was deleted (option 3). **Property:** drift in a non-finding field never raises the
+  alarm, or the alarm carries a one-command "accept this drift" path.
+
+- **The step prompt's "Result status requiring attention" lists MISSING results with the same shape
+  as rejections (2026-08-23, low).** A host parser had to special-case "no result file exists".
+  **Property:** missing and rejected are distinct machine-readable statuses (or absent items are not
+  listed).
+
+- **The per-item required tests and the host landing gate do not include the tree-wide guard
+  suites or the cheap release gates, and every landing's evidence is Windows-local (2026-08-23,
+  medium).** Three remediation landings reddened CI after green per-item runs: a hand-restated
+  `.audit-tools` literal caught only by `tests/shared/audit-tools-path-guard.test.ts` (`1e7a4a54`
+  fixed it), a case-folding assertion true only on a case-insensitive volume (`011c6ae0`), and an
+  intra-`src/shared` import cycle the reviewer graded minor that `check:depgraph` refuses
+  (`b5963957`). **Property:** a landing runs the repository's guard suites and the cheap release gates
+  (`check:depgraph`, `check:deadcode`, `check:lint`) for the areas it touches, and the host treats
+  Linux CI as the real signal per commit.
+
+- **Dispatch-lane children still answer the Stop "closeout challenge" despite
+  `AUDIT_TOOLS_CHILD_SESSION=1` (2026-08-23, low).** Implementer and reviewer children ended with
+  "Closeout challenge addressed…" prose; once it displaced a reviewer's final JSON verdict and the host
+  had to retry the review. **Property:** the closeout-challenge gate honors the child marker.
+
+- **The phase-boundary repository gate re-runs on EVERY `next-step` at the boundary (2026-08-23,
+  low).** `phase_boundary_gate` (build + vitest, 2–5 min) ran on each of several consecutive
+  `next-step` calls while the run sat at phase 1. **Property:** the gate runs once per boundary and
+  its verdict is cached against the tree hash.
+
+- **Reviewer minors carried from the first-draw landings (2026-08-23, low).** Same-lens dedupe
+  absorption fix has no regression test (`src/shared/findings/dedupe.ts`); `collectPathARefusals`
+  duplicates the promoter's Path-A membership logic and `FINALIZED_MODULE_CONTRACT_FIELDS` is a third
+  hand-written field list beside `derive.ts` (`src/remediate/contractPipeline/`); `renderMembers`'
+  `includeBodies` knob in `scripts/shared/generate-filelock-export-surface.mjs` is a no-op;
+  `hostHandoffCore.ts` exports `idsAreUnique`/`absoluteHostHandoffResultPath` with no production
+  caller and `resultPathFor` in the remediate adapter re-derives `runDir` by slicing the workload path.
+  **Property:** each is pinned or deleted; none blocks.
+
 - **The friction close-out walk must be written twice under two different names (2026-08-21, low, friction: tool_should_decide).** The Stop backstop (`.claude/hooks/friction-stop-gate.mjs`) scans every `*.json` under `<artifacts>/friction` and accepts the run-id-keyed record, while the close step demands the walk specifically at `<artifacts>/friction/run.json`. A complete walk recorded against the real run id satisfies the backstop and still leaves the close gate reporting all three categories MISSING. **Property:** one run has one friction record path, and both gates read it.
 
 - **The systemic-challenge lane prompt withholds the banked findings it asks the adversary to beat (2026-08-21, medium).** The prompt states only a COUNT of prior improvements, and `systemicChallengeLoop` computes newness by exact identity over adversary-minted ids. An adversary therefore cannot tell what it must not repeat, and a paraphrase registers as new: round 3 of the 2026-08-21 lap re-emitted round 2's `mapWithConcurrency` item under a fresh id, and the lane raised both halves as findings itself. **Property:** the adversary sees the banked set, and convergence dedups on content rather than on a worker-minted id. Related: the no-ceiling entry — together they are why that lap's loop had to be stopped by a hand-written empty submission.

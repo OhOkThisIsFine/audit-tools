@@ -10,29 +10,27 @@
 - The dogfood self-audit's deliverables are `.audit-tools/audit-report.md` and
   `.audit-tools/audit-findings.json`. The tool defects it and the remediation run exposed are the
   2026-08-21 and 2026-08-22 entries in `docs/backlog/open-bugs.md`.
-- A first-draw REMEDIATION RUN (all high findings + the top risks' medium ones) is IN FLIGHT in
-  `.audit-tools/remediation/` and is BLOCKED inside the contract pipeline on an owner decision:
-  the adversarial judge demands adding a module for MNT-c2dc7f9c (dropped at intake, no evidence
-  array) or an owner-level goal_spec waiver, plus structured dependency/scope fields the finalized
-  contract schema does not have. The run, every host decision taken, the drivers, and how to
-  resume are in project memory `remediation-first-draw-2026-08-22`; the tool defects it exposed are
-  the 2026-08-22 high entries in docs/backlog/open-bugs.md.
+- The first-draw REMEDIATION RUN (`.audit-tools/remediation/`, 30 work items) is in its implement
+  phase and mostly landed: 24 items are on `main` (each implemented and independently reviewed on
+  the Ox-Alpha lane, gated, CI-green), 5 resolved with no change, and NODE-5 is implementing with
+  26 → 7 → 14 queued behind it. A DETACHED host runner drives it (launched 2026-08-23 from the main
+  checkout; it lands items serially on `main`, writes the bound result docs, re-runs `next-step` per
+  round, and stops on any pause it cannot answer). The runner, its logs, how to watch/stop/resume it,
+  and the pauses it hits are in project memory `remediation-host-runner-2026-08-23`; the run's
+  decisions are in `remediation-first-draw-2026-08-22`. P39 and P40 (the two approved nightly
+  proposals) are built and landed.
 
 ## Immediate next
 
-1. Resume the remediation run with the OWNER'S ANSWERS (given 2026-08-22 at hand-back): (a)
-   MNT-c2dc7f9c is WAIVED for this run — record it as a host decision (goal_spec non_goal / the
-   contracts' out-of-scope note already says so) and remediate it in a later draw; (b) the judge's
-   structured-field demands are DOWNGRADED for this run — the `artifact:` token graph is the
-   structured form; proceed to implementation dispatch. Mechanically: from the main checkout,
-   resolve the six accepted counterexamples in
-   `.audit-tools/remediation/intake/contract/judge_report.input.json` as downgraded/waived with that
-   rationale (use the tool's own downgrade path if its block prompt names one; otherwise edit the
-   classifications), `node remediate-code.mjs next-step`, then relaunch the driver described in memory
-   `remediation-first-draw-2026-08-22`. Implementation dispatch follows; items ship per dependency
-   level, results are `host-results/<sha256(item)>.json`, landed commits must be reachable from
-   HEAD, and the tool reruns the required tests.
-2. Ship a release for the work landed on `main` since v0.45.0 (`/ship`).
+1. Finish the remediation run: read the runner log named in memory `remediation-host-runner-2026-08-23`.
+   If the parent is alive, leave it; if it stopped, answer the pause per that memory's recipe and relaunch
+   `node .audit-tools/remediation/host-runner/impl-runner.mjs --concurrency 10` from the main checkout.
+   When every item is terminal the tool enters closing (final gate): run `node remediate-code.mjs next-step`
+   until the report is promoted (`.audit-tools/remediation-report.md` / `remediation-outcomes.json`).
+2. Ask the owner the waiting nightly decisions (generated list below; plain-language forms for
+   `docs-1..7` and `backlogN-1` are in `.audit-tools/remediation/host-runner/inbox-questions.json`).
+3. Ship a release once the run closes (`/ship`): `main` carries 24 remediation landings, P39, P40
+   and four follow-up fixes since v0.45.0.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
