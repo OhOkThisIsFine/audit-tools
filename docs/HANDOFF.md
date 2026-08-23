@@ -37,10 +37,7 @@
    `remediation-first-draw-2026-08-22`. Implementation dispatch follows; items ship per dependency
    level, results are `host-results/<sha256(item)>.json`, landed commits must be reachable from
    HEAD, and the tool reruns the required tests.
-2. Decision queue: P39 and P40 are APPROVED and both have LANDED (`594071ff`, `c3eaa59d`), so
-   they have left the queue. The items still open are listed in the generated block below and in
-   [`nightly-inbox.md`](nightly-inbox.md); ask them at the next session start.
-3. Ship a release for the work landed on `main` since v0.45.0 (`/ship`).
+2. Ship a release for the work landed on `main` since v0.45.0 (`/ship`).
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
