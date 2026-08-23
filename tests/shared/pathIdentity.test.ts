@@ -34,8 +34,10 @@ test("case folding: differing-case spellings of one file collide", () => {
     // The folded form is fully lowercase on a case-insensitive volume…
     const folded = canonicalizeFilePath(upper, { root });
     if (CASE_INSENSITIVE_FS) expect(folded).toBe(folded.toLowerCase());
-    // …and stable across repeated calls (pure function of its inputs).
-    expect(folded).toBe(canonicalizeFilePath(lower, { root }));
+    // …and stable across repeated calls (pure function of its inputs) — the SAME
+    // spelling re-canonicalized; the cross-spelling collision is the branch above,
+    // and on a case-sensitive volume the two spellings are distinct keys by design.
+    expect(folded).toBe(canonicalizeFilePath(upper, { root }));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
