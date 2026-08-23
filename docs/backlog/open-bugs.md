@@ -67,17 +67,6 @@
   `check:handoff-roadmap` green — the regeneration belongs to `writeOpenItems` or the run contract,
   not to the operator noticing.
 
-- **A src deletion that changes the derived runtime-artifact-name set lands through a green
-  commit gate (2026-08-20, low, friction: tool_should_decide).** Deleting the
-  <!-- doc-citation-exempt: deliberate does-not-exist narrative — the deletion is the entry's subject -->
-  `validateDispatchArtifacts` family removed the last source mention of `dispatch-plan.json`,
-  and the tracked `scripts/shared/runtime-artifact-names.generated.mjs` render lagged — green
-  at commit, red only in the full suite's drift test and the pre-tag `verify:checks`
-  (`check:runtime-artifact-names` is not in the commit gate's triggered set). Cost one failed
-  full-suite run and a regen commit. **Property:** a commit whose staged set touches the
-  sources the generator derives from either runs the check in the gate leg or regenerates
-  mechanically — same class as the HANDOFF empty-queue full-suite-only contract entry.
-
 - **next-step discards a rejected submission's classified issues (2026-08-20, medium,
   friction: tool_should_decide).** `buildImplementDispatchStep` consumes
   `ingestRemediationHostResults` and, when `accepted_count` is 0, falls through to
