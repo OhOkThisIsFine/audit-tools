@@ -271,6 +271,13 @@ const invokedDirectly =
   process.argv[1] != null && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
   const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) {
+    // A real flag, exit 0: `--help` is also the module's declared smoke command
+    // (it proves the module loads and executes), so it must not share the
+    // missing-argument usage path's non-zero exit.
+    console.log('usage: node scripts/shared/sessionRegistry.mjs --register <session-id>');
+    process.exit(0);
+  }
   const flagIndex = args.indexOf('--register');
   const rawId = flagIndex === -1 ? undefined : args[flagIndex + 1];
   if (rawId === undefined) {
