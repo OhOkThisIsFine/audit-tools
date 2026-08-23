@@ -1524,7 +1524,9 @@
     "answer": "Conversation-first is settled: the slash workflow is the product. Rewrite the precursor framing so the contract describes the shipped surface as the interaction model, keeping the aspirational entrypoint name if it is still wanted.",
     "subject": "",
     "path": "spec/audit/entrypoint-contract.md",
-    "decided_at": "2026-08-23T15:58:26.272Z"
+    "decided_at": "2026-08-23T15:58:26.272Z",
+    "completed_at": "2026-08-23T17:49:46.202Z",
+    "completed_ref": "366509a0 — entrypoint-contract.md now describes the shipped CLI/slash surface as the interaction model; precursor framing removed"
   },
   "dd47a7ac66507930": {
     "disposition": "settled",
