@@ -14,14 +14,17 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 /**
  * Read a source file that is required for the install to proceed at all
- * (e.g. the prompt/skill markdown). Missing source is reported as a skip
- * (exitCode reset to 0, not a failure) rather than thrown.
+ * (e.g. the prompt/skill markdown — the product surface itself). A missing
+ * required source is a LOUD failure: it throws so the postinstall exits
+ * non-zero and any failure an earlier step already recorded is never masked
+ * by an exit-code reset here. Only truly optional sources go through
+ * readOptionalSource, which still degrades to a skip.
  */
 export function readRequiredSource(path, label, toolName) {
   if (!existsSync(path)) {
-    console.warn(`${toolName}: ${label} source not found at ${path} - skipping global command install`);
-    process.exitCode = 0;
-    return null;
+    throw new Error(
+      `${toolName}: ${label} source not found at ${path} - required for the install; not skipping silently`,
+    );
   }
   return readFileSync(path);
 }
