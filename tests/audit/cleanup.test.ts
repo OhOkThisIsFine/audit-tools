@@ -1,7 +1,8 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, writeFile, stat } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { join, dirname, parse } from "node:path";
+import { auditArtifactsDir } from "audit-tools/shared";
 import { fileURLToPath } from "node:url";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 import { withTempDir } from "./helpers/withTempDir.mjs";
@@ -13,7 +14,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 
 const { cleanupStaleArtifactsDir } = await import("../../src/audit/cli/cleanup.js");
-const { cmdCleanup } = await import("../../src/audit/cli/cleanupCommand.js");
+const { cmdCleanup, validateCleanupTarget } = await import(
+  "../../src/audit/cli/cleanupCommand.js"
+);
 
 async function dirExists(dirPath: string): Promise<boolean> {
   try {
@@ -368,6 +371,88 @@ test("cmdCleanup: stdout is always valid JSON", async () => {
     }
     expect(typeof parsed.action === "string", "action should be a string").toBeTruthy();
     expect(typeof parsed.artifacts_dir === "string", "artifacts_dir should be a string").toBeTruthy();
+  });
+});
+
+// ── validateCleanupTarget (CP-NODE-16) ────────────────────────────────────────
+// The cleanup verb recursively deletes. Before ANY delete path — --force or not
+// — it must prove the target IS an audit artifacts dir: `<X>/.audit-tools/audit`,
+// never a filesystem root (fail-1), never a wrong-shaped path (fail-2). `--force`
+// additionally requires the audit_state.json marker on disk (fail-3): force
+// waives the status evidence, never the identity evidence.
+
+test("validateCleanupTarget accepts a well-formed artifacts dir path", () => {
+  const { ok } = validateCleanupTarget(auditArtifactsDir("/repo"));
+  expect(ok).toBe(true);
+});
+
+test("validateCleanupTarget refuses a filesystem root", () => {
+  for (const root of [parse(process.cwd()).root, "/"]) {
+    const v = validateCleanupTarget(root);
+    expect(v.ok, `root ${root} must be refused`).toBe(false);
+    if (!v.ok) {
+      expect(v.reason.includes("filesystem root"), "reason names the root").toBe(true);
+    }
+  }
+});
+
+test.each([".", "..", "/tmp", "/var/log", "C:\\Windows"])(
+  "validateCleanupTarget refuses wrong-shape target %s",
+  (target) => {
+    const v = validateCleanupTarget(target);
+    expect(v.ok, `${target} is not <X>/.audit-tools/audit`).toBe(false);
+    if (!v.ok) {
+      expect(v.reason.includes(".audit-tools/audit"), "reason names the required shape").toBe(true);
+    }
+  },
+);
+
+test("cmdCleanup: --force without marker refused — exitCode=1, action=refused, dir intact", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    // No audit_state.json written.
+
+    const { code, stdout } = await runCleanup(artifactsDir, ["--force"]);
+
+    expect(code, "--force without the marker must be refused").toBe(1);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.action).toBe("refused");
+    expect(parsed.artifacts_dir).toBe(artifactsDir);
+    expect(parsed.reason.includes("audit_state.json"), "reason names the missing marker").toBe(true);
+    expect(await dirExists(artifactsDir), "the directory must survive the refusal").toBeTruthy();
+  });
+});
+
+test("cmdCleanup: --force with marker on a valid shape still deletes, exitCode=0", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "active" }),
+    );
+
+    const { code, stdout } = await runCleanup(artifactsDir, ["--force"]);
+
+    expect(code, "force-delete of a proven artifacts dir succeeds").toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.action).toBe("deleted");
+    expect(!(await dirExists(artifactsDir)), "directory should be removed").toBeTruthy();
+  });
+});
+
+test("cmdCleanup: structural refusal fires even with --force and --dry-run", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const broadDir = join(tempDir, "not-audit");
+    await mkdir(broadDir, { recursive: true });
+
+    const { code, stdout } = await runCleanup(broadDir, ["--force"]);
+
+    expect(code, "a wrong-shape target is refused regardless of --force").toBe(1);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.action).toBe("refused");
+    expect(await dirExists(broadDir), "the non-audit dir must survive").toBeTruthy();
   });
 });
 
