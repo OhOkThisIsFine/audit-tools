@@ -477,6 +477,20 @@ export const GUARDS = [
       'imperative — including the driver-facing "The executor must write ... to:" step-prompt lines, ' +
       'which are deliberately in scope for neither — goes unflagged',
   },
+  {
+    id: 'prompt-renders-its-contract-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/prompt-renders-its-contract.test.ts',
+    note:
+      'P40 (nightly 2026-08-22): a generated worker prompt that states an output contract must not ' +
+      'hand-type it beside the validator that enforces it — the charter lane prompt DERIVES its ' +
+      'provenance kind alternation from CharterProvenanceSchema.shape.kind.options at render time, ' +
+      'and the pin holds the RENDERED prompt (closed, exhaustive, no trailing ellipsis), while BOTH ' +
+      'branches of the remediate confirm-intent template state the {path, reason} element shape of ' +
+      'excluded_scope (that half is a source scan; shape rules, deliberately not a field-set ' +
+      'reconciliation — `created_at` is stamped tool-side in contractPipeline.ts and the prompts ' +
+      'omit it correctly).',
+  },
 ];
 
 /** @type {ReachRow[]} */
@@ -505,11 +519,17 @@ export const REACH = [
       'check:depgraph',
       'pre-commit-gate',
       'prompt-capability-test',
+      'prompt-renders-its-contract-test',
     ],
     uncovered:
       'the loop-core attestation half of pre-commit-gate covers only the LOOP_CORE_PATTERNS prefixes ' +
       '(src/shared/loopCorePaths.ts), not every dispatch-adjacent CLI file; no gate refuses a direct ' +
-      'child_process.spawn that bypasses spawnLoggedCommand (durable-traps)',
+      'child_process.spawn that bypasses spawnLoggedCommand (durable-traps). P40: prompt-renders-its-contract-test ' +
+      'reaches only its two named builders — a third prompt site (including the 15 contract-pipeline ' +
+      'sketches and synthesize_intake, whose checkpoint-field drift was never verified) goes uncaught; ' +
+      'the charter half pins ONE renderCharterKindLanePrompt call, so a second provenance rendering in ' +
+      'another builder or lane escapes it; and the excluded_scope pin is a LITERAL source scan of ' +
+      'nextStep.ts, so a differently-worded template line evades it',
   },
   {
     area: 'tests',

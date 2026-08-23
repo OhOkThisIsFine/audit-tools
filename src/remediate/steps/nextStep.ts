@@ -3581,7 +3581,7 @@ To confirm, write the final checkpoint to:
   "intent_summary": "${draft.intent_summary ?? "<the goal>"}",
   "free_form_intent": "<optional: additional guidance>",
   "filters": ${JSON.stringify(draft.filters ?? {}, null, 2)},
-  "excluded_scope": [],
+  "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],
   "must_not_touch": []
 }
 \`\`\`

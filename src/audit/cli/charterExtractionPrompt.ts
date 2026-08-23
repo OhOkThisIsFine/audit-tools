@@ -1,5 +1,9 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
+import { CharterProvenanceSchema } from "audit-tools/shared";
 import type { Ceiling, CharterKind } from "audit-tools/shared";
+
+/** The provenance-kind alternation, DERIVED from the schema at render time. */
+const PROVENANCE_KINDS = CharterProvenanceSchema.shape.kind.options.join("|");
 
 /**
  * Per-kind charter-extraction LANE prompts (Phase C.1). The host supplies
@@ -163,7 +167,14 @@ export function renderCharterKindLanePrompt(
     '      "purpose": "<telos, not mechanism>",',
     '      "premise_height": 0,',
     '      "files": ["<repo-relative path>", "..."],',
-    '      "provenance": [{ "kind": "doc|code|comment|inferred|...", "ref": "<path/id>", "quote": "<optional>" }],',
+    // Closed enum, exhaustive, NO trailing ellipsis — DERIVED from
+    // CharterProvenanceSchema at render time, so a schema enum change flows into
+    // the prompt automatically; the behavioral pin in
+    // tests/shared/prompt-renders-its-contract.test.ts holds exhaustiveness and
+    // closedness of the RENDERED text instead of teaching a worker a smaller
+    // contract (an open list here coined a member and quarantined a 34-minute
+    // lane run).
+    `      "provenance": [{ "kind": "${PROVENANCE_KINDS}", "ref": "<path/id>", "quote": "<optional>" }],`,
     '      "confidence": "high|medium|low"',
     "    }",
     "  ]",
