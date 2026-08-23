@@ -1,5 +1,15 @@
 # 11 verified doc fixes — held because the tree was dirty
 
+> **SUPERSEDED — do not apply. Verified fully moot at HEAD `fa66bd8c` on 2026-08-23.**
+> Every one of the eleven fixes has either landed or lost its target file. Fixes 1-4 named
+> `spec/backend-identity-axes.md`, `spec/dispatch-jit-claims.md`, `spec/cross-provider-quota-matrix.md`
+> and `spec/unified-dispatch-worker-model.md`, all four of which are deleted; `backend_provider`
+> now occurs nowhere under `src/` and nowhere outside the excluded `docs/reviews/` row. Fix 7's
+> file `spec/host-validation.md` is deleted. Fixes 5, 8, 9, 10 and 11 are already correct in the
+> tree, and fix 6's `ledger.ts` reference is gone from `spec/multi-ide-concurrent-runs-design.md`.
+> The record is kept as provenance only. A free-provider lane found this file while looking for
+> work on 2026-08-23 and offered to verify against it, which is why the banner is here.
+
 Every fix below passed the full three-agent gate (reviewer → independent adversary →
 judge) **and** was re-verified against local HEAD `a0deffcc` by the judge personally.
 None was applied: the working tree carried an untracked file from a concurrent session

@@ -1492,13 +1492,17 @@
     "answer": "Land P40: both prompt fixes plus tests/shared/prompt-renders-its-contract.test.ts, with the charter list RENDERED from CharterProvenanceSchema rather than retyped, and a guard-reach registry row declaring the uncovered half.",
     "subject": "",
     "path": "src/audit/cli/charterExtractionPrompt.ts",
-    "decided_at": "2026-08-22T23:59:09.055Z"
+    "decided_at": "2026-08-22T23:59:09.055Z",
+    "completed_at": "2026-08-23T09:19:24.826Z",
+    "completed_ref": "c3eaa59d — charterExtractionPrompt.ts:6 derives PROVENANCE_KINDS from CharterProvenanceSchema.shape.kind.options, pinned by tests/shared/prompt-renders-its-contract.test.ts; verified at HEAD fa66bd8c"
   },
   "51c20f54edd9aafb": {
     "disposition": "settled",
     "answer": "Approved — build both. Flip check:runtime-artifact-names to preCommit:'reach' and add a REACH row whose files are DERIVED from the generator's exported RUNTIME_NAME_SOURCES (plus the generator and its render), so the reach cannot drift narrower than what the generator reads. Then add tests/shared/generator-gates-run-at-commit.test.ts asserting no gate with a regenerate-shaped fix is registered preCommit:false. Red-green validate: the test must be RED at HEAD naming check:runtime-artifact-names before the flip lands.",
     "subject": "",
     "path": "scripts/guard-reach-data.mjs",
-    "decided_at": "2026-08-22T23:59:09.058Z"
+    "decided_at": "2026-08-22T23:59:09.058Z",
+    "completed_at": "2026-08-23T09:19:24.448Z",
+    "completed_ref": "594071ff — check:runtime-artifact-names now preCommit:'reach' plus tests/shared/generator-gates-run-at-commit.test.ts forbidding the shape; both halves verified at HEAD fa66bd8c"
   }
 }
