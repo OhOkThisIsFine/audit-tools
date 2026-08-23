@@ -1,7 +1,10 @@
 import { join } from "node:path";
+import { readdir } from "node:fs/promises";
 import {
   type FrictionCaptureArtifact,
   type FrictionItem,
+  type FrictionRunLinks,
+  type FrictionRunLinkUpdate,
   FRICTION_CAPTURE_SCHEMA_VERSION,
   frictionCaptureDir,
   frictionCapturePath,
@@ -180,8 +183,46 @@ function emptyRecord(
     schema_version: FRICTION_CAPTURE_SCHEMA_VERSION,
     tool,
     run_id: runId,
+    // Materialization happens at whichever seam touches the record first, routinely
+    // BEFORE either related run exists (semantics: `FrictionRunLinks`).
+    step_run_ids: [],
+    dispatch_run_ids: [],
     captured_at: new Date().toISOString(),
     frictions: [],
+  };
+}
+
+/**
+ * A stored reference array as read off disk: deduped and sorted in code-unit order of the
+ * id, so the array is content-ordered rather than write-ordered. The value arrives through
+ * an unchecked JSON cast, so anything that is not an array of strings (a record written
+ * before the field existed) normalizes to empty instead of throwing.
+ */
+function normalizeRunRefs(stored: unknown): string[] {
+  const refs = Array.isArray(stored)
+    ? stored.filter((ref): ref is string => typeof ref === "string")
+    : [];
+  return [...new Set(refs)].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+/** {@link normalizeRunRefs} of the stored array unioned with one newly-supplied id. */
+function mergeRunRefs(stored: unknown, added: string | null | undefined): string[] {
+  const existing = normalizeRunRefs(stored);
+  return typeof added === "string" ? normalizeRunRefs([...existing, added]) : existing;
+}
+
+/**
+ * Fold a run-link update into a record — the single chokepoint implementing the reference
+ * semantics stated on `FrictionRunLinks` (src/shared/io/frictionCapture.ts).
+ */
+function mergeFrictionRunLinks(
+  record: TriagedFrictionArtifact,
+  links: FrictionRunLinkUpdate | undefined,
+): TriagedFrictionArtifact {
+  return {
+    ...record,
+    step_run_ids: mergeRunRefs(record.step_run_ids, links?.step_run_id),
+    dispatch_run_ids: mergeRunRefs(record.dispatch_run_ids, links?.dispatch_run_id),
   };
 }
 
@@ -196,20 +237,118 @@ function emptyRecord(
  * appenders never lost-update each other's fields — the late writer always sees
  * the earlier writer's merged record (CE-010). `mutate` must be pure and
  * total (it returns the next record); it never performs IO of its own.
+ *
+ * `links` names the runs this write knows about (semantics: `FrictionRunLinks`). It is
+ * folded in AROUND `mutate`, never inside it, because every caller's mutate has an early
+ * return that yields the record unchanged (the per-event de-dup in `captureFrictionEvent`
+ * most of all) — and a re-entrant pass is exactly when a newly-known id arrives.
  */
 export async function appendFrictionUnderLock(
   artifactsDir: string,
   runId: string,
   mutate: (record: TriagedFrictionArtifact) => TriagedFrictionArtifact,
   tool: FrictionCaptureArtifact["tool"] = "remediate-code",
+  links?: FrictionRunLinkUpdate,
 ): Promise<TriagedFrictionArtifact> {
   return withFileLock(frictionLockPath(artifactsDir, runId), async () => {
     const existing = await readOptionalJsonFile<TriagedFrictionArtifact>(
       frictionCapturePath(artifactsDir, runId),
     );
     const base = existing ?? emptyRecord(runId, tool);
-    const next = mutate(base);
+    const next = mergeFrictionRunLinks(mutate(base), links);
     await writeJsonFile(frictionCapturePath(artifactsDir, runId), next);
     return next;
   });
+}
+
+/**
+ * Record which step-envelope run and/or dispatch run this friction record relates to,
+ * best-effort. The only writer seam whose whole purpose is the reference — every other
+ * writer carries frictions and merely passes its links along.
+ *
+ * Call it at a seam that HOLDS the id (a dispatch prepare, a step publish), once per
+ * round, passing only what is genuinely in scope (semantics: `FrictionRunLinks`). Never
+ * throws: a failed link is diagnostic loss, never a broken obligation — the same
+ * best-effort contract as the mechanical capture sink.
+ *
+ * ⚠ It MATERIALIZES the record when none exists (`appendFrictionUnderLock` creates on
+ * miss), so a link write alone makes `frictionCaptured` — the never-re-loop gate keyed
+ * on artifact existence — answer true for a run with no close-out. Harmless only while
+ * that gate has no live consumer; re-wiring it means this seam must stop creating.
+ */
+export async function linkFrictionRunIds(
+  artifactsDir: string,
+  runId: string,
+  links: FrictionRunLinkUpdate,
+  tool: FrictionCaptureArtifact["tool"] = "remediate-code",
+): Promise<void> {
+  try {
+    await appendFrictionUnderLock(artifactsDir, runId, (record) => record, tool, links);
+  } catch {
+    // Best-effort: swallow every failure so linking never breaks the obligation.
+  }
+}
+
+/** One friction record found by reference, with the references it carries. */
+export interface FrictionRecordReference extends FrictionRunLinks {
+  /** The record's own run key (the friction dir entry it is filed under). */
+  run_id: string;
+  /** Absolute path to the record. */
+  path: string;
+}
+
+/**
+ * Find every friction record under `artifactsDir` that REFERENCES the given run(s) —
+ * the read side of the linkage. Without it a caller holding a dispatch run id can only
+ * guess at the record's key, and a record filed under a different key is invisible.
+ *
+ * A record matches when ANY queried id is a MEMBER of the record's corresponding
+ * reference array — so a record naming N rounds is found from any one of them, not just
+ * the first, and a caller holding a whole round set joins in ONE scan. Querying no id
+ * matches nothing (an empty query is not "everything"). Results are ordered by `run_id` —
+ * a stable, content-derived key, never directory-read order.
+ */
+export async function findFrictionRecordsByRunLink(
+  artifactsDir: string,
+  link: Partial<FrictionRunLinks>,
+): Promise<FrictionRecordReference[]> {
+  const wantStep = normalizeRunRefs(link.step_run_ids);
+  const wantDispatch = normalizeRunRefs(link.dispatch_run_ids);
+  if (wantStep.length === 0 && wantDispatch.length === 0) return [];
+  const dir = frictionCaptureDir(artifactsDir);
+  let names: string[];
+  try {
+    names = (await readdir(dir)).filter((name) => name.endsWith(".json"));
+  } catch {
+    return []; // no friction dir → nothing to join against
+  }
+  const found: FrictionRecordReference[] = [];
+  for (const name of names) {
+    const path = join(dir, name);
+    // Siblings are host-authorable (the triage block asks the host to write one), so an
+    // unreadable record costs only its own visibility — never the caller's close-out.
+    let record: TriagedFrictionArtifact | null | undefined;
+    try {
+      record = await readOptionalJsonFile<TriagedFrictionArtifact>(path);
+    } catch {
+      continue;
+    }
+    if (!record || typeof record.run_id !== "string") continue;
+    const stepRunIds = normalizeRunRefs(record.step_run_ids);
+    const dispatchRunIds = normalizeRunRefs(record.dispatch_run_ids);
+    const matches =
+      wantStep.some((id) => stepRunIds.includes(id)) ||
+      wantDispatch.some((id) => dispatchRunIds.includes(id));
+    if (!matches) continue;
+    found.push({
+      run_id: record.run_id,
+      path,
+      step_run_ids: stepRunIds,
+      dispatch_run_ids: dispatchRunIds,
+    });
+  }
+  // Code-unit order on the record's own key: stable, content-derived, locale-free.
+  return found.sort((left, right) =>
+    left.run_id < right.run_id ? -1 : left.run_id > right.run_id ? 1 : 0,
+  );
 }

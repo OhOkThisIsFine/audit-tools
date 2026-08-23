@@ -67,7 +67,12 @@ import {
   type DesignReviewPass,
 } from "../orchestrator/designReviewSnapshot.js";
 import { computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
-import { decideNextStep, PRIORITY, decideAuditFrictionCloseout } from "../orchestrator/nextStep.js";
+import {
+  decideNextStep,
+  PRIORITY,
+  AUDIT_FRICTION_RUN_ID,
+  decideAuditFrictionCloseout,
+} from "../orchestrator/nextStep.js";
 import { isHostDelegationExecutor } from "../orchestrator/executors.js";
 import {
   resolveCharterCeiling,
@@ -354,7 +359,7 @@ export async function buildTerminalStep(
   // audit_state/audit_report so the next next-step replays the fold from scratch
   // (the confirm_intent regression). Defer promotion until triage is satisfied;
   // until then keep the in-place report so the host can read it.
-  const triage = await decideAuditFrictionCloseout(params.artifactsDir, "run");
+  const triage = await decideAuditFrictionCloseout(params.artifactsDir, AUDIT_FRICTION_RUN_ID);
   const finalReportPath = await promoteIfFrictionSatisfied(params.artifactsDir, triage);
   return {
     kind: "complete",
@@ -2770,7 +2775,7 @@ export async function runDeterministicForNextStep(
     // is satisfied (see promoteIfFrictionSatisfied). Promoting while triage is
     // still pending would delete the friction record the host must finish writing
     // and wipe audit_state/audit_report (→ confirm_intent replay on re-entry).
-    const triage = await decideAuditFrictionCloseout(params.artifactsDir, "run");
+    const triage = await decideAuditFrictionCloseout(params.artifactsDir, AUDIT_FRICTION_RUN_ID);
     const finalReportPath = await promoteIfFrictionSatisfied(params.artifactsDir, triage);
     return {
       kind: "complete",

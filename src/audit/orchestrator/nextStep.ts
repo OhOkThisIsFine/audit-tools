@@ -155,6 +155,14 @@ export function decideNextStep(
 }
 
 /**
+ * The audit friction record's own key. Audit keeps ONE friction record per artifacts
+ * dir — its step envelopes carry no per-run id — so the key is a fixed literal rather
+ * than a minted run id. Single-sourced here beside the close-out that reads it, so the
+ * capture seams, the close-out, and the run-linkage writers cannot spell it differently.
+ */
+export const AUDIT_FRICTION_RUN_ID = "run";
+
+/**
  * Terminal friction-TRIAGE close-out for audit. Folded into the `present_report`
  * terminal step (not a separate executor) so it fires at exactly the right moment.
  * Blocks ("dispose") until every mechanical event + reflection is disposed AND ≥1

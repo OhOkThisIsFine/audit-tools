@@ -1,6 +1,8 @@
 import { resolve } from "node:path";
 
-import { readJsonFile } from "audit-tools/shared";
+import { linkFrictionRunIds, readJsonFile } from "audit-tools/shared";
+
+import { AUDIT_FRICTION_RUN_ID } from "../orchestrator/nextStep.js";
 
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AuditTask } from "../types.js";
@@ -120,6 +122,18 @@ export async function renderSemanticReviewStep(params: {
     runId: activeReviewRun.run_id,
     tasks: tasks.map(toHostTask),
   });
+  // Name this round's runs on the audit friction record, which is keyed by a fixed
+  // literal and so on its own names no run at all (semantics: `FrictionRunLinks`). Each
+  // reference is sourced from the envelope that owns it, never synthesized.
+  await linkFrictionRunIds(
+    artifactsDir,
+    AUDIT_FRICTION_RUN_ID,
+    {
+      step_run_id: activeReviewRun.run_id,
+      dispatch_run_id: handoff.workload.run_id,
+    },
+    "audit-code",
+  );
   const continueCommand = nextStepCommand(root, artifactsDir);
   const resultPaths = handoff.workload.work_items.map((item) =>
     resolve(root, item.result_path),

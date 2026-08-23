@@ -784,6 +784,8 @@ export {
 export type {
   FrictionItem,
   FrictionCaptureArtifact,
+  FrictionRunLinks,
+  FrictionRunLinkUpdate,
 } from "./io/frictionCapture.js";
 export {
   FRICTION_CAPTURE_SCHEMA_VERSION,
@@ -792,7 +794,6 @@ export {
   frictionCaptureDir,
   frictionCapturePath,
   frictionCaptured,
-  persistFrictionCapture,
   sanitizeRunId,
 } from "./io/frictionCapture.js";
 
@@ -849,6 +850,15 @@ export {
   appendFrictionUnderLock,
   recordFrictionDisposition,
 } from "./friction/triage.js";
+
+// The friction record's RUN LINKAGE: the writer seam that names the step-envelope
+// run and the dispatch run a round relates to, and the by-reference reader that
+// finds a record from any id it references (semantics: `FrictionRunLinks`).
+export type { FrictionRecordReference } from "./friction/frictionRecord.js";
+export {
+  linkFrictionRunIds,
+  findFrictionRecordsByRunLink,
+} from "./friction/frictionRecord.js";
 
 // IO: install/ensure-time .gitignore management for artifacts emitted into a
 // consuming repo's tree — always-ignore build/install assets + friction sidecar;

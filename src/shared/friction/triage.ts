@@ -18,6 +18,7 @@ import {
   type TriagedFrictionArtifact,
   FRICTION_CATEGORIES,
   appendFrictionUnderLock,
+  findFrictionRecordsByRunLink,
   isFrictionCategory,
 } from './frictionRecord.js';
 
@@ -351,6 +352,21 @@ export interface FrictionTriageDecision {
   existing_attestations: FrictionCategoryAttestation[];
   /** Free-form notes already recorded (undefined when none). */
   free_form_notes?: string;
+  /**
+   * Every step-envelope run this record relates to (semantics: `FrictionRunLinks`).
+   * Surfaced so the close-out states which runs it is closing out instead of leaving
+   * the relation to be inferred from the record's key. Empty when none was recorded.
+   */
+  step_run_ids: readonly string[];
+  /** Every dispatch (host-handoff) run this record relates to; empty when none. */
+  dispatch_run_ids: readonly string[];
+  /**
+   * The OWN KEYS of other friction records under the same artifacts dir that reference
+   * one of the SAME runs — found by reference, not by key, so a record filed under a
+   * substrate-minted key is visible to a close-out walking a different key. Ordered by
+   * key; empty when this record names no run or nothing else references one.
+   */
+  related_record_keys: string[];
 }
 
 /** A stable key for a surfaced reflection (task_id + ordinal within the run). */
@@ -485,6 +501,19 @@ export async function decideFrictionTriage(
   const missing_categories = FRICTION_CATEGORIES.filter((c) => !covered.has(c));
   const needs_open_observations = missing_categories.length > 0;
 
+  // Follow the record's references OUTWARD: every other record naming one of the same
+  // runs. Read-only and by reference — the join never guesses at a key. Cheap: one
+  // readdir plus one small JSON read per `*.json` record, over a dir holding one record
+  // per run, on a decider that already reads and rewrites the record under a lock.
+  const { step_run_ids, dispatch_run_ids } = record;
+  const related = await findFrictionRecordsByRunLink(artifactsDir, {
+    step_run_ids,
+    dispatch_run_ids,
+  });
+  const related_record_keys = related
+    .map((entry) => entry.run_id)
+    .filter((id) => id !== record.run_id);
+
   return {
     action: pending.length === 0 && !needs_open_observations ? 'disposed' : 'dispose',
     pending,
@@ -494,6 +523,9 @@ export async function decideFrictionTriage(
     existing_observations: existingObservations,
     existing_attestations: existingAttestations,
     free_form_notes: record.free_form_notes,
+    step_run_ids,
+    dispatch_run_ids,
+    related_record_keys,
   };
 }
 
@@ -557,7 +589,25 @@ export function buildFrictionTriageBlock(triage: FrictionTriageDecision): string
     (triage.free_form_notes ? " Already recorded." : "") +
     "\n";
 
-  return `\n## Run friction triage (BLOCKING close-out)\n\nWrite to the friction record at:\n\`${triage.recordPath}\`${pendingSection}${categorySection}${freeFormSection}\nCall next-step again after writing.\n`;
+  // The runs this record RELATES to, stated rather than inferred from the key — every
+  // round, not just the first — plus any sibling record reaching the same runs, so a
+  // record filed under a different key is visible to the walk instead of silently
+  // orphaned.
+  const runList = (ids: readonly string[]): string =>
+    ids.length > 0 ? ids.map((id) => `\`${id}\``).join(", ") : "none recorded";
+  const relationLines = [
+    `- step-envelope run(s): ${runList(triage.step_run_ids)}`,
+    `- dispatch run(s): ${runList(triage.dispatch_run_ids)}`,
+    ...(triage.related_record_keys.length > 0
+      ? [
+          `- other friction records reaching the same run(s): ` +
+            triage.related_record_keys.map((id) => `\`${id}\``).join(", "),
+        ]
+      : []),
+  ].join("\n");
+  const relationSection = `\n### Runs this record relates to\n\n${relationLines}\n`;
+
+  return `\n## Run friction triage (BLOCKING close-out)\n\nWrite to the friction record at:\n\`${triage.recordPath}\`${relationSection}${pendingSection}${categorySection}${freeFormSection}\nCall next-step again after writing.\n`;
 }
 
 /**

@@ -30,6 +30,7 @@ import {
   advance,
   decideFrictionTriage,
   buildFrictionTriageBlock,
+  linkFrictionRunIds,
   // domain constants
   LENSES,
   SEVERITIES,
@@ -1069,6 +1070,17 @@ async function buildImplementDispatchStep(ctx: {
       host_handoff: handoff.handoff_record,
     });
   }
+
+  // Name the runs this dispatch round relates to on the friction record (semantics:
+  // `FrictionRunLinks`). Each reference is sourced from the envelope that owns it — the
+  // persisted handoff record for the dispatch run, the step contract's own run id for
+  // the step — never synthesized from the other.
+  await linkFrictionRunIds(
+    artifactsDir,
+    stateRunId(state),
+    { step_run_id: runId, dispatch_run_id: handoff.handoff_record.run_id },
+    "remediate-code",
+  );
 
   // Ingest issues reached the PROMPT and nothing else — a channel that survives
   // exactly as long as the host reads that one step. They are also the durable

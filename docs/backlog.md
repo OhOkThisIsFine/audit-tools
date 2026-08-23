@@ -115,14 +115,14 @@
 - `open-bugs.md:798` — systemic_challenge findings ids are adversary-invented and round-colliding.
 - `open-bugs.md:805` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
 - `open-bugs.md:812` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:817` — Two run-id notions; friction record keyed both ways.
-- `open-bugs.md:823` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:828` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `.audit-tools/audit/analyzer-policy.json` (2026-08-12, nightly, low).
-- `open-bugs.md:837` — `check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling (2026-08-14, nightly, low).
-- `open-bugs.md:848` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
-- `open-bugs.md:858` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
-- `open-bugs.md:865` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
-- `open-bugs.md:876` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
+- `open-bugs.md:817` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `open-bugs.md:822` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `.audit-tools/audit/analyzer-policy.json` (2026-08-12, nightly, low).
+- `open-bugs.md:831` — `check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling (2026-08-14, nightly, low).
+- `open-bugs.md:842` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
+- `open-bugs.md:852` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
+- `open-bugs.md:859` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
+- `open-bugs.md:870` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
+- `open-bugs.md:889` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

@@ -814,12 +814,6 @@
   dirtying every tree it touches. **Property to hold:** generated host configs are byte-stable
   under repeated ensure.
 
-- **Two run-id notions; friction record keyed both ways.** Step envelopes carried `run_id: null`
-  all session (path resolves to `friction/run.json`) while host workload artifacts use timestamped run
-  ids the shared friction substrate keys by — a substrate-keyed close-out walk was invisible to the
-  present_report gate and had to be rewritten under "run". **Property to hold:** one run identity
-  across step envelope, dispatch artifacts, and friction record.
-
 - **Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification
   (2026-08-06, lead, low).** 3 refuted / 6 downgraded — record in
   [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:
@@ -891,3 +885,16 @@
   question for the owner is whether that trade stays accepted as-is (reword such tokens out of
   backticks, as done here) or the rule should distinguish "no plausible non-file reading" before
   skipping; no trigger-set widening is needed either way.
+
+- **On remediate the fully-green close walks a different friction record than the run wrote
+  (2026-08-23, low).** `stateRunId` keys the record on `state.plan.plan_id`, falling back to
+  `"run"` when the plan is absent — and a fully-green close DELETES the state after
+  `runClosePhase` has archived every friction record and `rm -r`'d the whole artifacts dir, so
+  `decideRemediateFrictionCloseout` does not merely read a different existing file: it
+  materializes a fresh empty `friction/run.json` inside the just-deleted dir, in place of the
+  plan-keyed record the run actually wrote. The by-reference join on `step_run_ids` /
+  `dispatch_run_ids` cannot bridge it: the fallback record is materialized with both reference
+  arrays empty, and an empty query matches nothing. The audit half of this class is closed — its
+  fixed-literal key accumulates every round's review and dispatch run id. **Property to hold:** the record a
+  run writes friction to is the record its close-out reads, whatever the state's lifecycle did in
+  between.
