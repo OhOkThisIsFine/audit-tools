@@ -2514,13 +2514,20 @@ async function applyPlanClarificationResolution(
   // their questions unanswered. Load-bearing now that the round runs at the
   // DRAINED end of the implement phase, where `remainingPending` is normally
   // false — the fall-through it guards is the common case, not a corner.
+  // INV-RS-10 / OBL-seam-prep-remediate-core-inv-1: a resolution that disposes
+  // of every remaining item does NOT write `closing` here. Writing it directly
+  // satisfied the all_terminal derive (`status !== "closing"`) on the very next
+  // scan, so the tool-owned final gate never ran for this arrival at close.
+  // Landing in `implementing` lets the single all-terminal → closing funnel
+  // (handleAllTerminalTransition) run the gate, exactly as every other closing
+  // transition does; `closing_plan` is stamped by that funnel's successor, not
+  // pre-stamped here (the gate-red pause must not leave a half-prepared close).
   state.status = remainingPending
     ? "implementing"
     : hasUnansweredClarification(state)
       ? "waiting_for_clarification"
-      : "closing";
+      : "implementing";
   state.clarifications = [];
-  state.closing_plan ??= { action: "none" };
   await store.saveState(state);
   return { kind: "applied", state };
 }
@@ -2925,11 +2932,37 @@ async function handleImplementing(
   state: RemediationState,
   runLogger: RunLogger,
   store: StateStore,
+  options: NextStepOptions,
 ): Promise<RemediateOutcome> {
   const triageStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
   const triaged = await runTriagePhase(state, { root, artifactsDir });
   runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "triage", duration_ms: Date.now() - triageStart });
+  // INV-RS-10 / OBL-seam-prep-remediate-core-inv-1..4 (the CP-NODE-3 review
+  // finding): this is the ONE caller of runTriagePhase, shared by the
+  // `implementing` and `triage` obligations, so it is also THE single seam
+  // where a triage closing-intent crosses into close. Persisting
+  // `status: "closing"` directly would satisfy the closing obligation on the
+  // next scan and preempt the all-terminal → closing funnel's tool-owned final
+  // gate — exactly the defect class the finding named. So the intent is
+  // persisted under the NON-closing `triage` status first (keeping every
+  // preparation runTriagePhase made — halted items already converted to
+  // `abandoned`, `closing_context` stamped — so a gate-RED pause, which persists
+  // nothing itself, cannot lose them: re-entering triage with zero blocked items
+  // re-derives this exact intent instead of auto-retrying halted work), and only
+  // then handed to the funnel, which runs the gate and owns the closing stamp.
+  if (triaged.status === "closing") {
+    const prepared = { ...triaged, status: "triage" as const };
+    await store.saveState(prepared);
+    return handleAllTerminalTransition(
+      root,
+      artifactsDir,
+      prepared,
+      store,
+      options,
+      runLogger,
+    );
+  }
   await store.saveState(triaged);
   return { kind: "transition", state: triaged };
 }
@@ -4188,14 +4221,21 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
             return { kind: "transition", state: s };
           }
         }
-        return handleImplementing(root, artifactsDir, s, runLogger, store);
+        return handleImplementing(root, artifactsDir, s, runLogger, store, options);
       },
     },
     {
       id: "triage",
       derive: (state) => (state?.status === "triage" ? "missing" : "satisfied"),
       execute: async (state) =>
-        handleImplementing(root, artifactsDir, requireState(state), runLogger, store),
+        handleImplementing(
+          root,
+          artifactsDir,
+          requireState(state),
+          runLogger,
+          store,
+          options,
+        ),
     },
     {
       // planning with zero documentable findings is a user question, not a

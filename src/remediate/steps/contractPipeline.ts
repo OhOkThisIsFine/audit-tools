@@ -2878,6 +2878,22 @@ The previous implementation_dag (and/or upstream contract artifacts) failed the 
     });
   }
 
+  // Path-A canonical-block membership (inv-2): validated BEFORE the gates so an
+  // invalid source_finding_ids id fails fast here instead of throwing out of the
+  // promoter below and wedging every subsequent next-step (COR-114e4941).
+  const pathARefusals = await collectPathARefusals(ctx.artifactsDir);
+  if (pathARefusals.length > 0) {
+    return await dagRegenerationPlan(ctx, {
+      heading: "Path-A Canonical Block Join Failed",
+      blockedBody:
+        "The implementation_dag repeatedly declares source_finding_ids that cannot be joined to a canonical audit work block:",
+      reEmitBody: `## Path-A Canonical Block Errors From the Previous Attempt
+
+Each node's source_finding_ids must name exactly one canonical audit work block, and together the nodes must cover every block exactly once. Fix every entry below:`,
+      violations: pathARefusals,
+    });
+  }
+
   // Write-scope + command SHAPE, before anything is promoted. These refusals
   // used to throw out of the promoter — an unclassified stack that wedged every
   // subsequent next-step, reachable from an LLM form as ordinary as a
@@ -3950,6 +3966,93 @@ export async function collectDagWriteScopeRefusals(
     refusals.push(
       ...normalizeBlockTouchedFiles(root, deriveNodeFiles(node), blockId).refusals,
       ...normalizeBlockTargetedCommands(node.targeted_commands ?? [], blockId).refusals,
+    );
+  }
+  return refusals;
+}
+
+/**
+ * Path-A canonical-block membership validation, run BEFORE anything is promoted
+ * (OBL-seam-prep-remediate-core-inv-2 / COR-114e4941). These are exactly the
+ * checks the promoter itself performs while building its node→canonical-group
+ * map — but there they THROW out of `promoteImplementationDagToExtractedPlan`,
+ * an unclassified stack that wedged every subsequent next-step. Hoisted here so
+ * an invalid `source_finding_ids` declaration takes the same bounded re-emit as
+ * every other promotion rejection, with no gate having executed past it.
+ *
+ * Returns one line per violation; empty means the DAG is promotable on this
+ * axis (or Path A is not in play at all).
+ */
+export async function collectPathARefusals(
+  artifactsDir: string,
+): Promise<string[]> {
+  const dag = envelopePayload(
+    await readContractArtifact(artifactsDir, "implementation_dag"),
+  ) as ImplementationDAG | undefined;
+  const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
+  if (nodes.length === 0) return [];
+  if (!nodes.some((node) => Array.isArray(node.source_finding_ids))) return [];
+
+  const pathASeed = await readOptionalJsonFile<PathASeed>(
+    pathASeedFilePath(artifactsDir),
+  );
+  const approvedSource = pathASeed
+    ? projectApprovedFindings(
+        await readOptionalJsonFile<unknown>(pathASeed.audit_findings_path),
+      )
+    : undefined;
+  if (!approvedSource) {
+    return [
+      "implementation_dag declares source_finding_ids but no Path-A seed is present, so the ids cannot be joined to a canonical audit work block.",
+    ];
+  }
+
+  const signature = (ids: readonly string[]): string =>
+    JSON.stringify([...ids].sort((left, right) => left.localeCompare(right)));
+  const canonicalGroups = new Map(
+    approvedSource.workBlocks.map((block) => [
+      signature(block.finding_ids),
+      [...block.finding_ids].sort((left, right) => left.localeCompare(right)),
+    ]),
+  );
+  const usedGroups = new Set<string>();
+  const refusals: string[] = [];
+  for (const [index, node] of nodes.entries()) {
+    const nodeId = ensureNodeId(node.id, index);
+    const sourceIds = node.source_finding_ids;
+    if (!Array.isArray(sourceIds) || sourceIds.length === 0) {
+      refusals.push(
+        `implementation_dag node "${nodeId}" must declare source_finding_ids for Path-A promotion.`,
+      );
+      continue;
+    }
+    const uniqueIds = [...new Set(sourceIds)];
+    if (uniqueIds.length !== sourceIds.length) {
+      refusals.push(
+        `implementation_dag node "${nodeId}" repeats a source_finding_ids member.`,
+      );
+    }
+    const groupSignature = signature(uniqueIds);
+    const canonicalGroup = canonicalGroups.get(groupSignature);
+    if (!canonicalGroup) {
+      refusals.push(
+        `implementation_dag node "${nodeId}" source_finding_ids do not match a canonical audit work block.`,
+      );
+      continue;
+    }
+    if (usedGroups.has(groupSignature)) {
+      refusals.push(
+        `implementation_dag node "${nodeId}" duplicates a canonical audit work block.`,
+      );
+    }
+    usedGroups.add(groupSignature);
+  }
+  if (
+    refusals.length === 0 &&
+    usedGroups.size !== canonicalGroups.size
+  ) {
+    refusals.push(
+      "implementation_dag source_finding_ids do not cover every canonical audit work block exactly once.",
     );
   }
   return refusals;

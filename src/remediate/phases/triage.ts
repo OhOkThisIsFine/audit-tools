@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { rename } from "node:fs/promises";
 import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, withFsRetry, commandLeavesDeclaredShape } from "audit-tools/shared";
 import { validateTriageResolution } from "../validation/remediationState.js";
+import { isTerminalStatus } from "../state/itemStatus.js";
 import { rationaleAsksForRetry } from "../steps/stepUtils.js";
 import { remediationHostResultFilePath } from "../steps/dispatch/hostHandoff.js";
 
@@ -185,6 +186,64 @@ async function archiveImplementResultsForRetries(
   }
 }
 
+// ── The ONE closing INTENT out of triage ─────────────────────────────────────
+// INV-RS-10 / OBL-seam-prep-remediate-core-inv-1..4 (CP-NODE-3 review finding):
+// triage never PERSISTS `closing` itself — its single caller
+// (`handleImplementing` in src/remediate/steps/nextStep.ts) intercepts a
+// closing-intent return and routes it through the single all-terminal → closing
+// funnel (`handleAllTerminalTransition`), so the tool-owned final gate runs on
+// EVERY arrival at close. A direct `status: "closing"` persist would satisfy
+// the closing obligation on the next scan and preempt that gate. Both exits
+// below therefore only PREPARE the intent; the caller owns the transition.
+
+/**
+ * The triage exit for an operator HALT (partial report). Converts every item
+ * left undecided at the halt to the terminal `abandoned` — close's force-close
+ * backstop would have done the same — so a gate-red pause cannot lose the halt:
+ * re-entering triage with zero blocked items re-derives this exact intent and
+ * crosses the gate again instead of auto-retrying halted work. Stamps
+ * `closing_context` and the INV-RSM-STATE-COMPLETE `closing_plan`.
+ */
+function haltToClosing(state: RemediationState): RemediationState {
+  const now = new Date().toISOString();
+  const items = Object.fromEntries(
+    Object.entries(state.items ?? {}).map(([id, item]) => [
+      id,
+      isTerminalStatus(item.status)
+        ? item
+        : {
+            ...item,
+            status: "abandoned" as const,
+            started_at: item.started_at ?? now,
+            completed_at: now,
+            failure_reason:
+              item.failure_reason ?? "Run halted by the operator during triage.",
+          },
+    ]),
+  );
+  return {
+    ...state,
+    items,
+    status: "closing",
+    closing_context: "user_halted",
+    // INV-RSM-STATE-COMPLETE: a closing state must persist a closing_plan.
+    closing_plan: state.closing_plan ?? { action: "none" },
+  };
+}
+
+/**
+ * The ordinary triage exit toward close (nothing left to do / reconciled run):
+ * closing intent plus the INV-RSM-STATE-COMPLETE `closing_plan` stamp. The
+ * caller's funnel interception runs the gate before this ever persists.
+ */
+function reconciledToClosing(state: RemediationState): RemediationState {
+  return {
+    ...state,
+    status: "closing",
+    closing_plan: state.closing_plan ?? { action: "none" },
+  };
+}
+
 export async function runTriagePhase(
   state: RemediationState,
   options: OrchestratorOptions,
@@ -248,13 +307,7 @@ export async function runTriagePhase(
             join(options.artifactsDir, "triage-outcome.json"),
             { resolved_at: new Date().toISOString(), items: triageOutcome },
           );
-          return {
-            ...state,
-            status: "closing",
-            closing_context: "user_halted",
-            // INV-RSM-STATE-COMPLETE: a closing state must persist a closing_plan.
-            closing_plan: state.closing_plan ?? { action: "none" },
-          };
+          return haltToClosing(state);
         }
 
         const item = state.items[res.finding_id];
@@ -370,11 +423,7 @@ export async function runTriagePhase(
         console.log(
           "All blocked items already satisfied in the working tree — closing the reconciled run.",
         );
-        return {
-          ...state,
-          status: "closing",
-          closing_plan: state.closing_plan ?? { action: "none" },
-        };
+        return reconciledToClosing(state);
       }
 
       const triageBatch: TriageBatch = {
@@ -403,11 +452,10 @@ export async function runTriagePhase(
     console.log("No blocked items found. Proceeding to close.");
   }
 
-  // "closing" status triggers runClosePhase in the orchestrator switch.
-  // INV-RSM-STATE-COMPLETE: every closing transition persists a closing_plan.
-  return {
-    ...state,
-    status: "closing",
-    closing_plan: state.closing_plan ?? { action: "none" },
-  };
+  // The "no blocked items" exit lands here with the phase still `triage` and
+  // every item terminal — exactly the all_terminal derive. The single
+  // all-terminal → closing funnel in nextStep.ts owns the closing transition, the
+  // INV-RS-10 gate, and the `closing_plan` stamp; triage no longer writes any of
+  // the three (see the seam comment above).
+  return reconciledToClosing(state);
 }
