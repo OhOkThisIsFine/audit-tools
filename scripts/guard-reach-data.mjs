@@ -625,7 +625,10 @@ export const REACH = [
       'nightly-surface by nightly-routine-test.)' +
       ' The P28 long-dispatch refusal in shell-trap-guard measures only the INLINE quoted prompt — a ' +
       'prompt delivered via a stdin file (`codex exec < prompt.txt`), `$(cat …)`, or a heredoc body ' +
-      '(blanked before scanning) escapes measurement; scripts/shared/lane-dispatch.mjs is the primary fix.',
+      '(blanked before scanning) escapes measurement; scripts/shared/lane-dispatch.mjs is the primary fix. ' +
+      '.claude/hooks/friction-stop-gate.mjs re-implements the friction-dir *.json listing by hand ' +
+      '(readdirSync + .endsWith(".json")) because a pre-build hook cannot import built src — a ' +
+      'hand-maintained duplicate of listFrictionRecordFilenames that drifts independently.',
   },
   {
     area: 'gate scripts (the guards themselves)',

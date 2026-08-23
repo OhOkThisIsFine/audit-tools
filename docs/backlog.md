@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 171 entr(y/ies) indexed.
+> and at commit). 172 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -123,6 +123,7 @@
 - `open-bugs.md:861` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
 - `open-bugs.md:872` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
 - `open-bugs.md:891` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
+- `open-bugs.md:904` — Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run, medium).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

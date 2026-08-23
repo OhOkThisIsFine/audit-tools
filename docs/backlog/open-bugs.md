@@ -900,3 +900,13 @@
   fixed-literal key accumulates every round's review and dispatch run id. **Property to hold:** the record a
   run writes friction to is the record its close-out reads, whatever the state's lifecycle did in
   between.
+
+- **Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run,
+  medium).** `state.host_handoff` pins the dispatched workload by `workload_sha256`; widening a
+  bound block's `touched_files` (the sanctioned hand recipe for a scope clarification) changes the
+  canonical workload, so `prepareRemediationHostHandoff` fails closed with "Trusted remediation
+  host workload no longer matches the persisted state binding" and the run cannot advance. The host
+  repair was to delete `state.host_handoff` so prepare re-minted the binding at the current HEAD —
+  a hand edit of fail-closed state. **Property to hold:** the tool offers a sanctioned re-bind for
+  a host-widened frontier block (or the clarification flow itself carries the widening), so a scope
+  answer never requires hand-editing the binding.
