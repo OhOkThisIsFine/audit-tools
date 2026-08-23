@@ -1533,6 +1533,8 @@
     "answer": "Rewrite the entry's property: the three run notions stay distinct because their lifecycles genuinely differ, and the friction record gains explicit nullable foreign keys naming the step envelope run and the dispatch run it relates to. The defect to close is the invisibility, not the multiplicity of ids.",
     "subject": "",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-23T15:58:26.274Z"
+    "decided_at": "2026-08-23T15:58:26.274Z",
+    "completed_at": "2026-08-23T19:13:32.258Z",
+    "completed_ref": "71acd115 — friction record carries nullable step_run_ids/dispatch_run_ids reference keys; read seam tolerates a malformed sibling; persistFrictionCapture deleted"
   }
 }
