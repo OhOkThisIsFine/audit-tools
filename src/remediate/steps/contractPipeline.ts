@@ -2806,12 +2806,30 @@ ${rejectionRewriteInstruction(archived)}`,
 }
 
 /**
- * All phases exist: enforce referential integrity, traceability and the
- * fail-closed contract-obligation gates, then convert the implementation_dag
- * into an extracted plan and ground its citations.
+ * All phases exist: enforce referential integrity, traceability, the
+ * fail-closed contract-obligation gates, and the Path-A canonical-block join,
+ * then convert the implementation_dag into an extracted plan and ground its citations.
  */
 const implementationPlanPromotionGate: ContractGate = async (ctx) => {
   if (ctx.nextPhase) return null;
+
+  // Path-A canonical-block membership (inv-2), FIRST in this walk so a late
+  // source_finding_ids violation fails before any other gate executes instead
+  // of throwing out of the promoter below and wedging every subsequent
+  // next-step (COR-114e4941). Same bounded re-emit as every other promotion
+  // rejection; no gate has executed past it.
+  const pathARefusals = await collectPathARefusals(ctx.artifactsDir);
+  if (pathARefusals.length > 0) {
+    return await dagRegenerationPlan(ctx, {
+      heading: "Path-A Canonical Block Join Failed",
+      blockedBody:
+        "The implementation_dag repeatedly declares source_finding_ids that cannot be joined to a canonical audit work block:",
+      reEmitBody: `## Path-A Canonical Block Errors From the Previous Attempt
+
+Each node's source_finding_ids must name exactly one canonical audit work block, and together the nodes must cover every block exactly once. Fix every entry below:`,
+      violations: pathARefusals,
+    });
+  }
 
   // DAG referential integrity + bidirectional coverage (ARC-86b18f1b-2), run
   // before the traceability check so specific referential violations are
@@ -2875,22 +2893,6 @@ The previous implementation_dag was rejected and archived. Every node must trace
 
 The previous implementation_dag (and/or upstream contract artifacts) failed the fail-closed contract-obligation gates. Fix every issue below before the plan can be promoted:`,
       violations: obligationGate.violations,
-    });
-  }
-
-  // Path-A canonical-block membership (inv-2): validated BEFORE the gates so an
-  // invalid source_finding_ids id fails fast here instead of throwing out of the
-  // promoter below and wedging every subsequent next-step (COR-114e4941).
-  const pathARefusals = await collectPathARefusals(ctx.artifactsDir);
-  if (pathARefusals.length > 0) {
-    return await dagRegenerationPlan(ctx, {
-      heading: "Path-A Canonical Block Join Failed",
-      blockedBody:
-        "The implementation_dag repeatedly declares source_finding_ids that cannot be joined to a canonical audit work block:",
-      reEmitBody: `## Path-A Canonical Block Errors From the Previous Attempt
-
-Each node's source_finding_ids must name exactly one canonical audit work block, and together the nodes must cover every block exactly once. Fix every entry below:`,
-      violations: pathARefusals,
     });
   }
 
