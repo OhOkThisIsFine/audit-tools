@@ -546,6 +546,13 @@ export function sameLensDedupe(findings: Finding[]): Finding[] {
     for (let i = 0; i < group.length; i++) {
       if (removed.has(group[i])) continue;
       for (let j = i + 1; j < group.length; j++) {
+        // The i-slot finding may have been absorbed mid-scan (as b of an earlier
+        // pair): an absorbed finding must never act as a survivor again, or it
+        // re-absorbs data that was already unioned into ITS absorber and the
+        // final filter silently drops everything it then wins — the same
+        // conservation guard crossLensDedupe carries. Checked BEFORE the j-slot
+        // skip, mirroring that pass.
+        if (removed.has(group[i])) break;
         if (removed.has(group[j])) continue;
         const a = group[i];
         const b = group[j];

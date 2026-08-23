@@ -13,9 +13,13 @@
  * appends `recovered_by_hand`, so a run repaired by an operator stays
  * distinguishable from one the host got right.
  */
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 
-import { readOptionalJsonFile, writeJsonFile } from "../io/json.js";
+import {
+  readOptionalJsonFile,
+  writeFileAtomic,
+  writeJsonFile,
+} from "../io/json.js";
 import { discardOnSchemaVersionMismatch } from "../io/schemaVersion.js";
 import {
   expectedSubmissionsPath,
@@ -201,15 +205,13 @@ export async function recoverSubmission(
       if (priorContent === null) {
         await unlink(landingPath);
       } else {
-        // UNCOVERED HALF, stated: this restore is a RAW write while the forward
-        // write above is atomic (temp + rename). A crash between truncate and
-        // the last byte therefore leaves a TRUNCATED prior payload — worse than
-        // either outcome this rollback chooses between. Closing it needs
-        // `writeFileAtomic` to accept `string | Buffer` and be exported, which is
-        // the io module's node (CP-NODE-3) and named in its dispatch, not a
-        // change this module may make. Until it lands, the restore is atomic in
-        // intent and not in mechanism.
-        await writeFile(landingPath, priorContent);
+        // Restored through the SHARED atomic writer with the captured raw bytes,
+        // so the rollback is byte-for-byte AND crash-safe: the forward write is
+        // temp+rename and the restore must be no weaker, or a crash between
+        // truncate and the last byte would leave a TRUNCATED prior payload —
+        // worse than either outcome this rollback chooses between. (`writeFile`
+        // accepting a Buffer was not enough; only the atomic form closes it.)
+        await writeFileAtomic(landingPath, priorContent);
       }
     } catch (rollbackError) {
       // UNCOVERED HALF, stated: this branch — the append AND the rollback both

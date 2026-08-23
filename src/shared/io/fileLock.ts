@@ -1,6 +1,9 @@
 import { access, writeFile, unlink, stat, readFile, mkdir, utimes } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname } from "node:path";
+// The shared atomic JSON writer (temp + rename) for `lockedJsonMutate`'s persist.
+// json.ts imports no sibling module here, so this edge stays acyclic.
+import { writeJsonFile } from "./json.js";
 import type { RunLogger } from "../observability/runLog.js";
 
 export const STALE_LOCK_MS = 30_000;
@@ -147,8 +150,18 @@ async function stealStaleLock(lockPath: string, staleToken: string, now: Clock):
   // the stale lock. Delete it only if it STILL carries the exact stale token we
   // observed; if a prior steal already replaced it with a fresh lock (different
   // token), leave that lock intact.
+  //
+  // The token check alone is NOT enough, because `staleToken` was read by
+  // readStaleLockToken AFTER the staleness stat — a successor could have stolen
+  // and re-created the lock in that gap, so what we read is a FRESH token whose
+  // content we then faithfully match and unlink (the live holder's lock clobbered
+  // mid-flight). Re-stamp the freshness decision at this point too: a lock whose
+  // mtime has come back inside the staleness window since our first observation
+  // is somebody's live lock, whatever its content says, and is left untouched.
   try {
-    if ((await readFile(lockPath, "utf8")) === staleToken) {
+    const [info, content] = await Promise.all([stat(lockPath), readFile(lockPath, "utf8")]);
+    const stillStale = now() - info.mtimeMs > STALE_LOCK_MS;
+    if (stillStale && content === staleToken) {
       await unlink(lockPath);
     }
   } catch {
@@ -379,8 +392,14 @@ export async function lockedJsonMutate<T>(
     async () => {
       const current = await readJsonIfExists(jsonPath);
       const next = mutate(current);
-      await mkdir(dirname(jsonPath), { recursive: true });
-      await writeFile(jsonPath, JSON.stringify(next, null, 2), "utf8");
+      // Persisted through the SHARED atomic writer (temp + rename), not a bare
+      // `writeFile`: this is a guarded artifact whose every other locked writer
+      // (`createLockedJsonStore`, `writeJsonFile`) already lands atomically, and
+      // a crash mid-write here used to truncate or tear it permanently — the one
+      // state the lock cannot recover, because the bytes never existed whole.
+      // `writeJsonFile` also creates the parent directory itself, so the former
+      // explicit `mkdir` folds into it.
+      await writeJsonFile(jsonPath, next);
       return next;
     },
     options.timeoutMs,

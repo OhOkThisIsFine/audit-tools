@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 
 import { appendNdjsonFile } from "../io/json.js";
+import { withFileLock } from "../io/fileLock.js";
 import { discardOnSchemaVersionMismatch } from "../io/schemaVersion.js";
 import { submissionsDir } from "../io/auditToolsPaths.js";
 import type { SubmissionIssueCode } from "./submissionClassifier.js";
@@ -82,11 +83,31 @@ export function submissionLedgerPath(artifactsDir: string): string {
   return join(submissionsDir(artifactsDir), "submission-ledger.jsonl");
 }
 
-/** Append one event. The parent directory is created on demand. */
+// Sibling lock serializing every append. Two concurrent appends used to be two
+// independent open-append syscalls on one file: on Windows (and wherever O_APPEND
+// is not what the runtime actually performs) they can interleave so one event's
+// line lands INSIDE the other's, and both lines are then torn — the ledger
+// silently loses an event, which is precisely the clean-vs-repaired collapse it
+// exists to prevent. Same sibling pattern the locked JSON stores use.
+function ledgerLockPath(ledgerPath: string): string {
+  return `${ledgerPath}.lock`;
+}
+
+/**
+ * Append one event under the shared file lock, so concurrent appends cannot
+ * interleave mid-line. The parent directory is created on demand (the lock
+ * acquire creates its own parent; `appendNdjsonFile` creates the ledger's).
+ */
 export async function appendSubmissionEvent<
   TIssueCode extends string = SubmissionIssueCode,
 >(artifactsDir: string, event: SubmissionLedgerEvent<TIssueCode>): Promise<void> {
-  await appendNdjsonFile(submissionLedgerPath(artifactsDir), event);
+  const ledgerPath = submissionLedgerPath(artifactsDir);
+  await withFileLock(
+    ledgerLockPath(ledgerPath),
+    async () => {
+      await appendNdjsonFile(ledgerPath, event);
+    },
+  );
 }
 
 /** Why one ledger line did not become an event. */
@@ -188,7 +209,17 @@ export async function readSubmissionLedger(
     if (line.trim().length === 0) continue;
     let parsed: SubmissionLedgerEvent;
     try {
-      parsed = JSON.parse(line) as SubmissionLedgerEvent;
+      const value: unknown = JSON.parse(line);
+      // A line that is valid JSON but not an OBJECT is still not an event: the
+      // version check below reads properties off it (`in`), which throws on a
+      // primitive or array and broke this function's documented never-throw
+      // guarantee — one stray line failed the whole call that records drift.
+      // Classified exactly like a torn line instead.
+      if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        dropped.push({ line: lineNumber, reason: "unparsable" });
+        continue;
+      }
+      parsed = value as SubmissionLedgerEvent;
     } catch {
       dropped.push({ line: lineNumber, reason: "unparsable" });
       continue;
