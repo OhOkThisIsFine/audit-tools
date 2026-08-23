@@ -57,3 +57,31 @@ test("wrapper resolveSpawn is a passthrough for non-.cmd/.bat commands and on no
   });
 });
 
+// The OpenCode global command template is rendered from this file by
+// postinstall and documents the wrapper CLI surface. It once told hosts to read
+// `prompt_content` — a field the `.strict()` AuditCodeResponseSchema never
+// emits (the prompt reaches the host via `handoff.artifact_paths.current_prompt`
+// / the `prompt_path` the sibling assets name). Pin the wording so it cannot
+// drift from the response contract again.
+test("opencode command template binds to the wrapper response surface it documents", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { dirname, join } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+
+  const template = await readFile(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "skills",
+      "audit-code",
+      "opencode-command-template.txt",
+    ),
+    "utf8",
+  );
+  expect(template, "template must point the host at `prompt_path`").toContain("`prompt_path`");
+  expect(template, "template must not name a field no producer emits").not.toContain("prompt_content");
+  // The documented loop is the wrapper's only primary interface.
+  expect(template).toContain("audit-code next-step");
+});
+

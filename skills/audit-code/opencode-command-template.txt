@@ -3,7 +3,7 @@
 Use `audit-code next-step` as the primary interface to the audit workflow.
 
 1. Run `audit-code next-step` directly when shell access is available.
-2. Read `prompt_content` in the response and follow it.
+2. Read the returned JSON far enough to find `prompt_path`, then read and follow the prompt file it points to.
 3. When a step completes (not blocked), run `audit-code next-step` again.
 4. Stop when the step instructions say to stop.
 
