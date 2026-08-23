@@ -32,15 +32,16 @@ import {
   readObligationChangeClassification,
 } from "../../src/remediate/contractPipeline/changeClassification.js";
 import { deriveObligationLedger } from "../../src/remediate/contractPipeline/derive.js";
-import { validatePairedObligations } from "../../src/remediate/validation/contractPipeline.js";
+import {
+  validatePairedObligations,
+  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+} from "../../src/remediate/validation/contractPipeline.js";
 import {
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
   CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
 } from "audit-tools/shared";
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
-const CP_FINALIZED_MODULE_CONTRACTS_VERSION =
-  "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1" as const;
 
 // ── inv-1: deterministic touches-an-existing-symbol classifier ─────────────────
 
