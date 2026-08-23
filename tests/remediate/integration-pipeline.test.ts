@@ -5,7 +5,7 @@
  * 1. confirm_intent gate — no path bypasses it
  * 2. Zero-findings planning state — routed to user question, not dead-end
  * 3. Universal contract pipeline — both Path A and Path B enter it
- * 4. Seam negotiation + reconciliation + cyclic-seam break
+ * 4. Seam negotiation + reconciliation + cyclic-seam halt
  * 5. Deterministic design gates incl. circular-interface detection
  * 6. Infra-node live-surface verification
  * 7. Context-carrying triage retries
@@ -509,8 +509,9 @@ describe("seam reconciliation: cyclic-seam break via detectCyclicSeamObligations
   it("pipeline does not advance to implementation when cyclic interface obligation is present", async () => {
     await resetTestRepo();
     // Write all contract pipeline artifacts up to and including obligation_ledger,
-    // but simulate a cyclic interface scenario in module_contracts (neighbor_needs
-    // form a cycle). The cyclic_seam_resolution artifact is NOT written.
+    // whose depends_on edges hold an ACTUAL cycle (O-1 -> O-2 -> O-1) so
+    // detectCyclicSeamObligations is exercised on the real graph, not just the
+    // missing-artifact path. The cyclic_seam_resolution artifact is NOT written.
     const CP_GOAL_SPEC_VERSION = "remediate-code-contract-pipeline/goal-spec/v1alpha1" as const;
     const CP_CTX_VERSION = "remediate-code-contract-pipeline/context-bundle/v1alpha1" as const;
     const CP_DECOMP_VERSION = "remediate-code-contract-pipeline/module-decomposition/v1alpha1" as const;
@@ -615,7 +616,8 @@ describe("seam reconciliation: cyclic-seam break via detectCyclicSeamObligations
       contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
       goal_id: "G1",
       obligations: [
-        { id: "O-1", description: "Auth flow", kind: "behavioral", depends_on: [], status: "pending" },
+        { id: "O-1", description: "Auth flow", kind: "behavioral", depends_on: ["O-2"], status: "pending" },
+        { id: "O-2", description: "Session flow", kind: "behavioral", depends_on: ["O-1"], status: "pending" },
       ],
       created_at: CREATED_AT,
     });
@@ -631,8 +633,16 @@ describe("seam reconciliation: cyclic-seam break via detectCyclicSeamObligations
     // The pipeline should be at cyclic_seam_resolution, not implementation.
     const contractPipelineStepKinds = ["contract_pipeline", "contract_pipeline_blocked"];
     expect(contractPipelineStepKinds).toContain(step.step_kind);
-    // Must not skip to implementation planning — no implementation_dag exists yet.
+    // The detector must have run over the fixture's REAL cycle: the emitted
+    // prompt names the Detected Cycles section and both member obligations.
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toMatch(/Detected Cycles/i);
+    expect(prompt).toMatch(/Cycle 1:\s*\[.*O-1.*O-2.*]/);
+
+    // Halt-before-implementation guard: neither the DAG nor a promoted plan may
+    // exist while the cycle is unresolved.
     expect(existsSync(join(ARTIFACTS_DIR, "intake", "contract", "implementation_dag.json"))).toBe(false);
+    expect(existsSync(intakePaths(ARTIFACTS_DIR).extractedPlan)).toBe(false);
 
     await rm(TEST_DIR, { recursive: true, force: true });
   });
@@ -849,9 +859,13 @@ describe("context-carrying triage retries", () => {
     expect(step.step_kind).toBe("collect_triage");
 
     const prompt = await readFile(step.prompt_path, "utf8");
-    // The triage prompt must contain the failure context so retries are informed.
+    // The triage prompt must carry the blocked item's failure context so the
+    // user's retry/ignore decision is informed by what actually failed.
     expect(prompt).toContain("F-001");
-    // The failure reason (or at least the finding ID) must appear in the triage prompt.
+    expect(prompt).toContain(FAILURE_CONTEXT);
+    // Both halves of the captured context render: the failure reason and the
+    // last step that succeeded before it.
+    expect(prompt).toContain("Failure reason:");
     expect(prompt).toMatch(/triage/i);
   });
 });
