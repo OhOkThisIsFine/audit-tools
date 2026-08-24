@@ -1544,7 +1544,9 @@
     "answer": "Apply the de-status rule uniformly: strip the measurement, lap reference, or migration marker at every site, keeping the durable sentence around it. No exceptions.",
     "subject": "",
     "path": "spec/self-scaling-pipeline-design.md",
-    "decided_at": "2026-08-23T23:16:48.273Z"
+    "decided_at": "2026-08-23T23:16:48.273Z",
+    "completed_at": "2026-08-24T04:12:07.136Z",
+    "completed_ref": "bbfd922e — de-status applied uniformly across spec/, skills, and the adapter README"
   },
   "d37581ceaceb366b": {
     "disposition": "settled",
@@ -1565,7 +1567,9 @@
     "answer": "Drop \"burned v0.34.17\" and \"burned v0.39.7\" and keep the sentences explaining what each check catches. The mechanism carries the force on its own, and the version numbers are exactly the dated status the documentation philosophy bans.",
     "subject": "",
     "path": ".claude/skills/ship/SKILL.md",
-    "decided_at": "2026-08-23T23:16:48.280Z"
+    "decided_at": "2026-08-23T23:16:48.280Z",
+    "completed_at": "2026-08-24T04:12:07.194Z",
+    "completed_ref": "bbfd922e — dropped the burned-version stamps from the ship skill, kept the explanations"
   },
   "5acf2e262ebd7ab0": {
     "disposition": "settled",
