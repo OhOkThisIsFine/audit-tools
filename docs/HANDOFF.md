@@ -12,25 +12,27 @@
   2026-08-21 through 2026-08-23 entries in `docs/backlog/open-bugs.md`.
 - The first-draw REMEDIATION RUN (`.audit-tools/remediation/`, 30 work items) is in its implement
   phase: 22 items are resolved on `main`, 5 resolved with no change, and THREE remain pending —
-  CP-NODE-7, CP-NODE-14 and CP-NODE-26. NODE-5 landed as `2f518770`. The detached host runner is
+  CP-NODE-7, CP-NODE-14 and CP-NODE-26. The detached host runner is
   NOT currently alive; relaunch it per project memory `remediation-host-runner-2026-08-23`, which
   holds its logs, watch/stop/resume, the pause recipes, and the relaunch traps (an
   auto-permission-mode session cannot spawn it). The run's decisions are in
   `remediation-first-draw-2026-08-22`.
-- Every queue decision of 2026-08-23 is answered and recorded. ONE of the four answered-not-done
-  items landed on 2026-08-24 as `7e34fe14`: the F-label retirement from source comments
-  (`5acf2e262ebd7ab0`), which touched no file any pending block claims. THREE still wait, because
-  their write targets DO collide with the three pending items' declared scope: the per-run-consent
-  code fix (remove the durable recorded-`granted` route from `admitSpawn`; `240e467dfd7a8ac9`),
-  P41 (prompt-contract registry, `db629de141ee6414`), and P42 (advance command out of worker
-  prompts, `26e2d10e4569b448`). That collision is re-derived by hand each session; the queue below
-  carries a proposal to print the run's write scope in `answer.mjs --list` instead.
+- THREE answered decisions wait on the run, because their write targets collide with the three
+  pending items' declared scope: the per-run-consent code fix (remove the durable
+  recorded-`granted` route from `admitSpawn`; `240e467dfd7a8ac9`), P41 (prompt-contract registry,
+  `db629de141ee6414`), and P42 (advance command out of worker prompts, `26e2d10e4569b448`). Check
+  each answer's own write set against the PENDING blocks — the set is not uniformly blocked, and
+  treating it as one unit has already parked ready work.
+- DELIBERATE, not a bug: `src/audit/orchestrator/localCommands.ts` is inside CP-NODE-7's declared
+  write scope and was edited on `main` anyway, to clear a CI red that had stood since the run's
+  own CP-NODE-5 landing. That was safe because CP-NODE-7 has no worktree and no `host_handoff`
+  binding — the run had not started it — so a worker branches from `main` and inherits the fix.
 
 ## Immediate next
 
-1. Finish the remediation run: read the runner log named in memory `remediation-host-runner-2026-08-23`.
-   If the parent is alive, leave it; if it stopped, answer the pause per that memory's recipes and
-   relaunch `node .audit-tools/remediation/host-runner/impl-runner.mjs --concurrency 10` from the
+1. Finish the remediation run. The runner is down, so answer any recorded pause per the recipes in
+   memory `remediation-host-runner-2026-08-23`, then relaunch
+   `node .audit-tools/remediation/host-runner/impl-runner.mjs --concurrency 10` from the
    main checkout — from a terminal or a bypass-permissions session; auto permission mode refuses
    the spawn. When every item is terminal the tool enters closing (final gate): run
    `node remediate-code.mjs next-step` until the report is promoted
