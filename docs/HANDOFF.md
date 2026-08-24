@@ -22,10 +22,14 @@
   its logs, watch/stop/resume, the pause recipes, and the relaunch traps (an auto-permission-mode
   session cannot spawn it) are in project memory `remediation-host-runner-2026-08-23`; the run's
   decisions are in `remediation-first-draw-2026-08-22`.
-- The owner-answered queue items of 2026-08-23 are executed except one: the per-run-consent code
-  fix (remove the durable recorded-`granted` route from `admitSpawn`; answer key
-  `240e467dfd7a8ac9` in the decision ledger under `.claude/`) deliberately waits for NODE-5 to
-  land, because it edits NODE-5's files.
+- Every queue decision of 2026-08-23 is answered and recorded; the executed ones landed. FOUR
+  answered items deliberately wait for the remediation run to close, because they edit files or
+  prompt text the run's workload binding pins: the per-run-consent code fix (remove the durable
+  recorded-`granted` route from `admitSpawn`; answer key `240e467dfd7a8ac9`), the F-label
+  retirement from source comments (`5acf2e262ebd7ab0`), P41 (prompt-contract registry,
+  `db629de141ee6414`), and P42 (advance command out of worker prompts, `26e2d10e4569b448`) —
+  all four live in the decision ledger under `.claude/` and in `node scripts/…` (the answer
+  lister shows them as answered, not done).
 
 ## Immediate next
 
@@ -36,8 +40,9 @@
    the spawn. When every item is terminal the tool enters closing (final gate): run
    `node remediate-code.mjs next-step` until the report is promoted
    (`.audit-tools/remediation-report.md` / `remediation-outcomes.json`).
-2. After NODE-5 lands: the per-run-consent code fix (answer key `240e467dfd7a8ac9`, see Live
-   state), then record it done in the decision ledger.
+2. After the run closes: the four run-close-gated answers named in Live state (per-run-consent
+   code fix first — it edits the files the final work item just changed), each recorded done in
+   the decision ledger as it lands.
 3. Ask the owner the waiting decisions (generated list below).
 4. Ship a release once the run closes (`/ship`): `main` carries the 24 remediation landings, P39,
    P40, three executed queue items and the follow-up fixes since v0.45.0.
