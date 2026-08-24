@@ -263,13 +263,17 @@ export const GUARDS = [
     preCommit: 'reach',
     fix:
       'reconcile scripts/shared/offload-lane-data.mjs: every lane row needs a valid bounded probe or an ' +
-      'unprobeableReason, plus a remedy; the session-start hook must iterate the registry (no /health, ' +
-      'no hardcoded lane URL); DOC_LANE_MARKERS must map every documented lane spelling to a live row',
+      'unprobeableReason, plus a remedy, plus a configDirTrust check or a trustUncheckableReason; the ' +
+      'session-start hook must iterate the registry (no /health, no hardcoded lane URL); ' +
+      'DOC_LANE_MARKERS must map every documented lane spelling to a live row',
     note:
       'uncovered halves, stated as data: ~/.claude/CLAUDE.md is the true lane authority but untracked — ' +
       'a gate must not ask the local disk, so its lane list is NOT reconciled (scanned docs: ' +
-      'docs/nightly-routine.md + docs/backlog/durable-traps.md only); and a probe proves reachable ' +
-      'TRANSPORT only, never that a model, quota, or dispatched session will serve',
+      'docs/nightly-routine.md + docs/backlog/durable-traps.md only); a probe proves reachable ' +
+      'TRANSPORT only, never that a model, quota, or dispatched session will serve; and the ' +
+      'configDirTrust rows are reconciled for SHAPE only — the session-start leg reads the trust state ' +
+      'and REPORTS it, while the file that would grant trust belongs to the launcher outside this repo, ' +
+      'so trust can also change between session start and dispatch',
   },
   {
     id: 'check:lint',

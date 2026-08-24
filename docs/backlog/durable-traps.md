@@ -113,10 +113,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   request came back as a sprint closeout claiming zero findings and a green 5111-test run it never
   executed (recorded as the symptom in `23d2a1e8`; cause found two nights later). For a
   corroboration lane this is worse than silence: it manufactures agreement
-  ([[lane-agreement-is-not-evidence]]). Check line 1 of the lane's log before believing any reply.
-  UNENFORCED — no guard checks lane workspace trust; the session-start lane leg (P36) probes
-  per-lane TRANSPORT liveness from the declared registry (`scripts/shared/offload-lane-data.mjs`)
-  and cannot see trust. Fix + guard proposed as nightly P33.
+  ([[lane-agreement-is-not-evidence]]). REPORTED, NOT REPAIRED — each lane row declares
+  `configDirTrust` (or states why the question is uncheckable) in `scripts/shared/offload-lane-data.mjs`,
+  and the session-start lane leg names an untrusted lane UNUSABLE before any dispatch. The uncovered
+  halves: the file that would GRANT trust belongs to the launcher outside this repo, trust can change
+  between session start and dispatch (a stale green is possible), and a config dir that cannot be read
+  at all answers unknown rather than untrusted, so it stays silent.
   [[pool-lane-fabricates-when-untrusted]]
 
 - **The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look

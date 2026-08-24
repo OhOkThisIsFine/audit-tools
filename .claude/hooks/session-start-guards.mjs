@@ -9,7 +9,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { OFFLOAD_LANES, probeLane } from '../../scripts/shared/offload-lane-data.mjs';
+import { OFFLOAD_LANES, checkLaneTrust, probeLane } from '../../scripts/shared/offload-lane-data.mjs';
 import {
   baselineFromEntries,
   pruneStaleSessionRecords,
@@ -308,6 +308,32 @@ try {
   }
 } catch {
   /* lane probing is best-effort — a probe must never block a session */
+}
+
+// ── Offload-lane workspace trust ─────────────────────────────────────────────
+// A second, independent precondition (P43 / sol-4): a Claude lane launched with
+// an isolated CLAUDE_CONFIG_DIR that has not trusted THIS workspace does not
+// error — it runs with no repo tools and answers from nothing, in the right
+// shape and with fabricated supporting quotes. Trust is per-project and not
+// inherited from a parent path, it is readable before dispatch (so this costs
+// no quota), and the file that would REPAIR it belongs to the launcher outside
+// this repo: this leg reports, it never repairs. Silent unless a config dir
+// exists and does not list this workspace — unknown is silence, not a guess.
+try {
+  const trust = await Promise.all(
+    OFFLOAD_LANES.map(async (lane) => ({ lane, trusted: await checkLaneTrust(lane, ROOT, process.env) })),
+  );
+  for (const { lane, trusted } of trust) {
+    if (trusted !== false) continue; // trusted, or unchecked/unknown — silent
+    notes.push(
+      `OFFLOAD LANE UNUSABLE — ${lane.label} launches with an isolated config dir ` +
+        `(${lane.configDirTrust.configDir}) that has NOT trusted this workspace (${ROOT}). It will not ` +
+        `fail: it runs with no repo tools and answers from nothing. Do not delegate to it until:\n    ` +
+        lane.configDirTrust.untrustedRemedy,
+    );
+  }
+} catch {
+  /* trust reading is best-effort — it must never block a session */
 }
 
 if (notes.length > 0) {

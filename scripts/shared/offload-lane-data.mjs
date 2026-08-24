@@ -23,6 +23,19 @@
 //   • `probe: null` is the honest unprobeable answer; `unprobeableReason` is
 //     REQUIRED there (reconciled). Unprobeable lanes are SILENT at session
 //     start — an every-session line would be read past.
+//   • `configDirTrust` is a SECOND, independent question (P43 / sol-4): a
+//     Claude lane launched with an isolated CLAUDE_CONFIG_DIR that has not
+//     trusted this workspace does not error — it runs with no repo tools and
+//     answers from nothing, in the right shape, with fabricated supporting
+//     quotes (2026-08-07/13/14/15). Trust is per-project and NOT inherited
+//     from a parent path, and the state is readable BEFORE dispatch, so this
+//     check spends no quota. `configDirTrust: null` is the uncheckable answer
+//     and REQUIRES `trustUncheckableReason` — lanes that receive inlined
+//     content or run a non-Claude client have no such trust file and must
+//     never red for lacking one. The repairing half lives in the launcher
+//     OUTSIDE this repo (`claude.ps1` refuses on the same condition), so the
+//     session-start leg REPORTS and never repairs; trust can also change
+//     between session start and dispatch, so a stale green is possible.
 //   • The lane AUTHORITY is ~/.claude/CLAUDE.md — untracked and per-machine. A
 //     gate must not ask the local disk, so the reconciler checks these rows
 //     only against the TRACKED docs in SCANNED_DOCS; the global lane list
@@ -48,6 +61,17 @@
  */
 
 /**
+ * @typedef {object} ConfigDirTrust
+ * @property {string} configDir absolute path of the isolated CLAUDE_CONFIG_DIR
+ *   the lane launches with; its `.claude.json` `projects` map is the trust
+ *   record
+ * @property {string} envOverride env var replacing configDir for tests, or the
+ *   literal 'skip' to leave the lane's trust unchecked
+ * @property {string} untrustedRemedy the one line a session can act on when the
+ *   workspace is untrusted — printed verbatim in the session-start note
+ */
+
+/**
  * @typedef {object} LaneRow
  * @property {string} id
  * @property {'router'|'mcp-offload'|'peer-cli'|'launcher'} kind
@@ -59,6 +83,10 @@
  *   an http probe reads it as a replacement URL; a command probe reads it as a
  *   replacement command, or the literal 'skip' to leave the lane unprobed
  * @property {string} [unprobeableReason] REQUIRED when probe is null
+ * @property {ConfigDirTrust|null} configDirTrust workspace-trust precondition,
+ *   or null when the lane has no such config dir
+ * @property {string} [trustUncheckableReason] REQUIRED when configDirTrust is
+ *   null
  * @property {string} remedy the one line a session can act on when the lane is
  *   down — printed verbatim in the session-start note
  * @property {string} [note]
@@ -79,6 +107,10 @@ export const OFFLOAD_LANES = [
       requireJsonOn: [200],
     },
     envOverride: 'AUDIT_TOOLS_OFFLOAD_PROBE_URL',
+    configDirTrust: null,
+    trustUncheckableReason:
+      'transport, not a reading client — the router opens no workspace and has no config dir of its ' +
+      'own; every lane riding it answers this question on its own row',
     remedy: 'powershell -File C:\\Users\\ethan\\freellmapi\\start.ps1',
     note:
       '/v1/models is a REAL route (verified 2026-08-18: 401 application/json with no key; ' +
@@ -95,6 +127,14 @@ export const OFFLOAD_LANES = [
     unprobeableReason:
       "transport liveness is the freellmapi-router row's probe; whether the lane will SERVE " +
       '(models, quota, a finishing session) is unknowable without spending a real call',
+    configDirTrust: {
+      configDir: 'C:\\Users\\ethan\\freellmapi\\claude-config',
+      envOverride: 'AUDIT_TOOLS_POOL_TRUST_DIR',
+      untrustedRemedy:
+        "add this workspace to that dir's .claude.json as " +
+        "projects['<workspace>'].hasTrustDialogAccepted = true, then re-dispatch — the freellmapi " +
+        'launcher owns that file and refuses on the same condition, so this leg reports and cannot repair',
+    },
     remedy:
       'powershell -File C:\\Users\\ethan\\freellmapi\\start.ps1 — then verify with the ' +
       'mcp__freellmapi__offload_lanes tool',
@@ -115,6 +155,10 @@ export const OFFLOAD_LANES = [
     unprobeableReason:
       'composite lane: MCP transport is covered by the freellmapi-router probe and the agy binary ' +
       'by the agy-cli probe; whether a dispatch will serve is unknowable without spending quota',
+    configDirTrust: null,
+    trustUncheckableReason:
+      'agy is not a Claude client — no CLAUDE_CONFIG_DIR workspace-trust record exists to read; its ' +
+      'workspace comes from the lane --add-dir argument',
     remedy:
       'powershell -File C:\\Users\\ethan\\freellmapi\\start.ps1 for the MCP side; see the agy-cli ' +
       'row for the credential side',
@@ -128,6 +172,9 @@ export const OFFLOAD_LANES = [
     unprobeableReason:
       'same composite as mcp-agy-recon (router MCP + agy credential) — covered by those two ' +
       "rows' probes; lane-serves is unknowable without spending quota",
+    configDirTrust: null,
+    trustUncheckableReason:
+      'same as mcp-agy-recon — agy carries no CLAUDE_CONFIG_DIR trust record',
     remedy:
       'powershell -File C:\\Users\\ethan\\freellmapi\\start.ps1 for the MCP side; see the agy-cli ' +
       'row for the credential side',
@@ -141,6 +188,10 @@ export const OFFLOAD_LANES = [
     unprobeableReason:
       'composite lane: MCP transport is covered by the freellmapi-router probe and the headroom ' +
       'transport by the codex-cli probe; lane-serves is unknowable without spending quota',
+    configDirTrust: null,
+    trustUncheckableReason:
+      'codex is not a Claude client — no CLAUDE_CONFIG_DIR trust record exists; the lane receives ' +
+      'inlined prompt content',
     remedy:
       'powershell -File C:\\Users\\ethan\\freellmapi\\start.ps1 for the MCP side; see the ' +
       'codex-cli row for the headroom side',
@@ -154,6 +205,9 @@ export const OFFLOAD_LANES = [
     unprobeableReason:
       'same composite as mcp-codex-recon (router MCP + codex/headroom) — covered by those two ' +
       "rows' probes; lane-serves is unknowable without spending quota",
+    configDirTrust: null,
+    trustUncheckableReason:
+      'same as mcp-codex-recon — codex carries no CLAUDE_CONFIG_DIR trust record',
     remedy:
       'powershell -File C:\\Users\\ethan\\freellmapi\\start.ps1 for the MCP side; see the ' +
       'codex-cli row for the headroom side',
@@ -165,6 +219,10 @@ export const OFFLOAD_LANES = [
     transport: 'client-bound agy.exe — no proxy on the path',
     probe: { kind: 'command', command: 'agy', args: ['--version'], timeoutMs: 3_000 },
     envOverride: 'AUDIT_TOOLS_AGY_PROBE_CMD',
+    configDirTrust: null,
+    trustUncheckableReason:
+      'agy is not a Claude client — no CLAUDE_CONFIG_DIR trust record; a prompt carries inlined ' +
+      'content and an explicit workspace argument',
     remedy:
       'reinstall/update the Antigravity CLI (`agy`) — client-bound, there is no local service to ' +
       'restart',
@@ -186,6 +244,9 @@ export const OFFLOAD_LANES = [
       upStatuses: [200],
     },
     envOverride: 'AUDIT_TOOLS_HEADROOM_PROBE_URL',
+    configDirTrust: null,
+    trustUncheckableReason:
+      'codex is not a Claude client — no CLAUDE_CONFIG_DIR trust record to read',
     remedy:
       'wscript.exe "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\headroom.vbs" ' +
       '(`cmd /c start` on a .vbs opens a shell instead of launching it)',
@@ -204,6 +265,14 @@ export const OFFLOAD_LANES = [
       'a launcher script, not a service — nothing listens. Its lane health is the ' +
       'freellmapi-router probe plus nested claude.exe session startup, which is minutes-slow by ' +
       'design and cannot be probed cheaply',
+    configDirTrust: {
+      configDir: 'C:\\Users\\ethan\\freellmapi\\claude-config',
+      envOverride: 'AUDIT_TOOLS_LAUNCHER_TRUST_DIR',
+      untrustedRemedy:
+        "add this workspace to that dir's .claude.json as " +
+        "projects['<workspace>'].hasTrustDialogAccepted = true, then re-dispatch — the freellmapi " +
+        'launcher owns that file and refuses on the same condition, so this leg reports and cannot repair',
+    },
     remedy:
       'powershell -File C:\\Users\\ethan\\freellmapi\\start.ps1 (the launcher starts the router ' +
       'itself when down; a hung launcher is usually nested session startup, not the pool)',
@@ -257,6 +326,76 @@ export async function probeLane(lane, env = process.env) {
   if (lane.probe.kind === 'http') return probeHttp(lane.probe, override);
   if (override === 'skip') return null;
   return probeCommand(lane.probe, override);
+}
+
+/**
+ * One workspace path in the comparable form: forward slashes, no trailing
+ * separator, case-folded (git and the launcher disagree on drive-letter case).
+ *
+ * @param {string} workspacePath
+ */
+function normalizeWorkspaceKey(workspacePath) {
+  return String(workspacePath).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/**
+ * Classify one config dir's `.claude.json` against a workspace. Pure —
+ * unit-testable without a config dir.
+ *
+ * Trust is per-project and NOT inherited: a trusted PARENT path leaves the
+ * workspace untrusted, which is exactly how `C:/Code` being listed hid the
+ * 2026-08-15 fabrication.
+ *
+ * @param {string} trustFileText raw `.claude.json`
+ * @param {string} workspacePath
+ * @returns {boolean|null} true = trusted, false = untrusted, null = unknown
+ *   (unparseable, or no `projects` map — never a guess)
+ */
+export function classifyConfigDirTrust(trustFileText, workspacePath) {
+  let parsed;
+  try {
+    parsed = JSON.parse(trustFileText);
+  } catch {
+    return null;
+  }
+  const projects = parsed?.projects;
+  if (projects === null || typeof projects !== 'object') return null;
+  const wanted = normalizeWorkspaceKey(workspacePath);
+  for (const [key, entry] of Object.entries(projects)) {
+    if (normalizeWorkspaceKey(key) !== wanted) continue;
+    return entry?.hasTrustDialogAccepted === true;
+  }
+  return false;
+}
+
+/**
+ * Read one lane's workspace-trust state. Never throws, spends no quota.
+ *
+ * A config dir that cannot be read at all answers null, not false: the whole
+ * launcher install may be absent on this machine, and an absent install must
+ * not red a lane every session. The discriminator is a config dir that EXISTS
+ * and does not list this workspace.
+ *
+ * @param {LaneRow} lane
+ * @param {string} workspacePath
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {Promise<boolean|null>} true = trusted, false = UNUSABLE, null =
+ *   unchecked/unknown
+ */
+export async function checkLaneTrust(lane, workspacePath, env = process.env) {
+  const trust = lane.configDirTrust;
+  if (!trust) return null;
+  const override = env[trust.envOverride];
+  if (override === 'skip') return null;
+  const { readFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  let text;
+  try {
+    text = await readFile(join(override || trust.configDir, '.claude.json'), 'utf8');
+  } catch {
+    return null;
+  }
+  return classifyConfigDirTrust(text, workspacePath);
 }
 
 /** Wrap a promise resolver so only the first settlement wins. */

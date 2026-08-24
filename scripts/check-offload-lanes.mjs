@@ -9,7 +9,11 @@
 // DATA (`scripts/shared/offload-lane-data.mjs`) that the guard iterates; this
 // gate reconciles the declaration, the same shape as check-guard-reach.mjs:
 //   1. registry integrity — unique ids, valid probe shapes, an unprobeable row
-//      must state its reason, every row carries an actionable remedy,
+//      must state its reason, every row carries an actionable remedy, and every
+//      row answers the workspace-trust question (a configDirTrust check, or a
+//      trustUncheckableReason: an untrusted Claude lane answers from nothing
+//      instead of failing, and a lane with no such config dir must never red
+//      for lacking one) — SHAPE only, since a gate must not ask the local disk,
 //   2. hook wiring — the guard actually imports the registry, and the vacuous
 //      probe is pinned OUT forever (no '/health' literal, no hardcoded lane
 //      URL in the hook),
@@ -72,6 +76,27 @@ function probeProblems(probe) {
 }
 
 /**
+ * Validate one configDirTrust declaration; returns problem strings for the row.
+ * SHAPE ONLY — the reconciler never reads a config dir (a gate must not ask the
+ * local disk); the session-start leg does that at session start.
+ *
+ * @param {{ configDir?: unknown, envOverride?: unknown, untrustedRemedy?: unknown }} trust
+ */
+function trustProblems(trust) {
+  const problems = [];
+  if (!isNonEmptyString(trust.configDir) || !/^([a-zA-Z]:[\\/]|\/)/.test(trust.configDir)) {
+    problems.push('configDirTrust needs an absolute configDir — the hook resolves nothing relative');
+  }
+  if (!isNonEmptyString(trust.envOverride)) {
+    problems.push('configDirTrust needs an envOverride so the check can be redirected in tests');
+  }
+  if (!isNonEmptyString(trust.untrustedRemedy)) {
+    problems.push('configDirTrust needs an untrustedRemedy — a lane reported unusable must be actionable');
+  }
+  return problems;
+}
+
+/**
  * Reconcile the lane registry against the hook source and the tracked docs.
  * Pure — takes the rows, the marker map, the hook's source text and the
  * scanned docs' text keyed by repo path; returns error strings (empty = clean).
@@ -109,16 +134,38 @@ export function reconcile({ lanes, markers, hookSource, docTexts }) {
       }
       for (const p of probeProblems(lane.probe)) errors.push(`${label}: ${p}`);
     }
-    if (lane.envOverride !== undefined) {
-      if (!isNonEmptyString(lane.envOverride)) {
-        errors.push(`${label} has an empty envOverride.`);
-      } else if (seenOverrides.has(lane.envOverride)) {
+    // Workspace trust: a SECOND question every row must answer, because an
+    // untrusted Claude lane answers from nothing instead of failing.
+    if (!Object.hasOwn(lane, 'configDirTrust')) {
+      errors.push(
+        `${label} declares no configDirTrust — every row must answer whether its isolated config dir trusts ` +
+          `this workspace, or state why that is uncheckable.`,
+      );
+    } else if (lane.configDirTrust === null) {
+      if (!isNonEmptyString(lane.trustUncheckableReason)) {
         errors.push(
-          `envOverride "${lane.envOverride}" is claimed by both "${seenOverrides.get(lane.envOverride)}" and ` +
+          `${label} declares no configDirTrust and no trustUncheckableReason — uncheckable is a STATEMENT, ` +
+            `never silence.`,
+        );
+      }
+    } else {
+      if (lane.trustUncheckableReason !== undefined) {
+        errors.push(`${label} carries both a configDirTrust and a trustUncheckableReason — contradictory; keep one.`);
+      }
+      for (const p of trustProblems(lane.configDirTrust)) errors.push(`${label}: ${p}`);
+    }
+
+    const overrides = [lane.envOverride, lane.configDirTrust?.envOverride].filter((v) => v !== undefined);
+    for (const override of overrides) {
+      if (!isNonEmptyString(override)) {
+        errors.push(`${label} has an empty envOverride.`);
+      } else if (seenOverrides.has(override)) {
+        errors.push(
+          `envOverride "${override}" is claimed by both "${seenOverrides.get(override)}" and ` +
             `"${lane.id}" — one test override would redirect two lanes.`,
         );
       } else {
-        seenOverrides.set(lane.envOverride, lane.id);
+        seenOverrides.set(override, lane.id);
       }
     }
   }
@@ -179,9 +226,12 @@ function main() {
     process.exit(1);
   }
   const probed = OFFLOAD_LANES.filter((l) => l.probe !== null).length;
+  const trustChecked = OFFLOAD_LANES.filter((l) => l.configDirTrust !== null).length;
   console.log(
     `✓ offload-lanes: ${OFFLOAD_LANES.length} lanes declared (${probed} probed, ` +
-      `${OFFLOAD_LANES.length - probed} unprobeable with reasons stated); hook iterates the registry; ` +
+      `${OFFLOAD_LANES.length - probed} unprobeable with reasons stated; ${trustChecked} workspace-trust ` +
+      `checked, ${OFFLOAD_LANES.length - trustChecked} uncheckable with reasons stated); ` +
+      `hook iterates the registry; ` +
       `${DOC_LANE_MARKERS.length} doc markers reconciled over ${SCANNED_DOCS.length} tracked docs`,
   );
 }
