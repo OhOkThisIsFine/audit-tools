@@ -1597,6 +1597,8 @@
     "answer": "Add the configDirTrust row and let the session-start lane leg report an untrusted lane as unusable, with unprobeable lanes marked so they do not red falsely.",
     "subject": "",
     "path": "scripts/shared/offload-lane-data.mjs",
-    "decided_at": "2026-08-23T23:16:48.288Z"
+    "decided_at": "2026-08-23T23:16:48.288Z",
+    "completed_at": "2026-08-24T04:17:09.666Z",
+    "completed_ref": "22be768f — configDirTrust row declared; untrusted lane reported unusable, unprobeable lanes marked"
   }
 }
