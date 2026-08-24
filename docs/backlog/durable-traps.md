@@ -691,4 +691,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   proxy's tool-result interception first (its own documentation says to drop that flag
   when an agent acts on file content that does not match disk).
 
+- **A COMMENT-only edit to a graph extractor reds the graph-edge cache digest pin, and the
+  failure text tells you to bump the cache version (2026-08-24).** `tests/audit/graph-edge-cache.test.ts`
+  hashes whole extractor module CONTENT, so a reworded comment moves the digest exactly like a
+  behaviour change. Its assertion message says to bump `GRAPH_EDGE_CACHE_KEY_VERSION`, which
+  invalidates EVERY prior cache entry. Judge before obeying: if the diff inside the cached-contribution
+  closure is comment-only, update the digest pin and leave the version alone — no prior entry replays
+  under changed rules. Bump the version only when extraction behaviour actually moved.
+
 ## Doc-set hygiene (enforced)

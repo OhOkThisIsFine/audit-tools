@@ -1580,7 +1580,9 @@
     "answer": "F5, F6 and item-C are historical program-phase noise in source comments. Remove them from the comments rather than documenting them, which makes the glossary correct without growing it.",
     "subject": "",
     "path": "docs/glossary-ids.md",
-    "decided_at": "2026-08-23T23:16:48.282Z"
+    "decided_at": "2026-08-23T23:16:48.282Z",
+    "completed_at": "2026-08-24T09:14:14.599Z",
+    "completed_ref": "7e34fe14"
   },
   "db629de141ee6414": {
     "disposition": "settled",
