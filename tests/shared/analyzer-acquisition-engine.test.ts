@@ -182,6 +182,38 @@ test("admitLocalSpawn [decline-first]: declined:{prettier} vetoes the node_modul
   }
 });
 
+test("a recorded decline is reported even when the tool resolves NOWHERE", async () => {
+  // The decline veto must not sit behind resolution. Whether the binary happens
+  // to be INSTALLED says nothing about whether the operator refused it, so a
+  // decline has to surface identically on a machine that has the tool and one
+  // that does not. Resolving first made an absent declined tool report
+  // `not_resolved` with the decline never consulted — one policy reading two
+  // ways on two machines, which is what reddened CI while the local suite
+  // stayed green.
+  const root = await mkdtemp(join(tmpdir(), "admit-absent-"));
+  try {
+    const result = runFirstAvailableCommand(
+      root,
+      [
+        {
+          command: "audit-tools-nonexistent-linter",
+          args: ["--version"],
+          display: "audit-tools-nonexistent-linter --version",
+          toolId: "audit-tools-nonexistent-linter",
+        },
+      ],
+      { analyzerConsent: { "audit-tools-nonexistent-linter": "declined" } },
+    );
+    expect(
+      result?.declinedReason,
+      "an unresolvable declined tool must still report the decline, not a bare null",
+    ).toMatch(/declined/i);
+    expect(result?.exitCode, "nothing may spawn under a recorded decline").toBeNull();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("registerExternalAnalyzers: own-vs-acquire rejects git-history at registration", () => {
   const accepted = registerExternalAnalyzers([
     candidate({ id: "git-history" }),

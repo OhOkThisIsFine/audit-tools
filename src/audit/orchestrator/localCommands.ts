@@ -137,20 +137,26 @@ export function runFirstAvailableCommand(
 ): LocalCommandResult | null {
   let lastDecline: string | undefined;
   for (const candidate of candidates) {
-    const resolved = resolveCandidate(root, candidate);
-    if (!resolved) {
-      continue;
-    }
-    // Decline-first admission, BEFORE anything spawns. A recorded refusal is a
-    // veto for THIS tool wherever its executable resolves from — including the
-    // repo-local `node <script>` arm (the script is the key, never `node`).
+    // Decline-first admission, BEFORE resolution and before anything spawns. A
+    // recorded refusal is a veto for THIS tool wherever its executable resolves
+    // from — including the repo-local `node <script>` arm (the script is the
+    // key, never `node`). It runs ahead of resolution because whether the binary
+    // happens to be INSTALLED says nothing about whether the operator refused
+    // it: resolving first meant an absent tool reported `not_resolved` and the
+    // recorded decline was never consulted, so one policy read two ways on two
+    // machines.
     const denied = admitLocalSpawn(
-      [resolved.command, ...resolved.args],
+      [candidate.command, ...candidate.args],
       options.analyzerConsent,
       candidate.toolId,
     );
     if (denied) {
       lastDecline = denied;
+      continue;
+    }
+
+    const resolved = resolveCandidate(root, candidate);
+    if (!resolved) {
       continue;
     }
 
