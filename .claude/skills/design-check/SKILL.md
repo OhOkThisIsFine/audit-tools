@@ -56,11 +56,10 @@ evidence files from step 2 as file PATHS in the prompt; never paste file bodies 
 **Hand the lane the recon rather than the job of redoing it.** What a round must not do is judge work
 it authored — that is independence of *verdict*, and it is the whole point of delegating. Independence
 of *input* was never carrying it: a fresh lane that re-greps the same call-site map the last round
-already established burns its budget from scratch on rediscovery instead of judgment (four rounds over
-one step cost ~135k subagent tokens apiece, nearly all of it identical). So write the verified map once
-— the call sites, their current values, who writes what — and pass it as a **read-only, provenanced
-input**, labelled as prior verified recon this lane did not author. The lane never writes back to it,
-and its verdict stays its own. When it disagrees with the map it must say so and name the file and line
+already established burns its budget from scratch on rediscovery instead of judgment. So write the
+verified map once — the call sites, their current values, who writes what — and pass it as a
+**read-only, provenanced input**, labelled as prior verified recon this lane did not author. The lane
+never writes back to it, and its verdict stays its own. When it disagrees with the map it must say so and name the file and line
 that contradicts it; that disagreement is a fresh recon pass, which is the only thing allowed to update
 the map. Otherwise the map quietly absorbs one reviewer's assumption and reaches the next round as
 fact. Sharing an agent *session* across rounds is the wrong version of this — it keeps the context by

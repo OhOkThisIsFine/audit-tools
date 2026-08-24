@@ -13,8 +13,8 @@ Remote `audit-tools`, branch `main` (not origin, not master).
 
 ## 1. Preflight gate (fast local fast-fail — CI is the authoritative full gate)
 
-The full vitest suite is ~93% of the gate and takes minutes on Windows, which is *not* the authoritative
-signal (Linux CI is). CI runs the full suite **sharded across parallel jobs** (~2× faster) as the real
+The full vitest suite is most of the gate and takes minutes on Windows, which is *not* the authoritative
+signal (Linux CI is). CI runs the full suite **sharded across parallel jobs** as the real
 gate, so the local preflight is a quick fast-fail, not the full run.
 
 - Fresh worktree → `npm install` first (otherwise tsc resolves `audit-tools/shared` against a stale `dist/` → fake "missing export" errors).
@@ -22,12 +22,11 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 - Fast local checks, Bash tool:
   `npx vitest run --changed` (only tests touching your uncommitted edits) +
   `npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code` +
-  `npm run check:doc-manifest` (0.1s — ANY new/renamed tracked `*.md` anywhere in the repo, not just
+  `npm run check:doc-manifest` (fast — ANY new/renamed tracked `*.md` anywhere in the repo, not just
   `docs/**`, unregistered in `scripts/doc-manifest-data.mjs`; the pre-commit gate already runs this
-  whenever the staged set touches markdown, so running it here is fast feedback, not the only gate;
-  burned v0.34.17) +
-  `npm run check:lint` (14s — `tsc` does NOT flag an unused DESTRUCTURED binding or a
-  newly-dead import, so `build && check` goes green while eslint fails; burned v0.39.7).
+  whenever the staged set touches markdown, so running it here is fast feedback, not the only gate) +
+  `npm run check:lint` (`tsc` does NOT flag an unused DESTRUCTURED binding or a
+  newly-dead import, so `build && check` goes green while eslint fails).
   These are for FAST FEEDBACK only — nothing here is load-bearing, because the release script's
   pre-tag gate now runs the whole `verify:checks` and refuses to tag if any of it is red.
 - Want the belt-and-suspenders full local run anyway? `npm run verify:release`

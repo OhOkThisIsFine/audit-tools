@@ -5,23 +5,6 @@ C: mechanical re-verify at remediation close) has durable outcomes that live in 
 contract tests; this doc keeps only what is not derivable from them: the decided-against list and
 the two recorded design deviations. Which release carried which item is git's job, not this doc's.
 
-Where the shipped mechanisms live:
-
-- Safety profiles + admission (`admitSpawn`: default ∨ recorded `granted` ∨ per-run token) and the
-  acquisition engine: `src/shared/analyzers/acquisitionEngine.ts` (relocated from the audit tree —
-  one core, two draws). Candidate registry + parse adapters: `src/shared/analyzers/candidates.ts`.
-- Consent surfacing: the `analyzer_consent` step kind (`src/audit/cli/steps.ts`), emitted while
-  resolving the `external_analyzers_current` obligation; decisions persist under `analyzer_consent`
-  in `.audit-tools/audit/analyzer-policy.json` (`src/shared/analyzerPolicy.ts`); tokens never persist.
-- Lead provenance: `src/shared/analyzers/provenance.ts` — `{analyzer_id, rule?, path,
-  snippet_hash}`, snippet-hash over the normalized flagged span (content identity, not layout);
-  attached at `src/shared/analyzers/normalizeExternal.ts`, carried packet lead → finding
-  (`analyzer_provenance`) → remediation via the finding id-join.
-- Close-verify: `src/remediate/phases/closeVerifyAnalyzerLeads.ts`, a close-gate verify leg in
-  `runClosePhase` — instance-level identity match over a same-pinned-spec re-run; per-item
-  `mechanical_verification` (`verified_mechanically` / `lead_persists` / `skipped`) in the
-  outcomes contract; a persisting lead re-blocks only its item and routes to triage.
-
 ## Recorded design deviations (from the original item-C text)
 
 1. **The candidate registry moved to shared too** — the verify draw re-runs "the same pinned

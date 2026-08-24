@@ -13,8 +13,8 @@ Implemented:
 - `npmAudit.ts` — npm dependency vulnerabilities
 - `coverageSummary.ts` — test coverage summaries
 
-The generic normalize seam plus the clippy/rubocop parse adapters moved to `src/shared/analyzers/`
-with the acquisition substrate (item-C relocation) — both orchestrator draws consume them there.
+The generic normalize seam plus the clippy/rubocop parse adapters live in `src/shared/analyzers/`
+with the acquisition substrate — both orchestrator draws consume them there.
 
 Secret scanning is ACQUIRED, not owned — it's the default-run `gitleaksCandidate` member of the
 F5 analyzer-acquisition-engine's curated candidate registry (`src/shared/analyzers/candidates.ts`),

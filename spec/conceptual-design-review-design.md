@@ -29,7 +29,7 @@ Two sweeps fall out, both needed:
 
 This is *not* /init. /init is whole-repo distillation → a durable bootstrap doc (prose, one-shot, no
 contract, output treated as authoritative). Two things transfer from it and nothing else: (1) its
-**negative-constraint discipline** — ~80% of its prompt is *what not to emit* (no obvious, no
+**negative-constraint discipline** — most of its prompt is *what not to emit* (no obvious, no
 generic, no discoverable, no fabricated) → port that into conceptual-reviewer worker guidance as an
 anti-slop filter; (2) its **targeting** — "the cross-file big picture no single-file view catches."
 The mechanism below is otherwise a different genre.

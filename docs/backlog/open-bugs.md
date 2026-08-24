@@ -910,3 +910,11 @@
   a hand edit of fail-closed state. **Property to hold:** the tool offers a sanctioned re-bind for
   a host-widened frontier block (or the clarification flow itself carries the widening), so a scope
   answer never requires hand-editing the binding.
+
+- **A dated measurement sits inside durable routine prose (2026-08-23, low).**
+  `docs/nightly-routine.md`, `docs/nightly-routine-prompt.md` and `docs/backlog.md` each carry the
+  same "a 2026-07-19 pass found ~21% of entries stale or already closed" as the motivation for the
+  re-check-at-presentation rule. The rule is durable; the measured share and its date are a status
+  reading pinned into a concept doc, and it rots silently in three places at once. **Property to
+  hold:** a concept doc states the invariant, and the measurement that motivated it lives in the
+  review record or `git log`, in one place.
