@@ -259,7 +259,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P43-answered-work-vs-open-run-co
 
 - Leg 2 mechanical sweep classified 69 of 110 backlog entries. 41 errored on the free-provider lane (schema-mismatch replies, plus an HTTP 502 from a provider whose key is known-broken); 34 of the classified had unusable premise probes. 41 entries were NOT triaged this run.
 
-- Leg 1 independent Codex lane on CLAUDE.md's five own-vs-acquire analyzer claims did not return before the run closed. Its central claim, a single admitSpawn chokepoint for acquired-tool spawns, was verified directly instead; the other four were not independently re-checked.
+- Leg 1's SECOND lane did not land: the Codex lane on CLAUDE.md's five own-vs-acquire analyzer claims read source for ~45 minutes and never emitted a verdict. All five claims were verified directly instead and all five hold (admitSpawn is the single acquired-spawn chokepoint at acquisitionEngine.ts:314, called only at 482 and 754; declined then skip are checked before defaultRun, granted and the token; the consent token is pinned unpersistable by a passing contract test; nothing spawns npm audit). What is missing is the INDEPENDENT re-check, not the verification.
 
 - Three of the four answered-not-done decisions (240e467dfd7a8ac9, db629de141ee6414, 26e2d10e4569b448) were NOT executed: their write targets collide with the three pending remediation work items' declared scope.
 
