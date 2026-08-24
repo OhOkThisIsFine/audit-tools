@@ -575,6 +575,7 @@ export {
 export type { RunTrackedOptions, RunTrackedResult } from "./tooling/exec.js";
 export {
   runTracked,
+  runTrackedAsync,
   spawnSyncHidden,
   spawnHidden,
   resolveExecArgv,
@@ -1067,6 +1068,8 @@ export { applyGuidanceFile } from "./intake/guidanceBootstrap.js";
 export {
   OWNED_TOOL_IDS,
   admitSpawn,
+  admitLocalSpawn,
+  localToolIdFor,
   runSafetyGate,
   runExternalAnalyzer,
   registerExternalAnalyzers,
@@ -1079,6 +1082,8 @@ export type {
   EcosystemRunner,
   AnalyzerSafetyProfile,
   ExternalAnalyzerCandidate,
+  AnalyzerConsentTokenGrant,
+  AnalyzerConsentDecisions,
   AcquisitionRunner,
   AcquisitionEngineOptions,
   AcquisitionOutcome,

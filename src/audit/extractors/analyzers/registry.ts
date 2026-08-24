@@ -32,6 +32,8 @@ export const ANALYZER_REGISTRY: LanguageAnalyzer[] = [
 export {
   OWNED_TOOL_IDS,
   admitSpawn,
+  admitLocalSpawn,
+  localToolIdFor,
   runSafetyGate,
   runExternalAnalyzer,
   registerExternalAnalyzers,

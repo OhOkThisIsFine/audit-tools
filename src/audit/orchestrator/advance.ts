@@ -777,6 +777,8 @@ async function advanceAuditInner(
         graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
         externalAcquisitionEnabled: options.externalAcquisition?.enabled,
         analyzerConsent: options.externalAcquisition?.analyzerConsent,
+        // The grant rides through TYPED (AnalyzerConsentTokenGrant): the pause
+        // predicate reads its per-candidate scope, never a run-wide string.
         acquisitionConsentToken: options.externalAcquisition?.consentToken,
       },
       stepsRun: { value: 0 },

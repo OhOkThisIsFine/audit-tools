@@ -361,6 +361,83 @@ export function runTracked(
 }
 
 /**
+ * Async twin of {@link runTracked}: same argv resolution, control-env scrub, and
+ * result shape, driven by {@link spawnHidden} instead of `spawnSync`. Analyzer
+ * acquisition runs HERE rather than on the synchronous runner because a
+ * synchronous child blocks the event loop for the whole spawn — which starves
+ * every `setInterval` liveness heartbeat in the process (the advance
+ * heartbeat, and each held file lock's mtime heartbeat), so one stalled
+ * `npx --version` probe classified a LIVE lock stale and stole it mid-flight.
+ * Awaited by the acquisition engine and the binary resolver; never mixed with
+ * {@link runTracked} in one call path.
+ */
+export async function runTrackedAsync(
+  argv: string[],
+  options: RunTrackedOptions = {},
+): Promise<RunTrackedResult> {
+  if (argv.length === 0) {
+    return {
+      status: null,
+      stdout: "",
+      stderr: "",
+      argv: [],
+      cwd: options.cwd,
+      duration_ms: 0,
+      error: new Error("runTrackedAsync requires a non-empty argv"),
+    };
+  }
+  const resolved = resolveExecArgv(argv, {
+    platform: options.platform,
+  });
+  const start = Date.now();
+  return await new Promise<RunTrackedResult>((resolve) => {
+    const child = spawnHidden(resolved[0], resolved.slice(1), {
+      cwd: options.cwd,
+      env: stripAuditToolsControlEnv(options.env),
+      ...(options.timeout ? { timeout: options.timeout } : {}),
+      windowsHide: true,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    // Bounded: a hostile/oversized emitter cannot grow the heap without limit.
+    const MAX_CAPTURE = 10 * 1024 * 1024;
+    child.stdout?.on("data", (chunk: Buffer) => {
+      if (stdout.length < MAX_CAPTURE) stdout += chunk.toString(options.encoding ?? "utf8");
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      if (stderr.length < MAX_CAPTURE) stderr += chunk.toString(options.encoding ?? "utf8");
+    });
+    child.on("error", (error) => {
+      resolve({
+        status: null,
+        stdout,
+        stderr,
+        argv: resolved,
+        cwd: options.cwd,
+        duration_ms: Date.now() - start,
+        error,
+      });
+    });
+    child.on("close", (code, signal) => {
+      resolve({
+        status: code,
+        stdout,
+        stderr,
+        argv: resolved,
+        cwd: options.cwd,
+        duration_ms: Date.now() - start,
+        error:
+          signal !== null && signal !== undefined
+            ? new Error(`child terminated by signal ${signal}`)
+            : undefined,
+      });
+    });
+  });
+}
+
+/**
  * `child_process.spawnSync` with `windowsHide` forced on. A windowless parent
  * (node launched by an IDE/agent) spawning a console child (git, sqlite3, …) pops
  * a console window on win32 unless suppressed — the many direct git spawns across

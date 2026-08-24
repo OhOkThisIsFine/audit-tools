@@ -778,12 +778,17 @@ const engineCandidate = (
   ...overrides,
 });
 
-/** A runner whose `--version` probe succeeds and whose tool spawn is scripted. */
+/** A per-run consent GRANT naming the candidate under test (the only token form). */
+function grantFor(id: string, value = "tok"): { value: string; tools: string[] } {
+  return { value, tools: [id] };
+}
+
+/** An ASYNC runner whose `--version` probe succeeds and whose tool spawn is scripted. */
 function scriptedRunner(
   tool: () => { status: number; stdout: string; stderr: string },
   spawned: string[][] = [],
 ) {
-  return (argv: string[]) => {
+  return async (argv: string[]) => {
     spawned.push(argv);
     if (argv.includes("--version")) {
       return { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 };
@@ -797,8 +802,13 @@ test("inv-1: a recorded 'declined' vetoes the spawn BEFORE the token and BEFORE 
   // branch admitted it. A DEFAULT-set tool: the defaultRun short-circuit returned
   // admitted before the recorded decision was ever read.
   expect(
-    typeof admitSpawn(engineCandidate({ defaultRun: false }), "auto", "tok", "declined"),
-    "a per-run token must NEVER override a recorded decline",
+    typeof admitSpawn(
+      engineCandidate({ defaultRun: false }),
+      "auto",
+      grantFor("eslint"),
+      "declined",
+    ),
+    "a per-run grant must NEVER override a recorded decline",
   ).toBe("string");
   expect(
     typeof admitSpawn(engineCandidate({ defaultRun: true }), "auto", undefined, "declined"),
@@ -811,7 +821,7 @@ test("inv-1: a recorded 'declined' vetoes the spawn BEFORE the token and BEFORE 
   );
 });
 
-test("inv-2: declined and undecided are DISTINCT reasons, and the reason reaches the status record", () => {
+test("inv-2: declined and undecided are DISTINCT reasons, and the reason reaches the status record", async () => {
   const declined = admitSpawn(engineCandidate(), "auto", undefined, "declined");
   const undecided = admitSpawn(engineCandidate(), "auto", undefined, undefined);
   expect(declined).toBe(ANALYZER_DENIAL_REASONS.consent_declined);
@@ -822,7 +832,7 @@ test("inv-2: declined and undecided are DISTINCT reasons, and the reason reaches
 
   // The cause survives onto the emitted status — the only post-run evidence there is.
   const spawned: string[][] = [];
-  const outcome = runExternalAnalyzer(engineCandidate(), "/root", {
+  const outcome = await runExternalAnalyzer(engineCandidate(), "/root", {
     run: scriptedRunner(() => ({ status: 0, stdout: "[]", stderr: "" }), spawned),
     analyzerConsent: { eslint: "declined" },
   });
@@ -848,8 +858,8 @@ test("inv-3: a SCOPED consent token issued for tool A denies tool B", () => {
   );
 });
 
-test("inv-7: a non-zero exit with diagnostics on stderr is `failed`, never `success`", () => {
-  const outcome = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+test("inv-7: a non-zero exit with diagnostics on stderr is `failed`, never `success`", async () => {
+  const outcome = await runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
     run: scriptedRunner(() => ({ status: 2, stdout: "", stderr: "config error: bad rule set" })),
   });
   expect(outcome.status.status, "a broken analyzer must not read as a clean repo").toBe("failed");
@@ -861,7 +871,7 @@ test("inv-7: a non-zero exit with diagnostics on stderr is `failed`, never `succ
 
   // The exit code alone is decisive — a silent non-zero exit is still not a clean
   // scan, so this half must hold with nothing on stderr to fall back on.
-  const silentFailure = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+  const silentFailure = await runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
     run: scriptedRunner(() => ({ status: 3, stdout: "[]", stderr: "" })),
   });
   expect(silentFailure.status.status, "exit 3 with parsable-but-empty output is a failure").toBe(
@@ -870,21 +880,21 @@ test("inv-7: a non-zero exit with diagnostics on stderr is `failed`, never `succ
   expect(silentFailure.status.exit_code).toBe(3);
 });
 
-test("inv-7: a run whose only output is stderr is `failed`; a genuinely clean run is `success`", () => {
-  const stderrOnly = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+test("inv-7: a run whose only output is stderr is `failed`; a genuinely clean run is `success`", async () => {
+  const stderrOnly = await runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
     run: scriptedRunner(() => ({ status: 0, stdout: "   ", stderr: "warning: no config found" })),
   });
   expect(stderrOnly.status.status).toBe("failed");
   expect(stderrOnly.status.stderr_snippet).toMatch(/no config found/);
 
-  const clean = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+  const clean = await runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
     run: scriptedRunner(() => ({ status: 0, stdout: "[]", stderr: "" })),
   });
   expect(clean.status.status, "exit 0 + parsed + nothing on stderr IS a clean scan").toBe("success");
 });
 
-test("inv-8: a reported parse failure classifies `parse_error`, and dropped rows classify too", () => {
-  const parseFailed = runExternalAnalyzer(
+test("inv-8: a reported parse failure classifies `parse_error`, and dropped rows classify too", async () => {
+  const parseFailed = await runExternalAnalyzer(
     engineCandidate({
       defaultRun: true,
       parse: () => ({ items: [], parse_failed: true, note: "shape drift: renamed key" }),
@@ -895,7 +905,7 @@ test("inv-8: a reported parse failure classifies `parse_error`, and dropped rows
   expect(parseFailed.status.status).toBe("parse_error");
   expect(parseFailed.status.error).toMatch(/shape drift/);
 
-  const dropped = runExternalAnalyzer(
+  const dropped = await runExternalAnalyzer(
     engineCandidate({ defaultRun: true, parse: () => ({ items: [], dropped_rows: 4 }) }),
     "/root",
     { run: scriptedRunner(() => ({ status: 0, stdout: "rows", stderr: "" })) },
@@ -908,7 +918,7 @@ test("inv-10 + inv-11: absolute tool paths persist repo-relative, and an unreada
   const root = await mkdtemp(join(tmpdir(), "cp1-paths-"));
   try {
     await writeFile(join(root, "a.ts"), "line one\nline two\nline three\n");
-    const outcome = runExternalAnalyzer(
+    const outcome = await runExternalAnalyzer(
       engineCandidate({
         defaultRun: true,
         parse: () => [
@@ -945,8 +955,8 @@ test("inv-10 + inv-11: absolute tool paths persist repo-relative, and an unreada
   }
 });
 
-test("inv-11: an item with no line anchor is NOT counted as a read failure", () => {
-  const outcome = runExternalAnalyzer(
+test("inv-11: an item with no line anchor is NOT counted as a read failure", async () => {
+  const outcome = await runExternalAnalyzer(
     engineCandidate({
       defaultRun: true,
       parse: () => [{ path: "nowhere.ts", summary: "no anchor at all" }],
@@ -961,9 +971,9 @@ test("inv-11: an item with no line anchor is NOT counted as a read failure", () 
   ).toBe(undefined);
 });
 
-test("fail-7: an absent runner degrades to not_resolved carrying the probe reason, never success", () => {
-  const outcome = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
-    run: (argv: string[]) => ({
+test("fail-7: an absent runner degrades to not_resolved carrying the probe reason, never success", async () => {
+  const outcome = await runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+    run: async (argv: string[]) => ({
       status: 127,
       stdout: "",
       stderr: "command not found",
@@ -1210,13 +1220,13 @@ test("fail-10: a malformed policy artifact throws — it never degrades to an em
 // Adversarial-review fixes (RV-1, RV-3, RV-4, RV-5).
 // ───────────────────────────────────────────────────────────────────────────
 
-test("RV-1: a signal-killed analyzer (null exit status) is `failed`, never a clean scan", () => {
+test("RV-1: a signal-killed analyzer (null exit status) is `failed`, never a clean scan", async () => {
   // RunTrackedResult carries no signal field, so a null status is the ONLY trace that
   // the child never exited on its own (SIGKILL / OOM). Reading `typeof status ===
   // "number" && status !== 0` skipped it entirely — and win32 reports the same kill as
   // status 1, so the identical event classified differently per OS.
-  const killed = runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
-    run: (argv: string[]) =>
+  const killed = await runExternalAnalyzer(engineCandidate({ defaultRun: true }), "/root", {
+    run: async (argv: string[]) =>
       argv.includes("--version")
         ? { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 }
         : { status: null, stdout: "", stderr: "", argv, duration_ms: 1 },
@@ -1229,10 +1239,10 @@ test("RV-1: a signal-killed analyzer (null exit status) is `failed`, never a cle
   ).toBe(true);
 });
 
-test("RV-3: items the NORMALIZER drops are counted — an all-dropped run is not clean", () => {
+test("RV-3: items the NORMALIZER drops are counted — an all-dropped run is not clean", async () => {
   // Two items parse fine and both are discarded for a missing summary. Counting only
   // the parser's own drops left this reading as `success` with no drop count at all.
-  const outcome = runExternalAnalyzer(
+  const outcome = await runExternalAnalyzer(
     engineCandidate({
       defaultRun: true,
       parse: () => [{ path: "a.ts" }, { path: "b.ts" }],
@@ -1245,8 +1255,8 @@ test("RV-3: items the NORMALIZER drops are counted — an all-dropped run is not
   expect(isDegradedExternalAnalyzerStatus(outcome.status)).toBe(true);
 });
 
-test("RV-3: parser-dropped and normalizer-dropped counts land on ONE field", () => {
-  const outcome = runExternalAnalyzer(
+test("RV-3: parser-dropped and normalizer-dropped counts land on ONE field", async () => {
+  const outcome = await runExternalAnalyzer(
     engineCandidate({
       defaultRun: true,
       parse: () => ({ items: [{ path: "a.ts" }], dropped_rows: 3 }),
@@ -1257,10 +1267,10 @@ test("RV-3: parser-dropped and normalizer-dropped counts land on ONE field", () 
   expect(outcome.status.dropped_rows, "3 parser rows + 1 normalizer item").toBe(4);
 });
 
-test("RV-4: a partially-crashed run carrying items still classifies as DEGRADED", () => {
+test("RV-4: a partially-crashed run carrying items still classifies as DEGRADED", async () => {
   // The status member lands on `findings` — an affirmative value — because items
   // survived. Asking the member alone reports a crashed run as trustworthy coverage.
-  const partial = runExternalAnalyzer(
+  const partial = await runExternalAnalyzer(
     engineCandidate({
       defaultRun: true,
       parse: () => [{ path: "a.ts", summary: "one surviving lead" }],
@@ -1276,7 +1286,7 @@ test("RV-4: a partially-crashed run carrying items still classifies as DEGRADED"
   ).toBe(true);
 
   // Same for dropped rows and unresolved provenance alongside surviving items.
-  const dropped = runExternalAnalyzer(
+  const dropped = await runExternalAnalyzer(
     engineCandidate({
       defaultRun: true,
       parse: () => ({ items: [{ path: "a.ts", summary: "kept" }], dropped_rows: 5 }),
@@ -1288,7 +1298,7 @@ test("RV-4: a partially-crashed run carrying items still classifies as DEGRADED"
   expect(isDegradedExternalAnalyzerStatus(dropped.status)).toBe(true);
 
   // …and a genuinely clean run is NOT degraded, so the predicate still discriminates.
-  const clean = runExternalAnalyzer(
+  const clean = await runExternalAnalyzer(
     engineCandidate({
       defaultRun: true,
       parse: () => [{ path: "a.ts", summary: "kept" }],
@@ -1306,7 +1316,7 @@ test("D-2: an unresolved provenance anchor is NOT lost coverage — it does not 
   // The count stays on the record because it is worth surfacing.
   const root = await mkdtemp(join(tmpdir(), "cp1-anchor-"));
   try {
-    const outcome = runExternalAnalyzer(
+    const outcome = await runExternalAnalyzer(
       engineCandidate({
         defaultRun: true,
         parse: () => [
@@ -1335,11 +1345,11 @@ test("RV-5: a recorded decline outranks setting=skip — the reason names the OP
   expect(admitSpawn(engineCandidate(), "skip", undefined, "declined")).toBe(
     ANALYZER_DENIAL_REASONS.consent_declined,
   );
-  expect(admitSpawn(engineCandidate({ defaultRun: true }), "skip", "tok", "declined")).toBe(
-    ANALYZER_DENIAL_REASONS.consent_declined,
-  );
+  expect(
+    admitSpawn(engineCandidate({ defaultRun: true }), "skip", grantFor("eslint"), "declined"),
+  ).toBe(ANALYZER_DENIAL_REASONS.consent_declined);
   // With no recorded decision, `skip` is still the decisive (and honest) reason.
-  expect(admitSpawn(engineCandidate({ defaultRun: true }), "skip", "tok")).toBe(
+  expect(admitSpawn(engineCandidate({ defaultRun: true }), "skip", grantFor("eslint"))).toBe(
     ANALYZER_DENIAL_REASONS.setting_skip,
   );
 });

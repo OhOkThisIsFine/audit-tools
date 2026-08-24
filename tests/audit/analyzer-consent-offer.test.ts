@@ -14,13 +14,18 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  writeFile as writeFileSyncCb,
   writeFileSync,
   readFileSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { pendingAnalyzerConsent } from "../../src/audit/orchestrator/hostInputPause.js";
+import { promisify } from "node:util";
+import {
+  pendingAnalyzerConsent,
+} from "../../src/audit/orchestrator/hostInputPause.js";
+import type { AnalyzerConsentTokenGrant, FileDispositionStatus } from "audit-tools/shared";
 import { handleAnalyzerConsentBranch } from "../../src/audit/cli/nextStepHelpers.js";
 import {
   GATE_LANES,
@@ -34,6 +39,14 @@ import {
 } from "../../src/shared/analyzerPolicy.js";
 import { renderAnalyzerConsentPrompt } from "../../src/audit/cli/prompts.js";
 import { EXTERNAL_ANALYZER_CANDIDATES } from "../../src/shared/analyzers/candidates.js";
+const { writeFixtureRepo } = await import("./helpers/fixture.mjs");
+const { withTempDir } = await import("./helpers/withTempDir.mjs");
+
+const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
+const { runSyntaxResolutionExecutor } = await import(
+  "../../src/audit/orchestrator/syntaxResolutionExecutor.js"
+);
+const writeFileAsync = promisify(writeFileSyncCb);
 
 const RM_DIRS: string[] = [];
 const tempDir = (prefix: string): string => {
@@ -88,14 +101,39 @@ describe("pendingAnalyzerConsent — who is owed the offer", () => {
     expect(after).toHaveLength(base.length - 1);
   });
 
-  it("a per-run token empties the offer (everything is admitted this run)", () => {
+  it("a per-run SCOPED grant naming every applicable candidate empties the offer", () => {
+    const root = nodeRepo();
+    const base = pendingAnalyzerConsent({ root, externalAcquisitionEnabled: true });
+    expect(base.length).toBeGreaterThan(0);
+    // Typed {@link AnalyzerConsentTokenGrant}, never a bare string: the grant
+    // names EXACTLY the candidates it admits.
+    const grant: AnalyzerConsentTokenGrant = {
+      value: "tok-123",
+      tools: base.map((c) => c.id),
+    };
     expect(
       pendingAnalyzerConsent({
-        root: nodeRepo(),
+        root,
         externalAcquisitionEnabled: true,
-        acquisitionConsentToken: "tok-123",
+        acquisitionConsentToken: grant,
       }),
     ).toEqual([]);
+  });
+
+  it("a PARTIAL grant leaves every unnamed candidate owed — scope never widens to the run", () => {
+    const root = nodeRepo();
+    const base = pendingAnalyzerConsent({ root, externalAcquisitionEnabled: true });
+    const named = base[0]!.id;
+    const after = pendingAnalyzerConsent({
+      root,
+      externalAcquisitionEnabled: true,
+      acquisitionConsentToken: { value: "tok-part", tools: [named] },
+    });
+    expect(after.map((c) => c.id)).not.toContain(named);
+    // Every candidate OUTSIDE the grant's `tools` is still owed its offer.
+    expect(after.map((c) => c.id).sort()).toEqual(
+      base.slice(1).map((c) => c.id).sort(),
+    );
   });
 
   it("acquisition disabled / no root / skip setting all empty the offer", () => {
@@ -251,5 +289,118 @@ describe("candidate registry contract", () => {
     for (const c of EXTERNAL_ANALYZER_CANDIDATES) {
       expect(c.purpose, `${c.id} must carry a purpose line`).toBeTruthy();
     }
+  });
+});
+
+/**
+ * CP-NODE-5 — the decline-first LOCAL-tooling veto (formatters, syntax
+ * resolvers) must fire through the PRODUCTION dispatch, not only at an
+ * executor's direct seam. The first review found it dead in production: the
+ * runner accepted `analyzerConsent` but `EXECUTOR_RUNNERS.auto_fix_executor`
+ * dispatched with no third argument, so `admitLocalSpawn` always admitted.
+ * These tests reach the veto THROUGH `advanceAudit` — the same path a real
+ * `audit-code next-step` run takes — so unwiring the dispatch fails here.
+ */
+describe("the local-tooling decline veto fires through the production dispatch", () => {
+  const bundleWith = (paths: string[]) => ({
+    file_disposition: {
+      files: paths.map((path): { path: string; status: FileDispositionStatus } => ({
+        path,
+        status: "included",
+      })),
+    },
+  });
+
+  interface AutoFixesApplied {
+    executed_tools: string[];
+    failed_tools: string[];
+    tool_timings: unknown[];
+    timestamp: string;
+  }
+
+  it("a recorded prettier decline refuses every auto-fix spawn through advanceAudit", async () => {
+    await withTempDir("consent-veto-", async (root: string) => {
+      await writeFixtureRepo(root);
+      await writeFileAsync(join(root, ".prettierrc.json"), "{}\n");
+      // The durable policy is where a real run's decisions live; the
+      // production dispatch reads them out of the loaded policy via the
+      // advance options.
+      await persistAnalyzerConsent(root, { prettier: "declined" });
+      const policy = await loadAnalyzerPolicy(root);
+      expect(policy.analyzer_consent?.prettier).toBe("declined");
+
+      const result = await advanceAudit(bundleWith([
+        "src/api/auth.ts",
+        "infra/deploy.yml",
+      ]), {
+        root,
+        preferredExecutor: "auto_fix_executor",
+        externalAcquisition: {
+          enabled: true,
+          analyzers: policy.analyzers,
+          analyzerConsent: policy.analyzer_consent,
+        },
+      });
+
+      expect(result.selected_executor).toBe("auto_fix_executor");
+      const applied = result.updated_bundle
+        .auto_fixes_applied as AutoFixesApplied;
+      expect(applied.executed_tools, "a declined formatter never executes").toEqual([]);
+      expect(applied.failed_tools, "a refusal is not a formatter failure").toEqual([]);
+      expect(applied.tool_timings).toEqual([]);
+    });
+  });
+
+  it("without the decline the same run still attempts the formatter (veto is decision-driven)", async () => {
+    await withTempDir("consent-no-veto-", async (root: string) => {
+      await writeFixtureRepo(root);
+      await writeFileAsync(join(root, ".prettierrc.json"), "{}\n");
+      // A repo-local prettier entrypoint so the repo-local arm (the first
+      // candidate) is resolvable without any real npm install.
+      const binDir = join(root, "node_modules", "prettier", "bin");
+      mkdirSync(binDir, { recursive: true });
+      writeFileSync(join(binDir, "prettier.cjs"), "");
+
+      const result = await advanceAudit(bundleWith(["src/api/auth.ts"]), {
+        root,
+        preferredExecutor: "auto_fix_executor",
+      });
+
+      const applied = result.updated_bundle
+        .auto_fixes_applied as AutoFixesApplied;
+      // No recorded decision ⇒ admission proceeds. Whether prettier itself
+      // succeeds or fails on this machine is not the assertion; that it was
+      // ATTEMPTED is.
+      const attempted =
+        applied.executed_tools.includes("prettier") ||
+        applied.failed_tools.includes("prettier");
+      expect(attempted, "no decline ⇒ prettier must be attempted").toBeTruthy();
+    });
+  });
+
+  it("a recorded eslint decline surfaces as skipped coverage, never resolved:true", async () => {
+    await withTempDir("consent-syntax-", async (root: string) => {
+      await writeFixtureRepo(root);
+      // Flat config — the only form the runnable gate accepts.
+      await writeFileAsync(join(root, "eslint.config.js"), "module.exports = [];\n");
+      await persistAnalyzerConsent(root, { eslint: "declined" });
+      const policy = await loadAnalyzerPolicy(root);
+
+      const result = runSyntaxResolutionExecutor(
+        bundleWith(["src/api/auth.ts"]),
+        root,
+        { analyzerConsent: policy.analyzer_consent },
+      );
+
+      const statuses =
+        result.updated.external_analyzer_results?.find(
+          (r) => r.tool === "syntax_resolution_executor",
+        )?.tool_statuses ?? [];
+      const eslintStatus = statuses.find((s) => s.tool === "eslint");
+      expect(eslintStatus, "eslint status must be recorded").toBeTruthy();
+      expect(eslintStatus!.resolved).toBe(false);
+      expect(eslintStatus!.status).toBe("skipped");
+      expect(eslintStatus!.error).toContain("declined");
+    });
   });
 });

@@ -29,7 +29,7 @@ function bundleAfterIntake(): ArtifactBundle {
 
 test("disabled (no option) ⇒ hermetic empty marker, nothing spawned, results untouched", async () => {
   let spawned = false;
-  const run: BinaryCommandRunner = () => {
+  const run: BinaryCommandRunner = async () => {
     spawned = true;
     return { status: 0, stdout: "", stderr: "", argv: [], duration_ms: 1 };
   };
@@ -77,7 +77,7 @@ test("enabled ⇒ gitleaks (PATH-resolved) findings upserted + marker records st
     },
   ]);
 
-  const run: BinaryCommandRunner = (argv) => {
+  const run: BinaryCommandRunner = async (argv) => {
     // PATH probe for gitleaks (`gitleaks version`) succeeds so resolveBinary
     // returns the on-PATH binary and never downloads.
     if (argv.includes("version") && argv.includes("gitleaks")) {

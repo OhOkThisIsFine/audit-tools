@@ -1,6 +1,6 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
-import type { AnalyzerSetting } from "audit-tools/shared";
+import type { AnalyzerSetting, AnalyzerConsentTokenGrant } from "audit-tools/shared";
 import {
   runAcquisitionEngine,
   resolveBinaryCandidates,
@@ -30,16 +30,21 @@ export interface ExternalAcquisitionAdvanceOptions {
   enabled?: boolean;
   /** Injected network fetch for binary acquisition; defaults to a global-fetch adapter. */
   fetch?: BinaryFetcher;
-  /** Injected command runner (probe / spawn); defaults to the shared runTracked. */
+  /** Injected command runner (probe / spawn); defaults to the shared runTrackedAsync. */
   run?: BinaryCommandRunner;
-  /** Per-run consent token gating non-default candidates (semgrep / eslint). */
-  consentToken?: string;
+  /**
+   * Per-run, tool-SCOPED consent grant gating non-default candidates (semgrep /
+   * eslint / …). Typed as {@link AnalyzerConsentTokenGrant} — never a bare string —
+   * so a grant admits ONLY the candidates it names and an operator's recorded
+   * decline is overridden by nothing.
+   */
+  consentToken?: AnalyzerConsentTokenGrant;
   /** Per-analyzer resolution policy (auto|ephemeral|permanent|skip|repo). */
   analyzers?: Record<string, AnalyzerSetting>;
   /**
    * Item B: recorded consent decisions from session config. A recorded
-   * "granted" admits a non-default candidate without a per-run token; a
-   * per-run token still overrides a recorded "declined".
+   * "granted" admits a non-default candidate without a per-run grant; a
+   * recorded "declined" is terminal — no grant overrides it.
    */
   analyzerConsent?: Record<string, "granted" | "declined">;
   /** Override the binary cache dir / platform / arch (tests). */
@@ -113,7 +118,7 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     },
   );
 
-  const { results, statuses } = runAcquisitionEngine(candidates, root, {
+  const { results, statuses } = await runAcquisitionEngine(candidates, root, {
     run: options.run,
     resolvedBinaries,
     consentToken: options.consentToken,

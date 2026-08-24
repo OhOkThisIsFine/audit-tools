@@ -182,12 +182,19 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       options.externalAnalyzerResults,
     );
   },
+  // Both local-tooling executors receive the recorded consent decisions so a
+  // recorded operator decline of prettier/black/sqlfluff/tsc/eslint vetoes the
+  // spawn at the shared admitLocalSpawn chokepoint — the same decline-first
+  // rule the acquisition engine enforces, applied to repo-local tooling.
   auto_fix_executor: async (bundle, { options }) =>
-    runAutoFixExecutor(bundle, requireRoot(options.root, "auto_fix_executor")),
+    runAutoFixExecutor(bundle, requireRoot(options.root, "auto_fix_executor"), {
+      analyzerConsent: options.externalAcquisition?.analyzerConsent,
+    }),
   syntax_resolution_executor: async (bundle, { options }) =>
     runSyntaxResolutionExecutor(
       bundle,
       requireRoot(options.root, "syntax_resolution_executor"),
+      { analyzerConsent: options.externalAcquisition?.analyzerConsent },
     ),
   // friction_capture_executor is retained for schema compatibility but is unreachable:
   // the friction_capture_current obligation is not in deriveAuditState, so the engine

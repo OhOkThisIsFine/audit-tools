@@ -2,6 +2,7 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { AnalyzerConsentDecisions } from "audit-tools/shared";
 import { isAuditExcludedStatus } from "../extractors/disposition.js";
 import {
   resolveNodeTool,
@@ -12,9 +13,12 @@ import {
 function tryRunConfiguredFormatter(
   root: string,
   candidates: LocalCommandCandidate[],
+  analyzerConsent: AnalyzerConsentDecisions | undefined,
 ): "not_found" | "success" | "failed" {
-  const result = runFirstAvailableCommand(root, candidates);
+  const result = runFirstAvailableCommand(root, candidates, { analyzerConsent });
   if (result === null) return "not_found";
+  // A recorded operator decline refused every candidate of this formatter.
+  if (result.declinedReason) return "not_found";
   if (!result.error && result.exitCode === 0) return "success";
   return "failed";
 }
@@ -69,9 +73,10 @@ function runFormatter(
   executedTools: string[],
   failedTools: string[],
   toolTimings: { tool: string; duration_ms: number }[],
+  analyzerConsent: AnalyzerConsentDecisions | undefined,
 ): void {
   const start = Date.now();
-  const outcome = tryRunConfiguredFormatter(root, candidates);
+  const outcome = tryRunConfiguredFormatter(root, candidates, analyzerConsent);
   if (outcome === "success") {
     executedTools.push(toolName);
     toolTimings.push({ tool: toolName, duration_ms: Date.now() - start });
@@ -128,6 +133,15 @@ function pathsForExtensions(
 export async function runAutoFixExecutor(
   bundle: ArtifactBundle,
   root: string,
+  options: {
+    /**
+     * Recorded consent decisions (from the durable analyzer policy). A recorded
+     * `declined` for a formatter's tool id vetoes its spawn at the shared
+     * admitSpawn-family chokepoint — the same decline-first rule the acquired
+     * analyzers face, applied to local tooling. Nothing overrides it.
+     */
+    analyzerConsent?: AnalyzerConsentDecisions;
+  } = {},
 ): Promise<ExecutorRunResult> {
   if (!bundle.file_disposition) {
     throw new Error("Cannot run auto fix executor without file_disposition");
@@ -154,6 +168,10 @@ export async function runAutoFixExecutor(
   ]);
   if (prettierPaths.length > 0 && (await hasPrettierConfig(root))) {
     const display = `prettier --write (${prettierPaths.length} in-scope file${prettierPaths.length === 1 ? "" : "s"})`;
+    // NO npx fallback arm: `npx --yes prettier` fetches a package from the npm
+    // registry and executes it against the audited tree — an acquisition the
+    // consent chokepoint exists to gate, hidden inside a formatter resolution
+    // order. A formatter must resolve from what the repo/machine already has.
     runFormatter(root, "prettier", [
       ...resolveNodeTool(
         root,
@@ -162,8 +180,7 @@ export async function runAutoFixExecutor(
         display,
       ),
       { command: "prettier", args: ["--write", ...prettierPaths], display },
-      { command: "npx", args: ["--yes", "prettier", "--write", ...prettierPaths], display },
-    ], executedTools, failedTools, toolTimings);
+    ], executedTools, failedTools, toolTimings, options.analyzerConsent);
   }
 
   // Python
@@ -172,10 +189,18 @@ export async function runAutoFixExecutor(
     const display = `black (${pythonPaths.length} in-scope file${pythonPaths.length === 1 ? "" : "s"})`;
     runFormatter(root, "black", [
       { command: "black", args: [...pythonPaths], display },
-      { command: "python", args: ["-m", "black", ...pythonPaths], display },
-      { command: "uvx", args: ["black", ...pythonPaths], display },
-      { command: "pipx", args: ["run", "black", ...pythonPaths], display },
-    ], executedTools, failedTools, toolTimings);
+      // The runner-prefix arms declare their id explicitly — argv derivation
+      // would key them `python`/`uvx`/`pipx` and a recorded decline of `black`
+      // would never veto them.
+      {
+        command: "python",
+        args: ["-m", "black", ...pythonPaths],
+        display,
+        toolId: "black",
+      },
+      { command: "uvx", args: ["black", ...pythonPaths], display, toolId: "black" },
+      { command: "pipx", args: ["run", "black", ...pythonPaths], display, toolId: "black" },
+    ], executedTools, failedTools, toolTimings, options.analyzerConsent);
   }
 
   // SQL
@@ -184,9 +209,20 @@ export async function runAutoFixExecutor(
     const display = `sqlfluff fix --force (${sqlPaths.length} in-scope file${sqlPaths.length === 1 ? "" : "s"})`;
     runFormatter(root, "sqlfluff", [
       { command: "sqlfluff", args: ["fix", "--force", ...sqlPaths], display },
-      { command: "uvx", args: ["sqlfluff", "fix", "--force", ...sqlPaths], display },
-      { command: "pipx", args: ["run", "sqlfluff", "fix", "--force", ...sqlPaths], display },
-    ], executedTools, failedTools, toolTimings);
+      // Runner-prefix arms declare their id (see the black block above).
+      {
+        command: "uvx",
+        args: ["sqlfluff", "fix", "--force", ...sqlPaths],
+        display,
+        toolId: "sqlfluff",
+      },
+      {
+        command: "pipx",
+        args: ["run", "sqlfluff", "fix", "--force", ...sqlPaths],
+        display,
+        toolId: "sqlfluff",
+      },
+    ], executedTools, failedTools, toolTimings, options.analyzerConsent);
   }
 
   // Go
@@ -195,7 +231,7 @@ export async function runAutoFixExecutor(
     const display = `gofmt -w (${goPaths.length} in-scope file${goPaths.length === 1 ? "" : "s"})`;
     runFormatter(root, "gofmt", [
       { command: "gofmt", args: ["-w", ...goPaths], display },
-    ], executedTools, failedTools, toolTimings);
+    ], executedTools, failedTools, toolTimings, options.analyzerConsent);
   }
 
   const resultsArtifact = {

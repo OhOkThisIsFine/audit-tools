@@ -378,8 +378,9 @@ type AnalyzerConsentBranchResult =
 /**
  * Item B (consent surfacing) — the acquisition obligation's fold branch,
  * mirroring the analyzer-install consent fold exactly:
- *   - nothing pending (acquisition off / token present / all decided) → run the
- *     deterministic acquisition executor (`fallthrough`);
+ *   - nothing pending (acquisition off / this run's scoped grant covers every
+ *     applicable candidate / all decided) → run the deterministic acquisition
+ *     executor (`fallthrough`);
  *   - a decisions submission arrived on the `analyzer_consent` lane
  *     (`{ "<id>": "granted" | "declined" }`) → persist the decisions into
  *     session config (decisions durable, tokens never), fold them into the
@@ -399,6 +400,9 @@ export async function handleAnalyzerConsentBranch(
     analyzers: analyzersRef.value,
     externalAcquisitionEnabled: params.externalAcquisition?.enabled,
     analyzerConsent: params.externalAcquisition?.analyzerConsent,
+    // Typed as AnalyzerConsentTokenGrant end-to-end — the forwarding site takes
+    // the grant, never a bare string, so a candidate outside the grant's scope
+    // is still offered rather than silently admitted.
     acquisitionConsentToken: params.externalAcquisition?.consentToken,
   });
   if (pending.length === 0) return { action: "fallthrough" };

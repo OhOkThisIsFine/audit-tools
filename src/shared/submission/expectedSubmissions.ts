@@ -49,6 +49,14 @@ export interface ExpectedSubmissionLane {
   readonly lane: string;
   readonly submissionId: string;
   readonly promptSha256: string;
+  /**
+   * False for a lane whose submission the TOOL never reads — a host-side
+   * intermediate another lane consumes (the conceptual perspectives, which only
+   * the judge reads). Declared so the builder below can REFUSE one rather than
+   * mint an expectation that can never be satisfied or dropped. Absent/true is
+   * the ordinary lane.
+   */
+  readonly expected?: boolean;
 }
 
 /** Per-member verdict of a diff. */
@@ -76,12 +84,31 @@ function compareIds(left: string, right: string): number {
  * Build the set one emission owes. Entries are ordered by `submission_id` — a
  * content-derived key, never emission or filesystem order, so re-recording an
  * unchanged set produces byte-identical content.
+ *
+ * A lane declaring `expected: false` is REFUSED here, at the ONE seam every
+ * emitter builds its set through: the tool never reads that lane's submission,
+ * so an expectation recorded against it can never be satisfied or dropped —
+ * it would accumulate as a permanent, false shortfall the run reports forever.
+ * Throwing (not filtering) is the fail-closed shape: a caller that routes its
+ * un-expected lanes through this builder anyway has misstated what it owes,
+ * and a silently narrowed set would hide exactly that. The audit draw's
+ * materializer filters at its own boundary first; this is the backstop that
+ * makes the filter's omission non-optional.
  */
 export function buildExpectedSubmissionSet(params: {
   readonly runId: string;
   readonly paths: SubmissionRoots;
   readonly lanes: readonly ExpectedSubmissionLane[];
 }): ExpectedSubmissionSet {
+  const unexpected = params.lanes.filter((lane) => lane.expected === false);
+  if (unexpected.length > 0) {
+    throw new Error(
+      `buildExpectedSubmissionSet refused ${unexpected.length} un-expected lane(s): ` +
+        `${unexpected.map((lane) => `'${lane.lane}'`).join(", ")}. The tool never reads ` +
+        "a lane whose submission another lane consumes, so recording one would mint an " +
+        "expectation no submission can ever satisfy — filter it out before building the set.",
+    );
+  }
   const entries = params.lanes.map((lane) => ({
     submission_id: lane.submissionId,
     lane: lane.lane,

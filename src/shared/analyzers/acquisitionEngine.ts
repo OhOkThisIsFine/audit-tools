@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { runTracked, type RunTrackedResult } from "../tooling/exec.js";
+import { runTrackedAsync, type RunTrackedResult } from "../tooling/exec.js";
 import type { AnalyzerSetting } from "../analyzerPolicy.js";
 import {
   normalizeGenericExternalResults,
@@ -195,8 +195,14 @@ function runnerPrefix(runner: EcosystemRunner, spec: string): string[] {
   }
 }
 
+/**
+ * The async command-runner seam. Analyzer spawns run on
+ * {@link runTrackedAsync} (the shared exec boundary's async twin) so a stalled
+ * child cannot block the event loop and starve the liveness/file-lock
+ * heartbeats; tests inject an async fake at this seam.
+ */
 export interface AcquisitionRunner {
-  (argv: string[], cwd: string): RunTrackedResult;
+  (argv: string[], cwd: string): Promise<RunTrackedResult>;
 }
 
 /** A recorded, durable operator decision for one analyzer. */
@@ -207,8 +213,10 @@ export type AnalyzerConsentDecisions = Record<string, AnalyzerConsentDecision>;
 
 /**
  * A consent token SCOPED to the analyzers the operator was actually offered. This is
- * the form a caller should issue: the grant names its tools, so a grant obtained by
+ * THE form a caller issues: the grant names its tools, so a grant obtained by
  * offering one analyzer cannot silently admit an analyzer the operator never saw.
+ * The former unscoped bare-string form is retired — a run-wide token is expressed
+ * as a grant naming every candidate the run offered.
  */
 export interface AnalyzerConsentTokenGrant {
   /** Opaque per-run value; never persisted (pinned by the strict AnalyzerPolicy schema). */
@@ -217,24 +225,15 @@ export interface AnalyzerConsentTokenGrant {
   readonly tools: readonly string[];
 }
 
-/**
- * What a caller may present as consent for this run.
- *
- * ⚠ The bare-string form is UNSCOPED — it authorizes every undecided candidate in the
- * run. It remains accepted only because retiring it is a caller-side change owned by
- * the acquisition entry point's own node; new callers should issue an
- * {@link AnalyzerConsentTokenGrant}, which the chokepoint enforces per candidate.
- */
-export type AnalyzerConsentTokenInput = string | AnalyzerConsentTokenGrant;
-
 export interface AcquisitionEngineOptions {
   /**
-   * Per-run consent token. REQUIRED to spawn any non-DEFAULT candidate (and any
-   * candidate whose setting is ephemeral/permanent) that has no recorded "granted"
-   * decision. Absent ⇒ only the DEFAULT set runs; everything else is reported
-   * `skipped` with a consent note. A token NEVER overrides a recorded "declined".
+   * Per-run, tool-SCOPED consent grant. REQUIRED to spawn any non-DEFAULT candidate
+   * (and any candidate whose setting is ephemeral/permanent) that has no recorded
+   * "granted" decision. Absent ⇒ only the DEFAULT set runs; everything else is
+   * reported `skipped` with a consent note. A grant admits ONLY the candidates it
+   * names — and NEVER overrides a recorded "declined".
    */
-  consentToken?: AnalyzerConsentTokenInput;
+  consentToken?: AnalyzerConsentTokenGrant;
   /** Per-analyzer settings (auto|ephemeral|permanent|skip|repo). */
   analyzers?: Record<string, AnalyzerSetting>;
   /**
@@ -281,22 +280,17 @@ export const ANALYZER_DENIAL_REASONS = {
 } as const;
 
 /**
- * Does this consent input authorize THIS candidate?
+ * Does this consent grant authorize THIS candidate?
  *
- * A scoped grant authorizes exactly the tools it names — a grant obtained by offering
- * tool A cannot admit tool B. The legacy bare string carries no scope, so it can only
- * be read as run-wide; it is accepted for compatibility with the acquisition entry
- * point that still issues one, and is deliberately reported distinctly here so the
- * unscoped case is visible rather than indistinguishable from a scoped grant.
+ * A grant authorizes exactly the tools it names — a grant obtained by offering
+ * tool A cannot admit tool B. There is deliberately no run-wide form: a caller
+ * that was authorized for everything issues a grant naming everything it offered.
  */
 function consentTokenAdmits(
-  consentToken: AnalyzerConsentTokenInput | undefined,
+  consentToken: AnalyzerConsentTokenGrant | undefined,
   candidateId: string,
 ): "admit" | "out_of_scope" | "absent" {
   if (consentToken === undefined || consentToken === null) return "absent";
-  if (typeof consentToken === "string") {
-    return consentToken.trim().length > 0 ? "admit" : "absent";
-  }
   if (typeof consentToken.value !== "string" || consentToken.value.trim().length === 0) {
     return "absent";
   }
@@ -320,7 +314,7 @@ function consentTokenAdmits(
 export function admitSpawn(
   candidate: ExternalAnalyzerCandidate,
   setting: AnalyzerSetting,
-  consentToken: AnalyzerConsentTokenInput | undefined,
+  consentToken: AnalyzerConsentTokenGrant | undefined,
   recordedDecision?: AnalyzerConsentDecision,
 ): string | undefined {
   // A recorded refusal is terminal and is read BEFORE anything else — including the
@@ -337,21 +331,88 @@ export function admitSpawn(
 }
 
 /**
+ * Local (non-analyzer) spawn admission for the deterministic executors that run
+ * repo tooling in place — formatters, syntax resolvers. The decline-first rule
+ * is ONE rule regardless of WHAT spawns: a recorded operator `declined` for a
+ * tool id vetoes every spawn of that id, exactly as {@link admitSpawn} does for
+ * acquired analyzers, and nothing overrides it. Everything else about a local
+ * command (resolution order, fallbacks) stays its executor's own business; this
+ * gate adds only the veto, so "the operator said no to this tool" can never
+ * resolve into a spawn.
+ *
+ * Deliberately narrower than {@link admitSpawn}: a formatter is not an acquired
+ * analyzer — there is no per-run consent offer and no DEFAULT-set notion, only
+ * the operator's own refusal. The FULL argv is passed, not just `command`, so
+ * the reduction sees a `process.execPath` invocation's script
+ * (`node …/prettier.cjs` is `prettier`, never `node` — keying the executable
+ * alone would let a recorded decline of `prettier` sail past the repo-local
+ * `node_modules` arm). An arm whose real tool sits deeper in the argv than the
+ * script (`python -m black`, `uvx black`, `pipx run black`) cannot be derived
+ * — pass its id as `declaredToolId`; a declared id always wins over derivation.
+ */
+export function admitLocalSpawn(
+  argv: readonly string[],
+  recordedDecisions: AnalyzerConsentDecisions | undefined,
+  declaredToolId?: string,
+): string | undefined {
+  const id = declaredToolId ?? localToolIdFor(argv);
+  if (recordedDecisions?.[id] === "declined") {
+    return ANALYZER_DENIAL_REASONS.consent_declined;
+  }
+  return undefined;
+}
+
+function lastPathSegment(pathLike: string): string {
+  const segments = pathLike.split(/[\\/]/u);
+  return segments[segments.length - 1] ?? pathLike;
+}
+
+/**
+ * Strip the suffixes a tool id hides behind: the Windows shim extensions
+ * (`.cmd`/`.bat`/`.exe`/`.com`) and the JS script extensions a `node <script>`
+ * invocation runs through (`.js`/`.cjs`/`.mjs`). `prettier.cjs` — the actual
+ * entrypoint inside the prettier package — has to reduce to `prettier`, or a
+ * recorded decline of `prettier` never matches the arm that runs it.
+ */
+function stripLauncherSuffix(executableName: string): string {
+  return executableName.replace(/\.(cmd|bat|exe|com|cjs|mjs|js)$/iu, "");
+}
+
+/**
+ * Reduce a local spawn's ARGV to its registry key: the executable's basename
+ * with any launcher suffix stripped. `C:\repo\node_modules\.bin\prettier.cmd`,
+ * `/usr/bin/prettier`, and `prettier` all reduce to `prettier`. For a
+ * `process.execPath` invocation (`node <script>`) the SCRIPT name is the key,
+ * since that is the tool actually running. A runner-prefix arm whose real tool
+ * is a later argv token (`python -m black`, `uvx black`, `pipx run black`)
+ * deliberately does NOT reduce to that tool — the caller declares its id
+ * instead ({@link admitLocalSpawn}), because argv archaeology cannot tell a
+ * tool argument from an ordinary flag.
+ */
+export function localToolIdFor(argv: readonly string[]): string {
+  const [first = "", second = ""] = argv;
+  if (first === process.execPath && second.length > 0) {
+    return stripLauncherSuffix(lastPathSegment(second));
+  }
+  return stripLauncherSuffix(lastPathSegment(first));
+}
+
+/**
  * The run-safety gate, written once: capability-probe the runner, then (if the
  * probe passes) the caller may spawn the pinned, read-only argv. Returns the
  * probe outcome so a missing runner degrades to an empty result + a status.
  */
-export function runSafetyGate(
+export async function runSafetyGate(
   candidate: ExternalAnalyzerCandidate,
   run: AcquisitionRunner,
   root: string,
-): { ok: true } | { ok: false; reason: string } {
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   // Pinned version is mandatory for reproducibility — a candidate without a
   // pinned tool spec is never executed (degrades to empty + status).
   if (!candidate.spec || candidate.spec.trim().length === 0) {
     return { ok: false, reason: `tool '${candidate.id}' has no pinned version spec` };
   }
-  const probe = run(runnerProbeArgv(candidate.runner), root);
+  const probe = await run(runnerProbeArgv(candidate.runner), root);
   if (probe.error || probe.status !== 0) {
     return {
       ok: false,
@@ -384,11 +445,11 @@ export interface AcquisitionOutcome {
  * output through the adapter seam. Never throws; always returns exactly one
  * {@link ExternalAnalyzerToolStatus} alongside the (possibly empty) results.
  */
-export function runExternalAnalyzer(
+export async function runExternalAnalyzer(
   candidate: ExternalAnalyzerCandidate,
   root: string,
   options: AcquisitionEngineOptions = {},
-): AcquisitionOutcome {
+): Promise<AcquisitionOutcome> {
   if (OWNED_TOOL_IDS.has(candidate.id)) {
     // Defence in depth — registration already rejects these.
     return {
@@ -402,7 +463,10 @@ export function runExternalAnalyzer(
     };
   }
 
-  const run = options.run ?? ((argv, cwd) => runTracked(argv, { cwd }));
+  // The async shared runner (runTrackedAsync), never the synchronous twin: a
+  // synchronous child would block this loop and starve every liveness /
+  // file-lock heartbeat in the process for the length of one stalled probe.
+  const run = options.run ?? ((argv, cwd) => runTrackedAsync(argv, { cwd }));
   const log = options.log ?? (() => {});
   const setting = settingFor(options.analyzers, candidate.id);
 
@@ -445,7 +509,7 @@ export function runExternalAnalyzer(
     }
     prefix = [resolved];
   } else {
-    const gate = runSafetyGate(candidate, run, root);
+    const gate = await runSafetyGate(candidate, run, root);
     if (!gate.ok) {
       log("[f5] %s safety gate failed: %s", candidate.id, gate.reason);
       return {
@@ -460,7 +524,7 @@ export function runExternalAnalyzer(
   const command = argv.join(" ");
   let result: RunTrackedResult;
   try {
-    result = run(argv, root);
+    result = await run(argv, root);
   } catch (error) {
     return {
       results: emptyResults(candidate.id),
@@ -726,16 +790,18 @@ export interface RunAllOutcome {
  * collecting one status per candidate. Owned tools are rejected at registration;
  * each survivor passes through the spawn-admission chokepoint and run-safety gate.
  */
-export function runAcquisitionEngine(
+export async function runAcquisitionEngine(
   candidates: ExternalAnalyzerCandidate[],
   root: string,
   options: AcquisitionEngineOptions = {},
-): RunAllOutcome {
+): Promise<RunAllOutcome> {
   const registered = registerExternalAnalyzers(candidates);
   const results: ExternalAnalyzerResults[] = [];
   const statuses: ExternalAnalyzerToolStatus[] = [];
   for (const candidate of registered) {
-    const outcome = runExternalAnalyzer(candidate, root, options);
+    // Sequential by design: one analyzer at a time keeps the spawn set bounded
+    // and the status order deterministic (registration order).
+    const outcome = await runExternalAnalyzer(candidate, root, options);
     statuses.push(outcome.status);
     if (outcome.results.results.length > 0 || outcome.results.graph_edges?.length) {
       results.push(outcome.results);

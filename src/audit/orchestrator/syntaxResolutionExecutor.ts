@@ -5,6 +5,7 @@ import {
   type ExternalAnalyzerResults,
   type ExternalAnalyzerResultItem,
   type ExternalAnalyzerToolStatus,
+  type AnalyzerConsentDecisions,
 } from "audit-tools/shared";
 import {
   EXTERNAL_ANALYZER_STATUS_CLASSIFICATION,
@@ -165,6 +166,22 @@ function commandErrorResult(
   command: ReturnType<typeof runFirstAvailableCommand>,
   results: ExternalAnalyzerResultItem[],
 ): { results: ExternalAnalyzerResultItem[]; status: ExternalAnalyzerToolStatus } {
+  // A declined candidate resolves to a record with NO command and NO error —
+  // only `declinedReason`. `Boolean(record)` alone would read that refusal as
+  // "the tool resolved and ran", so the status must branch on the decline
+  // marker first: a vetoed spawn is coverage the operator refused, not a
+  // resolution failure — and never a resolved:true run.
+  if (command?.declinedReason) {
+    return {
+      results,
+      status: {
+        tool,
+        resolved: false,
+        status: "skipped",
+        error: command.declinedReason,
+      },
+    };
+  }
   return {
     results,
     status: {
@@ -178,7 +195,10 @@ function commandErrorResult(
   };
 }
 
-function runTsc(root: string): {
+function runTsc(
+  root: string,
+  analyzerConsent: AnalyzerConsentDecisions | undefined,
+): {
   results: ExternalAnalyzerResultItem[];
   status: ExternalAnalyzerToolStatus;
 } {
@@ -191,8 +211,8 @@ function runTsc(root: string): {
       "tsc --noEmit",
     ),
     { command: "tsc", args: ["--noEmit"], display: "tsc --noEmit" },
-  ]);
-  if (!command || command.error) {
+  ], { analyzerConsent });
+  if (!command || command.error || command.declinedReason) {
     return commandErrorResult("tsc", command, results);
   }
 
@@ -259,7 +279,10 @@ function runTsc(root: string): {
   };
 }
 
-function runEslint(root: string): {
+function runEslint(
+  root: string,
+  analyzerConsent: AnalyzerConsentDecisions | undefined,
+): {
   results: ExternalAnalyzerResultItem[];
   status: ExternalAnalyzerToolStatus;
 } {
@@ -287,8 +310,8 @@ function runEslint(root: string): {
       display,
     ),
     { command: "eslint", args, display },
-  ]);
-  if (!command || command.error) {
+  ], { analyzerConsent });
+  if (!command || command.error || command.declinedReason) {
     return commandErrorResult("eslint", command, results);
   }
 
@@ -356,9 +379,20 @@ function runEslint(root: string): {
   };
 }
 
+export interface SyntaxResolutionExecutorOptions {
+  /**
+   * Recorded consent decisions (from the durable analyzer policy). A recorded
+   * `declined` for `tsc` or `eslint` vetoes that spawn at the shared
+   * admitLocalSpawn chokepoint — the same decline-first rule every other local
+   * tooling spawn faces.
+   */
+  analyzerConsent?: AnalyzerConsentDecisions;
+}
+
 export function runSyntaxResolutionExecutor(
   bundle: ArtifactBundle,
   root: string,
+  options: SyntaxResolutionExecutorOptions = {},
 ): ExecutorRunResult {
   const items: ExternalAnalyzerResultItem[] = [];
   const toolStatuses: ExternalAnalyzerToolStatus[] = [];
@@ -367,7 +401,7 @@ export function runSyntaxResolutionExecutor(
     hasTypeScriptConfig(root) &&
     bundle.file_disposition?.files.some((f) => f.path.endsWith(".ts"))
   ) {
-    const tsc = runTsc(root);
+    const tsc = runTsc(root, options.analyzerConsent);
     items.push(...tsc.results);
     toolStatuses.push(tsc.status);
   }
@@ -376,7 +410,7 @@ export function runSyntaxResolutionExecutor(
       (f) => f.path.endsWith(".ts") || f.path.endsWith(".js"),
     )
   ) {
-    const eslint = runEslint(root);
+    const eslint = runEslint(root, options.analyzerConsent);
     items.push(...eslint.results);
     toolStatuses.push(eslint.status);
   }

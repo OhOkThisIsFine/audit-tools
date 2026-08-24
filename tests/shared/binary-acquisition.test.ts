@@ -60,7 +60,7 @@ function fetcher({ asset = ASSET_BYTES, digest }: { asset?: Uint8Array; digest?:
 // A runner that fails the PATH probe and, for `tar`, "extracts" by writing the
 // expected binary into the version dir (-C target).
 function offlineRunnerExtractingTo(binaryName: string): BinaryCommandRunner {
-  return (argv: string[]): RunTrackedResult => {
+  return async (argv: string[]): Promise<RunTrackedResult> => {
     if (argv[0] === "tar") {
       const dashC = argv.indexOf("-C");
       const dir = argv[dashC + 1];
@@ -74,7 +74,13 @@ function offlineRunnerExtractingTo(binaryName: string): BinaryCommandRunner {
 
 function pathRunner(): BinaryCommandRunner {
   // PATH probe succeeds.
-  return (argv: string[]): RunTrackedResult => ({ status: 0, stdout: "gitleaks 8.x", stderr: "", argv, duration_ms: 1 });
+  return async (argv: string[]): Promise<RunTrackedResult> => ({
+    status: 0,
+    stdout: "gitleaks 8.x",
+    stderr: "",
+    argv,
+    duration_ms: 1,
+  });
 }
 
 // HERMETICITY: several cases below resolve with NO `cacheDir` argument, i.e. through
@@ -210,7 +216,7 @@ test("resolveBinary(archived:false) writes the verified bytes directly as the ex
       throw new Error("tar must never be invoked for a non-archived asset");
     };
     const res = await resolveBinary(rawSpec, {
-      run: (argv) => {
+      run: async (argv) => {
         if (argv[0] === "tar") return runNeverCallsTar();
         // PATH version-probe fails (forces the download path).
         return { status: 1, stdout: "", stderr: "not found", argv, duration_ms: 1, error: new Error("ENOENT") };
@@ -238,7 +244,14 @@ test("resolveBinary(archived:false) still refuses a checksum mismatch", async ()
       archived: false,
     });
     const res = await resolveBinary(rawSpec, {
-      run: (argv) => ({ status: 1, stdout: "", stderr: "", argv, duration_ms: 1, error: new Error("ENOENT") }),
+      run: async (argv) => ({
+        status: 1,
+        stdout: "",
+        stderr: "",
+        argv,
+        duration_ms: 1,
+        error: new Error("ENOENT"),
+      }),
       fetch: async (url) =>
         url.endsWith("SHA256SUMS")
           ? new TextEncoder().encode(`${"0".repeat(64)}  osv-scanner_linux_amd64\n`)
@@ -317,11 +330,11 @@ test("resolveBinaryCandidates skips a non-default binary without a consent token
   }
 });
 
-test("runExternalAnalyzer runs a binary candidate via its resolved path", () => {
+test("runExternalAnalyzer runs a binary candidate via its resolved path", async () => {
   const captured: string[][] = [];
-  const out = runExternalAnalyzer(binaryCandidate(), "/repo", {
+  const out = await runExternalAnalyzer(binaryCandidate(), "/repo", {
     resolvedBinaries: { gitleaks: "/cache/gitleaks" },
-    run: (argv) => {
+    run: async (argv) => {
       captured.push(argv);
       return { status: 0, stdout: "[]", stderr: "", argv, duration_ms: 1 };
     },
@@ -330,10 +343,10 @@ test("runExternalAnalyzer runs a binary candidate via its resolved path", () => 
   expect(captured[0]).toEqual(["/cache/gitleaks", "detect", "--source", "/repo"]);
 });
 
-test("runExternalAnalyzer reports not_resolved when a binary was not acquired", () => {
-  const out = runExternalAnalyzer(binaryCandidate(), "/repo", {
+test("runExternalAnalyzer reports not_resolved when a binary was not acquired", async () => {
+  const out = await runExternalAnalyzer(binaryCandidate(), "/repo", {
     resolvedBinaries: {},
-    run: () => ({ status: 0, stdout: "", stderr: "", argv: [], duration_ms: 1 }),
+    run: async () => ({ status: 0, stdout: "", stderr: "", argv: [], duration_ms: 1 }),
   });
   expect(out.status.status).toBe("not_resolved");
   expect(out.results.results.length).toBe(0);
@@ -399,7 +412,9 @@ test("inv-6: a FAILED extraction leaves nothing a later resolution can take as a
   const cacheDir = await mkdtemp(join(tmpdir(), "bincache-"));
   try {
     // tar writes the executable and THEN fails — the partial-extract case.
-    const partialExtractThenFail: BinaryCommandRunner = (argv: string[]): RunTrackedResult => {
+    const partialExtractThenFail: BinaryCommandRunner = async (
+      argv: string[],
+    ): Promise<RunTrackedResult> => {
       if (argv[0] === "tar") {
         const dir = argv[argv.indexOf("-C") + 1];
         writeFileSync(join(dir, "gitleaks"), "#!/bin/sh\nhalf-extracted\n");
@@ -549,7 +564,7 @@ test("inv-4: a consent-denied binary candidate fetches NOTHING (no download, not
 
 /** A win32 runner: the PATH probe fails and the archive tool writes `<name>.exe`. */
 function win32ExtractingRunner(binaryName: string): BinaryCommandRunner {
-  return (argv: string[]): RunTrackedResult => {
+  return async (argv: string[]): Promise<RunTrackedResult> => {
     if (argv[0] === "tar") {
       const dir = argv[argv.indexOf("-C") + 1];
       writeFileSync(join(dir, `${binaryName}.exe`), "MZ-fake-windows-binary");
@@ -615,7 +630,7 @@ test("inv-14: win32 archived:false writes the verified bytes straight to <name>.
       archived: false,
     });
     const res = await resolveBinary(rawSpec, {
-      run: (argv: string[]): RunTrackedResult => {
+      run: async (argv: string[]): Promise<RunTrackedResult> => {
         if (argv[0] === "tar") throw new Error("tar must never run for a non-archived asset");
         return {
           status: 1,

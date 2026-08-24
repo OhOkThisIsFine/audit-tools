@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type {
   ExternalAnalyzerCandidate,
@@ -11,12 +11,18 @@ import type {
 const {
   OWNED_TOOL_IDS,
   admitSpawn,
+  admitLocalSpawn,
+  localToolIdFor,
   runSafetyGate,
   runExternalAnalyzer,
   registerExternalAnalyzers,
   runAcquisitionEngine,
   detectNodeEcosystem,
 } = await import("../../src/shared/analyzers/acquisitionEngine.js");
+
+const { runFirstAvailableCommand } = await import(
+  "../../src/audit/orchestrator/localCommands.js"
+);
 
 // F5 inv-8 imports the SAME pre-shipped merge-helper seam pair F6 consumes. The
 // top-level await below means a half-shipped state (F5 producers present, seam
@@ -28,10 +34,11 @@ const { mergeAnalyzerRiskSignals } = await import(
   "../../src/audit/extractors/risk.js"
 );
 
-// A fake runner: capability probe (`--version`) succeeds; the real tool spawn
-// returns a canned JSON payload one finding + one edge.
+// A fake ASYNC runner (the post-migration AcquisitionRunner contract): capability
+// probe (`--version`) succeeds; the real tool spawn returns a canned JSON payload
+// one finding + one edge.
 function fakeRunner({ probeOk = true, toolStdout = "[]", throwOnTool = false } = {}) {
-  return (argv: string[], _cwd?: string) => {
+  return async (argv: string[], _cwd?: string) => {
     if (argv.includes("--version")) {
       return probeOk
         ? { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 }
@@ -40,6 +47,14 @@ function fakeRunner({ probeOk = true, toolStdout = "[]", throwOnTool = false } =
     if (throwOnTool) throw new Error("spawn blew up");
     return { status: 0, stdout: toolStdout, stderr: "", argv, duration_ms: 1 };
   };
+}
+
+/**
+ * A per-run consent GRANT naming the candidate under test — the only token form
+ * the chokepoint accepts now that the unscoped bare-string form is retired.
+ */
+function grantFor(id: string, value = "consent-token"): { value: string; tools: string[] } {
+  return { value, tools: [id] };
 }
 
 function candidate(overrides: Partial<ExternalAnalyzerCandidate> = {}): ExternalAnalyzerCandidate {
@@ -76,20 +91,95 @@ test("admitSpawn: non-DEFAULT tool is denied without a consent token (any settin
   }
 });
 
-test("admitSpawn: CE-005 revised — non-default tool needs token OR recorded 'granted' decision", () => {
+test("admitSpawn: CE-005 revised — non-default tool needs a SCOPED grant OR recorded 'granted' decision", () => {
   const c = candidate({ defaultRun: false });
-  // No token, no decision: denied
+  // No grant, no decision: denied
   expect(typeof admitSpawn(c, "permanent", undefined) === "string").toBeTruthy();
-  // With token: admitted
-  expect(admitSpawn(c, "permanent", "consent-xyz")).toBe(undefined);
-  // With recorded "granted": admitted (even without token)
+  // With a grant NAMING this tool: admitted
+  expect(admitSpawn(c, "permanent", grantFor("eslint", "consent-xyz"))).toBe(undefined);
+  // With recorded "granted": admitted (even without a grant)
   expect(admitSpawn(c, "permanent", undefined, "granted")).toBe(undefined);
-  // With recorded "declined" but no token: denied
+  // With recorded "declined" but no grant: denied
   expect(typeof admitSpawn(c, "permanent", undefined, "declined") === "string").toBeTruthy();
 });
 
-test("admitSpawn: skip is decisive regardless of token", () => {
-  expect(typeof admitSpawn(candidate({ defaultRun: true }), "skip", "tok") === "string").toBeTruthy();
+test("admitSpawn: skip is decisive regardless of grant", () => {
+  expect(typeof admitSpawn(candidate({ defaultRun: true }), "skip", grantFor("eslint", "tok")) === "string").toBeTruthy();
+});
+
+test("F5 inv-1 [decline-first]: a recorded decline refuses outright even under a valid grant naming the tool", () => {
+  const c = candidate({ defaultRun: false });
+  const reason = admitSpawn(c, "auto", grantFor("eslint"), "declined");
+  expect(typeof reason, "no consent input overrides a recorded operator decline").toBe("string");
+  expect(reason).toMatch(/declined/i);
+});
+
+test("F5 inv-1 [scoped grant]: a grant naming OTHER tools admits nothing here — out-of-scope is visible, not silent admission", () => {
+  const c = candidate({ id: "eslint", defaultRun: false });
+  const semgrepGrant = { value: "consent-token", tools: ["semgrep"] };
+  const reason = admitSpawn(c, "auto", semgrepGrant);
+  expect(typeof reason, "a grant obtained by offering semgrep cannot admit eslint").toBe("string");
+  expect(reason).toMatch(/out.of.scope|scope|not named/i);
+});
+
+test("localToolIdFor: a process.execPath invocation keys on its SCRIPT, never the executable", () => {
+  // The repo-local arm's exact shape: `node <root>/node_modules/prettier/bin/prettier.cjs`.
+  expect(
+    localToolIdFor([process.execPath, join("x", "node_modules", "prettier", "bin", "prettier.cjs")]),
+    "the script is the tool actually running — prettier, not node",
+  ).toBe("prettier");
+  // Shim spellings reduce to the same key.
+  expect(localToolIdFor([join("a", ".bin", "prettier.cmd")])).toBe("prettier");
+  expect(localToolIdFor(["prettier"])).toBe("prettier");
+  // A bare executable with no script token keeps the executable as key.
+  expect(localToolIdFor(["gofmt", "-w"])).toBe("gofmt");
+});
+
+test("admitLocalSpawn: a recorded decline refuses by derived id AND declared id alike", () => {
+  // Derived from full argv — including the node_modules script shape.
+  expect(
+    typeof admitLocalSpawn(
+      [process.execPath, join("r", "node_modules", "prettier", "bin", "prettier.cjs")],
+      { prettier: "declined" },
+    ),
+  ).toBe("string");
+  // Declared id wins over derivation (the runner-prefix arms): `uvx black`
+  // keys as `uvx` by argv, so only the declared id can carry the refusal.
+  expect(typeof admitLocalSpawn(["uvx", "black"], { black: "declined" }, "black")).toBe("string");
+  expect(admitLocalSpawn(["uvx", "black"], { black: "declined" })).toBeUndefined();
+  // No decline for this id ⇒ admitted.
+  expect(admitLocalSpawn(["gofmt", "-w"], { prettier: "declined" })).toBeUndefined();
+});
+
+test("admitLocalSpawn [decline-first]: declined:{prettier} vetoes the node_modules/prettier/bin/prettier.cjs arm", async () => {
+  // A temp root whose node_modules arm RESOLVES (the script exists on disk), so
+  // this pins the real resolution order: the node arm is tried FIRST and must
+  // be refused by the recorded decline rather than spawning. A spawned run
+  // would come back with an exitCode and NO declinedReason, so both assertions
+  // discriminate.
+  const root = await mkdtemp(join(tmpdir(), "admit-local-"));
+  try {
+    const scriptPath = join(root, "node_modules", "prettier", "bin", "prettier.cjs");
+    await mkdir(dirname(scriptPath), { recursive: true });
+    await writeFile(scriptPath, "// fake prettier entrypoint\n");
+
+    const result = runFirstAvailableCommand(
+      root,
+      [
+        {
+          command: process.execPath,
+          args: [scriptPath, "--version"],
+          display: "prettier --version",
+        },
+        { command: "prettier", args: ["--version"], display: "prettier --version" },
+      ],
+      { analyzerConsent: { prettier: "declined" } },
+    );
+    expect(result?.declinedReason, "a recorded decline must surface as the outcome").toMatch(/declined/i);
+    expect(result?.exitCode, "nothing may spawn under a recorded decline").toBeNull();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("registerExternalAnalyzers: own-vs-acquire rejects git-history at registration", () => {
@@ -105,41 +195,41 @@ test("registerExternalAnalyzers: own-vs-acquire rejects git-history at registrat
   expect(OWNED_TOOL_IDS.has("secret-scan")).toBe(false);
 });
 
-test("runSafetyGate: missing runner degrades (probe fails → ok:false)", () => {
-  const gate = runSafetyGate(candidate(), fakeRunner({ probeOk: false }), "/root");
+test("runSafetyGate: missing runner degrades (probe fails → ok:false)", async () => {
+  const gate = await runSafetyGate(candidate(), fakeRunner({ probeOk: false }), "/root");
   expect(gate.ok).toBe(false);
 });
 
-test("runSafetyGate: F5 inv-1 — candidate lacking a pinned version is never executed (degrades)", () => {
+test("runSafetyGate: F5 inv-1 — candidate lacking a pinned version is never executed (degrades)", async () => {
   for (const spec of ["", "   ", undefined]) {
-    const gate = runSafetyGate(candidate({ spec }), fakeRunner({ probeOk: true }), "/root");
+    const gate = await runSafetyGate(candidate({ spec }), fakeRunner({ probeOk: true }), "/root");
     expect(gate.ok, `spec=${JSON.stringify(spec)} must fail the gate`).toBe(false);
     expect(!gate.ok ? gate.reason : undefined).toMatch(/pinned version/);
   }
 });
 
-test("runExternalAnalyzer: F5 inv-1 — unpinned candidate yields empty results + a tool_status, never spawns the tool", () => {
+test("runExternalAnalyzer: F5 inv-1 — unpinned candidate yields empty results + a tool_status, never spawns the tool", async () => {
   let toolSpawned = false;
-  const run = (argv: string[], cwd?: string) => {
+  const run = async (argv: string[], cwd?: string) => {
     if (!argv.includes("--version")) toolSpawned = true;
     return fakeRunner({ toolStdout: findingPayload })(argv, cwd);
   };
-  const out = runExternalAnalyzer(candidate({ defaultRun: true, spec: "" }), "/root", { run });
+  const out = await runExternalAnalyzer(candidate({ defaultRun: true, spec: "" }), "/root", { run });
   expect(toolSpawned, "an unpinned tool must never be spawned").toBe(false);
   expect(out.status.status).toBe("not_resolved");
   expect(out.status.error).toMatch(/pinned version/);
   expect(out.results.results.length).toBe(0);
 });
 
-test("runExternalAnalyzer: non-default tool without consent is reported skipped (never silently)", () => {
-  const out = runExternalAnalyzer(candidate(), "/root", { run: fakeRunner({ toolStdout: findingPayload }) });
+test("runExternalAnalyzer: non-default tool without consent is reported skipped (never silently)", async () => {
+  const out = await runExternalAnalyzer(candidate(), "/root", { run: fakeRunner({ toolStdout: findingPayload }) });
   expect(out.status.status).toBe("skipped");
   expect(out.results.results.length).toBe(0);
 });
 
-test("runExternalAnalyzer: with consent token, runs + normalizes through the adapter seam", () => {
-  const out = runExternalAnalyzer(candidate(), "/root", {
-    consentToken: "tok",
+test("runExternalAnalyzer: with a SCOPED consent grant naming the tool, runs + normalizes through the adapter seam", async () => {
+  const out = await runExternalAnalyzer(candidate(), "/root", {
+    consentToken: grantFor("eslint", "tok"),
     run: fakeRunner({ toolStdout: findingPayload }),
   });
   expect(out.status.status).toBe("findings");
@@ -151,74 +241,74 @@ test("runExternalAnalyzer: with consent token, runs + normalizes through the ada
   expect(out.results.graph_edges?.[0].from).toBe("src/a.ts");
 });
 
-test("runExternalAnalyzer: default tool runs without a token", () => {
-  const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
+test("runExternalAnalyzer: default tool runs without a grant", async () => {
+  const out = await runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
     run: fakeRunner({ toolStdout: findingPayload }),
   });
   expect(out.status.status).toBe("findings");
 });
 
-test("runExternalAnalyzer: duration_ms is carried from RunTrackedResult to status", () => {
-  const customRun = (argv: string[], _cwd?: string) => {
+test("runExternalAnalyzer: duration_ms is carried from RunTrackedResult to status", async () => {
+  const customRun = async (argv: string[], _cwd?: string) => {
     if (argv.includes("--version")) {
       return { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 42 };
     }
     return { status: 0, stdout: findingPayload, stderr: "", argv, duration_ms: 100 };
   };
-  const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", { run: customRun });
+  const out = await runExternalAnalyzer(candidate({ defaultRun: true }), "/root", { run: customRun });
   expect(out.status.duration_ms).toBe(100);
 });
 
-test("runExternalAnalyzer: capability-probe failure degrades to empty + not_resolved status", () => {
-  const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
+test("runExternalAnalyzer: capability-probe failure degrades to empty + not_resolved status", async () => {
+  const out = await runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
     run: fakeRunner({ probeOk: false }),
   });
   expect(out.status.status).toBe("not_resolved");
   expect(out.results.results.length).toBe(0);
 });
 
-test("runExternalAnalyzer: undetected ecosystem is reported skipped", () => {
-  const out = runExternalAnalyzer(candidate({ defaultRun: true, detect: () => false }), "/root", {
+test("runExternalAnalyzer: undetected ecosystem is reported skipped", async () => {
+  const out = await runExternalAnalyzer(candidate({ defaultRun: true, detect: () => false }), "/root", {
     run: fakeRunner({ toolStdout: findingPayload }),
   });
   expect(out.status.status).toBe("skipped");
   expect(out.status.error).toMatch(/ecosystem/);
 });
 
-test("runExternalAnalyzer: a thrown spawn degrades to spawn_error, never throws", () => {
-  const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
+test("runExternalAnalyzer: a thrown spawn degrades to spawn_error, never throws", async () => {
+  const out = await runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
     run: fakeRunner({ throwOnTool: true }),
   });
   expect(out.status.status).toBe("spawn_error");
   expect(out.results.results.length).toBe(0);
 });
 
-test("runExternalAnalyzer: F5 fail-2 — a non-zero spawn exit (result.error) degrades to spawn_error, never throws", () => {
-  const run = (argv: string[], _cwd?: string) => {
+test("runExternalAnalyzer: F5 fail-2 — a non-zero spawn exit (result.error) degrades to spawn_error, never throws", async () => {
+  const run = async (argv: string[], _cwd?: string) => {
     if (argv.includes("--version")) return { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 };
     // Tool spawned, exits non-zero with an error attached (process-level failure).
     return { status: 2, stdout: "", stderr: "boom", argv, duration_ms: 1, error: new Error("exited 2") };
   };
-  const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", { run });
+  const out = await runExternalAnalyzer(candidate({ defaultRun: true }), "/root", { run });
   expect(out.status.status).toBe("spawn_error");
   expect(out.status.exit_code).toBe(2);
   expect(out.results.results.length).toBe(0);
 });
 
-test("runExternalAnalyzer: malformed tool output degrades to parse_error, never throws", () => {
-  const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
+test("runExternalAnalyzer: malformed tool output degrades to parse_error, never throws", async () => {
+  const out = await runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
     run: fakeRunner({ toolStdout: "not json {{{" }),
   });
   expect(out.status.status).toBe("parse_error");
   expect(out.results.results.length).toBe(0);
 });
 
-test("F5 fail-3: malformed output degrades graph_edges too — no partial/corrupt edges merged", () => {
+test("F5 fail-3: malformed output degrades graph_edges too — no partial/corrupt edges merged", async () => {
   // CP-NODE-68: a parse failure must yield empty results AND no graph_edges, so
   // nothing partial/corrupt can reach the shared merge seam. A candidate whose
   // parse() emits edges on success is fed malformed stdout: the parse throws
   // before any edge is normalized, so graph_edges must be absent/empty.
-  const out = runExternalAnalyzer(
+  const out = await runExternalAnalyzer(
     candidate({ defaultRun: true, parse: (stdout) => JSON.parse(stdout) }),
     "/root",
     { run: fakeRunner({ toolStdout: "not json {{{" }) },
@@ -228,19 +318,19 @@ test("F5 fail-3: malformed output degrades graph_edges too — no partial/corrup
   expect(!out.results.graph_edges || out.results.graph_edges.length === 0, "no graph_edges may survive a parse failure (no partial/corrupt edges merged)").toBeTruthy();
 });
 
-test("runExternalAnalyzer: owned tool is rejected even if it slips past registration", () => {
-  const out = runExternalAnalyzer(candidate({ id: "git-history", defaultRun: true }), "/root", {
+test("runExternalAnalyzer: owned tool is rejected even if it slips past registration", async () => {
+  const out = await runExternalAnalyzer(candidate({ id: "git-history", defaultRun: true }), "/root", {
     run: fakeRunner({ toolStdout: findingPayload }),
   });
   expect(out.status.status).toBe("skipped");
   expect(out.status.error).toMatch(/owned by F6/);
 });
 
-test("runAcquisitionEngine: one status per candidate; owned rejected; gating applied", () => {
-  const { results, statuses } = runAcquisitionEngine(
+test("runAcquisitionEngine: one status per candidate; owned rejected; gating applied", async () => {
+  const { results, statuses } = await runAcquisitionEngine(
     [
       candidate({ id: "eslint", defaultRun: true }),
-      candidate({ id: "ruff", defaultRun: false }), // no token → skipped
+      candidate({ id: "ruff", defaultRun: false }), // no grant → skipped
       candidate({ id: "git-history" }), // owned → rejected at registration
     ],
     "/root",
@@ -255,7 +345,7 @@ test("runAcquisitionEngine: one status per candidate; owned rejected; gating app
   expect(results.length, "only the admitted tool with findings contributes results").toBe(1);
 });
 
-test("F5 inv-4: report-skipped-never-silently — exactly one status per in-scope candidate across absent/consent-denied/parse-error paths", () => {
+test("F5 inv-4: report-skipped-never-silently — exactly one status per in-scope candidate across absent/consent-denied/parse-error paths", async () => {
   // Three in-scope (non-owned) candidates exercising distinct degrade paths:
   //  - absent runner    → not_resolved (capability probe fails)
   //  - consent denied   → skipped (non-default, no consent token)
@@ -279,7 +369,7 @@ test("F5 inv-4: report-skipped-never-silently — exactly one status per in-scop
   ];
   const candidates = [...scoped, candidate({ id: 'git-history' })];
 
-  const run = (argv: string[]) => {
+  const run = async (argv: string[]) => {
     if (argv.includes('--version')) {
       // pipx (the "absent" runner) is unavailable on this machine; npx is fine.
       return argv[0] === 'pipx'
@@ -292,7 +382,7 @@ test("F5 inv-4: report-skipped-never-silently — exactly one status per in-scop
     return { status: 0, stdout: findingPayload, stderr: '', argv, duration_ms: 1 };
   };
 
-  const { statuses } = runAcquisitionEngine(candidates, '/root', { run });
+  const { statuses } = await runAcquisitionEngine(candidates, '/root', { run });
 
   // inv-4 core: status count == in-scope candidate count (owned tool dropped at
   // registration, NOT silently from the in-scope set).
@@ -392,7 +482,7 @@ test("F5 inv-8: F5 analyzer risk signals union into the register through the sha
   expect(register.items[0].signals, "input register not mutated").toEqual(["change_hotspot"]);
 });
 
-test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to skipped/not_resolved, zero edges (runtime-discovered)", () => {
+test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to skipped/not_resolved, zero edges (runtime-discovered)", async () => {
   // inv-5: ecosystem detection + runner selection are RUNTIME-discovered — there
   // is no baked-in language->tool or OS->runner table; the capability probe
   // (`--version`) is the sole authority on what can run on THIS machine. Simulate
@@ -402,7 +492,7 @@ test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to sk
   // `skipped` — but NOTHING is silently dropped, NO tool is spawned, and ZERO
   // edges/results reach the shared merge seam.
   let toolSpawned = false;
-  const noRunnerInstalled = (argv: string[]) => {
+  const noRunnerInstalled = async (argv: string[]) => {
     if (argv.includes('--version')) {
       // Every runner is absent regardless of which one a candidate selected.
       return { status: 127, stdout: '', stderr: 'command not found', argv, duration_ms: 1, error: new Error('ENOENT') };
@@ -417,10 +507,10 @@ test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to sk
     candidate({ id: 'eslint', runner: 'npx', defaultRun: true, detect: () => true }),
     candidate({ id: 'ruff', runner: 'pipx', defaultRun: true, detect: () => true }),
     candidate({ id: 'clippy', runner: 'cargo', defaultRun: true, detect: () => true }),
-    candidate({ id: 'rubocop', runner: 'bundle', defaultRun: false, detect: () => true }), // no token => skipped
+    candidate({ id: 'rubocop', runner: 'bundle', defaultRun: false, detect: () => true }), // no grant => skipped
   ];
 
-  const { results, statuses } = runAcquisitionEngine(candidates, '/root', { run: noRunnerInstalled });
+  const { results, statuses } = await runAcquisitionEngine(candidates, '/root', { run: noRunnerInstalled });
 
   expect(toolSpawned, 'no tool may be spawned when no runner probes successfully').toBe(false);
   // One status per in-scope candidate — none silently dropped.
@@ -449,19 +539,19 @@ const { EXTERNAL_ANALYZER_CANDIDATES } = await import(
 );
 
 for (const id of ["clippy", "rubocop"]) {
-  test(`CP-NODE-1: ${id} is consent-gated — no token => skipped, zero subprocess spawn`, () => {
+  test(`CP-NODE-1: ${id} is consent-gated — no token => skipped, zero subprocess spawn`, async () => {
     const real = EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.id === id)!;
     expect(real, `${id} must be registered`).toBeTruthy();
     expect(real.defaultRun, `${id} must be defaultRun:false`).toBe(false);
 
     const spawned = [];
-    const spy = (argv: string[], cwd?: string) => {
+    const spy = async (argv: string[], cwd?: string) => {
       spawned.push(argv);
       return fakeRunner({ toolStdout: "[]" })(argv, cwd);
     };
     // Force detect() true so the ONLY thing withholding the spawn is consent.
     const forced = { ...real, detect: () => true };
-    const out = runExternalAnalyzer(forced, "/root", { run: spy, analyzers: {} });
+    const out = await runExternalAnalyzer(forced, "/root", { run: spy, analyzers: {} });
     expect(out.status.status, `${id} without consent => skipped`).toBe("skipped");
     expect(out.status.error).toMatch(/consent/i);
     expect(spawned.length, `${id} must spawn ZERO subprocesses without consent`).toBe(0);
@@ -488,35 +578,39 @@ test("detectNodeEcosystem: deterministic marker-file detection", async () => {
 // This boundary test drives the gate end-to-end through the engine with a spy
 // runner so the "zero subprocesses on consent_denied" half of the invariant is
 // observed mechanically, not just at the pure-function level.
-test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on consent (incl. permanent); DEFAULT unprompted", () => {
+test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on a SCOPED grant (incl. permanent); DEFAULT unprompted", async () => {
   // Pure-function chokepoint: across ALL settings, a non-DEFAULT tool is denied
-  // without a token and admitted with one; DEFAULT is admitted token-free.
+  // without a grant naming it and admitted by one; DEFAULT is admitted grant-free.
   const nonDefault = candidate({ defaultRun: false });
   const dflt = candidate({ defaultRun: true });
   for (const setting of ["auto", "ephemeral", "permanent"] as const) {
-    expect(typeof admitSpawn(nonDefault, setting, undefined), `non-default + setting=${setting} must be consent_denied without a token`).toBe("string");
-    expect(admitSpawn(nonDefault, setting, "consent-token"), `non-default + setting=${setting} is admitted once the per-run token is present`).toBe(undefined);
-    expect(admitSpawn(dflt, setting, undefined), `DEFAULT + setting=${setting} runs unprompted (no token required)`).toBe(undefined);
+    const label = `non-default + setting=${setting}`;
+    expect(typeof admitSpawn(nonDefault, setting, undefined), `${label} must be consent_denied without a grant`).toBe("string");
+    expect(
+      admitSpawn(nonDefault, setting, grantFor("eslint")),
+      `${label} is admitted once this run's grant names it`,
+    ).toBe(undefined);
+    expect(admitSpawn(dflt, setting, undefined), `DEFAULT + setting=${setting} runs unprompted (no grant required)`).toBe(undefined);
   }
 
   // End-to-end through the engine: a spy runner records every subprocess argv.
-  // For a non-DEFAULT tool with NO consent token, the chokepoint must short-
+  // For a non-DEFAULT tool with NO consent grant, the chokepoint must short-
   // circuit BEFORE the capability probe — i.e. ZERO subprocesses — even when the
   // operator set the tool to `permanent` (CE-005: a pre-installed permanent tool
-  // still needs the token).
+  // still needs this run's grant to name it).
   const spawned = [];
-  const spy = (argv: string[], cwd?: string) => {
+  const spy = async (argv: string[], cwd?: string) => {
     spawned.push(argv);
     return fakeRunner({ toolStdout: findingPayload })(argv, cwd);
   };
 
-  const deniedOutcome = runExternalAnalyzer(
+  const deniedOutcome = await runExternalAnalyzer(
     candidate({ id: "eslint", defaultRun: false }),
     "/root",
     {
       run: spy,
       analyzers: { eslint: "permanent" }, // operator pinned it permanent…
-      // …but supplied NO consentToken for this run.
+      // …but supplied NO consent grant for this run.
     },
   );
   expect(deniedOutcome.status.status, "consent_denied => skipped").toBe("skipped");
@@ -524,19 +618,19 @@ test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on con
   expect(deniedOutcome.results.results.length, "no findings on a denied spawn").toBe(0);
   expect(spawned.length, "consent absent => permanent non-default tool spawns ZERO subprocesses (not even the probe)").toBe(0);
 
-  // With the per-run token present, the SAME permanent tool is admitted and the
-  // subprocess actually runs (probe + real spawn observed by the spy).
-  const admittedOutcome = runExternalAnalyzer(
+  // With a per-run grant naming it present, the SAME permanent tool is admitted
+  // and the subprocess actually runs (probe + real spawn observed by the spy).
+  const admittedOutcome = await runExternalAnalyzer(
     candidate({ id: "eslint", defaultRun: false }),
     "/root",
-    { run: spy, analyzers: { eslint: "permanent" }, consentToken: "consent-token" },
+    { run: spy, analyzers: { eslint: "permanent" }, consentToken: grantFor("eslint") },
   );
   expect(admittedOutcome.status.status, "admitted spawn produces findings").toBe("findings");
   expect(spawned.length >= 1, "admitted spawn invokes the runner at least once").toBeTruthy();
 
-  // A DEFAULT tool runs UNPROMPTED — no token, yet the subprocess fires.
+  // A DEFAULT tool runs UNPROMPTED — no grant, yet the subprocess fires.
   const beforeDefault = spawned.length;
-  const defaultOutcome = runExternalAnalyzer(
+  const defaultOutcome = await runExternalAnalyzer(
     candidate({ id: "eslint", defaultRun: true }),
     "/root",
     { run: spy }, // no consentToken, no analyzers setting
@@ -557,9 +651,9 @@ const { ExternalAnalyzerResultsSchema } = await import(
   "../../src/shared/analyzers/types.js"
 );
 
-test("F5 inv-7 [CP-NODE-64]: acquired output normalizes through the existing adapter seam, validates ExternalAnalyzerResultsSchema.strict()", () => {
-  const out = runExternalAnalyzer(candidate(), "/root", {
-    consentToken: "tok",
+test("F5 inv-7 [CP-NODE-64]: acquired output normalizes through the existing adapter seam, validates ExternalAnalyzerResultsSchema.strict()", async () => {
+  const out = await runExternalAnalyzer(candidate(), "/root", {
+    consentToken: grantFor("eslint", "tok"),
     run: fakeRunner({ toolStdout: findingPayload }),
   });
 
@@ -589,9 +683,9 @@ test("F5 inv-7 [CP-NODE-64]: acquired output normalizes through the existing ada
 // to F5 inv-2: it asserts the FAIL contract (skipped/denied + no spawn) holds even
 // when the candidate's own `detect()` would say the tool is installed, so nothing
 // past the chokepoint (probe or real spawn) can leak through.
-test("F5 fail-4 [CP-NODE-69]: non-DEFAULT tool without consent => consent_denied, zero subprocess spawn", () => {
+test("F5 fail-4 [CP-NODE-69]: non-DEFAULT tool without consent => consent_denied, zero subprocess spawn", async () => {
   // detect() returns true so a missing-binary path can't masquerade as the reason
-  // for skipping; the ONLY thing withholding the spawn is the absent consent token.
+  // for skipping; the ONLY thing withholding the spawn is the absent consent grant.
   const installedNonDefault = candidate({
     id: "eslint",
     defaultRun: false,
@@ -601,19 +695,19 @@ test("F5 fail-4 [CP-NODE-69]: non-DEFAULT tool without consent => consent_denied
   // Pure chokepoint: denial yields a string (the consent_denied reason), never the
   // `undefined` that means "admitted".
   const reason = admitSpawn(installedNonDefault, "auto", undefined);
-  expect(typeof reason, "non-default w/o token must be denied at admitSpawn").toBe("string");
+  expect(typeof reason, "non-default w/o grant must be denied at admitSpawn").toBe("string");
 
   // End-to-end through the engine with a spy runner: not a single argv may be
   // dispatched — not even the `--version` capability probe.
   const spawned = [];
-  const spy = (argv: string[], cwd?: string) => {
+  const spy = async (argv: string[], cwd?: string) => {
     spawned.push(argv);
     return fakeRunner({ toolStdout: findingPayload })(argv, cwd);
   };
 
-  const outcome = runExternalAnalyzer(installedNonDefault, "/root", {
+  const outcome = await runExternalAnalyzer(installedNonDefault, "/root", {
     run: spy,
-    // non-default tool requested (auto), but NO consentToken supplied this run.
+    // non-default tool requested (auto), but NO consent grant supplied this run.
     analyzers: { eslint: "auto" },
   });
 
@@ -632,7 +726,7 @@ test("F5 fail-4 [CP-NODE-69]: non-DEFAULT tool without consent => consent_denied
 // as an acquired external tool is REJECTED at registration. The own-vs-acquire
 // boundary is enforced mechanically: OWNED_TOOL_IDS can never enter the engine,
 // so an owned id cannot be double-run via the acquisition path.
-test("F5 fail-7 [CP-NODE-72]: an owned signal (git-history) registered as an acquired tool is rejected at registration", () => {
+test("F5 fail-7 [CP-NODE-72]: an owned signal (git-history) registered as an acquired tool is rejected at registration", async () => {
   // Every OWNED id, plus a legitimate acquirable tool that MUST survive.
   const ownedCandidates = [...OWNED_TOOL_IDS].map((id) => candidate({ id }));
   const acquirable = candidate({ id: "eslint", defaultRun: true });
@@ -650,10 +744,10 @@ test("F5 fail-7 [CP-NODE-72]: an owned signal (git-history) registered as an acq
 
   // End-to-end: driving the whole set through the engine never runs an owned id.
   const spawned = [];
-  const spy = (argv: string[], cwd?: string) => {
+  const spy = async (argv: string[], cwd?: string) => {
     spawned.push(argv);
     return fakeRunner({ toolStdout: "[]" })(argv, cwd);
   };
-  runAcquisitionEngine([...ownedCandidates], "/root", { run: spy, analyzers: {} });
+  await runAcquisitionEngine([...ownedCandidates], "/root", { run: spy, analyzers: {} });
   expect(spawned.length, "no owned candidate is ever spawned through the engine").toBe(0);
 });

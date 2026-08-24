@@ -9,6 +9,7 @@ import type { RemediationState } from "../../src/remediate/state/store.js";
 import type {
   ExternalAnalyzerCandidate,
   AnalyzerLeadProvenance,
+  AcquisitionRunner,
 } from "audit-tools/shared";
 import { hashAnalyzerSnippet } from "../../src/shared/analyzers/provenance.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
@@ -61,8 +62,13 @@ function fakeCandidate(): ExternalAnalyzerCandidate {
   };
 }
 
-/** Spawn-free runner: probe and scan both "succeed" without any subprocess. */
-const fakeRun = (argv: string[], cwd: string) => ({
+/**
+ * Spawn-free runner: probe and scan both "succeed" without any subprocess.
+ * Async — the {@link AcquisitionRunner} seam is promise-returning
+ * (`runTrackedAsync`), so an injected fake must match or the engine awaits a
+ * non-promise and drifts from the real boundary.
+ */
+const fakeRun: AcquisitionRunner = async (argv: string[], cwd: string) => ({
   status: 0,
   stdout: "",
   stderr: "",

@@ -124,9 +124,9 @@ export async function verifyAnalyzerLeads(params: {
       continue;
     }
     // Binary-runner candidates resolve (PATH probe / checksum-gated download)
-    // ahead of the synchronous engine, exactly as the audit draw does.
+    // ahead of the async engine, exactly as the audit draw does.
     const resolved = await resolveBinaryCandidates([candidate], root, engineOptions);
-    const outcome = runExternalAnalyzer(candidate, root, {
+    const outcome = await runExternalAnalyzer(candidate, root, {
       ...engineOptions,
       resolvedBinaries: resolved.resolvedBinaries,
     });

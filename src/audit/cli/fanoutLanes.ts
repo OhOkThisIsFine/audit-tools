@@ -189,6 +189,10 @@ export async function materializeFanoutLanes(params: {
   const shortfall = await recordExpectedLanes(
     params.artifactsDir,
     params.runId,
+    // Un-expected lanes are filtered HERE, at this draw's one materializing
+    // boundary; `buildExpectedSubmissionSet` REFUSES an `expected: false`
+    // lane outright, so a future caller that routes one past this filter
+    // throws instead of minting an expectation nothing can ever satisfy.
     params.lanes
       .filter((spec) => spec.expected !== false)
       .map((spec) => ({ lane: spec.id, promptText: writtenText.get(spec.id)! })),

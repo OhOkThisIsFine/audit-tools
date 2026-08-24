@@ -12,7 +12,7 @@ import {
 import { isAbsolute, join, relative } from "node:path";
 import { homedir } from "node:os";
 import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
-import { runTracked, type RunTrackedResult } from "../tooling/exec.js";
+import { runTrackedAsync, type RunTrackedResult } from "../tooling/exec.js";
 
 /**
  * Generic acquisition of a standalone mature analyzer BINARY (gitleaks,
@@ -55,9 +55,15 @@ export interface BinaryFetcher {
   (url: string): Promise<Uint8Array | null>;
 }
 
-/** Injected command runner (probe PATH, run `tar`); defaults to the shared runTracked. */
+/**
+ * Injected command runner (probe PATH, run `tar`). THE async runner contract —
+ * the same seam shape as the acquisition engine's {@link AcquisitionRunner} —
+ * defaulting to the shared {@link runTrackedAsync}. There is no synchronous twin:
+ * a synchronous `tar`/probe under a held file lock would block the event loop and
+ * starve that lock's mtime heartbeat.
+ */
 export interface BinaryCommandRunner {
-  (argv: string[], cwd: string): RunTrackedResult;
+  (argv: string[], cwd: string): Promise<RunTrackedResult>;
 }
 
 /** Pinned, os/arch-aware description of one acquirable release binary. */
@@ -292,12 +298,12 @@ export async function resolveBinary(
 ): Promise<BinaryResolution> {
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
-  const run = options.run ?? ((argv, cwd) => runTracked(argv, { cwd }));
+  const run = options.run ?? ((argv, cwd) => runTrackedAsync(argv, { cwd }));
   const cacheDir = options.cacheDir ?? defaultCacheDir();
 
   // 1. PATH — already installed. Nothing below this point runs, so a tool the machine
   // already has must not cause a cache directory to be created as a side effect.
-  const probe = run(spec.versionProbeArgs, process.cwd());
+  const probe = await run(spec.versionProbeArgs, process.cwd());
   if (!probe.error && probe.status === 0) {
     return { status: "path", command: spec.binaryName };
   }
@@ -401,7 +407,7 @@ export async function resolveBinary(
     mkdirSync(versionDir, { recursive: true });
     const archivePath = join(versionDir, assetName);
     writeFileSync(archivePath, assetBytes);
-    const extract = run(["tar", "-xf", archivePath, "-C", versionDir], versionDir);
+    const extract = await run(["tar", "-xf", archivePath, "-C", versionDir], versionDir);
     rmSync(archivePath, { force: true });
     if (extract.error || extract.status !== 0) {
       // Whatever tar managed to write before failing must NOT survive as a cache hit.
