@@ -114,6 +114,46 @@ The heading names a 'lean fast-path exception'; the section body states 'This is
 ---
 
 
+<!-- nightly:item key=6c96d291fad77b9a -->
+
+## `docs-3` — instruction-file edit: CLAUDE.md's consent bullet reads as covering every eslint spawn, but the syntax-resolution path admits eslint on decline-only <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `CLAUDE.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+CLAUDE.md's analyzer bullet says every candidate outside the curated default set needs first-use consent before it can run. eslint is such a candidate: it is registered with defaultRun false, so as an acquired analyzer it genuinely cannot spawn without a recorded grant or a per-run token. But eslint is also reachable by a second, different route. The syntax-resolution executor runs repo-local tooling in place, and that route goes through a deliberately narrower admission function that only honours a recorded refusal. It asks for no consent, because in that role eslint is not being acquired at all, just used where it already sits. Both behaviours are intended, and the code says so in as many words. The problem is that CLAUDE.md describes only the first route, so a reader checking the consent boundary would conclude that no eslint spawn can happen without consent, which is not what the tree does. The question is whether the bullet should say that the rule is per role rather than per tool. An independent review lane raised this; it was verified against the code before being asked.
+
+### The question
+
+CLAUDE.md's consent bullet describes the acquired-analyzer route only. eslint also spawns via the syntax-resolution route, which requires no consent (decline-veto only). Should the bullet say the consent rule is per ROLE, not per tool?
+
+### Your answer
+
+- [ ] **1. State the two roles** — Amend the bullet to say consent binds the ACQUIRED-analyzer role, and that the same binary used as repo-local tooling is governed by the decline-only local admission instead.
+- [ ] **2. Leave it — the bullet is scoped already** — Leave CLAUDE.md as it is. The bullet opens with 'Every acquired-tool spawn', so the scope is stated and the local-tooling route is out of it.
+- [ ] **3. Tighten the code instead** — Do not change the doc — change the code so a registered analyzer candidate cannot spawn through the local route without consent either, making the simple reading true.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- src/shared/analyzers/candidates.ts:265 registers eslint as a candidate with defaultRun:false (line 275), so the acquired route requires a grant or token.
+- src/audit/orchestrator/syntaxResolutionExecutor.ts spawns eslint via runFirstAvailableCommand(..., { analyzerConsent }), which admits through admitLocalSpawn.
+- admitLocalSpawn (src/shared/analyzers/acquisitionEngine.ts) returns undefined unless a recorded decision is 'declined' — no consent requirement, no default-set notion. Its own doc comment calls it 'Deliberately narrower than admitSpawn'.
+- Raised by the independent Codex lane as claim C3 FALSE; re-verified directly against the tree before this item was written. The lane also disputed 'a consent token authorizes ONE run' on the ground that nothing consumes the token — the guarantee CLAUDE.md actually names and pins is non-persistence, which does hold.
+
+</details>
+
+---
+
+
 # Backlog disambiguation
 
 
@@ -259,7 +299,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P43-answered-work-vs-open-run-co
 
 - Leg 2 mechanical sweep classified 69 of 110 backlog entries. 41 errored on the free-provider lane (schema-mismatch replies, plus an HTTP 502 from a provider whose key is known-broken); 34 of the classified had unusable premise probes. 41 entries were NOT triaged this run.
 
-- Leg 1's SECOND lane did not land: the Codex lane on CLAUDE.md's five own-vs-acquire analyzer claims read source for ~45 minutes and never emitted a verdict. All five claims were verified directly instead and all five hold (admitSpawn is the single acquired-spawn chokepoint at acquisitionEngine.ts:314, called only at 482 and 754; declined then skip are checked before defaultRun, granted and the token; the consent token is pinned unpersistable by a passing contract test; nothing spawns npm audit). What is missing is the INDEPENDENT re-check, not the verification.
+- Nothing was skipped in leg 1's two-lane review of CLAUDE.md's five own-vs-acquire analyzer claims: both lanes reported. The independent Codex lane disputed two, and one dispute survived re-verification and became item docs-3 (eslint spawns through the decline-only local admission as well as the consent-gated acquired one). Its other dispute — that nothing CONSUMES a consent token, so 'authorizes ONE run' overstates — was checked and set aside: the guarantee CLAUDE.md names and pins is non-persistence, which holds.
 
 - Three of the four answered-not-done decisions (240e467dfd7a8ac9, db629de141ee6414, 26e2d10e4569b448) were NOT executed: their write targets collide with the three pending remediation work items' declared scope.
 
