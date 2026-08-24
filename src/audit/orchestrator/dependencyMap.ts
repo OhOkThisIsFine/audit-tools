@@ -74,7 +74,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "surface_manifest.json",
     "critical_flows.json",
   ],
-  // F6 git-history mining: deterministic co-change / churn / authorship mined
+  // Git-history mining: deterministic co-change / churn / authorship mined
   // from the commit log, scoped to the audited file set. Declared upstream deps
   // {repo_manifest, file_disposition} so a manifest/disposition change re-mines.
   "git_history.json": ["repo_manifest.json", "file_disposition.json"],

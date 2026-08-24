@@ -25,7 +25,7 @@ export const ANALYZER_REGISTRY: LanguageAnalyzer[] = [
   sqlAnalyzer,
 ];
 
-// F5 external analyzer acquisition engine (on-demand ecosystem-native tools run
+// External analyzer acquisition engine (on-demand ecosystem-native tools run
 // ephemerally + normalized through the adapter seam). Re-exported here so the
 // analyzer registry is the single entry point for both the in-tree
 // `LanguageAnalyzer` set and the acquired external set.

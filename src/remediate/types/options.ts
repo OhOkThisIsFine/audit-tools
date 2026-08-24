@@ -5,7 +5,7 @@ export interface OrchestratorOptions {
   artifactsDir: string;
   input?: string;
   /**
-   * Test-only seams for the item-C close-gate analyzer re-verify leg
+   * Test-only seams for the close-gate analyzer re-verify leg
    * (candidate set / spawn runner / session config). Production passes nothing.
    */
   analyzerLeadVerifyOverrides?: AnalyzerLeadVerifyOverrides;

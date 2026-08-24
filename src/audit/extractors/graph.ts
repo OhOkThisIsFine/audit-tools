@@ -963,7 +963,7 @@ function accumulateCrossFileEdges(
  * Append an analyzer's contributed edges into a graph bundle's edge categories,
  * returning a NEW bundle (the input is never mutated). This is the single,
  * pre-shipped seam through which any post-build analyzer contribution —
- * git-history co-change (F6), and any later F5+ analyzer — re-enters the graph,
+ * git-history co-change, and any later acquired analyzer — re-enters the graph,
  * so contributions can never drift in how they merge.
  *
  * Merged into `graphs.references` by default (the open-ended cross-file edge

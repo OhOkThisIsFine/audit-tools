@@ -9,7 +9,7 @@ import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import { graphEdge, graphLookupKey } from "./graphPathUtils.js";
 
 /**
- * F6 — git-history mining.
+ * Git-history mining.
  *
  * Deterministic extractor that turns the repository's commit log into the
  * language-neutral `git_history.json` artifact: co-change (temporal coupling),

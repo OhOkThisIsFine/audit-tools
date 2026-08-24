@@ -100,7 +100,7 @@ export async function runStructureExecutor(
     graphSignals,
   );
 
-  // F6 — git-history mining. A deterministic, language-neutral extraction source
+  // Git-history mining. A deterministic, language-neutral extraction source
   // (degrades to empty without a root / git): co-change coupling the dependency
   // graph misses, churn + authorship-breadth risk signals, and the churn ×
   // complexity compound (the real risk concentration). Merged through the shared

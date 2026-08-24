@@ -323,7 +323,7 @@ test("runExternalAnalyzer: owned tool is rejected even if it slips past registra
     run: fakeRunner({ toolStdout: findingPayload }),
   });
   expect(out.status.status).toBe("skipped");
-  expect(out.status.error).toMatch(/owned by F6/);
+  expect(out.status.error).toMatch(/owned in-house/);
 });
 
 test("runAcquisitionEngine: one status per candidate; owned rejected; gating applied", async () => {

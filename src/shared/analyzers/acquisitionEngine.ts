@@ -20,12 +20,12 @@ import {
 } from "./binaryAcquisition.js";
 
 /**
- * F5 — external analyzer acquisition engine.
+ * External analyzer acquisition engine.
  *
  * On-demand acquisition + ephemeral execution of mature, ecosystem-native
  * analyzers (eslint, ruff, cargo-clippy, …). Distinct from the in-tree
  * `LanguageAnalyzer` registry (which enriches the regex floor from a resolved
- * npm package directory): F5 *runs an external tool as a subprocess* and
+ * npm package directory): this engine *runs an external tool as a subprocess* and
  * normalizes its native output through the EXISTING adapter seam
  * (`normalizeExternal.ts`) into {@link ExternalAnalyzerResults}, which then
  * re-enters the graph/risk artifacts through the shared
@@ -40,7 +40,7 @@ import {
  *    its `AnalyzerSetting` (auto|ephemeral|permanent) — even a `permanent`,
  *    pre-installed tool cannot spawn without consent (CE-005). The small
  *    value-curated DEFAULT set runs without prompting.
- *  - **Own-vs-acquire boundary.** git-history is OWNED by F6 and is rejected at
+ *  - **Own-vs-acquire boundary.** git-history is OWNED in-house and is rejected at
  *    registration — never acquired here. Secret scanning is ACQUIRED (gitleaks).
  *  - **Run-safety gate written once** (`runSafetyGate`): capability-probe, pin
  *    version, read-only/sandboxed argv, degrade-to-empty.
@@ -50,7 +50,7 @@ import {
  */
 
 /**
- * Tool ids OWNED by F6 and never acquired. Only git-history mining is OWNED — it
+ * Tool ids OWNED in-house and never acquired. Only git-history mining is OWNED — it
  * is a truly-agnostic signal with no ecosystem tool. Secret scanning is ACQUIRED
  * (gitleaks), not owned, so it is deliberately NOT listed here.
  */
@@ -60,7 +60,7 @@ export const OWNED_TOOL_IDS = new Set<string>([
 ]);
 
 /**
- * Ecosystem runners F5 knows how to drive. `npx`/`pipx`/`cargo`/`bundle` acquire
+ * Ecosystem runners this engine knows how to drive. `npx`/`pipx`/`cargo`/`bundle` acquire
  * + run a pinned package ephemerally; `binary` runs a standalone release binary
  * resolved (and downloaded-if-absent) by the binary-acquisition seam.
  */
@@ -102,7 +102,7 @@ export interface ExternalAnalyzerCandidate {
   purpose?: string;
   /**
    * Build the read-only argv for the tool given the resolved runner argv prefix
-   * and repo root. MUST NOT request fixes/writes — F5 is observe-only.
+   * and repo root. MUST NOT request fixes/writes — acquisition is observe-only.
    */
   buildArgv(runnerPrefix: string[], root: string): string[];
   /**
@@ -458,7 +458,7 @@ export async function runExternalAnalyzer(
         tool: candidate.id,
         resolved: false,
         status: "skipped",
-        error: "owned by F6 (git-history/secret-scan); never acquired",
+        error: "owned in-house (git-history/secret-scan); never acquired",
       },
     };
   }
@@ -701,7 +701,7 @@ export async function runExternalAnalyzer(
 }
 
 /**
- * Register external analyzer candidates, rejecting any whose id is OWNED by F6
+ * Register external analyzer candidates, rejecting any whose id is OWNED in-house
  * (git-history/secret-scan). Returns the accepted candidates; the own-vs-acquire
  * boundary is enforced HERE so an owned tool can never enter the engine.
  */

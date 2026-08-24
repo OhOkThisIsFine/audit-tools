@@ -298,7 +298,7 @@ const HIDDEN_COUPLING_CAP = 10;
  * have NO structural edge (import / call / reference) connecting them. This is
  * the coupling static analysis structurally cannot see: a temporal dependency
  * with no code-level link, which the dependency graph misses entirely. Reads the
- * `co_change` bucket (git-history mining, F6) and the structural edge set; a
+ * `co_change` bucket (git-history mining) and the structural edge set; a
  * pair backed by any structural edge in either direction is NOT hidden (it is
  * already visible to the graph) and is dropped. Empty when git-history was not
  * mined (no `co_change` bucket).

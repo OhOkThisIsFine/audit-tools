@@ -26,7 +26,7 @@ const DUPLICATION_FLOOR = 1;
  * Append an analyzer's per-unit risk signals into a risk register, returning a
  * NEW register (the input is never mutated). This is the single, pre-shipped
  * seam through which any post-build analyzer risk contribution — git-history
- * change-hotspot / broad-authorship (F6), and any later F5+ analyzer — re-enters
+ * change-hotspot / broad-authorship, and any later acquired analyzer — re-enters
  * the register, so contributions can never drift in how they merge.
  *
  * Each entry of `signalsByUnit` (keyed by `unit_id`) is unioned into the
