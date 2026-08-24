@@ -22,34 +22,232 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-23 at `a5a673e8`.*
+*Last run: 2026-08-24.*
 
 
-> **9 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+> **3 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
 
 
 ---
 
-## Nothing to answer
 
-No open propositions. The next run will refill this file if it finds any.
+# Documentation
+
+
+<!-- nightly:item key=c293f51214b487a6 -->
+
+## `docs-1` — instruction-file edit: name the shared host-handoff core in CLAUDE.md, or leave the two twins as the documented owners <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `CLAUDE.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+CLAUDE.md describes host handoff twice, once for the auditor and once for the remediator, and each description names a single file as the owner: src/audit/cli/dispatch/hostHandoff.ts and src/remediate/steps/dispatch/hostHandoff.ts. Since then a work item extracted a shared module underneath both of them, src/shared/submission/hostHandoffCore.ts, 379 lines, and both twins now import it through the audit-tools/shared barrel. Nothing CLAUDE.md says is false: the twins still exist and still do the described work. But the document does not mention that a shared core exists. That matters more here than it would elsewhere, because one core, two draws is one of this project's stated convictions, so where the shared core lives has architectural meaning. Naming it would make the document match the shape of the code. Leaving it out keeps CLAUDE.md shorter and treats the core as an implementation detail beneath the boundary the document is actually describing. CLAUDE.md is an instruction file, so the nightly routine never edits it on its own.
+
+### The question
+
+CLAUDE.md's two host-handoff paragraphs name only the per-side twins. A shared core (src/shared/submission/hostHandoffCore.ts) now sits underneath both. Should CLAUDE.md name it?
+
+### Your answer
+
+- [ ] **1. Name the shared core** — Add the shared core to CLAUDE.md's host-handoff description. The one core, two draws conviction makes where the shared substrate lives part of the architecture, not an implementation detail.
+- [ ] **2. Leave the twins as documented** — Leave CLAUDE.md as it is. The twins are the boundary the document describes, and the shared core beneath them is an implementation detail that would date the prose.
+- [ ] **3. Point at the barrel instead** — Do not name the core file, but say the twins share their substrate through audit-tools/shared. That is the durable fact, without a filename a later refactor moves.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- src/shared/submission/hostHandoffCore.ts exists (379 lines), added by commit 76196e53 'remediate(CP-BLOCK-CP-NODE-6): Extract shared host-handoff core; reduce both twins'.
+- Both twins import from the shared barrel: src/audit/cli/dispatch/hostHandoff.ts:36 and src/remediate/steps/dispatch/hostHandoff.ts:38, and src/shared/index.ts re-exports hostHandoffCore.
+- CLAUDE.md:99 and CLAUDE.md:136 each name one twin as the host-handoff owner; neither mentions a shared core.
+- src/shared/loopCorePaths.ts already lists src/shared/submission/ as loop-core, so the core is gated like the twins.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=a1bcdf448f875452 -->
+
+## `docs-2` — the 'lean fast-path exception' heading advertises an exception the same section then denies — reword it, or keep it as history <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/remediation-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+In spec/remediation-workflow-design.md a section heading reads: Both paths run the pipeline, except the lean fast-path exception. The body underneath then says the opposite in as many words: This is not a parallel path. It explains that depth scales with a single risk dial rather than branching, and it points at spec/self-scaling-pipeline-design.md, whose own opening line says it supersedes the lean fast path framing entirely. So a reader who scans headings takes away that a fast-path exception exists, and a reader who reads the paragraph takes away that it does not. Both cannot be the intended message. The fix is a wording change in a normative design document, which is substance rather than a stale fact, so the routine will not make it alone.
+
+### The question
+
+The heading names a 'lean fast-path exception'; the section body states 'This is not a parallel path', and the superseding design doc retired that framing. Should the heading change?
+
+### Your answer
+
+- [ ] **1. Reword the heading** — Reword the heading to describe the risk dial, for example 'Both paths run the pipeline; the risk tier sets the depth', so heading and body agree.
+- [ ] **2. Keep it — it names what was superseded** — Keep the heading. It deliberately names the framing a reader arrives with, and the body's job is to correct it.
+- [ ] **3. Drop the clause** — Shorten the heading to 'Both paths run the pipeline' and let the body carry the whole nuance.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- spec/remediation-workflow-design.md:146 heading reads: Both paths run the pipeline — except the lean fast-path exception.
+- The same section states: This is not a parallel path. The tier is the SINGLE classifier.
+- spec/self-scaling-pipeline-design.md opens by superseding the earlier 'give document input a separate lean fast path' framing, and calls a separate leanFastPath the wrong shape.
+- A lean-fast-path branch does exist in code, but as a plan-normalization branch in normalizeExtractedPlan, not as a pipeline path, so the heading's word 'exception' does not describe the code either.
+
+</details>
+
+---
+
+
+# Backlog disambiguation
+
+
+<!-- nightly:item key=896100e34412fa40 -->
+
+## `backlog-1` — intent-interpretation.json is a write-only sidecar — give it a reader, or delete it <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+One part of the 'Promotion and close residuals' backlog entry reports that the file intent-interpretation.json is written but never read by anything. Its unencodable_clauses field is described as being surfaced so the host can promote them, yet no code reads it back. Write-only data is a known trap in this project: it looks authoritative to a later reader precisely because it exists and is kept up to date, while nothing depends on it being correct. The entry names two ways out and does not choose between them, which is why the routine cannot act on it. Giving the sidecar a real reader makes the data load-bearing and therefore worth trusting. Deleting it removes a file that quietly implies a contract nobody honours. There is also a smaller sub-question in the same entry about whether the unencodable_clauses surface should survive either way.
+
+### The question
+
+Should intent-interpretation.json be given a real reader, or deleted? And should its unencodable_clauses surface be preserved either way?
+
+### Your answer
+
+- [ ] **1. Delete the sidecar** — Delete intent-interpretation.json and its unencodable_clauses surface. Write-only data that implies a contract nobody honours is worse than no file.
+- [ ] **2. Give it a reader** — Keep the sidecar and wire a real consumer for unencodable_clauses, so the data is load-bearing and its correctness is actually tested.
+- [ ] **3. Delete the file, keep the surface** — Drop the persisted sidecar but keep unencodable_clauses on the in-memory interpretation result, where its consumer is visible.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (3) — what was verified against code, and how</summary>
+
+- docs/backlog/open-bugs.md part (d) of 'Promotion and close residuals from CP-NODE-3/15 reviews' states the sidecar has zero readers.
+- The nightly mechanical backlog sweep classified this entry owner_decision_needed with its premise holding at HEAD (.audit-tools/nightly/triage-2026-08-24.jsonl, open-bugs#82cdddee).
+- The entry links project memory write-only-data-looks-authoritative, which records the same class of defect.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=0c89f4cedc88b54d -->
+
+## `backlog-2` — declare the tracked trees no typechecker reaches — pick the mechanism, or accept the absence <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The scripts directory is a whole tracked tree that no TypeScript config covers: tsconfig.json includes only src, and tsconfig.test.json includes src and tests. Nothing anywhere states that scripts is deliberately unchecked. You can only find that out by opening both config files and noticing what is missing, an absence, which is the hardest thing to notice and the easiest thing to break by accident. The backlog entry asks for the unchecked set to be stated somewhere mechanical, so it is a fact the build can check rather than something a reader has to deduce. What it does not do is say which mechanism, and that is the decision. A declared-data file reconciled by a check script would match how this repo already handles the doc manifest and guard reach. Extending a typechecker to cover scripts is a different and larger answer. Doing nothing is also a real option if the absence is considered self-evident.
+
+### The question
+
+How should the set of tracked source trees that no typechecker reaches be declared, and should it be declared at all?
+
+### Your answer
+
+- [ ] **1. Declared data + reconciliation check** — State the unchecked set as declared data with a check script that reconciles it against the tracked tree, following the doc-manifest and guard-reach precedent.
+- [ ] **2. Typecheck scripts/ instead** — Do not declare the gap, close it. Bring scripts/ under a tsconfig so the unchecked set is empty and needs no declaration.
+- [ ] **3. Leave it undeclared** — Leave it as is. The include arrays are the statement, and a second declaration is one more thing to keep in sync.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- docs/backlog/open-bugs.md states scripts/ is covered by NO tsconfig, that tsconfig.json includes ["src"], and tsconfig.test.json includes ["src","tests"] with checkJs:false.
+- Verified at HEAD this run: npm run check and check:tests both pass while nothing under scripts/ is typechecked.
+- The nightly mechanical sweep classified this entry owner_decision_needed with its premise holding (.audit-tools/nightly/triage-2026-08-24.jsonl, open-bugs#33da27bd).
+- The repo already uses declared-data-plus-reconciliation twice: scripts/doc-manifest-data.mjs and scripts/guard-reach-data.mjs.
+
+</details>
+
+---
+
+
+# Recurring-problem solutions
+
+
+<!-- nightly:item key=8a7a479fcb205ac8 -->
+
+## `sol-1` — P43: print an open remediation run's write scope in answer.mjs --list, so answered work is not hand-checked against it every session <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `scripts/nightly/answer.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+When you answer a nightly question, the work it implies often means editing code. If a remediation run is in progress at the same time, some of its work items have already reserved a set of files, and editing one of those files behind the run's back corrupts the binding it uses to accept results. Nothing computes that overlap today, so each session opens the run's state file, finds the pending items, joins them to their blocks, and works out by hand which answered items are safe. That happened on 2026-08-23 and again during this run, and the two derivations disagreed: last night's concluded that all four waiting answers were blocked, when one of them touched no reserved file at all. It shipped this run, a day later than it needed to. The proposal is to print the run's reserved files underneath the answered-not-done list, so the fact is in front of the reader instead of being re-derived. It deliberately stops short of labelling items ready or blocked, because a decision record stores the file the question was about, not the file its fix will touch, so a verdict would sometimes say ready when it is not, which is worse than saying nothing.
+
+### The question
+
+Adopt P43: print an open remediation run's per-item write scope beneath the answered-not-done list in answer.mjs --list?
+
+### Your answer
+
+- [ ] **1. Adopt as proposed** — Adopt P43 as written: print the open run's per-item write scope, and deliberately do not label answered items ready or blocked.
+- [ ] **2. Adopt, but make it a verdict** — Adopt the mechanism but go further: match each answered item's recorded path against the run's write scope and label it, accepting that the recorded path under-detects a fix's real write set.
+- [ ] **3. Decline** — Decline. Two occurrences is thin evidence, and reading the run state by hand when a run is open is acceptable.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P43-answered-work-vs-open-run-collision/answer-list-run-scope.patch`](../.audit-tools/nightly/proposals/P43-answered-work-vs-open-run-collision/answer-list-run-scope.patch) <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- Recurrence, two dates: commit 78ad5f54 (2026-08-23) hand-derived the collision for four answered items and wrote the conclusion into docs/HANDOFF.md prose; this run re-derived it from scratch.
+- The derivations disagreed. 5acf2e262ebd7ab0, the F-label comment cleanup, touches no file any pending block claims, and shipped this run as 7e34fe14 after being parked for a day.
+- Verified at HEAD: the three pending items' blocks claim src/audit/orchestrator/runtimeCommand.ts; four files including src/remediate/steps/dispatch/hostHandoff.ts; and eleven more. The other three answered items DO collide with that scope.
+- Full proposal, patch and red/green test: .audit-tools/nightly/proposals/P43-answered-work-vs-open-run-collision/
+
+</details>
+
+---
 
 
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- Auto-closed docs-7 (HANDOFF carried nine hand-typed run counts — trim or keep them deliberately). The premise is gone: 61b51287 rewrote docs/HANDOFF.md and removed the counts, so both probe fragments the item quotes ("2,712 findings" and "the P38 write-scope union, ...") are absent at HEAD. The trim the item asked about happened, so it left the queue without needing an answer. Its probes were record-path probes, which by design never auto-close, so this was recorded by hand rather than by the close path.
+- 7e34fe14 — retired the historical F5/F6/item-C program-phase labels from src comments, executing recorded answer 5acf2e262ebd7ab0; recorded done.
 
-- Landed 12 code-anchored doc fixes held by the 2026-08-22 dirty tree, as one revertible commit (fa66bd8c): seven in docs/glossary-ids.md (two rows deleted for identifiers with zero occurrences in src, four owner-column corrections, and CE-P3-001 added to the live-counterexample sentence), the PRIORITY-disclaimer misattribution in docs/audit-pkg/development.md, the unclosed migration-residue parenthesis in .claude/skills/disambiguate-backlog/SKILL.md, and three release-state corrections in the hand-written half of docs/HANDOFF.md (v0.45.0 is the last tag, is an ancestor of main, and is published to npm; all four named defect-fix commits are ancestors of it).
-
-- Leg 2 mechanical cleanup (a5a673e8): merged the two open-bugs.md entries recording the same writeOpenItems subject_key defect (2026-08-14 and 2026-08-19), keeping both dates, the mechanism and both memory links, and dropping the post-mortem tail. Backlog seek index regenerated.
-
-- Recorded two approved queue items as LANDED after verifying both halves at HEAD: P39 (594071ff — check:runtime-artifact-names is preCommit:'reach' and tests/shared/generator-gates-run-at-commit.test.ts forbids the shape) and P40 (c3eaa59d — charterExtractionPrompt.ts derives the provenance alternation from the schema, pinned by tests/shared/prompt-renders-its-contract.test.ts).
-
-- Marked .audit-tools/nightly/proposals/QUEUED-doc-fixes/READY-TO-APPLY.md SUPERSEDED. All eleven of its fixes are moot at HEAD — four named spec files are deleted, a fifth target is deleted, and the remaining six are already correct in the tree. A free-provider lane found the file this run and offered to work from it, which is the failure the banner prevents.
-
-- Green gate before push: npm run build, npm run check, and 439/439 vitest test files pass. Doc, backlog and handoff gates green (doc-manifest, doc-code-citations, doc-links, memory-citations, backlog-index, backlog-status, backlog-line-numbers, backlog-budget, handoff-roadmap).
+- 0bc635a6 — logged the graph-edge cache digest-pin trap in docs/backlog/durable-traps.md and regenerated the backlog seek index.
 
 
 </details>
@@ -59,19 +257,13 @@ No open propositions. The next run will refill this file if it finds any.
 <summary>What the last run could NOT cover</summary>
 
 
-- Codex lane UNAVAILABLE for the second night — `codex exec` returns "You've hit your usage limit ... try again at Aug 27th, 2026". Its share of leg-1 review was re-routed to an independent reviewer lane and the free-provider adversary lane, so no leg-1 coverage was lost; recorded because the lane stays dead until 2026-08-27 and the next several runs must route around it. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Leg 2 mechanical sweep classified 69 of 110 backlog entries. 41 errored on the free-provider lane (schema-mismatch replies, plus an HTTP 502 from a provider whose key is known-broken); 34 of the classified had unusable premise probes. 41 entries were NOT triaged this run.
 
-- Leg 2 sweep — 81 of 100 backlog entries classified, 19 errored (the lane returned no parseable triage record). Those 19 are unclassified this run. Coverage read from .audit-tools/nightly/triage-2026-08-23-coverage.json, not eyeballed.
+- Leg 1 independent Codex lane on CLAUDE.md's five own-vs-acquire analyzer claims did not return before the run closed. Its central claim, a single admitSpawn chokepoint for acquired-tool spawns, was verified directly instead; the other four were not independently re-checked.
 
-- Leg 2 premise probes — 39 of 100 entries came back `probes_unusable`, meaning the lane's quoted fragments could not be evaluated against the tree. Those verdicts carry NO premise confirmation and must be re-verified against HEAD before any of them is worked. This is the single largest hole in this run. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Three of the four answered-not-done decisions (240e467dfd7a8ac9, db629de141ee6414, 26e2d10e4569b448) were NOT executed: their write targets collide with the three pending remediation work items' declared scope.
 
-- Leg 2 found no shipped-and-deletable entry. The sweep's taxonomy returned actionable_now (58), owner_decision_needed (15), live_run_blocked (6) and accepted_residual_no_work (1), and no already-shipped class at all — so the shipped-entry deletion pass had nothing code-proven to delete, rather than having been skipped. Stated because a quiet result must not read as an unrun leg.
-
-- Leg 1 reviewed 14 of the 54 in-scope docs end-to-end this run (README.md, the five docs/audit-pkg pages, src/audit/README.md, src/audit/adapters/README.md, examples/README.md, the ship / start-lap / design-check skills, docs/glossary-ids.md and docs/end-of-sprint-report-template.md) plus docs/nightly-routine.md and the four canonical loader bodies under skills/ checked directly for CLI-literal drift. The remaining docs were not examined and carry no ledger stamp for this run; leg1-2026-08-23-coverage.json is the machine record.
-
-- The doc-set condensation pass (perspective 2) ran over the 40-doc non-review corpus and found NO new fold, merge or retire candidate beyond the two already-open items docs-2 and docs-4. Recorded so a silent result is not mistaken for a skipped pass.
-
-- The /insights weekly pass was NOT due — the stamp at .audit-tools/nightly/insights-last-run.json has ran_at 2026-08-21, under seven days old. Recorded for completeness only; being not-due is not a skipped leg.
+- The weekly /insights pass was not due (stamp 2026-08-21, three days old), so it did not run. Not a skipped leg.
 
 
 </details>

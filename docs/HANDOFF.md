@@ -11,25 +11,20 @@
   `.audit-tools/audit-findings.json`. The tool defects it and the remediation run exposed are the
   2026-08-21 through 2026-08-23 entries in `docs/backlog/open-bugs.md`.
 - The first-draw REMEDIATION RUN (`.audit-tools/remediation/`, 30 work items) is in its implement
-  phase: 24 items are on `main`, 5 resolved with no change, and NODE-5 is implementing with
-  26 → 7 → 14 queued behind it. NODE-5 is a RESUMED worker: two 160-turn attempts died on an
-  under-scoped async-boundary ripple, so the host widened the block a second time (19 allowed
-  files), re-queued it with `resume_from: "implement"` to keep the partial worktree, and dropped
-  the stale `state.host_handoff` binding so the tool re-minted the workload (see the binding-wedge
-  entry in `docs/backlog/open-bugs.md`). A DETACHED host runner drives the run (relaunched
-  2026-08-23 22:58Z from the main checkout); it lands items serially on `main`, writes the bound
-  result docs, re-runs `next-step` per round, and stops on any pause it cannot answer. The runner,
-  its logs, watch/stop/resume, the pause recipes, and the relaunch traps (an auto-permission-mode
-  session cannot spawn it) are in project memory `remediation-host-runner-2026-08-23`; the run's
-  decisions are in `remediation-first-draw-2026-08-22`.
-- Every queue decision of 2026-08-23 is answered and recorded; the executed ones landed. FOUR
-  answered items deliberately wait for the remediation run to close, because they edit files or
-  prompt text the run's workload binding pins: the per-run-consent code fix (remove the durable
-  recorded-`granted` route from `admitSpawn`; answer key `240e467dfd7a8ac9`), the F-label
-  retirement from source comments (`5acf2e262ebd7ab0`), P41 (prompt-contract registry,
-  `db629de141ee6414`), and P42 (advance command out of worker prompts, `26e2d10e4569b448`) —
-  all four live in the decision ledger under `.claude/` and in `node scripts/…` (the answer
-  lister shows them as answered, not done).
+  phase: 22 items are resolved on `main`, 5 resolved with no change, and THREE remain pending —
+  CP-NODE-7, CP-NODE-14 and CP-NODE-26. NODE-5 landed as `2f518770`. The detached host runner is
+  NOT currently alive; relaunch it per project memory `remediation-host-runner-2026-08-23`, which
+  holds its logs, watch/stop/resume, the pause recipes, and the relaunch traps (an
+  auto-permission-mode session cannot spawn it). The run's decisions are in
+  `remediation-first-draw-2026-08-22`.
+- Every queue decision of 2026-08-23 is answered and recorded. ONE of the four answered-not-done
+  items landed on 2026-08-24 as `7e34fe14`: the F-label retirement from source comments
+  (`5acf2e262ebd7ab0`), which touched no file any pending block claims. THREE still wait, because
+  their write targets DO collide with the three pending items' declared scope: the per-run-consent
+  code fix (remove the durable recorded-`granted` route from `admitSpawn`; `240e467dfd7a8ac9`),
+  P41 (prompt-contract registry, `db629de141ee6414`), and P42 (advance command out of worker
+  prompts, `26e2d10e4569b448`). That collision is re-derived by hand each session; the queue below
+  carries a proposal to print the run's write scope in `answer.mjs --list` instead.
 
 ## Immediate next
 
@@ -40,14 +35,22 @@
    the spawn. When every item is terminal the tool enters closing (final gate): run
    `node remediate-code.mjs next-step` until the report is promoted
    (`.audit-tools/remediation-report.md` / `remediation-outcomes.json`).
-2. After the run closes: the four run-close-gated answers named in Live state (per-run-consent
-   code fix first — it edits the files the final work item just changed), each recorded done in
-   the decision ledger as it lands.
+2. After the run closes: the three remaining run-close-gated answers named in Live state
+   (per-run-consent code fix first — it edits the files the final work items touch), each
+   recorded done in the decision ledger as it lands.
 3. Ask the owner the waiting decisions (generated list below).
-4. Ship a release once the run closes (`/ship`): `main` carries the 24 remediation landings, P39,
-   P40, three executed queue items and the follow-up fixes since v0.45.0.
+4. Ship a release once the run closes (`/ship`): `main` carries the remediation landings, P39,
+   P40, the executed queue items and the follow-up fixes since v0.45.0.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **5 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `docs-1` — instruction-file edit: name the shared host-handoff core in CLAUDE.md, or leave the two twins as the documented owners
+  - `docs-2` — the 'lean fast-path exception' heading advertises an exception the same section then denies — reword it, or keep it as history
+  - `backlog-1` — intent-interpretation.json is a write-only sidecar — give it a reader, or delete it
+  - `backlog-2` — declare the tracked trees no typechecker reaches — pick the mechanism, or accept the absence
+  - `sol-1` — P43: print an open remediation run's write scope in answer.mjs --list, so answered work is not hand-checked against it every session
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

@@ -1,525 +1,215 @@
 {
-  "generated_at": "2026-08-23T09:24:46.249Z",
+  "generated_at": "2026-08-24T09:24:51.070Z",
   "run": {
-    "date": "2026-08-23",
-    "head": "a5a673e8"
+    "date": "2026-08-24"
   },
   "items": [
     {
       "id": "docs-1",
       "leg": "docs",
-      "path": "docs/project-philosophy.md",
-      "subject_key": "240e467dfd7a8ac9",
-      "title": "A10 says analyzer consent is \"per-run\", but the code also admits a DURABLE recorded grant — settle which the project means before either side is changed",
-      "eli5": "Before this tool runs an outside analyzer program on your code, it asks permission. There are two ways permission can be given. One is a token that authorises a single run and is thrown away afterwards. The other is a recorded \"granted\" decision that is saved to a file on disk and keeps admitting that analyzer on every future run. The code does both: the admission function checks the saved decision first, and only then falls back to the single-run token. The full rule is written correctly in CLAUDE.md, which names both routes. But the one-line summary in project-philosophy.md names only the single-run route, so a reader of the map learns a stricter rule than the tool actually applies. Normally the repair would be obvious, because the map is a pointer and a pointer that disagrees with its home is simply wrong. What makes this your decision is that the newest commit on this branch opens a backlog item arguing the opposite: that per-run choices, analyzer consent among them, should never be persisted at all. If that argument wins, the map is already right and the CODE is what has to change. The same divergence therefore has two opposite repairs, and only you know which direction the project is going.",
-      "question": "docs/project-philosophy.md states the analyzer gate as \"mechanical run-safety + curated default set + per-run consent, NOT a maintained allowlist\". CLAUDE.md and admitSpawn both also admit a durable recorded `granted` decision persisted to .audit-tools/audit/analyzer-policy.json. Which is the intent?",
+      "path": "CLAUDE.md",
+      "subject": "**Host handoff** (`src/audit/cli/dispatch/hostHandoff.ts`): the tool writes a versioned workload, prompt digests, task bindings, and a result map beneath the run directory.",
+      "title": "instruction-file edit: name the shared host-handoff core in CLAUDE.md, or leave the two twins as the documented owners",
+      "eli5": "CLAUDE.md describes host handoff twice, once for the auditor and once for the remediator, and each description names a single file as the owner: src/audit/cli/dispatch/hostHandoff.ts and src/remediate/steps/dispatch/hostHandoff.ts. Since then a work item extracted a shared module underneath both of them, src/shared/submission/hostHandoffCore.ts, 379 lines, and both twins now import it through the audit-tools/shared barrel. Nothing CLAUDE.md says is false: the twins still exist and still do the described work. But the document does not mention that a shared core exists. That matters more here than it would elsewhere, because one core, two draws is one of this project's stated convictions, so where the shared core lives has architectural meaning. Naming it would make the document match the shape of the code. Leaving it out keeps CLAUDE.md shorter and treats the core as an implementation detail beneath the boundary the document is actually describing. CLAUDE.md is an instruction file, so the nightly routine never edits it on its own.",
+      "question": "CLAUDE.md's two host-handoff paragraphs name only the per-side twins. A shared core (src/shared/submission/hostHandoffCore.ts) now sits underneath both. Should CLAUDE.md name it?",
       "options": [
         {
-          "label": "Fix the map",
-          "answer": "The durable recorded grant is intended. Correct project-philosophy.md A10 to name both routes, matching CLAUDE.md and admitSpawn."
+          "label": "Name the shared core",
+          "answer": "Add the shared core to CLAUDE.md's host-handoff description. The one core, two draws conviction makes where the shared substrate lives part of the architecture, not an implementation detail."
         },
         {
-          "label": "Fix the code",
-          "answer": "Per-run only is intended, as the map says and as the newest backlog item argues. The durable `granted` path in admitSpawn is what should go, and CLAUDE.md follows the code once it changes."
+          "label": "Leave the twins as documented",
+          "answer": "Leave CLAUDE.md as it is. The twins are the boundary the document describes, and the shared core beneath them is an implementation detail that would date the prose."
         },
         {
-          "label": "Wait for the backlog item",
-          "answer": "Do not touch either side yet. The divergence is a live design question already tracked in the backlog; re-raise it only once that item is decided."
+          "label": "Point at the barrel instead",
+          "answer": "Do not name the core file, but say the twins share their substrate through audit-tools/shared. That is the durable fact, without a filename a later refactor moves."
         }
       ],
       "evidence": [
-        "src/shared/analyzers/acquisitionEngine.ts — admitSpawn: `if (recordedDecision === \"granted\") return undefined;` sits ahead of the consent-token branch, and its doc comment states that order is the contract.",
-        "CLAUDE.md states the disjunction correctly: \"either a durable recorded `granted` decision in `.audit-tools/audit/analyzer-policy.json`, or the per-run consent token\".",
-        "src/shared/analyzerPolicy.ts persists the decision, so the grant genuinely survives the run.",
-        "HEAD tip commit 5e1d92c0 \"backlog: per-run choices must not be persisted — analyzer consent and review depth\" argues the code is the wrong side.",
-        "Verified independently this run by reading admitSpawn from source, not from the reviewing agent summary."
+        "src/shared/submission/hostHandoffCore.ts exists (379 lines), added by commit 76196e53 'remediate(CP-BLOCK-CP-NODE-6): Extract shared host-handoff core; reduce both twins'.",
+        "Both twins import from the shared barrel: src/audit/cli/dispatch/hostHandoff.ts:36 and src/remediate/steps/dispatch/hostHandoff.ts:38, and src/shared/index.ts re-exports hostHandoffCore.",
+        "CLAUDE.md:99 and CLAUDE.md:136 each name one twin as the host-handoff owner; neither mentions a shared core.",
+        "src/shared/loopCorePaths.ts already lists src/shared/submission/ as loop-core, so the core is gated like the twins."
       ],
       "premise_probes": [
         {
-          "file": "docs/project-philosophy.md",
-          "contains": "mechanical run-safety + curated default set + per-run consent, NOT a maintained allowlist."
+          "file": "CLAUDE.md",
+          "contains": "**Host handoff** (`src/audit/cli/dispatch/hostHandoff.ts`)"
         }
       ],
-      "first_seen": "2026-08-22",
-      "nights_open": 2
+      "subject_key": "c293f51214b487a6",
+      "first_seen": "2026-08-24",
+      "nights_open": 1
     },
     {
       "id": "docs-2",
       "leg": "docs",
-      "path": "spec/self-scaling-pipeline-design.md",
-      "subject_key": "7ff5e4661b46ebf5",
-      "title": "Apply the de-status rule uniformly to the concept docs still carrying measurements, lap narratives and migration markers — or name the sites that keep them deliberately",
-      "eli5": "This project has a written rule that a concept document explains an idea which stays true, and never records what happened on a particular day or what something measured at one moment. Several documents break that rule while explicitly claiming to follow it. One design spec opens by saying it contains no dated status, then refers to \"laps 1-3\" and quotes a token cost. A README says a piece of code moved as part of a numbered work item that no longer exists anywhere in the tree. The shipping how-to quotes a percentage and two release versions as evidence for rules that hold regardless of the numbers. In every case the surrounding point is durable and worth keeping; only the number or the date is the problem. This is your call rather than an automatic cleanup because removing text is a judgment about what a future reader needs, and at least one site may carry its index on purpose as a way to find things. The cost of leaving it is quieter than it looks: no tool can check any of these values, so they never visibly go stale — they simply become wrong while still reading as authoritative.",
-      "question": "Several concept docs carry pinned measurements, lap narratives, or shipped-migration markers while declaring themselves status-free. Apply the de-status rule uniformly across them, and is any site a deliberate exception?",
+      "path": "spec/remediation-workflow-design.md",
+      "subject": "### Both paths run the pipeline — except the lean fast-path exception",
+      "title": "the 'lean fast-path exception' heading advertises an exception the same section then denies — reword it, or keep it as history",
+      "eli5": "In spec/remediation-workflow-design.md a section heading reads: Both paths run the pipeline, except the lean fast-path exception. The body underneath then says the opposite in as many words: This is not a parallel path. It explains that depth scales with a single risk dial rather than branching, and it points at spec/self-scaling-pipeline-design.md, whose own opening line says it supersedes the lean fast path framing entirely. So a reader who scans headings takes away that a fast-path exception exists, and a reader who reads the paragraph takes away that it does not. Both cannot be the intended message. The fix is a wording change in a normative design document, which is substance rather than a stale fact, so the routine will not make it alone.",
+      "question": "The heading names a 'lean fast-path exception'; the section body states 'This is not a parallel path', and the superseding design doc retired that framing. Should the heading change?",
       "options": [
         {
-          "label": "Sweep them all",
-          "answer": "Apply the de-status rule uniformly: strip the measurement, lap reference, or migration marker at every site, keeping the durable sentence around it. No exceptions."
+          "label": "Reword the heading",
+          "answer": "Reword the heading to describe the risk dial, for example 'Both paths run the pipeline; the risk tier sets the depth', so heading and body agree."
         },
         {
-          "label": "Sweep, keep the location index",
-          "answer": "Strip the measurements, lap narratives and migration markers, but keep the \"Where the shipped mechanisms live\" index in spec/mechanical-analyzer-layer-design.md as a deliberate seek-aid."
+          "label": "Keep it — it names what was superseded",
+          "answer": "Keep the heading. It deliberately names the framing a reader arrives with, and the body's job is to correct it."
         },
         {
-          "label": "Leave them",
-          "answer": "The values earn their place as evidence for the rules they justify. Leave every site as written and stop raising them."
+          "label": "Drop the clause",
+          "answer": "Shorten the heading to 'Both paths run the pipeline' and let the body carry the whole nuance."
         }
       ],
       "evidence": [
-        "spec/self-scaling-pipeline-design.md declares \"Durable conceptual design; no dated status here.\" and then carries \"(laps 1–3)\" plus a hand-typed token range.",
-        "src/audit/adapters/README.md carries \"(item-C relocation)\". The end state is true — the analyzers do live in src/shared/analyzers/ — so only the migration marker is at issue.",
-        ".claude/skills/ship/SKILL.md carries two release-version incident markers plus a percentage and timing set; the profiler measures those durations every run, so any fixed number is a snapshot of a moving value.",
-        ".claude/skills/design-check/SKILL.md carries a per-subagent token cost for a rationale that stands without it.",
-        "spec/mechanical-analyzer-layer-design.md carries \"Where the shipped mechanisms live:\" — every path resolves today, which is precisely why it will rot silently.",
-        "No probe can track any of these values, so per the routine contract the only admissible action is removal, never correction. This item asks for the rule, not for corrected numbers."
+        "spec/remediation-workflow-design.md:146 heading reads: Both paths run the pipeline — except the lean fast-path exception.",
+        "The same section states: This is not a parallel path. The tier is the SINGLE classifier.",
+        "spec/self-scaling-pipeline-design.md opens by superseding the earlier 'give document input a separate lean fast path' framing, and calls a separate leanFastPath the wrong shape.",
+        "A lean-fast-path branch does exist in code, but as a plan-normalization branch in normalizeExtractedPlan, not as a pipeline path, so the heading's word 'exception' does not describe the code either."
       ],
       "premise_probes": [
         {
-          "file": "spec/self-scaling-pipeline-design.md",
-          "contains": "(laps 1–3)"
-        },
-        {
-          "file": "src/audit/adapters/README.md",
-          "contains": "(item-C relocation)"
+          "file": "spec/remediation-workflow-design.md",
+          "contains": "Both paths run the pipeline — except the lean fast-path exception"
         }
       ],
-      "first_seen": "2026-08-22",
-      "nights_open": 2
+      "subject_key": "a1bcdf448f875452",
+      "first_seen": "2026-08-24",
+      "nights_open": 1
     },
     {
-      "id": "docs-3",
-      "leg": "docs",
-      "path": "README.md",
-      "subject_key": "d37581ceaceb366b",
-      "title": "Decide what audit-tools ships to npm consumers — the tarball carries a contributor guide and a maintainer release runbook, and their pointers dangle there",
-      "eli5": "When this package is published to npm, only some of the repository goes into the download. The list of what goes in is in package.json. Three documents that DO go in point at documents that do NOT. The main README ends by sending the reader to CLAUDE.md and to the specs folder; neither is published, so on the npm page both links lead nowhere. A contributor guide about running the test suite and adding language analyzers is published, and it links to the handoff and backlog files, which are not. A maintainer release runbook is published too, complete with the GitHub account name and the steps for triggering a release workflow — none of which a consumer of the package can use or should need. Nothing here is broken inside the repository; every link works when you have the whole checkout. The question is only about the published copy, and it has more than one reasonable answer: publish fewer documents, publish more of them, or rewrite the pointers to full web addresses. That choice is about who the package page is for, which is yours to make.",
-      "question": "The npm tarball ships README.md, docs/audit-pkg/development.md and docs/audit-pkg/release.md, while CLAUDE.md, spec/, docs/HANDOFF.md and docs/backlog.md are absent. Should the shipped doc set shrink, grow, or should the pointers become absolute URLs?",
-      "options": [
-        {
-          "label": "Ship less",
-          "answer": "Narrow the published doc set to consumer-facing pages. Drop the contributor guide and the maintainer release runbook from the tarball, and rewrite any surviving pointer that leaves the shipped set."
-        },
-        {
-          "label": "Keep the set, fix the links",
-          "answer": "Keep shipping all three, and rewrite every pointer that leaves the tarball as an absolute GitHub URL so it resolves on the npm page."
-        },
-        {
-          "label": "Ship more",
-          "answer": "Add the pointed-at paths to package.json files so the published set is self-contained."
-        },
-        {
-          "label": "Leave it",
-          "answer": "The npm page is not a supported reading surface. Accept the dangling links and stop raising them."
-        }
-      ],
-      "evidence": [
-        "Premise verified EMPIRICALLY, not inferred from files semantics: npm pack --dry-run at HEAD lists README.md, docs/audit-pkg/development.md and docs/audit-pkg/release.md as present, and CLAUDE.md, spec/, docs/HANDOFF.md and docs/backlog.md as absent.",
-        "There is no .npmignore, so npm’s always-include set (package.json, README, LICENSE) covers none of the dangling targets.",
-        "README.md closes by pointing at CLAUDE.md and spec/.",
-        "docs/audit-pkg/development.md sits under an Agent handoff heading and links ../HANDOFF.md and ../backlog.md.",
-        "docs/audit-pkg/release.md carries the trusted-publisher owner name and GitHub Actions workflow-dispatch steps.",
-        "check:doc-links passes because it resolves against the working tree, so no existing gate sees this."
-      ],
-      "premise_probes": [
-        {
-          "file": "README.md",
-          "contains": "See [`CLAUDE.md`](CLAUDE.md) for architecture and design decisions, the specs in"
-        },
-        {
-          "file": "docs/audit-pkg/release.md",
-          "contains": "owner or organization: `OhOkThisIsFine`"
-        }
-      ],
-      "first_seen": "2026-08-22",
-      "nights_open": 2
-    },
-    {
-      "id": "docs-4",
-      "leg": "docs",
-      "path": "docs/audit-pkg/product.md",
-      "subject_key": "283f545fb4a904b8",
-      "title": "Four facts are kept in two hand-written homes each and three have already drifted — single-source them, or accept the copies deliberately",
-      "eli5": "The same fact is written down twice in several places in this project, by hand, with nothing checking that the two copies agree. Three of the four pairs have already come apart. One page lists the commands a user can run and presents the list as complete; it is missing two of them, and a different page lists one of the missing ones. A folder of example files has a README that lists the files in that folder, which the folder itself already tells you. The instruction about passing a target directory is written twice across two files that both ship to users, and the two wordings have already diverged on a word. An open piece of work is recorded both in a design spec and in the backlog, so finishing it means remembering to delete it twice. None of these is wrong today in a way that breaks anything; the point is that each pair can only drift further, and the drift is silent because no check compares them. The decision is whether to generate the second copy from the first, delete it, or keep it on purpose.",
-      "question": "Four facts live in two hand-maintained homes each, three already divergent. Should each be single-sourced (generated or reduced to a pointer), or are any of the copies deliberate?",
-      "options": [
-        {
-          "label": "Single-source all four",
-          "answer": "Derive or delete the second copy in every case: generate the CLI-surface list from installer-verb-help.mjs, drop the examples inventory, single-source the target-directory instruction across the two shipped loader assets, and leave the open-work item only in the backlog."
-        },
-        {
-          "label": "Fix the CLI surface list only",
-          "answer": "The user-facing command list is the one that matters — make it complete and single-sourced. Leave the examples inventory, the loader wording, and the duplicated open-work entry as they are."
-        },
-        {
-          "label": "Leave them",
-          "answer": "The copies are cheap and readable where they sit. Accept the drift risk and stop raising these."
-        }
-      ],
-      "evidence": [
-        "docs/audit-pkg/product.md introduces its list as the supported user-facing surfaces and then omits verify-install AND install-host. The wrapper dispatches five verbs: prompt-path, ensure, install, install-host, verify-install. docs/audit-pkg/operator-guide.md names verify-install but not install-host, so both hand-written copies are incomplete and they disagree with each other.",
-        "examples/README.md hand-lists the files in examples/, which the directory listing already provides; its durable content is the two config-home paragraphs, which survive without the inventory.",
-        "The target-directory instruction is duplicated across skills/audit-code/SKILL.md and skills/audit-code/audit-code.prompt.md, BOTH of which ship in the tarball, and the two wordings have already diverged on the adjective.",
-        "spec/contract-authoring-determinism-design.md carries an open-work line whose item is already tracked in docs/backlog/open-bugs.md, giving one open item two homes.",
-        "spec/audit-workflow-design.md restates the structure-decomposition and charter-layer design at length, then defers those same three items to spec/conceptual-design-review-design.md — a copy where a pointer already exists.",
-        "Refuted and NOT included: the claim that spec/audit/dependency-map.md has no doc-reading parity gate. tests/audit/staleness.test.ts reads that markdown and asserts bidirectional parity against ARTIFACT_DEPENDS_ON_MAP. The gate is real, though scoped to one artifact’s edges."
-      ],
-      "premise_probes": [
-        {
-          "file": "docs/audit-pkg/product.md",
-          "contains": "5. `audit-code install` for explicit repair or force refresh"
-        },
-        {
-          "file": "examples/README.md",
-          "contains": "example audit tasks + requeue tasks"
-        }
-      ],
-      "first_seen": "2026-08-22",
-      "nights_open": 2
-    },
-    {
-      "id": "docs-5",
-      "leg": "docs",
-      "path": "spec/audit/dependency-map.md",
-      "subject_key": "c2f8a24fcedba792",
-      "title": "CONSTITUTIONAL: the audit spec documents an executor-to-artifact producer relation that no registry encodes, and its cross-reference bounces the reader — decide the home",
-      "eli5": "The audit specification tells you which internal step produces which output file. It presents that table as a readable rendering of a machine-readable source, which is the project’s usual safety argument: the table cannot go wrong because the code is the real list. In this one case there is no such list. Both registries the table names record other things — one records what each step is for, the other records each file’s name and phase — and neither records who writes what. The real answer is scattered across the individual step implementations. A second document compounds this by sending readers to a third document for the same mapping, and that third document says explicitly that it deliberately does not carry it, so the reader is bounced without ever arriving. Separately, a list of files that participate in the run without being registered is missing two entries whose own source comments say in the strongest terms that they must never be registered — exactly the readers that list exists to protect. These files are constitutional, meaning nothing may edit them without your decision, which is why this comes to you rather than being fixed.",
-      "question": "The spec/audit corpus documents an executor-to-artifact producer relation with no machine-readable source, a cross-reference that bounces, and an incomplete not-a-registry-entry enumeration. Where should the producer relation live?",
-      "options": [
-        {
-          "label": "Give it a machine source",
-          "answer": "Add the producer relation to a registry (an artifacts_written declaration on ExecutorDefinition, or an equivalent), then generate the table from it and fix the cross-reference to point at the real home."
-        },
-        {
-          "label": "Keep it hand-maintained, say so",
-          "answer": "Leave the table hand-maintained but stop claiming it renders a machine-readable ground truth. Fix the bouncing cross-reference and complete the not-a-registry-entry enumeration."
-        },
-        {
-          "label": "Fix the pointers only",
-          "answer": "Correct the cross-reference and add the two missing entries to the enumeration. Leave the derivation claim as written."
-        }
-      ],
-      "evidence": [
-        "ExecutorDefinition in src/audit/orchestrator/executors.ts carries id, kind and obligation_ids. ArtifactDefinition in src/audit/io/artifacts.ts carries fileName, phase, read and write. Neither encodes a producer relation.",
-        "The relation lives in each runner’s artifacts_written array, which is a runtime result rather than a declarative registry.",
-        "spec/audit/artifact-contract.md defers the executor-to-artifact mapping to spec/audit/executor-catalog.md, which states the mapping is authoritative in dependency-map.md and that the catalog deliberately does not re-list producers.",
-        "artifact-contract.md’s enumeration of members that participate in state without being registry entries omits submission_ledger and submission_ledger_dropped, whose ArtifactBundle comment says the ledger must never become an ARTIFACT_DEFINITIONS entry, and omits expected-submissions.json, marked Deliberately UNREGISTERED in src/shared/io/auditToolsPaths.ts.",
-        "Partial mechanical grounding does exist: tests/audit/seam-dependency-map-executor-writeset-parity.test.ts checks write-sets against the dependency map. It does not cover the named registry pair.",
-        "Escalate-only: every spec/audit doc is constitutional per src/shared/constitutionalDocPaths.ts.",
-        "Two sibling findings were REFUTED this run and are excluded: the intent-equivalence-verdict.json row carries an explicit exemption marker stating the real path and pre-empting the objection, and the abstract priority list is a policy layer above the PRIORITY array rather than a competing ordering."
-      ],
-      "premise_probes": [
-        {
-          "file": "spec/audit/dependency-map.md",
-          "contains": "truth remains the pair of registries"
-        },
-        {
-          "file": "src/audit/orchestrator/executors.ts",
-          "absent": "artifacts_written"
-        }
-      ],
-      "first_seen": "2026-08-22",
-      "nights_open": 2
-    },
-    {
-      "id": "docs-6",
-      "leg": "docs",
-      "path": "spec/audit/entrypoint-contract.md",
-      "subject_key": "e15d0c1d1880d695",
-      "title": "CONSTITUTIONAL: the entrypoint contract calls the shipped slash workflow an interim precursor, while the standing decision says that workflow IS the product",
-      "eli5": "This project has a settled conviction, written in its instruction file, that the product is the slash-command workflow the user runs inside a conversation, and that the command-line tool exists to serve it. The audit entrypoint specification says something different. It describes the shipped slash command and its command-line equivalent as an interim precursor, and states that the current commands should be treated as steps toward internal machinery rather than as the final way people will interact with the tool. So the specification that defines the product boundary is written as though today’s product were a way-station. Worth separating from a related non-issue: the same document is written against a future entrypoint name that exists nowhere in the code, and an independent check found that this is fine, because the document declares that choice openly in its opening paragraphs and explains why. The precursor framing is different — it is not declared anywhere as a deliberate departure, and it contradicts the conviction rather than restating it. This document is constitutional, so nothing may change it without your decision.",
-      "question": "spec/audit/entrypoint-contract.md describes the shipped /audit-code slash workflow as an interim precursor and says the current CLI commands should be treated as precursors, not the final public interaction model. CLAUDE.md states the slash workflow IS the product. Which stands?",
-      "options": [
-        {
-          "label": "The conviction stands",
-          "answer": "Conversation-first is settled: the slash workflow is the product. Rewrite the precursor framing so the contract describes the shipped surface as the interaction model, keeping the aspirational entrypoint name if it is still wanted."
-        },
-        {
-          "label": "The contract stands",
-          "answer": "The internal-executor direction is still intended and the shipped surface really is interim. Leave the contract and reconcile CLAUDE.md instead."
-        },
-        {
-          "label": "Both, at different layers",
-          "answer": "They describe different layers and do not conflict. Add a sentence to the contract saying so, and stop raising it."
-        }
-      ],
-      "evidence": [
-        "spec/audit/entrypoint-contract.md calls the conversation-first CLI and slash command the interim precursor surface, and states that the current CLI commands should be treated as precursors to internal executors, not as the final public interaction model.",
-        "CLAUDE.md states: Conversation-first. Product is the slash workflow inside host conversation; CLI is backend/fallback.",
-        "This was raised by the independent adversary pass as a false negative, after it REFUTED the related surface finding: the doc openly declares that it is written against an aspirational entrypoint name and explains why, so code-absence of that name is the doc working as designed. The precursor framing carries no such declaration.",
-        "Escalate-only: spec/audit/* is constitutional per src/shared/constitutionalDocPaths.ts."
-      ],
-      "premise_probes": [
-        {
-          "file": "spec/audit/entrypoint-contract.md",
-          "contains": "The current CLI commands should be treated as precursors to internal executors"
-        }
-      ],
-      "first_seen": "2026-08-22",
-      "nights_open": 2
-    },
-    {
-      "id": "backlogN-1",
+      "id": "backlog-1",
       "leg": "backlog",
       "path": "docs/backlog/open-bugs.md",
-      "subject_key": "dd47a7ac66507930",
-      "title": "Backlog disambiguation: \"one run identity\" is the stated property, but the adversary says the gap is LINKAGE, not identity — decide which the entry means",
-      "eli5": "Three parts of this tool each have their own idea of what a \"run\" is. The step envelope — the small record written each time the tool advances — has a run_id field that is allowed to be empty, and in practice it is empty. The dispatch artifacts, which describe work handed to the host, use a run id built from a timestamp. The friction record, which collects the annoyances found during a run, names its own file after a cleaned-up run id. Because these three do not agree, a friction close-out that was written under one id was invisible to the part of the tool that reads the other, and it had to be rewritten by hand. The backlog entry that records this says the property to hold is \"one run identity across all three\". An independent adversary pass pushed back on exactly that wording. Its argument is that the three genuinely have different lifetimes — a step envelope is one advance, a dispatch run is one handoff to the host, and a friction record spans many of both — so forcing one shared id inverts the relationship and also throws away the timestamp meaning the dispatch ids carry for free. Its counter-proposal is cheaper: leave the three ids alone and add explicit pointer fields on the friction record naming the step envelope and dispatch run it belongs to. That fixes the invisibility, which was the actual symptom, without a migration. This is a decision only you can make, because the two answers lead to very different amounts of work and to a different shape for the tool. The entry cannot be turned into a task until it is settled, which is why it has sat as prose.",
-      "question": "docs/backlog/open-bugs.md states the property as \"one run identity across step envelope, dispatch artifacts, and friction record\". The adversary pass argues the three have genuinely different lifecycles and that the observed defect was a LINKAGE gap, not an identity gap, and proposes nullable foreign keys on the friction record instead. Which does the entry mean — unify the identity, or link the three ids?",
-      "options": [
-        {
-          "label": "Unify the identity",
-          "answer": "Keep the entry as written: one run identity across step envelope, dispatch artifacts and friction record. The step envelope run_id stops being nullable and is minted from the same source the dispatch artifacts and the friction substrate use. Accept the migration cost and the loss of the timestamp semantics carried implicitly by the current dispatch ids."
-        },
-        {
-          "label": "Link, do not unify",
-          "answer": "Rewrite the entry's property: the three run notions stay distinct because their lifecycles genuinely differ, and the friction record gains explicit nullable foreign keys naming the step envelope run and the dispatch run it relates to. The defect to close is the invisibility, not the multiplicity of ids."
-        },
-        {
-          "label": "Neither — the envelope field goes",
-          "answer": "The step envelope's run_id is nullable and null in practice, which makes it a field nothing relies on. Delete it rather than either unifying or linking, and let the dispatch artifacts and the friction record be the only two run notions. Rewrite the entry to that scope."
-        }
-      ],
-      "evidence": [
-        "src/audit/cli/steps.ts:76 — the step envelope schema declares `run_id: z.string().nullable(),`. The nullable half of the divergence still holds at HEAD 01595a4c.",
-        "src/shared/friction/frictionRecord.ts:165-212 — the friction record and its lock are keyed by a sanitized run id (`frictionLockPath`, `frictionCapturePath`, `sanitizeRunId`), a separate identity from the envelope field.",
-        "Leg 2's mechanical sweep classified this entry owner_decision_needed with the action \"Owner needs to decide on the canonical run-id scheme and the migration scope before any concrete code change is derivable\" (.audit-tools/nightly/triage-2026-08-21.jsonl, open-bugs#da502b77).",
-        "Adversary characterization from the independent free-provider lane (.audit-tools/nightly/free-adv2-0821.log): different lifecycles per notion; a step envelope can fail without invalidating an already-emitted dispatch run; the timestamped dispatch ids carry temporal semantics a unified opaque id loses; friction is cross-cutting rather than hierarchical, so one parent id inverts the relationship; and the cheapest alternative is nullable foreign keys on the friction record.",
-        "The adversary reasoned from the proposal text only and did not read source — its lifecycle claims are argument, not verified fact, and are offered as the counter-case rather than as evidence.",
-        "Related durable memory: renaming-a-persisted-field-is-not-a-rename, identity-change-must-audit-its-filters, prefix-join-between-two-name-spaces-fails-empty — all three describe the cost of changing a persisted identity, which is what option 1 commits to."
-      ],
-      "premise_probes": [
-        {
-          "file": "src/audit/cli/steps.ts",
-          "contains": "run_id: z.string().nullable(),"
-        }
-      ],
-      "first_seen": "2026-08-21",
-      "nights_open": 3
-    },
-    {
-      "id": "docs-8",
-      "leg": "docs",
-      "path": ".claude/skills/ship/SKILL.md",
-      "subject_key": "6759f1304bccb490",
-      "title": "The ship skill anchors two preflight checks to the releases they burned (v0.34.17, v0.39.7) — keep the version stamps as incident anchors, or drop them and keep the mechanism sentence",
-      "eli5": "The ship skill lists a couple of quick checks to run before releasing, and next to each one it names the release that broke because that check was missing. One says \"burned v0.34.17\" and the other says \"burned v0.39.7\". The reason each check exists is timeless and worth keeping: one catches a documentation file that was never registered, and the other catches an unused import that the type checker ignores but the linter refuses. The version numbers are a different kind of thing. This project treats a pinned version or date inside a prose document as status noise, because it records what was true on one day rather than a rule that keeps holding. So the rule says to flag it and ask rather than quietly update or delete it. There is a real argument for keeping them: a version number is evidence that the failure actually happened, and evidence is what stops a future reader deleting a check that looks unnecessary. There is an equally real argument for dropping them: the sentence explaining what the check catches already carries all the force, and the number will mean less every month. Nothing is broken either way. The choice is whether this document is allowed to hold dated incident anchors at all, and that is a policy call about the document, not a fact anyone can verify.",
-      "question": ".claude/skills/ship/SKILL.md lines 28 and 30 read \"burned v0.34.17\" and \"burned v0.39.7\". The documentation philosophy calls a pinned version in a prose doc status-noise. Keep them as incident anchors, or drop the numbers and keep the mechanism sentence?",
-      "options": [
-        {
-          "label": "Keep the anchors",
-          "answer": "Keep both version stamps. A named burned release is evidence the failure was real, and that evidence is what stops a future reader deleting a preflight check that looks unnecessary. Record this subject as a deliberate exception to the pinned-version rule so the routine stops raising it."
-        },
-        {
-          "label": "Drop the numbers",
-          "answer": "Drop \"burned v0.34.17\" and \"burned v0.39.7\" and keep the sentences explaining what each check catches. The mechanism carries the force on its own, and the version numbers are exactly the dated status the documentation philosophy bans."
-        },
-        {
-          "label": "Drop, but say it happened",
-          "answer": "Drop the version numbers but keep an undated marker that each check exists because a release actually broke without it — evidence without a stamp that rots."
-        }
-      ],
-      "evidence": [
-        "Verified at HEAD a5a673e8: .claude/skills/ship/SKILL.md:28 reads \"burned v0.34.17)\" and :30 reads \"burned v0.39.7)\".",
-        "Both checks are live: package.json defines check:doc-manifest (node scripts/check-doc-manifest.mjs) and check:lint (eslint .), and both are in verify:checks. So the mechanism half of each sentence is true.",
-        "Independently surfaced by a separate reviewer lane this run, which verified the two checks exist and proposed no edit — it classified the version stamps as an owner decision.",
-        "Routing: the doc-review rubric treats a pinned version/date/status string in a prose doc as status-noise, and requires escalating \"de-status this or retire it\" rather than auto-bumping or auto-deleting the value."
-      ],
-      "premise_probes": [
-        {
-          "file": ".claude/skills/ship/SKILL.md",
-          "contains": "burned v0.34.17"
-        }
-      ],
+      "subject": "Align doc to scope; give the sidecar a reader or delete it.",
+      "title": "intent-interpretation.json is a write-only sidecar — give it a reader, or delete it",
       "auto_close": false,
-      "first_seen": "2026-08-23",
-      "nights_open": 1
-    },
-    {
-      "id": "docs-9",
-      "leg": "docs",
-      "path": "docs/glossary-ids.md",
-      "subject_key": "5acf2e262ebd7ab0",
-      "title": "The glossary promises to cover every opaque identifier in src, but the F-series phase labels and item-C have no family row — register them, or narrow the promise",
-      "eli5": "The glossary is a lookup table for the cryptic short identifiers that appear in code comments, so that someone reading a comment like \"INV-RS-10\" can find out what it means. Its opening sentence makes a broad promise: it covers the opaque identifiers that still occur anywhere under the source tree. It then lists five families of them. The problem is that the source tree contains at least two more kinds that no family covers. There are program-phase labels written as F5 and F6, which appear in six or more source files and mark which phase of the project a piece of machinery came from. There is also a label written as item-C, which appears in one file. A reader who meets F6 in a comment and goes to the glossary finds nothing, and the glossary gives no hint that it deliberately leaves those out. So either the promise is too broad or the table is incomplete, and only you can say which. Adding rows makes the table match its promise but grows a document whose whole value is being short. Narrowing the promise keeps the table small but means a reader has to learn that phase labels are simply not covered here. A third answer is that these labels are historical noise that should be removed from the source comments instead, which fixes the mismatch by making the identifiers go away.",
-      "question": "docs/glossary-ids.md says it is \"the lookup table for opaque identifiers that still occur in src/**/*.ts\", but F5/F6 (six-plus source sites) and item-C (one site) match no family row. Register them, narrow the stated scope, or retire the labels from source?",
+      "eli5": "One part of the 'Promotion and close residuals' backlog entry reports that the file intent-interpretation.json is written but never read by anything. Its unencodable_clauses field is described as being surfaced so the host can promote them, yet no code reads it back. Write-only data is a known trap in this project: it looks authoritative to a later reader precisely because it exists and is kept up to date, while nothing depends on it being correct. The entry names two ways out and does not choose between them, which is why the routine cannot act on it. Giving the sidecar a real reader makes the data load-bearing and therefore worth trusting. Deleting it removes a file that quietly implies a contract nobody honours. There is also a smaller sub-question in the same entry about whether the unencodable_clauses surface should survive either way.",
+      "question": "Should intent-interpretation.json be given a real reader, or deleted? And should its unencodable_clauses surface be preserved either way?",
       "options": [
         {
-          "label": "Register them",
-          "answer": "Add an F- family row (program-phase labels) and decide item-C alongside it, so the table matches the scope it already claims."
+          "label": "Delete the sidecar",
+          "answer": "Delete intent-interpretation.json and its unencodable_clauses surface. Write-only data that implies a contract nobody honours is worse than no file."
         },
         {
-          "label": "Narrow the scope",
-          "answer": "Declare program-phase labels out of the glossary's scope in its opening sentence. The glossary covers invariant, counterexample, plan-node and finding families only, and a phase label is resolved at the citing module."
+          "label": "Give it a reader",
+          "answer": "Keep the sidecar and wire a real consumer for unencodable_clauses, so the data is load-bearing and its correctness is actually tested."
         },
         {
-          "label": "Retire the labels",
-          "answer": "F5, F6 and item-C are historical program-phase noise in source comments. Remove them from the comments rather than documenting them, which makes the glossary correct without growing it."
+          "label": "Delete the file, keep the surface",
+          "answer": "Drop the persisted sidecar but keep unencodable_clauses on the in-memory interpretation result, where its consumer is visible."
         }
       ],
       "evidence": [
-        "Verified at HEAD a5a673e8: F5 and F6 occur in src/audit/extractors/analyzers/registry.ts:28, src/audit/extractors/gitHistory.ts:12, src/audit/extractors/designAssessment.ts:301, src/audit/extractors/graph.ts:966, src/audit/extractors/risk.ts:29 and src/audit/orchestrator/dependencyMap.ts:77.",
-        "item-C occurs at src/remediate/types/options.ts:8 (\"Test-only seams for the item-C close-gate analyzer re-verify leg\").",
-        "The glossary family table lists exactly five families: INV-, CE-, N-, the lens-prefix finding ids, and FND-. No row matches F- or item-C.",
-        "The glossary states its own contract as occurrence-based: \"The source tree is the authority: when the final occurrence of an identifier or family is deleted, its glossary entry is deleted too.\" That contract makes the gap a real mismatch rather than a stylistic gap, which is why it is asked rather than ignored.",
-        "Surfaced independently by a separate reviewer lane this run while reviewing src/audit/adapters/README.md, which cites F5 and F6 in prose."
+        "docs/backlog/open-bugs.md part (d) of 'Promotion and close residuals from CP-NODE-3/15 reviews' states the sidecar has zero readers.",
+        "The nightly mechanical backlog sweep classified this entry owner_decision_needed with its premise holding at HEAD (.audit-tools/nightly/triage-2026-08-24.jsonl, open-bugs#82cdddee).",
+        "The entry links project memory write-only-data-looks-authoritative, which records the same class of defect."
       ],
       "premise_probes": [
         {
-          "file": "docs/glossary-ids.md",
-          "absent": "| F- |"
-        },
-        {
-          "file": "src/audit/extractors/gitHistory.ts",
-          "contains": "git-history mining."
+          "file": "docs/backlog/open-bugs.md",
+          "contains": "give the sidecar a reader or delete it"
         }
       ],
-      "first_seen": "2026-08-23",
+      "subject_key": "896100e34412fa40",
+      "first_seen": "2026-08-24",
       "nights_open": 1
     },
     {
-      "id": "sol-2",
-      "leg": "solutions",
-      "path": "tests/shared/prompt-renders-its-contract.test.ts",
-      "subject_key": "db629de141ee6414",
-      "title": "P41: approve a registry-driven prompt-contract test that reconciles against every prompt builder — 12 records across 7 dates, and guard-reach already declares the class open",
-      "eli5": "When this tool hands work to a worker, it writes the worker a prompt that says what shape the answer must take. Separately, the tool has a schema that checks the answer when it comes back. Today those two are written by hand in different files, so they drift apart. A worker is told one thing and judged by another, and the mismatch is invisible until a run fails. A fix landed yesterday for two specific prompts: they now build the contract sentence out of the schema itself, so the two cannot disagree. The proposal is to make that the rule everywhere rather than at two named places. The way to do it is a table listing every prompt-writing function paired with the schema its output is checked by, with a test asserting per row that the prompt sentence is generated from the schema. The table is then reconciled against the source tree, the same way the guard registry already is, so a prompt-writing function that no row mentions fails the build. That reconciliation is what makes it a fix for the whole class instead of a third named instance. The catch is that some prompts legitimately ask for only part of the schema, and some contracts are prose with no schema at all, so the table needs two escape hatches or it will fail on correct prompts. The full proposal, with the recurrence evidence and the false-positive surface, is written out for you.",
-      "question": "Approve the registry-driven prompt-contract test — every prompt builder paired with the schema its output is parsed by, reconciled against src so an unclaimed builder is a red build, with declared \"projection\" and \"declared-gap\" escapes? Full proposal at .audit-tools/nightly/proposals/P41-prompt-contract-registry/PROPOSAL.md.",
+      "id": "backlog-2",
+      "leg": "backlog",
+      "path": "docs/backlog/open-bugs.md",
+      "subject": "the set of tracked source trees NOT reached by any typechecker should be stated mechanically, not inferred from what the include arrays omit.",
+      "title": "declare the tracked trees no typechecker reaches — pick the mechanism, or accept the absence",
+      "auto_close": false,
+      "eli5": "The scripts directory is a whole tracked tree that no TypeScript config covers: tsconfig.json includes only src, and tsconfig.test.json includes src and tests. Nothing anywhere states that scripts is deliberately unchecked. You can only find that out by opening both config files and noticing what is missing, an absence, which is the hardest thing to notice and the easiest thing to break by accident. The backlog entry asks for the unchecked set to be stated somewhere mechanical, so it is a fact the build can check rather than something a reader has to deduce. What it does not do is say which mechanism, and that is the decision. A declared-data file reconciled by a check script would match how this repo already handles the doc manifest and guard reach. Extending a typechecker to cover scripts is a different and larger answer. Doing nothing is also a real option if the absence is considered self-evident.",
+      "question": "How should the set of tracked source trees that no typechecker reaches be declared, and should it be declared at all?",
       "options": [
         {
-          "label": "Approve as proposed",
-          "answer": "Build the registry with the reconciliation leg (a prompt builder under src that no row claims is a red build) and both escapes — projection rows and declared-gap rows."
+          "label": "Declared data + reconciliation check",
+          "answer": "State the unchecked set as declared data with a check script that reconciles it against the tracked tree, following the doc-manifest and guard-reach precedent."
         },
         {
-          "label": "Registry without reconciliation",
-          "answer": "Build the registry and the per-row assertions, but do not make an unclaimed builder a red build. Rows are added deliberately rather than forced, which lowers the false-positive surface at the cost of leaving the class only partly closed — state the uncovered half in guard-reach-data.mjs."
+          "label": "Typecheck scripts/ instead",
+          "answer": "Do not declare the gap, close it. Bring scripts/ under a tsconfig so the unchecked set is empty and needs no declaration."
+        },
+        {
+          "label": "Leave it undeclared",
+          "answer": "Leave it as is. The include arrays are the statement, and a second declaration is one more thing to keep in sync."
+        }
+      ],
+      "evidence": [
+        "docs/backlog/open-bugs.md states scripts/ is covered by NO tsconfig, that tsconfig.json includes [\"src\"], and tsconfig.test.json includes [\"src\",\"tests\"] with checkJs:false.",
+        "Verified at HEAD this run: npm run check and check:tests both pass while nothing under scripts/ is typechecked.",
+        "The nightly mechanical sweep classified this entry owner_decision_needed with its premise holding (.audit-tools/nightly/triage-2026-08-24.jsonl, open-bugs#33da27bd).",
+        "The repo already uses declared-data-plus-reconciliation twice: scripts/doc-manifest-data.mjs and scripts/guard-reach-data.mjs."
+      ],
+      "premise_probes": [
+        {
+          "file": "docs/backlog/open-bugs.md",
+          "contains": "typechecker should be stated mechanically"
+        }
+      ],
+      "subject_key": "0c89f4cedc88b54d",
+      "first_seen": "2026-08-24",
+      "nights_open": 1
+    },
+    {
+      "id": "sol-1",
+      "leg": "solutions",
+      "path": "scripts/nightly/answer.mjs",
+      "subject": "ANSWERED, NOT RECORDED AS DONE",
+      "title": "P43: print an open remediation run's write scope in answer.mjs --list, so answered work is not hand-checked against it every session",
+      "eli5": "When you answer a nightly question, the work it implies often means editing code. If a remediation run is in progress at the same time, some of its work items have already reserved a set of files, and editing one of those files behind the run's back corrupts the binding it uses to accept results. Nothing computes that overlap today, so each session opens the run's state file, finds the pending items, joins them to their blocks, and works out by hand which answered items are safe. That happened on 2026-08-23 and again during this run, and the two derivations disagreed: last night's concluded that all four waiting answers were blocked, when one of them touched no reserved file at all. It shipped this run, a day later than it needed to. The proposal is to print the run's reserved files underneath the answered-not-done list, so the fact is in front of the reader instead of being re-derived. It deliberately stops short of labelling items ready or blocked, because a decision record stores the file the question was about, not the file its fix will touch, so a verdict would sometimes say ready when it is not, which is worse than saying nothing.",
+      "question": "Adopt P43: print an open remediation run's per-item write scope beneath the answered-not-done list in answer.mjs --list?",
+      "options": [
+        {
+          "label": "Adopt as proposed",
+          "answer": "Adopt P43 as written: print the open run's per-item write scope, and deliberately do not label answered items ready or blocked."
+        },
+        {
+          "label": "Adopt, but make it a verdict",
+          "answer": "Adopt the mechanism but go further: match each answered item's recorded path against the run's write scope and label it, accepting that the recorded path under-detects a fix's real write set."
         },
         {
           "label": "Decline",
-          "answer": "Keep the two named pins from P40. The reconciliation cost and the projection escape are not worth it for this class."
+          "answer": "Decline. Two occurrences is thin evidence, and reading the run state by hand when a run is open is acceptable."
         }
       ],
       "evidence": [
-        "Recurrence counted, not asserted: 12 records across 7 distinct dates — 7 open-bugs.md entries (2026-07-16, 2026-08-08 x2, 2026-08-09, 2026-08-19, 2026-08-21, 2026-08-22), 2 durable-traps entries (both 2026-08-09), and 3 friction records (2026-08-12, 2026-08-19, 2026-08-21).",
-        "Verified open at HEAD a5a673e8: tests/shared/prompt-renders-its-contract.test.ts:4 imports exactly one builder, renderCharterKindLanePrompt.",
-        "scripts/guard-reach-data.mjs:524 declares the gap as data, verbatim: \"P40: prompt-renders-its-contract-test reaches only its two named builders — a third prompt site (including the 15 contract-pipeline sketches and synthesize_intake ...) goes uncaught\".",
-        "A live instance of the drift the registry would catch: src/shared/types/finding.ts:206 has evidence optional, src/audit/contracts/workerSchemas.ts:35 has evidence .min(1), and src/audit/validation/auditResults.ts:339 enforces it imperatively.",
-        "Already-shipped check: c3eaa59d (P40) and 20bba526 closed two named instances on 2026-08-22. The class is not shipped — the uncovered field above says so at HEAD."
+        "Recurrence, two dates: commit 78ad5f54 (2026-08-23) hand-derived the collision for four answered items and wrote the conclusion into docs/HANDOFF.md prose; this run re-derived it from scratch.",
+        "The derivations disagreed. 5acf2e262ebd7ab0, the F-label comment cleanup, touches no file any pending block claims, and shipped this run as 7e34fe14 after being parked for a day.",
+        "Verified at HEAD: the three pending items' blocks claim src/audit/orchestrator/runtimeCommand.ts; four files including src/remediate/steps/dispatch/hostHandoff.ts; and eleven more. The other three answered items DO collide with that scope.",
+        "Full proposal, patch and red/green test: .audit-tools/nightly/proposals/P43-answered-work-vs-open-run-collision/"
       ],
       "premise_probes": [
         {
-          "file": "tests/shared/prompt-renders-its-contract.test.ts",
-          "contains": "renderCharterKindLanePrompt"
+          "file": "scripts/nightly/answer.mjs",
+          "contains": "ANSWERED, NOT RECORDED AS DONE"
         },
         {
-          "file": "src/shared/types/finding.ts",
-          "contains": "evidence: z.array(z.string()).optional(),"
+          "file": "scripts/nightly/answer.mjs",
+          "absent": "REMEDIATION RUN IS OPEN"
         }
       ],
-      "proposal": "P41 — registry-driven prompt-contract test, reconciled against src the way guard-reach-data.mjs is.",
-      "patch_path": ".audit-tools/nightly/proposals/P41-prompt-contract-registry/PROPOSAL.md",
-      "first_seen": "2026-08-23",
-      "nights_open": 1
-    },
-    {
-      "id": "sol-3",
-      "leg": "solutions",
-      "path": "src/remediate/steps/prompts.ts",
-      "subject_key": "26e2d10e4569b448",
-      "title": "P42: approve deleting the advance command from the worker-facing prompt, so a delegated executor cannot advance the run — a design change, not a guard",
-      "eli5": "Every step of a run produces two things. One is a machine record for the driver — the process actually steering the run. The other is a prompt document for the worker doing the piece of work. Today the worker prompt ends by telling the worker to run the advance command. That command is what moves the whole run to its next step. So the worker, which was supposed to do one bounded task and stop, is handed the ability to drive. It has happened at least three times: twice in 2026-07-16 and again in a 2026-08-19 record where two separate helpers independently noticed that the same prompt says \"do not advance to the next step\" and \"run the advance command\" in the same document. The proposal is not to add a rule against it. It is to stop writing the command into the worker document at all, leaving it only in the driver record. A worker handed material with no advance command in it has nothing to obey, so the mistake stops being possible rather than becoming something to catch. The cost is real but narrow: a host that has been reading the advance command out of the prompt file, rather than out of the driver record, loses its cue. So the driver record has to show the command at least as prominently before this lands. The backlog entry that records the incidents already contains a full spec and explicitly warns off two other designs.",
-      "question": "Approve moving the advance command out of the worker-facing prompt document and into the driver-facing step contract only? src/remediate/steps/prompts.ts renders it at seven sites. Full proposal at .audit-tools/nightly/proposals/P42-advance-command-in-worker-prompt/PROPOSAL.md.",
-      "options": [
-        {
-          "label": "Approve as proposed",
-          "answer": "Remove the advance command from the worker-facing prompt at all seven sites; it lives in the driver-facing step contract only."
-        },
-        {
-          "label": "Approve with a prominence requirement",
-          "answer": "Approve, but only together with a named requirement that the driver-facing step contract surfaces the advance command at least as prominently as the prompt did, so a host reading the prompt file today does not silently lose its cue."
-        },
-        {
-          "label": "Decline",
-          "answer": "Keep the advance command in the worker prompt. The self-advance risk is acceptable compared to the chance of a host losing its advance cue."
-        }
-      ],
-      "evidence": [
-        "Recurrence: 3 incidents across 2 distinct dates. docs/backlog/open-bugs.md:547 records two separate 2026-07-16 occurrences (a charter_extraction worker and a later systemic_challenge round) and already carries a full SPEC; a 2026-08-19 remediation friction record has two independent sub-agents flagging the same prompt self-contradiction unprompted.",
-        "Verified open at HEAD a5a673e8: src/remediate/steps/prompts.ts renders loaderCommand(\"next-step\") into worker prompts at lines 88, 171, 269, 311, 386, 504 and 548.",
-        "The contradiction in one document, from the 2026-08-19 record: \"Stop ... Do not advance to the next pipeline step\" alongside \"After writing the output file, run: remediate-code next-step\".",
-        "Already-shipped check: grepped .claude/hooks/ and scripts/check-*.mjs — nothing refuses an advance command in worker material.",
-        "False-positive surface: none, because it is not a guard. The cost is behavioural — a host reading the command out of the prompt file loses its cue unless the step contract surfaces it, which is what option 2 requires."
-      ],
-      "premise_probes": [
-        {
-          "file": "src/remediate/steps/prompts.ts",
-          "contains": "loaderCommand(\"next-step\")"
-        }
-      ],
-      "proposal": "P42 — the advance command lives in the driver-facing step contract only; the worker prompt stops carrying it.",
-      "patch_path": ".audit-tools/nightly/proposals/P42-advance-command-in-worker-prompt/PROPOSAL.md",
-      "first_seen": "2026-08-23",
-      "nights_open": 1
-    },
-    {
-      "id": "sol-4",
-      "leg": "solutions",
-      "path": "scripts/shared/offload-lane-data.mjs",
-      "subject_key": "ffaa77551e147264",
-      "title": "P43: approve a configDirTrust row so a lane that cannot read the repo is refused before it is spent on — 10 records across 8 dates, and the trap is marked UNENFORCED",
-      "eli5": "Some work is handed off to a helper session running on a different provider. That helper is launched with its own isolated settings directory. If that directory has never been told to trust this workspace, the helper cannot read any file here. It does not fail or complain. It answers anyway, from nothing — with the right structure and with quotes it made up, which is the shape a reader accepts as real work. This has happened repeatedly: the trap is written down and explicitly marked as not enforced, and there are memory records of fabricated results on four separate dates. It happened in a milder form during this very run: the first helper dispatch could not see the questions it was sent and offered to check an unrelated file it had found instead. The proposal is to check the one thing that is knowable in advance — whether the isolated settings directory has trusted this workspace — and report a lane as unusable at the start of a session rather than trusting it mid-task. It deliberately does not send a test request, because that costs quota, and the existing design says on purpose that \"will this lane actually serve\" cannot be known without spending. The honest limit is that the part which would grant the trust lives in a launcher outside this repository, so this half can only report, not repair.",
-      "question": "Approve a configDirTrust row in scripts/shared/offload-lane-data.mjs for the file-reading lanes, checked by the existing session-start lane leg, so an untrusted lane is reported unusable at lap start? Full proposal at .audit-tools/nightly/proposals/P43-lane-cannot-read-repo/PROPOSAL.md.",
-      "options": [
-        {
-          "label": "Approve as proposed",
-          "answer": "Add the configDirTrust row and let the session-start lane leg report an untrusted lane as unusable, with unprobeable lanes marked so they do not red falsely."
-        },
-        {
-          "label": "Report only",
-          "answer": "Add the row and report the trust state at session start, but never mark a lane unusable. Trust can change between session start and dispatch, so a hard verdict from a stale read would be a false red."
-        },
-        {
-          "label": "Decline",
-          "answer": "Do not add it. The half that would actually grant the trust lives in a launcher outside this repo, so an in-repo row can only report a condition it cannot fix."
-        }
-      ],
-      "evidence": [
-        "Recurrence counted: 10 records across 8 distinct dates. docs/backlog/durable-traps.md:95 records the trap (2026-08-15) and marks it UNENFORCED; a second trap entry covers fabricated supporting quotes (2026-07-20); project memory carries pool-lane-fabricates-when-untrusted (2026-08-07, 08-13, 08-14, 08-15), lane-agreement-is-not-evidence (08-14), context-bundle-attributions-are-unverified-leads (08-09), codex-bulk-verification-returns-leads (07-29) and verify-delegated-findings-mechanism-not-just-citation (07-18, 07-25, 07-26, 08-11).",
-        "Verified open at HEAD a5a673e8: scripts/shared/offload-lane-data.mjs contains exactly one occurrence of \"trust\", at line 18, and it is unrelated prose about probe remedies. No row expresses trust or file-read capability.",
-        "P36 probes transport liveness only and the module explicitly separates that from \"will it serve\", so the existing probe does not cover this.",
-        "Observed this run: the first free-lane adversary dispatch reported the claim list \"was cut off before the visible text\" and offered to verify against an unrelated proposals file it had found instead — the same class of failure, caught only because the claims were re-sent by file path.",
-        "False-positive surface, stated: the repairing half lives at ~/freellmapi/claude.ps1, outside this repo; trust can change between session start and dispatch, so a stale green is possible; lanes that receive inlined content rather than file access must be marked unprobeable."
-      ],
-      "premise_probes": [
-        {
-          "file": "scripts/shared/offload-lane-data.mjs",
-          "contains": "A probe proves REACHABLE TRANSPORT only, never that a model will serve"
-        },
-        {
-          "file": "scripts/shared/offload-lane-data.mjs",
-          "absent": "configDirTrust"
-        }
-      ],
-      "proposal": "P43 — a configDirTrust precondition row, checked at session start, spending no quota.",
-      "patch_path": ".audit-tools/nightly/proposals/P43-lane-cannot-read-repo/PROPOSAL.md",
-      "first_seen": "2026-08-23",
+      "proposal": "P43-answered-work-vs-open-run-collision",
+      "patch_path": ".audit-tools/nightly/proposals/P43-answered-work-vs-open-run-collision/answer-list-run-scope.patch",
+      "subject_key": "8a7a479fcb205ac8",
+      "first_seen": "2026-08-24",
       "nights_open": 1
     }
   ],
   "applied": [
-    "Auto-closed docs-7 (HANDOFF carried nine hand-typed run counts — trim or keep them deliberately). The premise is gone: 61b51287 rewrote docs/HANDOFF.md and removed the counts, so both probe fragments the item quotes (\"2,712 findings\" and \"the P38 write-scope union, ...\") are absent at HEAD. The trim the item asked about happened, so it left the queue without needing an answer. Its probes were record-path probes, which by design never auto-close, so this was recorded by hand rather than by the close path.",
-    "Landed 12 code-anchored doc fixes held by the 2026-08-22 dirty tree, as one revertible commit (fa66bd8c): seven in docs/glossary-ids.md (two rows deleted for identifiers with zero occurrences in src, four owner-column corrections, and CE-P3-001 added to the live-counterexample sentence), the PRIORITY-disclaimer misattribution in docs/audit-pkg/development.md, the unclosed migration-residue parenthesis in .claude/skills/disambiguate-backlog/SKILL.md, and three release-state corrections in the hand-written half of docs/HANDOFF.md (v0.45.0 is the last tag, is an ancestor of main, and is published to npm; all four named defect-fix commits are ancestors of it).",
-    "Leg 2 mechanical cleanup (a5a673e8): merged the two open-bugs.md entries recording the same writeOpenItems subject_key defect (2026-08-14 and 2026-08-19), keeping both dates, the mechanism and both memory links, and dropping the post-mortem tail. Backlog seek index regenerated.",
-    "Recorded two approved queue items as LANDED after verifying both halves at HEAD: P39 (594071ff — check:runtime-artifact-names is preCommit:'reach' and tests/shared/generator-gates-run-at-commit.test.ts forbids the shape) and P40 (c3eaa59d — charterExtractionPrompt.ts derives the provenance alternation from the schema, pinned by tests/shared/prompt-renders-its-contract.test.ts).",
-    "Marked .audit-tools/nightly/proposals/QUEUED-doc-fixes/READY-TO-APPLY.md SUPERSEDED. All eleven of its fixes are moot at HEAD — four named spec files are deleted, a fifth target is deleted, and the remaining six are already correct in the tree. A free-provider lane found the file this run and offered to work from it, which is the failure the banner prevents.",
-    "Green gate before push: npm run build, npm run check, and 439/439 vitest test files pass. Doc, backlog and handoff gates green (doc-manifest, doc-code-citations, doc-links, memory-citations, backlog-index, backlog-status, backlog-line-numbers, backlog-budget, handoff-roadmap)."
+    "7e34fe14 — retired the historical F5/F6/item-C program-phase labels from src comments, executing recorded answer 5acf2e262ebd7ab0; recorded done.",
+    "0bc635a6 — logged the graph-edge cache digest-pin trap in docs/backlog/durable-traps.md and regenerated the backlog seek index."
   ],
   "skipped": [
-    "Codex lane UNAVAILABLE for the second night — `codex exec` returns \"You've hit your usage limit ... try again at Aug 27th, 2026\". Its share of leg-1 review was re-routed to an independent reviewer lane and the free-provider adversary lane, so no leg-1 coverage was lost; recorded because the lane stays dead until 2026-08-27 and the next several runs must route around it.",
-    "Leg 2 sweep — 81 of 100 backlog entries classified, 19 errored (the lane returned no parseable triage record). Those 19 are unclassified this run. Coverage read from .audit-tools/nightly/triage-2026-08-23-coverage.json, not eyeballed.",
-    "Leg 2 premise probes — 39 of 100 entries came back `probes_unusable`, meaning the lane's quoted fragments could not be evaluated against the tree. Those verdicts carry NO premise confirmation and must be re-verified against HEAD before any of them is worked. This is the single largest hole in this run.",
-    "Leg 2 found no shipped-and-deletable entry. The sweep's taxonomy returned actionable_now (58), owner_decision_needed (15), live_run_blocked (6) and accepted_residual_no_work (1), and no already-shipped class at all — so the shipped-entry deletion pass had nothing code-proven to delete, rather than having been skipped. Stated because a quiet result must not read as an unrun leg.",
-    "Leg 1 reviewed 14 of the 54 in-scope docs end-to-end this run (README.md, the five docs/audit-pkg pages, src/audit/README.md, src/audit/adapters/README.md, examples/README.md, the ship / start-lap / design-check skills, docs/glossary-ids.md and docs/end-of-sprint-report-template.md) plus docs/nightly-routine.md and the four canonical loader bodies under skills/ checked directly for CLI-literal drift. The remaining docs were not examined and carry no ledger stamp for this run; leg1-2026-08-23-coverage.json is the machine record.",
-    "The doc-set condensation pass (perspective 2) ran over the 40-doc non-review corpus and found NO new fold, merge or retire candidate beyond the two already-open items docs-2 and docs-4. Recorded so a silent result is not mistaken for a skipped pass.",
-    "The /insights weekly pass was NOT due — the stamp at .audit-tools/nightly/insights-last-run.json has ran_at 2026-08-21, under seven days old. Recorded for completeness only; being not-due is not a skipped leg."
+    "Leg 2 mechanical sweep classified 69 of 110 backlog entries. 41 errored on the free-provider lane (schema-mismatch replies, plus an HTTP 502 from a provider whose key is known-broken); 34 of the classified had unusable premise probes. 41 entries were NOT triaged this run.",
+    "Leg 1 independent Codex lane on CLAUDE.md's five own-vs-acquire analyzer claims did not return before the run closed. Its central claim, a single admitSpawn chokepoint for acquired-tool spawns, was verified directly instead; the other four were not independently re-checked.",
+    "Three of the four answered-not-done decisions (240e467dfd7a8ac9, db629de141ee6414, 26e2d10e4569b448) were NOT executed: their write targets collide with the three pending remediation work items' declared scope.",
+    "The weekly /insights pass was not due (stamp 2026-08-21, three days old), so it did not run. Not a skipped leg."
   ]
 }
