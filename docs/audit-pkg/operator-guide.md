@@ -15,8 +15,11 @@ bootstraps the current repository with:
 audit-code ensure --quiet
 ```
 
-For setup repair or inspection, use `audit-code ensure`, `audit-code install`,
-`audit-code verify-install`, or `audit-code prompt-path`.
+For setup repair or inspection, use the installer verbs, plus the
+`audit-code prompt-path` helper. Their one home is
+[`product.md`](product.md#supported-surfaces): the installer-verb block there is
+generated from the module both bins read, and `audit-code <verb> --help` prints
+the same summary plus its options.
 
 The install surface includes the repo-local import prompt, getting-started
 guide, manifest, and the host-specific command or skill files supported by the

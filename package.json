@@ -34,7 +34,9 @@
     "scripts/shared/install-host-assets.mjs",
     "opencode.json",
     "README.md",
-    "docs/audit-pkg/**"
+    "docs/audit-pkg/product.md",
+    "docs/audit-pkg/operator-guide.md",
+    "docs/audit-pkg/contracts.md"
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
@@ -48,7 +50,7 @@
     "test": "npm run build && node scripts/shared/run-vitest-gate.mjs",
     "test:single": "npm run build && node scripts/shared/run-vitest-gate.mjs",
     "verify:guards": "node scripts/shared/run-vitest-gate.mjs --retry=2 --exclude \"**/audit-code-completion-*.test.ts\" --exclude \"**/audit-code-wrapper-*.test.ts\" --exclude \"**/audit/next-step-core-*.test.ts\" --exclude \"**/seam-host-only-next-step.test.ts\" --exclude \"**/*-e2e.test.*\" --exclude \"**/next-step-implement-dispatch.test.ts\" --exclude \"**/next-step-pipeline-dispatch.test.ts\"",
-    "verify:checks": "node scripts/shared/profile-run.mjs verify-checks check:control-bytes check:version-gates check:guard-reach check:ci-trigger-paths check:offload-lanes check:loop-core-patterns check:constitutional-doc-paths check:runtime-artifact-names check:executor-producers check:deadcode check:lint check:dup check:depgraph check:doc-manifest check:doc-links check:doc-code-citations check:gate-enumeration check:philosophy-brief check:nightly-routine-prompt check:handoff-roadmap check:backlog-index check:memory-citations check:backlog-budget check:backlog-status check:backlog-line-numbers check:tests build verify:hosts verify:remediate-hosts pack:smoke smoke:packaged-audit-code smoke:packaged-remediate-code",
+    "verify:checks": "node scripts/shared/profile-run.mjs verify-checks check:control-bytes check:version-gates check:guard-reach check:ci-trigger-paths check:offload-lanes check:loop-core-patterns check:constitutional-doc-paths check:runtime-artifact-names check:executor-producers check:cli-surface check:deadcode check:lint check:dup check:depgraph check:doc-manifest check:doc-links check:doc-code-citations check:gate-enumeration check:philosophy-brief check:nightly-routine-prompt check:handoff-roadmap check:backlog-index check:memory-citations check:backlog-budget check:backlog-status check:backlog-line-numbers check:tests build verify:hosts verify:remediate-hosts pack:smoke smoke:packaged-audit-code smoke:packaged-remediate-code",
     "verify:release": "npm run verify:checks && node scripts/shared/run-vitest-gate.mjs && npm run smoke:linked-audit-code && npm run smoke:linked-remediate-code",
     "check:control-bytes": "node scripts/check-control-bytes.mjs",
     "check:guard-reach": "node scripts/check-guard-reach.mjs",
@@ -95,6 +97,7 @@
     "check:backlog-line-numbers": "node scripts/check-backlog-line-numbers.mjs",
     "check:runtime-artifact-names": "node scripts/shared/generate-runtime-artifact-names.mjs --check",
     "check:executor-producers": "node scripts/shared/generate-executor-producers.mjs --check",
+    "check:cli-surface": "node scripts/shared/generate-cli-surface.mjs --check",
     "generate:shard-baseline": "node scripts/shared/generate-vitest-shard-baseline.mjs"
   },
   "engines": {

@@ -15,7 +15,11 @@ import {
   _getInstallProfile,
   _renderGeminiCommandToml,
 } from './audit-code-wrapper-install-hosts.mjs';
-import { wantsInstallerVerbHelp, installerVerbHelp } from './installer-verb-help.mjs';
+import {
+  wantsInstallerVerbHelp,
+  installerVerbHelp,
+  installerVerbSummaries,
+} from './installer-verb-help.mjs';
 
 export { shouldBuildDistForPaths, assertWorkspaceInstalled };
 export { _INSTALL_HOST_ORDER, _INSTALL_HOST_DEFINITIONS, _getInstallHostKeys, _getInstallProfile, _renderGeminiCommandToml };
@@ -245,11 +249,12 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '',
     'Helper commands:',
     '- prompt-path prints the absolute path to the canonical /audit-code prompt asset',
-    '- ensure lazily bootstraps repo-local /audit-code assets when they are missing or stale',
-    '- install bootstraps /audit-code into supported repo-local host surfaces',
-    '- verify-install smoke-tests the generated host assets after install',
+    // The four wrapper-intercepted installer verbs are RENDERED from the module
+    // this file already answers `<verb> --help` from, so the listing and the
+    // per-verb help cannot disagree. They were hand-restated here and had
+    // already drifted from it on two of the four.
+    ...installerVerbSummaries('/audit-code'),
     '- mcp starts the local stdio MCP server for repo-local IDE integrations',
-    '- install-host --host copilot keeps the narrower Copilot-focused install path available',
     '- validate checks the current artifact bundle and canonical session intent and exits non-zero when issues exist',
     '- validate-results --results FILE validates AuditResult payloads against the active task manifest without ingesting them',
     '- explain-task <task_id> prints the resolved file coverage and current status for a task id',

@@ -158,12 +158,13 @@ program
 // They stay registered, description-only, because `--help` must list the bin's
 // real surface. `wrapper/installer-verb-help.mjs` is the single source for these
 // summaries; the wrapper is `.mjs` and this tree is typechecked TypeScript with
-// no allowJs, so a contract test pins the two lists rather than an import.
+// no allowJs, so a contract test pins the verbs AND their summary text against
+// that module (tests/shared/installer-verb-help.test.ts) rather than an import.
 const BIN_ROUTED_INSTALLER_VERBS: ReadonlyArray<readonly [string, string]> = [
   ["ensure", "lazily bootstraps repo-local /remediate-code assets when they are missing or stale"],
   ["install", "bootstraps /remediate-code into supported repo-local host surfaces"],
   ["install-host", "installs /remediate-code into ONE named host surface (--host <name>)"],
-  ["verify-install", "smoke-tests the generated host assets after an install"],
+  ["verify-install", "smoke-tests the generated /remediate-code host assets after an install"],
 ];
 
 for (const [verb, summary] of BIN_ROUTED_INSTALLER_VERBS) {

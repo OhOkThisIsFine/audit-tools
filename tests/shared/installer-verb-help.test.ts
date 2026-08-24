@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
 
-import { INSTALLER_VERBS } from "../../wrapper/installer-verb-help.mjs";
+import { INSTALLER_VERBS, installerVerbSummary } from "../../wrapper/installer-verb-help.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BINS = [
@@ -80,12 +80,17 @@ describe("every installer verb of both shipped bins answers --help without doing
   });
 });
 
-// The verb list lives in wrapper/installer-verb-help.mjs. Two other places
-// enumerate the same verbs and cannot import it — remediate-code.mjs routes them
-// with literal comparisons (a top-level wrapper/ import would break the tests
-// that copy that bin alone into a temp dir), and src/remediate/index.ts is
-// typechecked TypeScript with no allowJs, so it cannot import a .mjs module.
-// These assertions are what keeps the three lists from drifting.
+// The verb list AND each verb's one-line summary live in
+// wrapper/installer-verb-help.mjs. Two places enumerate them and cannot import
+// it — remediate-code.mjs routes them with literal comparisons (a top-level
+// wrapper/ import would break the tests that copy that bin alone into a temp
+// dir), and src/remediate/index.ts is typechecked TypeScript with no allowJs, so
+// it cannot import a .mjs module. Every other consumer imports the module
+// (wrapper/audit-code-wrapper-lib.mjs renders its top-level listing from
+// installerVerbSummaries; docs/audit-pkg/product.md is generated from it), so
+// these are the only copies — and the pin compares the SUMMARY text, not just
+// the verb name, because name-only matching let a copy print a summary the
+// declaration does not render while staying green.
 describe("the installer verb list has ONE source, pinned across the copies", () => {
   it("remediate-code.mjs routes exactly the verbs the shared module declares", () => {
     const text = readFileSync(join(REPO_ROOT, "remediate-code.mjs"), "utf8");
@@ -93,12 +98,37 @@ describe("the installer verb list has ONE source, pinned across the copies", () 
     expect([...new Set(routed)].sort()).toEqual([...INSTALLER_VERBS].sort());
   });
 
-  it("src/remediate/index.ts registers exactly those verbs for --help", () => {
+  it("src/remediate/index.ts registers those verbs with the declared summaries", () => {
     const text = readFileSync(join(REPO_ROOT, "src", "remediate", "index.ts"), "utf8");
     const block = /BIN_ROUTED_INSTALLER_VERBS[^=]*=\s*\[([\s\S]*?)\n\];/.exec(text);
     expect(block, "BIN_ROUTED_INSTALLER_VERBS not found").not.toBeNull();
-    const registered = [...block![1].matchAll(/\[\s*"([a-z-]+)"/g)].map((m) => m[1]);
-    expect(registered.sort()).toEqual([...INSTALLER_VERBS].sort());
+    const registered = [...block![1].matchAll(/\[\s*"([a-z-]+)",\s*"([^"]*)"\s*\]/g)].map(
+      (m) => [m[1], m[2]] as const,
+    );
+    expect(
+      registered.map(([verb]) => verb).sort(),
+      "every entry must parse as a [verb, summary] pair",
+    ).toEqual([...INSTALLER_VERBS].sort());
+    // The summary text is the half a name-only pin could not see: `verify-install`
+    // had already lost the product token the declaration renders.
+    expect([...registered].sort((a, b) => a[0].localeCompare(b[0]))).toEqual(
+      [...INSTALLER_VERBS]
+        .sort()
+        .map((verb) => [verb, installerVerbSummary(verb, "/remediate-code")]),
+    );
+  });
+
+  it("audit-code --help PRINTS the declared summaries rather than restating them", () => {
+    // Asserted on the bin's real output, not on its source: a render wired to
+    // the declaration but never reached would pass a source scan. The listing
+    // was hand-restated here and two of its four lines had already drifted.
+    const { code, stdout, stderr } = runBin(BINS[0].entry, ["--help"]);
+    expect(code, `stderr: ${stderr}`).toBe(0);
+    for (const verb of INSTALLER_VERBS) {
+      expect(stdout).toContain(`- ${verb} ${installerVerbSummary(verb, BINS[0].product)}`);
+    }
+    expect(readdirSync(sandbox).filter((e) => e !== "home")).toEqual([]);
+    expect(readdirSync(home)).toEqual([]);
   });
 
   it("the dist CLI carries no asset installer for the bin to shadow", () => {

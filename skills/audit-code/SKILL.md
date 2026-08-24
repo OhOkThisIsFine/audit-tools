@@ -43,8 +43,10 @@ node audit-code.mjs ensure --quiet
 node audit-code.mjs next-step
 ```
 
-Pass a user-supplied target directory with `--root <path>` on every command. Do
-not add provider, model, quota, routing, or launch flags.
+The target-directory rule has one home — *Preserve user arguments* in the
+`/audit-code` loader prompt, whose absolute path `audit-code prompt-path` prints.
+Follow it as written there. Do not add provider, model, quota, routing, or launch
+flags.
 
 Read the returned JSON only far enough to find `prompt_path`, then read and
 follow only that prompt. Do not inspect workload, result, schema, or state files

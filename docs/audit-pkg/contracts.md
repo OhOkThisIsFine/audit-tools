@@ -86,7 +86,8 @@ audit-code validate-results --results /path/to/results.json
 ## Artifact bundle
 
 Resumable state lives under `.audit-tools/audit/`. The registry-backed contract
-in [`artifact-contract.md`](../../spec/audit/artifact-contract.md) covers the
+in [`spec/audit/artifact-contract.md`](https://github.com/OhOkThisIsFine/audit-tools/blob/HEAD/spec/audit/artifact-contract.md)
+(repository-only, so the link is absolute) covers the
 complete set. Representative artifacts include repository and unit manifests,
 file disposition, graph and critical-flow data, coverage, risk, audit tasks,
 runtime validation, accepted host results, synthesis narrative, and the final

@@ -33,6 +33,7 @@ on:
       - "audit-code.mjs"
       - "dispatch/**"
       - "docs/HANDOFF.md"
+      - "docs/audit-pkg/*.md"
       - "docs/backlog.md"
       - "docs/backlog/*.md"
       - "docs/backlog/.size-baseline.json"
@@ -64,6 +65,7 @@ on:
       - "scripts/shared/**"
       - "scripts/shared/executor-write-sites.mjs"
       - "scripts/shared/generate-*.mjs"
+      - "scripts/shared/generate-cli-surface.mjs"
       - "scripts/shared/generate-executor-producers.mjs"
       - "scripts/shared/generate-runtime-artifact-names.mjs"
       - "scripts/shared/offload-lane-data.mjs"
@@ -92,6 +94,7 @@ on:
       - "tsconfig.test.json"
       - "vitest.config.ts"
       - "wrapper/**"
+      - "wrapper/installer-verb-help.mjs"
     # END generated ci-trigger-paths
   pull_request:
     branches:
@@ -125,6 +128,7 @@ on:
       - "audit-code.mjs"
       - "dispatch/**"
       - "docs/HANDOFF.md"
+      - "docs/audit-pkg/*.md"
       - "docs/backlog.md"
       - "docs/backlog/*.md"
       - "docs/backlog/.size-baseline.json"
@@ -156,6 +160,7 @@ on:
       - "scripts/shared/**"
       - "scripts/shared/executor-write-sites.mjs"
       - "scripts/shared/generate-*.mjs"
+      - "scripts/shared/generate-cli-surface.mjs"
       - "scripts/shared/generate-executor-producers.mjs"
       - "scripts/shared/generate-runtime-artifact-names.mjs"
       - "scripts/shared/offload-lane-data.mjs"
@@ -184,6 +189,7 @@ on:
       - "tsconfig.test.json"
       - "vitest.config.ts"
       - "wrapper/**"
+      - "wrapper/installer-verb-help.mjs"
     # END generated ci-trigger-paths
 
 concurrency:

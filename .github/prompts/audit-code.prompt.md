@@ -20,8 +20,11 @@ repository root.
 
 Preserve user arguments:
 
-- pass a typed target directory with `--root <path>` on every `audit-code`
-  command (`ensure` and each `next-step`)
+- pass the user-supplied target directory with `--root <path>` on every
+  `audit-code` command (`ensure` and each `next-step`)
+
+This is the one full statement of the target-directory rule; the `audit-code`
+skill points here instead of restating it.
 
 Ask for exactly one step:
 

@@ -52,6 +52,18 @@ const VERB_DETAIL = Object.freeze({
   ],
 });
 
+/**
+ * One verb's one-line summary, with `{product}` bound to the slash-command the
+ * bin installs. The accessor exists so the surface can be RENDERED — the docs
+ * that list these verbs read this module rather than restating it, which is how
+ * `docs/audit-pkg/product.md` came to omit two of the four.
+ */
+export function installerVerbSummary(verb, product) {
+  const summary = VERB_SUMMARY[verb];
+  if (summary === undefined) throw new Error(`unknown installer verb: ${verb}`);
+  return summary.replace('{product}', product);
+}
+
 /** True when `verb` is one of the wrapper-intercepted installer verbs. */
 export function isInstallerVerb(verb) {
   return typeof verb === 'string' && INSTALLER_VERBS.includes(verb);
@@ -76,7 +88,7 @@ export function wantsInstallerVerbHelp(argv) {
  * installs (e.g. `/audit-code`); `usageName` is the bin as the caller invoked it.
  */
 export function installerVerbHelp(verb, { usageName, product }) {
-  const summary = VERB_SUMMARY[verb].replace('{product}', product);
+  const summary = installerVerbSummary(verb, product);
   return [
     `Usage: node ${usageName} ${verb} [--root PATH] [--quiet]`,
     '',
@@ -92,7 +104,5 @@ export function installerVerbHelp(verb, { usageName, product }) {
 
 /** The one-line summaries, for a bin's top-level help listing. */
 export function installerVerbSummaries(product) {
-  return INSTALLER_VERBS.map(
-    (verb) => `- ${verb} ${VERB_SUMMARY[verb].replace('{product}', product)}`,
-  );
+  return INSTALLER_VERBS.map((verb) => `- ${verb} ${installerVerbSummary(verb, product)}`);
 }

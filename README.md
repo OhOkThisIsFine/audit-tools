@@ -212,8 +212,21 @@ npm test        # build + test
 Missing `node_modules` makes `audit-tools/shared` resolve a stale `dist/`, producing
 misleading "no exported member" type errors, so install before build/check/test.
 
-See [`CLAUDE.md`](CLAUDE.md) for architecture and design decisions, the specs in
-[`spec/`](spec/), and the product/operator/contract guides in `docs/audit-pkg/`.
+The published package carries the consumer-facing guides only:
+
+- [Product overview](docs/audit-pkg/product.md)
+- [Operator guide](docs/audit-pkg/operator-guide.md)
+- [Contract reference](docs/audit-pkg/contracts.md)
+
+Everything else is repository-only and therefore linked absolutely: architecture
+and design decisions
+([`CLAUDE.md`](https://github.com/OhOkThisIsFine/audit-tools/blob/HEAD/CLAUDE.md)),
+the normative specs
+([`spec/`](https://github.com/OhOkThisIsFine/audit-tools/tree/HEAD/spec)), the
+contributor guide
+([`docs/audit-pkg/development.md`](https://github.com/OhOkThisIsFine/audit-tools/blob/HEAD/docs/audit-pkg/development.md)),
+and the release runbook
+([`docs/audit-pkg/release.md`](https://github.com/OhOkThisIsFine/audit-tools/blob/HEAD/docs/audit-pkg/release.md)).
 
 ## License
 

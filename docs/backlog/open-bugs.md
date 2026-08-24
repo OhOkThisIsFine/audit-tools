@@ -918,3 +918,11 @@
   reading pinned into a concept doc, and it rots silently in three places at once. **Property to
   hold:** a concept doc states the invariant, and the measurement that motivated it lives in the
   review record or `git log`, in one place.
+
+- **The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).**
+  `skills/remediate-code/SKILL.md` and `skills/remediate-code/remediate-code.prompt.md` each state
+  the `--input` / `--guidance-file` argument-preservation rule, and the "Read the returned JSON only
+  far enough…" paragraph is verbatim in ALL FOUR loader assets (both pairs) — the same two-copies
+  shape the audit `--root` statement was collapsed out of, and all of them ship (`skills/**`), so an
+  npm reader sees each copy as authoritative. **Property to hold:** across a loader pair, each instruction has
+  one full statement and the other asset points at it, mechanically pinned rather than remembered.

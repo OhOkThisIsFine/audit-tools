@@ -1,18 +1,9 @@
 # Examples
 
-This directory holds:
-
-- example repo/unit manifests
-- example file disposition
-- example audit state snapshot
-- example risk register
-- example critical flows + flow coverage
-- example coverage matrices
-- example audit tasks + requeue tasks (plain + flow-scoped)
-- example audit results
-- example external analyzer results
-- example runtime validation tasks/report/update
-- example audit plan metrics
+Every `*.example.json` here is named after what it illustrates. The payloads are
+illustrative, not normative — a couple have a JSON Schema under `schemas/`, and
+only the ones a contract test names are validated at all. The two configuration
+homes below are the exception: those are config, not artifact payloads.
 
 Review work is emitted as a versioned host workload under `.audit-tools/audit/`
 during a run, so there is no static execution-backend example here.

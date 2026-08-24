@@ -1,8 +1,10 @@
 # Product
 
-> Normative definition: [`spec/audit/audit-goals.md`](../../spec/audit/audit-goals.md) — product
-> identity, invariants, deterministic/LLM boundaries, and completion. This page is
-> the product overview.
+> Normative definition:
+> [`spec/audit/audit-goals.md`](https://github.com/OhOkThisIsFine/audit-tools/blob/HEAD/spec/audit/audit-goals.md)
+> — product identity, invariants, deterministic/LLM boundaries, and completion.
+> This page is the product overview. (The `spec/` corpus is repository-only and
+> is not part of the published package, so the link is absolute.)
 
 ## Canonical surface
 
@@ -26,9 +28,23 @@ The supported user-facing surfaces are:
 1. `/audit-code` in conversation
 2. `npm install -g audit-tools` as the one-time package install
 3. `audit-code prompt-path` to locate the packaged prompt asset
-4. `audit-code ensure` for idempotent repo-local bootstrap
-5. `audit-code install` for explicit repair or force refresh
-6. `audit-code` as the repo-local backend fallback
+4. the installer verbs below, for bootstrap, repair, and post-install verification
+5. `audit-code` as the repo-local backend fallback
+
+<!-- BEGIN GENERATED CLI SURFACE — scripts/shared/generate-cli-surface.mjs — DO NOT EDIT BY HAND -->
+
+> Rendered from `wrapper/installer-verb-help.mjs` — the module both shipped bins read to answer
+> `<verb> --help`. Add a verb there and this list follows.
+
+- `audit-code ensure` — lazily bootstraps repo-local /audit-code assets when they are missing or stale
+- `audit-code install` — bootstraps /audit-code into supported repo-local host surfaces
+- `audit-code install-host` — installs /audit-code into ONE named host surface (--host <name>)
+- `audit-code verify-install` — smoke-tests the generated /audit-code host assets after an install
+
+<!-- END GENERATED CLI SURFACE -->
+
+This is the one home for that list — `operator-guide.md` points here rather than
+restating it.
 
 Anything below `dist/` is backend or development interface.
 

@@ -138,9 +138,9 @@ test.concurrent("audit-code wrapper prints help text", async () => {
   expect(stdout.includes("next-step advances deterministic audit state")).toBeTruthy();
   expect(stdout.includes("advance-audit")).toBe(false);
   expect(stdout.includes("explain-task <task_id>")).toBeTruthy();
-  expect(stdout.includes("ensure lazily bootstraps repo-local")).toBeTruthy();
-  expect(stdout.includes("install bootstraps /audit-code")).toBeTruthy();
-  expect(stdout.includes("install-host --host copilot")).toBeTruthy();
+  // The four installer-verb lines are RENDERED from wrapper/installer-verb-help.mjs
+  // and pinned against that declaration by tests/shared/installer-verb-help.test.ts;
+  // restating them here is the drift this listing already suffered.
   // The batch loop and its flags are gone from the product surface.
   expect(!stdout.includes("--single-step")).toBeTruthy();
   expect(!stdout.includes("run-to-completion")).toBeTruthy();

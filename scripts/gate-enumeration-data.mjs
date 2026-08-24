@@ -38,6 +38,7 @@ export const STEP_GLOSS = {
   "check:constitutional-doc-paths": "constitutional-doc-path parity",
   "check:runtime-artifact-names": "runtime artifact-name set parity",
   "check:executor-producers": "executor→artifact producer-table parity",
+  "check:cli-surface": "installer-verb surface parity in the shipped product page",
   "check:deadcode": "dead-code export gate",
   "check:lint": "curated lint gate (eslint, zero-tolerance)",
   "check:dup": "duplication ratchet (jscpd)",

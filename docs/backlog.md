@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 173 entr(y/ies) indexed.
+> and at commit). 174 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -125,6 +125,7 @@
 - `open-bugs.md:891` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
 - `open-bugs.md:904` — Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run, medium).
 - `open-bugs.md:914` — A dated measurement sits inside durable routine prose (2026-08-23, low).
+- `open-bugs.md:922` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

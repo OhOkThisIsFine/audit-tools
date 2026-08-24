@@ -159,6 +159,23 @@ export const GUARDS = [
       'then re-stage it. The producer relation is declared on EXECUTOR_REGISTRY[].produces; never hand-edit the render',
   },
   {
+    id: 'check:cli-surface',
+    kind: 'gate',
+    impl: 'check:cli-surface',
+    preCommit: 'reach',
+    fix:
+      "docs/audit-pkg/product.md's installer-verb block is stale — run " +
+      '`node scripts/shared/generate-cli-surface.mjs`, then re-stage it. The verbs and their ' +
+      'summaries are declared in wrapper/installer-verb-help.mjs (what both bins answer ' +
+      '`<verb> --help` from); never hand-edit inside the markers',
+    note:
+      'covers the four wrapper-intercepted INSTALLER verbs only. UNCOVERED HALF: every OTHER command ' +
+      "wrapper/audit-code-wrapper-lib.mjs's printHelp() lists — `prompt-path`, `mcp`, `validate`, " +
+      '`explain-task`, the ingest verbs — carries its one-line summary as loose prose rather than a ' +
+      'declaration this render can read, so doc prose naming those stays hand-written and unchecked ' +
+      '(lift them from printHelp to a declaration the way the installer verbs were)',
+  },
+  {
     id: 'check:handoff-roadmap',
     kind: 'gate',
     impl: 'check:handoff-roadmap',
@@ -347,6 +364,23 @@ export const GUARDS = [
   { id: 'hook-friction-stop-test', kind: 'contract-test', impl: 'tests/shared/hook-friction-stop-gate.test.ts' },
   { id: 'hook-session-start-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-session-start-guards.test.ts' },
   { id: 'session-start-hook-test', kind: 'contract-test', impl: 'tests/audit/session-start-hook.test.ts' },
+  {
+    id: 'installer-verb-help-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/installer-verb-help.test.ts',
+    note:
+      'the installer-verb declaration and its copies: every verb of both bins answers --help without ' +
+      'installing, and the two enumerations that cannot import the module are pinned verb AND summary',
+  },
+  {
+    id: 'shipped-doc-surface-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/shipped-doc-surface.test.ts',
+    note:
+      'the npm tarball as a doc surface: which docs/ pages ship, README naming exactly them, no ' +
+      'relative link or fragment leaving the set, every absolute github.com slug bound to ' +
+      'package.json `repository`, and the target-directory rule stated once across the loader pair',
+  },
   { id: 'doc-manifest-gate-test', kind: 'contract-test', impl: 'tests/shared/doc-manifest-gate.test.ts' },
   { id: 'guard-reach-gate-test', kind: 'contract-test', impl: 'tests/shared/guard-reach-gate.test.ts' },
   {
@@ -551,6 +585,40 @@ export const REACH = [
       'nothing would extract it and its declared-⊇-extracted pin would stay vacuous. Within a `produces` entry only ' +
       'the artifact name is checked against the code: the `role` (primary vs refresh) and `note` fields are ' +
       'hand-authored and mechanically unchecked, so a wrong role or a stale note renders faithfully',
+  },
+  {
+    area: 'installer-verb surface render',
+    files: ['wrapper/installer-verb-help.mjs', 'scripts/shared/generate-cli-surface.mjs'],
+    guardedBy: ['check:cli-surface', 'vitest-gate', 'installer-verb-help-test'],
+    note:
+      'the declaration (verbs + summaries) both bins read, plus its doc render; the render target ' +
+      'docs/audit-pkg/product.md is claimed by the shipped-doc-surface row. The two consumers that ' +
+      'CANNOT import it — remediate-code.mjs (literal argv comparisons) and src/remediate/index.ts ' +
+      '(no allowJs) — are pinned verb-and-summary by installer-verb-help-test, which also spawns ' +
+      '`audit-code --help` and matches the printed listing against the declaration',
+    uncovered:
+      'the summaries are pinned only where a copy exists TODAY — a NEW hand-restatement in a third ' +
+      'file is claimed by no rule, since only src/remediate/index.ts and remediate-code.mjs are ' +
+      "scanned; and `remediate-code --help` (commander, dist-side) is not spawned, only its source " +
+      "table read. printHelp()'s non-installer command lines stay prose (check:cli-surface note)",
+  },
+  {
+    area: 'shipped doc surface',
+    files: ['docs/audit-pkg/*.md'],
+    guardedBy: ['check:cli-surface', 'vitest-gate', 'shipped-doc-surface-test'],
+    note:
+      'package.json `files` decides which of these reach npm; tests/shared/shipped-doc-surface.test.ts ' +
+      'pins the shipped set, pins README to name exactly it, refuses a relative link that leaves it, ' +
+      'resolves every relative link fragment against the target page\'s headings, and binds every ' +
+      'absolute github.com owner/repo in a shipped page to package.json `repository`',
+    uncovered:
+      'only the owner/repo segment of an absolute URL is checked — the PATH after it is never ' +
+      'fetched, so a page moved on GitHub goes stale silently, and the same slug in non-markdown ' +
+      'sources (scripts/audit/postinstall.mjs) is outside this rule. Anchor resolution covers ' +
+      'RELATIVE links only: a fragment on an absolute repository URL is unchecked. The loader-pair ' +
+      'single-statement rule is pinned by exact flag spelling only — the literal substring ' +
+      '`--root <path>`, so a restatement worded any other way (`--root <dir>`, `the --root flag`, ' +
+      'or prose that omits the flag) passes green',
   },
   {
     area: 'source',
