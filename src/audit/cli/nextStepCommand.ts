@@ -1173,6 +1173,73 @@ const emitEdgeReasoning = emissionRow<"edge_reasoning">(
   },
 );
 
+export interface IntentEquivalencePromptInput {
+  verdictPath: string;
+  continueCommand: string;
+  pending?: {
+    prior_prose: string;
+    current_prose: string;
+    prior_hash: string;
+    new_hash: string;
+  };
+}
+
+/** Render the worker-facing verdict contract for a prose-only intent change. */
+export function renderIntentEquivalencePrompt(
+  input: IntentEquivalencePromptInput,
+): string {
+  const { verdictPath, continueCommand, pending } = input;
+  return [
+    "# Intent-equivalence judgment (bounded)",
+    "",
+    "The intent checkpoint's PROSE changed since the planning artifacts derived",
+    "(structured fields are identical — this is wording only). Judge whether the",
+    "two prose forms express the SAME audit intent. Judge STRICTLY: any change",
+    "in scope, emphasis, constraint, or goal — however small — is `changed`.",
+    "Only pure rephrasing (wording, ordering, formatting) is `equivalent`.",
+    "An `equivalent` verdict keeps every planning artifact fresh; `changed`",
+    "re-derives the planning cascade against the new intent.",
+    "",
+    "## Prior prose normal form (what planning derived against)",
+    "",
+    "```json",
+    pending?.prior_prose ?? "(unavailable — re-run next-step)",
+    "```",
+    "",
+    "## Current prose normal form",
+    "",
+    "```json",
+    pending?.current_prose ?? "(unavailable — re-run next-step)",
+    "```",
+    "",
+    "## Verdict contract",
+    "",
+    "Write EXACTLY this JSON object (no extra fields) to:",
+    "",
+    `  ${verdictPath}`,
+    "",
+    "```json",
+    JSON.stringify(
+      {
+        verdict: "equivalent | changed",
+        judged_pair: {
+          prior_hash: pending?.prior_hash ?? "",
+          new_hash: pending?.new_hash ?? "",
+        },
+      },
+      null,
+      2,
+    ),
+    "```",
+    "",
+    "`judged_pair` must carry the two hashes shown above verbatim — they bind",
+    "the verdict to this exact pair; a checkpoint edited again mid-judgment is",
+    "detected and re-judged.",
+    "",
+    `Then run: ${continueCommand}`,
+    "",
+  ].join("\n");
+}
 const emitIntentEquivalence = emissionRow<"intent_equivalence">(
   async ({ root, artifactsDir }, result) => {
     const verdictPath = laneSubmissionPath(
@@ -1183,56 +1250,11 @@ const emitIntentEquivalence = emissionRow<"intent_equivalence">(
     const status = deriveIntentEquivalenceStatus(result.bundle);
     const pending =
       status.kind === "prose_judgment_pending" ? status : undefined;
-    const fullPrompt = [
-      "# Intent-equivalence judgment (bounded)",
-      "",
-      "The intent checkpoint's PROSE changed since the planning artifacts derived",
-      "(structured fields are identical — this is wording only). Judge whether the",
-      "two prose forms express the SAME audit intent. Judge STRICTLY: any change",
-      "in scope, emphasis, constraint, or goal — however small — is `changed`.",
-      "Only pure rephrasing (wording, ordering, formatting) is `equivalent`.",
-      "An `equivalent` verdict keeps every planning artifact fresh; `changed`",
-      "re-derives the planning cascade against the new intent.",
-      "",
-      "## Prior prose normal form (what planning derived against)",
-      "",
-      "```json",
-      pending?.prior_prose ?? "(unavailable — re-run next-step)",
-      "```",
-      "",
-      "## Current prose normal form",
-      "",
-      "```json",
-      pending?.current_prose ?? "(unavailable — re-run next-step)",
-      "```",
-      "",
-      "## Verdict contract",
-      "",
-      "Write EXACTLY this JSON object (no extra fields) to:",
-      "",
-      `  ${verdictPath}`,
-      "",
-      "```json",
-      JSON.stringify(
-        {
-          verdict: "equivalent | changed",
-          judged_pair: {
-            prior_hash: pending?.prior_hash ?? "",
-            new_hash: pending?.new_hash ?? "",
-          },
-        },
-        null,
-        2,
-      ),
-      "```",
-      "",
-      "`judged_pair` must carry the two hashes shown above verbatim — they bind",
-      "the verdict to this exact pair; a checkpoint edited again mid-judgment is",
-      "detected and re-judged.",
-      "",
-      `Then run: ${continueCommand}`,
-      "",
-    ].join("\n");
+    const fullPrompt = renderIntentEquivalencePrompt({
+      verdictPath,
+      continueCommand,
+      pending,
+    });
     const shortfall = await recordExpectedLanes(
       artifactsDir,
       AUDIT_GATE_SUBMISSION_SCOPE,
