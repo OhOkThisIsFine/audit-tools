@@ -119,8 +119,9 @@ pending → planning → implementing → closing → complete
   implement dispatch, a review-necessity gate (`runPlanningReviewGate`) surfaces findings tiered by
   review-need for a batched keep/decline (declined → recorded `ignored`) and an up-front ambiguity gate
   (`runPlanAmbiguityGate`) batches all scoping/judgment ambiguities into one `clarification_request`;
-  planning then transitions DIRECTLY to implementing. `ItemSpec` is optional enrichment that rides the
-  dispatch assignment as context — it is NOT the write scope. The enforced scope is
+  planning then transitions DIRECTLY to implementing. There is no per-item specification artifact —
+  `ItemSpec` was deleted outright (owner, 2026-08-25) after the N-R13 ratification, because nothing in
+  production ever wrote one. The enforced write scope is
   `block.touched_files`, normalized into the work item's `allowed_files` by `buildWorkItem`
   (`src/remediate/steps/dispatch/hostHandoff.ts`) and re-checked against the landed diff at ingestion.
   `touched_files` is produced upstream two ways: the contract pipeline's `deriveNodeFiles` (node

@@ -283,6 +283,13 @@ function conceptualCritiqueInstructions(): string[] {
     "- **Read the project's own documentation first** — its README, anything under `docs/`, design notes, and any `CLAUDE.md`/agent-instruction files — to learn what this project is *trying* to be and why. Understand the intent before you judge the execution.",
     "- **Then roam the actual code freely.** Read whole files, follow imports and call paths wherever they lead, and build your own mental model the way a new senior engineer would. Do NOT confine yourself to the highest-risk units — emergent, whole-system problems live in the connections between ordinary-looking parts, which no per-unit risk score surfaces.",
     "",
+    // Two DIFFERENT rules, deliberately named apart. The grant above is about
+    // what you may READ; the rule below is about what you may REPORT. Conflating
+    // them is what let the doc and this prompt disagree: the doc described a
+    // graph-constrained reading grant, the prompt granted free roaming, and
+    // neither stated the finding-target scope the annotations already imply.
+    "**Roaming is a reading grant, not a reporting grant.** Read anything you need in order to understand the system. But produce findings only about units marked `[in scope]` above — a unit marked `[excluded: <reason>]` may inform your reasoning and may be cited as evidence, and must never itself be the target of a finding.",
+    "",
     "## How to think — first principles, not a checklist",
     "",
     "Interrogate the design from the ground up. These are starting questions, not a form to fill — follow the ones that prove fruitful for THIS codebase:",

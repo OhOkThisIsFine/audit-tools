@@ -184,13 +184,23 @@ Runs after the intent checkpoint so the reviewer works within confirmed scope.
 - Instruction: generate findings only for in-scope units; use the graph for
   cross-boundary coupling reasoning; do not produce findings about excluded files
 
-**File access — soft grant with graph-constrained expansion:**
-- Starting grant: top-N highest-risk in-scope units (heuristic from risk
-  register)
-- Expansion allowed: reviewer may follow edges that exist in the graph bundle
-  to adjacent files
-- Out-of-scope files may be read for context only, not as finding targets
-- Design reviewers use soft grants; auditor workers retain hard grants
+**File access — two separate rules, deliberately named apart.** One governs what
+the reviewer may READ; the other governs what it may REPORT. Conflating them is
+what made this section and the shipped prompt appear to disagree.
+
+*Orientation grant (reading):* unbounded. The reviewer is given the top-N
+highest-risk in-scope units as a starting point (heuristic from the risk
+register) and is then told to roam the code freely — whole files, imports, call
+paths, wherever they lead. Confining the read to high-risk units would hide the
+emergent, whole-system problems that live in the connections between
+ordinary-looking parts, which is precisely what this lens exists to find.
+
+*Finding-target scope (reporting):* bounded. Each unit is annotated `[in scope]`
+or `[excluded: <reason>]`, and only an in-scope unit may be the TARGET of a
+finding. An excluded file may inform the reasoning and may be cited as evidence;
+it may never be what a finding is about.
+
+Auditor workers, by contrast, retain hard grants for both.
 
 **Pass 1 — Contract review** (adversarial, evidence-bound):
 - Infer existing contracts from structure and code: invariants, trust

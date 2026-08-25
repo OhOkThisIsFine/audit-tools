@@ -7,8 +7,12 @@ but runs independently; when the two are paired, read alongside the auditor's
 
 ## Core principles
 
-1. Automate every step that can be automated; reserve the LLM for judgment
-   calls that cannot be reduced to a deterministic rule.
+1. Three rules, balanced case by case: use the mechanical tool wherever it does
+   the job as well as or better than a model; use LLM judgment where it strongly
+   lifts quality, bounded and recorded; and enforce in tooling whatever *can* be
+   enforced, regardless of who does the work. This restates conviction A2 in
+   [`docs/project-philosophy.md`](../../docs/project-philosophy.md), which
+   GOVERNS: where this document and the philosophy differ, the philosophy wins.
 2. User *questions* are confined to explicit, batched windows: an up-front
    planning window before implementation starts, a clarification window at the
    END of the implement phase for questions workers raised mid-phase, and an
@@ -75,10 +79,8 @@ Write Tests -> Refactor Code -> Verify Code Against Tests -> Verify Code Against
 ```
 
 There is no separate per-item "document" authoring step (dissolved — N-R13):
-planning emits an OPTIONAL `item_spec` enrichment, and when it is absent implement
-dispatch reads scope directly from the finding. Steps may be declared
-not-applicable per item (for example, a comment-only fix has no test step); the
-declaration is part of the item record.
+planning transitions directly to implementing, and implement dispatch reads scope
+from the finding. There is no per-item specification artifact at all.
 
 ## Planning mechanisms
 
@@ -103,7 +105,7 @@ the mechanism's internals.
 Every plan carries a `plan.source` tag recording which mechanism built it:
 `contract_pipeline` for the primary engine, or `lean_fast_path` for its
 bounded Path-A shortcut. Whichever source produced the plan, it converges on
-the same output contract (Finding / Item / Block, `ItemSpec`, `TestSpec`) and
+the same output contract (Finding / Item / Block, `TestSpec`) and
 the same downstream implement→close machinery.
 
 ## Phases
@@ -161,13 +163,11 @@ any individual item "deemed inappropriate"; that proposal rides the same
 clarification batch and requires user confirmation. A block may contain some items
 that are remediated and others declared inappropriate without dropping the block.
 
-`ItemSpec` is OPTIONAL enrichment, not a mandatory per-finding write-up: when a
-node carries one it seeds test authoring and the code-vs-spec conformance check;
-when it is absent, the implementation workload reads file scope directly from
-`finding.affected_files`. Any produced `item_spec`
-and the project-level `closing_plan` persist inline on `RemediationState`
-(`state.items[id].item_spec`, `state.closing_plan`), validated against
-`ItemSpecSchema` / `ClosingPlanSchema` before the next phase may read them.
+There is no per-item specification artifact: the implementation workload reads
+file scope from `finding.affected_files`, and the ENFORCED write scope is the
+block's `touched_files`. The project-level `closing_plan` persists inline on
+`RemediationState` (`state.closing_plan`), validated against `ClosingPlanSchema`
+before the next phase may read it.
 
 After the gates exit cleanly, the next user *question* is the deferred
 clarification window at the end of Phase 3, or the end-of-run triage window.
@@ -184,13 +184,13 @@ Completed work is accepted in the workload's deterministic item order. Worktrees
 
 Within a block, each item runs through:
 
-1. Write tests from the Phase 2 item spec. Tests must fail on the current
-   code where a test step is applicable.
+1. Write tests from the finding — its title, summary and `affected_files`.
+   Tests must fail on the current code where a test step is applicable.
 2. Refactor code until the item's tests pass.
 3. Run the affected test scope deterministically and record results.
-4. LLM-verify the produced code against the Phase 2 item spec. Conformance
-   check, not a freshness opinion: catches cases where tests pass but the
-   change deviates from written intent.
+4. LLM-verify the produced code against the finding. Conformance check, not a
+   freshness opinion: catches cases where tests pass but the change deviates
+   from the stated intent.
 
 Per-item state: `pending -> tested -> tested_successfully -> refactored -> verified -> resolved`
 (or `resolved_no_change`), with side-states `blocked`, `needs_clarification`, `deemed_inappropriate`,
@@ -269,8 +269,7 @@ Deterministic responsibilities:
 LLM responsibilities:
 
 - finding extraction from Markdown, free-form, or conversational inputs
-- ambiguity identification and optional `item_spec` enrichment (no mandatory
-  per-item write-up phase)
+- ambiguity identification (no per-item write-up phase)
 - test authoring
 - refactor authoring
 - code-vs-documentation conformance verification
@@ -313,7 +312,7 @@ refined once the first runs produce real clarification batches.
 ## Schemas
 
 Only `finding.schema.json` is mirrored in `schemas/` as a JSON Schema. The rest of the remediation
-contract (`RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `ClosingPlan`,
+contract (`RemediationPlan`, `RemediationBlock`, `ClarificationRequest`, `ClosingPlan`,
 `TestSpec`, the remediation report) is validated by hand-written TypeScript validator functions
 (`src/remediate/validation/remediationState.ts`, `src/remediate/validation/contractPipeline.ts`,
 `src/remediate/validation/contractPipelineGates.ts`, `src/remediate/validation/artifacts.ts`),

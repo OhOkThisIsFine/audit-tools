@@ -1751,6 +1751,8 @@
     "answer": "Resolved by the ItemSpec decision (2026-08-25): ItemSpec is being deleted outright - zero production writers, never parsed. So delete the item-spec references from Phase 3 entirely rather than making them conditional. Phase 3 steps 1 and 4 name the finding (title, description, affected_files) as the source. N-R13 is ratified as-is; tests_to_write, not_applicable_steps and no_change are removed rather than restored.",
     "subject": "Phase 3 writes tests from an item spec the same doc calls optional - name the fallback, or make the spec mandatory",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-08-25T16:30:21.821Z"
+    "decided_at": "2026-08-25T16:30:21.821Z",
+    "completed_at": "2026-08-25T17:11:40.415Z",
+    "completed_ref": "28912720 — ItemSpec deleted outright, so Phase 3's item-spec references are removed rather than made conditional. The spec doc edit rides the docs-9 batch."
   }
 }
