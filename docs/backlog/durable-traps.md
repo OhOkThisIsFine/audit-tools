@@ -51,6 +51,16 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   every patch against source before landing (two waves of this sprint each shipped
   inverted-semantics fixes that read plausibly).
 
+- **A spend-limit death returns a workflow as `completed` with a success-shaped empty result
+  (2026-08-25).** All seven agents of a fan-out errored instantly on "You've hit your monthly spend
+  limit"; the notification still read `<status>completed</status>` and the return value was a
+  well-formed `{clusters: [], tally: {surviving: 0, refuted: 0}}` — the shape a genuine
+  nothing-found run produces. The real cause appears only in the `<failures>` block and in
+  `agents_error` under `<usage>`. Read those two before believing an empty tally, and never let a
+  zero-finding workflow stand as evidence of absence
+  (memory: success-shaped-empty-needs-affirmation). Recovery is to do the verification inline;
+  the graph queries that seeded the fan-out are unaffected, since MCP calls come from the parent.
+
 - **A broad multi-file review scope kills both peer-CLI lanes, and they fail in OPPOSITE shapes
   (2026-08-09 and 2026-08-10, four deaths in two nights).** `agy -p` dies fast and loud —
   `Error: timeout waiting for response`, ~36 bytes, nothing salvageable. `codex exec` dies slow and
