@@ -2,7 +2,6 @@
 // Locks the selection semantics both orchestrators rely on: priority is the
 // authority on order AND membership; only missing/stale are actionable.
 import { test, expect } from "vitest";
-import assert from "node:assert/strict";
 // Import the SOURCE engine module (not the built dist) so this suite never
 // races the central build's dist/ and exercises the exact code under audit.
 import {
