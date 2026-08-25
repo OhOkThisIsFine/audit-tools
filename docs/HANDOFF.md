@@ -12,11 +12,17 @@
   2026-08-21 through 2026-08-23 entries in `docs/backlog/open-bugs.md`.
 - The first-draw REMEDIATION RUN (`.audit-tools/remediation/`, 30 work items) is in its implement
   phase: 22 items are resolved on `main`, 5 resolved with no change, and THREE remain pending —
-  CP-NODE-7, CP-NODE-14 and CP-NODE-26. The detached host runner is
-  NOT currently alive; relaunch it per project memory `remediation-host-runner-2026-08-23`, which
-  holds its logs, watch/stop/resume, the pause recipes, and the relaunch traps (an
-  auto-permission-mode session cannot spawn it). The run's decisions are in
-  `remediation-first-draw-2026-08-22`.
+  CP-NODE-7, CP-NODE-14 and CP-NODE-26. CP-NODE-26's CODE is fully landed on `main` (`da531169`,
+  implemented by the free lane, finished and reviewed across three native review rounds after the
+  free-lane outage) with the bound result doc already at the workload's `result_path` — but the
+  tool refuses the ingestion: its mechanical required-test rerun keys on the EXIT CODE, and the
+  full `npx vitest run tests/remediate tests/shared` sweep exits 1 on a vitest worker-RPC flake
+  ("Timeout calling onTaskUpdate" as an unhandled error) while reporting zero failed tests. So
+  `state.json` still holds CP-NODE-26 `pending` and `next-step` re-emits its workload. NODE-7 and
+  NODE-14 are not started. The detached host runner is NOT alive and must stay down: the owner
+  chose native workflow agents for the three remaining items (Ox-Alpha still refuses real-size
+  requests; nemotron cannot close a pass). Runner recipes and relaunch traps: project memory
+  `remediation-host-runner-2026-08-23`; run decisions: `remediation-first-draw-2026-08-22`.
 - THREE answered decisions wait on the run, because their write targets collide with the three
   pending items' declared scope: the per-run-consent code fix (remove the durable
   recorded-`granted` route from `admitSpawn`; `240e467dfd7a8ac9`), P41 (prompt-contract registry,
@@ -30,18 +36,22 @@
 
 ## Immediate next
 
-1. Finish the remediation run. The runner is down, so answer any recorded pause per the recipes in
-   memory `remediation-host-runner-2026-08-23`, then relaunch
-   `node .audit-tools/remediation/host-runner/impl-runner.mjs --concurrency 10` from the
-   main checkout — from a terminal or a bypass-permissions session; auto permission mode refuses
-   the spawn. When every item is terminal the tool enters closing (final gate): run
-   `node remediate-code.mjs next-step` until the report is promoted
+1. Fix the vitest worker-RPC flake FIRST — it blocks EVERY remaining ingestion: either a vitest
+   pool/reporter config fix, or the tool's required-test rerun counts test failures instead of the
+   bare exit code when zero tests failed. Then run `node remediate-code.mjs next-step` (a timeout of
+   eight minutes or more; NEVER the default two — a killed `next-step` wedges `phase.lock` for every
+   later call, see the backlog entry) so CP-NODE-26's existing result doc ingests.
+2. Finish NODE-7 then NODE-14 with the native workflow pattern this run used for CP-NODE-26
+   (worktree → implement → adversarial review rounds → land with attestation → result doc via the
+   <!-- doc-citation-exempt: session-scratchpad helper, deliberately outside the tree -->
+   scratchpad `write-result-doc.mjs` → `next-step` ingests). When every item is terminal the tool
+   enters closing (final gate): run `node remediate-code.mjs next-step` until the report is promoted
    (`.audit-tools/remediation-report.md` / `remediation-outcomes.json`).
-2. After the run closes: the three remaining run-close-gated answers named in Live state
+3. After the run closes: the three remaining run-close-gated answers named in Live state
    (per-run-consent code fix first — it edits the files the final work items touch), each
    recorded done in the decision ledger as it lands.
-3. Ask the owner the waiting decisions (generated list below).
-4. Ship a release once the run closes (`/ship`): `main` carries the remediation landings, P39,
+4. Ask the owner the waiting decisions (generated list below).
+5. Ship a release once the run closes (`/ship`): `main` carries the remediation landings, P39,
    P40, the executed queue items and the follow-up fixes since v0.45.0.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

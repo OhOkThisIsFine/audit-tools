@@ -901,6 +901,15 @@
   run writes friction to is the record its close-out reads, whatever the state's lifecycle did in
   between.
 
+- **A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run,
+  medium).** `PHASE_LOCK_TIMEOUT_MS = 0` makes the phase acquirer try once and return `phase_busy`
+  without ever entering the wait loop — but the stale-steal path (`STALE_LOCK_MS`, dead-owner
+  token check) lives inside that loop, so a `phase.lock` whose holder died (observed: a
+  `next-step` killed by a 2-minute shell timeout) is never stolen and every later `next-step`
+  bounces forever; the host had to verify the owner pid dead and delete the lock by hand.
+  **Property to hold:** a zero-timeout acquirer still runs the stale-steal check once, so a
+  dead-holder lock never needs a hand deletion.
+
 - **Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run,
   medium).** `state.host_handoff` pins the dispatched workload by `workload_sha256`; widening a
   bound block's `touched_files` (the sanctioned hand recipe for a scope clarification) changes the
