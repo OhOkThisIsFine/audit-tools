@@ -32,15 +32,18 @@
 
 ## Immediate next
 
-1. Drive the run to close: `node remediate-code.mjs next-step` until the report is promoted. Launch
-   it DETACHED (`Start-Process`, redirected logs) — never the default two-minute timeout, which
-   kills `next-step` mid-gate and wedges `phase.lock` for every later call.
-2. Execute the nine answered-not-done decisions — `node scripts/nightly/answer.mjs --list`. With the
-   run closed nothing is scope-blocked; record each with `--done <KEY> "<ref>"` as it lands. They
-   are: the per-run-consent code fix, P41, P42, P43, and the five 2026-08-24 answers (docs-1,
-   docs-2, docs-3, backlog-1 give the sidecar a reader, backlog-2 typecheck `scripts/`).
-3. Ship a release (`/ship`): `main` carries the three remediation landings plus everything since
+1. Execute the nine answered-but-unexecuted decisions the ledger lists — run `answer.mjs --list` to
+   see them. Nothing is scope-blocked now that the run is closed; record each with
+   `--done <KEY> "<ref>"` as it lands. They are: the per-run-consent code fix, P41, P42, P43, and
+   the five 2026-08-24 answers (name the shared host-handoff barrel in `CLAUDE.md`; reword the
+   lean-fast-path heading in `spec/remediation-workflow-design.md`; state the two consent roles;
+   <!-- doc-citation-exempt: a runtime artifact the tool writes under .audit-tools/, never tracked -->
+   give the `intent-interpretation.json` sidecar a real reader; bring `scripts/` under a tsconfig).
+2. Ship a release (`/ship`): `main` carries the three remediation landings plus everything since
    v0.45.0.
+3. Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
+   never the default two-minute timeout, which kills it mid-gate and wedges `phase.lock` for every
+   later call.
 
 ## Deliberate state, not bugs
 
