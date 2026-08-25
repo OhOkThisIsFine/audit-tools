@@ -22,10 +22,10 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-24.*
+*Last run: 2026-08-25 at `44e12b99`.*
 
 
-> **3 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+> **5 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
 
 
 ---
@@ -34,25 +34,25 @@ records them in the tracked ledger, and does the work.
 # Documentation
 
 
-<!-- nightly:item key=c293f51214b487a6 -->
+<!-- nightly:item key=a0876394f38d09bf -->
 
-## `docs-1` — instruction-file edit: name the shared host-handoff core in CLAUDE.md, or leave the two twins as the documented owners <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `docs-1` — The cleanup sentence says --force unblocks a missing-state run; it never does - restate the three-way rule, or trim the claim <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `CLAUDE.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 1 night · `docs/audit-pkg/operator-guide.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-CLAUDE.md describes host handoff twice, once for the auditor and once for the remediator, and each description names a single file as the owner: src/audit/cli/dispatch/hostHandoff.ts and src/remediate/steps/dispatch/hostHandoff.ts. Since then a work item extracted a shared module underneath both of them, src/shared/submission/hostHandoffCore.ts, 379 lines, and both twins now import it through the audit-tools/shared barrel. Nothing CLAUDE.md says is false: the twins still exist and still do the described work. But the document does not mention that a shared core exists. That matters more here than it would elsewhere, because one core, two draws is one of this project's stated convictions, so where the shared core lives has architectural meaning. Naming it would make the document match the shape of the code. Leaving it out keeps CLAUDE.md shorter and treats the core as an implementation detail beneath the boundary the document is actually describing. CLAUDE.md is an instruction file, so the nightly routine never edits it on its own.
+The operator guide explains when `audit-code cleanup` will delete a run directory. It says active, blocked, or missing-state runs are all refused unless you pass --force. Two of those three are right. The third is not: if the directory has no audit_state.json marker, cleanup refuses it whether or not you pass --force, because --force waives the evidence about a run's STATUS and never the evidence about its IDENTITY - the tool will not delete a directory it cannot prove is an audit run. There is also a separate shape guard on --artifacts-dir that the sentence never mentions. So the current wording tells an operator that a flag exists which will get them past a refusal, and it does not. The fix is a wording decision: how much of the real three-way behaviour should the sentence carry? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### The question
 
-CLAUDE.md's two host-handoff paragraphs name only the per-side twins. A shared core (src/shared/submission/hostHandoffCore.ts) now sits underneath both. Should CLAUDE.md name it?
+How should the operator guide state cleanup's refusal rule? The current sentence is "Active, blocked, or missing-state runs are refused unless the operator explicitly supplies `--force`; `--dry-run` previews the decision." <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### Your answer
 
-- [ ] **1. Name the shared core** — Add the shared core to CLAUDE.md's host-handoff description. The one core, two draws conviction makes where the shared substrate lives part of the architecture, not an implementation detail.
-- [ ] **2. Leave the twins as documented** — Leave CLAUDE.md as it is. The twins are the boundary the document describes, and the shared core beneath them is an implementation detail that would date the prose.
-- [ ] **3. Point at the barrel instead** — Do not name the core file, but say the twins share their substrate through audit-tools/shared. That is the durable fact, without a filename a later refactor moves.
+- [ ] **1. State the three-way rule** — Restate it fully: complete and not-started runs are deleted; active and blocked runs need --force; a directory with no audit_state.json marker is refused even with --force, because --force waives status evidence and never identity evidence.
+- [ ] **2. Trim to what is true** — Drop "missing-state" from the --force clause and say nothing more. Active or blocked runs need --force; --dry-run previews the decision.
+- [ ] **3. Leave it** — Leave the sentence as it is; the missing-state case is rare enough that the simplification is acceptable.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -64,35 +64,35 @@ CLAUDE.md's two host-handoff paragraphs name only the per-side twins. A shared c
 <details>
 <summary>Evidence (4) — what was verified against code, and how</summary>
 
-- src/shared/submission/hostHandoffCore.ts exists (379 lines), added by commit 76196e53 'remediate(CP-BLOCK-CP-NODE-6): Extract shared host-handoff core; reduce both twins'.
-- Both twins import from the shared barrel: src/audit/cli/dispatch/hostHandoff.ts:36 and src/remediate/steps/dispatch/hostHandoff.ts:38, and src/shared/index.ts re-exports hostHandoffCore.
-- CLAUDE.md:99 and CLAUDE.md:136 each name one twin as the host-handoff owner; neither mentions a shared core.
-- src/shared/loopCorePaths.ts already lists src/shared/submission/ as loop-core, so the core is gated like the twins.
+- src/audit/cli/cleanupCommand.ts:95-105 - with --force and no audit_state.json marker, cmdCleanup emits a refusal and returns before cleanupStaleArtifactsDir runs.
+- src/audit/cli/cleanup.ts:69-72 - without --force the same directory returns { action: "skipped", status: "unknown" } and exit 1. So it is deletable under no flag combination.
+- src/audit/cli/cleanupCommand.ts:31-38 - the code comment states the identity-vs-status split the doc omits.
+- Reviewer and an independent adversary lane both agree the claim is contradicted; the adversary refused it as an auto-apply because choosing the replacement wording is a judgment call.
 
 </details>
 
 ---
 
 
-<!-- nightly:item key=a1bcdf448f875452 -->
+<!-- nightly:item key=8e52c6194a0dc09d -->
 
-## `docs-2` — the 'lean fast-path exception' heading advertises an exception the same section then denies — reword it, or keep it as history <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `docs-2` — The HANDOFF still tells the next agent to advance a remediation run that closed and deleted its state - rewrite the bullet, or drop it <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `spec/remediation-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 1 night · `docs/HANDOFF.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-In spec/remediation-workflow-design.md a section heading reads: Both paths run the pipeline, except the lean fast-path exception. The body underneath then says the opposite in as many words: This is not a parallel path. It explains that depth scales with a single risk dial rather than branching, and it points at spec/self-scaling-pipeline-design.md, whose own opening line says it supersedes the lean fast path framing entirely. So a reader who scans headings takes away that a fast-path exception exists, and a reader who reads the paragraph takes away that it does not. Both cannot be the intended message. The fix is a wording change in a normative design document, which is substance rather than a stale fact, so the routine will not make it alone.
+The handoff document carries a bullet describing an in-flight remediation run, and it ends by telling the reader to keep calling next-step until the report and outcomes files are promoted. That work is finished. Both files are on disk, tracked, and committed, and the run's state.json is gone - a green close deletes it and archives the state. So the instruction cannot be followed: a next-step there would not resume that run, because there is no run left to resume. The reader is being pointed at a task that does not exist. What the bullet should say instead is a handoff-content decision, which is why it is being asked rather than quietly rewritten.
 
 ### The question
 
-The heading names a 'lean fast-path exception'; the section body states 'This is not a parallel path', and the superseding design doc retired that framing. Should the heading change?
+The HANDOFF bullet ends "`next-step` until `.audit-tools/remediation-report.md` and `remediation-outcomes.json` are promoted." That work is done and the run state is gone. What should the bullet become? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### Your answer
 
-- [ ] **1. Reword the heading** — Reword the heading to describe the risk dial, for example 'Both paths run the pipeline; the risk tier sets the depth', so heading and body agree.
-- [ ] **2. Keep it — it names what was superseded** — Keep the heading. It deliberately names the framing a reader arrives with, and the body's job is to correct it.
-- [ ] **3. Drop the clause** — Shorten the heading to 'Both paths run the pipeline' and let the body carry the whole nuance.
+- [ ] **1. State it closed** — Rewrite the bullet to say the run is closed: both deliverables are promoted and committed and the green close removed state.json, so nothing is owed.
+- [ ] **2. Delete the bullet** — Delete the bullet entirely. A closed run is git history, not immediate-next state, and the HANDOFF is immediate-next only.
+- [ ] **3. Keep as history** — Keep the bullet, but mark it explicitly as the last completed run rather than as pending work.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -104,35 +104,35 @@ The heading names a 'lean fast-path exception'; the section body states 'This is
 <details>
 <summary>Evidence (4) — what was verified against code, and how</summary>
 
-- spec/remediation-workflow-design.md:146 heading reads: Both paths run the pipeline — except the lean fast-path exception.
-- The same section states: This is not a parallel path. The tier is the SINGLE classifier.
-- spec/self-scaling-pipeline-design.md opens by superseding the earlier 'give document input a separate lean fast path' framing, and calls a separate leanFastPath the wrong shape.
-- A lean-fast-path branch does exist in code, but as a plan-normalization branch in normalizeExtractedPlan, not as a pipeline path, so the heading's word 'exception' does not describe the code either.
+- .audit-tools/remediation-report.md and .audit-tools/remediation-outcomes.json are both in git ls-files and clean; last touched by 1fdbb858 and d755f0b1.
+- .audit-tools/remediation-outcomes.json reports total 30, resolved 25, verified_no_change 5.
+- .audit-tools/remediation/ holds only friction/, run.log.jsonl and steps/ - no state.json. src/remediate/state/store.ts:105 states a green close deletes state.json.
+- Record-path item: its premise is prose in the handoff, so it declares auto_close:false and leaves the queue when answered.
 
 </details>
 
 ---
 
 
-<!-- nightly:item key=6c96d291fad77b9a -->
+<!-- nightly:item key=7920fb558571ba07 -->
 
-## `docs-3` — instruction-file edit: CLAUDE.md's consent bullet reads as covering every eslint spawn, but the syntax-resolution path admits eslint on decline-only <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `docs-3` — The README promises every finding is adversarially verified before it is kept; ungrounded findings ARE kept - reword the promise, or narrow it <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `CLAUDE.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 1 night · `README.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-CLAUDE.md's analyzer bullet says every candidate outside the curated default set needs first-use consent before it can run. eslint is such a candidate: it is registered with defaultRun false, so as an acquired analyzer it genuinely cannot spawn without a recorded grant or a per-run token. But eslint is also reachable by a second, different route. The syntax-resolution executor runs repo-local tooling in place, and that route goes through a deliberately narrower admission function that only honours a recorded refusal. It asks for no consent, because in that role eslint is not being acquired at all, just used where it already sits. Both behaviours are intended, and the code says so in as many words. The problem is that CLAUDE.md describes only the first route, so a reader checking the consent boundary would conclude that no eslint spawn can happen without consent, which is not what the tree does. The question is whether the bullet should say that the rule is per role rather than per tool. An independent review lane raised this; it was verified against the code before being asked.
+The README tells a prospective user that every finding in the report was adversarially verified against current source by an independent reviewer before being kept. What the code does is narrower. A grounding pass checks each finding against an anchor on disk. Findings it DISPROVES are excluded. Findings it cannot confirm either way are still printed in the report, labelled not-confirmed. And the check is a deterministic anchor test, not an independent reviewer re-reading the code. There are adversarial passes in the pipeline, but they run over the design and over the system as a whole, not over each finding. So the sentence promises more than the tool delivers, in the one place where a new user forms their expectation. The right replacement wording is a product-description decision.
 
 ### The question
 
-CLAUDE.md's consent bullet describes the acquired-analyzer route only. eslint also spawns via the syntax-resolution route, which requires no consent (decline-veto only). Should the bullet say the consent rule is per ROLE, not per tool?
+The README says "Every finding in the report is adversarially verified against current source by an independent reviewer before it's kept." How should finding verification be described?
 
 ### Your answer
 
-- [ ] **1. State the two roles** — Amend the bullet to say consent binds the ACQUIRED-analyzer role, and that the same binary used as repo-local tooling is governed by the decline-only local admission instead.
-- [ ] **2. Leave it — the bullet is scoped already** — Leave CLAUDE.md as it is. The bullet opens with 'Every acquired-tool spawn', so the scope is stated and the local-tooling route is out of it.
-- [ ] **3. Tighten the code instead** — Do not change the doc — change the code so a registered analyzer candidate cannot spawn through the local route without consent either, making the simple reading true.
+- [ ] **1. Describe grounding** — Replace it with what the grounding pass does: every finding is re-verified against the source on disk; disproven findings are excluded and unverifiable ones are explicitly marked not-confirmed.
+- [ ] **2. Scope the adversarial claim** — Keep the adversarial framing but scope it to where it actually runs - the design review and the systemic challenge - and describe per-finding grounding separately.
+- [ ] **3. Drop the sentence** — Drop the sentence and let the report's own Grounding line carry the claim.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -144,77 +144,35 @@ CLAUDE.md's consent bullet describes the acquired-analyzer route only. eslint al
 <details>
 <summary>Evidence (4) — what was verified against code, and how</summary>
 
-- src/shared/analyzers/candidates.ts:265 registers eslint as a candidate with defaultRun:false (line 275), so the acquired route requires a grant or token.
-- src/audit/orchestrator/syntaxResolutionExecutor.ts spawns eslint via runFirstAvailableCommand(..., { analyzerConsent }), which admits through admitLocalSpawn.
-- admitLocalSpawn (src/shared/analyzers/acquisitionEngine.ts) returns undefined unless a recorded decision is 'declined' — no consent requirement, no default-set notion. Its own doc comment calls it 'Deliberately narrower than admitSpawn'.
-- Raised by the independent Codex lane as claim C3 FALSE; re-verified directly against the tree before this item was written. The lane also disputed 'a consent token authorizes ONE run' on the ground that nothing consumes the token — the guarantee CLAUDE.md actually names and pins is non-persistence, which does hold.
+- src/audit/reporting/synthesis.ts:196-197 - only findings whose grounding.status is "refuted" are removed; everything else is kept.
+- src/audit/reporting/synthesis.ts:545-556 - ungrounded findings appear with the rest and are explicitly not confirmed.
+- src/audit/reporting/synthesis.ts:572 - a refuted finding was disproved by a tool-executable anchor, not by a reviewer.
+- src/audit/orchestrator/nextStep.ts PRIORITY carries no per-finding independent-review obligation; design_review_conceptual_completed and systemic_challenge_current are not per-finding.
 
 </details>
 
 ---
 
 
-# Backlog disambiguation
+<!-- nightly:item key=ab79146b0c30ac64 -->
 
+## `docs-4` — The README sample report shows headings the renderer never emits - generate the sample, or hand-correct it <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-<!-- nightly:item key=896100e34412fa40 -->
-
-## `backlog-1` — intent-interpretation.json is a write-only sidecar — give it a reader, or delete it <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 1 night · `README.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-One part of the 'Promotion and close residuals' backlog entry reports that the file intent-interpretation.json is written but never read by anything. Its unencodable_clauses field is described as being surfaced so the host can promote them, yet no code reads it back. Write-only data is a known trap in this project: it looks authoritative to a later reader precisely because it exists and is kept up to date, while nothing depends on it being correct. The entry names two ways out and does not choose between them, which is why the routine cannot act on it. Giving the sidecar a real reader makes the data load-bearing and therefore worth trusting. Deleting it removes a file that quietly implies a contract nobody honours. There is also a smaller sub-question in the same entry about whether the unencodable_clauses surface should survive either way.
+The README shows a sample of what an audit report looks like. It does not match what the tool writes. The real report opens with the heading "Audit Report" and a Summary section; the sample shows an "Audit findings" heading and summary lines about false and uncertain findings that no code produces. The real report lists findings under one flat Findings heading; the sample groups them under per-severity headings. The sample also shows a Category bullet the renderer does not write. A sample that does not match the output is the most misleading kind of doc, because a reader has no way to tell. The deeper question is whether a hand-written sample should exist at all, given that it drifts every time the renderer changes.
 
 ### The question
 
-Should intent-interpretation.json be given a real reader, or deleted? And should its unencodable_clauses surface be preserved either way?
+The README's sample report block does not match the renderer's output. How should it be fixed?
 
 ### Your answer
 
-- [ ] **1. Delete the sidecar** — Delete intent-interpretation.json and its unencodable_clauses surface. Write-only data that implies a contract nobody honours is worse than no file.
-- [ ] **2. Give it a reader** — Keep the sidecar and wire a real consumer for unencodable_clauses, so the data is load-bearing and its correctness is actually tested.
-- [ ] **3. Delete the file, keep the surface** — Drop the persisted sidecar but keep unencodable_clauses on the in-memory interpretation result, where its consumer is visible.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (3) — what was verified against code, and how</summary>
-
-- docs/backlog/open-bugs.md part (d) of 'Promotion and close residuals from CP-NODE-3/15 reviews' states the sidecar has zero readers.
-- The nightly mechanical backlog sweep classified this entry owner_decision_needed with its premise holding at HEAD (.audit-tools/nightly/triage-2026-08-24.jsonl, open-bugs#82cdddee).
-- The entry links project memory write-only-data-looks-authoritative, which records the same class of defect.
-
-</details>
-
----
-
-
-<!-- nightly:item key=0c89f4cedc88b54d -->
-
-## `backlog-2` — declare the tracked trees no typechecker reaches — pick the mechanism, or accept the absence <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-The scripts directory is a whole tracked tree that no TypeScript config covers: tsconfig.json includes only src, and tsconfig.test.json includes src and tests. Nothing anywhere states that scripts is deliberately unchecked. You can only find that out by opening both config files and noticing what is missing, an absence, which is the hardest thing to notice and the easiest thing to break by accident. The backlog entry asks for the unchecked set to be stated somewhere mechanical, so it is a fact the build can check rather than something a reader has to deduce. What it does not do is say which mechanism, and that is the decision. A declared-data file reconciled by a check script would match how this repo already handles the doc manifest and guard reach. Extending a typechecker to cover scripts is a different and larger answer. Doing nothing is also a real option if the absence is considered self-evident.
-
-### The question
-
-How should the set of tracked source trees that no typechecker reaches be declared, and should it be declared at all?
-
-### Your answer
-
-- [ ] **1. Declared data + reconciliation check** — State the unchecked set as declared data with a check script that reconciles it against the tracked tree, following the doc-manifest and guard-reach precedent.
-- [ ] **2. Typecheck scripts/ instead** — Do not declare the gap, close it. Bring scripts/ under a tsconfig so the unchecked set is empty and needs no declaration.
-- [ ] **3. Leave it undeclared** — Leave it as is. The include arrays are the statement, and a second declaration is one more thing to keep in sync.
+- [ ] **1. Generate it** — Generate the sample block from the renderer, the same way the Philosophy block is generated, so it cannot drift again.
+- [ ] **2. Hand-correct it** — Hand-correct the block to the renderer's current headings and bullets, and accept that it will need re-checking when the renderer changes.
+- [ ] **3. Drop the sample** — Drop the sample block and describe the report's shape in prose instead.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -226,10 +184,252 @@ How should the set of tracked source trees that no typechecker reaches be declar
 <details>
 <summary>Evidence (4) — what was verified against code, and how</summary>
 
-- docs/backlog/open-bugs.md states scripts/ is covered by NO tsconfig, that tsconfig.json includes ["src"], and tsconfig.test.json includes ["src","tests"] with checkJs:false.
-- Verified at HEAD this run: npm run check and check:tests both pass while nothing under scripts/ is typechecked.
-- The nightly mechanical sweep classified this entry owner_decision_needed with its premise holding (.audit-tools/nightly/triage-2026-08-24.jsonl, open-bugs#33da27bd).
-- The repo already uses declared-data-plus-reconciliation twice: scripts/doc-manifest-data.mjs and scripts/guard-reach-data.mjs.
+- src/audit/reporting/synthesis.ts:437 - the report H1 is "# Audit Report".
+- src/audit/reporting/synthesis.ts:445-471 - the Summary bullets are Findings, Work blocks, Severity breakdown, Lens breakdown, Grounding (S7), Fully audited files, Excluded non-auditable files. There is no verified-real line, and no false/uncertain disposition exists anywhere in the pipeline.
+- src/audit/reporting/synthesis.ts:531-537 and src/shared/reporting/findingDisplay.ts:209 - findings render under one flat Findings section, with no per-severity headings.
+- src/shared/reporting/findingDisplay.ts:139-167 - the per-finding bullets are Severity, Confidence, Lens, grounding, Files. There is no Category bullet.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=8f55734a2c168667 -->
+
+## `docs-5` — The artifact contract stamps the charter layer charter-register/v2; the code says v3 - bump the literal, or stop stating the version in prose <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/audit/artifact-contract.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The artifact contract names the schema version stamped on the charter register, and gives it as v2. The code declares v3. The rest of the sentence is still true - the register is discarded on a version mismatch, which is what makes it safe to regenerate. Only the version literal drifted. This is the smallest possible kind of doc error, and it is being asked rather than fixed for one reason: this file is constitutional, meaning it defines what the project IS rather than describing what its code currently does, so nothing edits it without an owner decision on the record. There is also a real question underneath, because a hand-typed version literal in prose will drift again.
+
+### The question
+
+spec/audit/artifact-contract.md says the charter layer is "stamped `charter-register/v2`" and the code constant is `charter-register/v3`. What should happen? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### Your answer
+
+- [ ] **1. Bump to v3** — Correct the literal to charter-register/v3 and keep the sentence as it is.
+- [ ] **2. Stop stating the version** — Drop the version literal from the prose and state the durable rule instead - the register carries a stamped schema version and is discarded on mismatch - so it cannot drift again.
+- [ ] **3. Leave it** — Leave the literal as it is.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- src/audit/types/charterRegister.ts:34 - export const CHARTER_REGISTER_SCHEMA_VERSION = "charter-register/v3".
+- The DISCARD read-policy half of the same sentence is still correct (discardOnSchemaVersionMismatch on charter_register).
+- An independent adversary lane confirmed the primary claim and REFUTED a secondary one: src/audit/io/artifacts.ts contains no charter-register/v2 literal, so no code comment needs the same fix.
+- spec/audit/artifact-contract.md is listed in src/shared/constitutionalDocPaths.ts, so any change needs a recorded owner decision.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=4a13b8cefd26bafc -->
+
+## `docs-6` — The release refusal message says origin/main in a checkout whose only remote is audit-tools - print the resolved remote, or keep the shorthand <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `scripts/release-and-publish.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The release script checks that your branch tip already matches the remote default branch before it will publish. It resolves the remote name at runtime and correctly falls back to the first remote when there is no remote called origin - which is this checkout, where the only remote is named audit-tools. But when it refuses, it prints a message that says origin/main anyway, because that spelling is hard-coded in the message. The ship skill then documents the same origin/main shorthand. So an operator who hits the refusal is told to compare against a ref that does not exist in their checkout. A doc-only fix would make the skill disagree with the message the operator actually sees, so the honest fix touches the message.
+
+### The question
+
+The release script resolves the remote at runtime but hard-codes "origin/" in its refusal message, and the ship skill repeats that shorthand. This checkout has no origin remote. What should happen?
+
+### Your answer
+
+- [ ] **1. Print the resolved remote** — Interpolate the resolved remote name into the refusal message and the comments, then update the ship skill to match, so the operator sees the ref that exists in their checkout.
+- [ ] **2. Keep the shorthand** — Keep origin/ as a generic shorthand for the remote default branch in both places; the ship skill already states the real remote name two lines above.
+- [ ] **3. Doc only** — Change only the ship skill to say audit-tools/main and leave the script message as it is.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- scripts/release-and-publish.mjs:61-66 - getRemoteName() returns "origin" only if that remote exists, otherwise the first remote.
+- scripts/release-and-publish.mjs:250 - the ref is built as refs/remotes/${remoteName}/${defaultBranch}, so the CHECK itself is correct.
+- scripts/release-and-publish.mjs:259 - the operator-facing refusal message hard-codes "HEAD already equals origin/${defaultBranch}".
+- git remote -v shows one remote, audit-tools. An adversary lane refused a doc-only fix for exactly this reason.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=7092bf4d0d6500f3 -->
+
+## `docs-7` — The design doc grants design review a graph-constrained file scope; the shipped prompt tells it to roam freely - pick which is authoritative <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The workflow design describes how much of the codebase a design reviewer is allowed to look at. It says the reviewer gets a soft grant: start from the in-scope units, expand along graph edges, and read out-of-scope files only for context, never as targets for findings. The prompt the tool actually ships says the opposite - roam the code freely, follow imports wherever they lead, and do not confine yourself to the highest-risk units. Neither is obviously wrong; they are two different products. But only one of them is what runs, and a design doc that describes the other one will quietly mislead every future change to that prompt.
+
+### The question
+
+The design doc describes a graph-constrained soft grant for design-review file access; designReviewPrompt.ts instructs free roaming. Which is authoritative?
+
+### Your answer
+
+- [ ] **1. Doc follows the code** — Rewrite the doc's file-access block to describe the shipped model: free roaming with a top-N risk orientation list and in-scope/excluded annotations.
+- [ ] **2. Code follows the doc** — Keep the doc as the target design and add the missing scope instruction and edge-constrained expansion to designReviewPrompt.ts.
+- [ ] **3. Split the two rules** — Keep both, naming them separately: an orientation grant (roam freely to understand) and a finding-target scope (only in-scope units produce findings).
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- spec/audit-workflow-design.md:187-192 - "soft grant with graph-constrained expansion"; out-of-scope files readable for context, not as finding targets.
+- src/audit/orchestrator/designReviewPrompt.ts:284 and :453 - "Then roam the actual code freely. Read whole files, follow imports and call paths wherever they lead... Do NOT confine yourself to the highest-risk units."
+- A repo-wide grep finds no soft-grant or hard-grant concept in src, and no instruction matching "generate findings only for in-scope units".
+- src/audit/orchestrator/designReviewProjection.ts:99 states the shipped model outright: the reviewer re-roams the live code regardless.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=a04a8cfcef8b908e -->
+
+## `docs-8` — The goals doc names lean_fast_path a second plan-building MECHANISM; the philosophy says one pipeline at two depths - pick the normative wording <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/remediate/remediation-goals.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The remediation goals document is normative: it says what the remediator IS, not what today's code happens to do. It records that every plan carries a tag naming which of two MECHANISMS built it - the contract pipeline, or a lean fast path. The project philosophy says something different: there is one pipeline, and a risk dial sets how deep it goes, explicitly not a separate lean path. The code sits between the two readings. There genuinely is a separate lean plan builder with its own thresholds, but which one runs is decided by the risk tier, and both rejoin the same downstream machinery. So the wording gap is real, and only the owner can close it, because it decides what the thing is meant to be.
+
+### The question
+
+Is "two mechanisms with a plan.source tag" the intended normative framing, or should the goals doc restate it as one pipeline at two dial settings?
+
+### Your answer
+
+- [ ] **1. One mechanism, two depths** — Reword the goals doc to "one mechanism, two traversal depths; plan.source records provenance only", matching the self-scaling pipeline design.
+- [ ] **2. Two mechanisms** — Keep two named mechanisms in the goals doc and soften the philosophy's A6 conviction to match.
+- [ ] **3. Leave the gap** — Leave both as they are and accept the wording gap.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- spec/remediate/remediation-goals.md:104 - plan.source is contract_pipeline "for the primary engine", or lean_fast_path "for its bounded Path-A shortcut".
+- docs/project-philosophy.md A6 - explicitly ONE pipeline, not a separate lean path; its named home is spec/self-scaling-pipeline-design.md, which frames the lean traversal as the low point of one dial.
+- src/remediate/steps/contractPipeline.ts:4542 - buildLeanExtractedPlan is a distinct producer tagged LEAN_FAST_PATH_SOURCE; src/remediate/riskSignal.ts:372 and :380 hold lean-specific thresholds.
+- Selection is tier-driven and both paths rejoin one normalizeExtractedPlan/applyPlanPipeline path (src/remediate/phases/plan.ts:373), which is what makes the framing a wording choice rather than a code defect.
+- spec/remediate/remediation-goals.md is constitutional, so this is escalate-only by construction.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=84d2a3758bfb619d -->
+
+## `docs-9` — Core principle 1 admits the LLM only where no deterministic rule exists; the philosophy admits it wherever it strongly lifts quality - reword, or keep it stricter <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/remediate/remediation-goals.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The first core principle of the remediation goals document says: automate everything that can be automated, and reserve the LLM for judgment calls that cannot be reduced to a deterministic rule. The project philosophy is deliberately broader. It says the project is NOT 100% deterministic, and that where a bit of LLM judgment strongly improves quality, you use the LLM, even when a mechanical rule would technically be possible. Those are different bars. The stricter one is the exact "deterministic by default" framing that the doc-review rubric lists as a conformance smell. It may still be what the owner wants for the remediator specifically, which is why this is a question and not a correction.
+
+### The question
+
+Core principle 1 reserves the LLM for what cannot be reduced to a deterministic rule; philosophy A2 admits it wherever it strongly lifts quality. Which wording is normative?
+
+### Your answer
+
+- [ ] **1. Match the philosophy** — Reword principle 1 to A2's three-rule balance: use the mechanical tool where it does the job as well or better, use the LLM where its judgment strongly lifts quality, and enforce in tooling whatever can be enforced.
+- [ ] **2. Keep it stricter** — Leave principle 1 as a deliberately stricter statement for the remediator, and note in the doc that it is intentionally narrower than A2.
+- [ ] **3. Amend the philosophy** — Treat A2 as the one that needs amending instead.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- spec/remediate/remediation-goals.md core principle 1 - "reserve the LLM for judgment calls that cannot be reduced to a deterministic rule".
+- docs/project-philosophy.md A2 - the project is not "100% deterministic"; where LLM judgment strongly lifts quality, use the LLM.
+- The same goals doc's own "Deterministic vs LLM boundaries" section is consistent with A2; only principle 1's phrasing is not, so this is a one-sentence divergence rather than a whole-doc position.
+- spec/remediate/remediation-goals.md is constitutional, so this is escalate-only by construction.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=b4483fd2dc6c2c36 -->
+
+## `docs-10` — Phase 3 writes tests from an item spec the same doc calls optional - name the fallback, or make the spec mandatory <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/remediate/remediation-goals.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The remediation goals document describes a phase that writes tests before implementing a fix, and it says to write those tests from the Phase 2 item spec. Elsewhere the same document says the item spec is optional enrichment, frequently absent, and that when it is absent the work reads its file scope straight from the finding. Both statements cannot govern at once. If the spec is optional, Phase 3 needs to say what it does when there is none. If Phase 3 genuinely cannot proceed without one, then the spec is not optional and the other sentence is the wrong one. This is a contradiction inside a normative document, which is the kind that quietly decides itself in whichever direction the next implementer happens to read first.
+
+### The question
+
+Phase 3 says "Write tests from the Phase 2 item spec"; the same doc says the item spec is optional and frequently absent. Which is normative?
+
+### Your answer
+
+- [ ] **1. Name the fallback** — Make Phase 3 steps 1 and 4 conditional on an item spec being present, and name the fallback source - the finding and its affected files - when it is absent.
+- [ ] **2. Make the spec mandatory** — Treat the item spec as required wherever a test or verify step runs, and correct the optionality claim instead.
+- [ ] **3. Leave it** — Leave both statements as they are.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- spec/remediate/remediation-goals.md Phase 3 step 1 - "Write tests from the Phase 2 item spec. Tests must fail on the current code where a test step is applicable."
+- The same doc: ItemSpec is optional enrichment, and when absent the implementation workload reads file scope from finding.affected_files.
+- src/remediate/state/types.ts:376 - item_spec is declared optional.
+- src/remediate/steps/dispatch/hostHandoff.ts:79 and :703 - the ENFORCED scope is allowed_files derived from block scope, not from the item spec.
+- spec/remediate/remediation-goals.md is constitutional, so this is escalate-only by construction.
 
 </details>
 
@@ -239,25 +439,25 @@ How should the set of tracked source trees that no typechecker reaches be declar
 # Recurring-problem solutions
 
 
-<!-- nightly:item key=8a7a479fcb205ac8 -->
+<!-- nightly:item key=9393f270260c00d4 -->
 
-## `sol-1` — P43: print an open remediation run's write scope in answer.mjs --list, so answered work is not hand-checked against it every session <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `sol-1` — P44: a leg-3 proposal ships a red-green test nobody ever runs - record the measured RED, or keep the prediction <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `scripts/nightly/answer.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · open 1 night · `scripts/check-guard-reach.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-When you answer a nightly question, the work it implies often means editing code. If a remediation run is in progress at the same time, some of its work items have already reserved a set of files, and editing one of those files behind the run's back corrupts the binding it uses to accept results. Nothing computes that overlap today, so each session opens the run's state file, finds the pending items, joins them to their blocks, and works out by hand which answered items are safe. That happened on 2026-08-23 and again during this run, and the two derivations disagreed: last night's concluded that all four waiting answers were blocked, when one of them touched no reserved file at all. It shipped this run, a day later than it needed to. The proposal is to print the run's reserved files underneath the answered-not-done list, so the fact is in front of the reader instead of being re-derived. It deliberately stops short of labelling items ready or blocked, because a decision record stores the file the question was about, not the file its fix will touch, so a verdict would sometimes say ready when it is not, which is worse than saying nothing.
+When this routine proposes a new guard, it is required to ship the patch AND its red-green test, so the owner can approve in one step instead of re-deriving the work. Nobody ever runs that test. It is written by reading the code, and its claim to be RED at HEAD is a prediction. Tonight that prediction was wrong in both of the only two proposal tests ever applied: one could not have run at all, because of two missing imports and a missing fixture helper, and one was red for a reason entirely unrelated to the missing mechanism, because its fixture wrote the decision ledger in the wrong shape. A test asserted to be red whose redness nobody observed is a false red, and the proposal presents it to the owner as a measurement.
 
 ### The question
 
-Adopt P43: print an open remediation run's per-item write scope beneath the answered-not-done list in answer.mjs --list?
+Should a leg-3 proposal be required to RUN its test and record the measured failure? Full proposal at .audit-tools/nightly/proposals/P44-proposal-test-never-run/PROPOSAL.md.
 
 ### Your answer
 
-- [ ] **1. Adopt as proposed** — Adopt P43 as written: print the open run's per-item write scope, and deliberately do not label answered items ready or blocked.
-- [ ] **2. Adopt, but make it a verdict** — Adopt the mechanism but go further: match each answered item's recorded path against the run's write scope and label it, accepting that the recorded path under-detects a fix's real write set.
-- [ ] **3. Decline** — Decline. Two occurrences is thin evidence, and reading the run state by hand when a run is open is acceptable.
+- [ ] **1. Record and check** — Adopt the RED-AT record with the reconciliation check: the routine runs the test at HEAD, writes the verbatim failure and the sha to RED-AT.txt, and a check wired into verify:checks refuses a proposal test with no sibling record.
+- [ ] **2. Record only** — Adopt the RED-AT record without the reconciliation check - honest, but unenforced.
+- [ ] **3. Decline** — Decline. Keep the proposal test as a written prediction; the cost of running it is not worth the mechanism.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -266,15 +466,57 @@ Adopt P43: print an open remediation run's per-item write scope beneath the answ
 
 ```
 
-Full proposal: [`.audit-tools/nightly/proposals/P43-answered-work-vs-open-run-collision/answer-list-run-scope.patch`](../.audit-tools/nightly/proposals/P43-answered-work-vs-open-run-collision/answer-list-run-scope.patch) <!-- doc-citation-exempt: quoted item prose, not citations -->
+Full proposal: [`.audit-tools/nightly/proposals/P44-proposal-test-never-run/PROPOSAL.md`](../.audit-tools/nightly/proposals/P44-proposal-test-never-run/PROPOSAL.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 <details>
-<summary>Evidence (4) — what was verified against code, and how</summary>
+<summary>Evidence (5) — what was verified against code, and how</summary>
 
-- Recurrence, two dates: commit 78ad5f54 (2026-08-23) hand-derived the collision for four answered items and wrote the conclusion into docs/HANDOFF.md prose; this run re-derived it from scratch.
-- The derivations disagreed. 5acf2e262ebd7ab0, the F-label comment cleanup, touches no file any pending block claims, and shipped this run as 7e34fe14 after being parked for a day.
-- Verified at HEAD: the three pending items' blocks claim src/audit/orchestrator/runtimeCommand.ts; four files including src/remediate/steps/dispatch/hostHandoff.ts; and eleven more. The other three answered items DO collide with that scope.
-- Full proposal, patch and red/green test: .audit-tools/nightly/proposals/P43-answered-work-vs-open-run-collision/
+- P40: the landed tests/shared/prompt-renders-its-contract.test.ts differs from the proposal copy by 66 diff lines - two missing imports and a bundle() fixture helper the proposal never wrote. The proposal copy could not have run.
+- P43, applied tonight: the fixture wrote the decision ledger as { decisions: { ... } }; the ledger is a flat map, so readDecisions saw an empty ledger and --list took its early exit. The test was red, but not for the reason the proposal stated.
+- P43 also imported execFileSync from node:child_process, which invariant INV-WH refuses across the whole test tree - landing it as written reddened npm test.
+- Two proposals, two dates, and they are the complete population of proposal-authored tests ever applied. The hit rate is 2 of 2.
+- Nothing in scripts/check-*.mjs or .claude/hooks/ reads .audit-tools/nightly/proposals/** at all.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=225930847089a734 -->
+
+## `sol-2` — P42's premise is false: its seven cited sites are DRIVER-facing - withdraw the answer, or re-target it at audit-code <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `src/remediate/steps/prompts.ts`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+You answered an earlier proposal, P42, by approving the removal of the advance command from what it called the worker-facing prompt, at seven named sites. Before making that edit the routine checked what those seven sites actually are, and they are the opposite of what P42 said. All seven build the prompt the DRIVER reads - the operator-facing questions about clarifications, triage, the review gate and intake - and telling the driver how to advance is correct there. Meanwhile no delegated worker packet carries the advance command at all, so the trap P42 describes is not currently possible. The incidents P42 cites happened in audit-code, but P42 cited a remediate-code file. Nothing was applied, and this asks what to do with the approval.
+
+### The question
+
+P42 was approved on a false premise: its seven cited sites are driver-facing, and no worker packet carries the advance command. What now?
+
+### Your answer
+
+- [ ] **1. Withdraw it** — Withdraw the approval. The trap is not representable at HEAD, so there is nothing to remove; close the backlog entry as already-unreachable.
+- [ ] **2. Re-target at audit-code** — Keep the intent and re-target the investigation at audit-code, where the charter_extraction and systemic_challenge incidents actually happened, before proposing any edit.
+- [ ] **3. Apply anyway** — Apply it as answered at the seven cited sites, accepting that the driver then relies on allowed_commands in current-step.json alone for its advance cue.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- All seven prompt builders in src/remediate/steps/prompts.ts are passed as the prompt: field of writeCurrentStep(...), which renders the driver-facing current-prompt.md - callers at src/remediate/steps/nextStep.ts:1539, :2308, :2566, :2589, :2778, :2815 and src/remediate/steps/intakeResolver.ts:104, :387, :414, :445, :472.
+- Every one of those steps is operator-interactive (status "blocked"), and its step contract already carries allowedCommands: [loaderCommand("next-step")].
+- Grepped both host-handoff modules for the advance command inside worker material: the only hits are ingestion-error and unaccept-results messages addressed to the driver. No delegated worker prompt instructs its executor to advance.
+- P42's recurrence evidence names charter_extraction and systemic_challenge, which are audit-code obligations, while its "verified open at HEAD" section cites a remediate-code file.
+- Full record at .audit-tools/nightly/proposals/P42-advance-command-in-worker-prompt/CORRECTION-2026-08-25.md. NOT independently adversaried: the Codex lane timed out twice tonight.
 
 </details>
 
@@ -285,9 +527,13 @@ Full proposal: [`.audit-tools/nightly/proposals/P43-answered-work-vs-open-run-co
 <summary>What the last run changed on its own</summary>
 
 
-- 7e34fe14 — retired the historical F5/F6/item-C program-phase labels from src comments, executing recorded answer 5acf2e262ebd7ab0; recorded done.
+- Applied three owner-answered decisions held over from 2026-08-24. 594046d7 reworded the "lean fast-path exception" heading in spec/remediation-workflow-design.md to "Both paths run the pipeline; the risk tier sets the depth" (subject a1bcdf448f875452). 33719f19 made both answered CLAUDE.md corrections under a recorded constitutional-doc override: the consent bullet now states the two roles (consent binds the ACQUIRED-analyzer role; the same binary used as repo-local tooling is admitted by the decline-only admitLocalSpawn gate) and the host-handoff line now points at the audit-tools/shared barrel instead of naming a core file (subjects 6c96d291fad77b9a and c293f51214b487a6). All three recorded --done.
 
-- 0bc635a6 — logged the graph-edge cache digest-pin trap in docs/backlog/durable-traps.md and regenerated the backlog seek index.
+- Landed nightly proposal P43 as b5a36ae5: answer.mjs --list now prints an open remediation run's per-item write scope beneath the answered-not-done list, and deliberately does not label an item ready or blocked. Two corrections to the proposal's own test were needed first - its fixture wrote the decision ledger in a { decisions: ... } envelope when the ledger is a flat map, so the test was red for the wrong reason, and it imported execFileSync from node:child_process against invariant INV-WH. Red-green validated by inverting the mechanism. Recorded --done (subject 8a7a479fcb205ac8).
+
+- Landed two code-anchored doc corrections as 44e12b99, both agreed by an independent adversary lane: docs/audit-pkg/operator-guide.md now documents "audit-code validate-results --results <file>", because the command throws without the flag, and spec/audit-workflow-design.md now names resolveIntentLensSelection, the function planningExecutors.ts actually calls, instead of resolveEffectiveLenses, which takes a different argument type and has no caller outside its own module.
+
+- Green gate before every push: npm run build, npm run check, npm run verify:checks and the full vitest suite all pass at HEAD.
 
 
 </details>
@@ -297,13 +543,21 @@ Full proposal: [`.audit-tools/nightly/proposals/P43-answered-work-vs-open-run-co
 <summary>What the last run could NOT cover</summary>
 
 
-- Leg 2 mechanical sweep classified 69 of 110 backlog entries. 41 errored on the free-provider lane (schema-mismatch replies, plus an HTTP 502 from a provider whose key is known-broken); 34 of the classified had unusable premise probes. 41 entries were NOT triaged this run.
+- Leg 2 sweep - 58 of 113 backlog entries classified, 55 errored. Coverage read from .audit-tools/backlog-triage-coverage.json, not eyeballed. The errors split by output size: 5 near-zero replies (dialect failure), 1 truncated at the length cap, 33 that returned prose the parser could not read as a triage record, and 16 with no reply at all. Just under half the backlog is unclassified this run and must not be read as clean.
 
-- Nothing was skipped in leg 1's two-lane review of CLAUDE.md's five own-vs-acquire analyzer claims: both lanes reported. The independent Codex lane disputed two, and one dispute survived re-verification and became item docs-3 (eslint spawns through the decline-only local admission as well as the consent-gated acquired one). Its other dispute — that nothing CONSUMES a consent token, so 'authorizes ONE run' overstates — was checked and set aside: the guarantee CLAUDE.md names and pins is non-persistence, which holds.
+- Leg 2 premise probes - 31 of 113 entries came back probes_unusable, meaning the lane's quoted fragments could not be evaluated against the tree. Those verdicts carry NO premise confirmation and must be re-verified against HEAD before any of them is worked.
 
-- Three of the four answered-not-done decisions (240e467dfd7a8ac9, db629de141ee6414, 26e2d10e4569b448) were NOT executed: their write targets collide with the three pending remediation work items' declared scope.
+- Leg 2 found no shipped-and-deletable entry for the second run running. The taxonomy returned actionable_now (44), owner_decision_needed (9), live_run_blocked (3) and accepted_residual_no_work (2), and no already-shipped class at all - so the shipped-entry deletion pass had nothing code-proven to delete, rather than having been skipped.
 
-- The weekly /insights pass was not due (stamp 2026-08-21, three days old), so it did not run. Not a skipped leg.
+- The Codex lane TIMED OUT twice tonight, at 9 and 7 minutes, on two different prompt sizes; a liveness probe answered in seconds, so the lane is up but too slow for a bounded adversary pass. Its share of adversarial coverage was re-routed to an independent reviewer lane, which covered the six leg-1 auto-apply candidates. The ONE conclusion it did not cover is sol-2, the P42 premise falsification, which therefore rests on this run's own verification plus the reviewer lanes, with no independent refutation attempt.
+
+- Leg 1 reviewed 40 of the 55 in-scope docs end-to-end across four reviewer lanes: the seven spec/audit docs, the eight spec/remediate and design docs, the five docs/audit-pkg pages, README.md, the three philosophy/glossary/template docs, docs/nightly-routine.md, the three package READMEs, the four .claude skills, the four canonical loader bodies under skills/, CLAUDE.md, AGENTS.md and docs/HANDOFF.md. The generated host assets under .agent/ and .github/, the generated inbox and scheduler prompt, and the five backlog files were not reviewed as leg-1 items: the first four are renderer- or generator-owned, and the backlog is leg 2's scope.
+
+- The doc-set condensation pass (perspective 2) ran and found five candidates, all escalate-only, none of which were queued this run because the leg-1 queue is already ten items: two hand-maintained parallel host grids in docs/audit-pkg/release.md; docs/audit-pkg/ mixing three shipped package docs with two repo-only ones; the closeout contract stated in three homes (docs/end-of-sprint-report-template.md, CLAUDE.md and project-philosophy.md B4); host-handoff guarantees stated in three homes (cross-tool-alignment.md, multi-ide-concurrent-runs-design.md, remediation-workflow-design.md); and two proposal-shaped specs whose proposals have landed (contract-authoring-determinism-design.md, mechanical-analyzer-layer-design.md). They are recorded here so they are not lost, and will be queued next run.
+
+- Two answered-but-unlanded decisions were measured rather than applied, because both are programs rather than nightly edits. Subject 0c89f4cedc88b54d (bring scripts/ under a tsconfig so the unchecked set is empty) was probed with checkJs:true over the 79-file scripts tree: 1234 errors, dominated by 790 TS7006 implicit-any parameters and 131 TS7031 implicit-any bindings. Subjects db629de141ee6414 (the prompt-contract registry with a reconciliation leg) and 896100e34412fa40 (wire a reader for unencodable_clauses) were verified absent at HEAD and left for a work lap.
+
+- The /insights weekly pass was NOT due - the stamp at .audit-tools/nightly/insights-last-run.json has ran_at 2026-08-21, four days old. Recorded for completeness only; being not-due is not a skipped leg.
 
 
 </details>

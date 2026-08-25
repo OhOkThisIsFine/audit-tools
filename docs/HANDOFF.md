@@ -54,6 +54,21 @@
   invisibly. It needs a real merge-and-cut pass (the sanctioned remedy), not another mechanical trim.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **12 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `docs-1` — The cleanup sentence says --force unblocks a missing-state run; it never does - restate the three-way rule, or trim the claim
+  - `docs-2` — The HANDOFF still tells the next agent to advance a remediation run that closed and deleted its state - rewrite the bullet, or drop it
+  - `docs-3` — The README promises every finding is adversarially verified before it is kept; ungrounded findings ARE kept - reword the promise, or narrow it
+  - `docs-4` — The README sample report shows headings the renderer never emits - generate the sample, or hand-correct it
+  - `docs-5` — The artifact contract stamps the charter layer charter-register/v2; the code says v3 - bump the literal, or stop stating the version in prose
+  - `docs-6` — The release refusal message says origin/main in a checkout whose only remote is audit-tools - print the resolved remote, or keep the shorthand
+  - `docs-7` — The design doc grants design review a graph-constrained file scope; the shipped prompt tells it to roam freely - pick which is authoritative
+  - `docs-8` — The goals doc names lean_fast_path a second plan-building MECHANISM; the philosophy says one pipeline at two depths - pick the normative wording
+  - `docs-9` — Core principle 1 admits the LLM only where no deterministic rule exists; the philosophy admits it wherever it strongly lifts quality - reword, or keep it stricter
+  - `docs-10` — Phase 3 writes tests from an item spec the same doc calls optional - name the fallback, or make the spec mandatory
+  - `sol-1` — P44: a leg-3 proposal ships a red-green test nobody ever runs - record the measured RED, or keep the prediction
+  - `sol-2` — P42's premise is false: its seven cited sites are DRIVER-facing - withdraw the answer, or re-target it at audit-code
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

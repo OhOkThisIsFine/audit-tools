@@ -1612,14 +1612,18 @@
     "answer": "Adopt P43 as written: print the open run's per-item write scope beneath the answered-not-done list, and deliberately do not label answered items ready or blocked.",
     "subject": "P43: print an open remediation run's write scope in answer.mjs --list, so answered work is not hand-checked against it every session",
     "path": "scripts/nightly/answer.mjs",
-    "decided_at": "2026-08-25T03:25:40.733Z"
+    "decided_at": "2026-08-25T03:25:40.733Z",
+    "completed_at": "2026-08-25T13:25:12.506Z",
+    "completed_ref": "b5a36ae5"
   },
   "6c96d291fad77b9a": {
     "disposition": "settled",
     "answer": "State the two roles: amend the bullet to say consent binds the ACQUIRED-analyzer role, and that the same binary used as repo-local tooling is governed by the decline-only local admission (admitLocalSpawn) instead.",
     "subject": "instruction-file edit: CLAUDE.md's consent bullet reads as covering every eslint spawn, but the syntax-resolution path admits eslint on decline-only",
     "path": "CLAUDE.md",
-    "decided_at": "2026-08-25T03:25:40.863Z"
+    "decided_at": "2026-08-25T03:25:40.863Z",
+    "completed_at": "2026-08-25T13:13:45.396Z",
+    "completed_ref": "33719f19"
   },
   "896100e34412fa40": {
     "disposition": "settled",
@@ -1640,13 +1644,17 @@
     "answer": "Point at the barrel: do not name the core file; say the twins share their substrate through audit-tools/shared — the durable fact, without a filename a later refactor moves.",
     "subject": "instruction-file edit: name the shared host-handoff core in CLAUDE.md, or leave the two twins as the documented owners",
     "path": "CLAUDE.md",
-    "decided_at": "2026-08-25T03:38:35.689Z"
+    "decided_at": "2026-08-25T03:38:35.689Z",
+    "completed_at": "2026-08-25T13:13:45.484Z",
+    "completed_ref": "33719f19"
   },
   "a1bcdf448f875452": {
     "disposition": "settled",
     "answer": "Reword the heading to describe the risk dial (e.g. 'Both paths run the pipeline; the risk tier sets the depth') so heading and body agree.",
     "subject": "the 'lean fast-path exception' heading advertises an exception the same section then denies — reword it, or keep it as history",
     "path": "spec/remediation-workflow-design.md",
-    "decided_at": "2026-08-25T03:38:35.766Z"
+    "decided_at": "2026-08-25T03:38:35.766Z",
+    "completed_at": "2026-08-25T13:13:45.313Z",
+    "completed_ref": "594046d7"
   }
 }
