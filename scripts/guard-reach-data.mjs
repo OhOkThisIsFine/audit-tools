@@ -357,6 +357,17 @@ export const GUARDS = [
       'leg end-to-end, the explicit-id CLI, and the readSessionRegistry predicate the session-scoped ' +
       'gates import',
   },
+  {
+    id: 'repo-root-hermeticity-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/repo-root-hermeticity.test.ts',
+    note:
+      'the repo-root delta check tests/helpers/global-setup.ts runs at teardown: a run that ADDED a ' +
+      'root entry it does not own fails and the entry is named (the shell-redirect artifacts — an ' +
+      'empty `o.testId)` / `60s` / `0)` — are the observed shape). UNCOVERED: a child that outlives ' +
+      'the run writes after teardown has passed, and the next run reads that entry as pre-existing, ' +
+      'so a straggler leak is reported by nobody',
+  },
   { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
   { id: 'nightly-items-mandatory-fields-test', kind: 'contract-test', impl: 'tests/shared/nightly-items-mandatory-fields.test.ts' },
   { id: 'nightly-scope-ledger-test', kind: 'contract-test', impl: 'tests/shared/nightly-scope-ledger.test.ts' },

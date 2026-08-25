@@ -928,18 +928,24 @@
   hold:** a concept doc states the invariant, and the measurement that motivated it lives in the
   review record or `git log`, in one place.
 
-- **Empty repo-root files named from code fragments — the SUITE is exonerated; what stays open is a
-  child that outlives its run (2026-08-24, low, friction: hermeticity).** Four so far — `60s`,
-  `o.testId)`, `0)`, `entry.tool` — all empty and untracked, so a routine `git add -A` would commit
-  them and a content-based clean-tree check never sees them. Each name is a shell-redirect artifact:
-  a command STRING reaching `cmd.exe` carries that shell's grammar, so `>` redirects even inside
-  quoted source text and the target token ends at whitespace. Instrumented measurement
-  (`NODE_OPTIONS=--require` wrapping every `child_process` entry point) logged 6,496 spawns across a
-  sweep with ZERO carrying `>`, and both checkout roots were unchanged — the producer is an agent
-  session's own shell, not the suite. `tests/helpers/global-setup.ts` now fails a run that ADDED an
-  unowned root entry, but only at teardown. **Property (residual):** a spawned child that outlives
-  its run cannot leak into the repo root unseen. Measurement in project memory
-  `repo-root-empty-files-are-shell-redirect-artifacts`.
+- **A leak that lands AFTER teardown is reported by nobody (2026-08-24, low, friction:
+  hermeticity).** Empty repo-root files named from repo text keep appearing (`o.testId)`, `60s`,
+  `0)`). Mechanism confirmed by reproduction: a command STRING reaching `cmd.exe` redirects at any
+  `>` in the line — quoted source included — and ends the target token at whitespace, `;`, `,` or
+  `=`, so `.map((o) => o.testId);` writes `o.testId)` and prose reading `the >60s blocking worker`
+  writes `60s`. The `tests/remediate`+`tests/shared` sweep is NOT the producer: an instrumented run
+  logging every `child_process` entry point saw 6,496 spawns, none carrying `>`, and left both
+  checkout roots unchanged. Teardown now fails a run that ADDED a root entry it does not own
+  (`tests/helpers/global-setup.ts`). **Open half:** a child outliving the run writes after that
+  check, and the next run reads the entry as pre-existing — so a straggler leak is caught by
+  nothing, and the producer of the three artifacts is still unnamed.
+
+- **HEAD's lockfile does not satisfy HEAD's package.json (2026-08-24, medium).** `package.json`
+  declares `tree-sitter-wasms` and `web-tree-sitter` as prod dependencies; `package-lock.json`'s
+  root entry still carries `tree-sitter-wasms` as dev and omits `web-tree-sitter`, so `npm ci`
+  refuses on a fresh clone and every `npm install` dirties the tree with the same re-sync diff.
+  **Property:** the two manifests agree at every commit, mechanically — a dependency move that skips
+  the lockfile is a red build, not a discovery made by the next person who clones.
 
 - **The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).**
   `skills/remediate-code/SKILL.md` and `skills/remediate-code/remediate-code.prompt.md` each state
