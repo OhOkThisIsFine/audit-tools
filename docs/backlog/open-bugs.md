@@ -928,17 +928,17 @@
   hold:** a concept doc states the invariant, and the measurement that motivated it lives in the
   review record or `git log`, in one place.
 
-- **A leak that lands AFTER teardown is reported by nobody (2026-08-24, low, friction:
+- **The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction:
   hermeticity).** Empty repo-root files named from repo text keep appearing (`o.testId)`, `60s`,
-  `0)`). Mechanism confirmed by reproduction: a command STRING reaching `cmd.exe` redirects at any
-  `>` in the line — quoted source included — and ends the target token at whitespace, `;`, `,` or
-  `=`, so `.map((o) => o.testId);` writes `o.testId)` and prose reading `the >60s blocking worker`
-  writes `60s`. The `tests/remediate`+`tests/shared` sweep is NOT the producer: an instrumented run
-  logging every `child_process` entry point saw 6,496 spawns, none carrying `>`, and left both
-  checkout roots unchanged. Teardown now fails a run that ADDED a root entry it does not own
-  (`tests/helpers/global-setup.ts`). **Open half:** a child outliving the run writes after that
-  check, and the next run reads the entry as pre-existing — so a straggler leak is caught by
-  nothing, and the producer of the three artifacts is still unnamed.
+  `0)`, `entry.tool`). Mechanism confirmed by reproduction: a command STRING reaching `cmd.exe`
+  redirects at any `>` in the line — quoted source included — and ends the target token at
+  whitespace, `;`, `,` or `=`, so `.map((o) => o.testId);` writes `o.testId)` and prose reading
+  `the >60s blocking worker` writes `60s`. The `tests/remediate`+`tests/shared` sweep is NOT the
+  producer: an instrumented run logging every `child_process` entry point saw 6,496 spawns, none
+  carrying `>`, and left both checkout roots unchanged. Teardown now fails a run that ADDED a root
+  entry it does not own, or that still owns a live child, naming either
+  (`tests/helpers/global-setup.ts`). **Still open:** the producer is unnamed, and it is outside both
+  checks — they bound what a vitest run can leave, not what an agent lane can.
 
 - **HEAD's lockfile does not satisfy HEAD's package.json (2026-08-24, medium).** `package.json`
   declares `tree-sitter-wasms` and `web-tree-sitter` as prod dependencies; `package-lock.json`'s

@@ -27,6 +27,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TEST_RUN_ROOT_ENV } from "./scratch.js";
 import { registerSuite, unregisterSuite, SUITE_OWNED_BUILD_ENV } from "./suiteLock.js";
+import { settleTrackedChildren, type LiveChild } from "./trackedSpawn.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -48,6 +49,8 @@ export async function setup(): Promise<void> {
 
 export async function teardown(): Promise<void> {
   unregisterSuite(repoRoot);
+  // BEFORE the run root goes: the child ledger lives inside it.
+  const liveChildren = await settleTrackedChildren();
   const root = process.env[TEST_RUN_ROOT_ENV];
   if (root) {
     try {
@@ -56,10 +59,14 @@ export async function teardown(): Promise<void> {
       // Best-effort; the OS temp dir is the backstop.
     }
   }
-  // BOTH reports, never the first one only: the two say different things about
+  // EVERY report, never the first one only: the three say different things about
   // the same run, and a fixture tree in `tests/` must not hide a leaked file in
-  // the root behind it.
-  const problems = [...inTreeFixtureProblems(), ...repoRootProblems()];
+  // the root, or a child still running, behind it.
+  const problems = [
+    ...inTreeFixtureProblems(),
+    ...repoRootProblems(),
+    ...liveChildProblems(liveChildren),
+  ];
   if (problems.length > 0) throw new Error(problems.join("\n\n"));
 }
 
@@ -154,10 +161,9 @@ export function unexpectedRootEntries(
  * by nothing, and names its own producer — which is why this reports rather than
  * deletes it.
  *
- * UNCOVERED HALF, stated: a child that OUTLIVES the run writes after this check
- * has already passed. Nothing here can see that; the artifact still lands, and
- * only the NEXT run reports it (as a pre-existing entry it does not own, so it
- * will not even do that). Kill or await every child within its test.
+ * A child that OUTLIVES the run writes after this check has already passed, so
+ * the root delta alone cannot see it — {@link liveChildProblems} is the half
+ * that does, by naming the child instead of waiting for its artifact.
  */
 function repoRootProblems(): string[] {
   // No baseline means `setup` never ran, and a repo root is never empty — so an
@@ -174,5 +180,41 @@ function repoRootProblems(): string[] {
       `it through argv (\`resolveExecArgv\` / \`parseCommandString\`, never \`shell: true\`). A name ` +
       `that looks deliberate is a test writing outside its scratch dir — root it with scratchDir() ` +
       `(tests/helpers/scratch.ts). Declare a genuinely tool-owned entry in RUN_OWNED_ROOT_ENTRIES.`,
+  ];
+}
+
+/**
+ * Fail the run if a child it spawned is STILL RUNNING.
+ *
+ * The other half of the same property, caught at the only moment it is still
+ * attributable: a straggler writes into the checkout minutes after vitest
+ * exits, when the run that spawned it is gone and its artifact belongs to
+ * nobody. The ledger (`tests/helpers/trackedSpawn.ts`) knows which pids this run
+ * started, so the report names the child and its command rather than the file it
+ * will eventually leave.
+ *
+ * REPORTS, never kills: a pid outlives the process that owned it and the OS
+ * reuses it, so killing by pid can hit an unrelated process. The failing run is
+ * the signal; the operator decides what to do with a named pid.
+ *
+ * WHAT IT REACHES, measured on win32: an ordinary child of a vitest worker is
+ * reaped when the pool goes down, so it never reaches this check — the report
+ * fires for a child that genuinely survives its parent, which is the `detached`
+ * spawn and the `shell: true` grandchild that outlives the `cmd.exe` its parent
+ * actually held. The grandchild is the one this cannot NAME: the ledger knows
+ * the pid of cmd.exe, which is dead, not of what cmd.exe started.
+ */
+export function liveChildProblems(live: readonly LiveChild[]): string[] {
+  if (live.length === 0) return [];
+  return [
+    `${live.length} child process${live.length === 1 ? "" : "es"} spawned by this run ${
+      live.length === 1 ? "is" : "are"
+    } STILL RUNNING:\n` +
+      live.map((child) => `  - pid ${child.pid}: ${child.command}`).join("\n") +
+      `\nAwait every child, or kill it before the test ends. On win32 a \`shell: true\` spawn makes ` +
+      `cmd.exe the child, and killing cmd.exe leaves the grandchild it started — spawn through argv ` +
+      `(\`resolveExecArgv\` / \`parseCommandString\`) so the process you hold is the process that runs. ` +
+      `A surviving child writes into the checkout after every check here has passed, which is how an ` +
+      `artifact ends up belonging to no run at all.`,
   ];
 }
