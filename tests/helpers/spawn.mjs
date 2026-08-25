@@ -23,13 +23,20 @@
  * `windowsHide: true` inline. INV-WH (tests/shared/shared-tests-invariants) is
  * the grep-guard that keeps this true across the whole test tree.
  *
- * `spawnHidden` / `spawnSyncHidden` are re-exported from the single shared
- * source so tests and production share one implementation. The `exec*Hidden`
- * wrappers below cover the sync/promisified exec entry points tests use.
+ * `spawnSyncHidden` is re-exported from the single shared source so tests and
+ * production share one implementation. The `exec*Hidden` wrappers below cover
+ * the sync exec entry points tests use.
+ *
+ * The two ASYNC entry points — `spawnHidden` and `execFileHidden` — come from
+ * `trackedSpawn.ts` instead, which is the same helper plus a ledger of the
+ * children still running. Only an async spawn can outlive its test, and a child
+ * that does writes into the checkout after every check has passed; read that
+ * module's header for what the ledger reaches and what it does not.
  */
-import { execFile, execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 
-export { spawnHidden, spawnSyncHidden } from "../../src/shared/tooling/exec.ts";
+export { spawnSyncHidden } from "../../src/shared/tooling/exec.ts";
+export { spawnHidden, execFileHidden } from "./trackedSpawn.ts";
 
 /** `child_process.execFileSync` with `windowsHide` forced on. */
 export const execFileSyncHidden = (command, args, options) =>
@@ -38,10 +45,3 @@ export const execFileSyncHidden = (command, args, options) =>
 /** `child_process.execSync` with `windowsHide` forced on. */
 export const execSyncHidden = (command, options) =>
   execSync(command, { ...(options ?? {}), windowsHide: true });
-
-/**
- * `child_process.execFile` with `windowsHide` forced on. Arity matches the
- * `(file, args, options, callback)` form so `promisify(execFileHidden)` works.
- */
-export const execFileHidden = (command, args, options, callback) =>
-  execFile(command, args, { ...(options ?? {}), windowsHide: true }, callback);

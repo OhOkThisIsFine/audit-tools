@@ -126,9 +126,9 @@
 - `open-bugs.md:904` — A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run, medium).
 - `open-bugs.md:913` — Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run, medium).
 - `open-bugs.md:923` — A dated measurement sits inside durable routine prose (2026-08-23, low).
-- `open-bugs.md:931` — A leak that lands AFTER teardown is reported by nobody (2026-08-24, low, friction: hermeticity).
-- `open-bugs.md:943` — HEAD's lockfile does not satisfy HEAD's package.json (2026-08-24, medium).
-- `open-bugs.md:950` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
+- `open-bugs.md:931` — The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction: hermeticity).
+- `open-bugs.md:945` — HEAD's lockfile does not satisfy HEAD's package.json (2026-08-24, medium).
+- `open-bugs.md:952` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

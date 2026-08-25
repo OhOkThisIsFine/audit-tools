@@ -358,15 +358,18 @@ export const GUARDS = [
       'gates import',
   },
   {
-    id: 'repo-root-hermeticity-test',
+    id: 'run-hermeticity-test',
     kind: 'contract-test',
-    impl: 'tests/shared/repo-root-hermeticity.test.ts',
+    impl: 'tests/shared/run-hermeticity.test.ts',
     note:
-      'the repo-root delta check tests/helpers/global-setup.ts runs at teardown: a run that ADDED a ' +
-      'root entry it does not own fails and the entry is named (the shell-redirect artifacts — an ' +
-      'empty `o.testId)` / `60s` / `0)` — are the observed shape). UNCOVERED: a child that outlives ' +
-      'the run writes after teardown has passed, and the next run reads that entry as pre-existing, ' +
-      'so a straggler leak is reported by nobody',
+      'the two teardown checks in tests/helpers/global-setup.ts: a run that ADDED a repo-root entry ' +
+      'it does not own fails with the entry named (the shell-redirect artifacts — an empty ' +
+      '`o.testId)` / `60s` / `0)` — are the observed shape), and a run whose own spawned child is ' +
+      'still alive fails with pid and command named (ledger: tests/helpers/trackedSpawn.ts). ' +
+      'UNCOVERED: a `shell: true` grandchild, since the ledger holds the pid of the cmd.exe its ' +
+      'parent actually spawned, not of what cmd.exe started; sync spawns, which cannot straggle; ' +
+      'and the CONTENT of root entries that were already there — the root check is a delta of ' +
+      'names, so a run that rewrites a tracked root file passes it',
   },
   { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
   { id: 'nightly-items-mandatory-fields-test', kind: 'contract-test', impl: 'tests/shared/nightly-items-mandatory-fields.test.ts' },

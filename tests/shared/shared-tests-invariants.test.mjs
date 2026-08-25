@@ -254,6 +254,13 @@ const TESTS_ROOT = resolve(__dirname, "..");
 const SCRIPTS_ROOT = resolve(REPO_ROOT, "scripts");
 const SPAWN_HELPER = resolve(TESTS_ROOT, "helpers/spawn.mjs");
 
+// The same sanctioned home, split in two: the async wrappers live in
+// `trackedSpawn.ts` because the child ledger they add needs TypeScript, and
+// `spawn.mjs` re-exports them, so every import site still names one module.
+// Excluded from the no-raw-import walk for the reason spawn.mjs is, and added to
+// the inline-windowsHide scan below so it is not merely unguarded.
+const TRACKED_SPAWN_HELPER = resolve(TESTS_ROOT, "helpers/trackedSpawn.ts");
+
 // Files under tests/ that are EXECUTED AS SPAWNED CHILD `node` processes (not run
 // under vitest) cannot import tests/helpers/spawn.mjs — it transitively imports
 // the shared `src/shared/tooling/exec.ts` source, which a plain node child can't
@@ -336,6 +343,7 @@ test("INV-WH: no test file imports a raw spawn/exec entry point from node:child_
     (f) =>
       (f.endsWith(".mjs") || f.endsWith(".ts")) &&
       f !== SPAWN_HELPER &&
+      f !== TRACKED_SPAWN_HELPER &&
       !CHILD_EXECUTED_SPAWN_FILES.includes(f),
   );
 
@@ -373,6 +381,7 @@ test("INV-WH: EVERY spawn-carrying script + child-executed test helper hides the
   const scripts = [
     ...walkFiles(SCRIPTS_ROOT).filter((f) => f.endsWith(".mjs")),
     ...CHILD_EXECUTED_SPAWN_FILES,
+    TRACKED_SPAWN_HELPER,
   ];
 
   const violations = [];
