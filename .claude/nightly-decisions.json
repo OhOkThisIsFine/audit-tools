@@ -1512,7 +1512,9 @@
     "answer": "Per-run only is intended, as the map says and as the newest backlog item argues. The durable `granted` path in admitSpawn is what should go, and CLAUDE.md follows the code once it changes.",
     "subject": "",
     "path": "docs/project-philosophy.md",
-    "decided_at": "2026-08-23T15:58:26.267Z"
+    "decided_at": "2026-08-23T15:58:26.267Z",
+    "completed_at": "2026-08-25T18:06:09.910Z",
+    "completed_ref": "a5a8aedc"
   },
   "c2f8a24fcedba792": {
     "disposition": "settled",
