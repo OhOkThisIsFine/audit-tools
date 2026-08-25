@@ -1636,7 +1636,9 @@
     "answer": "Give it a reader: keep intent-interpretation.json and wire a real consumer for unencodable_clauses, so the persisted data is load-bearing and its correctness is tested.",
     "subject": "intent-interpretation.json is a write-only sidecar — give it a reader, or delete it",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-25T03:38:35.481Z"
+    "decided_at": "2026-08-25T03:38:35.481Z",
+    "completed_at": "2026-08-25T23:49:23.603Z",
+    "completed_ref": "0287e93d"
   },
   "0c89f4cedc88b54d": {
     "disposition": "settled",
@@ -1695,7 +1697,9 @@
     "answer": "Generate the sample block from the renderer, the same way the Philosophy block is generated, so it cannot drift again.",
     "subject": "The README sample report shows headings the renderer never emits - generate the sample, or hand-correct it",
     "path": "README.md",
-    "decided_at": "2026-08-25T16:16:21.957Z"
+    "decided_at": "2026-08-25T16:16:21.957Z",
+    "completed_at": "2026-08-25T23:49:23.528Z",
+    "completed_ref": "6eb71c06"
   },
   "8f55734a2c168667": {
     "disposition": "settled",
@@ -1747,14 +1751,18 @@
     "answer": "Record and check: adopt the RED-AT record with the reconciliation check - the routine runs the test at HEAD, writes the verbatim failure and the sha to RED-AT.txt, and a check wired into verify:checks refuses a proposal test with no sibling record. Also correct P44's evidence table, which claims 2 of 2 when P37 and P40 both recorded genuine measured RED/GREEN runs.",
     "subject": "P44: a leg-3 proposal ships a red-green test nobody ever runs - record the measured RED, or keep the prediction",
     "path": "scripts/check-guard-reach.mjs",
-    "decided_at": "2026-08-25T16:16:37.522Z"
+    "decided_at": "2026-08-25T16:16:37.522Z",
+    "completed_at": "2026-08-25T23:49:23.426Z",
+    "completed_ref": "e624e7b3"
   },
   "225930847089a734": {
     "disposition": "settled",
     "answer": "Re-target at audit-code: keep the intent and re-target the investigation at audit-code, where the charter_extraction and systemic_challenge incidents actually happened, before proposing any edit. P42's original premise is verified false - all seven cited sites in src/remediate/steps/prompts.ts are driver-facing, and the worker packet built by buildPrompt in dispatch/hostHandoff.ts carries no advance command.",
     "subject": "P42's premise is false: its seven cited sites are DRIVER-facing - withdraw the answer, or re-target it at audit-code",
     "path": "src/remediate/steps/prompts.ts",
-    "decided_at": "2026-08-25T16:16:37.665Z"
+    "decided_at": "2026-08-25T16:16:37.665Z",
+    "completed_at": "2026-08-25T23:49:23.309Z",
+    "completed_ref": "66df2416"
   },
   "b4483fd2dc6c2c36": {
     "disposition": "settled",
