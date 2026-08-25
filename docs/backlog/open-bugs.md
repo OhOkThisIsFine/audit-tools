@@ -956,3 +956,72 @@
   shape the audit `--root` statement was collapsed out of, and all of them ship (`skills/**`), so an
   npm reader sees each copy as authoritative. **Property to hold:** across a loader pair, each instruction has
   one full statement and the other asset points at it, mechanically pinned rather than remembered.
+
+- **The root-containment guard is maintained in five places, and four of them are outside the test
+  suite that pins it (2026-08-25, medium).** `src/shared/io/pathContainment.ts` is the declared single
+  source and argues the case itself: five copies of a containment check is five chances for one to be
+  subtly wrong, and this is the class where that is a security property rather than a style
+  preference. It already parameterizes the only two axes callers differ on — `assertWithinRoot` throws
+  where `resolveWithinRoot` returns null, and `allowRoot` decides whether the root itself counts as
+  contained — so both are settings, not reasons to fork. `tests/shared/path-containment.test.ts` pins
+  the edge cases: a `..cache` entry is inside, a `..` segment is outside, a cross-drive `relative()`
+  result is outside. Two production call sites adopt it, in
+  `src/audit/extractors/analyzers/typescript.ts` and `src/audit/extractors/graph.ts`. Four live forks
+  re-derive the predicate by hand and no test reaches any of them: `canonicalPath` in
+  `src/shared/analyzerPolicy.ts` and `canonicalIntentPath` in `src/shared/sessionConfig.ts` are the
+  same 22-line function differing only in a bound argument and an error string; `isOutsideRoot` in
+  `src/remediate/utils/fileIntegrity.ts` is the boolean draw; `src/shared/submission/submissionIdentity.ts`
+  splits the first segment instead. No live escape was demonstrated — all four use the
+  segment-accurate form — so what is open is the fork count, not a known hole. Evidence:
+  `docs/reviews/shared-helper-adoption-2026-08-25.md`. **Property:** one containment predicate exists,
+  and a second hand-rolled root-escape test is a red build rather than something review has to catch.
+
+- **Shared primitives with a declared single home are re-rolled at 30+ call sites, and one copy is
+  weaker than the guard it names (2026-08-25, medium).** `isRecord` has nine definitions; the
+  barrel-exported one is in `src/shared/validation/basic.ts`, and the copy in
+  `src/audit/orchestrator.ts` omits the array clause, so an array satisfies a guard named "is record"
+  — latent only because `assertUnitManifest` reads a property immediately after. `compareCodeUnits`
+  has seven identical definitions and TWO exported homes, `src/shared/submission/hostHandoffCore.ts`
+  (which the barrel re-exports) and `src/shared/affinityArtifacts.ts`, with consumers split between
+  them; `src/shared/stableStringify.ts`, whose header says there must be exactly ONE such serializer,
+  carries the seventh copy. `hashContent` in `src/shared/hash.ts` states that no call site should
+  carry a bare truncation literal on a hash result, and `workBlockSeamId` in
+  `src/shared/decompose/workBlockSeams.ts` carries exactly that; four further inline hash chains
+  bypass it. Ten path helpers collapse to two behaviours, one of them byte-identical to the private
+  `posixify` in `src/shared/analyzers/normalizeExternal.ts`. Four exact twins remain, including
+  `formatSchemaFailure` in both `src/shared/analyzerPolicy.ts` and `src/shared/sessionConfig.ts`, and
+  `pushIssue` in `src/audit/validation/artifacts.ts` is a pass-through to a function the same file
+  already imports. Sites and rejected candidates:
+  `docs/reviews/shared-helper-adoption-2026-08-25.md`. Finer grain than the one-core dissolution lap
+  in `docs/backlog/forward-tracks.md`, which is whole-subsystem forks. **Property:** a primitive with
+  a declared single home has exactly one definition, enforced mechanically — a second definition of a
+  barrel-exported helper is a red build, not something a reviewer has to notice.
+
+- **Persisted artifact arrays are ordered by ICU collation in the file whose own comment forbids it
+  (2026-08-25, medium).** `src/remediate/steps/contractPipeline.ts` states the rule inline — code-unit
+  order, never `localeCompare`, on every persisted seed array, because the order must not depend on
+  the host's ICU collation — and it imports `compareCodeUnits`, applying it correctly to the
+  work-block and seam seeds. Seven other sorts in the same file use `localeCompare`, including the
+  findings array and each finding's affected-files array promoted into the extracted plan. The two
+  comparators genuinely disagree on mixed case: by code unit "B" precedes "a", while ICU puts "a"
+  first. A content hash over an ICU-ordered array therefore varies with the host locale — the
+  phantom-staleness cascade already fought once for repo-manifest file order (memory:
+  staleness-churn-repo-manifest-file-order). A related split: `pairKey` in
+  `src/shared/decompose/consensus.ts` canonicalizes with `localeCompare` while `pairKey` in
+  `src/shared/decompose/contentCoherence.ts` canonicalizes with `compareCodeUnits`. 150
+  `localeCompare` sites exist across `src/`; which of them feed a persisted artifact rather than a
+  human render is the open question, and is why the property is a gate and not a blanket replacement.
+  **Property:** a comparator deciding a persisted array's order is code-unit, enforced by a gate over
+  the artifact-producing modules rather than by a comment inside one of them.
+
+- **A JSONC comment stripper hand-rolls the scanner its own file imports (2026-08-25, low).**
+  `src/audit/extractors/graphManifestEdges/jsonc.ts` imports `scanStringAware` and uses it in
+  `removeTrailingJsonCommas`; its sibling `stripJsonComments` instead runs a private in-string and
+  escape state machine — cyclomatic 13, cognitive 37, one of the five most complex functions in
+  `src/`. Two quote grammars in one file, only one of them shared. Not a swap: `scanStringAware` owns
+  its loop index and offers no skip-ahead, so a comment body still reaches the unquoted callback and
+  that callback must carry its own line- and block-comment flag — the rewrite removes the
+  quote-and-escape half, not the whole function. The two-tier dependency rule in `CLAUDE.md` also
+  bears on it, since JSONC is a grammar this repo does not own. **Property:** one string-scanning
+  grammar per file, and a format whose grammar we do not own is parsed by the shared scanner or a
+  vetted library, never by a second hand-rolled state machine.

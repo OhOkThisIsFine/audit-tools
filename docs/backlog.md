@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 178 entr(y/ies) indexed.
+> and at commit). 182 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -129,6 +129,10 @@
 - `open-bugs.md:931` — The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction: hermeticity).
 - `open-bugs.md:945` — HEAD's lockfile does not satisfy HEAD's package.json (2026-08-24, medium).
 - `open-bugs.md:952` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
+- `open-bugs.md:960` — The root-containment guard is maintained in five places, and four of them are outside the test suite that pins it (2026-08-25, medium).
+- `open-bugs.md:979` — Shared primitives with a declared single home are re-rolled at 30+ call sites, and one copy is weaker than the guard it names (2026-08-25, medium).
+- `open-bugs.md:1000` — Persisted artifact arrays are ordered by ICU collation in the file whose own comment forbids it (2026-08-25, medium).
+- `open-bugs.md:1017` — A JSONC comment stripper hand-rolls the scanner its own file imports (2026-08-25, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
