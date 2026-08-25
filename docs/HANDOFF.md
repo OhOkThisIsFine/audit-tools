@@ -6,8 +6,10 @@
 ## Live state
 
 - Published state: **v0.46.0** is the last tag, is published to npm, and is what the global bins run
-  (`audit-code --version` / `remediate-code --version` both report it). `main` is at the release
-  commit and in sync with the remote; there is no unreleased work.
+  (`audit-code --version` / `remediate-code --version` both report it). `main` is five commits
+  AHEAD of that tag and in sync with the remote: the 2026-08-25 nightly run's doc corrections,
+  proposal P43, and the run's own artifacts. None of it changes shipped behaviour, so no release
+  is owed.
 - The first-draw REMEDIATION RUN (`.audit-tools/remediation/`, 30 work items) has every work item
   terminal: 25 resolved, 5 resolved with no change. CP-NODE-26, CP-NODE-7 and CP-NODE-14 all landed
   and ingested on 2026-08-24. Its `closing_plan` is `{action: "none"}`, so closing runs no actions —
