@@ -249,12 +249,14 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   warnIfNotGitRepo(root);
   const artifactsDir = getArtifactsDir(argv);
   // Terminal-exit backstop (backlog: abnormal-exit no-step-contract): ANY throw
-    // out of the body — a host-handoff abort, the engine's `exceeded maxTransitions`
-  // cycle throw, a mis-shaped-submission parse crash — writes a blocked step
-  // naming the cause before propagating, so a consumer can never read the
-  // PREVIOUS current-step.json as a live instruction after a fatal exit. Exit
-  // semantics are unchanged (cli.ts still reports the error and exits nonzero);
-  // only the on-disk step contract is guaranteed fresh.
+  // out of the body — a host-handoff abort, a mis-shaped-submission parse crash,
+  // an IO failure — writes a blocked step naming the cause before propagating,
+  // so a consumer can never read the PREVIOUS current-step.json as a live
+  // instruction after a fatal exit. Exit semantics are unchanged (cli.ts still
+  // reports the error and exits nonzero); only the on-disk step contract is
+  // guaranteed fresh. A non-convergent obligation fold is NOT in this class:
+  // the engine reports its bound as an outcome, so that path emits its own
+  // resumable blocked step rather than throwing.
   await runWithBlockedStepBackstop(
     () => cmdNextStepBody(argv, root, artifactsDir),
     (reason) =>

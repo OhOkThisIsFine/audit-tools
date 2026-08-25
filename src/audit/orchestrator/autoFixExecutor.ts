@@ -130,6 +130,22 @@ function pathsForExtensions(
   return [...collected].sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * Why the gate returns rather than guarding each formatter: only the prettier
+ * branch is config-gated, while black, sqlfluff and gofmt fire on an extension
+ * match alone — so on a Go, Python or SQL repo the FIRST mutation is not the
+ * prettier call. A gate installed in one branch would be a false close on
+ * exactly the repos that have no prettier config.
+ */
+function autoFixGateRefusal(options: {
+  enabled?: boolean;
+  dryRun?: boolean;
+}): string | null {
+  if (options.enabled === false) return "opted out";
+  if (options.dryRun === true) return "dry run";
+  return null;
+}
+
 export async function runAutoFixExecutor(
   bundle: ArtifactBundle,
   root: string,
@@ -141,10 +157,42 @@ export async function runAutoFixExecutor(
      * analyzers face, applied to local tooling. Nothing overrides it.
      */
     analyzerConsent?: AnalyzerConsentDecisions;
+    /**
+     * Host gate on the whole phase. `enabled: false` opts the phase out;
+     * `dryRun: true` asks what it WOULD do. Distinct from `analyzerConsent`,
+     * which vetoes one named tool: this refuses the phase, whatever tools it
+     * would have resolved.
+     */
+    autoFix?: { enabled?: boolean; dryRun?: boolean };
   } = {},
 ): Promise<ExecutorRunResult> {
   if (!bundle.file_disposition) {
     throw new Error("Cannot run auto fix executor without file_disposition");
+  }
+
+  // THE GATE — first statement of the body, so it is ahead of every formatter by
+  // CONSTRUCTION rather than by a reader checking that the lines above it happen
+  // to be pure. Deliberately NOT a revert after the fact: a formatter that has
+  // already run has already rewritten the sources, and a crash between the write
+  // and the undo would leave the mutation behind — so "dry run" has to mean the
+  // spawn never happens, not that it is taken back.
+  const refusal = autoFixGateRefusal(options.autoFix ?? {});
+  if (refusal !== null) {
+    return {
+      updated: {
+        ...bundle,
+        auto_fixes_applied: {
+          executed_tools: [],
+          failed_tools: [],
+          tool_timings: [],
+          timestamp: new Date().toISOString(),
+        },
+      },
+      artifacts_written: ["auto_fixes_applied.json"],
+      progress_summary:
+        `Phase 1 Deterministic Auto-Fix skipped (${refusal}). ` +
+        "No formatter ran and nothing was written.",
+    };
   }
 
   const byExtension = buildInScopePathsByExtension(bundle);

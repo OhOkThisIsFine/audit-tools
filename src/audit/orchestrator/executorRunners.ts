@@ -189,6 +189,10 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
   auto_fix_executor: async (bundle, { options }) =>
     runAutoFixExecutor(bundle, requireRoot(options.root, "auto_fix_executor"), {
       analyzerConsent: options.externalAcquisition?.analyzerConsent,
+      // Forwarded so the phase gate is reachable through the PRODUCTION
+      // dispatch, not only at the executor's direct seam — the shape the
+      // decline veto was once found dead in (CP-NODE-5).
+      autoFix: options.autoFix,
     }),
   syntax_resolution_executor: async (bundle, { options }) =>
     runSyntaxResolutionExecutor(

@@ -56,6 +56,17 @@ export interface AdvanceAuditOptions {
    * semgrep/eslint) acquire + run.
    */
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
+  /**
+   * Host gate on the phase-1 deterministic auto-fix, which is the one audit
+   * phase that WRITES to the audited tree. Absent ⇒ the phase runs, preserving
+   * today's default. `enabled: false` opts it out; `dryRun: true` reports what
+   * it would do without spawning a formatter. Both are checked before the first
+   * formatter, never applied as a revert afterwards.
+   *
+   * Distinct from `externalAcquisition.analyzerConsent`, which vetoes one named
+   * tool: this refuses the phase regardless of which formatters resolve.
+   */
+  autoFix?: { enabled?: boolean; dryRun?: boolean };
   /** Phase 4B gate (session-config `graph.llm_edge_reasoning`); default off. */
   graphLlmEdgeReasoning?: boolean;
   /** Phase 4B host-supplied reason rewrites for low-confidence graph edges. */

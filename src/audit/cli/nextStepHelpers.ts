@@ -2718,46 +2718,47 @@ export async function runDeterministicForNextStep(
   };
 
   const startBundle = await loadArtifactBundle(params.artifactsDir);
-  let outcome: Awaited<ReturnType<typeof advance<ArtifactBundle, AuditNextStepCtx, NextStepResult>>>;
-  try {
-    outcome = await advance(
-      {
-        priority: PRIORITY,
-        obligations: countTransitions(buildAuditObligations()),
-      },
-      startBundle,
-      ctx,
-    );
-  } catch (err) {
-    // maxTransitions is the engine's runaway backstop, and audit deliberately
+  const outcome = await advance(
+    {
+      priority: PRIORITY,
+      obligations: countTransitions(buildAuditObligations()),
+    },
+    startBundle,
+    ctx,
+  );
+
+  if (outcome.step) return outcome.step;
+
+  if (outcome.stopped) {
+    // The engine's bound is its runaway backstop, and audit deliberately
     // supplies no stateSignature (cycle detection lives in ctx-level guards with
     // tolerance windows). A cause those guards miss — observed 2026-07-30: an
     // errored rolling packet left `audit_tasks_completed` actionable while its
     // error-shaped result files made the pending frontier look answered — used
     // to CRASH next-step with exit 1, where the same class of stall
-    // (no_capable_pool) gets a graceful resumable pause. Convert the throw into
-    // that same resumable blocked step, naming the spinning obligation so the
-    // cause is actionable rather than a stack trace.
-    if (err instanceof Error && err.message.includes("exceeded maxTransitions")) {
-      const bundle = await loadArtifactBundle(params.artifactsDir);
-      const decision = decideNextStep(bundle);
-      return {
-        kind: "blocked",
-        state: decision.state,
-        bundle,
-        reason:
-          `The deterministic fold made ${DEFAULT_MAX_TRANSITIONS}+ transitions without reaching a ` +
-          `host-actionable step — an obligation is re-selecting without clearing its own actionable ` +
-          `state (${err.message.match(/last selected obligation was "([^"]+)"/)?.[1] ?? "unknown"}). ` +
-          "The run is paused resumably, not crashed: inspect the run's task-results/ for error-shaped " +
-          "result files whose tasks never completed (delete them to re-dispatch those tasks), or hand " +
-          "results in with `audit-code ingest-results --results <file>`; then re-run next-step.",
-      };
-    }
-    throw err;
+    // (no_capable_pool) gets a graceful resumable pause. The engine now REPORTS
+    // the non-convergence instead of throwing it, so the pause is built from the
+    // outcome's own fields — no error message is parsed to learn either that the
+    // bound fired or which obligation was spinning.
+    const bundle = await loadArtifactBundle(params.artifactsDir);
+    const decision = decideNextStep(bundle);
+    const spinning = outcome.lastObligationId ?? "unknown";
+    const cause =
+      outcome.stopped === "bound"
+        ? `made ${DEFAULT_MAX_TRANSITIONS}+ transitions without reaching a host-actionable step`
+        : "revisited a state it had already scanned this run";
+    return {
+      kind: "blocked",
+      state: decision.state,
+      bundle,
+      reason:
+        `The deterministic fold ${cause} — an obligation is re-selecting without clearing its own ` +
+        `actionable state (${spinning}). ` +
+        "The run is paused resumably, not crashed: inspect the run's task-results/ for error-shaped " +
+        "result files whose tasks never completed (delete them to re-dispatch those tasks), or hand " +
+        "results in with `audit-code ingest-results --results <file>`; then re-run next-step.",
+    };
   }
-
-  if (outcome.step) return outcome.step;
 
   // No actionable obligation: the fold reached completion (e.g. synthesis flipped
   // the state to complete and every obligation is now satisfied). Build the

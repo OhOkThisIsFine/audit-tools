@@ -1060,6 +1060,8 @@ export {
   findNextObligation,
   advance,
   DEFAULT_MAX_TRANSITIONS,
+  ENGINE_TRANSITION_HEADROOM,
+  deriveEngineBound,
 } from "./engine/obligationEngine.js";
 export { LOOP_CORE_PATTERNS, isLoopCorePath } from "./loopCorePaths.js";
 export { applyGuidanceFile } from "./intake/guidanceBootstrap.js";

@@ -185,17 +185,41 @@ test("advance threads ctx into execute", async () => {
   expect(seen).toEqual({ dep: 42 });
 });
 
-test("advance throws when transitions exceed maxTransitions (cycle backstop)", async () => {
+// CP-NODE-7 (OBL-impl-block-5-inv-1): the bound STOPS the fold, it does not
+// throw it. The bound used to raise an Error, which made every consumer
+// recognize a wedged fold by matching text in a message and recover the
+// spinning obligation with a regex over that same prose. A structured stop is
+// what lets a consumer pause resumably at the bound.
+test("advance STOPS gracefully when transitions exceed maxTransitions (never throws)", async () => {
   const engine: ObligationEngine<Record<string, never>, unknown, unknown> = {
     priority: ["loop"],
     // Always actionable, always transitions to a fresh object that is still
     // actionable → never reaches emit/completion.
     obligations: [{ id: "loop", derive: () => "missing", execute: async (s) => ({ kind: "transition", state: { ...s } }) }],
   };
-  await assert.rejects(
-    () => advance(engine, {}, {}, { maxTransitions: 5 }),
-    /exceeded maxTransitions \(5\).*"loop".*cycle/s,
-  );
+  // A throw here fails the test on its own — the assertion is that we get a
+  // VALUE describing the stop, and that the value says which bound fired.
+  const outcome = await advance(engine, {}, {}, { maxTransitions: 5 });
+
+  expect(outcome.step, "a bounded stop reaches no host-actionable step").toBe(null);
+  expect(outcome.stopped, "the bound must be REPORTED, not thrown").toBe("bound");
+  expect(
+    outcome.lastObligationId,
+    "the spinning obligation is a field, so no caller parses it out of prose",
+  ).toBe("loop");
+});
+
+test("a completed fold is distinguishable from a bounded one (stopped is absent)", async () => {
+  const engine: ObligationEngine<Record<string, never>, unknown, unknown> = {
+    priority: ["done"],
+    obligations: [{ id: "done", derive: () => "satisfied", execute: async (s) => ({ kind: "transition", state: s }) }],
+  };
+  const outcome = await advance(engine, {}, {}, { maxTransitions: 5 });
+  expect(outcome.step).toBe(null);
+  expect(
+    outcome.stopped,
+    "completion and non-convergence must never look alike — both have a null step",
+  ).toBeUndefined();
 });
 
 test("advance default transition cap is exported and finite", () => {

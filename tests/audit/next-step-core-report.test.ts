@@ -187,9 +187,11 @@ test("present_report with pending friction triage is a ready step carrying the n
 // next-step exit must overwrite current-step.json with a blocked step naming
 // the cause — a consumer must never read the PREVIOUS step as live after a
 // crash. The trigger here (a missing --guidance-file) is one arbitrary member
-// of the covered class (quota-wall abort, engine maxTransitions throw, parse
-// crash, IO error): the backstop wraps the whole command body, so any throw
-// exercises the same path.
+// of the covered class (quota-wall abort, parse crash, IO error): the backstop
+// wraps the whole command body, so any throw exercises the same path. A
+// non-convergent obligation fold is deliberately NOT in this class — the engine
+// reports its bound as an outcome, so that path emits its own resumable blocked
+// step instead of throwing.
 // ---------------------------------------------------------------------------
 
 test("a fatal next-step exit overwrites the stale step with a blocked step naming the cause", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {

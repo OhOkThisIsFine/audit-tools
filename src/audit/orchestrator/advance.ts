@@ -21,6 +21,7 @@ import {
   AGENT_FEEDBACK_FILENAME,
   RunLogger,
   advance as advanceObligations,
+  deriveEngineBound,
   type ObligationDef,
   type ObligationOutcome,
 } from "audit-tools/shared";
@@ -38,34 +39,29 @@ export type { AdvanceAuditOptions, AdvanceAuditResult } from "./advanceTypes.js"
  * healthy run. Chain-length/index-agnostic: it caps iterations, not a fixed
  * executor index.
  *
- * Kept as a LOCAL cap enforced from inside the drain obligations' `execute`
- * (see `runDrainStep` below) rather than threaded through the shared engine's
- * `advance(..., { maxTransitions })` — that option THROWS once exceeded, while
- * this cap has always been a graceful "stop and hand back the last good
- * result" backstop (the caller simply resumes the drain on its next
- * `next-step` call). Mirrors the CLI fold's (`nextStepHelpers.ts`) established
- * precedent of keeping cycle/step-count bookkeeping in the local `Ctx` rather
- * than in the engine's own transition counter.
+ * Enforced from inside the drain obligations' `execute` (see `runDrainStep`
+ * below) because this cap is about DISPATCH SLOTS — how many steps one call may
+ * hand out — which is a fact about the audit drain, not about the engine's
+ * transition counting. The engine bound derived from it
+ * (`engineMaxTransitions`) is the outer backstop, and both now stop the fold
+ * gracefully, so the two differ in what they COUNT rather than in how harshly
+ * they fail.
  */
 export const MAX_DRAIN_STEPS = 64;
 
 /**
- * Headroom between the graceful local cap and the engine's THROWING
- * `maxTransitions` backstop. Named once and consumed by `engineMaxTransitions`
- * so the two bounds can never be set independently: the cap emits on the step
- * that spends the last slot, so the engine sees at most `MAX_DRAIN_STEPS`
- * transitions and its throw is unreachable in practice.
- */
-const ENGINE_TRANSITION_HEADROOM = 2;
-
-/**
  * The engine bound, DERIVED from the graceful cap rather than written as a
  * literal at the call site. Raising `MAX_DRAIN_STEPS` therefore can never
- * silently convert the graceful stop into an engine throw — there is no second
- * number to remember to re-derive.
+ * silently move the fold past the bound — there is no second number to
+ * remember to re-derive.
+ *
+ * The derivation itself (the headroom, and the rule that the bound is the cap
+ * plus it) lives in the shared obligation engine, which owns the bounded-call
+ * invariant for BOTH orchestrators. This function is the audit draw of that one
+ * statement, not a second copy of it.
  */
 export function engineMaxTransitions(cap: number = MAX_DRAIN_STEPS): number {
-  return cap + ENGINE_TRANSITION_HEADROOM;
+  return deriveEngineBound(cap);
 }
 
 // ── The PRIORITY-ordering guarantee (owned here, as a caller precondition) ────
@@ -792,12 +788,12 @@ async function advanceAuditInner(
       { priority: PRIORITY, obligations: buildDrainObligations(deriveCache) },
       bundle,
       ctx,
-      // INVARIANT: the local graceful cap (MAX_DRAIN_STEPS, enforced inside
-      // runDrainStep) must always fire strictly before the engine's THROWING
+      // INVARIANT: the local dispatch-slot cap (MAX_DRAIN_STEPS, enforced
+      // inside runDrainStep) must always fire strictly before the engine's
       // maxTransitions backstop. The engine bound is DERIVED from the same
       // constant (see engineMaxTransitions), never written as a literal here,
-      // so raising MAX_DRAIN_STEPS can never silently convert the graceful stop
-      // into an engine throw.
+      // so raising MAX_DRAIN_STEPS can never silently move the stop out to the
+      // engine's coarser one.
       { maxTransitions: engineMaxTransitions() },
     );
     if (outcome.step) {
@@ -828,6 +824,35 @@ async function advanceAuditInner(
         selectedObligation: decision.selected_obligation,
         selectedExecutor: decision.selected_executor,
       });
+      // A non-convergent stop reaches this same branch — no step, nothing
+      // actionable — but it is NOT completion, and a summary reading like a
+      // finished drain would describe a spinning fold as a healthy one.
+      //
+      // Reported through the summary and the run log rather than a new result
+      // field: those two already have readers, and the drain's own
+      // MAX_DRAIN_STEPS cap emits strictly before the engine bound (see the
+      // INVARIANT above), so this branch is a backstop on a broken invariant,
+      // not a state the host is expected to route on.
+      if (outcome.stopped) {
+        const spinning = outcome.lastObligationId ?? "unknown";
+        const cause =
+          outcome.stopped === "bound"
+            ? `spent the engine transition bound (${String(engineMaxTransitions())})`
+            : "revisited a state it had already scanned";
+        log.event({
+          kind: "error",
+          note: "obligation_fold_did_not_converge",
+          stopped: outcome.stopped,
+          obligation: spinning,
+        } as never);
+        result = {
+          ...result,
+          progress_summary:
+            `Obligation fold did not converge: it ${cause} without reaching a ` +
+            `host-actionable step (${spinning}). The drain's own dispatch cap should have ` +
+            "stopped it first, so this is a backstop firing — re-run next-step to resume.",
+        };
+      }
     }
   }
 

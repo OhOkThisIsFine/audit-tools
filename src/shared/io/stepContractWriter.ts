@@ -336,9 +336,9 @@ export async function writeStepContract<
 
 /**
  * Run `body` under the terminal-exit backstop both next-step CLIs share
- * (backlog: abnormal-exit no-step-contract). If `body` throws — the engine's
- * maxTransitions cycle abort, a mis-shaped-submission parse crash,
- * an IO failure — write a blocked step contract naming the cause via
+ * (backlog: abnormal-exit no-step-contract). If `body` throws — a
+ * mis-shaped-submission parse crash, a host-handoff abort, an IO failure —
+ * write a blocked step contract naming the cause via
  * `writeBlockedStep`, then rethrow the ORIGINAL error so the caller's exit
  * semantics (stderr report + nonzero exit) are unchanged. This guarantees the
  * step-contract property mechanically: after ANY terminal exit of a next-step

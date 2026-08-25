@@ -242,8 +242,16 @@ test("the engine's throwing backstop is DERIVED from MAX_DRAIN_STEPS, never a li
   ).toMatch(/maxTransitions: engineMaxTransitions\(\)/);
   expect(
     /maxTransitions: MAX_DRAIN_STEPS \+ \d+/.test(source),
-    "a re-inlined literal decouples the graceful cap from the throwing backstop",
+    "a re-inlined literal decouples the graceful cap from the derived backstop",
   ).toBe(false);
+  // CP-NODE-7: the derivation itself lives in the shared engine, so this file
+  // consumes the invariant rather than restating it. A local headroom constant
+  // here would be the second home the single-source obligation bans.
+  expect(
+    /(?:const|let|var)\s+ENGINE_TRANSITION_HEADROOM\b/.test(source),
+    "the headroom belongs to the shared engine, not to this consumer",
+  ).toBe(false);
+  expect(source).toMatch(/deriveEngineBound/);
 });
 
 // ── The zero-dispatch result has ONE construction site (MNT-03034c94) ─────────

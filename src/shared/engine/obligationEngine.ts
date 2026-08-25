@@ -142,6 +142,31 @@ export function findNextObligation<S, Ctx, Step>(
 export const DEFAULT_MAX_TRANSITIONS = 100;
 
 /**
+ * Headroom between a consumer's own GRACEFUL step cap and the engine bound
+ * derived from it. Stated HERE, once, because the relationship between the two
+ * numbers is a property of the engine's contract, not of any one consumer: a
+ * consumer that stops its fold at its own cap must be able to prove the engine
+ * bound cannot fire first, and it can only do that if the two are derived from
+ * a single formulation rather than written independently.
+ *
+ * The value is the slack the engine needs to observe a consumer's final,
+ * cap-spending step and the emit that follows it.
+ */
+export const ENGINE_TRANSITION_HEADROOM = 2;
+
+/**
+ * The engine bound DERIVED from a consumer's graceful cap — the second half of
+ * the bounded-call invariant this module owns.
+ *
+ * Consumers call this instead of restating a constant, so raising a graceful
+ * cap can never silently push the fold past the engine bound: there is no
+ * second number anywhere to remember to re-derive.
+ */
+export function deriveEngineBound(cap: number): number {
+  return cap + ENGINE_TRANSITION_HEADROOM;
+}
+
+/**
  * The outcome of an `advance` run.
  *
  * - `step` non-null → an obligation emitted a host-actionable step; `state` is the
@@ -151,12 +176,24 @@ export const DEFAULT_MAX_TRANSITIONS = 100;
  * - `step` null, `stopped: "cycle"` → a transition revisited an already-seen state
  *   signature, so the fold is not converging; the caller surfaces a graceful
  *   terminal rather than looping. Only possible when `opts.stateSignature` is
- *   supplied (otherwise a runaway fold hits the `maxTransitions` throw instead).
+ *   supplied.
+ * - `step` null, `stopped: "bound"` → the fold spent `maxTransitions`
+ *   transitions without reaching an emit or completion. Also non-convergence,
+ *   detected by counting rather than by signature.
+ *
+ * `stopped` being ABSENT is what means "the run is complete". A caller that
+ * branches on `step` alone therefore cannot tell completion from
+ * non-convergence, and would report a wedged fold as a finished one — so both
+ * stopped values must be handled explicitly. `lastObligationId` names the
+ * obligation the fold was executing when it stopped, so a caller can say WHICH
+ * obligation is spinning without parsing it out of a message.
  */
 export interface AdvanceResult<S, Step> {
   state: S;
   step: Step | null;
-  stopped?: "cycle";
+  stopped?: "cycle" | "bound";
+  /** The obligation in flight when `stopped` was set; absent otherwise. */
+  lastObligationId?: string;
 }
 
 /**
@@ -179,7 +216,15 @@ export interface AdvanceResult<S, Step> {
  *   work-set before it shrinks): each distinct round is a new signature, so only a
  *   genuine revisit stops it.
  * - `maxTransitions` is the absolute backstop for callers that supply no
- *   signature — it *throws* after that many consecutive transitions.
+ *   signature — it stops the loop with `stopped: "bound"` after that many
+ *   consecutive transitions.
+ *
+ * BOTH backstops terminate GRACEFULLY. The bound used to throw, which forced
+ * every consumer to recognize a wedged fold by matching text in an error
+ * message and to recover the spinning obligation's id with a regex over that
+ * same prose — so the engine's bound was part of its contract while its only
+ * signal was a sentence. A structured stop lets a consumer pause resumably at
+ * the bound the way it already pauses for any other non-actionable outcome.
  *
  * `emit` and natural completion both terminate the loop and are never bounded.
  *
@@ -199,6 +244,9 @@ export async function advance<S, Ctx, Step>(
   const visited = stateSignature ? new Set<string>() : null;
   let current = state;
   let transitions = 0;
+  // The obligation most recently selected — reported on every non-convergent
+  // stop so the caller can name what is spinning.
+  let lastObligationId: string | null = null;
   for (;;) {
     if (visited) {
       const signature = stateSignature!(current);
@@ -207,7 +255,12 @@ export async function advance<S, Ctx, Step>(
         // not converging (a no-progress step that left the signature unchanged,
         // or a multi-obligation state cycle). Stop gracefully; the caller renders
         // a terminal rather than throwing.
-        return { state: current, step: null, stopped: "cycle" };
+        return {
+          state: current,
+          step: null,
+          stopped: "cycle",
+          ...(lastObligationId === null ? {} : { lastObligationId }),
+        };
       }
       visited.add(signature);
     }
@@ -217,19 +270,24 @@ export async function advance<S, Ctx, Step>(
       current,
     );
     if (!obligation) return { state: current, step: null };
+    lastObligationId = obligation.id;
     const outcome = await obligation.execute(current, ctx);
     if (outcome.kind === "emit") {
       return { state: outcome.state ?? current, step: outcome.step };
     }
     current = outcome.state;
     if (++transitions > maxTransitions) {
-      throw new Error(
-        `advance: exceeded maxTransitions (${maxTransitions}) without reaching ` +
-          `an emit or completion. The last selected obligation was ` +
-          `"${obligation.id}" — a transition obligation is likely not clearing ` +
-          `its own actionable state (cycle). Supply opts.stateSignature for ` +
-          `graceful cycle detection.`,
-      );
+      // The fold spent its whole bound without reaching an emit or completion —
+      // a transition obligation is not clearing its own actionable state. This
+      // returns rather than throws (see the doc comment): the caller pauses
+      // resumably and names `lastObligationId`, instead of recognizing the
+      // condition by matching text in an exception.
+      return {
+        state: current,
+        step: null,
+        stopped: "bound",
+        lastObligationId,
+      };
     }
   }
 }
