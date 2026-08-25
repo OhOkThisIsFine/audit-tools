@@ -143,7 +143,7 @@ The contract pipeline is the planning engine for **both** input paths, and its
 design phase is a multi-agent seam negotiation rather than a single
 self-consistent author.
 
-### Both paths run the pipeline — except the lean fast-path exception
+### Both paths run the pipeline; the risk tier sets the depth
 
 - **Path A (structured `audit-findings.json`)** seeds `goal_normalization` with
   the findings ("remediate these N findings under this checkpoint") and
