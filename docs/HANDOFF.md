@@ -10,10 +10,6 @@
   AHEAD of that tag and in sync with the remote: the 2026-08-25 nightly run's doc corrections,
   proposal P43, and the run's own artifacts. None of it changes shipped behaviour, so no release
   is owed.
-- The first-draw REMEDIATION RUN (`.audit-tools/remediation/`, 30 work items) has every work item
-  terminal: 25 resolved, 5 resolved with no change. CP-NODE-26, CP-NODE-7 and CP-NODE-14 all landed
-  and ingested on 2026-08-24. Its `closing_plan` is `{action: "none"}`, so closing runs no actions —
-  `next-step` until `.audit-tools/remediation-report.md` and `remediation-outcomes.json` are promoted.
 - ⚠ `tests/audit/host-delegation-fold-carries-advisories.test.ts` timed out at 120s once under a
   full `npx vitest run tests/audit` and passed alone — the known load/hermeticity class, and it does
   NOT reach either item's changed code (its `runtime_validation_tasks` list is empty). The flake
@@ -35,16 +31,25 @@
 
 ## Immediate next
 
-1. Execute the nine answered-but-unexecuted decisions the ledger lists — run `answer.mjs --list` to
-   see them. Nothing is scope-blocked now that the run is closed; record each with
-   `--done <KEY> "<ref>"` as it lands. They are: the per-run-consent code fix, P41, P42, P43, and
-   the five 2026-08-24 answers (name the shared host-handoff barrel in `CLAUDE.md`; reword the
-   lean-fast-path heading in `spec/remediation-workflow-design.md`; state the two consent roles;
-   <!-- doc-citation-exempt: a runtime artifact the tool writes under .audit-tools/, never tracked -->
-   give the `intent-interpretation.json` sidecar a real reader; bring `scripts/` under a tsconfig).
-2. Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
-   never the default two-minute timeout, which kills it mid-gate and wedges `phase.lock` for every
-   later call.
+Run `answer.mjs --list` for the authoritative set; record each with `--done <KEY> "<ref>"` as it
+lands. Two owner decisions of 2026-08-25 order the queue:
+
+1. **Finish the lean fold in code, THEN reword the doc.** The owner ruled the fork a defect on
+   2026-07-26 (ledger `7fc1c1d310dda95d`) and that ruling was never executed. Selection, artifact
+   and consumer are unified; `buildLeanExtractedPlan` and the bypass that returns before the
+   pipeline's entry seed are not. Only after the fold does the `docs-8` reword state a true fact.
+2. **Delete `ItemSpec` outright**, and fix the attribution bug riding on it — the close gate reads
+   an empty per-item list, so one test failure blocks every resolved item. `docs-10` then resolves
+   by deleting the item-spec references from Phase 3. N-R13 is RATIFIED as-is: the abandoned
+   `tests_to_write` / `not_applicable_steps` / `no_change` fields are removed, not restored.
+
+Then the remaining answered decisions: `docs-4`, `docs-7`, `docs-9`, `sol-1`, `sol-2`, the
+<!-- doc-citation-exempt: a runtime artifact the tool writes under .audit-tools/, never tracked -->
+per-run-consent code fix, P41, the `intent-interpretation.json` reader, and the `scripts/` tsconfig.
+
+Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
+never the default two-minute timeout, which kills it mid-gate and wedges `phase.lock` for every
+later call.
 
 ## Deliberate state, not bugs
 
@@ -56,21 +61,6 @@
   invisibly. It needs a real merge-and-cut pass (the sanctioned remedy), not another mechanical trim.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
-
-- **12 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `docs-1` — The cleanup sentence says --force unblocks a missing-state run; it never does - restate the three-way rule, or trim the claim
-  - `docs-2` — The HANDOFF still tells the next agent to advance a remediation run that closed and deleted its state - rewrite the bullet, or drop it
-  - `docs-3` — The README promises every finding is adversarially verified before it is kept; ungrounded findings ARE kept - reword the promise, or narrow it
-  - `docs-4` — The README sample report shows headings the renderer never emits - generate the sample, or hand-correct it
-  - `docs-5` — The artifact contract stamps the charter layer charter-register/v2; the code says v3 - bump the literal, or stop stating the version in prose
-  - `docs-6` — The release refusal message says origin/main in a checkout whose only remote is audit-tools - print the resolved remote, or keep the shorthand
-  - `docs-7` — The design doc grants design review a graph-constrained file scope; the shipped prompt tells it to roam freely - pick which is authoritative
-  - `docs-8` — The goals doc names lean_fast_path a second plan-building MECHANISM; the philosophy says one pipeline at two depths - pick the normative wording
-  - `docs-9` — Core principle 1 admits the LLM only where no deterministic rule exists; the philosophy admits it wherever it strongly lifts quality - reword, or keep it stricter
-  - `docs-10` — Phase 3 writes tests from an item spec the same doc calls optional - name the fallback, or make the spec mandatory
-  - `sol-1` — P44: a leg-3 proposal ships a red-green test nobody ever runs - record the measured RED, or keep the prediction
-  - `sol-2` — P42's premise is false: its seven cited sites are DRIVER-facing - withdraw the answer, or re-target it at audit-code
-
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

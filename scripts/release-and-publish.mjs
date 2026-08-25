@@ -65,6 +65,16 @@ function getRemoteName() {
   throw new Error("No git remotes found.");
 }
 
+// Same resolution, but for MESSAGE text only: a refusal must never be turned
+// into a crash by the absence of a remote it is already refusing over.
+function tryRemoteName() {
+  try {
+    return getRemoteName();
+  } catch {
+    return null;
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
@@ -192,7 +202,7 @@ export function assessWorktreeCleanliness(statusText) {
 // Admits either:
 //   1. The default branch itself (the classic primary-worktree ship).
 //   2. Any other branch (e.g. a `claude/<lap>` worktree) whose local HEAD SHA
-//      equals origin/<default>'s SHA — i.e. the lap already landed on the remote
+//      equals <remote>/<default>'s SHA — i.e. the lap already landed on the remote
 //      default, so releasing in place mutates no primary worktree and introduces
 //      no new manual flag. Requires a git remote (isDetached branches with no
 //      current branch name are never admitted).
@@ -242,20 +252,28 @@ function ensureMainBranch() {
 
   // Only reach for remote-tip comparison when we're off the default branch —
   // e.g. releasing in place from a `claude/<lap>` linked worktree whose HEAD has
-  // already been fast-forwarded onto origin/<default>.
+  // already been fast-forwarded onto <remote>/<default>.
   let headSha = null;
   let remoteDefaultSha = null;
+  let remoteName = null;
   if (branch !== defaultBranch) {
-    const remoteName = getRemoteName();
+    remoteName = getRemoteName();
     headSha = tryGitSha("HEAD");
     remoteDefaultSha = tryGitSha(`refs/remotes/${remoteName}/${defaultBranch}`);
   }
 
   const verdict = evaluateReleaseBranch({ branch, defaultBranch, headSha, remoteDefaultSha });
   if (!verdict.allowed) {
+    // Name the ref that EXISTS in this checkout. The remote is already resolved
+    // at runtime by getRemoteName(), so a hard-coded "origin/" prints a ref the
+    // operator cannot look up whenever their only remote is named something
+    // else — which is the case in the primary checkout, where it is
+    // "audit-tools". Resolve lazily: the guard must still refuse (not crash)
+    // in a checkout with no remote at all.
+    const remoteRef = `${remoteName ?? tryRemoteName() ?? "<remote>"}/${defaultBranch}`;
     throw new Error(
       `Release publishing expects the default branch ('${defaultBranch}') or a linked worktree whose ` +
-        `HEAD already equals origin/${defaultBranch}, but current branch is '${branch}' ` +
+        `HEAD already equals ${remoteRef}, but current branch is '${branch}' ` +
         `(${verdict.reason}).`,
     );
   }
@@ -264,7 +282,7 @@ function ensureMainBranch() {
 
 // Resolve the refspec that pushes the release (bump) commit onto the REMOTE
 // default branch. On the default branch itself we push the branch by name; from
-// a linked worktree/feature branch whose HEAD already equals origin/<default>,
+// a linked worktree/feature branch whose HEAD already equals <remote>/<default>,
 // we push HEAD onto the default branch (a fast-forward) so the tag commit lands
 // on the default branch's history — never mutating any primary worktree.
 export function resolveReleasePushRefspec({ branch, defaultBranch } = {}) {

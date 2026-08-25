@@ -81,9 +81,10 @@ You'll confirm scope, depth, and which lenses to apply (security, correctness, r
 data_integrity, etc.), then it runs autonomously to completion and leaves
 `audit-findings.json` + `audit-report.md` in `.audit-tools/`.
 
-Every finding in the report is adversarially verified against current source by an
-independent reviewer before it's kept. The report opens with a triaged summary and 
-drills down by severity:
+Every finding is re-verified against the source on disk before the report is written. A finding a
+tool-executable check disproves is excluded outright; a finding that cannot be confirmed stays in
+the report, explicitly marked not-confirmed, so an unverifiable claim is surfaced rather than either
+hidden or asserted. The report opens with a triaged summary and drills down by severity:
 
 *(Illustrative sample — the counts and the `file:line` citation below are fabricated for the example, not a real finding.)*
 

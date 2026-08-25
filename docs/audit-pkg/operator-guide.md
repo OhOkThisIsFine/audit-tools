@@ -87,9 +87,12 @@ distinguishable from a clean one, invalidates the persisted step contract, and
 the next `next-step` re-reads the bound result files for the dropped items.
 
 `audit-code cleanup` removes `.audit-tools/audit/` only when the persisted run
-is complete or not started. Active, blocked, or missing-state runs are refused
-unless the operator explicitly supplies `--force`; `--dry-run` previews the
-decision.
+is complete or not started. Active or blocked runs are refused unless the
+operator explicitly supplies `--force`. A directory with no `audit_state.json`
+marker is refused whether or not `--force` is supplied: `--force` waives the
+evidence about a run's STATUS, never the evidence about its IDENTITY, and the
+verb will not delete a directory it cannot prove is an audit run. `--dry-run`
+previews the decision.
 
 ## Repository intent and analyzer policy
 

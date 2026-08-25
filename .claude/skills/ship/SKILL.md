@@ -43,10 +43,10 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   worktree, not the primary `main` checkout. You do NOT need to FF the primary worktree or rebuild its stale
   `dist/`. Push the lap branch's landed work onto `main` (`git push audit-tools HEAD:main`, a fast-forward),
   then run the release **from the lap worktree itself** — `scripts/release-and-publish.mjs` admits any
-  branch whose HEAD already equals `origin/main` (`evaluateReleaseBranch()`), pushes the bump commit onto
+  branch whose HEAD already equals `audit-tools/main` (`evaluateReleaseBranch()`), pushes the bump commit onto
   the remote `main` via `HEAD:refs/heads/main`, and never touches the primary worktree. The `ensureCleanWorktree()`
   CRLF/clean-tree guard and the `verify:checks` pre-tag gate still run. No `--root`/branch flag is needed —
-  if the lap HEAD hasn't been fast-forwarded onto `origin/main` first, the guard refuses (fix the sync, don't
+  if the lap HEAD has not been fast-forwarded onto `audit-tools/main` first, the guard refuses (fix the sync, do not
   add a flag).
 
 ## 3. Publish (single package)
