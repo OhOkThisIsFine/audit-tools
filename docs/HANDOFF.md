@@ -27,7 +27,7 @@
 
 ## Immediate next
 
-The nightly queue is EMPTY — all twelve propositions were answered on 2026-08-25 and nine are
+The decision queue is EMPTY — all twelve propositions were answered on 2026-08-25 and nine are
 landed. Six answered decisions remain unexecuted. Run `answer.mjs --list` for the authoritative
 set with its keys; record each with `--done <KEY> "<ref>"` as it lands.
 
