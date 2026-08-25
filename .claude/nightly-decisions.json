@@ -1716,7 +1716,9 @@
     "answer": "Split the two rules: keep both and name them separately - an orientation grant (roam freely to understand the system) and a finding-target scope (only in-scope units may produce findings).",
     "subject": "The design doc grants design review a graph-constrained file scope; the shipped prompt tells it to roam freely - pick which is authoritative",
     "path": "spec/audit-workflow-design.md",
-    "decided_at": "2026-08-25T16:16:28.679Z"
+    "decided_at": "2026-08-25T16:16:28.679Z",
+    "completed_at": "2026-08-25T17:33:49.877Z",
+    "completed_ref": "521d43b0"
   },
   "a04a8cfcef8b908e": {
     "disposition": "settled",
@@ -1730,7 +1732,9 @@
     "answer": "Match the philosophy: reword principle 1 to A2's three-rule balance - use the mechanical tool where it does the job as well or better, use the LLM where its judgment strongly lifts quality, and enforce in tooling whatever can be enforced - and have the spec cite A2 as governing so the precedence is stated once instead of inferred.",
     "subject": "Core principle 1 admits the LLM only where no deterministic rule exists; the philosophy admits it wherever it strongly lifts quality - reword, or keep it stricter",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-08-25T16:16:37.328Z"
+    "decided_at": "2026-08-25T16:16:37.328Z",
+    "completed_at": "2026-08-25T17:33:49.944Z",
+    "completed_ref": "521d43b0"
   },
   "9393f270260c00d4": {
     "disposition": "settled",
