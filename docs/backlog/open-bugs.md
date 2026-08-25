@@ -928,6 +928,15 @@
   hold:** a concept doc states the invariant, and the measurement that motivated it lives in the
   review record or `git log`, in one place.
 
+- **The remediate+shared sweep leaks empty repo-root files named from code fragments (2026-08-24,
+  low, friction: hermeticity).** One `npx vitest run tests/remediate tests/shared` run left `./60s`
+  (mtime inside the run window) and `./o.testId)` (mtime ~2.5 minutes AFTER the run exited — a
+  detached straggler child) on an otherwise clean tree. Both names are shell-redirect artifacts:
+  `o.testId)` is a fragment of `scripts/shared/vitest-timing-reporter.mjs`, so some spawned shell
+  received unquoted source text and parsed `> <fragment>` as a redirect. **Property:** no test
+  writes outside its scratch dir, no spawned child outlives its test, and a suite run leaves the
+  repo root byte-identical.
+
 - **The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).**
   `skills/remediate-code/SKILL.md` and `skills/remediate-code/remediate-code.prompt.md` each state
   the `--input` / `--guidance-file` argument-preservation rule, and the "Read the returned JSON only

@@ -55,15 +55,6 @@
    P40, the executed queue items and the follow-up fixes since v0.45.0.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
-
-- **6 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `docs-1` — instruction-file edit: name the shared host-handoff core in CLAUDE.md, or leave the two twins as the documented owners
-  - `docs-2` — the 'lean fast-path exception' heading advertises an exception the same section then denies — reword it, or keep it as history
-  - `backlog-1` — intent-interpretation.json is a write-only sidecar — give it a reader, or delete it
-  - `backlog-2` — declare the tracked trees no typechecker reaches — pick the mechanism, or accept the absence
-  - `docs-3` — instruction-file edit: CLAUDE.md's consent bullet reads as covering every eslint spawn, but the syntax-resolution path admits eslint on decline-only
-  - `sol-1` — P43: print an open remediation run's write scope in answer.mjs --list, so answered work is not hand-checked against it every session
-
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
