@@ -33,6 +33,26 @@ test("every engine-dispatched PRIORITY obligation has an entry in the CLI fold's
   }
 });
 
+// CP-NODE-14 (OBL-impl-block-148-contract): the REVERSE direction of the test
+// above. `findFirstActionableObligation` treats PRIORITY as the authority on
+// order AND membership — an obligation absent from it is never selected — so a
+// registration that never reaches PRIORITY is not a slow path or a fallback, it
+// is dead code that looks live at its definition site. The forward test cannot
+// see that: it walks PRIORITY, so an id missing from PRIORITY is exactly what it
+// never visits.
+test("every buildAuditObligations() registration appears in PRIORITY (an unlisted one is unreachable)", () => {
+  const prioritySet = new Set(PRIORITY);
+  const unreachable = buildAuditObligations()
+    .map((obligation) => obligation.id)
+    .filter((id) => !prioritySet.has(id));
+
+  expect(
+    unreachable,
+    "these obligations are registered in the CLI fold but absent from PRIORITY, so the engine's " +
+      "ordered scan can never select them — either add them to PRIORITY or delete the registration",
+  ).toEqual([]);
+});
+
 test("isHostDelegationExecutor recognizes the registered host-delegation executors", () => {
   expect(isHostDelegationExecutor("design_review_contract")).toBe(true);
   expect(isHostDelegationExecutor("design_review_conceptual")).toBe(true);
