@@ -66,7 +66,7 @@ one bounded, persisted step. Useful diagnostic and recovery commands include:
 audit-code status
 audit-code explain-task <task_id>
 audit-code validate
-audit-code validate-results
+audit-code validate-results --results <file>
 audit-code requeue
 audit-code synthesize
 audit-code resynthesize

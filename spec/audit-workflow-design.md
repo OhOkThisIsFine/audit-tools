@@ -247,7 +247,7 @@ Overridden files never enter coverage. This is a deeper hook than
 `excluded_scope` (which filters after coverage is initialized) and ensures
 overridden files never become audit tasks.
 
-**Lens selection:** `resolveEffectiveLenses` is called with `lens_selection`
+**Lens selection:** `resolveIntentLensSelection` is called with `lens_selection`
 from the intent checkpoint. Mandatory lenses are always included.
 
 **No N-file task cap:** `max_task_files` is a degenerate guard only; the token
