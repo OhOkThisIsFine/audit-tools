@@ -23,7 +23,7 @@ function stateWith(
     touched_files: string[];
     phase_ordinal?: number;
   }>,
-  items: Record<string, { status: string; block_id: string; touched_files?: string[] }>,
+  items: Record<string, { status: string; block_id: string }>,
   planId = "plan-1",
 ) {
   return makeState({
@@ -41,7 +41,6 @@ function stateWith(
           finding_id: id,
           status: v.status,
           block_id: v.block_id,
-          ...(v.touched_files ? { item_spec: { touched_files: v.touched_files } } : {}),
         },
       ]),
     ),
@@ -75,17 +74,18 @@ describe("deriveRemediationAccessMemory", () => {
     expect(mem.paths[0].last_ordinal).toBe(0); // b1 at ordinal 0
   });
 
-  it("prefers per-item item_spec.touched_files over the block surface", () => {
+  it("takes the surface from the item's BLOCK, and a blocked sibling contributes nothing", () => {
     const state = stateWith(
       [{ block_id: "b1", items: ["f1", "f2"], touched_files: ["src/whole-block.ts"], phase_ordinal: 0 }],
       {
-        f1: { status: "resolved", block_id: "b1", touched_files: ["src/only-f1.ts"] },
+        f1: { status: "resolved", block_id: "b1" },
         f2: { status: "blocked", block_id: "b1" }, // blocked sibling contributes nothing
       },
     );
     const mem = deriveRemediationAccessMemory(state);
-    // Only f1's own surface — NOT the block's whole declared surface, and not f2's.
-    expect(mem.paths.map((p) => p.path)).toEqual(["src/only-f1.ts"]);
+    // The block's declared surface, contributed once — f2 lands no diff, so a
+    // block whose only resolved member is f1 still reports exactly that surface.
+    expect(mem.paths.map((p) => p.path)).toEqual(["src/whole-block.ts"]);
   });
 
   it("orders blocks by (phase_ordinal, block_id) for a deterministic recency ordinal", () => {

@@ -916,7 +916,7 @@ describe("OBL-item-status-partition-and-close-inv-5 (+ fail-2): e2e-failure tria
       plan: {
         plan_id: "PLAN-E1",
         findings: [mkFinding("F-E1", "src/e1.ts")],
-        blocks: [{ block_id: "B-1", items: ["F-E1"], parallel_safe: true, touched_files: [] }],
+        blocks: [{ block_id: "B-1", items: ["F-E1"], parallel_safe: true, touched_files: ["src/e1.ts"] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
         // The e2e child must REALLY RUN and REALLY FAIL. The single-quoted
@@ -935,7 +935,6 @@ describe("OBL-item-status-partition-and-close-inv-5 (+ fail-2): e2e-failure tria
           finding_id: "F-E1",
           status: "resolved",
           block_id: "B-1",
-          item_spec: { finding_id: "F-E1", concrete_change: "x", tests_to_write: [], not_applicable_steps: [], touched_files: ["src/e1.ts"] },
         },
       },
       closing_plan: { action: "none", pre_authorized: true },
@@ -982,19 +981,15 @@ describe("OBL-item-status-partition-and-close-inv-5 (+ fail-2): e2e-failure tria
 describe("OBL-item-status-partition-and-close-inv-6: real path-key join, never a bare substring test", () => {
   it("POSITIVE: an exact path-anchored match attributes the failure to only the matching item", () => {
     const state = {
+      plan: {
+        blocks: [
+          { block_id: "B-1", items: ["F-1"], parallel_safe: true, touched_files: ["src/foo.ts"] },
+          { block_id: "B-2", items: ["F-2"], parallel_safe: true, touched_files: ["src/unrelated.ts"] },
+        ],
+      },
       items: {
-        "F-1": {
-          finding_id: "F-1",
-          status: "resolved",
-          block_id: "B-1",
-          item_spec: { finding_id: "F-1", concrete_change: "x", tests_to_write: [], not_applicable_steps: [], touched_files: ["src/foo.ts"] },
-        },
-        "F-2": {
-          finding_id: "F-2",
-          status: "resolved",
-          block_id: "B-1",
-          item_spec: { finding_id: "F-2", concrete_change: "x", tests_to_write: [], not_applicable_steps: [], touched_files: ["src/unrelated.ts"] },
-        },
+        "F-1": { finding_id: "F-1", status: "resolved", block_id: "B-1" },
+        "F-2": { finding_id: "F-2", status: "resolved", block_id: "B-2" },
       },
     } as unknown as RemediationState;
     const blocked = blockResolvedItemsOnCombinedFailure(state, "FAIL src/foo.ts");
@@ -1005,23 +1000,19 @@ describe("OBL-item-status-partition-and-close-inv-6: real path-key join, never a
 
   it("NEGATIVE: a shared bare suffix ('myfoo.ts' vs implicated 'foo.ts') must NOT falsely attribute — the ambiguous-attribution fallback must instead block every resolved item, never leave the true culprit clear", () => {
     const state = {
+      plan: {
+        blocks: [
+          { block_id: "B-1", items: ["F-innocent"], parallel_safe: true, touched_files: ["src/myfoo.ts"] },
+          { block_id: "B-2", items: ["F-guilty"], parallel_safe: true, touched_files: ["src/other.ts"] },
+        ],
+      },
       items: {
         // Under the historical `ip.endsWith(tf) || tf.endsWith(ip)` bug,
         // "src/myfoo.ts" wrongly matches implicated "foo.ts" (bare suffix, no
         // '/' anchor), suppressing the conservative fallback and leaving
         // F-guilty (the genuinely unrelated item) incorrectly `resolved`.
-        "F-innocent": {
-          finding_id: "F-innocent",
-          status: "resolved",
-          block_id: "B-1",
-          item_spec: { finding_id: "F-innocent", concrete_change: "x", tests_to_write: [], not_applicable_steps: [], touched_files: ["src/myfoo.ts"] },
-        },
-        "F-guilty": {
-          finding_id: "F-guilty",
-          status: "resolved",
-          block_id: "B-1",
-          item_spec: { finding_id: "F-guilty", concrete_change: "x", tests_to_write: [], not_applicable_steps: [], touched_files: ["src/other.ts"] },
-        },
+        "F-innocent": { finding_id: "F-innocent", status: "resolved", block_id: "B-1" },
+        "F-guilty": { finding_id: "F-guilty", status: "resolved", block_id: "B-2" },
       },
     } as unknown as RemediationState;
     const blocked = blockResolvedItemsOnCombinedFailure(state, "FAIL foo.ts");

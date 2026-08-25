@@ -249,7 +249,6 @@ const CURRENT_ITEM_KEYS = new Set([
   "host_result_evidence",
   "finding_id",
   "incomplete_coverage_attempts",
-  "item_spec",
   "last_successful_step",
   "mechanical_verification",
   "rework_count",
@@ -733,7 +732,6 @@ function buildFindingAssignments(
     }
     return {
       finding: FindingSchema.parse(finding),
-      ...(item.item_spec ? { item_spec: item.item_spec } : {}),
       ...(item.clarification_context
         ? { clarification_context: item.clarification_context }
         : {}),

@@ -40,17 +40,6 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
       };
     }
 
-    function makeItemSpec(findingId: string, file: string) {
-      return {
-        finding_id: findingId,
-        concrete_change: `fix ${file}`,
-        no_change: false,
-        touched_files: [file],
-        tests_to_write: [{ name: `${findingId} regression`, assertions: ["holds"] }],
-        not_applicable_steps: [],
-      };
-    }
-
     function makeRetryableClosingState(): RemediationState {
       return {
         status: "closing",
@@ -86,13 +75,11 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
             finding_id: "F-001",
             status: "resolved",
             block_id: "B-001",
-            item_spec: makeItemSpec("F-001", "src/a.ts"),
           },
           "F-002": {
             finding_id: "F-002",
             status: "blocked",
             block_id: "B-002",
-            item_spec: makeItemSpec("F-002", "src/b.ts"),
             failure_reason: "Implementation failed: unit tests did not pass.",
           },
           "F-003": {
@@ -137,19 +124,12 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
         expect(byId.get(finding.id)?.finding).toEqual(finding);
       }
 
-      // (b) Item-spec summary matching the documented ItemSpec.
-      expect(byId.get("F-001")?.item_spec).toEqual({
-        concrete_change: "fix src/a.ts",
-        no_change: false,
-        touched_files: ["src/a.ts"],
-        tests_to_write: ["F-001 regression"],
-      });
-      expect(byId.get("F-002")?.item_spec).toEqual({
-        concrete_change: "fix src/b.ts",
-        no_change: false,
-        touched_files: ["src/b.ts"],
-        tests_to_write: ["F-002 regression"],
-      });
+      // (b) No per-item spec rides the outcomes contract. The document phase
+      // that produced one was dissolved (N-R13) and the field is gone; a retry
+      // reads the full Finding in (a) and the block scope in (c) instead.
+      for (const id of ["F-001", "F-002"]) {
+        expect(byId.get(id)).not.toHaveProperty("item_spec");
+      }
 
       // (c) Owning block id and that block's dependency ids.
       expect(byId.get("F-001")?.block_id).toBe("B-001");
@@ -176,7 +156,6 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
         finding_id: "F-002",
         status: "pending",
         block_id: "B-002",
-        item_spec: makeItemSpec("F-002", "src/b.ts"),
       };
       await saveState(state);
       await acknowledgeResume();

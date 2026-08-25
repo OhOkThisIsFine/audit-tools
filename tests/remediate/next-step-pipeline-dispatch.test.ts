@@ -711,27 +711,11 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
           finding_id: "F-001",
           status: "pending",
           block_id: "B-001",
-          item_spec: {
-            finding_id: "F-001",
-            concrete_change: "fix a",
-            no_change: false,
-            touched_files: ["src/a.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
         },
         "F-002": {
           finding_id: "F-002",
           status: "pending",
           block_id: "B-002",
-          item_spec: {
-            finding_id: "F-002",
-            concrete_change: "fix b",
-            no_change: false,
-            touched_files: ["src/b.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
         },
       },
     });
@@ -756,7 +740,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     );
     expect(savedState.status).toBe("implementing");
     expect(savedState.items["F-001"].status).toBe("pending");
-    expect(savedState.items["F-001"].item_spec.concrete_change).toBe("fix a");
     expect(
       savedState.plan.findings[0].affected_files[0].hash_at_plan_time,
     ).toMatch(/^[a-f0-9]{64}$/);
@@ -884,14 +867,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
             status: "blocked",
             block_id: "B-001",
             failure_reason: "needs another implementation pass",
-            item_spec: {
-              finding_id: "F-001",
-              concrete_change: "fix a",
-              no_change: false,
-              touched_files: ["src/a.ts"],
-              tests_to_write: [],
-              not_applicable_steps: [],
-            },
           },
           "F-002": {
             finding_id: "F-002",

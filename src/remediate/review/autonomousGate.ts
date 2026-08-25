@@ -24,7 +24,6 @@
 // Fail-closed everywhere: any classifier ambiguity resolves to NOT auto-approved.
 
 import type { Finding } from "audit-tools/shared";
-import type { ItemSpec } from "../state/types.js";
 import { classifyFindingRisk, type FindingRiskTier } from "../steps/stepUtils.js";
 
 /**
@@ -110,16 +109,14 @@ const ADD_CONFIG_KEY_RE =
 const ADD_GUARD_RE =
   /\b(add(?:s|ing)?\s+(?:a\s+)?(?:null|nil|undefined|bounds|range|length|empty|guard|sanity|input|defensive)\s*(?:check|guard|validation)|guard\s+against|add(?:s|ing)?\s+(?:a\s+)?(?:missing\s+)?(?:return|early\s+return))\b/i;
 
-function changeText(finding: Finding, spec?: ItemSpec): string {
-  // At the review gate there is no ItemSpec yet, so the finding's own prose is
-  // the authority. When a spec exists (later phases / tests), its concrete_change
-  // is the most precise signal and is included.
+function changeText(finding: Finding): string {
+  // The finding's own prose is the authority. There is no per-item spec to
+  // sharpen it with — see classifyFindingRisk.
   return [
     finding.title,
     finding.summary,
     finding.category,
     finding.impact ?? "",
-    spec?.concrete_change ?? "",
   ]
     .join(" \n ")
     .toLowerCase();
@@ -131,11 +128,8 @@ function changeText(finding: Finding, spec?: ItemSpec): string {
  * BEFORE the additive kinds are considered, so a finding that both "adds a test"
  * and "removes the legacy parser" classifies as `deletion`, never `add_test`.
  */
-export function classifyChangeKind(
-  finding: Finding,
-  spec?: ItemSpec,
-): ChangeKindClassification {
-  const text = changeText(finding, spec);
+export function classifyChangeKind(finding: Finding): ChangeKindClassification {
+  const text = changeText(finding);
 
   // 1. Disqualifying signals first (deletion, then in-place semantic edit).
   if (DELETION_RE.test(text)) {
@@ -200,22 +194,9 @@ export interface AutonomousFindingVerdict {
   reason: string;
 }
 
-export function evaluateAutonomousFinding(
-  finding: Finding,
-  spec?: ItemSpec,
-): AutonomousFindingVerdict {
-  // classifyFindingRisk needs an ItemSpec; at the gate we have none, so derive a
-  // minimal spec whose concrete_change is the finding prose (so the destructive-
-  // verb / breaking-lens / low-confidence signals still fire).
-  const effectiveSpec: ItemSpec =
-    spec ?? {
-      finding_id: finding.id,
-      concrete_change: [finding.title, finding.summary, finding.impact ?? ""].join(" \n "),
-      tests_to_write: [],
-      not_applicable_steps: [],
-    };
-  const tier = classifyFindingRisk(finding, effectiveSpec).tier;
-  const kind = classifyChangeKind(finding, spec);
+export function evaluateAutonomousFinding(finding: Finding): AutonomousFindingVerdict {
+  const tier = classifyFindingRisk(finding).tier;
+  const kind = classifyChangeKind(finding);
   const tierSafe = tier === "safe";
   const approved = tierSafe && kind.allowlisted && SAFE_CHANGE_KINDS.has(kind.change_kind);
   let reason: string;
@@ -244,15 +225,11 @@ export interface AutonomousReviewDecision {
  * FRESH each call (no memory of a prior run's verdict), so a leftover that
  * drifted across the "safe" boundary is re-checked on the next nightly run.
  *
- * `specs` is an optional map from finding id to its documented ItemSpec; when a
- * spec is present it sharpens the classification, but the decision works without
- * any specs (the gate fires before the document phase).
  */
 export function buildAutonomousReviewDecision(
   survivors: readonly Finding[],
-  specs?: ReadonlyMap<string, ItemSpec>,
 ): AutonomousReviewDecision {
-  const verdicts = survivors.map((f) => evaluateAutonomousFinding(f, specs?.get(f.id)));
+  const verdicts = survivors.map((f) => evaluateAutonomousFinding(f));
   return {
     approved_ids: verdicts.filter((v) => v.approved).map((v) => v.finding_id),
     leftover_ids: verdicts.filter((v) => !v.approved).map((v) => v.finding_id),

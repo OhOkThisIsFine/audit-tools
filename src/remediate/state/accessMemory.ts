@@ -18,9 +18,8 @@ import type { RemediationBlock } from "./types.js";
  * Attribution is per-ITEM and restricted to `resolved` items — the only status
  * that lands an actual diff. `resolved_no_change` (verified but zero diff), skips
  * (`ignored`/`deemed_inappropriate`) and `blocked` items edit nothing and are
- * excluded. Each resolved item's edited surface is its `item_spec.touched_files`
- * (the declared surface of that specific item), falling back to its block's
- * `touched_files` only when the item carries no per-item surface. This is the
+ * excluded. Each resolved item's edited surface is its block's `touched_files`.
+ * This is the
  * DECLARED edit surface, not a live git diff: it's the only CUMULATIVE,
  * git-independent source (worktree branches for earlier waves are already
  * merged/gone), and the ownership-disjoint scheduler + post-merge attribution hold
@@ -55,10 +54,7 @@ export function deriveRemediationAccessMemory(
   for (const item of items) {
     if (item.status !== "resolved") continue; // only an actual diff counts as an edit
     const ordinal = ordinalByBlock.get(item.block_id) ?? 0;
-    const surface =
-      item.item_spec?.touched_files ??
-      blockById.get(item.block_id)?.touched_files ??
-      [];
+    const surface = blockById.get(item.block_id)?.touched_files ?? [];
     for (const path of new Set(surface)) {
       if (!path) continue;
       events.push({ path, edited: true, ordinal });

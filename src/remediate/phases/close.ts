@@ -35,8 +35,6 @@ import type { ClosingAction } from "../state/closingActions.js";
 import type {
   CoverageLedgerEntry,
   Finding,
-  ItemSpec,
-  ItemSpecSummary,
   NeverPlannedDropReason,
   OutcomeCoverageEntry,
   OutcomeCoverageLedger,
@@ -111,16 +109,6 @@ const DEFAULT_REASON_BY_OUTCOME: Partial<
   inappropriate: "Deemed inappropriate during remediation.",
   ignored: "Ignored by user.",
 };
-
-/** Project the documented ItemSpec onto the outcomes contract's summary shape. */
-function summarizeItemSpec(spec: ItemSpec): ItemSpecSummary {
-  return {
-    concrete_change: spec.concrete_change,
-    ...(spec.no_change !== undefined ? { no_change: spec.no_change } : {}),
-    ...(spec.touched_files ? { touched_files: spec.touched_files } : {}),
-    tests_to_write: (spec.tests_to_write ?? []).map((test) => test.name),
-  };
-}
 
 /**
  * Phase 7B — capture one outcome per finding (lens, affected file types, how it
@@ -318,7 +306,6 @@ export function buildRemediationOutcomesReport(
     const enriched: RemediationOutcomeItem = {
       ...base,
       finding,
-      ...(item.item_spec ? { item_spec: summarizeItemSpec(item.item_spec) } : {}),
       block_id: item.block_id,
       block_dependencies: [...(blocksById.get(item.block_id)?.dependencies ?? [])],
       final_status: FINAL_STATUS_BY_OUTCOME[outcome],
@@ -1076,6 +1063,14 @@ function touchedPathMatchesImplicated(tf: string, ip: string): boolean {
  * overlap with the failing tests' implicated paths. When attribution is
  * ambiguous (no overlap found), falls back to re-blocking all resolved items.
  * Returns whether any item was blocked — the caller transitions back to triage.
+ *
+ * The surface is read from the item's BLOCK (`block.touched_files`), which is
+ * REQUIRED on the block contract and is the same scope the host binds an
+ * implementer to. It previously read a per-item `item_spec.touched_files`;
+ * nothing in production ever wrote an item_spec, so that expression was always
+ * `[]`, attribution could never succeed, and the ambiguity fallback re-blocked
+ * EVERY resolved item on any combined-suite failure. Reading the block is what
+ * makes the attribution arm reachable at all.
  */
 export function blockResolvedItemsOnCombinedFailure(
   state: RemediationState,
@@ -1088,12 +1083,15 @@ export function blockResolvedItemsOnCombinedFailure(
 
   const implicatedPaths = extractImplicatedPaths(testOutput);
   const now = new Date().toISOString();
+  const touchedFilesByBlock = new Map(
+    (state.plan?.blocks ?? []).map((block) => [block.block_id, block.touched_files]),
+  );
 
-  // Attempt attribution: find items whose touched_files overlap implicated paths.
+  // Attempt attribution: find items whose block touched an implicated path.
   let attributed: typeof resolvedItems = [];
   if (implicatedPaths.length > 0) {
     for (const item of resolvedItems) {
-      const touchedFiles = item.item_spec?.touched_files ?? [];
+      const touchedFiles = touchedFilesByBlock.get(item.block_id) ?? [];
       const overlaps = touchedFiles.some((tf) =>
         implicatedPaths.some((ip) => touchedPathMatchesImplicated(tf, ip)),
       );

@@ -39,14 +39,6 @@ function item(
     finding_id: findingId,
     status,
     block_id: blockId,
-    item_spec: {
-      finding_id: findingId,
-      concrete_change: `fix ${findingId}`,
-      no_change: false,
-      touched_files: [`src/${findingId}.ts`],
-      tests_to_write: [],
-      not_applicable_steps: [],
-    },
   };
 }
 

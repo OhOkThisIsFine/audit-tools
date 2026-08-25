@@ -208,7 +208,7 @@ describe("Finding identity — INV-remediate-state-11: plan-time bookkeeping fie
   // The carry-forward identity is `findingCarryForwardKey` in nextStep.ts:
   // canonical JSON of the finding with the plan-time bookkeeping keys stripped,
   // so a re-plan whose only delta is a recomputed file hash / grounding flag
-  // carries the prior item (and its item_spec) forward, while a real change to
+  // carries the prior item forward, while a real change to
   // the finding does not.
   //
   // OBL-remediate-nextstep-and-final-gate-inv-7: this block used to declare its

@@ -4,7 +4,7 @@
 // complements it by completing a run whose findings end in every terminal
 // disposition class (fixed / failed / ignored / checkpoint-dropped / deduped),
 // deleting state.json (and every other state artifact), and reconstructing the
-// full Finding[] — with ItemSpec and RemediationBlock context — from the
+// full Finding[] — with RemediationBlock context — from the
 // outcomes file alone, asserting deep equivalence with the original run.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -18,8 +18,6 @@ import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type {
   Finding,
-  ItemSpec,
-  ItemSpecSummary,
   OutcomeCoverageEntry,
   RemediationOutcomeItem,
 } from "../../src/remediate/state/types.js";
@@ -60,17 +58,6 @@ function makeFinding(id: string, title: string, lens: string, path: string): Fin
   };
 }
 
-function makeItemSpec(findingId: string, file: string): ItemSpec {
-  return {
-    finding_id: findingId,
-    concrete_change: `fix ${file}`,
-    no_change: false,
-    touched_files: [file],
-    tests_to_write: [{ name: `${findingId} regression`, assertions: ["holds"] }],
-    not_applicable_steps: [],
-  };
-}
-
 // Planned findings — one per planned terminal class.
 const F_FIX = makeFinding("F-FIX", "Fixed finding", "correctness", "src/a.ts");
 const F_FAIL = makeFinding("F-FAIL", "Failed finding", "security", "src/b.ts");
@@ -78,9 +65,6 @@ const F_IGN = makeFinding("F-IGN", "Ignored finding", "tests", "src/c.ts");
 // Never-planned findings — dropped before the plan was written.
 const F_DUP = makeFinding("F-DUP", "Fixed finding duplicate", "maintainability", "src/a.ts");
 const F_CHK = makeFinding("F-CHK", "Checkpointed finding", "performance", "src/d.ts");
-
-const SPEC_FIX = makeItemSpec("F-FIX", "src/a.ts");
-const SPEC_FAIL = makeItemSpec("F-FAIL", "src/b.ts");
 
 const CHECKPOINT_RATIONALE =
   "Finding excluded by the intent checkpoint (filter or excluded scope).";
@@ -115,7 +99,6 @@ function makeCompletedRunClosingState(): RemediationState {
         finding_id: "F-FIX",
         status: "resolved",
         block_id: "B-001",
-        item_spec: SPEC_FIX,
         // Volatile fields — must be excluded from the normalized comparison.
         started_at: "2026-06-09T10:00:00.000Z",
         completed_at: "2026-06-09T10:05:00.000Z",
@@ -124,7 +107,6 @@ function makeCompletedRunClosingState(): RemediationState {
         finding_id: "F-FAIL",
         status: "blocked",
         block_id: "B-002",
-        item_spec: SPEC_FAIL,
         failure_reason: "Implementation failed: unit tests did not pass.",
         rework_count: 2,
       },
@@ -268,7 +250,6 @@ type TerminalDisposition =
 interface ReconstructedFinding {
   finding: Finding;
   disposition: TerminalDisposition;
-  item_spec?: ItemSpecSummary;
   block?: { block_id: string; block_dependencies: string[] };
   /** Surviving canonical finding a deduped entry was merged into. */
   folded_into?: string;
@@ -297,7 +278,6 @@ function reconstructFindings(report: any): ReconstructedFinding[] {
     byId.set(id, {
       finding: entry.finding,
       disposition: entry.final_status,
-      ...(entry.item_spec ? { item_spec: entry.item_spec } : {}),
       block: {
         block_id: entry.block_id,
         block_dependencies: entry.block_dependencies,
@@ -347,15 +327,6 @@ function reconstructFindings(report: any): ReconstructedFinding[] {
   // duration_ms on the outcome entries) were never copied into the
   // reconstructed shape, so the comparison is deterministic.
   return [...byId.values()].sort((a, b) => a.finding.id.localeCompare(b.finding.id));
-}
-
-function summarizeSpec(spec: ItemSpec): ItemSpecSummary {
-  return {
-    concrete_change: spec.concrete_change,
-    no_change: spec.no_change,
-    touched_files: spec.touched_files,
-    tests_to_write: spec.tests_to_write.map((test) => test.name),
-  };
 }
 
 /**
@@ -432,21 +403,19 @@ describe("remediation-outcomes round-trip (OBL-018)", () => {
       },
       // Deduped: full payload, traceable to the surviving canonical finding.
       { finding: F_DUP, disposition: "deduped", folded_into: "F-FIX" },
-      // Failed (exhausted retries / blocked): spec + block context preserved.
+      // Failed (exhausted retries / blocked): block context preserved.
       {
         finding: F_FAIL,
         disposition: "failed",
-        item_spec: summarizeSpec(SPEC_FAIL),
         block: { block_id: "B-002", block_dependencies: ["B-001"] },
       },
-      // Fixed: spec + block context preserved.
+      // Fixed: block context preserved.
       {
         finding: F_FIX,
         disposition: "fixed",
-        item_spec: summarizeSpec(SPEC_FIX),
         block: { block_id: "B-001", block_dependencies: [] },
       },
-      // Ignored: never documented, so no spec — but block membership survives.
+      // Ignored: block membership survives.
       {
         finding: F_IGN,
         disposition: "ignored",

@@ -106,7 +106,7 @@ describe("N-R13: planning transitions directly to implementing", () => {
           },
         ],
         blocks: [
-          { block_id: "B-001", items: [findingId], parallel_safe: true, touched_files: [] },
+          { block_id: "B-001", items: [findingId], parallel_safe: true, touched_files: ["src/a.ts"] },
         ],
         project_type: "unknown" as const,
         candidate_closing_actions: ["none" as const],
@@ -116,14 +116,6 @@ describe("N-R13: planning transitions directly to implementing", () => {
           finding_id: findingId,
           status: "pending" as const,
           block_id: "B-001",
-          item_spec: {
-            finding_id: findingId,
-            concrete_change: "fix it",
-            no_change: false,
-            touched_files: ["src/a.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
         },
       },
       closing_plan: { action: "none" as const },
@@ -160,7 +152,7 @@ describe("N-R13: planning transitions directly to implementing", () => {
     expect(step.step_kind).not.toBe("document_single_item");
 
     // TST-4a7b1751: this fixture is a fully-ready implementing state (planning +
-    // a pending item with an item_spec + every ack written). The N-R13 contract
+    // a pending item + every ack written). The N-R13 contract
     // is that planning goes DIRECTLY to implementing — so the only acceptable
     // kind is the host-workload implementation handoff. Terminal/error kinds
     // (collect_starting_point, present_report, collect_triage,

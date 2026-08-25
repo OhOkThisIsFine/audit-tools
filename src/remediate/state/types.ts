@@ -56,7 +56,7 @@ export const RemediationBlockSchema = z
      * rejected by `validateRemediationBlock` — which the state LOAD gate
      * delegates to, so the requirement holds on every path a block reaches a
      * consumer through): the file-ownership-disjoint scheduler and
-     * `attributePostMergeFailure` both read it, so a block with no declared
+     * `blockResolvedItemsOnCombinedFailure` both read it, so a block with no declared
      * surface is a producer bug, not an implicit empty.
      */
     touched_files: z.array(z.string()),
@@ -126,51 +126,6 @@ export const RemediationHostHandoffRecordSchema = z
 export type RemediationHostHandoffRecord = z.infer<
   typeof RemediationHostHandoffRecordSchema
 >;
-
-/**
- * Canonical names of the bounded remediation steps. Defined as named constants
- * (rather than bare string literals scattered across the phases) so the
- * implement phase, the validator, and the item-spec contract share one source
- * of truth for these magic strings.
- */
-export const REMEDIATION_STEP = {
-  WRITE_TESTS: "Write Tests",
-  REFACTOR_CODE: "Refactor Code",
-  VERIFY_AGAINST_TESTS: "Verify Code Against Tests",
-  VERIFY_AGAINST_DOCUMENTATION: "Verify Code Against Documentation",
-} as const;
-
-export const ItemSpecSchema = z
-  .object({
-    finding_id: z.string(),
-    concrete_change: z.string(),
-    no_change: z.boolean().optional(),
-    /**
-     * Repo-relative paths the fix will create or modify, as declared by the
-     * document worker. The document phase can correct or extend the finding's
-     * pre-document affected_files (e.g. when the real fix lives elsewhere); block
-     * access is recomputed from this union so the implementer may write them.
-     */
-    touched_files: z.array(z.string()).optional(),
-    tests_to_write: z.array(
-      z.object({ name: z.string(), assertions: z.array(z.string()) }).strict(),
-    ),
-    not_applicable_steps: z.array(
-      z
-        .object({
-          step: z.enum([
-            REMEDIATION_STEP.WRITE_TESTS,
-            REMEDIATION_STEP.REFACTOR_CODE,
-            REMEDIATION_STEP.VERIFY_AGAINST_TESTS,
-            REMEDIATION_STEP.VERIFY_AGAINST_DOCUMENTATION,
-          ]),
-          rationale: z.string(),
-        })
-        .strict(),
-    ),
-  })
-  .strict();
-export type ItemSpec = z.infer<typeof ItemSpecSchema>;
 
 export const ClarificationRequestSchema = z
   .object({
@@ -302,16 +257,6 @@ export type RemediationOutcomeFinalStatus =
   | "skipped";
 
 /**
- * Typed subset of `ItemSpec` carried on each outcomes item — the documented
- * fields a retry needs without re-running the document phase.
- */
-export interface ItemSpecSummary
-  extends Pick<ItemSpec, "concrete_change" | "no_change" | "touched_files"> {
-  /** Names of the tests the document phase specified (`ItemSpec.tests_to_write[].name`). */
-  tests_to_write: string[];
-}
-
-/**
  * One fully self-describing entry per finding in `remediation-outcomes.json`.
  * Extends the shared per-finding outcome so the file is retryable on its own:
  * close deletes state.json, so every payload a retry needs must be here.
@@ -326,8 +271,6 @@ export interface ItemSpecSummary
 export interface RemediationOutcomeItem extends RemediationOutcome {
   /** Full original Finding payload (the shared `Finding` type, verbatim). */
   finding: Finding;
-  /** Summary of the documented `ItemSpec`; absent when never documented. */
-  item_spec?: ItemSpecSummary;
   /** Owning block id (`RemediationBlock.block_id`). */
   block_id: RemediationBlock["block_id"];
   /** The owning block's dependency block ids (`RemediationBlock.dependencies`). */
@@ -373,7 +316,6 @@ export interface RemediationItemState {
   finding_id: string;
   status: RemediationItemStatus;
   block_id: string;
-  item_spec?: ItemSpec;
   last_successful_step?: string;
   failure_reason?: string;
   /** Prompt-bound evidence supplied for a verified no-change host outcome. */

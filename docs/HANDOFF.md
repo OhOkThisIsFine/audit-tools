@@ -6,10 +6,9 @@
 ## Live state
 
 - Published state: **v0.46.0** is the last tag, is published to npm, and is what the global bins run
-  (`audit-code --version` / `remediate-code --version` both report it). `main` is five commits
-  AHEAD of that tag and in sync with the remote: the 2026-08-25 nightly run's doc corrections,
-  proposal P43, and the run's own artifacts. None of it changes shipped behaviour, so no release
-  is owed.
+  (`audit-code --version` / `remediate-code --version` both report it). `main` is ahead of that tag
+  and in sync with the remote. Nothing ahead of the tag changes shipped behaviour, so no release
+  is owed; `git log v0.46.0..main` is the record of what is ahead.
 - ⚠ `tests/audit/host-delegation-fold-carries-advisories.test.ts` timed out at 120s once under a
   full `npx vitest run tests/audit` and passed alone — the known load/hermeticity class, and it does
   NOT reach either item's changed code (its `runtime_validation_tasks` list is empty). The flake

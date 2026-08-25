@@ -12,7 +12,7 @@
  * INV-remediate-phases-10: ClosingResult always carries contract_version field
  * TST-d1399aa3: groundAffectedFiles and evidenceCitesRealPath dedicated unit tests
  * TST-761e8471: buildCoverageLedger disposition precedence with overlapping sets
- * TST-cb981ad0: close.ts summarizeItemSpec and FINAL_STATUS_BY_OUTCOME via buildRemediationOutcomesReport
+ * TST-cb981ad0: close.ts FINAL_STATUS_BY_OUTCOME via buildRemediationOutcomesReport
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -846,10 +846,10 @@ describe("buildCoverageLedger — TST-761e8471: disposition precedence for overl
 });
 
 // ---------------------------------------------------------------------------
-// TST-cb981ad0: close.ts summarizeItemSpec and FINAL_STATUS_BY_OUTCOME via buildRemediationOutcomesReport
+// TST-cb981ad0: close.ts FINAL_STATUS_BY_OUTCOME via buildRemediationOutcomesReport
 // ---------------------------------------------------------------------------
 
-describe("buildRemediationOutcomesReport — TST-cb981ad0: summarizeItemSpec and final_status mappings", () => {
+describe("buildRemediationOutcomesReport — TST-cb981ad0: final_status mappings", () => {
   const VACUOUS_CLOSING_RESULT = {
     contract_version: "remediate-code-closing-result/v1alpha1" as const,
     action: "none" as const,
@@ -870,80 +870,6 @@ describe("buildRemediationOutcomesReport — TST-cb981ad0: summarizeItemSpec and
       evidence: ["e"],
     };
   }
-
-  it("summarizeItemSpec projects concrete_change, touched_files, and tests_to_write names", () => {
-    const state = makeState({
-      status: "closing",
-      plan: {
-        plan_id: "P-SIS",
-        findings: [mkPlanFinding("F1")],
-        blocks: [{ block_id: "B1", items: ["F1"], parallel_safe: true }],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items: {
-        F1: {
-          finding_id: "F1",
-          status: "resolved",
-          block_id: "B1",
-          item_spec: {
-            finding_id: "F1",
-            concrete_change: "Fix the null dereference",
-            // TST-882697b6: ItemSpec.tests_to_write entries are { name, assertions }
-            // (state/types.ts). The fixture must model that real contract — not
-            // {name, description, acceptance_criteria} — so a regression in how
-            // summarizeItemSpec reads tests_to_write is actually caught.
-            tests_to_write: [
-              { name: "test-auth-null", assertions: ["rejects null"] },
-              { name: "test-auth-empty", assertions: ["rejects empty"] },
-            ],
-            not_applicable_steps: [],
-            touched_files: ["src/auth.ts", "src/util.ts"],
-          },
-        },
-      },
-    });
-
-    const report = buildRemediationOutcomesReport(state as any, VACUOUS_CLOSING_RESULT);
-    const outcome = report.outcomes.find((o) => o.finding_id === "F1") as any;
-
-    expect(outcome).toBeDefined();
-    expect(outcome.item_spec.concrete_change).toBe("Fix the null dereference");
-    expect(outcome.item_spec.touched_files).toEqual(["src/auth.ts", "src/util.ts"]);
-    expect(outcome.item_spec.tests_to_write).toEqual(["test-auth-null", "test-auth-empty"]);
-    expect(outcome.item_spec.no_change).toBeUndefined();
-  });
-
-  it("summarizeItemSpec includes no_change when the spec carries it", () => {
-    const state = makeState({
-      status: "closing",
-      plan: {
-        plan_id: "P-SIS-NC",
-        findings: [mkPlanFinding("F2")],
-        blocks: [{ block_id: "B2", items: ["F2"], parallel_safe: true }],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items: {
-        F2: {
-          finding_id: "F2",
-          status: "resolved_no_change",
-          block_id: "B2",
-          item_spec: {
-            finding_id: "F2",
-            concrete_change: "No change required",
-            no_change: true,
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-      },
-    });
-
-    const report = buildRemediationOutcomesReport(state as any, VACUOUS_CLOSING_RESULT);
-    const outcome = report.outcomes.find((o) => o.finding_id === "F2") as any;
-    expect(outcome.item_spec.no_change).toBe(true);
-  });
 
   it("FINAL_STATUS_BY_OUTCOME: resolved→fixed, blocked→failed, ignored→ignored, inappropriate→skipped", () => {
     const findings = ["F-resolved", "F-blocked", "F-ignored", "F-inappropriate"].map(mkPlanFinding);

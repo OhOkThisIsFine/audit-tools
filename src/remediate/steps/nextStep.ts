@@ -709,7 +709,7 @@ function stripPlanTimeBookkeeping(value: unknown): unknown {
  * The re-plan carry-forward identity of a finding: canonical JSON with the
  * plan-time bookkeeping keys stripped, so a re-plan whose only delta is a
  * recomputed file hash or a re-evaluated grounding flag carries the prior item
- * (and its `item_spec`) forward, while a real change to the finding does not.
+ * forward, while a real change to the finding does not.
  *
  * EXPORTED so the invariant suite can call THIS function. It was module-internal,
  * and the suite claiming to cover the invariant declared its own copy of the key
@@ -757,14 +757,15 @@ function carryForwardMatchingItems(
   for (const finding of replanned.plan.findings) {
     const previousFinding = previousFindings.get(finding.id);
     const previousItem = previous.items[finding.id];
-    // Skip items that were never documented (pending with no item_spec). Under
-    // N-R13 (document phase dissolved), a pending item that already has an
-    // item_spec from a prior planning/document pass should carry forward
-    // together with its spec rather than being discarded.
+    // A still-pending item carries no work to preserve, so it is re-minted from
+    // the fresh plan rather than carried forward. (This test used to also admit
+    // a pending item that held an `item_spec`; the document phase that produced
+    // one was dissolved by N-R13 and the field is gone, so the second condition
+    // could never be true and is not restated here.)
     if (!previousFinding || !previousItem) {
       continue;
     }
-    if (previousItem.status === "pending" && !previousItem.item_spec) {
+    if (previousItem.status === "pending") {
       continue;
     }
     if (findingCarryForwardKey(previousFinding) !== findingCarryForwardKey(finding)) {
@@ -2871,9 +2872,8 @@ async function handlePlanning(
     if (halt) return { kind: "emit", step: halt };
   }
 
-  // Document phase dissolved: planning transitions directly to implementing.
-  // The host workload reads item_spec from the plan DAG node when present, or
-  // uses finding context directly when absent.
+  // Document phase dissolved (N-R13): planning transitions directly to
+  // implementing, and the host workload reads finding context directly.
   const implementBlocks = implementableBlocks(state);
   if (implementBlocks.length > 0) {
     if (state.plan) {

@@ -31,7 +31,7 @@ export interface IntakeSourceManifest {
 }
 
 // Zod is the single source for shape + type here (matching the repo-wide
-// zod-single-source convention, e.g. RemediationBlockSchema/ItemSpecSchema in
+// zod-single-source convention, e.g. RemediationBlockSchema in
 // src/remediate/state/types.ts) rather than a hand-written interface kept in
 // lockstep with a second, independent runtime check. Deliberately NOT
 // `.strict()`: intake-summary.json is HOST-AUTHORED (the LLM-produced artifact

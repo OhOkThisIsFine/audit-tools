@@ -197,14 +197,6 @@ async function fixture(options: {
         finding_id: "F1",
         block_id: "B1",
         status: "pending",
-        item_spec: {
-          finding_id: "F1",
-          concrete_change: "Replace the exported literal and add focused coverage.",
-          tests_to_write: [
-            { name: "value regression", assertions: ["exports two"] },
-          ],
-          not_applicable_steps: [],
-        },
         clarification_context: "Keep the public export name unchanged.",
         failure_context: "A prior attempt changed the API name.",
       },
@@ -422,14 +414,11 @@ function reopenGate(value: Fixture): CurrentRemediationHostState {
 }
 
 describe("remediation host handoff repository corroboration", () => {
-  it("binds complete finding, specification, clarification, and retry instructions into the prompt", async () => {
+  it("binds complete finding, clarification, and retry instructions into the prompt", async () => {
     const value = await fixture();
     expect(value.item.prompt.text).toContain("Correct the returned value");
     expect(value.item.prompt.text).toContain(
       "Change the exported value from one to two.",
-    );
-    expect(value.item.prompt.text).toContain(
-      "Replace the exported literal and add focused coverage.",
     );
     expect(value.item.prompt.text).toContain(
       "Keep the public export name unchanged.",

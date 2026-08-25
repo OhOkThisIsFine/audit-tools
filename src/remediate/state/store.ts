@@ -51,10 +51,9 @@ export interface RemediationState {
    * never commit files the run didn't touch" is enforced by staging exactly
    * `applied_edit_surface ∩ currently-dirty`, never a repo-wide sweep.
    *
-   * The close phase additionally unions in each resolved item's declared
-   * `item_spec.touched_files` / finding `affected_files` as a conservative
-   * fallback for current states created before host-result ingestion recorded
-   * this surface.
+   * The close phase additionally unions in each resolved finding's declared
+   * `affected_files` as a conservative fallback for current states created
+   * before host-result ingestion recorded this surface.
    */
   applied_edit_surface?: string[];
   /**
@@ -66,9 +65,9 @@ export interface RemediationState {
    *
    * Consumed by the close phase's `resolveEditSurfaceManifest`: a file that was
    * dirty BEFORE the run started cannot be one of the run's edits, so it is
-   * excluded from the DECLARED (fallback) manifest sources
-   * (`item_spec.touched_files` / finding `affected_files` — plan-time
-   * declarations/write-grants, not verified diffs). Ground-truth entries
+   * excluded from the DECLARED (fallback) manifest sources (finding
+   * `affected_files` — plan-time declarations/write-grants, not verified
+   * diffs). Ground-truth entries
    * (`applied_edit_surface`) are also excluded from closing-stage staging: a
    * landed commit proves attribution of the commit, not ownership of any
    * still-dirty pre-run content at that path.

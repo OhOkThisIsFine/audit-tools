@@ -12,7 +12,6 @@ import { StateStore } from "../state/store.js";
 import { isInProgressStatus } from "../state/itemStatus.js";
 import {
   validateClarificationRequest,
-  validateItemSpec,
   validateRemediationPlan,
   validateTriageResolution,
 } from "./remediationState.js";
@@ -445,26 +444,10 @@ export async function validateArtifacts(
     pushErrorIssues(issues, validateRemediationPlan(state.plan));
   }
 
-  if (state?.items) {
-    for (const item of Object.values(state.items)) {
-      if (item.item_spec) {
-        pushErrorIssues(issues, validateItemSpec(item.item_spec));
-      }
-    }
-  }
-
   const planPath = join(artifactsDir, "remediation_plan.json");
   const persistedPlan = await readJsonForValidation(planPath, issues);
   if (persistedPlan) {
     pushErrorIssues(issues, validateRemediationPlan(persistedPlan));
-  }
-
-  for (const file of await collectFiles(artifactsDir)) {
-    if (/[/\\]item_spec_[^/\\]+\.json$/u.test(file)) {
-      const spec = await readJsonForValidation(file, issues);
-      if (!spec) continue;
-      pushErrorIssues(issues, validateItemSpec(spec));
-    }
   }
 
   const clarificationRequest = await readJsonForValidation(

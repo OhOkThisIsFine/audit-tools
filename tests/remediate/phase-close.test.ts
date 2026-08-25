@@ -5,6 +5,7 @@ import {
   buildOutcomeCoverageLedger,
   runCombinedTestSuite,
   executeClosingAction,
+  blockResolvedItemsOnCombinedFailure,
 } from "../../src/remediate/phases/close.js";
 import { readFile, rm, mkdir, writeFile as writeFileAsync } from "node:fs/promises";
 import { writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
@@ -763,9 +764,10 @@ describe("runClosePhase", () => {
       expect(report).toContain("`unrelated-dirt.txt`");
     });
 
-    // Finding 1 (adversarial review): item_spec is only a plan-time declaration,
-    // not a verified diff. Only the corroborated host-result edit surface may be
-    // staged, and run-start dirt remains excluded even when an item declares it.
+    // Finding 1 (adversarial review): a block's touched_files is only a
+    // plan-time declaration, not a verified diff. Only the corroborated
+    // host-result edit surface may be staged, and run-start dirt remains
+    // excluded even when a block declares it.
     it("stages the accepted edit surface but leaves a run-start-dirty declared file untouched", async () => {
       // Pre-existing user WIP, dirty since before the run started.
       writeFileSync(join(REPO_DIR, "pre-existing-wip.ts"), "user WIP, never touched by the run");
@@ -777,21 +779,24 @@ describe("runClosePhase", () => {
         applied_edit_surface: ["hand-edited.ts"],
         // Captured at plan-join time (handlePendingExtractedPlan), before any remediation edit.
         run_start_dirty: ["pre-existing-wip.ts"],
-        items: {
-          F1: {
-            finding_id: "F1",
-            status: "resolved",
-            block_id: "B1",
-            item_spec: {
-              finding_id: "F1",
-              concrete_change: "fix",
+        plan: {
+          plan_id: "P1",
+          findings: [],
+          project_type: "unknown",
+          candidate_closing_actions: ["none"],
+          blocks: [
+            {
+              block_id: "B1",
+              items: ["F1"],
+              parallel_safe: true,
               // Over-broad declaration: claims BOTH the real edit and the
               // pre-existing WIP file (which the run never actually edited).
               touched_files: ["hand-edited.ts", "pre-existing-wip.ts"],
-              tests_to_write: [],
-              not_applicable_steps: [],
             },
-          },
+          ],
+        },
+        items: {
+          F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
         },
       });
 
@@ -941,13 +946,16 @@ describe("runClosePhase", () => {
   });
 
   describe("selective re-block on combined failure (N-R16)", () => {
-    it("re-blocks only the item whose touched_files overlap the failing test path", async () => {
+    it("re-blocks only the item whose BLOCK touched_files overlap the failing test path", async () => {
       const state = makeState({
         closing_plan: { action: "none", pre_authorized: true },
         plan: {
           plan_id: "P1",
           findings: [],
-          blocks: [],
+          blocks: [
+            { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: ["src/auth.ts"] },
+            { block_id: "B2", items: ["F2"], parallel_safe: true, touched_files: ["src/util.ts"] },
+          ],
           project_type: "unknown",
           candidate_closing_actions: ["none"],
           // Emit a failure that mentions src/auth.ts specifically. The message
@@ -959,30 +967,8 @@ describe("runClosePhase", () => {
             'node -e "process.stderr.write(process.argv[1]); process.exit(1)" "FAIL src/auth.ts"',
         },
         items: {
-          F1: {
-            finding_id: "F1",
-            status: "resolved",
-            block_id: "B1",
-            item_spec: {
-              finding_id: "F1",
-              concrete_change: "fix auth",
-              tests_to_write: [],
-              not_applicable_steps: [],
-              touched_files: ["src/auth.ts"],
-            } as any,
-          },
-          F2: {
-            finding_id: "F2",
-            status: "resolved",
-            block_id: "B2",
-            item_spec: {
-              finding_id: "F2",
-              concrete_change: "fix util",
-              tests_to_write: [],
-              not_applicable_steps: [],
-              touched_files: ["src/util.ts"],
-            } as any,
-          },
+          F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
+          F2: { finding_id: "F2", status: "resolved", block_id: "B2" },
         },
       });
 
@@ -1475,7 +1461,9 @@ describe("closing spawns refuse a command that leaves the declared single-invoca
       plan: {
         plan_id: "P1",
         findings: [],
-        blocks: [],
+        blocks: [
+          { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: ["src/e1.ts"] },
+        ],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
         // No test_command: the combined suite is vacuous, so this exercises the
@@ -1483,18 +1471,7 @@ describe("closing spawns refuse a command that leaves the declared single-invoca
         e2e_command: SHAPE_LEAVING_CANARY_COMMAND,
       },
       items: {
-        F1: {
-          finding_id: "F1",
-          status: "resolved",
-          block_id: "B1",
-          item_spec: {
-            finding_id: "F1",
-            concrete_change: "x",
-            tests_to_write: [],
-            not_applicable_steps: [],
-            touched_files: ["src/e1.ts"],
-          },
-        },
+        F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
       },
       closing_plan: { action: "none", pre_authorized: true },
     });
@@ -1591,5 +1568,88 @@ describe("closing spawns do not starve event-loop liveness", () => {
     expect(result.commands[0]!.exit_code).toBe(0);
     expect(result.status).toBe("success");
     expect(ticks).toBeGreaterThan(0);
+  });
+});
+
+describe("blockResolvedItemsOnCombinedFailure — per-item attribution", () => {
+  // The attribution arm read `item.item_spec?.touched_files`. Nothing in
+  // production ever WROTE an item_spec, so that expression was always `[]`,
+  // `attributed` was always empty, and the ambiguous-attribution fallback
+  // re-blocked EVERY resolved item on any combined-suite failure. The block a
+  // finding belongs to already declares the surface (`block.touched_files` is
+  // REQUIRED on the block contract), which is what attribution must read.
+  it("blocks only the items whose BLOCK touched the failing paths", () => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        findings: [],
+        blocks: [
+          {
+            block_id: "B1",
+            finding_ids: ["F1"],
+            dependencies: [],
+            touched_files: ["src/alpha.ts"],
+          },
+          {
+            block_id: "B2",
+            finding_ids: ["F2"],
+            dependencies: [],
+            touched_files: ["src/beta.ts"],
+          },
+        ],
+      },
+      items: {
+        F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
+        F2: { finding_id: "F2", status: "resolved", block_id: "B2" },
+      },
+    });
+
+    const blocked = blockResolvedItemsOnCombinedFailure(
+      state,
+      "FAIL src/alpha.ts > it explodes",
+    );
+
+    expect(blocked, "a failing suite must block something").toBe(true);
+    expect(state.items!.F1!.status, "the implicated block's item is blocked").toBe(
+      "blocked",
+    );
+    expect(
+      state.items!.F2!.status,
+      "an unimplicated block's item must stay resolved, not be swept up by the fallback",
+    ).toBe("resolved");
+    expect(state.items!.F1!.failure_reason ?? "").toContain("Attributed to 1 item");
+  });
+
+  it("still falls back to all resolved items when nothing overlaps", () => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        findings: [],
+        blocks: [
+          {
+            block_id: "B1",
+            finding_ids: ["F1"],
+            dependencies: [],
+            touched_files: ["src/alpha.ts"],
+          },
+        ],
+      },
+      items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+    });
+
+    const blocked = blockResolvedItemsOnCombinedFailure(
+      state,
+      "FAIL src/unrelated.ts > it explodes",
+    );
+
+    expect(blocked).toBe(true);
+    expect(state.items!.F1!.status).toBe("blocked");
+    expect(state.items!.F1!.failure_reason ?? "").toContain(
+      "falling back to re-blocking all resolved items",
+    );
   });
 });

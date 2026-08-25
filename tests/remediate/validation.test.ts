@@ -3,7 +3,6 @@ import {
   validateFinding,
   validateRemediationPlan,
   validateRemediationBlock,
-  validateItemSpec,
   validateClarificationRequest,
   validateTriageResolution,
 } from "../../src/remediate/validation/remediationState.js";
@@ -241,30 +240,6 @@ describe("validateRemediationBlock", () => {
     expect(
       issues.some((i) => i.severity === "error" && i.path.includes("dependencies")),
     ).toBe(true);
-  });
-});
-
-describe("validateItemSpec", () => {
-  it("passes a valid item_spec", () => {
-    const spec = {
-      finding_id: "F-001",
-      concrete_change: "Fix it.",
-      tests_to_write: [{ name: "Test A", assertions: ["assert 1"] }],
-      not_applicable_steps: [],
-    };
-    const issues = validateItemSpec(spec);
-    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
-  });
-
-  it("errors when finding_id is missing", () => {
-    const issues = validateItemSpec({
-      concrete_change: "x",
-      tests_to_write: [],
-      not_applicable_steps: [],
-    });
-    expect(issues.filter((i) => i.severity === "error").length).toBeGreaterThan(
-      0,
-    );
   });
 });
 
