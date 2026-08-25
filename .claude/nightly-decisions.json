@@ -18,7 +18,9 @@
     "answer": "It is the defect. THE BRIEF settles it: depth and granularity are dials on ONE pipeline, never a separate lighter path. Fold the lean fast path into the self-scaling continuum.",
     "subject": "The lean fast path is a real structural fork at HEAD — sanctioned exception to \"one pipeline\", or the defect?",
     "path": "spec/remediation-workflow-design.md",
-    "decided_at": "2026-07-26T00:11:09.802Z"
+    "decided_at": "2026-07-26T00:11:09.802Z",
+    "completed_at": "2026-08-25T17:53:22.112Z",
+    "completed_ref": "38d8da6f — the 2026-07-26 ruling, executed. The second plan producer, the bypass and the light-review gate are gone; every run enters the pipeline and the tier sets depth only."
   },
   "382fc399247ea706": {
     "disposition": "settled",
@@ -1725,7 +1727,9 @@
     "answer": "One mechanism, two depths: reword the goals doc to 'one mechanism, two traversal depths; plan.source records provenance only', matching the self-scaling pipeline design and conviction A6.",
     "subject": "The goals doc names lean_fast_path a second plan-building MECHANISM; the philosophy says one pipeline at two depths - pick the normative wording",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-08-25T16:16:28.953Z"
+    "decided_at": "2026-08-25T16:16:28.953Z",
+    "completed_at": "2026-08-25T17:53:22.045Z",
+    "completed_ref": "38d8da6f"
   },
   "84d2a3758bfb619d": {
     "disposition": "settled",
