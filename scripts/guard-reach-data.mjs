@@ -132,6 +132,15 @@ export const GUARDS = [
       '`npm run check:philosophy-brief -- --write`; never hand-edit the rendered block',
   },
   {
+    id: 'check:readme-sample-report',
+    kind: 'gate',
+    impl: 'check:readme-sample-report',
+    preCommit: 'reach',
+    fix:
+      "README.md's sample-report block is GENERATED from the report renderer — regenerate with " +
+      '`npm run check:readme-sample-report -- --write`; never hand-edit the rendered block',
+  },
+  {
     id: 'check:nightly-routine-prompt',
     kind: 'gate',
     impl: 'check:nightly-routine-prompt',
@@ -933,6 +942,19 @@ export const REACH = [
     files: ['docs/project-philosophy.md', 'README.md'],
     guardedBy: ['check:philosophy-brief'],
     note: 'the gate reads ONLY these two — the README Philosophy block is generated from the brief',
+  },
+  {
+    area: 'README sample-report render',
+    files: [
+      'README.md',
+      'src/audit/cli/sampleRunCommand.ts',
+      'src/audit/reporting/synthesis.ts',
+      'src/shared/reporting/findingDisplay.ts',
+    ],
+    guardedBy: ['check:readme-sample-report'],
+    note:
+      'the gate renders the sample bundle through the real renderer and diffs the README block — ' +
+      'a renderer heading/bullet change reds it instead of silently drifting the README sample',
   },
   {
     area: 'gate-enumeration render target',

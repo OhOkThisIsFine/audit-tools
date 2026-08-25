@@ -16,6 +16,7 @@ import {
 } from "../reporting/synthesis.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import type { AuditResult } from "../types.js";
+import type { Finding } from "../../shared/types/finding.js";
 import { getArtifactsDir, hasFlag } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
 
@@ -26,7 +27,39 @@ const SAMPLE_REPO_FILES = [
   { path: "docs/notes.md", size_bytes: 300, hash: "doc111" },
 ];
 
-export async function runSample(argv: string[] = process.argv): Promise<void> {
+/**
+ * Fabricated fixture finding for the README sample-report block. It cites the
+ * fabricated sample repo above, never this repository. Typed here so tsc
+ * checks the fixture against the real contract; the README generator
+ * (scripts/check-readme-sample-report.mjs) renders it through the real
+ * renderer and excerpts the output.
+ */
+export const SAMPLE_REPORT_FINDING: Finding = {
+  id: "FND-001",
+  title: "Expired session tokens are accepted on the refresh path",
+  category: "auth-token-lifecycle",
+  severity: "high",
+  confidence: "high",
+  lens: "security",
+  summary:
+    "refreshSession() checks the token signature but never the expiry, so an expired token mints a fresh session.",
+  affected_files: [{ path: "src/api/auth.ts", line_start: 41, line_end: 58 }],
+  impact: "A leaked token stays usable indefinitely.",
+  likelihood: "Any expired token replayed against the refresh endpoint.",
+  evidence: [
+    "The expiry field read at line 44 is never compared against the clock.",
+  ],
+  grounding: { status: "grounded" },
+  systemic: false,
+};
+
+/**
+ * Build the fabricated sample bundle. Pure — nothing is written. `sample-run`
+ * persists it with no findings; the README sample-report generator threads
+ * SAMPLE_REPORT_FINDING through it so the rendered report exercises the
+ * per-finding template.
+ */
+export function buildSampleAuditBundle(findings: Finding[] = []) {
   const repoManifest = buildRepoManifest("sample-repo", SAMPLE_REPO_FILES);
   const disposition = buildFileDisposition(repoManifest);
   const unitManifest = buildUnitManifest(repoManifest, disposition);
@@ -61,7 +94,7 @@ export async function runSample(argv: string[] = process.argv): Promise<void> {
             : 0,
         },
       ],
-      findings: [],
+      findings,
       notes: ["Sample result ingestion path."],
       requires_followup: false,
     },
@@ -91,6 +124,35 @@ export async function runSample(argv: string[] = process.argv): Promise<void> {
       runtimeValidationReport,
     }),
   );
+  return {
+    repoManifest,
+    disposition,
+    unitManifest,
+    surfaceManifest,
+    criticalFlows,
+    coverage,
+    flowCoverage,
+    runtimeValidationTasks,
+    runtimeValidationReport,
+    sampleResults,
+    auditReport,
+  };
+}
+
+export async function runSample(argv: string[] = process.argv): Promise<void> {
+  const {
+    repoManifest,
+    disposition,
+    unitManifest,
+    surfaceManifest,
+    criticalFlows,
+    coverage,
+    flowCoverage,
+    runtimeValidationTasks,
+    runtimeValidationReport,
+    sampleResults,
+    auditReport,
+  } = buildSampleAuditBundle();
   const auditState = deriveAuditState({
     repo_manifest: repoManifest,
     file_disposition: disposition,

@@ -48,6 +48,7 @@ export const STEP_GLOSS = {
   "check:doc-code-citations": "backticked repo-path citation gate",
   "check:gate-enumeration": "gate-enumeration parity (this list)",
   "check:philosophy-brief": "README philosophy-brief parity",
+  "check:readme-sample-report": "README sample-report render parity",
   "check:nightly-routine-prompt": "nightly scheduler-prompt parity",
   "check:handoff-roadmap": "HANDOFF roadmap parity",
   "check:backlog-index": "backlog seek-index parity",
