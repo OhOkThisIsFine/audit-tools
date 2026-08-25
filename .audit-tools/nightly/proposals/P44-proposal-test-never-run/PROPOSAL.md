@@ -9,15 +9,20 @@ red-green tests**", so "the owner approves in one step rather than re-deriving t
 test is written from reading the code, never executed. So the proposal's stated RED reason is
 an unverified claim, and the promise — approve in one step — does not hold.
 
-## Recurrence evidence — 2 proposals, 2 dates, and both are every proposal test ever landed
+## Recurrence evidence — two landed proposal tests needed correction before they could be trusted
 
 | Date | Proposal | What the test needed before it could be trusted |
 |---|---|---|
 | earlier | `P40-prompt-renders-its-contract` | The landed `tests/shared/prompt-renders-its-contract.test.ts` differs from the proposal copy by 66 diff lines: two missing imports (`ArtifactBundle`, `renderCharterKindLanePrompt`) and a `bundle()` fixture helper the proposal never wrote. The proposal copy could not have run at all. |
 | 2026-08-25 | `P43-answered-work-vs-open-run-collision` | Two defects. (1) The fixture wrote the decision ledger as `{ decisions: { … } }`; the ledger is a FLAT map, so `readDecisions` saw an empty ledger, `--list` took its early exit, and the test was RED for a reason unrelated to the missing mechanism — the proposal's stated RED reason ("`--list` prints nothing about an open remediation run") was not the reason it failed. (2) It imported `execFileSync` from `node:child_process`, which the repo invariant INV-WH refuses across the whole test tree — landing it reddened `npm test`. |
 
-Two proposals, two dates, one property. It is also the complete population: these are the only
-two proposal-authored tests that have ever been applied to the tree. The hit rate is 2 of 2.
+Correction (2026-08-25, owner): an earlier version of this section claimed these two rows were
+the complete population and a 2-of-2 hit rate. That overclaimed. P37 and P40 both recorded
+genuine measured RED/GREEN runs in their proposals (P37 at `ad0d51b0` with exit codes; P40
+measured a real 2-failed red in the same run, after fixing an in-run false red). The rows above
+still stand as defects — a recorded measurement can diverge from the landed copy (P40) or be red
+for the wrong reason (P43) — which is why the record must bind the verbatim failure, the exact
+command, and the sha.
 
 ## Why this is the signature of a missing mechanism
 

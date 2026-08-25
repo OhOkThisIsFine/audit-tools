@@ -1,0 +1,7 @@
+RETROACTIVE record (written 2026-08-25 when the P44 RED-AT mechanism landed).
+
+This 2026-07-28 proposal predates the mechanism. No red run of doc-link-gate.test.mjs was
+recorded at proposal time. The proposed gate itself LANDED as scripts/check-doc-links.mjs
+(live in verify:checks as check:doc-links), so the copies in this directory are superseded
+by the landed gate and its wiring; the test copy is historical material, not runnable
+evidence at HEAD.

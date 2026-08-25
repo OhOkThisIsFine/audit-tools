@@ -1,0 +1,8 @@
+RETROACTIVE record (written 2026-08-25 when the P44 RED-AT mechanism landed; the run below was
+recorded in proposal.md at proposal time, not re-measured at this sha).
+
+Measured 2026-08-19 at ad0d51b0, per proposal.md "Red-green validation":
+  RED:   npx vitest run tests/shared/glossary-citations-backticked.test.ts   (patch NOT applied)
+         exit 1 — "1 failed", listing the un-backticked citations
+  GREEN: node apply-patch.mjs, then the same vitest run
+         exit 0 — "1 passed"; patch reported "45 citations now backticked"

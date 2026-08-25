@@ -1,0 +1,10 @@
+RETROACTIVE record (written 2026-08-25 when the P44 RED-AT mechanism landed; the run below was
+recorded in proposal.md at proposal time, not re-measured at this sha).
+
+Measured at proposal time (2026-08-22), per proposal.md "Red-green validation": the corrected
+in-run test measured "2 failed" at HEAD unpatched — the open-alternation assertion and the
+excluded_scope shape assertion — after an initial false red (TypeError from a wrong call
+signature) was fixed in-run. CAVEAT, and the reason P44 exists: the proposal-directory COPY of the
+test differs from the landed tests/shared/prompt-renders-its-contract.test.ts by 66 diff lines
+(two missing imports and the bundle() fixture helper); the copy in this directory could not have
+run as written.

@@ -141,6 +141,16 @@ export const GUARDS = [
       '`npm run check:readme-sample-report -- --write`; never hand-edit the rendered block',
   },
   {
+    id: 'check:proposal-red-at',
+    kind: 'gate',
+    impl: 'check:proposal-red-at',
+    preCommit: 'reach',
+    fix:
+      'a proposal dir ships a *.test.ts/*.test.mjs with no sibling RED-AT.txt — run the test at ' +
+      'HEAD and record the exact command, sha, and verbatim failure (or one line stating why it ' +
+      'cannot run at HEAD)',
+  },
+  {
     id: 'check:nightly-routine-prompt',
     kind: 'gate',
     impl: 'check:nightly-routine-prompt',
@@ -942,6 +952,16 @@ export const REACH = [
     files: ['docs/project-philosophy.md', 'README.md'],
     guardedBy: ['check:philosophy-brief'],
     note: 'the gate reads ONLY these two — the README Philosophy block is generated from the brief',
+  },
+  {
+    area: 'proposal-test RED-AT records',
+    files: ['.audit-tools/nightly/proposals/**'],
+    guardedBy: ['check:proposal-red-at'],
+    note:
+      'the gate scans the tracked proposals tree: a proposal dir shipping a *.test.ts/*.test.mjs ' +
+      'must carry a non-empty sibling RED-AT.txt (measured red, or a declared not-runnable line). ' +
+      'Uncovered half: the record body is free-form — the gate enforces existence and non-emptiness, ' +
+      'not that the recorded run was real or fresh',
   },
   {
     area: 'README sample-report render',

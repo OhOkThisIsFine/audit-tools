@@ -115,6 +115,15 @@ reference it — the owner approves in one step rather than re-deriving the work
 Tests belong under `tests/`; Vitest excludes `.claude/**`, so a test beside a
 hook never runs.
 
+**Run the proposal's test at HEAD before writing the proposal.** Record the
+exact command, the HEAD sha, and the verbatim failure in
+`.audit-tools/nightly/proposals/<id>/RED-AT.txt`, and quote that real failure
+in the proposal — never a predicted one (a stated RED nobody observed is a
+false red presented as evidence). A test that genuinely cannot run at HEAD
+(the patch creates the file under test) still gets a RED-AT.txt stating, in
+one line, why. `npm run check:proposal-red-at` (in verify:checks) refuses a
+proposal test with no sibling record.
+
 Prefer the fix that removes the trap over the guard that catches it. A guard is
 what you build when the trap cannot be designed away.
 

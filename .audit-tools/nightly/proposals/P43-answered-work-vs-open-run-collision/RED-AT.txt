@@ -1,0 +1,9 @@
+RETROACTIVE record (written 2026-08-25 when the P44 RED-AT mechanism landed; the state below was
+established when P43 was applied on 2026-08-25, not re-measured at this sha).
+
+The shipped test answer-list-run-scope.test.mjs was asserted RED against HEAD but the assertion
+was never run at proposal time. When it was finally executed, it WAS red — for the wrong reason:
+the fixture wrote the decision ledger as { decisions: { ... } } while the ledger is a flat map, so
+readDecisions saw an empty ledger and --list took its early exit. It also imported execFileSync
+from node:child_process, which invariant INV-WH refuses across the test tree — landing it as
+written reddened npm test. Both defects were corrected before landing.
