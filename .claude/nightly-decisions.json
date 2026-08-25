@@ -1596,7 +1596,9 @@
     "answer": "Remove the advance command from the worker-facing prompt at all seven sites; it lives in the driver-facing step contract only.",
     "subject": "",
     "path": "src/remediate/steps/prompts.ts",
-    "decided_at": "2026-08-23T23:16:48.286Z"
+    "decided_at": "2026-08-23T23:16:48.286Z",
+    "completed_at": "2026-08-25T16:33:46.069Z",
+    "completed_ref": "SUPERSEDED at e2eca197 — P42's premise is verified false (all seven sites are driver-facing; the worker packet carries no advance command). Replaced by sol-2, answered 2026-08-25: re-target the investigation at audit-code. No edit to src/remediate/steps/prompts.ts is owed."
   },
   "ffaa77551e147264": {
     "disposition": "settled",
@@ -1662,21 +1664,27 @@
     "answer": "Delete the bullet entirely. A closed run is git history, not immediate-next state, and the HANDOFF is immediate-next only.",
     "subject": "The HANDOFF still tells the next agent to advance a remediation run that closed and deleted its state - rewrite the bullet, or drop it",
     "path": "docs/HANDOFF.md",
-    "decided_at": "2026-08-25T16:16:13.886Z"
+    "decided_at": "2026-08-25T16:16:13.886Z",
+    "completed_at": "2026-08-25T16:33:36.197Z",
+    "completed_ref": "e2eca197"
   },
   "a0876394f38d09bf": {
     "disposition": "settled",
     "answer": "Fix doc and CLI: state the three-way rule in the operator guide (complete and not-started runs are deleted; active and blocked runs need --force; a directory with no audit_state.json marker is refused even with --force, because --force waives status evidence and never identity evidence), AND correct the CLI skipped-reason string at src/audit/cli/cleanupCommand.ts:115, which today advises --force in the exact case --force refuses.",
     "subject": "The cleanup sentence says --force unblocks a missing-state run; it never does - restate the three-way rule, or trim the claim",
     "path": "docs/audit-pkg/operator-guide.md",
-    "decided_at": "2026-08-25T16:16:21.199Z"
+    "decided_at": "2026-08-25T16:16:21.199Z",
+    "completed_at": "2026-08-25T16:33:36.101Z",
+    "completed_ref": "e2eca197"
   },
   "7920fb558571ba07": {
     "disposition": "settled",
     "answer": "Describe grounding: replace the sentence with what the grounding pass does - every finding is re-verified against the source on disk; disproven (refuted) findings are excluded and unverifiable (ungrounded) ones are explicitly marked not-confirmed. Do not change the code; surfacing-not-confirming is deliberate.",
     "subject": "The README promises every finding is adversarially verified before it is kept; ungrounded findings ARE kept - reword the promise, or narrow it",
     "path": "README.md",
-    "decided_at": "2026-08-25T16:16:21.593Z"
+    "decided_at": "2026-08-25T16:16:21.593Z",
+    "completed_at": "2026-08-25T16:33:36.284Z",
+    "completed_ref": "e2eca197"
   },
   "ab79146b0c30ac64": {
     "disposition": "settled",
@@ -1690,14 +1698,18 @@
     "answer": "Stop stating the version: drop the version literal from the prose and state the durable rule instead - the register carries a stamped schema version and is discarded on mismatch - so it cannot drift again.",
     "subject": "The artifact contract stamps the charter layer charter-register/v2; the code says v3 - bump the literal, or stop stating the version in prose",
     "path": "spec/audit/artifact-contract.md",
-    "decided_at": "2026-08-25T16:16:28.030Z"
+    "decided_at": "2026-08-25T16:16:28.030Z",
+    "completed_at": "2026-08-25T16:33:36.349Z",
+    "completed_ref": "e2eca197"
   },
   "4a13b8cefd26bafc": {
     "disposition": "settled",
     "answer": "Print the resolved remote: interpolate the resolved remote name into the refusal message and the comments in scripts/release-and-publish.mjs, then update the ship skill to match, so the operator sees the ref that exists in their checkout.",
     "subject": "The release refusal message says origin/main in a checkout whose only remote is audit-tools - print the resolved remote, or keep the shorthand",
     "path": "scripts/release-and-publish.mjs",
-    "decided_at": "2026-08-25T16:16:28.368Z"
+    "decided_at": "2026-08-25T16:16:28.368Z",
+    "completed_at": "2026-08-25T16:33:36.411Z",
+    "completed_ref": "e2eca197"
   },
   "7092bf4d0d6500f3": {
     "disposition": "settled",
