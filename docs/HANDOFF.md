@@ -17,11 +17,11 @@
   NOT reach either item's changed code (its `runtime_validation_tasks` list is empty). The flake
   baseline correctly left it UNRECOGNIZED, which keeps it red. It matters because ingestion reruns
   that exact raw command with no retry, so a flaky red there refuses a good result.
-  DELIBERATE, not an oversight: the baseline was NOT written. Both observations the record needs
-  now exist (a parallel failure and a solo pass), so `npm run test:rebaseline-flakes` would be
-  legitimate — but writing it is a deliberate act on a tree already decided green, and doing it
-  mid-item is how a genuine regression gets laundered into "known flaky". Decide it at a settled
-  point, or leave it red.
+  OWNER DECISION (2026-08-24): leave it RED — the baseline is deliberately NOT written. Both
+  observations the record needs now exist (a parallel failure and a solo pass), so
+  `npm run test:rebaseline-flakes` would be legitimate; recording it was declined because a
+  known-flaky record is also what would launder a genuine regression, and a red that is re-checked
+  costs less than a green that is trusted wrongly. Do not "fix" this by re-baselining.
 - The detached host runner is NOT alive and must stay down; the remaining items were done with
   native agents.
 - **Both final items needed their write scope widened before they could be implemented**, with the
