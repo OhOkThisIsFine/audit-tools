@@ -27,7 +27,6 @@ export type RemediationStepKind =
   | "synthesize_intake"
   | "collect_intake_clarifications"
   | "contract_pipeline"
-  | "lean_light_review"
   | "collect_review_approval"
   | "collect_clarifications"
   | "dispatch_implement"

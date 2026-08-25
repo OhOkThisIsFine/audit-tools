@@ -16,8 +16,6 @@ import { describe, it, expect } from "vitest";
 import { validateImplementationDAG } from "../../src/remediate/validation/contractPipeline.js";
 import { rejectionRewriteInstruction } from "../../src/remediate/steps/contractPipeline.js";
 import {
-  interpretLeanLightReviewVerdict,
-  LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
 } from "../../src/remediate/riskSignal.js";
 import { CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION } from "audit-tools/shared";
 
@@ -74,36 +72,6 @@ describe("CP-NODE-3: implementation_dag edge referential integrity", () => {
       dagWithEdges([{ from: "N-1", to: "N-GHOST", kind: "dependency" }]),
     );
     expect(issues.some((i) => /to "N-GHOST" does not reference a declared node id/.test(i.message))).toBe(true);
-  });
-});
-
-describe("CP-NODE-3: lean light-review verdict schema_version enforcement", () => {
-  it("interprets a correctly-versioned `clear` verdict as clear", () => {
-    const out = interpretLeanLightReviewVerdict({
-      schema_version: LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
-      disposition: "clear",
-      concerns: [],
-    });
-    expect(out.disposition).toBe("clear");
-  });
-
-  it("escalates a `clear` verdict that omits schema_version (never a silent pass)", () => {
-    const out = interpretLeanLightReviewVerdict({
-      disposition: "clear",
-      concerns: [],
-    });
-    expect(out.disposition).toBe("escalate");
-    expect(out.concerns.join(" ")).toMatch(/schema_version/);
-  });
-
-  it("escalates a `clear` verdict carrying a wrong schema_version", () => {
-    const out = interpretLeanLightReviewVerdict({
-      schema_version: "some-other-contract/v1",
-      disposition: "clear",
-      concerns: [],
-    });
-    expect(out.disposition).toBe("escalate");
-    expect(out.concerns.join(" ")).toMatch(/schema_version/);
   });
 });
 

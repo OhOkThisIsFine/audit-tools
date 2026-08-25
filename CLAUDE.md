@@ -126,8 +126,9 @@ pending → planning → implementing → closing → complete
   (`src/remediate/steps/dispatch/hostHandoff.ts`) and re-checked against the landed diff at ingestion.
   `touched_files` is produced upstream two ways: the contract pipeline's `deriveNodeFiles` (node
   `output_files` → `files_likely_touched` → the matched module's `file_scope`), which makes it a SIBLING
-  of `finding.affected_files` rather than a derivation of it; or, on the no-blocks / lean-fast-path branch
-  of `normalizeExtractedPlan` (`src/remediate/steps/nextStep.ts`), copied straight from `finding.affected_files`. Both gates
+  of `finding.affected_files` rather than a derivation of it; or, on the no-blocks branch of
+  `normalizeExtractedPlan` (`src/remediate/steps/nextStep.ts`) — reached by a plan supplied from OUTSIDE
+  the pipeline — copied straight from `finding.affected_files`. Both gates
   in `src/remediate/steps/nextStep.ts`; dispatch in `src/remediate/steps/dispatch.ts` (a barrel over the
   host-handoff module above).
 - implement phase (dispatches implementation with test execution + verification) — in `src/remediate/steps/dispatch.ts`

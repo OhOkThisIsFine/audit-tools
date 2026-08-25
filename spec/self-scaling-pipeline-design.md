@@ -10,14 +10,20 @@ contracts → seam → finalize → critique → obligation-ledger → cyclic-se
 → assessment → counterexample → judge(+repair) → impl-DAG → review → dispatch → triage → close)
 applies the **same full ceremony to every input regardless of size or risk** — that makes a
 one-line log-removal cost roughly the same orchestration as a
-concurrency-correctness change. A separate `leanFastPath` that *skips*
-the whole design ceremony for pre-vetted structured-audit findings is the wrong shape: it is too
+concurrency-correctness change. A separate `leanFastPath` that *skipped*
+the whole design ceremony for pre-vetted structured-audit findings was the wrong shape: too
 trusting (remediation routinely re-finds errors in audit conclusions), too narrow in scope
-(document/backlog input can't reach it), and structurally-forked (a separate eligible/ineligible
-gate rather than a point on the Dial A/B continuum). Per the A6 target ("self-scaling pipeline,
-not forked paths"), the lowest-risk case is the lowest point of the dial, not separate code: Dial A
-enforces a mandatory light-review floor rather than a zero-scrutiny skip — see Mechanisms, Dial A/B
-below for the shape.
+(document/backlog input could not reach it), and structurally-forked (a separate
+eligible/ineligible gate rather than a point on the Dial A/B continuum). Per the A6 target
+("self-scaling pipeline, not forked paths"), the lowest-risk case is the lowest point of the dial,
+not separate code — see Mechanisms, Dial A/B below for the shape.
+
+That fork is GONE: its plan producer, its bypass branch and its light-review gate were deleted
+together, so every run now enters the pipeline and the tier decides only how deeply it is
+traversed. The cost of that decision was measured rather than assumed — a clean low-tier run pays
+eight gated host turns, and only one further collapse was safe, so the fold made the cheapest case
+seven rather than one. The owner took that trade knowingly: the conviction outranks the saving.
+Per-phase evidence: [`../docs/reviews/low-tier-phase-cost-2026-08-25.md`](../docs/reviews/low-tier-phase-cost-2026-08-25.md).
 
 ## Two distinct cost drivers (measured)
 
@@ -40,10 +46,11 @@ Critique / counterexample scrutiny scales with the assessed risk/complexity:
 - high → full independent critique + counterexample + judge, as warranted and earned.
 
 **Floor is *light*, never *off*.** Nothing — including pre-vetted structured-audit findings — gets
-zero scrutiny, because remediation legitimately catches upstream (audit) errors. The
-structured-audit lean path runs one bounded light adversarial pass before proceeding
-(`interpretLeanLightReviewVerdict` in `src/remediate/riskSignal.ts`), escalating to the full
-pipeline on any concern — a mandatory light-review floor, not a zero-scrutiny fork.
+zero scrutiny, because remediation legitimately catches upstream (audit) errors. Scrutiny is a
+DEPTH setting on the one pipeline, never a path that skips it: at the `low` tier the critique,
+critic and judge phases still each run, at light adversarial depth. Those three can never be
+collapsed into their neighbours — the judge verdict is the sole admission to implementation
+planning, so a merged turn would let the loop certify its own exit.
 
 ### Dial B — phase granularity / round-trips (the ceremony saving)
 - **Collapse in general**: phases that are one coherent act of authoring (e.g. decomposition +
@@ -74,7 +81,7 @@ don't exist at the decision point — an intake signal cannot be a pipeline outp
 
 ## What this dissolves
 
-- **No separate document lean path** ⇒ no separate plan-builder ⇒ the "document→`Finding`
+- **No separate lean path for ANY input** ⇒ no separate plan-builder ⇒ the "document→`Finding`
   synthesis seam" problem **evaporates**: there is one flow that turns any input into the work it
   implements; document input is just a coarse, light traversal of it, not a forked path needing its
   own finding synthesis.

@@ -102,11 +102,14 @@ and [`spec/contract-authoring-determinism-design.md`](../contract-authoring-dete
 this document names the mechanism and owns the output contract it produces, not
 the mechanism's internals.
 
-Every plan carries a `plan.source` tag recording which mechanism built it:
-`contract_pipeline` for the primary engine, or `lean_fast_path` for its
-bounded Path-A shortcut. Whichever source produced the plan, it converges on
-the same output contract (Finding / Item / Block, `TestSpec`) and
-the same downstream implement→close machinery.
+There is ONE plan-building mechanism traversed at two depths. The risk tier is
+the dial: a `low` tier collapses coherent authoring phases into shared
+round-trips and drops adversarial depth to a light inline self-check, while
+`medium`/`high` keep every phase its own gated step at full depth. There is no
+second producer and no path that skips the pipeline. `plan.source` records
+PROVENANCE only — where a plan came from, never which engine built it — so a
+plan ingested from outside the pipeline is still distinguishable from one the
+pipeline authored.
 
 ## Phases
 

@@ -89,7 +89,7 @@ describe("granularity collapse in buildNextContractPipelineStep", () => {
     });
 
     expect(step).not.toBeNull();
-    expect(step!.stop_condition).toContain("collapsed-framing artifacts");
+    expect(step!.stop_condition).toContain("collapsed artifacts");
     expect(step!.stop_condition).toContain("goal_normalization");
     expect(step!.stop_condition).toContain("decomposition");
 
@@ -167,5 +167,172 @@ describe("granularity collapse in buildNextContractPipelineStep", () => {
 
     const prompt = await readFile(step!.prompt_path, "utf8");
     expect(prompt).not.toContain("Collapsed Authoring Round-Trip");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The AUTHORING-TAIL group: {test_validator_plan, assessment}.
+//
+// The second (and only other) safe collapse group. Both are author-side,
+// neither carries the independent-critic mandate, and the critic reviews both
+// afterwards unchanged. See docs/reviews/low-tier-phase-cost-2026-08-25.md for
+// why every other adjacency is unsafe.
+//
+// The scaffold assertion is the load-bearing one. `collapsedRoundTripGate` is
+// registered BEFORE `scaffoldedPhaseGate`, so a group containing
+// test_validator_plan can silently swallow the S3 skeleton the worker is meant
+// to fill — which would make the collapse make that phase HARDER, not cheaper.
+// ---------------------------------------------------------------------------
+
+describe("authoring-tail collapse — {test_validator_plan, assessment}", () => {
+  let root: string;
+  let artifactsDir: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "authoring-tail-collapse-"));
+    artifactsDir = join(root, ".audit-tools", "remediation");
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  /** Seed every phase up to (not including) test_validator_plan. */
+  async function seedThroughCyclicSeamResolution(): Promise<void> {
+    const g = "G-1";
+    await seedGoalSpec(artifactsDir);
+    await writeContractArtifact(artifactsDir, "context_bundle", {
+      contract_version: "remediate-code-contract-pipeline/context-bundle/v1alpha1",
+      goal_id: g,
+      entries: [],
+      context_summary: "ctx",
+      created_at: CREATED_AT,
+    });
+    await writeContractArtifact(artifactsDir, "module_decomposition", {
+      contract_version: "remediate-code-contract-pipeline/module-decomposition/v1alpha1",
+      goal_id: g,
+      modules: [{ name: "mod-a", responsibilities: "Does A.", file_scope: ["src/a.ts"] }],
+      created_at: CREATED_AT,
+    });
+    const contract = {
+      name: "mod-a",
+      inputs: ["x"],
+      outputs: ["y"],
+      invariants: ["x is always validated"],
+      side_effects: [],
+      validation_boundary: "validates x",
+      failure_modes: [],
+      neighbor_needs: [],
+    };
+    await writeContractArtifact(artifactsDir, "module_contracts", {
+      contract_version: "remediate-code-contract-pipeline/module-contracts/v1alpha1",
+      goal_id: g,
+      module_contracts: [contract],
+      created_at: CREATED_AT,
+    });
+    await writeContractArtifact(artifactsDir, "seam_reconciliation_report", {
+      contract_version: "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
+      goal_id: g,
+      mismatches: [],
+      created_at: CREATED_AT,
+    });
+    await writeContractArtifact(artifactsDir, "finalized_module_contracts", {
+      contract_version: "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+      goal_id: g,
+      module_contracts: [{ ...contract, seam_adjustments: [] }],
+      created_at: CREATED_AT,
+    });
+    await writeContractArtifact(artifactsDir, "conceptual_design_critique", {
+      contract_version: "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1",
+      goal_id: g,
+      items: [],
+      verdict: "approved",
+      created_at: CREATED_AT,
+    });
+    await writeContractArtifact(artifactsDir, "obligation_ledger", {
+      contract_version: "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
+      goal_id: g,
+      obligations: [
+        {
+          id: "O-1",
+          description: "x is always validated.",
+          kind: "behavioral",
+          depends_on: [],
+          status: "pending",
+        },
+      ],
+      created_at: CREATED_AT,
+    });
+    await writeContractArtifact(artifactsDir, "cyclic_seam_resolution", {
+      contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+      goal_id: g,
+      status: "no_cycles",
+      cycles: [],
+      created_at: CREATED_AT,
+    });
+  }
+
+  it("folds the tail into ONE round-trip on a low-tier run", async () => {
+    await writeIntakeRiskSignal(artifactsDir, lowSignal());
+    await seedThroughCyclicSeamResolution();
+
+    const step = await buildNextContractPipelineStep({
+      root,
+      artifactsDir,
+      runId: "AT-TEST",
+    });
+
+    expect(step).not.toBeNull();
+    expect(step!.stop_condition).toContain("collapsed artifacts");
+    expect(step!.stop_condition).toContain("test_validator_plan");
+    expect(step!.stop_condition).toContain("assessment");
+
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).toContain("Collapsed Authoring Round-Trip — 2 Phases");
+    expect(prompt).toContain("test_validator_plan.input.json");
+    expect(prompt).toContain("contract_assessment_report.input.json");
+  });
+
+  it("carries the S3 scaffold into the collapsed round-trip", async () => {
+    await writeIntakeRiskSignal(artifactsDir, lowSignal());
+    await seedThroughCyclicSeamResolution();
+
+    const step = await buildNextContractPipelineStep({
+      root,
+      artifactsDir,
+      runId: "AT-SCAFFOLD",
+    });
+    const prompt = await readFile(step!.prompt_path, "utf8");
+
+    // The collapse gate runs BEFORE the scaffolded-phase gate. Without the
+    // per-section extra, the skeleton would vanish and the worker would be
+    // asked to author the whole plan from scratch inside a CHEAPER step.
+    expect(prompt, "the pre-filled skeleton must survive the collapse").toContain(
+      "Pre-filled Skeleton",
+    );
+    expect(prompt, "the skeleton must carry the derived obligation id").toContain(
+      "O-1",
+    );
+  });
+
+  it("stays fine-grained at medium tier, and still scaffolds", async () => {
+    const medium = computeIntakeRiskSignal({
+      affectedFiles: ["src/a.ts", "src/b.ts", "src/c.ts"],
+      goals: ["rework the authentication boundary"],
+    });
+    expect(roundTripGranularityForTier(medium.tier)).toBe("fine");
+    await writeIntakeRiskSignal(artifactsDir, medium);
+    await seedThroughCyclicSeamResolution();
+
+    const step = await buildNextContractPipelineStep({
+      root,
+      artifactsDir,
+      runId: "AT-FINE",
+    });
+
+    expect(step).not.toBeNull();
+    expect(step!.stop_condition).not.toContain("collapsed artifacts");
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).not.toContain("Collapsed Authoring Round-Trip");
+    expect(prompt).toContain("Pre-filled Skeleton");
   });
 });

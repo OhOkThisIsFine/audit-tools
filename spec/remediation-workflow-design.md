@@ -160,20 +160,18 @@ that gap.
 
 **How the risk dial realizes this, per** [`self-scaling-pipeline-design.md`](self-scaling-pipeline-design.md)
 **(the newer design-of-record):** depth scales with the run's risk tier rather than
-branching to a separate path. At the `low` tier a run synthesizes its extracted plan
-directly, skipping the adversarial contract-DESIGN loop while emitting the SAME
-`extracted-plan.json` join artifact and rejoining the same plan→implement→close
-machinery (deterministic grounding, block derivation, file-hash integrity,
-verify-before-merge). It skips only the expensive negotiation phases — never
-traceability or verification: a mandatory light adversarial pass runs first and any
-concern escalates the tier, which takes the run through the full pipeline.
+branching to a separate path. EVERY run enters the contract pipeline; the tier sets
+how deeply it is traversed. At the `low` tier, coherent authoring phases collapse
+into shared round-trips and adversarial depth drops to a light inline self-check;
+`medium`/`high` keep every phase its own gated step at full depth. No tier skips a
+phase, and none skips traceability or verification.
 
-This is not a parallel path. The tier is the SINGLE classifier: finding-level risk
-evidence is folded into the shared risk signal before the gate, so there is no
-separate fast-path boolean that can disagree with the dial — a grounded handful
-touching a risk subsystem stays `high` and takes the full pipeline. Read this
-section's "both paths run the [full] pipeline" as the shape of the machinery every
-run passes through; the dial sets how much design negotiation happens on the way in.
+This is not a parallel path, and no longer even a shallow one that bypasses the
+engine. The tier is the SINGLE classifier: finding-level risk evidence is folded
+into the shared risk signal before the run proceeds, so there is no separate
+eligibility boolean that can disagree with the dial — a grounded handful touching a
+risk subsystem stays `high` and is traversed at full depth. Read this section's
+"both paths run the [full] pipeline" literally: they do, at different depths.
 
 ### Multi-agent seam negotiation
 

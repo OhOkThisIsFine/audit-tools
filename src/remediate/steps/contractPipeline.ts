@@ -169,24 +169,45 @@ const PRE_IMPLEMENTATION_PHASE_ORDER = CONTRACT_PIPELINE_PHASE_ORDER.filter(
 );
 
 /**
- * Granularity collapse group (T1 slice 4b). The framing phases — goal, context,
- * decomposition — are ONE coherent act of authoring (scope the change top-down):
- * they carry no adversarial judgment and no deterministic derivation interleaves
- * them, so for low-complexity work they fold into a single round-trip producing
- * all three artifacts instead of three gated steps. The group deliberately STOPS
- * at decomposition (before module_contract_drafting): keeping the decomposition→
- * drafting boundary lets the slice-4a escalate-on-evidence intercept inspect the
- * fresh decomposition and raise the tier — un-collapsing every remaining phase —
- * before any contract is drafted or the per-module wave fans out. Collapse is
+ * Granularity collapse GROUPS (T1 slice 4b). Each group is a run of CONSECUTIVE
+ * phases that folds into ONE round-trip at the `collapsed` granularity — i.e.
+ * only at the `low` tier (see `roundTripGranularityForTier`). Collapse is
  * best-effort: any member artifact the worker omits or writes malformed is
  * re-emitted as its own fine-grained step by `nextMissingContractPhase`, so no
- * work is ever lost. See `roundTripGranularityForTier`.
+ * work is ever lost.
+ *
+ * These are the ONLY two safe groups, and the gaps between them are not
+ * oversights — each is a property worth more than the round-trip it would save.
+ * The full per-phase map is `docs/reviews/low-tier-phase-cost-2026-08-25.md`;
+ * the boundaries that matter here:
+ *
+ *   - The framing group STOPS at `decomposition`. Keeping the decomposition→
+ *     drafting boundary lets the slice-4a escalate-on-evidence intercept read
+ *     the fresh decomposition and raise the tier — un-collapsing everything
+ *     after it — before any contract is drafted or the module wave fans out.
+ *   - `critique`, `critic` and `judge` are independent-adversary phases and can
+ *     never join a group with what they review. Collapsing critic+judge is the
+ *     sharpest case: the judge verdict is the SOLE admission to implementation
+ *     planning, so one worker emitting both artifacts could write zero
+ *     counterexamples plus `approved` and let the loop certify its own exit.
+ *   - `implementation_planning` is the phase `judgeRepairGate` protects, and its
+ *     scaffold is built from the judge's accepted counterexamples, which do not
+ *     exist at judge-render time.
+ *
+ * A collapsed section carries exactly what its fine-grained step would have
+ * carried — see `collapsedSectionExtra`.
  */
-const FRAMING_COLLAPSE_GROUP = [
-  "goal_normalization",
-  "context_collection",
-  "decomposition",
-] as const;
+const COLLAPSE_GROUPS: readonly (readonly string[])[] = [
+  // Framing: scope the change top-down. One coherent authoring act, no
+  // adversarial judgment, no deterministic derivation interleaved.
+  ["goal_normalization", "context_collection", "decomposition"],
+  // Authoring tail: the test/validator plan and the author's OWN coverage
+  // self-assessment. `assessment` is deliberately not an independent-critic
+  // phase, and `contract_assessment_report` already depends on
+  // `test_validator_plan` — the same later-reads-earlier shape the framing
+  // group relies on. The critic reviews both afterwards, unchanged.
+  ["test_validator_plan", "assessment"],
+];
 
 // ── Bounded-loop caps ─────────────────────────────────────────────────────────
 
@@ -1870,7 +1891,7 @@ type ContractStepPlan =
   | { via: "step"; prompt: string; outputPath: string; stopCondition: string }
   | { via: "blocked"; prompt: string; stopCondition: string }
   | { via: "module_wave"; phase: ParallelModulePhase }
-  | { via: "collapsed_framing"; phases: string[] }
+  | { via: "collapsed_round_trip"; phases: string[] }
   | { via: "rederive" }
   | { via: "pipeline_complete" };
 
@@ -1964,21 +1985,45 @@ function writeContractBlockedStep(
  * overrides the per-section "stop after writing" lines so they are not read as
  * three separate stop points.
  */
-function writeCollapsedFramingStep(
+/**
+ * The extra section a collapsed member carries, mirroring the gate that would
+ * have claimed that phase on its own — so collapsing changes the number of
+ * round-trips and nothing else about what the worker is told.
+ *
+ * This is load-bearing, not tidiness. `collapsedRoundTripGate` is registered
+ * BEFORE `scaffoldedPhaseGate`, so without this a group containing
+ * `test_validator_plan` would silently drop the S3 skeleton the worker is
+ * supposed to fill in, and the collapse would quietly make that phase HARDER
+ * rather than cheaper.
+ */
+async function collapsedSectionExtra(
+  phase: string,
+  artifactsDir: string,
+): Promise<string | undefined> {
+  if (phase === "test_validator_plan" || phase === "implementation_planning") {
+    return await buildScaffoldSection(phase, artifactsDir);
+  }
+  return await buildReReviewSection(phase, artifactsDir);
+}
+
+async function writeCollapsedRoundTripStep(
   ctx: ContractGateContext,
   phases: string[],
 ): Promise<RemediationStep> {
-  const sections = phases.map((phase) => ({
-    phase,
-    rendered: renderContractPipelinePrompt({
-      role: phase,
-      artifactPaths: ctx.artifactPaths,
-      sourcePaths: ctx.sourcePaths,
-      repoRoot: ctx.root,
-      pathASeedPath: ctx.pathASeedPath,
-      adversarialDepth: ctx.adversarialDepth,
-    }),
-  }));
+  const sections = await Promise.all(
+    phases.map(async (phase) => ({
+      phase,
+      rendered: renderContractPipelinePrompt({
+        role: phase,
+        artifactPaths: ctx.artifactPaths,
+        sourcePaths: ctx.sourcePaths,
+        repoRoot: ctx.root,
+        pathASeedPath: ctx.pathASeedPath,
+        adversarialDepth: ctx.adversarialDepth,
+      }),
+      extra: await collapsedSectionExtra(phase, ctx.artifactsDir),
+    })),
+  );
   const outputPaths = sections.map((s) => s.rendered.outputPath);
   const header = `# Collapsed Authoring Round-Trip — ${phases.length} Phases
 
@@ -1990,11 +2035,16 @@ If you cannot complete a section (an artifact would be malformed), write the one
 
 Artifacts to produce (in order):
 ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
-  const body = sections.map((s) => `\n---\n\n${s.rendered.prompt}`).join("\n");
+  const body = sections
+    .map(
+      (s) =>
+        `\n---\n\n${s.extra ? `${s.rendered.prompt}\n${s.extra}` : s.rendered.prompt}`,
+    )
+    .join("\n");
   return writeContractPromptStep(ctx, {
     prompt: `${header}\n${body}`,
     outputPath: outputPaths[outputPaths.length - 1],
-    stopCondition: `Stop after writing all ${phases.length} collapsed-framing artifacts (${phases.join(", ")}) and running next-step once.`,
+    stopCondition: `Stop after writing all ${phases.length} collapsed artifacts (${phases.join(", ")}) and running next-step once.`,
   });
 }
 
@@ -2106,8 +2156,8 @@ async function writeContractStepPlan(
       return await writeContractBlockedStep(ctx, plan);
     case "module_wave":
       return await writeParallelModuleWaveStep(ctx, plan.phase);
-    case "collapsed_framing":
-      return await writeCollapsedFramingStep(ctx, plan.phases);
+    case "collapsed_round_trip":
+      return await writeCollapsedRoundTripStep(ctx, plan.phases);
     case "rederive":
       // A deterministic artifact was just written; the frontier moved, so the
       // whole walk re-runs against the new state rather than guessing the phase.
@@ -3473,28 +3523,27 @@ const phaseCutCritiqueGate: ContractGate = async (ctx) => {
 };
 
 /**
- * Granularity collapse (T1 slice 4b): for low-complexity work, fold the framing
- * suffix [nextPhase..decomposition] into ONE round-trip producing several
+ * Granularity collapse (T1 slice 4b): for low-complexity work, fold the suffix
+ * [nextPhase .. end of its group] into ONE round-trip producing several
  * artifacts, instead of one gated step per phase. Reads the POST-escalation
  * riskSignal (the escalate-on-evidence intercept may have already raised the
  * tier), so the dial is never frozen at run start — `fine` for medium/high keeps
- * full per-phase isolation. Only collapses a genuine multi-phase suffix.
+ * full per-phase isolation. Only collapses a genuine multi-phase suffix, so a
+ * lone trailing member falls through to its ordinary per-phase step.
  */
-const collapsedFramingGate: ContractGate = (ctx) => {
+const collapsedRoundTripGate: ContractGate = (ctx) => {
   const phase = ctx.nextPhase;
   if (
     phase === null ||
-    roundTripGranularityForTier(ctx.riskSignal?.tier) !== "collapsed" ||
-    !(FRAMING_COLLAPSE_GROUP as readonly string[]).includes(phase)
+    roundTripGranularityForTier(ctx.riskSignal?.tier) !== "collapsed"
   ) {
     return null;
   }
-  const startIdx = FRAMING_COLLAPSE_GROUP.indexOf(
-    phase as (typeof FRAMING_COLLAPSE_GROUP)[number],
-  );
-  const suffix = FRAMING_COLLAPSE_GROUP.slice(startIdx);
+  const group = COLLAPSE_GROUPS.find((g) => g.includes(phase));
+  if (!group) return null;
+  const suffix = group.slice(group.indexOf(phase));
   if (suffix.length <= 1) return null;
-  return { via: "collapsed_framing", phases: [...suffix] };
+  return { via: "collapsed_round_trip", phases: [...suffix] };
 };
 
 /**
@@ -3566,7 +3615,7 @@ const CONTRACT_PIPELINE_GATES: Readonly<Record<string, ContractGate>> = {
   pre_critic_structural: preCriticStructuralGate,
   parallel_module_wave: parallelModuleWaveGate,
   phase_cut_critique: phaseCutCritiqueGate,
-  collapsed_framing_round_trip: collapsedFramingGate,
+  collapsed_round_trip: collapsedRoundTripGate,
   scaffolded_phase: scaffoldedPhaseGate,
 };
 
@@ -4507,48 +4556,3 @@ export async function readContractPipelinePlanningOutputs(
   };
 }
 
-// ── Lean-path extracted plan (the `low` risk tier's plan emission) ────────────
-//
-// The heavy pipeline above derives its `extracted-plan.json` from the adversarial
-// DAG (`source: "contract_pipeline"`). The `low` risk tier skips that design loop
-// (its findings are a handful of concrete, already-grounded fixes) and emits this
-// lean sibling instead, tagged `source: "lean_fast_path"` so the two producers are
-// distinguished at the artifact level. Both rejoin the SAME plan→implement→close
-// machinery — `normalizeExtractedPlan` synthesizes one block per finding and
-// `applyPlanPipeline` merges blocks sharing a file + splits by context budget, so
-// block derivation is single-sourced, not reimplemented here. The retained safety
-// net (grounding re-pass, affected-file hash snapshot, per-node verify-before-merge,
-// final whole-repo gate) still runs; only the adversarial DESIGN loop + obligation
-// derivation are dropped. (Relocated from the retired `steps/leanFastPath.ts` — DD-21.)
-
-/** Source tag stamped on a lean-fast-path extracted plan (distinguishes it from `contract_pipeline`). */
-export const LEAN_FAST_PATH_SOURCE = "lean_fast_path";
-
-/** The minimal `extracted-plan.json` shape the lean path emits. */
-export interface LeanExtractedPlan {
-  plan_id: string;
-  findings: Finding[];
-  project_type: string;
-  source: typeof LEAN_FAST_PATH_SOURCE;
-  candidate_closing_actions: string[];
-}
-
-/**
- * Build the lean extracted plan from the approved findings. Blocks are
- * intentionally omitted: `normalizeExtractedPlan` synthesizes one block per
- * finding and `applyPlanPipeline` then merges blocks sharing a file + splits by
- * context budget — the same deterministic block derivation the contract pipeline
- * feeds into, single-sourced rather than reimplemented here.
- */
-export function buildLeanExtractedPlan(
-  findings: Finding[],
-  planId: string,
-): LeanExtractedPlan {
-  return {
-    plan_id: planId,
-    findings,
-    project_type: "unknown",
-    source: LEAN_FAST_PATH_SOURCE,
-    candidate_closing_actions: ["none"],
-  };
-}

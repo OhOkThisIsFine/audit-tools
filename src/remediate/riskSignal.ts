@@ -23,7 +23,7 @@
  */
 
 import type { Finding } from "audit-tools/shared";
-import { readOptionalJsonFile, writeJsonFile, findingIsGrounded, isRecord, discardOnSchemaVersionMismatch } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, findingIsGrounded, discardOnSchemaVersionMismatch } from "audit-tools/shared";
 import { intakePaths } from "./intake.js";
 
 export const INTAKE_RISK_SIGNAL_SCHEMA_VERSION =
@@ -354,22 +354,21 @@ export function decompositionRiskEvidence(
   return undefined;
 }
 
-// ── Finding-level risk (the low-tier / lean-path eligibility, folded into the dial) ──
+// ── Finding-level risk (folded into the dial) ──
 //
-// The lean fast path is NOT a second, parallel classifier that can DISAGREE with the
-// risk tier (a grounded 5-finding batch touching `src/shared/quota` used to be
-// "fast-path eligible" AND risk-tier `high` — and bypassed the pipeline anyway). It is
-// now the `low` tier's realization: the finding-level simplicity signals below fold
-// INTO the tier as escalate-on-evidence, so a run takes the lean path IFF the effective
-// tier is `low`. These are the finding-QUALITY / coupling signals the path/breadth/intent
-// intake signal doesn't see; a failing signal raises the tier so the change routes to the
-// full contract pipeline. Fail-closed like every other risk input.
+// The tier is the SINGLE classifier, and the only thing it selects is DEPTH. There is
+// no separate eligibility boolean that could DISAGREE with it, and no path that skips
+// the pipeline: a `low` tier traverses the SAME pipeline shallowly. The finding-level
+// simplicity signals below fold INTO the tier as escalate-on-evidence — these are the
+// finding-QUALITY / coupling signals the path/breadth/intent intake signal doesn't see,
+// and a failing signal raises the tier so the change is traversed at full depth.
+// Fail-closed like every other risk input.
 
 /**
- * Max findings a `low`-tier (lean) run will take — "a handful". Above this, the
- * coordination risk of the batch warrants at least `medium` (the full pipeline).
+ * Max findings a `low`-tier run will take — "a handful". Above this, the
+ * coordination risk of the batch warrants at least `medium` (full depth).
  */
-export const MAX_FAST_PATH_FINDINGS = 5;
+export const MAX_LOW_TIER_FINDINGS = 5;
 
 /**
  * Max DISTINCT affected files across the approved set for a `low`-tier run. A small
@@ -377,7 +376,7 @@ export const MAX_FAST_PATH_FINDINGS = 5;
  * (Aligned with the intake breadth threshold `DEFAULT_MEDIUM_FILE_COUNT = 6`, so >5
  * files is `medium` by both the intake signal and this finding-level check.)
  */
-export const MAX_FAST_PATH_FILES = 5;
+export const MAX_LOW_TIER_FILES = 5;
 
 /** Distinct affected-file paths across a finding set. */
 export function distinctAffectedFiles(findings: Finding[]): string[] {
@@ -396,13 +395,13 @@ export function distinctAffectedFiles(findings: Finding[]): string[] {
  * Derive escalate-on-evidence from the APPROVED finding set's finding-level quality /
  * coupling signals — the dimension the intake path/breadth/intent signal does not
  * capture. Any signal that carries design-level doubt raises the tier so the run leaves
- * the `low` (lean) tier for the full contract pipeline:
+ * the `low` tier and is traversed at full depth:
  *   - a `systemic` finding, or an `architecture`-lens finding ⇒ `high` (design-level);
  *   - an ungrounded finding, a below-high-confidence finding, a finding coupled to
- *     related findings (seam risk), more than {@link MAX_FAST_PATH_FINDINGS} findings,
- *     or more than {@link MAX_FAST_PATH_FILES} distinct affected files ⇒ `medium`.
+ *     related findings (seam risk), more than {@link MAX_LOW_TIER_FINDINGS} findings,
+ *     or more than {@link MAX_LOW_TIER_FILES} distinct affected files ⇒ `medium`.
  * Returns undefined when the set is a clean handful of grounded, high-confidence,
- * localized, non-coupled fixes (the tier stays `low` ⇒ lean). Pure + deterministic;
+ * localized, non-coupled fixes (the tier stays `low`). Pure + deterministic;
  * the {@link escalateRiskSignal} combinator enforces raise-only. Mirrors
  * {@link decompositionRiskEvidence}'s shape — evidence, never a direct tier write.
  */
@@ -421,15 +420,15 @@ export function findingRiskEvidence(
     highReasons.push(`architecture-lens (design-level): ${architectural.map((f) => f.id).join(", ")}`);
   }
 
-  if (findings.length > MAX_FAST_PATH_FINDINGS) {
+  if (findings.length > MAX_LOW_TIER_FINDINGS) {
     mediumReasons.push(
-      `${findings.length} findings exceeds the ${MAX_FAST_PATH_FINDINGS}-finding low-tier cap`,
+      `${findings.length} findings exceeds the ${MAX_LOW_TIER_FINDINGS}-finding low-tier cap`,
     );
   }
   const fileCount = distinctAffectedFiles(findings).length;
-  if (fileCount > MAX_FAST_PATH_FILES) {
+  if (fileCount > MAX_LOW_TIER_FILES) {
     mediumReasons.push(
-      `${fileCount} affected files exceeds the ${MAX_FAST_PATH_FILES}-file low-tier cap`,
+      `${fileCount} affected files exceeds the ${MAX_LOW_TIER_FILES}-file low-tier cap`,
     );
   }
   const ungrounded = findings.filter((f) => !findingIsGrounded(f));
@@ -497,68 +496,4 @@ export async function ensureIntakeRiskSignal(
   const signal = computeIntakeRiskSignal(await resolveInput());
   await writeIntakeRiskSignal(artifactsDir, signal);
   return signal;
-}
-
-// ── Low-tier light adversarial review floor (T1 slice 3b) ─────────────────────
-//
-// The `low` risk tier does NOT skip adversarial scrutiny — that would be a
-// zero-scrutiny fork, and remediation legitimately catches upstream (audit)
-// errors. Instead a low-tier run runs ONE bounded LIGHT adversarial pass over the
-// approved findings (the floor: light, never off — `adversarialDepthForTier("low")
-// === "light"`, above) before the lean plan is trusted. A `clear` verdict proceeds
-// to the lean plan; a verdict surfacing a real concern ESCALATES the run (evidence
-// the change is harder than assessed) and routes it to the full contract pipeline.
-// The verdict is a mechanical on-disk gate, NOT a "please self-check" instruction
-// the host might ignore. (Relocated from the retired `steps/leanFastPath.ts`, whose
-// filename read as a vestige of the pre-fold "separate lean path" era — DD-21.)
-
-export const LEAN_LIGHT_REVIEW_SCHEMA_VERSION =
-  "remediate-code-lean-light-review/v1alpha1" as const;
-
-export type LeanLightReviewDisposition = "clear" | "escalate";
-
-/**
- * Interpret a host-written light-review verdict, fail-safe toward escalation:
- * any malformed / ambiguous verdict, or an `escalate` with no stated concern,
- * routes to the full pipeline. The floor must never silently pass — when in
- * doubt, escalate (a wrong call costs extra pipeline work, never skipped review).
- */
-export function interpretLeanLightReviewVerdict(raw: unknown): {
-  disposition: LeanLightReviewDisposition;
-  concerns: string[];
-} {
-  if (!isRecord(raw)) {
-    return { disposition: "escalate", concerns: ["unreadable light-review verdict"] };
-  }
-  // Schema-version gate: a verdict that does not carry the exact expected
-  // schema_version is not a trustworthy light-review emission (it may be a stale,
-  // mis-shaped, or wrong-contract artifact). Fail safe toward escalation rather
-  // than trusting an unversioned `clear`.
-  if (raw.schema_version !== LEAN_LIGHT_REVIEW_SCHEMA_VERSION) {
-    return {
-      disposition: "escalate",
-      concerns: [
-        `light-review verdict schema_version must be "${LEAN_LIGHT_REVIEW_SCHEMA_VERSION}"`,
-      ],
-    };
-  }
-  const concerns = Array.isArray(raw.concerns)
-    ? raw.concerns.filter((c): c is string => typeof c === "string")
-    : [];
-  if (raw.disposition === "clear") {
-    return { disposition: "clear", concerns: [] };
-  }
-  if (raw.disposition === "escalate") {
-    return {
-      disposition: "escalate",
-      concerns:
-        concerns.length > 0
-          ? concerns
-          : ["light review escalated without a stated concern"],
-    };
-  }
-  return {
-    disposition: "escalate",
-    concerns: ["light-review verdict missing a valid disposition"],
-  };
 }

@@ -58,8 +58,6 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "intake-clarifications.json",
   "intake-summary.json",
   "intent_checkpoint.json",
-  "lean_light_review_decision.json",
-  "lean_light_review_verdict.json",
   "pending-audit-tasks.json",
   "phase.lock",
   "remediation-brief.md",
