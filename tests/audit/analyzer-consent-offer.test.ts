@@ -158,7 +158,6 @@ describe("persistAnalyzerConsent — decisions durable, tokens never", () => {
     mkdirSync(auditDir, { recursive: true });
     writeFileSync(sessionConfigPath, sessionConfigBytes, "utf8");
 
-    await persistAnalyzerConsent(root, { eslint: "granted" });
     await persistAnalyzerConsent(root, { knip: "declined" });
     const cfg = JSON.parse(
       readFileSync(getAnalyzerPolicyPath(root), "utf8"),
@@ -166,7 +165,7 @@ describe("persistAnalyzerConsent — decisions durable, tokens never", () => {
       analyzer_consent?: Record<string, string>;
       external_acquisition?: unknown;
     };
-    expect(cfg.analyzer_consent).toEqual({ eslint: "granted", knip: "declined" });
+    expect(cfg.analyzer_consent).toEqual({ knip: "declined" });
     expect(JSON.stringify(cfg)).not.toContain("consent_token");
     expect(readFileSync(sessionConfigPath, "utf8")).toBe(sessionConfigBytes);
   });
@@ -219,15 +218,18 @@ describe("the consent gate refuses a submission it understands nothing in", () =
   const driveConsentGate = async (root: string) => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     mkdirSync(artifactsDir, { recursive: true });
+    // Held so a test can observe BOTH halves of the split: what the gate
+    // persisted, and what it folded into this run's consent token.
+    const externalAcquisition: {
+      enabled: boolean;
+      consentToken?: { value: string; tools: readonly string[] };
+    } = { enabled: true };
     return {
       artifactsDir,
+      externalAcquisition,
       run: () =>
         handleAnalyzerConsentBranch(
-          {
-            root,
-            artifactsDir,
-            externalAcquisition: { enabled: true },
-          },
+          { root, artifactsDir, externalAcquisition } as never,
           {} as never,
           { status: "active", obligations: [] } as never,
           { value: undefined },
@@ -265,15 +267,25 @@ describe("the consent gate refuses a submission it understands nothing in", () =
 
   it("partial recognition still applies the real decisions, naming the ignored keys on the record", async () => {
     const root = nodeRepo();
-    const { artifactsDir, run } = await driveConsentGate(root);
+    const { artifactsDir, externalAcquisition, run } = await driveConsentGate(root);
     plant(artifactsDir, { eslint: "granted", knip: "maybe" });
 
     expect((await run()).action).toBe("continue");
 
+    // The grant IS applied — to this run, via the scoped consent token, which is
+    // the only channel a grant travels on. It must NOT reach the durable policy:
+    // a standing grant would keep admitting eslint for operators who never saw
+    // the offer.
+    expect(externalAcquisition.consentToken?.tools).toEqual(["eslint"]);
+    expect(externalAcquisition.consentToken?.value).toBeTruthy();
+
     const policy = JSON.parse(readFileSync(getAnalyzerPolicyPath(root), "utf8")) as {
       analyzer_consent?: Record<string, string>;
     };
-    expect(policy.analyzer_consent).toEqual({ eslint: "granted" });
+    expect(
+      policy.analyzer_consent ?? {},
+      "a grant must leave nothing durable behind",
+    ).toEqual({});
 
     const accepted = (await readSubmissionLedger(artifactsDir)).filter(
       (event) => event.kind === "accepted",

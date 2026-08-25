@@ -205,8 +205,12 @@ export interface AcquisitionRunner {
   (argv: string[], cwd: string): Promise<RunTrackedResult>;
 }
 
-/** A recorded, durable operator decision for one analyzer. */
-export type AnalyzerConsentDecision = "granted" | "declined";
+/**
+ * A recorded, durable operator decision for one analyzer. DECLINE ONLY — a grant
+ * binds one run and rides the per-run {@link AnalyzerConsentTokenGrant}, so it
+ * has no durable form to be recorded in.
+ */
+export type AnalyzerConsentDecision = "declined";
 
 /** The recorded decisions, keyed by candidate id, as loaded from the durable policy. */
 export type AnalyzerConsentDecisions = Record<string, AnalyzerConsentDecision>;
@@ -228,10 +232,11 @@ export interface AnalyzerConsentTokenGrant {
 export interface AcquisitionEngineOptions {
   /**
    * Per-run, tool-SCOPED consent grant. REQUIRED to spawn any non-DEFAULT candidate
-   * (and any candidate whose setting is ephemeral/permanent) that has no recorded
-   * "granted" decision. Absent ⇒ only the DEFAULT set runs; everything else is
-   * reported `skipped` with a consent note. A grant admits ONLY the candidates it
-   * names — and NEVER overrides a recorded "declined".
+   * (and any candidate whose setting is ephemeral/permanent). It is the ONLY way a
+   * grant is expressed — there is no durable granted decision. Absent ⇒ only the
+   * DEFAULT set runs; everything else is reported `skipped` with a consent note.
+   * A grant admits ONLY the candidates it names — and NEVER overrides a recorded
+   * "declined".
    */
   consentToken?: AnalyzerConsentTokenGrant;
   /** Per-analyzer settings (auto|ephemeral|permanent|skip|repo). */
@@ -308,8 +313,9 @@ function consentTokenAdmits(
  * default-set member, and no token can override it. It also outranks
  * `setting=skip`: both refuse, but only one of them is the operator's own decision,
  * and the REASON is what tells them so. Only then: `skip`, then the DEFAULT set
- * runs unprompted, a recorded `"granted"` admits, and finally a consent token
- * admits the candidate it was issued for.
+ * runs unprompted, and finally a consent token admits the candidate it was
+ * issued for. There is deliberately no durable-grant arm: consent that outlives
+ * its run is consent an operator never gave.
  */
 export function admitSpawn(
   candidate: ExternalAnalyzerCandidate,
@@ -323,7 +329,6 @@ export function admitSpawn(
   if (recordedDecision === "declined") return ANALYZER_DENIAL_REASONS.consent_declined;
   if (setting === "skip") return ANALYZER_DENIAL_REASONS.setting_skip;
   if (candidate.defaultRun) return undefined;
-  if (recordedDecision === "granted") return undefined;
   const tokenVerdict = consentTokenAdmits(consentToken, candidate.id);
   if (tokenVerdict === "admit") return undefined;
   if (tokenVerdict === "out_of_scope") return ANALYZER_DENIAL_REASONS.consent_token_scope;

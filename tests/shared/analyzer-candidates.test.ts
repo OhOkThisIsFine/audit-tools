@@ -816,9 +816,9 @@ test("inv-1: a recorded 'declined' vetoes the spawn BEFORE the token and BEFORE 
   ).toBe("string");
   // …and the positive controls still admit, so the veto is not just "deny everything".
   expect(admitSpawn(engineCandidate({ defaultRun: true }), "auto", undefined)).toBe(undefined);
-  expect(admitSpawn(engineCandidate({ defaultRun: false }), "auto", undefined, "granted")).toBe(
-    undefined,
-  );
+  expect(
+    admitSpawn(engineCandidate({ defaultRun: false }), "auto", grantFor("eslint")),
+  ).toBe(undefined);
 });
 
 test("inv-2: declined and undecided are DISTINCT reasons, and the reason reaches the status record", async () => {

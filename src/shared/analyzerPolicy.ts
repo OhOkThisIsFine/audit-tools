@@ -19,7 +19,19 @@ export const ANALYZER_POLICY_RELATIVE_PATH =
 const ANALYZER_POLICY_LOCK_RELATIVE_PATH =
   ".audit-tools/audit/analyzer-policy.lock" as const;
 
-export const AnalyzerConsentDecisionSchema = z.enum(["granted", "declined"]);
+/**
+ * The DURABLE analyzer decision. Deliberately a one-member enum: a decline is
+ * the only analyzer answer that outlives the run that was asked.
+ *
+ * An operator's grant binds THE RUN THAT WAS ASKED and nothing else (owner
+ * directive, 2026-08-21). A durable grant silently keeps granting itself to
+ * later runs whose operator never saw the offer — and for a network-egress
+ * analyzer that converts one consent into standing consent. A grant therefore
+ * travels on the per-run consent TOKEN, which the strict schema below cannot
+ * hold; there is no shape here for it to be written into, so the rule is
+ * enforced by the type rather than remembered.
+ */
+export const AnalyzerConsentDecisionSchema = z.enum(["declined"]);
 export type AnalyzerConsentDecision = z.infer<
   typeof AnalyzerConsentDecisionSchema
 >;
@@ -132,8 +144,8 @@ export async function persistAnalyzerSettings(
 }
 
 /**
- * Durably merge consent decisions. The API accepts decisions only; a per-run
- * consent token is neither accepted nor representable in the strict artifact.
+ * Durably merge consent DECLINES. Neither a grant nor a per-run consent token is
+ * accepted or representable here — see {@link AnalyzerConsentDecisionSchema}.
  */
 export async function persistAnalyzerConsent(
   repositoryRoot: string,

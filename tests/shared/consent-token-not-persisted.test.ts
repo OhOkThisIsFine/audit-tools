@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   AnalyzerPolicySchema,
+  AnalyzerConsentDecisionSchema,
   SessionIntentV1Schema,
   getAnalyzerPolicyPath,
   loadAnalyzerPolicy,
@@ -72,7 +73,7 @@ describe("persisted schemas admit no acquisition consent token", () => {
     "the analyzer-policy schema rejects a %s field",
     (key) => {
       const parsed = AnalyzerPolicySchema.safeParse({
-        analyzer_consent: { eslint: "granted" },
+        analyzer_consent: { eslint: "declined" },
         [key]: "tok",
       });
       expect(parsed.success).toBe(false);
@@ -95,7 +96,7 @@ describe("the analyzer-policy store never lets a token become durable", () => {
   it("persists decisions and settings without any token-shaped key", async () => {
     const root = await makeRoot();
     await persistAnalyzerSettings(root, { eslint: "permanent" });
-    await persistAnalyzerConsent(root, { eslint: "granted" });
+    await persistAnalyzerConsent(root, { eslint: "declined" });
 
     const raw = await readFile(getAnalyzerPolicyPath(root), "utf8");
     expect(raw).not.toMatch(TOKEN_KEY_PATTERN);
@@ -106,7 +107,7 @@ describe("the analyzer-policy store never lets a token become durable", () => {
     }
     expect(parsed).toEqual({
       analyzers: { eslint: "permanent" },
-      analyzer_consent: { eslint: "granted" },
+      analyzer_consent: { eslint: "declined" },
     });
   });
 
@@ -117,12 +118,50 @@ describe("the analyzer-policy store never lets a token become durable", () => {
     await writeFile(
       policyPath,
       JSON.stringify({
-        analyzer_consent: { eslint: "granted" },
+        analyzer_consent: { eslint: "declined" },
         consentToken: "tok",
       }),
       "utf8",
     );
 
     await expect(loadAnalyzerPolicy(root)).rejects.toThrow(/consentToken/u);
+  });
+});
+
+/**
+ * The sibling guarantee, and the one an operator's egress exposure actually
+ * rests on: a GRANT is not persistable either.
+ *
+ * A decline is durable — it vetoes every later spawn of that tool. A grant binds
+ * the run that was asked (owner directive, 2026-08-21). A durable grant keeps
+ * granting itself to runs whose operator never saw the offer, which for a
+ * network-egress analyzer converts one consent into standing consent.
+ *
+ * That rule is enforced by the SCHEMA, not by a caller remembering it:
+ * `AnalyzerConsentDecisionSchema` is a one-member enum, and the analyzer-policy
+ * store re-validates on write. Re-widening it to accept "granted" turns this red.
+ */
+describe("a consent GRANT is not durable either", () => {
+  it("refuses to persist a granted decision, and leaves the prior policy intact", async () => {
+    const root = await makeRoot();
+    await persistAnalyzerConsent(root, { knip: "declined" });
+
+    await expect(
+      // `as never` defeats the compile-time half deliberately: the point is that
+      // the RUNTIME schema refuses it too, so a JS caller or a hand-edited
+      // artifact cannot smuggle a standing grant in.
+      persistAnalyzerConsent(root, { eslint: "granted" as never }),
+    ).rejects.toThrow();
+
+    const policy = await loadAnalyzerPolicy(root);
+    expect(
+      policy.analyzer_consent,
+      "the refused write must not partially land",
+    ).toEqual({ knip: "declined" });
+  });
+
+  it("the decision schema admits declines only", () => {
+    expect(AnalyzerConsentDecisionSchema.safeParse("declined").success).toBe(true);
+    expect(AnalyzerConsentDecisionSchema.safeParse("granted").success).toBe(false);
   });
 });

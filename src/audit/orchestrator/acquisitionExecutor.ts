@@ -1,6 +1,10 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
-import type { AnalyzerSetting, AnalyzerConsentTokenGrant } from "audit-tools/shared";
+import type {
+  AnalyzerSetting,
+  AnalyzerConsentTokenGrant,
+  AnalyzerConsentDecisions,
+} from "audit-tools/shared";
 import {
   runAcquisitionEngine,
   resolveBinaryCandidates,
@@ -46,7 +50,7 @@ export interface ExternalAcquisitionAdvanceOptions {
    * "granted" admits a non-default candidate without a per-run grant; a
    * recorded "declined" is terminal — no grant overrides it.
    */
-  analyzerConsent?: Record<string, "granted" | "declined">;
+  analyzerConsent?: AnalyzerConsentDecisions;
   /** Override the binary cache dir / platform / arch (tests). */
   cacheDir?: string;
   platform?: NodeJS.Platform;

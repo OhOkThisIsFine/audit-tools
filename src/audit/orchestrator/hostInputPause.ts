@@ -1,3 +1,4 @@
+import type { AnalyzerConsentDecisions } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type {
   AnalyzerConsentTokenGrant,
@@ -33,7 +34,7 @@ export interface HostInputPauseInputs {
   /** Item B: acquisition gate — the consent fold only fires when acquisition is live. */
   externalAcquisitionEnabled?: boolean;
   /** Item B: recorded per-candidate consent decisions (session config). */
-  analyzerConsent?: Record<string, "granted" | "declined">;
+  analyzerConsent?: AnalyzerConsentDecisions;
   /**
    * Item B: a per-run, tool-SCOPED consent grant. Typed as the
    * {@link AnalyzerConsentTokenGrant} shape — never a bare string — so the

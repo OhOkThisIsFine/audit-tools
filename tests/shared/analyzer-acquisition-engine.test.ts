@@ -97,8 +97,9 @@ test("admitSpawn: CE-005 revised — non-default tool needs a SCOPED grant OR re
   expect(typeof admitSpawn(c, "permanent", undefined) === "string").toBeTruthy();
   // With a grant NAMING this tool: admitted
   expect(admitSpawn(c, "permanent", grantFor("eslint", "consent-xyz"))).toBe(undefined);
-  // With recorded "granted": admitted (even without a grant)
-  expect(admitSpawn(c, "permanent", undefined, "granted")).toBe(undefined);
+  // There is NO durable-grant arm any more: a grant binds the run that was
+  // asked and rides the per-run token above, so "granted" is not even a
+  // representable recorded decision (owner directive, 2026-08-21).
   // With recorded "declined" but no grant: denied
   expect(typeof admitSpawn(c, "permanent", undefined, "declined") === "string").toBeTruthy();
 });

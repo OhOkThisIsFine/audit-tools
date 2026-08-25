@@ -6,6 +6,7 @@
  * concern.
  */
 
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -415,12 +416,37 @@ export async function handleAnalyzerConsentBranch(
     return { action: "continue" };
   }
   if (incoming.status === "ok") {
-    await persistAnalyzerConsent(params.root, incoming.values);
+    // The operator answers grants and declines on ONE lane, but the two have
+    // different lifetimes and the split is enforced here rather than trusted.
+    // A DECLINE is durable: it vetoes every later spawn of that tool. A GRANT
+    // binds only the run that asked (owner directive, 2026-08-21) — a durable
+    // grant keeps granting itself to runs whose operator never saw the offer,
+    // which for a network-egress analyzer turns one consent into standing
+    // consent. Grants therefore ride the per-run consent TOKEN, the channel the
+    // strict policy schema cannot hold.
+    const declined: Record<string, "declined"> = {};
+    const granted: string[] = [];
+    for (const [id, decision] of Object.entries(incoming.values)) {
+      if (decision === "declined") declined[id] = "declined";
+      else granted.push(id);
+    }
+    await persistAnalyzerConsent(params.root, declined);
     if (params.externalAcquisition) {
       params.externalAcquisition.analyzerConsent = {
         ...(params.externalAcquisition.analyzerConsent ?? {}),
-        ...incoming.values,
+        ...declined,
       };
+      if (granted.length > 0) {
+        const existing = params.externalAcquisition.consentToken;
+        params.externalAcquisition.consentToken = {
+          value: existing?.value ?? randomUUID(),
+          // Scoped, never run-wide: the grant names exactly the ids the
+          // operator was offered and answered.
+          tools: [...new Set([...(existing?.tools ?? []), ...granted])].sort(
+            (a, b) => (a < b ? -1 : a > b ? 1 : 0),
+          ),
+        };
+      }
     }
     await unlink(incoming.path).catch(() => {});
     await recordLaneOutcome(params.artifactsDir, GATE_LANES.analyzer_consent, {
