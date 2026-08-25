@@ -613,22 +613,6 @@
   imports it. Auditor-agnostic rule exactly — it worked only when the DAG author happened to restate
   every declared value in the node description. [[enforce-robustness-in-tooling-not-host-discretion]]
 
-- **A delegated step prompt can turn its executor into a second driver (2026-07-16,
-  tool-should-decide, medium).** A host worker given one bounded `charter_extraction` prompt followed
-  that prompt's embedded `next-step` command and advanced the workflow itself. The same happened in a
-  later `systemic_challenge` round. The advance command belongs to the driver, not to the material a
-  bounded executor receives. [[enforce-robustness-in-tooling-not-host-discretion]]
-  **SPEC — the advance command goes in the DRIVER-facing artifact only, never in the worker-facing prompt.**
-  Each step already emits two things: a machine step contract the driver consumes, and a prompt document
-  the executor reads. The advance command belongs exclusively to the first. An executor handed a prompt
-  with no advance command in it has nothing to obey — the failure stops being a matter of whether the
-  worker follows instructions, which is the only way to fix it, since every attempted prompt-text
-  mitigation has worked only for as long as someone remembered to write it. **Property to hold:** loop
-  advancement is not expressible from the material a delegated executor is given. ⚠ Do not reach for an
-  out-of-band control channel or an agent-identity check on the advance command — both are real designs,
-  but they add a mechanism to defend a boundary that simply removing the text from one document already
-  makes unreachable. Prefer the change that makes the process simpler.
-
 - **Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16,
   ambiguous-direction, low-medium).** The defect was found BY the run, and committing its fix changed
   the audited tree → staleness correctly marked the planning chain stale and restarted from

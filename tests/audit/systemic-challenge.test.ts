@@ -333,6 +333,12 @@ describe("renderSecondOrderAdversaryPrompt", () => {
     expect(prompt).toMatch(/true lens/i);
     // The metrics are flagged as supporting-but-not-sufficient evidence.
     expect(prompt).toMatch(/necessary, NOT sufficient/i);
+    // The lane is advance-free — a 2026-07-16 systemic_challenge worker
+    // followed an embedded next-step command and advanced the loop itself;
+    // the always-materialized fan-out (2625563f) removed the command from
+    // lane prompts. Mirror of the charter pin in
+    // charter-extraction-executor.test.ts.
+    expect(prompt).not.toContain("next-step");
   });
 });
 
