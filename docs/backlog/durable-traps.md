@@ -166,6 +166,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'` or the PowerShell tool. The failure is silent: the
   callee reports a sensible-sounding error about the mangled value, so the wrong conclusion is the
   DEFAULT one. Verify a "that command does not exist" answer against the binary before believing it.
+  Same class, own spelling: `cmd /c "…"` arrives as `cmd C:/c`, so cmd opens an interactive banner
+  and runs nothing — double the slash (`cmd //c`) to reach cmd.exe from the Bash tool at all.
 
 - **Concurrent agent sessions can share the ONE primary checkout (2026-07-23).** Two live
   sessions worked `C:\Code\audit-tools` simultaneously: files changed under each other mid-turn,
