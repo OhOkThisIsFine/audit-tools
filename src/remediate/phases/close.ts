@@ -1,6 +1,5 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import { spawnSync } from "node:child_process";
 import { dirname, extname, isAbsolute, join, relative } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import {
@@ -15,6 +14,9 @@ import {
   writeTextFile,
   RemediationOutcomeStatusSchema,
   countBy,
+  commandLeavesDeclaredShape,
+  parseCommandString,
+  runTrackedAsync,
 } from "audit-tools/shared";
 import type {
   AgentReflection,
@@ -27,7 +29,6 @@ import type {
   VerificationTraceEntry,
 } from "audit-tools/shared";
 import { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "audit-tools/shared";
-import { runTracked } from "audit-tools/shared";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import { verifyAnalyzerLeads } from "./closeVerifyAnalyzerLeads.js";
 import type { ClosingAction } from "../state/closingActions.js";
@@ -548,7 +549,7 @@ function trimOutput(value: unknown): string | undefined {
 
 function commandResult(
   command: string[],
-  result: ReturnType<typeof runTracked>,
+  result: Awaited<ReturnType<typeof runTrackedAsync>>,
 ): ClosingCommandResult {
   return {
     command,
@@ -558,14 +559,29 @@ function commandResult(
   };
 }
 
-function runTrackedCommand(
+/**
+ * Spawn ONE closing-action command.
+ *
+ * ASYNC, for the same reason {@link runCombinedTestSuite} is, and it is not an
+ * ornament: every closing command runs inside `advanceUnderPhaseLock`, with the
+ * phase lock HELD. That lock's soundness rests on a `setInterval` mtime
+ * heartbeat — a lock whose mtime stops advancing for ~30s is classified stale
+ * and STOLEN by a second acquirer. A synchronous child blocks the event loop for
+ * the entire spawn, so the heartbeat cannot fire, and the closing commands are
+ * exactly the long ones: `git push` over the network, `gh pr create`, `npm
+ * publish`, and an operator-authored `custom_command` of arbitrary duration. Any
+ * one of them could out-sit the stale threshold and have the run's own lock
+ * taken out from under it mid-close. Awaiting {@link runTrackedAsync} keeps the
+ * loop turning for the whole command, so the heartbeat keeps the lock live.
+ */
+async function runTrackedCommand(
   root: string,
   command: string,
   args: string[],
-): ClosingCommandResult {
-  const result = runTracked([command, ...args], {
+): Promise<ClosingCommandResult> {
+  const result = await runTrackedAsync([command, ...args], {
     cwd: root,
-    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
   return commandResult([command, ...args], result);
 }
@@ -827,10 +843,17 @@ function checkClosingPreview(
   };
 }
 
-export function executeClosingAction(
+/**
+ * Execute the run's closing action.
+ *
+ * ASYNC because every command it spawns is awaited — see
+ * {@link runTrackedCommand} for why a synchronous child under the held phase
+ * lock is a liveness hazard rather than a style preference.
+ */
+export async function executeClosingAction(
   state: RemediationState,
   options: OrchestratorOptions,
-): ClosingResult {
+): Promise<ClosingResult> {
   const action = state.closing_plan!.action;
   if (action === "none") {
     return {
@@ -842,8 +865,8 @@ export function executeClosingAction(
   }
 
   const commands: ClosingCommandResult[] = [];
-  const run = (command: string, args: string[]): boolean => {
-    const result = runTrackedCommand(options.root, command, args);
+  const run = async (command: string, args: string[]): Promise<boolean> => {
+    const result = await runTrackedCommand(options.root, command, args);
     commands.push(result);
     return isSuccess(result);
   };
@@ -879,20 +902,28 @@ export function executeClosingAction(
     }
     const commitMessage = state.closing_plan!.closing_action_preview?.commit_message
       ?? generateCommitMessage(state);
+    // Awaited stepwise so the `&&` short-circuit survives the async migration:
+    // a promise is truthy, so a bare `a() && b()` over async runs would have
+    // run BOTH commands and dropped the failure gate.
     const committed =
-      run("git", ["add", "--", ...files]) &&
-      run("git", ["commit", "-m", commitMessage]);
+      (await run("git", ["add", "--", ...files])) &&
+      (await run("git", ["commit", "-m", commitMessage]));
     if (committed && action === "push") {
-      run("git", ["push"]);
+      await run("git", ["push"]);
     } else if (committed && action === "open-pr") {
-      run("git", ["push"]) && run("gh", ["pr", "create", "--fill"]);
+      if (await run("git", ["push"])) {
+        await run("gh", ["pr", "create", "--fill"]);
+      }
     }
   } else if (action === "publish") {
-    run("npm", ["publish"]);
+    await run("npm", ["publish"]);
   } else if (action === "tag") {
-    run("git", ["tag", "auto-remediation"]);
+    await run("git", ["tag", "auto-remediation"]);
   } else if (action === "custom" && state.closing_plan!.custom_command?.length) {
-    run(state.closing_plan!.custom_command[0], state.closing_plan!.custom_command.slice(1));
+    await run(
+      state.closing_plan!.custom_command[0],
+      state.closing_plan!.custom_command.slice(1),
+    );
   }
 
   return {
@@ -929,11 +960,39 @@ export interface CombinedTestResult {
  * `ran` is what lets a caller (buildVerificationReport's trace) tell the two
  * apart rather than rendering "combined test suite passed" for a suite that
  * never executed.
+ *
+ * The declared command passes the single-invocation shape gate BEFORE any
+ * spawn — the same rule that guards a block's `targeted_commands`. A command
+ * that chains, redirects or substitutes is REFUSED as a non-run
+ * (`ran:false, passed:false`), never executed and never silently treated as a
+ * pass, so a malformed suite declaration fails the close rather than handing a
+ * shell an extra process.
+ *
+ * ⚠ BEHAVIOUR CHANGE, and a NARROWING — declarations this used to run now fail
+ * the close instead. The gate refuses `' \ ^ % $` and backtick in EVERY
+ * position, so two shapes that `shell: true` accepted are now refused outright:
+ *
+ *   - an absolute Windows interpreter/script path (`C:\Program
+ *     Files\nodejs\node.exe …`) — backslashes;
+ *   - a single-quoted argument (`pytest -k 'not slow'`, `node -e "x('y')"`).
+ *
+ * Both are re-expressible: use the bare shim name (`node`, `npm`) and let
+ * `resolveExecArgv` find it, and pass an argument as a DOUBLE-quoted token
+ * rather than a nested single-quoted literal. The refusal is deliberate — a
+ * declaration whose meaning depends on which shell reads it is exactly what the
+ * shape rule exists to reject — but it IS a migration for anyone whose
+ * `test_command` / `e2e_command` carries either shape.
+ *
+ * ASYNC, and that is the point: the close phase holds the state lock across
+ * this call, and a synchronous child blocks the event loop for the whole spawn
+ * — starving the lock's own mtime heartbeat until a live lock reads as stale
+ * and is stolen mid-close. Awaiting {@link runTrackedAsync} keeps the loop
+ * turning for the entire suite.
  */
-export function runCombinedTestSuite(
+export async function runCombinedTestSuite(
   state: RemediationState,
   options: OrchestratorOptions,
-): CombinedTestResult {
+): Promise<CombinedTestResult> {
   console.log("Running full test suite on combined post-remediation state...");
   if (!state.plan?.test_command) {
     return { ran: false, passed: true, duration_ms: 0, output: "" };
@@ -941,13 +1000,23 @@ export function runCombinedTestSuite(
   const suiteName = Array.isArray(state.plan.test_command)
     ? state.plan.test_command.join(" ")
     : state.plan.test_command;
+
+  if (commandLeavesDeclaredShape(suiteName)) {
+    return {
+      ran: false,
+      passed: false,
+      suite_name: suiteName,
+      duration_ms: 0,
+      output: `refused: the declared test_command leaves the single-invocation command shape: ${suiteName}`,
+    };
+  }
+
   const startedAt = Date.now();
-  // Windows-aware: force-hide the console window a windowless parent would
-  // otherwise pop for this shell child (former `runShellCommand` default).
-  const result = spawnSync(state.plan.test_command, {
+  // argv, never a shell string: the shape gate admits only single invocations,
+  // and `resolveExecArgv` inside the shared runner is what makes an `npm`/`npx`
+  // shim resolve on win32 without one.
+  const result = await runTrackedAsync(parseCommandString(suiteName), {
     cwd: options.root,
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: true,
     windowsHide: true,
   });
   const durationMs = Date.now() - startedAt;
@@ -1058,23 +1127,36 @@ export interface E2eTestResult {
  * per-block) because interdependent refactors can break e2e flows even when
  * per-item unit tests pass. Returns `{ ran: false }` when no e2e_command is
  * configured. Never throws — failure is returned as `passed: false`.
+ *
+ * Shape-gated and async for the same two reasons as
+ * {@link runCombinedTestSuite}: a declaration that leaves the single-invocation
+ * shape is REFUSED as a non-run rather than handed to a shell, and the spawn is
+ * awaited so the state lock's heartbeat keeps beating while e2e runs.
  */
-function runE2eTests(
+async function runE2eTests(
   state: RemediationState,
   options: OrchestratorOptions,
-): E2eTestResult {
+): Promise<E2eTestResult> {
   if (!state.plan?.e2e_command) {
     return { ran: false, passed: true, output: "" };
   }
+
+  if (commandLeavesDeclaredShape(state.plan.e2e_command)) {
+    return {
+      ran: false,
+      passed: false,
+      output: `refused: the declared e2e_command leaves the single-invocation command shape: ${state.plan.e2e_command}`,
+    };
+  }
+
   console.log("Running end-to-end tests on combined post-remediation state...");
-  // Windows-aware: force-hide the console window a windowless parent would
-  // otherwise pop for this shell child (former `runShellCommand` default).
-  const e2eResult = spawnSync(state.plan.e2e_command, {
-    cwd: options.root,
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: true,
-    windowsHide: true,
-  });
+  const e2eResult = await runTrackedAsync(
+    parseCommandString(state.plan.e2e_command),
+    {
+      cwd: options.root,
+      windowsHide: true,
+    },
+  );
   const e2ePassed = e2eResult.status === 0;
   if (!e2ePassed) {
     const e2eOutput = (
@@ -1714,7 +1796,7 @@ export async function runClosePhase(
   }
 
   // 2. Run the full test suite; on failure re-block resolved items and triage.
-  const combinedTest = runCombinedTestSuite(state, options);
+  const combinedTest = await runCombinedTestSuite(state, options);
   if (!combinedTest.passed) {
     console.log("Full test suite failed. Transitioning back to triage.");
     if (blockResolvedItemsOnCombinedFailure(state, combinedTest.output)) {
@@ -1779,7 +1861,7 @@ export async function runClosePhase(
   // on, never unconditionally (a failure with zero verified-complete items has
   // nothing to re-block, so an unconditional triage transition would enter a
   // state with no newly-blocked item to drive it forward).
-  const e2eResult = runE2eTests(state, options);
+  const e2eResult = await runE2eTests(state, options);
   if (!e2eResult.passed) {
     console.log("End-to-end tests failed. Transitioning back to triage.");
     if (blockResolvedItemsOnCombinedFailure(state, e2eResult.output)) {
@@ -1799,7 +1881,7 @@ export async function runClosePhase(
   // 4. Execute the closing action and record exact command outcomes before
   // reporting success.
   console.log(`Executing closing action: ${state.closing_plan.action}`);
-  const closingResult = executeClosingAction(state, options);
+  const closingResult = await executeClosingAction(state, options);
   await writeJsonFile(
     join(options.artifactsDir, "remediation-closing-result.json"),
     closingResult,

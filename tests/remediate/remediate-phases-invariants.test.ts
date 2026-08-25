@@ -607,22 +607,22 @@ describe("runClosePhase — INV-remediate-phases-10: ClosingResult always has co
     await rm(REPO_DIR, { recursive: true, force: true });
   });
 
-  it("ClosingResult always carries contract_version for action=none", () => {
+  it("ClosingResult always carries contract_version for action=none", async () => {
     // Use executeClosingAction directly — runClosePhase deletes the artifacts dir
     // on a clean (fully-green) close, so the written file would be gone before
     // we can read it. The invariant being tested is that every code path in
     // executeClosingAction sets contract_version.
     const state = makeClosingState("none");
-    const result = executeClosingAction(state, BASE_OPTIONS);
+    const result = await executeClosingAction(state, BASE_OPTIONS);
     expect(result.contract_version).toBe("remediate-code-closing-result/v1alpha1");
     expect(result.action).toBe("none");
   });
 
-  it("ClosingResult always carries contract_version for action=commit (no staged files)", () => {
+  it("ClosingResult always carries contract_version for action=commit (no staged files)", async () => {
     // executeClosingAction directly: repo has no staged/untracked files, so the
     // vacuous-success path runs. All paths must set contract_version.
     const state = makeClosingState("commit");
-    const result = executeClosingAction(state, BASE_OPTIONS);
+    const result = await executeClosingAction(state, BASE_OPTIONS);
     expect(result.contract_version).toBe("remediate-code-closing-result/v1alpha1");
     expect(result.action).toBe("commit");
   });

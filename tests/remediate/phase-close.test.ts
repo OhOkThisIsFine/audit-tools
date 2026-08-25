@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { runClosePhase, collectStagingFiles, buildOutcomeCoverageLedger } from "../../src/remediate/phases/close.js";
+import {
+  runClosePhase,
+  collectStagingFiles,
+  buildOutcomeCoverageLedger,
+  runCombinedTestSuite,
+  executeClosingAction,
+} from "../../src/remediate/phases/close.js";
 import { readFile, rm, mkdir, writeFile as writeFileAsync } from "node:fs/promises";
-import { writeFileSync, mkdirSync, readdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -251,8 +257,18 @@ describe("runClosePhase", () => {
         blocks: [],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
+        // Still asserts the ORIGINAL property — a double-quoted argument
+        // reaches the child as ONE argv token — now that the suite is split
+        // into argv and spawned with `shell: false` instead of handed to a
+        // shell. `"hello world"` must arrive as the 11-character `hello world`;
+        // if the quoting were dropped, argv[1] would be `hello` (5) and the
+        // child exits 1, failing the close.
+        //
+        // Length, not an equality against a literal, because the declared-shape
+        // gate refuses single quotes in every position, so the command cannot
+        // carry a nested string literal to compare against.
         test_command:
-          'node -e "if (process.argv[1] !== \'hello world\') process.exit(1)" "hello world"',
+          'node -e "process.exit(process.argv[1].length === 11 ? 0 : 1)" "hello world"',
       },
       items: {
         F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
@@ -361,7 +377,21 @@ describe("runClosePhase", () => {
         blocks: [],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-        test_command: `${process.execPath} -e "console.error('combined failed'); process.exit(1)"`,
+        // The suite must REALLY RUN and REALLY FAIL — this test's whole
+        // subject is what happens after a genuine combined-suite failure.
+        //
+        // So the command must clear the declared-shape gate, which
+        // `${process.execPath} -e "…'combined failed'…"` does NOT: on win32
+        // execPath is `C:\Program Files\nodejs\node.exe` (backslashes) and the
+        // nested literal needs single quotes, and BOTH are unconditionally
+        // refused. Under that fixture the suite never spawned, the refusal path
+        // satisfied every assertion below (duration 0 ≥ 0; the refusal text is a
+        // non-empty failure_summary), and the coverage silently evaporated.
+        //
+        // Bare `node`, and the failure text as a double-quoted ARGUMENT rather
+        // than a nested string literal.
+        test_command:
+          'node -e "process.stderr.write(process.argv[1]); process.exit(1)" "combined failed"',
       },
       items: {
         F1: {
@@ -413,6 +443,15 @@ describe("runClosePhase", () => {
       expect.any(String),
     );
     expect(jsonReport.combined_test_result.failure_summary.length).toBeGreaterThan(0);
+    // The summary is the CHILD's stderr, which proves a child existed. Without
+    // this pair the assertions above are all satisfied by a shape-gate refusal
+    // that never spawned anything.
+    expect(jsonReport.combined_test_result.failure_summary).toContain(
+      "combined failed",
+    );
+    expect(jsonReport.combined_test_result.failure_summary).not.toContain(
+      "leaves the single-invocation command shape",
+    );
     expect(jsonReport.combined_test_result.output).toBeUndefined();
 
     const warnEmitted = warnMessages.some((msg) =>
@@ -911,9 +950,13 @@ describe("runClosePhase", () => {
           blocks: [],
           project_type: "unknown",
           candidate_closing_actions: ["none"],
-          // Emit a failure that mentions src/auth.ts specifically.
-          // Use bare 'node' to avoid Windows path-with-spaces issues under shell:true.
-          test_command: 'node -e "process.stderr.write(\'FAIL src/auth.ts\\n\'); process.exit(1)"',
+          // Emit a failure that mentions src/auth.ts specifically. The message
+          // rides in as a double-quoted ARGUMENT rather than a nested string
+          // literal, because the declared-shape gate refuses single quotes in
+          // every position and the suite is now split into argv rather than
+          // handed to a shell.
+          test_command:
+            'node -e "process.stderr.write(process.argv[1]); process.exit(1)" "FAIL src/auth.ts"',
         },
         items: {
           F1: {
@@ -1380,5 +1423,173 @@ describe("buildOutcomeCoverageLedger — review-gate declines (1c-2)", () => {
     expect(entry.finding).toBeDefined();
     expect(entry.finding!.title).toBe("Module boundaries leak persistence concerns");
     expect(entry.rationale).toMatch(/review gate/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The declared single-invocation shape gate, ONE REFUSAL TEST PER CLOSING SPAWN
+// SITE. Partial coverage is the documented failure mode here: a gate added at
+// one closing spawn site and not the other reads as done and re-fires the
+// finding, so both sites are pinned — `runCombinedTestSuite` directly, and
+// `runE2eTests` through `runClosePhase` (it is module-private by design).
+//
+// Each test is RED-GREEN by construction: the declared command both leaves the
+// shape AND has an observable side effect. Delete the `if
+// (commandLeavesDeclaredShape(...))` block at that site and the canary file
+// appears — the assertion cannot be satisfied by a refusal that never spawned
+// and cannot be satisfied by a spawn that did.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Single quotes are refused by the gate in EVERY position, and the body writes
+// a canary into the close phase's cwd (`root`) and exits 0.
+const SHAPE_LEAVING_CANARY_COMMAND =
+  `node -e "require('node:fs').writeFileSync('canary.txt', 'ran')"`;
+
+describe("closing spawns refuse a command that leaves the declared single-invocation shape", () => {
+  it("runCombinedTestSuite refuses rather than spawning", async () => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        findings: [],
+        blocks: [],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        test_command: SHAPE_LEAVING_CANARY_COMMAND,
+      },
+    });
+
+    const result = await runCombinedTestSuite(state, BASE_OPTIONS);
+
+    expect(result.ran).toBe(false);
+    expect(result.passed).toBe(false);
+    expect(result.duration_ms).toBe(0);
+    expect(result.output).toContain(
+      "leaves the single-invocation command shape",
+    );
+    // Nothing was spawned. Without the gate the canary exists and `ran` is true.
+    expect(existsSync(join(REPO_DIR, "canary.txt"))).toBe(false);
+  });
+
+  it("runE2eTests refuses rather than spawning, and the refusal fails the close", async () => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        findings: [],
+        blocks: [],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        // No test_command: the combined suite is vacuous, so this exercises the
+        // e2e site alone.
+        e2e_command: SHAPE_LEAVING_CANARY_COMMAND,
+      },
+      items: {
+        F1: {
+          finding_id: "F1",
+          status: "resolved",
+          block_id: "B1",
+          item_spec: {
+            finding_id: "F1",
+            concrete_change: "x",
+            tests_to_write: [],
+            not_applicable_steps: [],
+            touched_files: ["src/e1.ts"],
+          },
+        },
+      },
+      closing_plan: { action: "none", pre_authorized: true },
+    });
+
+    const next = await runClosePhase(state, BASE_OPTIONS);
+
+    // A refused e2e declaration is a FAILED close, never a silent pass: the
+    // resolved item is re-blocked and the run goes back to triage.
+    expect(next.status).toBe("triage");
+    expect(next.items?.F1?.status).toBe("blocked");
+    expect(next.items?.F1?.failure_reason).toContain(
+      "leaves the single-invocation command shape",
+    );
+    // Nothing was spawned. Without the gate the canary exists, the command
+    // exits 0, e2e passes, and the close completes instead.
+    expect(existsSync(join(REPO_DIR, "canary.txt"))).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OBL-impl-block-1296-inv-2 — the closing spawns are AWAITED, not synchronous.
+// The close phase holds the state lock across them, and every liveness
+// heartbeat in the process (the advance heartbeat, each held lock's mtime
+// heartbeat) is a timer on this event loop. A synchronous child blocks that
+// loop for the entire suite, so a LIVE lock stops being refreshed and is
+// classified stale and stolen mid-close.
+//
+// The pin is the cheapest honest one: run a ~1s child and count timer ticks
+// across it. Revert `runCombinedTestSuite` to `spawnSync` and the count is 0.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("closing spawns do not starve event-loop liveness", () => {
+  it("runCombinedTestSuite lets timers fire while the suite runs", async () => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        findings: [],
+        blocks: [],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        // ~1s of real child wall time, and it clears the declared-shape gate.
+        test_command: 'node -e "setTimeout(function () {}, 1000)"',
+      },
+    });
+
+    let ticks = 0;
+    const heartbeat = setInterval(() => {
+      ticks += 1;
+    }, 50);
+    let result: Awaited<ReturnType<typeof runCombinedTestSuite>>;
+    try {
+      result = await runCombinedTestSuite(state, BASE_OPTIONS);
+    } finally {
+      clearInterval(heartbeat);
+    }
+
+    // The suite really ran (so the tick count is about a real child, not a
+    // no-op) and the loop kept turning for its whole duration.
+    expect(result.ran).toBe(true);
+    expect(result.passed).toBe(true);
+    expect(result.duration_ms).toBeGreaterThan(0);
+    expect(ticks).toBeGreaterThan(0);
+  });
+
+  it("executeClosingAction lets timers fire while a closing-action child runs", async () => {
+    // The second, and larger, family of children the close phase spawns under
+    // the held phase lock: the closing ACTION itself. `git push` over the
+    // network, `gh pr create --fill`, `npm publish` and an operator-authored
+    // `custom_command` are all unbounded in duration, so any one of them could
+    // out-sit the lock's ~30s stale threshold. Same pin as the suite above:
+    // a ~1s real child, and the loop must keep turning across it. Revert
+    // `runTrackedCommand` to `runTracked` and the tick count is 0.
+    const state = makeState({
+      closing_plan: {
+        action: "custom",
+        custom_command: ["node", "-e", "setTimeout(function () {}, 1000)"],
+      },
+    });
+
+    let ticks = 0;
+    const heartbeat = setInterval(() => {
+      ticks += 1;
+    }, 50);
+    let result: Awaited<ReturnType<typeof executeClosingAction>>;
+    try {
+      result = await executeClosingAction(state, BASE_OPTIONS);
+    } finally {
+      clearInterval(heartbeat);
+    }
+
+    // A child really ran — without this the tick count would be satisfied by a
+    // no-op branch that never spawned anything.
+    expect(result.commands).toHaveLength(1);
+    expect(result.commands[0]!.exit_code).toBe(0);
+    expect(result.status).toBe("success");
+    expect(ticks).toBeGreaterThan(0);
   });
 });

@@ -1,8 +1,8 @@
-import { spawnSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 import {
+  AUDIT_TOOLS_DIRNAME,
   headCommit,
   commandLeavesDeclaredShape,
   FindingSchema,
@@ -20,6 +20,7 @@ import {
   isSha256,
   normalizeRepoPath,
   parseAllWorkloadItems,
+  parseCommandString,
   parseWorkloadEnvelope,
   promptSha256,
   readSubmissionDocument,
@@ -28,6 +29,7 @@ import {
   resolveContainedPath,
   resolveHostHandoffPaths,
   resultIdentityIsBound,
+  runTrackedAsync,
   sameStrings,
   stringArray,
   spawnSyncHidden,
@@ -1199,6 +1201,159 @@ function gitChangedFilesOfCommit(
 }
 
 /**
+ * Every repo-relative path the tree shows as touched since `baseline` — the
+ * commits baseline→HEAD, the working tree's own deviation from HEAD (staged and
+ * unstaged alike), and the untracked files git considers repository content.
+ *
+ * All three legs are needed to falsify a no-change claim, and they enumerate the
+ * three ways a host can have edited: committed (leg 1), edited a TRACKED file
+ * and left it uncommitted (leg 2), and CREATED a file (leg 3). A new `src/*.ts`
+ * is a real edit and the most natural shape a remediation takes; without leg 3
+ * the cheapest way to smuggle one past a no-change claim was simply never to
+ * `git add` it. `null` means git could not answer, which callers must treat as
+ * "cannot corroborate" rather than as "nothing changed".
+ *
+ * The untracked leg honours `--exclude-standard`, so it enumerates only what git
+ * itself treats as content — a repo's `.gitignore`d build and coverage output is
+ * already invisible to it. Two exemptions cover the remainder, both ground
+ * truth rather than the host's word:
+ *
+ *  - THIS TOOL'S OWN ARTIFACT TREE ({@link AUDIT_TOOLS_DIRNAME}) is subtracted
+ *    here, explicitly. In a real repository the tool writes a managed
+ *    `.gitignore` block covering it, so it never reaches this probe at all; the
+ *    explicit subtraction is what makes that independent of whether the block
+ *    has been written yet, so a bare root (a fixture, a first run) cannot
+ *    manufacture a false refusal out of the tool's own workload, prompt and
+ *    result documents.
+ *  - PRE-EXISTING untracked strays are excused by the caller's `excusedPaths`,
+ *    for free: `run_start_dirty` is captured from `stagedAndUntracked` before
+ *    any remediation edit exists, so it already enumerates untracked files.
+ *    What survives both is an untracked file that appeared DURING the run — the
+ *    only untracked class that can be this host's edit.
+ */
+function gitChangedFilesSince(
+  root: string,
+  baseline: string,
+): readonly string[] | null {
+  const files = new Set<string>();
+  for (const args of [
+    // baseline → HEAD: what the host committed.
+    ["diff", "--name-only", "-z", baseline, "HEAD"],
+    // HEAD → working tree: what the host edited and did not commit.
+    ["diff", "--name-only", "-z", "HEAD"],
+    // Never added: what the host CREATED. `--exclude-standard` keeps git's own
+    // ignore rules authoritative.
+    ["ls-files", "--others", "--exclude-standard", "-z"],
+  ]) {
+    const probe = spawnSyncHidden("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      shell: false,
+    });
+    if (probe.error || probe.status !== 0) return null;
+    for (const file of (probe.stdout ?? "").split("\0").filter(Boolean)) {
+      if (isAuditToolsArtifactPath(file)) continue;
+      files.add(file);
+    }
+  }
+  return [...files].sort(compareCodeUnits);
+}
+
+/** Whether a repo-relative path lives inside this tool's own artifact tree. */
+function isAuditToolsArtifactPath(path: string): boolean {
+  const normalized = normalizeRepoPath(path);
+  return (
+    normalized === AUDIT_TOOLS_DIRNAME ||
+    normalized.startsWith(`${AUDIT_TOOLS_DIRNAME}/`)
+  );
+}
+
+/**
+ * Corroborate an explicit `resolved_no_change` decision against the repository.
+ *
+ * A no-change decision used to be accepted on its evidence STRINGS alone, with
+ * only the required tests re-run — so a host that had in fact edited and then
+ * declared "nothing to do" was recorded as verified-no-change, and the edit
+ * rode into the run unattributed. The claim is mechanically falsifiable, so it
+ * is FALSIFIED.
+ *
+ * The scope of the falsification is the FULL write-scope corroboration every
+ * other acceptance path gets, NOT a narrowing to this item's `allowed_files`.
+ * `corroborateHostResult` refuses a landed commit that touched anything outside
+ * `allowed_files`; a no-change decision that narrowed the check to files INSIDE
+ * `allowed_files` would be the inverse rule — the out-of-scope edit, the more
+ * serious of the two, would be the one silently admitted. So EVERY path the
+ * tree shows as moved since the workload baseline refuses the claim.
+ *
+ * `excusedPaths` is the only exemption, and it is ground truth rather than the
+ * host's word: `run_start_dirty` (already dirty before the run began, so not
+ * evidence that this host edited anything — and because it is captured from
+ * `stagedAndUntracked`, it excuses pre-existing UNTRACKED strays too) unioned
+ * with the accepted edit surface — `applied_edit_surface` plus whatever this
+ * same ingest has already corroborated and accepted, so a sibling work item's
+ * legitimately landed files do not falsify this item's claim.
+ *
+ * Fails CLOSED, like every other corroboration here: a git that cannot answer
+ * refuses the claim rather than admitting it.
+ */
+function corroborateNoChangeClaim(params: {
+  readonly root: string;
+  readonly workItem: RemediationHostWorkItem;
+  /** Repo-relative paths whose movement is already accounted for. */
+  readonly excusedPaths: ReadonlySet<string>;
+}):
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly code: RemediationHostIngestIssue["code"];
+      readonly message: string;
+    } {
+  const { root, workItem, excusedPaths } = params;
+  if (!isGitRepo(root)) return { ok: true };
+  const baseline = workItem.baseline_commit;
+  if (!gitCommitExists(root, baseline)) {
+    return {
+      ok: false,
+      code: "commit_missing",
+      message:
+        "resolved_no_change cannot be corroborated: baseline_commit does not resolve to a real commit",
+    };
+  }
+  const changed = gitChangedFilesSince(root, baseline);
+  if (changed === null) {
+    return {
+      ok: false,
+      code: "commit_missing",
+      message:
+        "resolved_no_change cannot be corroborated: git could not enumerate the changes since the workload baseline",
+    };
+  }
+  const violating = changed.filter(
+    (path) => !excusedPaths.has(normalizeRepoPath(path)),
+  );
+  if (violating.length > 0) {
+    const inScope = violating.filter((path) =>
+      workItem.allowed_files.includes(path),
+    );
+    const outOfScope = violating.filter(
+      (path) => !workItem.allowed_files.includes(path),
+    );
+    return {
+      ok: false,
+      code: "changed_files_mismatch",
+      message:
+        "resolved_no_change is contradicted by the tree — these files changed since the " +
+        `workload baseline: ${violating.join(", ")}` +
+        (outOfScope.length > 0
+          ? ` (outside the prompt-bound allowed_files: ${outOfScope.join(", ")}` +
+            (inScope.length > 0 ? `; inside: ${inScope.join(", ")})` : ")")
+          : ""),
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * Pre-computed required-test verdicts, keyed by `root` + command: `null` =
  * green, a string = the failure detail.
  *
@@ -1334,14 +1489,23 @@ function requiredTestVerdictKey(root: string, command: string): string {
  * first-class outcome of this function, and an outcome that can only be reached
  * by waiting ten real minutes is an outcome nothing ever tests.
  */
-export function runRequiredTest(
+export async function runRequiredTest(
   root: string,
   command: string,
   timeoutMs: number = REQUIRED_TEST_TIMEOUT_MS,
-): RequiredTestFailure | null {
-  const result = spawnSync(command, {
+): Promise<RequiredTestFailure | null> {
+  // AWAITED, never `spawnSync`: ingestion runs with the remediation state lock
+  // held, and a synchronous child blocks the event loop for the whole suite —
+  // starving the lock's mtime heartbeat until a LIVE lock is classified stale
+  // and stolen mid-ingest.
+  //
+  // argv + `shell: false`, never a shell string. A required test is a workload
+  // command that already cleared the declared-shape gate at the producer, so
+  // splitting it is unambiguous, and dropping the shell removes the last place
+  // an ingest hands a declared string to `sh`/`cmd.exe`. `resolveExecArgv`
+  // inside the runner is what keeps the npm/npx shims resolvable on win32.
+  const result = await runTrackedAsync(parseCommandString(command), {
     cwd: root,
-    shell: true,
     // Captured, not discarded: without it a red ingest reports that something
     // failed and nothing about why.
     encoding: "utf8",
@@ -1393,7 +1557,7 @@ export function runRequiredTest(
   // `status` with `signal` null — so this branch is unreachable on the platform
   // this repo runs its suites on, and no test exercises it. It is kept because
   // the runner is OS-agnostic by contract, not because it has been observed.
-  if (result.signal !== null) {
+  if (result.signal !== null && result.signal !== undefined) {
     return {
       command,
       outcome: "failed",
@@ -1415,12 +1579,12 @@ export function runRequiredTest(
   return null;
 }
 
-function rerunRequiredTests(
+async function rerunRequiredTests(
   root: string,
   commands: readonly string[],
   /** `null` on the normal lane — see {@link RemediationRequiredTestVerdicts}. */
   verdicts: RemediationRequiredTestVerdicts | null,
-): readonly RequiredTestFailure[] {
+): Promise<readonly RequiredTestFailure[]> {
   const failures: RequiredTestFailure[] = [];
   for (const command of commands) {
     if (verdicts) {
@@ -1439,7 +1603,7 @@ function rerunRequiredTests(
       }
       continue;
     }
-    const failure = runRequiredTest(root, command);
+    const failure = await runRequiredTest(root, command);
     if (failure !== null) failures.push(failure);
   }
   return failures;
@@ -1518,13 +1682,13 @@ export async function precomputeRecoveryTestVerdicts(params: {
   for (const command of commands) {
     verdicts.set(
       requiredTestVerdictKey(paths.root, command),
-      runRequiredTest(paths.root, command),
+      await runRequiredTest(paths.root, command),
     );
   }
   return verdicts;
 }
 
-function corroborateHostResult(params: {
+async function corroborateHostResult(params: {
   readonly root: string;
   readonly state: CurrentRemediationHostState;
   readonly workItem: RemediationHostWorkItem;
@@ -1532,7 +1696,7 @@ function corroborateHostResult(params: {
   readonly verdicts: RemediationRequiredTestVerdicts | null;
   /** See `ingestRemediationHostResults`'s `recovery` option. */
   readonly recovery: boolean;
-}): CorroboratedHostResult {
+}): Promise<CorroboratedHostResult> {
   const { root, state, workItem, result, verdicts } = params;
   const baseline = workItem.baseline_commit;
   const landed = result.commit_evidence.after;
@@ -1609,7 +1773,7 @@ function corroborateHostResult(params: {
       message: `landed files overlap pre-existing run-start dirt: ${dirtyOverlap.join(", ")}`,
     };
   }
-  const failedTests = rerunRequiredTests(
+  const failedTests = await rerunRequiredTests(
     root,
     workItem.required_tests,
     verdicts,
@@ -1871,7 +2035,13 @@ export async function ingestRemediationHostResults(params: {
   // the same acceptance.
   let recordedRecoveryMarks: SubmissionLedgerEvent[] | null = null;
   const landedFiles = new Set(nextState.applied_edit_surface ?? []);
-  const requireRepositoryCorroboration =
+  // Can this ingest be corroborated against ground truth AT ALL? A git root
+  // supplies the tree; a persisted `host_handoff` supplies the trusted binding.
+  // With NEITHER there is nothing to check a host's claim against, and the
+  // remaining evidence is the host's own attestation — which is exactly the
+  // claim under test. That branch is REFUSED for both result and decision
+  // documents rather than admitted on the attestation alone.
+  const canCorroborate =
     state.host_handoff !== undefined || isGitRepo(paths.root);
   for (const workItem of workload.work_items) {
     const pendingItems = workItem.finding_ids.filter(
@@ -1939,7 +2109,37 @@ export async function ingestRemediationHostResults(params: {
       const result = parsed.result;
       const outcome = result.outcome;
       if (outcome.status === "resolved_no_change") {
-        const failedTests = rerunRequiredTests(
+        if (!canCorroborate) {
+          issues.push({
+            code: "trusted_binding_missing",
+            work_item_id: workItem.id,
+            result_path: workItem.result_path,
+            message:
+              "resolved_no_change needs a git root or a persisted host_handoff binding to corroborate the write scope against; attestation-only acceptance is refused",
+          });
+          continue;
+        }
+        const noChange = corroborateNoChangeClaim({
+          root: paths.root,
+          workItem,
+          // Ground truth only: pre-existing dirt plus the edit surface this run
+          // has already corroborated and accepted (`landedFiles` starts from
+          // `applied_edit_surface` and grows as this same ingest accepts).
+          excusedPaths: new Set([
+            ...(state.run_start_dirty ?? []).map(normalizeRepoPath),
+            ...[...landedFiles].map(normalizeRepoPath),
+          ]),
+        });
+        if (!noChange.ok) {
+          issues.push({
+            code: noChange.code,
+            work_item_id: workItem.id,
+            result_path: workItem.result_path,
+            message: noChange.message,
+          });
+          continue;
+        }
+        const failedTests = await rerunRequiredTests(
           paths.root,
           workItem.required_tests,
           requiredTestVerdicts,
@@ -1984,82 +2184,89 @@ export async function ingestRemediationHostResults(params: {
     }
 
     const result = parsed.result;
-    let acceptedFiles = result.changed_files;
-    if (requireRepositoryCorroboration) {
-      const corroborated = corroborateHostResult({
-        root: paths.root,
-        state,
-        workItem,
-        result,
-        verdicts: requiredTestVerdicts,
-        recovery: params.recovery !== undefined,
+    if (!canCorroborate) {
+      issues.push({
+        code: "trusted_binding_missing",
+        work_item_id: workItem.id,
+        result_path: workItem.result_path,
+        message:
+          "a landed result needs a git root or a persisted host_handoff binding to corroborate the write scope against; attestation-only acceptance is refused",
       });
-      if (!corroborated.ok) {
+      continue;
+    }
+    const corroborated = await corroborateHostResult({
+      root: paths.root,
+      state,
+      workItem,
+      result,
+      verdicts: requiredTestVerdicts,
+      recovery: params.recovery !== undefined,
+    });
+    if (!corroborated.ok) {
+      issues.push({
+        code: corroborated.code,
+        work_item_id: workItem.id,
+        result_path: workItem.result_path,
+        message: corroborated.message,
+      });
+      continue;
+    }
+    if (corroborated.usedRecovery) {
+      // No acceptance without a record. The mark goes down BEFORE the item is
+      // marked resolved, and an append that throws refuses this item rather
+      // than landing an acceptance the ledger cannot account for — the run
+      // must never read as one that never drifted. The refusal is per item:
+      // an unwritable ledger is not a reason to discard the whole ingest.
+      try {
+        recordedRecoveryMarks ??= (
+          await readSubmissionLedger(paths.artifactsDir)
+        ).filter((event) => event.kind === "accepted_via_recovery");
+        // The mark's identity is (run, item, LANDED COMMIT), not just
+        // (run, item): an item re-opened and later re-accepted from a
+        // DIFFERENT landing is a different relaxed acceptance and earns its
+        // own record. Only a retry of the SAME landing is a duplicate. The
+        // landed sha is matched inside the message because the shared event
+        // contract carries no commit field, and a 40-hex sha this writer
+        // itself emitted is an unambiguous token to match on.
+        const landedCommit = result.commit_evidence.after;
+        const alreadyMarked = recordedRecoveryMarks.some(
+          (event) =>
+            event.run_id === params.runId &&
+            event.submission_id === workItem.id &&
+            (event.message ?? "").includes(landedCommit),
+        );
+        if (!alreadyMarked) {
+          const event: SubmissionLedgerEvent = {
+            contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+            run_id: params.runId,
+            submission_id: workItem.id,
+            lane: workItem.id,
+            kind: "accepted_via_recovery",
+            // Derived from what was actually probed, never asserted: the
+            // baseline was found in no ref and unreachable from HEAD.
+            message:
+              `accepted under recovery: the trusted baseline ${workItem.baseline_commit} is ` +
+              "contained by no ref and unreachable from HEAD, so landed commit " +
+              `${landedCommit} was corroborated against HEAD and this ` +
+              "item's bound scope instead of against baseline ancestry",
+            recorded_at: new Date().toISOString(),
+          };
+          await appendSubmissionEvent(paths.artifactsDir, event);
+          recordedRecoveryMarks.push(event);
+        }
+      } catch (error) {
         issues.push({
-          code: corroborated.code,
+          code: "recovery_unrecorded",
           work_item_id: workItem.id,
           result_path: workItem.result_path,
-          message: corroborated.message,
+          message:
+            "the recovery acceptance could not be recorded on the submission ledger, so it " +
+            `was refused: ${error instanceof Error ? error.message : String(error)}`,
         });
         continue;
       }
-      if (corroborated.usedRecovery) {
-        // No acceptance without a record. The mark goes down BEFORE the item is
-        // marked resolved, and an append that throws refuses this item rather
-        // than landing an acceptance the ledger cannot account for — the run
-        // must never read as one that never drifted. The refusal is per item:
-        // an unwritable ledger is not a reason to discard the whole ingest.
-        try {
-          recordedRecoveryMarks ??= (
-            await readSubmissionLedger(paths.artifactsDir)
-          ).filter((event) => event.kind === "accepted_via_recovery");
-          // The mark's identity is (run, item, LANDED COMMIT), not just
-          // (run, item): an item re-opened and later re-accepted from a
-          // DIFFERENT landing is a different relaxed acceptance and earns its
-          // own record. Only a retry of the SAME landing is a duplicate. The
-          // landed sha is matched inside the message because the shared event
-          // contract carries no commit field, and a 40-hex sha this writer
-          // itself emitted is an unambiguous token to match on.
-          const landedCommit = result.commit_evidence.after;
-          const alreadyMarked = recordedRecoveryMarks.some(
-            (event) =>
-              event.run_id === params.runId &&
-              event.submission_id === workItem.id &&
-              (event.message ?? "").includes(landedCommit),
-          );
-          if (!alreadyMarked) {
-            const event: SubmissionLedgerEvent = {
-              contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
-              run_id: params.runId,
-              submission_id: workItem.id,
-              lane: workItem.id,
-              kind: "accepted_via_recovery",
-              // Derived from what was actually probed, never asserted: the
-              // baseline was found in no ref and unreachable from HEAD.
-              message:
-                `accepted under recovery: the trusted baseline ${workItem.baseline_commit} is ` +
-                "contained by no ref and unreachable from HEAD, so landed commit " +
-                `${landedCommit} was corroborated against HEAD and this ` +
-                "item's bound scope instead of against baseline ancestry",
-              recorded_at: new Date().toISOString(),
-            };
-            await appendSubmissionEvent(paths.artifactsDir, event);
-            recordedRecoveryMarks.push(event);
-          }
-        } catch (error) {
-          issues.push({
-            code: "recovery_unrecorded",
-            work_item_id: workItem.id,
-            result_path: workItem.result_path,
-            message:
-              "the recovery acceptance could not be recorded on the submission ledger, so it " +
-              `was refused: ${error instanceof Error ? error.message : String(error)}`,
-          });
-          continue;
-        }
-      }
-      acceptedFiles = corroborated.changedFiles;
     }
+    const acceptedFiles = corroborated.changedFiles;
     const completedAt = new Date().toISOString();
     for (const findingId of pendingItems) {
       const item = nextState.items[findingId]!;

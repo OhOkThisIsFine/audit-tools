@@ -8,10 +8,13 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+
+import { execFileHidden } from "../helpers/spawn.mjs";
 
 import { DISPATCH_BARREL_EXPORTS } from "../helpers/dispatchBarrelBaseline.js";
 
@@ -210,6 +213,78 @@ function finding(id: string, path: string): Record<string, unknown> {
   };
 }
 
+/**
+ * The fixture roots are REAL git repositories, because ingestion corroborates a
+ * landed result against the tree: a root with neither a git repo nor a
+ * persisted `host_handoff` binding has nothing to check a host's claim against,
+ * and that branch is refused rather than accepted on the attestation alone. A
+ * synthetic `"1".repeat(40)` baseline can still stand in wherever the assertion
+ * is about PREPARE-time refusal, which never reaches corroboration.
+ */
+/**
+ * ASYNC on purpose. A synchronous `git` blocks the vitest worker's event loop
+ * for the whole spawn, starving the worker-to-runner RPC heartbeat until the
+ * full suite reports `Timeout calling "onTaskUpdate"` — the same starvation
+ * this work item removes from the production close and ingest paths,
+ * reproduced in the fixture that covers it.
+ *
+ * Written out rather than `promisify`d because the helper is untyped JS, so
+ * `promisify` cannot recover its `(file, args, options, callback)` arity.
+ */
+function git(root: string, args: readonly string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFileHidden(
+      "git",
+      [...args],
+      { cwd: root, encoding: "utf8" },
+      (error: Error | null, stdout: string) => {
+        if (error) reject(error);
+        else resolve(String(stdout).trim());
+      },
+    );
+  });
+}
+
+/** The repository HEAD — the only baseline a git-backed prepare accepts. */
+async function headOf(root: string): Promise<string> {
+  return await git(root, ["rev-parse", "HEAD"]);
+}
+
+/**
+ * Turn a fresh temp dir into a git repository holding the four source files the
+ * fixture blocks declare as their write scope, and return the baseline commit.
+ */
+async function initGitRoot(root: string): Promise<string> {
+  await git(root, ["init"]);
+  await git(root, ["config", "user.email", "fixture@example.invalid"]);
+  await git(root, ["config", "user.name", "Fixture"]);
+  await git(root, ["config", "commit.gpgsign", "false"]);
+  mkdirSync(join(root, "src"), { recursive: true });
+  const files = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"];
+  for (const file of files) {
+    writeFileSync(join(root, file), `export const value = "${file}";\n`, "utf8");
+  }
+  await git(root, ["add", ...files]);
+  await git(root, ["commit", "-m", "baseline"]);
+  return await headOf(root);
+}
+
+/**
+ * Land a real commit touching EXACTLY `file`, and return its sha.
+ *
+ * Exactly one file, because corroboration compares the commit's mechanically
+ * derived change set against the result's `changed_files` for equality — a
+ * commit that swept in anything else would be refused for the wrong reason.
+ */
+let landedCounter = 0;
+async function landCommit(root: string, file: string): Promise<string> {
+  const marker = ++landedCounter;
+  writeFileSync(join(root, file), `export const value = ${String(marker)};\n`, "utf8");
+  await git(root, ["add", file]);
+  await git(root, ["commit", "-m", `land ${String(marker)}`]);
+  return await headOf(root);
+}
+
 function block(
   id: string,
   findingId: string,
@@ -221,7 +296,11 @@ function block(
     items: [findingId],
     parallel_safe: true,
     dependencies: options.dependencies ?? [],
-    targeted_commands: [`npx vitest run tests/${findingId}.test.ts`],
+    // A real, fast, always-green invocation: corroboration RE-RUNS a work
+    // item's required tests against the tree, so a command naming a vitest file
+    // that does not exist in the temp root would fail the ingest for a reason
+    // this fixture is not about.
+    targeted_commands: [`node -e "process.exit(0)"`],
     touched_files: [path],
     phase_ordinal: options.phase ?? 0,
     token_estimate: 1_800,
@@ -282,20 +361,29 @@ function requireIngested(
   return value as IngestSummary;
 }
 
-function validResult(
+/**
+ * The result document for `item` claiming `after` as its landed commit.
+ *
+ * Split from {@link validResult} so a test that only needs a REJECTION can
+ * build many variants over ONE landed commit — the variants are refused on
+ * their own defect, and landing a commit per variant would spawn git dozens of
+ * times to no effect.
+ */
+function resultShape(
   runId: string,
   item: HostWorkItem,
+  after: string,
   overrides: Readonly<Record<string, unknown>> = {},
 ): Record<string, unknown> {
   const changedFiles = [item.allowed_files[0]!];
   return {
     contract_version: "remediation-host-result/v1alpha1",
-    result_id: `result-${item.id}`,
+    result_id: `result-${item.id}-${after.slice(0, 8)}`,
     run_id: runId,
     work_item_id: item.id,
     prompt_sha256: item.prompt.sha256,
     changed_files: changedFiles,
-    commit_evidence: { before: item.baseline_commit, after: AFTER_COMMIT },
+    commit_evidence: { before: item.baseline_commit, after },
     test_evidence: item.required_tests.map((command) => ({
       command,
       status: "passed",
@@ -310,6 +398,25 @@ function validResult(
   };
 }
 
+/**
+ * A result backed by a REAL landed commit, for the paths that must be ACCEPTED:
+ * corroboration resolves both commits, checks baseline→landed→HEAD ancestry,
+ * and compares the commit's own change set against `changed_files`.
+ */
+async function validResult(
+  root: string,
+  runId: string,
+  item: HostWorkItem,
+  overrides: Readonly<Record<string, unknown>> = {},
+): Promise<Record<string, unknown>> {
+  return resultShape(
+    runId,
+    item,
+    await landCommit(root, item.allowed_files[0]!),
+    overrides,
+  );
+}
+
 async function prepareFixture(): Promise<{
   boundary: HostBoundary;
   root: string;
@@ -317,29 +424,47 @@ async function prepareFixture(): Promise<{
   runId: string;
   state: CurrentState;
   handoff: PreparedHandoff;
+  baselineCommit: string;
 }> {
   const boundary = await loadBoundary();
   const root = await mkdtemp(join(tmpdir(), "remediation-host-handoff-"));
   cleanupRoots.push(root);
   const artifactsDir = join(root, ".audit-tools", "remediation");
   const runId = FIXTURE_RUN_ID;
+  const baselineCommit = await initGitRoot(root);
   const state = currentState();
   const handoff = requirePrepared(
     await boundary.prepareRemediationHostHandoff({
       root,
       artifactsDir,
       runId,
-      baselineCommit: BASELINE_COMMIT,
+      baselineCommit,
       state,
     }),
   );
-  return { boundary, root, artifactsDir, runId, state, handoff };
+  // The prepared state carries the binding the prepare just minted: a
+  // git-backed workload REQUIRES the tool-owned `host_handoff` record, and
+  // ingestion clears it again once every bound item has completed.
+  const boundState: CurrentState = {
+    ...state,
+    host_handoff: handoff.handoff_record,
+  };
+  return {
+    boundary,
+    root,
+    artifactsDir,
+    runId,
+    state: boundState,
+    handoff,
+    baselineCommit,
+  };
 }
 
 describe(FAILURE_SIGNATURE, () => {
   it("emits exactly hostDependencyLevels(state)[0] as a provider-neutral, bound handoff", async () => {
     const scheduler = await loadScheduler();
-    const { root, artifactsDir, runId, state, handoff } = await prepareFixture();
+    const { root, artifactsDir, runId, state, handoff, baselineCommit } =
+      await prepareFixture();
     const expected = (scheduler.hostDependencyLevels(state)[0] ?? [])
       .map((entry) => entry.block_id)
       .sort();
@@ -362,11 +487,17 @@ describe(FAILURE_SIGNATURE, () => {
       expect(item.allowed_files).toEqual([...source.touched_files].sort());
       expect(item.required_tests).toEqual(source.targeted_commands);
       expect(item.token_estimate).toBe(source.token_estimate);
-      expect(item.baseline_commit).toBe(BASELINE_COMMIT);
+      expect(item.baseline_commit).toBe(baselineCommit);
       expect(item.prompt.sha256).toBe(sha256(item.prompt.text));
       expect(item.prompt.text).toContain(item.id);
       expect(item.prompt.text).toContain(item.allowed_files[0]);
-      expect(item.prompt.text).toContain(item.required_tests[0]);
+      // The command is embedded inside the JSON-stringified assignment, so it
+      // appears ESCAPED (`node -e \"process.exit(0)\"`). Asserting the escaped
+      // form keeps the prompt↔required_tests binding pinned rather than
+      // dropping the assertion because the raw string no longer matches.
+      expect(item.prompt.text).toContain(
+        JSON.stringify(item.required_tests[0]),
+      );
       expect(isAbsolute(item.result_path)).toBe(false);
       expectContained(artifactsDir, expectContained(root, item.result_path, "result"), "result");
     }
@@ -386,7 +517,7 @@ describe(FAILURE_SIGNATURE, () => {
   });
 
   it("accepts only complete run/block/prompt/worktree/commit/test/scope/merge evidence", async () => {
-    const { boundary, root, artifactsDir, runId, state, handoff } =
+    const { boundary, root, artifactsDir, runId, state, handoff, baselineCommit } =
       await prepareFixture();
     const [first, second] = handoff.workload.work_items;
     expect(first).toBeDefined();
@@ -412,40 +543,49 @@ describe(FAILURE_SIGNATURE, () => {
     );
     expect(malformed.completed_work_item_ids).toEqual([]);
 
+    // ONE real landed commit, reused by every variant below: each is refused on
+    // its OWN defect, so landing a commit per variant would spawn git fourteen
+    // times without changing a single verdict.
+    const landed = await landCommit(root, first!.allowed_files[0]!);
     const invalidResults: Record<string, unknown>[] = [
-      validResult(runId, first!, { contract_version: "retired/v0" }),
-      validResult(runId, first!, { run_id: "wrong-run" }),
-      validResult(runId, first!, { work_item_id: second!.id }),
-      validResult(runId, first!, { prompt_sha256: "0".repeat(64) }),
-      validResult(runId, first!, { changed_files: ["src/outside.ts"] }),
-      validResult(runId, first!, {
+      resultShape(runId, first!, landed, { contract_version: "retired/v0" }),
+      resultShape(runId, first!, landed, { run_id: "wrong-run" }),
+      resultShape(runId, first!, landed, { work_item_id: second!.id }),
+      resultShape(runId, first!, landed, { prompt_sha256: "0".repeat(64) }),
+      resultShape(runId, first!, landed, { changed_files: ["src/outside.ts"] }),
+      resultShape(runId, first!, landed, {
         commit_evidence: { before: "0".repeat(40), after: AFTER_COMMIT },
       }),
-      validResult(runId, first!, {
-        commit_evidence: { before: BASELINE_COMMIT, after: BASELINE_COMMIT },
+      resultShape(runId, first!, landed, {
+        // The REAL baseline on both sides, so this is refused for the reason
+        // it is here to pin — a landed commit that did not move — and not
+        // merely for naming a commit the repository never had.
+        commit_evidence: { before: baselineCommit, after: baselineCommit },
       }),
-      validResult(runId, first!, { test_evidence: [] }),
-      validResult(runId, first!, {
+      resultShape(runId, first!, landed, { test_evidence: [] }),
+      resultShape(runId, first!, landed, {
         test_evidence: first!.required_tests.map((command) => ({
           command,
           status: "failed",
         })),
       }),
-      validResult(runId, first!, {
+      resultShape(runId, first!, landed, {
         worktree_evidence: {
           baseline_commit: "0".repeat(40),
           changed_files: [first!.allowed_files[0]],
         },
       }),
-      validResult(runId, first!, {
+      resultShape(runId, first!, landed, {
         worktree_evidence: {
-          baseline_commit: BASELINE_COMMIT,
+          // Real baseline, empty change set: the EMPTY list is the defect under
+          // test, not the baseline identity.
+          baseline_commit: baselineCommit,
           changed_files: [],
         },
       }),
-      validResult(runId, first!, { acceptance: { status: "rejected" } }),
-      validResult(runId, first!, { merge: { status: "pending" } }),
-      validResult(runId, first!, { unexpected_legacy_field: true }),
+      resultShape(runId, first!, landed, { acceptance: { status: "rejected" } }),
+      resultShape(runId, first!, landed, { merge: { status: "pending" } }),
+      resultShape(runId, first!, landed, { unexpected_legacy_field: true }),
     ];
     for (const invalid of invalidResults) {
       await writeFile(firstPath, JSON.stringify(invalid), "utf8");
@@ -455,10 +595,22 @@ describe(FAILURE_SIGNATURE, () => {
       expect(rejected.accepted_count).toBe(0);
       expect(rejected.completed_work_item_ids).toEqual([]);
       expect(rejected.state.items[first!.finding_ids[0]!]!.status).toBe("pending");
+      // Refused for ITS OWN defect, and refused exactly once. Asserting only
+      // "not accepted" would stay green if a variant started being rejected by
+      // some SHARED downstream reason — a git-ancestry or changed-files
+      // corroboration that fires for every variant alike — at which point the
+      // fourteen cases would all be pinning the same thing. Each of these is a
+      // malformed SUBMISSION, so each must be caught by the contract
+      // validation, before any repository probe.
+      expect(
+        rejected.issues
+          .filter((issue) => issue.work_item_id === first!.id)
+          .map((issue) => issue.code),
+      ).toEqual(["submission_contract_invalid"]);
     }
 
-    await writeFile(firstPath, JSON.stringify(validResult(runId, first!)), "utf8");
-    await writeFile(secondPath, JSON.stringify(validResult(runId, second!)), "utf8");
+    await writeFile(firstPath, JSON.stringify(await validResult(root, runId, first!)), "utf8");
+    await writeFile(secondPath, JSON.stringify(await validResult(root, runId, second!)), "utf8");
     const accepted = requireIngested(
       await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
     );
@@ -475,7 +627,7 @@ describe(FAILURE_SIGNATURE, () => {
         root,
         artifactsDir,
         runId,
-        baselineCommit: AFTER_COMMIT,
+        baselineCommit: await headOf(root),
         state: accepted.state,
       }),
     );
@@ -905,23 +1057,30 @@ describe("a malformed block reports without blocking the frontier", () => {
     cleanupRoots.push(root);
     const artifactsDir = join(root, ".audit-tools", "remediation");
     const runId = "nonfrontier-block-run";
+    const baselineCommit = await initGitRoot(root);
     const state = stateWithMalformedDependent();
     const handoff = requirePrepared(
       await boundary.prepareRemediationHostHandoff({
         root,
         artifactsDir,
         runId,
-        baselineCommit: BASELINE_COMMIT,
+        baselineCommit,
         state,
       }),
     );
     const good = handoff.workload.work_items.find((entry) => entry.id === "block-a")!;
     const goodPath = expectContained(root, good.result_path, "good result");
     await mkdir(resolve(goodPath, ".."), { recursive: true });
-    await writeFile(goodPath, JSON.stringify(validResult(runId, good)), "utf8");
+    await writeFile(goodPath, JSON.stringify(await validResult(root, runId, good)), "utf8");
+    const bound: CurrentState = { ...state, host_handoff: handoff.handoff_record };
 
     const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
+      await boundary.ingestRemediationHostResults({
+        root,
+        artifactsDir,
+        runId,
+        state: bound,
+      }),
     );
     expect(summary.accepted_count).toBe(1);
     expect(summary.completed_work_item_ids).toEqual(["block-a"]);
@@ -940,6 +1099,7 @@ describe("a malformed block reports without blocking the frontier", () => {
     cleanupRoots.push(root);
     const artifactsDir = join(root, ".audit-tools", "remediation");
     const runId = "blocked-block-run";
+    const baselineCommit = await initGitRoot(root);
     // `blocked` is UNSETTLED, not settled: triage retries it, so the item is
     // still bound and `parseWorkItem` still re-derives its block. A scan that
     // only looked at `pending` left that re-derivation failing as a bare
@@ -957,17 +1117,23 @@ describe("a malformed block reports without blocking the frontier", () => {
         root,
         artifactsDir,
         runId,
-        baselineCommit: BASELINE_COMMIT,
+        baselineCommit,
         state,
       }),
     );
     const good = handoff.workload.work_items.find((entry) => entry.id === "block-a")!;
     const goodPath = expectContained(root, good.result_path, "good result");
     await mkdir(resolve(goodPath, ".."), { recursive: true });
-    await writeFile(goodPath, JSON.stringify(validResult(runId, good)), "utf8");
+    await writeFile(goodPath, JSON.stringify(await validResult(root, runId, good)), "utf8");
+    const bound: CurrentState = { ...state, host_handoff: handoff.handoff_record };
 
     const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
+      await boundary.ingestRemediationHostResults({
+        root,
+        artifactsDir,
+        runId,
+        state: bound,
+      }),
     );
     const issue = summary.issues.find(
       (entry) => entry.code === "block_contract_invalid",
@@ -1027,7 +1193,7 @@ describe("a malformed block reports without blocking the frontier", () => {
     const first = handoff.workload.work_items.find((entry) => entry.id === "block-a")!;
     const firstPath = expectContained(root, first.result_path, "first result");
     await mkdir(resolve(firstPath, ".."), { recursive: true });
-    await writeFile(firstPath, JSON.stringify(validResult(runId, first)), "utf8");
+    await writeFile(firstPath, JSON.stringify(await validResult(root, runId, first)), "utf8");
     const malformed: CurrentState = {
       ...state,
       plan: {
@@ -1066,7 +1232,7 @@ describe("the remediate ingest is pure with respect to persisted state", () => {
     const first = handoff.workload.work_items[0]!;
     const firstPath = expectContained(root, first.result_path, "first result");
     await mkdir(resolve(firstPath, ".."), { recursive: true });
-    await writeFile(firstPath, JSON.stringify(validResult(runId, first)), "utf8");
+    await writeFile(firstPath, JSON.stringify(await validResult(root, runId, first)), "utf8");
     const before = JSON.parse(JSON.stringify(state)) as CurrentState;
 
     const summary = requireIngested(
@@ -1165,7 +1331,7 @@ describe("an empty scan is not a pass", () => {
     const first = handoff.workload.work_items[0]!;
     const firstPath = expectContained(root, first.result_path, "first result");
     await mkdir(resolve(firstPath, ".."), { recursive: true });
-    await writeFile(firstPath, JSON.stringify(validResult(runId, first)), "utf8");
+    await writeFile(firstPath, JSON.stringify(await validResult(root, runId, first)), "utf8");
 
     const result = await validate(artifactsDir, root);
     // The discovery filter joins on the filenames submissionIdentity MINTS: a
@@ -1185,7 +1351,7 @@ describe("an empty scan is not a pass", () => {
     const first = handoff.workload.work_items[0]!;
     const firstPath = expectContained(root, first.result_path, "first result");
     await mkdir(resolve(firstPath, ".."), { recursive: true });
-    const { contract_version: _dropped, ...corrupt } = validResult(runId, first);
+    const { contract_version: _dropped, ...corrupt } = await validResult(root, runId, first);
     await writeFile(firstPath, JSON.stringify(corrupt), "utf8");
 
     const result = await validate(artifactsDir, root);
@@ -1234,8 +1400,8 @@ describe("an empty scan is not a pass", () => {
     const firstPath = expectContained(root, first!.result_path, "first result");
     const secondPath = expectContained(root, second!.result_path, "second result");
     await mkdir(resolve(firstPath, ".."), { recursive: true });
-    await writeFile(firstPath, JSON.stringify(validResult(runId, first!)), "utf8");
-    await writeFile(secondPath, JSON.stringify(validResult(runId, second!)), "utf8");
+    await writeFile(firstPath, JSON.stringify(await validResult(root, runId, first!)), "utf8");
+    await writeFile(secondPath, JSON.stringify(await validResult(root, runId, second!)), "utf8");
 
     const accepted = requireIngested(
       await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
@@ -1253,7 +1419,7 @@ describe("an empty scan is not a pass", () => {
         root,
         artifactsDir,
         runId,
-        baselineCommit: AFTER_COMMIT,
+        baselineCommit: await headOf(root),
         state: accepted.state,
       }),
     );
@@ -1301,7 +1467,7 @@ describe("an empty scan is not a pass", () => {
         root,
         artifactsDir,
         runId: secondRunId,
-        baselineCommit: AFTER_COMMIT,
+        baselineCommit: await headOf(root),
         state: secondRun,
       }),
     );

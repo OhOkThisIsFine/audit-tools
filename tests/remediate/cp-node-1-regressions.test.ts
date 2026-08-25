@@ -859,17 +859,17 @@ describe("OBL-item-status-partition-and-close-inv-3: original_state preservation
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("OBL-item-status-partition-and-close-inv-4: never-ran vs ran-and-passed", () => {
-  it("POSITIVE: a configured, passing test_command reports ran:true, passed:true, and a real suite_name", () => {
+  it("POSITIVE: a configured, passing test_command reports ran:true, passed:true, and a real suite_name", async () => {
     const state = { plan: { test_command: `node -e "process.exit(0)"` } } as unknown as RemediationState;
-    const result = runCombinedTestSuite(state, { root: SCRATCH, artifactsDir: SCRATCH } as OrchestratorOptions);
+    const result = await runCombinedTestSuite(state, { root: SCRATCH, artifactsDir: SCRATCH } as OrchestratorOptions);
     expect(result.ran).toBe(true);
     expect(result.passed).toBe(true);
     expect(result.suite_name).toBeTruthy();
   });
 
-  it("NEGATIVE: an unset test_command reports ran:false — never a bare passed:true masquerading as a real run", () => {
+  it("NEGATIVE: an unset test_command reports ran:false — never a bare passed:true masquerading as a real run", async () => {
     const state = { plan: {} } as unknown as RemediationState;
-    const result = runCombinedTestSuite(state, { root: SCRATCH, artifactsDir: SCRATCH } as OrchestratorOptions);
+    const result = await runCombinedTestSuite(state, { root: SCRATCH, artifactsDir: SCRATCH } as OrchestratorOptions);
     expect(result.ran).toBe(false);
     // passed stays true so pre-existing fullyGreen callers keep their
     // vacuously-green behavior for "nothing configured" (backward compatible);
@@ -919,7 +919,16 @@ describe("OBL-item-status-partition-and-close-inv-5 (+ fail-2): e2e-failure tria
         blocks: [{ block_id: "B-1", items: ["F-E1"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-        e2e_command: `node -e "process.stderr.write('FAIL src/e1.ts\\n'); process.exit(1)"`,
+        // The e2e child must REALLY RUN and REALLY FAIL. The single-quoted
+        // form this used to carry is unconditionally refused by the declared-
+        // shape gate, so runE2eTests returned the refusal without spawning —
+        // and the test still went green ONLY because the refusal message echoes
+        // the offending command verbatim, so the echoed `src/e1.ts` satisfied
+        // the path-key join. That is passing on the wording of a refusal, not
+        // on the invariant this test names. Failure text as a double-quoted
+        // ARGUMENT instead.
+        e2e_command:
+          'node -e "process.stderr.write(process.argv[1]); process.exit(1)" "FAIL src/e1.ts"',
       },
       items: {
         "F-E1": {
@@ -934,6 +943,13 @@ describe("OBL-item-status-partition-and-close-inv-5 (+ fail-2): e2e-failure tria
     const next = await runClosePhase(state, { root, artifactsDir } as OrchestratorOptions);
     expect(next.status).toBe("triage");
     expect(next.items?.["F-E1"]?.status).toBe("blocked");
+    // The recorded failure is the CHILD's stderr, never a shape-gate refusal
+    // that skipped the spawn: without this pair the assertions above are
+    // satisfied by a non-run whose refusal text happens to echo the path.
+    expect(next.items?.["F-E1"]?.failure_reason).toContain("FAIL src/e1.ts");
+    expect(next.items?.["F-E1"]?.failure_reason).not.toContain(
+      "leaves the single-invocation command shape",
+    );
   });
 
   it("NEGATIVE: runClosePhase does NOT transition to triage when e2e fails and nothing can be re-blocked", async () => {

@@ -617,6 +617,7 @@ export { discoverProjectCommands } from "./tooling/testCommand.js";
 export {
   commandLeavesDeclaredShape,
   partitionCommandsByDeclaredShape,
+  parseCommandString,
 } from "./tooling/commandShape.js";
 
 // Tooling: project-test admission gate (CP-NODE-4 obligation 3) — a SECOND,

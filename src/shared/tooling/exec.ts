@@ -31,9 +31,27 @@ export interface RunTrackedResult {
   /** Elapsed wall-clock time in milliseconds for the spawned command. */
   duration_ms: number;
   error?: Error;
+  /**
+   * The signal that killed the child, or `null` when it exited on its own.
+   *
+   * Reported, never DISCRIMINATED on by callers that need to know WHY a child
+   * died: a deadline miss, a `maxBuffer` overflow and an external `kill` all
+   * set it. The `error.code` (`ETIMEDOUT` / `ENOBUFS`) is what separates those
+   * three; `signal` is the residue that names an external kill once they are
+   * ruled out.
+   */
+  signal?: string | null;
 }
 
 const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
+
+/**
+ * How long {@link runTrackedAsync} waits after SIGTERM before escalating to an
+ * unignorable SIGKILL for a child it killed on its own deadline/overflow bound.
+ * Long enough for an ordinary child to flush and exit, short enough that a
+ * child which ignores SIGTERM cannot hang the awaiting caller.
+ */
+const KILL_ESCALATION_GRACE_MS = 2_000;
 
 // --- cmd.exe quoting helpers ---
 //
@@ -357,6 +375,7 @@ export function runTracked(
     cwd: options.cwd,
     duration_ms: Date.now() - start,
     error: result.error,
+    signal: result.signal ?? null,
   };
 }
 
@@ -368,8 +387,18 @@ export function runTracked(
  * every `setInterval` liveness heartbeat in the process (the advance
  * heartbeat, and each held file lock's mtime heartbeat), so one stalled
  * `npx --version` probe classified a LIVE lock stale and stole it mid-flight.
- * Awaited by the acquisition engine and the binary resolver; never mixed with
- * {@link runTracked} in one call path.
+ * Awaited by the acquisition engine, the binary resolver, and every closing /
+ * required-test spawn; never mixed with {@link runTracked} in one call path.
+ *
+ * DEADLINE AND OVERFLOW ARE CLASSIFIED, not left as a bare signal. `spawnSync`
+ * reports an over-deadline child as `ETIMEDOUT` and an over-`maxBuffer` child
+ * as `ENOBUFS`, and callers discriminate on those codes precisely because
+ * `signal` conflates them with an external `kill`. Node's own `timeout` option
+ * on the async path would surface both as an ordinary SIGTERM close and throw
+ * that distinction away, so this runner enforces BOTH bounds itself and stamps
+ * the same two codes — one classification serves both twins, and the bounds
+ * themselves are measured the same way (`maxBuffer` PER STREAM, as `spawnSync`
+ * measures it) so the two twins cannot disagree about which children overflow.
  */
 export async function runTrackedAsync(
   argv: string[],
@@ -394,23 +423,126 @@ export async function runTrackedAsync(
     const child = spawnHidden(resolved[0], resolved.slice(1), {
       cwd: options.cwd,
       env: stripAuditToolsControlEnv(options.env),
-      ...(options.timeout ? { timeout: options.timeout } : {}),
       windowsHide: true,
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
+    // Bytes SEEN on each pipe, which is not the same as bytes kept: the counters
+    // keep rising after MAX_CAPTURE stops appending. See `capture`.
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let settled = false;
+    // Which bound killed the child, when one did. Read on `close` to stamp the
+    // matching `spawnSync` error code.
+    let killedBy: "timeout" | "overflow" | null = null;
     // Bounded: a hostile/oversized emitter cannot grow the heap without limit.
+    // An explicit `maxBuffer` is the caller's stricter bound and is REPORTED as
+    // an overflow; the 10MiB default is the silent backstop.
     const MAX_CAPTURE = 10 * 1024 * 1024;
+    const overflowLimit = options.maxBuffer;
+
+    let killTimer: NodeJS.Timeout | null = null;
+    /**
+     * Terminate the child for a bound this runner owns, and make the
+     * termination ACTUALLY terminal.
+     *
+     * `child.kill()` sends SIGTERM, which is a request: a child that installs a
+     * handler and ignores it never emits `close`, so the promise would never
+     * settle and the deadline this runner advertises would be a deadline in
+     * name only (`spawnSync`'s `timeout` had no such hole — it kills from the
+     * runtime). So the SIGTERM is followed by an unignorable SIGKILL after a
+     * short grace period. The timer is `unref`d so a settled call never holds
+     * the event loop open.
+     */
+    const killForBound = (): void => {
+      child.kill();
+      if (killTimer) return;
+      killTimer = setTimeout(() => {
+        if (!settled) child.kill("SIGKILL");
+      }, KILL_ESCALATION_GRACE_MS);
+      killTimer.unref?.();
+    };
+
+    const timer =
+      options.timeout !== undefined && options.timeout > 0
+        ? setTimeout(() => {
+            killedBy = "timeout";
+            killForBound();
+          }, options.timeout)
+        : null;
+    const finish = (result: RunTrackedResult): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      resolve(result);
+    };
+    /**
+     * Accumulate one chunk and enforce the overflow bound.
+     *
+     * The bound is checked PER STREAM and against bytes SEEN, not against what
+     * was kept — both deliberate:
+     *
+     *  - per stream, because `spawnSync`'s `maxBuffer`, which the sync twin
+     *    {@link runTracked} still enforces, is per stream. A combined bound
+     *    would classify a child emitting 5MiB on each pipe under an 8MiB limit
+     *    as an overflow that the sync twin admits verbatim, and this module's
+     *    claim that one classification serves both twins would be false.
+     *  - against bytes seen, because the MAX_CAPTURE backstop stops APPENDING
+     *    at 10MiB. Counting kept characters instead would make ENOBUFS
+     *    unreachable for any caller whose `maxBuffer` exceeds MAX_CAPTURE — the
+     *    output would silently truncate where the contract says it refuses.
+     */
+    const capture = (
+      chunk: Buffer,
+      append: (text: string) => void,
+      seen: () => number,
+      kept: () => number,
+    ): void => {
+      if (kept() < MAX_CAPTURE) {
+        append(chunk.toString(options.encoding ?? "utf8"));
+      }
+      if (
+        overflowLimit !== undefined &&
+        seen() > overflowLimit &&
+        killedBy === null
+      ) {
+        killedBy = "overflow";
+        killForBound();
+      }
+    };
     child.stdout?.on("data", (chunk: Buffer) => {
-      if (stdout.length < MAX_CAPTURE) stdout += chunk.toString(options.encoding ?? "utf8");
+      stdoutBytes += chunk.length;
+      capture(
+        chunk,
+        (text) => {
+          stdout += text;
+        },
+        () => stdoutBytes,
+        () => stdout.length,
+      );
     });
     child.stderr?.on("data", (chunk: Buffer) => {
-      if (stderr.length < MAX_CAPTURE) stderr += chunk.toString(options.encoding ?? "utf8");
+      stderrBytes += chunk.length;
+      capture(
+        chunk,
+        (text) => {
+          stderr += text;
+        },
+        () => stderrBytes,
+        () => stderr.length,
+      );
     });
+    // stdin is CLOSED (optionally after `input`), never left open: a command
+    // that reads stdin would otherwise block forever on a pipe nothing writes,
+    // turning an ordinary test invocation into a hang.
+    if (options.input !== undefined) child.stdin?.write(options.input);
+    child.stdin?.end();
+
     child.on("error", (error) => {
-      resolve({
+      finish({
         status: null,
         stdout,
         stderr,
@@ -418,20 +550,31 @@ export async function runTrackedAsync(
         cwd: options.cwd,
         duration_ms: Date.now() - start,
         error,
+        signal: null,
       });
     });
     child.on("close", (code, signal) => {
-      resolve({
+      let error: Error | undefined;
+      if (killedBy !== null) {
+        const bound: NodeJS.ErrnoException = new Error(
+          killedBy === "timeout"
+            ? `child exceeded the ${String(options.timeout)}ms deadline`
+            : `child exceeded the ${String(overflowLimit)}-byte output bound`,
+        );
+        bound.code = killedBy === "timeout" ? "ETIMEDOUT" : "ENOBUFS";
+        error = bound;
+      } else if (signal !== null && signal !== undefined) {
+        error = new Error(`child terminated by signal ${signal}`);
+      }
+      finish({
         status: code,
         stdout,
         stderr,
         argv: resolved,
         cwd: options.cwd,
         duration_ms: Date.now() - start,
-        error:
-          signal !== null && signal !== undefined
-            ? new Error(`child terminated by signal ${signal}`)
-            : undefined,
+        ...(error ? { error } : {}),
+        signal: signal ?? null,
       });
     });
   });

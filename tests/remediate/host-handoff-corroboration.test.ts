@@ -218,9 +218,17 @@ async function fixture(options: {
           }
         : {}),
     },
-    ...(options.runStartDirty
-      ? { run_start_dirty: options.runStartDirty }
-      : {}),
+    // The fixture's OWN untracked scratch is pre-existing dirt, exactly as a
+    // real run's `run_start_dirty` (captured from `stagedAndUntracked` before
+    // any remediation edit exists) would record it. Declared here so the
+    // untracked probe leg sees the fixture the way it sees a real repo — the
+    // alternative would be to let the fixture's scaffolding read as this host's
+    // edit, which is a false red manufactured by the harness.
+    run_start_dirty: [
+      COUNTER_SCRIPT,
+      ".counter",
+      ...(options.runStartDirty ?? []),
+    ],
   } as unknown as CurrentRemediationHostState;
   const prepared = await prepareRemediationHostHandoff({
     root,
@@ -572,6 +580,189 @@ describe("remediation host handoff repository corroboration", () => {
     expect(diagnosed.issues.map((issue) => issue.code)).toContain(
       "submission_malformed",
     );
+  });
+
+  it("refuses a resolved_no_change whose write scope the tree shows as CHANGED", async () => {
+    // A no-change decision used to be accepted on its evidence STRINGS alone,
+    // with only the required tests re-run. So a host that edited inside its own
+    // write scope and then declared "nothing to do" was recorded as
+    // verified-no-change and the edit rode in unattributed. The claim is
+    // mechanically falsifiable against the tree, so it must be FALSIFIED.
+    const contradicted = await fixture();
+    // The host really did land a change to its own allowed file, then claimed
+    // it had changed nothing.
+    await landA(contradicted);
+    await writeResult(
+      contradicted,
+      decisionFor(contradicted, {
+        status: "resolved_no_change",
+        evidence: ["Claimed the existing code already satisfied the contract."],
+      }),
+    );
+    const refused = await ingestRemediationHostResults({
+      root: contradicted.root,
+      artifactsDir: contradicted.artifactsDir,
+      runId: contradicted.runId,
+      state: boundState(contradicted),
+    });
+    expect(refused).not.toBe("unsupported_retired_state");
+    if (refused === "unsupported_retired_state") return;
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.issues.map((issue) => issue.code)).toContain(
+      "changed_files_mismatch",
+    );
+    // The item stays PENDING: an unaccepted claim must not settle the finding.
+    expect(refused.state.items.F1!.status).toBe("pending");
+  });
+
+  it("refuses a resolved_no_change contradicted by an UNCOMMITTED edit", async () => {
+    // The second half of the enumeration. A host that edits and commits is
+    // caught by baseline→HEAD; a host that edits and leaves the change in the
+    // working tree is caught by HEAD→worktree. Without the second probe the
+    // cheapest way to smuggle an edit past the claim is simply not to commit it.
+    const uncommitted = await fixture();
+    await writeFile(
+      join(uncommitted.root, "src", "a.ts"),
+      "export const value = 2;\n",
+    );
+    await writeResult(
+      uncommitted,
+      decisionFor(uncommitted, {
+        status: "resolved_no_change",
+        evidence: ["Claimed the existing code already satisfied the contract."],
+      }),
+    );
+    const refused = await ingestRemediationHostResults({
+      root: uncommitted.root,
+      artifactsDir: uncommitted.artifactsDir,
+      runId: uncommitted.runId,
+      state: boundState(uncommitted),
+    });
+    expect(refused).not.toBe("unsupported_retired_state");
+    if (refused === "unsupported_retired_state") return;
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.issues.map((issue) => issue.code)).toContain(
+      "changed_files_mismatch",
+    );
+    expect(refused.state.items.F1!.status).toBe("pending");
+  });
+
+  it("refuses a resolved_no_change contradicted by a NEW UNTRACKED file", async () => {
+    // The third way a host can have edited, and the one the tracked-only probe
+    // could not see: CREATING a file. A new `src/new.ts` is a real edit — and
+    // the most natural shape a remediation takes — so a claim of "nothing to
+    // do" beside one is false. Without the `ls-files --others` leg the cheapest
+    // way to smuggle an edit past the claim was simply never to `git add` it.
+    //
+    // The old justification for omitting untracked files was that the tool's
+    // own `.audit-tools` documents would refuse every claim ever made. They do
+    // not: the tool writes a managed `.gitignore` block covering that tree, so
+    // `--exclude-standard` never reports it, and the probe subtracts the
+    // directory explicitly besides. Pre-existing strays are excused by
+    // `run_start_dirty`, which is captured from `stagedAndUntracked` and so
+    // already enumerates untracked files. What is left is exactly this: a file
+    // that appeared DURING the run.
+    const created = await fixture();
+    await writeFile(
+      join(created.root, "src", "new.ts"),
+      "export const added = 1;\n",
+    );
+    await writeResult(
+      created,
+      decisionFor(created, {
+        status: "resolved_no_change",
+        evidence: ["Claimed the existing code already satisfied the contract."],
+      }),
+    );
+    const refused = await ingestRemediationHostResults({
+      root: created.root,
+      artifactsDir: created.artifactsDir,
+      runId: created.runId,
+      state: boundState(created),
+    });
+    expect(refused).not.toBe("unsupported_retired_state");
+    if (refused === "unsupported_retired_state") return;
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.issues.map((issue) => issue.code)).toContain(
+      "changed_files_mismatch",
+    );
+    // The created file is NAMED, and named as out-of-scope: `src/new.ts` is in
+    // nobody's `allowed_files`.
+    expect(refused.issues.map((issue) => issue.message).join("\n")).toContain(
+      "src/new.ts",
+    );
+    expect(refused.state.items.F1!.status).toBe("pending");
+  });
+
+  it("accepts a resolved_no_change whose only untracked files are the tool's own artifacts", async () => {
+    // The other half, and the one that keeps the leg from becoming a check that
+    // always fires: an honest no-change claim in a repo where the ONLY
+    // untracked paths are this tool's own workload/prompt/result documents
+    // under `.audit-tools/` must still be accepted. The fixture root carries no
+    // `.gitignore` at all, so this pins the explicit subtraction rather than
+    // git's ignore rules doing the work.
+    const honest = await fixture();
+    expect(
+      git(honest.root, ["ls-files", "--others", "--exclude-standard"]),
+    ).toContain(".audit-tools/");
+    await writeResult(
+      honest,
+      decisionFor(honest, {
+        status: "resolved_no_change",
+        evidence: ["The existing code already satisfies the contract."],
+      }),
+    );
+    const accepted = await ingestRemediationHostResults({
+      root: honest.root,
+      artifactsDir: honest.artifactsDir,
+      runId: honest.runId,
+      state: boundState(honest),
+    });
+    expect(accepted).not.toBe("unsupported_retired_state");
+    if (accepted === "unsupported_retired_state") return;
+    expect(accepted.issues).toEqual([]);
+    expect(accepted.accepted_count).toBe(1);
+  });
+
+  it("refuses a resolved_no_change whose tree shows changes OUTSIDE allowed_files", async () => {
+    // The out-of-scope half, and the one a narrowed check inverts. For a LANDED
+    // result `corroborateHostResult` refuses a commit that touched anything
+    // outside the prompt-bound `allowed_files` — that is the more serious
+    // violation, not the lesser one. A no-change corroboration that only asked
+    // about files INSIDE `allowed_files` would therefore be the exact INVERSE
+    // of the rule it claims to share: the in-scope edit refused, the
+    // out-of-scope edit waved through. Both halves refuse.
+    const outOfScope = await fixture();
+    // `src/b.ts` is nobody's write scope in this workload — the item is bound
+    // to `src/a.ts` alone.
+    expect(outOfScope.item.allowed_files).toEqual(["src/a.ts"]);
+    const landed = await landB(outOfScope);
+    expect(landed).toBeTruthy();
+    await writeResult(
+      outOfScope,
+      decisionFor(outOfScope, {
+        status: "resolved_no_change",
+        evidence: ["Claimed the existing code already satisfied the contract."],
+      }),
+    );
+    const refused = await ingestRemediationHostResults({
+      root: outOfScope.root,
+      artifactsDir: outOfScope.artifactsDir,
+      runId: outOfScope.runId,
+      state: boundState(outOfScope),
+    });
+    expect(refused).not.toBe("unsupported_retired_state");
+    if (refused === "unsupported_retired_state") return;
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.issues.map((issue) => issue.code)).toContain(
+      "changed_files_mismatch",
+    );
+    // Named in the refusal as out-of-scope, so the operator is not left to
+    // guess which half of the rule fired.
+    expect(
+      refused.issues.map((issue) => issue.message).join("\n"),
+    ).toContain("src/b.ts");
+    expect(refused.state.items.F1!.status).toBe("pending");
   });
 
   it("converges explicit no-change, blocked, and clarification outcomes without fabricated merge evidence", async () => {
@@ -1073,10 +1264,10 @@ describe("remediation host handoff repository corroboration", () => {
 
   // ── CORROBORATION FAILS CLOSED — both branches, so the skip cannot widen ──
 
-  it("skips corroboration ONLY with neither a trusted binding nor a git repo", async () => {
-    // The documented, bounded skip: nothing to corroborate against, and no
-    // trusted record claiming there was. This is the ONE branch that proceeds
-    // on the declared evidence, and it is pinned so it can never grow.
+  it("refuses attestation-only acceptance when neither a trusted binding nor a git repo exists", async () => {
+    // The documented, bounded refusal: nothing to corroborate against, and no
+    // trusted record claiming there was. This branch MUST refuse and is pinned
+    // so it can never widen into accepting attestation-only evidence.
     const root = await mkdtemp(join(tmpdir(), "remediation-no-git-"));
     cleanupRoots.push(root);
     await mkdir(join(root, "src"), { recursive: true });
@@ -1160,8 +1351,10 @@ describe("remediation host handoff repository corroboration", () => {
       state,
     });
     if (ingested === "unsupported_retired_state") throw new Error("state rejected");
-    expect(ingested.accepted_count).toBe(1);
-    expect(ingested.issues).toEqual([]);
+    // Must be refused: no git repo and no host_handoff binding means no corroboration possible
+    expect(ingested.accepted_count).toBe(0);
+    expect(ingested.issues.map((i) => i.code)).toContain("trusted_binding_missing");
+    expect(ingested.state.items.F1!.status).toBe("pending");
   });
 
   it("refuses a git-backed workload with no trusted binding rather than accepting the claim", async () => {
@@ -1232,7 +1425,7 @@ describe("remediation host handoff repository corroboration", () => {
     // not a fixed cost. The child hangs for a minute, so the deadline is the only
     // thing that ends it and the test still finishes in seconds.
     const hanging = `node -e "console.log('starting'); setTimeout(function () {}, 60000)"`;
-    const timedOut = runRequiredTest(cwd, hanging, 5_000);
+    const timedOut = await runRequiredTest(cwd, hanging, 5_000);
     expect(timedOut).not.toBeNull();
     expect(timedOut!.outcome).toBe("timed_out");
     expect(timedOut!.command).toBe(hanging);
@@ -1240,7 +1433,7 @@ describe("remediation host handoff repository corroboration", () => {
     // returned a joined string, so an operator had nothing to read.
     expect(timedOut!.stdout).toContain("starting");
 
-    const failed = runRequiredTest(
+    const failed = await runRequiredTest(
       cwd,
       `node -e "console.error('boom'); process.exit(3)"`,
     );
@@ -1249,7 +1442,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(failed!.exit_code).toBe(3);
     expect(failed!.stderr).toContain("boom");
 
-    expect(runRequiredTest(cwd, `node -e "process.exit(0)"`)).toBeNull();
+    expect(await runRequiredTest(cwd, `node -e "process.exit(0)"`)).toBeNull();
   });
 
   it("classifies a command that outran the capture buffer as overflow, never as a hang", async () => {
@@ -1270,11 +1463,42 @@ describe("remediation host handoff repository corroboration", () => {
     // way.)
     const overflowing =
       `node -e "process.stdout.write('x'.repeat(9 * 1024 * 1024))"`;
-    const overflowed = runRequiredTest(cwd, overflowing);
+    const overflowed = await runRequiredTest(cwd, overflowing);
     expect(overflowed).not.toBeNull();
     expect(overflowed!.outcome).toBe("output_overflow");
     expect(overflowed!.exit_code).toBeNull();
     expect(overflowed!.command).toBe(overflowing);
+  });
+
+  // ── OBL-impl-block-1296-inv-2: A REQUIRED TEST MUST NOT STARVE LIVENESS ───
+
+  it("lets timers fire while a required test runs, so a held lock's heartbeat survives it", async () => {
+    // Ingestion runs with the remediation state lock HELD, and every liveness
+    // heartbeat in the process — the advance heartbeat, each held lock's mtime
+    // heartbeat — is a timer on this event loop. A synchronous child blocks
+    // that loop for the whole suite, so a LIVE lock stops being refreshed,
+    // reads as stale, and is stolen mid-ingest. Awaiting is what prevents it.
+    //
+    // Cheapest honest pin: count timer ticks across a ~1s child. Revert
+    // `runRequiredTest` to `spawnSync` and the count is 0.
+    const cwd = await runnerCwd();
+    let ticks = 0;
+    const heartbeat = setInterval(() => {
+      ticks += 1;
+    }, 50);
+    let failure: RequiredTestFailure | null;
+    try {
+      failure = await runRequiredTest(
+        cwd,
+        `node -e "setTimeout(function () {}, 1000)"`,
+      );
+    } finally {
+      clearInterval(heartbeat);
+    }
+    // The child really ran and really passed, so the tick count is about a real
+    // ~1s spawn rather than an early refusal.
+    expect(failure).toBeNull();
+    expect(ticks).toBeGreaterThan(0);
   });
 
   it("reports a hung required test under its own issue code, distinguishable without parsing prose", async () => {
