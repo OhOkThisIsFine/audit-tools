@@ -1,5 +1,5 @@
 import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { StateStore, type RemediationState } from "../state/store.js";
@@ -27,6 +27,8 @@ import {
   projectAuditFindingsReportSubset,
   // obligation engine + intent
   interpretFreeFormIntent,
+  interpretIntent,
+  unresolvedFromClauses,
   advance,
   decideFrictionTriage,
   buildFrictionTriageBlock,
@@ -35,6 +37,7 @@ import {
   LENSES,
   SEVERITIES,
   // types
+  type ConstraintClauseRecord,
   type FrictionTriageDecision,
   type ObligationDef,
   type ObligationOutcome,
@@ -3483,19 +3486,25 @@ Once the file is written, run:
 
 /** Sidecar artifact recording the deterministic interpretation of free_form_intent. */
 export const INTENT_INTERPRETATION_FILENAME = "intent-interpretation.json";
+// v1alpha2: unencodable_clauses carries identity-keyed records (clause_id +
+// checkpoint_question), not bare strings — the shape the blocking consumer
+// reads. A v1alpha1 sidecar (string[]) is stale and is repaired by
+// re-derivation; it had no readers, so no migration path is owed.
 export const INTENT_INTERPRETATION_SCHEMA_VERSION =
-  "remediate-code-intent-interpretation/v1alpha1";
+  "remediate-code-intent-interpretation/v1alpha2";
 
 export interface PersistedIntentInterpretation {
   schema_version: typeof INTENT_INTERPRETATION_SCHEMA_VERSION;
   /** The interpreter's structured output (lens weights / priority / scope). */
   interpreted: InterpretedIntent;
   /**
-   * Clauses the interpreter could not encode as a lens weight, priority signal,
-   * or scope emphasis. Surfaced so the host can promote them to constraints —
-   * never silently dropped.
+   * Clauses the clause pipeline could not encode as a lens weight, priority
+   * signal, or scope emphasis — with their stable identity and blocking
+   * question. CONSUMED by the interpret_intent obligation: an unanswered
+   * record blocks the decide loop until the host resolves it via a
+   * `constraint_clauses` entry on the checkpoint (CE-004, identity-keyed).
    */
-  unencodable_clauses: string[];
+  unencodable_clauses: ConstraintClauseRecord[];
   created_at: string;
 }
 
@@ -3520,10 +3529,23 @@ export async function interpretConfirmedCheckpointIntent(
   if (typeof raw !== "string" || raw.trim().length === 0) return null;
 
   const interpreted = interpretFreeFormIntent(raw);
+  // The clause pipeline (interpretIntent) owns identity + blocking questions;
+  // the hint interpreter above owns lens/priority/scope signals. Both are
+  // deterministic draws over the same input.
+  const clauseResult = interpretIntent(raw);
+  const unencodable_clauses: ConstraintClauseRecord[] = [];
+  for (const clause of clauseResult.clauses) {
+    if (clause.encodable || !clause.checkpoint_question) continue;
+    unencodable_clauses.push({
+      clause_id: clause.clause_id,
+      text: clause.text,
+      checkpoint_question: clause.checkpoint_question,
+    });
+  }
   const persisted: PersistedIntentInterpretation = {
     schema_version: INTENT_INTERPRETATION_SCHEMA_VERSION,
     interpreted,
-    unencodable_clauses: interpreted.unencodableClauses,
+    unencodable_clauses,
     created_at: new Date().toISOString(),
   };
   try {
@@ -3532,25 +3554,93 @@ export async function interpretConfirmedCheckpointIntent(
       persisted,
     );
   } catch {
-    // Best-effort sidecar: a write failure must never block the decide loop.
+    // Best-effort WRITE: a write failure must never crash the decide loop.
+    // Enforcement does not depend on it — the consumer re-derives when the
+    // sidecar is missing (readOrRepairIntentInterpretation).
   }
-  if (interpreted.unencodableClauses.length > 0) {
+  if (unencodable_clauses.length > 0) {
+    const clauseTexts = unencodable_clauses.map((c) => c.text);
     runLogger?.event({
       phase: "next-step",
       kind: "outcome",
       obligation: "interpret_intent",
       note:
-        `intent_unencodable_clauses count=${String(interpreted.unencodableClauses.length)} ` +
-        `clauses=${interpreted.unencodableClauses.join("; ")}`,
+        `intent_unencodable_clauses count=${String(unencodable_clauses.length)} ` +
+        `clauses=${clauseTexts.join("; ")}`,
     });
     process.stderr.write(
-      `[remediate-code] free_form_intent: ${interpreted.unencodableClauses.length} ` +
-        `clause(s) could not be encoded as lens/priority/scope signals and are ` +
-        `surfaced for promotion to constraints: ` +
-        `${interpreted.unencodableClauses.join("; ")}\n`,
+      `[remediate-code] free_form_intent: ${unencodable_clauses.length} ` +
+        `clause(s) could not be encoded as lens/priority/scope signals and ` +
+        `block planning until answered via constraint_clauses: ` +
+        `${clauseTexts.join("; ")}\n`,
     );
   }
   return persisted;
+}
+
+/**
+ * Read the persisted intent interpretation — the LOAD-BEARING input to the
+ * constraint-clause gate — repairing it by re-derivation when it is missing,
+ * unparseable, or carries a stale schema_version. Returns null only when
+ * there is nothing to interpret (no confirmed checkpoint / empty intent).
+ */
+export async function readOrRepairIntentInterpretation(
+  artifactsDir: string,
+  checkpoint: IntentCheckpoint | undefined,
+  runLogger?: RunLogger,
+): Promise<PersistedIntentInterpretation | null> {
+  if (!checkpoint || checkpoint.confirmed_by !== "host") return null;
+  const raw = checkpoint.free_form_intent;
+  if (typeof raw !== "string" || raw.trim().length === 0) return null;
+
+  const sidecarPath = join(artifactsDir, INTENT_INTERPRETATION_FILENAME);
+  try {
+    const parsed = parsePersistedIntentInterpretation(
+      JSON.parse(await readFile(sidecarPath, "utf8")),
+    );
+    if (parsed) return parsed;
+  } catch {
+    // Missing or unreadable — fall through to repair.
+  }
+  return interpretConfirmedCheckpointIntent(artifactsDir, checkpoint, runLogger);
+}
+
+/** Pure shape gate for the sidecar: current version + record-shaped clauses, else null. */
+function parsePersistedIntentInterpretation(
+  parsed: unknown,
+): PersistedIntentInterpretation | null {
+  if (
+    isRecord(parsed) &&
+    parsed.schema_version === INTENT_INTERPRETATION_SCHEMA_VERSION &&
+    Array.isArray(parsed.unencodable_clauses) &&
+    parsed.unencodable_clauses.every(
+      (c): c is ConstraintClauseRecord =>
+        isRecord(c) &&
+        typeof c.clause_id === "string" &&
+        typeof c.text === "string" &&
+        typeof c.checkpoint_question === "string",
+    )
+  ) {
+    return parsed as unknown as PersistedIntentInterpretation;
+  }
+  return null;
+}
+
+/**
+ * Sync sidecar read for the obligation's derive scan. Returns the persisted
+ * interpretation, or null when the sidecar is missing, unreadable, or stale —
+ * the execute path repairs via {@link readOrRepairIntentInterpretation}.
+ */
+function readPersistedIntentInterpretationSync(
+  sidecarPath: string,
+): PersistedIntentInterpretation | null {
+  try {
+    return parsePersistedIntentInterpretation(
+      JSON.parse(readFileSync(sidecarPath, "utf8")),
+    );
+  } catch {
+    return null;
+  }
 }
 
 /** Execution dependencies threaded to every remediate obligation executor. */
@@ -3744,24 +3834,90 @@ function buildPreIntakeObligations(
     },
     {
       // Past the intent gate: interpret the confirmed checkpoint's
-      // free_form_intent once (INV-S04) and persist the structured signals. A
-      // transition (state unchanged) — the re-scan skips it once the sidecar
-      // exists.
+      // free_form_intent once (INV-S04), persist the structured signals, and
+      // ENFORCE the unencodable-clause contract: an unanswered clause blocks
+      // the decide loop until the host resolves it via a `constraint_clauses`
+      // entry on the checkpoint (CE-004, identity-keyed — the shared matcher
+      // in audit-tools/shared intent/constraintClauses.ts, the same core the
+      // audit gate uses). The PERSISTED sidecar is the consumed input; a
+      // missing or stale sidecar is repaired by re-derivation, never skipped.
       id: "interpret_intent",
-      derive: () =>
-        existingCheckpoint?.confirmed_by === "host" &&
-        typeof existingCheckpoint.free_form_intent === "string" &&
-        existingCheckpoint.free_form_intent.trim().length > 0 &&
-        !existsSync(interpretationPath)
+      derive: () => {
+        if (
+          existingCheckpoint?.confirmed_by !== "host" ||
+          typeof existingCheckpoint.free_form_intent !== "string" ||
+          existingCheckpoint.free_form_intent.trim().length === 0
+        ) {
+          return "satisfied";
+        }
+        const sidecar = readPersistedIntentInterpretationSync(interpretationPath);
+        if (sidecar === null) return "missing";
+        return unresolvedFromClauses(sidecar.unencodable_clauses, existingCheckpoint)
+          .length > 0
           ? "missing"
-          : "satisfied",
+          : "satisfied";
+      },
       execute: async (state, c) => {
-        await interpretConfirmedCheckpointIntent(
+        const persisted = await readOrRepairIntentInterpretation(
           artifactsDir,
           existingCheckpoint,
           c.runLogger,
         );
-        return { kind: "transition", state };
+        const unresolved = persisted
+          ? unresolvedFromClauses(persisted.unencodable_clauses, existingCheckpoint)
+          : [];
+        if (unresolved.length === 0) return { kind: "transition", state };
+
+        const nextCommand = loaderCommand("next-step");
+        const checkpointPath = join(artifactsDir, "intent_checkpoint.json");
+        const clauseLines = unresolved
+          .map(
+            (clause) =>
+              `- **${clause.clause_id}** — "${clause.text}"\n  Question: ${clause.checkpoint_question}`,
+          )
+          .join("\n");
+        const prompt = `
+# Resolve Free-Form Intent Constraints
+
+${unresolved.length} clause(s) of the confirmed checkpoint's \`free_form_intent\` could
+not be encoded as lens/priority/scope signals. Each needs an explicit answer
+before planning proceeds — an unanswered clause would otherwise be silently
+dropped.
+
+${clauseLines}
+
+Answer each clause by adding a \`constraint_clauses\` entry to
+\`intent_checkpoint.json\` (keep the exact \`clause_id\` — answers are keyed on
+clause identity, not on the question text):
+
+\`\`\`json
+"constraint_clauses": [
+  { "clause_id": "<the clause_id above>", "text": "<the clause text>", "checkpoint_question": "<the question above>", "host_answer": "<how to apply this constraint>" }
+]
+\`\`\`
+
+Then run:
+
+\`${nextCommand}\`
+`;
+        return {
+          kind: "emit",
+          step: await writeCurrentStep({
+            stepKind: "confirm_intent",
+            status: "blocked",
+            runId: stateRunId(state),
+            repoRoot: c.root,
+            artifactsDir,
+            prompt,
+            allowedCommands: [nextCommand],
+            stopCondition:
+              "Stop after adding constraint_clauses answers to intent_checkpoint.json and running next-step.",
+            artifactPaths: {
+              intent_checkpoint: checkpointPath,
+              intent_interpretation: interpretationPath,
+            },
+          }),
+        };
       },
     },
     {

@@ -231,6 +231,8 @@ export {
   interpretIntent,
   clauseIdentity,
 } from "./intent/clauseInterpreter.js";
+export type { ConstraintClauseRecord } from "./intent/constraintClauses.js";
+export { unresolvedFromClauses } from "./intent/constraintClauses.js";
 export type {
   RemediationOutcomeStatus,
   RemediationOutcome,

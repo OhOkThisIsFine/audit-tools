@@ -4,15 +4,21 @@
  * Bridges the audit-tools/shared clause interpreter to the pinned
  * FreeFormIntentInterpretation seam contract (N-X06).
  *
- * INV-S04: the verbatim free_form_intent string MUST NOT appear in any output
- * field. All fields are derived signals only.
+ * INV-S04: the WHOLE verbatim free_form_intent string is never emitted, and
+ * worker/dispatch prompt material never carries it in any form. Individual
+ * clause substrings DO ride derived fields (clause text, checkpoint
+ * questions, the remediate sidecar, run-log notes) — that is inside the
+ * charge's plan/prompt/workload scope, and the guarded boundary is the
+ * worker-facing prompt surface, not every derived field.
  */
 
 import {
   interpretIntent,
+  unresolvedFromClauses,
   FREE_FORM_INTENT_INTERPRETATION_VERSION,
 } from "audit-tools/shared";
 import type {
+  ConstraintClauseRecord,
   FreeFormIntentInterpretation,
   EncodedClause,
   IntentCheckpoint,
@@ -79,21 +85,14 @@ export function interpretFreeFormIntentForAudit(
 // Blocking-escalation gate
 // ---------------------------------------------------------------------------
 
-/** A blocking checkpoint question that the host has not yet answered. */
-export interface UnresolvedConstraintClause {
-  /**
-   * Stable clause identity — the resolution key (CE-004). A `constraint_clauses`
-   * entry resolves this clause when its `clause_id` matches, NOT when its
-   * rendered `checkpoint_question` matches (two distinct clauses can render to
-   * the same question). The host recorder threads this back so the
-   * answer is keyed on identity.
-   */
-  clause_id: string;
-  /** The original unencodable clause text. */
-  text: string;
-  /** The blocking question that must be answered before planning proceeds. */
-  checkpoint_question: string;
-}
+/**
+ * A blocking checkpoint question that the host has not yet answered.
+ * Alias of the shared {@link ConstraintClauseRecord}: the identity-keyed
+ * resolution semantics (CE-004) live in audit-tools/shared
+ * (`intent/constraintClauses.ts`) so remediate's sidecar consumer and this
+ * gate cannot drift.
+ */
+export type UnresolvedConstraintClause = ConstraintClauseRecord;
 
 /**
  * Compute the blocking checkpoint questions raised by an intent checkpoint's
@@ -125,32 +124,16 @@ export function unresolvedConstraintClauses(
   const result = interpretIntent(freeForm);
   if (!result.has_unencodable) return [];
 
-  // A clause is answered when an entry with a non-empty host_answer matches it
-  // by clause identity (preferred) or, for legacy entries lacking a clause_id,
-  // by the rendered checkpoint_question.
-  const answeredIds = new Set<string>();
-  const answeredQuestions = new Set<string>();
-  for (const c of checkpoint?.constraint_clauses ?? []) {
-    if (typeof c.host_answer !== "string" || c.host_answer.trim().length === 0) {
-      continue;
-    }
-    if (typeof c.clause_id === "string" && c.clause_id.length > 0) {
-      answeredIds.add(c.clause_id);
-    } else {
-      answeredQuestions.add(c.checkpoint_question);
-    }
-  }
-
-  const unresolved: UnresolvedConstraintClause[] = [];
+  const records: ConstraintClauseRecord[] = [];
   for (const clause of result.clauses) {
     if (clause.encodable || !clause.checkpoint_question) continue;
-    if (answeredIds.has(clause.clause_id)) continue;
-    if (answeredQuestions.has(clause.checkpoint_question)) continue;
-    unresolved.push({
+    records.push({
       clause_id: clause.clause_id,
       text: clause.text,
       checkpoint_question: clause.checkpoint_question,
     });
   }
-  return unresolved;
+  // Identity-keyed resolution (CE-004) is the shared core — one matcher for
+  // this gate and remediate's sidecar consumer.
+  return unresolvedFromClauses(records, checkpoint);
 }

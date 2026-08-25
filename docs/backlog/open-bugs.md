@@ -110,14 +110,7 @@
   exposed to stale-lock reclaim — the CP-NODE-5 lock-hazard class; pre-existing, and the
   one-lock restructure lengthens the hold with (non-spawning) pre-intake. **Property:** a held
   lock's heartbeat survives the longest spawn under it.
-  <!-- doc-citation-exempt: runtime sidecar written under the artifacts dir, not a tracked file -->
-  (d) `intent-interpretation.json` is a
-  write-only sidecar — `unencodable_clauses` is surfaced "so the host can promote them" with
-  zero readers — and the INV-S04 doc comment at `src/audit/orchestrator/intentInterpreter.ts`
-  overstates the boundary its code enforces (raw clause substrings ride interpreted fields into
-  the sidecar/run-log, which the charge's plan/prompt/workload scope permits). Align doc to
-  scope; give the sidecar a reader or delete it. [[write-only-data-looks-authoritative]]
-  (e) The stderr/run-log pairing pin's residual doors, probed: migrating ONE diagnostic to
+  (d) The stderr/run-log pairing pin's residual doors, probed: migrating ONE diagnostic to
   `console.log` and deleting its event stays green (the in-family survivors satisfy the
   vacuity guard — widen the family or key on the `[remediate-code]` prefix), and the pin
   silently mandates event-BEFORE-write ordering — a legitimate write-then-log pairing would
