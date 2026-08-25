@@ -5,8 +5,9 @@
 
 ## Live state
 
-- Published state: v0.45.0 is the last tag, is published to npm, and is what the global bins run.
-  `main` is ahead of it, pushed, and green; that work is not yet released.
+- Published state: **v0.46.0** is the last tag, is published to npm, and is what the global bins run
+  (`audit-code --version` / `remediate-code --version` both report it). `main` is at the release
+  commit and in sync with the remote; there is no unreleased work.
 - The first-draw REMEDIATION RUN (`.audit-tools/remediation/`, 30 work items) has every work item
   terminal: 25 resolved, 5 resolved with no change. CP-NODE-26, CP-NODE-7 and CP-NODE-14 all landed
   and ingested on 2026-08-24. Its `closing_plan` is `{action: "none"}`, so closing runs no actions —
@@ -39,9 +40,7 @@
    lean-fast-path heading in `spec/remediation-workflow-design.md`; state the two consent roles;
    <!-- doc-citation-exempt: a runtime artifact the tool writes under .audit-tools/, never tracked -->
    give the `intent-interpretation.json` sidecar a real reader; bring `scripts/` under a tsconfig).
-2. Ship a release (`/ship`): `main` carries the three remediation landings plus everything since
-   v0.45.0.
-3. Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
+2. Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
    never the default two-minute timeout, which kills it mid-gate and wedges `phase.lock` for every
    later call.
 
