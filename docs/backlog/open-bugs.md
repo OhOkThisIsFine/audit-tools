@@ -928,14 +928,18 @@
   hold:** a concept doc states the invariant, and the measurement that motivated it lives in the
   review record or `git log`, in one place.
 
-- **The remediate+shared sweep leaks empty repo-root files named from code fragments (2026-08-24,
-  low, friction: hermeticity).** One `npx vitest run tests/remediate tests/shared` run left `./60s`
-  (mtime inside the run window) and `./o.testId)` (mtime ~2.5 minutes AFTER the run exited — a
-  detached straggler child) on an otherwise clean tree. Both names are shell-redirect artifacts:
-  `o.testId)` is a fragment of `scripts/shared/vitest-timing-reporter.mjs`, so some spawned shell
-  received unquoted source text and parsed `> <fragment>` as a redirect. **Property:** no test
-  writes outside its scratch dir, no spawned child outlives its test, and a suite run leaves the
-  repo root byte-identical.
+- **Empty repo-root files named from code fragments — the SUITE is exonerated; what stays open is a
+  child that outlives its run (2026-08-24, low, friction: hermeticity).** Four so far — `60s`,
+  `o.testId)`, `0)`, `entry.tool` — all empty and untracked, so a routine `git add -A` would commit
+  them and a content-based clean-tree check never sees them. Each name is a shell-redirect artifact:
+  a command STRING reaching `cmd.exe` carries that shell's grammar, so `>` redirects even inside
+  quoted source text and the target token ends at whitespace. Instrumented measurement
+  (`NODE_OPTIONS=--require` wrapping every `child_process` entry point) logged 6,496 spawns across a
+  sweep with ZERO carrying `>`, and both checkout roots were unchanged — the producer is an agent
+  session's own shell, not the suite. `tests/helpers/global-setup.ts` now fails a run that ADDED an
+  unowned root entry, but only at teardown. **Property (residual):** a spawned child that outlives
+  its run cannot leak into the repo root unseen. Measurement in project memory
+  `repo-root-empty-files-are-shell-redirect-artifacts`.
 
 - **The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).**
   `skills/remediate-code/SKILL.md` and `skills/remediate-code/remediate-code.prompt.md` each state

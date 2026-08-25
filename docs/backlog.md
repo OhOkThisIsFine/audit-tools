@@ -126,23 +126,23 @@
 - `open-bugs.md:904` — A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run, medium).
 - `open-bugs.md:913` — Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run, medium).
 - `open-bugs.md:923` — A dated measurement sits inside durable routine prose (2026-08-23, low).
-- `open-bugs.md:931` — The remediate+shared sweep leaks empty repo-root files named from code fragments (2026-08-24, low, friction: hermeticity).
-- `open-bugs.md:940` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
+- `open-bugs.md:931` — Empty repo-root files named from code fragments — the SUITE is exonerated; what stays open is a child that outlives its run (2026-08-24, low, friction: hermeticity).
+- `open-bugs.md:944` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:20` — Track 2.5 — keep production-orphan detection beside knip.
+- `forward-tracks.md:29` — Track 2.5 — keep production-orphan detection beside knip.
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:34` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:58` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:66` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:81` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:88` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:100` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:114` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
-- `forward-tracks.md:123` — One-core dissolution lap — unify the host-handoff substrate and converge remediate on the obligation walk (owner-routed 2026-08-19).
+- `forward-tracks.md:43` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
+- `forward-tracks.md:67` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:75` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:90` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:97` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:109` — Wave-friendly host dispatch: run identity survives partial ingest.
+- `forward-tracks.md:123` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:132` — One-core dissolution lap — unify the host-handoff substrate and converge remediate on the obligation walk (owner-routed 2026-08-19).
 
 ### [`deferred.md`](backlog/deferred.md)
 

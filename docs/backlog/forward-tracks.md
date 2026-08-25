@@ -8,6 +8,15 @@
 
 ## Open tracks
 
+**The audit draw WRITES to the audited tree, and the read-only framing does not say so
+(2026-08-24, raised by CP-NODE-7's refutation lane).** `docs/project-philosophy.md` and CLAUDE.md
+describe auditing as "the read-only selection" and remediating as "the write/apply selection", but
+phase-1 auto-fix spawns `prettier --write` / `black` / `sqlfluff fix --force` / `gofmt -w` over the
+audited files, so an audit mutates the tree it is auditing. CP-NODE-7 gave the phase a mechanical
+opt-out and dry-run, which makes the mutation refusable but leaves it ON by default. **Property:**
+either the read-only framing names auto-fix as its one declared exception, or the phase defaults to
+off and a host opts IN — the two documents and the executor agree on which.
+
 **Metric-pool empirical program — grouping/characterization metrics (owner-directed 2026-08-19).**
 The in-tree grouping (`shared_file ∧ same_lens` eligibility + constant-free modularity-peak
 refinement + per-file aggregated seams) is INTERIM: it is the best-measured choice on one run, not a
