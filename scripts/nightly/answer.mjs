@@ -24,6 +24,9 @@
 // twelve answers had no corresponding change anywhere in the tree, because the
 // ledger could not tell the two apart — and a settled subject is never re-raised,
 // so that work was invisible rather than merely pending.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import {
   readOpenItems,
   readDecisions,
@@ -81,6 +84,50 @@ if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {
   process.exit(0);
 }
 
+// An answered decision often implies a CODE fix, and a remediation run in flight
+// may already claim the file that fix would touch. Applying into a claimed file
+// corrupts the run's workload binding, so the fact has to be in front of the
+// reader — otherwise every session re-derives it from the run state by hand, and
+// gets it wrong in the over-broad direction (2026-08-23: four items parked, one
+// of them for no reason).
+//
+// This REPORTS the open run's write scope; it never labels an answered item ready
+// or blocked. A decision record carries the path its QUESTION was about, which is
+// frequently not the file its FIX touches, so a path-match verdict would hand out
+// a false READY. The tool supplies the fact and leaves the judgement.
+function openRunWriteScope(root) {
+  let state;
+  try {
+    state = JSON.parse(
+      readFileSync(join(root, '.audit-tools', 'remediation', 'state.json'), 'utf8'),
+    );
+  } catch {
+    return null; // No run, unreadable state: nothing to say.
+  }
+  if (!state || typeof state !== 'object') return null;
+  if (state.status === 'complete' || state.status === 'closing') return null;
+
+  const TERMINAL = new Set(['resolved', 'resolved_no_change', 'ignored', 'abandoned']);
+  const blocks = new Map();
+  for (const block of Array.isArray(state?.plan?.blocks) ? state.plan.blocks : []) {
+    if (block?.id) blocks.set(block.id, block);
+  }
+
+  const rows = [];
+  for (const [id, item] of Object.entries(state.items ?? {})) {
+    if (TERMINAL.has(item?.status)) continue;
+    const files = blocks.get(item?.block_id)?.touched_files;
+    rows.push({
+      id,
+      status: item?.status ?? '(no status)',
+      files: Array.isArray(files) ? [...files].sort() : [],
+    });
+  }
+  // Content-derived order, never object-key order.
+  rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return rows.length > 0 ? rows : null;
+}
+
 if (argv[0] === '--list') {
   const { actionable, grandfathered } = answeredNotDone(decisions);
   if (open.length === 0 && actionable.length === 0) {
@@ -116,6 +163,17 @@ if (argv[0] === '--list') {
       console.log(`  ${d.key}\t${d.path || '(no path)'}\t${(d.subject || '').slice(0, 70)}`);
     }
     console.log(`\nVerify each against HEAD, then: node scripts/nightly/answer.mjs --done <KEY> "<ref>"`);
+    const scope = openRunWriteScope(ROOT);
+    if (scope) {
+      console.log(
+        `
+A REMEDIATION RUN IS OPEN — ${scope.length} item(s) still claim a write scope. An answered` +
+          ` fix that touches a file below collides with that item's binding; one that does not, does not.`,
+      );
+      for (const row of scope) {
+        console.log(`  ${row.id}	[${row.status}]	${row.files.join(', ') || '(no declared write scope)'}`);
+      }
+    }
   }
   if (grandfathered.length > 0) {
     console.log(
