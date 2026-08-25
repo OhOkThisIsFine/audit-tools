@@ -111,11 +111,12 @@ A `[[...]]` column means a SURVIVING memory links to it; those references get sw
 | `x-cluster-sidecar-trim-falsified` | One-off falsified review premise about a closed cluster; too narrow to ever match again. | 1 |
 | `zero-adapter-retirement-shipped` | Shipped-status record; the never-recreate directive already lives in CLAUDE.md. |  |
 
-## B. Blocked by a CONSTITUTIONAL doc (15) — NOT cut without your say-so
+## B. Held by a CONSTITUTIONAL doc (15) — SINCE CUT, on the owner's call
 
-Each is cited by `docs/project-philosophy.md` in the gated citation form (the `memory` keyword, a colon, then the note name) — the
-provenance link for a conviction. Cutting any of them reds `check:memory-citations` AND
-requires editing a constitutional doc, which needs an owner-decision attestation.
+Each was cited by `docs/project-philosophy.md` as a conviction's provenance. The owner chose
+**"cut all 15, rewrite the citations"**, so each pointer was repointed at the conviction's REAL
+home — `CLAUDE.md`, a spec, or the brief itself where nothing else owned it — and the entries were
+deleted. No conviction's content changed; only where it says its evidence lives.
 
 | entry | why the triage cut it |
 |---|---|

@@ -137,7 +137,7 @@ guaranteed.
 - **Resolve toward the durable contract.** LLM-vs-deterministic → deterministic; graph/language →
   language-neutral. *(home: `CLAUDE.md` → Preferences & standing decisions)*
 
-*(home: `CLAUDE.md` → Concepts; memory: right-tool-not-deterministic-dogma)*
+*(home: `CLAUDE.md` → Concepts)*
 
 ## A3. Enforce robustness in tooling, never host discretion
 
@@ -148,7 +148,7 @@ verified from disk / hand-fixed a break* is a **latent failure mode** → move i
 concurrency, retries, and transport are deliberately host-owned; audit-tools guarantees that the emitted
 workload is complete and that returned results cannot escape or forge its bindings.
 "Be careful" / "my side" is never a fix; **a needed manual flag is a bug signal.**
-*(home: `CLAUDE.md` → Conventions; memory: enforce-robustness-in-tooling-not-host-discretion)*
+*(home: `CLAUDE.md` → Conventions)*
 
 ## A4. Everything-agnostic by default
 
@@ -161,7 +161,7 @@ contract or abstracted, never baked in. The named rules are *instances of one pr
   `reason`); new analyzers *enrich* shared artifacts, never fork planning.
 - **OS/platform-agnostic:** no platform-baked path/shell/command/line-ending assumptions in core logic;
   route through the existing abstractions. Windows-aware is the most-exercised instance, not the boundary.
-*(home: `CLAUDE.md` → Conventions; memory: model-provider-ide-agnostic)*
+*(home: `CLAUDE.md` → Conventions)*
 
 ## A5. Conversation-first  ⚑
 
@@ -179,7 +179,7 @@ Scale the *process* to the work; don't fork the *path*. Two continuous dials —
 light, never off) and **phase granularity** (degenerate phases collapse by structure). Signal assessed
 cheaply at intake (affected-file count + path-risk patterns + intent), re-assessed on evidence. Escape
 hatch: optimistic-start, escalate-on-evidence. Explicitly ONE pipeline, *not* a separate lean path.
-*(home: `spec/self-scaling-pipeline-design.md`; memory: self-scaling-pipeline-not-forked-paths)*
+*(home: `spec/self-scaling-pipeline-design.md`)*
 
 ## A7. Contract-authoring determinism
 
@@ -192,7 +192,7 @@ INTO judgment.
 - **Handoff = enforcement ⟂ execution ⟂ judgment:** mechanical contract builder/validator → host-owned
   execution → bounded judgment at named seams.
 *(home: "Split design assessment" → `CLAUDE.md` → Preferences; memory:
-delegate-adversarial-phases-to-separate-agent, dispatch-enforcement-driving-judgment-separation)*
+delegate-adversarial-phases-to-separate-agent)*
 
 ## A8. How the tool decomposes & hands off work
 
@@ -205,15 +205,16 @@ delegate-adversarial-phases-to-separate-agent, dispatch-enforcement-driving-judg
   wrongly-admitted pair conflicts at rebase → quarantine → retry off updated HEAD. Pre-declared
   per-file edit-region ownership was falsified: disjointness cannot be proven at decomposition time,
   so proving it would be LLM judgment where the goal is enforcement in tooling.
-*(home: memory: remediator-must-decompose-and-boundary-enforce, decomposition-colocate-source-and-tests,
-parallel-dispatch-optimistic-not-anchors)*
+*(home: this brief — no other doc owns these three. The mechanisms are
+`src/remediate/steps/contractPipeline.ts` (decomposition into nodes) and
+`src/remediate/steps/dispatch/hostHandoff.ts` (write-scope binding + accept-time collision).)*
 
 ## A9. Multi-agent cooperative runs
 
 Arbitrary host agents and IDEs may contribute to the SAME audit/remediation (JOIN, not isolate) — symmetric
 peers, no primary/secondary. Safety comes from persisted workload/result bindings + idempotent ingestion —
 no claim registry, lease, or per-IDE namespace.
-*(home: `spec/multi-ide-concurrent-runs-design.md`; memory: multi-ide-concurrent-runs-design)*
+*(home: `spec/multi-ide-concurrent-runs-design.md`)*
 
 ## A10. Analyzers & dependencies (the product's ingestion of external tools)
 
@@ -258,7 +259,7 @@ ship process. They'd change if the developer or workflow changed; they don't des
   (paths/commands/versions/line-refs). Owner toggles off when clarity needed.
 - **Deliverables always land in a file** (repo doc or artifact dir); chat gets path + digest, never
   chat-only. *(home: `CLAUDE.md` → Preferences (ideal-code, caveman); global `~/.claude/CLAUDE.md`
-  (Deliverables, caveman); memory: prefer-ideal-code-no-backcompat, ask-on-ambiguity-dont-defer-silently,
+  (Deliverables, caveman); memory: ask-on-ambiguity-dont-defer-silently,
   proportionality-defer-needs-user-signal — the ask/defer pair lives in memory, not repo `CLAUDE.md`)*
 
 ## B2. Ship-pipeline ownership
@@ -266,8 +267,7 @@ ship process. They'd change if the developer or workflow changed; they don't des
 **The agent owns the ship pipeline** — commit → push → merge → publish → verify-live → reinstall global
 bins, end-to-end by default. Never park at the push/publish boundary. Hand back only for destructive
 ambiguity. Encoded in the `/ship` skill (CRLF clean-tree guard, allow-scripts
-postinstall, release-CI-is-the-real-signal). *(home: `CLAUDE.md` → Release & publish; global `~/.claude/CLAUDE.md`; memory:
-agent-owns-ship-pipeline)*
+postinstall, release-CI-is-the-real-signal). *(home: `CLAUDE.md` → Release & publish; global `~/.claude/CLAUDE.md`)*
 
 ## B3. Code & repo discipline
 
@@ -282,8 +282,7 @@ agent-owns-ship-pipeline)*
   policy-selecting adapter — so a fix in one usually belongs in both.
 - **Prefer extraction over drift-tests** — single-source two copies instead of guarding them with a drift
   test; make drift impossible. *(home: `CLAUDE.md` → Conventions/Preferences for the other B3 bullets;
-  memory: knip-deadcode-gate-default-mode, prefer-extraction-over-drift-tests — the latter not yet in
-  CLAUDE.md)*
+  memory: prefer-extraction-over-drift-tests — not yet in CLAUDE.md)*
 
 ## B4. End-of-sprint cleanup (standing, unprompted)
 
@@ -292,8 +291,7 @@ code/debug/TODO → no half-done broken state (call out deliberate intermediate)
 backlog → sync memory + index → **state remaining steps and name each one's home doc** (an explicit list: immediate-next → HANDOFF; bugs/tracks → backlog; durable design → memory+index;
 how-to → `CLAUDE.md`). The hand-back is RENDERED (`scripts/render-closeout.mjs`), which refuses until
 every section states content or an explicit "none" and then omits the silent ones — short report,
-stated silence. *(home: `CLAUDE.md` → Conventions; global `~/.claude/CLAUDE.md`; memory:
-end-of-sprint-cleanup-standing-step)*
+stated silence. *(home: `CLAUDE.md` → Conventions; global `~/.claude/CLAUDE.md`)*
 
 ## B5. Documentation governance
 
@@ -303,8 +301,7 @@ end-of-sprint-cleanup-standing-step)*
   is referenced, not copied, from others.
 - **Condensation bias** — fewer, denser, timeless docs; enforced by a doc-manifest gate + nightly review.
 - **Universal host prompts, single-sourced** — ONE canonical prompt body rendered per-IDE, never per-IDE
-  prose. *(home: `docs/documentation-philosophy.md`; memory: spec-degradation-and-doc-staleness,
-  universal-host-prompts-single-source)*
+  prose. *(home: `docs/documentation-philosophy.md`)*
 
 ## B6. Backlog & friction hygiene
 
