@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 177 entr(y/ies) indexed.
+> and at commit). 178 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -126,8 +126,9 @@
 - `open-bugs.md:904` — A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run, medium).
 - `open-bugs.md:913` — Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run, medium).
 - `open-bugs.md:923` — A dated measurement sits inside durable routine prose (2026-08-23, low).
-- `open-bugs.md:931` — The remediate+shared sweep leaks empty repo-root files named from code fragments (2026-08-24, low, friction: hermeticity).
-- `open-bugs.md:940` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
+- `open-bugs.md:931` — A leak that lands AFTER teardown is reported by nobody (2026-08-24, low, friction: hermeticity).
+- `open-bugs.md:943` — HEAD's lockfile does not satisfy HEAD's package.json (2026-08-24, medium).
+- `open-bugs.md:950` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

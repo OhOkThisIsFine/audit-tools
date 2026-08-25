@@ -928,14 +928,24 @@
   hold:** a concept doc states the invariant, and the measurement that motivated it lives in the
   review record or `git log`, in one place.
 
-- **The remediate+shared sweep leaks empty repo-root files named from code fragments (2026-08-24,
-  low, friction: hermeticity).** One `npx vitest run tests/remediate tests/shared` run left `./60s`
-  (mtime inside the run window) and `./o.testId)` (mtime ~2.5 minutes AFTER the run exited — a
-  detached straggler child) on an otherwise clean tree. Both names are shell-redirect artifacts:
-  `o.testId)` is a fragment of `scripts/shared/vitest-timing-reporter.mjs`, so some spawned shell
-  received unquoted source text and parsed `> <fragment>` as a redirect. **Property:** no test
-  writes outside its scratch dir, no spawned child outlives its test, and a suite run leaves the
-  repo root byte-identical.
+- **A leak that lands AFTER teardown is reported by nobody (2026-08-24, low, friction:
+  hermeticity).** Empty repo-root files named from repo text keep appearing (`o.testId)`, `60s`,
+  `0)`). Mechanism confirmed by reproduction: a command STRING reaching `cmd.exe` redirects at any
+  `>` in the line — quoted source included — and ends the target token at whitespace, `;`, `,` or
+  `=`, so `.map((o) => o.testId);` writes `o.testId)` and prose reading `the >60s blocking worker`
+  writes `60s`. The `tests/remediate`+`tests/shared` sweep is NOT the producer: an instrumented run
+  logging every `child_process` entry point saw 6,496 spawns, none carrying `>`, and left both
+  checkout roots unchanged. Teardown now fails a run that ADDED a root entry it does not own
+  (`tests/helpers/global-setup.ts`). **Open half:** a child outliving the run writes after that
+  check, and the next run reads the entry as pre-existing — so a straggler leak is caught by
+  nothing, and the producer of the three artifacts is still unnamed.
+
+- **HEAD's lockfile does not satisfy HEAD's package.json (2026-08-24, medium).** `package.json`
+  declares `tree-sitter-wasms` and `web-tree-sitter` as prod dependencies; `package-lock.json`'s
+  root entry still carries `tree-sitter-wasms` as dev and omits `web-tree-sitter`, so `npm ci`
+  refuses on a fresh clone and every `npm install` dirties the tree with the same re-sync diff.
+  **Property:** the two manifests agree at every commit, mechanically — a dependency move that skips
+  the lockfile is a red build, not a discovery made by the next person who clones.
 
 - **The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).**
   `skills/remediate-code/SKILL.md` and `skills/remediate-code/remediate-code.prompt.md` each state
