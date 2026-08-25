@@ -94,8 +94,7 @@
 
 - **Acquisition of `actionlint` fails on extract (2026-08-21, low).** `external_analyzer_acquisition.json` recorded `actionlint` as `not_resolved` with `extract failed: tar exit 128`, so the workflow linter silently never ran although `.github/workflows` exists. **Property:** a tool that resolves and then fails to unpack is distinguishable from one that is not applicable to the repo.
 
-- **Analyzer consent and conceptual-review depth are modelled as DURABLE when they must be per-run (2026-08-21, owner directive, medium).** `persistAnalyzerConsent` (`src/shared/analyzerPolicy.ts`, called from `src/audit/cli/nextStepHelpers.ts`) writes `analyzer_consent` into `.audit-tools/audit/analyzer-policy.json` so a `granted` answer silently runs that analyzer "from now on", and the `analyzer_consent` step text states that persistence as the contract. The intent checkpoint reuses a prior `design_review.conceptual_depth` the same way (the design-review step announces `Reusing intent from <timestamp> ... conceptual depth deep`). Owner, 2026-08-21: **these are per-run choices and should not be persisted — a user may not want the same settings every audit.** Consequences: the offer stops being made, an operator who granted a network-egress analyzer once keeps granting it unseen, and a delegate advancing a run unattended must record a durable decision merely to proceed. **Property:** an analyzer-consent answer and a review-depth answer bind the run that was asked, and the next run asks again; nothing about either survives into a run whose operator did not choose it. Note this REVERSES the reading that promotion deleting `<!-- doc-citation-exempt: runtime artifact under the gitignored .audit-tools/ tree, not a tracked file -->
-  `analyzer-policy.json` was itself a defect — under this directive the deletion is closer to the desired behaviour than the persistence is, and the durable store is what needs removing.
+- **Conceptual-review DEPTH is still modelled as durable when it must be per-run (2026-08-21, owner directive, medium).** The analyzer-consent half of this entry is CLOSED: a grant now binds one run and rides the scoped consent token, only declines persist, and `AnalyzerConsentDecisionSchema` is a one-member enum so a grant has no durable shape. The review-depth half is NOT, and is stated here rather than left implied by a closed sibling: the intent checkpoint reuses a prior `design_review.conceptual_depth`, so the design-review step announces `Reusing intent from <timestamp> ... conceptual depth deep` to an operator who never chose it. Owner, 2026-08-21: **these are per-run choices and should not be persisted — a user may not want the same settings every audit.** **Property:** a review-depth answer binds the run that was asked, and the next run asks again.
 
 - **Promotion and close residuals from the CP-NODE-3/15 reviews (low, one entry).** (a) The
   friction shortfall gate reads `readdir(...).catch(() => [])`, and `archiveFrictionRecords`
@@ -820,15 +819,6 @@
   (2026-08-06, lead, low).** 3 refuted / 6 downgraded — record in
   [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:
   should synthesis demand mechanism-grounded (not flow-existence) evidence for `critical`?
-
-- **`hostInputPause.ts` says analyzer consent lives in session config; it lives in
-  `.audit-tools/audit/analyzer-policy.json` (2026-08-12, nightly, low).** `src/audit/orchestrator/hostInputPause.ts`
-  documents `analyzerConsent` as "recorded per-candidate consent decisions (session config)". It
-  cannot be: `SessionIntentV1Schema` is `.strict()` with exactly `review_mode` and `observability`.
-  Consent persists via `AnalyzerPolicySchema` at `.audit-tools/audit/analyzer-policy.json`. The
-  identical claim was corrected in `spec/mechanical-analyzer-layer-design.md` (`4d5987bf`); this is
-  its code-comment sibling, left because the nightly's autonomy covers docs only.
-  **Property to hold:** doc and code name the same persistence home for consent.
 
 - **`check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling
   (2026-08-14, nightly, low).** The gate matches only the `memory: <name>` prose form in tracked

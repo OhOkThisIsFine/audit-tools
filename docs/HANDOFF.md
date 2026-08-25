@@ -19,32 +19,41 @@
   `npm run test:rebaseline-flakes` would be legitimate; recording it was declined because a
   known-flaky record is also what would launder a genuine regression, and a red that is re-checked
   costs less than a green that is trusted wrongly. Do not "fix" this by re-baselining.
-- The detached host runner is NOT alive and must stay down; the remaining items were done with
-  native agents.
-- **Both final items needed their write scope widened before they could be implemented**, with the
-  owner's approval: each declared only source files while its obligations required tests, and
-  CP-NODE-14's own contract text said the scope "spans the sole src file AND tests/audit". The
-  sanctioned recipe is widen `state.plan.blocks[].touched_files`, delete `state.host_handoff`, then
-  `next-step` to re-mint. This is the open high-severity entry *"The DAG-derived write scope omits
-  the companion files a fix needs"* — P38 closed only the declared-outputs half.
+- The detached host runner is NOT alive and must stay down.
+- ⚠ **A second session has been committing to this checkout.** Three commits between `28912720`
+  and `521d43b0` were not mine, and one of them (`cc73faa9`) fixed a real `check:lint` red I had
+  left on main. Run `git log` before assuming the tree is only yours, and run `check:lint` — not
+  just `check` + `check:tests` — after any deletion-heavy change.
 
 ## Immediate next
 
-Run `answer.mjs --list` for the authoritative set; record each with `--done <KEY> "<ref>"` as it
-lands. Two owner decisions of 2026-08-25 order the queue:
+The nightly queue is EMPTY — all twelve propositions were answered on 2026-08-25 and nine are
+landed. Six answered decisions remain unexecuted. Run `answer.mjs --list` for the authoritative
+set with its keys; record each with `--done <KEY> "<ref>"` as it lands.
 
-1. **Finish the lean fold in code, THEN reword the doc.** The owner ruled the fork a defect on
-   2026-07-26 (ledger `7fc1c1d310dda95d`) and that ruling was never executed. Selection, artifact
-   and consumer are unified; `buildLeanExtractedPlan` and the bypass that returns before the
-   pipeline's entry seed are not. Only after the fold does the `docs-8` reword state a true fact.
-2. **Delete `ItemSpec` outright**, and fix the attribution bug riding on it — the close gate reads
-   an empty per-item list, so one test failure blocks every resolved item. `docs-10` then resolves
-   by deleting the item-spec references from Phase 3. N-R13 is RATIFIED as-is: the abandoned
-   `tests_to_write` / `not_applicable_steps` / `no_change` fields are removed, not restored.
-
-Then the remaining answered decisions: `docs-4`, `docs-7`, `docs-9`, `sol-1`, `sol-2`, the
-<!-- doc-citation-exempt: a runtime artifact the tool writes under .audit-tools/, never tracked -->
-per-run-consent code fix, P41, the `intent-interpretation.json` reader, and the `scripts/` tsconfig.
+1. **sol-2 — re-target the P42 investigation at audit-code.** P42's original premise is verified
+   FALSE (all seven cited sites in `src/remediate/steps/prompts.ts` are driver-facing; the worker
+   packet carries no advance command), and its answer is already closed as superseded. What the
+   owner kept is the intent: find where the `charter_extraction` / `systemic_challenge` incidents
+   actually happened, in audit-code, before proposing any edit.
+2. **sol-1 — the RED-AT record plus its reconciliation check.** A leg-3 proposal must RUN its test
+   <!-- doc-citation-exempt: the record file this item exists to CREATE; it does not exist yet -->
+   at HEAD, write the verbatim failure and sha to `RED-AT.txt`, and a check in `verify:checks`
+   must refuse a proposal test with no sibling record. Also correct P44's own evidence table: it
+   claims a hit rate of "2 of 2" when P37 and P40 both recorded genuine measured RED/GREEN runs.
+3. **docs-4 — generate the README sample report from the renderer**, the way the Philosophy block
+   is generated, so it cannot drift again.
+4. **P41 — the prompt-contract registry** with its reconciliation leg (a prompt builder under
+   `src/` that no row claims is a red build) and both escapes: projection rows and declared-gap rows.
+   <!-- doc-citation-exempt: a runtime artifact the tool writes under .audit-tools/, never tracked -->
+5. **Give `intent-interpretation.json` a reader** — wire a real consumer for `unencodable_clauses`
+   so the persisted data is load-bearing and its correctness is tested.
+6. **Bring `scripts/` under a tsconfig.** Measured this session: 1348 errors under full `strict`
+   with `checkJs`, but **161** with `noImplicitAny` relaxed — the 1187 difference is pure
+   annotation noise in plain `.mjs`. The 161 are real (a `Property 'code' does not exist on type
+   'Error'`, several `possibly null`, an unguarded optional dynamic import). Note the owner's
+   answer says "so the unchecked set is EMPTY": `wrapper/` (13 files), `.claude/hooks/` (12),
+   `dispatch/` (4) and the repo-root bins are unreached too, not just `scripts/`.
 
 Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
 never the default two-minute timeout, which kills it mid-gate and wedges `phase.lock` for every

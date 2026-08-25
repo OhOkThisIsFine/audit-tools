@@ -33,7 +33,12 @@ export interface HostInputPauseInputs {
   graphLlmEdgeReasoning?: boolean;
   /** Item B: acquisition gate — the consent fold only fires when acquisition is live. */
   externalAcquisitionEnabled?: boolean;
-  /** Item B: recorded per-candidate consent decisions (session config). */
+  /**
+   * Item B: recorded per-candidate consent DECLINES, from the durable analyzer
+   * policy at `.audit-tools/audit/analyzer-policy.json` — NOT session config,
+   * whose schema is strict and holds only review_mode + observability. A grant
+   * is never here: it binds one run and rides the scoped consent token below.
+   */
   analyzerConsent?: AnalyzerConsentDecisions;
   /**
    * Item B: a per-run, tool-SCOPED consent grant. Typed as the
