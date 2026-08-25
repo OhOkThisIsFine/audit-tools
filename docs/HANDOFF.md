@@ -65,8 +65,17 @@ later call.
   6,496 instrumented spawns, none carrying a redirect. The producer is an agent session's own
   `cmd.exe`. Do not re-open it as a suite defect.
 <!-- doc-citation-exempt: the external per-project host-memory index, not a tracked repo file -->
-- The project memory index `MEMORY.md` sits AT its 24.4KB read limit, so trailing entries can load
-  invisibly. It needs a real merge-and-cut pass (the sanctioned remedy), not another mechanical trim.
+- The project memory store was PRUNED on 2026-08-25: 242 entries to 144, and its `MEMORY.md` index
+  from 24.8KB to 16.0KB, so nothing loads invisibly any more. Prune by USE ("would a session reach
+  for this?"), never by uniqueness — that criterion answers *keep* almost always and yielded one cut
+  from four clusters before the owner overruled it. Per-entry reasons:
+  [`reviews/memory-cut-list-2026-08-25.md`](reviews/memory-cut-list-2026-08-25.md).
+- ⏳ **OPEN, owner-only:** 15 further memory entries are held back because
+  `docs/project-philosophy.md` cites them as each conviction's provenance. Several are literal
+  duplicates of CLAUDE.md text, so the pointer may be dead weight — but cutting one edits a
+  constitutional doc and reds `check:memory-citations`. Section B of the cut list names all 15. The
+  question was put to the owner at the 2026-08-25 hand-back; if it is still unanswered, ask it again
+  rather than deciding it.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
