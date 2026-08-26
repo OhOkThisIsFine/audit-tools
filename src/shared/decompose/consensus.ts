@@ -22,6 +22,7 @@
 // and, in Phase C, at the charter layer (sources = the four charters). No IO.
 
 import type { Partition } from "./modularity.js";
+import { compareCodeUnits } from "../compareCodeUnits.js";
 
 /**
  * One independently-sourced view of the target, contributing a family of
@@ -109,7 +110,7 @@ const MIN_TOGETHER_SOURCES = 2;
 /** Canonical unordered-pair key (`minmax`, a text-safe unit separator that
  * cannot appear in a node id) so (u,v) and (v,u) collide. */
 function pairKey(a: string, b: string): string {
-  return a.localeCompare(b) <= 0 ? `${a}\u001f${b}` : `${b}\u001f${a}`;
+  return compareCodeUnits(a, b) <= 0 ? `${a}\u001f${b}` : `${b}\u001f${a}`;
 }
 
 function splitPairKey(key: string): [string, string] {
@@ -145,7 +146,7 @@ class UnionFind {
     if (ra === rb) return;
     // Attach the lexically larger root under the smaller so the representative is
     // stable and independent of union order.
-    if (ra.localeCompare(rb) < 0) this.parent.set(rb, ra);
+    if (compareCodeUnits(ra, rb) < 0) this.parent.set(rb, ra);
     else this.parent.set(ra, rb);
   }
 
@@ -157,7 +158,7 @@ class UnionFind {
       if (list) list.push(node);
       else out.set(root, [node]);
     }
-    for (const list of out.values()) list.sort((a, b) => a.localeCompare(b));
+    for (const list of out.values()) list.sort((a, b) => compareCodeUnits(a, b));
     return out;
   }
 }
@@ -181,7 +182,7 @@ function coMembershipCounts(
     }
     for (const members of communities.values()) {
       if (members.length < 2) continue;
-      const sorted = [...members].sort((a, b) => a.localeCompare(b));
+      const sorted = [...members].sort((a, b) => compareCodeUnits(a, b));
       for (let i = 0; i < sorted.length; i++) {
         for (let j = i + 1; j < sorted.length; j++) {
           const key = pairKey(sorted[i]!, sorted[j]!);
@@ -216,7 +217,7 @@ export function clustersFromPartitions(
     }
   }
   const groups = [...uf.groups().values()].filter((g) => g.length >= 2);
-  groups.sort((a, b) => a[0]!.localeCompare(b[0]!));
+  groups.sort((a, b) => compareCodeUnits(a[0]!, b[0]!));
   return groups;
 }
 
@@ -379,7 +380,7 @@ export function decompose(
   }
 
   const byId = (a: DecomposedNode, b: DecomposedNode) =>
-    a.node_id.localeCompare(b.node_id);
+    compareCodeUnits(a.node_id, b.node_id);
   consensus.sort(byId);
   contested.sort(byId);
   return { target, consensus, contested };

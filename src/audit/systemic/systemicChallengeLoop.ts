@@ -23,7 +23,7 @@
 
 import type { Finding } from "../types.js";
 import type { GoalGraph } from "audit-tools/shared";
-import { groundDesignFindings, findingReEmissionKey } from "audit-tools/shared";
+import { groundDesignFindings, findingReEmissionKey, compareCodeUnits } from "audit-tools/shared";
 import { goalBlastRadius } from "../clarification/blastRadius.js";
 
 /**
@@ -115,7 +115,7 @@ export function foldChallengeRound(params: {
   const findings = [...byKey.values()].sort((a, b) => {
     const blastDelta = (b.blast_radius ?? 0) - (a.blast_radius ?? 0);
     if (blastDelta !== 0) return blastDelta;
-    return a.id.localeCompare(b.id);
+    return compareCodeUnits(a.id, b.id);
   });
 
   // A round is DRY (converged) when it surfaced nothing the prior set lacked — an

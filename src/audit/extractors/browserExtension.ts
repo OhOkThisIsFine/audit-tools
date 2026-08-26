@@ -1,7 +1,7 @@
 import { posix } from "node:path";
 import type { Lens, RepoManifest } from "../types.js";
 import type { FileDisposition, GraphBundle, GraphEdge, SurfaceRecord } from "audit-tools/shared";
-import { isRecord } from "audit-tools/shared";
+import { isRecord, compareCodeUnits } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import {
   graphEdge,
@@ -453,7 +453,7 @@ export function buildBrowserExtensionSurfacesFromGraph(
   }
 
   return surfaces.sort(
-    (a, b) => a.entrypoint.localeCompare(b.entrypoint) || a.kind.localeCompare(b.kind),
+    (a, b) => compareCodeUnits(a.entrypoint, b.entrypoint) || compareCodeUnits(a.kind, b.kind),
   );
 }
 

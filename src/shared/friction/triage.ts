@@ -21,6 +21,7 @@ import {
   findFrictionRecordsByRunLink,
   isFrictionCategory,
 } from './frictionRecord.js';
+import { compareCodeUnits } from '../compareCodeUnits.js';
 
 export type {
   CapturedFrictionItem,
@@ -278,7 +279,7 @@ export function deriveFrictionObservations(
     (a, b) =>
       FRICTION_CATEGORIES.indexOf(a.category) -
         FRICTION_CATEGORIES.indexOf(b.category) ||
-      a.artifact.localeCompare(b.artifact),
+      compareCodeUnits(a.artifact, b.artifact),
   );
   return derived;
 }

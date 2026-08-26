@@ -23,6 +23,7 @@ import {
   type GoalGraph,
 } from "../types/charter.js";
 import type { Finding } from "../types/finding.js";
+import { compareCodeUnits } from "../compareCodeUnits.js";
 
 /**
  * The host answers submission (what the host writes to
@@ -163,7 +164,7 @@ export function assembleClarificationRegister(
   const findings = banked.map((request) =>
     questionToFinding(request, membersByNode.get(request.node_id) ?? []),
   );
-  findings.sort((a, b) => a.id.localeCompare(b.id));
+  findings.sort((a, b) => compareCodeUnits(a.id, b.id));
 
   return { asked, banked, findings, validation_issues };
 }

@@ -1,4 +1,4 @@
-import { changedFiles, gitRefExists, isGitRepo, pathMatchesPrefix } from "audit-tools/shared";
+import { changedFiles, gitRefExists, isGitRepo, pathMatchesPrefix, compareCodeUnits } from "audit-tools/shared";
 import type { GraphBundle } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { CoverageMatrix } from "../types.js";
@@ -163,10 +163,10 @@ export function computeAuditScope(
 
   const seedFiles = seedKeys
     .map((key) => canonicalByNorm.get(key)!)
-    .sort((a, b) => a.localeCompare(b));
+    .sort((a, b) => compareCodeUnits(a, b));
   const expandedFiles = expandedKeys
     .map((key) => canonicalByNorm.get(key)!)
-    .sort((a, b) => a.localeCompare(b));
+    .sort((a, b) => compareCodeUnits(a, b));
 
   const notes: string[] = [];
   if (seedFiles.length === 0) {
@@ -250,7 +250,7 @@ export function resolveAuditScope(
         ...new Set(
           buildPathLookup(input.bundle.repo_manifest, dispositionMap).values(),
         ),
-      ].sort((a, b) => a.localeCompare(b))
+      ].sort((a, b) => compareCodeUnits(a, b))
     : [];
 
   return computeAuditScope({

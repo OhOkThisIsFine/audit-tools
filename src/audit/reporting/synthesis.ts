@@ -142,7 +142,7 @@ function formatSeverityList(summary: Record<string, number>): string {
 function formatCountList(summary: Record<string, number>): string {
   const parts = Object.entries(summary)
     .filter(([, count]) => count > 0)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareCodeUnits(left, right))
     .map(([key, count]) => `${key}: ${count}`);
   return parts.length > 0 ? parts.join(", ") : "none";
 }

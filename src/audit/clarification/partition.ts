@@ -18,6 +18,7 @@ import type {
   CharterClarificationRequest,
   GoalGraph,
 } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import { deltaBlastRadius } from "./blastRadius.js";
 
 /** A routed delta joined to the subsystem node it belongs to. */
@@ -98,5 +99,5 @@ export function partitionDeltasToQuestions(
     };
   });
 
-  return requests.sort((a, b) => a.request_id.localeCompare(b.request_id));
+  return requests.sort((a, b) => compareCodeUnits(a.request_id, b.request_id));
 }

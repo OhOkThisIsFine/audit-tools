@@ -12,6 +12,7 @@
 // no IO, no LLM. Exported so phase-e reuses the same ranking.
 
 import type { CharterClarificationRequest } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 
 /**
  * The scalar VOI score of a question: blast radius (how far the answer ripples up
@@ -36,6 +37,6 @@ export function voiQueue(
   return [...requests].sort((a, b) => {
     const byScore = voiScore(b) - voiScore(a);
     if (byScore !== 0) return byScore;
-    return a.request_id.localeCompare(b.request_id);
+    return compareCodeUnits(a.request_id, b.request_id);
   });
 }

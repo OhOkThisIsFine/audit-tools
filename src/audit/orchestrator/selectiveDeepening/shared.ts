@@ -4,6 +4,7 @@ import {
   CONFIDENCES,
   severityRank,
   confidenceRank,
+  compareCodeUnits,
 } from "audit-tools/shared";
 import type { AuditResult, AuditTask, Finding, Lens } from "../../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
@@ -111,7 +112,7 @@ export function lineCountForPath(
 }
 
 export function uniqueSorted(values: Iterable<string>): string[] {
-  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+  return [...new Set(values)].sort((a, b) => compareCodeUnits(a, b));
 }
 
 export function intersects(left: string[], right: string[]): boolean {

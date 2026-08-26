@@ -1,5 +1,5 @@
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import { hashContent } from "audit-tools/shared";
+import { hashContent, compareCodeUnits } from "audit-tools/shared";
 
 /**
  * Phase 4B — optional, bounded edge-reasoning pass.
@@ -80,7 +80,7 @@ export function collectLowConfidenceEdges(
     }
   }
   return candidates
-    .sort((a, b) => edgeSignature(a).localeCompare(edgeSignature(b)))
+    .sort((a, b) => compareCodeUnits(edgeSignature(a), edgeSignature(b)))
     .slice(0, MAX_REASONED_EDGES);
 }
 

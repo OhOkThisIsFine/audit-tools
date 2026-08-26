@@ -55,7 +55,7 @@ export const AnalyzerPolicySchema = z
 
 export type AnalyzerPolicy = z.infer<typeof AnalyzerPolicySchema>;
 
-function canonicalPath(repositoryRoot: string, relativePath: string): string {
+function resolvePolicyPath(repositoryRoot: string, relativePath: string): string {
   if (!isAbsolute(repositoryRoot)) {
     throw new Error(
       `Repository root must be absolute: ${JSON.stringify(repositoryRoot)}`,
@@ -66,11 +66,11 @@ function canonicalPath(repositoryRoot: string, relativePath: string): string {
 
 /** The one canonical analyzer-policy artifact for a repository. */
 export function getAnalyzerPolicyPath(repositoryRoot: string): string {
-  return canonicalPath(repositoryRoot, ANALYZER_POLICY_RELATIVE_PATH);
+  return resolvePolicyPath(repositoryRoot, ANALYZER_POLICY_RELATIVE_PATH);
 }
 
 function getAnalyzerPolicyLockPath(repositoryRoot: string): string {
-  return canonicalPath(repositoryRoot, ANALYZER_POLICY_LOCK_RELATIVE_PATH);
+  return resolvePolicyPath(repositoryRoot, ANALYZER_POLICY_LOCK_RELATIVE_PATH);
 }
 
 function parseAnalyzerPolicy(

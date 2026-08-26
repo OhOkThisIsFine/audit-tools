@@ -21,7 +21,7 @@ export type SessionIntentLoadResult =
   | { readonly status: "not_configured"; readonly intent: SessionIntentV1 }
   | { readonly status: "configured"; readonly intent: SessionIntentV1 };
 
-function canonicalIntentPath(repositoryRoot: string): string {
+function resolveIntentPath(repositoryRoot: string): string {
   if (!isAbsolute(repositoryRoot)) {
     throw new Error(
       `Repository root must be absolute: ${JSON.stringify(repositoryRoot)}`,
@@ -53,7 +53,7 @@ function isMissingFileError(
 export async function loadSessionIntent(
   repositoryRoot: string,
 ): Promise<SessionIntentLoadResult> {
-  const configPath = canonicalIntentPath(repositoryRoot);
+  const configPath = resolveIntentPath(repositoryRoot);
 
   let contents: string;
   try {

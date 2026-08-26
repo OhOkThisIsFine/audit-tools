@@ -14,7 +14,7 @@ import type {
   GraphBundle,
   Partition,
 } from "audit-tools/shared";
-import { resolutionSweep, toPosixPath } from "audit-tools/shared";
+import { resolutionSweep, toPosixPath, compareCodeUnits } from "audit-tools/shared";
 import { allGraphEdges } from "../extractors/graphSignals.js";
 import { GIT_CO_CHANGE_CATEGORY } from "../extractors/gitHistory.js";
 import {
@@ -47,8 +47,8 @@ function weightedGraph(
     const b = toPosixPath(edge.b);
     if (a === b || !inScope.has(a) || !inScope.has(b)) continue;
     if (!(edge.weight > 0)) continue;
-    const lo = a.localeCompare(b) <= 0 ? a : b;
-    const hi = a.localeCompare(b) <= 0 ? b : a;
+    const lo = compareCodeUnits(a, b) <= 0 ? a : b;
+    const hi = compareCodeUnits(a, b) <= 0 ? b : a;
     const key = pairKey(lo, hi);
     const agg = byPair.get(key);
     if (agg) agg.weight += edge.weight;
@@ -94,7 +94,7 @@ function partitionFromGroups(
   const partition: Partition = new Map();
   for (const node of universe) partition.set(node, node);
   for (const group of groups) {
-    const rep = [...group].sort((a, b) => a.localeCompare(b))[0];
+    const rep = [...group].sort((a, b) => compareCodeUnits(a, b))[0];
     if (!rep) continue;
     for (const member of group) {
       const m = toPosixPath(member);
@@ -141,7 +141,7 @@ export function buildStructureSources(
   input: StructureSourcesInput,
 ): DecompositionSource[] {
   const universe = [...new Set(input.universe.map(toPosixPath))].sort((a, b) =>
-    a.localeCompare(b),
+    compareCodeUnits(a, b),
   );
   const sources: DecompositionSource[] = [];
 

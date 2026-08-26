@@ -2,6 +2,7 @@ import type { Finding } from "../types/finding.js";
 import { severityRank, confidenceRank } from "../types/lens.js";
 import { findingIdentityKey } from "../findingIdentitySignature.js";
 import { wordJaccard, filePathOverlap, primaryPath } from "../findingSimilarity.js";
+import { compareCodeUnits } from "../compareCodeUnits.js";
 
 /**
  * PUBLISHED PRECONDITION CONTRACT — artifact:cross-lens-dedup-core
@@ -111,7 +112,7 @@ export function mergeAffectedFiles(survivor: Finding, absorbed: Finding, sort: b
   }
   if (sort) {
     survivor.affected_files.sort(
-      (a, b) => a.path.localeCompare(b.path) || (a.line_start ?? 0) - (b.line_start ?? 0),
+      (a, b) => compareCodeUnits(a.path, b.path) || (a.line_start ?? 0) - (b.line_start ?? 0),
     );
   }
 }

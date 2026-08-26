@@ -33,6 +33,7 @@ import {
   type IntentCheckpoint,
   type RiskRegister,
   type SurfaceManifest,
+  compareCodeUnits,
 } from "audit-tools/shared";
 import type { RepoManifest, UnitManifest } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
@@ -83,7 +84,7 @@ export type DesignReviewInput = (typeof DESIGN_REVIEW_INPUTS)[number];
 /** Stable sort of a collection by its projection string (order-independent input). */
 function sortByProjection<T>(items: readonly T[]): T[] {
   return [...items].sort((a, b) =>
-    stableStringifyProjection(a).localeCompare(stableStringifyProjection(b)),
+    compareCodeUnits(stableStringifyProjection(a), stableStringifyProjection(b)),
   );
 }
 

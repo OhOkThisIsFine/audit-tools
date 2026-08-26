@@ -746,7 +746,7 @@ export async function writePathASeedFromFindings(
       depends_on: [...block.depends_on].sort(),
     }))
     .sort((a, b) => compareCodeUnits(a.id, b.id));
-  // Code-unit order, not `localeCompare`, on EVERY persisted seed array: the
+  // Code-unit order, not ICU collation, on EVERY persisted seed array: the
   // seed order must not depend on the host's ICU collation, and seam ids are
   // hex now — a locale that orders digits against letters differently would
   // reshuffle the file.
@@ -4059,11 +4059,11 @@ export async function collectPathARefusals(
   }
 
   const signature = (ids: readonly string[]): string =>
-    JSON.stringify([...ids].sort((left, right) => left.localeCompare(right)));
+    JSON.stringify([...ids].sort((left, right) => compareCodeUnits(left, right)));
   const canonicalGroups = new Map(
     approvedSource.workBlocks.map((block) => [
       signature(block.finding_ids),
-      [...block.finding_ids].sort((left, right) => left.localeCompare(right)),
+      [...block.finding_ids].sort((left, right) => compareCodeUnits(left, right)),
     ]),
   );
   const usedGroups = new Set<string>();
@@ -4203,7 +4203,7 @@ export async function promoteImplementationDagToExtractedPlan(
   const { resolve: deriveNodeFiles } = await buildNodeWriteScopeResolver(artifactsDir);
 
   const nodes = (Array.isArray(dag?.nodes) ? [...dag.nodes] : []).sort((left, right) =>
-    String(left.id).localeCompare(String(right.id)),
+    compareCodeUnits(String(left.id), String(right.id)),
   );
 
   // Path-A promotion is an identity-preserving projection. DAG node ids describe
@@ -4216,12 +4216,12 @@ export async function promoteImplementationDagToExtractedPlan(
   ) {
     const signature = (ids: readonly string[]): string =>
       JSON.stringify(
-        [...ids].sort((left, right) => left.localeCompare(right)),
+        [...ids].sort((left, right) => compareCodeUnits(left, right)),
       );
     const canonicalGroups = new Map(
       approvedSource.workBlocks.map((block) => [
         signature(block.finding_ids),
-        [...block.finding_ids].sort((left, right) => left.localeCompare(right)),
+        [...block.finding_ids].sort((left, right) => compareCodeUnits(left, right)),
       ]),
     );
     const usedGroups = new Set<string>();
@@ -4320,7 +4320,7 @@ export async function promoteImplementationDagToExtractedPlan(
       }
     }
     findings = [...approvedSource.findings]
-      .sort((left, right) => left.id.localeCompare(right.id))
+      .sort((left, right) => compareCodeUnits(left.id, right.id))
       .map((finding) => {
         const node = nodeByFindingId.get(finding.id)!;
         const contractObligations = [...new Set(node.satisfies_obligations ?? [])];
@@ -4330,7 +4330,7 @@ export async function promoteImplementationDagToExtractedPlan(
         return {
           ...finding,
           affected_files: [...finding.affected_files].sort((left, right) =>
-            left.path.localeCompare(right.path),
+            compareCodeUnits(left.path, right.path),
           ),
           contract_goal_id: dag?.goal_id,
           contract_obligation_ids: contractObligations,

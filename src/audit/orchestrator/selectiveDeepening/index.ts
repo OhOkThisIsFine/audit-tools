@@ -19,6 +19,7 @@ import {
 } from "./runtimeValidation.js";
 import { buildLensVerificationTasks } from "./lensVerification.js";
 import { buildVerificationFollowupTasks } from "./stewardFollowup.js";
+import { compareCodeUnits } from "../../../shared/compareCodeUnits.js";
 
 export type { BuildSelectiveDeepeningTaskOptions } from "./shared.js";
 
@@ -90,7 +91,7 @@ export function buildSelectiveDeepeningTasks(
 
   let beforeConflict = created.length;
   for (const [key, group] of [...conflictGroups(contexts).entries()].sort(
-    ([a], [b]) => a.localeCompare(b),
+    ([a], [b]) => compareCodeUnits(a, b),
   )) {
     pushIfNew(
       buildConflictFollowupTask({
@@ -123,7 +124,7 @@ export function buildSelectiveDeepeningTasks(
   );
   let beforeRuntimeValidation = created.length;
   for (const result of [...(options.runtimeValidationReport?.results ?? [])].sort(
-    (a, b) => a.task_id.localeCompare(b.task_id),
+    (a, b) => compareCodeUnits(a.task_id, b.task_id),
   )) {
     if (!runtimeResultNeedsFollowup(result.status)) {
       continue;
@@ -169,7 +170,7 @@ export function buildSelectiveDeepeningTasks(
       const priorityDelta =
         priorityRank(b.task?.priority) - priorityRank(a.task?.priority);
       if (priorityDelta !== 0) return priorityDelta;
-      return a.result.task_id.localeCompare(b.result.task_id);
+      return compareCodeUnits(a.result.task_id, b.result.task_id);
     });
 
   let beforeHighRiskClean = created.length;

@@ -1,4 +1,5 @@
 import type { GraphBundle, GraphEdge, NodeMetric } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import { GIT_CO_CHANGE_CATEGORY } from "./gitHistory.js";
 
 /** A per-node structural metric surfaced as a flat, deterministically sorted row. */
@@ -273,7 +274,7 @@ function readNodeMetricSignals(
       reach: reach as NodeMetric["reach"],
     });
   }
-  signals.sort((a, b) => a.node.localeCompare(b.node));
+  signals.sort((a, b) => compareCodeUnits(a.node, b.node));
   return signals;
 }
 
@@ -369,7 +370,7 @@ function deriveSeams(edges: GraphEdge[]): SeamSignal[] {
   }
 
   bridges.sort(
-    (a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to),
+    (a, b) => compareCodeUnits(a.from, b.from) || compareCodeUnits(a.to, b.to),
   );
   return bridges;
 }

@@ -3,6 +3,7 @@ import type { ExecutorRunResult } from "./executorResult.js";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AnalyzerConsentDecisions } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import { isAuditExcludedStatus } from "../extractors/disposition.js";
 import {
   resolveNodeTool,
@@ -127,7 +128,7 @@ function pathsForExtensions(
       collected.add(path);
     }
   }
-  return [...collected].sort((a, b) => a.localeCompare(b));
+  return [...collected].sort((a, b) => compareCodeUnits(a, b));
 }
 
 /**

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AnalyzerLeadProvenanceSchema } from "./provenance.js";
+import { compareCodeUnits } from "../compareCodeUnits.js";
 
 /** One normalized result imported from an external analyzer such as eslint or tsc. */
 export const ExternalAnalyzerResultItemSchema = z
@@ -317,5 +318,5 @@ export function upsertExternalToolResults(
 ): ExternalAnalyzerResults[] {
   const next = (existing ?? []).filter((entry) => entry.tool !== incoming.tool);
   next.push(incoming);
-  return next.sort((a, b) => a.tool.localeCompare(b.tool));
+  return next.sort((a, b) => compareCodeUnits(a.tool, b.tool));
 }

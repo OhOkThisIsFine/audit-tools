@@ -9,7 +9,7 @@ import type {
   GraphBundle,
   Partition,
 } from "audit-tools/shared";
-import { clustersFromPartitions, decompose, toPosixPath } from "audit-tools/shared";
+import { clustersFromPartitions, decompose, toPosixPath, compareCodeUnits } from "audit-tools/shared";
 import type { RepoManifest } from "../types.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import {
@@ -56,7 +56,7 @@ function partitionGroups(partition: Partition): string[][] {
   const groups: string[][] = [];
   for (const members of byComm.values()) {
     if (members.length >= 2) {
-      groups.push([...members].sort((a, b) => a.localeCompare(b)));
+      groups.push([...members].sort((a, b) => compareCodeUnits(a, b)));
     }
   }
   return groups;
@@ -77,9 +77,9 @@ export async function buildStructureDecomposition(
     }
   }
   const sortedUniverse = [...new Set(universe)].sort((a, b) =>
-    a.localeCompare(b),
+    compareCodeUnits(a, b),
   );
-  const sortedDocs = [...new Set(docFiles)].sort((a, b) => a.localeCompare(b));
+  const sortedDocs = [...new Set(docFiles)].sort((a, b) => compareCodeUnits(a, b));
 
   // Async intent extraction (skipped without a root — degrades to empty).
   const commentResult = params.root

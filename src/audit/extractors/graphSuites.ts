@@ -1,5 +1,6 @@
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import {
   graphEdge,
   isJsonSchemaPath,
@@ -165,7 +166,7 @@ export function extractSchemaContractTestEdges(
         literalBasenames.has(posix.basename(normalized).toLowerCase())
       );
     })
-    .sort((a, b) => a.localeCompare(b));
+    .sort((a, b) => compareCodeUnits(a, b));
   if (targets.length > MAX_BOUNDED_SUITE_EDGE_FILES) {
     return [];
   }
@@ -258,7 +259,7 @@ export function extractBoundedSuiteEdges(
   graphEdges: GraphEdge[],
 ): GraphEdge[] {
   const files = [...new Set(pathLookup.values())].sort((a, b) =>
-    a.localeCompare(b),
+    compareCodeUnits(a, b),
   );
   const edges: GraphEdge[] = [];
   const scriptSuiteDirectories = packageScriptSuiteDirectories(graphEdges);

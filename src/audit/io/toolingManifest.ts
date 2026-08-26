@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ToolingManifest } from "../types/toolingManifest.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 
 // dist/audit/io/toolingManifest.js → repo root is three levels up
 // (io → audit → dist → repo root).
@@ -42,7 +43,7 @@ async function collectFiles(path: string): Promise<string[]> {
 
   const entries = await readdir(path, { withFileTypes: true });
   const files: string[] = [];
-  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const entry of entries.sort((a, b) => compareCodeUnits(a.name, b.name))) {
     files.push(...(await collectFiles(join(path, entry.name))));
   }
   return files;
@@ -90,7 +91,7 @@ export async function buildToolingManifest(): Promise<ToolingManifest> {
     }
     existingInputs.push(input);
     const files = await collectFiles(absolute);
-    for (const file of files.sort((a, b) => a.localeCompare(b))) {
+    for (const file of files.sort((a, b) => compareCodeUnits(a, b))) {
       hash.update(relative(PACKAGE_ROOT, file).replace(/\\/g, "/"));
       hash.update("\n");
       hash.update(await readFile(file));

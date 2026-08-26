@@ -16,6 +16,7 @@
  * lockstep (one diff algorithm, one prompt shape) while leaving the
  * domain-specific projection to each side.
  */
+import { compareCodeUnits } from "../compareCodeUnits.js";
 
 /**
  * Order-independent stable serialization of a projection. Object keys are sorted
@@ -32,7 +33,7 @@ export function stableStringifyProjection(value: unknown): string {
   }
   const entries = Object.entries(value as Record<string, unknown>)
     .filter(([, item]) => item !== undefined)
-    .sort(([a], [b]) => a.localeCompare(b));
+    .sort(([a], [b]) => compareCodeUnits(a, b));
   return `{${entries
     .map(([key, item]) => `${JSON.stringify(key)}:${stableStringifyProjection(item)}`)
     .join(",")}}`;

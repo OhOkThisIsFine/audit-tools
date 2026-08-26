@@ -9,6 +9,7 @@ import {
 } from "./provenance.js";
 import { normalizeRepoRelPath } from "../paths.js";
 import { normalizeRepoPath } from "../validation/findingGrounding.js";
+import { compareCodeUnits } from "../compareCodeUnits.js";
 
 type SeverityEnum = "critical" | "high" | "medium" | "low" | "info";
 
@@ -234,8 +235,8 @@ export function normalizeGenericExternalEdges(
   }
   return [...deduped.values()].sort(
     (a, b) =>
-      a.from.localeCompare(b.from) ||
-      a.to.localeCompare(b.to) ||
-      (a.kind ?? "").localeCompare(b.kind ?? ""),
+      compareCodeUnits(a.from, b.from) ||
+      compareCodeUnits(a.to, b.to) ||
+      compareCodeUnits(a.kind ?? "", b.kind ?? ""),
   );
 }

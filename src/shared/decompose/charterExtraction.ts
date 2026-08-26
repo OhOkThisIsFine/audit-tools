@@ -43,6 +43,7 @@ import {
   gateCharterDelta,
 } from "../validation/charterGate.js";
 import type { Finding } from "../types/finding.js";
+import { compareCodeUnits } from "../compareCodeUnits.js";
 
 // ── Submission contracts (what the host LLM writes to its bound path) ───────
 
@@ -292,8 +293,8 @@ function sortNodeInputs(nodes: CharterNodeInput[]): CharterNodeInput[] {
     (a, b) =>
       KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) ||
       a.premise_height - b.premise_height ||
-      a.purpose.localeCompare(b.purpose) ||
-      (a.files[0] ?? "").localeCompare(b.files[0] ?? ""),
+      compareCodeUnits(a.purpose, b.purpose) ||
+      compareCodeUnits(a.files[0] ?? "", b.files[0] ?? ""),
   );
 }
 
@@ -349,16 +350,16 @@ export function assembleCharters(
     if (unknown.length > 0) {
       validation_issues.push(
         `${node.kind} teleology node "${node.purpose.slice(0, 80)}" cites file(s) outside the repo universe — dropped (${unknown
-          .sort((a, b) => a.localeCompare(b))
+          .sort((a, b) => compareCodeUnits(a, b))
           .join(", ")})`,
       );
       continue;
     }
-    grounded.push({ ...node, files: [...new Set(node.files)].sort((a, b) => a.localeCompare(b)) });
+    grounded.push({ ...node, files: [...new Set(node.files)].sort((a, b) => compareCodeUnits(a, b)) });
   }
 
   // Hint mapping: node → best-overlap consensus unit.
-  const hintIds = [...params.hint.keys()].sort((a, b) => a.localeCompare(b));
+  const hintIds = [...params.hint.keys()].sort((a, b) => compareCodeUnits(a, b));
   const hintMembers = new Map<string, ReadonlySet<string>>(
     hintIds.map((id) => [id, new Set(params.hint.get(id)!)]),
   );
@@ -427,17 +428,17 @@ export function assembleCharters(
     for (const node of nodes) for (const f of node.files) members.add(f);
     drafts.push({
       node_id: id,
-      members: [...members].sort((a, b) => a.localeCompare(b)),
+      members: [...members].sort((a, b) => compareCodeUnits(a, b)),
       nodes,
     });
   }
   for (const nodes of residualUnits.values()) {
     const members = new Set<string>();
     for (const node of nodes) for (const f of node.files) members.add(f);
-    const sorted = [...members].sort((a, b) => a.localeCompare(b));
+    const sorted = [...members].sort((a, b) => compareCodeUnits(a, b));
     drafts.push({ node_id: sorted[0]!, members: sorted, nodes });
   }
-  drafts.sort((a, b) => a.node_id.localeCompare(b.node_id));
+  drafts.sort((a, b) => compareCodeUnits(a.node_id, b.node_id));
 
   // Per unit: teleologies per kind + tool-selected charter per kind + True gate.
   const subsystems: CharterSubsystem[] = [];
@@ -463,13 +464,13 @@ export function assembleCharters(
         .sort(
           (a, b) =>
             a.premise_height - b.premise_height ||
-            a.purpose.localeCompare(b.purpose),
+            compareCodeUnits(a.purpose, b.purpose),
         );
       const best = [...nodes].sort(
         (a, b) =>
           overlapSize(b.files, memberSet) - overlapSize(a.files, memberSet) ||
           a.premise_height - b.premise_height ||
-          a.purpose.localeCompare(b.purpose),
+          compareCodeUnits(a.purpose, b.purpose),
       )[0]!;
       selected.push({
         charter_id: `${draft.node_id}:${kind}`,
@@ -497,7 +498,7 @@ export function assembleCharters(
     subsystems.push({
       node_id: draft.node_id,
       members: draft.members,
-      charters: [...kept].sort((a, b) => a.charter_id.localeCompare(b.charter_id)),
+      charters: [...kept].sort((a, b) => compareCodeUnits(a.charter_id, b.charter_id)),
       teleologies,
     });
   }
@@ -558,7 +559,7 @@ export function assembleDeltas(
   // True nominations first (deepest only): survivors join the unit's charters
   // and are pair-eligible for this same submission's deltas.
   const nominations = [...submission.true_nominations].sort(
-    (a, b) => a.node_id.localeCompare(b.node_id) || a.purpose.localeCompare(b.purpose),
+    (a, b) => compareCodeUnits(a.node_id, b.node_id) || compareCodeUnits(a.purpose, b.purpose),
   );
   if (nominations.length > 0 && !params.allowTrueNominations) {
     validation_issues.push(
@@ -594,14 +595,14 @@ export function assembleDeltas(
       }
       if (kept.length > 0) {
         subsystem.charters.push(kept[0]!);
-        subsystem.charters.sort((a, b) => a.charter_id.localeCompare(b.charter_id));
+        subsystem.charters.sort((a, b) => compareCodeUnits(a.charter_id, b.charter_id));
       }
     }
   }
 
   // Deltas: route by channel pair, gate by confidence, surface as leads.
   const sorted = [...submission.subsystems].sort((a, b) =>
-    a.node_id.localeCompare(b.node_id),
+    compareCodeUnits(a.node_id, b.node_id),
   );
   for (const sub of sorted) {
     const subsystem = byNode.get(sub.node_id);
@@ -700,7 +701,7 @@ export function assembleDeltas(
   const triangulated: TriangulatedTelos[] = [];
   const seenTelos = new Set<string>();
   for (const telos of [...submission.triangulated].sort((a, b) =>
-    a.node_id.localeCompare(b.node_id),
+    compareCodeUnits(a.node_id, b.node_id),
   )) {
     if (!byNode.has(telos.node_id)) {
       validation_issues.push(
@@ -736,13 +737,13 @@ export function assembleDeltas(
   }
   const disagreement = [...densityByKey.values()].sort(
     (a, b) =>
-      a.node_id.localeCompare(b.node_id) ||
-      a.pair[0].localeCompare(b.pair[0]) ||
-      a.pair[1].localeCompare(b.pair[1]),
+      compareCodeUnits(a.node_id, b.node_id) ||
+      compareCodeUnits(a.pair[0], b.pair[0]) ||
+      compareCodeUnits(a.pair[1], b.pair[1]),
   );
 
-  deltas.sort((a, b) => a.delta_id.localeCompare(b.delta_id));
-  findings.sort((a, b) => a.id.localeCompare(b.id));
+  deltas.sort((a, b) => compareCodeUnits(a.delta_id, b.delta_id));
+  findings.sort((a, b) => compareCodeUnits(a.id, b.id));
 
   return {
     subsystems: augmented,

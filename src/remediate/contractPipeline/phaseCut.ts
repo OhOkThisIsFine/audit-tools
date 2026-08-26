@@ -19,6 +19,7 @@
  */
 
 import { OBLIGATION_PREFIX } from "./idRegistry.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 
 /** One module + the names of the other modules it depends on (its foundations). */
 export interface PhaseCutModule {
@@ -346,7 +347,7 @@ export function applyWorkBlockSeamDependencies(
     ...module,
     depends_on: [
       ...new Set([...module.depends_on, ...(extraDeps.get(module.name) ?? [])]),
-    ].sort((a, b) => a.localeCompare(b)),
+    ].sort((a, b) => compareCodeUnits(a, b)),
   }));
 }
 

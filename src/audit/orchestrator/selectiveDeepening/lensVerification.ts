@@ -1,5 +1,6 @@
 import type { AuditResult, AuditTask, Lens } from "../../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import { isHighRiskCleanResult } from "./highRiskClean.js";
 import {
   DEEPENING_TAG,
@@ -248,7 +249,7 @@ function selectLensVerificationFiles(
     if (scoreDelta !== 0) return scoreDelta;
     const lineDelta = b[1].lines - a[1].lines;
     if (lineDelta !== 0) return lineDelta;
-    return a[0].localeCompare(b[0]);
+    return compareCodeUnits(a[0], b[0]);
   });
   if (ranked.length > MAX_LENS_VERIFICATION_FILES) {
     process.stderr.write(
@@ -319,7 +320,7 @@ function buildLensVerificationTask(params: {
     );
   }
   const summaries = params.sources
-    .sort((a, b) => a.result.task_id.localeCompare(b.result.task_id))
+    .sort((a, b) => compareCodeUnits(a.result.task_id, b.result.task_id))
     .slice(0, MAX_LENS_VERIFICATION_RESULT_SUMMARIES)
     .map(summarizeLensVerificationSource);
 
@@ -381,7 +382,7 @@ export function buildLensVerificationTasks(params: {
   const tasks: AuditTask[] = [];
 
   for (const lens of [...IMPORTANT_LENS_VERIFICATION_LENSES].sort((a, b) =>
-    a.localeCompare(b),
+    compareCodeUnits(a, b),
   )) {
     const sources = params.results
       .map((result) => ({ result, task: taskById.get(result.task_id) }))

@@ -1,5 +1,6 @@
 import type { AuditUnit, Lens, RepoManifest, UnitManifest } from "../types.js";
 import type { FileDisposition } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import {
   deriveBrowserExtensionLensesForPath,
   hasBrowserExtensionManifestFile,
@@ -209,7 +210,7 @@ export function buildUnitManifest(
       MAX_RISK_SCORE,
       Math.max(existing.risk_score ?? 0, riskScore),
     );
-    existing.files = existing.files.sort((a, b) => a.localeCompare(b));
+    existing.files = existing.files.sort((a, b) => compareCodeUnits(a, b));
     existing.critical_flows = inferCriticalFlows(
       existing.files,
       existing.required_lenses,
@@ -222,7 +223,7 @@ export function buildUnitManifest(
     units: [...units.values()].sort(
       (a, b) =>
         (b.risk_score ?? 0) - (a.risk_score ?? 0) ||
-        a.unit_id.localeCompare(b.unit_id),
+        compareCodeUnits(a.unit_id, b.unit_id),
     ),
   };
 }

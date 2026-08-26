@@ -6,7 +6,7 @@ import type {
   CriticalFlowFallbackResult,
   SurfaceManifest,
 } from "audit-tools/shared";
-import { CriticalFlowSchema } from "audit-tools/shared";
+import { CriticalFlowSchema, compareCodeUnits } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import {
   EXTRACTOR_HEURISTIC_NOTE,
@@ -72,7 +72,7 @@ function relatedPaths(entry: string, availablePaths: string[]): string[] {
     }
   }
 
-  return [...linked].sort((a, b) => a.localeCompare(b));
+  return [...linked].sort((a, b) => compareCodeUnits(a, b));
 }
 
 function dedupeFlows(flows: CriticalFlow[]): CriticalFlow[] {
@@ -208,7 +208,7 @@ export function mergeCriticalFlowFallback(
     accepted += 1;
   }
 
-  const merged = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+  const merged = [...byId.values()].sort((a, b) => compareCodeUnits(a.id, b.id));
   return {
     flows: merged,
     fallback_required: computeFlowFallbackRequired(merged),

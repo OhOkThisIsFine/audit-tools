@@ -1,6 +1,7 @@
 import type { UnitManifest } from "../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { CriticalFlowManifest, RiskItem, RiskRegister } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import type { GraphSignals } from "./graphSignals.js";
 
 const MAX_RISK_SCORE = 10;
@@ -46,7 +47,7 @@ export function mergeAnalyzerRiskSignals(
       const added = map.get(item.unit_id);
       if (!added || added.length === 0) return { ...item };
       const merged = [...new Set([...item.signals, ...added])].sort((a, b) =>
-        a.localeCompare(b),
+        compareCodeUnits(a, b),
       );
       return { ...item, signals: merged };
     }),
@@ -77,7 +78,7 @@ export function deriveRiskConcentration(register: RiskRegister): RiskRegister {
       }
       if (has.has(RISK_CONCENTRATION_SIGNAL)) return { ...item };
       const merged = [...item.signals, RISK_CONCENTRATION_SIGNAL].sort((a, b) =>
-        a.localeCompare(b),
+        compareCodeUnits(a, b),
       );
       return { ...item, signals: merged };
     }),

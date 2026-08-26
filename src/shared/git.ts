@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { runTracked } from "./tooling/exec.js";
+import { compareCodeUnits } from "./compareCodeUnits.js";
 
 // Git helpers shared by both orchestrators. The remediator previously issued
 // `git` calls inline in close.ts and plan.ts; the auditor's Phase 3 delta mode
@@ -265,11 +266,11 @@ export function mineGitHistory(
 
   const churnList: ChurnEntry[] = [...churn.entries()]
     .map(([path, commits]) => ({ path, commits }))
-    .sort((x, y) => y.commits - x.commits || x.path.localeCompare(y.path));
+    .sort((x, y) => y.commits - x.commits || compareCodeUnits(x.path, y.path));
 
   const authorshipList: AuthorshipEntry[] = [...authors.entries()]
     .map(([path, set]) => ({ path, authors: set.size }))
-    .sort((x, y) => y.authors - x.authors || x.path.localeCompare(y.path));
+    .sort((x, y) => y.authors - x.authors || compareCodeUnits(x.path, y.path));
 
   const coChangeList: CoChangePair[] = [...coChange.entries()]
     .filter(([, commits]) => commits >= minCoChange)
@@ -280,8 +281,8 @@ export function mineGitHistory(
     .sort(
       (x, y) =>
         y.commits - x.commits ||
-        x.a.localeCompare(y.a) ||
-        x.b.localeCompare(y.b),
+        compareCodeUnits(x.a, y.a) ||
+        compareCodeUnits(x.b, y.b),
     );
 
   return {

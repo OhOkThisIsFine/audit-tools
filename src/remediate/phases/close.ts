@@ -17,6 +17,7 @@ import {
   commandLeavesDeclaredShape,
   parseCommandString,
   runTrackedAsync,
+  compareCodeUnits,
 } from "audit-tools/shared";
 import type {
   AgentReflection,
@@ -313,7 +314,7 @@ export function buildRemediationOutcomesReport(
     };
     outcomes.push(enriched);
   }
-  outcomes.sort((a, b) => a.finding_id.localeCompare(b.finding_id));
+  outcomes.sort((a, b) => compareCodeUnits(a.finding_id, b.finding_id));
 
   // Zero-filled so every outcome status appears even when unused (byOutcome),
   // countBy(...) supplies the actual counts on top. Spreading the zero-filled
@@ -1717,7 +1718,7 @@ export function buildVerificationReport(
   }
 
   // Sort by finding_id for determinism.
-  findings.sort((a, b) => a.finding_id.localeCompare(b.finding_id));
+  findings.sort((a, b) => compareCodeUnits(a.finding_id, b.finding_id));
 
   // Overall status: ignored/inappropriate (skipped) items do NOT contribute
   // to failure — only resolved/non-skipped items count. The closing action's

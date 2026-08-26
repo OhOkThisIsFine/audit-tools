@@ -32,6 +32,7 @@ import {
   charterPacketReadSet,
   memberDependencyEdgeLines,
 } from "./charterPackets.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 
 type SliceProjection = (bundle: ArtifactBundle) => unknown;
 
@@ -51,7 +52,7 @@ function consensusMembershipSlice(bundle: ArtifactBundle): unknown {
       node_id: node.node_id,
       members: [...node.members].sort(),
     }))
-    .sort((a, b) => a.node_id.localeCompare(b.node_id));
+    .sort((a, b) => compareCodeUnits(a.node_id, b.node_id));
 }
 
 /**

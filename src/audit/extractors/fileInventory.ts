@@ -1,6 +1,7 @@
 import type { RepoManifest } from "../types.js";
 import { normalizeExtractorPath } from "./pathPatterns.js";
 import { LANGUAGE_BY_EXTENSION } from "./languageMap.generated.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 
 export interface InventoryInputFile {
   path: string;
@@ -57,6 +58,6 @@ export function buildRepoManifest(
         size_bytes: file.size_bytes,
         hash: file.hash,
       }))
-      .sort((a, b) => a.path.localeCompare(b.path)),
+      .sort((a, b) => compareCodeUnits(a.path, b.path)),
   };
 }

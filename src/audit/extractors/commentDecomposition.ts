@@ -26,6 +26,7 @@ import { join } from "node:path";
 import type { CouplingEdge } from "./dataStateCoupling.js";
 import { DEFAULT_MAX_BYTES, defaultReadFileText } from "./readFileText.js";
 import { toPosixPath } from "../../shared/paths.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 
 interface CommentSyntax {
   line: string[];
@@ -279,7 +280,7 @@ export async function deriveCommentDecomposition(
     params.readFileText ?? ((abs: string) => defaultReadFileText(abs, maxBytes));
 
   const files = [...new Set(params.files.map(toPosixPath))].sort((a, b) =>
-    a.localeCompare(b),
+    compareCodeUnits(a, b),
   );
 
   // token → owning file (longest/most-specific token wins on collision is
@@ -298,7 +299,7 @@ export async function deriveCommentDecomposition(
   }
   // Sort tokens longest-first so a specific path matches before a substring.
   const tokens = [...tokenOwner.keys()].sort(
-    (a, b) => b.length - a.length || a.localeCompare(b),
+    (a, b) => b.length - a.length || compareCodeUnits(a, b),
   );
 
   const weightByPair = new Map<string, number>();
@@ -317,8 +318,8 @@ export async function deriveCommentDecomposition(
       if (posixComments.includes(token)) referenced.add(owner);
     }
     for (const other of referenced) {
-      const a = file.localeCompare(other) <= 0 ? file : other;
-      const b = file.localeCompare(other) <= 0 ? other : file;
+      const a = compareCodeUnits(file, other) <= 0 ? file : other;
+      const b = compareCodeUnits(file, other) <= 0 ? other : file;
       const key = `${a} ${b}`;
       weightByPair.set(key, (weightByPair.get(key) ?? 0) + 1);
     }
@@ -329,7 +330,7 @@ export async function deriveCommentDecomposition(
     const idx = key.indexOf(" ");
     edges.push({ a: key.slice(0, idx), b: key.slice(idx + 1), weight });
   }
-  edges.sort((x, y) => x.a.localeCompare(y.a) || x.b.localeCompare(y.b));
+  edges.sort((x, y) => compareCodeUnits(x.a, y.a) || compareCodeUnits(x.b, y.b));
   return { edges, scannedFiles };
 }
 
@@ -357,10 +358,10 @@ export async function deriveDocGroups(
   const read =
     params.readFileText ?? ((abs: string) => defaultReadFileText(abs, maxBytes));
   const codeFiles = [...new Set(params.codeFiles.map(toPosixPath))].sort((a, b) =>
-    a.localeCompare(b),
+    compareCodeUnits(a, b),
   );
   const docFiles = [...new Set(params.docFiles.map(toPosixPath))].sort((a, b) =>
-    a.localeCompare(b),
+    compareCodeUnits(a, b),
   );
 
   const tokenOwner = new Map<string, string>();
@@ -374,7 +375,7 @@ export async function deriveDocGroups(
     if (owner === "\0ambiguous") tokenOwner.delete(token);
   }
   const tokens = [...tokenOwner.keys()].sort(
-    (a, b) => b.length - a.length || a.localeCompare(b),
+    (a, b) => b.length - a.length || compareCodeUnits(a, b),
   );
 
   const groups: string[][] = [];
@@ -389,9 +390,9 @@ export async function deriveDocGroups(
       if (posixText.includes(token)) named.add(owner);
     }
     if (named.size >= 2) {
-      groups.push([...named].sort((a, b) => a.localeCompare(b)));
+      groups.push([...named].sort((a, b) => compareCodeUnits(a, b)));
     }
   }
-  groups.sort((a, b) => (a[0] ?? "").localeCompare(b[0] ?? ""));
+  groups.sort((a, b) => compareCodeUnits(a[0] ?? "", b[0] ?? ""));
   return groups;
 }

@@ -1,5 +1,6 @@
 import type { Finding, UnitManifest } from "../types.js";
 import type { GraphBundle, CriticalFlowManifest, RiskRegister } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import { allGraphEdges, deriveGraphSignals, type GraphSignals } from "./graphSignals.js";
 import { GIT_CO_CHANGE_CATEGORY } from "./gitHistory.js";
@@ -221,7 +222,7 @@ function detectComplexityHotspots(
   // node-keyed finding — a node belonging to NO unit still surfaces.
   const hotspots = [...(signals.complexity ?? [])]
     .filter((m) => m.value >= HIGH_COMPLEXITY)
-    .sort((a, b) => a.node.localeCompare(b.node));
+    .sort((a, b) => compareCodeUnits(a.node, b.node));
 
   return hotspots.map((m) => ({
     id: nextId(),
@@ -245,7 +246,7 @@ function detectDuplication(
   // unit still surfaces.
   const dups = [...(signals.duplication ?? [])]
     .filter((m) => m.value >= DUPLICATION_FLOOR)
-    .sort((a, b) => a.node.localeCompare(b.node));
+    .sort((a, b) => compareCodeUnits(a.node, b.node));
 
   return dups.map((m) => ({
     id: nextId(),
@@ -268,7 +269,7 @@ function detectSeams(
   // id assignment is reproducible. Each seam is keyed by its two endpoints — a
   // seam whose endpoints belong to no unit still surfaces as a node-keyed finding.
   const seams = [...(signals.seams ?? [])].sort(
-    (a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to),
+    (a, b) => compareCodeUnits(a.from, b.from) || compareCodeUnits(a.to, b.to),
   );
 
   return seams.map((seam) => ({
@@ -331,8 +332,8 @@ function detectHiddenCoupling(
     .sort(
       (a, b) =>
         (b.confidence ?? 0) - (a.confidence ?? 0) ||
-        a.from.localeCompare(b.from) ||
-        a.to.localeCompare(b.to),
+        compareCodeUnits(a.from, b.from) ||
+        compareCodeUnits(a.to, b.to),
     )
     .slice(0, HIDDEN_COUPLING_CAP);
 

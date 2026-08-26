@@ -1,6 +1,6 @@
 import type { AuditTask } from "../types.js";
 import type { GraphEdge } from "audit-tools/shared";
-import { collectGraphEdges } from "audit-tools/shared";
+import { collectGraphEdges, compareCodeUnits } from "audit-tools/shared";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 
 // Graph-edge primitives: collection, scoring, degree indexing, expansion
@@ -46,9 +46,9 @@ export function compareGraphEdges(a: GraphEdge, b: GraphEdge): number {
   const confidenceDelta = graphEdgeConfidence(b) - graphEdgeConfidence(a);
   if (confidenceDelta !== 0) return confidenceDelta;
   return (
-    a.from.localeCompare(b.from) ||
-    a.to.localeCompare(b.to) ||
-    (a.kind ?? "").localeCompare(b.kind ?? "")
+    compareCodeUnits(a.from, b.from) ||
+    compareCodeUnits(a.to, b.to) ||
+    compareCodeUnits(a.kind ?? "", b.kind ?? "")
   );
 }
 

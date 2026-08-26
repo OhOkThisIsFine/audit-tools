@@ -1,5 +1,5 @@
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import { isRecord } from "audit-tools/shared";
+import { isRecord, compareCodeUnits } from "audit-tools/shared";
 import type {
   ReviewPacketGraphEdge,
   ReviewPacketQuality,
@@ -54,7 +54,7 @@ function packetEntrypoints(
       const method = typeof route.method === "string" ? `${route.method} ` : "";
       return `${method}${route.path} -> ${route.handler}`;
     })
-    .sort((a, b) => a.localeCompare(b));
+    .sort((a, b) => compareCodeUnits(a, b));
 }
 
 export function buildPacketGraphContext(
@@ -109,7 +109,7 @@ export function buildPacketGraphContext(
       .slice(0, MAX_PACKET_KEY_EDGES)
       .map(reviewPacketGraphEdge),
     boundaryFiles: [...boundaryFiles]
-      .sort((a, b) => a.localeCompare(b))
+      .sort((a, b) => compareCodeUnits(a, b))
       .slice(0, MAX_PACKET_BOUNDARY_FILES),
     entrypoints: packetEntrypoints(filePaths, graphBundle),
     quality: {

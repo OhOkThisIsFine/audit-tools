@@ -9,6 +9,7 @@
 
 import { join } from "node:path";
 import type { FileDisposition } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import { isDocIntentFile } from "../decompose/buildStructureDecomposition.js";
 import type { DocsDigest, DocsDigestEntry } from "../types/docsDigest.js";
 import { DEFAULT_MAX_BYTES, defaultReadFileText } from "./readFileText.js";
@@ -83,7 +84,7 @@ export async function buildDocsDigest(
         .filter((file) => isDocIntentFile(file.path, file.status))
         .map((file) => toPosixPath(file.path)),
     ),
-  ].sort((a, b) => pathDepth(a) - pathDepth(b) || a.localeCompare(b));
+  ].sort((a, b) => pathDepth(a) - pathDepth(b) || compareCodeUnits(a, b));
 
   const generated_at = new Date().toISOString();
   if (!params.root || docPaths.length === 0) {
@@ -114,6 +115,6 @@ export async function buildDocsDigest(
   return {
     generated_at,
     docs,
-    ...(omitted.length > 0 ? { omitted_paths: omitted.sort((a, b) => a.localeCompare(b)) } : {}),
+    ...(omitted.length > 0 ? { omitted_paths: omitted.sort((a, b) => compareCodeUnits(a, b)) } : {}),
   };
 }

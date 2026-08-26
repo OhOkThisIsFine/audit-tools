@@ -6,7 +6,7 @@ import type {
   GraphEdge,
   RouteEdge,
 } from "audit-tools/shared";
-import { installToCache, resolveAnalyzerDep } from "audit-tools/shared";
+import { installToCache, resolveAnalyzerDep, compareCodeUnits } from "audit-tools/shared";
 import { buildDispositionMap } from "../extractors/disposition.js";
 import { buildPathLookup } from "../extractors/graph.js";
 import { mergeAnalyzerEdges } from "../extractors/analyzers/merge.js";
@@ -81,9 +81,9 @@ function mergeRoutes(floor: RouteEdge[], analyzer: RouteEdge[]): RouteEdge[] {
   }
   return [...deduped.values()].sort(
     (a, b) =>
-      a.path.localeCompare(b.path) ||
-      a.handler.localeCompare(b.handler) ||
-      (a.method ?? "").localeCompare(b.method ?? ""),
+      compareCodeUnits(a.path, b.path) ||
+      compareCodeUnits(a.handler, b.handler) ||
+      compareCodeUnits(a.method ?? "", b.method ?? ""),
   );
 }
 
@@ -228,7 +228,7 @@ export async function runGraphEnrichmentExecutor(
     ? buildPathLookup(bundle.repo_manifest, dispositionMap)
     : new Map<string, string>();
   const includedFiles = [...new Set(pathLookup.values())].sort((a, b) =>
-    a.localeCompare(b),
+    compareCodeUnits(a, b),
   );
 
   const entries: AnalyzerCapabilityEntry[] = [];

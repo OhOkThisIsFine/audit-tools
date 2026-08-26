@@ -1,5 +1,6 @@
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { getArtifactsDir, getFlag } from "./args.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 
 export async function cmdExplainTask(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
@@ -19,7 +20,7 @@ export async function cmdExplainTask(argv: string[]): Promise<void> {
 
   const coverageEntries = (bundle.coverage_matrix?.files ?? [])
     .filter((file) => task.file_paths.includes(file.path))
-    .sort((a, b) => a.path.localeCompare(b.path));
+    .sort((a, b) => compareCodeUnits(a.path, b.path));
   const matchingResults = (bundle.audit_results ?? []).filter(
     (result) => result.task_id === task.task_id,
   );

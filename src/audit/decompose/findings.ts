@@ -14,7 +14,7 @@
 
 import type { Finding } from "../types.js";
 import type { Partition } from "audit-tools/shared";
-import { clustersFromPartitions } from "audit-tools/shared";
+import { clustersFromPartitions, compareCodeUnits } from "audit-tools/shared";
 
 /** Structural boundary-integrity findings carry the architecture lens. */
 const LENS = "architecture";
@@ -78,7 +78,7 @@ export function detectNonColocalization(
   const nextId = createIdGenerator();
 
   const bySizeThenFirst = (a: string[], b: string[]) =>
-    b.length - a.length || (a[0] ?? "").localeCompare(b[0] ?? "");
+    b.length - a.length || compareCodeUnits(a[0] ?? "", b[0] ?? "");
 
   const findings: Finding[] = [];
 

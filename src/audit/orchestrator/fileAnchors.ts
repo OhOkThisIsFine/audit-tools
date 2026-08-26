@@ -1,6 +1,6 @@
 import type { ExternalAnalyzerResults, AnalyzerLeadProvenance } from "audit-tools/shared";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import { normalizeRepoRelPath } from "audit-tools/shared";
+import { normalizeRepoRelPath, compareCodeUnits } from "audit-tools/shared";
 
 export type FileAnchorKind =
   | "boundary"
@@ -187,7 +187,7 @@ export function buildAnalyzerSignalAnchorIndex(
     results.sort(
       (a, b) =>
         (a.line_start ?? 0) - (b.line_start ?? 0) ||
-        a.id.localeCompare(b.id),
+        compareCodeUnits(a.id, b.id),
     );
     index.set(
       key,
@@ -254,9 +254,9 @@ function collectGraphEdges(graphBundle: GraphBundle | undefined, path: string): 
   }
   return edges.sort(
     (a, b) =>
-      (a.kind ?? "").localeCompare(b.kind ?? "") ||
-      a.from.localeCompare(b.from) ||
-      a.to.localeCompare(b.to),
+      compareCodeUnits(a.kind ?? "", b.kind ?? "") ||
+      compareCodeUnits(a.from, b.from) ||
+      compareCodeUnits(a.to, b.to),
   );
 }
 
@@ -407,8 +407,8 @@ export function buildFileAnchorSummary(params: {
   const sorted = anchors.sort(
     (a, b) =>
       (a.line ?? Number.MAX_SAFE_INTEGER) - (b.line ?? Number.MAX_SAFE_INTEGER) ||
-      a.kind.localeCompare(b.kind) ||
-      a.name.localeCompare(b.name),
+      compareCodeUnits(a.kind, b.kind) ||
+      compareCodeUnits(a.name, b.name),
   );
   // Seed per-symbol spans on the full sorted list (before the cap) so a
   // surviving anchor's span never depends on which anchors the cap dropped.

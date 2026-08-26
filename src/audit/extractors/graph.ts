@@ -9,7 +9,7 @@ import type {
   NodeMetrics,
   RouteEdge,
 } from "audit-tools/shared";
-import { hashContent, isRecord, stableStringify, resolveWithinRoot } from "audit-tools/shared";
+import { hashContent, isRecord, stableStringify, resolveWithinRoot, compareCodeUnits } from "audit-tools/shared";
 import { computeNodeMetricsForFile } from "./analyzers/complexityDuplication.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
@@ -246,9 +246,9 @@ export function uniqueSortedEdges(edges: GraphEdge[]): GraphEdge[] {
   }
   return [...deduped.values()].sort(
     (a, b) =>
-      a.from.localeCompare(b.from) ||
-      a.to.localeCompare(b.to) ||
-      (a.kind ?? "").localeCompare(b.kind ?? ""),
+      compareCodeUnits(a.from, b.from) ||
+      compareCodeUnits(a.to, b.to) ||
+      compareCodeUnits(a.kind ?? "", b.kind ?? ""),
   );
 }
 

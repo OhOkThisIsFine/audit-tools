@@ -34,16 +34,16 @@ await test("buildDocsDigest selects the doc universe via the single doc predicat
   });
 
   // excluded/binary never enter the universe; depth-then-path puts root docs
-  // first (locale collation within a depth: "notes" < "README").
+  // first (code-unit order within a depth: "README" < "notes").
   expect(digest.docs.map((d) => d.path)).toEqual([
-    "notes.txt",
     "README.md",
+    "notes.txt",
     "docs/guide.md",
   ]);
-  expect(digest.docs[1].title).toBe("Fixture Project");
-  expect(digest.docs[1].excerpt).toContain("Audits codebases.");
+  expect(digest.docs[0].title).toBe("Fixture Project");
+  expect(digest.docs[0].excerpt).toContain("Audits codebases.");
   // A doc without an ATX heading titles as its file name.
-  expect(digest.docs[0].title).toBe("notes.txt");
+  expect(digest.docs[1].title).toBe("notes.txt");
   expect(digest.omitted_paths).toBeUndefined();
 });
 

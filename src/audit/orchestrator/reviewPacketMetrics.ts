@@ -5,6 +5,7 @@ import type {
   WeaklyExplainedPacketSample,
 } from "../types/reviewPlanning.js";
 import type { GraphEdge } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 import {
   HIGH_FAN_DEGREE_THRESHOLD,
@@ -64,7 +65,7 @@ function incrementEdgeKindCount(
 
 function sortCountRecord(counts: Record<string, number>): Record<string, number> {
   return Object.fromEntries(
-    Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0])),
+    Object.entries(counts).sort((a, b) => compareCodeUnits(a[0], b[0])),
   );
 }
 
@@ -227,7 +228,7 @@ function weaklyExplainedPackets(packets: ReviewPacket[]): ReviewPacket[] {
 function weaklyExplainedPacketIds(weakPackets: ReviewPacket[]): string[] {
   return weakPackets
     .map((packet) => packet.packet_id)
-    .sort((a, b) => a.localeCompare(b));
+    .sort((a, b) => compareCodeUnits(a, b));
 }
 
 function weakPacketPrimaryGap(
@@ -300,7 +301,7 @@ function weaklyExplainedPacketSamples(
         b.quality.unexplained_file_count - a.quality.unexplained_file_count ||
         a.quality.cohesion_score - b.quality.cohesion_score ||
         b.file_paths.length - a.file_paths.length ||
-        a.packet_id.localeCompare(b.packet_id),
+        compareCodeUnits(a.packet_id, b.packet_id),
     )
     .slice(0, MAX_WEAK_PACKET_SAMPLES)
     .map((packet) => ({

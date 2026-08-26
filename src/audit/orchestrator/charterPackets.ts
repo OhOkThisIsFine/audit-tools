@@ -18,6 +18,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { CharterKind } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { isDocIntentFile } from "../decompose/buildStructureDecomposition.js";
 import {
@@ -50,8 +51,8 @@ export function charterPacketReadSet(bundle: ArtifactBundle): {
     if (isDocIntentFile(file.path, file.status)) docs.add(file.path);
   }
   return {
-    memberPaths: [...members].sort((a, b) => a.localeCompare(b)),
-    docPaths: [...docs].sort((a, b) => a.localeCompare(b)),
+    memberPaths: [...members].sort((a, b) => compareCodeUnits(a, b)),
+    docPaths: [...docs].sort((a, b) => compareCodeUnits(a, b)),
   };
 }
 
@@ -75,7 +76,7 @@ export function memberDependencyEdgeLines(bundle: ArtifactBundle): string[] {
       }
     }
   }
-  return edges.sort((a, b) => a.localeCompare(b));
+  return edges.sort((a, b) => compareCodeUnits(a, b));
 }
 
 /**

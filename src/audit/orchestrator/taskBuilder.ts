@@ -5,7 +5,7 @@ import type {
   Lens,
 } from "../types.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
-import { chunkByBudget } from "audit-tools/shared";
+import { chunkByBudget, compareCodeUnits } from "audit-tools/shared";
 import { claimFlowReviewBlocks } from "./flowPlanning.js";
 import { isTrivialAuditPath } from "./trivialAudit.js";
 import { LENS_ORDER, priorityRank } from "./auditTaskUtils.js";
@@ -339,7 +339,7 @@ function buildRemainderBlocks(
     if (!pendingPaths || pendingPaths.size === 0) {
       continue;
     }
-    for (const path of [...pendingPaths].sort((a, b) => a.localeCompare(b))) {
+    for (const path of [...pendingPaths].sort((a, b) => compareCodeUnits(a, b))) {
       if (assigned.has(`${lens}:${path}`)) {
         continue;
       }
@@ -369,7 +369,7 @@ function buildRemainderBlocks(
   return [...groupedRemainders.values()].sort((a, b) => {
     const lensDelta = LENS_ORDER.indexOf(a.lens) - LENS_ORDER.indexOf(b.lens);
     if (lensDelta !== 0) return lensDelta;
-    return a.unitId.localeCompare(b.unitId);
+    return compareCodeUnits(a.unitId, b.unitId);
   });
 }
 
@@ -500,7 +500,7 @@ export function buildChunkedAuditTasks(
   return tasks.sort((a, b) => {
     const priorityDelta = priorityRank(b.priority) - priorityRank(a.priority);
     if (priorityDelta !== 0) return priorityDelta;
-    return a.task_id.localeCompare(b.task_id);
+    return compareCodeUnits(a.task_id, b.task_id);
   });
 }
 

@@ -9,6 +9,7 @@
 
 import { z } from "zod";
 import { severityRank } from "./types/lens.js";
+import { compareCodeUnits } from "./compareCodeUnits.js";
 
 export const ReflectionClaritySchema = z.enum([
   "clear",
@@ -159,7 +160,7 @@ export function aggregateReflections(
 
   const rankedKeys = (target: Map<string, number>): string[] =>
     [...target.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .sort((a, b) => b[1] - a[1] || compareCodeUnits(a[0], b[0]))
       .map(([key]) => key);
 
   return {

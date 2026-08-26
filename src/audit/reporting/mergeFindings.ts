@@ -10,6 +10,7 @@ import {
   crossLensDedupe,
   sameLensDedupe,
   upsertFindingByIdentity,
+  compareCodeUnits,
 } from "audit-tools/shared";
 
 function relevantRuntimeEvidence(
@@ -129,6 +130,6 @@ export function mergeFindings(
     // goal graph) ranks first. Absent blast_radius is treated as 0.
     const blastDelta = (b.blast_radius ?? 0) - (a.blast_radius ?? 0);
     if (blastDelta !== 0) return blastDelta;
-    return a.title.localeCompare(b.title);
+    return compareCodeUnits(a.title, b.title);
   });
 }

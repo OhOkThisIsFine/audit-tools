@@ -1,4 +1,4 @@
-import { hashContent, checkFileIntegrityRecords, resolveWithinRoot } from "audit-tools/shared";
+import { hashContent, checkFileIntegrityRecords, resolveWithinRoot, compareCodeUnits } from "audit-tools/shared";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, isAbsolute, relative, resolve, sep } from "node:path";
 import {
@@ -47,7 +47,7 @@ function toDisplayRelativePath(root: string, absolutePath: string): string {
 }
 
 function sortDirents(a: Dirent, b: Dirent): number {
-  return a.name.localeCompare(b.name);
+  return compareCodeUnits(a.name, b.name);
 }
 
 // Directory digest: build a canonical manifest string (a "directory" marker,

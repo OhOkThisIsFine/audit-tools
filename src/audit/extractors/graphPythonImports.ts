@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
-import { scanStringAware } from "audit-tools/shared";
+import { scanStringAware, compareCodeUnits } from "audit-tools/shared";
 import {
   graphEdge,
   normalizeGraphPath,
@@ -251,7 +251,7 @@ function resolvePythonAbsoluteModuleSpecifier(
         posix.dirname(normalizeGraphPath(target)),
       ),
     }))
-    .sort((a, b) => b.score - a.score || a.target.localeCompare(b.target));
+    .sort((a, b) => b.score - a.score || compareCodeUnits(a.target, b.target));
   const bestScore = scored[0]?.score ?? 0;
   const bestMatches = scored.filter((item) => item.score === bestScore);
   if (bestScore > 0 && bestMatches.length === 1) {

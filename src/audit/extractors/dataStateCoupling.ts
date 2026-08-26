@@ -15,6 +15,7 @@
 // with N referrers would otherwise contribute O(N²) pairs.
 
 import type { GraphBundle } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import { allGraphEdges } from "./graphSignals.js";
 
 /** An undirected weighted coupling edge (canonical `a < b`). */
@@ -80,7 +81,7 @@ export function deriveDataStateCoupling(
   const sharedByPair = new Map<string, number>();
   for (const referrers of referrersByTarget.values()) {
     if (referrers.size < 2 || referrers.size > genericThreshold) continue;
-    const members = [...referrers].sort((a, b) => a.localeCompare(b));
+    const members = [...referrers].sort((a, b) => compareCodeUnits(a, b));
     for (let i = 0; i < members.length; i++) {
       for (let j = i + 1; j < members.length; j++) {
         const key = `${members[i]} ${members[j]}`;
@@ -95,6 +96,6 @@ export function deriveDataStateCoupling(
     const idx = key.indexOf(" ");
     result.push({ a: key.slice(0, idx), b: key.slice(idx + 1), weight });
   }
-  result.sort((x, y) => x.a.localeCompare(y.a) || x.b.localeCompare(y.b));
+  result.sort((x, y) => compareCodeUnits(x.a, y.a) || compareCodeUnits(x.b, y.b));
   return result;
 }

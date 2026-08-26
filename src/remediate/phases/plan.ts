@@ -8,7 +8,7 @@ import {
 } from "../state/types.js";
 import { isAbsolute, join } from "node:path";
 import type { AuditFindingsReport } from "audit-tools/shared";
-import { canonicalizeFilePath, claimsAuditFindingsContract } from "audit-tools/shared";
+import { canonicalizeFilePath, claimsAuditFindingsContract, compareCodeUnits } from "audit-tools/shared";
 import { readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
@@ -201,7 +201,7 @@ export function buildCoverageLedger(params: {
     };
   };
   const entries: CoverageLedgerEntry[] = [...params.sourceFindings]
-    .sort((left, right) => left.id.localeCompare(right.id))
+    .sort((left, right) => compareCodeUnits(left.id, right.id))
     .map((f) => {
       const phantomPaths = params.droppedPhantomPaths?.get(f.id);
       if (phantomPaths) {

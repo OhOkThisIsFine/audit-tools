@@ -3,6 +3,7 @@ import type {
   RuntimeValidationResult,
   RuntimeValidationTaskManifest,
 } from "../types/runtimeValidation.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 
 function normalizeResult(
   result: RuntimeValidationResult,
@@ -76,7 +77,7 @@ export function updateRuntimeValidationReport(
 
   return {
     results: [...merged.values()].sort((a, b) =>
-      a.task_id.localeCompare(b.task_id),
+      compareCodeUnits(a.task_id, b.task_id),
     ),
   };
 }

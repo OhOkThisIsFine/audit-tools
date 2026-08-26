@@ -1,4 +1,5 @@
 import type { GraphEdge, RouteEdge } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import {
   graphEdge,
   normalizeGraphPath,
@@ -52,9 +53,9 @@ export function uniqueSortedRoutes(routes: RouteEdge[]): RouteEdge[] {
   }
   return [...deduped.values()].sort(
     (a, b) =>
-      a.path.localeCompare(b.path) ||
-      a.handler.localeCompare(b.handler) ||
-      (a.method ?? "").localeCompare(b.method ?? ""),
+      compareCodeUnits(a.path, b.path) ||
+      compareCodeUnits(a.handler, b.handler) ||
+      compareCodeUnits(a.method ?? "", b.method ?? ""),
   );
 }
 

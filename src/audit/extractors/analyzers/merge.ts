@@ -1,4 +1,5 @@
 import type { GraphEdge } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 
 // Analyzer edge confidences are set above their regex-floor counterparts so the
 // group-aware merge below prefers the compiler-derived edge for the same
@@ -62,9 +63,9 @@ function ungroupedKey(edge: GraphEdge): string {
 function sortEdges(edges: GraphEdge[]): GraphEdge[] {
   return edges.sort(
     (a, b) =>
-      a.from.localeCompare(b.from) ||
-      a.to.localeCompare(b.to) ||
-      (a.kind ?? "").localeCompare(b.kind ?? ""),
+      compareCodeUnits(a.from, b.from) ||
+      compareCodeUnits(a.to, b.to) ||
+      compareCodeUnits(a.kind ?? "", b.kind ?? ""),
   );
 }
 
