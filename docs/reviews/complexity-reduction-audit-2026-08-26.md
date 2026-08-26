@@ -20,9 +20,9 @@ they are not findings by themselves.
   `b2e6734d9e92425308e521fb766d3bdb34566cf4` (`main`). None of the material
   source paths changed while the shared checkout advanced during this review.
 - **Codebase Memory project:** `C-Code-audit-tools`, full index generation
-  `2026-08-26T17:41:06Z`, coverage record complete, coverage version 3,
+  `2026-08-26T17:51:08Z`, coverage record complete, coverage version 3,
   `hash_records_complete=1`, ignored-file accounting `362/362`.
-- **Graph snapshot:** 20,882 nodes and 69,794 edges. Relevant call paths were
+- **Graph snapshot:** 20,897 nodes and 69,858 edges. Relevant call paths were
   checked in both directions; exact source was read for every material claim.
 - **Coverage:** the formal `check_index_coverage` CLI invocation was rejected
   before execution because another live CBM cohort owned the generation. As a

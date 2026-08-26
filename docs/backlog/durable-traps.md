@@ -723,4 +723,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   closure is comment-only, update the digest pin and leave the version alone — no prior entry replays
   under changed rules. Bump the version only when extraction behaviour actually moved.
 
+- **CBM graph tools can be absent while its daemon is healthy, and the fallback CLI can be cohort-locked (2026-08-26).** Codex loaded the configured `codebase-memory-mcp` process but exposed none of its tool schemas; the UI RPC allowed `list_projects` while rejecting structural search/coverage, and `codebase-memory-mcp cli` refused to start because other live sessions owned the active generation. Do not kill shared CBM processes to force access. A bounded read-only fallback is the UI layout plus the generation's SQLite coverage/file-hash tables, followed by exact source reads for every gap; disclose that `check_index_coverage` did not execute. Start a fresh session when a formal tool result is required.
+
 ## Doc-set hygiene (enforced)
