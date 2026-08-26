@@ -231,9 +231,12 @@ DAG promotion carries real metadata, never placeholder values — downstream ris
 classification, host workload scope, and `checkAffectedFileIntegrity` all depend
 on it:
 
-- `affected_files` ← `deriveNodeFiles(node)`: the node's declared `output_files`
-  (write scope) first, else `files_likely_touched`, else the owning module
-  contract's file scope — flowing through the whole chain (contract → DAG
+- `affected_files` ← `deriveNodeFiles(node)`, the `resolve` of
+  `buildNodeWriteScopeResolver`: the node's declared `output_files` (write
+  scope) first, else `files_likely_touched`, else the owning module contract's
+  file scope — and, in every one of those cases, the owning module contract's
+  declared write targets unioned in after that base, whenever an obligation id
+  prefix-matches a module slug. Flows through the whole chain (contract → DAG
   node → finding → host write scope).
 - `lens` / `severity` ← derived from obligation kinds and contract content (an
   `invariant` obligation on a trust boundary is a higher tier than a structural

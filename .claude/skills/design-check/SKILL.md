@@ -21,8 +21,9 @@ Run it when the change touches loop-core (the paths in
 attestation gate keys on), a shared contract under `src/shared`, host-handoff/result-ingestion behaviour, an
 artifact shape, or anything whose blast radius you cannot state in one sentence.
 
-Risk-tier it the same way a lap is tiered ([[risk-tier-loop-laps-cheap-vs-heavy]]): one pass for a
-contained change, the full three questions below for loop-core.
+Risk-tier it the same way a lap is tiered (`docs/project-philosophy.md` → A6, *Self-scaling
+pipeline, not forked paths*): one pass for a contained change, the full three questions below
+for loop-core.
 
 ## 2. Collect the retirement evidence (deterministic, before any LLM)
 
@@ -81,8 +82,8 @@ acting on it. A refutation you cannot reproduce in the code is not a refutation.
 Turn answer (3) into a real test and run it. It must be **red before the fix and green after**, and it
 must reach the code it names ([[test-must-reach-the-code-it-claims]]) — a test that would pass against
 the unfixed tree proves nothing. Restore any temporary mutation by **inverting the edit**, never with
-`git checkout --` ([[redgreen-restore-by-inverting-never-checkout]]); the shell-trap guard refuses that
-restore anyway.
+`git checkout --`; the shell-trap guard (`.claude/hooks/shell-trap-guard.mjs`) refuses that
+restore anyway, and states the trap when it fires.
 
 ## 5. Hand back — then implement
 

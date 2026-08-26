@@ -6,7 +6,7 @@ description: Land and publish audit-tools work end-to-end — verify green, comm
 # Ship — full land-and-publish pipeline
 
 Run the whole flow; never park at the push/publish boundary. Repo root = the audit-tools checkout.
-Remote `audit-tools`, branch `main` (not origin, not master).
+Remote `origin`, branch `main` (not master).
 
 **ONE package** (`audit-tools`), shipping both bins `audit-code` + `remediate-code`. Imports use the
 `audit-tools/shared` subpath export — never a separate `@audit-tools/shared` workspace dep.
@@ -41,12 +41,12 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 - Conventional commit message. Push `main` to the `audit-tools` remote.
 - **Lap-worktree ship (one command, no primary-worktree dance).** Laps run on a `claude/<lap>` linked
   worktree, not the primary `main` checkout. You do NOT need to FF the primary worktree or rebuild its stale
-  `dist/`. Push the lap branch's landed work onto `main` (`git push audit-tools HEAD:main`, a fast-forward),
+  `dist/`. Push the lap branch's landed work onto `main` (`git push origin HEAD:main`, a fast-forward),
   then run the release **from the lap worktree itself** — `scripts/release-and-publish.mjs` admits any
-  branch whose HEAD already equals `audit-tools/main` (`evaluateReleaseBranch()`), pushes the bump commit onto
+  branch whose HEAD already equals `origin/main` (`evaluateReleaseBranch()`), pushes the bump commit onto
   the remote `main` via `HEAD:refs/heads/main`, and never touches the primary worktree. The `ensureCleanWorktree()`
   CRLF/clean-tree guard and the `verify:checks` pre-tag gate still run. No `--root`/branch flag is needed —
-  if the lap HEAD has not been fast-forwarded onto `audit-tools/main` first, the guard refuses (fix the sync, do not
+  if the lap HEAD has not been fast-forwarded onto `origin/main` first, the guard refuses (fix the sync, do not
   add a flag).
 
 ## 3. Publish (single package)

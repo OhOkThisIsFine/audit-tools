@@ -67,7 +67,7 @@ cites them. Reuse of a number in another subsystem does not imply shared identit
 
 | Id | Meaning | Live owner |
 |---|---|---|
-| N-R13 | The former document phase remains dissolved; an existing item specification carries forward. | `src/remediate/steps/nextStep.ts` |
+| N-R13 | The former document phase remains dissolved; the item-specification field it produced is gone. | `src/remediate/steps/nextStep.ts` |
 | N-R21 | Circular interface-definition dependencies route to explicit resolution. | `src/remediate/validation/contractPipelineGates.ts` |
 | N-X06 | Deterministic free-form intent interpretation seam. | `src/audit/orchestrator/intentInterpreter.ts` |
 

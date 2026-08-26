@@ -13,7 +13,7 @@ carries a value — real content, or the literal `"none"`. In the **rendered out
 
 `--template` prints a blank input. The rendered markdown is the hand-back, pasted into chat; the
 durable pieces are simultaneously written to their permanent homes (`docs/HANDOFF.md`,
-`docs/backlog.md`, project memory).
+`docs/backlog/`, project memory).
 
 ## Why a renderer and not a template to copy
 

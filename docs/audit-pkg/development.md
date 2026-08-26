@@ -5,7 +5,7 @@
 - `src/`: implementation code
 - `schemas/`: JSON schemas for public and internal artifacts
 - `examples/`: validated artifact examples
-- `skills/audit-code/`: canonical prompt and skill-facing instructions
+- `skills/`: canonical prompts and skill-facing instructions, one subtree per shipped bin
 - `dispatch/`: standalone result validation and merge helpers
 - `tests/`: vitest-based test suite and regression coverage
 - `dist/`: build output (gitignored, not checked in) produced by `npm run build` / the `prepack` script;

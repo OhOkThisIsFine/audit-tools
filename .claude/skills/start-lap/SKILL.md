@@ -5,26 +5,26 @@ description: Start a work lap in audit-tools — sync with remote main (fetch + 
 
 # Start-lap — sync + orient + get rolling
 
-Automates the session-open ritual. Repo root = the audit-tools checkout. Remote `audit-tools`,
-branch `main` (not origin, not master). Do the mechanical steps yourself; only hand back on a
+Automates the session-open ritual. Repo root = the audit-tools checkout. Remote `origin`,
+branch `main` (not master). Do the mechanical steps yourself; only hand back on a
 destructive ambiguity (see step 2). End by telling the owner the immediate next item — don't ask
 "what now" when HANDOFF already names it.
 
 ## 1. Sync with remote main (stale-worktree guard — do this FIRST)
 
-A worktree can be branched behind `audit-tools/main` and miss landed work. From repo root, Bash tool:
+A worktree can be branched behind `origin/main` and miss landed work. From repo root, Bash tool:
 
 ```bash
 git rev-parse --abbrev-ref HEAD          # confirm current branch
-git fetch audit-tools main
-git log --oneline HEAD..audit-tools/main # commits on remote not local
+git fetch origin main
+git log --oneline HEAD..origin/main      # commits on remote not local
 ```
 
-- **On `main` and behind** → fast-forward: `git merge --ff-only audit-tools/main`. If ff-only fails
+- **On `main` and behind** → fast-forward: `git merge --ff-only origin/main`. If ff-only fails
   (local `main` has diverging commits), STOP and surface it — don't force.
-- **On a lap/worktree branch that is a clean ANCESTOR of `audit-tools/main`** (verify:
-  `git merge-base --is-ancestor HEAD audit-tools/main` + clean tree + empty
-  `git log audit-tools/main..HEAD`) → fast-forward it too: `git merge --ff-only audit-tools/main`.
+- **On a lap/worktree branch that is a clean ANCESTOR of `origin/main`** (verify:
+  `git merge-base --is-ancestor HEAD origin/main` + clean tree + empty
+  `git log origin/main..HEAD`) → fast-forward it too: `git merge --ff-only origin/main`.
   No unique commits = no strand risk, and lap work then starts from current code (ship pushes
   `HEAD:main` from the lap branch, so it never needs to be `main` itself).
 - **On a `remediation/<runId>` branch, or any branch with unique commits** (branch-strand trap):
@@ -88,7 +88,7 @@ Terse digest: current live version + released-vs-local delta, sync result (N com
 pulled / already current / stranded on branch X), a one-line skim of what shipped since (step 4), the
 **immediate next item** from HANDOFF's roadmap with its backlog home, and any open nightly items
 awaiting the owner. Then **start on that next item** — risk-tier it first
-([[risk-tier-loop-laps-cheap-vs-heavy]]): scale pipeline depth to the risk tier — full adversarial depth
+(`docs/project-philosophy.md` → A6): scale pipeline depth to the risk tier — full adversarial depth
 for loop-core / complex work, leaner for trivial mechanical clusters; it's ONE pipeline dialed by risk,
 not a separate lean path — unless the owner redirects. Getting rolling is the point of the skill; don't park at "here's the next
 item, what now?".

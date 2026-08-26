@@ -33,6 +33,9 @@ intake
   → runtime_validation      [deterministic — runs planned runtime-validation commands]
   → synthesis
   → synthesis_narrative     [host_delegation]
+  → friction_capture        [terminal close-out — resolved at the completion
+                             boundary in decideAuditFrictionCloseout, not by the
+                             bundle-derived obligation scan]
 ```
 
 ---
