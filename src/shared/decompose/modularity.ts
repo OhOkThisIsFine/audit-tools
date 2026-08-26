@@ -33,6 +33,8 @@
 // grammar → outside the import-vetted-libs policy; owning it keeps full
 // tie-break/determinism control).
 
+import { compareCodeUnits } from "../compareCodeUnits.js";
+
 /**
  * A weighted undirected graph over string node ids. `edges` are undirected; a
  * repeated {a,b} pair (either orientation) accumulates weight. Self-loops
@@ -58,10 +60,6 @@ export type Partition = Map<string, string>;
  * on input order changing the rounding of very large repeated sums.
  */
 const MAX_GRAPH_ARITHMETIC = Number.MAX_SAFE_INTEGER;
-
-function compareNodeIds(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
 
 function assertNodeId(value: unknown, context: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0) {
@@ -124,14 +122,14 @@ function buildAdjacency(graph: WeightedGraph): AdjacencyGraph {
     assertNodeId(edge.a, `Edge ${index} endpoint a`);
     assertNodeId(edge.b, `Edge ${index} endpoint b`);
     assertPositiveBounded(edge.weight, `Edge weight at index ${index}`);
-    return compareNodeIds(edge.a, edge.b) <= 0
+    return compareCodeUnits(edge.a, edge.b) <= 0
       ? { a: edge.a, b: edge.b, weight: edge.weight }
       : { a: edge.b, b: edge.a, weight: edge.weight };
   });
   normalizedEdges.sort(
     (left, right) =>
-      compareNodeIds(left.a, right.a) ||
-      compareNodeIds(left.b, right.b) ||
+      compareCodeUnits(left.a, right.a) ||
+      compareCodeUnits(left.b, right.b) ||
       left.weight - right.weight,
   );
 
@@ -143,7 +141,7 @@ function buildAdjacency(graph: WeightedGraph): AdjacencyGraph {
       ...graph.nodes,
       ...normalizedEdges.flatMap((edge) => [edge.a, edge.b]),
     ]),
-  ].sort(compareNodeIds);
+  ].sort(compareCodeUnits);
   const adjacency = new Map<string, Map<string, number>>();
   for (const node of nodes) adjacency.set(node, new Map());
 
@@ -272,7 +270,7 @@ function localMoving(
       let bestCommunity = current;
       let bestGain = 0;
       // Evaluate candidates in lexical order for a deterministic tie-break.
-      const candidates = [...weightToCommunity.keys()].sort(compareNodeIds);
+      const candidates = [...weightToCommunity.keys()].sort(compareCodeUnits);
       for (const comm of candidates) {
         const kiIn = weightToCommunity.get(comm) ?? 0;
         const sigmaTot = communityDegree.get(comm) ?? 0;
@@ -292,7 +290,7 @@ function localMoving(
         assertSignedBounded(gain, `Modularity gain for ${node}`);
         if (
           gain > bestGain + 1e-12 ||
-          (Math.abs(gain - bestGain) <= 1e-12 && compareNodeIds(comm, bestCommunity) < 0)
+          (Math.abs(gain - bestGain) <= 1e-12 && compareCodeUnits(comm, bestCommunity) < 0)
         ) {
           bestGain = gain;
           bestCommunity = comm;
@@ -329,7 +327,7 @@ function canonicalizeCommunities(
   const rep = new Map<string, string>();
   for (const [node, comm] of communityOf) {
     const existing = rep.get(comm);
-    if (existing === undefined || compareNodeIds(node, existing) < 0) {
+    if (existing === undefined || compareCodeUnits(node, existing) < 0) {
       rep.set(comm, node);
     }
   }
@@ -359,14 +357,14 @@ function aggregate(
   }
 
   const edges: Array<{ a: string; b: string; weight: number }> = [];
-  const superNodes = [...members.keys()].sort(compareNodeIds);
+  const superNodes = [...members.keys()].sort(compareCodeUnits);
   // Sum weights between/within communities. Each undirected pair is visited once
   // by iterating the symmetric adjacency and only taking a ≤ b (self included).
   for (const node of graph.nodes) {
     const commA = communityOf.get(node)!;
     const row = graph.adjacency.get(node) ?? new Map<string, number>();
     for (const [neighbor, weight] of row) {
-      if (compareNodeIds(neighbor, node) < 0) continue; // count each pair once
+      if (compareCodeUnits(neighbor, node) < 0) continue; // count each pair once
       const commB = communityOf.get(neighbor)!;
       // The adjacency already stores each cross pair on both endpoints; taking
       // node ≤ neighbor once reconstructs the undirected weight exactly.
@@ -462,7 +460,7 @@ export function modularityOf(
     for (const [neighbor, weight] of row) {
       // Visit each undirected pair once; a self-loop (neighbor === node) is not
       // skipped, so it contributes its weight exactly once.
-      if (compareNodeIds(neighbor, node) < 0) continue;
+      if (compareCodeUnits(neighbor, node) < 0) continue;
       if ((partition.get(neighbor) ?? neighbor) !== community) continue;
       internal.set(
         community,
@@ -476,7 +474,7 @@ export function modularityOf(
   }
 
   let quality = 0;
-  for (const community of [...total.keys()].sort(compareNodeIds)) {
+  for (const community of [...total.keys()].sort(compareCodeUnits)) {
     const share = (total.get(community) ?? 0) / twoM;
     quality += (internal.get(community) ?? 0) / base.totalWeight - resolution * share * share;
     assertSignedBounded(quality, `Modularity accumulation for ${community}`);

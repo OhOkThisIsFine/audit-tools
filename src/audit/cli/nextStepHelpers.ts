@@ -12,8 +12,10 @@ import { join } from "node:path";
 import {
   advance,
   DEFAULT_MAX_TRANSITIONS,
+  compareCodeUnits,
   isFileMissingError,
   isJsonParseError,
+  isRecord,
   readJsonFile,
   persistAnalyzerConsent,
   persistAnalyzerSettings,
@@ -47,7 +49,6 @@ import {
   LANE_SUBMISSION_SCHEMAS,
   charterLaneSchema,
   describeSubmissionShapeMismatch,
-  isSubmissionObjectMap,
   unwrapSubmissionArray,
 } from "./laneValidators.js";
 import type { ZodError, ZodTypeAny } from "zod";
@@ -443,7 +444,7 @@ export async function handleAnalyzerConsentBranch(
           // Scoped, never run-wide: the grant names exactly the ids the
           // operator was offered and answered.
           tools: [...new Set([...(existing?.tools ?? []), ...granted])].sort(
-            (a, b) => (a < b ? -1 : a > b ? 1 : 0),
+            compareCodeUnits,
           ),
         };
       }
@@ -828,7 +829,7 @@ export async function consumeObjectSubmission(
     return { status: "quarantined", quarantinePath, reason: incoming.reason };
   }
   const { value, path } = incoming;
-  if (isSubmissionObjectMap(value)) {
+  if (isRecord(value)) {
     return { status: "ok", value, path };
   }
   const reason = describeSubmissionShapeMismatch(value);

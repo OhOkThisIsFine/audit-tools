@@ -18,6 +18,7 @@ import type {
 } from "./types.js";
 import { parseClippy } from "./clippy.js";
 import { parseRubocopOutcome } from "./rubocop.js";
+import { isRecord } from "../validation/basic.js";
 
 /**
  * The value-curated EXTERNAL analyzer candidate registry. This is the only place
@@ -47,10 +48,6 @@ function items(parsed: ExternalAnalyzerParsedItem[]): ExternalAnalyzerParseRepor
  */
 function parseFailure(tool: string, cause: string): ExternalAnalyzerParseReport {
   return { items: [], parse_failed: true, note: `${tool}: ${cause}` };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 /**

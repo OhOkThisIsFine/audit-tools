@@ -4,7 +4,7 @@ import {
   type RunLedger,
   type RunLedgerEntry,
 } from "audit-tools/shared";
-import { isFileMissingError, readJsonFile } from "audit-tools/shared";
+import { isFileMissingError, isRecord, readJsonFile } from "audit-tools/shared";
 
 const RUN_LEDGER_FILENAME = "run-ledger.json";
 const VALID_RUN_LEDGER_STATUSES = new Set<RunLedgerEntry["status"]>(
@@ -13,10 +13,6 @@ const VALID_RUN_LEDGER_STATUSES = new Set<RunLedgerEntry["status"]>(
 
 function ledgerPath(artifactsDir: string): string {
   return join(artifactsDir, RUN_LEDGER_FILENAME);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function assertRunLedgerEntry(

@@ -9,7 +9,8 @@ import {
 import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-function errorMessage(error: unknown): string {
+/** The ONE unknown-thrown-value → message rendering (check:shared-primitives). */
+export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 

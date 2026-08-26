@@ -22,9 +22,9 @@
 // Unknown extensions fall back to the C-family `//` + `/* */` so a stray `#`
 // (e.g. a JS private field) is never misread as a comment.
 
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { CouplingEdge } from "./dataStateCoupling.js";
+import { DEFAULT_MAX_BYTES, defaultReadFileText } from "./readFileText.js";
 
 interface CommentSyntax {
   line: string[];
@@ -267,21 +267,6 @@ export interface CommentDecompositionParams {
   readFileText?: (absPath: string) => Promise<string | undefined>;
   /** Skip files larger than this many bytes when reading (default 512 KiB). */
   maxBytes?: number;
-}
-
-const DEFAULT_MAX_BYTES = 512 * 1024;
-
-async function defaultReadFileText(
-  absPath: string,
-  maxBytes: number,
-): Promise<string | undefined> {
-  try {
-    const buf = await readFile(absPath);
-    if (buf.byteLength > maxBytes) return undefined;
-    return buf.toString("utf8");
-  } catch {
-    return undefined;
-  }
 }
 
 /**

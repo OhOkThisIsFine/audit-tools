@@ -1,3 +1,4 @@
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 import {
   TASK_DRAW_COHERENCE_POLICY,
   buildContentCoherenceTrace,
@@ -21,10 +22,6 @@ export interface GraphPacket {
 export interface TaskCoherencePartition {
   coherence_trace: ContentCoherenceTrace;
   packets: GraphPacket[];
-}
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function relationshipsFromGraph(

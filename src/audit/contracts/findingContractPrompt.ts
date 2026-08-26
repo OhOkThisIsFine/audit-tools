@@ -22,6 +22,7 @@ import {
   FINDING_LINE_END_INTEGER_RULE,
   FINDING_LINE_ORDER_RULE,
   FINDING_LINE_START_INTEGER_RULE,
+  compareCodeUnits,
 } from "audit-tools/shared";
 import { AUDIT_RESULT_RULES } from "../validation/auditResults.js";
 import { WorkerFindingSchema } from "./workerSchemas.js";
@@ -83,7 +84,7 @@ export function findingContractPromptLines(): readonly string[] {
     .sort();
   const optionalFields = Object.entries(properties)
     .filter(([name]) => !required.includes(name))
-    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+    .sort(([left], [right]) => compareCodeUnits(left, right));
   // Every min(1) the schema carries is a contract fact the host must know —
   // an empty value fails the parse exactly as a missing field does — so it is
   // detected FROM the schema node (required or optional, array or string),

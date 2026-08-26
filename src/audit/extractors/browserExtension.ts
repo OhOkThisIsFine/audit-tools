@@ -1,6 +1,7 @@
 import { posix } from "node:path";
 import type { Lens, RepoManifest } from "../types.js";
 import type { FileDisposition, GraphBundle, GraphEdge, SurfaceRecord } from "audit-tools/shared";
+import { isRecord } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import {
   graphEdge,
@@ -29,10 +30,6 @@ const EXTENSION_SURFACE_EDGE_KINDS = new Set([
   CHROME_EXTENSION_CONTENT_SCRIPT_EDGE,
   CHROME_EXTENSION_UI_PAGE_EDGE,
 ]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0

@@ -22,6 +22,7 @@ import {
   CriticalFlowFallbackResultSchema,
   SynthesisNarrativeSchema,
   SystemicChallengeSubmissionSchema,
+  isRecord,
   type CharterKind,
   type SubmissionIssue,
 } from "audit-tools/shared";
@@ -70,13 +71,6 @@ export function unwrapSubmissionArray(
     }
   }
   return { ok: false, reason: describeSubmissionShapeMismatch(value) };
-}
-
-/** True for a plain top-level key → value map (the decisions-file shape). */
-export function isSubmissionObjectMap(
-  value: unknown,
-): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
@@ -149,7 +143,7 @@ function arrayIssue(value: unknown): SubmissionIssue | null {
 }
 
 function objectMapIssue(value: unknown): SubmissionIssue | null {
-  return isSubmissionObjectMap(value)
+  return isRecord(value)
     ? null
     : {
         code: "submission_contract_invalid",

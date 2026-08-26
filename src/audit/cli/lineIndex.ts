@@ -2,10 +2,8 @@ import { resolve } from "node:path";
 import { countLines } from "./args.js";
 import type { AuditTask, RepoManifest } from "../types.js";
 import { isFileMissingError } from "audit-tools/shared";
-import {
-  canonicalizeAuditTasks,
-  compareCodeUnits,
-} from "../../shared/affinityArtifacts.js";
+import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 
 // Line-count helpers extracted from cli.ts. Pure functions over the repo
 // manifest / task file paths — used to annotate audit tasks with per-file line

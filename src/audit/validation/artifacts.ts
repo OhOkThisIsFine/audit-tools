@@ -7,14 +7,6 @@ import {
 import type { AuditUnit } from "../types.js";
 import type { RuntimeValidationTask } from "../types/runtimeValidation.js";
 
-function pushIssue(
-  issues: ValidationIssue[],
-  path: string,
-  message: string,
-): void {
-  pushValidationIssue(issues, path, message);
-}
-
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -147,7 +139,7 @@ function validatePathsCoveredBySet(
   if (!prerequisites()) return;
   for (const path of idx.repoPaths) {
     if (!pathsToCheck.has(path)) {
-      pushIssue(issues, artifactName, errorMessage(path));
+      pushValidationIssue(issues, artifactName, errorMessage(path));
     }
   }
 }
@@ -181,18 +173,18 @@ function validateUnitManifest(bundle: ArtifactBundle, idx: BundleIndexes, issues
   if (!bundle.unit_manifest) return;
   for (const unit of idx.unitManifestUnits) {
     if (unit.files.length === 0) {
-      pushIssue(issues, `unit_manifest:${unit.unit_id}`, "Unit has no files");
+      pushValidationIssue(issues, `unit_manifest:${unit.unit_id}`, "Unit has no files");
     }
     if (unit.required_lenses.length === 0) {
-      pushIssue(issues, `unit_manifest:${unit.unit_id}`, "Unit has no required lenses");
+      pushValidationIssue(issues, `unit_manifest:${unit.unit_id}`, "Unit has no required lenses");
     }
     for (const path of unit.files) {
       if (!idx.repoPaths.has(path)) {
-        pushIssue(issues, `unit_manifest:${unit.unit_id}`, `Unit references unknown file ${path}`);
+        pushValidationIssue(issues, `unit_manifest:${unit.unit_id}`, `Unit references unknown file ${path}`);
       }
       const disposition = idx.dispositionMap.get(path);
       if (disposition && disposition !== "included") {
-        pushIssue(issues, `unit_manifest:${unit.unit_id}`, `Unit includes non-included file ${path} with disposition ${disposition}`);
+        pushValidationIssue(issues, `unit_manifest:${unit.unit_id}`, `Unit includes non-included file ${path} with disposition ${disposition}`);
       }
     }
   }
@@ -202,20 +194,20 @@ function validateCoverageMatrixEntries(bundle: ArtifactBundle, idx: BundleIndexe
   if (!bundle.coverage_matrix || !bundle.unit_manifest) return;
   for (const file of idx.coverageFiles) {
     if (!idx.repoPaths.has(file.path)) {
-      pushIssue(issues, "coverage_matrix", `Coverage contains unknown file ${file.path}`);
+      pushValidationIssue(issues, "coverage_matrix", `Coverage contains unknown file ${file.path}`);
     }
     for (const unitId of file.unit_ids) {
       if (!idx.unitIds.has(unitId)) {
-        pushIssue(issues, `coverage_matrix:${file.path}`, `Coverage references unknown unit ${unitId}`);
+        pushValidationIssue(issues, `coverage_matrix:${file.path}`, `Coverage references unknown unit ${unitId}`);
       }
     }
     const disposition = idx.dispositionMap.get(file.path);
     if (disposition && disposition !== "included" && file.audit_status !== "excluded") {
-      pushIssue(issues, `coverage_matrix:${file.path}`, `Non-included file should be excluded in coverage; found status ${file.audit_status}`);
+      pushValidationIssue(issues, `coverage_matrix:${file.path}`, `Non-included file should be excluded in coverage; found status ${file.audit_status}`);
     }
     for (const lens of file.completed_lenses) {
       if (!file.required_lenses.includes(lens) && file.audit_status !== "excluded") {
-        pushIssue(issues, `coverage_matrix:${file.path}`, `Completed lens ${lens} is not listed in required_lenses`);
+        pushValidationIssue(issues, `coverage_matrix:${file.path}`, `Completed lens ${lens} is not listed in required_lenses`);
       }
     }
   }
@@ -225,18 +217,18 @@ function validateCriticalFlows(bundle: ArtifactBundle, idx: BundleIndexes, issue
   if (!bundle.critical_flows) return;
   for (const flow of idx.criticalFlows) {
     if (flow.paths.length === 0) {
-      pushIssue(issues, `critical_flows:${flow.id}`, "Flow has no paths");
+      pushValidationIssue(issues, `critical_flows:${flow.id}`, "Flow has no paths");
     }
     if (flow.entrypoints.length === 0) {
-      pushIssue(issues, `critical_flows:${flow.id}`, "Flow has no entrypoints");
+      pushValidationIssue(issues, `critical_flows:${flow.id}`, "Flow has no entrypoints");
     }
     for (const path of flow.paths) {
       if (!idx.repoPaths.has(path)) {
-        pushIssue(issues, `critical_flows:${flow.id}`, `Flow references unknown file ${path}`);
+        pushValidationIssue(issues, `critical_flows:${flow.id}`, `Flow references unknown file ${path}`);
       }
       const disposition = idx.dispositionMap.get(path);
       if (disposition && disposition !== "included") {
-        pushIssue(issues, `critical_flows:${flow.id}`, `Flow includes non-included file ${path} with disposition ${disposition}`);
+        pushValidationIssue(issues, `critical_flows:${flow.id}`, `Flow includes non-included file ${path} with disposition ${disposition}`);
       }
     }
   }
@@ -246,11 +238,11 @@ function validateFlowCoverage(bundle: ArtifactBundle, idx: BundleIndexes, issues
   if (!bundle.flow_coverage || !bundle.critical_flows) return;
   for (const flow of idx.flowCoverageEntries) {
     if (!idx.flowIds.has(flow.flow_id)) {
-      pushIssue(issues, `flow_coverage:${flow.flow_id}`, `Flow coverage references unknown flow ${flow.flow_id}`);
+      pushValidationIssue(issues, `flow_coverage:${flow.flow_id}`, `Flow coverage references unknown flow ${flow.flow_id}`);
     }
     for (const lens of flow.completed_lenses) {
       if (!flow.required_lenses.includes(lens)) {
-        pushIssue(issues, `flow_coverage:${flow.flow_id}`, `Completed lens ${lens} is not in required_lenses`);
+        pushValidationIssue(issues, `flow_coverage:${flow.flow_id}`, `Completed lens ${lens} is not in required_lenses`);
       }
     }
     const expectedStatus =
@@ -260,7 +252,7 @@ function validateFlowCoverage(bundle: ArtifactBundle, idx: BundleIndexes, issues
           ? "partial"
           : "pending";
     if (flow.status !== expectedStatus) {
-      pushIssue(issues, `flow_coverage:${flow.flow_id}`, `Flow status ${flow.status} does not match expected ${expectedStatus}`);
+      pushValidationIssue(issues, `flow_coverage:${flow.flow_id}`, `Flow status ${flow.status} does not match expected ${expectedStatus}`);
     }
   }
 }
@@ -270,7 +262,7 @@ function validateRiskRegister(bundle: ArtifactBundle, idx: BundleIndexes, issues
   const riskUnitIds = new Set(idx.riskRegisterItems.map((item) => item.unit_id));
   for (const unit of idx.unitManifestUnits) {
     if (!riskUnitIds.has(unit.unit_id)) {
-      pushIssue(issues, "risk_register", `Missing risk entry for unit ${unit.unit_id}`);
+      pushValidationIssue(issues, "risk_register", `Missing risk entry for unit ${unit.unit_id}`);
     }
   }
 }
@@ -279,11 +271,11 @@ function validateSurfaceManifest(bundle: ArtifactBundle, idx: BundleIndexes, iss
   if (!bundle.surface_manifest) return;
   for (const surface of idx.surfaceEntries) {
     if (!idx.repoPaths.has(surface.entrypoint)) {
-      pushIssue(issues, `surface_manifest:${surface.id}`, `Surface references unknown entrypoint ${surface.entrypoint}`);
+      pushValidationIssue(issues, `surface_manifest:${surface.id}`, `Surface references unknown entrypoint ${surface.entrypoint}`);
     }
     const disposition = idx.dispositionMap.get(surface.entrypoint);
     if (disposition && disposition !== "included") {
-      pushIssue(issues, `surface_manifest:${surface.id}`, `Surface entrypoint ${surface.entrypoint} is not included`);
+      pushValidationIssue(issues, `surface_manifest:${surface.id}`, `Surface entrypoint ${surface.entrypoint} is not included`);
     }
   }
 }
@@ -292,11 +284,11 @@ function validateRuntimeValidationTasks(bundle: ArtifactBundle, idx: BundleIndex
   if (!bundle.runtime_validation_tasks) return;
   for (const task of idx.runtimeValidationTasks) {
     if (task.target_paths.length === 0) {
-      pushIssue(issues, `runtime_validation_tasks:${task.id}`, "Runtime validation task has no target paths");
+      pushValidationIssue(issues, `runtime_validation_tasks:${task.id}`, "Runtime validation task has no target paths");
     }
     for (const path of task.target_paths) {
       if (!idx.repoPaths.has(path)) {
-        pushIssue(issues, `runtime_validation_tasks:${task.id}`, `Runtime validation task references unknown path ${path}`);
+        pushValidationIssue(issues, `runtime_validation_tasks:${task.id}`, `Runtime validation task references unknown path ${path}`);
       }
     }
   }
@@ -306,7 +298,7 @@ function validateRuntimeValidationReport(bundle: ArtifactBundle, idx: BundleInde
   if (!bundle.runtime_validation_report) return;
   for (const result of idx.runtimeValidationResults) {
     if (!idx.runtimeTaskIds.has(result.task_id)) {
-      pushIssue(issues, `runtime_validation_report:${result.task_id}`, `Runtime validation result references unknown task ${result.task_id}`);
+      pushValidationIssue(issues, `runtime_validation_report:${result.task_id}`, `Runtime validation result references unknown task ${result.task_id}`);
     }
   }
 }
@@ -315,7 +307,7 @@ function validateExternalAnalyzerResults(bundle: ArtifactBundle, idx: BundleInde
   if (!bundle.external_analyzer_results) return;
   for (const item of idx.externalAnalyzerResults) {
     if (!idx.repoPaths.has(item.path) && bundle.repo_manifest) {
-      pushIssue(issues, `external_analyzer_results:${item.id}`, `External analyzer result references unknown path ${item.path}`);
+      pushValidationIssue(issues, `external_analyzer_results:${item.id}`, `External analyzer result references unknown path ${item.path}`);
     }
   }
 }
@@ -331,13 +323,13 @@ function validateTaskLineRanges(_bundle: ArtifactBundle, idx: BundleIndexes, iss
       for (const [rangeIndex, range] of (task.line_ranges ?? []).entries()) {
         const path = `${artifactPath}:${task.task_id}.line_ranges:${rangeIndex}`;
         if (range.start < 1) {
-          pushIssue(issues, path, "Line range start must be a positive 1-based integer");
+          pushValidationIssue(issues, path, "Line range start must be a positive 1-based integer");
         }
         if (range.end < 1) {
-          pushIssue(issues, path, "Line range end must be a positive 1-based integer");
+          pushValidationIssue(issues, path, "Line range end must be a positive 1-based integer");
         }
         if (range.end < range.start) {
-          pushIssue(issues, path, "Line range end must be greater than or equal to start");
+          pushValidationIssue(issues, path, "Line range end must be greater than or equal to start");
         }
       }
     }

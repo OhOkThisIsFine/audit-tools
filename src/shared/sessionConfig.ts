@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
+import { errorMessage } from "./io/json.js";
+import { formatSchemaFailure } from "./validation/schemaFailure.js";
 
 export const SESSION_INTENT_RELATIVE_PATH =
   ".audit-tools/audit/session-config.json" as const;
@@ -41,10 +43,6 @@ function canonicalIntentPath(repositoryRoot: string): string {
   return configPath;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function isMissingFileError(
   error: unknown,
 ): error is NodeJS.ErrnoException & { code: "ENOENT" } {
@@ -53,15 +51,6 @@ function isMissingFileError(
     "code" in error &&
     (error as NodeJS.ErrnoException).code === "ENOENT"
   );
-}
-
-function formatSchemaFailure(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => {
-      const path = issue.path.length > 0 ? issue.path.join(".") : "<root>";
-      return `${path}: ${issue.message}`;
-    })
-    .join("; ");
 }
 
 /**

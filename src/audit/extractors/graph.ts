@@ -9,7 +9,7 @@ import type {
   NodeMetrics,
   RouteEdge,
 } from "audit-tools/shared";
-import { hashContent, stableStringify, resolveWithinRoot } from "audit-tools/shared";
+import { hashContent, isRecord, stableStringify, resolveWithinRoot } from "audit-tools/shared";
 import { computeNodeMetricsForFile } from "./analyzers/complexityDuplication.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
@@ -812,22 +812,18 @@ function graphEdgeCacheKey(contentHash: string, contentAvailable: boolean): stri
   return `${GRAPH_EDGE_CACHE_KEY_VERSION}:${contentAvailable ? "content" : "no-content"}:${contentHash}`;
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** An array in which EVERY element carries the fields the build will read. */
 function isArrayOf(value: unknown, isElement: (item: unknown) => boolean): boolean {
   return Array.isArray(value) && value.every(isElement);
 }
 
 function isGraphEdgeShape(value: unknown): boolean {
-  return isPlainObject(value) && typeof value.from === "string" && typeof value.to === "string";
+  return isRecord(value) && typeof value.from === "string" && typeof value.to === "string";
 }
 
 function isRouteEdgeShape(value: unknown): boolean {
   return (
-    isPlainObject(value) &&
+    isRecord(value) &&
     typeof value.path === "string" &&
     typeof value.handler === "string"
   );
@@ -854,13 +850,13 @@ function isReusableCacheEntry(
   }
   const contribution = entry.contribution as PerFileGraphContribution | undefined;
   return (
-    isPlainObject(contribution) &&
+    isRecord(contribution) &&
     isArrayOf(contribution.imports, isGraphEdgeShape) &&
     isArrayOf(contribution.calls, isGraphEdgeShape) &&
     isArrayOf(contribution.references, isGraphEdgeShape) &&
     isArrayOf(contribution.heuristics, isGraphEdgeShape) &&
     isArrayOf(contribution.routes, isRouteEdgeShape) &&
-    (contribution.metrics === undefined || isPlainObject(contribution.metrics))
+    (contribution.metrics === undefined || isRecord(contribution.metrics))
   );
 }
 

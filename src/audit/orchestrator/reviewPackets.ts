@@ -6,7 +6,7 @@ import type {
   ReviewPacket,
 } from "../types/reviewPlanning.js";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import { collectGraphEdges } from "audit-tools/shared";
+import { collectGraphEdges, compareCodeUnits } from "audit-tools/shared";
 import { priorityRank, sortLenses } from "./auditTaskUtils.js";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 import {
@@ -44,10 +44,6 @@ export interface BuildReviewPacketOptions {
   sizeIndex?: Record<string, number>;
   continuityScores?: Map<string, number>;
   [presentationInput: string]: unknown;
-}
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function canonicalTasks(tasks: readonly AuditTask[]): AuditTask[] {

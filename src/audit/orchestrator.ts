@@ -1,5 +1,5 @@
 import type { AuditTask, UnitManifest } from "./types.js";
-import { coerceJsonObjectArg } from "audit-tools/shared";
+import { coerceJsonObjectArg, isRecord } from "audit-tools/shared";
 
 // (Removed dead DEFAULT_LENS_ORDER literal — MNT-94a2184f. It was unreferenced
 // and duplicated the registry-derived LENS_ORDER in auditTaskUtils.ts, which is
@@ -8,10 +8,6 @@ import { coerceJsonObjectArg } from "audit-tools/shared";
 export interface TaskBuildOptions {
   pass_prefix?: string;
   limit_lenses?: string[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
 }
 
 function assertStringArray(

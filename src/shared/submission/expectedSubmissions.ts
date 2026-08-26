@@ -17,6 +17,7 @@
  * set IS; the audit draw persists it as a file beside the submissions, the
  * remediate draw carries its equivalent inside `RemediationState`.
  */
+import { compareCodeUnits } from "../compareCodeUnits.js";
 import type {
   SubmissionIssue,
   SubmissionReadOutcome,
@@ -76,10 +77,6 @@ export interface ExpectedSetDiff {
   readonly members: readonly SubmissionClassification[];
 }
 
-function compareIds(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
 /**
  * Build the set one emission owes. Entries are ordered by `submission_id` — a
  * content-derived key, never emission or filesystem order, so re-recording an
@@ -119,7 +116,7 @@ export function buildExpectedSubmissionSet(params: {
     contract_version: EXPECTED_SET_CONTRACT_VERSION,
     run_id: params.runId,
     entries: entries.sort((left, right) =>
-      compareIds(left.submission_id, right.submission_id),
+      compareCodeUnits(left.submission_id, right.submission_id),
     ),
   };
 }
@@ -148,10 +145,10 @@ export function mergeExpectedSets(
       contract_version: EXPECTED_SET_CONTRACT_VERSION,
       run_id: additional.run_id,
       entries: [...merged.values()].sort((left, right) =>
-        compareIds(left.submission_id, right.submission_id),
+        compareCodeUnits(left.submission_id, right.submission_id),
       ),
     },
-    addedIds: addedIds.sort(compareIds),
+    addedIds: addedIds.sort(compareCodeUnits),
   };
 }
 

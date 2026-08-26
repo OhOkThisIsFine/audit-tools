@@ -7,18 +7,16 @@
 // Degrades to an empty digest without a root (mirrors the comment/doc intent
 // extractors); an unreadable or oversized doc is skipped, not thrown on.
 
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { FileDisposition } from "audit-tools/shared";
 import { isDocIntentFile } from "../decompose/buildStructureDecomposition.js";
 import type { DocsDigest, DocsDigestEntry } from "../types/docsDigest.js";
+import { DEFAULT_MAX_BYTES, defaultReadFileText } from "./readFileText.js";
 
 /** Selection cap: how many docs the digest carries (budget-context rule). */
 const DEFAULT_MAX_DOCS = 12;
 /** Per-doc excerpt cap in characters. */
 const DEFAULT_MAX_EXCERPT_CHARS = 1_000;
-/** Skip doc files larger than this many bytes (mirrors comment extraction). */
-const DEFAULT_MAX_BYTES = 512 * 1024;
 
 function toPosix(path: string): string {
   return path.replace(/\\/g, "/");
@@ -26,19 +24,6 @@ function toPosix(path: string): string {
 
 function pathDepth(path: string): number {
   return path.split("/").length;
-}
-
-async function defaultReadFileText(
-  absPath: string,
-  maxBytes: number,
-): Promise<string | undefined> {
-  try {
-    const buf = await readFile(absPath);
-    if (buf.byteLength > maxBytes) return undefined;
-    return buf.toString("utf8");
-  } catch {
-    return undefined;
-  }
 }
 
 /**

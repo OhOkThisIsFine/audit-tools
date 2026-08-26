@@ -1,3 +1,4 @@
+import { compareCodeUnits } from "./compareCodeUnits.js";
 import type { AccessMemory, AccessMemoryPathRecord } from "./types/accessMemory.js";
 import { ACCESS_MEMORY_VERSION } from "./types/accessMemory.js";
 
@@ -59,7 +60,7 @@ export function deriveAccessMemoryFromEvents(
   }
 
   const paths: AccessMemoryPathRecord[] = [...byPath.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .sort(([a], [b]) => compareCodeUnits(a, b))
     .map(([path, record]) => ({
       path,
       covered_count: record.covered,

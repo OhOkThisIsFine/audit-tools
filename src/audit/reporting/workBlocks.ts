@@ -8,6 +8,7 @@ import type {
 import {
   ESTIMATED_ITEM_OVERHEAD_TOKENS,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
+  compareCodeUnits,
   estimateTokensFromBytes,
 } from "audit-tools/shared";
 import {
@@ -34,10 +35,6 @@ export interface WorkBlockPartition {
   coherence_trace: ContentCoherenceTrace;
   blocks: WorkBlock[];
   seams: WorkBlockSeam[];
-}
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function normalizePath(path: string): string {

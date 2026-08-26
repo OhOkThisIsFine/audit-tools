@@ -17,6 +17,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   discardOnSchemaVersionMismatch,
+  isRecord,
   readOptionalJsonFile,
   writeJsonFile,
 } from "audit-tools/shared";
@@ -36,10 +37,6 @@ interface TestPlanCarry {
 
 export function testPlanCarryPath(artifactsDir: string): string {
   return join(contractPipelineDir(artifactsDir), "test-plan-carry.json");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function asStringArray(value: unknown): string[] {

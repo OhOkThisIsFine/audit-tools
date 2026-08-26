@@ -32,10 +32,8 @@ import { foldPendingRequeueTasks } from "./requeueFold.js";
 import { buildSelectiveDeepeningTasks } from "./selectiveDeepening.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import { buildTaskAffinityGraph } from "./taskAffinityGraph.js";
-import {
-  canonicalizeAuditTasks,
-  compareCodeUnits,
-} from "../../shared/affinityArtifacts.js";
+import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 
 function lineIndexFromTasks(tasks: AuditTask[] | undefined): Record<string, number> {
   return Object.fromEntries(

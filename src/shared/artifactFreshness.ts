@@ -3,10 +3,8 @@ import { createHash } from "node:crypto";
 // Single-sourced in src/shared/stableStringify.ts (INV-CK-2) — there is exactly
 // one serializer.
 import { stableStringify } from "./stableStringify.js";
-import {
-  canonicalizeAffinityArtifactValue,
-  compareCodeUnits,
-} from "./affinityArtifacts.js";
+import { compareCodeUnits } from "./compareCodeUnits.js";
+import { canonicalizeAffinityArtifactValue } from "./affinityArtifacts.js";
 
 // Non-semantic top-level fields stripped before hashing, per artifact. These
 // are provenance (wall-clock stamps, run ids), NOT content: two rebuilds with

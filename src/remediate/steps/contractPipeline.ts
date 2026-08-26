@@ -141,7 +141,7 @@ import {
   type GateOutcome,
 } from "../validation/contractPipelineGates.js";
 import type { Finding } from "audit-tools/shared";
-import { compareCodeUnits } from "../../shared/affinityArtifacts.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import { loaderCommand } from "./prompts.js";

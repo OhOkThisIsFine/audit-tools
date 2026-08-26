@@ -14,6 +14,7 @@ import {
   normalizeExtractorPath,
 } from "../extractors/pathPatterns.js";
 import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
+import { getExternalSignalPaths } from "./requeueUtils.js";
 
 export interface UnitLineIndex {
   [path: string]: number;
@@ -245,23 +246,6 @@ function addTaskBlock(
 
 function withSignalTag(baseTags: string[], hasExternalSignal: boolean): string[] {
   return hasExternalSignal ? [...baseTags, "external_analyzer_signal"] : baseTags;
-}
-
-function getExternalSignalPaths(
-  externalAnalyzerResults?: ExternalAnalyzerResults[],
-): Set<string> {
-  const results = (externalAnalyzerResults ?? []).flatMap((tool) =>
-    Array.isArray(tool.results) ? tool.results : [],
-  );
-  return new Set(
-    results
-      .map((item) =>
-        item && typeof item.path === "string" && item.path.length > 0
-          ? item.path
-          : null,
-      )
-      .filter((path): path is string => path !== null),
-  );
 }
 
 /**

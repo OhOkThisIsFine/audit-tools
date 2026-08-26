@@ -11,6 +11,7 @@ import {
 } from "../types/finding.js";
 import type { ContentCoherenceTrace } from "../decompose/contentCoherence.js";
 import { workBlockSeamRationale } from "../decompose/workBlockSeams.js";
+import { compareCodeUnits } from "../compareCodeUnits.js";
 import { severityRank } from "../types/lens.js";
 import type { ValidationIssue } from "./basic.js";
 import { isRecord, pushValidationIssue } from "./basic.js";
@@ -424,9 +425,7 @@ function projectedBreakdown(
 }
 
 function stableUnique(values: readonly string[]): string[] {
-  return [...new Set(values)].sort((left, right) =>
-    left < right ? -1 : left > right ? 1 : 0,
-  );
+  return [...new Set(values)].sort(compareCodeUnits);
 }
 
 /**

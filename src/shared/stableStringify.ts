@@ -10,9 +10,7 @@
  * which re-exports this) and the content-key seam (`src/shared/contentKey.ts`)
  * route through this function.
  */
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
+import { compareCodeUnits } from "./compareCodeUnits.js";
 
 export function stableStringify(value: unknown): string {
   if (value === undefined) {

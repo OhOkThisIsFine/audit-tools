@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { compareCodeUnits } from "../compareCodeUnits.js";
 import {
   type FrictionCaptureArtifact,
   type FrictionItem,
@@ -202,7 +203,7 @@ function normalizeRunRefs(stored: unknown): string[] {
   const refs = Array.isArray(stored)
     ? stored.filter((ref): ref is string => typeof ref === "string")
     : [];
-  return [...new Set(refs)].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+  return [...new Set(refs)].sort(compareCodeUnits);
 }
 
 /** {@link normalizeRunRefs} of the stored array unioned with one newly-supplied id. */
@@ -343,7 +344,5 @@ export async function findFrictionRecordsByRunLink(
     });
   }
   // Code-unit order on the record's own key: stable, content-derived, locale-free.
-  return found.sort((left, right) =>
-    left.run_id < right.run_id ? -1 : left.run_id > right.run_id ? 1 : 0,
-  );
+  return found.sort((left, right) => compareCodeUnits(left.run_id, right.run_id));
 }

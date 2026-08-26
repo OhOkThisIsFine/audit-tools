@@ -1,10 +1,10 @@
 import type { AuditResult, AuditTask } from "../../types.js";
+import { isRecord } from "audit-tools/shared";
 import {
   DEEPENING_TAG,
   LENS_VERIFICATION_FOLLOWUP_TAG,
   MAX_VERIFICATION_FOLLOWUP_TASKS_PER_RESULT,
   isLensVerificationTask,
-  isRecord,
   normalizedSuggestedPriority,
   sanitizeSegment,
   taskIdFor,

@@ -21,6 +21,7 @@ import {
   AUDITOR_REPORT_MARKER,
   renderProcessFeedbackSection,
   renderFindingBlockLines,
+  compareCodeUnits,
   countBy,
   type AgentReflection,
 } from "audit-tools/shared";
@@ -406,7 +407,7 @@ function renderSubmissionDriftSection(
     }
     lines.push(
       `- Refusals by reason: ${[...byCode.entries()]
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .sort(([left], [right]) => compareCodeUnits(left, right))
         .map(([code, count]) => `${code} ${count}`)
         .join(", ")}`,
       "",

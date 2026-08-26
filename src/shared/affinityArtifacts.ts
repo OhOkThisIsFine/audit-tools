@@ -7,9 +7,7 @@
  * by construction, persistence, and metadata hashing.
  */
 
-export function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
+import { compareCodeUnits } from "./compareCodeUnits.js";
 
 function sortObjectKeys<T>(value: T): T {
   if (Array.isArray(value)) {

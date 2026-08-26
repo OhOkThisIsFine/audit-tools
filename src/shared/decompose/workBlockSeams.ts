@@ -16,7 +16,7 @@
 
 import { createHash } from "node:crypto";
 
-import { compareCodeUnits } from "../affinityArtifacts.js";
+import { compareCodeUnits } from "../compareCodeUnits.js";
 import type { WorkBlock, WorkBlockSeam } from "../types/finding.js";
 
 /**

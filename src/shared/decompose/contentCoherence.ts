@@ -8,6 +8,8 @@
 
 import { z } from "zod";
 
+import { compareCodeUnits } from "../compareCodeUnits.js";
+import { isRecord } from "../validation/basic.js";
 import { louvain, modularityOf, type Partition } from "./modularity.js";
 
 export const CONTENT_COHERENCE_SCORES = Object.freeze({
@@ -173,14 +175,6 @@ const RELATION_EVIDENCE: Readonly<
   same_unit: "shared_unit",
   shared_file: "shared_file",
 });
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function normalizePath(value: string): string {
   return value.replace(/\\/gu, "/");

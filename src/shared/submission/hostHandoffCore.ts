@@ -15,23 +15,16 @@
 // Sibling modules imported DIRECTLY, never through ../index.js: the barrel
 // re-exports this module, so importing the barrel here would close a cycle
 // (index → hostHandoffCore → index) that check:depgraph refuses.
+import { compareCodeUnits } from "../compareCodeUnits.js";
 import { hashContent } from "../hash.js";
 import { stableStringify } from "../stableStringify.js";
+import { isRecord } from "../validation/basic.js";
 import {
   assertSubmissionRunId,
   resolveContainedPath,
   submissionPathFor,
 } from "./submissionIdentity.js";
 import { join, resolve } from "node:path";
-
-/** Code-unit lexical order — the shared comparator for every id sort here. */
-export function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** Exact key set, order-insensitive: a persisted envelope admits no extra keys. */
 export function hasExactKeys(

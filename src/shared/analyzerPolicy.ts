@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { createLockedJsonStore, type LockedJsonStore } from "./io/lockedJsonStore.js";
+import { formatSchemaFailure } from "./validation/schemaFailure.js";
 
 /** Per-analyzer resolution policy, independent of any execution backend. */
 export const ANALYZER_SETTINGS = [
@@ -83,15 +84,6 @@ export function getAnalyzerPolicyPath(repositoryRoot: string): string {
 
 function getAnalyzerPolicyLockPath(repositoryRoot: string): string {
   return canonicalPath(repositoryRoot, ANALYZER_POLICY_LOCK_RELATIVE_PATH);
-}
-
-function formatSchemaFailure(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => {
-      const path = issue.path.length > 0 ? issue.path.join(".") : "<root>";
-      return `${path}: ${issue.message}`;
-    })
-    .join("; ");
 }
 
 function parseAnalyzerPolicy(

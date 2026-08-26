@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { AccessMemory, AccessTouchEvent } from "audit-tools/shared";
 import {
+  compareCodeUnits,
   deriveAccessMemoryFromEvents,
   readOptionalJsonFile,
   AccessMemorySchema,
@@ -39,7 +40,7 @@ export function deriveRemediationAccessMemory(
   const blocks = [...(state.plan?.blocks ?? [])].sort((a, b) => {
     const phaseDelta = (a.phase_ordinal ?? 0) - (b.phase_ordinal ?? 0);
     if (phaseDelta !== 0) return phaseDelta;
-    return a.block_id < b.block_id ? -1 : a.block_id > b.block_id ? 1 : 0;
+    return compareCodeUnits(a.block_id, b.block_id);
   });
   const ordinalByBlock = new Map(blocks.map((block, index) => [block.block_id, index]));
   const blockById = new Map(blocks.map((block) => [block.block_id, block]));
@@ -47,7 +48,7 @@ export function deriveRemediationAccessMemory(
   // Sort items by finding_id so the (already path-sorted) core sees a stable
   // stream regardless of state.items key insertion order.
   const items = Object.values(state.items ?? {}).sort((a, b) =>
-    a.finding_id < b.finding_id ? -1 : a.finding_id > b.finding_id ? 1 : 0,
+    compareCodeUnits(a.finding_id, b.finding_id),
   );
 
   const events: AccessTouchEvent[] = [];
