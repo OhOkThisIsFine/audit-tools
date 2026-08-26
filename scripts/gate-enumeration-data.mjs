@@ -30,6 +30,7 @@ export const STEP_GLOSS = {
   // verify:checks steps, glossed. Order is NOT declared here — it is read from
   // package.json, so this map can never disagree with the gate about sequence.
   "check:control-bytes": "raw control-byte gate",
+  "check:shared-primitives": "shared-primitive single-source gate",
   "check:version-gates": "version-gate scan",
   "check:guard-reach": "guard wiring/reach reconciliation",
   "check:ci-trigger-paths": "CI trigger-path parity (derived from guard-reach)",

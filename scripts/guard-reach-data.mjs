@@ -71,6 +71,19 @@ export const GUARDS = [
     preCommit: false,
     note: 'preCommit false is deliberate (CI-only; the tool-input-guard hook already refuses control bytes at write time) — cheap, flip to reach if wanted',
   },
+  {
+    id: 'check:shared-primitives',
+    kind: 'gate',
+    impl: 'check:shared-primitives',
+    preCommit: 'reach',
+    fix:
+      'adopt the canonical shared helper the violation names (compareCodeUnits / isRecord / ' +
+      'hashContent / pathContainment / paths.ts), or amend the DATA tables in ' +
+      'scripts/check-shared-primitives.mjs — an exception is a file + reason row, never prose',
+    note:
+      'single-definition rules plus defect-class pattern rules (comparator body, containment ' +
+      'predicate, sha256 chain, localeCompare/ICU collation) over tracked src/**/*.ts',
+  },
   { id: 'check:deadcode', kind: 'gate', impl: 'check:deadcode', preCommit: false, note: 'knip, default mode' },
   {
     id: 'check:doc-manifest',
@@ -375,6 +388,12 @@ export const GUARDS = [
   { id: 'closeout-challenge-gate', kind: 'hook', impl: '.claude/hooks/closeout-challenge-gate.mjs' },
 
   // ── contract tests (the guards' own guards) ────────────────────────────────
+  {
+    id: 'shared-primitives-gate-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/check-shared-primitives.test.ts',
+    note: 'pins the rule matching semantics of check:shared-primitives on synthetic content',
+  },
   { id: 'hook-trap-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-trap-guards.test.ts' },
   { id: 'hook-session-gates-test', kind: 'contract-test', impl: 'tests/shared/hook-session-gates.test.ts' },
   {
@@ -592,6 +611,16 @@ export const GUARDS = [
 
 /** @type {ReachRow[]} */
 export const REACH = [
+  {
+    area: 'shared primitive single-source (comparator / containment / hash / paths / collation)',
+    files: ['src/**/*.ts', 'scripts/check-shared-primitives.mjs'],
+    guardedBy: ['check:shared-primitives', 'shared-primitives-gate-test'],
+    uncovered:
+      'tests/** is deliberately out of the scan set — a test oracle must not import the code it ' +
+      'validates, so test-tree comparator copies are accepted; the containment pattern rule ' +
+      'catches only the startsWith("..")-shaped re-roll — a first-segment-split re-roll under a ' +
+      'NEW name is not pattern-detectable (the known fork names are banned individually)',
+  },
   {
     area: 'runtime artifact-name layout sources',
     // DERIVED from the generator's declared input set — never hand-listed. A path
