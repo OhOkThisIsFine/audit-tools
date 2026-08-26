@@ -16,7 +16,12 @@
   morning, so the delay is upstream weather, not a workflow defect.
   **Property:** the await-run phase outlasts plausible event-delivery delay (or keeps polling
   with a "still waiting, the tag and release exist — do NOT re-dispatch yet" message), so a slow
-  event never reads as a missing one and never invites a duplicate publish attempt.
+  event never reads as a missing one and never invites a duplicate publish attempt. Note: a
+  duplicate dispatch can never go green at an already-published version (`npm publish` refuses
+  publish-over even under `--dry-run`), so each one parks a permanent red as the workflow's
+  latest run; the three v0.49.0 duplicates were deleted (`gh run delete`) so the banner carries
+  the canonical green run 32990705280 — their gate/test jobs had each passed, only the refused
+  publish step failed.
 
 - **The nightly clean-tree rule does not say which writes it blocks (2026-08-22, low, friction: ambiguous_direction).** `docs/nightly-routine.md` says a dirty tree means the run "applies **nothing**". But the same run must still write its own tracked output — `.audit-tools/nightly/open-items.json`, `docs/nightly-inbox.md`, the leg-3 proposal records, and the regenerated `docs/HANDOFF.md` live-state block, which the commit gate independently REQUIRES to be current. The 2026-08-22 run had to decide for itself that emitting the queue is not an "apply", which is the host-discretion shape the repo bans. **Property:** the rule names the blocked class (doc edits derived from the review) and the always-written class (the routine's own generated output), so no run has to judge it.
 
