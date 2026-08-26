@@ -617,9 +617,11 @@ export const REACH = [
     guardedBy: ['check:shared-primitives', 'shared-primitives-gate-test'],
     uncovered:
       'tests/** is deliberately out of the scan set — a test oracle must not import the code it ' +
-      'validates, so test-tree comparator copies are accepted; the containment pattern rule ' +
-      'catches only the startsWith("..")-shaped re-roll — a first-segment-split re-roll under a ' +
-      'NEW name is not pattern-detectable (the known fork names are banned individually)',
+      'validates, so test-tree comparator copies are accepted; the pattern rules match SPELLINGS, ' +
+      'not semantics — a first-segment-split containment re-roll, an aliased `relative as rel` ' +
+      'import, or an equivalent comparator under a novel spelling (`a === b ? 0 : a < b ? -1 : 1`) ' +
+      'under a NEW name passes (the known fork names are banned individually; review + jscpd are ' +
+      'the layers behind the gate)',
   },
   {
     area: 'runtime artifact-name layout sources',

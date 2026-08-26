@@ -111,6 +111,14 @@ export const PATTERN_RULES = [
     fix: 'route the digest through hashContent (src/shared/hash.ts)',
   },
   {
+    id: 'intl-collator',
+    // The other spelling of ICU collation. Same ban, same reason.
+    regex: /Intl\.Collator/g,
+    homes: [],
+    exceptions: [],
+    fix: 'sort with compareCodeUnits — ICU collation makes persisted order (and its hash) locale-dependent',
+  },
+  {
     id: 'locale-compare',
     // ICU collation is banned in src/ entirely: a persisted artifact ordered
     // by localeCompare hashes differently per host locale (phantom-staleness
@@ -128,7 +136,13 @@ export const PATTERN_RULES = [
  * @param {string} name
  */
 export function definitionRegex(name) {
-  return new RegExp(String.raw`(?:function\s+${name}\s*\(|(?:const|let)\s+${name}\s*=)`, 'g');
+  // The const/let arm admits an optional type annotation between the name and
+  // the `=` (`const isRecord: Predicate = ...`) — an annotated re-roll must not
+  // slip past the gate.
+  return new RegExp(
+    String.raw`(?:function\s+${name}\s*\(|(?:const|let)\s+${name}\s*(?::[^=\n]+)?=)`,
+    'g',
+  );
 }
 
 /** @param {string} content @param {number} index */
@@ -184,15 +198,36 @@ export function scanFile(file, content) {
 }
 
 /**
- * Every exception (and home) must name a file that exists in the scanned set —
- * a stale row is itself a violation, so the data self-cleans.
+ * Every exception AND every declared home must name a file that exists in the
+ * scanned set — a stale row is itself a violation, so the data self-cleans and
+ * a deleted home cannot leave its rule silently vacuous.
  * @param {ReadonlySet<string>} trackedSrc
  * @returns {Violation[]}
  */
 export function staleDataRows(trackedSrc) {
   /** @type {Violation[]} */
   const violations = [];
+  for (const rule of SINGLE_DEFINITION_RULES) {
+    if (rule.home !== null && !trackedSrc.has(rule.home)) {
+      violations.push({
+        file: 'scripts/check-shared-primitives.mjs',
+        line: 1,
+        rule: `single-definition:${rule.name}:missing-home`,
+        detail: `declared home ${rule.home} is not a tracked src file — fix the row or restore the home`,
+      });
+    }
+  }
   for (const rule of PATTERN_RULES) {
+    for (const home of rule.homes) {
+      if (!trackedSrc.has(home)) {
+        violations.push({
+          file: 'scripts/check-shared-primitives.mjs',
+          line: 1,
+          rule: `${rule.id}:missing-home`,
+          detail: `declared home ${home} is not a tracked src file — fix the row or restore the home`,
+        });
+      }
+    }
     for (const e of rule.exceptions) {
       if (!trackedSrc.has(e.file)) {
         violations.push({

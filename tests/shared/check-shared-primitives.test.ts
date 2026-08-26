@@ -56,6 +56,14 @@ describe("single-definition rules", () => {
     const hits = scanFile("src/audit/y.ts", "const x = isRecord(value);\nhashContent(v);\n");
     expect(hits.filter((h) => h.rule.startsWith("single-definition:"))).toEqual([]);
   });
+
+  test("a type-annotated const re-roll is still a definition", () => {
+    const hits = scanFile(
+      "src/audit/y.ts",
+      "const isRecord: (v: unknown) => boolean = (v) => typeof v === \"object\";",
+    );
+    expect(hits.some((h) => h.rule === "single-definition:isRecord")).toBe(true);
+  });
 });
 
 describe("comparator-body pattern", () => {
@@ -123,6 +131,16 @@ describe("sha256-chain pattern", () => {
   });
 });
 
+describe("intl-collator pattern", () => {
+  test("the other ICU spelling is banned too", () => {
+    expect(
+      scanFile("src/s.ts", "arr.sort(new Intl.Collator().compare);").some(
+        (h) => h.rule === "intl-collator",
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("locale-compare pattern", () => {
   test("fires on a call and on the bare token in a comment; src-wide (no homes)", () => {
     expect(ruleById("locale-compare").homes).toEqual([]);
@@ -142,10 +160,20 @@ describe("data hygiene", () => {
     const tracked = new Set(["src/shared/hash.ts"]);
     const stale = staleDataRows(tracked);
     expect(stale.some((v) => v.detail.includes("src/audit/io/toolingManifest.ts"))).toBe(true);
-    const allGood = staleDataRows(
-      new Set(PATTERN_RULES.flatMap((r) => r.exceptions.map((e) => e.file))),
+  });
+
+  test("a declared home missing from the tracked set is a violation (rule cannot go vacuous)", () => {
+    const withoutBasic = new Set(
+      [
+        ...SINGLE_DEFINITION_RULES.flatMap((r) => (r.home === null ? [] : [r.home])),
+        ...PATTERN_RULES.flatMap((r) => [...r.homes, ...r.exceptions.map((e) => e.file)]),
+      ].filter((f) => f !== "src/shared/validation/basic.ts"),
     );
-    expect(allGood).toEqual([]);
+    const stale = staleDataRows(withoutBasic);
+    expect(stale.some((v) => v.rule === "single-definition:isRecord:missing-home")).toBe(true);
+    expect(staleDataRows(new Set([...withoutBasic, "src/shared/validation/basic.ts"]))).toEqual(
+      [],
+    );
   });
 
   test("definitionRegex anchors on declaration syntax only", () => {
