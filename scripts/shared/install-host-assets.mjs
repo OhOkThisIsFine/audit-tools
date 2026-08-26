@@ -107,7 +107,7 @@ export function runInstalls(toolName, installs, counts) {
       console.log(`${toolName}: ${action} global ${install.label} at ${install.path}`);
       counts.succeeded++;
     } catch (err) {
-      console.warn(`${toolName}: could not install global ${install.label} (${err.message})`);
+      console.warn(`${toolName}: could not install global ${install.label} (${/** @type {any} */ (err).message})`);
       console.warn(`  To install manually, copy from:`);
       console.warn(`    ${install.sourcePath}`);
       console.warn(`  to:`);
@@ -125,6 +125,10 @@ export function runInstalls(toolName, installs, counts) {
  * audit-code, "OpenCode command" for remediate-code — the two tools have
  * historically worded this differently). `manualInstructions`, if given, is
  * an array of extra warn lines printed on failure only.
+ */
+/**
+ * @param {{toolName: string, path: string, sharedOpenCodePermissions: any, buildMerged: Function, label: string, manualInstructions?: string[]}} options
+ * @param {{succeeded: number, failed: number}} counts
  */
 export function installOpenCodeGlobalConfig(
   { toolName, path, sharedOpenCodePermissions, buildMerged, label, manualInstructions },
@@ -145,7 +149,7 @@ export function installOpenCodeGlobalConfig(
     console.log(`${toolName}: ${action} global ${label} in ${path}`);
     counts.succeeded++;
   } catch (err) {
-    console.warn(`${toolName}: could not install global ${label} (${err.message})`);
+    console.warn(`${toolName}: could not install global ${label} (${/** @type {any} */ (err).message})`);
     for (const line of manualInstructions ?? []) console.warn(line);
     counts.failed++;
   }
@@ -175,7 +179,7 @@ export function installAntigravityPlugin(
     console.log(`${toolName}: ${skillAction} Antigravity plugin skill at ${antigravityPluginSkillPath}`);
     counts.succeeded++;
   } catch (err) {
-    console.warn(`${toolName}: could not install Antigravity plugin (${err.message})`);
+    console.warn(`${toolName}: could not install Antigravity plugin (${/** @type {any} */ (err).message})`);
     counts.failed++;
   }
 }

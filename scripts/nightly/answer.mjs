@@ -41,6 +41,7 @@ import {
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const argv = process.argv.slice(2);
 
+/** @returns {never} */
 function fail(message) {
   console.error(message);
   process.exit(1);
@@ -64,7 +65,7 @@ try {
 } catch (err) {
   fail(
     `Cannot proceed: the nightly decisions ledger could not be read.\n` +
-      `  ${err && err.message ? err.message : String(err)}\n` +
+        `  ${err && /** @type {any} */ (err).message ? /** @type {any} */ (err).message : String(err)}\n` +
       `This is a REFUSAL, not an empty ledger — recording an answer now would silently overwrite every ` +
       `prior decision. Recovery is manual: inspect the file named above, repair or restore it (e.g. from ` +
       `git history or a backup), then retry.`,
@@ -193,7 +194,7 @@ if (argv[0] === '--done') {
   try {
     recordCompletion(ROOT, key, ref);
   } catch (err) {
-    fail(String(err.message ?? err));
+    fail(String(/** @type {any} */ (err).message ?? err));
   }
   console.log(`Marked ${key} DONE (${ref}) → ${DECISIONS_RELPATH}`);
   process.exit(0);

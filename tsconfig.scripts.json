@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "allowImportingTsExtensions": true,
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "scripts/**/*.mjs",
+    "scripts/**/*.js",
+    "wrapper/**/*.mjs",
+    "wrapper/**/*.js",
+    ".claude/hooks/**/*.mjs",
+    "dispatch/**/*.mjs",
+    "audit-code.mjs",
+    "remediate-code.mjs"
+  ]
+}

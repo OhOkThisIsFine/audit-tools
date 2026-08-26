@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 181 entr(y/ies) indexed.
+> and at commit). 180 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -85,52 +85,51 @@
 - `open-bugs.md:425` — Graph heuristics are promoted to findings without a semantic lead boundary (2026-08-03, medium).
 - `open-bugs.md:432` — Tool-owned gate reds are unattributed — foreign live-tree dirt pauses the run (2026-07-30, shrunk 2026-08-20; was "Phase-boundary gate false abandonment", HIGH).
 - `open-bugs.md:446` — Contract-type coverage is derived from where TESTS live, not from the contract (2026-07-25, low, friction: inefficient-feeding).
-- `open-bugs.md:455` — Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction).
-- `open-bugs.md:465` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
-- `open-bugs.md:490` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
-- `open-bugs.md:501` — ⬇ Live-run watch (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim.
-- `open-bugs.md:509` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
-- `open-bugs.md:527` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
-- `open-bugs.md:532` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
-- `open-bugs.md:553` — A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.
-- `open-bugs.md:573` — Friction walk (determinations-execution lap, 2026-07-29):
-- `open-bugs.md:587` — Friction walk (duplicated-guard lap, 2026-07-25):
-- `open-bugs.md:599` — Implementation workers are never given the contract they must satisfy (2026-08-09, high).
-- `open-bugs.md:609` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
-- `open-bugs.md:625` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
-- `open-bugs.md:627` — Friction walk (niggle-fix lap, 2026-08-07):
-- `open-bugs.md:645` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
-- `open-bugs.md:657` — Friction walk (nightly-determinations lap, 2026-07-26):
-- `open-bugs.md:669` — Friction walk (contract-sweep producer lap, 2026-07-26):
-- `open-bugs.md:681` — Friction walk (touched_files load-gate lap, 2026-07-25):
-- `open-bugs.md:687` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:700` — Friction walk (second backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:709` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
-- `open-bugs.md:735` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:747` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:753` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:761` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
-- `open-bugs.md:770` — `StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.
-- `open-bugs.md:776` — systemic_challenge findings ids are adversary-invented and round-colliding.
-- `open-bugs.md:783` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
-- `open-bugs.md:790` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:795` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:800` — `check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling (2026-08-14, nightly, low).
-- `open-bugs.md:811` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
-- `open-bugs.md:821` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
-- `open-bugs.md:828` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
-- `open-bugs.md:839` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
-- `open-bugs.md:858` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
-- `open-bugs.md:871` — A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run, medium).
-- `open-bugs.md:880` — Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run, medium).
-- `open-bugs.md:890` — A dated measurement sits inside durable routine prose (2026-08-23, low).
-- `open-bugs.md:898` — The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction: hermeticity).
-- `open-bugs.md:912` — HEAD's lockfile does not satisfy HEAD's package.json (2026-08-24, medium).
-- `open-bugs.md:919` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
-- `open-bugs.md:927` — The root-containment guard is maintained in five places, and four of them are outside the test suite that pins it (2026-08-25, medium).
-- `open-bugs.md:946` — Shared primitives with a declared single home are re-rolled at 30+ call sites, and one copy is weaker than the guard it names (2026-08-25, medium).
-- `open-bugs.md:967` — Persisted artifact arrays are ordered by ICU collation in the file whose own comment forbids it (2026-08-25, medium).
-- `open-bugs.md:984` — A JSONC comment stripper hand-rolls the scanner its own file imports (2026-08-25, low).
+- `open-bugs.md:456` — Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction).
+- `open-bugs.md:466` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `open-bugs.md:491` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
+- `open-bugs.md:502` — ⬇ Live-run watch (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim.
+- `open-bugs.md:510` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
+- `open-bugs.md:528` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
+- `open-bugs.md:533` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
+- `open-bugs.md:554` — A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.
+- `open-bugs.md:574` — Friction walk (determinations-execution lap, 2026-07-29):
+- `open-bugs.md:588` — Friction walk (duplicated-guard lap, 2026-07-25):
+- `open-bugs.md:600` — Implementation workers are never given the contract they must satisfy (2026-08-09, high).
+- `open-bugs.md:610` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
+- `open-bugs.md:626` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
+- `open-bugs.md:628` — Friction walk (niggle-fix lap, 2026-08-07):
+- `open-bugs.md:646` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
+- `open-bugs.md:658` — Friction walk (nightly-determinations lap, 2026-07-26):
+- `open-bugs.md:670` — Friction walk (touched_files load-gate lap, 2026-07-25):
+- `open-bugs.md:676` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:689` — Friction walk (second backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:698` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
+- `open-bugs.md:724` — External shared-logic audit V1–V7 residuals
+- `open-bugs.md:736` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:742` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:750` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:759` — `StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.
+- `open-bugs.md:765` — systemic_challenge findings ids are adversary-invented and round-colliding.
+- `open-bugs.md:772` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
+- `open-bugs.md:779` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:784` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `open-bugs.md:789` — `check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling (2026-08-14, nightly, low).
+- `open-bugs.md:800` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
+- `open-bugs.md:810` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
+- `open-bugs.md:817` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
+- `open-bugs.md:828` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
+- `open-bugs.md:847` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
+- `open-bugs.md:860` — A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run, medium).
+- `open-bugs.md:869` — Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run, medium).
+- `open-bugs.md:879` — A dated measurement sits inside durable routine prose (2026-08-23, low).
+- `open-bugs.md:887` — The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction: hermeticity).
+- `open-bugs.md:901` — HEAD's lockfile does not satisfy HEAD's package.json (2026-08-24, medium).
+- `open-bugs.md:908` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
+- `open-bugs.md:916` — The root-containment guard is maintained in five places, and four of them are outside the test suite that pins it (2026-08-25, medium).
+- `open-bugs.md:935` — Shared primitives with a declared single home are re-rolled at 30+ call sites, and one copy is weaker than the guard it names (2026-08-25, medium).
+- `open-bugs.md:956` — Persisted artifact arrays are ordered by ICU collation in the file whose own comment forbids it (2026-08-25, medium).
+- `open-bugs.md:973` — A JSONC comment stripper hand-rolls the scanner its own file imports (2026-08-25, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

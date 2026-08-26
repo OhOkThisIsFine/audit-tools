@@ -181,7 +181,7 @@ function gitIgnored(absolutePaths) {
   } catch (err) {
     // Exit 1 = "none of them are ignored" and carries empty stdout; any other
     // fault also lands here and yields an empty set, i.e. the strict reading.
-    const out = typeof err?.stdout === "string" ? err.stdout : "";
+    const out = typeof /** @type {any} */ (err)?.stdout === "string" ? /** @type {any} */ (err).stdout : "";
     return new Set(out.split("\0").filter(Boolean));
   }
 }

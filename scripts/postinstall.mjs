@@ -63,7 +63,7 @@ async function manageArtifactGitignore() {
     }
   } catch (err) {
     console.warn(
-      `[audit-tools] postinstall: .gitignore management skipped (${err?.message ?? err}).`,
+      `[audit-tools] postinstall: .gitignore management skipped (${/** @type {any} */ (err)?.message ?? err}).`,
     );
   }
 }

@@ -209,6 +209,7 @@ export function assessWorktreeCleanliness(statusText) {
 //
 // Returns { allowed: true, branch, reason } or { allowed: false, reason }.
 // `reason` is a stable machine tag; the caller renders the operator message.
+/** @param {{branch?: string, defaultBranch?: string, headSha?: string|null, remoteDefaultSha?: string|null}} [options] */
 export function evaluateReleaseBranch({
   branch,
   defaultBranch,
@@ -285,6 +286,7 @@ function ensureMainBranch() {
 // a linked worktree/feature branch whose HEAD already equals <remote>/<default>,
 // we push HEAD onto the default branch (a fast-forward) so the tag commit lands
 // on the default branch's history — never mutating any primary worktree.
+/** @param {{branch?: string, defaultBranch?: string}} [options] */
 export function resolveReleasePushRefspec({ branch, defaultBranch } = {}) {
   if (branch === defaultBranch) return { target: defaultBranch };
   return { target: `HEAD:refs/heads/${defaultBranch}` };
@@ -319,6 +321,7 @@ const RELEASE_RUN_SKEW_MS = 5_000;
 //      created_at is strictly after (tagPushedAtMs - skew), newest first.
 //   4. Never return a run by array position / name alone — return null if
 //      nothing qualifies the identity + freshness gate.
+/** @param {any[]} runs @param {{tag?: string, tagPushedAtMs?: number, headSha?: string|null}} [options] */
 export function selectReleaseRun(runs, { tag, tagPushedAtMs, headSha } = {}) {
   if (!Array.isArray(runs)) return null;
 
@@ -357,6 +360,7 @@ export function selectReleaseRun(runs, { tag, tagPushedAtMs, headSha } = {}) {
   return [...fresh].sort(newerFirst)[0];
 }
 
+/** @param {string} repoSlug @param {string} tag @param {{tagPushedAtMs?: number, headSha?: string|null}} [options] */
 async function waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha } = {}) {
   run("gh", ["workflow", "view", "publish-package.yml"]);
   const deadline = Date.now() + releaseRunTimeoutMs;
@@ -423,6 +427,7 @@ async function waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha } = {})
   );
 }
 
+/** @param {string} repoSlug @param {string|number} runId @param {{packageName?: string, packageVersion?: string}} [options] */
 async function waitForRunCompletion(repoSlug, runId, { packageName, packageVersion } = {}) {
   const deadline = Date.now() + releaseRunTimeoutMs;
   const startedAt = Date.now();
@@ -645,7 +650,7 @@ function summarizeCiTiming(repoSlug, runEntry, meta = {}) {
   if (steps.length === 0) return;
 
   const perJobMap = new Map(perJob.map((job) => [job.name, { ms: job.ms, conclusion: job.conclusion }]));
-  let criticalPathMs = perJobMap.size === 0 ? 0 : Math.max(...perJobMap.values().map((job) => job.ms));
+  let criticalPathMs = perJobMap.size === 0 ? 0 : Math.max(.../** @type {any} */ (perJobMap.values()).map((job) => job.ms));
   const workflow = loadWorkflowNeeds(runEntry);
   if (workflow) {
     const needsByRunJob = buildNeedsByRunJob(workflow.jobs, perJob);
@@ -749,6 +754,10 @@ async function main() {
     const { packageAfter, tag } = bumpVersionAndTag(npm);
     console.log(`[release] created ${tag} for ${packageAfter.name}@${packageAfter.version}.`);
     return;
+  }
+  if (releaseGate === null) {
+    // Unreachable: the bump-only path returned above; here narrows the type.
+    throw new Error("release gate missing outside --bump-only");
   }
 
   // The pre-tag gate runs the WHOLE non-test gate, because a tag is the one thing

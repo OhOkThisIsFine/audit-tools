@@ -61,7 +61,7 @@ export function writeAbortStamp(stampPath, { aborted, totalEntries, seed = {} })
   try {
     writeCoverageStamp(stampPath, stamp);
   } catch (err) {
-    process.stderr.write(`coverage stamp not writable (${err?.message ?? err}) — continuing without it\n`);
+    process.stderr.write(`coverage stamp not writable (${/** @type {any} */ (err)?.message ?? err}) — continuing without it\n`);
   }
   return stamp;
 }
@@ -137,7 +137,7 @@ export async function dispatchBoundedItems({
     } catch (err) {
       if (!stampWarned) {
         stampWarned = true;
-        process.stderr.write(`coverage stamp not writable (${err?.message ?? err}) — continuing without it\n`);
+        process.stderr.write(`coverage stamp not writable (${/** @type {any} */ (err)?.message ?? err}) — continuing without it\n`);
       }
     }
   };
@@ -187,7 +187,7 @@ export async function dispatchBoundedItems({
     try {
       await preflight();
     } catch (err) {
-      stamp.aborted = `preflight failed: ${String(err.message || err)}`;
+      stamp.aborted = /** @type {any} */ (`preflight failed: ${String(/** @type {any} */ (err).message || err)}`);
       stampSafe(stamp);
       throw new LanePreflightError(stamp.aborted, { cause: err });
     }
@@ -217,7 +217,7 @@ export async function dispatchBoundedItems({
         rec = {
           id: e.id,
           ...(typeof e.file === 'string' ? { file: e.file } : {}),
-          error: String(err.message || err),
+          error: String(/** @type {any} */ (err).message || err),
         };
       }
       if (laneAnswered) {
@@ -245,7 +245,7 @@ export async function dispatchBoundedItems({
   }
 
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
-  stamp.finished_at = new Date().toISOString();
+  stamp.finished_at = /** @type {any} */ (new Date().toISOString());
   stampSafe(stamp);
   return { stamp, records };
 }

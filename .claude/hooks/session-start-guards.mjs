@@ -327,9 +327,9 @@ try {
     if (trusted !== false) continue; // trusted, or unchecked/unknown — silent
     notes.push(
       `OFFLOAD LANE UNUSABLE — ${lane.label} launches with an isolated config dir ` +
-        `(${lane.configDirTrust.configDir}) that has NOT trusted this workspace (${ROOT}). It will not ` +
+        `(${/** @type {NonNullable<typeof lane.configDirTrust>} */ (lane.configDirTrust).configDir}) that has NOT trusted this workspace (${ROOT}). It will not ` +
         `fail: it runs with no repo tools and answers from nothing. Do not delegate to it until:\n    ` +
-        lane.configDirTrust.untrustedRemedy,
+        /** @type {NonNullable<typeof lane.configDirTrust>} */ (lane.configDirTrust).untrustedRemedy,
     );
   }
 } catch {

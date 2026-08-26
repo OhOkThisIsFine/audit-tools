@@ -26,6 +26,6 @@ const commands = scripts.map((script) => ({
 try {
   await runProfiledCommands(profileName, commands);
 } catch (error) {
-  console.error(`[profile:${profileName}] ${error.message}`);
+  console.error(`[profile:${profileName}] ${/** @type {any} */ (error).message}`);
   process.exit(1);
 }

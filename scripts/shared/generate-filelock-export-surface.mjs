@@ -116,13 +116,15 @@ function renderHeritage(clauses, sf) {
  */
 export function extractFileLockExportSurface(sourceText = readFileSync(join(repoRoot, SOURCE_FILE), "utf8")) {
   const sf = ts.createSourceFile(SOURCE_FILE, sourceText, ts.ScriptTarget.Latest, /*setParentNodes*/ true);
-  const diags = sf.parseDiagnostics ?? [];
+  const diags = /** @type {any} */ (sf).parseDiagnostics ?? [];
   if (diags.length) {
     throw new Error(`${SOURCE_FILE} failed to parse: ${diags[0].message}`);
   }
 
   const exports = [];
-  for (const stmt of sf.statements) {
+  for (const statement of sf.statements) {
+    // The switch below exhaustively validates the concrete declaration kind.
+    const stmt = /** @type {any} */ (statement);
     const isExported = hasModifier(stmt, ts.SyntaxKind.ExportKeyword);
     if (!isExported) continue;
     if (hasModifier(stmt, ts.SyntaxKind.DefaultKeyword)) {
@@ -258,5 +260,4 @@ const invokedDirectly =
   process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (invokedDirectly) main();
-
 

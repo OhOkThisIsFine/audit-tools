@@ -42,8 +42,9 @@ export const HARNESS_FAULT = /\[vitest-worker\]:\s*Timeout calling "on[A-Za-z]+"
  */
 export function isReporterTransportFault({ record, token, stderrText }) {
   if (!record || typeof record !== "object") return false;
-  if (record.runToken !== token) return false;
-  const outcome = record.outcome;
+  const typedRecord = /** @type {any} */ (record);
+  if (typedRecord.runToken !== token) return false;
+  const outcome = typedRecord.outcome;
   if (!outcome || typeof outcome !== "object") return false;
   if (outcome.failed !== 0) return false;
   if (outcome.unfinished !== 0) return false;

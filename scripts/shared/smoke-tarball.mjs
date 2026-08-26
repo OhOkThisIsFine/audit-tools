@@ -185,12 +185,12 @@ function parsePackJson(stdout) {
 function packWithNpm({ repoRoot, cacheDir }) {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const resolved = resolveSpawn(npm, ["pack", "--json", "--pack-destination", cacheDir]);
-  const result = spawnSync(resolved.command, resolved.args, {
+  const result = spawnSync(resolved.command, resolved.args, /** @type {any} */ ({
     cwd: repoRoot,
     encoding: "utf8",
     env: isolatedNpmEnv(),
     windowsHide: true,
-  });
+  }));
   if (result.status !== 0) {
     // prepack failures (tsc errors, the no-suite-running build guard) land on either
     // stream, so both are surfaced — a bare exit code is not a diagnosable gate failure.
@@ -262,7 +262,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const { tarballPath, packed } = resolveSmokeTarball();
     process.stdout.write(`[pack:smoke] ${packed ? "packed" : "reused"} ${tarballPath}\n`);
   } catch (error) {
-    process.stderr.write(`[pack:smoke] ${error.message}\n`);
+    process.stderr.write(`[pack:smoke] ${/** @type {any} */ (error).message}\n`);
     process.exit(1);
   }
 }

@@ -444,8 +444,9 @@
   foreign red reports as environment, not as the run's failure.
 
 - **Contract-type coverage is derived from where TESTS live, not from the contract (2026-07-25, low,
-  friction: inefficient-feeding).** `scripts/` is covered by no tsconfig, so a producer there cannot fail
-  on a contract it never consults — that is how adding `reviewed_clean` swept `tests/**`, missed the
+  friction: inefficient-feeding).** `scripts/` was covered by no tsconfig at the time (closed
+  2026-08-26 — `check:scripts` now typechecks it), so a producer there could not fail
+  on a contract it never consulted — that is how adding `reviewed_clean` swept `tests/**`, missed the
   `scripts/` producers, and failed release CI ([[lap-green-must-match-ci-evidence]]). AuditResult is
   closed by a per-type gate written by hand for it. **Property:** for every validated contract type, the
   set of construction sites is derivable FROM THE CONTRACT, not from test placement. Not yet designed —
@@ -665,18 +666,6 @@
   work shape, so executing 22 of them meant re-reading each item's evidence to rediscover the target
   file and edit. The item already knows its `path` and its options; the answer should carry the
   actionable target, not require a second derivation from the eli5 text.
-
-- **Friction walk (contract-sweep producer lap, 2026-07-26):** (1) **tool-should-decide (medium):**
-  `scripts/` is a whole tracked tree covered by NO tsconfig — `tsconfig.json` includes `["src"]`,
-  `tsconfig.test.json` includes `["src","tests"]` with `checkJs:false`. Nothing
-  anywhere says "this tree is uncompiled and unchecked"; it is discoverable only by reading both
-  configs and noticing an absence. Open property: the set of tracked source trees NOT reached by any
-  typechecker should be stated mechanically, not inferred from what the include arrays omit.
-  (2) **ambiguous-direction (low):** the backlog entry's own stopgap ("run `verify:checks`, not
-  `check`, before pushing") steers the reader toward widening the pre-commit hook — the expensive wrong
-  fix, since the legs that caught it repack the package. The cheap right fix was to validate at the
-  construction site. A stopgap phrased as a habit reads as the intended remedy; entries should mark a
-  stopgap as a stopgap.
 
 - **Friction walk (touched_files load-gate lap, 2026-07-25):** (1) **tool-should-decide (medium):** a
   fixture helper ending in `as RemediationState` (`tests/remediate/helpers/nextStepHarness.ts`)

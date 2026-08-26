@@ -89,7 +89,7 @@ if (currentToken !== token) {
 
 // ── 4. Run typecheck — ADVISORY hint only ────────────────────────────────────
 try {
-  execSync(`npm run check`, {
+  execSync(`npm run check`, /** @type {any} */ ({
     cwd: root,
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -99,10 +99,10 @@ try {
     // This hook fires after every source-.ts edit, so it is the most frequent
     // offender — hide the window.
     windowsHide: true,
-  });
+    }));
   process.exit(0);
 } catch (err) {
-  const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`
+    const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`
     .trim()
     .split('\n')
     .slice(-30)

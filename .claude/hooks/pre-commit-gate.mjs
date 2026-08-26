@@ -410,7 +410,8 @@ function repoKeyFor(dir) {
 // directory changes before it. Null = poisoned (unknown from that point on).
 const stmtCwd = [];
 {
-  let cur = payloadCwd || root;
+    /** @type {string|null} */
+    let cur = payloadCwd || root;
   for (const s of subCmds) {
     stmtCwd.push(cur);
     if (cur === null) continue;
@@ -707,15 +708,15 @@ function collectStagedSet() {
 function runGate(committedPaths) {
   // 1. Typecheck the (materialized) snapshot.
   try {
-    execSync('npm run check', {
+    execSync('npm run check', /** @type {any} */ ({
       cwd: root,
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 240_000,
       windowsHide: true,
-    });
+    }));
   } catch (err) {
-    const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`
+    const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`
       .trim()
       .split('\n')
       .slice(-40)
@@ -748,15 +749,15 @@ function runGate(committedPaths) {
     /\.md$/i.test(p) || p === 'opencode.json' || p.startsWith('.gemini/');
   if (staged.some(pinsDocContract)) {
     try {
-      execSync('npm run test:doc-contract', {
+      execSync('npm run test:doc-contract', /** @type {any} */ ({
         cwd: root,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 240_000,
         windowsHide: true,
-      });
+      }));
     } catch (err) {
-      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`
+      const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`
         .trim()
         .split('\n')
         .slice(-40)
@@ -810,16 +811,16 @@ function runGate(committedPaths) {
       return null;
     }
     try {
-      execSync(`npm run ${leg.script}`, {
+      execSync(`npm run ${leg.script}`, /** @type {any} */ ({
         cwd: root,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 60_000,
         windowsHide: true,
-      });
+      }));
       return null;
     } catch (err) {
-      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
+      const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
       return {
         blocked: true,
         message:

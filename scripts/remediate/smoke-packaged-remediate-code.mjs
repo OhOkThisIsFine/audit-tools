@@ -64,7 +64,7 @@ function check(label, fn) {
     console.log(`  PASS ${label}`);
     passed++;
   } catch (err) {
-    console.error(`  FAIL ${label}: ${err.message}`);
+    console.error(`  FAIL ${label}: ${/** @type {any} */ (err).message}`);
     failed++;
   }
 }
@@ -85,7 +85,7 @@ try {
     `  ${resolvedTarball.packed ? "packed" : "reused"}: ${tarball} (${Date.now() - packStart}ms)`,
   );
 } catch (err) {
-  console.error(`resolving the packaged tarball failed after ${Date.now() - packStart}ms:`, err.message);
+  console.error(`resolving the packaged tarball failed after ${Date.now() - packStart}ms:`, /** @type {any} */ (err).message);
   rmSync(smokeRoot, { recursive: true, force: true });
   process.exit(1);
 }

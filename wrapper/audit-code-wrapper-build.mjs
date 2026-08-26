@@ -32,7 +32,7 @@ function resolveSpawn(command, args) {
 }
 
 function runBuild(command, args) {
-  return new Promise((resolvePromise, rejectPromise) => {
+  return /** @type {Promise<void>} */ (new Promise((resolvePromise, rejectPromise) => {
     const resolved = resolveSpawn(command, args);
     const child = spawn(resolved.command, resolved.args, {
       cwd: repoRoot,
@@ -50,7 +50,7 @@ function runBuild(command, args) {
       }
       rejectPromise(new Error(`Command failed with exit code ${code}.`));
     });
-  });
+  }));
 }
 
 export async function shouldBuildDistForPaths({
@@ -120,7 +120,7 @@ async function acquireBuildLock() {
       process.stderr.write(JSON.stringify({ event: "build_lock_acquired", pid: process.pid, lock: buildLockPath, acquired_at: acquiredAt }) + '\n');
       return handle;
     } catch (error) {
-      if (error && error.code === 'EEXIST') {
+    if (error && /** @type {any} */ (error).code === 'EEXIST') {
         try {
           const lockStats = await stat(buildLockPath);
           if (Date.now() - lockStats.mtimeMs > BUILD_LOCK_MAX_AGE_MS) {

@@ -218,6 +218,7 @@ function readPackageScripts(root) {
  * a repo un-attestable. Returns { failures, skipped }; the caller refuses to
  * bind when failures is non-empty.
  */
+/** @param {{root: string, staged: string[], git?: Function}} options */
 export function runDerivedFilePreflight({ root, staged, git }) {
   const failures = [];
   const skipped = [];
@@ -228,15 +229,15 @@ export function runDerivedFilePreflight({ root, staged, git }) {
       continue;
     }
     try {
-      execSync(`npm run ${leg.script}`, {
+      execSync(`npm run ${leg.script}`, /** @type {any} */ ({
         cwd: root,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 60_000,
         windowsHide: true,
-      });
+      }));
     } catch (err) {
-      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-12).join('\n');
+    const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`.trim().split('\n').slice(-12).join('\n');
       failures.push({ id: leg.id, script: leg.script, fix: leg.fix, tail });
     }
   }

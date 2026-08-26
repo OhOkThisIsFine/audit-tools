@@ -93,13 +93,13 @@ let raw = '';
 try {
   raw = inPath === '-' ? readFileSync(0, 'utf8') : readFileSync(inPath, 'utf8');
 } catch (e) {
-  fail(`could not read ${inPath}: ${e?.message ?? e}`);
+  fail(`could not read ${inPath}: ${/** @type {any} */ (e)?.message ?? e}`);
 }
 let input;
 try {
   input = JSON.parse(raw);
 } catch (e) {
-  fail(`input is not valid JSON: ${e?.message ?? e}`);
+  fail(`input is not valid JSON: ${/** @type {any} */ (e)?.message ?? e}`);
 }
 if (input === null || typeof input !== 'object' || Array.isArray(input)) {
   fail('input must be a JSON object keyed by section id');
@@ -143,7 +143,7 @@ for (const section of CLOSEOUT_SECTIONS) {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
       fail(`section "${section.id}" takes an object keyed by bullet id, one value per bullet`);
     }
-    const unknownBullets = Object.keys(value).filter((k) => !section.bullets.some((b) => b.id === k));
+    const unknownBullets = Object.keys(value).filter((k) => !/** @type {NonNullable<typeof section.bullets>} */ (section.bullets).some((b) => b.id === k));
     if (unknownBullets.length > 0) {
       fail(`section "${section.id}": unknown bullet(s) ${unknownBullets.join(', ')}`);
     }

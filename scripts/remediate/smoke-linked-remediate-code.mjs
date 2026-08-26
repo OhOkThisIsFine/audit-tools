@@ -22,7 +22,7 @@ function check(label, fn) {
     console.log(`  PASS ${label}`);
     passed++;
   } catch (err) {
-    console.error(`  FAIL ${label}: ${err.message}`);
+    console.error(`  FAIL ${label}: ${/** @type {any} */ (err).message}`);
     failed++;
   }
 }

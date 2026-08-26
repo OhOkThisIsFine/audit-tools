@@ -30,7 +30,7 @@ function generateLanguageMap() {
   };
 
   for (const [langName, langData] of Object.entries(linguistLanguages)) {
-    if (!langData.extensions) continue;
+  if (!("extensions" in langData) || !langData.extensions) continue;
 
     const priority = getTypePriority(langData.type);
 

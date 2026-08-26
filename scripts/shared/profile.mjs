@@ -114,7 +114,7 @@ export function writeProfileLedger(profileName, entries, meta = {}) {
     appendFileSync(resolve(profileDir, `${profileName}-history.ndjson`), `${JSON.stringify(record)}\n`);
   } catch (error) {
     // Profiling is advisory — a ledger write failure must never fail a pipeline.
-    console.warn(`[profile:${profileName}] ledger write skipped: ${error?.message ?? error}`);
+    console.warn(`[profile:${profileName}] ledger write skipped: ${/** @type {any} */ (error)?.message ?? error}`);
   }
   appendJobSummary(profileName, record);
   return record;
@@ -142,6 +142,6 @@ function appendJobSummary(profileName, record) {
   try {
     appendFileSync(summaryPath, `${renderProfileTable(record)}\n`);
   } catch (error) {
-    console.warn(`[profile:${profileName}] job-summary append skipped: ${error?.message ?? error}`);
+    console.warn(`[profile:${profileName}] job-summary append skipped: ${/** @type {any} */ (error)?.message ?? error}`);
   }
 }

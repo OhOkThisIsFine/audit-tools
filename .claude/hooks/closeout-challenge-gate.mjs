@@ -143,7 +143,7 @@ const sessionDirtKey = sessionDirt
   .sort()
   .join('|').length;
 const stateKey = `${git(['rev-parse', 'HEAD']).out}:${sessionDirtKey}:${unpushed.length}`;
-if ((state.states ?? []).includes(stateKey)) process.exit(0);
+if ((/** @type {string[]} */ (state.states ?? [])).includes(stateKey)) process.exit(0);
 
 // ── Mechanical evidence — the part a confident "yes" cannot survive ──────────
 const findings = [];
@@ -263,18 +263,18 @@ try {
     '--json',
     'workflowName,status,conclusion,createdAt',
   ];
-  const ghOpts = {
+  const ghOpts = /** @type {import('node:child_process').SpawnSyncOptionsWithStringEncoding} */ ({
     cwd: ROOT,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 15_000,
     windowsHide: true,
-  };
+  });
   let r = spawnSync('gh', ghArgs, ghOpts);
   // win32: `gh` may be a `.cmd`/`.ps1` shim, which bare spawn does NOT resolve —
   // the same trap resolveWindowsShimSpawnCommand handles in src. Every arg here
   // is a fixed literal, so the shell retry carries no interpolation.
-  if (r.error?.code === 'ENOENT' && process.platform === 'win32') {
+  if ((/** @type {any} */ (r.error)?.code) === 'ENOENT' && process.platform === 'win32') {
     r = spawnSync('gh', ghArgs, { ...ghOpts, shell: true });
   }
   // No gh, not authed, no network, rate-limited, a 503 from either endpoint —

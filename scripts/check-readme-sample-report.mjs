@@ -120,7 +120,7 @@ if (invokedDirectly) {
     }
     console.log(`✓ readme-sample-report: ${TARGET}'s sample block matches the renderer.`);
   } catch (err) {
-    console.error(`✗ readme-sample-report check failed: ${err.message}`);
+    console.error(`✗ readme-sample-report check failed: ${/** @type {any} */ (err).message}`);
     process.exit(1);
   }
 }

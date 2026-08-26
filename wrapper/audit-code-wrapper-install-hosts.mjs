@@ -404,7 +404,7 @@ export function buildHostCatalog({ root, host, assets }) {
         steps: definition.steps,
       };
     })
-    .filter(Boolean)
+    .filter((entry) => entry !== null)
     .map((entry) => ({
       ...entry,
       primary_path: entry.primary_path,
@@ -882,9 +882,9 @@ export async function verifyInstalledBootstrap(argv) {
     return;
   }
 
-  const assetPaths = installManifest.asset_paths ?? {};
+  const assetPaths = /** @type {any} */ (installManifest).asset_paths ?? {};
   const hostCatalog = new Map(
-    (installManifest.hosts ?? []).map((entry) => [entry.host, entry]),
+    (/** @type {any} */ (installManifest).hosts ?? []).map((entry) => [entry.host, entry]),
   );
   const selectedHosts = requestedHost && requestedHost !== 'all'
     ? getInstallHostKeys(requestedHost)

@@ -64,7 +64,7 @@ function reachableScripts(packageScripts, root = 'verify:release') {
   const visited = new Set();
   const stack = [root];
   while (stack.length) {
-    const name = stack.pop();
+    const name = /** @type {string} */ (stack.pop());
     if (visited.has(name) || !(name in packageScripts)) continue;
     visited.add(name);
     const cmd = packageScripts[name];

@@ -335,6 +335,7 @@ async function runDistCommandInline(commandName, argv, { ensureArtifactsDir = fa
   await cli.runCli([process.execPath, distCliEntry, commandName, ...commandArgs]);
 }
 
+/** @param {{usageName: string, argv?: string[], preferredEntrypoint?: string}} options */
 export async function runAuditCodeWrapper({
   usageName,
   argv = process.argv.slice(2),

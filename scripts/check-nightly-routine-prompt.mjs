@@ -61,7 +61,7 @@ export function assertPackageWiring(packageText) {
   try {
     pkg = JSON.parse(packageText);
   } catch (error) {
-    throw new Error(`${PACKAGE_JSON} is not valid JSON: ${error.message}`);
+    throw new Error(`${PACKAGE_JSON} is not valid JSON: ${/** @type {any} */ (error).message}`);
   }
 
   if (pkg?.scripts?.["check:nightly-routine-prompt"] !== CHECK_SCRIPT) {
@@ -134,7 +134,7 @@ if (invokedDirectly) {
   try {
     main();
   } catch (error) {
-    process.stderr.write(`nightly-routine-prompt check failed: ${error.message}\n`);
+    process.stderr.write(`nightly-routine-prompt check failed: ${/** @type {any} */ (error).message}\n`);
     process.exitCode = 1;
   }
 }

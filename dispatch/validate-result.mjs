@@ -25,7 +25,7 @@ export function resolveTaskContext({ artifactsDir, runId, taskId }) {
   } catch (e) {
     return {
       task: null,
-      warning: `[warn] Could not read pending-audit-tasks.json; line-count validation will be skipped: ${e.message}`,
+      warning: `[warn] Could not read pending-audit-tasks.json; line-count validation will be skipped: ${/** @type {any} */ (e).message}`,
     };
   }
 }
@@ -59,7 +59,7 @@ export function validateOneResult({ artifactsDir, runId, taskId }) {
   try {
     resultObj = JSON.parse(readFileSync(resultPath, "utf8"));
   } catch (e) {
-    return { ok: false, fatal: { message: `Invalid JSON in ${resultPath}: ${e.message}` }, resultPath };
+    return { ok: false, fatal: { message: `Invalid JSON in ${resultPath}: ${/** @type {any} */ (e).message}` }, resultPath };
   }
 
   const { task, warning } = resolveTaskContext({ artifactsDir, runId, taskId });
@@ -86,7 +86,7 @@ function runCli() {
   const result = validateOneResult({ artifactsDir, runId, taskId });
 
   if (!result.ok) {
-    console.error(result.fatal.message);
+    console.error((/** @type {any} */ (result.fatal)).message);
     process.exit(1);
   }
 

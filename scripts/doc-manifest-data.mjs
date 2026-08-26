@@ -73,7 +73,7 @@ export const DOC_MANIFEST = [
   },
   {
     type: "instruction / policy",
-    files: ["CLAUDE.md", "AGENTS.md", "GEMINI.md"],
+    files: ["CLAUDE.md", "AGENTS.md"],
     check: "Factual claims only (file/command/path staleness). Policy & conventions untouchable.",
     autoApply:
       "**No — escalate-only.** Highest blast radius: a wrong edit deletes a guardrail governing all agents.",

@@ -84,7 +84,7 @@ function probeProblems(probe) {
  */
 function trustProblems(trust) {
   const problems = [];
-  if (!isNonEmptyString(trust.configDir) || !/^([a-zA-Z]:[\\/]|\/)/.test(trust.configDir)) {
+  if (!isNonEmptyString(trust.configDir) || !/^([a-zA-Z]:[\\/]|\/)/.test(/** @type {string} */ (trust.configDir))) {
     problems.push('configDirTrust needs an absolute configDir — the hook resolves nothing relative');
   }
   if (!isNonEmptyString(trust.envOverride)) {

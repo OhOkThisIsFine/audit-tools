@@ -63,7 +63,9 @@ const OPENCODE_AUDIT_BASH_PERMISSION = {
 // Resolved best-effort: on a fresh workspace checkout the shared dist may not
 // be built yet, in which case the OpenCode config deployment below is
 // skipped with a warning instead of failing the whole install.
-const sharedOpenCodePermissions = await resolveSharedOpenCodePermissions();
+const sharedOpenCodePermissions = /** @type {NonNullable<Awaited<ReturnType<typeof resolveSharedOpenCodePermissions>>>} */ (
+  await resolveSharedOpenCodePermissions()
+);
 
 // A pre-hardening deploy wrote agent-scope bash['*']='allow' (the historically
 // managed broad value). Migrate exactly that value away so the generated 'ask'
@@ -312,7 +314,7 @@ try {
   console.log(`audit-code: restart Claude Desktop for /audit-code to appear in the slash-command menu`);
   counts.succeeded++;
 } catch (err) {
-  console.warn(`audit-code: could not install Claude Desktop plugin (${err.message})`);
+  console.warn(`audit-code: could not install Claude Desktop plugin (${/** @type {any} */ (err).message})`);
   console.warn(`  Plugin directory: ${claudePluginDir}`);
   counts.failed++;
 }

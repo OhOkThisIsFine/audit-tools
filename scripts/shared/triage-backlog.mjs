@@ -160,7 +160,7 @@ export function resolveTriageModel(env = process.env, rosterSource = defaultRost
   } catch (err) {
     throw new Error(
       `triage lane cannot resolve a model target: router roster discovery failed ` +
-        `(${err?.message ?? err}). The lane is DEAD, not slow — start the router or set ` +
+        `(${/** @type {any} */ (err)?.message ?? err}). The lane is DEAD, not slow — start the router or set ` +
         `TRIAGE_MODEL=<spec> to bypass discovery.`,
     );
   }
@@ -191,7 +191,7 @@ export function resolveTriageModel(env = process.env, rosterSource = defaultRost
 /** Tracked files matching a git query, or null when git cannot answer. */
 function trackedMatches(root, args, okStatuses = [0]) {
   const out = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', windowsHide: true });
-  if (out.error || !okStatuses.includes(out.status)) return null;
+  if (out.error || !okStatuses.includes(/** @type {number} */ (out.status))) return null;
   return out.stdout.split('\n').filter((l) => l.trim() !== '');
 }
 
@@ -463,10 +463,10 @@ async function main() {
     MODEL = resolveTriageModel();
   } catch (err) {
     writeAbortStamp(stampPath, {
-      aborted: String(err.message || err),
+      aborted: String(/** @type {any} */ (err).message || err),
       totalEntries: entries.length,
     });
-    process.stderr.write(`${err.message}\n`);
+    process.stderr.write(`${/** @type {any} */ (err).message}\n`);
     process.exit(1);
   }
 

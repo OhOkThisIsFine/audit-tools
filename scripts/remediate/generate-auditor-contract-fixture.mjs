@@ -144,7 +144,7 @@ const model = {
   ],
   findings,
 };
-model.work_block_seams = deriveWorkBlockSeams(model.work_blocks);
+model.work_block_seams = deriveWorkBlockSeams(/** @type {any} */ (model.work_blocks));
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(model, null, 2)}\n`, "utf8");

@@ -136,7 +136,7 @@ export default class VitestDurationSequencer extends BaseSequencer {
           targetBucket = i;
         }
       }
-      buckets[targetBucket].push(item.spec);
+    (/** @type {string[]} */ (buckets[targetBucket])).push(item.spec);
       bucketTotals[targetBucket] += item.duration;
     }
 

@@ -32,7 +32,7 @@ function processAlive(pid) {
     process.kill(pid, 0);
     return true;
   } catch (err) {
-    return err.code === "EPERM";
+    return /** @type {any} */ (err).code === "EPERM";
   }
 }
 

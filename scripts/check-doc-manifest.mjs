@@ -184,7 +184,7 @@ export function reconcile({ manifest, onDisk, guidelinesText, constitutionalPath
   const deadGlobs = [];
   for (const p of patterns) {
     if (p.matcher) {
-      if (!onDisk.some((f) => p.matcher.test(f))) deadGlobs.push(p.pattern);
+      if (!onDisk.some((f) => /** @type {RegExp} */ (p.matcher).test(f))) deadGlobs.push(p.pattern);
     } else if (!onDisk.includes(p.pattern)) {
       missing.push(p.pattern);
     }
@@ -278,7 +278,7 @@ function main() {
     manifest: DOC_MANIFEST,
     onDisk,
     guidelinesText,
-    constitutionalPaths: CONSTITUTIONAL_DOC_PATHS,
+    constitutionalPaths: /** @type {any} */ (CONSTITUTIONAL_DOC_PATHS),
   });
 
   if (errors.length) {

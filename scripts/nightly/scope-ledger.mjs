@@ -178,6 +178,7 @@ export function writeScopeLedger(root, ledger) {
  * Record that an agent actually examined these items at `commit`. Called after
  * the examination, never before — see the header.
  */
+/** @param {any} ledger @param {string[]} hashes @param {{commit?: string, at?: string, path?: string}} [options] */
 export function stampExamined(ledger, hashes, { commit, at, path } = {}) {
   if (!commit) throw new Error('stampExamined: a commit is required — an unanchored stamp has no window');
   const items = ledger?.items ?? {};

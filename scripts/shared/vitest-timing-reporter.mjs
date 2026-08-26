@@ -53,7 +53,7 @@ function leavesOf(file) {
   const leaves = [];
   const stack = [...(file.tasks ?? [])].map((task) => ({ task, prefix: relPath(file) }));
   while (stack.length > 0) {
-    const { task, prefix } = stack.pop();
+    const { task, prefix } = /** @type {{task: any, prefix: string}} */ (stack.pop());
     const id = `${prefix} > ${task.name}`;
     if (task.type === "suite") {
       for (const child of task.tasks ?? []) stack.push({ task: child, prefix: id });
@@ -328,7 +328,7 @@ export function writeBaselineIfChanged(path, record) {
     return true;
   } catch (error) {
     // The baseline is advisory bookkeeping; a write failure must never fail a run.
-    console.warn(`[vitest-timing] flake baseline write skipped: ${error?.message ?? error}`);
+    console.warn(`[vitest-timing] flake baseline write skipped: ${/** @type {any} */ (error)?.message ?? error}`);
     return false;
   }
 }
@@ -457,7 +457,7 @@ export default class TimingReporter {
         );
       }
     } catch (error) {
-      lines.push(`   parallel-flake baseline skipped: ${error?.message ?? error}`);
+      lines.push(`   parallel-flake baseline skipped: ${/** @type {any} */ (error)?.message ?? error}`);
     }
     console.log(lines.join("\n"));
 

@@ -117,7 +117,7 @@ if (invokedDirectly) {
     }
     console.log(`✓ philosophy-brief: ${TARGET} matches the brief in ${SOURCE}; the hook reads the same source.`);
   } catch (err) {
-    console.error(`✗ philosophy-brief check failed: ${err.message}`);
+    console.error(`✗ philosophy-brief check failed: ${/** @type {any} */ (err).message}`);
     process.exit(1);
   }
 }

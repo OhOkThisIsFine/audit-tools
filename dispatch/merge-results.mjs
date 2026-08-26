@@ -65,7 +65,7 @@ export function mergeResults({ artifactsDir, runId }) {
       ok: false,
       fatal: {
         message:
-          `Cannot read pending manifest ${tasksPath}: ${e.message}\n` +
+          `Cannot read pending manifest ${tasksPath}: ${/** @type {any} */ (e).message}\n` +
           "merge-results judges acceptance against the pending manifest (fail-closed); aborting before any write.",
       },
       passing: [],
@@ -102,7 +102,7 @@ export function mergeResults({ artifactsDir, runId }) {
     try {
       parsed = JSON.parse(readFileSync(filePath, "utf8"));
     } catch (e) {
-      failing.push({ task_id: filename, errors: [`Invalid JSON: ${e.message}`] });
+      failing.push({ task_id: filename, errors: [`Invalid JSON: ${/** @type {any} */ (e).message}`] });
       continue;
     }
 
@@ -206,7 +206,7 @@ function runCli() {
   const result = mergeResults({ artifactsDir, runId });
 
   if (!result.ok) {
-    console.error(result.fatal.message);
+    console.error((/** @type {any} */ (result.fatal)).message);
     process.exit(1);
   }
 

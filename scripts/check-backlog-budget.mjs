@@ -174,7 +174,7 @@ export function evaluateBacklog(files, baseline) {
     for (const e of entries) {
       if (e.bytes <= ENTRY_BUDGET_BYTES) continue;
       const key = entryKey(file, e);
-      nextBaseline.entries_over_budget.push(key);
+      (/** @type {string[]} */ (nextBaseline.entries_over_budget)).push(key);
       if (baseline.entriesOverBudget.has(key)) {
         // Grandfathered BY NAME. Deliberately no size comparison: this entry's growth is
         // paid for out of its file's ceiling, so a correctness fix that costs 14 bytes

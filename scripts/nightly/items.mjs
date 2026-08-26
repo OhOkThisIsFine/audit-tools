@@ -106,18 +106,18 @@ export function readDecisions(root) {
   try {
     raw = readFileSync(file, 'utf8');
   } catch (err) {
-    if (err && err.code === 'ENOENT') return {}; // genuinely nothing recorded yet
+    if (err && /** @type {any} */ (err).code === 'ENOENT') return {}; // genuinely nothing recorded yet
     // Any other read failure (permissions, a symlink loop, ...) is refused
     // too — it cannot be told apart from "nothing recorded" and must not be
     // guessed at.
-    throw new Error(`readDecisions: could not read ${file}: ${err && err.message ? err.message : err}`);
+    throw new Error(`readDecisions: could not read ${file}: ${err && /** @type {any} */ (err).message ? /** @type {any} */ (err).message : err}`);
   }
   let data;
   try {
     data = JSON.parse(raw);
   } catch (err) {
     throw new Error(
-      `readDecisions: ${file} exists but is not valid JSON (${err && err.message ? err.message : err}). ` +
+      `readDecisions: ${file} exists but is not valid JSON (${err && /** @type {any} */ (err).message ? /** @type {any} */ (err).message : err}). ` +
         `This is the durable nightly decision ledger — refusing to read it as an empty ledger, which would ` +
         `let the next recorded answer silently overwrite every prior decision. Recovery is manual: inspect ` +
         `${file}, repair or restore it (e.g. from git history or a backup), then retry.`,
@@ -129,6 +129,11 @@ export function readDecisions(root) {
 // Record the owner's answer for a subject. Permanent by design — this is the
 // mechanism that stops a settled question from being asked again, so it must
 // NOT expire with a run, a findings file, or a branch.
+/**
+ * @param {string} root
+ * @param {string} key
+ * @param {{answer?: string, disposition?: string, subject?: string, path?: string, note?: string}} [options]
+ */
 export function recordDecision(root, key, { answer, disposition, subject, path, note } = {}) {
   if (!key) throw new Error('recordDecision: a subject key is required');
   const decisions = readDecisions(root);
@@ -276,7 +281,7 @@ function gitLines(root, args, { okStatuses = [0] } = {}) {
     windowsHide: true,
     timeout: 30_000,
   });
-  if (out.error || !okStatuses.includes(out.status)) return null; // null = git could not answer
+  if (out.error || !okStatuses.includes(/** @type {number} */ (out.status))) return null; // null = git could not answer
   return out.stdout.split('\n').filter((l) => l.trim() !== '');
 }
 
@@ -379,7 +384,7 @@ function evaluateOneProbe(root, probe, { recordPathsCarryEvidence = false } = {}
     try {
       recordText = readFileSync(join(root, probe.file), 'utf8');
     } catch (err) {
-      if (!err || err.code !== 'ENOENT') return { state: 'error' };
+      if (!err || /** @type {any} */ (err).code !== 'ENOENT') return { state: 'error' };
       return { state: 'record_missing' };
     }
     return recordText.includes(probe.contains)
@@ -413,7 +418,7 @@ function evaluateOneProbe(root, probe, { recordPathsCarryEvidence = false } = {}
     try {
       text = readFileSync(join(root, probe.file), 'utf8');
     } catch (err) {
-      if (!err || err.code !== 'ENOENT') return { state: 'error' };
+      if (!err || /** @type {any} */ (err).code !== 'ENOENT') return { state: 'error' };
       // Tracked but deleted from the worktree: the string is certainly not
       // there — the condition holds.
       return { state: 'holds' };
@@ -422,6 +427,7 @@ function evaluateOneProbe(root, probe, { recordPathsCarryEvidence = false } = {}
   }
 
   let fileText = null;
+  /** @type {any} */
   let readErr = null;
   try {
     fileText = readFileSync(join(root, probe.file), 'utf8');

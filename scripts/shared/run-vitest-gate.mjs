@@ -114,7 +114,7 @@ let record;
 try {
   record = JSON.parse(readFileSync(ledgerPath, "utf8"));
 } catch (error) {
-  failClosed(`ledger at ${ledgerPath} is unreadable/invalid JSON: ${error?.message ?? error}`);
+  failClosed(`ledger at ${ledgerPath} is unreadable/invalid JSON: ${/** @type {any} */ (error)?.message ?? error}`);
 }
 
 if (record.runToken !== token) {

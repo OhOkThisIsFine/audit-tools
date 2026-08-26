@@ -84,7 +84,9 @@ function withoutRetiredRemediateCodeBashRules(rule) {
 // Resolved best-effort: on a fresh workspace checkout the shared dist may not
 // be built yet, in which case the OpenCode config deployment below is
 // skipped with a warning instead of failing the whole install.
-const sharedOpenCodePermissions = await resolveSharedOpenCodePermissions();
+const sharedOpenCodePermissions = /** @type {NonNullable<Awaited<ReturnType<typeof resolveSharedOpenCodePermissions>>>} */ (
+  await resolveSharedOpenCodePermissions()
+);
 
 // A pre-hardening deploy wrote agent-scope bash['*']='allow' (the historically
 // managed broad value). Migrate exactly that value away so the generated 'ask'

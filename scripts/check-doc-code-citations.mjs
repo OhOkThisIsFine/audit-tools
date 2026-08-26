@@ -121,7 +121,7 @@ function ignoredPaths(candidates) {
       input: unique.join("\0") + "\0",
     });
   } catch (err) {
-    if (err && err.status === 1) return new Set();
+    if (err && /** @type {any} */ (err).status === 1) return new Set();
     throw err;
   }
   return new Set(out.split("\0").filter(Boolean));

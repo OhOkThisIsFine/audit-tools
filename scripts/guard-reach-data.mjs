@@ -319,7 +319,17 @@ export const GUARDS = [
     note:
       'eslint, curated zero-tolerance ruleset (eslint.config.js): unused-vars + verified sonarjs ' +
       'correctness rules over src (type-aware), tests (type-aware, unused-vars only) and the ' +
-      'typechecker-invisible .mjs surface (scripts/wrapper/dispatch/root bins)',
+      '.mjs script surface (scripts/wrapper/dispatch/root bins; typed by check:scripts since 2026-08-25)',
+  },
+  {
+    id: 'check:scripts',
+    kind: 'gate',
+    impl: 'check:scripts',
+    preCommit: 'reach',
+    fix:
+      'checkJs typecheck over scripts/, wrapper/, dispatch/, .claude/hooks/ and the root bins ' +
+      '(tsconfig.scripts.json) failed — fix the type error or annotate with JSDoc; noImplicitAny ' +
+      'stays relaxed there by design',
   },
   {
     id: 'check:dup',
@@ -716,6 +726,7 @@ export const REACH = [
       'check:offload-lanes',
       'check:loop-core-patterns',
       'check:guard-reach',
+      'check:scripts',
     ],
     uncovered:
       'shell-split (the trap-guard split helper, home of bypassEnabled) has no dedicated contract test ' +
@@ -756,10 +767,11 @@ export const REACH = [
       'check:ci-trigger-paths',
       // Parity over its own generator (scripts/shared/generate-runtime-artifact-names.mjs --check).
       'check:runtime-artifact-names',
+      'check:scripts',
     ],
     uncovered:
-      'scripts/ is reached by no tsconfig — deliberate (validate at the construction site; check:lint ' +
-      'gives an untyped no-undef/no-unused-vars floor, not a typecheck); ' +
+      'check:scripts typechecks the script trees with noImplicitAny relaxed — implicit-any ' +
+      'signatures pass by design, so the typed floor is narrower than src strict; ' +
       'attest-constitutional-doc-change is invoked per constitutional override, wired into no verify gate; ' +
       'render-closeout is invoked per hand-back, wired into no verify gate either — its enforcement is ' +
       'the closeout-challenge Stop gate reading the record it writes, so a session that never renders is ' +
@@ -787,18 +799,20 @@ export const REACH = [
       // Executes scripts/shared/derived-file-preflight.mjs directly (P34).
       'precommit-leg-derivation-test',
       'lane-dispatch-driver-test',
+      'check:scripts',
     ],
     uncovered:
       'release-and-publish, update-languages, triage-backlog, rebaseline-flakes and ' +
       'poll-log-throttle run only at release/maintenance time — no build gate executes them ' +
       "(triage-backlog's sweep driver is now shared lane-dispatch.mjs, gate-executed via " +
       "tests/shared/lane-dispatch.test.ts — the uncovered half is triage-backlog's HTTP lane + CLI " +
-      'shell only); no typecheck over scripts/ (deliberate; check:lint is an untyped floor)',
+      'shell only)',
   },
+
   {
     area: 'nightly routine',
     files: ['scripts/nightly/**'],
-    guardedBy: ['nightly-routine-test', 'nightly-scope-ledger-test', 'nightly-items-mandatory-fields-test', 'check:lint', 'check:dup'],
+    guardedBy: ['nightly-routine-test', 'nightly-scope-ledger-test', 'nightly-items-mandatory-fields-test', 'check:lint', 'check:dup', 'check:scripts'],
     note:
       'items.mjs, render-inbox.mjs, ingest-answers.mjs, answer.mjs and the nightly-surface hook are all ' +
       'exercised by tests/shared/nightly-routine.test.ts — subject-key identity, the settled/resolved ' +
@@ -848,7 +862,7 @@ export const REACH = [
   {
     area: 'worker dispatch assets',
     files: ['dispatch/**'],
-    guardedBy: ['vitest-gate', 'smoke:packaged-audit-code'],
+    guardedBy: ['vitest-gate', 'smoke:packaged-audit-code', 'check:scripts'],
     note: 'validate/merge exercised by tests/audit/dispatch-validate.test.ts and the packaged smoke',
   },
   {
@@ -867,6 +881,7 @@ export const REACH = [
       'smoke:linked-remediate-code',
       'vitest-gate',
       'check:lint',
+      'check:scripts',
     ],
   },
   {
@@ -876,6 +891,7 @@ export const REACH = [
       'tsconfig.json',
       'tsconfig.base.json',
       'tsconfig.test.json',
+      'tsconfig.scripts.json',
       'vitest.config.ts',
       'knip.json',
       'eslint.config.js',

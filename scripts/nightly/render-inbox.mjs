@@ -172,6 +172,7 @@ function renderItem(item, decision) {
   return lines.join('\n');
 }
 
+/** @param {{items: any[], decisions?: any, run?: {date?: string, head?: string}|null, applied?: any[], skipped?: any[]}} options */
 export function renderInbox({ items, decisions = {}, run = null, applied = [], skipped = [] }) {
   const out = [PREAMBLE];
 
