@@ -20,6 +20,12 @@
   violations before the lap, zero after). Backlog entries for the containment forks, re-rolled
   primitives, ICU ordering, the JSONC scanner, and the lockfile mismatch are DELETED as enforced
   or fixed.
+- The end-of-sprint hand-back pipeline was repaired at `698725bc`: the Stop challenge contradicted
+  the renderer's input contract, the blank `--template` could not be rendered, the render record was
+  neither session-scoped nor content-bound, and the section prose named a key that does not exist.
+  The record is now `version: 2` and binds to a worktree tree id. No `src/` path changed, so v0.49.0
+  remains the shipped artifact. Measurement, and the one residual stated rather than closed:
+  `docs/reviews/closeout-generation-failure-2026-08-26.md`.
 - ⚠ `tests/audit/host-delegation-fold-carries-advisories.test.ts` stays deliberately
   UN-baselined (owner, 2026-08-24): a parallel-load timeout there is re-checked by a solo rerun,
   never re-baselined — a known-flaky record would launder a genuine regression. Do not "fix" it.
@@ -27,9 +33,10 @@
 
 ## Immediate next
 
-Nothing pending — the consolidation lap is fully landed, reviewed (two adversary lanes + full
-verify:release), and SHIPPED as v0.49.0. Every open item lives in `docs/backlog/`; nothing is
-pinned immediate-next.
+Nothing pending. The closeout-pipeline repair is landed and verified — `verify:checks`, the full
+suite, and CI all green on `698725bc` — and needs no release, because it touches no `src/` path.
+The consolidation lap before it shipped as v0.49.0. Every open item lives in `docs/backlog/`;
+nothing is pinned immediate-next.
 
 Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
 never the default two-minute timeout, which kills it mid-gate and wedges `phase.lock` for every
