@@ -541,12 +541,12 @@ test("FND-COR-9fc7cbdb: import with default + named bindings resolves default to
 // The character immediately after */ must NOT be skipped.
 test("FND-COR-b29c9d4f: stripJsonComments preserves character immediately after block comment", async () => {
   const { stripJsonComments } = await import("../../src/audit/extractors/graphManifestEdges/jsonc.js");
-  // "a/*b*/c" => "ac" (the 'c' after */ must be preserved)
-  expect(stripJsonComments("a/*b*/c")).toBe("ac");
+  // Comments become whitespace (position-preserving); the 'c' after */ survives.
+  expect(stripJsonComments("a/*b*/c")).toBe("a     c");
   // Newlines inside block comments are preserved.
-  expect(stripJsonComments("a/*\n*/c")).toBe("a\nc");
+  expect(stripJsonComments("a/*\n*/c")).toBe("a  \n  c");
   // Character directly after closing */ must not be swallowed.
-  expect(stripJsonComments("x/* comment */y")).toBe("xy");
+  expect(stripJsonComments("x/* comment */y")).toBe("x             y");
   // Verify a realistic JSONC snippet.
   const input = '{\n  // line comment\n  "key": /* block */ "value"\n}';
   const result = stripJsonComments(input);

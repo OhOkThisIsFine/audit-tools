@@ -109,6 +109,7 @@
   "dependencies": {
     "commander": "^13.0.0",
     "smol-toml": "^1.6.1",
+    "strip-json-comments": "^5.0.3",
     "tree-sitter-wasms": "^0.1.13",
     "web-tree-sitter": "^0.25.10",
     "yaml": "^2.9.0",

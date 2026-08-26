@@ -1,65 +1,20 @@
 import { scanStringAware } from "audit-tools/shared";
+import stripJsonCommentsVetted from "strip-json-comments";
 
 const JSON_SCAN_OPTIONS = { quoteChars: ['"'] as const, escapedQuotes: ['"'] as const };
 
+/**
+ * JSONC comment stripping via the vetted parser (two-tier dependency rule:
+ * JSONC is a grammar this repo does not own). Comments are replaced with
+ * whitespace, which preserves both line AND column positions — strictly
+ * stronger than the prior hand-rolled scanner, which kept only newlines.
+ * `removeTrailingJsonCommas` stays on the shared string-aware scanner: that
+ * scanner is not comment-aware (a quote inside a comment body would desync its
+ * string state), which is exactly why comment stripping runs first and through
+ * the library.
+ */
 export function stripJsonComments(content: string): string {
-  let result = "";
-  let inString = false;
-  let escaped = false;
-
-  for (let index = 0; index < content.length; index++) {
-    const char = content[index];
-    const next = content[index + 1];
-
-    if (inString) {
-      result += char;
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      inString = true;
-      result += char;
-      continue;
-    }
-
-    if (char === "/" && next === "/") {
-      while (index < content.length && content[index] !== "\n") {
-        index++;
-      }
-      if (index < content.length) {
-        result += content[index];
-      }
-      continue;
-    }
-
-    if (char === "/" && next === "*") {
-      index += 2;
-      while (
-        index < content.length &&
-        !(content[index] === "*" && content[index + 1] === "/")
-      ) {
-        if (content[index] === "\n") {
-          result += "\n";
-        }
-        index++;
-      }
-      if (index < content.length) {
-        index++;
-      }
-      continue;
-    }
-
-    result += char;
-  }
-
-  return result;
+  return stripJsonCommentsVetted(content);
 }
 
 export function removeTrailingJsonCommas(content: string): string {
