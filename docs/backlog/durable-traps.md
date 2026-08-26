@@ -13,6 +13,18 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **A session rooted ABOVE the repo loads NONE of its hooks, so every commit gate is silently
+  absent (measured 2026-08-26).** Claude Code loads `.claude/settings.json` from the SESSION's
+  project directory. A session started in `C:/Code` that edits `C:/Code/audit-tools` therefore runs
+  zero audit-tools hooks: a commit staging `CLAUDE.md` landed with no constitutional-doc refusal, no
+  green-at-every-commit check, and no guard-reach leg — while `pre-commit-gate.mjs`, fed the same
+  staged tree by hand, refuses it. There is no in-repo fix: hooks cannot register themselves for a
+  session that never named this project, so this is the one class of trap the enforce-in-tooling rule
+  cannot reach. Start the session AT the repo root whenever you intend to commit, and read "the gates
+  passed" as a claim that needs the session's project dir behind it. Running the gate by hand from
+  such a session does not substitute: with no registry record it refuses as a dispatched CHILD first,
+  before it ever reaches the constitutional check.
+
 - **Each `dispatch_review` `next-step` re-mints EVERY outstanding binding (measured 2026-08-21).** One partial ingest published a new run directory and changed `prompt_sha256` for 494/494 carried-over items and `result_path` for 494/494; only `work_item_id` stayed stable. A host holding bindings from before that call has 100% stale identity, so results written against them are refused. Two consequences: do not call `next-step` while work is in flight, and prefer a dispatch shape where workers return FINDINGS ONLY while the host binds identity and `file_coverage` mechanically from the CURRENT `host-task-bindings.json` — that shape is immune by construction and is what made a 498-item fan-out survivable. Evidence for the "Wave-friendly host dispatch" forward track.
 
 - **The llm-relay process dies with the dispatching session, and nothing restarts it (2026-08-21).** A dropped connection took the relay down; every offloaded child then failed with `API Error: 502 backend unreachable` until it was restarted by hand. There is no Startup entry for it (only `freellmapi.vbs` and `headroom.vbs`). Probe `127.0.0.1:8791/telemetry` before and during a long fan-out.
