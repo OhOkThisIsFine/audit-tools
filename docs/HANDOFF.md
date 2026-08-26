@@ -13,6 +13,13 @@
   `docs/reviews/philosophy-simplification-audit-2026-08-26.md`. Production code is unchanged.
 - **Repository:** at hand-back, `main` and `origin/main` are synchronized and the required checks
   are green.
+- **Closeout:** repaired in two layers. *Repo* — five defects in the rendered hand-back; the
+  record is now `version: 2` and binds to a worktree tree id, so committing what the report described
+  no longer invalidates it. *Machine-wide* — the closeout SCHEMA is canonical in
+  `~/.claude/portable-engineering-principles.md` (eight steps, in order), this repo's step list now
+  matches it, and the multi-host generator at ~/.agent-config/sync.mjs mirrors that document, so its
+  --check catches drift. Measurement and the one residual stated rather than closed:
+  `docs/reviews/closeout-generation-failure-2026-08-26.md`.
 
 ## Immediate next
 
