@@ -13,6 +13,22 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **Generating code through a Bash heredoc loses ONE level of backslash escaping (2026-08-26).**
+  A `\n` written into the tool-call JSON arrives in the heredoc body as a real backslash-n, and
+  the Python or node string literal that receives it then turns it into an actual NEWLINE. The
+  generated JS string literal breaks mid-line with `SyntaxError: Invalid or unexpected token`. It
+  broke three separate edits in one session before the pattern was clear. Build the escape from
+  characters instead — `NL = chr(92) + 'n'` in Python — and concatenate it in. The same
+  applies to an apostrophe inside a single-quoted JS string: emit a DOUBLE-quoted JS string rather
+  than escaping the apostrophe, because that backslash is lost the same way.
+
+- **Two pushes landing close together can leave the NEWER commit with no CI signal (2026-08-26).**
+  The branch concurrency group cancelled both of the newer commit's runs and kept the older
+  commit's, so `gh run list` showed the tip as `cancelled` while an ANCESTOR ran to green. A
+  cancelled run is neither red nor green. Re-run the tip's workflows (`gh run rerun <id>`) or push
+  again before calling the lap green, and never read “the latest completed run succeeded” as 
+  “the tip is green” — match the head SHA first.
+
 - **A session rooted ABOVE the repo loads NONE of its hooks, so every commit gate is silently
   absent (measured 2026-08-26).** Claude Code loads `.claude/settings.json` from the SESSION's
   project directory. A session started in `C:/Code` that edits `C:/Code/audit-tools` therefore runs
