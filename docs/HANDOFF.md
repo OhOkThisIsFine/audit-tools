@@ -5,11 +5,11 @@
 
 ## Live state
 
-- Published state: **v0.46.0** is the last tag and what the global bins run. `main` is ahead of
-  the tag AND of the remote, and the delta now changes shipped behaviour (the remediate
-  constraint-clause blocking gate `0287e93d`; the generated README sample; three new verify gates:
-  `check:readme-sample-report`, `check:proposal-red-at`, `check:scripts`). **A release is owed** —
-  the immediate next below.
+- Published state: **v0.48.0** is the last tag, is live on npm (CI run 32953603424 green,
+  gate + 4 test shards + trusted publish), and is what the global bins run after the manual
+  postinstall. `main` is in sync with the remote. v0.47.0 was burned and cleaned
+  (`gh release delete --cleanup-tag`): its CI gate red was a dist-masked missing paths mapping in
+  `tsconfig.scripts.json`, fixed in `5c4dcaa0`. No release is owed.
 - The 2026-08-25 decision queue is fully executed and recorded (`answer.mjs --list` reports every
   tracked answer done): sol-2 `66df2416`, sol-1 `e624e7b3`, docs-4 `6eb71c06`, P41 `25036a5c`,
   the sidecar reader `0287e93d`, the scripts typecheck `2a1faa1f`.
@@ -31,9 +31,8 @@
 
 ## Immediate next
 
-**Ship the release** (`/ship` owns the flow): verify green on a clean pushed tree, publish, verify
-live, reinstall the global bins. Everything else from the 2026-08-25 queue is landed and marked —
-see Live state for the per-item refs.
+Nothing pending — the 2026-08-25 queue is fully landed, marked, and SHIPPED as v0.48.0 (per-item
+refs in Live state). Every open item lives in `docs/backlog/`; nothing is pinned immediate-next.
 
 Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
 never the default two-minute timeout, which kills it mid-gate and wedges `phase.lock` for every
