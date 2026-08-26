@@ -812,16 +812,15 @@
   [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:
   should synthesis demand mechanism-grounded (not flow-existence) evidence for `critical`?
 
-- **`check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling
-  (2026-08-14, nightly, low).** The gate matches only the `memory: <name>` prose form in tracked
-  docs, so the OTHER citation form — the `[[name]]` links memories use to reference each other — is
-  unchecked. Dangling at HEAD: `per-model-tiering` (from `unified-dispatch-routing-direction`),
-  `publish-workflow-hardening` (`audit-tools-run-hazards`), `relax-dispatch-source-forcing` (three
-  files), `review-gate-execution-status` (`remediate-extracted-plan-join-architecture`). This is the
-  same failure the gate was built for — a pointer nobody can follow re-asserting a deleted design
+- **`check:memory-citations` cannot see a `[[name]]` cross-link (2026-08-14, nightly, low).** The
+  gate matches only the `memory: <name>` prose form in tracked docs, so the OTHER citation form —
+  the `[[name]]` links memories use to reference each other — is unchecked. This is the same
+  failure the gate was built for — a pointer nobody can follow re-asserting a deleted design
   with the authority of a citation — and the memory-index header already warns the `[[…]]` half is
-  ungated, which makes every prune a hand-audit. **Property to hold:** both citation forms are
-  mechanically checked, so pruning a memory cannot silently strand a reference.
+  ungated, which makes every prune a hand-audit. A patch, its red-green test and a measured
+  false-positive surface are in `.audit-tools/nightly/proposals/P45-memory-crosslinks-ungated/`.
+  **Property to hold:** both citation forms are mechanically checked, so pruning a memory cannot
+  silently strand a reference.
 
 - **Steward verification metadata is undeliverable through the host-result envelope (hit
   2026-08-18).** The `deepening:steward` prompt instructs the host to return `findings: []` plus
