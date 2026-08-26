@@ -1,6 +1,7 @@
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { createLockedJsonStore, type LockedJsonStore } from "./io/lockedJsonStore.js";
+import { assertWithinRoot } from "./io/pathContainment.js";
 import { formatSchemaFailure } from "./validation/schemaFailure.js";
 
 /** Per-analyzer resolution policy, independent of any execution backend. */
@@ -60,21 +61,7 @@ function canonicalPath(repositoryRoot: string, relativePath: string): string {
       `Repository root must be absolute: ${JSON.stringify(repositoryRoot)}`,
     );
   }
-
-  const normalizedRoot = resolve(repositoryRoot);
-  const path = resolve(normalizedRoot, relativePath);
-  const containment = relative(normalizedRoot, path);
-  if (
-    containment === "" ||
-    containment === ".." ||
-    containment.startsWith(`..${sep}`) ||
-    isAbsolute(containment)
-  ) {
-    throw new Error(
-      `Analyzer policy path escapes repository root: ${path}`,
-    );
-  }
-  return path;
+  return assertWithinRoot(repositoryRoot, relativePath, { allowRoot: false });
 }
 
 /** The one canonical analyzer-policy artifact for a repository. */

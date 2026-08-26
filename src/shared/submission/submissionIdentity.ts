@@ -11,7 +11,8 @@
  * it. It replaces the two hand-rolled `resultPathFor` copies that carried the
  * same rule in two places.
  */
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
+import { resolveWithinRoot } from "../io/pathContainment.js";
 
 import { hashContent } from "../hash.js";
 import { stableStringify } from "../stableStringify.js";
@@ -113,15 +114,13 @@ export function resolveContainedPath(
   label: string,
 ): string {
   const absoluteBase = resolve(base);
-  const absoluteCandidate = isAbsolute(candidate)
-    ? resolve(candidate)
-    : resolve(absoluteBase, candidate);
-  const rel = relative(absoluteBase, absoluteCandidate);
-  const firstSegment = rel.split(/[\\/]/u)[0];
-  if (isAbsolute(rel) || firstSegment === "..") {
+  // Predicate from the ONE containment guard; only the error message (pinned
+  // by the submission-path tests) stays caller-specific.
+  const resolved = resolveWithinRoot(absoluteBase, candidate);
+  if (resolved === null) {
     throw new Error(`${label} must remain beneath ${absoluteBase}`);
   }
-  return absoluteCandidate;
+  return resolved;
 }
 
 /** Repository-relative, forward-slashed form of a contained absolute path. */

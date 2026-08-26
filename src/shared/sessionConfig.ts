@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { errorMessage } from "./io/json.js";
+import { assertWithinRoot } from "./io/pathContainment.js";
 import { formatSchemaFailure } from "./validation/schemaFailure.js";
 
 export const SESSION_INTENT_RELATIVE_PATH =
@@ -26,21 +27,9 @@ function canonicalIntentPath(repositoryRoot: string): string {
       `Repository root must be absolute: ${JSON.stringify(repositoryRoot)}`,
     );
   }
-
-  const normalizedRoot = resolve(repositoryRoot);
-  const configPath = resolve(normalizedRoot, SESSION_INTENT_RELATIVE_PATH);
-  const containment = relative(normalizedRoot, configPath);
-  if (
-    containment === "" ||
-    containment === ".." ||
-    containment.startsWith(`..${sep}`) ||
-    isAbsolute(containment)
-  ) {
-    throw new Error(
-      `Canonical session intent path escapes repository root: ${configPath}`,
-    );
-  }
-  return configPath;
+  return assertWithinRoot(repositoryRoot, SESSION_INTENT_RELATIVE_PATH, {
+    allowRoot: false,
+  });
 }
 
 function isMissingFileError(

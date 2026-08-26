@@ -9,9 +9,10 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { homedir } from "node:os";
 import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
+import { resolveWithinRoot } from "../io/pathContainment.js";
 import { runTrackedAsync, type RunTrackedResult } from "../tooling/exec.js";
 
 /**
@@ -259,8 +260,7 @@ function verifiedCachedExecutable(
     return null;
   }
   const executablePath = join(versionDir, manifest.executable_relative_path);
-  const containment = relative(versionDir, executablePath);
-  if (containment.startsWith("..") || isAbsolute(containment)) return null;
+  if (resolveWithinRoot(versionDir, executablePath) === null) return null;
   try {
     if (sha256(readFileSync(executablePath)) !== manifest.executable_sha256.toLowerCase()) {
       return null;

@@ -1,4 +1,4 @@
-import { hashContent, checkFileIntegrityRecords } from "audit-tools/shared";
+import { hashContent, checkFileIntegrityRecords, resolveWithinRoot } from "audit-tools/shared";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, isAbsolute, relative, resolve, sep } from "node:path";
 import {
@@ -155,11 +155,6 @@ export async function checkAffectedFileIntegrity(
   };
 }
 
-function isOutsideRoot(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate);
-  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
-}
-
 function planningBaselineError(
   affectedPath: string,
   reason: string,
@@ -188,7 +183,7 @@ function hashPlanningBaselineSync(
 
   const absoluteRoot = resolve(root);
   const absolutePath = resolve(absoluteRoot, affectedPath);
-  if (isOutsideRoot(absoluteRoot, absolutePath)) {
+  if (resolveWithinRoot(absoluteRoot, absolutePath) === null) {
     throw planningBaselineError(affectedPath, "path escapes the repository root");
   }
 
@@ -209,7 +204,7 @@ function hashPlanningBaselineSync(
   try {
     const physicalRoot = realpathSync(absoluteRoot);
     const physicalPath = realpathSync(absolutePath);
-    if (isOutsideRoot(physicalRoot, physicalPath)) {
+    if (resolveWithinRoot(physicalRoot, physicalPath) === null) {
       throw planningBaselineError(
         affectedPath,
         "resolved path escapes the repository root",

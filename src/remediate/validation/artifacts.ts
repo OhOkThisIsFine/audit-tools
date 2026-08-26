@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import {
   absoluteSubmissionPath,
   readJsonFile,
   readSubmissionLedger,
+  resolveWithinRoot,
 } from "audit-tools/shared";
 import { verificationReportPath } from "../../shared/io/auditToolsPaths.js";
 import type { RemediationState } from "../state/store.js";
@@ -208,10 +209,9 @@ function pathKey(path: string): string {
  * under `runs/`, so a caller filtering on it excludes rather than guesses.
  */
 function runDirectoryOf(runsDir: string, file: string): string | undefined {
-  const rel = relative(resolve(runsDir), resolve(file));
-  if (rel.length === 0 || isAbsolute(rel) || rel.startsWith("..")) {
-    return undefined;
-  }
+  const contained = resolveWithinRoot(runsDir, file, { allowRoot: false });
+  if (contained === null) return undefined;
+  const rel = relative(resolve(runsDir), contained);
   return rel.split(/[\\/]/u)[0];
 }
 
