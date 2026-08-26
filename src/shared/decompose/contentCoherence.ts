@@ -9,6 +9,7 @@
 import { z } from "zod";
 
 import { compareCodeUnits } from "../compareCodeUnits.js";
+import { toPosixPath } from "../paths.js";
 import { isRecord } from "../validation/basic.js";
 import { louvain, modularityOf, type Partition } from "./modularity.js";
 
@@ -176,10 +177,6 @@ const RELATION_EVIDENCE: Readonly<
   shared_file: "shared_file",
 });
 
-function normalizePath(value: string): string {
-  return value.replace(/\\/gu, "/");
-}
-
 function stableStrings(
   value: unknown,
   field: string,
@@ -239,7 +236,7 @@ function normalizeItems(value: unknown): NormalizedContentCoherenceItem[] {
         entry.file_paths,
         "file_paths",
         entry.id,
-        normalizePath,
+        toPosixPath,
       ),
       unit_ids: stableStrings(entry.unit_ids, "unit_ids", entry.id),
       tags: stableStrings(entry.tags, "tags", entry.id),

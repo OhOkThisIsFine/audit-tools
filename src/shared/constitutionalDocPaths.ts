@@ -46,6 +46,8 @@
 // the specific failure mode here). Paths compare with forward slashes (win32
 // backslashes are normalized first), so the set is OS-agnostic.
 
+import { normalizeRepoRelPath } from "./paths.js";
+
 /**
  * The canonical constitutional doc path list. Exact repo-relative paths, sorted
  * by content (path-sort) so the serialized order is stable and the parity
@@ -65,11 +67,6 @@ export const CONSTITUTIONAL_DOC_PATHS: readonly string[] = [
   "spec/audit/orchestration-policy.md",
   "spec/remediate/remediation-goals.md",
 ];
-
-/** Normalize a repo-relative path to forward slashes, no leading "./". */
-function normalizeRepoRelPath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//, "");
-}
 
 /**
  * Whether a repo-relative path names a constitutional doc. Exact match only —

@@ -9,7 +9,7 @@ import type {
   GraphBundle,
   Partition,
 } from "audit-tools/shared";
-import { clustersFromPartitions, decompose } from "audit-tools/shared";
+import { clustersFromPartitions, decompose, toPosixPath } from "audit-tools/shared";
 import type { RepoManifest } from "../types.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import {
@@ -34,10 +34,6 @@ export function isDocIntentFile(path: string, status: string): boolean {
 }
 /** Threshold at which an intent source's partitions collapse into boundary groups. */
 const INTENT_BOUNDARY_FRACTION = 0.5;
-
-function toPosix(path: string): string {
-  return path.replace(/\\/g, "/");
-}
 
 export interface BuildStructureDecompositionParams {
   /** Repo root (absolute); when absent, comment/doc extraction is skipped. */
@@ -74,7 +70,7 @@ export async function buildStructureDecomposition(
   const universe: string[] = [];
   const docFiles: string[] = [];
   for (const item of params.disposition.files) {
-    const path = toPosix(item.path);
+    const path = toPosixPath(item.path);
     if (item.status === "included") universe.push(path);
     if (isDocIntentFile(path, item.status)) {
       docFiles.push(path);

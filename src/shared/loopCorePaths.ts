@@ -24,6 +24,8 @@
 // pattern matches that exact repo-relative path. Paths are compared with forward
 // slashes (win32 backslashes are normalized first), so the set is OS-agnostic.
 
+import { normalizeRepoRelPath } from "./paths.js";
+
 /**
  * The canonical loop-core pattern list. Directory prefixes end in "/"; every
  * other entry is an exact repo-relative file path. Sorted by content (path-sort)
@@ -50,11 +52,6 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/shared/engine/",
   "src/shared/submission/",
 ];
-
-/** Normalize a repo-relative path to forward slashes, no leading "./". */
-function normalizeRepoRelPath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//, "");
-}
 
 /**
  * Whether a repo-relative path is in the loop-core set. A "/"-terminated pattern

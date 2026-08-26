@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { hashContent } from "audit-tools/shared";
+import { hashContent, toPosixPath } from "audit-tools/shared";
 import { join, relative, resolve } from "node:path";
 import type { RepoManifest } from "../types.js";
 import { buildRepoManifest } from "./fileInventory.js";
@@ -26,14 +26,10 @@ const DEFAULT_IGNORES = [
   "coverage",
 ];
 
-function normalizePath(path: string): string {
-  return path.replaceAll("\\", "/");
-}
-
 function shouldIgnore(relativePath: string, ignores: string[]): boolean {
-  const normalized = normalizePath(relativePath);
+  const normalized = toPosixPath(relativePath);
   return ignores.some((ignore) => {
-    const value = normalizePath(ignore);
+    const value = toPosixPath(ignore);
     return (
       normalized === value ||
       normalized.startsWith(`${value}/`) ||
@@ -76,7 +72,7 @@ async function walk(
 
   for (const entry of entries) {
     const absolutePath = join(current, entry.name);
-    const relativePath = normalizePath(relative(ctx.root, absolutePath));
+    const relativePath = toPosixPath(relative(ctx.root, absolutePath));
     if (!relativePath || shouldIgnore(relativePath, ctx.ignores)) {
       continue;
     }

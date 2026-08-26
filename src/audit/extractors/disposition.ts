@@ -4,7 +4,7 @@ import type {
   SpawnSyncReturns,
 } from "node:child_process";
 import type { RepoManifest } from "../types.js";
-import { normalizeRepoPath } from "audit-tools/shared";
+import { normalizeRepoPath, toPosixPath } from "audit-tools/shared";
 import type { FileDisposition, FileDispositionItem, FileDispositionStatus } from "audit-tools/shared";
 import {
   isNodeModulesOrGit,
@@ -189,9 +189,6 @@ export interface BuildFileDispositionOptions {
   lsFilesSpawn?: GitSpawn;
 }
 
-function toPosixPath(path: string): string {
-  return path.replace(/\\/g, "/");
-}
 
 type VcsIgnoreEvaluation =
   | { ok: true; ignored: Set<string> }

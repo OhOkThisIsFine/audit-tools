@@ -7,6 +7,7 @@ import {
   hashAnalyzerSnippet,
   type AnalyzerLeadProvenance,
 } from "./provenance.js";
+import { normalizeRepoRelPath } from "../paths.js";
 import { normalizeRepoPath } from "../validation/findingGrounding.js";
 
 type SeverityEnum = "critical" | "high" | "medium" | "low" | "info";
@@ -28,15 +29,6 @@ function normalizeExternalSeverity(value: string | undefined): SeverityEnum {
 }
 
 /**
- * Separator-normalized, `./`-stripped form. This is `normalizeRepoPath` WITHOUT the
- * case fold — the fold is correct for membership matching and wrong for a path that
- * will be persisted and later re-read from a case-sensitive filesystem.
- */
-function posixify(path: string): string {
-  return path.trim().replace(/\\/g, "/").replace(/^\.\//, "");
-}
-
-/**
  * Repo-relative form of an analyzer-reported path, case PRESERVED.
  *
  * Seven of the twelve candidates hand their tool the ABSOLUTE repository root as a
@@ -54,9 +46,14 @@ export function toRepoRelativeAnalyzerPath(
   repoRoot: string | undefined,
   rawPath: string,
 ): string {
-  const path = posixify(rawPath);
+  // normalizeRepoRelPath is `normalizeRepoPath` WITHOUT the case fold — the fold
+  // is correct for membership matching and wrong for a path that is persisted
+  // and later re-read from a case-sensitive filesystem. Trim stays caller-side:
+  // analyzer output can carry stray whitespace the shared token helper must not
+  // assume.
+  const path = normalizeRepoRelPath(rawPath.trim());
   if (!repoRoot || path.length === 0) return path;
-  const root = posixify(repoRoot).replace(/\/+$/, "");
+  const root = normalizeRepoRelPath(repoRoot.trim()).replace(/\/+$/, "");
   if (root.length === 0) return path;
   const foldedRoot = normalizeRepoPath(root);
   const foldedPath = normalizeRepoPath(path);

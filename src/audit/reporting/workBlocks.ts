@@ -18,6 +18,7 @@ import {
   type ContentCoherenceTrace,
 } from "../../shared/decompose/contentCoherence.js";
 import { deriveWorkBlockSeams } from "../../shared/decompose/workBlockSeams.js";
+import { toPosixPath } from "../../shared/paths.js";
 import { severityRank } from "./findingRanks.js";
 
 export type { WorkBlock } from "audit-tools/shared";
@@ -37,10 +38,6 @@ export interface WorkBlockPartition {
   seams: WorkBlockSeam[];
 }
 
-function normalizePath(path: string): string {
-  return path.replace(/\\/gu, "/");
-}
-
 function stableStrings(values: Iterable<string>): string[] {
   return [...new Set([...values])].sort(compareCodeUnits);
 }
@@ -52,7 +49,7 @@ function canonicalSizeIndex(
   for (const [path, bytes] of Object.entries(sizeIndex ?? {}).sort(([left], [right]) =>
     compareCodeUnits(left, right),
   )) {
-    const key = normalizePath(path);
+    const key = toPosixPath(path);
     const finiteBytes = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
     normalized.set(key, Math.max(normalized.get(key) ?? 0, finiteBytes));
   }
@@ -65,7 +62,7 @@ function advisoryTokenEstimate(
   sizes: ReadonlyMap<string, number>,
 ): number {
   const physicalBytes = files.reduce(
-    (sum, path) => sum + (sizes.get(normalizePath(path)) ?? 0),
+    (sum, path) => sum + (sizes.get(toPosixPath(path)) ?? 0),
     0,
   );
   return (
@@ -81,7 +78,7 @@ function buildFileUnitMap(
   const map = new Map<string, Set<string>>();
   for (const unit of unitManifest?.units ?? []) {
     for (const path of unit.files) {
-      const normalized = normalizePath(path);
+      const normalized = toPosixPath(path);
       const unitIds = map.get(normalized) ?? new Set<string>();
       unitIds.add(unit.unit_id);
       map.set(normalized, unitIds);
@@ -96,13 +93,13 @@ function unitsForFinding(
 ): string[] {
   return stableStrings(
     finding.affected_files.flatMap((file) => [
-      ...(fileUnitMap.get(normalizePath(file.path)) ?? []),
+      ...(fileUnitMap.get(toPosixPath(file.path)) ?? []),
     ]),
   );
 }
 
 function findingFileSet(finding: Finding): Set<string> {
-  return new Set(finding.affected_files.map((file) => normalizePath(file.path)));
+  return new Set(finding.affected_files.map((file) => toPosixPath(file.path)));
 }
 
 function pairRelationship(
@@ -149,8 +146,8 @@ function relationshipsForFindings(params: {
     ...(params.graphBundle?.graphs.references ?? []),
   ];
   for (const edge of graphEdges) {
-    const fromIds = byFile.get(normalizePath(edge.from)) ?? [];
-    const toIds = byFile.get(normalizePath(edge.to)) ?? [];
+    const fromIds = byFile.get(toPosixPath(edge.from)) ?? [];
+    const toIds = byFile.get(toPosixPath(edge.to)) ?? [];
     for (const fromId of fromIds) {
       for (const toId of toIds) add(fromId, toId, "call_adjacent");
     }
@@ -158,7 +155,7 @@ function relationshipsForFindings(params: {
 
   for (const flow of params.criticalFlows?.flows ?? []) {
     const flowFiles = new Set(
-      [...flow.entrypoints, ...flow.paths].map(normalizePath),
+      [...flow.entrypoints, ...flow.paths].map(toPosixPath),
     );
     const members = params.findings
       .filter((finding) =>
@@ -194,7 +191,7 @@ function blockDependencies(params: {
   const blocksByFile = new Map<string, string[]>();
   for (const block of params.blocks) {
     for (const path of block.owned_files) {
-      const normalized = normalizePath(path);
+      const normalized = toPosixPath(path);
       const blockIds = blocksByFile.get(normalized) ?? [];
       blockIds.push(block.id);
       blocksByFile.set(normalized, blockIds);
@@ -211,8 +208,8 @@ function blockDependencies(params: {
     ...(params.graphBundle?.graphs.calls ?? []),
     ...(params.graphBundle?.graphs.references ?? []),
   ]) {
-    for (const from of blocksByFile.get(normalizePath(edge.from)) ?? []) {
-      for (const to of blocksByFile.get(normalizePath(edge.to)) ?? []) {
+    for (const from of blocksByFile.get(toPosixPath(edge.from)) ?? []) {
+      for (const to of blocksByFile.get(toPosixPath(edge.to)) ?? []) {
         addCandidate(from, to);
       }
     }
@@ -221,7 +218,7 @@ function blockDependencies(params: {
     const ordered: string[] = [];
     const seen = new Set<string>();
     for (const path of [...flow.entrypoints, ...flow.paths]) {
-      for (const blockId of blocksByFile.get(normalizePath(path)) ?? []) {
+      for (const blockId of blocksByFile.get(toPosixPath(path)) ?? []) {
         if (seen.has(blockId)) continue;
         seen.add(blockId);
         ordered.push(blockId);
@@ -294,7 +291,7 @@ export function buildWorkBlockPartition(
     )[0]!.severity;
     const ownedFiles = stableStrings(
       findings.flatMap((finding) =>
-        finding.affected_files.map((file) => normalizePath(file.path)),
+        finding.affected_files.map((file) => toPosixPath(file.path)),
       ),
     );
     const block: WorkBlock = {

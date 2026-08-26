@@ -25,6 +25,7 @@
 import { join } from "node:path";
 import type { CouplingEdge } from "./dataStateCoupling.js";
 import { DEFAULT_MAX_BYTES, defaultReadFileText } from "./readFileText.js";
+import { toPosixPath } from "../../shared/paths.js";
 
 interface CommentSyntax {
   line: string[];
@@ -205,11 +206,6 @@ export function stripCommentText(source: string, path: string): string {
     .join("\n");
 }
 
-/** Normalize a repo path to forward slashes for matching. */
-function toPosix(path: string): string {
-  return path.replace(/\\/g, "/");
-}
-
 const GENERIC_STEMS = new Set([
   "index",
   "types",
@@ -282,7 +278,7 @@ export async function deriveCommentDecomposition(
   const read =
     params.readFileText ?? ((abs: string) => defaultReadFileText(abs, maxBytes));
 
-  const files = [...new Set(params.files.map(toPosix))].sort((a, b) =>
+  const files = [...new Set(params.files.map(toPosixPath))].sort((a, b) =>
     a.localeCompare(b),
   );
 
@@ -313,7 +309,7 @@ export async function deriveCommentDecomposition(
     scannedFiles += 1;
     const comments = extractCommentText(text, file);
     if (comments.length === 0) continue;
-    const posixComments = toPosix(comments);
+    const posixComments = toPosixPath(comments);
     const referenced = new Set<string>();
     for (const token of tokens) {
       const owner = tokenOwner.get(token)!;
@@ -360,10 +356,10 @@ export async function deriveDocGroups(
   const maxBytes = params.maxBytes ?? DEFAULT_MAX_BYTES;
   const read =
     params.readFileText ?? ((abs: string) => defaultReadFileText(abs, maxBytes));
-  const codeFiles = [...new Set(params.codeFiles.map(toPosix))].sort((a, b) =>
+  const codeFiles = [...new Set(params.codeFiles.map(toPosixPath))].sort((a, b) =>
     a.localeCompare(b),
   );
-  const docFiles = [...new Set(params.docFiles.map(toPosix))].sort((a, b) =>
+  const docFiles = [...new Set(params.docFiles.map(toPosixPath))].sort((a, b) =>
     a.localeCompare(b),
   );
 
@@ -385,7 +381,7 @@ export async function deriveDocGroups(
   for (const doc of docFiles) {
     const text = await read(join(params.root, doc));
     if (text === undefined) continue;
-    const posixText = toPosix(text);
+    const posixText = toPosixPath(text);
     const named = new Set<string>();
     for (const token of tokens) {
       const owner = tokenOwner.get(token)!;

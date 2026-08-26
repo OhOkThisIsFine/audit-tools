@@ -14,17 +14,13 @@ import type {
   GraphBundle,
   Partition,
 } from "audit-tools/shared";
-import { resolutionSweep } from "audit-tools/shared";
+import { resolutionSweep, toPosixPath } from "audit-tools/shared";
 import { allGraphEdges } from "../extractors/graphSignals.js";
 import { GIT_CO_CHANGE_CATEGORY } from "../extractors/gitHistory.js";
 import {
   deriveDataStateCoupling,
   type CouplingEdge,
 } from "../extractors/dataStateCoupling.js";
-
-function toPosix(path: string): string {
-  return path.replace(/\\/g, "/");
-}
 
 // U+001F (unit separator): paths never contain it, so joining on it is
 // injective — unlike a space join, where ("a b.ts", "c.ts") and ("a",
@@ -47,8 +43,8 @@ function weightedGraph(
   const inScope = new Set(universe);
   const byPair = new Map<string, { lo: string; hi: string; weight: number }>();
   for (const edge of edges) {
-    const a = toPosix(edge.a);
-    const b = toPosix(edge.b);
+    const a = toPosixPath(edge.a);
+    const b = toPosixPath(edge.b);
     if (a === b || !inScope.has(a) || !inScope.has(b)) continue;
     if (!(edge.weight > 0)) continue;
     const lo = a.localeCompare(b) <= 0 ? a : b;
@@ -101,7 +97,7 @@ function partitionFromGroups(
     const rep = [...group].sort((a, b) => a.localeCompare(b))[0];
     if (!rep) continue;
     for (const member of group) {
-      const m = toPosix(member);
+      const m = toPosixPath(member);
       if (partition.has(m)) partition.set(m, rep);
     }
   }
@@ -144,7 +140,7 @@ const DEFAULT_DIRECTORY_DEPTHS = [1, 2, 3];
 export function buildStructureSources(
   input: StructureSourcesInput,
 ): DecompositionSource[] {
-  const universe = [...new Set(input.universe.map(toPosix))].sort((a, b) =>
+  const universe = [...new Set(input.universe.map(toPosixPath))].sort((a, b) =>
     a.localeCompare(b),
   );
   const sources: DecompositionSource[] = [];

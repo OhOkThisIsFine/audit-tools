@@ -506,6 +506,9 @@ export { recoverSubmission } from "./submission/handRecovery.js";
 // The ONE code-unit comparator every persisted/hashed sort orders by.
 export { compareCodeUnits } from "./compareCodeUnits.js";
 
+// The two repo-path normalization behaviours (posix render / repo-rel token).
+export { normalizeRepoRelPath, toPosixPath } from "./paths.js";
+
 // The ONE host-handoff boundary both orchestrators draw from: run-scoped path
 // resolution, the bound submission-path rule, envelope/item/binding validation,
 // result-map identity, and the exact-key/commit/sha256 predicates both ingests

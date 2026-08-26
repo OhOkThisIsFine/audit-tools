@@ -23,7 +23,7 @@
  */
 
 import type { Finding } from "audit-tools/shared";
-import { readOptionalJsonFile, writeJsonFile, findingIsGrounded, discardOnSchemaVersionMismatch } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, findingIsGrounded, discardOnSchemaVersionMismatch, normalizeRepoRelPath } from "audit-tools/shared";
 import { intakePaths } from "./intake.js";
 
 export const INTAKE_RISK_SIGNAL_SCHEMA_VERSION =
@@ -171,9 +171,6 @@ export interface IntakeRiskSignal {
 }
 
 /** Normalize a path for pattern matching: forward slashes, no leading `./`. */
-function normalizePathForMatch(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//, "");
-}
 
 export interface ComputeIntakeRiskInput {
   /** Best-available affected-file list at intake (repo-relative paths). */
@@ -199,7 +196,7 @@ export function computeIntakeRiskSignal(
   const highFileCount = input.config?.highFileCount ?? DEFAULT_HIGH_FILE_COUNT;
 
   const distinctFiles = Array.from(
-    new Set(input.affectedFiles.map(normalizePathForMatch).filter((p) => p.length > 0)),
+    new Set(input.affectedFiles.map(normalizeRepoRelPath).filter((p) => p.length > 0)),
   );
   const fileCount = distinctFiles.length;
 
@@ -331,7 +328,7 @@ export function decompositionRiskEvidence(
 ): RiskEscalationEvidence | undefined {
   const patterns = input.config?.pathRiskPatterns ?? DEFAULT_PATH_RISK_PATTERNS;
   const files = Array.from(
-    new Set(input.fileScopes.map(normalizePathForMatch).filter((p) => p.length > 0)),
+    new Set(input.fileScopes.map(normalizeRepoRelPath).filter((p) => p.length > 0)),
   );
   const matched: string[] = [];
   for (const family of patterns) {

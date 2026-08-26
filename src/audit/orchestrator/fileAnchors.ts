@@ -1,5 +1,6 @@
 import type { ExternalAnalyzerResults, AnalyzerLeadProvenance } from "audit-tools/shared";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
+import { normalizeRepoRelPath } from "audit-tools/shared";
 
 export type FileAnchorKind =
   | "boundary"
@@ -134,10 +135,6 @@ const SYMBOL_PATTERNS: Array<{ kind: FileAnchorKind; pattern: RegExp; label: str
   },
 ];
 
-function normalizePath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//, "");
-}
-
 function truncate(value: string, maxLength: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > maxLength
@@ -176,7 +173,7 @@ export function buildAnalyzerSignalAnchorIndex(
   const grouped = new Map<string, ExternalAnalyzerResults["results"]>();
   for (const tool of externalAnalyzerResults ?? []) {
     for (const result of tool.results ?? []) {
-      const key = normalizePath(result.path).toLowerCase();
+      const key = normalizeRepoRelPath(result.path).toLowerCase();
       const bucket = grouped.get(key);
       if (bucket) {
         bucket.push(result);
@@ -217,14 +214,14 @@ export function analyzerSignalAnchorsForPath(
   path: string,
   index: AnalyzerSignalAnchorIndex | undefined,
 ): FileAnchor[] {
-  return index?.get(normalizePath(path).toLowerCase()) ?? [];
+  return index?.get(normalizeRepoRelPath(path).toLowerCase()) ?? [];
 }
 
 function collectGraphEdges(graphBundle: GraphBundle | undefined, path: string): GraphEdge[] {
   if (!graphBundle?.graphs) {
     return [];
   }
-  const normalizedPath = normalizePath(path).toLowerCase();
+  const normalizedPath = normalizeRepoRelPath(path).toLowerCase();
   const edges: GraphEdge[] = [];
   // Typed as `string` (not the literal union) so the lookup resolves through the
   // `[key: string]: unknown` index signature on `graphs` — the loop body then
@@ -243,8 +240,8 @@ function collectGraphEdges(graphBundle: GraphBundle | undefined, path: string): 
         typeof record.from === "string" &&
         typeof record.to === "string"
       ) {
-        const from = normalizePath(record.from).toLowerCase();
-        const to = normalizePath(record.to).toLowerCase();
+        const from = normalizeRepoRelPath(record.from).toLowerCase();
+        const to = normalizeRepoRelPath(record.to).toLowerCase();
         if (from === normalizedPath || to === normalizedPath) {
           edges.push({
             from: record.from,
@@ -348,7 +345,7 @@ export function buildFileAnchorSummary(params: {
 }): FileAnchorSummary {
   const anchors: FileAnchor[] = [];
   const seen = new Set<string>();
-  const path = normalizePath(params.path);
+  const path = normalizeRepoRelPath(params.path);
   const lines = params.content.split(/\r?\n/);
   let symbolCount = 0;
   let routeCount = 0;
@@ -393,7 +390,7 @@ export function buildFileAnchorSummary(params: {
       kind: "graph",
       name: edge.kind ?? "edge",
       detail:
-        normalizePath(edge.from).toLowerCase() === path.toLowerCase()
+        normalizeRepoRelPath(edge.from).toLowerCase() === path.toLowerCase()
           ? `outbound: ${edge.to}`
           : `inbound: ${edge.from}`,
     });

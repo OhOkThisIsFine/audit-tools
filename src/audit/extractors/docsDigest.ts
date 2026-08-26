@@ -12,15 +12,12 @@ import type { FileDisposition } from "audit-tools/shared";
 import { isDocIntentFile } from "../decompose/buildStructureDecomposition.js";
 import type { DocsDigest, DocsDigestEntry } from "../types/docsDigest.js";
 import { DEFAULT_MAX_BYTES, defaultReadFileText } from "./readFileText.js";
+import { toPosixPath } from "../../shared/paths.js";
 
 /** Selection cap: how many docs the digest carries (budget-context rule). */
 const DEFAULT_MAX_DOCS = 12;
 /** Per-doc excerpt cap in characters. */
 const DEFAULT_MAX_EXCERPT_CHARS = 1_000;
-
-function toPosix(path: string): string {
-  return path.replace(/\\/g, "/");
-}
 
 function pathDepth(path: string): number {
   return path.split("/").length;
@@ -84,7 +81,7 @@ export async function buildDocsDigest(
     ...new Set(
       params.disposition.files
         .filter((file) => isDocIntentFile(file.path, file.status))
-        .map((file) => toPosix(file.path)),
+        .map((file) => toPosixPath(file.path)),
     ),
   ].sort((a, b) => pathDepth(a) - pathDepth(b) || a.localeCompare(b));
 
