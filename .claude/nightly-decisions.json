@@ -1593,7 +1593,9 @@
     "answer": "Build the registry with the reconciliation leg (a prompt builder under src that no row claims is a red build) and both escapes — projection rows and declared-gap rows.",
     "subject": "",
     "path": "tests/shared/prompt-renders-its-contract.test.ts",
-    "decided_at": "2026-08-23T23:16:48.284Z"
+    "decided_at": "2026-08-23T23:16:48.284Z",
+    "completed_at": "2026-08-26T07:06:55.819Z",
+    "completed_ref": "25036a5c"
   },
   "26e2d10e4569b448": {
     "disposition": "settled",
@@ -1645,7 +1647,9 @@
     "answer": "Typecheck scripts/ instead: do not declare the gap, close it — bring scripts/ under a tsconfig so the unchecked set is empty and needs no declaration.",
     "subject": "declare the tracked trees no typechecker reaches — pick the mechanism, or accept the absence",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-25T03:38:35.586Z"
+    "decided_at": "2026-08-25T03:38:35.586Z",
+    "completed_at": "2026-08-26T07:06:55.863Z",
+    "completed_ref": "2a1faa1f"
   },
   "c293f51214b487a6": {
     "disposition": "settled",
