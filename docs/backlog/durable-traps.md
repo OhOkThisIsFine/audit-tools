@@ -13,6 +13,15 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **`git add -A` in a SHARED checkout commits a CONCURRENT session's files under your message
+  (2026-08-26).** Two sessions work this same working tree. A `git add -A` swept four staged files
+  belonging to another session's P45 proposal into a commit about something else and pushed them,
+  so `git log` now attributes that session's work to this one and those files' only commit carries
+  a message that never mentions them. The closeout gate already partitions FOREIGN dirt (present at
+  session start) from session dirt and prints “leave it alone” — but that is a Stop-TIME REPORT,
+  not a staging refusal, so nothing stands between `git add -A` and the push. Stage EXPLICIT paths
+  here, and diff the staged set against what you actually touched before committing.
+
 - **Generating code through a Bash heredoc loses ONE level of backslash escaping (2026-08-26).**
   A `\n` written into the tool-call JSON arrives in the heredoc body as a real backslash-n, and
   the Python or node string literal that receives it then turns it into an actual NEWLINE. The
