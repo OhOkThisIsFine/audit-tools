@@ -5,49 +5,28 @@
 
 ## Live state
 
-- Published state: **v0.49.0** is the last tag, is live on npm (`latest`), and is what the global
-  bins run after the manual postinstall. The canonical release run is **32990705280** (gate + 4
-  test shards + trusted publish, all green). Its `release` event arrived ~13 minutes late, the
-  release script timed out at 10 and exited 1 AFTER tagging — the recovery story and the property
-  to build live in the new `docs/backlog/open-bugs.md` entry on the await-run timeout. `main` is
-  in sync with the remote.
-- v0.49.0 is the **shared-helper consolidation lap** (10 commits, `6403e766..61b9aed9`): one home
-  each for `compareCodeUnits`, `isRecord`, `hashContent`, the root-containment predicate, and the
-  two path normalizers; `localeCompare` eliminated from `src/` entirely (one-time deliberate
-  persisted-order churn — artifacts re-derive); JSONC comments through the vetted
-  `strip-json-comments`; and the data-driven `check:shared-primitives` gate (verify:checks,
-  pre-commit reach on src, guard-reach registered, contract-tested — measured red at 231
-  violations before the lap, zero after). Backlog entries for the containment forks, re-rolled
-  primitives, ICU ordering, the JSONC scanner, and the lockfile mismatch are DELETED as enforced
-  or fixed.
-- The end-of-sprint hand-back pipeline was repaired at `698725bc`: the Stop challenge contradicted
-  the renderer's input contract, the blank `--template` could not be rendered, the render record was
-  neither session-scoped nor content-bound, and the section prose named a key that does not exist.
-  The record is now `version: 2` and binds to a worktree tree id. No `src/` path changed, so v0.49.0
-  remains the shipped artifact. Measurement, and the one residual stated rather than closed:
-  `docs/reviews/closeout-generation-failure-2026-08-26.md`.
-- ⚠ `tests/audit/host-delegation-fold-carries-advisories.test.ts` stays deliberately
-  UN-baselined (owner, 2026-08-24): a parallel-load timeout there is re-checked by a solo rerun,
-  never re-baselined — a known-flaky record would launder a genuine regression. Do not "fix" it.
-- The detached host runner is NOT alive and must stay down.
+- **Package:** the repository version remains `0.49.0` and both global command shims resolve.
+  This sprint changes documentation only, so it requires no tag, package publish, or global-bin
+  reinstall.
+- **Audits:** the structural and philosophy simplification reports are complete in
+  `docs/reviews/complexity-reduction-audit-2026-08-26.md` and
+  `docs/reviews/philosophy-simplification-audit-2026-08-26.md`. Production code is unchanged.
+- **Repository:** at hand-back, `main` and `origin/main` are synchronized and the required checks
+  are green.
 
 ## Immediate next
 
-Nothing pending. The closeout-pipeline repair is landed and verified — `verify:checks`, the full
-suite, and CI all green on `698725bc` — and needs no release, because it touches no `src/` path.
-The consolidation lap before it shipped as v0.49.0. Every open item lives in `docs/backlog/`;
-nothing is pinned immediate-next.
-
-Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
-never the default two-minute timeout, which kills it mid-gate and wedges `phase.lock` for every
-later call.
+Nothing pending. The reports contain recommendations, not an implementation commitment. Every
+accepted open item belongs in `docs/backlog/`; none is pinned as immediate next.
 
 ## Deliberate state, not bugs
 
-- The item-6 checkJs sweep is TYPE-ONLY by contract: JSDoc casts/typedefs and safe narrowing, plus
-  one unreachable narrowing throw in `scripts/release-and-publish.mjs` placed to keep the pinned
-  `resolveReleasePushRefspec(releaseGate)` source contract intact. A behavioral diff there is a
-  bug, not a refactor.
+- `tests/audit/host-delegation-fold-carries-advisories.test.ts` remains deliberately unbaselined:
+  its parallel-load timeout passes alone and is tracked as a known flake, so rebaselining it would
+  hide a real regression.
+- The detached host runner is intentionally not running.
+- The item-6 checkJs sweep remains type-only by contract; behavioral changes are bugs, not part of
+  that refactor.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
