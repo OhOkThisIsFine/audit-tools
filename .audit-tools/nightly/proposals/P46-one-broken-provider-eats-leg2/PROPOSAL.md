@@ -1,8 +1,8 @@
 # P46 — one broken provider key silently eats 39% of leg 2's coverage
 
-Nightly leg 3, 2026-08-26. Propose-only. No patch: the primary fix is the owner's and lives
-outside this repo. The fallback mechanism is described but deliberately not written, because
-writing it first would be building the guard instead of removing the trap.
+Nightly leg 3, 2026-08-26. Propose-only. **No patch, and none is wanted**: the fix is a
+credential repair outside this repo, and the one code change that suggests itself is already
+forbidden by a standing decision in the file it would touch — see *The fix*.
 
 ## What happened tonight
 
@@ -72,25 +72,23 @@ only thing that can decrypt the other eleven keys.
 
 That single action recovers essentially all of tonight's lost coverage, and no code changes.
 
-**Fallback, only if the general case is worth guarding:** `triage-backlog.mjs` counts an
-`HTTP 502 provider_error` as `errored` and moves to the next entry. It could instead re-attempt
-that entry once, and the router's own failover would land it elsewhere. That converts *"one
-broken provider eats the sweep"* into *"one broken provider costs some latency"*, for any
-provider, not just this one.
+**The obvious fallback is already refused, and the refusal is right.** `triage-backlog.mjs`
+counts an `HTTP 502 provider_error` as `errored` and moves on. The reflex is to re-attempt the
+entry so the router's failover lands it elsewhere. That file forbids it in as many words:
 
-It is written second on purpose. The trap here is a bad credential, and a retry loop that makes
-a bad credential survivable is exactly the kind of guard that lets the real defect sit for
-another seventeen days. Build it only if the owner wants the sweep robust to *any* provider
-failing, which is a different and legitimate goal.
+> Deliberately NO retry/backoff anywhere in this lane: failover is the router's job, and
+> duplicating it in the caller would hide a router defect.
+
+Tonight is that decision being *vindicated*, not violated. A caller-side retry would have
+absorbed 43 failures into latency, the classified count would have looked normal, and the
+broken credential would have gone another seventeen days unnoticed. The sweep reported the
+defect exactly as designed; what failed is that nobody read the report.
+
+So there is no code change to propose here. The single action is the credential.
 
 ## False-positive surface
 
-None for the primary fix — it is a credential repair, not a detector.
-
-For the fallback: a retry doubles the request cost of a genuinely-failing entry and could mask
-a systemic outage as slowness. If it is built, the coverage stamp must record retries
-separately from first-attempt successes, or the same "reported coverage overstates real
-coverage" shape returns one level up.
+None. The primary fix is a credential repair, not a detector, and no mechanism is proposed.
 
 ## Evidence
 
@@ -100,4 +98,4 @@ coverage" shape returns one level up.
 | 111 attempted, 66 classified, 45 errored | `.audit-tools/nightly/triage-2026-08-26-coverage.json` |
 | per-night `(CF)` counts | `.audit-tools/nightly/triage-2026-08-2{0,1,3,4}.log` |
 | the key has been known-broken since 2026-08-09 | `~/.claude/CLAUDE.md`, *Free-provider lane* |
-| the sweep records an error and moves on | `scripts/shared/triage-backlog.mjs` |
+| the sweep records an error and moves on, and forbids a caller-side retry | `scripts/shared/triage-backlog.mjs` |

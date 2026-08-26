@@ -36,6 +36,21 @@ accepted open item belongs in `docs/backlog/`; none is pinned as immediate next.
   that refactor.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **12 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `docs-1` — Stop hard-coding the git remote name in the skills, or keep spelling it out?
+  - `docs-2` — instruction-file edit: replace CLAUDE.md's hand-listed pre-commit legs with a pointer to the registry
+  - `docs-3` — instruction-file edit: the CLAUDE.md Commands block omits the check:scripts typecheck gate
+  - `docs-4` — constitutional doc: the goals doc names one review gate where the code has two, on different paths
+  - `docs-5` — The closeout template claims a single-sourced friction vocabulary that is actually a hand-copy
+  - `docs-6` — instruction-file edit: CLAUDE.md re-lists the eleven lenses that LensSchema already single-sources
+  - `docs-7` — Three spec/audit docs hand-mirror registries whose sibling view is already generated
+  - `docs-8` — The audit loader mandates --root on every command; CLAUDE.md calls a needed manual flag a bug signal
+  - `docs-9` — The philosophy map points the universal-host-prompts conviction at a home that does not state it
+  - `docs-10` — The audit workflow design states provider cache accounting the tool gave up owning
+  - `sol-1` — P45: extend check:memory-citations to the [[name]] form memories actually cite each other in
+  - `sol-2` — P46: one provider with a known-broken key took 43 of tonight's 45 leg-2 errors
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
