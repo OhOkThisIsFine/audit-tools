@@ -5,34 +5,31 @@
 
 ## Live state
 
-- Published state: **v0.48.0** is the last tag, is live on npm (CI run 32953603424 green,
-  gate + 4 test shards + trusted publish), and is what the global bins run after the manual
-  postinstall. `main` is in sync with the remote. v0.47.0 was burned and cleaned
-  (`gh release delete --cleanup-tag`): its CI gate red was a dist-masked missing paths mapping in
-  `tsconfig.scripts.json`, fixed in `5c4dcaa0`. No release is owed.
-- The 2026-08-25 decision queue is fully executed and recorded (`answer.mjs --list` reports every
-  tracked answer done): sol-2 `66df2416`, sol-1 `e624e7b3`, docs-4 `6eb71c06`, P41 `25036a5c`,
-  the sidecar reader `0287e93d`, the scripts typecheck `2a1faa1f`.
-- ⚠ `tests/audit/host-delegation-fold-carries-advisories.test.ts` timed out at 120s once under a
-  full `npx vitest run tests/audit` and passed alone — the known load/hermeticity class, and it does
-  NOT reach either item's changed code (its `runtime_validation_tasks` list is empty). The flake
-  baseline correctly left it UNRECOGNIZED, which keeps it red. It matters because ingestion reruns
-  that exact raw command with no retry, so a flaky red there refuses a good result.
-  OWNER DECISION (2026-08-24): leave it RED — the baseline is deliberately NOT written. Both
-  observations the record needs now exist (a parallel failure and a solo pass), so
-  `npm run test:rebaseline-flakes` would be legitimate; recording it was declined because a
-  known-flaky record is also what would launder a genuine regression, and a red that is re-checked
-  costs less than a green that is trusted wrongly. Do not "fix" this by re-baselining.
+- Published state: **v0.49.0** is the last tag, is live on npm (`latest`), and is what the global
+  bins run after the manual postinstall. The canonical release run is **32990705280** (gate + 4
+  test shards + trusted publish, all green). Its `release` event arrived ~13 minutes late, the
+  release script timed out at 10 and exited 1 AFTER tagging — the recovery story and the property
+  to build live in the new `docs/backlog/open-bugs.md` entry on the await-run timeout. `main` is
+  in sync with the remote.
+- v0.49.0 is the **shared-helper consolidation lap** (10 commits, `6403e766..61b9aed9`): one home
+  each for `compareCodeUnits`, `isRecord`, `hashContent`, the root-containment predicate, and the
+  two path normalizers; `localeCompare` eliminated from `src/` entirely (one-time deliberate
+  persisted-order churn — artifacts re-derive); JSONC comments through the vetted
+  `strip-json-comments`; and the data-driven `check:shared-primitives` gate (verify:checks,
+  pre-commit reach on src, guard-reach registered, contract-tested — measured red at 231
+  violations before the lap, zero after). Backlog entries for the containment forks, re-rolled
+  primitives, ICU ordering, the JSONC scanner, and the lockfile mismatch are DELETED as enforced
+  or fixed.
+- ⚠ `tests/audit/host-delegation-fold-carries-advisories.test.ts` stays deliberately
+  UN-baselined (owner, 2026-08-24): a parallel-load timeout there is re-checked by a solo rerun,
+  never re-baselined — a known-flaky record would launder a genuine regression. Do not "fix" it.
 - The detached host runner is NOT alive and must stay down.
-- ⚠ **A second session has been committing to this checkout.** Three commits between `28912720`
-  and `521d43b0` were not mine, and one of them (`cc73faa9`) fixed a real `check:lint` red I had
-  left on main. Run `git log` before assuming the tree is only yours, and run `check:lint` — not
-  just `check` + `check:tests` — after any deletion-heavy change.
 
 ## Immediate next
 
-Nothing pending — the 2026-08-25 queue is fully landed, marked, and SHIPPED as v0.48.0 (per-item
-refs in Live state). Every open item lives in `docs/backlog/`; nothing is pinned immediate-next.
+Nothing pending — the consolidation lap is fully landed, reviewed (two adversary lanes + full
+verify:release), and SHIPPED as v0.49.0. Every open item lives in `docs/backlog/`; nothing is
+pinned immediate-next.
 
 Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
 never the default two-minute timeout, which kills it mid-gate and wedges `phase.lock` for every
@@ -40,9 +37,6 @@ later call.
 
 ## Deliberate state, not bugs
 
-- `tests/audit/host-delegation-fold-carries-advisories.test.ts` stays deliberately UN-baselined
-  (owner, 2026-08-24): a parallel-load timeout there is re-checked by a solo rerun, never
-  re-baselined — a known-flaky record would launder a genuine regression. Do not "fix" it.
 - The item-6 checkJs sweep is TYPE-ONLY by contract: JSDoc casts/typedefs and safe narrowing, plus
   one unreachable narrowing throw in `scripts/release-and-publish.mjs` placed to keep the pinned
   `resolveReleasePushRefspec(releaseGate)` source contract intact. A behavioral diff there is a

@@ -6,6 +6,18 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The release script's await-run timeout (10 min) is shorter than a GitHub `release`-event
+  delivery delay it then misreads as "no run" (2026-08-26, low, friction: tool_should_decide).**
+  For v0.49.0 the release event fired ~13 minutes after `gh release create`; the script timed out
+  at 10 and exited 1 with "no run matched", the operator dispatched recovery runs by hand — and
+  then the DELAYED canonical run (32990705280) arrived, went green, and published, turning the
+  manual dispatches into harmless collisions (a live `workflow_dispatch` publish is refused from
+  a non-`main` ref, and npm refuses publish-over). v0.48.0 triggered within seconds the same
+  morning, so the delay is upstream weather, not a workflow defect.
+  **Property:** the await-run phase outlasts plausible event-delivery delay (or keeps polling
+  with a "still waiting, the tag and release exist — do NOT re-dispatch yet" message), so a slow
+  event never reads as a missing one and never invites a duplicate publish attempt.
+
 - **The nightly clean-tree rule does not say which writes it blocks (2026-08-22, low, friction: ambiguous_direction).** `docs/nightly-routine.md` says a dirty tree means the run "applies **nothing**". But the same run must still write its own tracked output — `.audit-tools/nightly/open-items.json`, `docs/nightly-inbox.md`, the leg-3 proposal records, and the regenerated `docs/HANDOFF.md` live-state block, which the commit gate independently REQUIRES to be current. The 2026-08-22 run had to decide for itself that emitting the queue is not an "apply", which is the host-discretion shape the repo bans. **Property:** the rule names the blocked class (doc edits derived from the review) and the always-written class (the routine's own generated output), so no run has to judge it.
 
 - **The backlog triage sweep needs a second manual invocation to reach its real coverage (2026-08-22, low, friction: tool_should_decide).** `scripts/shared/triage-backlog.mjs` errored on 22 of 96 entries in one pass — the lane returned no parseable JSON object, or output that missed the triage schema. Its documented recovery is a plain re-run, which re-queues exactly the failures; that second run recovered 20 of the 22. The recovery works, but it is the operator's to remember, and a run that stops after one pass writes a coverage stamp reporting 74/96 as if that were the ceiling. **Property:** the sweep retries its own transport-level failures within one invocation before writing the stamp, so the stamp reports the coverage the tool can actually reach.
