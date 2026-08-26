@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hashContent } from "../hash.js";
 import {
   chmodSync,
   existsSync,
@@ -218,7 +218,7 @@ function writeCacheManifest(
       binaryName: spec.binaryName,
       version: spec.version,
       executable_relative_path: relative(versionDir, executablePath).replace(/\\/g, "/"),
-      executable_sha256: sha256(readFileSync(executablePath)),
+      executable_sha256: hashContent(readFileSync(executablePath)),
     };
     writeFileSync(
       join(versionDir, CACHE_MANIFEST_FILENAME),
@@ -262,7 +262,7 @@ function verifiedCachedExecutable(
   const executablePath = join(versionDir, manifest.executable_relative_path);
   if (resolveWithinRoot(versionDir, executablePath) === null) return null;
   try {
-    if (sha256(readFileSync(executablePath)) !== manifest.executable_sha256.toLowerCase()) {
+    if (hashContent(readFileSync(executablePath)) !== manifest.executable_sha256.toLowerCase()) {
       return null;
     }
   } catch {
@@ -281,10 +281,6 @@ export function expectedSha256For(
     if (match && match[2].trim() === assetName) return match[1].toLowerCase();
   }
   return null;
-}
-
-function sha256(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 /**
@@ -361,7 +357,7 @@ export async function resolveBinary(
   if (!expected) {
     return unavailable("no_checksum_for_asset", `no checksum for ${assetName}`);
   }
-  const actual = sha256(assetBytes);
+  const actual = hashContent(assetBytes);
   if (actual !== expected) {
     return unavailable(
       "checksum_mismatch",

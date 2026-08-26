@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
   ArtifactMetadataEntry,
   ArtifactMetadataManifest,
@@ -8,6 +7,7 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
 import { ALL_DAG_ARTIFACTS, ARTIFACT_DEPENDS_ON_MAP } from "./dependencyMap.js";
 import { hashArtifactValue } from "../../shared/artifactFreshness.js";
+import { hashContent } from "../../shared/hash.js";
 import { stableStringify } from "../../shared/stableStringify.js";
 import { buildDependencySlices } from "./dependencySlices.js";
 import { computeGateVersion } from "./intentCheckpointGate.js";
@@ -67,7 +67,7 @@ export function computeArtifactStateSignature(bundle: ArtifactBundle): string {
   const entries = Object.entries(metadata.artifacts)
     .map(([name, entry]) => `${name}:${entry.content_hash}`)
     .sort();
-  return createHash("sha256").update(entries.join("\n")).digest("hex");
+  return hashContent(entries.join("\n"));
 }
 
 export function computeArtifactMetadata(

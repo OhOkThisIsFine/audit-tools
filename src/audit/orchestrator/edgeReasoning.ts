@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
+import { hashContent } from "audit-tools/shared";
 
 /**
  * Phase 4B — optional, bounded edge-reasoning pass.
@@ -96,7 +96,7 @@ export function edgeReasoningContentHash(candidates: GraphEdge[]): string {
       reason: edge.reason ?? "",
     })),
   });
-  return createHash("sha256").update(basis).digest("hex");
+  return hashContent(basis);
 }
 
 /** The single bounded prompt a host runs to produce {@link EdgeReasoningResults}. */

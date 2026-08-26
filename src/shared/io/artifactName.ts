@@ -24,11 +24,11 @@
  * format and its recognizer in one module is what stops the pair drifting.
  */
 
-import { createHash } from "node:crypto";
+import { hashContent } from "../hash.js";
 
 /** First 12 hex chars of the id's sha256 — the injective half of the name. */
 export function digestId(value: string): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+  return hashContent(value, { length: 12 });
 }
 
 /**

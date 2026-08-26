@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { hashContent } from "../hash.js";
 import { cp, readdir } from "node:fs/promises";
 import { readOptionalJsonFile } from "./json.js";
 import { discardOnSchemaVersionMismatch } from "./schemaVersion.js";
@@ -208,11 +208,9 @@ export function sanitizeRunId(runId: string): string {
   // Length bound: truncate + digest-disambiguate (uppercase hex marker — a form
   // no normal encoding can emit, so bounded and unbounded tokens never collide).
   if (out.length > MAX_RUN_ID_TOKEN_LENGTH) {
-    const digest = createHash("sha256")
-      .update(runId, "utf8")
-      .digest("hex")
-      .slice(0, TRUNCATION_DIGEST_HEX_CHARS)
-      .toUpperCase();
+    const digest = hashContent(runId, {
+      length: TRUNCATION_DIGEST_HEX_CHARS,
+    }).toUpperCase();
     out = out.slice(0, MAX_RUN_ID_TOKEN_LENGTH - 1 - TRUNCATION_DIGEST_HEX_CHARS) + "_" + digest;
   }
   return out;

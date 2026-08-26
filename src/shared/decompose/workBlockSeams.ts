@@ -14,7 +14,7 @@
  * nothing gating them. One derivation, both producers.
  */
 
-import { createHash } from "node:crypto";
+import { hashContent } from "../hash.js";
 
 import { compareCodeUnits } from "../compareCodeUnits.js";
 import type { WorkBlock, WorkBlockSeam } from "../types/finding.js";
@@ -26,7 +26,7 @@ import type { WorkBlock, WorkBlockSeam } from "../types/finding.js";
  * remediation contract pipeline references these across runs.
  */
 export function workBlockSeamId(file: string): string {
-  return `seam-${createHash("sha256").update(file, "utf8").digest("hex").slice(0, 12)}`;
+  return `seam-${hashContent(file, { length: 12 })}`;
 }
 
 /**

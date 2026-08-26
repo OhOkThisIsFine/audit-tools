@@ -55,7 +55,8 @@
  * re-association stability (idempotencyKey) and staleness-on-change (contentKey) are
  * reconciled, not in tension.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { hashContent } from "./hash.js";
 
 import { stableStringify } from "./stableStringify.js";
 import { normalizeForMetadataHash } from "./artifactFreshness.js";
@@ -161,10 +162,6 @@ export interface ContentKeyInput extends IdempotencyKeyInput {
   task_content_signature: string;
 }
 
-function sha256(value: string): string {
-  return createHash('sha256').update(value, 'utf8').digest('hex');
-}
-
 // Provenance / non-content fields stripped before signing. Renumbering a task,
 // or restamping it, must not change the task-content signature (FC-002). The
 // artifact name routes through the shared normalizeForMetadataHash so the same
@@ -199,7 +196,7 @@ export function buildTaskContentSignature(
       ([key]) => !NON_CONTENT_SIGNATURE_FIELDS.has(key),
     ),
   );
-  return sha256(
+  return hashContent(
     stableStringify(normalizeForMetadataHash(TASK_SIGNATURE_ARTIFACT, content)),
   );
 }
@@ -321,7 +318,7 @@ export function identityKey(input: IdentityKeyInput): string {
   const unit_id = requireField(input?.unit_id, 'unit_id');
   const lens = requireField(input?.lens, 'lens');
   const pass_id = requireField(input?.pass_id, 'pass_id');
-  return sha256(stableStringify({ unit_id, lens, pass_id }));
+  return hashContent(stableStringify({ unit_id, lens, pass_id }));
 }
 
 /**
@@ -336,7 +333,7 @@ export function idempotencyKey(input: IdempotencyKeyInput): string {
     input?.result_content_discriminator,
     'result_content_discriminator',
   );
-  return sha256(
+  return hashContent(
     stableStringify({ identity_key, result_content_discriminator }),
   );
 }
@@ -353,7 +350,7 @@ export function contentKey(input: ContentKeyInput): string {
     input?.task_content_signature,
     'task_content_signature',
   );
-  return sha256(
+  return hashContent(
     stableStringify({ idempotency_key, task_content_signature }),
   );
 }

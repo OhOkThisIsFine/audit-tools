@@ -1,8 +1,5 @@
-import { createHash } from "node:crypto";
+import { contentSha256 } from "./submission/hostHandoffCore.js";
 
-// Single-sourced in src/shared/stableStringify.ts (INV-CK-2) — there is exactly
-// one serializer.
-import { stableStringify } from "./stableStringify.js";
 import { compareCodeUnits } from "./compareCodeUnits.js";
 import { canonicalizeAffinityArtifactValue } from "./affinityArtifacts.js";
 
@@ -130,14 +127,10 @@ export function hashArtifactValue(
   artifactName: string,
   value: unknown,
 ): string {
-  return createHash("sha256")
-    .update(
-      stableStringify(
-        canonicalizeAffinityArtifactValue(
-          artifactName,
-          normalizeForMetadataHash(artifactName, value),
-        ),
-      ),
-    )
-    .digest("hex");
+  return contentSha256(
+    canonicalizeAffinityArtifactValue(
+      artifactName,
+      normalizeForMetadataHash(artifactName, value),
+    ),
+  );
 }

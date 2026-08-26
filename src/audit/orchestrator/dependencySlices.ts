@@ -26,9 +26,8 @@
  * matter. A membership change therefore moves the slice on BOTH edges — the
  * over-fire direction, which is safe.
  */
-import { createHash } from "node:crypto";
+import { contentSha256 } from "../../shared/submission/hostHandoffCore.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
-import { stableStringify } from "../../shared/stableStringify.js";
 import {
   charterPacketReadSet,
   memberDependencyEdgeLines,
@@ -151,9 +150,7 @@ export function computeDependencySliceHash(
   const projection = DEPENDENCY_SLICE_PROJECTIONS[downstream]?.[upstream];
   if (!projection) return undefined;
   try {
-    return createHash("sha256")
-      .update(stableStringify(projection(bundle)))
-      .digest("hex");
+    return contentSha256(projection(bundle));
   } catch {
     return SLICE_PROJECTION_ERROR;
   }
