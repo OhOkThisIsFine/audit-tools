@@ -1,15 +1,19 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "baseUrl": ".",
+    "paths": {
+      "audit-tools/shared": ["./src/shared/index.ts"],
+      "audit-tools/shared/*": ["./src/shared/*.ts"]
+    },
     "allowJs": true,
     "checkJs": true,
-    "noEmit": true,
-    "strict": true,
     "noImplicitAny": false,
     "allowImportingTsExtensions": true,
-    "target": "es2022",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "skipLibCheck": true,
     "types": ["node"]
   },
   "include": [
