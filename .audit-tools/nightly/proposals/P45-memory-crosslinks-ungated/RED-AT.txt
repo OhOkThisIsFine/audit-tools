@@ -1,0 +1,41 @@
+RED observed at HEAD, not predicted.
+
+HEAD:    5f5e005c48f1681cecc80585420a347a05fc7946
+Date:    2026-08-26
+Command: npx vitest run tests/shared/memory-crosslink-gate.test.ts
+         (the proposal's test copied to tests/shared/, then reverted)
+Exit:    1
+
+Verbatim failure:
+
+  × check-memory-citations covers memory-to-memory [[name]] cross-links >
+    fails on a [[name]] link whose target memory does not exist
+    → ✓ memory-citations: all citations across 1 present tracked docs resolve
+    : expected +0 to be 1 // Object.is equality
+
+  FAIL tests/shared/memory-crosslink-gate.test.ts
+  AssertionError: ✓ memory-citations: all citations across 1 present tracked docs resolve
+  : expected +0 to be 1 // Object.is equality
+
+  Test Files  1 failed (1)
+
+The failure is the defect itself: with a memory store holding `alpha.md` whose body
+reads "Supersedes any tier reflex in [[beta]]" and NO `beta.md`, the checker exits 0
+and prints "all citations resolve".
+
+HONEST BOUND on the other two cases. The `.md`-suffix case and the inline-code-span
+case pass at HEAD VACUOUSLY — nothing scans the store, so nothing can misfire on
+them. They are not red-green validated by this record; they are false-positive
+guards that only become meaningful once the patch lands, and they must be re-run
+after it. Only case 1 is red-green evidence.
+
+HEAD ADVANCED during the run, to e4bfb97f ("docs: regenerate AGENTS.md after the
+CLAUDE.md closeout edit") — a concurrent session in the same checkout. The interval
+5f5e005c..e4bfb97f touches AGENTS.md and nothing else, so neither the gate nor the
+test moved and the RED above still stands at e4bfb97f.
+
+GREEN after the patch, same command, same tree:
+  Test Files  2 passed (2)   — the new file plus the pre-existing
+  tests/shared/memory-citations-gate.test.ts, which still passes.
+Validated by INVERTING the production edit (a byte-exact restore of the pre-patch
+file), never by git checkout.
