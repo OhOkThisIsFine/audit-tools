@@ -204,6 +204,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   larger timeout. A 10-minute kill on a call the caller believed had 30 minutes reads exactly like
   a hung backend, which is the same misdiagnosis class as
   [[offload-lane-failures-are-usually-the-caller]].
+  **The same trap has a shell half (2026-08-26).** A `timeout 540 codex exec …` written INSIDE the
+  command is invisible to the tool, which applies its own DEFAULT 120000ms and kills at 2m00s. The
+  shell's number never governs; only the tool's `timeout` parameter does, and only up to the clamp.
+  So a long peer-CLI call needs `run_in_background: true` — passing `timeout` in the shell buys
+  nothing, and the kill again looks like a dead lane rather than a clamp.
 
 - **Git Bash MANGLES a leading-slash argument into a Windows path (2026-07-25).** `claude -p "/insights"`
   through the Bash tool reached the nested session as `C:/Program Files/Git/insights`, which answered
