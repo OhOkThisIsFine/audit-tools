@@ -453,6 +453,15 @@
   the doc-manifest data+refusal shape (`2adc716c`) is the precedent to follow, and a typecheck gate is
   NOT (a cast makes it inert, [[test-tree-typecheck-gate-and-its-cost]]).
 
+- **A deletion of a manifest-listed doc landed with the doc-manifest gate red (2026-08-26, low,
+  <!-- doc-citation-exempt: the deleted file IS the subject — it no longer exists by design -->
+  friction: tool-should-decide).** `a56f274d` deleted `GEMINI.md` and committed clean, leaving
+  `check:doc-manifest` red on HEAD (plus a stale citation in a generated render) until `2a1faa1f` —
+  the fails-only-in-release-CI class the pre-commit reach leg exists to stop. Unestablished which
+  half failed: the reach leg not triggering on a staged DELETION, or the committing session running
+  no hooks at all — establish that before designing a fix. **Property:** a staged deletion of a
+  manifest-listed doc trips the manifest gate exactly as an edit does, whichever session commits.
+
 - **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
   implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said
   "M dispatched-but-in-flight" and asserted entanglement with the claim-lease machinery; the primary

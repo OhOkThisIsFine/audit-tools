@@ -5,10 +5,14 @@
 
 ## Live state
 
-- Published state: **v0.46.0** is the last tag, is published to npm, and is what the global bins run
-  (`audit-code --version` / `remediate-code --version` both report it). `main` is ahead of that tag
-  and in sync with the remote. Nothing ahead of the tag changes shipped behaviour, so no release
-  is owed; `git log v0.46.0..main` is the record of what is ahead.
+- Published state: **v0.46.0** is the last tag and what the global bins run. `main` is ahead of
+  the tag AND of the remote, and the delta now changes shipped behaviour (the remediate
+  constraint-clause blocking gate `0287e93d`; the generated README sample; three new verify gates:
+  `check:readme-sample-report`, `check:proposal-red-at`, `check:scripts`). **A release is owed** —
+  the immediate next below.
+- The 2026-08-25 decision queue is fully executed and recorded (`answer.mjs --list` reports every
+  tracked answer done): sol-2 `66df2416`, sol-1 `e624e7b3`, docs-4 `6eb71c06`, P41 `25036a5c`,
+  the sidecar reader `0287e93d`, the scripts typecheck `2a1faa1f`.
 - ⚠ `tests/audit/host-delegation-fold-carries-advisories.test.ts` timed out at 120s once under a
   full `npx vitest run tests/audit` and passed alone — the known load/hermeticity class, and it does
   NOT reach either item's changed code (its `runtime_validation_tasks` list is empty). The flake
@@ -27,33 +31,9 @@
 
 ## Immediate next
 
-The decision queue is EMPTY — all twelve propositions were answered on 2026-08-25 and nine are
-landed. Six answered decisions remain unexecuted. Run `answer.mjs --list` for the authoritative
-set with its keys; record each with `--done <KEY> "<ref>"` as it lands.
-
-1. **sol-2 — re-target the P42 investigation at audit-code.** P42's original premise is verified
-   FALSE (all seven cited sites in `src/remediate/steps/prompts.ts` are driver-facing; the worker
-   packet carries no advance command), and its answer is already closed as superseded. What the
-   owner kept is the intent: find where the `charter_extraction` / `systemic_challenge` incidents
-   actually happened, in audit-code, before proposing any edit.
-2. **sol-1 — the RED-AT record plus its reconciliation check.** A leg-3 proposal must RUN its test
-   <!-- doc-citation-exempt: the record file this item exists to CREATE; it does not exist yet -->
-   at HEAD, write the verbatim failure and sha to `RED-AT.txt`, and a check in `verify:checks`
-   must refuse a proposal test with no sibling record. Also correct P44's own evidence table: it
-   claims a hit rate of "2 of 2" when P37 and P40 both recorded genuine measured RED/GREEN runs.
-3. **docs-4 — generate the README sample report from the renderer**, the way the Philosophy block
-   is generated, so it cannot drift again.
-4. **P41 — the prompt-contract registry** with its reconciliation leg (a prompt builder under
-   `src/` that no row claims is a red build) and both escapes: projection rows and declared-gap rows.
-   <!-- doc-citation-exempt: a runtime artifact the tool writes under .audit-tools/, never tracked -->
-5. **Give `intent-interpretation.json` a reader** — wire a real consumer for `unencodable_clauses`
-   so the persisted data is load-bearing and its correctness is tested.
-6. **Bring `scripts/` under a tsconfig.** Measured this session: 1348 errors under full `strict`
-   with `checkJs`, but **161** with `noImplicitAny` relaxed — the 1187 difference is pure
-   annotation noise in plain `.mjs`. The 161 are real (a `Property 'code' does not exist on type
-   'Error'`, several `possibly null`, an unguarded optional dynamic import). Note the owner's
-   answer says "so the unchecked set is EMPTY": `wrapper/` (13 files), `.claude/hooks/` (12),
-   `dispatch/` (4) and the repo-root bins are unreached too, not just `scripts/`.
+**Ship the release** (`/ship` owns the flow): verify green on a clean pushed tree, publish, verify
+live, reinstall the global bins. Everything else from the 2026-08-25 queue is landed and marked —
+see Live state for the per-item refs.
 
 Whenever a `next-step` is needed again, launch it DETACHED (`Start-Process`, redirected logs) —
 never the default two-minute timeout, which kills it mid-gate and wedges `phase.lock` for every
@@ -61,20 +41,13 @@ later call.
 
 ## Deliberate state, not bugs
 
-- `docs/backlog/open-bugs.md`'s repo-root-file entry was rewritten to say the SUITE is exonerated —
-  6,496 instrumented spawns, none carrying a redirect. The producer is an agent session's own
-  `cmd.exe`. Do not re-open it as a suite defect.
-<!-- doc-citation-exempt: the external per-project host-memory index, not a tracked repo file -->
-- The project memory store was PRUNED on 2026-08-25: 242 entries to 129, and its `MEMORY.md` index
-  from 24.8KB to 14.8KB, so nothing loads invisibly any more. Prune by USE ("would a session reach
-  for this?"), never by uniqueness — that criterion answers *keep* almost always and yielded one cut
-  from four clusters before the owner overruled it. Per-entry reasons:
-  [`reviews/memory-cut-list-2026-08-25.md`](reviews/memory-cut-list-2026-08-25.md).
-- The 15 entries `docs/project-philosophy.md` cited as conviction provenance were cut too, on the
-  owner's call, with each pointer repointed at the conviction's REAL home — `CLAUDE.md`, a spec, or
-  the brief itself where nothing else owned it. No conviction's content changed. One conviction
-  (remediator-decomposes / co-locates tests / optimistic parallel execution) turned out to have NO
-  home but memory; it now names the brief plus the two modules that implement it.
+- `tests/audit/host-delegation-fold-carries-advisories.test.ts` stays deliberately UN-baselined
+  (owner, 2026-08-24): a parallel-load timeout there is re-checked by a solo rerun, never
+  re-baselined — a known-flaky record would launder a genuine regression. Do not "fix" it.
+- The item-6 checkJs sweep is TYPE-ONLY by contract: JSDoc casts/typedefs and safe narrowing, plus
+  one unreachable narrowing throw in `scripts/release-and-publish.mjs` placed to keep the pinned
+  `resolveReleasePushRefspec(releaseGate)` source contract intact. A behavioral diff there is a
+  bug, not a refactor.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->

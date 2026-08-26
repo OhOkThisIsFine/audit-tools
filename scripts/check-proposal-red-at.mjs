@@ -19,6 +19,7 @@ const PROPOSALS_PREFIX = '.audit-tools/nightly/proposals/';
 const out = execFileSync('git', ['ls-files', '-z', PROPOSALS_PREFIX], {
   cwd: ROOT,
   encoding: 'utf8',
+  windowsHide: true,
 });
 const tracked = out.split('\0').filter(Boolean);
 
