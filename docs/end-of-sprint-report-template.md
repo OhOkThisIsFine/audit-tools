@@ -7,6 +7,10 @@ The closeout hand-back at the end of every sprint (see the *End-of-sprint cleanu
 node scripts/render-closeout.mjs --in closeout.json
 ```
 
+The `"none"` rule has two halves, and they are opposites. In the **input**, every section
+carries a value — real content, or the literal `"none"`. In the **rendered output**, the
+`"none"` sections are omitted. That omission is the renderer's job, never the author's.
+
 `--template` prints a blank input. The rendered markdown is the hand-back, pasted into chat; the
 durable pieces are simultaneously written to their permanent homes (`docs/HANDOFF.md`,
 `docs/backlog.md`, project memory).
@@ -33,29 +37,39 @@ sprint**. There an absence is not "nothing to say", it is "nobody looked".
 Section order is the registry's order, and it is bottom-weighted on purpose: chat shows the end of
 a long message first, so mechanics come first and what the owner must act on comes last.
 
-The refusal is backed by the `closeout-challenge-gate` Stop hook, which reads the HEAD-bound record
-the renderer writes: a sprint that ends with no render for the current tree is challenged, so
-hand-writing the report instead is not a quiet way around the check. The behavior is pinned by
+The refusal is backed by the `closeout-challenge-gate` Stop hook, which reads the record the renderer
+writes. That record binds two ways, and both matter:
+
+- **To the worktree CONTENT** — a tree object id, not HEAD. The closeout commits its own HANDOFF,
+  backlog, and memory updates, and a HEAD-bound record was invalidated by the very commit it
+  described. Committing exactly what the report described now keeps the record valid; an edit made
+  after the render correctly invalidates it.
+- **To the SESSION that rendered it** — the record is one file per repo, so an earlier session's
+  render is not your closeout. A render that predates this session is reported as another
+  session's hand-back.
+
+So hand-writing the report instead is not a quiet way around the check. The behavior is pinned by
 [`tests/shared/closeout-render.test.ts`](../tests/shared/closeout-render.test.ts).
 
 ## What each section is for
 
-- **Verification** (always renders) — what was run, what it returned, and the clean pushed commit it
+- **Verification** — input key `verification`, always renders — what was run, what it returned, and the clean pushed commit it
   ran on.
-- **Cleanup** — dead code / orphaned helpers / stray debug·TODO removed, and any *deliberate*
-  intermediate state called out so it does not read as a bug.
-- **Friction this sprint** — bullets keyed by the single-sourced friction vocabulary
+- **Cleanup** — input key `cleanup` — dead code, orphaned helpers, and stray debug/TODO removed. Any
+  intermediate state that is there on purpose belongs in this same section, worded so it does not
+  read as a bug. (There is no separate key for it — the input keys are exactly the ones named in this list.)
+- **Friction this sprint** — input key `friction`, an OBJECT keyed by bullet id, not a string — bullets keyed by the single-sourced friction vocabulary
   (`FRICTION_CATEGORIES`, `src/shared/friction/frictionRecord.ts`), one taxonomy for sprint retros
   and the product's mechanical capture. The named categories are seeds, not an exhaustive schema —
   the open-ended bullet is load-bearing whenever it has content.
-- **Docs synced** — HANDOFF / backlog / memory + index, only the ones that actually changed.
-- **Landed this sprint** (always renders) — what this sprint did and its outcome, with
+- **Docs synced** — input key `docs` — HANDOFF / backlog / memory + index, only the ones that actually changed.
+- **Landed this sprint** — input key `landed`, always renders — what this sprint did and its outcome, with
   commits/versions. "nothing — investigation/docs only" is a real answer; an empty section is not.
-- **Decisions needed from you** — every decision only the owner can make, posed as an actual
+- **Decisions needed from you** — input key `decisions` — every decision only the owner can make, posed as an actual
   answerable question with its options spelled out, via AskUserQuestion where the harness offers it.
   "Your decision: see queue X / run command Y" is a pointer, not a question, and does not satisfy
   this section. Record each answer in its durable home once given.
-- **Remaining next steps, and where each lives** — every remaining step WITH the document that will
+- **Remaining next steps, and where each lives** — input key `next_steps` — every remaining step WITH the document that will
   hold it after the session ends: immediate-next → `docs/HANDOFF.md`; open bugs →
   `docs/backlog/open-bugs.md`; forward tracks → `docs/backlog/forward-tracks.md`; durable
   design/status → project memory + its index; durable how-to → `CLAUDE.md`. A step living only in

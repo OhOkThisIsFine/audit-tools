@@ -12,7 +12,8 @@
 // input with a value — content, or the literal "none". Anything missing is a
 // refusal that names it. What renders is only the sections with content.
 //
-// It also writes a record bound to the current HEAD, which
+// It also writes a record bound to the worktree CONTENT (a tree object id, not
+// HEAD — committing what the report describes must not invalidate it), which
 // `.claude/hooks/closeout-challenge-gate.mjs` reads: a sprint that ends with no
 // record for this tree gets challenged, so the refusal cannot be sidestepped by
 // hand-writing the report instead.
@@ -32,6 +33,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CLOSEOUT_SECTIONS } from './closeout-sections-data.mjs';
+import { worktreeTree } from './shared/worktree-tree.mjs';
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const STATE_DIR = join(root, '.claude', 'hooks', '.state', 'closeout-render');
@@ -157,7 +159,7 @@ for (const section of CLOSEOUT_SECTIONS) {
       if (isSilent(bv)) continue;
       const bl = toLines(bv);
       if (bl.length === 0) {
-        emptied.push(`${section.id}.${bullet.id}`);
+        emptied.push({ id: `${section.id}.${bullet.id}`, required: !!bullet.required, prompt: bullet.label });
         continue;
       }
       lines.push(`- ${bullet.label}: ${bl.join('; ')}`);
@@ -179,7 +181,7 @@ for (const section of CLOSEOUT_SECTIONS) {
   }
   const lines = toLines(value);
   if (lines.length === 0) {
-    emptied.push(section.id);
+    emptied.push({ id: section.id, required: !!section.required, prompt: section.prompt });
     continue;
   }
   disposition[section.id] = 'content';
@@ -193,10 +195,27 @@ if (missing.length > 0) {
   );
 }
 if (emptied.length > 0) {
-  fail(
-    `empty value(s) for: ${emptied.join(', ')}. Write the literal "none" to fall silent on purpose — ` +
-      'an empty string or array is indistinguishable from forgetting.',
-  );
+  // Split by disposition. Telling a REQUIRED section to write "none" is the
+  // advice `--template` used to walk every agent into: the blank template ships
+  // `[""]` for verification and landed, and the old single message answered that
+  // with the one word those two sections are the only ones forbidden to use.
+  const req = emptied.filter((e) => e.required);
+  const opt = emptied.filter((e) => !e.required);
+  const parts = [];
+  if (req.length > 0) {
+    parts.push(
+      'required section(s) left EMPTY. These take neither an empty value nor "none" — there an ' +
+        'absence reads as work skipped, not as nothing to say. Fill in:\n  - ' +
+        req.map((e) => `${e.id} — ${e.prompt}`).join('\n  - '),
+    );
+  }
+  if (opt.length > 0) {
+    parts.push(
+      `empty value(s) for: ${opt.map((e) => e.id).join(', ')}. Write the literal "none" to fall ` +
+        'silent on purpose — an empty string or array is indistinguishable from forgetting.',
+    );
+  }
+  fail(parts.join('\n\n'));
 }
 
 // ── render ───────────────────────────────────────────────────────────────────
@@ -206,10 +225,15 @@ for (const { section, lines } of rendered) {
 }
 const markdown = out.join('\n').trimEnd() + '\n';
 
-// ── record, bound to HEAD ────────────────────────────────────────────────────
+// ── record, bound to the worktree CONTENT ────────────────────────────────────
+// `tree` is the identity the Stop gate compares. `head` is kept for a human
+// reading the record and for pre-v2 fallback, never as the binding: the closeout
+// commits its own HANDOFF/backlog/memory updates, and a HEAD-bound record is
+// invalidated by the very commit it describes.
 const head = git(['rev-parse', 'HEAD']);
 const record = {
-  version: 1,
+  version: 2,
+  tree: worktreeTree(root),
   head: head.ok ? head.stdout : null,
   rendered_at: new Date().toISOString(),
   session_id: process.env.CLAUDE_SESSION_ID ?? null,

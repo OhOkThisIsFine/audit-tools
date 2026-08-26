@@ -13,6 +13,9 @@
 //  - honors AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE;
 //  - at most CHALLENGE_CAP blocks per session, counted in the marker, so a fix
 //    that moves HEAD cannot ping-pong the gate forever;
+//  - the closeout-render check is SESSION-scoped and bound to worktree CONTENT:
+//    an earlier session's render does not close this one, and committing exactly
+//    what the report described does not invalidate it;
 //  - deliberately does NOT key on stop_hook_active alone: two other Stop hooks
 //    share this event, and a block from either would otherwise starve this one;
 //  - skips (spending nothing) while the payload shows live background tasks or
@@ -35,6 +38,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
 import { sessionHasLiveBackgroundWork } from '../../scripts/shared/liveSessionWork.mjs';
+import { worktreeTree } from '../../scripts/shared/worktree-tree.mjs';
 import {
   readSessionRegistry,
   runPorcelainStatus,
@@ -202,20 +206,49 @@ try {
 
 // The hand-back itself: rendered through scripts/render-closeout.mjs, which
 // REFUSES to render until every section carries a value or an explicit "none",
-// then omits the silent ones. Without a record bound to this HEAD, the report
+// then omits the silent ones. The record binds to the worktree CONTENT and to
+// the session that wrote it, so neither a commit of what the report described
+// nor an earlier session's render satisfies this check. Without one, the report
 // was hand-written — and a hand-written report is exactly where a skipped
 // section hides as a short one.
 try {
   const rec = JSON.parse(
     readFileSync(join(ROOT, '.claude', 'hooks', '.state', 'closeout-render', 'latest.json'), 'utf8'),
   );
-  const head = git(['rev-parse', 'HEAD']).out;
-  if (head && rec?.head && rec.head !== head) {
+  // The record is ONE file per repo, so its existence proves nothing about THIS
+  // session. Before this check, a session could stop at a HEAD an EARLIER session
+  // had rendered and pass in silence: 19 of 29 challenged sessions hand-wrote the
+  // report and only 3 were caught
+  // (docs/reviews/closeout-generation-failure-2026-08-26.md).
+  const startedAt = Date.parse(registry.record?.registered_at ?? '');
+  const renderedAt = Date.parse(rec?.rendered_at ?? '');
+  const foreignRender =
+    Number.isFinite(startedAt) && Number.isFinite(renderedAt) && renderedAt < startedAt;
+  const currentTree = worktreeTree(ROOT);
+  if (foreignRender) {
     findings.push(
-      `the closeout render on record is for ${String(rec.head).slice(0, 8)}, not the current ` +
-        `${head.slice(0, 8)} — re-render it so the report describes the tree being handed off ` +
-        '(`node scripts/render-closeout.mjs --in <closeout.json>`).',
+      "the closeout render on record predates this session, so it is ANOTHER session's hand-back. " +
+        'The record is one file per repo, and an earlier render does not close YOUR sprint — render ' +
+        'your own with `node scripts/render-closeout.mjs --in <closeout.json>`.',
     );
+  } else if (rec?.tree && currentTree && rec.tree !== currentTree) {
+    findings.push(
+      'the closeout render on record describes different content than the tree being handed off — ' +
+        're-render it (`node scripts/render-closeout.mjs --in <closeout.json>`). Committing exactly ' +
+        'what the report already described does NOT trigger this; an edit made AFTER the render does.',
+    );
+  } else if (!rec?.tree) {
+    // Pre-v2 record: HEAD-bound, and the closeout's own commit moves HEAD. Fall
+    // back to the old comparison for the single session that spans the upgrade —
+    // the next render writes a tree-bound record and this arm dies.
+    const head = git(['rev-parse', 'HEAD']).out;
+    if (head && rec?.head && rec.head !== head) {
+      findings.push(
+        `the closeout render on record is for ${String(rec.head).slice(0, 8)}, not the current ` +
+          `${head.slice(0, 8)} — re-render it so the report describes the tree being handed off ` +
+          '(`node scripts/render-closeout.mjs --in <closeout.json>`).',
+      );
+    }
   }
 } catch {
   findings.push(
@@ -319,18 +352,25 @@ console.error(
     '  - the sprint diff scanned for dead code / orphaned helpers / stray debug / TODO;\n' +
     '  - no half-done state, and any DELIBERATE intermediate state called out so it does not read as a bug;\n' +
     '  - HANDOFF trimmed to immediate-next-only; backlog status current; memory + index synced;\n' +
-    '  - every remaining step stated WITH its home doc; drop that section only when nothing pending ' +
-    'actually remains. A step that ' +
+    '  - every remaining step stated WITH its home doc; state "none" for that section only when ' +
+    'nothing pending actually remains. A step that ' +
     'lives only in this chat is lost when the session ends;\n' +
     '  - every decision only the OWNER can make ASKED as a direct question, options spelled out ' +
     '(AskUserQuestion where available) — "your decision: see queue X / run command Y" is a pointer, ' +
     'not a question, and the owner never has to go fetch a question the agent already holds.\n\n' +
-    'Fix what is real. Then RE-RENDER the whole closeout report to the scheme in ' +
-    'docs/end-of-sprint-report-template.md, carrying the corrections this pass just made — a line or ' +
-    'section with nothing to report is OMITTED, never written out as "none" and never explained. That report IS the ' +
-    'hand-back; a conversational reply ABOUT the challenge is not, and it leaves the next session ' +
-    'reading a hand-back that predates the fixes. State inside the report what this pass changed, or ' +
-    'that nothing was outstanding, then stop — ' +
+    'Fix what is real. Then produce the hand-back by RUNNING THE RENDERER:\n' +
+    '  node scripts/render-closeout.mjs --in <closeout.json>   (--template prints a blank input)\n' +
+    'Paste its output. Do NOT hand-write a report that imitates the renderer output: this gate reads ' +
+    'the record the RENDERER writes, so a hand-written one leaves no evidence any section was ' +
+    'considered.\n\n' +
+    'The "none" rule has two halves, and they are opposites — keep them straight:\n' +
+    '  - in the INPUT JSON, EVERY section carries a value: real content, or the literal "none";\n' +
+    '  - in the RENDERED OUTPUT, the "none" sections are omitted. That omission is the ' +
+    "renderer's job, never yours.\n\n" +
+    'Carry the corrections this pass just made into the INPUT, then render. The rendered report IS ' +
+    'the hand-back; a conversational reply ABOUT this challenge is not, and it leaves the next ' +
+    'session reading a hand-back that predates the fixes. State inside the report what this pass ' +
+    'changed, or that nothing was outstanding, then stop — ' +
     `this asks at most ${CHALLENGE_CAP}x per session. (Bypass: AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1.)`,
 );
 process.exit(2);

@@ -237,13 +237,23 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
     expect(stderr).toContain('a pointer, not a question');
   });
 
-  it('demands the closeout REPORT be re-rendered, not a conversational "yes, it was handled"', () => {
+  it('demands the hand-back come from the RENDERER, not a conversational "yes, it was handled"', () => {
     // Left to its own devices the agent answers the challenge in prose and the
     // structured hand-back — the thing the next session actually reads — is
     // never re-emitted with the corrections this pass just made.
+    //
+    // What is pinned is the COMMAND and both halves of the "none" rule, not the
+    // doc name. The message used to say "RE-RENDER the whole closeout report to
+    // the scheme in <doc> ... never written out as none", which reads as an
+    // instruction to hand-write markdown against a scheme, and applies the
+    // OUTPUT rule to the INPUT, where every section must state a value or the
+    // literal "none". 19 of 29 challenged sessions hand-wrote the report
+    // (docs/reviews/closeout-generation-failure-2026-08-26.md).
     const { stderr } = runHook(CLOSEOUT_GATE, stop(sid('re-render')), { root: repo });
-    expect(stderr).toContain('end-of-sprint-report-template.md');
-    expect(stderr).toMatch(/re-render/i);
+    expect(stderr).toContain('scripts/render-closeout.mjs --in');
+    expect(stderr).toContain('INPUT JSON, EVERY section carries a value');
+    expect(stderr).toContain('RENDERED OUTPUT');
+    expect(stderr).toMatch(/render/i);
   });
 
   it('does not re-ask about a tree state it already challenged', () => {
