@@ -151,8 +151,11 @@ describe('every retired hand-coded trigger is reproduced', () => {
     }
   });
 
-  it('a src-only staged set stays fast: only the unconditional guard-reach leg fires', () => {
-    expect(triggeredIds(['src/audit/orchestrator/advance.ts'])).toEqual(['check:guard-reach']);
+  it('a src-only staged set stays fast: the sub-second src-reach primitive gate plus the unconditional guard-reach leg', () => {
+    expect(triggeredIds(['src/audit/orchestrator/advance.ts'])).toEqual([
+      'check:shared-primitives',
+      'check:guard-reach',
+    ]);
   });
 
   it('backslashed staged paths normalize before matching (win32)', () => {
