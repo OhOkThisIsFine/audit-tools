@@ -137,3 +137,16 @@ Regression tests, in `tests/shared/closeout-render.test.ts`:
 
 Verified on 2026-08-26: `npm run build`, `npm run check`, `npm run check:scripts`,
 `npm run check:tests`, `npm run check:guard-reach`, and `npm test` (451 files, 5996 tests) all green.
+
+## Residual, stated rather than closed
+
+The session binding in root cause 3 is by **timestamp**, not by session id. The renderer cannot read
+one: `CLAUDE_SESSION_ID` does not reach a script invoked through the Bash tool, which is why the live
+record carried `"session_id": null`. So the gate compares the record's `rendered_at` against the
+session registry's `registered_at`, and a **concurrent** session that rendered after this one started
+still reads as this session's own render. The worktree-tree comparison is the only thing that catches
+that case, and only when the content differs.
+
+This is declared as data in the `uncovered` field of the gate-scripts row in
+`scripts/guard-reach-data.mjs`, per the project rule that a partly-enforced trap states its uncovered
+half rather than letting the covered half read as a close.

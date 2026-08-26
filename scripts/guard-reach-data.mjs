@@ -806,7 +806,11 @@ export const REACH = [
       'attest-constitutional-doc-change is invoked per constitutional override, wired into no verify gate; ' +
       'render-closeout is invoked per hand-back, wired into no verify gate either — its enforcement is ' +
       'the closeout-challenge Stop gate reading the record it writes, so a session that never renders is ' +
-      'challenged, not blocked',
+      'challenged, not blocked. That record OWNS ITS SESSION only by TIMESTAMP: the renderer cannot read ' +
+      'a session id (CLAUDE_SESSION_ID does not reach a Bash-invoked script, and record.session_id is ' +
+      'therefore null), so the gate compares rendered_at against the session registry registered_at. ' +
+      "A CONCURRENT session that rendered after this one started still reads as this one's render — " +
+      'the worktree-tree comparison is the only thing that catches it, and only when the content differs',
   },
   {
     area: 'pipeline, smoke & release scripts',
