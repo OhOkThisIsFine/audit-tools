@@ -12,7 +12,6 @@ import { join } from "node:path";
 import {
   advance,
   describeStoppedFold,
-  DEFAULT_MAX_TRANSITIONS,
   compareCodeUnits,
   isFileMissingError,
   isJsonParseError,
