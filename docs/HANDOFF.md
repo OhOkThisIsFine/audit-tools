@@ -5,26 +5,27 @@
 
 ## Live state
 
-- **Package:** the repository version remains `0.49.0` and both global command shims resolve.
-  This sprint changes documentation only, so it requires no tag, package publish, or global-bin
-  reinstall.
-- **Audits:** the structural and philosophy simplification reports are complete in
-  `docs/reviews/complexity-reduction-audit-2026-08-26.md` and
-  `docs/reviews/philosophy-simplification-audit-2026-08-26.md`. Production code is unchanged.
-- **Repository:** at hand-back, `main` and `origin/main` are synchronized and the required checks
-  are green.
-- **Closeout:** repaired in two layers. *Repo* — five defects in the rendered hand-back; the
-  record is now `version: 2` and binds to a worktree tree id, so committing what the report described
-  no longer invalidates it. *Machine-wide* — the closeout SCHEMA is canonical in
-  `~/.claude/portable-engineering-principles.md` (eight steps, in order), this repo's step list now
-  matches it, and the multi-host generator at ~/.agent-config/sync.mjs mirrors that document, so its
-  --check catches drift. Measurement and the one residual stated rather than closed:
-  `docs/reviews/closeout-generation-failure-2026-08-26.md`.
+- **Complexity review implemented:** six of the seven candidates in
+  `docs/reviews/complexity-reduction-audit-2026-08-26.md` are landed as atomic commits (CX-01
+  SCC cycle core — a real correctness fix; CX-03 dead-API deletion; CX-04 single cross-gate
+  evaluator; CX-05 shared survivor fold; CX-06 shared submission scan; CX-07 table-driven field
+  checks). Each was premise-verified by independent lanes and adversarially refuted before
+  implementation. CX-02 is the pinned next item (see the roadmap block below); its verified design
+  inputs live in `docs/reviews/cx02-drain-unification-design-2026-08-26.md`.
+- **Both nightly queues are fully answered and landed** (2026-08-26 twelve items; 2026-08-27 six
+  items), including: the P45 memory-crosslink gate, the remote-name removal from the skills, the
+  CLAUDE.md single-source edits, the generated spec/audit registry mirrors (`check:spec-mirrors`),
+  and `--root` absorbed into canonical root resolution on BOTH bins (an absent `--root` is now
+  discovered from the caller's cwd; explicit roots are honored verbatim).
+- **Off-repo:** the FreeLLMAPI Cloudflare key is repaired and verified live; the pool launcher no
+  longer hand-types a model alias.
+- **Repository:** `main` and `origin/main` are synchronized; every commit passed its gates.
+  The release pipeline run for this lap's code changes is the ship step of the current session.
 
 ## Immediate next
 
-Nothing pending. The reports contain recommendations, not an implementation commitment. Every
-accepted open item belongs in `docs/backlog/`; none is pinned as immediate next.
+CX-02 (pinned below) is the one open implementation item. It is a multi-session atomic loop-core
+replace — start from its design record, not from the review section.
 
 ## Deliberate state, not bugs
 

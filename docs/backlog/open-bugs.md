@@ -918,7 +918,12 @@
   owns a live child, naming either (`tests/helpers/global-setup.ts`, ledger in
   `tests/helpers/trackedSpawn.ts`). **Still open:** the producer is unnamed, and it is outside both
   checks — they bound what a vitest run can leave, not what an agent lane can. Measurement in
-  project memory (memory: repo-root-empty-files-are-shell-redirect-artifacts).
+  project memory (memory: repo-root-empty-files-are-shell-redirect-artifacts). Producer lead
+  (2026-08-27 lap): nine more appeared, each materializing DURING a codex-exec or delegated-agent
+  run — one timestamped mid-run by the lane that saw it appear. Codex 0.150.0 runs its shell as
+  `pwsh.exe -Command "<string>"` (observed in its transcripts), which is exactly the
+  command-STRING surface the reproduction names, so the leading suspect is codex-exec's quoted
+  command strings; unconfirmed by instrumentation.
 
 - **The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).**
   `skills/remediate-code/SKILL.md` and `skills/remediate-code/remediate-code.prompt.md` each state

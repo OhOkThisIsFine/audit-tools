@@ -1800,7 +1800,9 @@
     "answer": "Treat this as the bug signal CLAUDE.md says it is: fix canonical root/state resolution so the audit loader no longer has to pass --root, then strip the flag from the loader prompt and the README. Owner picked: Absorb it into root resolution.",
     "subject": "The audit loader mandates --root on every command; CLAUDE.md calls a needed manual flag a bug signal",
     "path": "skills/audit-code/audit-code.prompt.md",
-    "decided_at": "2026-08-26T22:21:16.935Z"
+    "decided_at": "2026-08-26T22:21:16.935Z",
+    "completed_at": "2026-08-27T17:00:32.440Z",
+    "completed_ref": "landed in 75c5a956 (discoverRepoRoot; loader prompt + README aligned)"
   },
   "bd7337d71e47882e": {
     "disposition": "settled",
@@ -1861,7 +1863,9 @@
     "answer": "Render the mirrored tables in all three docs from their code registries the way spec/audit/executor-producers.generated.md is rendered, with the same never-hand-edit banner and check gate. Owner picked: Generate them.",
     "subject": "Three spec/audit docs hand-mirror registries whose sibling view is already generated",
     "path": "spec/audit/dependency-map.md",
-    "decided_at": "2026-08-27T00:58:07.435Z"
+    "decided_at": "2026-08-27T00:58:07.435Z",
+    "completed_at": "2026-08-27T19:58:46.501Z",
+    "completed_ref": "landed in HEAD commit (generate-spec-mirrors; 14 regions, 93 rows, check:spec-mirrors gate)"
   },
   "85c6d5195eb768a1": {
     "disposition": "settled",
@@ -1886,35 +1890,45 @@
     "answer": "Move the Decided-against list into docs/backlog/durable-traps.md and the two recorded design deviations into CLAUDE.md, then delete spec/mechanical-analyzer-layer-design.md. Owner picked: Fold and delete.",
     "subject": "Fold the mechanical-analyzer spec into durable-traps, or keep it as its own 33-line doc?",
     "path": "spec/mechanical-analyzer-layer-design.md",
-    "decided_at": "2026-08-27T16:40:29.352Z"
+    "decided_at": "2026-08-27T16:40:29.352Z",
+    "completed_at": "2026-08-27T17:00:32.498Z",
+    "completed_ref": "landed in f41d2442"
   },
   "4c6b307253d9acec": {
     "disposition": "settled",
     "answer": "Delete (change 3) from the docs_digest.json row in spec/audit/artifact-contract.md. Owner picked: Delete the label.",
     "subject": "Drop the internal \"(change 3)\" label from the artifact contract, or spell it out?",
     "path": "spec/audit/artifact-contract.md",
-    "decided_at": "2026-08-27T16:40:29.534Z"
+    "decided_at": "2026-08-27T16:40:29.534Z",
+    "completed_at": "2026-08-27T17:00:32.551Z",
+    "completed_ref": "landed in f41d2442"
   },
   "a477c87be998e5a8": {
     "disposition": "settled",
     "answer": "Delete the starting-proposal sentence from spec/remediate/remediation-goals.md outright. Owner picked: Delete the sentence (not the restate option).",
     "subject": "constitutional doc: the goals doc still calls its category list a starting proposal awaiting first runs",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-08-27T16:40:29.692Z"
+    "decided_at": "2026-08-27T16:40:29.692Z",
+    "completed_at": "2026-08-27T17:00:32.603Z",
+    "completed_ref": "landed in f41d2442"
   },
   "38696b0dd8bcfd21": {
     "disposition": "settled",
     "answer": "Delete the F5 and F6 labels from src/audit/adapters/README.md. Owner picked: Drop the labels.",
     "subject": "The adapters README uses roadmap labels F5 and F6 that nothing in the repo defines",
     "path": "src/audit/adapters/README.md",
-    "decided_at": "2026-08-27T16:40:29.822Z"
+    "decided_at": "2026-08-27T16:40:29.822Z",
+    "completed_at": "2026-08-27T17:00:32.654Z",
+    "completed_ref": "landed in f41d2442"
   },
   "1588134708c50483": {
     "disposition": "settled",
     "answer": "Trim the INV-CPGV-OUTCOME-RECORD-OWNER row to the ownership invariant alone and drop the until-a-later-work-item clause; record the relocation as a backlog entry if still wanted. Owner picked: Drop the clause.",
     "subject": "A glossary invariant carries an \"until a later work item relocates it\" plan clause",
     "path": "docs/glossary-ids.md",
-    "decided_at": "2026-08-27T16:42:38.060Z"
+    "decided_at": "2026-08-27T16:42:38.060Z",
+    "completed_at": "2026-08-27T17:00:32.708Z",
+    "completed_ref": "landed in f41d2442"
   },
   "4fe542aceca77056": {
     "disposition": "settled",
