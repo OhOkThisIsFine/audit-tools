@@ -21,6 +21,7 @@ import {
   AGENT_FEEDBACK_FILENAME,
   RunLogger,
   advance as advanceObligations,
+  describeStoppedFold,
   deriveEngineBound,
   type ObligationDef,
   type ObligationOutcome,
@@ -833,23 +834,24 @@ async function advanceAuditInner(
       // MAX_DRAIN_STEPS cap emits strictly before the engine bound (see the
       // INVARIANT above), so this branch is a backstop on a broken invariant,
       // not a state the host is expected to route on.
-      if (outcome.stopped) {
-        const spinning = outcome.lastObligationId ?? "unknown";
-        const cause =
-          outcome.stopped === "bound"
-            ? `spent the engine transition bound (${String(engineMaxTransitions())})`
-            : "revisited a state it had already scanned";
+      // The description is built by the engine's own `describeStoppedFold`, not
+      // here: four folds across the two draws can stop non-convergently, and
+      // hand-rolling the cause at each is how they diverged. Returning null on a
+      // converged outcome also makes the null-check itself the branch, so this
+      // consumer cannot report a wedged fold as a finished one.
+      const stalled = describeStoppedFold(outcome, { bound: engineMaxTransitions() });
+      if (stalled) {
         log.event({
           kind: "error",
           note: "obligation_fold_did_not_converge",
-          stopped: outcome.stopped,
-          obligation: spinning,
+          stopped: stalled.stopped,
+          obligation: stalled.spinning,
         } as never);
         result = {
           ...result,
           progress_summary:
-            `Obligation fold did not converge: it ${cause} without reaching a ` +
-            `host-actionable step (${spinning}). The drain's own dispatch cap should have ` +
+            `Obligation fold did not converge: it ${stalled.cause} ` +
+            `(${stalled.spinning}). The drain's own dispatch cap should have ` +
             "stopped it first, so this is a backstop firing — re-run next-step to resume.",
         };
       }

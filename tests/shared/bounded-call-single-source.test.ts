@@ -98,19 +98,40 @@ test("no consumer recognizes the engine bound by string-matching an error messag
   ).toEqual([]);
 });
 
-test("the remediate step machine drives no second, uncapped fold (inv-3, by absence)", async () => {
-  // inv-3 asks that remediate pause rather than crash at the bound. Verified at
-  // HEAD and recorded here rather than satisfied by invention: the remediate
-  // step machine does not drive the shared engine at all, so it has no bound to
-  // reach. This test is what keeps that TRUE — the day it starts driving the
-  // engine, this red is the reminder that it needs the pause handling the audit
-  // CLI has.
-  const source = await readFile(
-    join(REPO_ROOT, "src/remediate/steps/nextStep.ts"),
-    "utf8",
-  );
+test("every fold that drives the engine routes its non-convergence through the ONE describer (inv-3)", async () => {
+  // inv-3 asks that a consumer PAUSE rather than report a finished run when the
+  // fold stops without converging.
+  //
+  // This assertion replaces a "satisfied by absence" record whose premise was
+  // false when it was written (2026-08-24, `9d32c078`). That record said "the
+  // remediate step machine does not drive the shared engine at all, so it has no
+  // bound to reach", and kept itself true by asserting only that the token
+  // `maxTransitions` was absent from remediate's step machine. But remediate had
+  // been driving `advance` since 2026-06-17 (A3 slices `54aa2ce9` / `0a321cc1`),
+  // two months earlier — so the guard was green for the wrong reason, and the
+  // very defect it existed to catch (both remediate sites branching on `.step`
+  // alone, reporting a wedged fold as a finished run) lived underneath it.
+  //
+  // An absence record is only ever as strong as its premise, and nothing
+  // re-checks a premise. So this asserts the PRESENT property instead: a file
+  // that drives the engine must describe a non-convergent stop through
+  // `describeStoppedFold`, the single home for that description. Hand-rolling
+  // the cause string is what let the two audit copies and the two remediate
+  // omissions diverge in the first place.
+  const offenders: string[] = [];
+  for (const file of await sourceFiles()) {
+    const source = await readFile(file, "utf8");
+    // Files that DRIVE the engine — the shared entry point, or its alias.
+    const drivesEngine = /(?:await\s+)?\b(?:advance|advanceObligations)\s*\(/.test(source);
+    // The engine module itself DEFINES both; it is not a consumer of them.
+    const isEngineItself = repoRelative(file) === "src/shared/engine/obligationEngine.ts";
+    if (!drivesEngine || isEngineItself) continue;
+    if (!/\bdescribeStoppedFold\s*\(/.test(source)) offenders.push(repoRelative(file));
+  }
   expect(
-    /\bmaxTransitions\b/.test(source),
-    "remediate's step machine has started bounding a fold — give it the graceful stopped:'bound' handling too",
-  ).toBe(false);
+    offenders,
+    "these files drive the obligation engine but never describe a non-convergent stop — a caller " +
+      "that branches on `step` alone cannot tell completion from non-convergence, so it reports a " +
+      "wedged fold as a finished run; route the outcome through describeStoppedFold()",
+  ).toEqual([]);
 });

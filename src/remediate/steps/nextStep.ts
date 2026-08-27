@@ -30,6 +30,7 @@ import {
   interpretIntent,
   unresolvedFromClauses,
   advance,
+  describeStoppedFold,
   decideFrictionTriage,
   buildFrictionTriageBlock,
   linkFrictionRunIds,
@@ -41,6 +42,7 @@ import {
   type FrictionTriageDecision,
   type ObligationDef,
   type ObligationOutcome,
+  type StoppedFoldDescription,
   type InterpretedIntent,
   type SessionIntentLoadResult,
 } from "audit-tools/shared";
@@ -3185,6 +3187,53 @@ Report this situation to the user and let them choose.
   });
 }
 
+/**
+ * The terminal for a fold that stopped WITHOUT converging.
+ *
+ * Distinct from `unhandled_state` on purpose. That kind means "the state machine
+ * has no transition for this state" — a gap in the registry. This one means an
+ * obligation kept transitioning without ever clearing its own actionable state,
+ * so the fold spun until the engine's backstop fired. Conflating them would send
+ * an operator to inspect a state that is perfectly well-formed, and the repo's
+ * own step types forbid conflating distinct causes.
+ *
+ * The description comes from the engine's `describeStoppedFold`, so the cause
+ * phrasing and the spinning obligation are read from the outcome's structured
+ * fields rather than rebuilt here — the same single source the audit draw uses.
+ */
+async function handleStoppedFold(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState | null,
+  stalled: StoppedFoldDescription,
+): Promise<RemediationStep> {
+  return writeCurrentStep({
+    stepKind: "fold_did_not_converge",
+    status: "blocked",
+    runId: stateRunId(state),
+    repoRoot: root,
+    artifactsDir,
+    prompt: `
+# Fold Did Not Converge
+
+The deterministic fold ${stalled.cause}.
+
+- **Spinning obligation**: \`${stalled.spinning}\`
+- **Backstop that fired**: \`${stalled.stopped}\`
+- **State file**: \`${join(artifactsDir, "state.json")}\`
+
+An obligation is re-selecting without clearing its own actionable state, so the
+engine stopped the fold rather than looping forever. This is a blocking
+diagnostic, not a resumable pause: re-running \`next-step\` will reproduce it.
+
+Inspect the obligation named above. Either its \`derive\` never goes
+non-actionable after its \`execute\` runs, or its executor is persisting a state
+its own guard still matches.
+`.trim(),
+    stopCondition: "Stop after reporting the diagnostic to the user.",
+  });
+}
+
 async function handleUnhandledState(
   root: string,
   artifactsDir: string,
@@ -3657,7 +3706,7 @@ function readPersistedIntentInterpretationSync(
 }
 
 /** Execution dependencies threaded to every remediate obligation executor. */
-interface RemediateCtx {
+export interface RemediateCtx {
   root: string;
   artifactsDir: string;
   options: NextStepOptions;
@@ -3669,7 +3718,7 @@ interface RemediateCtx {
 }
 
 /** The once-async-read signals the pre-intake derive()s consume synchronously. */
-interface PreIntakeSnapshot {
+export interface PreIntakeSnapshot {
   existingCheckpoint: IntentCheckpoint | undefined;
   resumeAck: { choice?: string } | undefined;
   /**
@@ -3725,13 +3774,12 @@ function requireState(state: RemediationState | null): RemediationState {
  * Priority order for the pre-intake obligations — mirrors the original cascade's
  * top-down guard order exactly so selection cannot drift.
  */
-const PRE_INTAKE_PRIORITY: readonly string[] = [
+export const PRE_INTAKE_PRIORITY: readonly string[] = [
   "input_conflict",
   "confirm_resume",
   "confirm_intent",
   "interpret_intent",
   "complete_redelivery",
-  "report_warning",
   "complete",
   "pending_intake",
 ];
@@ -3743,7 +3791,7 @@ const PRE_INTAKE_PRIORITY: readonly string[] = [
  * The matching executors are the original cascade handlers, classified emit vs
  * transition; the host-facing behaviour is unchanged.
  */
-function buildPreIntakeObligations(
+export function buildPreIntakeObligations(
   ctx: RemediateCtx,
   snapshot: PreIntakeSnapshot,
 ): RemediateObligation[] {
@@ -4006,7 +4054,7 @@ Then run:
  * Priority order for the main (post-intake) obligations — mirrors the original
  * cascade tail's guard order exactly so selection cannot drift.
  */
-const MAIN_PRIORITY: readonly string[] = [
+export const MAIN_PRIORITY: readonly string[] = [
   "waiting_for_clarification",
   "waiting_for_triage",
   "planning_documentable",
@@ -4029,7 +4077,7 @@ const MAIN_PRIORITY: readonly string[] = [
  * which lives in the pre-intake engine — emits the report directly rather than
  * transitioning (a main transition could never select it).
  */
-function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
+export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
   const { root, artifactsDir, options, runLogger, store } = ctx;
   const clarificationResolutionPath = join(
     artifactsDir,
@@ -4388,6 +4436,18 @@ async function advanceUnderPhaseLock(deps: {
     ctx,
   );
   if (preIntake.step) return preIntake.step;
+  // `stopped` ABSENT is what means "complete" — branching on `.step` alone
+  // cannot tell a finished fold from a wedged one, so this fold used to fall
+  // straight through into the main fold and report a spin as ordinary progress.
+  // `describeStoppedFold` returns null on a converged outcome, which makes the
+  // null-check itself the branch. `stopped: "cycle"` is unreachable here (the
+  // engine allocates its visited set only when a `stateSignature` is supplied,
+  // and this draw supplies none, per the 670a6148 revert) — the describer still
+  // covers it so the union stays exhaustive.
+  const preIntakeStalled = describeStoppedFold(preIntake);
+  if (preIntakeStalled) {
+    return handleStoppedFold(root, artifactsDir, preIntake.state, preIntakeStalled);
+  }
   state = preIntake.state;
 
   // pending_intake folds the old no-state branch (it emits handleNoState on a
@@ -4409,6 +4469,13 @@ async function advanceUnderPhaseLock(deps: {
     ctx,
   );
   if (main.step) return main.step;
+  // Same contract as the pre-intake fold above: a non-convergent stop must not
+  // reach `handleUnhandledState`, which would report a spinning obligation as a
+  // state the machine has no transition for — a different defect entirely.
+  const mainStalled = describeStoppedFold(main);
+  if (mainStalled) {
+    return handleStoppedFold(root, artifactsDir, main.state, mainStalled);
+  }
   // The unhandled catch-all always emits on a non-null state, so a null step
   // here is unreachable; keep an explicit fallback rather than a non-null assert.
   return handleUnhandledState(root, artifactsDir, advanceState);

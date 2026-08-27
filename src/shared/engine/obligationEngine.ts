@@ -196,6 +196,52 @@ export interface AdvanceResult<S, Step> {
   lastObligationId?: string;
 }
 
+/** A non-convergent stop, described once for every draw that can hit one. */
+export interface StoppedFoldDescription {
+  /** Which backstop fired, carried through so a caller need not re-read it. */
+  stopped: "cycle" | "bound";
+  /**
+   * The obligation in flight when the fold stopped, or `"unknown"` when it
+   * stopped before selecting one. Never parsed out of prose.
+   */
+  spinning: string;
+  /** A clause completing "the fold …", in the caller's own bound terms. */
+  cause: string;
+}
+
+/**
+ * Describe a non-convergent stop — the ONE home for that description.
+ *
+ * Returning `null` for a converged outcome is the load-bearing half. The
+ * contract on `AdvanceResult` is that ABSENT `stopped` means completion, so a
+ * caller branching on `step` alone cannot tell a finished run from a wedged one
+ * and reports the wedge as finished. Routing through this function makes the
+ * null-check itself the branch: there is no way to consume the description
+ * without having asked the question.
+ *
+ * Consumers pass the bound actually in force (`opts.bound`) rather than
+ * restating a constant, so the number a host reads is the number that fired.
+ *
+ * `cause` is prose for a human terminal ONLY. Never match it: `stopped` and
+ * `spinning` are the machine-readable fields, and recognizing a wedged fold by
+ * its message text is the divergence this module's bounded-call invariant bans.
+ */
+export function describeStoppedFold(
+  outcome: Pick<AdvanceResult<unknown, unknown>, "stopped" | "lastObligationId">,
+  opts?: { bound?: number },
+): StoppedFoldDescription | null {
+  if (!outcome.stopped) return null;
+  const bound = opts?.bound ?? DEFAULT_MAX_TRANSITIONS;
+  return {
+    stopped: outcome.stopped,
+    spinning: outcome.lastObligationId ?? "unknown",
+    cause:
+      outcome.stopped === "bound"
+        ? `spent the engine transition bound (${String(bound)}) without reaching a host-actionable step`
+        : "revisited a state it had already scanned this run",
+  };
+}
+
 /**
  * Drive the engine from `state`: repeatedly select the highest-priority actionable
  * obligation and execute it. A `transition` outcome advances the state and the

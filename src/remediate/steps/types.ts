@@ -53,7 +53,23 @@ export type RemediationStepKind =
   // Terminal-exit backstop (backlog: abnormal-exit no-step-contract): written by
   // the CLI when next-step dies on an unhandled error, so a stale prior step can
   // never read as a live instruction. Mirrors audit-code's "blocked" kind.
-  | "blocked";
+  | "blocked"
+  // A FOURTH thing, and the same attribution argument as `final_gate_red` above.
+  // The obligation fold stopped without converging: an obligation kept
+  // transitioning without ever clearing its own actionable state, so the
+  // engine's backstop fired. Distinct from `unhandled_state`, which means the
+  // machine has no transition for a state — there the state is the problem, here
+  // the state is well-formed and an obligation is spinning on it. Conflating
+  // them sends an operator to inspect a perfectly good state file.
+  //
+  // Until this existed, both remediate folds branched on the outcome's `step`
+  // alone. `stopped` being ABSENT is what means "complete", so a wedged fold
+  // reported as a finished run — the exact failure the shared engine's own
+  // contract warns about.
+  //
+  // Persisted contract: an ADDITIVE value, read the same way as `final_gate_red`
+  // by a host that does not know it.
+  | "fold_did_not_converge";
 
 import type { StepStatus, AccessDeclaration } from "audit-tools/shared";
 

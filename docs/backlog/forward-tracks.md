@@ -138,14 +138,27 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   isolated-branch dispatch returns as a first-class flow, re-add a landing action in tooling rather
   than relying on the host remembering.
 
-- **One-core dissolution lap — unify the host-handoff substrate and converge remediate on the
-  obligation walk (owner-routed 2026-08-19).** The owner declined two remediation-run findings
-  explicitly to route them here as a dedicated lap: ARC-e96acb7e (host-handoff subsystem
-  duplicated across `src/audit/cli/dispatch/hostHandoff.ts` and
-  `src/remediate/steps/dispatch/hostHandoff.ts` — path containment, sha256 prompt hashing,
-  result-map verification, schema validation reimplemented both sides) and ARC-908bbca5
-  (remediate's ~3,800-line procedural `src/remediate/steps/nextStep.ts` vs audit's priority-array
-  obligation walk). Scope: single-source the handoff substrate in `audit-tools/shared`, then
-  converge remediate's step derivation on the obligation-walk shape; per-mode differences become
-  policy axes of the shared core. [[dissolve-auditor-remediator-distinction]]
-  [[a3-a4-engine-unification]]
+- **One-core dissolution lap — the two draws are converged; what remains is two adapter divergences
+  (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).** The original entry routed two declined
+  findings, ARC-e96acb7e and ARC-908bbca5. **Both premises were false when routed**; this entry is
+  re-derived from measurement rather than deleted, because the stale framing follows from the file's
+  raw size and a true entry is the guard against it recurring. Measured at HEAD: remediate drives
+  shared `advance` twice over two priority arrays and two declarative registries (A3 landed
+  2026-06-17); `hostHandoffCore.ts` already owns three of the four named duplications; `jscpd` at
+  gate granularity finds zero clones across the twins. **Property:** each invariant audit enforces
+  mechanically on its draw, remediate enforces on its own — the shared core carries the mechanism
+  and each draw supplies its policy. Open residue: (1) remediate's boundary struct drops the
+  `runDir` the shared core returns and rebuilds it by slicing the workload filename, so renaming
+  that file mis-derives every remediate result path; (2) the prompt-binding check runs the same five
+  predicates in a different order on each side, so a doubly-malformed document is refused for
+  different reasons per draw. **Decided non-goal:** deriving remediate's engine bound.
+  `deriveEngineBound` derives FROM a consumer's own graceful cap so the consumer can prove the
+  engine bound cannot fire first; remediate has no cap (`countStep` is per-invocation telemetry that
+  enforces no limit), so deriving would mean inventing one to derive from. The engine's default is
+  its documented backstop for exactly this shallow-fold case.
+  **Deliberately NOT in scope:** obligation *granularity* — remediate
+  sequences sub-gates inside executor bodies where audit registers `PRIORITY` ids. No measured
+  defect attaches to it, and its target moves under CX-02, which converges audit toward remediate's
+  shape rather than the reverse. Re-open that quarter only on a measured defect, and only after
+  CX-02. Full brief, with both adversarial lanes and the limits of the measurement:
+  [`one-core-lap-scope-2026-08-27.md`](../reviews/one-core-lap-scope-2026-08-27.md).

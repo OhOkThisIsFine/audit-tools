@@ -8,6 +8,7 @@ import {
   findFirstActionableObligation,
   findNextObligation,
   advance,
+  describeStoppedFold,
   DEFAULT_MAX_TRANSITIONS,
 } from "../../src/shared/engine/obligationEngine.js";
 import type {
@@ -308,4 +309,39 @@ test("advance with stateSignature reports completion (not cycle) when nothing is
   const result = await advance(engine, {}, {}, { stateSignature: () => "x" });
   expect(result.step).toBe(null);
   expect(result.stopped).toBe(undefined);
+});
+
+// ── describeStoppedFold — the ONE home for a non-convergent stop ─────────────
+//
+// The null-on-converged return is the load-bearing half, not a convenience.
+// `stopped` being ABSENT means the run completed, so a caller branching on
+// `step` alone cannot tell a finished fold from a wedged one. Routing through
+// this function makes the null-check itself the branch: there is no way to
+// consume the description without having asked the question. Both remediate
+// folds shipped for two months without asking it.
+
+test("describeStoppedFold returns null for a CONVERGED outcome", () => {
+  expect(describeStoppedFold({ step: null } as never)).toBe(null);
+  expect(describeStoppedFold({ lastObligationId: "a" } as never)).toBe(null);
+});
+
+test("describeStoppedFold reports the bound in force, not a restated constant", () => {
+  const described = describeStoppedFold(
+    { stopped: "bound", lastObligationId: "spinner" },
+    { bound: 66 },
+  );
+  expect(described?.stopped).toBe("bound");
+  expect(described?.spinning).toBe("spinner");
+  expect(described?.cause).toContain("66");
+});
+
+test("describeStoppedFold falls back to the engine default when no bound is supplied", () => {
+  const described = describeStoppedFold({ stopped: "bound", lastObligationId: "x" });
+  expect(described?.cause).toContain(String(DEFAULT_MAX_TRANSITIONS));
+});
+
+test("describeStoppedFold names the obligation as unknown when the fold stopped before selecting one", () => {
+  const described = describeStoppedFold({ stopped: "cycle" });
+  expect(described?.spinning).toBe("unknown");
+  expect(described?.cause).toContain("revisited");
 });

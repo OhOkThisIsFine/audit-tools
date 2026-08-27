@@ -6,6 +6,16 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **`InputResolution` is declared twice, under one name, with two different shapes (2026-08-27,
+  low).** `src/remediate/steps/intakeResolver.ts` exports an `InputResolution` carrying `discovered`;
+  `src/remediate/steps/nextStep.ts` declares a private one of the same name that has `allExisting`
+  and no `discovered`. `RemediateCtx.inputResolution` binds the LOCAL one, so a caller reading the
+  exported declaration writes a literal the typechecker rejects — which is how this surfaced, while
+  building a ctx for the new priority-coverage contract test. Neither declaration references the
+  other, so nothing keeps them in step and the divergence is already real. **Property:** one
+  declaration of a name, or two names — the shared shape single-sourced and the per-site extras
+  stated as extensions, so a reader cannot pick the wrong one.
+
 - **The release script's await-run timeout (10 min) is shorter than a GitHub `release`-event
   delivery delay it then misreads as "no run" (2026-08-26, low, friction: tool_should_decide).**
   For v0.49.0 the release event fired ~13 minutes after `gh release create`; the script timed out
@@ -810,16 +820,6 @@
   (2026-08-06, lead, low).** 3 refuted / 6 downgraded — record in
   [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:
   should synthesis demand mechanism-grounded (not flow-existence) evidence for `critical`?
-
-- **`check:memory-citations` cannot see a `[[name]]` cross-link (2026-08-14, nightly, low).** The
-  gate matches only the `memory: <name>` prose form in tracked docs, so the OTHER citation form —
-  the `[[name]]` links memories use to reference each other — is unchecked. This is the same
-  failure the gate was built for — a pointer nobody can follow re-asserting a deleted design
-  with the authority of a citation — and the memory-index header already warns the `[[…]]` half is
-  ungated, which makes every prune a hand-audit. A patch, its red-green test and a measured
-  false-positive surface are in `.audit-tools/nightly/proposals/P45-memory-crosslinks-ungated/`.
-  **Property to hold:** both citation forms are mechanically checked, so pruning a memory cannot
-  silently strand a reference.
 
 - **Steward verification metadata is undeliverable through the host-result envelope (hit
   2026-08-18).** The `deepening:steward` prompt instructs the host to return `findings: []` plus

@@ -11,6 +11,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   advance,
+  describeStoppedFold,
   DEFAULT_MAX_TRANSITIONS,
   compareCodeUnits,
   isFileMissingError,
@@ -2756,7 +2757,11 @@ export async function runDeterministicForNextStep(
 
   if (outcome.step) return outcome.step;
 
-  if (outcome.stopped) {
+  // This call supplies no `maxTransitions`, so the bound in force IS the engine
+  // default — `describeStoppedFold` reads it from the same place rather than
+  // this site restating the constant.
+  const stalled = describeStoppedFold(outcome);
+  if (stalled) {
     // The engine's bound is its runaway backstop, and audit deliberately
     // supplies no stateSignature (cycle detection lives in ctx-level guards with
     // tolerance windows). A cause those guards miss — observed 2026-07-30: an
@@ -2769,18 +2774,13 @@ export async function runDeterministicForNextStep(
     // bound fired or which obligation was spinning.
     const bundle = await loadArtifactBundle(params.artifactsDir);
     const decision = decideNextStep(bundle);
-    const spinning = outcome.lastObligationId ?? "unknown";
-    const cause =
-      outcome.stopped === "bound"
-        ? `made ${DEFAULT_MAX_TRANSITIONS}+ transitions without reaching a host-actionable step`
-        : "revisited a state it had already scanned this run";
     return {
       kind: "blocked",
       state: decision.state,
       bundle,
       reason:
-        `The deterministic fold ${cause} — an obligation is re-selecting without clearing its own ` +
-        `actionable state (${spinning}). ` +
+        `The deterministic fold ${stalled.cause} — an obligation is re-selecting without clearing its own ` +
+        `actionable state (${stalled.spinning}). ` +
         "The run is paused resumably, not crashed: inspect the run's task-results/ for error-shaped " +
         "result files whose tasks never completed (delete them to re-dispatch those tasks), or hand " +
         "results in with `audit-code ingest-results --results <file>`; then re-run next-step.",

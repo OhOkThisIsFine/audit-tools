@@ -493,6 +493,14 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   re-reading the whole file (2026-07-16).** The one recorded case was never explained (the suspected
   hook rewriter was falsified 2026-07-25); the mitigation stands on its own.
 
+- **A `check:*` typecheck leg can exit non-zero with NO error text when it races the async
+  PostToolUse typecheck hook (2026-08-27).** `npm run check:scripts` returned exit 2 with only the
+  npm notices in its log — no `error TS…` line at all. `npx tsc -p tsconfig.scripts.json` on the same
+  tree exited 0, and the re-run of `npm run check:scripts` also exited 0. The hook fires its own
+  `tsc` after every TS edit, so two compilers can contend over the same build state. **Tell:** a
+  non-zero exit whose log holds no diagnostic is not a red — re-run it before believing it, per the
+  flake-first protocol. A red with actual `error TS…` lines is real.
+
 - **A typecheck sweep's error count is not final until you re-run it.** Clearing the test tree for
   `check:tests` (`tsconfig.test.json`, `allowJs`; wired into `verify:checks`) surfaced ~20 errors
   beyond the initial count — TS unmasks a second error on the same object literal only once its

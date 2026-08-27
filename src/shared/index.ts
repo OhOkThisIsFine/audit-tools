@@ -1076,6 +1076,7 @@ export type {
   ObligationOutcome,
   ObligationEngine,
   AdvanceResult,
+  StoppedFoldDescription,
 } from "./engine/obligationEngine.js";
 export {
   ObligationStateSchema,
@@ -1083,6 +1084,7 @@ export {
   findFirstActionableObligation,
   findNextObligation,
   advance,
+  describeStoppedFold,
   DEFAULT_MAX_TRANSITIONS,
   ENGINE_TRANSITION_HEADROOM,
   deriveEngineBound,
