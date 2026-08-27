@@ -86,6 +86,19 @@ describe("detectCyclicSeamObligations", () => {
     expect(cycles).toEqual([]);
   });
 
+  it("excludes a dependent tail that merely reaches the cycle", () => {
+    // TAIL needs A, but nothing in the cycle needs TAIL — TAIL is downstream of
+    // the cycle, not a member of it. A Kahn post-drain remainder reports every
+    // node it could not drain, which wrongly includes TAIL.
+    const cycles = detectCyclicSeamObligations([
+      { id: "A", needs: ["B"] },
+      { id: "B", needs: ["A"] },
+      { id: "TAIL", needs: ["A"] },
+    ]);
+    expect(cycles).toHaveLength(1);
+    expect(cycles[0].members).toEqual(["A", "B"]);
+  });
+
   it("reports two independent cycles as two separate cycles", () => {
     const cycles = detectCyclicSeamObligations([
       { id: "A", needs: ["B"] },
@@ -97,6 +110,31 @@ describe("detectCyclicSeamObligations", () => {
     const sorted = cycles.map((c) => c.members.sort()).sort();
     expect(sorted[0]).toEqual(["A", "B"]);
     expect(sorted[1]).toEqual(["C", "D"]);
+  });
+
+  it("splits two cycles chained by an edge into two separate cycles", () => {
+    // A<->B and C<->D are distinct strongly connected components; the B→C edge
+    // makes them one WEAKLY connected component, which the previous union-find
+    // grouping reported as a single 4-member cycle. Breaking one does not break
+    // the other, so they are two cycles.
+    const cycles = detectCyclicSeamObligations([
+      { id: "A", needs: ["B"] },
+      { id: "B", needs: ["A", "C"] },
+      { id: "C", needs: ["D"] },
+      { id: "D", needs: ["C"] },
+    ]);
+    expect(cycles).toHaveLength(2);
+    expect(cycles[0].members).toEqual(["A", "B"]);
+    expect(cycles[1].members).toEqual(["C", "D"]);
+  });
+
+  it("reports a self-needing module as a 1-member cycle", () => {
+    const cycles = detectCyclicSeamObligations([
+      { id: "A", needs: ["A"] },
+      { id: "B", needs: ["A"] },
+    ]);
+    expect(cycles).toHaveLength(1);
+    expect(cycles[0].members).toEqual(["A"]);
   });
 });
 

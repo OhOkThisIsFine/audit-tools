@@ -14,11 +14,16 @@ import type {
 import {
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
 } from "./contractPipeline.js";
+import { findFirstCycleWitness } from "../graph/directedCycles.js";
 
 /**
- * Detect cycles in an obligation dependency graph using DFS with three-color
- * marking (white/gray/black). Returns the IDs of obligations forming the first
- * cycle detected, or null when the graph is acyclic.
+ * Detect cycles in an obligation dependency graph. Returns the IDs of
+ * obligations forming the first cycle detected as a witness path with its start
+ * repeated at the end (`["A","B","A"]`), or null when the graph is acyclic.
+ *
+ * A thin draw over the shared directed-cycle core: an obligation that depends
+ * on ITSELF is a cycle here (self-loops included), and dependencies naming an
+ * id outside the ledger are external references the core ignores.
  *
  * INV-shared-core-07: called at construction time so a cycle is caught early
  * rather than causing an infinite loop or confusing error at scheduling time.
@@ -26,40 +31,7 @@ import {
 export function detectObligationCycle(
   obligations: readonly ObligationEntry[],
 ): string[] | null {
-  const idSet = new Set(obligations.map((o) => o.id));
-  const depMap = new Map<string, string[]>();
-  for (const o of obligations) {
-    depMap.set(o.id, o.depends_on.filter((dep) => idSet.has(dep)));
-  }
-
-  // Three-color DFS: 0 = unvisited, 1 = in-stack (gray), 2 = done (black).
-  const color = new Map<string, number>();
-  const path: string[] = [];
-
-  function dfs(id: string): string[] | null {
-    const c = color.get(id) ?? 0;
-    if (c === 2) return null; // already done
-    if (c === 1) {
-      // Cycle detected: return the cycle slice.
-      const cycleStart = path.indexOf(id);
-      return path.slice(cycleStart).concat(id);
-    }
-    color.set(id, 1);
-    path.push(id);
-    for (const dep of depMap.get(id) ?? []) {
-      const cycle = dfs(dep);
-      if (cycle) return cycle;
-    }
-    path.pop();
-    color.set(id, 2);
-    return null;
-  }
-
-  for (const o of obligations) {
-    const cycle = dfs(o.id);
-    if (cycle) return cycle;
-  }
-  return null;
+  return findFirstCycleWitness(obligations, { includeSelfLoops: true });
 }
 
 export interface BuildObligationLedgerOptions {

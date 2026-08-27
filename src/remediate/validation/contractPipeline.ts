@@ -7,6 +7,7 @@ import {
   type ValidationIssue,
   isRecord,
   pushValidationIssue,
+  findFirstCycleWitness,
 } from "audit-tools/shared";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import {
@@ -643,7 +644,7 @@ export function validateImplementationDAG(
   // `depends_on` must be rejected too (referential integrity alone let it pass).
   // Traverse declared nodes only (a dangling dep is ignored, as promotion drops it).
   if (Array.isArray(v.nodes)) {
-    const adjacency = new Map<string, string[]>();
+    const dagNodes: { id: string; depends_on: string[] }[] = [];
     for (const node of v.nodes) {
       if (!isRecord(node) || typeof node.id !== "string") continue;
       const deps = Array.isArray(node.depends_on)
@@ -652,9 +653,12 @@ export function validateImplementationDAG(
               typeof d === "string" && d !== node.id && declaredNodeIds.has(d),
           )
         : [];
-      adjacency.set(node.id, deps);
+      dagNodes.push({ id: node.id, depends_on: deps });
     }
-    const cycle = findFirstDependencyCycle(adjacency);
+    // Self-edges are stripped above and self-loops stay OFF in the core: a node
+    // that lists itself is a redundant self-reference here, not a cycle that
+    // stalls the phase scheduler.
+    const cycle = findFirstCycleWitness(dagNodes);
     if (cycle) {
       pushValidationIssue(
         issues,
@@ -665,46 +669,6 @@ export function validateImplementationDAG(
   }
   requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
-}
-
-/**
- * Return the node ids forming the first `depends_on` cycle (as `a -> b -> a`), or
- * null when the graph is acyclic. Standard white/gray/black DFS; iteration follows
- * node insertion order so the reported cycle is deterministic.
- */
-function findFirstDependencyCycle(adjacency: Map<string, string[]>): string[] | null {
-  const WHITE = 0;
-  const GRAY = 1;
-  const BLACK = 2;
-  const color = new Map<string, number>();
-  for (const id of adjacency.keys()) color.set(id, WHITE);
-  const stack: string[] = [];
-
-  const visit = (id: string): string[] | null => {
-    color.set(id, GRAY);
-    stack.push(id);
-    for (const next of adjacency.get(id) ?? []) {
-      if (!adjacency.has(next)) continue;
-      if (color.get(next) === GRAY) {
-        return [...stack.slice(stack.indexOf(next)), next];
-      }
-      if (color.get(next) === WHITE) {
-        const found = visit(next);
-        if (found) return found;
-      }
-    }
-    stack.pop();
-    color.set(id, BLACK);
-    return null;
-  };
-
-  for (const id of adjacency.keys()) {
-    if (color.get(id) === WHITE) {
-      const found = visit(id);
-      if (found) return found;
-    }
-  }
-  return null;
 }
 
 // ── VerificationReport ────────────────────────────────────────────────────────

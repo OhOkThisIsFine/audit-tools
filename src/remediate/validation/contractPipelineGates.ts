@@ -2,8 +2,8 @@
  * Structural gates for the DesignSpec contract-pipeline artifact.
  *
  * Extracted from contractPipeline.ts to keep gate logic (structural checks,
- * obligation cross-checks, Kahn's topological sort) separate from the
- * per-artifact field validators. MNT-86b18f1b.
+ * obligation cross-checks, cycle detection) separate from the per-artifact
+ * field validators. MNT-86b18f1b.
  *
  * Re-exported from contractPipeline.ts for backward-compatible imports.
  *
@@ -28,6 +28,7 @@ import {
   isBareBasename,
   resolveBasenameToTrackedPath,
   enumerateTrackedFilePaths,
+  findCyclicComponents,
 } from "audit-tools/shared";
 import {
   evaluatePairing,
@@ -220,55 +221,27 @@ export function validateDesignSpecGates(
   runDesignSpecFieldChecks(checksGate4And5);
 
   // Gate 6: circular obligation dependency detection (warning, not error).
-  // Uses Kahn's algorithm (iterative topological sort).
+  // Exact cycle membership from the shared directed-cycle core: the reported
+  // ids are the strongly connected components' own members, so an obligation
+  // merely DOWNSTREAM of a cycle is not named (the Kahn drain this replaced
+  // reported every node it could not drain, tails included). The ledger is
+  // untrusted host-authored input, so the shape guards stay here at the call
+  // site — the core takes typed nodes.
   if (isRecord(obligationLedger) && Array.isArray(obligationLedger.obligations)) {
     const obligations = obligationLedger.obligations as unknown[];
-    const ids = new Set<string>();
-    const dependsOnMap = new Map<string, string[]>();
+    const nodes: { id: string; depends_on: string[] }[] = [];
     for (const obl of obligations) {
       if (!isRecord(obl) || typeof obl.id !== "string") continue;
-      ids.add(obl.id);
-      dependsOnMap.set(
-        obl.id,
-        Array.isArray(obl.depends_on)
+      nodes.push({
+        id: obl.id,
+        depends_on: Array.isArray(obl.depends_on)
           ? (obl.depends_on as unknown[]).filter((d): d is string => typeof d === "string")
           : [],
-      );
+      });
     }
 
-    // Build in-degree count and adjacency list (edge: dependency → dependent).
-    const inDegree = new Map<string, number>();
-    const adjacency = new Map<string, string[]>();
-    for (const id of ids) {
-      inDegree.set(id, 0);
-      adjacency.set(id, []);
-    }
-    for (const [id, deps] of dependsOnMap.entries()) {
-      for (const dep of deps) {
-        if (!ids.has(dep)) continue; // ignore external refs
-        adjacency.get(dep)!.push(id);
-        inDegree.set(id, (inDegree.get(id) ?? 0) + 1);
-      }
-    }
-
-    const queue: string[] = [];
-    for (const [id, deg] of inDegree.entries()) {
-      if (deg === 0) queue.push(id);
-    }
-    let visited = 0;
-    while (queue.length > 0) {
-      const node = queue.shift()!;
-      visited++;
-      for (const next of adjacency.get(node) ?? []) {
-        const newDeg = (inDegree.get(next) ?? 0) - 1;
-        inDegree.set(next, newDeg);
-        if (newDeg === 0) queue.push(next);
-      }
-    }
-
-    if (visited < ids.size) {
-      // Remaining nodes with inDegree > 0 are part of the cycle.
-      const cycleIds = [...ids].filter((id) => (inDegree.get(id) ?? 0) > 0);
+    const cycleIds = findCyclicComponents(nodes, { includeSelfLoops: true }).flat();
+    if (cycleIds.length > 0) {
       issues.push({
         path: "obligation_ledger.obligations",
         message: `Circular interface-definition dependency detected among obligations: [${cycleIds.join(", ")}]; route to N-R21 for resolution`,

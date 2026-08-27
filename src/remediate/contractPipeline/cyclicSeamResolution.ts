@@ -8,11 +8,12 @@
  * owned by another module.  For the purposes of this detector, a module M
  * is said to need module N when M lists N in its `needs` array.
  *
- * Detection algorithm: Kahn's iterative topological sort over the directed
- * graph of (module → modules it needs).  Any node that remains after the
- * sort is part of a cycle.  The resulting connected components are each
- * reported as one detected cycle.
+ * Detection is the shared directed-cycle core's exact strongly-connected-
+ * component membership (`audit-tools/shared` → `findCyclicComponents`).  Each
+ * cyclic component is reported as one detected cycle.
  */
+
+import { findCyclicComponents } from "audit-tools/shared";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,9 +25,12 @@ export interface SeamObligationNode {
   needs: string[];
 }
 
-/** One detected cycle (N ≥ 2 nodes). */
+/**
+ * One detected cycle (N ≥ 1 nodes — a module that needs ITSELF is a 1-member
+ * cycle; every other cycle has 2 or more members).
+ */
 export interface DetectedCycle {
-  /** Ordered list of module IDs that form the cycle (not necessarily in cycle order). */
+  /** Module IDs that form the cycle, in input order (not in cycle order). */
   members: string[];
 }
 
@@ -68,96 +72,28 @@ export interface AuthoredCycleBreak {
 /**
  * Detect cyclic seam obligations in a module graph.
  *
- * Uses Kahn's topological sort: build an in-degree map and a dependency →
- * dependent adjacency list, then drain the zero-in-degree queue.  Any node
- * remaining in the graph after the drain is part of a cycle.  Weakly
- * connected components among remaining nodes are grouped into cycles.
+ * Membership is EXACT: each reported cycle is one strongly connected component
+ * of the (module → modules it needs) graph. Two properties follow, and both
+ * differ from the Kahn drain this replaced:
+ *
+ *  - a module DOWNSTREAM of a cycle (it needs a member, no member needs it) is
+ *    not a member and is not reported — the drain reported every node it could
+ *    not drain, tails included;
+ *  - two cycles CHAINED by an edge between them are two cycles, not one — the
+ *    drain's weakly-connected grouping fused them.
+ *
+ * A module that needs ITSELF is reported as a 1-member cycle.
  *
  * Returns an empty array when no cycle is found.
  */
 export function detectCyclicSeamObligations(
   nodes: SeamObligationNode[],
 ): DetectedCycle[] {
-  if (nodes.length === 0) return [];
-
-  const ids = new Set(nodes.map((n) => n.id));
-  // adjacency: dep → [dependents]
-  const adjacency = new Map<string, string[]>();
-  const inDegree = new Map<string, number>();
-
-  for (const id of ids) {
-    adjacency.set(id, []);
-    inDegree.set(id, 0);
-  }
-
-  for (const node of nodes) {
-    for (const dep of node.needs) {
-      if (!ids.has(dep)) continue; // ignore external refs
-      // edge: dep → node (dep must come before node)
-      adjacency.get(dep)!.push(node.id);
-      inDegree.set(node.id, (inDegree.get(node.id) ?? 0) + 1);
-    }
-  }
-
-  // Kahn's drain
-  const queue: string[] = [];
-  for (const [id, deg] of inDegree.entries()) {
-    if (deg === 0) queue.push(id);
-  }
-  let visited = 0;
-  while (queue.length > 0) {
-    const node = queue.shift()!;
-    visited++;
-    for (const next of adjacency.get(node) ?? []) {
-      const newDeg = (inDegree.get(next) ?? 0) - 1;
-      inDegree.set(next, newDeg);
-      if (newDeg === 0) queue.push(next);
-    }
-  }
-
-  if (visited === ids.size) return []; // no cycles
-
-  // Collect cycle members (nodes with in-degree > 0 after drain).
-  const cycleNodes = [...ids].filter((id) => (inDegree.get(id) ?? 0) > 0);
-
-  // Group by weakly connected component using union-find on the original
-  // needs edges (restricted to cycle nodes).
-  const cycleSet = new Set(cycleNodes);
-  const parent = new Map<string, string>(cycleNodes.map((id) => [id, id]));
-
-  function find(x: string): string {
-    while (parent.get(x) !== x) {
-      const p = parent.get(x)!;
-      parent.set(x, parent.get(p) ?? p);
-      x = parent.get(x)!;
-    }
-    return x;
-  }
-
-  function union(a: string, b: string): void {
-    const ra = find(a);
-    const rb = find(b);
-    if (ra !== rb) parent.set(ra, rb);
-  }
-
-  for (const node of nodes) {
-    if (!cycleSet.has(node.id)) continue;
-    for (const dep of node.needs) {
-      if (cycleSet.has(dep)) {
-        union(node.id, dep);
-      }
-    }
-  }
-
-  // Group by root.
-  const components = new Map<string, string[]>();
-  for (const id of cycleNodes) {
-    const root = find(id);
-    if (!components.has(root)) components.set(root, []);
-    components.get(root)!.push(id);
-  }
-
-  return [...components.values()].map((members) => ({ members }));
+  const components = findCyclicComponents(
+    nodes.map((node) => ({ id: node.id, depends_on: node.needs })),
+    { includeSelfLoops: true },
+  );
+  return components.map((members) => ({ members }));
 }
 
 // ── Cycle-break re-check ──────────────────────────────────────────────────────
@@ -176,6 +112,12 @@ export function detectCyclicSeamObligations(
  *
  * If the resulting graph still contains a cycle, the proposed break is
  * rejected.
+ *
+ * The mediator appears EXACTLY ONCE in the patched graph. When it is already a
+ * node of `allNodes` — which is the live feed from
+ * {@link validateAuthoredCycleBreak}, where the mediator is a real obligation —
+ * its own entry carries the proposed needs instead of a second entry with the
+ * same id being appended.
  */
 export function validateCycleBreak(
   originalCycle: DetectedCycle,
@@ -188,11 +130,18 @@ export function validateCycleBreak(
   // - For each cycle member: replace needs-edges to other cycle members with
   //   a needs-edge to the mediator.
   // - For non-cycle members: unchanged.
-  // - Add the mediator.
+  // - Add the mediator, unless the graph already carries a node with its id.
   const patched: SeamObligationNode[] = [];
+  const mediatorAlreadyPresent = allNodes.some(
+    (node) => node.id === proposedMediator.id,
+  );
 
   for (const node of allNodes) {
-    if (cycleSet.has(node.id)) {
+    if (node.id === proposedMediator.id) {
+      // The mediator's own entry — carry the proposed needs here rather than
+      // appending a second node with the same id below.
+      patched.push({ id: node.id, needs: [...proposedMediator.needs] });
+    } else if (cycleSet.has(node.id)) {
       const newNeeds = node.needs.map((dep) =>
         cycleSet.has(dep) ? proposedMediator.id : dep,
       );
@@ -203,8 +152,10 @@ export function validateCycleBreak(
     }
   }
 
-  // Add the mediator itself.
-  patched.push({ id: proposedMediator.id, needs: proposedMediator.needs });
+  // Add the mediator itself, unless the live graph already carries it.
+  if (!mediatorAlreadyPresent) {
+    patched.push({ id: proposedMediator.id, needs: proposedMediator.needs });
+  }
 
   const remaining = detectCyclicSeamObligations(patched);
 
