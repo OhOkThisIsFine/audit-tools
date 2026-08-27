@@ -108,13 +108,66 @@ vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
+    realpathSync: (
+      path: Parameters<typeof actual.realpathSync>[0],
+      ...args: unknown[]
+    ): ReturnType<typeof actual.realpathSync> => {
+      if (
+        String(path)
+          .replace(/\\/gu, "/")
+          .endsWith("/disappears-after-stat.ts")
+      ) {
+        const error = new Error(
+          "synthetic post-stat disappearance",
+        ) as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        throw error;
+      }
+      return (
+        actual.realpathSync as (
+          ...values: unknown[]
+        ) => ReturnType<typeof actual.realpathSync>
+      )(path, ...args);
+    },
+    statSync: (
+      path: Parameters<typeof actual.statSync>[0],
+      ...args: unknown[]
+    ): ReturnType<typeof actual.statSync> => {
+      if (
+        String(path)
+          .replace(/\\/gu, "/")
+          .endsWith("/disappears-after-lstat.ts")
+      ) {
+        const error = new Error(
+          "synthetic post-lstat disappearance",
+        ) as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        throw error;
+      }
+      return (
+        actual.statSync as (
+          ...values: unknown[]
+        ) => ReturnType<typeof actual.statSync>
+      )(path, ...args);
+    },
     readFileSync: (
       path: Parameters<typeof actual.readFileSync>[0],
       ...args: unknown[]
     ): ReturnType<typeof actual.readFileSync> => {
-      if (String(path).replace(/\\/gu, "/").endsWith("/unreadable-baseline.ts")) {
-        const error = new Error("synthetic unreadable baseline") as NodeJS.ErrnoException;
-        error.code = "EACCES";
+      const normalized = String(path).replace(/\\/gu, "/");
+      if (
+        normalized.endsWith("/unreadable-baseline.ts") ||
+        normalized.endsWith("/disappears-after-realpath.ts")
+      ) {
+        const disappears = normalized.endsWith(
+          "/disappears-after-realpath.ts",
+        );
+        const error = new Error(
+          disappears
+            ? "synthetic post-realpath disappearance"
+            : "synthetic unreadable baseline",
+        ) as NodeJS.ErrnoException;
+        error.code = disappears ? "ENOENT" : "EACCES";
         throw error;
       }
       return (actual.readFileSync as (...values: unknown[]) => ReturnType<typeof actual.readFileSync>)(
@@ -428,16 +481,39 @@ describe(RED_SIGNATURE, () => {
     assertOffline();
   });
 
-  it("allows deterministic missing estimates but refuses dangerous paths as trusted baselines", async () => {
+  it("allows deterministic missing estimates and directories but refuses unsafe or racy baselines", async () => {
     const { sandbox, root } = await makeSandbox();
     await mkdir(join(root, "src", "directory-baseline"), { recursive: true });
     await writeFile(join(root, "src", "directory-baseline", "nested.ts"), "nested", "utf8");
     await writeFile(join(root, "src", "unreadable-baseline.ts"), "secret", "utf8");
+    await writeFile(join(root, "src", "disappears-after-lstat.ts"), "race", "utf8");
+    await writeFile(join(root, "src", "disappears-after-stat.ts"), "race", "utf8");
+    await writeFile(
+      join(root, "src", "disappears-after-realpath.ts"),
+      "race",
+      "utf8",
+    );
     const outside = join(sandbox, "outside.ts");
     await writeFile(outside, "outside", "utf8");
+
+    const directory = finding("a", ["src/directory-baseline"]);
+    snapshotAffectedFileHashes(root, [directory]);
+    requireContract(
+      typeof directory.affected_files[0]?.hash_at_plan_time === "string",
+      "directory did not acquire trusted baseline hash",
+    );
+
     const cases = [
-      { label: "directory", path: "src/directory-baseline" },
       { label: "unreadable", path: "src/unreadable-baseline.ts" },
+      {
+        label: "post-lstat disappearance",
+        path: "src/disappears-after-lstat.ts",
+      },
+      { label: "post-stat disappearance", path: "src/disappears-after-stat.ts" },
+      {
+        label: "post-realpath disappearance",
+        path: "src/disappears-after-realpath.ts",
+      },
       { label: "absolute", path: join(root, "src", "shared.ts") },
       { label: "root-escaping", path: "../outside.ts" },
     ];

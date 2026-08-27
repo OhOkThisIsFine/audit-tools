@@ -1,10 +1,20 @@
 import { hashContent, checkFileIntegrityRecords, resolveWithinRoot, compareCodeUnits } from "audit-tools/shared";
-import { readFile, readdir, stat } from "node:fs/promises";
+import {
+  lstat,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  stat,
+} from "node:fs/promises";
 import { join, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   existsSync,
+  lstatSync,
   realpathSync,
   readFileSync,
+  readlinkSync,
+  readdirSync,
   statSync,
   type Dirent,
 } from "node:fs";
@@ -50,28 +60,67 @@ function sortDirents(a: Dirent, b: Dirent): number {
   return compareCodeUnits(a.name, b.name);
 }
 
+function pushDirectorySymlinkHash(
+  parts: string[],
+  root: string,
+  logicalPath: string,
+  linkText: string,
+): void {
+  parts.push(
+    toDisplayRelativePath(root, logicalPath),
+    "\0",
+    "symlink\0",
+    hashContent(linkText),
+    "\0",
+  );
+}
+
 // Directory digest: build a canonical manifest string (a "directory" marker,
 // then NUL-separated relpath/file-hash pairs) from a depth-first, name-sorted
 // walk, then hash it once via the shared primitive. Per-file content hashes
 // also route through hashContent — no inline createHash remains.
-async function hashDirectory(root: string, absolutePath: string): Promise<string> {
+async function hashDirectory(
+  root: string,
+  logicalPath: string,
+  physicalPath: string,
+): Promise<string> {
   const parts: string[] = ["directory\n"];
 
-  const visit = async (dir: string): Promise<void> => {
-    const entries = (await readdir(dir, { withFileTypes: true })).sort(sortDirents);
+  const visit = async (
+    logicalDirectory: string,
+    physicalDirectory: string,
+  ): Promise<void> => {
+    const entries = (
+      await readdir(physicalDirectory, { withFileTypes: true })
+    ).sort(sortDirents);
     for (const entry of entries) {
-      const child = join(dir, entry.name);
+      const logicalChild = join(logicalDirectory, entry.name);
+      const physicalChild = join(physicalDirectory, entry.name);
+      if (entry.isSymbolicLink()) {
+        pushDirectorySymlinkHash(
+          parts,
+          root,
+          logicalChild,
+          await readlink(physicalChild),
+        );
+        continue;
+      }
       if (entry.isDirectory()) {
-        await visit(child);
+        await visit(logicalChild, physicalChild);
         continue;
       }
       if (!entry.isFile()) continue;
-      const content = await readFile(child);
-      parts.push(toDisplayRelativePath(root, child), "\0", hashContent(content), "\0");
+      const content = await readFile(physicalChild);
+      parts.push(
+        toDisplayRelativePath(root, logicalChild),
+        "\0",
+        hashContent(content),
+        "\0",
+      );
     }
   };
 
-  await visit(absolutePath);
+  await visit(logicalPath, physicalPath);
   return hashContent(parts.join(""));
 }
 
@@ -84,12 +133,27 @@ export async function hashAffectedPath(
   root: string,
   affectedPath: string,
 ): Promise<string | undefined> {
-  const absolutePath = resolveAffectedPath(root, affectedPath);
+  const absoluteRoot = resolve(root);
+  const absolutePath = resolveAffectedPath(absoluteRoot, affectedPath);
   if (!existsSync(absolutePath)) return undefined;
   try {
-    const pathStat = await stat(absolutePath);
-    if (pathStat.isDirectory()) return await hashDirectory(root, absolutePath);
-    if (pathStat.isFile()) return await hashFile(absolutePath);
+    if (resolveWithinRoot(absoluteRoot, absolutePath) === null) {
+      throw new Error("affected path escapes the repository root");
+    }
+    const lexicalPathStat = await lstat(absolutePath);
+    if (lexicalPathStat.isSymbolicLink()) {
+      throw new Error("top-level symlinks cannot be trusted affected paths");
+    }
+    const physicalRoot = await realpath(absoluteRoot);
+    const physicalPath = await realpath(absolutePath);
+    if (resolveWithinRoot(physicalRoot, physicalPath) === null) {
+      throw new Error("resolved affected path escapes the repository root");
+    }
+    const pathStat = await stat(physicalPath);
+    if (pathStat.isDirectory()) {
+      return await hashDirectory(absoluteRoot, absolutePath, physicalPath);
+    }
+    if (pathStat.isFile()) return await hashFile(physicalPath);
     return undefined;
   } catch (err) {
     reportHashIoError(absolutePath, err);
@@ -166,9 +230,107 @@ function planningBaselineError(
   );
 }
 
+function hashPlanningDirectorySync(
+  absoluteRoot: string,
+  absolutePath: string,
+  physicalRoot: string,
+  physicalPath: string,
+  affectedPath: string,
+): string {
+  const parts: string[] = ["directory\n"];
+
+  const visit = (logicalDirectory: string, physicalDirectory: string): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(physicalDirectory, { withFileTypes: true }).sort(
+        sortDirents,
+      );
+    } catch (error) {
+      throw planningBaselineError(
+        affectedPath,
+        "directory content is unreadable",
+        error,
+      );
+    }
+
+    for (const entry of entries) {
+      const logicalChild = join(logicalDirectory, entry.name);
+      const unresolvedPhysicalChild = join(physicalDirectory, entry.name);
+      if (entry.isSymbolicLink()) {
+        try {
+          pushDirectorySymlinkHash(
+            parts,
+            absoluteRoot,
+            logicalChild,
+            readlinkSync(unresolvedPhysicalChild),
+          );
+        } catch (error) {
+          throw planningBaselineError(
+            affectedPath,
+            `directory symlink ${JSON.stringify(
+              toDisplayRelativePath(absoluteRoot, logicalChild),
+            )} is unreadable`,
+            error,
+          );
+        }
+        continue;
+      }
+      if (!entry.isDirectory() && !entry.isFile()) continue;
+
+      let physicalChild: string;
+      try {
+        physicalChild = realpathSync(unresolvedPhysicalChild);
+      } catch (error) {
+        throw planningBaselineError(
+          affectedPath,
+          `directory entry ${JSON.stringify(
+            toDisplayRelativePath(absoluteRoot, logicalChild),
+          )} is unreadable`,
+          error,
+        );
+      }
+      if (resolveWithinRoot(physicalRoot, physicalChild) === null) {
+        throw planningBaselineError(
+          affectedPath,
+          `resolved directory entry ${JSON.stringify(
+            toDisplayRelativePath(absoluteRoot, logicalChild),
+          )} escapes the repository root`,
+        );
+      }
+
+      if (entry.isDirectory()) {
+        visit(logicalChild, physicalChild);
+        continue;
+      }
+
+      try {
+        const content = readFileSync(physicalChild);
+        parts.push(
+          toDisplayRelativePath(absoluteRoot, logicalChild),
+          "\0",
+          hashContent(content),
+          "\0",
+        );
+      } catch (error) {
+        throw planningBaselineError(
+          affectedPath,
+          `directory file ${JSON.stringify(
+            toDisplayRelativePath(absoluteRoot, logicalChild),
+          )} is unreadable`,
+          error,
+        );
+      }
+    }
+  };
+
+  visit(absolutePath, physicalPath);
+  return hashContent(parts.join(""));
+}
+
 /**
- * Strict plan-time baseline policy. Only readable regular files lexically and
- * physically contained by the repository root may become trusted baselines.
+ * Strict plan-time baseline policy. Only readable regular files and directories
+ * lexically and physically contained by the repository root may become trusted
+ * baselines.
  * A genuinely absent path is deterministic future work and
  * contributes no baseline; every other unsafe or unreadable path is refused
  * loudly.
@@ -188,34 +350,63 @@ function hashPlanningBaselineSync(
   }
 
   let pathStat;
+  let lexicalPathStat;
   try {
-    pathStat = statSync(absolutePath);
+    lexicalPathStat = lstatSync(absolutePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw planningBaselineError(affectedPath, "path metadata is unreadable", error);
   }
-  if (!pathStat.isFile()) {
+  if (lexicalPathStat.isSymbolicLink()) {
     throw planningBaselineError(
       affectedPath,
-      "existing path is not a regular file",
+      "top-level symlinks cannot become trusted affected paths",
+    );
+  }
+  try {
+    pathStat = statSync(absolutePath);
+  } catch (error) {
+    throw planningBaselineError(affectedPath, "path metadata is unreadable", error);
+  }
+  if (!pathStat.isFile() && !pathStat.isDirectory()) {
+    throw planningBaselineError(
+      affectedPath,
+      "existing path is not a regular file or directory",
+    );
+  }
+  let physicalRoot: string;
+  try {
+    physicalRoot = realpathSync(absoluteRoot);
+  } catch (error) {
+    throw planningBaselineError(affectedPath, "repository root is unreadable", error);
+  }
+
+  let physicalPath: string;
+  try {
+    physicalPath = realpathSync(absolutePath);
+  } catch (error) {
+    throw planningBaselineError(affectedPath, "path content is unreadable", error);
+  }
+  if (resolveWithinRoot(physicalRoot, physicalPath) === null) {
+    throw planningBaselineError(
+      affectedPath,
+      "resolved path escapes the repository root",
+    );
+  }
+
+  if (pathStat.isDirectory()) {
+    return hashPlanningDirectorySync(
+      absoluteRoot,
+      absolutePath,
+      physicalRoot,
+      physicalPath,
+      affectedPath,
     );
   }
 
   try {
-    const physicalRoot = realpathSync(absoluteRoot);
-    const physicalPath = realpathSync(absolutePath);
-    if (resolveWithinRoot(physicalRoot, physicalPath) === null) {
-      throw planningBaselineError(
-        affectedPath,
-        "resolved path escapes the repository root",
-      );
-    }
     return hashContent(readFileSync(physicalPath));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    if (error instanceof Error && error.message.includes(`"${affectedPath}"`)) {
-      throw error;
-    }
     throw planningBaselineError(affectedPath, "path content is unreadable", error);
   }
 }

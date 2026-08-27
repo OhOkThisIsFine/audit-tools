@@ -7,6 +7,7 @@ import {
   ingestRemediationHostResults,
   precomputeRecoveryTestVerdicts,
   prepareRemediationHostHandoff,
+  remediationSubmissionBinding,
   runRequiredTest,
   type CurrentRemediationHostState,
   type PreparedRemediationHostHandoff,
@@ -448,6 +449,61 @@ describe("remediation host handoff repository corroboration", () => {
     expect(ingested.state.host_handoff).toBeUndefined();
   });
 
+  it("accepts a real commit beneath a prompt-bound directory write scope", async () => {
+    const value = await fixture({ allowedFiles: ["src/"] });
+    expect(value.item.allowed_files).toEqual(["src/"]);
+    const after = await landA(value);
+    await writeResult(value, resultFor(value, after));
+
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+    });
+    expect(ingested).not.toBe("unsupported_retired_state");
+    if (ingested === "unsupported_retired_state") return;
+    expect(ingested.accepted_count).toBe(1);
+    expect(ingested.issues).toEqual([]);
+    expect(ingested.state.applied_edit_surface).toEqual(["src/a.ts"]);
+  });
+
+  it("keeps directory write scopes component-aware and result paths normalized", async () => {
+    const directory = await fixture({ allowedFiles: ["src/"] });
+    const directoryBinding = await remediationSubmissionBinding({
+      root: directory.root,
+      artifactsDir: directory.artifactsDir,
+      runId: directory.runId,
+      workItemId: directory.item.id,
+    });
+    expect(directoryBinding).not.toBeNull();
+    for (const candidate of [
+      "src2/a.ts",
+      "src/../src/a.ts",
+      "src\\a.ts",
+    ]) {
+      expect(
+        directoryBinding!.validate(
+          resultFor(directory, "f".repeat(40), [candidate]),
+        ),
+      ).toMatchObject({ code: "submission_contract_invalid" });
+    }
+
+    const exact = await fixture({ allowedFiles: ["src"] });
+    const exactBinding = await remediationSubmissionBinding({
+      root: exact.root,
+      artifactsDir: exact.artifactsDir,
+      runId: exact.runId,
+      workItemId: exact.item.id,
+    });
+    expect(exactBinding).not.toBeNull();
+    expect(
+      exactBinding!.validate(
+        resultFor(exact, "f".repeat(40), ["src/a.ts"]),
+      ),
+    ).toMatchObject({ code: "submission_contract_invalid" });
+  });
+
   it("rejects fabricated and unlanded commit evidence", async () => {
     const fabricated = await fixture();
     await writeResult(fabricated, resultFor(fabricated, "2".repeat(40)));
@@ -577,7 +633,7 @@ describe("remediation host handoff repository corroboration", () => {
     // write scope and then declared "nothing to do" was recorded as
     // verified-no-change and the edit rode in unattributed. The claim is
     // mechanically falsifiable against the tree, so it must be FALSIFIED.
-    const contradicted = await fixture();
+    const contradicted = await fixture({ allowedFiles: ["src/"] });
     // The host really did land a change to its own allowed file, then claimed
     // it had changed nothing.
     await landA(contradicted);
@@ -599,6 +655,9 @@ describe("remediation host handoff repository corroboration", () => {
     expect(refused.accepted_count).toBe(0);
     expect(refused.issues.map((issue) => issue.code)).toContain(
       "changed_files_mismatch",
+    );
+    expect(refused.issues.map((issue) => issue.message).join("\n")).not.toContain(
+      "outside prompt-bound allowed_files",
     );
     // The item stays PENDING: an unaccepted claim must not settle the finding.
     expect(refused.state.items.F1!.status).toBe("pending");

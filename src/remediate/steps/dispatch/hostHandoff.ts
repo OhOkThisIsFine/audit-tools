@@ -334,7 +334,27 @@ function normalizeDeclaredPath(root: string, candidate: string, label: string): 
   if (candidate.length === 0 || isAbsolute(candidate)) {
     throw new Error(`${label} must be a non-empty repository-relative path`);
   }
-  return repoRelativePath(root, candidate, label);
+  const normalized = repoRelativePath(root, candidate, label);
+  return candidate.endsWith("/") ? `${normalized}/` : normalized;
+}
+
+function pathIsAllowedByWriteScope(
+  root: string,
+  candidate: string,
+  allowedFiles: readonly string[],
+): boolean {
+  let normalized: string;
+  try {
+    normalized = repoRelativePath(root, candidate, "changed_files[]");
+  } catch {
+    return false;
+  }
+  if (normalized !== candidate) return false;
+  return allowedFiles.some((allowed) =>
+    allowed.endsWith("/")
+      ? normalized.startsWith(allowed)
+      : normalized === allowed,
+  );
 }
 
 /**
@@ -390,7 +410,11 @@ function assertBlockContract(root: string, block: RemediationBlock): void {
     }
     let normalized: string;
     try {
-      normalized = repoRelativePath(root, raw, `${block.block_id}.touched_files[]`);
+      normalized = normalizeDeclaredPath(
+        root,
+        raw,
+        `${block.block_id}.touched_files[]`,
+      );
     } catch {
       throw new BlockContractError(
         block.block_id,
@@ -590,7 +614,7 @@ export async function remediationSubmissionBinding(params: {
   return {
     submissionDir: paths.resultDir,
     validate: (value: unknown): SubmissionIssue | null => {
-      const parsed = parseResult(value, params.runId, workItem);
+      const parsed = parseResult(value, params.runId, workItem, paths.root);
       return parsed.ok
         ? null
         : { code: "submission_contract_invalid", message: parsed.reason };
@@ -713,6 +737,7 @@ function buildPrompt(item: {
     "Implement the bounded remediation work item below.",
     "The host owns execution choices. For every assignment, apply the finding and item instructions exactly, including any clarified scope or retry context.",
     "Keep every edit within allowed_files, run every required test, land one attributable commit whose changed-file set is exact, and write one JSON result at result_path.",
+    'An allowed_files entry ending in "/" authorizes normalized descendant files; every other entry authorizes only that exact file.',
     `Assignment: ${assignment}`,
     "The result must use remediation-host-result/v1alpha1 and contain exactly contract_version, result_id, run_id, work_item_id, prompt_sha256, changed_files, commit_evidence, test_evidence, worktree_evidence, acceptance, and merge.",
     "Bind commit_evidence.before and worktree_evidence.baseline_commit to baseline_commit; report only passed required tests; acceptance.status must be accepted and merge.status must be merged.",
@@ -944,6 +969,7 @@ function parseResult(
   value: unknown,
   runId: string,
   workItem: RemediationHostWorkItem,
+  root: string,
 ): ParsedHostResult {
   if (isRecord(value) && value.contract_version === DECISION_CONTRACT_VERSION) {
     if (
@@ -1048,10 +1074,12 @@ function parseResult(
     changedFiles.length === 0 ||
     new Set(changedFiles).size !== changedFiles.length ||
     !sameStrings([...changedFiles].sort(compareCodeUnits), changedFiles) ||
-    changedFiles.some((path) => !workItem.allowed_files.includes(path))
+    changedFiles.some(
+      (path) => !pathIsAllowedByWriteScope(root, path, workItem.allowed_files),
+    )
   ) {
     return invalidResult(
-      "changed_files must be a non-empty, sorted, unique subset of allowed_files",
+      "changed_files must be non-empty, sorted, unique, normalized paths within allowed_files",
     );
   }
 
@@ -1350,10 +1378,10 @@ function corroborateNoChangeClaim(params: {
   );
   if (violating.length > 0) {
     const inScope = violating.filter((path) =>
-      workItem.allowed_files.includes(path),
+      pathIsAllowedByWriteScope(root, path, workItem.allowed_files),
     );
     const outOfScope = violating.filter(
-      (path) => !workItem.allowed_files.includes(path),
+      (path) => !pathIsAllowedByWriteScope(root, path, workItem.allowed_files),
     );
     return {
       ok: false,
@@ -1770,7 +1798,11 @@ async function corroborateHostResult(params: {
         "the landed commit's mechanically derived changed files do not exactly match changed_files",
     };
   }
-  if (actualFiles.some((path) => !workItem.allowed_files.includes(path))) {
+  if (
+    actualFiles.some(
+      (path) => !pathIsAllowedByWriteScope(root, path, workItem.allowed_files),
+    )
+  ) {
     return {
       ok: false,
       code: "changed_files_mismatch",
@@ -2081,7 +2113,7 @@ export async function ingestRemediationHostResults(params: {
       workItemId: workItem.id,
       resultPath: workItem.result_path,
       parse: (value) => {
-        const result = parseResult(value, params.runId, workItem);
+        const result = parseResult(value, params.runId, workItem, paths.root);
         return result.ok
           ? { ok: true, parsed: result }
           : { ok: false, detail: result.reason };
