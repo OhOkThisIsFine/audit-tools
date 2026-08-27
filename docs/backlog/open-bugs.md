@@ -350,7 +350,9 @@
   is not left disjunctive on the grounds that nobody looked.
 
 - **The HANDOFF empty-queue projection contract is full-suite-only, so the commit gates pass a red
-  against it (2026-08-18, low, friction).** `handoff-roadmap.test.ts`'s live-tree case (an empty
+  against it (2026-08-18, low, friction; BIT 2026-08-27 — burned tag v0.50.0: a hand-written
+  live-state edit using the word the contract bans passed every commit gate and failed only in the
+  release run's test shard, exactly as this entry predicted).** `handoff-roadmap.test.ts`'s live-tree case (an empty
   nightly queue leaves no hand-written "nightly" text in HANDOFF) is not run by the staged-triggered
   `check:handoff-roadmap` leg — a HANDOFF edit landed through a green pre-commit gate and green
   targeted suites, and only a voluntary full-suite run caught it before push. **Property:** every

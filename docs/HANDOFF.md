@@ -12,8 +12,8 @@
   checks). Each was premise-verified by independent lanes and adversarially refuted before
   implementation. CX-02 is the pinned next item (see the roadmap block below); its verified design
   inputs live in `docs/reviews/cx02-drain-unification-design-2026-08-26.md`.
-- **Both nightly queues are fully answered and landed** (2026-08-26 twelve items; 2026-08-27 six
-  items), including: the P45 memory-crosslink gate, the remote-name removal from the skills, the
+- **Both overnight decision queues are fully answered and landed** (2026-08-26 twelve items;
+  2026-08-27 six items), including: the P45 memory-crosslink gate, the remote-name removal from the skills, the
   CLAUDE.md single-source edits, the generated spec/audit registry mirrors (`check:spec-mirrors`),
   and `--root` absorbed into canonical root resolution on BOTH bins (an absent `--root` is now
   discovered from the caller's cwd; explicit roots are honored verbatim).
