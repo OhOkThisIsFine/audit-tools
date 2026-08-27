@@ -244,6 +244,15 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   is mid-flight on it. Full protocol: memory [[concurrent-sessions-share-the-checkout]]. No
   tooling fix proposed yet; if a collision ever loses work, the mechanical form is a session
   lease/marker in `.claude/hooks/.state/`.
+  **A sibling's WIP can also VANISH mid-session, so a red you attribute to it is not stable
+  (2026-08-27).** A full-suite run failed exactly one file; the cause was a sibling's unstaged
+  directory-hashing change to `src/remediate/utils/fileIntegrity.ts`, attributed by reading its
+  diff and matching the mechanism to the assertion — not by correlation. Committing by explicit
+  path excluded it correctly. Minutes later the sibling's four files were back to HEAD with no
+  commit, and the test passed again. **So: attribute a foreign red by MECHANISM, exclude it by
+  explicit path — and re-check the tree before writing that attribution into any durable doc.** A
+  HANDOFF bullet describing the sibling's WIP as live state was already false by the time it was
+  staged.
 
 - **The pre-commit gate scans the WHOLE command string — including commit-message text — for the
   hooksPath/no-verify bypass tokens (2026-07-21).** A commit whose message names the literal tokens

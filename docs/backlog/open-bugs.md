@@ -6,6 +6,28 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The rendered decision queue and its tracked snapshot can outlive the ledger that settles them,
+  and nothing gates the disagreement (2026-08-27, medium, friction: tool_should_decide).**
+  `docs/nightly-inbox.md` and the tracked `.audit-tools/nightly/open-items.json` both still present
+  six propositions as open, plus a banner reading "11 answered items not yet marked done", while
+  `node scripts/nightly/answer.mjs --list` reports zero open and zero pending. `109d101a` rendered
+  the queue; `b91057c5` and `f41d2442` then landed the answers and neither re-rendered either
+  artifact. `render-inbox.mjs` has no `--check`, and no gate reconciles the rendered queue or the
+  snapshot against the ledger, so the drift is silent and every doc gate stays green. The
+  `SessionStart` hook reads the ledger and so surfaced nothing — the damage falls on a human or an
+  agent who opens the inbox and works six settled items. **Property:** the rendered queue and its
+  snapshot are derived artifacts with a freshness gate, so neither can assert an item is open that
+  the ledger records as done.
+
+- **The backlog size baseline holds amnesties for entries that no longer exist, and its file ceiling
+  never ratchets down (2026-08-27, low).** `docs/backlog/.size-baseline.json` grandfathers two
+  `forward-tracks.md` entries — the quota-arbitrage dispatch tier and the Slice-3 heartbeat item —
+  that were deleted with the retired execution substrate; `grep` finds neither. A stale amnesty
+  never matches, so the dead data is invisible rather than red. The same file caps `open-bugs.md` at
+  129,162 bytes against a file well under 90,000, so the gate permits roughly 48% growth before it
+  fires. **Property:** an amnesty naming an entry that no longer exists is a red, not a silent
+  no-op, and the recorded ceiling follows the file down.
+
 - **`InputResolution` is declared twice, under one name, with two different shapes (2026-08-27,
   low).** `src/remediate/steps/intakeResolver.ts` exports an `InputResolution` carrying `discovered`;
   `src/remediate/steps/nextStep.ts` declares a private one of the same name that has `allExisting`
