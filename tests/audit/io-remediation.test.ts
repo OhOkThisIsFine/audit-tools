@@ -601,41 +601,6 @@ test("INV 9: checksum_mismatch round-trips through the registry, distinguishable
 // INV 7: artifact:canonical-audit-deliverable-write-path.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("INV 7: the canonical write path archives and VERIFIES before replacing", async () => {
-  await withTempDir("audit-code-canonical-write-", async (tempDir: string) => {
-    const { writeCanonicalAuditDeliverables } = await import(
-      "../../src/audit/io/artifacts.js"
-    );
-    const { readFile, mkdir } = await import("node:fs/promises");
-    const artifactsDir = join(tempDir, ".audit-tools", "audit");
-    await mkdir(artifactsDir, { recursive: true });
-    const root = join(tempDir, ".audit-tools");
-
-    // First write: nothing to archive.
-    const first = await writeCanonicalAuditDeliverables({
-      artifactsDir,
-      findings: { contract_version: "audit-findings/v1", n: 1 },
-      report: "# first\n",
-    });
-    expect(first.archived, "a first write archives nothing").toEqual([]);
-    expect(await readFile(join(root, "audit-report.md"), "utf8")).toBe("# first\n");
-
-    // Second write: the PRIOR pair must be archived, verified, then replaced.
-    const second = await writeCanonicalAuditDeliverables({
-      artifactsDir,
-      findings: { contract_version: "audit-findings/v1", n: 2 },
-      report: "# second\n",
-    });
-    expect(second.archived.length, "both prior deliverables are archived").toBe(2);
-    for (const archivePath of second.archived) {
-      // Verified means read back: the archive holds the PRIOR content.
-      const body = await readFile(archivePath, "utf8");
-      expect(body.includes("first") || body.includes('"n": 1')).toBe(true);
-    }
-    expect(await readFile(join(root, "audit-report.md"), "utf8")).toBe("# second\n");
-  });
-});
-
 test("INV 7: the canonical pair has ONE writer in src/ (import-anchored scan)", async () => {
   const { readdir, readFile } = await import("node:fs/promises");
   const srcRoot = join(__dirname, "..", "..", "src");
@@ -671,10 +636,12 @@ test("INV 7: the canonical pair has ONE writer in src/ (import-anchored scan)", 
   // Destination-FIRST family: the path is argument 1.
   const DEST_FIRST =
     "writeFile|writeFileSync|writeFileAtomic|writeJsonFile|writeTextFile|appendFile|appendFileSync|appendNdjsonFile|writeNdjsonFile|createWriteStream|open|unlink|rm";
-  // Destination-SECOND family: `cp(src, dest)`, `copyFile(src, dest)`,
+  // Destination-SECOND family: `cp/copy/copyFile(src, dest)` and
   // `rename(from, to)`. This is the position the first scan was blind to, which
   // is why it matched the canonical path only ever as a READ.
-  const DEST_SECOND = "cp|cpSync|copyFile|copyFileSync|rename|renameSync";
+  const DEST_SECOND = "cp|cpSync|copy|copyFile|copyFileSync|rename|renameSync";
+  // Destination-THIRD family: `archiveVerified(copy, src, dest)`.
+  const DEST_THIRD = "archiveVerified";
 
   const candidates: string[] = [];
   for (const file of await walk(srcRoot)) {
@@ -710,7 +677,10 @@ test("INV 7: the canonical pair has ONE writer in src/ (import-anchored scan)", 
 
     const writesTo = (name: string): boolean =>
       new RegExp(`(?:${DEST_FIRST})\\s*\\(\\s*${name}\\b`, "u").test(body) ||
-      new RegExp(`(?:${DEST_SECOND})\\s*\\([^,()]*,\\s*${name}\\b`, "u").test(body);
+      new RegExp(`(?:${DEST_SECOND})\\s*\\([^,()]*,\\s*${name}\\b`, "u").test(body) ||
+      new RegExp(`(?:${DEST_THIRD})\\s*\\([^,]+,\\s*[^,]+,\\s*${name}\\b`, "u").test(
+        body,
+      );
 
     const inlineDestFirst = new RegExp(
       `(?:${DEST_FIRST})\\s*\\(\\s*(?:${helperAlt})\\s*\\(`,
@@ -720,11 +690,16 @@ test("INV 7: the canonical pair has ONE writer in src/ (import-anchored scan)", 
       `(?:${DEST_SECOND})\\s*\\([^,()]*,\\s*(?:${helperAlt})\\s*\\(`,
       "u",
     );
+    const inlineDestThird = new RegExp(
+      `(?:${DEST_THIRD})\\s*\\([^,]+,\\s*[^,]+,\\s*(?:${helperAlt})\\s*\\(`,
+      "u",
+    );
 
     if (
       bound.some(writesTo) ||
       inlineDestFirst.test(body) ||
-      inlineDestSecond.test(body)
+      inlineDestSecond.test(body) ||
+      inlineDestThird.test(body)
     ) {
       candidates.push(file.split("\\").join("/").replace(/^.*\/src\//u, "src/"));
     }

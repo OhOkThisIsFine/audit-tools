@@ -34,6 +34,7 @@ import type { Finding } from "../types.js";
 import {
   DESIGN_REVIEW_INPUTS,
   projectDesignReviewInput,
+  projectDesignReviewInputs,
   type DesignReviewBundle,
   type DesignReviewInput,
 } from "./designReviewProjection.js";
@@ -116,10 +117,7 @@ export async function captureDesignReviewSnapshot(
   bundle: DesignReviewBundle,
   reviewedAt: string,
 ): Promise<void> {
-  const reviewed_inputs = {} as Record<DesignReviewInput, unknown>;
-  for (const input of DESIGN_REVIEW_INPUTS) {
-    reviewed_inputs[input] = projectDesignReviewInput(input, bundle);
-  }
+  const reviewed_inputs = projectDesignReviewInputs(bundle);
   const snapshot: DesignReviewSnapshot = {
     schema_version: SNAPSHOT_SCHEMA_VERSION,
     pass,

@@ -15,8 +15,6 @@ import {
   evaluatePromotedPlanWriteScope,
   normalizeBlockTargetedCommands,
   normalizeBlockTouchedFiles,
-  obligationKindVocabularyDivergence,
-  readContractPipelinePlanningOutputs,
   writePathASeedFromFindings,
   CONTRACT_PIPELINE_GATE_ORDER,
   OBLIGATION_KIND_PRIORITY,
@@ -1596,23 +1594,17 @@ describe("CP-NODE-13 F1: a rejected resolution that cannot be archived does not 
 
 describe("CP-NODE-13 inv-3: ONE obligation-kind vocabulary", () => {
   it("POSITIVE: every kind the gate module calls testable is in this module's vocabulary", () => {
-    expect(obligationKindVocabularyDivergence()).toEqual([]);
+    expect(OBLIGATION_KIND_PRIORITY).toEqual([
+      "test",
+      "structural",
+      "behavioral",
+      "invariant",
+    ]);
+    expect([...TESTABLE_OBLIGATION_KINDS]).toEqual(["invariant", "behavioral"]);
     for (const kind of TESTABLE_OBLIGATION_KINDS) {
       expect(OBLIGATION_KIND_PRIORITY).toContain(kind);
       expect(classifyObligationKind(kind)).toBe(kind);
     }
-  });
-
-  it("NEGATIVE: a kind added to the SHARED testable set alone turns the cross-check red", () => {
-    // Red-green by inversion, at runtime: widen the gate module's set, confirm
-    // the divergence check names the new kind, then invert the edit.
-    TESTABLE_OBLIGATION_KINDS.add("operational");
-    try {
-      expect(obligationKindVocabularyDivergence()).toEqual(["operational"]);
-    } finally {
-      TESTABLE_OBLIGATION_KINDS.delete("operational");
-    }
-    expect(obligationKindVocabularyDivergence()).toEqual([]);
   });
 
   it("NEGATIVE: an unrecognized ledger kind never promotes a lens-less finding", async () => {
@@ -1947,7 +1939,23 @@ describe("CP-NODE-13 inv-7: the path_a seed binds its sources by digest", () => 
   });
 });
 
-describe("CP-NODE-13 inv-9: the planning outputs are a PINNED shape", () => {
+describe("CP-NODE-13 inv-9: the promoted plan is the pinned planning output", () => {
+  interface PromotedPlan {
+    findings: Array<{ id: string }>;
+    blocks: Array<{
+      block_id: string;
+      items: string[];
+      touched_files: string[];
+      targeted_commands: string[];
+    }>;
+  }
+
+  async function readPromotedPlan(): Promise<PromotedPlan> {
+    return JSON.parse(
+      await readFile(intakePaths(ARTIFACTS_DIR).extractedPlan, "utf8"),
+    ) as PromotedPlan;
+  }
+
   async function promoteTwoBlocks(): Promise<void> {
     await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
       ...CHAIN_PAYLOADS.implementation_dag,
@@ -1979,39 +1987,31 @@ describe("CP-NODE-13 inv-9: the planning outputs are a PINNED shape", () => {
     await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR, TEST_DIR);
   }
 
-  it("POSITIVE: membership, coverage, estimates and digests are all exported together", async () => {
+  it("POSITIVE: canonical membership and normalized write scope are promoted together", async () => {
     await promoteTwoBlocks();
-    const pinned = await readContractPipelinePlanningOutputs(ARTIFACTS_DIR);
-    expect(pinned).not.toBeNull();
-    expect(pinned!.block_membership.map((b) => b.block_id)).toEqual([
+    const plan = await readPromotedPlan();
+    // CDC-03 reversal: pin the live artifact, not a test-only production reader.
+    expect(plan.blocks.map((block) => block.block_id)).toEqual([
       "CP-BLOCK-N1",
       "CP-BLOCK-N2",
     ]);
-    expect(pinned!.block_membership[0].items).toEqual(["N1"]);
-    expect(pinned!.block_membership[0].touched_files).toEqual(["src/one.ts"]);
-    expect(pinned!.block_membership[0].targeted_commands).toEqual(["npm run check"]);
-    expect(pinned!.coverage).toEqual({
-      finding_ids: ["N1", "N2"],
-      exhaustive_once: true,
-    });
-    expect(pinned!.token_estimates.every((e) => e.estimated_tokens > 0)).toBe(true);
-    expect(pinned!.seed_source_digests).toEqual([]);
+    expect(plan.blocks[0].items).toEqual(["N1"]);
+    expect(plan.blocks[0].touched_files).toEqual(["src/one.ts"]);
+    expect(plan.blocks[0].targeted_commands).toEqual(["npm run check"]);
+    expect(plan.findings.map((finding) => finding.id)).toEqual(["N1", "N2"]);
   });
 
-  it("NEGATIVE: moving one finding into another block's membership turns the pinned coverage red", async () => {
+  it("NEGATIVE: a membership edit is visible in the promoted artifact", async () => {
     await promoteTwoBlocks();
     const planPath = intakePaths(ARTIFACTS_DIR).extractedPlan;
-    const plan = JSON.parse(await readFile(planPath, "utf8"));
-    // Invert the canonical membership: N2 is now claimed twice, N1 not at all.
+    const plan = await readPromotedPlan();
     plan.blocks[0].items = ["N2"];
     await writeJson(planPath, plan);
 
-    const pinned = await readContractPipelinePlanningOutputs(ARTIFACTS_DIR);
-    expect(pinned!.coverage.exhaustive_once).toBe(false);
-    expect(pinned!.block_membership[0].items).toEqual(["N2"]);
+    expect((await readPromotedPlan()).blocks[0].items).toEqual(["N2"]);
   });
 
-  it("POSITIVE: no promoted plan yields null rather than a fabricated shape", async () => {
-    expect(await readContractPipelinePlanningOutputs(ARTIFACTS_DIR)).toBeNull();
+  it("POSITIVE: before promotion, the promoted-plan path is absent", () => {
+    expect(existsSync(intakePaths(ARTIFACTS_DIR).extractedPlan)).toBe(false);
   });
 });

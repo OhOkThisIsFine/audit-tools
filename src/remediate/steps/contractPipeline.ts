@@ -40,7 +40,6 @@ import {
   captureStepBoundaryFriction,
   climbOutOfAuditTools,
   partitionCommandsByDeclaredShape,
-  estimateTokensFromBytes,
   normalizeRepoPath,
   repoRelativePath,
 } from "audit-tools/shared";
@@ -49,6 +48,10 @@ import {
   type StepGateHandler,
 } from "../../shared/steps/stepEmissionScaffold.js";
 import { counterexampleFingerprint } from "../contractPipeline/counterexampleFingerprint.js";
+import {
+  OBLIGATION_KIND_PRIORITY,
+  type ObligationKind,
+} from "../contractPipeline/obligationKinds.js";
 import {
   CP_ARTIFACT_NAMES,
   contractArtifactExists,
@@ -136,7 +139,6 @@ import {
   enumerateRepoTreePaths,
   isInsideGitWorkTree,
   isTestablePhaseObligation,
-  TESTABLE_OBLIGATION_KINDS,
   type ContractPipelineCrossGateInputs,
   type GateOutcome,
 } from "../validation/contractPipelineGates.js";
@@ -3738,23 +3740,12 @@ async function buildReReviewSection(
  * `undefined` — so a ledger kind outside these four promoted a finding with
  * `lens: undefined`.
  *
- * It is now single-sourced two ways at once:
- *   • MEMBERSHIP — {@link obligationKindVocabularyDivergence} reconciles this
- *     list against the gate module's exported `TESTABLE_OBLIGATION_KINDS`, so a
- *     kind added there and not here is a red contract test rather than a silent
- *     misclassification;
- *   • SEMANTICS — an unrecognized kind is not dropped or cast. It is routed
- *     through the gate module's own `isTestablePhaseObligation` predicate, so
- *     the two modules answer "is this kind testable?" with ONE implementation.
+ * Membership and priority are now derived from the single definition list in
+ * `contractPipeline/obligationKinds.ts`. An unrecognized kind is not dropped or
+ * cast: it is routed through the shared `isTestablePhaseObligation` predicate.
  */
-export const OBLIGATION_KIND_PRIORITY = [
-  "test",
-  "structural",
-  "behavioral",
-  "invariant",
-] as const;
-
-export type ObligationKind = (typeof OBLIGATION_KIND_PRIORITY)[number];
+export { OBLIGATION_KIND_PRIORITY };
+export type { ObligationKind };
 
 const OBLIGATION_KIND_SET: ReadonlySet<string> = new Set(OBLIGATION_KIND_PRIORITY);
 
@@ -3768,18 +3759,6 @@ const OBLIGATION_KIND_SET: ReadonlySet<string> = new Set(OBLIGATION_KIND_PRIORIT
 export function classifyObligationKind(kind: string): ObligationKind {
   if (OBLIGATION_KIND_SET.has(kind)) return kind as ObligationKind;
   return isTestablePhaseObligation(kind) ? "behavioral" : "structural";
-}
-
-/**
- * Kinds the gate module declares TESTABLE that this module's vocabulary does
- * not carry — the drift MNT-114e4941-3 names, reported as data so a contract
- * test can go red on it instead of a reviewer having to notice.
- * Empty when the two agree.
- */
-export function obligationKindVocabularyDivergence(): string[] {
-  return [...TESTABLE_OBLIGATION_KINDS]
-    .filter((kind) => !OBLIGATION_KIND_SET.has(kind))
-    .sort();
 }
 
 function deriveObligationLensAndSeverity(kinds: readonly ObligationKind[]): {
@@ -4452,107 +4431,3 @@ export async function promoteImplementationDagToExtractedPlan(
 
   await writeJsonFile(paths.extractedPlan, extractedPlan);
 }
-
-// ── artifact:contract-pipeline-planning-outputs (pinned planning outputs) ──
-
-/**
- * The PINNED shape of everything this module's two planning producers decide —
- * `promoteImplementationDagToExtractedPlan`'s canonical block membership and
- * normalized write scope, and `writePathASeedFromFindings`' sha256 baselines —
- * exported as ONE record so the regression guard that pins them imports a real
- * contract instead of re-deriving the plan's internals from JSON by hand.
- *
- * CDC-03: the guard consumes this token, so the phase deriver places it adjacent
- * to this module rather than four phases later, and a change to block membership
- * goes red in the phase immediately after this one.
- *
- * `estimated_tokens` is byte-derived and LOCAL (`estimateTokensFromBytes`) — it
- * describes content size only and is never a backend-fit claim; audit-tools does
- * not route.
- */
-export interface ContractPipelinePlanningOutputs {
-  /** Canonical membership + normalized write scope, in block-id order. */
-  block_membership: Array<{
-    block_id: string;
-    items: string[];
-    touched_files: string[];
-    targeted_commands: string[];
-  }>;
-  /** Every promoted finding id, and whether each is claimed by exactly one block. */
-  coverage: { finding_ids: string[]; exhaustive_once: boolean };
-  /** Byte-derived per-block estimate over the findings the block claims. */
-  token_estimates: Array<{ block_id: string; estimated_tokens: number }>;
-  /** The path_a seed's recorded per-path sha256 baselines, path-sorted. */
-  seed_source_digests: Array<{ path: string; sha256: string }>;
-}
-
-/**
- * Read the pinned planning outputs for a run, or null when no plan has been
- * promoted yet.
- */
-export async function readContractPipelinePlanningOutputs(
-  artifactsDir: string,
-): Promise<ContractPipelinePlanningOutputs | null> {
-  const plan = await readOptionalJsonFile<{
-    findings?: Array<{ id?: unknown; summary?: unknown; title?: unknown }>;
-    blocks?: Array<{
-      block_id?: unknown;
-      items?: unknown;
-      touched_files?: unknown;
-      targeted_commands?: unknown;
-    }>;
-  }>(intakePaths(artifactsDir).extractedPlan);
-  if (!plan) return null;
-
-  const stringsOf = (value: unknown): string[] =>
-    Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
-
-  const blocks = (Array.isArray(plan.blocks) ? plan.blocks : [])
-    .map((block) => ({
-      block_id: typeof block.block_id === "string" ? block.block_id : "",
-      items: stringsOf(block.items),
-      touched_files: stringsOf(block.touched_files),
-      targeted_commands: stringsOf(block.targeted_commands),
-    }))
-    .sort((left, right) => compareCodeUnits(left.block_id, right.block_id));
-
-  const findingBytes = new Map<string, number>();
-  for (const finding of Array.isArray(plan.findings) ? plan.findings : []) {
-    if (typeof finding.id !== "string") continue;
-    const text = `${String(finding.title ?? "")}\n${String(finding.summary ?? "")}`;
-    findingBytes.set(finding.id, Buffer.byteLength(text, "utf8"));
-  }
-
-  const claimCounts = new Map<string, number>();
-  for (const block of blocks) {
-    for (const item of block.items) {
-      claimCounts.set(item, (claimCounts.get(item) ?? 0) + 1);
-    }
-  }
-  const findingIds = [...findingBytes.keys()].sort((left, right) =>
-    compareCodeUnits(left, right),
-  );
-
-  return {
-    block_membership: blocks,
-    coverage: {
-      finding_ids: findingIds,
-      exhaustive_once:
-        findingIds.length > 0 &&
-        findingIds.every((id) => claimCounts.get(id) === 1) &&
-        [...claimCounts.keys()].every((id) => findingBytes.has(id)),
-    },
-    token_estimates: blocks.map((block) => ({
-      block_id: block.block_id,
-      estimated_tokens: estimateTokensFromBytes(
-        block.items.reduce((total, item) => total + (findingBytes.get(item) ?? 0), 0),
-      ),
-    })),
-    seed_source_digests: [
-      ...((
-        await readOptionalJsonFile<PathASeed>(pathASeedFilePath(artifactsDir))
-      )?.source_digests ?? []),
-    ].sort((left, right) => compareCodeUnits(left.path, right.path)),
-  };
-}
-

@@ -103,9 +103,9 @@ only judgment slots blank — and gives the worker a **write-time validator** (t
   tokens on boilerplate. This is the core "both weak and strong" lever.
 
 ### S4 — Single ID authority
-`src/remediate/contractPipeline/idRegistry.ts` is a tool-owned registry owning two relationships:
-the `CP-BLOCK-` block-id ↔ bare-node-id bijection (`ensureNodeId`/`toBlockId`/`fromBlockId`) that
-caused the recurring "Unknown finding_id" merge trap, and the derived obligation-id shape
+`src/remediate/contractPipeline/idRegistry.ts` is a tool-owned registry owning two mint authorities:
+the one-way bare-node-id → `CP-BLOCK-` block-id mint (`ensureNodeId`/`toBlockId`) that closes the
+recurring "Unknown finding_id" merge trap, and the derived obligation-id shape
 (`OBLIGATION_PREFIX`/`moduleSlug`/`obligationId`).
 - **Plug-in:** `contractPipeline/idRegistry.ts`; repoint the mint sites (`goal_normalization`,
   `obligation_ledger` derivation, `promoteImplementationDagToExtractedPlan`'s `CP-BLOCK-` prefix)

@@ -37,6 +37,7 @@ import {
   type PairingVerdict,
 } from "../contractPipeline/changeClassification.js";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
+import { TESTABLE_OBLIGATION_KINDS } from "../contractPipeline/obligationKinds.js";
 
 // ── DesignSpec structural gates ───────────────────────────────────────────────
 
@@ -451,10 +452,11 @@ export function validateImplementationDAGIntegrity(
  * copies had already diverged — derive.ts failed OPEN on an unrecognized kind
  * (conservatively testable) while this file failed CLOSED (silently skipped,
  * i.e. treated as non-testable, so a scaffold-offered spec was never actually
- * required). Single-sourced here; derive.ts imports isTestablePhaseObligation
- * from this module instead of re-declaring it.
+ * required). The subset is now derived from the full vocabulary in
+ * contractPipeline/obligationKinds.ts; this module owns only the fail-open
+ * classification policy.
  */
-export const TESTABLE_OBLIGATION_KINDS = new Set(["invariant", "behavioral"]);
+export { TESTABLE_OBLIGATION_KINDS };
 
 /**
  * testable (invariant/behavioral) → true; the structural contract-conformance

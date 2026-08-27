@@ -1,5 +1,5 @@
 import { cp, readFile, rm, unlink } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   AUDIT_REPORT_FILENAME,
   AUDIT_FINDINGS_FILENAME,
@@ -28,10 +28,6 @@ import type { AccessMemory, SubmissionLedgerEvent } from "audit-tools/shared";
 // write scope; the deep form is already the convention in this file (see the
 // affinityArtifacts import below) so no barrel change is needed.
 import type { SubmissionLedgerDrop } from "../../shared/submission/submissionLedger.js";
-// Deep for the same reason: `writeFileAtomic` is newly exported from json.ts and
-// the `audit-tools/shared` barrel (outside this module's write scope) does not
-// re-export it.
-import { writeFileAtomic } from "../../shared/io/json.js";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 import type {
   ExternalAnalyzerResults,
@@ -515,77 +511,6 @@ async function archiveVerified(
   const sourceBytes = await readFile(from);
   await copyFn(from, to, { force: true });
   return verifyArchivedBytes(to, sourceBytes);
-}
-
-/**
- * artifact:canonical-audit-deliverable-write-path -- the ONE write path to the
- * canonical `.audit-tools/audit-findings.json` + `audit-report.md` pair.
- *
- * ARCHIVE, THEN VERIFY, THEN REPLACE. An existing pair is copied into the
- * history directory and the copy is READ BACK and compared before either
- * destination is overwritten. A copy that is merely attempted-and-warned is not
- * an archive: it leaves the caller believing a prior deliverable was preserved
- * when it may not have been -- the same swallow-the-failure shape
- * DAT-4802dc9e-2 / -3 closed on the promotion side.
- *
- * Refuses rather than replaces: if the archive cannot be verified, the existing
- * pair stays exactly as it was and this throws. Keeping a stale deliverable is
- * recoverable; overwriting an unarchived one is not.
- *
- * CONSUMER DEFERRAL: `remediate-nextstep-and-final-gate` must route its own
- * leftover deliverable through this path and emit to a remediation-owned
- * location instead of writing this pair directly. That edit is CP-NODE-15's,
- * not this node's -- the same mechanical hand-off shape CP-NODE-5 used when it
- * deferred its ledger-read consumers here.
- */
-export async function writeCanonicalAuditDeliverables(params: {
-  artifactsDir: string;
-  findings: unknown;
-  report: string;
-}): Promise<{ archived: readonly string[] }> {
-  const findingsPath = promotedAuditFindingsPath(params.artifactsDir);
-  const reportPath = promotedAuditReportPath(params.artifactsDir);
-  const historyDir = join(
-    dirname(reportPath),
-    "audit-history",
-    new Date().toISOString().replace(/[:.]/gu, "-"),
-  );
-
-  const archived: string[] = [];
-  for (const existing of [findingsPath, reportPath]) {
-    let priorBytes: Buffer;
-    try {
-      priorBytes = await readFile(existing);
-    } catch (error) {
-      // Nothing there is the ordinary first-write case and archives nothing.
-      if (isFileMissingError(error)) continue;
-      throw error;
-    }
-    const archivePath = join(historyDir, basename(existing));
-    await writeFileAtomic(archivePath, priorBytes);
-    // VERIFIED, not attempted: read the archive back and compare the bytes. A
-    // write that reported success but landed nothing would otherwise clear the
-    // way for the replace below.
-    const mismatch = await verifyArchivedBytes(archivePath, priorBytes);
-    if (mismatch) {
-      throw new Error(
-        `audit-code: refusing to replace ${existing} - ${mismatch}, so the existing ` +
-          "deliverable is not safely preserved.",
-      );
-    }
-    archived.push(archivePath);
-  }
-
-  // TWO ATOMIC WRITES, NOT ONE ATOMIC PAIR. Each destination is replaced
-  // atomically, but a crash BETWEEN them leaves the findings JSON and the report
-  // markdown skewed - a new machine contract beside a stale human render. That is
-  // recoverable: the pre-write pair sits in the verified archive above, so both
-  // sides of the skew are reconstructable. A genuinely atomic pair would need a
-  // directory-level swap, which this path deliberately does not attempt.
-  await writeFileAtomic(findingsPath, `${JSON.stringify(params.findings, null, 2)}
-`);
-  await writeFileAtomic(reportPath, params.report);
-  return { archived };
 }
 
 export async function promoteFinalAuditReport(params: {
