@@ -57,46 +57,129 @@ export function validateDesignSpecGates(
   const issues: ValidationIssue[] = [];
   if (!canEvaluateDesignSpec(designSpec)) return issues;
 
-  // Gate 1: every module entry must have non-empty inputs and outputs.
-  // Checks both DesignSpec.modules (optional annotation array) and
-  // finalized_module_contracts.module_contracts (used when called with the
-  // finalized design artifact).
-  const [moduleFieldName, moduleEntries]: [string, unknown[]] = Array.isArray(
-    designSpec.modules,
-  )
-    ? ["modules", designSpec.modules as unknown[]]
-    : ["module_contracts", Array.isArray(designSpec.module_contracts) ? (designSpec.module_contracts as unknown[]) : []];
-  for (const [i, mod] of moduleEntries.entries()) {
-    if (!isRecord(mod)) continue;
-    if (!Array.isArray(mod.inputs) || mod.inputs.length === 0) {
-      pushValidationIssue(
-        issues,
-        `${moduleFieldName}[${i}].inputs`,
-        `${moduleFieldName}[${i}].inputs must be a non-empty array — every module must declare its inputs.`,
-      );
-    }
-    if (!Array.isArray(mod.outputs) || mod.outputs.length === 0) {
-      pushValidationIssue(
-        issues,
-        `${moduleFieldName}[${i}].outputs`,
-        `${moduleFieldName}[${i}].outputs must be a non-empty array — every module must declare its outputs.`,
-      );
-    }
-  }
+  type RequiredEntryShape = "array" | "string";
+  type ModuleOrModuleContracts = "modules" | "module_contracts";
+  type DesignSpecFieldCheck = {
+    collections: readonly (
+      | ModuleOrModuleContracts
+      | "side_effects"
+      | "external_dependencies"
+      | "trust_boundaries"
+    )[];
+    field: string;
+    expectedShape: RequiredEntryShape;
+    message: (collection: string, index: number, field: string) => string;
+  };
 
-  // Gate 2: every side-effect entry must have a non-empty owner.
-  if (Array.isArray(designSpec.side_effects)) {
-    for (const [i, se] of (designSpec.side_effects as unknown[]).entries()) {
-      if (!isRecord(se)) continue;
-      if (typeof se.owner !== "string" || se.owner.length === 0) {
-        pushValidationIssue(
-          issues,
-          `side_effects[${i}].owner`,
-          `side_effects[${i}].owner must be a non-empty string — every side effect must have an owner.`,
-        );
+  const requiredFieldChecks: readonly DesignSpecFieldCheck[] = [
+    {
+      collections: ["modules", "module_contracts"] as const,
+      field: "inputs",
+      expectedShape: "array",
+      message: (collection, index) =>
+        `${collection}[${index}].inputs must be a non-empty array — every module must declare its inputs.`,
+    },
+    {
+      collections: ["modules", "module_contracts"] as const,
+      field: "outputs",
+      expectedShape: "array",
+      message: (collection, index) =>
+        `${collection}[${index}].outputs must be a non-empty array — every module must declare its outputs.`,
+    },
+    {
+      collections: ["side_effects"],
+      field: "owner",
+      expectedShape: "string",
+      message: (_, index) =>
+        `side_effects[${index}].owner must be a non-empty string — every side effect must have an owner.`,
+    },
+    {
+      collections: ["external_dependencies"],
+      field: "failure_semantics",
+      expectedShape: "string",
+      message: (collection, index, field) =>
+        `${collection}[${index}].${field} must be a non-empty string — every external dependency must declare its failure semantics.`,
+    },
+    {
+      collections: ["trust_boundaries"],
+      field: "untrusted_inputs",
+      expectedShape: "array",
+      message: (collection, index, field) =>
+        `${collection}[${index}].${field} must be a non-empty array — every trust boundary must declare its untrusted inputs.`,
+    },
+    {
+      collections: ["trust_boundaries"],
+      field: "validation_ref",
+      expectedShape: "string",
+      message: (collection, index, field) =>
+        `${collection}[${index}].${field} must be a non-empty string — every trust boundary must have a validation reference.`,
+    },
+  ];
+
+  const checksGate1And2 = requiredFieldChecks.slice(0, 3);
+  const checksGate4And5 = requiredFieldChecks.slice(3);
+  const specRecord = designSpec as Record<string, unknown>;
+
+  const resolveCollection = (
+    check: DesignSpecFieldCheck,
+  ):
+    | "modules"
+    | "module_contracts"
+    | "side_effects"
+    | "external_dependencies"
+    | "trust_boundaries"
+    | undefined => {
+    if (check.collections.includes("modules")) {
+      if (Array.isArray(specRecord.modules)) return "modules";
+      if (Array.isArray(specRecord.module_contracts)) return "module_contracts";
+    }
+    return check.collections.find((collection): collection is
+      | "side_effects"
+      | "external_dependencies"
+      | "trust_boundaries"
+      | "module_contracts" => Array.isArray(specRecord[collection]));
+  };
+
+  const runDesignSpecFieldChecks = (
+    checks: readonly DesignSpecFieldCheck[],
+  ): void => {
+    const isInvalid = (shape: RequiredEntryShape, value: unknown): boolean => {
+      if (shape === "array") {
+        return !Array.isArray(value) || value.length === 0;
+      }
+      return typeof value !== "string" || value.length === 0;
+    };
+
+    const collectionOrder: string[] = [];
+    for (const check of checks) {
+      const collection = resolveCollection(check);
+      if (collection && !collectionOrder.includes(collection)) {
+        collectionOrder.push(collection);
       }
     }
-  }
+
+    for (const collection of collectionOrder) {
+      const maybeEntries = specRecord[collection as keyof typeof specRecord];
+      if (!Array.isArray(maybeEntries)) continue;
+      const checksForCollection = checks.filter(
+        (check) => resolveCollection(check) === collection,
+      );
+      for (const [index, entry] of maybeEntries.entries()) {
+        if (!isRecord(entry)) continue;
+        for (const check of checksForCollection) {
+          if (isInvalid(check.expectedShape, entry[check.field])) {
+            pushValidationIssue(
+              issues,
+              `${collection}[${index}].${check.field}`,
+              check.message(collection, index, check.field),
+            );
+          }
+        }
+      }
+    }
+  };
+
+  runDesignSpecFieldChecks(checksGate1And2);
 
   // Gate 3: invariant/obligation ledger cross-check.
   // Every invariant in the design_spec must have at least one obligation in the ledger
@@ -134,40 +217,7 @@ export function validateDesignSpecGates(
     }
   }
 
-  // Gate 4: every external_dependency entry must have non-empty failure_semantics.
-  if (Array.isArray(designSpec.external_dependencies)) {
-    for (const [i, dep] of (designSpec.external_dependencies as unknown[]).entries()) {
-      if (!isRecord(dep)) continue;
-      if (typeof dep.failure_semantics !== "string" || dep.failure_semantics.length === 0) {
-        pushValidationIssue(
-          issues,
-          `external_dependencies[${i}].failure_semantics`,
-          `external_dependencies[${i}].failure_semantics must be a non-empty string — every external dependency must declare its failure semantics.`,
-        );
-      }
-    }
-  }
-
-  // Gate 5: every trust_boundary entry must have non-empty untrusted_inputs and validation_ref.
-  if (Array.isArray(designSpec.trust_boundaries)) {
-    for (const [i, tb] of (designSpec.trust_boundaries as unknown[]).entries()) {
-      if (!isRecord(tb)) continue;
-      if (!Array.isArray(tb.untrusted_inputs) || tb.untrusted_inputs.length === 0) {
-        pushValidationIssue(
-          issues,
-          `trust_boundaries[${i}].untrusted_inputs`,
-          `trust_boundaries[${i}].untrusted_inputs must be a non-empty array — every trust boundary must declare its untrusted inputs.`,
-        );
-      }
-      if (typeof tb.validation_ref !== "string" || tb.validation_ref.length === 0) {
-        pushValidationIssue(
-          issues,
-          `trust_boundaries[${i}].validation_ref`,
-          `trust_boundaries[${i}].validation_ref must be a non-empty string — every trust boundary must have a validation reference.`,
-        );
-      }
-    }
-  }
+  runDesignSpecFieldChecks(checksGate4And5);
 
   // Gate 6: circular obligation dependency detection (warning, not error).
   // Uses Kahn's algorithm (iterative topological sort).
@@ -229,7 +279,6 @@ export function validateDesignSpecGates(
 
   return issues;
 }
-
 // ── Goal-ID consistency gate ──────────────────────────────────────────────────
 
 /**
@@ -1872,3 +1921,4 @@ export function evaluateContractPipelineCrossGateOutcomes(
 // re-derives exactly the genuinely-affected downstream artifacts after a repair, so
 // this function had no correct caller. Verified via the S2/S4 dogfood (2026-06-15);
 // see `spec/contract-authoring-determinism-design.md` S2. Do not re-add it.
+

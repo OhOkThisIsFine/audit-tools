@@ -774,6 +774,21 @@ describe("validateDesignSpecGates", () => {
     expect(errors.some((e) => e.message.toLowerCase().includes("inputs"))).toBe(true);
   });
 
+  it("errors when a module_contracts entry lacks inputs (alias arm)", () => {
+    const spec = {
+      ...minimalDesignSpec,
+      module_contracts: [{ id: "M-1", inputs: [], outputs: ["out"] }],
+    };
+    const issues = validateDesignSpecGates(spec);
+    const errors = issues.filter((i) => i.severity === "error");
+    expect(errors.length).toBeGreaterThan(0);
+    const issue = errors.find((e) => e.path === "module_contracts[0].inputs");
+    expect(issue?.path).toBe("module_contracts[0].inputs");
+    expect(issue?.message).toBe(
+      "module_contracts[0].inputs must be a non-empty array — every module must declare its inputs.",
+    );
+  });
+
   it("errors when a module entry lacks outputs", () => {
     const spec = { ...minimalDesignSpec, modules: [{ id: "M-1", inputs: ["in"], outputs: [] }] };
     const issues = validateDesignSpecGates(spec);
@@ -807,6 +822,21 @@ describe("validateDesignSpecGates", () => {
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => e.path.includes("trust_boundaries[0].validation_ref"))).toBe(true);
+  });
+
+  it("errors when a trust_boundary entry lacks untrusted_inputs", () => {
+    const spec = {
+      ...minimalDesignSpec,
+      trust_boundaries: [{ id: "TB-1", untrusted_inputs: [], validation_ref: "vr-1" }],
+    };
+    const issues = validateDesignSpecGates(spec);
+    const errors = issues.filter((i) => i.severity === "error");
+    expect(errors.length).toBeGreaterThan(0);
+    const issue = errors.find((e) => e.path === "trust_boundaries[0].untrusted_inputs");
+    expect(issue?.path).toBe("trust_boundaries[0].untrusted_inputs");
+    expect(issue?.message).toBe(
+      "trust_boundaries[0].untrusted_inputs must be a non-empty array — every trust boundary must declare its untrusted inputs.",
+    );
   });
 
   describe("invariant/obligation ledger cross-check", () => {
