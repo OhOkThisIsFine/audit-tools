@@ -21,6 +21,7 @@ import {
   findLegacyRemediateCodeSurfaceFiles,
   removeLegacyRemediateCodeSurfaceFiles,
 } from './remediate-code-wrapper-legacy.mjs';
+import { resolveWrapperRoot } from './repo-root.mjs';
 import {
   renderVSCodeAgentFile,
   renderCodexAutomationRecipe,
@@ -597,7 +598,11 @@ export async function writeAntigravityAssets(assetPaths, promptBody, skillSource
 
 export async function installBootstrap(argv, options = {}) {
   const host = (getFlag(argv, '--host') ?? DEFAULT_INSTALL_HOST).toLowerCase();
-  const root = resolve(getFlag(argv, '--root') ?? '.');
+  // An absent --root is the repository the caller is standing in, discovered
+  // the same way `next-step` discovers it — never the cwd verbatim, which would
+  // deposit a full set of host assets in whatever subdirectory the operator
+  // happened to be in.
+  const root = resolveWrapperRoot(getFlag(argv, '--root'));
   await assertDirectoryExists(root, 'Target repository root');
   const profile = getInstallProfile(host);
   const promptSource = (await readFile(promptAssetPath, 'utf8')).replace(/\r\n/g, '\n');
@@ -864,7 +869,7 @@ export async function verifyHostsIsolated(options = {}) {
 }
 
 export async function verifyInstalledBootstrap(argv) {
-  const root = resolve(getFlag(argv, '--root') ?? '.');
+  const root = resolveWrapperRoot(getFlag(argv, '--root'));
   const requestedHost = getFlag(argv, '--host')?.toLowerCase() ?? null;
   const installManifestPath = join(
     root,
@@ -1154,7 +1159,7 @@ export async function detectBootstrapRefreshReason(root, host) {
 
 export async function ensureBootstrap(argv) {
   const host = (getFlag(argv, '--host') ?? DEFAULT_INSTALL_HOST).toLowerCase();
-  const root = resolve(getFlag(argv, '--root') ?? '.');
+  const root = resolveWrapperRoot(getFlag(argv, '--root'));
   const quiet = hasFlag(argv, '--quiet');
   const force = hasFlag(argv, '--force');
   await assertDirectoryExists(root, 'Target repository root');

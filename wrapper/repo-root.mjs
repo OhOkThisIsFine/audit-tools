@@ -2,7 +2,12 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 
-// Canonical repo-root discovery for the WRAPPER side of audit-code.
+// Canonical repo-root discovery for the WRAPPER side of BOTH bins.
+//
+// Bin-neutral by name and by ownership, like `installer-verb-help.mjs`: audit-code
+// and remediate-code answer their installer verbs from this one module, so the two
+// wrappers cannot resolve "no --root" differently (one core, two draws — never a
+// per-bin fork of the same algorithm).
 //
 // This is a deliberate, pinned MIRROR of `discoverRepoRoot` / `climbOutOfAuditTools`
 // in src/shared/io/repoRoot.ts, kept for the same bootstrap constraint that
@@ -63,9 +68,9 @@ export function discoverRepoRoot(startDir = process.cwd()) {
 /**
  * The root a wrapper-side command acts on: an explicitly supplied `--root` is
  * honored verbatim (resolved against the caller's cwd), an absent one is
- * discovered. The ONE place the wrapper turns "no --root" into a directory, so
- * `next-step`, `ensure`, `install` and `verify-install` cannot answer it
- * differently.
+ * discovered. The ONE place either wrapper turns "no --root" into a directory,
+ * so `next-step`, `ensure`, `install` and `verify-install` cannot answer it
+ * differently — across both bins.
  *
  * @param {string | undefined} rawRoot
  * @returns {string}

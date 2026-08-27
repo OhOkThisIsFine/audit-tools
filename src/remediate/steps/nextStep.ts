@@ -78,7 +78,11 @@ import {
   promotedAuditReportPath,
   remediationArtifactsDir,
 } from "../../shared/io/auditToolsPaths.js";
-import { resolveRepoRoot } from "../../shared/io/repoRoot.js";
+import {
+  callerWorkingDirectory,
+  discoverRepoRoot,
+  resolveRepoRoot,
+} from "../../shared/io/repoRoot.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
 import {
@@ -210,10 +214,19 @@ function randomRunId(prefix = "RUN"): string {
 }
 
 function resolveRoot(root?: string): string {
-  // Anchor away from a drifted cwd — never trust bare `resolve(".")`. A run whose
-  // cwd wandered into `.audit-tools/` would otherwise recompute repo_root as that
-  // dir and fork a phantom nested tree. See src/shared/io/repoRoot.ts.
-  return resolveRepoRoot(root ?? ".");
+  // The library-entry arm of the same two-arm resolution the CLI performs
+  // (`resolveRootOption` in src/remediate/index.ts). A SUPPLIED root is honored
+  // verbatim through `resolveRepoRoot` — an explicit root is an instruction, so
+  // a sub-project inside a larger repo stays the sub-project — while an ABSENT
+  // one is DISCOVERED from the caller's working directory rather than falling
+  // back to the literal ".". The old `?? "."` made an embedded call from a
+  // nested cwd root the run at that SUBDIRECTORY and fork a phantom nested
+  // artifact tree there; anchoring alone could not fix it, because
+  // `resolveRepoRoot` only climbs out of `.audit-tools/` and never up to the
+  // owning repository. See src/shared/io/repoRoot.ts.
+  return root === undefined
+    ? discoverRepoRoot(callerWorkingDirectory())
+    : resolveRepoRoot(root);
 }
 
 function resolveArtifactsDir(root: string, artifactsDir?: string): string {

@@ -660,10 +660,14 @@ describe("validate-artifact Commander wiring", () => {
     return cmd;
   }
 
-  it("registers --root with the '.' default (matches validate-artifacts)", () => {
+  it("registers --root with NO literal default, so an absent flag is discoverable (matches validate-artifacts)", () => {
     const opt = validateArtifactCommand().options.find((o) => o.long === "--root");
     expect(opt).toBeDefined();
-    expect(opt!.defaultValue).toBe(".");
+    // A literal `"."` default here is the defect: it makes "the user passed
+    // `--root .`" indistinguishable from "no `--root`", so the absent arm cannot
+    // discover the repository root and a nested cwd roots the run at that
+    // subdirectory. `undefined` is what lets `resolveRootOption` tell them apart.
+    expect(opt!.defaultValue).toBeUndefined();
   });
 
   it("registers --artifacts-dir with the '.audit-tools/remediation' default (matches validate-artifacts)", () => {

@@ -4,10 +4,11 @@
  *
  * The wrapper cannot import the shared TypeScript (or its build output): the
  * installer verbs `ensure` / `install` / `verify-install` are answered entirely
- * in plain node BEFORE any build, so the copy in
- * `wrapper/audit-code-wrapper-repo-root.mjs` exists for the same bootstrap
- * constraint that forces `quoteForCmd` to be mirrored there. Both copies are
- * run here over the same fixture trees; a divergence in ANY case is red.
+ * in plain node BEFORE any build, so the copy in `wrapper/repo-root.mjs` exists
+ * for the same bootstrap constraint that forces `quoteForCmd` to be mirrored
+ * there. That copy is bin-neutral — BOTH wrappers import it, so this parity test
+ * covers audit-code's and remediate-code's installer verbs at once. Both copies
+ * are run here over the same fixture trees; a divergence in ANY case is red.
  *
  * Cases are chosen to cover each decision the walk makes: nested cwd, drift
  * into `.audit-tools/`, a `.git` FILE (linked worktree), nearest-marker-wins
@@ -26,7 +27,7 @@ import {
   discoverRepoRoot as wrapperDiscoverRepoRoot,
   climbOutOfAuditTools as wrapperClimbOutOfAuditTools,
   REPO_ROOT_MARKERS as WRAPPER_REPO_ROOT_MARKERS,
-} from "../../wrapper/audit-code-wrapper-repo-root.mjs";
+} from "../../wrapper/repo-root.mjs";
 
 test("the wrapper and shared copies declare the same root markers", () => {
   expect([...WRAPPER_REPO_ROOT_MARKERS]).toEqual([...SHARED_REPO_ROOT_MARKERS]);

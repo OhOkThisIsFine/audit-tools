@@ -97,7 +97,9 @@ export function installerVerbHelp(verb, { usageName, product }) {
     ...VERB_DETAIL[verb],
     '',
     'Common options:',
-    '- --root PATH   repository root (default: .)',
+    // NOT "(default: .)" — an absent --root is DISCOVERED (nearest ancestor
+    // owning .audit-tools/ or .git), not the cwd verbatim, on both bins.
+    '- --root PATH   repository root (default: the repository the working directory is in)',
     '- --quiet       suppress output',
   ].join('\n');
 }

@@ -20,7 +20,7 @@ import {
   installerVerbHelp,
   installerVerbSummaries,
 } from './installer-verb-help.mjs';
-import { resolveWrapperRoot } from './audit-code-wrapper-repo-root.mjs';
+import { resolveWrapperRoot } from './repo-root.mjs';
 
 export { shouldBuildDistForPaths, assertWorkspaceInstalled };
 export { _INSTALL_HOST_ORDER, _INSTALL_HOST_DEFINITIONS, _getInstallHostKeys, _getInstallProfile, _renderGeminiCommandToml };

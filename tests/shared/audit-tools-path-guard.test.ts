@@ -86,7 +86,7 @@ const ALLOWLIST = new Map<string, string>([
       "compiled shared path module",
   ],
   [
-    "wrapper/audit-code-wrapper-repo-root.mjs",
+    "wrapper/repo-root.mjs",
     "pre-dist bootstrap: the pinned wrapper-side MIRROR of " +
       "src/shared/io/repoRoot.ts's root discovery — the installer verbs answer " +
       "before any build, so the dirname literal cannot be imported. Divergence " +

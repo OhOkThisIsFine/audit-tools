@@ -19,7 +19,7 @@ import {
   findLegacyAuditCodeSurfaceFiles,
   removeLegacyAuditCodeSurfaceFiles,
 } from './audit-code-wrapper-legacy.mjs';
-import { resolveWrapperRoot } from './audit-code-wrapper-repo-root.mjs';
+import { resolveWrapperRoot } from './repo-root.mjs';
 import {
   renderVSCodeAgentFile,
   renderCodexAutomationRecipe,
