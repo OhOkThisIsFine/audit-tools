@@ -58,10 +58,10 @@ accepted open item belongs in `docs/backlog/`; none is pinned as immediate next.
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 0 pinned item(s).
+> `verify:checks` and at commit). 1 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-*(nothing pinned — no immediate next step is set. Every open item is in [`docs/backlog/`](backlog/).)*
+- ▶ CX-02 — one audit obligation registry, one drain. · [`forward-tracks.md`](backlog/forward-tracks.md)
 
 <!-- END GENERATED ROADMAP -->

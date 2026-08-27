@@ -301,7 +301,7 @@ stated silence. *(home: `CLAUDE.md` → Conventions; global `~/.claude/CLAUDE.md
   is referenced, not copied, from others.
 - **Condensation bias** — fewer, denser, timeless docs; enforced by a doc-manifest gate + nightly review.
 - **Universal host prompts, single-sourced** — ONE canonical prompt body rendered per-IDE, never per-IDE
-  prose. *(home: `docs/documentation-philosophy.md`)*
+  prose. *(home: `CLAUDE.md`, Conventions & invariants)*
 
 ## B6. Backlog & friction hygiene
 

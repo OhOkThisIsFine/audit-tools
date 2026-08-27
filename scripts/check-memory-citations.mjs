@@ -89,10 +89,35 @@ for (const file of tracked) {
   }
 }
 
+// The OTHER citation form. Memories cite each other as `[[name]]`, and a dangling
+// one fails exactly the way a dangling `memory:` citation does — a pointer nobody can
+// follow re-asserting whatever the deleted note said. It was structurally invisible
+// to this gate, which is what made every prune of the store a hand-audit.
+const WIKILINK = /\[\[([^\][|]+)\]\]/g;
+
+/** Inline code and fenced blocks quote the SYNTAX; they document the form, not a target. */
+function stripCodeSpans(text) {
+  return text.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
+}
+
+for (const note of readdirSync(memoryDir).filter((f) => f.endsWith(".md"))) {
+  const text = readFileSync(join(memoryDir, note), "utf8");
+  const lines = text.split(/\r?\n/);
+  for (const match of stripCodeSpans(text).matchAll(WIKILINK)) {
+    // A stray `.md` suffix is a misspelling of a real target, not a second kind
+    // of link — resolve the note first, then judge whether that note exists.
+    const name = match[1].trim().replace(/\.md$/, "");
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) continue;
+    if (known.has(name)) continue;
+    const line = lines.findIndex((l) => l.includes(match[1])) + 1;
+    dangling.push({ file: join(memoryDir, note), line, name, form: "[[…]]" });
+  }
+}
+
 if (dangling.length > 0) {
   console.error(`✗ memory-citations: ${dangling.length} citation(s) resolve to no memory file\n`);
-  for (const { file, line, name } of dangling) {
-    console.error(`  ${file}:${line || "?"} → memory: ${name}`);
+  for (const { file, line, name, form } of dangling) {
+    console.error(`  ${file}:${line || "?"} → ${form ?? "memory:"} ${name}`);
   }
   console.error(
     `\n  A citation to a deleted note re-asserts whatever that note said, with the\n` +

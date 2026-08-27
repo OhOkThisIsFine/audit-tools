@@ -17,6 +17,32 @@
 // itself the message: a closeout with no Verification line is not reporting
 // "nothing to verify", it is reporting that nobody looked.
 
+import { FRICTION_CATEGORIES } from "audit-tools/shared";
+
+// Labels for the REAL friction categories. The IDS are the single-sourced
+// vocabulary (src/shared/friction/frictionRecord.ts, via the shared barrel);
+// only the presentation label lives here, keyed by that vocabulary. A category
+// added there without a label here throws at load, so the two cannot drift
+// silently; a category removed there drops out of the bullets automatically.
+const FRICTION_CATEGORY_LABELS = {
+  ambiguous_direction:
+    'ambiguous_direction (instructions/docs/specs pointed the wrong way, or contradicted each other)',
+  tool_should_decide:
+    'tool_should_decide (a human/agent had to remember, notice, or decide something the tool should enforce)',
+  inefficient_feeding:
+    'inefficient_feeding (context/tokens wasted moving information in or out — re-derivation, dumps, re-loops)',
+};
+
+const frictionCategoryBullets = FRICTION_CATEGORIES.map((id) => {
+  const label = FRICTION_CATEGORY_LABELS[id];
+  if (!label) {
+    throw new Error(
+      `closeout-sections-data: no bullet label for friction category '${id}' — add one to FRICTION_CATEGORY_LABELS.`,
+    );
+  }
+  return { id, label };
+});
+
 /**
  * @typedef {object} Bullet
  * @property {string} id
@@ -60,20 +86,7 @@ export const CLOSEOUT_SECTIONS = [
     heading: 'Friction this sprint',
     prompt: 'friction hit this sprint, by category',
     bullets: [
-      {
-        id: 'ambiguous_direction',
-        label: 'ambiguous_direction (instructions/docs/specs pointed the wrong way, or contradicted each other)',
-      },
-      {
-        id: 'tool_should_decide',
-        label:
-          'tool_should_decide (a human/agent had to remember, notice, or decide something the tool should enforce)',
-      },
-      {
-        id: 'inefficient_feeding',
-        label:
-          'inefficient_feeding (context/tokens wasted moving information in or out — re-derivation, dumps, re-loops)',
-      },
+      ...frictionCategoryBullets,
       {
         id: 'open_ended',
         label: '**Open-ended (anything else that caused friction, fit no category above)**',
@@ -109,8 +122,3 @@ export const CLOSEOUT_SECTIONS = [
       'living only in chat is lost',
   },
 ];
-
-/** The friction bullet vocabulary, for the caller that wants just the ids. */
-export const FRICTION_BULLET_IDS = (CLOSEOUT_SECTIONS.find((s) => s.id === 'friction')?.bullets ?? []).map(
-  (b) => b.id,
-);

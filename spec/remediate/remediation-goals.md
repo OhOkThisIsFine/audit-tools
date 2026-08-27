@@ -142,10 +142,13 @@ There is no separate per-item LLM "document" phase (dissolved — N-R13): planni
 transitions DIRECTLY to implementing. Before any implement dispatch, two batched
 gates fire at planning, each at most once per run:
 
-- **Review-necessity gate** (`runPlanningReviewGate`): the plan's nodes are
-  surfaced tiered by how much human review each needs, for a batched keep/decline.
-  A declined node becomes a RECORDED terminal disposition (`ignored`), never
-  silently bulk-dispositioned inside a quality-tail node.
+- **Review-necessity gate**: every run gets exactly ONE batched keep/decline
+  review before implementation, surfaced tiered by how much human review each
+  item needs. A declined item becomes a RECORDED terminal disposition
+  (`ignored`), never silently bulk-dispositioned inside a quality-tail node.
+  Which step performs the review (and over which objects) differs by intake
+  path; the obligation — one batched review per run, with recorded declines —
+  is the contract, and no run is reviewed twice.
 - **Ambiguity gate** (`runPlanAmbiguityGate`): every scoping/judgment ambiguity
   across all items is batched into a single `ambiguity_request.json` and
   surfaced to the user at once (categories under Ambiguity criteria below).

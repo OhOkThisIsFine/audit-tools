@@ -246,9 +246,12 @@ the design of record, matching audit-code's host-handoff boundary
 (`src/audit/cli/dispatch/hostHandoff.ts`, which binds prompt digests and result
 paths before any result is accepted).
 
-**Prompt caching:** the shared structural context block (graph, surfaces, flows,
-risk register, file inventory) is identical for both agents. It goes first in
-both prompts, marked for caching. One cache write, two cache reads.
+**Shared preamble:** the shared structural context block (graph, surfaces, flows,
+risk register, file inventory) is identical for both agents. The tool emits it
+once and places it first in both prompts, so both reference one block. What a
+host's provider does with that repetition (caching or not) is the host's
+business — the tool asserts nothing about provider cache behavior, and the
+property holds even when the active host exposes no cache controls at all.
 
 ---
 

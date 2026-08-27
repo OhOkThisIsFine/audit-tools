@@ -40,6 +40,15 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
 
 ## Forward tracks
 
+- **▶ CX-02 — one audit obligation registry, one drain.** The last unimplemented candidate of the
+  2026-08-26 complexity review. Premise verified and adversarially refuted (safe to proceed, heavy
+  constraints); the pinned design inputs — the approach-B cycle-guard decision, the `audit-code plan`
+  policy draw, lock/persist granularity, the composite-cap replacement, the marker-protocol
+  semantics, and the nine pinning test files — live in
+  [`cx02-drain-unification-design-2026-08-26.md`](../reviews/cx02-drain-unification-design-2026-08-26.md).
+  One atomic loop-core replace; never stage half of it. Its one open design question (lock hold-time
+  around formerly-outside-the-lock work) needs a live-audit measurement before the cap is sized.
+
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** A contract-valid empty result cannot be scored for quality without ground truth;
   raw finding yield is a noisy signal. Its affirmation half (`reviewed_clean`) is shipped. The

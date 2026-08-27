@@ -266,11 +266,11 @@ function ensureMainBranch() {
   const verdict = evaluateReleaseBranch({ branch, defaultBranch, headSha, remoteDefaultSha });
   if (!verdict.allowed) {
     // Name the ref that EXISTS in this checkout. The remote is already resolved
-    // at runtime by getRemoteName(), so a hard-coded "origin/" prints a ref the
-    // operator cannot look up whenever their only remote is named something
-    // else — which is the case in the primary checkout, where it is
-    // "audit-tools". Resolve lazily: the guard must still refuse (not crash)
-    // in a checkout with no remote at all.
+    // at runtime by getRemoteName(), so a hard-coded "origin/" would print a ref
+    // the operator cannot look up whenever their only remote is named something
+    // else. Never assert a concrete remote name here — it has drifted in both
+    // directions before. Resolve lazily: the guard must still refuse (not
+    // crash) in a checkout with no remote at all.
     const remoteRef = `${remoteName ?? tryRemoteName() ?? "<remote>"}/${defaultBranch}`;
     throw new Error(
       `Release publishing expects the default branch ('${defaultBranch}') or a linked worktree whose ` +

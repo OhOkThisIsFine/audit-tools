@@ -6,7 +6,9 @@ description: Land and publish audit-tools work end-to-end — verify green, comm
 # Ship — full land-and-publish pipeline
 
 Run the whole flow; never park at the push/publish boundary. Repo root = the audit-tools checkout.
-Remote `origin`, branch `main` (not master).
+Branch `main` (not master). Never hard-code the remote's name — it has drifted in both directions
+before. Resolve it at runtime (`remote=$(git remote | head -n 1)`, the same rule
+`release-and-publish.mjs` `getRemoteName()` applies) and use `"$remote"` in every command.
 
 **ONE package** (`audit-tools`), shipping both bins `audit-code` + `remediate-code`. Imports use the
 `audit-tools/shared` subpath export — never a separate `@audit-tools/shared` workspace dep.
@@ -41,12 +43,12 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 - Conventional commit message. Push `main` to the `audit-tools` remote.
 - **Lap-worktree ship (one command, no primary-worktree dance).** Laps run on a `claude/<lap>` linked
   worktree, not the primary `main` checkout. You do NOT need to FF the primary worktree or rebuild its stale
-  `dist/`. Push the lap branch's landed work onto `main` (`git push origin HEAD:main`, a fast-forward),
+  `dist/`. Push the lap branch's landed work onto `main` (`git push "$remote" HEAD:main`, a fast-forward),
   then run the release **from the lap worktree itself** — `scripts/release-and-publish.mjs` admits any
-  branch whose HEAD already equals `origin/main` (`evaluateReleaseBranch()`), pushes the bump commit onto
+  branch whose HEAD already equals the remote default ref (`evaluateReleaseBranch()`), pushes the bump commit onto
   the remote `main` via `HEAD:refs/heads/main`, and never touches the primary worktree. The `ensureCleanWorktree()`
   CRLF/clean-tree guard and the `verify:checks` pre-tag gate still run. No `--root`/branch flag is needed —
-  if the lap HEAD has not been fast-forwarded onto `origin/main` first, the guard refuses (fix the sync, do not
+  if the lap HEAD has not been fast-forwarded onto the remote default ref first, the guard refuses (fix the sync, do not
   add a flag).
 
 ## 3. Publish (single package)

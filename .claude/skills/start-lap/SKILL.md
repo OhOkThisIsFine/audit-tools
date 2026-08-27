@@ -5,26 +5,28 @@ description: Start a work lap in audit-tools — sync with remote main (fetch + 
 
 # Start-lap — sync + orient + get rolling
 
-Automates the session-open ritual. Repo root = the audit-tools checkout. Remote `origin`,
-branch `main` (not master). Do the mechanical steps yourself; only hand back on a
+Automates the session-open ritual. Repo root = the audit-tools checkout. Branch `main` (not
+master). Never hard-code the remote's name — it has drifted in both directions before; resolve it
+once (`remote=$(git remote | head -n 1)`) and use `"$remote"` in every command below. Do the mechanical steps yourself; only hand back on a
 destructive ambiguity (see step 2). End by telling the owner the immediate next item — don't ask
 "what now" when HANDOFF already names it.
 
 ## 1. Sync with remote main (stale-worktree guard — do this FIRST)
 
-A worktree can be branched behind `origin/main` and miss landed work. From repo root, Bash tool:
+A worktree can be branched behind the remote default branch and miss landed work. From repo root, Bash tool:
 
 ```bash
 git rev-parse --abbrev-ref HEAD          # confirm current branch
-git fetch origin main
-git log --oneline HEAD..origin/main      # commits on remote not local
+remote=$(git remote | head -n 1)         # resolve the tracked remote — never hard-code its name
+git fetch "$remote" main
+git log --oneline "HEAD..$remote/main"   # commits on remote not local
 ```
 
-- **On `main` and behind** → fast-forward: `git merge --ff-only origin/main`. If ff-only fails
+- **On `main` and behind** → fast-forward: `git merge --ff-only "$remote/main"`. If ff-only fails
   (local `main` has diverging commits), STOP and surface it — don't force.
-- **On a lap/worktree branch that is a clean ANCESTOR of `origin/main`** (verify:
-  `git merge-base --is-ancestor HEAD origin/main` + clean tree + empty
-  `git log origin/main..HEAD`) → fast-forward it too: `git merge --ff-only origin/main`.
+- **On a lap/worktree branch that is a clean ANCESTOR of the remote default ref** (verify:
+  `git merge-base --is-ancestor HEAD "$remote/main"` + clean tree + empty
+  `git log "$remote/main..HEAD"`) → fast-forward it too: `git merge --ff-only "$remote/main"`.
   No unique commits = no strand risk, and lap work then starts from current code (ship pushes
   `HEAD:main` from the lap branch, so it never needs to be `main` itself).
 - **On a `remediation/<runId>` branch, or any branch with unique commits** (branch-strand trap):
