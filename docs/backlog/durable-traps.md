@@ -13,6 +13,21 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **Mechanical-analyzer acquisitions decided against — do not re-propose without new evidence
+  (folded here 2026-08-27 from the retired mechanical-analyzer layer spec, now deleted).**
+  ast-grep: a rule engine with no shipped ruleset — zero leads unless we own a rule catalog, which
+  is the banned hand-maintained table; semgrep (registered, someone-else-maintained registry rules)
+  occupies the niche; revisit only with a concrete rule semgrep cannot express. PMD CPD: JVM
+  acquisition overhead, duplicates jscpd's signal, would need its own lead-dedup. Tree-sitter
+  universal-CST normalization layer: the per-grammar node-type→category mappings are
+  hand-maintained per-language tables that drift with grammar versions; its unique slice (Type-3
+  structural clones) sits between jscpd (Type-1/2) and the LLM lens (Type-3/4) — if dogfood
+  evidence ever shows that slice mattering, prefer acquiring a maintained multilingual clone
+  detector over building this. MinHash/shingle near-dup for docs/config: no consumer; jscpd covers
+  code-shaped duplication. osv-scanner as a default-set member: owner call — dependency-identity
+  egress to OSV.dev stays an explicit per-run decision (offline-DB mode was considered and not
+  taken).
+
 - **`git add -A` in a SHARED checkout commits a CONCURRENT session's files under your message
   (2026-08-26).** Two sessions work this same working tree. A `git add -A` swept four staged files
   belonging to another session's P45 proposal into a commit about something else and pushed them,

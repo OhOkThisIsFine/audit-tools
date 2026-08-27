@@ -312,9 +312,6 @@ Style, internal naming, comment wording, import order, local structure
 when behavior is clear, and test naming are explicitly not ambiguous —
 the LLM decides.
 
-This category list is the starting proposal and is expected to be
-refined once the first runs produce real clarification batches.
-
 ## Schemas
 
 Only `finding.schema.json` is mirrored in `schemas/` as a JSON Schema. The rest of the remediation

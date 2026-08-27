@@ -1782,14 +1782,18 @@
     "answer": "Apply P45 and repair the one dangling pointer in the same change: in memory/opus5-low-effort-beats-sonnet-haiku.md, repoint [[delegate-bulk-work-off-fable]] at the note that superseded it, or drop the citation. Owner picked: Land it, then repair.",
     "subject": "P45: extend check:memory-citations to the [[name]] form memories actually cite each other in",
     "path": "scripts/check-memory-citations.mjs",
-    "decided_at": "2026-08-26T22:21:16.089Z"
+    "decided_at": "2026-08-26T22:21:16.089Z",
+    "completed_at": "2026-08-27T16:35:25.124Z",
+    "completed_ref": "landed in b91057c5"
   },
   "329de84f3eba6628": {
     "disposition": "settled",
     "answer": "Rewrite both skills so no remote name appears: instruct the reader to use the remote git already tracks (git rev-parse --abbrev-ref @{upstream}, or the resolver the release script uses), and delete the stale audit-tools assertion from the release-and-publish.mjs comment. Owner picked: Stop naming it.",
     "subject": "Stop hard-coding the git remote name in the skills, or keep spelling it out?",
     "path": ".claude/skills/ship/SKILL.md",
-    "decided_at": "2026-08-26T22:21:16.518Z"
+    "decided_at": "2026-08-26T22:21:16.518Z",
+    "completed_at": "2026-08-27T16:35:25.332Z",
+    "completed_ref": "landed in b91057c5"
   },
   "8340f15d45a5573d": {
     "disposition": "settled",
@@ -1803,21 +1807,27 @@
     "answer": "Replace the hand-listed legs in CLAUDE.md with a statement that the pre-commit leg set and its triggers are DERIVED from scripts/guard-reach-data.mjs via buildPreCommitLegs, and name no individual gates. Owner picked: Point at the registry.",
     "subject": "instruction-file edit: replace CLAUDE.md's hand-listed pre-commit legs with a pointer to the registry",
     "path": "CLAUDE.md",
-    "decided_at": "2026-08-27T00:49:37.970Z"
+    "decided_at": "2026-08-27T00:49:37.970Z",
+    "completed_at": "2026-08-27T16:35:25.539Z",
+    "completed_ref": "landed in b91057c5"
   },
   "95926d4bcb5d5b6d": {
     "disposition": "settled",
     "answer": "Add a check:scripts line to the CLAUDE.md Commands block alongside check:tests, naming what it covers (the .mjs trees under tsconfig.scripts.json) and that it is in verify:checks. Owner picked: Add it.",
     "subject": "instruction-file edit: the CLAUDE.md Commands block omits the check:scripts typecheck gate",
     "path": "CLAUDE.md",
-    "decided_at": "2026-08-27T00:49:38.445Z"
+    "decided_at": "2026-08-27T00:49:38.445Z",
+    "completed_at": "2026-08-27T16:35:25.749Z",
+    "completed_ref": "landed in b91057c5"
   },
   "1c0446384cd15e13": {
     "disposition": "settled",
     "answer": "Replace the inline lens list in CLAUDE.md with a pointer to src/shared/types/lens.ts as the canonical vocabulary, naming no individual lenses. Owner picked: Point at the code.",
     "subject": "instruction-file edit: CLAUDE.md re-lists the eleven lenses that LensSchema already single-sources",
     "path": "CLAUDE.md",
-    "decided_at": "2026-08-27T00:49:38.777Z"
+    "decided_at": "2026-08-27T00:49:38.777Z",
+    "completed_at": "2026-08-27T16:35:26.372Z",
+    "completed_ref": "landed in b91057c5"
   },
   "e87a32300d80ad04": {
     "disposition": "settled",
@@ -1833,14 +1843,18 @@
     "answer": "Rewrite the bullet to state only the durable property — every run gets exactly one batched keep/decline review before implementation, and a declined item becomes a recorded ignored disposition — and name no function. Owner picked: State the property, name nothing.",
     "subject": "constitutional doc: the goals doc names one review gate where the code has two, on different paths",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-08-27T00:58:07.052Z"
+    "decided_at": "2026-08-27T00:58:07.052Z",
+    "completed_at": "2026-08-27T16:35:25.957Z",
+    "completed_ref": "landed in b91057c5"
   },
   "ee60ccdfd552bb19": {
     "disposition": "settled",
     "answer": "Make scripts/closeout-sections-data.mjs derive the bullet ids from FRICTION_CATEGORIES in src/shared/friction/frictionRecord.ts (adopting or replacing the unused FRICTION_BULLET_IDS bridge), so the doc's claim becomes true and the hand-copy disappears. Owner picked: Derive them.",
     "subject": "The closeout template claims a single-sourced friction vocabulary that is actually a hand-copy",
     "path": "docs/end-of-sprint-report-template.md",
-    "decided_at": "2026-08-27T00:58:07.267Z"
+    "decided_at": "2026-08-27T00:58:07.267Z",
+    "completed_at": "2026-08-27T16:35:26.166Z",
+    "completed_ref": "landed in b91057c5"
   },
   "0cbd3c98cd882ec6": {
     "disposition": "settled",
@@ -1854,13 +1868,61 @@
     "answer": "State the universal-host-prompts conviction in CLAUDE.md as its canonical home and repoint the map there. Owner picked: Home it in CLAUDE.md.",
     "subject": "The philosophy map points the universal-host-prompts conviction at a home that does not state it",
     "path": "docs/project-philosophy.md",
-    "decided_at": "2026-08-27T00:58:07.564Z"
+    "decided_at": "2026-08-27T00:58:07.564Z",
+    "completed_at": "2026-08-27T16:35:26.580Z",
+    "completed_ref": "landed in b91057c5"
   },
   "17f45bbef58bc713": {
     "disposition": "settled",
     "answer": "Rewrite the passage to state only what the tool controls — one shared preamble emitted once and referenced by both prompts — and drop the cache-write/cache-read accounting and the marked-for-caching control, matching the hedge the companion paragraph already uses. Owner picked: Restate host-agnostically.",
     "subject": "The audit workflow design states provider cache accounting the tool gave up owning",
     "path": "spec/audit-workflow-design.md",
-    "decided_at": "2026-08-27T00:59:33.561Z"
+    "decided_at": "2026-08-27T00:59:33.561Z",
+    "completed_at": "2026-08-27T16:35:26.789Z",
+    "completed_ref": "landed in b91057c5"
+  },
+  "d1415c54048eacc1": {
+    "disposition": "settled",
+    "answer": "Move the Decided-against list into docs/backlog/durable-traps.md and the two recorded design deviations into CLAUDE.md, then delete spec/mechanical-analyzer-layer-design.md. Owner picked: Fold and delete.",
+    "subject": "Fold the mechanical-analyzer spec into durable-traps, or keep it as its own 33-line doc?",
+    "path": "spec/mechanical-analyzer-layer-design.md",
+    "decided_at": "2026-08-27T16:40:29.352Z"
+  },
+  "4c6b307253d9acec": {
+    "disposition": "settled",
+    "answer": "Delete (change 3) from the docs_digest.json row in spec/audit/artifact-contract.md. Owner picked: Delete the label.",
+    "subject": "Drop the internal \"(change 3)\" label from the artifact contract, or spell it out?",
+    "path": "spec/audit/artifact-contract.md",
+    "decided_at": "2026-08-27T16:40:29.534Z"
+  },
+  "a477c87be998e5a8": {
+    "disposition": "settled",
+    "answer": "Delete the starting-proposal sentence from spec/remediate/remediation-goals.md outright. Owner picked: Delete the sentence (not the restate option).",
+    "subject": "constitutional doc: the goals doc still calls its category list a starting proposal awaiting first runs",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-08-27T16:40:29.692Z"
+  },
+  "38696b0dd8bcfd21": {
+    "disposition": "settled",
+    "answer": "Delete the F5 and F6 labels from src/audit/adapters/README.md. Owner picked: Drop the labels.",
+    "subject": "The adapters README uses roadmap labels F5 and F6 that nothing in the repo defines",
+    "path": "src/audit/adapters/README.md",
+    "decided_at": "2026-08-27T16:40:29.822Z"
+  },
+  "1588134708c50483": {
+    "disposition": "settled",
+    "answer": "Trim the INV-CPGV-OUTCOME-RECORD-OWNER row to the ownership invariant alone and drop the until-a-later-work-item clause; record the relocation as a backlog entry if still wanted. Owner picked: Drop the clause.",
+    "subject": "A glossary invariant carries an \"until a later work item relocates it\" plan clause",
+    "path": "docs/glossary-ids.md",
+    "decided_at": "2026-08-27T16:42:38.060Z"
+  },
+  "4fe542aceca77056": {
+    "disposition": "settled",
+    "answer": "Delete --model auto from the freellmapi claude.ps1 launcher so the nested session takes the router default; trailing @args still allows pinning. Owner picked: Drop the flag.",
+    "subject": "P47: the pool launcher hand-types a model alias the client rejects, and it killed a review lane tonight",
+    "path": "scripts/shared/offload-lane-data.mjs",
+    "decided_at": "2026-08-27T16:42:38.138Z",
+    "completed_at": "2026-08-27T16:42:48.630Z",
+    "completed_ref": "claude.ps1 line 53: --model auto removed 2026-08-27; @args still allows pinning"
   }
 }

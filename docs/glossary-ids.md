@@ -24,7 +24,7 @@ is deleted too.
 | INV-CDI-EXPLICIT-NODE-FIELDS | A charter delta carries its subsystem identity as explicit `node_id`/`goal_node_id` fields rather than encoded inside `delta_id`, so `delta_id` stays an opaque identity no consumer needs to parse. | `src/shared/decompose/charterExtraction.ts` |
 | INV-CK | Deterministic identity, idempotency, and content keys. | `src/shared/contentKey.ts`; `src/shared/stableStringify.ts` |
 | INV-CO | Contract-pipeline obligation and reconciliation derivation. | `src/remediate/validation/contractPipelineGates.ts` |
-| INV-CPGV-OUTCOME-RECORD-OWNER | The cross-artifact gate-outcome record (`evaluated`/`reason`) is owned by `src/remediate/validation/contractPipelineGates.ts` until a later work item relocates its shared shape into `audit-tools/shared`. | `src/remediate/validation/contractPipelineGates.ts` |
+| INV-CPGV-OUTCOME-RECORD-OWNER | The cross-artifact gate-outcome record (`evaluated`/`reason`) is owned by `src/remediate/validation/contractPipelineGates.ts`. | `src/remediate/validation/contractPipelineGates.ts` |
 | INV-CVG | Fail-closed contract validation and scoped positive/negative coverage. | `src/remediate/validation/contractPipelineGates.ts` |
 | INV-DA | Analyzer deletion signals remain advisory and never authorize unattended deletion. | `src/remediate/review/autonomousGate.ts` |
 | INV-GND | Missing grounding evidence is treated as ungrounded. | `src/shared/validation/findingGrounding.ts` |

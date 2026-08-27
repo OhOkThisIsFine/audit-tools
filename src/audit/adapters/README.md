@@ -17,9 +17,9 @@ The generic normalize seam plus the clippy/rubocop parse adapters live in `src/s
 with the acquisition substrate — both orchestrator draws consume them there.
 
 Secret scanning is ACQUIRED, not owned — it's the default-run `gitleaksCandidate` member of the
-F5 analyzer-acquisition-engine's curated candidate registry (`src/shared/analyzers/candidates.ts`),
+the analyzer-acquisition-engine's curated candidate registry (`src/shared/analyzers/candidates.ts`),
 normalized through the acquisition engine's own seam rather than this directory's per-tool adapters.
-Git-history mining (F6) is the one deterministically-*owned* analyzer signal (own-vs-acquire — see
+Git-history mining is the one deterministically-*owned* analyzer signal (own-vs-acquire — see
 the **Own-vs-acquire analyzer engine** decision in [`CLAUDE.md`](../../../CLAUDE.md), implemented by
 [`candidates.ts`](../../shared/analyzers/candidates.ts) and
 [`acquisitionEngine.ts`](../../shared/analyzers/acquisitionEngine.ts)) — by design it has no file here.
