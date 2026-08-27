@@ -22,8 +22,11 @@ repository root.
 
 Preserve user arguments:
 
-- pass the user-supplied target directory with `--root <path>` on every
-  `audit-code` command (`ensure` and each `next-step`)
+- run `audit-code` from inside the target repository; every command resolves
+  that repository's root from the working directory on its own, so normal usage
+  passes no `--root`
+- pass the user-supplied target directory with `--root <path>` only when running
+  from outside that repository
 
 This is the one full statement of the target-directory rule; the `audit-code`
 skill points here instead of restating it.

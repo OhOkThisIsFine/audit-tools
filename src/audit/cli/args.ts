@@ -6,6 +6,8 @@ import { join, resolve } from "node:path";
 import {
   artifactNameForId,
   auditArtifactsDir,
+  callerWorkingDirectory,
+  discoverRepoRoot,
   isCanonicalResultFilename,
   quotePromptCommandArg,
   renderPromptCommand,
@@ -14,6 +16,12 @@ import {
 } from "audit-tools/shared";
 
 export const DIRECT_CLI_DEFAULTS = {
+  /**
+   * There is no literal default root any more: an absent `--root` is DISCOVERED
+   * from the caller's working directory (`getRootDir`). The sentinel is kept
+   * only as the documented "the caller's own repository" answer the help text
+   * prints — a `"."` used as a value would be the very bug the discovery fixed.
+   */
   rootDir: ".",
   artifactsDir: ".audit-tools/audit",
   timeoutMs: 30 * 60 * 1000,
@@ -64,10 +72,32 @@ export function parsePositiveIntegerFlag(
   return raw === undefined ? undefined : normalizePositiveInteger(Number(raw));
 }
 
+/**
+ * The repository root every audit-code command acts on.
+ *
+ * Two arms, and the difference between them is the whole point:
+ *   • `--root <X>` supplied → `resolveRepoRoot(X)`, which honors X verbatim
+ *     (only climbing out of a `.audit-tools/` segment). An explicit root is an
+ *     instruction, never a hint — a sub-project inside a larger repo stays the
+ *     sub-project. This is the EXPLICIT OVERRIDE for running from outside the
+ *     target repository.
+ *   • no `--root` → `discoverRepoRoot` from the caller's working directory: the
+ *     nearest ancestor owning `.audit-tools/` or `.git`. So every command run
+ *     from anywhere inside a repository — including from inside its own
+ *     `.audit-tools/` tree — resolves the SAME root.
+ *
+ * The second arm is why the `/audit-code` loader no longer has to mandate
+ * `--root` on every command: the property is tool-guaranteed rather than
+ * something the host must remember (auditor-agnostic robustness). Previously
+ * the default was the literal `"."`, i.e. the caller's cwd verbatim, so running
+ * from `<repo>/src` rooted the run at `<repo>/src` and minted a second artifact
+ * tree there.
+ */
 export function getRootDir(argv: string[]): string {
-  return resolveRepoRoot(
-    getFlag(argv, "--root", DIRECT_CLI_DEFAULTS.rootDir) as string,
-  );
+  const explicit = getFlag(argv, "--root");
+  return explicit === undefined
+    ? discoverRepoRoot(callerWorkingDirectory())
+    : resolveRepoRoot(explicit);
 }
 
 export function getArtifactsDir(argv: string[]): string {

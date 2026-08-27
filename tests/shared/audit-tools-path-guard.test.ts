@@ -86,6 +86,14 @@ const ALLOWLIST = new Map<string, string>([
       "compiled shared path module",
   ],
   [
+    "wrapper/audit-code-wrapper-repo-root.mjs",
+    "pre-dist bootstrap: the pinned wrapper-side MIRROR of " +
+      "src/shared/io/repoRoot.ts's root discovery — the installer verbs answer " +
+      "before any build, so the dirname literal cannot be imported. Divergence " +
+      "from the shared copy is caught by " +
+      "tests/shared/wrapper-repo-root-parity.test.ts, not by this allowlist",
+  ],
+  [
     "wrapper/audit-code-wrapper-opencode.mjs",
     "pre-dist bootstrap + opencode permission GLOB patterns ('.audit-tools/**')",
   ],

@@ -20,6 +20,7 @@ import {
   installerVerbHelp,
   installerVerbSummaries,
 } from './installer-verb-help.mjs';
+import { resolveWrapperRoot } from './audit-code-wrapper-repo-root.mjs';
 
 export { shouldBuildDistForPaths, assertWorkspaceInstalled };
 export { _INSTALL_HOST_ORDER, _INSTALL_HOST_DEFINITIONS, _getInstallHostKeys, _getInstallProfile, _renderGeminiCommandToml };
@@ -263,7 +264,7 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '- status summarizes deterministic audit state and pending review work',
     '',
     'Defaults:',
-    '- --root .',
+    '- --root the repository the working directory is in (nearest ancestor owning .audit-tools/ or .git); pass it only to target a repository you are not inside',
     '- --artifacts-dir <root>/.audit-tools/audit',
   ];
 
@@ -284,7 +285,11 @@ async function printPromptPath() {
 
 async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } = {}) {
   const commandArgs = [...argv];
-  const rootValue = resolve(getFlag(commandArgs, '--root') ?? '.');
+  // An absent --root is DISCOVERED (nearest ancestor owning .audit-tools/.git),
+  // not defaulted to the caller's cwd verbatim: the wrapper normalizes the root
+  // to an absolute path before the child sees it (CE-001), so a cwd-verbatim
+  // default here would pin the wrong root no matter what dist resolves.
+  const rootValue = resolveWrapperRoot(getFlag(commandArgs, '--root'));
   const artifactsDir = resolve(getFlag(commandArgs, '--artifacts-dir') ?? join(rootValue, '.audit-tools', 'audit'));
 
   // Overwrite (not default) so a user-supplied relative value is normalized to
@@ -304,7 +309,9 @@ async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } 
 
 async function runDistCommandInline(commandName, argv, { ensureArtifactsDir = false } = {}) {
   const commandArgs = [...argv];
-  const rootValue = resolve(getFlag(commandArgs, '--root') ?? '.');
+  // Same discovery as runDistCommand — the two paths must not answer "which
+  // repository is this?" differently.
+  const rootValue = resolveWrapperRoot(getFlag(commandArgs, '--root'));
   const artifactsDir = resolve(getFlag(commandArgs, '--artifacts-dir') ?? join(rootValue, '.audit-tools', 'audit'));
 
   setFlag(commandArgs, '--root', rootValue);

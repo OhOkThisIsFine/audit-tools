@@ -784,7 +784,13 @@ export {
 } from "./io/artifactName.js";
 
 // IO: repo-root anchoring (untrust the process cwd; never nest .audit-tools)
-export { resolveRepoRoot, climbOutOfAuditTools } from "./io/repoRoot.js";
+export {
+  resolveRepoRoot,
+  climbOutOfAuditTools,
+  discoverRepoRoot,
+  callerWorkingDirectory,
+  REPO_ROOT_MARKERS,
+} from "./io/repoRoot.js";
 export { resolveWithinRoot, assertWithinRoot } from "./io/pathContainment.js";
 export type { WithinRootOptions } from "./io/pathContainment.js";
 

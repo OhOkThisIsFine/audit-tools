@@ -216,7 +216,9 @@ audit-code next-step        # advance an audit one step
 remediate-code next-step    # advance a remediation one step
 ```
 
-Add `--root <repo>` when running from outside the target repository.
+Run them from anywhere inside the target repository — each resolves that repository's root
+from the working directory. `--root <repo>` is the explicit override for running from outside
+it (or for targeting a sub-project inside a larger repo).
 
 ## Develop
 
