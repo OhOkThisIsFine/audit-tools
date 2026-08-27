@@ -36,6 +36,15 @@ accepted open item belongs in `docs/backlog/`; none is pinned as immediate next.
   that refactor.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **6 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `docs-1` — Fold the mechanical-analyzer spec into durable-traps, or keep it as its own 33-line doc?
+  - `docs-2` — Drop the internal "(change 3)" label from the artifact contract, or spell it out?
+  - `docs-3` — constitutional doc: the goals doc still calls its category list a starting proposal awaiting first runs
+  - `docs-4` — The adapters README uses roadmap labels F5 and F6 that nothing in the repo defines
+  - `docs-5` — A glossary invariant carries an "until a later work item relocates it" plan clause
+  - `sol-1` — P47: the pool launcher hand-types a model alias the client rejects, and it killed a review lane tonight
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

@@ -1,0 +1,29 @@
+RED observed at HEAD c39a9b8857ed9b04d2d5857a38fcebc4ae00d1d6 on 2026-08-27.
+
+This proposal patches a file OUTSIDE the repo
+(C:\Users\ethan\freellmapi\claude.ps1), so it carries no repo test and no
+red-green pair can be written under tests/. The RED below is the real,
+observed lane failure that motivated it, not a predicted one.
+
+Command (nightly leg-1 reviewer lane, run from C:\Code\audit-tools):
+
+  powershell -File "C:/Users/ethan/freellmapi/claude.ps1" -p "<leg-1 review prompt>" \
+    > .audit-tools/nightly/free-leg1-0827.log 2>&1 < /dev/null
+
+Verbatim output (the entire 71-byte log):
+
+  [claude-code:unrecognized_model] {"model":"auto","query_source":"sdk"}
+
+Cause, read from the launcher itself (line 53, the only --model in the file):
+
+  & claude --model auto @args
+
+Confirmed workaround, same launcher, same session:
+
+  powershell -File "C:/Users/ethan/freellmapi/claude.ps1" -p "Reply with the single word: ok" \
+    --model "claude-sonnet-5"
+  -> ok        (exit 0)
+
+So the launcher is reachable and the router is up; the hand-typed `auto`
+alias is the whole failure. @args is appended after the hardcoded flag, so a
+trailing --model overrides it.

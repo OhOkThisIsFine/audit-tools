@@ -22,7 +22,10 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-26 at `1de3854c`.*
+*Last run: 2026-08-27 at `c39a9b88`.*
+
+
+> **11 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
 
 
 ---
@@ -31,106 +34,25 @@ records them in the tracked ledger, and does the work.
 # Documentation
 
 
-<!-- nightly:item key=329de84f3eba6628 -->
+<!-- nightly:item key=d1415c54048eacc1 -->
 
-## `docs-1` — Stop hard-coding the git remote name in the skills, or keep spelling it out? <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `docs-1` — Fold the mechanical-analyzer spec into durable-traps, or keep it as its own 33-line doc? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `.claude/skills/ship/SKILL.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-Two dev-workflow skills (ship and start-lap) begin by telling you what this repo's git remote is called, and then give copy-paste commands built on that name. Tonight every one of those commands was broken: they said the remote is "audit-tools", and the only remote in this checkout is "origin", so a fetch, a push and a merge all errored as written. Two independent lanes confirmed it, and the routine fixed the name tonight. What makes this a decision rather than a fix is that this is the SECOND time the name has been wrong, in the OPPOSITE direction: a nightly run already corrected these skills from "origin" to "audit-tools" once, on your answer, and now that correction is what is wrong. The release script never had this problem, because it asks git for the remote name at runtime instead of storing it. A third copy of the stale belief is still sitting in a code comment in that script, which says the primary checkout's remote is "audit-tools". So the question is whether the skills should keep naming the remote at all.
-
-### The question
-
-The ship and start-lap skills hard-code the remote name, and it has now been wrong in both directions within two weeks. release-and-publish.mjs resolves it at runtime and does not have the problem, but a comment in it still asserts the old name. What should happen?
-
-### Your answer
-
-- [ ] **1. Stop naming it** — Rewrite both skills so no remote name appears: instruct the reader to use the remote git already tracks (git rev-parse --abbrev-ref @{upstream}, or the resolver the release script uses), and delete the stale "audit-tools" assertion from the release-and-publish.mjs comment.
-- [ ] **2. Keep the name, fix the comment** — Keep the hard-coded remote name in the skills — tonight's correction to "origin" stands — and separately fix the stale "audit-tools" assertion in the release-and-publish.mjs comment so all three copies agree.
-- [ ] **3. Leave it** — Leave both skills naming the remote explicitly and leave the code comment as it is; the name is corrected whenever it drifts and that is an acceptable cost.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (6) — what was verified against code, and how</summary>
-
-- git remote -v in this checkout returns exactly one remote: origin, at https://github.com/OhOkThisIsFine/audit-tools.git. git branch -r lists only origin/* refs; refs/remotes/audit-tools/main does not exist.
-- Before tonight, .claude/skills/ship/SKILL.md declared "Remote `audit-tools`" and used "git push audit-tools HEAD:main"; .claude/skills/start-lap/SKILL.md used "git fetch audit-tools main" and "git merge --ff-only audit-tools/main" in its copy-paste sync block. All of them error as written. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- The previous flip is in git history: commit e2eca197 ("doc-review: apply five owner-answered corrections") is what set these skills to "audit-tools". So the hard-coded name has now been corrected twice, in opposite directions.
-- scripts/release-and-publish.mjs getRemoteName() prefers "origin" when it exists and otherwise takes the first remote, and the refusal message at line 274 already resolves the ref lazily rather than hard-coding a spelling — so the SCRIPT has no stale name, only the comment above it does.
-- That comment (scripts/release-and-publish.mjs:269-272) still says a hard-coded "origin/" would print a ref the operator cannot look up "whenever their only remote is named something else — which is the case in the primary checkout, where it is 'audit-tools'". That statement is false at HEAD.
-- Two independent adversary lanes (Codex, and a separate reviewer lane) each verified the remote independently and both agreed the documented commands fail as written.
-
-</details>
-
----
-
-
-<!-- nightly:item key=bd7337d71e47882e -->
-
-## `docs-2` — instruction-file edit: replace CLAUDE.md's hand-listed pre-commit legs with a pointer to the registry <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 1 night · `CLAUDE.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 1 night · `spec/mechanical-analyzer-layer-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-CLAUDE.md explains what runs when you commit. It names the checks by hand: the guard-reach reconciliation always, plus the doc-contract subset and check:doc-manifest when the staged files touch them. That reads as a complete list, and it is not. The pre-commit legs are not hand-maintained at all — the hook derives them from the guard registry in scripts/guard-reach-data.mjs, which currently declares 22 gates with a pre-commit leg, not 2. So an agent reading CLAUDE.md to find out what will run before its commit gets a wrong and much smaller answer. This is the exact shape the project bans elsewhere: a hand-copied list standing in for a generated one. CLAUDE.md is an instruction file, so the routine will never edit it on its own — this needs your call.
+There is a short design document called "Mechanical analyzer layer — shipped program + standing refusals". It has only two sections. One records two small ways the implementation differed from an older plan. The other is a list of tools the project decided NOT to use, and why — ast-grep, PMD CPD, a tree-sitter layer, MinHash, and osv-scanner as a default. The work it describes has already shipped, so the only durable thing left is that refusal list. The repo already has a home for standing rules of that kind: docs/backlog/durable-traps.md, and CLAUDE.md for policy. So the question is whether this list should move to one of those homes and the doc go away, or whether a refusal list earns its own spec. An independent reviewer argued the second way: the doc states its own reason to exist, and a record of what was decided against is genuinely something code cannot express. Both readings are defensible, which is why this is your call and not a fix.
 
 ### The question
 
-CLAUDE.md hand-lists two pre-commit legs where the hook derives 22 from scripts/guard-reach-data.mjs. Should the sentence point at the registry instead of enumerating?
+Should spec/mechanical-analyzer-layer-design.md be folded into docs/backlog/durable-traps.md (its "Decided against" list) plus CLAUDE.md (the two design deviations) and then deleted, or should it stay as a standalone spec?
 
 ### Your answer
 
-- [ ] **1. Point at the registry** — Replace the hand-listed legs in CLAUDE.md with a statement that the pre-commit leg set and its triggers are DERIVED from scripts/guard-reach-data.mjs via buildPreCommitLegs, and name no individual gates.
-- [ ] **2. Keep the two, say it is partial** — Keep naming the two most-hit legs but state explicitly that they are examples, not the set, and name scripts/guard-reach-data.mjs as the authority.
-- [ ] **3. Leave it** — Leave the sentence as it is.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (3) — what was verified against code, and how</summary>
-
-- .claude/hooks/pre-commit-gate.mjs:776-786 states that the leg set and every trigger come from the guard-reach registry (scripts/guard-reach-data.mjs) via buildPreCommitLegs — the legs are derived, not enumerated.
-- Enumerating the registry gives 22 gates carrying a pre-commit leg (21 with a "reach" trigger plus check:guard-reach with "always"), against the two CLAUDE.md names.
-- CLAUDE.md itself states the governing rule this violates: prose states invariants, and whatever can be enforced in tooling must be — a hand-copied list of a generated set is the drift surface the project removes elsewhere.
-
-</details>
-
----
-
-
-<!-- nightly:item key=95926d4bcb5d5b6d -->
-
-## `docs-3` — instruction-file edit: the CLAUDE.md Commands block omits the check:scripts typecheck gate <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 1 night · `CLAUDE.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-CLAUDE.md has a Commands block that tells an agent how to build, typecheck and test. It lists build, check, check:tests and test. A third typecheck gate landed this sprint — check:scripts — which type-checks the .mjs trees (scripts/, wrapper/, .claude/hooks/, dispatch/ and the two root entry files) with checkJs turned on. It is in verify:checks and it has a pre-commit leg, so it can fail your commit. But it is not in the Commands block, so an agent reading the instruction file cannot discover it, and will be surprised by it rather than running it. CLAUDE.md is an instruction file and is never auto-edited, so this needs your call.
-
-### The question
-
-check:scripts landed this sprint, gates commits, and is absent from the CLAUDE.md Commands block. Should it be listed there?
-
-### Your answer
-
-- [ ] **1. Add it** — Add a check:scripts line to the CLAUDE.md Commands block alongside check:tests, naming what it covers (the .mjs trees under tsconfig.scripts.json) and that it is in verify:checks.
-- [ ] **2. Point at the registry instead** — Do not enumerate a third gate. Replace the per-gate lines with a pointer to scripts/guard-reach-data.mjs as the authority on which checks exist and where each is wired.
-- [ ] **3. Leave it** — Leave the Commands block as it is.
+- [ ] **1. Fold and delete** — Move the "Decided against (do not re-propose without new evidence)" list into docs/backlog/durable-traps.md and the two recorded design deviations into CLAUDE.md, then delete spec/mechanical-analyzer-layer-design.md. Nothing is retained just to host the rule.
+- [ ] **2. Keep it** — Keep spec/mechanical-analyzer-layer-design.md as its own spec. A record of deliberately-rejected alternatives is a durable design artifact that code and contract tests cannot express, and the doc states that reason itself.
+- [ ] **3. Keep, but retitle** — Keep the doc but retitle it so it stops describing itself as a "shipped program" — a shipped-status label in a title is the status-noise the philosophy bans. Keep the refusal list where it is.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -142,35 +64,74 @@ check:scripts landed this sprint, gates commits, and is absent from the CLAUDE.m
 <details>
 <summary>Evidence (4) — what was verified against code, and how</summary>
 
-- package.json declares "check:scripts": "tsc -p tsconfig.scripts.json", and it appears in the verify:checks chain.
-- tsconfig.scripts.json covers scripts/**, wrapper/**, .claude/hooks/**, dispatch/**, audit-code.mjs and remediate-code.mjs with checkJs enabled.
-- scripts/guard-reach-data.mjs gives check:scripts a pre-commit "reach" leg, so it can block a commit.
-- The string "check:scripts" does not appear anywhere in CLAUDE.md at HEAD.
+- spec/mechanical-analyzer-layer-design.md is 33 lines. Its two headings are "Recorded design deviations (from the original item-C text)" and "Decided against (do not re-propose without new evidence)".
+- Its own opening paragraph says the program "has durable outcomes that live in the code and its contract tests" and that the doc "keeps only what is not derivable from them".
+- docs/backlog/durable-traps.md is the declared home for standing reference rules, and CLAUDE.md already carries the "Own-vs-acquire analyzer engine" decision this doc refuses against.
+- An independent lane REFUTED the fold, arguing the decided-against list is a durable reason to exist that code cannot express. Recorded rather than suppressed; the disagreement is why this escalates.
 
 </details>
 
 ---
 
 
-<!-- nightly:item key=fa3d28fd81768089 -->
+<!-- nightly:item key=4c6b307253d9acec -->
 
-## `docs-4` — constitutional doc: the goals doc names one review gate where the code has two, on different paths <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `docs-2` — Drop the internal "(change 3)" label from the artifact contract, or spell it out? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/audit/artifact-contract.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The audit artifact contract describes each artifact the audit produces. The row for docs_digest.json ends its description with the parenthetical "(change 3)". "Change 3" was an internal label for a batch of work while it was being built. A reader today cannot resolve it — no document, spec, or source file in the repo says what change 3 was. So the label carries no information and is a leftover from the work rather than a durable statement about the artifact. The documentation philosophy calls this changelog creep: a concept doc should say what a thing IS, not which internal batch introduced it. The straightforward fix is to delete the two words. The alternative is that the label means something to you that it does not mean to a reader, in which case it should be spelled out rather than removed.
+
+### The question
+
+Should the "(change 3)" parenthetical be deleted from the docs_digest.json row in spec/audit/artifact-contract.md?
+
+### Your answer
+
+- [ ] **1. Delete the label** — Delete "(change 3)" from the docs_digest.json row in spec/audit/artifact-contract.md. It is an internal work label a reader cannot resolve, and the artifact description stands without it.
+- [ ] **2. Spell it out** — Keep the reference but replace "(change 3)" with prose that says what it actually means, so a reader who was not present for the work can resolve it.
+- [ ] **3. Leave it** — Leave "(change 3)" exactly as it is.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (3) — what was verified against code, and how</summary>
+
+- spec/audit/artifact-contract.md line 58 reads: "| `docs_digest.json` | JSON | Deterministic bounded telos extraction over the doc universe (change 3); rendered into the confirm-intent prompt. ..." — quoted back independently by a second lane reading the file. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- A repo-wide search for a definition of "change 3" outside this line found none in docs/, spec/, CLAUDE.md, or README.md.
+- The previous run reported a sibling label "Slice D" in this same file. It is GONE at HEAD c39a9b88, so only "(change 3)" remains and the earlier pairing is stale.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=a477c87be998e5a8 -->
+
+## `docs-3` — constitutional doc: the goals doc still calls its category list a starting proposal awaiting first runs <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 *Documentation · open 1 night · `spec/remediate/remediation-goals.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-The remediation goals doc describes the review-necessity gate — the step that shows you the findings tiered by how much review each needs, so you can keep or decline them in one batch. It names the function runPlanningReviewGate and says the plan's nodes are what get surfaced. That is only true for one of the two intake paths. When remediation starts from structured findings (Path A), the review decision is recorded at intake by a DIFFERENT function, runReviewApprovalGate, over the ORIGINAL findings, before the contract pipeline turns them into DAG nodes; those runs never reach runPlanningReviewGate at all, and the code says so explicitly to avoid double review. So the doc names the wrong function and the wrong thing being reviewed for structured-findings runs. This is a normative goals doc, which the routine is forbidden from rewriting on its own.
+The remediation goals document lists the categories a clarification request can fall into, then says the list "is the starting proposal and is expected to be refined once the first runs produce real clarification batches." Two things have happened since that sentence was written. The first remediation draw ran to completion on 2026-08-24, so the first runs are no longer ahead of us. And the category values are now a fixed TypeScript union the compiler enforces — adding or removing one is a compile error at every place that handles them, which is the opposite of a provisional list. So the sentence describes a state the project has left. This document is constitutional: a commit that touches it is blocked unless an override records your decision, and the routine is never allowed to rewrite it on its own. That is why you are being asked rather than told.
 
 ### The question
 
-The goals doc states one review-necessity gate (runPlanningReviewGate over plan nodes); the code has two, on the two intake paths, over different objects. How should the doc state it?
+Should the "starting proposal ... expected to be refined once the first runs produce real clarification batches" sentence be removed or rewritten, now that the first runs have happened and the categories are a compile-enforced enum?
 
 ### Your answer
 
-- [ ] **1. State both paths** — Rewrite the bullet to state one review surface reached two ways: Path A (structured findings) records the decision at intake via runReviewApprovalGate over the original findings; Path B (document / conversation) is gated at planning via runPlanningReviewGate over the plan's nodes. At most one review per run either way.
-- [ ] **2. State the property, name nothing** — Rewrite the bullet to state only the durable property — every run gets exactly one batched keep/decline review before implementation, and a declined item becomes a recorded ignored disposition — and name no function, since the goals doc is normative about obligations rather than about symbols.
-- [ ] **3. Leave it** — Leave the bullet as it is.
+- [ ] **1. Delete the sentence** — Delete the "starting proposal and is expected to be refined" sentence from spec/remediate/remediation-goals.md. The categories are now a compile-enforced union and the first runs have happened, so the provisional framing states nothing durable.
+- [ ] **2. Restate as durable** — Replace the sentence with a durable statement — that the category set is fixed in code and any change to it is a deliberate contract change — so the doc says what is true rather than what was expected.
+- [ ] **3. Keep it provisional** — Keep the sentence. The list is still genuinely open to revision and the framing should stay until you decide it is settled.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -182,75 +143,35 @@ The goals doc states one review-necessity gate (runPlanningReviewGate over plan 
 <details>
 <summary>Evidence (4) — what was verified against code, and how</summary>
 
-- src/remediate/steps/nextStep.ts:2392 defines runPlanningReviewGate; its own doc comment says the caller fires it only when review_decision.json is ABSENT, so Path A never reaches it — no double review.
-- The call site (nextStep.ts:2637) is guarded by state.plan && !existsSync(reviewDecisionPath(artifactsDir)), commented "Review-necessity gate (Path B). Path A records its review decision at intake".
-- The Path A gate is runReviewApprovalGate (nextStep.ts:1611), guarded on !contractArtifactExists(artifactsDir, "goal_spec") — i.e. before the contract pipeline exists, so it reviews the original findings, not DAG nodes.
-- spec/remediate/remediation-goals.md is in the constitutional set (src/shared/constitutionalDocPaths.ts), so a change to it is a design-decision and the commit gate demands a recorded override.
+- spec/remediate/remediation-goals.md line 312: "This category list is the starting proposal and is expected to be refined once the first runs produce real clarification batches."
+- src/remediate/state/disposition.ts line 42 and src/remediate/state/itemStatus.ts line 48 both carry "deemed_inappropriate" as a member of a fixed union/array; itemStatus.ts partitions every status under an exhaustive Record, so an added member is a compile error at every axis.
+- The first remediation draw completed 2026-08-24, so "once the first runs produce real clarification batches" names a condition already met.
+- This file is in the constitutional set: a commit touching it is refused by .claude/hooks/pre-commit-gate.mjs without a fresh owner-decision override, so the routine cannot apply any of these options itself.
 
 </details>
 
 ---
 
 
-<!-- nightly:item key=ee60ccdfd552bb19 -->
+<!-- nightly:item key=38696b0dd8bcfd21 -->
 
-## `docs-5` — The closeout template claims a single-sourced friction vocabulary that is actually a hand-copy <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `docs-4` — The adapters README uses roadmap labels F5 and F6 that nothing in the repo defines <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `docs/end-of-sprint-report-template.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-The closeout report has friction bullets — ambiguous direction, tool should decide, inefficient feeding. The template says those bullets are "keyed by the single-sourced friction vocabulary", which tells a reader they cannot drift from the code. They can. The renderer's section data hard-codes those ids as string literals and does not import them from the module that defines FRICTION_CATEGORIES — whose own header claims there is exactly ONE category vocabulary shared by capture, triage and render, and that it can never drift. There is even a bridge export, FRICTION_BULLET_IDS, that would have made the claim true; nothing in the repo imports it. The values agree today, so nothing is wrong right now — the doc simply asserts a guarantee that is not enforced.
-
-### The question
-
-The template asserts the friction bullets are single-sourced; they are hand-copied literals with an unused bridge export sitting next to them. Derive them, or soften the claim?
-
-### Your answer
-
-- [ ] **1. Derive them** — Make scripts/closeout-sections-data.mjs derive the bullet ids from FRICTION_CATEGORIES in src/shared/friction/frictionRecord.ts (adopting or replacing the unused FRICTION_BULLET_IDS bridge), so the doc's claim becomes true and the hand-copy disappears.
-- [ ] **2. Add a reconciliation gate** — Leave the literals where they are but add a check that reconciles them against FRICTION_CATEGORIES and fails the build on drift, the way the other registry gates work.
-- [ ] **3. Soften the claim** — Change the template to say the bullets MIRROR the friction vocabulary rather than being single-sourced from it, and delete the unused FRICTION_BULLET_IDS export.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (4) — what was verified against code, and how</summary>
-
-- scripts/closeout-sections-data.mjs hard-codes the bullet ids as string literals (ambiguous_direction, tool_should_decide, inefficient_feeding, plus open_ended and logged_to) and does not import from src/shared/friction/frictionRecord.ts.
-- src/shared/friction/frictionRecord.ts defines FRICTION_CATEGORIES and its header claims there is exactly ONE category vocabulary shared by capture, triage and the render, and that it can never drift.
-- FRICTION_BULLET_IDS is exported from scripts/closeout-sections-data.mjs and has zero importers anywhere in the repo — the bridge that would make the claim true is dead.
-- No test or gate reconciles the two lists; they agree at HEAD, so this is an unenforced guarantee rather than a live defect.
-
-</details>
-
----
-
-
-<!-- nightly:item key=1c0446384cd15e13 -->
-
-## `docs-6` — instruction-file edit: CLAUDE.md re-lists the eleven lenses that LensSchema already single-sources <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 1 night · `CLAUDE.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 1 night · `src/audit/adapters/README.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-CLAUDE.md spells out the eleven audit lens names. That list is also declared in code as a zod enum, LensSchema, which is the thing that actually validates a lens at runtime. The code module's own header records why it exists: each package used to hand-copy the list, the copies drifted, and one copy that omitted "observability" caused that lens to be wrongly rejected. CLAUDE.md is now another hand-copy of the same list. It is correct today — all eleven names match, in the same order — so this is not a wrong statement, it is a second home for a fact that already has a canonical one, of exactly the kind that has bitten before. CLAUDE.md is an instruction file and is never auto-edited.
+The README for the external analyzer adapters names two things by a code: "the F5 analyzer-acquisition-engine" and "Git-history mining (F6)". F5 and F6 were roadmap item numbers from an older plan. Nothing in the repository says what F5 or F6 are — not another doc, not a spec, not a source comment. So a reader meeting these labels has no way to look them up, and the letters add nothing the surrounding words do not already say: the sentences still read correctly as "the analyzer-acquisition-engine's curated candidate registry" and "Git-history mining". The simple fix is to drop the two labels. The alternative is that they point at a roadmap you still keep somewhere, in which case the README should link it.
 
 ### The question
 
-CLAUDE.md hand-lists the eleven lenses that src/shared/types/lens.ts single-sources, a duplication whose own module records a past drift incident. Replace the list with a pointer?
+Should the orphaned "F5" and "F6" roadmap labels be dropped from src/audit/adapters/README.md?
 
 ### Your answer
 
-- [ ] **1. Point at the code** — Replace the inline lens list in CLAUDE.md with a pointer to src/shared/types/lens.ts as the canonical vocabulary, naming no individual lenses.
-- [ ] **2. Keep it, gate it** — Keep the inline list for readability but add a check that reconciles it against LensSchema and fails the build on drift.
-- [ ] **3. Leave it** — Leave the inline list; it is short, stable, and useful to have in front of an agent.
+- [ ] **1. Drop the labels** — Delete the "F5" and "F6" labels from src/audit/adapters/README.md. Both sentences read correctly without them and nothing in the repo defines what they mean.
+- [ ] **2. Link the roadmap** — Keep the labels but add a pointer to wherever the F-numbered roadmap is recorded, so a reader can resolve them.
+- [ ] **3. Leave them** — Leave F5 and F6 exactly as they are.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -262,159 +183,34 @@ CLAUDE.md hand-lists the eleven lenses that src/shared/types/lens.ts single-sour
 <details>
 <summary>Evidence (3) — what was verified against code, and how</summary>
 
-- src/shared/types/lens.ts declares LensSchema as the canonical zod enum with exactly the eleven members CLAUDE.md lists, in the same order.
-- That module's header states it exists because each package previously hand-copied the list and the copies drifted — a copy omitting "observability" once caused that lens to be wrongly rejected.
-- The CLAUDE.md list is correct at HEAD; nothing is wrong today, which is why this is a duplication question rather than a stale-fact fix.
+- src/audit/adapters/README.md line 20: "F5 analyzer-acquisition-engine's curated candidate registry (`src/shared/analyzers/candidates.ts`),"; line 22: "Git-history mining (F6) is the one deterministically-*owned* analyzer signal". <!-- doc-citation-exempt: quoted item prose, not citations -->
+- A repo-wide search for F5 or F6 across docs/, spec/, CLAUDE.md and README.md found no definition; the only other occurrence is the nightly inbox line that recorded this same observation.
+- Both sentences stay complete and accurate with the labels removed — the surrounding prose already names the engine and the signal.
 
 </details>
 
 ---
 
 
-<!-- nightly:item key=0cbd3c98cd882ec6 -->
+<!-- nightly:item key=1588134708c50483 -->
 
-## `docs-7` — Three spec/audit docs hand-mirror registries whose sibling view is already generated <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `docs-5` — A glossary invariant carries an "until a later work item relocates it" plan clause <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `spec/audit/dependency-map.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-Three normative spec documents each restate, by hand, a table that already exists in exactly one place in code: the artifact contract mirrors ARTIFACT_DEFINITIONS, the executor catalog mirrors the executor registry, and the dependency map mirrors ARTIFACT_DEPENDS_ON_MAP. Reviewer lanes checked all three row-by-row tonight and every row currently matches, so nothing is wrong today. What makes it worth asking is the asymmetry: the SAME executor registry already has a generated view — spec/audit/executor-producers.generated.md is rendered from it and gated — while the by-executor view beside it is typed out by hand. CLAUDE.md separately records that the artifact list "has drifted when copied". So the machinery to generate these exists and is in use one file over.
-
-### The question
-
-The artifact contract, executor catalog and dependency map hand-mirror code registries that already have a generated sibling view. Generate them, gate them, or accept the hand-mirror?
-
-### Your answer
-
-- [ ] **1. Generate them** — Render the mirrored tables in all three docs from their code registries the way spec/audit/executor-producers.generated.md is rendered, with the same never-hand-edit banner and check gate.
-- [ ] **2. Gate them where they are** — Leave the tables hand-written but add reconciliation checks that fail the build when a doc table and its registry disagree, so drift cannot land.
-- [ ] **3. One at a time** — Do only the dependency map first — it is the largest mirror and the one whose drift silently changes staleness ordering — and revisit the other two after.
-- [ ] **4. Accept the mirror** — Leave all three hand-written; they are normative prose that benefits from being read as prose, and the nightly review is the reconciliation.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (6) — what was verified against code, and how</summary>
-
-- src/audit/io/artifacts.ts ARTIFACT_DEFINITIONS declares every artifact filename and phase; spec/audit/artifact-contract.md re-lists them by hand across five phase tables.
-- src/audit/orchestrator/executors.ts declares the executor entries with their ids, kinds and obligation_ids; spec/audit/executor-catalog.md restates them by hand, while the PRODUCERS view of the same registry is generated into spec/audit/executor-producers.generated.md.
-- src/audit/orchestrator/dependencyMap.ts ARTIFACT_DEPENDS_ON_MAP is the canonical adjacency table; spec/audit/dependency-map.md mirrors the whole DAG by hand.
-- A reviewer lane compared all three edge-for-edge at HEAD and found no mismatch — this is a drift-surface question, not a correction.
-- CLAUDE.md records that the artifact list "has drifted when copied", which is why it tells readers to read the registry rather than a copy.
-- All three docs are in the constitutional set (src/shared/constitutionalDocPaths.ts), so any change needs a recorded override.
-
-</details>
-
----
-
-
-<!-- nightly:item key=8340f15d45a5573d -->
-
-## `docs-8` — The audit loader mandates --root on every command; CLAUDE.md calls a needed manual flag a bug signal <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 1 night · `skills/audit-code/audit-code.prompt.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 1 night · `docs/glossary-ids.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-The canonical audit loader prompt — the one body every IDE asset is rendered from — instructs the host to pass --root on every single audit-code command, and says it is the one full statement of that rule. CLAUDE.md says the opposite twice: normal usage should need no manual --root, and "a needed manual flag is a bug signal — fix canonical root resolution; do not document a workflow flag". The README instructs the reader to reach for --root too. The remediate loader, doing the same job for the other bin, mandates no --root at all, so the two halves of one pipeline disagree. The flag is real and works; this is not a broken reference. The question is whether the target-directory argument is a deliberate carve-out from the no-manual-flags rule, or a root-resolution gap that should absorb it.
+The glossary of invariant IDs records durable properties of the system — things that are true and are meant to stay true. One row, INV-CPGV-OUTCOME-RECORD-OWNER, says the gate-outcome record is owned by a particular file "until a later work item relocates its shared shape into audit-tools/shared". The ownership half is a real invariant and is still accurate at HEAD. The trailing clause is different: it describes an intention to move the code later. That is a plan, and a plan in a glossary of invariants is status-noise — it goes stale silently if the move happens, if it is abandoned, or if it is never scheduled, and no test can tell. The clean version states the ownership and stops. If the planned move still matters, its home is the backlog, where open work is tracked and can be closed.
 
 ### The question
 
-The audit loader and README document --root as required workflow while CLAUDE.md names a needed manual flag a bug signal, and the remediate loader needs no such flag. Which is right?
+Should the "until a later work item relocates its shared shape into audit-tools/shared" clause be dropped from the INV-CPGV-OUTCOME-RECORD-OWNER row, with the planned relocation recorded in the backlog if it is still wanted?
 
 ### Your answer
 
-- [ ] **1. Carve it out explicitly** — Ratify the target directory as a named exception to the no-manual-flags rule — state in CLAUDE.md that the audit target directory is the one flag normal usage may require, and why the remediate side does not need it.
-- [ ] **2. Absorb it into root resolution** — Treat this as the bug signal CLAUDE.md says it is: fix canonical root/state resolution so the audit loader no longer has to pass --root, then strip the flag from the loader prompt and the README.
-- [ ] **3. Align the two loaders** — Decide the correct behaviour once and make the audit and remediate loaders state the same rule, whichever way it goes, so the two halves of the pipeline stop disagreeing.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (5) — what was verified against code, and how</summary>
-
-- skills/audit-code/audit-code.prompt.md instructs the host to pass the user-supplied target directory with --root on every audit-code command (ensure and each next-step), and calls itself the one full statement of the target-directory rule.
-- skills/remediate-code/remediate-code.prompt.md mandates no --root at all, so the two canonical loader bodies are asymmetric.
-- CLAUDE.md, Conventions: "Normal usage: no manual --root, provider, model, routing, quota, or worker flags." And in standing decisions: "A needed manual flag is a bug signal. Fix canonical root/state resolution; do not document a workflow flag."
-- README.md separately instructs the reader to add --root when running from outside the target repository.
-- The flag itself is real and correct in code (src/audit/cli/args.ts reads it, src/audit/cli.ts passes it to the cwd guard), so this is a convention question rather than a stale reference.
-
-</details>
-
----
-
-
-<!-- nightly:item key=85c6d5195eb768a1 -->
-
-## `docs-9` — The philosophy map points the universal-host-prompts conviction at a home that does not state it <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 1 night · `docs/project-philosophy.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-docs/project-philosophy.md is deliberately a MAP, not a home: it states each conviction in one line and points at the document that actually owns it, and its own rule says that where the map and a home disagree, the home wins. One of its convictions — one canonical prompt body rendered per IDE, never per-IDE prose — points at documentation-philosophy.md as its home. That file was read in full and says nothing about host prompts, per-IDE rendering, or prompt bodies at all. The conviction is real and the mechanism exists in code (src/shared/hostAssets.ts renders host assets from the one canonical prompt body), but no document outside the map states it. So the pointer is stale and the conviction is currently homeless, and the map cannot fix that by itself without becoming the home, which contradicts its stated role.
-
-### The question
-
-The universal-host-prompts conviction points at documentation-philosophy.md, which does not state it, and no other doc does either. Where should it live?
-
-### Your answer
-
-- [ ] **1. Home it in CLAUDE.md** — State the universal-host-prompts conviction in CLAUDE.md as its canonical home and repoint the map there.
-- [ ] **2. Home it in a spec** — State it in the spec corpus alongside the host-asset rendering design and repoint the map there.
-- [ ] **3. Ratify the map as the home** — Accept the map as this conviction's home, mark the entry as self-homed the way A8 already is, and drop the pointer.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (5) — what was verified against code, and how</summary>
-
-- docs/project-philosophy.md states the conviction and names docs/documentation-philosophy.md as its home.
-- docs/documentation-philosophy.md was read in full and contains no statement about host prompts, per-IDE rendering, or canonical prompt bodies.
-- A repo-wide search for the conviction's wording finds only the map line plus the mechanism in src/shared/hostAssets.ts, which renders a host asset from the one canonical prompt body.
-- The map's own rule is that where map and home disagree the HOME is ground truth — so a home that does not state the conviction makes the pointer stale.
-- A related case is already live in the same file: A8 declares the map itself the home for three product invariants, in tension with the map's stated non-home role.
-
-</details>
-
----
-
-
-<!-- nightly:item key=17f45bbef58bc713 -->
-
-## `docs-10` — The audit workflow design states provider cache accounting the tool gave up owning <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 1 night · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-The audit workflow design describes how a shared preamble is reused across two prompts and states the provider-side result: one cache write, two cache reads, with both prompts marked for caching. That is transport accounting about a specific provider's prompt cache. The project deliberately gave up owning anything of that kind — no provider roster, no model or window table, no quota policy, no transport config — because backend behaviour belongs to the host. The design is not wrong about caching in general; the point is that a design contract should not assert what a provider's cache will do, because the tool cannot know and does not choose the provider. The companion paragraph a few lines down already hedges correctly, saying the property holds even when the active host exposes no explicit cache controls, which is the register the whole section should be in.
-
-### The question
-
-The audit workflow design asserts provider prompt-cache accounting ("one cache write, two cache reads", "marked for caching"), which the everything-agnostic conviction puts outside this package. Restate or keep?
-
-### Your answer
-
-- [ ] **1. Restate host-agnostically** — Rewrite the passage to state only what the tool controls — one shared preamble emitted once and referenced by both prompts — and drop the cache-write/cache-read accounting and the "marked for caching" control, matching the hedge the companion paragraph already uses.
-- [ ] **2. Keep it as a worked example** — Keep the accounting but label it explicitly as an illustration of what a caching host would do, not a property audit-tools asserts or depends on.
-- [ ] **3. Leave it** — Leave the passage as it is.
+- [ ] **1. Drop the clause** — Trim the INV-CPGV-OUTCOME-RECORD-OWNER row to the ownership invariant alone and drop the "until a later work item relocates it" clause. Record the relocation as a backlog entry if it is still wanted.
+- [ ] **2. Drop clause, no backlog entry** — Drop the clause and open no backlog entry — the relocation is not planned work.
+- [ ] **3. Keep it** — Keep the clause. The conditional ownership is itself the invariant worth recording, and dropping the clause would lose the intent.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -426,10 +222,10 @@ The audit workflow design asserts provider prompt-cache accounting ("one cache w
 <details>
 <summary>Evidence (4) — what was verified against code, and how</summary>
 
-- spec/audit-workflow-design.md states "One cache write, two cache reads" and describes both prompts as "marked for caching" — provider cache accounting and a provider-specific control.
-- CLAUDE.md, No execution inventory in this package: model identities, windows, prices, rate limits and provider rosters are host concerns and must not be discovered, persisted, or routed on inside audit-tools.
-- docs/project-philosophy.md, everything-agnostic: provider, backend, host, OS, model, shell and language stay outside the contract.
-- The companion worker paragraph in the same section already hedges correctly — "even when the active host does not expose explicit cache controls" — so the correct register is present a few lines away.
+- docs/glossary-ids.md, row INV-CPGV-OUTCOME-RECORD-OWNER: "The cross-artifact gate-outcome record (`evaluated`/`reason`) is owned by `src/remediate/validation/contractPipelineGates.ts` until a later work item relocates its shared shape into `audit-tools/shared`." <!-- doc-citation-exempt: quoted item prose, not citations -->
+- The ownership half is TRUE at HEAD: the GateOutcome interface with its evaluated/reason fields is defined at src/remediate/validation/contractPipelineGates.ts:1731, not under src/shared/.
+- CX-04 ("cross-gate outcomes becomes the only evaluator") landed in this review window and did NOT relocate the shape, so the clause is unfulfilled rather than stale-by-completion.
+- docs/documentation-philosophy.md governs concept docs as durable statements rather than status; a forward-looking plan clause is the documented smell.
 
 </details>
 
@@ -439,26 +235,26 @@ The audit workflow design asserts provider prompt-cache accounting ("one cache w
 # Recurring-problem solutions
 
 
-<!-- nightly:item key=82f85f356dc7fef5 -->
+<!-- nightly:item key=4fe542aceca77056 -->
 
-## `sol-1` — P45: extend check:memory-citations to the [[name]] form memories actually cite each other in <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `sol-1` — P47: the pool launcher hand-types a model alias the client rejects, and it killed a review lane tonight <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `scripts/check-memory-citations.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · open 1 night · `scripts/shared/offload-lane-data.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-There is a gate that catches a citation pointing at a memory note that no longer exists — because a dead pointer quietly re-asserts whatever the deleted note said. It only understands one spelling: the "memory: some-name" form used in repo docs. Memories cite EACH OTHER in a different spelling, [[some-name]], and the gate never looks at those, even though it opens the memory store to build its list of what exists. So the one place dead pointers are actually created — pruning the store — is the one place the gate cannot see. The memory index already warns about this in its own header and says it makes every prune a hand-audit. There is a real dead pointer in the store right now. A patch, a red-green test and a measured false-positive surface are written and waiting.
+The free-provider offload lane is started by a small PowerShell script, claude.ps1. Line 53 of that script runs "claude --model auto". Claude Code no longer accepts "auto" as a model name, so tonight the lane answered every prompt with a 71-byte error and nothing else. The router was up the whole time and the credentials were fine — the only broken thing was a model name typed by hand into a script. This is a repeat. An agy model pin went stale the same way on 2026-08-05, the "auto" alias was recorded as a bad pin on 2026-08-09, and the global instruction file already notes that Claude Code does not recognize "auto" and works around it on a different flag in that very same script. The fix that removes the trap is to stop typing a model name there at all: either drop the flag, or ask the router for a live model id at launch. The script lives outside this repository, so nothing here can fix it and no repo test can guard it. The proposal is written up and waiting for you.
 
 ### The question
 
-Extend check:memory-citations to also resolve [[name]] cross-links inside the memory store? Note that landing the patch alone turns the build RED until one existing dead pointer is repaired.
+How should the pool launcher stop carrying a hand-typed model alias — drop the --model flag entirely, or resolve a live model id from the router at launch?
 
 ### Your answer
 
-- [ ] **1. Land it, then repair** — Apply P45 and repair the one dangling pointer in the same change: in memory/opus5-low-effort-beats-sonnet-haiku.md, repoint [[delegate-bulk-work-off-fable]] at the note that superseded it, or drop the citation.
-- [ ] **2. Repair first, land later** — Repair the dangling pointer now and land P45 afterwards, so the gate arrives green rather than arriving red and being suppressed.
-- [ ] **3. Widen to tracked docs too** — Land P45 but widen its scope beyond the memory store, accepting that the nightly proposal corpus deliberately cites pruned notes and must be excluded explicitly.
-- [ ] **4. Do not gate it** — Leave the [[name]] form unchecked; pruning the store stays a hand-audit and the memory index keeps warning about it.
+- [ ] **1. Drop the flag** — Delete "--model auto" from line 53 of the freellmapi claude.ps1 launcher so the nested session takes the router default; the trailing @args still lets a caller pin a model. Smallest change, and nothing is left to go stale.
+- [ ] **2. Resolve from the roster** — Change the launcher to resolve a live model id from the router roster at launch and pass that, so an explicit pin remains but nothing hand-types it.
+- [ ] **3. Just fix the literal** — Replace "auto" with a working model id and leave the hand-typed form in place, accepting that it can go stale again.
+- [ ] **4. Record the trap only** — Leave the launcher alone and record the trailing --model override as a documented workaround in docs/backlog/durable-traps.md.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -467,61 +263,17 @@ Extend check:memory-citations to also resolve [[name]] cross-links inside the me
 
 ```
 
-Full proposal: [`.audit-tools/nightly/proposals/P45-memory-crosslinks-ungated/apply-patch.mjs`](../.audit-tools/nightly/proposals/P45-memory-crosslinks-ungated/apply-patch.mjs) <!-- doc-citation-exempt: quoted item prose, not citations -->
+Full proposal: [`.audit-tools/nightly/proposals/P47-launcher-hand-typed-model-alias/PROPOSAL.md`](../.audit-tools/nightly/proposals/P47-launcher-hand-typed-model-alias/PROPOSAL.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 <details>
-<summary>Evidence (7) — what was verified against code, and how</summary>
+<summary>Evidence (6) — what was verified against code, and how</summary>
 
-- scripts/check-memory-citations.mjs scans tracked repo docs for the "memory: <name>" form only. It reads the memory directory solely to build the set of known names and never scans those files' own contents.
-- One real dangling cross-link at HEAD across the 130-file store: memory/opus5-low-effort-beats-sonnet-haiku.md line 24 cites [[delegate-bulk-work-off-fable.md]], which was pruned and does not exist.
-- The patched gate was run against the real store and reported exactly that one finding — zero false positives — measured, not estimated.
-- The two near-misses it correctly ignores are both prose ABOUT the syntax inside inline code spans (the memory index header and the prune note), which is why the patch strips code spans rather than allowlisting names.
-- RED-AT.txt records the verbatim HEAD failure: with a fixture note citing [[beta]] and no beta.md, the unpatched checker exits 0 and prints "all citations resolve". Green after the patch, with the pre-existing gate test still passing. Validated by inverting the edit, never by git checkout.
-- Honest bound: only the dangling-link case is red-green evidence. The .md-suffix and code-span cases pass at HEAD vacuously, because nothing scans the store yet.
-- Recurrence, four dates: 2026-08-13 (P29, the sibling doc-citation gate blind to directory and bare-filename forms), 2026-08-14 (this gap filed in open-bugs), 2026-08-19 (P37, the same sibling gate blind to un-backticked citations), 2026-08-25 (the memory prune wrote the gap into the index header as a standing caveat).
-
-</details>
-
----
-
-
-<!-- nightly:item key=e87a32300d80ad04 -->
-
-## `sol-2` — P46: one provider with a known-broken key took 43 of tonight's 45 leg-2 errors <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Recurring-problem solutions · open 1 night · `scripts/shared/triage-backlog.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-Leg 2 asks a model, entry by entry, whether each backlog item is still real. Tonight it managed 66 of 111 entries; 45 failed. Forty-three of those 45 failed for one reason: every model routed through Cloudflare returns an error saying its key is in the wrong format. Your global notes have recorded that key as broken since 2026-08-09 — it needs to be stored as account_id:api_token and holds a bare token instead. What is new is the cost. Cloudflare accounted for 0, then 1, then 1, then 3 failures on previous nights, and 43 tonight, because the router's roster filled up with its models while the key stayed broken. So "leg 2 found nothing to delete" is not a statement about the backlog — it is a statement about 41% of it never being looked at. There is no code fix to make: the sweep is doing exactly what it was designed to do, and its file explicitly forbids the retry that would have hidden this.
-
-### The question
-
-Cloudflare's stored key is malformed and is now consuming most of leg 2's capacity. Fix the key, disable the provider, or leave it?
-
-### Your answer
-
-- [ ] **1. Fix the key** — Store the Cloudflare key in FreeLLMAPI in the required account_id:api_token form (running freellmapi\backup.ps1 first, since the ENCRYPTION_KEY in app\.env is the only thing that can decrypt the other eleven keys).
-- [ ] **2. Disable the provider** — Disable Cloudflare in FreeLLMAPI so the router stops offering its models, and accept the smaller pool until the key is available.
-- [ ] **3. Leave it** — Leave the key as it is and accept that leg 2 covers roughly 60% of the backlog per night, with the shortfall reported each run.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (7) — what was verified against code, and how</summary>
-
-- Tonight's coverage stamp (.audit-tools/nightly/triage-2026-08-26-coverage.json): 111 entries attempted, 66 classified, 45 errored, 34 with unusable premise probes.
-- 43 of the 45 errors are HTTP 502 provider_error from a (CF) model, all carrying: Cloudflare key must be in format "account_id:api_token". The other 2 are ordinary upstream failures elsewhere.
-- Eight distinct Cloudflare-routed models failed the same way, so this is the credential and not one bad model.
-- The (CF) share by night, from each run's own log: 08-20 zero, 08-21 one, 08-23 one, 08-24 three, 08-26 forty-three — while classified coverage fell from 81 to 66.
-- ~/.claude/CLAUDE.md has recorded this key as broken since 2026-08-09, naming the exact required format.
-- No code change is proposed: scripts/shared/triage-backlog.mjs states "Deliberately NO retry/backoff anywhere in this lane: failover is the router's job, and duplicating it in the caller would hide a router defect." A caller-side retry would have absorbed all 43 failures into latency and hidden the broken credential for longer.
-- Consequence for this run: the taxonomy returned actionable_now 58, owner_decision_needed 3, live_run_blocked 5, and no already-shipped class at all for the third run running — with 41% unclassified, that is not evidence the backlog has nothing to delete.
+- The freellmapi claude.ps1 launcher line 53 is "& claude --model auto @args" — the only --model in the file.
+- Observed at HEAD c39a9b88 on 2026-08-27: the leg-1 lane returned exactly [claude-code:unrecognized_model] with model "auto" and nothing else, a 71-byte reply.
+- Confirmed workaround in the same session: appending --model "claude-sonnet-5" after the script path returned "ok" at exit 0, because @args is appended after the hardcoded flag.
+- Recurrence, four records on four dates: docs/backlog/durable-traps.md (d) 2026-08-05 (a stale hand-written agy pin, whose own remedy is "read the roster rather than hand-typing it"); durable-traps 2026-08-09 (the router auto alias resolves to a reasoning model, 7 of 7 jobs unusable); the global instruction file, which records that claude.ps1 pins CLAUDE_CODE_MAX_CONTEXT_TOKENS because Claude Code does not recognize the auto alias; and tonight.
+- The launcher is outside this repo, so a repo gate reading it would be a gate asking the local disk, which this project bans. The in-repo half is the claude-ps1-launcher row in scripts/shared/offload-lane-data.mjs, whose unprobeableReason speaks only to liveness and is silent about a rejected flag.
+- Full analysis and the observed RED: .audit-tools/nightly/proposals/P47-launcher-hand-typed-model-alias/
 
 </details>
 
@@ -532,15 +284,15 @@ Cloudflare's stored key is malformed and is now consuming most of leg 2's capaci
 <summary>What the last run changed on its own</summary>
 
 
-- Leg 1 landed nine code-anchored doc corrections as a4f7a519, each verified against source by a reviewer lane and independently by TWO adversary lanes. spec/audit-workflow-design.md: the pipeline-order block renders PRIORITY and stopped one element short - friction_capture is its last entry, resolved at the completion boundary in decideAuditFrictionCloseout rather than by the bundle-derived obligation scan, and the doc did not mention the close-out at all. spec/remediation-workflow-design.md: deriveNodeFiles is the resolve of buildNodeWriteScopeResolver, and file_scope inheritance is the scope-less fallback ONLY - the module contract's declared write targets are unioned in every case, so the stated first/else/else chain understated the write scope.
+- NOTHING was applied to any document this run. The working tree was dirty at start — three modified tracked files (.claude/skills/ship/SKILL.md, scripts/check-memory-citations.mjs, scripts/release-and-publish.mjs) and an untracked tests/shared/memory-crosslink-gate.test.ts, which together are an interactive session mid-flight on last night's docs-1 and sol-1 answers. The clean-tree rule says review and report, apply nothing, so leg 1 landed no doc edit and no commit or push was made.
 
-- Leg 1, same commit: every git command in the ship and start-lap skills naming a remote called "audit-tools" now names origin. That remote does not exist in this checkout, so the documented fetch, push and merge lines errored as written. Three dangling [[...]] memory citations left by the 2026-08-25 prune were also repaired - the two risk-tier ones repoint at project-philosophy A6, which the cut list records as their supersessor; the third does NOT, so its token was deleted rather than repointed. An adversary lane caught that: repointing it at A6 would have landed a citation its target does not support.
+- The owner ANSWERED all twelve of last night's items. partitionBySettled classified every one as settled, so the queue emptied and none is re-raised. None is marked --done, and the answers to docs-1 and sol-1 are visibly the work in the dirty tree; the other ten answers imply work not yet in the tree.
 
-- Leg 1, same commit: docs/audit-pkg/development.md named skills/audit-code/ for a directory serving both shipped bins; docs/glossary-ids.md said an N-R13 item specification carries forward when no type, field or writer survives and a test pins its absence; docs/end-of-sprint-report-template.md named docs/backlog.md as a permanent home when durable content lands in docs/backlog/.
+- Leg 2 mechanical sweep ran to completion and covered the whole backlog: 111 of 111 entries attempted, 107 classified, 4 errored. That is 96% against last night's 59%, and it is direct evidence that the owner's sol-2 answer (the Cloudflare credential stored in account_id:api_token form) fixed the lane — 43 of last night's 45 errors were that one provider.
 
-- Leg 2 mechanical, 1de3854c: the check:memory-citations entry enumerated four dangling [[name]] links "at HEAD". All four are gone - not repaired, but carried away by the 2026-08-25 memory prune deleting the citing notes. A hand-typed instance list is a computed value the entry cannot keep true, so the list was removed rather than corrected; the entry's property is untouched and now points at P45.
+- Leg 2 verified before deleting and deleted nothing. The sweep returned exactly one already_shipped_or_stale verdict, on the forward-tracks entry "CI wall-clock: shard balance and the single-file floor". Reading the entry refutes it: it says "Implementation assigned outside this repo's agent loop by the owner 2026-08-07", which means assigned elsewhere, not shipped. The entry is a live pointer to its single home and stays.
 
-- Green gate before every push: npm run build, npm run check and the full vitest suite all pass on a clean tree. The commit gate independently rejected one of tonight's own edits for an unresolvable backticked citation, which was fixed before landing.
+- Sidecar state only: leg 1 stamped eleven examined docs into the scope ledger, the sweep wrote .audit-tools/nightly/triage-2026-08-27.jsonl and its coverage stamp, and the P47 proposal directory was written. No tracked document content changed.
 
 
 </details>
@@ -550,25 +302,23 @@ Cloudflare's stored key is malformed and is now consuming most of leg 2's capaci
 <summary>What the last run could NOT cover</summary>
 
 
-- Leg 2 sweep - 66 of 111 backlog entries classified, 45 errored. Coverage read from .audit-tools/nightly/triage-2026-08-26-coverage.json, not eyeballed. 43 of the 45 errors are ONE provider whose stored key is malformed (see sol-2 / P46). 41% of the backlog is unclassified this run and must not be read as clean.
+- BOTH independent lanes were degraded, so leg 1 ran with reviewer coverage that a second agent only partly checked. Codex is out of quota until 2026-09-01 ("You've hit your usage limit ... try again at Sep 1st, 2026") and answered nothing. The free-provider pool lane was then broken by its own launcher — see sol-1 / P47 — and needed a trailing --model override before it would answer at all.
 
-- Leg 2 premise probes - 34 of 111 entries returned unusable probes, meaning the lane's quoted fragments could not be evaluated against the tree. Those verdicts carry NO premise confirmation and must be re-verified against HEAD before any of them is worked.
+- The free-pool ADVERSARY pass FABRICATED. Given five findings to agree or refute, it returned five verdicts, four of which discuss findings that were never sent (a dependency-map direction claim, an emitSystemicChallenge claim, a quoteForCmd parity claim). Only its F1 verdict addresses a real finding, and that one is recorded inside docs-1 as the counter-argument. The other four verdicts were discarded as unusable, not counted as coverage.
 
-- Leg 2 found no shipped-and-deletable entry for the third run running. The taxonomy returned actionable_now (58), owner_decision_needed (3) and live_run_blocked (5), with no already-shipped class at all. With 41% of entries unclassified this is NOT evidence that the backlog has nothing to delete.
+- A re-run verification-shaped adversary prompt was MANGLED by shell quoting: four questions went out, the lane received only the first, and answered only that one. Q1 (the "(change 3)" literal in spec/audit/artifact-contract.md) is therefore independently confirmed with the line quoted back; the premises behind docs-3, docs-4 and docs-5 rest on this run's own direct file reads alone.
 
-- Leg 1 examined 40 of the 55 in-scope docs end-to-end across five reviewer lanes; the coverage stamp is .audit-tools/nightly/leg1-2026-08-26-coverage.json. The 15 not reviewed as leg-1 items are out of leg 1's reach by construction: seven generated host assets under .agent/ and .github/ (renderer-owned, governed by drift tests), docs/nightly-inbox.md and docs/nightly-routine-prompt.md (generator-owned), spec/audit/executor-producers.generated.md (generator-owned), and the five backlog files (leg 2's scope).
+- Leg 1 examined 11 of the 55 in-scope docs end-to-end this run, against 40 last run; the coverage stamp is .audit-tools/nightly/leg1-2026-08-27-coverage.json, read from the file and not eyeballed. The narrower pass is deliberate: the evidence window since the last run is five refactor commits confined to src/, so the review was scoped to the docs those commits could have invalidated plus the docs behind the escalations the last run recorded and could not queue. It is NOT a claim that the other 44 are clean.
 
-- The Codex adversary lane was SLOW but not dead - it spent several minutes reading unrelated skill files before answering, and its first invocation was killed by a two-minute tool clamp. A second independent adversary lane was dispatched in parallel so a Codex stall could not shrink coverage. Both lanes eventually covered all seven auto-apply candidates: Codex agreed with all seven, the second lane agreed with five, refuted one in part and refuted the premise of another. The second lane's refutation is what stopped a bad memory-citation replacement from landing.
+- The five refactor commits (CX-01, CX-03, CX-04, CX-05, CX-07) broke NO documented claim. That is a two-lane agreement, reached independently: a pool-lane reviewer reading the six most exposed docs returned NONE with per-commit reasoning, and this run's own grep of every doc citing a changed module found no contradiction. npm run check:doc-code-citations also passes — 407 path plus 74 directory plus 423 bare-filename citations across 55 docs all resolve.
 
-- HEAD MOVED FOUR TIMES during this run - a concurrent interactive session was working in the same checkout, taking it from 5f5e005c to 3e5d9ce0 before the routine's own commits. One of that session's commits (f0f691f4) swept this run's untracked P45 proposal directory into a commit about something else via git add -A, and the session then recorded that as a durable trap (0d14eb02). Nothing was lost and the routine staged only its own paths by name, but a nightly run and a live session sharing one checkout is not a covered case: the routine's clean-tree rule governs DIRT, not concurrency.
+- The doc-set condensation pass (perspective 2) ran and queued one candidate (docs-1). The five candidates the 2026-08-25 run recorded, plus spec/audit/orchestration-policy.md from the last run, remain unqueued. orchestration-policy.md was examined directly this run rather than carried on the earlier claim, and it did not hold up as a pure duplicate: it is 135 lines of genuine selection-principle prose that abstracts over the code registry rather than mirroring it, and its one clear pointer is a single sentence deferring the bounded-step guarantee to entrypoint-contract.md. It is not queued because the earlier "most of it is a pointer or a second copy" premise did not survive reading it.
 
-- The doc-set condensation pass (perspective 2) ran. It re-confirms the five candidates the 2026-08-25 run recorded and could not queue, and they remain unqueued for the same reason - the leg-1 queue is full at ten. They are: two hand-maintained parallel host grids in docs/audit-pkg/release.md; docs/audit-pkg/ mixing three shipped package docs with two repo-only ones; the closeout contract stated in three homes; host-handoff guarantees stated in three homes; and two proposal-shaped specs whose proposals have landed. Tonight adds two more of the same shape: spec/audit/orchestration-policy.md, most of which is a pointer or a second copy of rules homed in entrypoint-contract.md and dependency-map.md, and spec/mechanical-analyzer-layer-design.md, whose durable remainder is a standing refusal list that belongs in durable-traps or CLAUDE.md.
+- Two empty files sit in the repo root at HEAD, untracked: a file literally named "0)" and one named "entry.finding_id", both zero bytes and timestamped 2026-08-26 19:38 and 19:41 — minutes either side of commit c39a9b88. Both are the documented shell-redirect artifact class (a command redirected into a token taken from source). They belong to the concurrent session, not to this run, so this run did not delete them.
 
-- Six leg-1 escalations found tonight were NOT queued, to keep the queue answerable: internal change/slice labels ("change 3", "Slice D") as changelog creep in spec/audit/artifact-contract.md; a retired-mechanism narrative in spec/remediation-workflow-design.md; hand-typed turn counts in spec/self-scaling-pipeline-design.md; a "starting proposal, to be refined" framing in spec/remediate/remediation-goals.md whose enum is now fixed in code; a half-shipped prescription in spec/contract-authoring-determinism-design.md; orphaned F5/F6 roadmap labels in src/audit/adapters/README.md; and two changelog-creep bullets in docs/HANDOFF.md, which a concurrent session was actively rewriting during this run. They are recorded here so they are not lost.
+- The /insights weekly pass was NOT due. The stamp .audit-tools/nightly/insights-last-run.json has ran_at 2026-08-21T09:07:15Z, exactly 6.00 days before this run, and due means seven or more. Recorded for completeness; being not-due is not a skipped leg.
 
-- A CLAUDE.md observation not queued as its own item: the two-tier dependency policy names smol-toml and yaml as its worked examples, and strip-json-comments joined them in the v0.49.0 lap. Folded into docs-2/docs-6 territory rather than raised separately, since all three CLAUDE.md items ask the same question about hand-copied lists.
-
-- The /insights weekly pass was NOT due - the stamp at .audit-tools/nightly/insights-last-run.json has ran_at 2026-08-21, five days old, and due means seven or more. Recorded for completeness only; being not-due is not a skipped leg.
+- Leg 2 premise confirmation stayed weak even at full coverage: of 111 entries, 23 verdicts hold their premise, 3 partial, 35 unprobed and 33 returned unusable probes. So the coverage gain is in CLASSIFICATION, not in verification — those verdicts must be re-checked against HEAD before any of them is worked.
 
 
 </details>
