@@ -31,12 +31,14 @@ import {
   resultIdentityIsBound,
   runTrackedAsync,
   sameStrings,
+  scanBoundSubmission,
   stringArray,
   spawnSyncHidden,
   stableStringify,
   writeJsonFile,
   type SubmissionIssue,
   type SubmissionLedgerEvent,
+  type SubmissionScanMessages,
 } from "audit-tools/shared";
 import type { RemediationState } from "../../state/store.js";
 import {
@@ -920,6 +922,23 @@ type ParsedHostResult =
 function invalidResult(reason: string): ParsedHostResult {
   return { ok: false, reason };
 }
+
+/** A submission this draw's contract gate accepted — landed edit or decision. */
+type AcceptedHostResult = Extract<ParsedHostResult, { readonly ok: true }>;
+
+/**
+ * This draw's refusal vocabulary for {@link scanBoundSubmission}. The scan owns
+ * the sequence (containment, read, classify, duplicate check); the words are
+ * this lane's, because they address a host repairing a pending work item rather
+ * than an audit submission. `contractInvalid` passes `parseResult`'s own reason
+ * through untouched — the hand-recovery lane is pinned to that exact text.
+ */
+const remediationScanMessages: SubmissionScanMessages = {
+  missing: () => "no result file exists for this pending work item",
+  malformed: (detail) => `result JSON could not be parsed: ${detail}`,
+  contractInvalid: (detail) => detail,
+  duplicate: (resultId) => `result_id ${resultId} is duplicated in this workload`,
+};
 
 function parseResult(
   value: unknown,
@@ -2056,51 +2075,27 @@ export async function ingestRemediationHostResults(params: {
       continue;
     }
 
-    const absoluteResultPath = resolveContainedPath(
-      paths.root,
-      workItem.result_path,
-      `result path for ${workItem.id}`,
-    );
-    resolveContainedPath(paths.artifactsDir, absoluteResultPath, `result path for ${workItem.id}`);
-    const resultRead = await readSubmissionDocument(absoluteResultPath);
-    if (resultRead.kind === "missing") {
-      issues.push({
-        code: "submission_missing",
-        work_item_id: workItem.id,
-        result_path: workItem.result_path,
-        message: "no result file exists for this pending work item",
-      });
+    const scan = await scanBoundSubmission<AcceptedHostResult>({
+      root: paths.root,
+      artifactsDir: paths.artifactsDir,
+      workItemId: workItem.id,
+      resultPath: workItem.result_path,
+      parse: (value) => {
+        const result = parseResult(value, params.runId, workItem);
+        return result.ok
+          ? { ok: true, parsed: result }
+          : { ok: false, detail: result.reason };
+      },
+      resultId: (result) => result.result.result_id,
+      seen: (resultId) => resultIds.has(resultId),
+      messages: remediationScanMessages,
+    });
+    if (!scan.ok) {
+      issues.push(scan.issue);
       continue;
     }
-    if (resultRead.kind === "malformed") {
-      issues.push({
-        code: "submission_malformed",
-        work_item_id: workItem.id,
-        result_path: workItem.result_path,
-        message: `result JSON could not be parsed: ${resultRead.detail}`,
-      });
-      continue;
-    }
-    const parsed = parseResult(resultRead.value, params.runId, workItem);
-    if (!parsed.ok) {
-      issues.push({
-        code: "submission_contract_invalid",
-        work_item_id: workItem.id,
-        result_path: workItem.result_path,
-        message: parsed.reason,
-      });
-      continue;
-    }
+    const parsed = scan.parsed;
     const resultId = parsed.result.result_id;
-    if (resultIds.has(resultId)) {
-      issues.push({
-        code: "duplicate_submission_id",
-        work_item_id: workItem.id,
-        result_path: workItem.result_path,
-        message: `result_id ${resultId} is duplicated in this workload`,
-      });
-      continue;
-    }
 
     resultIds.add(resultId);
     if (parsed.kind === "decision") {

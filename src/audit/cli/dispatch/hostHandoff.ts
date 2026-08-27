@@ -18,12 +18,12 @@ import {
   parseWorkloadEnvelope,
   promptSha256,
   readJsonFile,
-  readSubmissionDocument,
   repoRelativePath,
   requireNonEmptyString,
   resolveContainedPath,
   resolveHostHandoffPaths,
   resultMapIdentity,
+  scanBoundSubmission,
   siblingLockPath,
   sameStrings,
   stableStringify,
@@ -32,7 +32,7 @@ import {
   writeBlockedStepContract,
   writeJsonFile,
   type RunLogger,
-  type SubmissionIssue,
+  type SubmissionScanMessages,
 } from "audit-tools/shared";
 import { findingContractPromptLines } from "../../contracts/findingContractPrompt.js";
 import { WorkerFindingSchema, type WorkerFinding } from "../../contracts/workerSchemas.js";
@@ -111,7 +111,7 @@ export interface PreparedAuditHostHandoff {
 
 /**
  * One ADVISORY validation finding on an ACCEPTED result. Deliberately not a
- * {@link SubmissionIssue}: an accepted result was never refused, so it must
+ * {@link AuditHostIngestIssue}: an accepted result was never refused, so it must
  * never ride (or be recorded through) the rejection-classified channel — see
  * {@link AuditHostIngestSummary.validation_warnings}.
  */
@@ -1009,61 +1009,26 @@ function toAuditResult(
   };
 }
 
-/** A submission read that either yielded a valid result or says why not. */
-type SubmittedResultOutcome =
-  | { readonly ok: true; readonly result: AuditHostResult }
-  | { readonly ok: false; readonly issue: SubmissionIssue };
-
 /**
- * Read one bound submission and CLASSIFY the outcome. Every failure names
- * itself and the bound path it looked at; nothing collapses to `null`.
+ * This draw's refusal vocabulary for {@link scanBoundSubmission}. The scan owns
+ * the sequence (containment, read, classify, duplicate check); the words are
+ * this lane's, because they address a host repairing a bound audit result.
  */
-async function readSubmittedResult(
-  absolutePath: string,
-  boundPath: string,
-  runId: string,
-  item: AuditHostWorkItem,
-  binding: AuditHostTaskBinding,
-): Promise<SubmittedResultOutcome> {
-  const locators = { work_item_id: item.id, result_path: boundPath } as const;
-  const read = await readSubmissionDocument(absolutePath);
-  if (read.kind === "missing") {
-    return {
-      ok: false,
-      issue: {
-        code: "submission_missing",
-        message: `work item '${item.id}' submitted nothing at its bound path`,
-        ...locators,
-      },
-    };
-  }
-  if (read.kind === "malformed") {
-    return {
-      ok: false,
-      issue: {
-        code: "submission_malformed",
-        message: `work item '${item.id}' submitted bytes that are not JSON: ${read.detail}`,
-        ...locators,
-      },
-    };
-  }
-  const parsed = parseHostResult(read.value, runId, item, binding);
-  if (!parsed.ok) {
-    return {
-      ok: false,
-      issue: {
-        code: "submission_contract_invalid",
-        // The detail NAMES its own category. The message must never enumerate
-        // categories the submission satisfied — that is how four correct-identity
-        // results read as an identity problem for a whole lap.
-        message:
-          `work item '${item.id}' submitted JSON that does not satisfy the audit host ` +
-          `result contract: ${parsed.detail}`,
-        ...locators,
-      },
-    };
-  }
-  return { ok: true, result: parsed.result };
+function auditScanMessages(workItemId: string): SubmissionScanMessages {
+  return {
+    missing: () => `work item '${workItemId}' submitted nothing at its bound path`,
+    malformed: (detail) =>
+      `work item '${workItemId}' submitted bytes that are not JSON: ${detail}`,
+    // The detail NAMES its own category. The message must never enumerate
+    // categories the submission satisfied — that is how four correct-identity
+    // results read as an identity problem for a whole lap.
+    contractInvalid: (detail) =>
+      `work item '${workItemId}' submitted JSON that does not satisfy the audit host ` +
+      `result contract: ${detail}`,
+    duplicate: (resultId) =>
+      `work item '${workItemId}' submitted result id '${resultId}', ` +
+      `which this run has already accepted`,
+  };
 }
 
 export async function ingestAuditHostResults(params: {
@@ -1126,34 +1091,26 @@ export async function ingestAuditHostResults(params: {
     const item = items.get(entry.work_item_id);
     const binding = taskBindings.get(entry.work_item_id);
     if (item === undefined || binding === undefined) continue;
-    const absoluteResultPath = resolveContainedPath(
-      paths.root,
-      entry.result_path,
-      `result path for ${entry.work_item_id}`,
-    );
-    const outcome = await readSubmittedResult(
-      absoluteResultPath,
-      entry.result_path,
-      params.runId,
-      item,
-      binding,
-    );
+    const outcome = await scanBoundSubmission<AuditHostResult>({
+      root: paths.root,
+      artifactsDir: paths.artifactsDir,
+      workItemId: entry.work_item_id,
+      resultPath: entry.result_path,
+      parse: (value) => {
+        const parsed = parseHostResult(value, params.runId, item, binding);
+        return parsed.ok ? { ok: true, parsed: parsed.result } : parsed;
+      },
+      resultId: (result) => result.result_id,
+      // CHECK only. The id is consumed further down, after conversion,
+      // validation and grounding — a result refused there must stay re-submittable.
+      seen: (resultId) => resultIds.has(resultId),
+      messages: auditScanMessages(entry.work_item_id),
+    });
     if (!outcome.ok) {
       issues.push(outcome.issue);
       continue;
     }
-    const result = outcome.result;
-    if (resultIds.has(result.result_id)) {
-      issues.push({
-        code: "duplicate_submission_id",
-        message:
-          `work item '${entry.work_item_id}' submitted result id '${result.result_id}', ` +
-          `which this run has already accepted`,
-        work_item_id: entry.work_item_id,
-        result_path: entry.result_path,
-      });
-      continue;
-    }
+    const result = outcome.parsed;
     const converted = toAuditResult(result, binding);
     if (!converted.ok) {
       issues.push({

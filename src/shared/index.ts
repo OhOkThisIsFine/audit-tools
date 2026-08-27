@@ -503,6 +503,15 @@ export type {
   HandRecoveryRequest,
 } from "./submission/handRecovery.js";
 export { recoverSubmission } from "./submission/handRecovery.js";
+// The ONE per-item submission scan both ingests draw from: containment, read,
+// missing/malformed/contract-invalid classification behind a per-draw message
+// renderer, the draw's domain parser, and a caller-predicate duplicate check.
+export type {
+  SubmissionParse,
+  SubmissionScanMessages,
+  SubmissionScanOutcome,
+} from "./submission/submissionScan.js";
+export { scanBoundSubmission } from "./submission/submissionScan.js";
 
 // The ONE code-unit comparator every persisted/hashed sort orders by.
 export { compareCodeUnits } from "./compareCodeUnits.js";
