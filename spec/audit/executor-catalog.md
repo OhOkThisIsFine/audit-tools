@@ -40,17 +40,27 @@ actual friction triage fires from the `present_report` terminal step
 
 ## Executors
 
+The tables below are GENERATED from `EXECUTOR_REGISTRY` by
+`scripts/shared/generate-spec-mirrors.mjs` (`npm run check:spec-mirrors` gates
+them). Executor id, kind and obligation ids come from the registry; the *Notes*
+prose and the pipeline stage each executor is filed under are declared in
+`scripts/shared/spec-mirror-data.mjs` — the registry declares no stage. Never
+hand-edit between the markers.
+
 ### Intake
 
+<!-- BEGIN GENERATED spec-mirror executor-catalog#intake — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
 | `intake_executor` | deterministic | `repo_manifest`, `file_disposition` | one call satisfies two obligations, each with its own satisfaction rule (`repo_manifest`: presence-only; `file_disposition`: presence + staleness) |
 | `intent_checkpoint_executor` | host_delegation | `intent_checkpoint_current` | — |
 | `intent_equivalence_executor` | host_delegation | `intent_equivalence_current` | DD-9 intent-equivalence gate. A prose-only delta emits the bounded judge step; every other arm (baseline stamp, gate-version stale, structured delta) resolves deterministically via the runner — mirroring `charter_extraction`'s emit-vs-run gating in `nextStepHelpers` |
 | `auto_fix_executor` | deterministic | `auto_fixes_applied` | — |
+<!-- END GENERATED spec-mirror executor-catalog#intake -->
 
 ### Analysis
 
+<!-- BEGIN GENERATED spec-mirror executor-catalog#analysis — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
 | `external_analyzer_acquisition_executor` | deterministic | `external_analyzers_current` | acquires the analyzer set and records the acquisition marker |
@@ -67,9 +77,11 @@ actual friction triage fires from the `present_report` terminal step
 | `charter_clarification_executor` | host_delegation | `charter_clarification_current` | Phase D triangulation loop; assembles deterministically at a shallow ceiling / zero attention |
 | `systemic_challenge_executor` | host_delegation | `systemic_challenge_current` | Phase E second-order-adversary loop-until-dry; omits deterministically at a shallow ceiling |
 | `syntax_resolution_executor` | deterministic | `syntax_resolved` | — |
+<!-- END GENERATED spec-mirror executor-catalog#analysis -->
 
 ### Execution
 
+<!-- BEGIN GENERATED spec-mirror executor-catalog#execution — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
 | `planning_executor` | deterministic | `planning_artifacts` | emits all planning artifacts in one call |
@@ -78,19 +90,24 @@ actual friction triage fires from the `present_report` terminal step
 | `result_ingestion_executor` | deterministic | `audit_results_ingested` | ingests prompt-bound host results and refreshes the downstream planning/coverage view |
 | `runtime_validation_executor` | deterministic | `runtime_validation_current` | the first runtime-validation pass; applies selective deepening |
 | `runtime_validation_update_executor` | deterministic | *(none — `preferredExecutor` only)* | re-runs that pass over imported evidence |
+<!-- END GENERATED spec-mirror executor-catalog#execution -->
 
 ### Reporting
 
+<!-- BEGIN GENERATED spec-mirror executor-catalog#reporting — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
 | `synthesis_executor` | deterministic | `synthesis_current` | co-produces the machine contract + its human render |
 | `synthesis_narrative_executor` | host_delegation | `synthesis_narrative_current` | optional LLM narrative pass (+ re-renders the contract/report with the enriched narrative) |
+<!-- END GENERATED spec-mirror executor-catalog#reporting -->
 
 ### Unreachable
 
-| Executor | Kind | Obligation | Note |
+<!-- BEGIN GENERATED spec-mirror executor-catalog#unreachable — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
+| Executor | Kind | Obligation | Notes |
 |---|---|---|---|
 | `friction_capture_executor` | deterministic | `friction_capture_current` | Unreachable — never produced by `deriveAuditState`'s obligation scan (its id sits in `PRIORITY` only to satisfy the executor-registry-coverage invariant). Friction triage actually fires from the `present_report` terminal step. |
+<!-- END GENERATED spec-mirror executor-catalog#unreachable -->
 
 ## Bounded-step expectations
 

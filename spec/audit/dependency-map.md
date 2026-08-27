@@ -20,18 +20,29 @@ table by `invertDependencyMap` — there is exactly one hand-authored adjacency
 representation, so the two views can never drift. This document mirrors the
 canonical (upstream) direction for the same reason.
 
+The four phase tables below are GENERATED from `ARTIFACT_DEPENDS_ON_MAP` by
+`scripts/shared/generate-spec-mirrors.mjs` (`npm run check:spec-mirrors` gates
+them) — every cell is registry-derived, and only which phase a row is filed under
+is declared, in `scripts/shared/spec-mirror-data.mjs` (the DAG phases are not the
+artifact registry's phases: `flow_coverage.json` is registry-phase `analysis` and
+DAG-phase 3). Never hand-edit between the markers; edit the map and re-run the
+generator.
+
 ### Phase 1 — intake
 
+<!-- BEGIN GENERATED spec-mirror dependency-map#phase-1 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Depends on |
 |---|---|
 | `repo_manifest.json` | `tooling_manifest.json` |
 | `file_disposition.json` | `repo_manifest.json` |
+<!-- END GENERATED spec-mirror dependency-map#phase-1 -->
 
 `repo_manifest.json` is rebuilt when the tooling/environment probe changes (a
 different analyzer version can classify files differently).
 
 ### Phase 2 — structure
 
+<!-- BEGIN GENERATED spec-mirror dependency-map#phase-2 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Depends on |
 |---|---|
 | `graph_bundle.json` | `repo_manifest.json`, `file_disposition.json` |
@@ -48,6 +59,7 @@ different analyzer version can classify files differently).
 | `charter_register.json` | `structure_decomposition.json`, `intent_checkpoint.json`, `repo_manifest.json`, `graph_bundle.json` |
 | `charter_clarification.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json` |
 | `systemic_challenge.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json` |
+<!-- END GENERATED spec-mirror dependency-map#phase-2 -->
 
 `charter_clarification.json` (Phase D charter-alignment triangulation loop) and
 `systemic_challenge.json` (Phase E second-order-adversary challenge loop) both
@@ -110,6 +122,7 @@ three writers).
 
 ### Phase 3 — planning & execution
 
+<!-- BEGIN GENERATED spec-mirror dependency-map#phase-3 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Depends on |
 |---|---|
 | `coverage_matrix.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `intent_checkpoint.json`, `external_analyzer_results.json`, `scope.json`, `audit_results.jsonl` |
@@ -121,6 +134,7 @@ three writers).
 | `runtime_validation_tasks.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `audit_results.jsonl` |
 | `runtime_validation_report.json` | `repo_manifest.json`, `file_disposition.json`, `critical_flows.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `audit_results.jsonl` |
 | `access_memory.json` | `audit_results.jsonl` |
+<!-- END GENERATED spec-mirror dependency-map#phase-3 -->
 
 `access_memory.json` is a pure per-run summary harvested from the ingested
 result ledger (which files/lenses each step covered, with recency in
@@ -152,10 +166,12 @@ note the extension: this is **not** a `.json` array.
 
 ### Phase 4 — reporting
 
+<!-- BEGIN GENERATED spec-mirror dependency-map#phase-4 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Depends on |
 |---|---|
 | `audit-report.md` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `design_assessment.json`, `structure_decomposition.json`, `charter_register.json`, `charter_clarification.json`, `systemic_challenge.json`, `syntax_resolution_status.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `runtime_validation_report.json`, `audit_results.jsonl`, `agent-feedback.jsonl` |
 | `synthesis-narrative.json` | `audit-findings.json` |
+<!-- END GENERATED spec-mirror dependency-map#phase-4 -->
 
 The human render (`audit-report.md`) depends on every analysis artifact plus
 `agent-feedback.jsonl` (see below). The canonical machine contract

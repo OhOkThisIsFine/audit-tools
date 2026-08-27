@@ -21,6 +21,7 @@
 // segments, `?` one character.
 
 import { RUNTIME_NAME_SOURCES } from "./shared/generate-runtime-artifact-names.mjs";
+import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror-data.mjs";
 
 /**
  * @typedef {object} GuardRow
@@ -189,6 +190,20 @@ export const GUARDS = [
     fix:
       'spec/audit/executor-producers.generated.md is stale — run `node scripts/shared/generate-executor-producers.mjs`, ' +
       'then re-stage it. The producer relation is declared on EXECUTOR_REGISTRY[].produces; never hand-edit the render',
+  },
+  {
+    id: 'check:spec-mirrors',
+    kind: 'gate',
+    impl: 'check:spec-mirrors',
+    preCommit: 'reach',
+    fix:
+      'a generated table region in spec/audit/artifact-contract.md, executor-catalog.md or ' +
+      'dependency-map.md is stale — run `node scripts/shared/generate-spec-mirrors.mjs`, then ' +
+      're-stage the doc(s). Never hand-edit between the markers: the rows come from ' +
+      'ARTIFACT_DEFINITIONS / EXECUTOR_REGISTRY / ARTIFACT_DEPENDS_ON_MAP and the Purpose/Notes ' +
+      'prose from scripts/shared/spec-mirror-data.mjs. If the check instead names a row the ' +
+      'declaration and the registry disagree about, fix the declaration — a new registry entry ' +
+      'must be filed under a section with its prose before it can render',
   },
   {
     id: 'check:cli-surface',
@@ -557,6 +572,15 @@ export const GUARDS = [
       'plus one primary producer per registry artifact and drift of the generated render',
   },
   {
+    id: 'spec-mirror-drift-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/spec-mirror-drift.test.ts',
+    note:
+      'asserts the three docs against a fresh render of the registries (not against themselves, which ' +
+      'the gate already does), pins the both-way membership reconciliation red on a dropped and on an ' +
+      'invented row, and pins the splice refusals for a missing / duplicated marker pair',
+  },
+  {
     id: 'offload-lane-probe-test',
     kind: 'contract-test',
     impl: 'tests/shared/offload-lane-probe.test.ts',
@@ -657,6 +681,35 @@ export const REACH = [
       'nothing would extract it and its declared-⊇-extracted pin would stay vacuous. Within a `produces` entry only ' +
       'the artifact name is checked against the code: the `role` (primary vs refresh) and `note` fields are ' +
       'hand-authored and mechanically unchecked, so a wrong role or a stale note renders faithfully',
+  },
+  {
+    area: 'spec/audit registry mirrors',
+    // DERIVED from the render's own declared input/output sets — never hand-listed, so a
+    // registry or doc added to the mirror joins the commit gate's reach in the same edit.
+    files: [
+      ...SPEC_MIRROR_SOURCE_FILES,
+      ...SPEC_MIRROR_DOCS,
+      'scripts/shared/generate-spec-mirrors.mjs',
+      'scripts/shared/spec-mirror-data.mjs',
+    ],
+    guardedBy: ['check:spec-mirrors', 'spec-mirror-drift-test'],
+    note:
+      'the three tables that used to hand-mirror ARTIFACT_DEFINITIONS, EXECUTOR_REGISTRY and ' +
+      'ARTIFACT_DEPENDS_ON_MAP. Membership is reconciled BOTH ways — a registry row no region ' +
+      'declares, and a declared row no registry holds, are hard refusals — so the row set cannot ' +
+      'drift; the two constant sources are read only to resolve filenames the registries name by ' +
+      'identifier',
+    uncovered:
+      'only the registry-DERIVED cells are checked. The Purpose / Notes prose is hand-authored in ' +
+      'spec-mirror-data.mjs and mechanically unverified, so a stale purpose renders faithfully ' +
+      '(the same half the producer-relation row states for `role`/`note`). Section membership is ' +
+      'declared, not derived, for two of the three: EXECUTOR_REGISTRY declares no pipeline stage ' +
+      'and the DAG phases are not the artifact registry\'s phases, so an executor filed under the ' +
+      'wrong stage — or a DAG row under the wrong phase — passes; only the artifact-contract ' +
+      'regions pin membership against the registry phase. Row ORDER within a region is declaration ' +
+      'order and is unchecked. The one declared non-registry row is checked only for being ABSENT ' +
+      'from ARTIFACT_DEFINITIONS; nothing verifies the runtime submission it describes still behaves ' +
+      'as stated',
   },
   {
     area: 'installer-verb surface render',

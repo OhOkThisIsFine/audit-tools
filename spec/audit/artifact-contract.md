@@ -32,17 +32,28 @@ staleness DAG (see dependency-map.md).
 
 ## Artifacts by phase
 
+The five tables below are GENERATED from `ARTIFACT_DEFINITIONS` by
+`scripts/shared/generate-spec-mirrors.mjs` (`npm run check:spec-mirrors` gates
+them). Filename, format and phase come from the registry; the *Purpose* prose and
+the one deliberate non-registry row are declared in
+`scripts/shared/spec-mirror-data.mjs`. Never hand-edit between the markers — add
+the artifact to the registry, its purpose to the declaration, and re-run the
+generator.
+
 ### Intake
 
+<!-- BEGIN GENERATED spec-mirror artifact-contract#intake — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Format | Purpose |
 |---|---|---|
 | `repo_manifest.json` | JSON | Repository structure and file classification. |
 | `file_disposition.json` | JSON | Per-file audit-scope disposition derived from the manifest. |
 | `auto_fixes_applied.json` | JSON | Record of mechanical auto-fixes applied before review. |
 | `intent_checkpoint.json` | JSON | User/host-confirmed audit intent and lens propositions. |
+<!-- END GENERATED spec-mirror artifact-contract#intake -->
 
 ### Analysis
 
+<!-- BEGIN GENERATED spec-mirror artifact-contract#analysis — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Format | Purpose |
 |---|---|---|
 | `unit_manifest.json` | JSON | Parsed units (functions/classes/modules). |
@@ -62,6 +73,7 @@ staleness DAG (see dependency-map.md).
 | `systemic_challenge.json` | JSON | Phase-E second-order-adversary improvement-seeking challenge loop over the charter register, gated by the confirmed intent-checkpoint ceiling. |
 | `analyzer_capability.json` | JSON | Marker: outcome of the optional graph-enrichment pass (`applied`/`omitted`) + per-analyzer provenance. |
 | `external_analyzer_acquisition.json` | JSON | Marker: external-analyzer acquisition run record over the curated `EXTERNAL_ANALYZER_CANDIDATES` registry in `src/shared/analyzers/candidates.ts` — `defaultRun: true` members run without the per-run consent token; every other candidate requires it. |
+<!-- END GENERATED spec-mirror artifact-contract#analysis -->
 
 `flow_coverage.json` is listed here at `analysis` phase per `ARTIFACT_DEFINITIONS`
 even though it's computed after execution — the phase tag reflects where it's
@@ -79,6 +91,7 @@ audit-code into an implementation pipeline.
 
 ### Execution
 
+<!-- BEGIN GENERATED spec-mirror artifact-contract#execution — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Format | Purpose |
 |---|---|---|
 | `scope.json` | JSON | How this run was scoped (`full` vs. `delta` with `--since` seed/expanded file sets). |
@@ -93,6 +106,7 @@ audit-code into an implementation pipeline.
 | `task_affinity_graph.json` | JSON | Provider-neutral task-affinity graph derived from `audit_tasks.json`; consumed during planning packet composition. |
 | `requeue_tasks.json` | JSON | Re-audit tasks derived from coverage/flow-coverage gaps. |
 | `access_memory.json` | JSON | Per-run access-memory: deterministic path-level summary harvested from the ingested result ledger (frequency + step-ordinal recency + lenses) — a write-only record with no audit-side reader; reserved to bias later host-work composition toward continuity. |
+<!-- END GENERATED spec-mirror artifact-contract#execution -->
 
 Run-scoped host handoff adds `host-workload.json`, `host-result-map.json`,
 `host-task-bindings.json`, host result files, and the accepted-results ledger.
@@ -101,11 +115,13 @@ file presence alone is not acceptance.
 
 ### Reporting
 
+<!-- BEGIN GENERATED spec-mirror artifact-contract#reporting — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Format | Purpose | Deliverable? |
 |---|---|---|---|
 | `audit-report.md` | **Markdown** | Human-readable rendered report. | **Promoted** on completion. |
 | `audit-findings.json` | JSON | Canonical machine contract (`AuditFindingsReport`) — source of truth. | **Promoted** on completion. |
 | `synthesis-narrative.json` | JSON | Marker: whether the optional LLM narrative pass (themes/exec-summary/top-risks) was `applied` or `omitted`. | internal |
+<!-- END GENERATED spec-mirror artifact-contract#reporting -->
 
 `audit-report.md` and `audit-findings.json` are co-produced by
 `synthesis_executor` in one call — `audit-report.md` is the render of
@@ -113,8 +129,10 @@ file presence alone is not acceptance.
 
 ### Supervisor
 
+<!-- BEGIN GENERATED spec-mirror artifact-contract#supervisor — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Format | Purpose |
 |---|---|---|
 | `audit_state.json` | JSON | Orchestrator state snapshot (stateless — re-derivable from the rest of the bundle). |
 | `artifact_metadata.json` | JSON | Per-artifact staleness metadata (recorded upstream revisions/hashes). |
 | `tooling_manifest.json` | JSON | Detected tooling/analyzer versions (rebuilt fresh every `advanceAudit` call — never stale by construction). |
+<!-- END GENERATED spec-mirror artifact-contract#supervisor -->
