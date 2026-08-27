@@ -13,9 +13,8 @@ export type CrossLensDedupResult = CrossLensDedupeResult;
  * auto-apply block-machine policy — a HARD category gate (never collapse two
  * different-category fixes, OBL-C003-DEDUP), the exact-identity short-circuit
  * (drift-plan R2), CLONE survivors so the caller's Finding objects are never
- * mutated (INV-remediate-state-05), no grounding merge / no file sort, break on an
- * absorbed i-slot, and a structured merge log. The returned `mergeMap` feeds
- * `fixupBlocksAfterDedup`.
+ * mutated (INV-remediate-state-05), no grounding merge / no file sort, and a
+ * structured merge log. The returned `mergeMap` feeds `fixupBlocksAfterDedup`.
  */
 export function deduplicateCrossLensFindings(
   findings: Finding[],
@@ -26,7 +25,6 @@ export function deduplicateCrossLensFindings(
     survivorMutation: "clone",
     mergeGrounding: false,
     sortAffectedFiles: false,
-    breakOnAbsorbedSurvivor: true,
     // Input ids come from audit-findings.json (globally unique), so id-keyed
     // provenance is well-defined: duplicates refuse, dispositionById is emitted.
     idDiscipline: "global",

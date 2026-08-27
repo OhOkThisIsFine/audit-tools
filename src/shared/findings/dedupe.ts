@@ -26,16 +26,19 @@ import { compareCodeUnits } from "../compareCodeUnits.js";
  * violated, recorded here so a caller-side check has something to test
  * against. This is NOT a promise that this module will start enforcing it:
  *   - A missing/unrecognized `policy.categoryGate` (neither `"soft"` nor
- *     `"hard"`) silently falls through in the PERMISSIVE direction: the
- *     hard-gate check in `crossLensDedupe` only special-cases the literal
- *     string `"hard"`, so anything else (including `undefined`) never blocks
- *     a cross-category pair — it falls through to the exact/fuzzy match layers
- *     as if the gate were absent.
+ *     `"hard"`) silently falls through in the PERMISSIVE direction, in BOTH
+ *     places `crossLensDedupe` consults it. The hard-gate refusal lives in the
+ *     shared `compareFindingPair` and only special-cases the literal string
+ *     `"hard"`, so anything else (including `undefined`) never blocks a
+ *     cross-category pair; and the `PairMatchPolicy.titleThreshold`
+ *     `crossLensDedupe` derives only special-cases `"soft"`, so an unrecognized
+ *     value takes the LOWER cross-category title floor (0.4, the same-category
+ *     one) instead of soft's 0.5.
  *   - A `Finding` missing `affected_files` throws an uncaught TypeError inside
  *     `mergeAffectedFiles` (`survivor.affected_files.map(...)` called on
  *     `undefined`) the first time that finding is absorbed or absorbs another.
  *   - Two input findings sharing the same `id` (precondition 2 violated) yield
- *     an UNSPECIFIED merge-chain target once `crossLensDedupe`'s post-loop
+ *     an UNSPECIFIED merge-chain target once `crossLensDedupe`'s post-fold
  *     chain-collapse runs: the `visited`-guard there stops the walk instead of
  *     spinning forever on the resulting id cycle, but which of the colliding
  *     ids the chain resolves to is not a contract this module makes.
@@ -49,16 +52,29 @@ import { compareCodeUnits } from "../compareCodeUnits.js";
  */
 
 /**
- * ONE shared finding-dedup core. There is no auditor-dedup vs remediator-dedup —
- * there is one skeleton (group-by-primary-path → pairwise cross-lens compare →
- * similarity gate → survivor selection → absorb), and each orchestrator DRAWS it
- * with its own POLICY. Audit draws it read-only for the report (mutate survivors
- * in place, grounding-precedence merge, cross-category merge allowed at a higher
- * threshold); remediate draws it for the auto-apply block machine (clone survivors,
- * hard category gate, exact-identity short-circuit, a mergeMap its blocks consume).
- * Single-sourcing the skeleton is what stops the two from silently drifting on the
- * grouping / thresholds / survivor rule; the divergences are the explicit named
- * policy knobs below, not forked code.
+ * ONE shared finding-dedup core. There is no auditor-dedup vs remediator-dedup,
+ * and no cross-lens-fold vs same-lens-fold — there is one skeleton
+ * (group → pairwise compare → similarity gate → survivor selection → absorb →
+ * remove), and every pass DRAWS it with its own POLICY. Two seams carry the whole
+ * divergence:
+ *
+ *   - `collapseFindingGroups` — the survivor FOLD (grouping, the pair scan, the
+ *     mid-scan absorbed-survivor conservation guard, absorption, removal, and the
+ *     mutate-vs-clone survivor axis). Drawn by `crossLensDedupe` AND
+ *     `sameLensDedupe`.
+ *   - `compareFindingPair` — the one pair decision, parameterized by
+ *     `PairMatchPolicy` (lens eligibility, category gate, title floors, what
+ *     counts as the same place).
+ *
+ * Audit draws the core read-only for the report (mutate survivors in place,
+ * grounding-precedence merge, cross-category merge allowed at a higher threshold);
+ * remediate draws it for the auto-apply block machine (clone survivors, hard
+ * category gate, exact-identity short-circuit, a mergeMap its blocks consume).
+ * Single-sourcing the skeleton is what stops them drifting on the grouping /
+ * thresholds / survivor rule; the divergences are the named policy fields, not
+ * forked code. What stays per-draw is only what is genuinely terminal: cross-lens
+ * merge-chain closure, dispositions, and the evidence-conservation check, all
+ * post-fold phases in `crossLensDedupe`.
  */
 
 /**
@@ -156,6 +172,266 @@ function discriminatingIdentityKey(finding: Finding): string | null {
   return key;
 }
 
+/**
+ * Do two findings describe the same place? `lineRangeOverlaps` is the finer of
+ * the two "same place" signals: the same file AND touching line ranges, with an
+ * explicit sentinel — two findings that both omit line information (both ends
+ * degenerate to 0) are treated as overlapping rather than as disjoint.
+ */
+function lineRangeOverlaps(a: Finding, b: Finding): boolean {
+  const aFile = a.affected_files[0];
+  const bFile = b.affected_files[0];
+  if (!aFile || !bFile) return false;
+  if (aFile.path !== bFile.path) return false;
+  const aStart = aFile.line_start ?? 0;
+  const aEnd = aFile.line_end ?? aStart;
+  const bStart = bFile.line_start ?? 0;
+  const bEnd = bFile.line_end ?? bStart;
+  if (aEnd === 0 && bEnd === 0) return true;
+  return aStart <= bEnd && bStart <= aEnd;
+}
+
+/** Shared pairwise comparison result: should these two findings be merged? */
+interface PairwiseComparisonResult {
+  /** If true, a is kept as survivor; if false, b is kept. */
+  keepA: boolean;
+  /** Did the pair match under the comparison criteria? */
+  matched: boolean;
+}
+
+/**
+ * The MATCHING half of the shared core, stated as data. Everything the two draws
+ * genuinely disagree about — which lens pairs are eligible, whether a category
+ * difference is fatal, the title floors, and what counts as "the same place" — is
+ * a field here, which is what makes `compareFindingPair` the one comparison BOTH
+ * draws actually run. (It claimed to be shared while same-lens kept a second
+ * inline copy that had already drifted on thresholds and on the overlap gate.)
+ */
+interface PairMatchPolicy {
+  /**
+   * `different`: only pairs of DIFFERENT lenses are eligible (the cross-lens
+   * draw — same-lens collapse is a separate pass). `any`: no lens condition,
+   * because the same-lens draw's group key already fixes the lens.
+   */
+  lensGate: "different" | "any";
+  /**
+   * Category handling: `soft` still merges two findings of different categories but
+   * at a higher title-similarity threshold (audit review — a human reads the
+   * report); `hard` NEVER merges across categories — a different category is a
+   * structurally different fix, unsafe to auto-collapse (remediate, OBL-C003-DEDUP).
+   */
+  categoryGate: "soft" | "hard";
+  /**
+   * When true, two findings sharing a DISCRIMINATING shared-identity signature
+   * collapse even below the title-Jaccard floor (remediate drift-plan R2).
+   */
+  exactIdentityShortCircuit: boolean;
+  /** Title-Jaccard floor, lowered when the two categories agree. */
+  titleThreshold: { sameCategory: number; crossCategory: number };
+  /**
+   * What "the same place" means: `file` = file-path overlap alone (cross-lens);
+   * `line-or-file` = an overlapping line range OR file-path overlap (same-lens).
+   */
+  overlapGate: "file" | "line-or-file";
+}
+
+/**
+ * The ONE pairwise comparison: do these two findings merge, and which side
+ * survives? Both `crossLensDedupe` and `sameLensDedupe` route their pair decision
+ * through here, each with its own `PairMatchPolicy`.
+ *
+ * Survivor selection is severity-then-confidence with `aConf >= bConf`, so a
+ * fully-tied pair keeps the FIRST-SEEN finding — input order is the tiebreak, and
+ * that is a pinned property, not an accident.
+ */
+function compareFindingPair(
+  a: Finding,
+  b: Finding,
+  policy: PairMatchPolicy,
+): PairwiseComparisonResult {
+  if (policy.lensGate === "different" && normalizeText(a.lens) === normalizeText(b.lens)) {
+    return { matched: false, keepA: false };
+  }
+
+  const catMatch = normalizeText(a.category) === normalizeText(b.category);
+
+  // Hard category gate applies ahead of both exact-match and fuzzy layers
+  if (policy.categoryGate === "hard" && !catMatch) {
+    return { matched: false, keepA: false };
+  }
+
+  let matched = false;
+  if (policy.exactIdentityShortCircuit) {
+    const keyA = discriminatingIdentityKey(a);
+    const keyB = discriminatingIdentityKey(b);
+    matched = keyA !== null && keyA === keyB;
+  }
+
+  if (!matched) {
+    const titleSim = wordJaccard(a.title, b.title);
+    const threshold = catMatch
+      ? policy.titleThreshold.sameCategory
+      : policy.titleThreshold.crossCategory;
+    if (titleSim < threshold) {
+      return { matched: false, keepA: false };
+    }
+    const sameProblemSite =
+      (policy.overlapGate === "line-or-file" && lineRangeOverlaps(a, b)) ||
+      filePathOverlap(a, b) >= 0.5;
+    if (!sameProblemSite) {
+      return { matched: false, keepA: false };
+    }
+    matched = true;
+  }
+
+  // Rank by severity then confidence
+  const aSev = severityRank(a.severity);
+  const bSev = severityRank(b.severity);
+  const aConf = confidenceRank(a.confidence);
+  const bConf = confidenceRank(b.confidence);
+  const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
+
+  return { matched, keepA };
+}
+
+/**
+ * The per-draw policy of the shared survivor FOLD. The fold owns the whole
+ * survivor lifecycle — grouping, the pair scan, the mid-scan absorbed-survivor
+ * conservation guard, winner selection, absorption, and removal — and every
+ * genuine per-draw difference is a field here rather than a forked loop.
+ */
+interface FindingGroupFoldPolicy {
+  /**
+   * Group key. Groups are built in INPUT order and each group's members keep
+   * input order, because merge OUTCOMES depend on scan order (first-seen tie
+   * survival) and downstream artifact hashes depend on emission order.
+   */
+  groupKey: (finding: Finding) => string;
+  /** The pair decision, run over the ACCUMULATED (canonical) views. */
+  matchPair: (a: Finding, b: Finding) => PairwiseComparisonResult;
+  /**
+   * `mutate` the survivor original in place (audit report); `clone` it first so the
+   * caller's Finding objects are never mutated (remediate block state machine,
+   * INV-remediate-state-05).
+   */
+  survivorMutation: "mutate" | "clone";
+  /** Absorption mechanics: grounding precedence, affected-file sort. */
+  absorb: AbsorbOptions;
+  /**
+   * Called for every absorb. The cross-lens draw records its `mergeMap` and fires
+   * its `onMerge` audit-log hook here; the same-lens draw records nothing.
+   */
+  onAbsorb?: (info: {
+    /** The caller's ORIGINAL absorbed object — the emission filter's key. */
+    absorbedOriginal: Finding;
+    /** The absorbed side's ACCUMULATED view (what actually travelled). */
+    absorbed: Finding;
+    /** The live survivor object the data landed on (original or clone). */
+    survivor: Finding;
+  }) => void;
+}
+
+interface FindingGroupFoldResult {
+  /** The ORIGINAL objects that were absorbed — the emission filter's authority. */
+  removed: Set<Finding>;
+  /** The accumulated view of a finding: its canonical clone when one exists. */
+  canonical: (finding: Finding) => Finding;
+}
+
+/**
+ * The ONE finding-survivor fold. There is no auditor-fold and remediator-fold:
+ * group → pairwise scan → similarity gate → survivor selection → absorb → remove
+ * is one skeleton, and both dedup passes DRAW it with their own policy.
+ *
+ * Removal and clone bookkeeping are BOTH keyed by the caller's ORIGINAL Finding
+ * objects (group slots are never rewritten): `removed` holds absorbed originals,
+ * and `cloneOf` maps each original survivor to its single canonical clone (clone
+ * mode only). Keying by originals is what guarantees conservation — a caller's
+ * final filter over its input array sees exactly the objects this fold marked, so
+ * a finding is emitted exactly once XOR recorded as absorbed, never both, never
+ * neither.
+ *
+ * ⚠ The clone/canonical accumulation is MID-FOLD state, not a post-fold phase:
+ * `matchPair` and `absorbFinding` both read the CANONICAL views, so a later pair
+ * compares (and absorbs) everything an earlier merge already accumulated. Lifting
+ * it out of the fold changes merge outcomes.
+ */
+function collapseFindingGroups(
+  findings: Finding[],
+  policy: FindingGroupFoldPolicy,
+): FindingGroupFoldResult {
+  const groups = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const key = policy.groupKey(finding);
+    const group = groups.get(key);
+    if (group) group.push(finding);
+    else groups.set(key, [finding]);
+  }
+
+  const removed = new Set<Finding>();
+  const cloneOf = new Map<Finding, Finding>();
+  const canonical = (f: Finding): Finding => cloneOf.get(f) ?? f;
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    for (let i = 0; i < group.length; i++) {
+      if (removed.has(group[i])) continue;
+      for (let j = i + 1; j < group.length; j++) {
+        // The i-slot finding may have been absorbed mid-scan (!keepA below): an
+        // absorbed finding never acts as a survivor again — it would re-absorb
+        // data already unioned into ITS absorber, and the emission filter then
+        // silently drops everything it won. Every remaining (i, j) pair is dead,
+        // so stop unconditionally (conservation, never a policy knob). Checked
+        // BEFORE the j-slot skip.
+        if (removed.has(group[i])) break;
+        if (removed.has(group[j])) continue;
+        const originalA = group[i];
+        const originalB = group[j];
+        // Compare the CANONICAL views: in clone mode a prior merge's accumulation
+        // lives on the survivor's single clone, never on the caller's object.
+        const a = canonical(originalA);
+        const b = canonical(originalB);
+
+        const comparison = policy.matchPair(a, b);
+        if (!comparison.matched) continue;
+
+        const keepA = comparison.keepA;
+        const survivorOriginal = keepA ? originalA : originalB;
+        const absorbedOriginal = keepA ? originalB : originalA;
+        // Absorb the absorbed side's ACCUMULATED view so data it absorbed earlier
+        // travels to the new survivor instead of being stranded (no loss).
+        const absorbed = keepA ? b : a;
+
+        let survivor: Finding;
+        if (policy.survivorMutation === "clone") {
+          // Exactly ONE canonical clone per original survivor: every subsequent
+          // merge into this survivor mutates the SAME clone (a first-time survivor
+          // cannot already carry foreign data, so cloning the original is exact).
+          const existing = cloneOf.get(survivorOriginal);
+          if (existing) {
+            survivor = existing;
+          } else {
+            survivor = {
+              ...survivorOriginal,
+              affected_files: [...survivorOriginal.affected_files],
+              evidence: survivorOriginal.evidence ? [...survivorOriginal.evidence] : [],
+            };
+            cloneOf.set(survivorOriginal, survivor);
+          }
+        } else {
+          survivor = survivorOriginal;
+        }
+
+        absorbFinding(survivor, absorbed, policy.absorb);
+        removed.add(absorbedOriginal);
+        policy.onAbsorb?.({ absorbedOriginal, absorbed, survivor });
+      }
+    }
+  }
+
+  return { removed, canonical };
+}
+
 export interface CrossLensDedupePolicy {
   /**
    * Category handling: `soft` still merges two findings of different categories but
@@ -179,14 +455,6 @@ export interface CrossLensDedupePolicy {
   mergeGrounding: boolean;
   /** Sort a survivor's affected_files after each absorb (audit). */
   sortAffectedFiles: boolean;
-  /**
-   * Stop the inner scan immediately when the i-slot finding is itself absorbed
-   * (remediate). This is an OPTIMIZATION knob only: correctness never depends on
-   * it — an absorbed finding is unconditionally excluded from every subsequent
-   * pairwise comparison in both loops (conservation: once removed, a finding can
-   * neither absorb nor be re-emitted).
-   */
-  breakOnAbsorbedSurvivor: boolean;
   /**
    * What the caller's finding ids MEAN, which decides whether id-keyed provenance
    * is well-defined:
@@ -256,93 +524,34 @@ export function crossLensDedupe(
     }
   }
 
-  const groups = new Map<string, Finding[]>();
-  for (const finding of findings) {
-    const key = primaryPath(finding);
-    const group = groups.get(key);
-    if (group) group.push(finding);
-    else groups.set(key, [finding]);
-  }
-
-  /**
-   * Removal and clone bookkeeping are BOTH keyed by the caller's ORIGINAL Finding
-   * objects (group slots are never rewritten): `removed` holds absorbed originals,
-   * and `cloneOf` maps each original survivor to its single canonical clone (clone
-   * mode only). Keying by originals is what guarantees conservation — the final
-   * filter over `findings` sees exactly the objects the loop marked, so a finding
-   * is emitted exactly once XOR recorded in `mergeMap`, never both, never neither.
-   */
-  const removed = new Set<Finding>();
-  const mergeMap = new Map<string, string>();
-  const cloneOf = new Map<Finding, Finding>();
-  /** The accumulated view of a finding: its canonical clone when one exists. */
-  const canonical = (f: Finding): Finding => cloneOf.get(f) ?? f;
-  const absorbOpts: AbsorbOptions = {
-    mergeGrounding: policy.mergeGrounding,
-    sortAffectedFiles: policy.sortAffectedFiles,
+  const matchPolicy: PairMatchPolicy = {
+    lensGate: "different",
+    categoryGate: policy.categoryGate,
+    exactIdentityShortCircuit: policy.exactIdentityShortCircuit,
+    // The soft gate keeps cross-category merges but raises their title floor.
+    // Under the hard gate a cross-category pair is refused before any floor is
+    // consulted, so both entries are the same number there.
+    titleThreshold:
+      policy.categoryGate === "soft"
+        ? { sameCategory: 0.4, crossCategory: 0.5 }
+        : { sameCategory: 0.4, crossCategory: 0.4 },
+    overlapGate: "file",
   };
 
-  for (const group of groups.values()) {
-    if (group.length < 2) continue;
-    for (let i = 0; i < group.length; i++) {
-      if (removed.has(group[i])) continue;
-      for (let j = i + 1; j < group.length; j++) {
-        // The i-slot finding may have been absorbed mid-scan (!keepA below): an
-        // absorbed finding never acts as a survivor, so every remaining (i, j)
-        // pair is dead — stop unconditionally (not policy-gated; conservation).
-        if (removed.has(group[i])) break;
-        if (removed.has(group[j])) continue;
-        const originalA = group[i];
-        const originalB = group[j];
-        // Compare the CANONICAL views: in clone mode a prior merge's accumulation
-        // lives on the survivor's single clone, never on the caller's object.
-        const a = canonical(originalA);
-        const b = canonical(originalB);
-        // crossLensDedupe only pairs findings of DIFFERENT lenses
-        if (normalizeText(a.lens) === normalizeText(b.lens)) continue;
-
-        const comparison = compareFindingPair(a, b, {
-          categoryGate: policy.categoryGate,
-          exactIdentityShortCircuit: policy.exactIdentityShortCircuit,
-        });
-        if (!comparison.matched) continue;
-
-        const keepA = comparison.keepA;
-        const survivorOriginal = keepA ? originalA : originalB;
-        const absorbedOriginal = keepA ? originalB : originalA;
-        // Absorb the absorbed side's ACCUMULATED view so data it absorbed earlier
-        // travels to the new survivor instead of being stranded (no loss).
-        const absorbed = keepA ? b : a;
-
-        let survivor: Finding;
-        if (policy.survivorMutation === "clone") {
-          // Exactly ONE canonical clone per original survivor: every subsequent
-          // merge into this survivor mutates the SAME clone (a first-time survivor
-          // cannot already carry foreign data, so cloning the original is exact).
-          const existing = cloneOf.get(survivorOriginal);
-          if (existing) {
-            survivor = existing;
-          } else {
-            survivor = {
-              ...survivorOriginal,
-              affected_files: [...survivorOriginal.affected_files],
-              evidence: survivorOriginal.evidence ? [...survivorOriginal.evidence] : [],
-            };
-            cloneOf.set(survivorOriginal, survivor);
-          }
-        } else {
-          survivor = survivorOriginal;
-        }
-
-        absorbFinding(survivor, absorbed, absorbOpts);
-        removed.add(absorbedOriginal);
-        mergeMap.set(absorbedOriginal.id, survivor.id);
-        policy.onMerge?.({ absorbed, survivor });
-        // If the i-slot finding was just absorbed (!keepA), stop the inner loop.
-        if (policy.breakOnAbsorbedSurvivor && !keepA) break;
-      }
-    }
-  }
+  const mergeMap = new Map<string, string>();
+  const { removed, canonical } = collapseFindingGroups(findings, {
+    groupKey: primaryPath,
+    matchPair: (a, b) => compareFindingPair(a, b, matchPolicy),
+    survivorMutation: policy.survivorMutation,
+    absorb: {
+      mergeGrounding: policy.mergeGrounding,
+      sortAffectedFiles: policy.sortAffectedFiles,
+    },
+    onAbsorb: ({ absorbedOriginal, absorbed, survivor }) => {
+      mergeMap.set(absorbedOriginal.id, survivor.id);
+      policy.onMerge?.({ absorbed, survivor });
+    },
+  });
 
   // Preserve the direct edges before terminal collapse so the disposition map can
   // explain B→A→C rather than reducing all provenance to B→C.
@@ -433,67 +642,6 @@ export function crossLensDedupe(
 }
 
 /**
- * Shared pairwise comparison result: should these two findings be merged?
- * Extracted to eliminate duplication between crossLensDedupe and sameLensDedupe.
- */
-interface PairwiseComparisonResult {
-  /** If true, a is kept as survivor; if false, b is kept. */
-  keepA: boolean;
-  /** Did the pair match under the comparison criteria? */
-  matched: boolean;
-}
-
-/**
- * Perform pairwise comparison of two findings using similarity metrics.
- * Returns whether they match and which should be the survivor.
- * This logic is shared by both crossLensDedupe and sameLensDedupe.
- */
-function compareFindingPair(
-  a: Finding,
-  b: Finding,
-  options: {
-    skipLensCheck?: boolean; // Skip the lens equality check (crossLensDedupe sets different-lens requirement in its own logic)
-    categoryGate?: "soft" | "hard";
-    exactIdentityShortCircuit?: boolean;
-  },
-): PairwiseComparisonResult {
-  const catMatch = normalizeText(a.category) === normalizeText(b.category);
-
-  // Hard category gate applies ahead of both exact-match and fuzzy layers
-  if (options.categoryGate === "hard" && !catMatch) {
-    return { matched: false, keepA: false };
-  }
-
-  let matched = false;
-  if (options.exactIdentityShortCircuit) {
-    const keyA = discriminatingIdentityKey(a);
-    const keyB = discriminatingIdentityKey(b);
-    matched = keyA !== null && keyA === keyB;
-  }
-
-  if (!matched) {
-    const titleSim = wordJaccard(a.title, b.title);
-    const threshold = options.categoryGate === "soft" ? (catMatch ? 0.4 : 0.5) : 0.4;
-    if (titleSim < threshold) {
-      return { matched: false, keepA: false };
-    }
-    if (filePathOverlap(a, b) < 0.5) {
-      return { matched: false, keepA: false };
-    }
-    matched = true;
-  }
-
-  // Rank by severity then confidence
-  const aSev = severityRank(a.severity);
-  const bSev = severityRank(b.severity);
-  const aConf = confidenceRank(a.confidence);
-  const bConf = confidenceRank(b.confidence);
-  const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
-
-  return { matched, keepA };
-}
-
-/**
  * File-independent finding identity for exact re-emission collapse: the same logical
  * finding (normalized lens + category + title) re-emitted across files / units /
  * passes shares one key. Distinct from `findingIdentityKey` (the 3-tier structural-
@@ -510,72 +658,38 @@ export function findingReEmissionKey(finding: Finding): string {
   ].join("|");
 }
 
-function lineRangeOverlaps(a: Finding, b: Finding): boolean {
-  const aFile = a.affected_files[0];
-  const bFile = b.affected_files[0];
-  if (!aFile || !bFile) return false;
-  if (aFile.path !== bFile.path) return false;
-  const aStart = aFile.line_start ?? 0;
-  const aEnd = aFile.line_end ?? aStart;
-  const bStart = bFile.line_start ?? 0;
-  const bEnd = bFile.line_end ?? bStart;
-  if (aEnd === 0 && bEnd === 0) return true;
-  return aStart <= bEnd && bStart <= aEnd;
-}
+/**
+ * The same-lens draw's matching policy. The group key already fixes the lens, so
+ * there is no lens condition; the title floors sit BELOW the cross-lens ones
+ * (two findings one lens raised about one place are more often one defect), and
+ * "the same place" is additionally satisfied by an overlapping line range.
+ */
+const SAME_LENS_MATCH_POLICY: PairMatchPolicy = {
+  lensGate: "any",
+  // `soft`, not "no category gate": a category difference is not fatal here, it
+  // only raises the title floor.
+  categoryGate: "soft",
+  exactIdentityShortCircuit: false,
+  titleThreshold: { sameCategory: 0.35, crossCategory: 0.45 },
+  overlapGate: "line-or-file",
+};
 
 /**
  * Same-lens dedup: within each (lens, primary-path) group, collapse fuzzily-similar
  * findings (title Jaccard with a category-lowered threshold, plus line-range OR file
  * overlap), the higher sev/conf survivor absorbing the loser in place with grounding-
- * precedence + sorted files. A core capability only audit currently draws (remediate
- * consumes findings the auditor already collapsed), single-sourced here so the whole
- * finding-dedup family lives in one place.
+ * precedence + sorted files. The audit draw of the shared survivor fold — same
+ * skeleton as `crossLensDedupe`, a different `PairMatchPolicy`, mutate-in-place
+ * survivors, and no merge record (a human reads the report; nothing consumes an
+ * id-keyed same-lens provenance today).
  */
 export function sameLensDedupe(findings: Finding[]): Finding[] {
-  const groups = new Map<string, Finding[]>();
-  for (const finding of findings) {
-    const key = `${normalizeText(finding.lens)}:${primaryPath(finding)}`;
-    const group = groups.get(key);
-    if (group) group.push(finding);
-    else groups.set(key, [finding]);
-  }
-
-  const removed = new Set<Finding>();
-
-  for (const group of groups.values()) {
-    if (group.length < 2) continue;
-    for (let i = 0; i < group.length; i++) {
-      if (removed.has(group[i])) continue;
-      for (let j = i + 1; j < group.length; j++) {
-        // The i-slot finding may have been absorbed mid-scan (as b of an earlier
-        // pair): an absorbed finding must never act as a survivor again, or it
-        // re-absorbs data that was already unioned into ITS absorber and the
-        // final filter silently drops everything it then wins — the same
-        // conservation guard crossLensDedupe carries. Checked BEFORE the j-slot
-        // skip, mirroring that pass.
-        if (removed.has(group[i])) break;
-        if (removed.has(group[j])) continue;
-        const a = group[i];
-        const b = group[j];
-
-        // sameLensDedupe has different similarity thresholds than crossLensDedupe
-        const catMatch = normalizeText(a.category) === normalizeText(b.category);
-        const titleSim = wordJaccard(a.title, b.title);
-        const threshold = catMatch ? 0.35 : 0.45;
-        if (titleSim < threshold) continue;
-        if (!lineRangeOverlaps(a, b) && filePathOverlap(a, b) < 0.5) continue;
-
-        const aSev = severityRank(a.severity);
-        const bSev = severityRank(b.severity);
-        const aConf = confidenceRank(a.confidence);
-        const bConf = confidenceRank(b.confidence);
-        const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
-        const [survivor, absorbed] = keepA ? [a, b] : [b, a];
-        absorbFinding(survivor, absorbed, { mergeGrounding: true, sortAffectedFiles: true });
-        removed.add(absorbed);
-      }
-    }
-  }
+  const { removed } = collapseFindingGroups(findings, {
+    groupKey: (finding) => `${normalizeText(finding.lens)}:${primaryPath(finding)}`,
+    matchPair: (a, b) => compareFindingPair(a, b, SAME_LENS_MATCH_POLICY),
+    survivorMutation: "mutate",
+    absorb: { mergeGrounding: true, sortAffectedFiles: true },
+  });
 
   return findings.filter((f) => !removed.has(f));
 }

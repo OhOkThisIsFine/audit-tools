@@ -108,14 +108,13 @@ export function mergeFindings(
   // Audit's DRAW of the shared cross-lens core: read-only report policy — mutate
   // survivors in place, grounding-precedence merge, sort files, and a SOFT category
   // gate (merge cross-category at a higher title threshold). No exact-identity
-  // short-circuit / no break; the mergeMap is unused (a human reads the report).
+  // short-circuit; the mergeMap is unused (a human reads the report).
   return crossLensDedupe(dedupedSameLens, {
     categoryGate: "soft",
     exactIdentityShortCircuit: false,
     survivorMutation: "mutate",
     mergeGrounding: true,
     sortAffectedFiles: true,
-    breakOnAbsorbedSurvivor: false,
     // Packet-scoped ids collide across units by construction here; global ids
     // are minted downstream at assignStableFindingIds.
     idDiscipline: "local",

@@ -96,8 +96,7 @@
   `next-step` calls while the run sat at phase 1. **Property:** the gate runs once per boundary and
   its verdict is cached against the tree hash.
 
-- **Reviewer minors carried from the first-draw landings (2026-08-23, low).** Same-lens dedupe
-  absorption fix has no regression test (`src/shared/findings/dedupe.ts`); `collectPathARefusals`
+- **Reviewer minors carried from the first-draw landings (2026-08-23, low).** `collectPathARefusals`
   duplicates the promoter's Path-A membership logic and `FINALIZED_MODULE_CONTRACT_FIELDS` is a third
   hand-written field list beside `derive.ts` (`src/remediate/contractPipeline/`); `renderMembers`'
   `includeBodies` knob in `scripts/shared/generate-filelock-export-surface.mjs` is a no-op;

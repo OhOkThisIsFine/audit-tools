@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { crossLensDedupe, mergeGrounding, upsertFindingByIdentity } from "audit-tools/shared";
+import {
+  crossLensDedupe,
+  mergeGrounding,
+  sameLensDedupe,
+  upsertFindingByIdentity,
+} from "audit-tools/shared";
 import type { CrossLensDedupePolicy, Finding } from "audit-tools/shared";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
@@ -24,7 +29,6 @@ const AUDIT_POLICY: CrossLensDedupePolicy = {
   survivorMutation: "mutate",
   mergeGrounding: true,
   sortAffectedFiles: true,
-  breakOnAbsorbedSurvivor: false,
   idDiscipline: "local",
 };
 const REMEDIATE_POLICY: CrossLensDedupePolicy = {
@@ -33,7 +37,6 @@ const REMEDIATE_POLICY: CrossLensDedupePolicy = {
   survivorMutation: "clone",
   mergeGrounding: false,
   sortAffectedFiles: false,
-  breakOnAbsorbedSurvivor: true,
   idDiscipline: "global",
 };
 
@@ -278,10 +281,10 @@ describe("crossLensDedupe — one core, per-mode policy", () => {
     expect(out.dispositionById!.get("C")).toEqual({ status: "retained", terminalFindingId: "C", mergePath: ["C"] });
   });
 
-  // dedupe.ts:213-215 (hard category gate) runs AHEAD of both the exact-identity
-  // short-circuit (:218-222) and the fuzzy title/overlap layer: an exact-identity
-  // match must never cross categories under 'hard' policy, even though on its own
-  // the exact-identity layer would happily collapse it.
+  // In the shared `compareFindingPair`, the hard category gate runs AHEAD of both
+  // the exact-identity short-circuit and the fuzzy title/overlap layer: an
+  // exact-identity match must never cross categories under 'hard' policy, even
+  // though on its own the exact-identity layer would happily collapse it.
   it("hard category gate blocks an exact-identity match across categories (gate precedes exact-identity)", () => {
     const findings = [
       // Same structural anchor (path + symbol) → discriminating exact-identity
@@ -306,10 +309,10 @@ describe("crossLensDedupe — one core, per-mode policy", () => {
     expect(out.mergeMap.size).toBe(0);
   });
 
-  // dedupe.ts:275-283 — chain collapse walks mergeMap via a `visited` guard so a
-  // malformed input (duplicate caller-supplied ids, precondition 2 of the
-  // published contract violated) TERMINATES instead of spinning on the id cycle
-  // it produces. The resulting chain target in that malformed case is
+  // `crossLensDedupe`'s post-fold chain collapse walks mergeMap via a `visited`
+  // guard so a malformed input (duplicate caller-supplied ids, precondition 2 of
+  // the published contract violated) TERMINATES instead of spinning on the id
+  // cycle it produces. The resulting chain target in that malformed case is
   // deliberately unspecified — this test proves termination, not a target value.
   it("chain collapse terminates on a malformed duplicate-id cycle instead of spinning (visited guard)", () => {
     const policy: CrossLensDedupePolicy = {
@@ -318,7 +321,6 @@ describe("crossLensDedupe — one core, per-mode policy", () => {
       survivorMutation: "clone",
       mergeGrounding: false,
       sortAffectedFiles: false,
-      breakOnAbsorbedSurvivor: false,
       idDiscipline: "local",
     };
     // Two DIFFERENT primary-path groups, each producing one absorb event, wired
@@ -346,27 +348,6 @@ describe("crossLensDedupe — one core, per-mode policy", () => {
       expect(typeof target).toBe("string");
       expect(target.length).toBeGreaterThan(0);
     }
-  });
-
-  // breakOnAbsorbedSurvivor (dedupe.ts CrossLensDedupePolicy) is documented as a
-  // PURE performance/iteration-count optimization: toggling it must never change
-  // WHAT is merged, only how many redundant comparisons the inner loop makes.
-  it("breakOnAbsorbedSurvivor is a pure performance flag: true vs false produce identical findings and mergeMap", () => {
-    // Shape where the i-slot IS absorbed mid-scan (A absorbed by higher-severity
-    // B, then C compares against the live survivor B) — the only shape where
-    // breakOnAbsorbedSurvivor actually has an extra comparison to skip.
-    const mkAbsorbedISlot = () => [
-      makeFinding({ id: "A", title: "Timeout not enforced", lens: "correctness", category: "net", severity: "low", evidence: ["ev-A"] }),
-      makeFinding({ id: "B", title: "Timeout not enforced", lens: "security", category: "net", severity: "high", evidence: ["ev-B"] }),
-      makeFinding({ id: "C", title: "Timeout not enforced", lens: "tests", category: "net", severity: "medium", evidence: ["ev-C"] }),
-    ];
-
-    const withBreak = crossLensDedupe(mkAbsorbedISlot(), { ...REMEDIATE_POLICY, breakOnAbsorbedSurvivor: true });
-    const withoutBreak = crossLensDedupe(mkAbsorbedISlot(), { ...REMEDIATE_POLICY, breakOnAbsorbedSurvivor: false });
-
-    expect(withBreak.findings.map((f) => f.id)).toEqual(withoutBreak.findings.map((f) => f.id));
-    expect(withBreak.findings.map((f) => f.evidence)).toEqual(withoutBreak.findings.map((f) => f.evidence));
-    expect([...withBreak.mergeMap.entries()]).toEqual([...withoutBreak.mergeMap.entries()]);
   });
 
   // Conservation (explicit count form): every input finding is emitted exactly
@@ -408,6 +389,59 @@ describe("crossLensDedupe — one core, per-mode policy", () => {
         const out = crossLensDedupe(input, policy);
         expect(out.findings.length + out.mergeMap.size).toBe(input.length);
       });
+    }
+  });
+});
+
+// ── sameLensDedupe: the mid-scan absorbed-survivor conservation guard ────────
+//
+// The i-slot finding can be absorbed MID-SCAN (as the `b` of an earlier pair).
+// Without the unconditional `removed.has(group[i])` break, that dead i-slot
+// keeps winning later pairs, and the closing `findings.filter` then discards it
+// TOGETHER with everything it absorbed after its own removal — a silent finding
+// loss. The guard shipped without a regression test; this is it.
+
+describe("sameLensDedupe — an absorbed i-slot survivor never absorbs again (conservation)", () => {
+  function sameLensFinding(overrides: Partial<Finding> & { id: string }): Finding {
+    return {
+      title: "Retry loop never terminates",
+      category: "reliability",
+      severity: "medium",
+      confidence: "medium",
+      lens: "correctness",
+      summary: "Same summary.",
+      affected_files: [{ path: "src/retry.ts", line_start: 10, line_end: 20 }],
+      evidence: [],
+      ...overrides,
+    };
+  }
+
+  it("drops the mid-scan-absorbed survivor AND lands every input's evidence on an emitted finding", () => {
+    // One same-lens, same-primary-path group of three mutually-matching
+    // findings: identical titles (Jaccard 1.0 >= the 0.35 same-category floor)
+    // and identical line ranges (lineRangeOverlaps true), so every pair clears
+    // the match gates and only the survivor rule decides the outcome.
+    //
+    //   X medium/high · Y critical/low · Z medium/low
+    //
+    // (X,Y): Y outranks X on severity, so the i-slot X is absorbed MID-SCAN.
+    // (X,Z): X would still outrank Z on confidence — so WITHOUT the guard the
+    //        dead X absorbs Z, and the final filter drops both: ev-Z is lost.
+    // With the guard the inner scan breaks, and (Y,Z) lands Z's data on the
+    // LIVE survivor instead.
+    const x = sameLensFinding({ id: "X", severity: "medium", confidence: "high", evidence: ["ev-X"] });
+    const y = sameLensFinding({ id: "Y", severity: "critical", confidence: "low", evidence: ["ev-Y"] });
+    const z = sameLensFinding({ id: "Z", severity: "medium", confidence: "low", evidence: ["ev-Z"] });
+
+    const out = sameLensDedupe([x, y, z]);
+
+    // No resurrection: the absorbed X is never emitted beside the live survivor.
+    expect(out.map((f) => f.id), "only the live survivor Y is emitted").toEqual(["Y"]);
+    // Conservation: no input's evidence is stranded on a finding that was itself
+    // dropped — every input contributes to the emitted set.
+    const emittedEvidence = new Set(out.flatMap((f) => f.evidence ?? []));
+    for (const ev of ["ev-X", "ev-Y", "ev-Z"]) {
+      expect(emittedEvidence.has(ev), `${ev} must reach an emitted finding`).toBe(true);
     }
   });
 });
