@@ -4,10 +4,8 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { decideNextStep, recoverIngestHostResults } from "./steps/nextStep.js";
 import { validateArtifacts } from "./validation/artifacts.js";
-import {
-  CONTRACT_PIPELINE_VALIDATORS,
-  evaluateContractPipelineCrossGates,
-} from "./validation/contractPipeline.js";
+import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
+import { evaluateContractPipelineCrossGateOutcomes } from "./validation/contractPipelineGates.js";
 import {
   CP_ARTIFACT_NAMES,
   isEnvelope,
@@ -337,8 +335,8 @@ export interface ValidateArtifactActionResult {
  * Beyond the per-artifact structural validator, this ALSO loads the on-disk
  * sibling contract-pipeline artifacts (under `<artifactsDir>/intake/contract/`)
  * and runs the SAME cross-artifact gates the plural `validate-artifacts` sweep
- * and `next-step` enforce (evaluateContractPipelineCrossGates — single-sourced
- * in validation/contractPipelineGates.ts), substituting the in-flight `name`
+ * and `next-step` enforce (evaluateContractPipelineCrossGateOutcomes —
+ * single-sourced in validation/contractPipelineGates.ts), substituting the in-flight `name`
  * payload for its on-disk version so the in-flight edit always wins over a
  * stale/absent sibling. Without this, a shape-valid artifact missing its
  * cross-artifact obligations (e.g. a test_validator_plan missing its CE-006
@@ -408,11 +406,11 @@ export async function runValidateArtifactAction(options: {
     const findingEnumeration = await readOptionalJsonFile(
       intakePaths(artifactsDir).findingEnumeration,
     );
-    crossGateIssues = evaluateContractPipelineCrossGates({
+    crossGateIssues = evaluateContractPipelineCrossGateOutcomes({
       payloads,
       findingEnumeration,
       root,
-    }).flat();
+    }).flatMap((outcome) => outcome.issues);
   } catch (err) {
     // readContractArtifact / readOptionalJsonFile throw on a corrupt (malformed-
     // JSON) sibling envelope — mirror the same JSON-parse-error shape/exit code

@@ -119,8 +119,8 @@ export function validateDesignSpecGates(
         // substring false-positives (e.g. "INV-1" ⊂ "INV-10"). COR-cca3801c:
         // invId is worker-authored and must be escaped before interpolation —
         // unescaped, a metacharacter id (e.g. "INV-(1") threw and aborted the
-        // whole evaluateContractPipelineCrossGates array literal, losing all
-        // eight gate results, not just this one. Mirrors the sibling fix
+        // whole cross-gate evaluation, losing all eight gate results, not just
+        // this one. Mirrors the sibling fix
         // already applied to fid in validateDigestCoverage below.
         return oblId === invId || new RegExp(`(?<![\\w-])${escapeRegExp(invId)}(?![\\w-])`).test(oblDesc);
       });
@@ -1696,7 +1696,7 @@ function canEvaluateFinalizedModuleSet(
  * on that follow-up; see CP-BLOCK-CP-NODE-14's result deviations.
  */
 export interface GateOutcome {
-  /** Stable identity, in evaluateContractPipelineCrossGates's fixed canonical order. */
+  /** Stable identity, in evaluateContractPipelineCrossGateOutcomes's fixed canonical order. */
   gate:
     | "paired_obligations"
     | "evidence_threaded"
@@ -1734,7 +1734,7 @@ function gateOutcome(
 // cross-gates never ran against it (an authoring round-trip a self-check exists
 // to prevent).
 
-/** Input to {@link evaluateContractPipelineCrossGates}. */
+/** Input to {@link evaluateContractPipelineCrossGateOutcomes}. */
 export interface ContractPipelineCrossGateInputs {
   /** Every contract-pipeline artifact payload currently known, by name. An
    *  absent entry means "this artifact is not available" — every gate below
@@ -1751,10 +1751,11 @@ export interface ContractPipelineCrossGateInputs {
 
 /**
  * Evaluate the SAME 8 cross-artifact gates the plural `validate-artifacts`
- * sweep runs, returning one `ValidationIssue[]` PER gate in a FIXED canonical
- * order (never a flattened single array — callers that need per-gate issue
- * counts, e.g. INV-CVG-1's "one issue-string entry per failing gate", rely on
- * this shape; a caller that just wants everything can `.flat()` the result).
+ * sweep runs, returning one {@link GateOutcome} PER gate in a FIXED canonical
+ * order. This is the single cross-gate entry point: callers that need only
+ * issues flatten `outcome.issues` in returned order, while callers that need
+ * per-gate counts or evaluated/skipped classification retain the outcome
+ * records (OBS-cca3801c / OBS-cca3801c-2).
  *
  * Absent-input tolerance is guaranteed PER GATE, not by this runner — this
  * function adds NO extra tolerance logic of its own, it only wires named
@@ -1787,49 +1788,6 @@ export interface ContractPipelineCrossGateInputs {
  * So a partial pipeline (most artifacts absent — e.g. a single-artifact
  * self-check in an otherwise-empty run) can never false-fail: every gate
  * lacking its input contributes an empty array, not a fabricated issue.
- */
-export function evaluateContractPipelineCrossGates(
-  inputs: ContractPipelineCrossGateInputs,
-): ValidationIssue[][] {
-  const { payloads, findingEnumeration, root } = inputs;
-
-  const goalSpec = payloads.get("goal_spec");
-  const sourceType =
-    isRecord(goalSpec) && typeof goalSpec.source_type === "string"
-      ? goalSpec.source_type
-      : undefined;
-  const obligationLedger = payloads.get("obligation_ledger");
-  const testValidatorPlan = payloads.get("test_validator_plan");
-  const finalizedContracts = payloads.get("finalized_module_contracts");
-  const draftedContracts = payloads.get("module_contracts");
-  const seamReport = payloads.get("seam_reconciliation_report");
-  const assessment = payloads.get("contract_assessment_report");
-  const judge = payloads.get("judge_report");
-  const counterexample = payloads.get("counterexample");
-  const dag = payloads.get("implementation_dag");
-  const moduleDecomposition = payloads.get("module_decomposition");
-
-  return [
-    validatePairedObligations(obligationLedger, testValidatorPlan),
-    validateEvidenceThreaded(assessment, judge, dag),
-    validateDigestCoverage(sourceType, findingEnumeration, obligationLedger),
-    validateReconciliationDerivation(seamReport, finalizedContracts),
-    validateDesignSpecGates(finalizedContracts, obligationLedger),
-    validateImplementationDAGIntegrity(dag, obligationLedger, counterexample, judge),
-    validateDecompositionFileScope(moduleDecomposition, root),
-    validateFinalizedModuleSetPreserved(draftedContracts, finalizedContracts),
-  ];
-}
-
-/**
- * Evaluate the SAME 8 cross-artifact gates {@link evaluateContractPipelineCrossGates}
- * calls, in the SAME canonical order, additionally classifying each as
- * evaluated or skipped-with-reason (OBS-cca3801c / OBS-cca3801c-2, see
- * {@link GateOutcome}). Additive: evaluateContractPipelineCrossGates keeps its
- * existing `ValidationIssue[][]` shape unchanged for its existing callers
- * (validation/artifacts.ts, index.ts) — this is a parallel, richer view for a
- * caller that must refuse an empty `issues` array as proof-of-clean without
- * checking `evaluated` first.
  */
 export function evaluateContractPipelineCrossGateOutcomes(
   inputs: ContractPipelineCrossGateInputs,

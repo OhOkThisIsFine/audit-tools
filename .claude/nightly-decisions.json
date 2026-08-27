@@ -1776,5 +1776,91 @@
     "decided_at": "2026-08-25T16:30:21.821Z",
     "completed_at": "2026-08-25T17:11:40.415Z",
     "completed_ref": "28912720 — ItemSpec deleted outright, so Phase 3's item-spec references are removed rather than made conditional. The spec doc edit rides the docs-9 batch."
+  },
+  "82f85f356dc7fef5": {
+    "disposition": "settled",
+    "answer": "Apply P45 and repair the one dangling pointer in the same change: in memory/opus5-low-effort-beats-sonnet-haiku.md, repoint [[delegate-bulk-work-off-fable]] at the note that superseded it, or drop the citation. Owner picked: Land it, then repair.",
+    "subject": "P45: extend check:memory-citations to the [[name]] form memories actually cite each other in",
+    "path": "scripts/check-memory-citations.mjs",
+    "decided_at": "2026-08-26T22:21:16.089Z"
+  },
+  "329de84f3eba6628": {
+    "disposition": "settled",
+    "answer": "Rewrite both skills so no remote name appears: instruct the reader to use the remote git already tracks (git rev-parse --abbrev-ref @{upstream}, or the resolver the release script uses), and delete the stale audit-tools assertion from the release-and-publish.mjs comment. Owner picked: Stop naming it.",
+    "subject": "Stop hard-coding the git remote name in the skills, or keep spelling it out?",
+    "path": ".claude/skills/ship/SKILL.md",
+    "decided_at": "2026-08-26T22:21:16.518Z"
+  },
+  "8340f15d45a5573d": {
+    "disposition": "settled",
+    "answer": "Treat this as the bug signal CLAUDE.md says it is: fix canonical root/state resolution so the audit loader no longer has to pass --root, then strip the flag from the loader prompt and the README. Owner picked: Absorb it into root resolution.",
+    "subject": "The audit loader mandates --root on every command; CLAUDE.md calls a needed manual flag a bug signal",
+    "path": "skills/audit-code/audit-code.prompt.md",
+    "decided_at": "2026-08-26T22:21:16.935Z"
+  },
+  "bd7337d71e47882e": {
+    "disposition": "settled",
+    "answer": "Replace the hand-listed legs in CLAUDE.md with a statement that the pre-commit leg set and its triggers are DERIVED from scripts/guard-reach-data.mjs via buildPreCommitLegs, and name no individual gates. Owner picked: Point at the registry.",
+    "subject": "instruction-file edit: replace CLAUDE.md's hand-listed pre-commit legs with a pointer to the registry",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-08-27T00:49:37.970Z"
+  },
+  "95926d4bcb5d5b6d": {
+    "disposition": "settled",
+    "answer": "Add a check:scripts line to the CLAUDE.md Commands block alongside check:tests, naming what it covers (the .mjs trees under tsconfig.scripts.json) and that it is in verify:checks. Owner picked: Add it.",
+    "subject": "instruction-file edit: the CLAUDE.md Commands block omits the check:scripts typecheck gate",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-08-27T00:49:38.445Z"
+  },
+  "1c0446384cd15e13": {
+    "disposition": "settled",
+    "answer": "Replace the inline lens list in CLAUDE.md with a pointer to src/shared/types/lens.ts as the canonical vocabulary, naming no individual lenses. Owner picked: Point at the code.",
+    "subject": "instruction-file edit: CLAUDE.md re-lists the eleven lenses that LensSchema already single-sources",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-08-27T00:49:38.777Z"
+  },
+  "e87a32300d80ad04": {
+    "disposition": "settled",
+    "answer": "Fixed the key: stored the Cloudflare credential in the required account_id:api_token form (owner supplied both out-of-band; freellmapi backup.ps1 run first). Router restarted; provider shows 21 models, 0 cooldowns; verified with a live Workers AI chat completion. Owner picked: Fix the key.",
+    "subject": "P46: one provider with a known-broken key took 43 of tonight's 45 leg-2 errors",
+    "path": "scripts/shared/triage-backlog.mjs",
+    "decided_at": "2026-08-27T00:52:32.731Z",
+    "completed_at": "2026-08-27T00:52:32.981Z",
+    "completed_ref": "FreeLLMAPI api_keys row 3 repaired in place and verified live 2026-08-26"
+  },
+  "fa3d28fd81768089": {
+    "disposition": "settled",
+    "answer": "Rewrite the bullet to state only the durable property — every run gets exactly one batched keep/decline review before implementation, and a declined item becomes a recorded ignored disposition — and name no function. Owner picked: State the property, name nothing.",
+    "subject": "constitutional doc: the goals doc names one review gate where the code has two, on different paths",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-08-27T00:58:07.052Z"
+  },
+  "ee60ccdfd552bb19": {
+    "disposition": "settled",
+    "answer": "Make scripts/closeout-sections-data.mjs derive the bullet ids from FRICTION_CATEGORIES in src/shared/friction/frictionRecord.ts (adopting or replacing the unused FRICTION_BULLET_IDS bridge), so the doc's claim becomes true and the hand-copy disappears. Owner picked: Derive them.",
+    "subject": "The closeout template claims a single-sourced friction vocabulary that is actually a hand-copy",
+    "path": "docs/end-of-sprint-report-template.md",
+    "decided_at": "2026-08-27T00:58:07.267Z"
+  },
+  "0cbd3c98cd882ec6": {
+    "disposition": "settled",
+    "answer": "Render the mirrored tables in all three docs from their code registries the way spec/audit/executor-producers.generated.md is rendered, with the same never-hand-edit banner and check gate. Owner picked: Generate them.",
+    "subject": "Three spec/audit docs hand-mirror registries whose sibling view is already generated",
+    "path": "spec/audit/dependency-map.md",
+    "decided_at": "2026-08-27T00:58:07.435Z"
+  },
+  "85c6d5195eb768a1": {
+    "disposition": "settled",
+    "answer": "State the universal-host-prompts conviction in CLAUDE.md as its canonical home and repoint the map there. Owner picked: Home it in CLAUDE.md.",
+    "subject": "The philosophy map points the universal-host-prompts conviction at a home that does not state it",
+    "path": "docs/project-philosophy.md",
+    "decided_at": "2026-08-27T00:58:07.564Z"
+  },
+  "17f45bbef58bc713": {
+    "disposition": "settled",
+    "answer": "Rewrite the passage to state only what the tool controls — one shared preamble emitted once and referenced by both prompts — and drop the cache-write/cache-read accounting and the marked-for-caching control, matching the hedge the companion paragraph already uses. Owner picked: Restate host-agnostically.",
+    "subject": "The audit workflow design states provider cache accounting the tool gave up owning",
+    "path": "spec/audit-workflow-design.md",
+    "decided_at": "2026-08-27T00:59:33.561Z"
   }
 }

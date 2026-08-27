@@ -534,15 +534,9 @@ export async function validateArtifacts(
   // so an incomplete pipeline never fabricates errors — only present artifacts
   // are gated.
   //
-  // NOT the same function as the singular self-check: this plural sweep calls
-  // `evaluateContractPipelineCrossGateOutcomes` (which reports which gates ran)
-  // while `index.ts`'s `validate-artifact --name X` calls
-  // `evaluateContractPipelineCrossGates` (issues only). They are two entry
-  // points over one gate list, so they CAN diverge — what holds them together is
-  // the drift test that runs both over the same payloads
-  // (tests/remediate/validate-artifact-cross-gates.test.ts, "is additive"), not a
-  // shared call. Collapsing the pair into one evaluator is tracked as backlog
-  // work.
+  // The plural sweep and the singular `validate-artifact --name X` self-check
+  // both call `evaluateContractPipelineCrossGateOutcomes`, the single entry
+  // point that couples each gate's issues with its evaluated/skipped metadata.
   let gatesEvaluated = 0;
   let gatesSkipped = 0;
   if (cpPayloads.size > 0) {

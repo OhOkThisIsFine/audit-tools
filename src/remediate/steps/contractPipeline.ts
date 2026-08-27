@@ -130,10 +130,9 @@ import {
   validateWorkBlockSeamPreparation,
   validateContractCitationGrounding,
 } from "../validation/contractPipeline.js";
-// Imported from the gate module DIRECTLY (as derive.ts does), not through the
-// validation barrel: the barrel re-exports the older flattened cross-gate
-// runner, and re-exporting the outcome vocabulary through it would mean editing
-// a file outside this work item's write scope.
+// Imported from the owning gate module directly (as derive.ts does): this
+// loop-core path consumes the single outcome-based entry point and its
+// evaluated/skipped vocabulary together.
 import {
   evaluateContractPipelineCrossGateOutcomes,
   enumerateRepoTreePaths,

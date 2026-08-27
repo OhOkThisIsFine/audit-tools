@@ -322,7 +322,6 @@ export {
   validateContractCitationGrounding,
   validateDecompositionFileScope,
   validateFinalizedModuleSetPreserved,
-  evaluateContractPipelineCrossGates,
   enumerateRepoTreePaths,
   isInsideGitWorkTree,
   type ContractCitationGroundingResult,

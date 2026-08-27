@@ -163,10 +163,8 @@
   `withAcceptedResultsLock` covers the accepted-results pair only: ingest reads the
   workload/result-map/task-bindings trio before the lock; prepare writes task-bindings
   entirely outside it. **Property:** one serialization covers the whole binding set.
-  (c) The heartbeat/stale-reclaim logger seam has no production adopter. (d)
-  `evaluateContractPipelineCrossGateOutcomes` / `evaluateContractPipelineCrossGates` are
-  hand-maintained parallels; the drift test covers one 2-payload fixture — collapse the
-  plain variant to a projection. (e) `describeRequiredTestFailure` inlines up to 8KB per
+  (c) The heartbeat/stale-reclaim logger seam has no production adopter. (e)
+  `describeRequiredTestFailure` inlines up to 8KB per
   failure into the dispatch prompt — bound the excerpt. (f) `recover-ingest` exits 1
   whenever issues exist even when work WAS accepted — distinguish accepted-with-issues.
   (g) The ENOBUFS/ETIMEDOUT discriminator is win32-verified only (off-platform timeout
@@ -930,4 +928,3 @@
   shape the audit `--root` statement was collapsed out of, and all of them ship (`skills/**`), so an
   npm reader sees each copy as authoritative. **Property to hold:** across a loader pair, each instruction has
   one full statement and the other asset points at it, mechanically pinned rather than remembered.
-
