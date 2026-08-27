@@ -137,14 +137,14 @@
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
 - `forward-tracks.md:43` — ▶ CX-02 — one audit obligation registry, one drain.
-- `forward-tracks.md:52` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:76` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:84` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:99` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:106` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:118` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:132` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
-- `forward-tracks.md:141` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
+- `forward-tracks.md:66` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
+- `forward-tracks.md:90` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:98` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:113` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:120` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:132` — Wave-friendly host dispatch: run identity survives partial ingest.
+- `forward-tracks.md:146` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:155` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
 
 ### [`deferred.md`](backlog/deferred.md)
 

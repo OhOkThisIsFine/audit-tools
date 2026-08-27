@@ -48,6 +48,20 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   [`cx02-drain-unification-design-2026-08-26.md`](../reviews/cx02-drain-unification-design-2026-08-26.md).
   One atomic loop-core replace; never stage half of it. Its one open design question (lock hold-time
   around formerly-outside-the-lock work) needs a live-audit measurement before the cap is sized.
+  **REPAIR THE DESIGN RECORD FIRST — owner decision 2026-08-27; it stays pinned.** Four of its
+  claims were refuted against HEAD and must be corrected before any implementation reads them:
+  (a) the marker-protocol sub-claim that `spec/audit/executor-producers.generated.md` names an
+  obligation registry — it is generated structurally from `EXECUTOR_REGISTRY[].produces` and
+  `LIFECYCLE_PRODUCTIONS`, and names no registry; (b) its cite for the lock-held read-modify-write
+  of `audit_state.last_executor` / `last_obligation` points at the SUCCESS-path progress marker's
+  fields of the same names instead — the real site is the
+  `withFileLock(artifactTreeLockPath(...))` block that reloads the bundle on the failure path;
+  (c) "`executor-registry-sync` retires with the second registry" is overstated —
+  only 2 of that file's 4 tests consume `buildAuditObligations` and the other two must survive;
+  (d) the composite cap mixes units — 100 is the OUTER engine's transition budget, 64 the INNER
+  dispatch-slot cap, and the inner engine transition bound is 66, so the product is a dispatch-slot
+  ceiling rather than a transition count. Evidence for each:
+  [`one-core-lap-scope-2026-08-27.md`](../reviews/one-core-lap-scope-2026-08-27.md).
 
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** A contract-valid empty result cannot be scored for quality without ground truth;

@@ -28,9 +28,17 @@
 
 ## Immediate next
 
-Route the seven orphaned `docs/reviews/` records into `docs/backlog/`. It is purely mechanical, it
-needs no design decision, and it is what unblocks judgment on everything else — including whether
-CX-02 (pinned below) should still be the next implementation item.
+Two steps, in order, both DECIDED by the owner 2026-08-27.
+
+1. **Route all seven orphaned `docs/reviews/` records into `docs/backlog/`.** Purely mechanical, no
+   design decision. The four simplification analyses become entries; the workflow-gap P0 becomes one
+   pointer entry, in the style the CI-wall-clock track already uses; the three record-type ones get a
+   home too. The seven are listed with their line counts in
+   [`state-of-play-2026-08-27.md`](reviews/state-of-play-2026-08-27.md).
+2. **Repair CX-02's design record, then implement it. It STAYS pinned.** Four of its claims are
+   refuted against HEAD; each is named in the CX-02 backlog entry with its correction. Repair the
+   record before any implementation reads it — this is a multi-session atomic loop-core replace that
+   must never be staged half-done, so a wrong cap or a wrong lock site is expensive to find later.
 
 ## Deliberate state, not bugs
 
