@@ -6,6 +6,13 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The closeout challenge fires while dispatched work is in flight, because no hook reads
+  `background_tasks` (2026-08-28, low, friction: tool_should_decide).** It challenged a hand-back
+  while two dispatched peer-CLI lanes were still running and their results were the sprint's whole
+  point. The Stop payload carries `background_tasks`; no hook in `.claude/hooks/` reads it, though
+  `CLAUDE.md` says the closeout must NEVER run mid-conversation. **Property:** a Stop gate asking
+  whether the sprint is finished consults the running-task signal it is already given.
+
 - **The audit local-command path spawns SYNCHRONOUSLY inside the artifact-tree lock; remediate
   already fixed this (2026-08-28, DECIDED owner, medium).** `runFirstAvailableCommand`
   (`src/audit/orchestrator/localCommands.ts`) calls the sync `runTracked`, so a child blocks the
@@ -22,10 +29,9 @@
 
 - **The obligation engine's bound doc is off by one against its own comparison (2026-08-28, low).**
   `obligationEngine.ts` documents `maxTransitions` as stopping "after that many consecutive
-  transitions"; the guard is `if (++transitions > maxTransitions)`, which fires on N+1. No test
-  counts executions against the bound, so nothing catches it — and CX-02 re-specifies the cap on
-  exactly this firing point. **Property:** doc and comparison agree, and a test pins which
-  transition stops the loop.
+  transitions"; the guard `if (++transitions > maxTransitions)` fires on N+1. No test counts
+  executions against the bound, and CX-02 re-specifies the cap on exactly this firing point.
+  **Property:** doc and comparison agree, and a test pins which transition stops the loop.
 
 - **The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
   shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction:
@@ -574,12 +580,8 @@
   quote or link the primary record's own words for the mechanism, not restate them.
 
 - **DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low,
-  accepted).** The pair itself SHIPPED (intent-equivalence gate wired as the
-  `intent_equivalence_current` obligation — `src/audit/orchestrator/nextStep.ts` PRIORITY slot between
-  `intent_checkpoint_current` and `charter_extraction_current` — with
-  `artifact_metadata.intent_baseline` as the intent entry's revision authority; per-edge dependency
-  slices for `charter_register.json` in `src/audit/orchestrator/dependencySlices.ts`; mechanism
-  record: [`intent-gate-charter-slice-design-2026-07-23.md`](../reviews/intent-gate-charter-slice-design-2026-07-23.md)).
+  accepted).** The pair SHIPPED; its mechanism record is the single home —
+  [`intent-gate-charter-slice-design-2026-07-23.md`](../reviews/intent-gate-charter-slice-design-2026-07-23.md).
   Accepted residuals:
   (a) over-stale: `charter_clarification` / `systemic_challenge` keep WHOLE-ARTIFACT
   `repo_manifest` edges (`dependencyMap.ts`; `DEPENDENCY_SLICE_PROJECTIONS` registers
@@ -806,18 +808,16 @@
   monitored and looks hung. Redirect to a file and grep it instead of piping through `tail`.
 
 - **Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code
-  site).** Shipped 2026-07-10: `buildFileDisposition` runs an `untracked` scope rule (one batched
-  `git ls-files -z`; still-included files absent from the index → `excluded/untracked`), so
-  untracked litter cannot enter the auditable scope. Still live: a
-  `renderHostScratchNote`/`hostScratchDir` pair (`src/shared/prompts.ts`,
-  `src/shared/io/auditToolsPaths.ts`) has ZERO callers — only definitions plus a re-export in
-  `src/shared/index.ts`, which knip's default mode counts as a consumer — so it reaches no prompt.
-  Wire it into the prompt below, or delete it. Residuals:
+  site).** Shipped 2026-07-10: `buildFileDisposition` runs an `untracked` scope rule, so untracked
+  litter cannot enter the auditable scope. Still live: a `renderHostScratchNote`/`hostScratchDir`
+  pair (`src/shared/prompts.ts`, `src/shared/io/auditToolsPaths.ts`) has ZERO callers — only
+  definitions plus a re-export in `src/shared/index.ts`, which knip's default mode counts as a
+  consumer — so it reaches no prompt. Wire it into the prompt below, or delete it. Residuals:
   - (a) **Submodule / nested-repo contents are now excluded as `untracked`** (parent `ls-files` lists only the
-    gitlink). Consistent with citation grounding (which also can't ground them), but a silent scope change for
-    repos with first-party submodules. Ideal fix = `--recurse-submodules` in BOTH the disposition rule and the
-    grounding corpora (`findingGrounding.enumerateTrackedFilePaths`, M-B3 `enumerateRepoTreePaths`) as one
-    atomic change — never one side alone (re-opens the asymmetry).
+    gitlink). Consistent with citation grounding, but a silent scope change for repos with first-party
+    submodules. Ideal fix = `--recurse-submodules` in BOTH the disposition rule and the grounding corpora
+    (`findingGrounding.enumerateTrackedFilePaths`, M-B3 `enumerateRepoTreePaths`) as ONE atomic change —
+    never one side alone.
   - (b) **`file_disposition` now depends on git index state, which the dependency DAG doesn't track**
     (`dependencyMap.ts` keys it to `repo_manifest.json` only). An index-only change (committing a
     previously-untracked file) won't re-stale a persisted disposition until repo_manifest churns.
