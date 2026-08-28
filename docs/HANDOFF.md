@@ -49,7 +49,7 @@ the pinning suites staying green is the evidence.
 - The tracked decision-queue snapshot STILL disagrees with the ledger that settles it, and it will
   keep doing so: its writer refuses a batch that drops a record-path item on its own, so no lap can
   quietly true it up. What changed is the consumer, not the artifact — `start-lap` step 5 now asks
-  `node scripts/nightly/answer.mjs --list` and treats it as the authority (`0ada039a`), because
+  the decision ledger (`answer.mjs --list`) and treats it as the authority (`0ada039a`), because
   trusting the snapshot cost a lap four questions the ledger had already recorded settled AND landed.
   **Ask the ledger. Never read the snapshot for what is open.** The artifact's own freshness gate
   remains the real fix and is stated in full in its [`open-bugs.md`](backlog/open-bugs.md) entry,
