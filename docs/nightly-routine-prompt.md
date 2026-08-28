@@ -492,7 +492,9 @@ review* below); the routine never rewrites a doc's substance to fit a conviction
 The routine reviews on **two distinct perspectives every run** (the philosophy demands both):
 
 1. **Within a document** — do the items inside it fit the philosophy (durable concept, not
-   status-noise) and are they factually true against code? This is the item-level pass below.
+   status-noise), are they factually true against code, and does each one still **earn its
+   length**? This is the item-level pass below. Its condensation half runs **every pass**, never
+   only when a file is near its size budget (*Entry-level condensation*, below).
 2. **Across the document set** — is each *document itself* in line with the philosophy, and
    **can/should the corpus be condensed**? Overlap between docs, a doc that should fold into
    another, a doc whose reason-to-exist has lapsed, a thin doc that belongs as a section
@@ -605,6 +607,44 @@ own normative rows**, never guessed; the derivation is written out in the module
   "anchor ignore patterns to `.audit-tools/`"), that belongs in its durable home (Durable
   traps, `CLAUDE.md`) — move it there in the same edit, then delete the backlog entry; never
   retain the entry just to host the rule.
+
+## Entry-level condensation — every run, and NOT gated on file size
+
+The size budget (`check:backlog-budget`) is a **backstop, not a trigger**. Waiting for a file to
+approach its ceiling before condensing gets the incentive exactly backwards: at the ceiling every
+new entry must be paid for by shrinking another *right then*, so the pressure falls on whichever
+entry is easiest to shorten rather than on whichever has least value — which is how mechanism gets
+trimmed out of entries that still need it. So condensation is part of the **normal** per-doc pass,
+run against every in-scope doc regardless of how much room its file has left.
+
+Hunt for, on every run:
+
+- **Obsolete entries** — the work shipped, the question was answered, the tool was retired, the
+  premise was refuted. This is *Shipped-entry deletion* above, applied beyond the backlog: any
+  entry whose reason to exist has lapsed. Code-proven → auto-apply; anything else → escalate.
+- **Accreted post-mortem narrative** — the growth driver named in the budget gate's own rationale.
+  An entry that retells *how a defect was found* where it needs only the mechanism and the open
+  property. The story belongs in `git log` or a `docs/reviews/` record; propose the trim and quote
+  what would be cut.
+- **Repetition inside one doc** — the same constraint restated in two entries, or an entry
+  re-explaining a rule the doc already states once. Keep the clearest statement, point at it from
+  the other.
+- **Superseded halves** — an entry carrying both a decided answer and the deliberation it
+  replaced. The deliberation goes; a REJECTED option stays only when naming it prevents the
+  proposal being raised again.
+- **Shipped-status preambles** — "X SHIPPED (with A, B, C …)" ahead of the still-open remainder.
+  Reduce to a pointer at the mechanism record and keep the remainder.
+
+**Dispositions are unchanged, and that is the safety surface.** Deleting a code-proven shipped
+entry is factual → auto-apply. **Every judgment about whether prose is redundant or over-long is a
+design-decision → escalate**, quoting the entry and the proposed shorter form, so the owner
+compares them directly. The routine never silently rewrites an entry it merely finds wordy —
+brevity is not a licence to drop the load-bearing half, and *pruning aggressively is the wrong
+failure mode*: a condensed entry that has lost its mechanism is worse than a long one.
+
+Report these under a **"Entry-level condensation"** heading in the findings file, with the file's
+current size and its ceiling stated beside them — as CONTEXT for the owner, never as the reason
+the proposal was raised.
 
 ## Philosophy-conformance review — every doc, every run
 
