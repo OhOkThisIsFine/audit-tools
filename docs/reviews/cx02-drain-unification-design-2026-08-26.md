@@ -557,6 +557,36 @@ ALIAS as well as the name. That site is also where the crash-safety ordering is 
 itself: "Apply BEFORE deleting the submission: if runStep throws (locks, crash), the submission
 survives for the retry instead of being lost" (`:599-600`).
 
+## Where each blocker lands — PROPOSED, not decided
+
+Stated so the next lap starts from a shape rather than from six open problems. Four of these are
+mechanically forced by the evidence above and are proposals only in the sense that nobody has
+adversarially checked them yet. Two are genuine judgments. **None has been through a refutation
+pass, and the last thing this record did without one was overclaim an acceptance test.**
+
+1. **Lock re-entry — forced.** Wrapper plus lock-free core at each of the three fold-reachable
+   sites, the idiom `auditStep.ts` already uses. Enforce with a contract test: nothing reachable
+   from a fold `execute` acquires `artifactTreeLockPath`. That test must search the ALIAS too.
+2. **Direct core writes — forced.** Enumerate every direct and indirect core writer, convert each to
+   an in-memory transaction result the single outer commit consumes. The handlers' return type grows
+   a bundle; today it carries only an `action`.
+3. **Unlink ordering — forced.** The fold carries a pending-deletion list and applies it only after
+   the halt persist succeeds. Do not rely on a `finally`: it does not run on process death.
+4. **Plan draw — forced.** A REPLACEMENT view, not an exclusion: every id keeps its membership and
+   order, and every host-policy `execute` is substituted with a plan-safe halt.
+5. **Cap unit — a judgment, with an obvious candidate.** Charge EVERY obligation execution to the
+   slot, not only an executor dispatch. Slots and engine transitions return to 1:1, so
+   `deriveEngineBound` is a true backstop again, and the cap has exactly one unit — which is what
+   constraint 4 demands. The cost is honest: the cap then means 64 obligation executions rather than
+   64 executor dispatches. Needs the mixed policy-transition test that nothing currently provides.
+6. **Synchronous children in the hold — a judgment, and the one to put to the owner.** The exposure
+   is NOT new: `git ls-files` / `git check-ignore` / `tsc` / `eslint` already run synchronously
+   inside today's hold, with no timeout on `runTracked` (`localCommands.ts:163-168`) reaching
+   `spawnSync` (`exec.ts:359-369`). Widening the hold does not add the class, but it does lengthen
+   the window in which a >30s synchronous stretch lets a second process steal a lock the first still
+   believes it holds. The cheap fix is a timeout on those spawns, which is worth doing on its own
+   merits and independent of CX-02.
+
 ## Preserve list (report + refuter union)
 
 Deterministic frontier draining within one call; every host-input stop boundary; exactly-once
