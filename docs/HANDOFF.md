@@ -98,6 +98,12 @@ turns it green with both drains still standing, which is why the record now says
   that refactor.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **3 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `sol-1` — P48: record every full-suite green against the tree it ran on, so a later edit cannot inherit it?
+  - `backlog-1` — Systemic-challenge convergence: fix a number of consecutive quiet rounds, or make the current one-round rule normative?
+  - `backlog-2` — The shared-hash gate is keyed to the algorithm name, so two sha1 sites re-roll the pattern it bans — widen the rule, or declare short ids out of remit?
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

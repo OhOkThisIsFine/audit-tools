@@ -1,0 +1,33 @@
+RED at HEAD — observed, not predicted.
+
+HEAD:    6e2f902d1cc443fd0448c7332ec257a88570d212
+Date:    2026-08-28
+Command: cp .audit-tools/nightly/proposals/P48-suite-green-stamp/suite-green-stamp.test.ts \
+           tests/shared/suite-green-stamp.test.ts
+         node scripts/shared/run-vitest-gate.mjs tests/shared/suite-green-stamp.test.ts
+         (the copy is removed again immediately; the tree was clean before and after)
+Exit:    1
+
+Verbatim failure (4 of 4 tests failed, each for the intended reason):
+
+  tests/shared/suite-green-stamp.test.ts (4 tests | 4 failed) 21ms
+   x full-suite green is recorded as tree-bound evidence > exposes a full-suite predicate that a filtered run cannot satisfy
+     -> Cannot find module 'C:\Code\audit-tools\scripts\shared\suiteGreenStamp.mjs' imported from 'C:/Code/audit-tools/tests/shared/suite-green-stamp.test.ts'
+   x full-suite green is recorded as tree-bound evidence > binds the stamp to the worktree CONTENT, not to HEAD
+     -> Cannot find module 'C:\Code\audit-tools\scripts\shared\suiteGreenStamp.mjs' imported from 'C:/Code/audit-tools/tests/shared/suite-green-stamp.test.ts'
+   x full-suite green is recorded as tree-bound evidence > is written by the one vitest gate every suite run goes through
+     AssertionError: expected '#!/usr/bin/env node\n// Single-source...' to contain 'suiteGreenStamp.mjs'
+   x full-suite green is recorded as tree-bound evidence > is read by the closeout challenge, so a stale green cannot pass in silence
+     AssertionError: expected ... to contain 'readSuiteGreenStamp'
+
+  Test Files  1 failed (1)
+       Tests  4 failed (4)
+   outcome: 0 passed, 4 failed, 0 skipped, 0 unfinished (total 4)
+
+A FIRST attempt at this test produced a DIFFERENT, false red — an esbuild
+"Unterminated string literal" at the line holding a backslash regex, because the
+heredoc that wrote the file lost one level of backslash escaping. That failure
+proved nothing about the property, so it is not the record. The test was
+rewritten without backslash literals (split('\\').join('/') is written through
+the Write tool, not a heredoc) and re-run to produce the failure above. This is
+itself an instance of the shell-quoting friction class logged this run.

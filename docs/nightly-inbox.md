@@ -22,29 +22,160 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-27 at `c39a9b88`.*
+*Last run: 2026-08-28 at `6e2f902d`.*
 
 
 ---
 
-## Nothing to answer
 
-No open propositions. The next run will refill this file if it finds any.
+# Backlog disambiguation
+
+
+<!-- nightly:item key=f4ea81e5c2d284d7 -->
+
+## `backlog-1` — Systemic-challenge convergence: fix a number of consecutive quiet rounds, or make the current one-round rule normative? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The systemic-challenge loop keeps asking an adversary for new findings until it stops finding any. The design document says the loop ends once "N rounds surface no new" findings, but it never says what N is. The code picks N = 1: the first round that turns up nothing new ends the loop. So the document and the code do not agree, and the record the loop writes does not say which rule it applied. Only one thing is actually open here — how many consecutive quiet rounds convergence should require. If the answer is one, the fix is to write that into the spec and have the register record it. If the answer is more than one, the loop needs a counter and the code changes. This is not the same as the separate question of a total round budget; answering this one must not silently answer that one.
+
+### The question
+
+Should convergence require a stated number of consecutive zero-novelty rounds, or should the current single-round rule be made normative in the spec? Either way the register must record which rule it applied.
+
+### Your answer
+
+- [ ] **1. One round — make it normative** — Convergence stays at one zero-novelty round. Fix the spec to state that literally instead of "N rounds", and make the register record the rule it applied. No code change to the convergence condition.
+- [ ] **2. Two consecutive quiet rounds** — Convergence requires two consecutive zero-novelty rounds. Add the counter in systemicChallengeExecutor.ts, state the number in the spec, and record the applied rule in the register.
+- [ ] **3. Make it configurable with a stated default** — Make the number of consecutive zero-novelty rounds a declared value with a stated default, rather than a constant. The spec states the default; the register records the value that was actually applied.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- src/audit/orchestrator/systemicChallengeExecutor.ts sets `converged: folded.dry,` — one round's dryness ends the loop. Confirmed at HEAD by direct read and independently by a second lane quoting the line back. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- spec/conceptual-design-review-design.md states convergence as "keep seeding overlapping reviews until N rounds surface no new" and never fixes or configures N.
+- Novelty is already content-derived (findingReEmissionKey via src/shared/findings/dedupe.ts), so the earlier worker-id objection to this item is spent — only the round count is open.
+- The mechanical backlog sweep of 2026-08-28 classified this entry owner_decision_needed, agreeing that the entry states its own open choice and cannot be resolved mechanically.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=bd756879fbb9184a -->
+
+## `backlog-2` — The shared-hash gate is keyed to the algorithm name, so two sha1 sites re-roll the pattern it bans — widen the rule, or declare short ids out of remit? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The project has one home for content hashing and a gate that stops other files from hand-rolling their own hash chain. The gate spots the problem by looking for the text "sha256". Two places in the audit orchestrator build the very same kind of chain but use "sha1" instead, and then cut the result down to ten characters — exactly the shape the hash module says no caller should carry. Because the gate is keyed to the algorithm name rather than to the construction, it reports both files clean. So the gate is real but its aim is slightly off. There are two honest answers. Either these short non-cryptographic ids are genuinely not what the hash home is for, and the gate is right to ignore them — in which case say so, so nobody re-opens this. Or they are the same construction, in which case the two sites adopt the shared helper and the rule widens to catch the construction rather than the word.
+
+### The question
+
+Is a short non-cryptographic id legitimately outside the remit of src/shared/hash.ts, or should the two sites adopt hashContent and the pattern rule widen from the algorithm name to the construction?
+
+### Your answer
+
+- [ ] **1. Widen the rule; migrate both sites** — The construction is what is banned, not the algorithm name. Widen the check:shared-primitives pattern rule to match an inline createHash chain of any algorithm truncated by a bare slice, and migrate shortHash and packetIdFor onto the shared helper.
+- [ ] **2. Short ids are out of remit — say so** — A short non-cryptographic id is outside the remit of src/shared/hash.ts. Leave both sites as they are and state the exemption where the gate declares its rules, so the exemption is recorded rather than rediscovered.
+- [ ] **3. Migrate the sites, leave the rule alone** — Migrate shortHash and packetIdFor onto the shared helper because the duplication is real, but do not widen the pattern rule — the gate keeps its current, narrower aim.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- scripts/check-shared-primitives.mjs declares the rule with `id: 'sha256-chain'` — keyed to the algorithm spelling. Confirmed at HEAD by direct read and independently by a second lane. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- src/audit/orchestrator/selectiveDeepening/shared.ts:88 reads `return createHash("sha1").update(value).digest("hex").slice(0, 10);` <!-- doc-citation-exempt: quoted item prose, not citations -->
+- src/audit/orchestrator/reviewPackets.ts:58-61 builds `createHash("sha1")` and truncates with `.slice(0, 10);`. That module already imports sanitizeSegment from selectiveDeepening/shared.ts, yet re-rolls shortHash's body. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Running scripts/check-shared-primitives.mjs at HEAD reports every tracked src file clean with both sites live, so the gate sees neither. `npm run verify:checks` passed this run with both sites present. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- The mechanical backlog sweep of 2026-08-28 classified this entry owner_decision_needed on the same two-option split the entry itself states.
+
+</details>
+
+---
+
+
+# Recurring-problem solutions
+
+
+<!-- nightly:item key=7abf9b363b40d381 -->
+
+## `sol-1` — P48: record every full-suite green against the tree it ran on, so a later edit cannot inherit it? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `docs/backlog/durable-traps.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+Running the test suite proves something about the exact files that existed when it ran. The moment you edit anything afterwards — a source file, a doc, a ledger — that proof is about a version of the project that no longer exists. Nothing in the repo currently notices this. The commit check runs type-checking and a small subset of doc tests, never the whole suite, so if you edit a source file after a green run and then push, only CI will find out. This happened twice on 2026-08-27 and two commits shipped red before anything caught it, and the repo's own trap entry says outright that this half is left to discipline rather than to a mechanism. The proposal is small: when the full suite passes, write down a fingerprint of the exact file content it ran on; when the end-of-sprint challenge fires, compare that fingerprint to the current files and say so if they differ. It reuses the same fingerprint the closeout report is already bound to, it adds no new refusal, and it cannot fire when you simply commit what the green run already covered. Saying yes means the trap stops depending on remembering. Saying no means it stays a discipline, and the next late edit is caught by CI as before.
+
+### The question
+
+Adopt P48 — a full-suite green writes a worktree-content-bound stamp that the closeout challenge reads — or leave the general half of the suite-run trap as discipline?
+
+### Your answer
+
+- [ ] **1. Adopt P48 as proposed** — Adopt P48 as written: run-vitest-gate writes a worktree-tree-bound stamp on a full-suite green, and closeout-challenge-gate reads it as one more piece of mechanical evidence. Apply the patch in .audit-tools/nightly/proposals/P48-suite-green-stamp/.
+- [ ] **2. Adopt, but make it a commit refusal** — Adopt the stamp, but wire it into the pre-commit gate as a refusal rather than into the closeout challenge as evidence — a stale green should block the commit, not merely be reported at hand-back.
+- [ ] **3. Leave it as discipline** — Do not adopt P48. The general half of the suite-run trap stays discipline; CI remains the backstop for a late source edit, and the trap entry stays open as it is.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P48-suite-green-stamp/PATCH.md`](../.audit-tools/nightly/proposals/P48-suite-green-stamp/PATCH.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- docs/backlog/durable-traps.md states the uncovered half verbatim: "a late SOURCE edit after a green run is still caught only by CI. That half is discipline, not a mechanism".
+- scripts/shared/run-vitest-gate.mjs at HEAD contains no stamp of any kind — verified by direct read and independently by a second lane, which returned REFUTED for any mention of suiteGreenStamp or suite-green.
+- The primitive already exists and is proven: scripts/shared/worktree-tree.mjs, used by scripts/render-closeout.mjs and by .claude/hooks/closeout-challenge-gate.mjs, which already computes currentTree.
+- Recurrence, counted: two occurrences on 2026-08-27 (durable-traps, same entry), docs/reviews/closeout-generation-failure-2026-08-26.md (19 of 29 challenged sessions hand-wrote the report), and the /insights pass of 2026-08-28 measuring the same failure across 241 sessions and naming at least four nightly maintenance sessions.
+- RED at HEAD is recorded verbatim in .audit-tools/nightly/proposals/P48-suite-green-stamp/RED-AT.txt: 4 of 4 tests fail, each for its intended reason.
+- Full patch, module and test: .audit-tools/nightly/proposals/P48-suite-green-stamp/.
+
+</details>
+
+---
 
 
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- NOTHING was applied to any document this run. The working tree was dirty at start — three modified tracked files (.claude/skills/ship/SKILL.md, scripts/check-memory-citations.mjs, scripts/release-and-publish.mjs) and an untracked tests/shared/memory-crosslink-gate.test.ts, which together are an interactive session mid-flight on last night's docs-1 and sol-1 answers. The clean-tree rule says review and report, apply nothing, so leg 1 landed no doc edit and no commit or push was made.
+- NOTHING was applied to any tracked document this run. Leg 1 found no stale-factual claim that survived verification, so there was no doc edit to make; leg 2 verified before deleting and deleted nothing; leg 3 is propose-only by contract. No commit and no push was made.
 
-- The owner ANSWERED all twelve of last night's items. partitionBySettled classified every one as settled, so the queue emptied and none is re-raised. None is marked --done, and the answers to docs-1 and sol-1 are visibly the work in the dirty tree; the other ten answers imply work not yet in the tree.
+- The queue emptied cleanly. All six items from the 2026-08-27 run (docs-1 through docs-5, sol-1) were ANSWERED by the owner and every answer is recorded as landed — `answer.mjs --list` returns "No open nightly items, and every tracked answer is recorded as done." partitionBySettled classified all six as settled, so none is re-raised. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- Leg 2 mechanical sweep ran to completion and covered the whole backlog: 111 of 111 entries attempted, 107 classified, 4 errored. That is 96% against last night's 59%, and it is direct evidence that the owner's sol-2 answer (the Cloudflare credential stored in account_id:api_token form) fixed the lane — 43 of last night's 45 errors were that one provider.
+- Both independent lanes were HEALTHY this run, which is a change from the last two. Codex answered a probe in seconds despite last run recording it quota-blocked until 2026-09-01, and the free pool lane answered with no --model override, which is direct evidence that the owner's sol-1 answer (P47) fixed the launcher. The pool lane then verified four premises independently and quoted the exact source line back for each — the fabrication failure of the last run did not recur, with the difference being a verification-shaped prompt fed from a file rather than through shell quoting.
 
-- Leg 2 verified before deleting and deleted nothing. The sweep returned exactly one already_shipped_or_stale verdict, on the forward-tracks entry "CI wall-clock: shard balance and the single-file floor". Reading the entry refutes it: it says "Implementation assigned outside this repo's agent loop by the owner 2026-08-07", which means assigned elsewhere, not shipped. The entry is a live pointer to its single home and stays.
+- Leg 2 mechanical sweep ran to completion over the whole backlog: 135 of 135 entries attempted, 131 classified, 4 errored, 0 aborted. Coverage stamp: .audit-tools/nightly/triage-2026-08-28-coverage.json. That is 97%, against 96% last run over 111 entries.
 
-- Sidecar state only: leg 1 stamped eleven examined docs into the scope ledger, the sweep wrote .audit-tools/nightly/triage-2026-08-27.jsonl and its coverage stamp, and the P47 proposal directory was written. No tracked document content changed.
+- Leg 2 verified before deleting and deleted nothing. The sweep returned exactly one already_shipped_or_stale verdict, on the forward-tracks entry "CI wall-clock: shard balance and the single-file floor" — the identical false positive the last run refuted. Reading the entry refutes it again: "Implementation assigned outside this repo's agent loop by the owner 2026-08-07" means assigned elsewhere, not shipped. The entry stays.
+
+- The weekly /insights pass was DUE and RAN (stamp was 7.0 days old). Report: C:\Users\ethan\.claude\usage-data\report-2026-08-28-020731.html. 16 suggestions triaged against HEAD: 13 already shipped or already decided, 3 debatable, 0 genuinely open. Its measured friction is what supplies the outside recurrence evidence for P48.
+
+- Sidecar and untracked state only: the leg-2 sweep JSONL and its coverage stamp, the leg-1 scope plan, the P48 proposal directory, and the insights stamp. No tracked document content changed.
 
 
 </details>
@@ -54,23 +185,17 @@ No open propositions. The next run will refill this file if it finds any.
 <summary>What the last run could NOT cover</summary>
 
 
-- BOTH independent lanes were degraded, so leg 1 ran with reviewer coverage that a second agent only partly checked. Codex is out of quota until 2026-09-01 ("You've hit your usage limit ... try again at Sep 1st, 2026") and answered nothing. The free-provider pool lane was then broken by its own launcher — see sol-1 / P47 — and needed a trailing --model override before it would answer at all.
+- The /insights suggestions that were NOT dropped: three are debatable and are NOT queued as items this run, deliberately, because none has a code-side premise a probe can track and each is about host practice rather than this repo. They are: a subagent delegation contract requiring each lane to return the paths it wrote plus a git status snippet; a mutation-verify step on every delegated implementation; and an owner approval gate on the lane table before a wide fan-out. Recorded here so a quiet inbox does not read as "nothing was found".
 
-- The free-pool ADVERSARY pass FABRICATED. Given five findings to agree or refute, it returned five verdicts, four of which discuss findings that were never sent (a dependency-map direction claim, an emitSystemicChallenge claim, a quoteForCmd parity claim). Only its F1 verdict addresses a real finding, and that one is recorded inside docs-1 as the counter-argument. The other four verdicts were discarded as unusable, not counted as coverage.
+- Three further /insights suggestions were dropped as already DECIDED rather than already shipped, and the decision is named in each case: a read-only-mode rule (one cited incident, not a pattern); a self-healing provider-fallback fan-out layer inside this repo (audit-tools does NOT route — the zero-execution-adapters cut, CLAUDE.md); and upgrading the nightly into a full autonomous sprint (the standing "redesign before scheduled autonomy" decision). One of them, the provider fallback suggestion, names the Ox-Alpha lane, which was de-listed 2026-08-28 — the stale-report class the routine is told to check for.
 
-- A re-run verification-shaped adversary prompt was MANGLED by shell quoting: four questions went out, the lane received only the first, and answered only that one. Q1 (the "(change 3)" literal in spec/audit/artifact-contract.md) is therefore independently confirmed with the line quoted back; the premises behind docs-3, docs-4 and docs-5 rest on this run's own direct file reads alone.
+- Leg 1 examined 19 of the 54 in-scope docs end-to-end this run — 864 of 1773 reviewable items, 0 reviewed cold. Read from the coverage stamp .audit-tools/nightly/leg1-2026-08-28-coverage.json, not eyeballed. The evidence window is LARGE — 50 commits between the last run's HEAD c39a9b88 and 6e2f902d, touching 88 files — so the pass was scoped to the docs those commits could have invalidated plus the docs behind this run's escalations. It is NOT a claim that the other 35 are clean. Every in-scope doc was covered MECHANICALLY regardless: check:doc-code-citations, check:doc-manifest, check:doc-links, check:memory-citations, check:backlog-budget and the full verify:checks all passed at this HEAD.
 
-- Leg 1 examined 11 of the 55 in-scope docs end-to-end this run, against 40 last run; the coverage stamp is .audit-tools/nightly/leg1-2026-08-27-coverage.json, read from the file and not eyeballed. The narrower pass is deliberate: the evidence window since the last run is five refactor commits confined to src/, so the review was scoped to the docs those commits could have invalidated plus the docs behind the escalations the last run recorded and could not queue. It is NOT a claim that the other 44 are clean.
+- The Codex leg-1 lane was dispatched over 16 documents and did NOT return within the run. It read source for roughly an hour and emitted no FINDING or CLEAN marker, so it contributed no coverage and no refutation. Leg 1's per-document conclusions therefore rest on this run's own direct reads plus the mechanical gates; the four premises behind the escalated items were independently verified by the pool lane instead. Its log is .audit-tools/nightly/leg1-codex-0828.log.
 
-- The five refactor commits (CX-01, CX-03, CX-04, CX-05, CX-07) broke NO documented claim. That is a two-lane agreement, reached independently: a pool-lane reviewer reading the six most exposed docs returned NONE with per-commit reasoning, and this run's own grep of every doc citing a changed module found no contradiction. npm run check:doc-code-citations also passes — 407 path plus 74 directory plus 423 bare-filename citations across 55 docs all resolve.
+- The doc-set condensation pass (perspective 2) ran and queued NOTHING. The 2026-08-27 candidate (the mechanical-analyzer spec) was answered and the file is gone at HEAD. The three thinnest remaining docs were read directly rather than carried on an earlier claim — spec/cross-tool-alignment.md, src/audit/README.md and examples/README.md — and each is dense, durable and single-homed, so none is a fold candidate. spec/audit/orchestration-policy.md remains unqueued for the reason the last run recorded after reading it.
 
-- The doc-set condensation pass (perspective 2) ran and queued one candidate (docs-1). The five candidates the 2026-08-25 run recorded, plus spec/audit/orchestration-policy.md from the last run, remain unqueued. orchestration-policy.md was examined directly this run rather than carried on the earlier claim, and it did not hold up as a pure duplicate: it is 135 lines of genuine selection-principle prose that abstracts over the code registry rather than mirroring it, and its one clear pointer is a single sentence deferring the bounded-step guarantee to entrypoint-contract.md. It is not queued because the earlier "most of it is a pointer or a second copy" premise did not survive reading it.
-
-- Two empty files sit in the repo root at HEAD, untracked: a file literally named "0)" and one named "entry.finding_id", both zero bytes and timestamped 2026-08-26 19:38 and 19:41 — minutes either side of commit c39a9b88. Both are the documented shell-redirect artifact class (a command redirected into a token taken from source). They belong to the concurrent session, not to this run, so this run did not delete them.
-
-- The /insights weekly pass was NOT due. The stamp .audit-tools/nightly/insights-last-run.json has ran_at 2026-08-21T09:07:15Z, exactly 6.00 days before this run, and due means seven or more. Recorded for completeness; being not-due is not a skipped leg.
-
-- Leg 2 premise confirmation stayed weak even at full coverage: of 111 entries, 23 verdicts hold their premise, 3 partial, 35 unprobed and 33 returned unusable probes. So the coverage gain is in CLASSIFICATION, not in verification — those verdicts must be re-checked against HEAD before any of them is worked.
+- Leg 2 premise confirmation is still the weak half even at full coverage: of 135 entries, 47 verdicts hold their premise, 4 partial, 31 unprobed and 47 returned unusable probes. The gain over the last run is in CLASSIFICATION, not verification, so those verdicts must be re-checked against HEAD before any of them is worked.
 
 
 </details>

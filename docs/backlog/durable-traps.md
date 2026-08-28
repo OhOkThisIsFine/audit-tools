@@ -134,6 +134,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   not run shell commands, do not explore the repo* and *your final message must be the answer itself;
   do not end your turn on a tool call*. It returned a usable verdict in ~4 minutes. Lane health is not
   the discriminator — Codex was probed live and answered `CODEX_OK` at run start.
+  ⚠ **Re-hit 2026-08-28 because the remedy above was not applied.** A 16-document leg-1 lane got a
+  strict per-finding output FORMAT but neither clause: no *do not explore the repo*, no forced
+  finish. It ran past 75 minutes, wrote 11,000+ lines of source it had read, and emitted not one of
+  the three markers its prompt required. A strict output format is not a forced finish. Grep the
+  trace for the REQUIRED MARKER rather than for output — byte count cannot separate this from a
+  working lane.
 
 - **A PreToolUse block kills the WHOLE chained command — the earlier statements never ran (2026-07-25).**
   A refused `git add <files> && git commit …` is refused at the tool call, before any statement executes, so
@@ -887,5 +893,22 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   **Classify by OUTPUT SIZE before blaming quota**, and read `stderr_tail` on any lane whose
   `stdoutBytes` is 0 — the status field will not tell you. Pass an explicit `model` to `pool` rather
   than relying on its default. Neither failure is quota, and neither is the prompt.
+
+- **A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it
+  before the shell ever sees it (2026-08-28).** A quoted heredoc is literal to the shell, so the
+  usual reasoning says a regex inside it is safe. It is not: the Bash tool's own JSON decoding
+  collapses `\\` to `\` on the way in, and `.replace(/\\/g, '/')` arrived on disk as
+  `.replace(/\/g, '/')` — an unterminated regex. The failure surfaced as an esbuild
+  `Unterminated string literal`, i.e. a test that failed for a reason unrelated to what it asserts,
+  which is a FALSE RED and proves nothing. **Write any file containing a backslash through the Write
+  tool, never a heredoc**, and read a test's failure MESSAGE before recording it as evidence — a
+  transform error is not an assertion failure. Same root as the `\u` decode entry; the new fact is
+  that heredoc quoting does not protect you, because the corruption happens one layer earlier.
+
+- **A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).**
+  The 2026-08-27 nightly recorded the codex lane refusing with "You've hit your usage limit … try
+  again at Sep 1st, 2026", and wrote that lane off for the run. On 2026-08-28 the same lane answered
+  a probe in seconds. **Probe every lane at run start; never carry a quota verdict forward from a
+  previous run's record** — a stale one silently shrinks coverage while looking like diligence.
 
 ## Doc-set hygiene (enforced)

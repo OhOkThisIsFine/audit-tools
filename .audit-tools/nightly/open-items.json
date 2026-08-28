@@ -1,261 +1,150 @@
 {
-  "generated_at": "2026-08-27T09:19:42.149Z",
+  "generated_at": "2026-08-28T09:25:30.399Z",
   "run": {
-    "date": "2026-08-27",
-    "head": "c39a9b88"
+    "date": "2026-08-28",
+    "head": "6e2f902d"
   },
   "items": [
     {
-      "id": "docs-1",
-      "leg": "docs",
-      "path": "spec/mechanical-analyzer-layer-design.md",
-      "subject": "Mechanical analyzer layer — shipped program + standing refusals. The four-item program has durable outcomes that live in the code and its contract tests; this doc keeps only what is not derivable from them: the decided-against list and the two recorded design deviations.",
-      "title": "Fold the mechanical-analyzer spec into durable-traps, or keep it as its own 33-line doc?",
-      "eli5": "There is a short design document called \"Mechanical analyzer layer — shipped program + standing refusals\". It has only two sections. One records two small ways the implementation differed from an older plan. The other is a list of tools the project decided NOT to use, and why — ast-grep, PMD CPD, a tree-sitter layer, MinHash, and osv-scanner as a default. The work it describes has already shipped, so the only durable thing left is that refusal list. The repo already has a home for standing rules of that kind: docs/backlog/durable-traps.md, and CLAUDE.md for policy. So the question is whether this list should move to one of those homes and the doc go away, or whether a refusal list earns its own spec. An independent reviewer argued the second way: the doc states its own reason to exist, and a record of what was decided against is genuinely something code cannot express. Both readings are defensible, which is why this is your call and not a fix.",
-      "question": "Should spec/mechanical-analyzer-layer-design.md be folded into docs/backlog/durable-traps.md (its \"Decided against\" list) plus CLAUDE.md (the two design deviations) and then deleted, or should it stay as a standalone spec?",
-      "options": [
-        {
-          "label": "Fold and delete",
-          "answer": "Move the \"Decided against (do not re-propose without new evidence)\" list into docs/backlog/durable-traps.md and the two recorded design deviations into CLAUDE.md, then delete spec/mechanical-analyzer-layer-design.md. Nothing is retained just to host the rule."
-        },
-        {
-          "label": "Keep it",
-          "answer": "Keep spec/mechanical-analyzer-layer-design.md as its own spec. A record of deliberately-rejected alternatives is a durable design artifact that code and contract tests cannot express, and the doc states that reason itself."
-        },
-        {
-          "label": "Keep, but retitle",
-          "answer": "Keep the doc but retitle it so it stops describing itself as a \"shipped program\" — a shipped-status label in a title is the status-noise the philosophy bans. Keep the refusal list where it is."
-        }
-      ],
-      "evidence": [
-        "spec/mechanical-analyzer-layer-design.md is 33 lines. Its two headings are \"Recorded design deviations (from the original item-C text)\" and \"Decided against (do not re-propose without new evidence)\".",
-        "Its own opening paragraph says the program \"has durable outcomes that live in the code and its contract tests\" and that the doc \"keeps only what is not derivable from them\".",
-        "docs/backlog/durable-traps.md is the declared home for standing reference rules, and CLAUDE.md already carries the \"Own-vs-acquire analyzer engine\" decision this doc refuses against.",
-        "An independent lane REFUTED the fold, arguing the decided-against list is a durable reason to exist that code cannot express. Recorded rather than suppressed; the disagreement is why this escalates."
-      ],
-      "premise_probes": [
-        {
-          "file": "spec/mechanical-analyzer-layer-design.md",
-          "contains": "shipped program + standing refusals"
-        }
-      ],
-      "subject_key": "d1415c54048eacc1",
-      "first_seen": "2026-08-27",
-      "nights_open": 1
-    },
-    {
-      "id": "docs-2",
-      "leg": "docs",
-      "path": "spec/audit/artifact-contract.md",
-      "subject": "Deterministic bounded telos extraction over the doc universe (change 3); rendered into the confirm-intent prompt.",
-      "title": "Drop the internal \"(change 3)\" label from the artifact contract, or spell it out?",
-      "eli5": "The audit artifact contract describes each artifact the audit produces. The row for docs_digest.json ends its description with the parenthetical \"(change 3)\". \"Change 3\" was an internal label for a batch of work while it was being built. A reader today cannot resolve it — no document, spec, or source file in the repo says what change 3 was. So the label carries no information and is a leftover from the work rather than a durable statement about the artifact. The documentation philosophy calls this changelog creep: a concept doc should say what a thing IS, not which internal batch introduced it. The straightforward fix is to delete the two words. The alternative is that the label means something to you that it does not mean to a reader, in which case it should be spelled out rather than removed.",
-      "question": "Should the \"(change 3)\" parenthetical be deleted from the docs_digest.json row in spec/audit/artifact-contract.md?",
-      "options": [
-        {
-          "label": "Delete the label",
-          "answer": "Delete \"(change 3)\" from the docs_digest.json row in spec/audit/artifact-contract.md. It is an internal work label a reader cannot resolve, and the artifact description stands without it."
-        },
-        {
-          "label": "Spell it out",
-          "answer": "Keep the reference but replace \"(change 3)\" with prose that says what it actually means, so a reader who was not present for the work can resolve it."
-        },
-        {
-          "label": "Leave it",
-          "answer": "Leave \"(change 3)\" exactly as it is."
-        }
-      ],
-      "evidence": [
-        "spec/audit/artifact-contract.md line 58 reads: \"| `docs_digest.json` | JSON | Deterministic bounded telos extraction over the doc universe (change 3); rendered into the confirm-intent prompt. ...\" — quoted back independently by a second lane reading the file.",
-        "A repo-wide search for a definition of \"change 3\" outside this line found none in docs/, spec/, CLAUDE.md, or README.md.",
-        "The previous run reported a sibling label \"Slice D\" in this same file. It is GONE at HEAD c39a9b88, so only \"(change 3)\" remains and the earlier pairing is stale."
-      ],
-      "premise_probes": [
-        {
-          "file": "spec/audit/artifact-contract.md",
-          "contains": "(change 3)"
-        }
-      ],
-      "subject_key": "4c6b307253d9acec",
-      "first_seen": "2026-08-27",
-      "nights_open": 1
-    },
-    {
-      "id": "docs-3",
-      "leg": "docs",
-      "path": "spec/remediate/remediation-goals.md",
-      "subject": "This category list is the starting proposal and is expected to be refined once the first runs produce real clarification batches.",
-      "title": "constitutional doc: the goals doc still calls its category list a starting proposal awaiting first runs",
-      "eli5": "The remediation goals document lists the categories a clarification request can fall into, then says the list \"is the starting proposal and is expected to be refined once the first runs produce real clarification batches.\" Two things have happened since that sentence was written. The first remediation draw ran to completion on 2026-08-24, so the first runs are no longer ahead of us. And the category values are now a fixed TypeScript union the compiler enforces — adding or removing one is a compile error at every place that handles them, which is the opposite of a provisional list. So the sentence describes a state the project has left. This document is constitutional: a commit that touches it is blocked unless an override records your decision, and the routine is never allowed to rewrite it on its own. That is why you are being asked rather than told.",
-      "question": "Should the \"starting proposal ... expected to be refined once the first runs produce real clarification batches\" sentence be removed or rewritten, now that the first runs have happened and the categories are a compile-enforced enum?",
-      "options": [
-        {
-          "label": "Delete the sentence",
-          "answer": "Delete the \"starting proposal and is expected to be refined\" sentence from spec/remediate/remediation-goals.md. The categories are now a compile-enforced union and the first runs have happened, so the provisional framing states nothing durable."
-        },
-        {
-          "label": "Restate as durable",
-          "answer": "Replace the sentence with a durable statement — that the category set is fixed in code and any change to it is a deliberate contract change — so the doc says what is true rather than what was expected."
-        },
-        {
-          "label": "Keep it provisional",
-          "answer": "Keep the sentence. The list is still genuinely open to revision and the framing should stay until you decide it is settled."
-        }
-      ],
-      "evidence": [
-        "spec/remediate/remediation-goals.md line 312: \"This category list is the starting proposal and is expected to be refined once the first runs produce real clarification batches.\"",
-        "src/remediate/state/disposition.ts line 42 and src/remediate/state/itemStatus.ts line 48 both carry \"deemed_inappropriate\" as a member of a fixed union/array; itemStatus.ts partitions every status under an exhaustive Record, so an added member is a compile error at every axis.",
-        "The first remediation draw completed 2026-08-24, so \"once the first runs produce real clarification batches\" names a condition already met.",
-        "This file is in the constitutional set: a commit touching it is refused by .claude/hooks/pre-commit-gate.mjs without a fresh owner-decision override, so the routine cannot apply any of these options itself."
-      ],
-      "premise_probes": [
-        {
-          "file": "spec/remediate/remediation-goals.md",
-          "contains": "This category list is the starting proposal"
-        }
-      ],
-      "subject_key": "a477c87be998e5a8",
-      "first_seen": "2026-08-27",
-      "nights_open": 1
-    },
-    {
-      "id": "docs-4",
-      "leg": "docs",
-      "path": "src/audit/adapters/README.md",
-      "subject": "the F5 analyzer-acquisition-engine's curated candidate registry, normalized through the acquisition engine's own seam rather than this directory's per-tool adapters. Git-history mining (F6) is the one deterministically-owned analyzer signal",
-      "title": "The adapters README uses roadmap labels F5 and F6 that nothing in the repo defines",
-      "eli5": "The README for the external analyzer adapters names two things by a code: \"the F5 analyzer-acquisition-engine\" and \"Git-history mining (F6)\". F5 and F6 were roadmap item numbers from an older plan. Nothing in the repository says what F5 or F6 are — not another doc, not a spec, not a source comment. So a reader meeting these labels has no way to look them up, and the letters add nothing the surrounding words do not already say: the sentences still read correctly as \"the analyzer-acquisition-engine's curated candidate registry\" and \"Git-history mining\". The simple fix is to drop the two labels. The alternative is that they point at a roadmap you still keep somewhere, in which case the README should link it.",
-      "question": "Should the orphaned \"F5\" and \"F6\" roadmap labels be dropped from src/audit/adapters/README.md?",
-      "options": [
-        {
-          "label": "Drop the labels",
-          "answer": "Delete the \"F5\" and \"F6\" labels from src/audit/adapters/README.md. Both sentences read correctly without them and nothing in the repo defines what they mean."
-        },
-        {
-          "label": "Link the roadmap",
-          "answer": "Keep the labels but add a pointer to wherever the F-numbered roadmap is recorded, so a reader can resolve them."
-        },
-        {
-          "label": "Leave them",
-          "answer": "Leave F5 and F6 exactly as they are."
-        }
-      ],
-      "evidence": [
-        "src/audit/adapters/README.md line 20: \"F5 analyzer-acquisition-engine's curated candidate registry (`src/shared/analyzers/candidates.ts`),\"; line 22: \"Git-history mining (F6) is the one deterministically-*owned* analyzer signal\".",
-        "A repo-wide search for F5 or F6 across docs/, spec/, CLAUDE.md and README.md found no definition; the only other occurrence is the nightly inbox line that recorded this same observation.",
-        "Both sentences stay complete and accurate with the labels removed — the surrounding prose already names the engine and the signal."
-      ],
-      "premise_probes": [
-        {
-          "file": "src/audit/adapters/README.md",
-          "contains": "Git-history mining (F6)"
-        }
-      ],
-      "subject_key": "38696b0dd8bcfd21",
-      "first_seen": "2026-08-27",
-      "nights_open": 1
-    },
-    {
-      "id": "docs-5",
-      "leg": "docs",
-      "path": "docs/glossary-ids.md",
-      "subject": "The cross-artifact gate-outcome record is owned by src/remediate/validation/contractPipelineGates.ts until a later work item relocates its shared shape into audit-tools/shared.",
-      "title": "A glossary invariant carries an \"until a later work item relocates it\" plan clause",
-      "eli5": "The glossary of invariant IDs records durable properties of the system — things that are true and are meant to stay true. One row, INV-CPGV-OUTCOME-RECORD-OWNER, says the gate-outcome record is owned by a particular file \"until a later work item relocates its shared shape into audit-tools/shared\". The ownership half is a real invariant and is still accurate at HEAD. The trailing clause is different: it describes an intention to move the code later. That is a plan, and a plan in a glossary of invariants is status-noise — it goes stale silently if the move happens, if it is abandoned, or if it is never scheduled, and no test can tell. The clean version states the ownership and stops. If the planned move still matters, its home is the backlog, where open work is tracked and can be closed.",
-      "question": "Should the \"until a later work item relocates its shared shape into audit-tools/shared\" clause be dropped from the INV-CPGV-OUTCOME-RECORD-OWNER row, with the planned relocation recorded in the backlog if it is still wanted?",
-      "options": [
-        {
-          "label": "Drop the clause",
-          "answer": "Trim the INV-CPGV-OUTCOME-RECORD-OWNER row to the ownership invariant alone and drop the \"until a later work item relocates it\" clause. Record the relocation as a backlog entry if it is still wanted."
-        },
-        {
-          "label": "Drop clause, no backlog entry",
-          "answer": "Drop the clause and open no backlog entry — the relocation is not planned work."
-        },
-        {
-          "label": "Keep it",
-          "answer": "Keep the clause. The conditional ownership is itself the invariant worth recording, and dropping the clause would lose the intent."
-        }
-      ],
-      "evidence": [
-        "docs/glossary-ids.md, row INV-CPGV-OUTCOME-RECORD-OWNER: \"The cross-artifact gate-outcome record (`evaluated`/`reason`) is owned by `src/remediate/validation/contractPipelineGates.ts` until a later work item relocates its shared shape into `audit-tools/shared`.\"",
-        "The ownership half is TRUE at HEAD: the GateOutcome interface with its evaluated/reason fields is defined at src/remediate/validation/contractPipelineGates.ts:1731, not under src/shared/.",
-        "CX-04 (\"cross-gate outcomes becomes the only evaluator\") landed in this review window and did NOT relocate the shape, so the clause is unfulfilled rather than stale-by-completion.",
-        "docs/documentation-philosophy.md governs concept docs as durable statements rather than status; a forward-looking plan clause is the documented smell."
-      ],
-      "premise_probes": [
-        {
-          "file": "docs/glossary-ids.md",
-          "contains": "until a later work item relocates its shared shape"
-        }
-      ],
-      "subject_key": "1588134708c50483",
-      "first_seen": "2026-08-27",
-      "nights_open": 1
-    },
-    {
       "id": "sol-1",
       "leg": "solutions",
-      "path": "scripts/shared/offload-lane-data.mjs",
-      "subject": "a launcher script, not a service — nothing listens. Its lane health is the freellmapi-router probe plus nested claude.exe session startup, which is minutes-slow by design and cannot be probed cheaply",
-      "title": "P47: the pool launcher hand-types a model alias the client rejects, and it killed a review lane tonight",
-      "eli5": "The free-provider offload lane is started by a small PowerShell script, claude.ps1. Line 53 of that script runs \"claude --model auto\". Claude Code no longer accepts \"auto\" as a model name, so tonight the lane answered every prompt with a 71-byte error and nothing else. The router was up the whole time and the credentials were fine — the only broken thing was a model name typed by hand into a script. This is a repeat. An agy model pin went stale the same way on 2026-08-05, the \"auto\" alias was recorded as a bad pin on 2026-08-09, and the global instruction file already notes that Claude Code does not recognize \"auto\" and works around it on a different flag in that very same script. The fix that removes the trap is to stop typing a model name there at all: either drop the flag, or ask the router for a live model id at launch. The script lives outside this repository, so nothing here can fix it and no repo test can guard it. The proposal is written up and waiting for you.",
-      "question": "How should the pool launcher stop carrying a hand-typed model alias — drop the --model flag entirely, or resolve a live model id from the router at launch?",
+      "path": "docs/backlog/durable-traps.md",
+      "subject_key": "7abf9b363b40d381",
+      "title": "P48: record every full-suite green against the tree it ran on, so a later edit cannot inherit it?",
+      "eli5": "Running the test suite proves something about the exact files that existed when it ran. The moment you edit anything afterwards — a source file, a doc, a ledger — that proof is about a version of the project that no longer exists. Nothing in the repo currently notices this. The commit check runs type-checking and a small subset of doc tests, never the whole suite, so if you edit a source file after a green run and then push, only CI will find out. This happened twice on 2026-08-27 and two commits shipped red before anything caught it, and the repo's own trap entry says outright that this half is left to discipline rather than to a mechanism. The proposal is small: when the full suite passes, write down a fingerprint of the exact file content it ran on; when the end-of-sprint challenge fires, compare that fingerprint to the current files and say so if they differ. It reuses the same fingerprint the closeout report is already bound to, it adds no new refusal, and it cannot fire when you simply commit what the green run already covered. Saying yes means the trap stops depending on remembering. Saying no means it stays a discipline, and the next late edit is caught by CI as before.",
+      "question": "Adopt P48 — a full-suite green writes a worktree-content-bound stamp that the closeout challenge reads — or leave the general half of the suite-run trap as discipline?",
       "options": [
         {
-          "label": "Drop the flag",
-          "answer": "Delete \"--model auto\" from line 53 of the freellmapi claude.ps1 launcher so the nested session takes the router default; the trailing @args still lets a caller pin a model. Smallest change, and nothing is left to go stale."
+          "label": "Adopt P48 as proposed",
+          "answer": "Adopt P48 as written: run-vitest-gate writes a worktree-tree-bound stamp on a full-suite green, and closeout-challenge-gate reads it as one more piece of mechanical evidence. Apply the patch in .audit-tools/nightly/proposals/P48-suite-green-stamp/."
         },
         {
-          "label": "Resolve from the roster",
-          "answer": "Change the launcher to resolve a live model id from the router roster at launch and pass that, so an explicit pin remains but nothing hand-types it."
+          "label": "Adopt, but make it a commit refusal",
+          "answer": "Adopt the stamp, but wire it into the pre-commit gate as a refusal rather than into the closeout challenge as evidence — a stale green should block the commit, not merely be reported at hand-back."
         },
         {
-          "label": "Just fix the literal",
-          "answer": "Replace \"auto\" with a working model id and leave the hand-typed form in place, accepting that it can go stale again."
-        },
-        {
-          "label": "Record the trap only",
-          "answer": "Leave the launcher alone and record the trailing --model override as a documented workaround in docs/backlog/durable-traps.md."
+          "label": "Leave it as discipline",
+          "answer": "Do not adopt P48. The general half of the suite-run trap stays discipline; CI remains the backstop for a late source edit, and the trap entry stays open as it is."
         }
       ],
       "evidence": [
-        "The freellmapi claude.ps1 launcher line 53 is \"& claude --model auto @args\" — the only --model in the file.",
-        "Observed at HEAD c39a9b88 on 2026-08-27: the leg-1 lane returned exactly [claude-code:unrecognized_model] with model \"auto\" and nothing else, a 71-byte reply.",
-        "Confirmed workaround in the same session: appending --model \"claude-sonnet-5\" after the script path returned \"ok\" at exit 0, because @args is appended after the hardcoded flag.",
-        "Recurrence, four records on four dates: docs/backlog/durable-traps.md (d) 2026-08-05 (a stale hand-written agy pin, whose own remedy is \"read the roster rather than hand-typing it\"); durable-traps 2026-08-09 (the router auto alias resolves to a reasoning model, 7 of 7 jobs unusable); the global instruction file, which records that claude.ps1 pins CLAUDE_CODE_MAX_CONTEXT_TOKENS because Claude Code does not recognize the auto alias; and tonight.",
-        "The launcher is outside this repo, so a repo gate reading it would be a gate asking the local disk, which this project bans. The in-repo half is the claude-ps1-launcher row in scripts/shared/offload-lane-data.mjs, whose unprobeableReason speaks only to liveness and is silent about a rejected flag.",
-        "Full analysis and the observed RED: .audit-tools/nightly/proposals/P47-launcher-hand-typed-model-alias/"
+        "docs/backlog/durable-traps.md states the uncovered half verbatim: \"a late SOURCE edit after a green run is still caught only by CI. That half is discipline, not a mechanism\".",
+        "scripts/shared/run-vitest-gate.mjs at HEAD contains no stamp of any kind — verified by direct read and independently by a second lane, which returned REFUTED for any mention of suiteGreenStamp or suite-green.",
+        "The primitive already exists and is proven: scripts/shared/worktree-tree.mjs, used by scripts/render-closeout.mjs and by .claude/hooks/closeout-challenge-gate.mjs, which already computes currentTree.",
+        "Recurrence, counted: two occurrences on 2026-08-27 (durable-traps, same entry), docs/reviews/closeout-generation-failure-2026-08-26.md (19 of 29 challenged sessions hand-wrote the report), and the /insights pass of 2026-08-28 measuring the same failure across 241 sessions and naming at least four nightly maintenance sessions.",
+        "RED at HEAD is recorded verbatim in .audit-tools/nightly/proposals/P48-suite-green-stamp/RED-AT.txt: 4 of 4 tests fail, each for its intended reason.",
+        "Full patch, module and test: .audit-tools/nightly/proposals/P48-suite-green-stamp/."
       ],
       "premise_probes": [
         {
-          "file": "scripts/shared/offload-lane-data.mjs",
-          "contains": "a launcher script, not a service"
+          "file": "CLAUDE.md",
+          "contains": "on a **clean, fully-pushed tree**"
+        },
+        {
+          "file": "scripts/shared/run-vitest-gate.mjs",
+          "absent": "suiteGreenStamp"
         }
       ],
-      "proposal": "P47 — the pool launcher hand-types a model alias, and the alias is not recognized",
-      "patch_path": ".audit-tools/nightly/proposals/P47-launcher-hand-typed-model-alias/PROPOSAL.md",
-      "subject_key": "4fe542aceca77056",
-      "first_seen": "2026-08-27",
+      "proposal": "P48-suite-green-stamp",
+      "patch_path": ".audit-tools/nightly/proposals/P48-suite-green-stamp/PATCH.md",
+      "first_seen": "2026-08-28",
+      "nights_open": 1
+    },
+    {
+      "id": "backlog-1",
+      "leg": "backlog",
+      "path": "docs/backlog/open-bugs.md",
+      "subject_key": "f4ea81e5c2d284d7",
+      "title": "Systemic-challenge convergence: fix a number of consecutive quiet rounds, or make the current one-round rule normative?",
+      "eli5": "The systemic-challenge loop keeps asking an adversary for new findings until it stops finding any. The design document says the loop ends once \"N rounds surface no new\" findings, but it never says what N is. The code picks N = 1: the first round that turns up nothing new ends the loop. So the document and the code do not agree, and the record the loop writes does not say which rule it applied. Only one thing is actually open here — how many consecutive quiet rounds convergence should require. If the answer is one, the fix is to write that into the spec and have the register record it. If the answer is more than one, the loop needs a counter and the code changes. This is not the same as the separate question of a total round budget; answering this one must not silently answer that one.",
+      "question": "Should convergence require a stated number of consecutive zero-novelty rounds, or should the current single-round rule be made normative in the spec? Either way the register must record which rule it applied.",
+      "options": [
+        {
+          "label": "One round — make it normative",
+          "answer": "Convergence stays at one zero-novelty round. Fix the spec to state that literally instead of \"N rounds\", and make the register record the rule it applied. No code change to the convergence condition."
+        },
+        {
+          "label": "Two consecutive quiet rounds",
+          "answer": "Convergence requires two consecutive zero-novelty rounds. Add the counter in systemicChallengeExecutor.ts, state the number in the spec, and record the applied rule in the register."
+        },
+        {
+          "label": "Make it configurable with a stated default",
+          "answer": "Make the number of consecutive zero-novelty rounds a declared value with a stated default, rather than a constant. The spec states the default; the register records the value that was actually applied."
+        }
+      ],
+      "evidence": [
+        "src/audit/orchestrator/systemicChallengeExecutor.ts sets `converged: folded.dry,` — one round's dryness ends the loop. Confirmed at HEAD by direct read and independently by a second lane quoting the line back.",
+        "spec/conceptual-design-review-design.md states convergence as \"keep seeding overlapping reviews until N rounds surface no new\" and never fixes or configures N.",
+        "Novelty is already content-derived (findingReEmissionKey via src/shared/findings/dedupe.ts), so the earlier worker-id objection to this item is spent — only the round count is open.",
+        "The mechanical backlog sweep of 2026-08-28 classified this entry owner_decision_needed, agreeing that the entry states its own open choice and cannot be resolved mechanically."
+      ],
+      "premise_probes": [
+        {
+          "file": "src/audit/orchestrator/systemicChallengeExecutor.ts",
+          "contains": "converged: folded.dry"
+        }
+      ],
+      "first_seen": "2026-08-28",
+      "nights_open": 1
+    },
+    {
+      "id": "backlog-2",
+      "leg": "backlog",
+      "path": "docs/backlog/open-bugs.md",
+      "subject_key": "bd756879fbb9184a",
+      "title": "The shared-hash gate is keyed to the algorithm name, so two sha1 sites re-roll the pattern it bans — widen the rule, or declare short ids out of remit?",
+      "eli5": "The project has one home for content hashing and a gate that stops other files from hand-rolling their own hash chain. The gate spots the problem by looking for the text \"sha256\". Two places in the audit orchestrator build the very same kind of chain but use \"sha1\" instead, and then cut the result down to ten characters — exactly the shape the hash module says no caller should carry. Because the gate is keyed to the algorithm name rather than to the construction, it reports both files clean. So the gate is real but its aim is slightly off. There are two honest answers. Either these short non-cryptographic ids are genuinely not what the hash home is for, and the gate is right to ignore them — in which case say so, so nobody re-opens this. Or they are the same construction, in which case the two sites adopt the shared helper and the rule widens to catch the construction rather than the word.",
+      "question": "Is a short non-cryptographic id legitimately outside the remit of src/shared/hash.ts, or should the two sites adopt hashContent and the pattern rule widen from the algorithm name to the construction?",
+      "options": [
+        {
+          "label": "Widen the rule; migrate both sites",
+          "answer": "The construction is what is banned, not the algorithm name. Widen the check:shared-primitives pattern rule to match an inline createHash chain of any algorithm truncated by a bare slice, and migrate shortHash and packetIdFor onto the shared helper."
+        },
+        {
+          "label": "Short ids are out of remit — say so",
+          "answer": "A short non-cryptographic id is outside the remit of src/shared/hash.ts. Leave both sites as they are and state the exemption where the gate declares its rules, so the exemption is recorded rather than rediscovered."
+        },
+        {
+          "label": "Migrate the sites, leave the rule alone",
+          "answer": "Migrate shortHash and packetIdFor onto the shared helper because the duplication is real, but do not widen the pattern rule — the gate keeps its current, narrower aim."
+        }
+      ],
+      "evidence": [
+        "scripts/check-shared-primitives.mjs declares the rule with `id: 'sha256-chain'` — keyed to the algorithm spelling. Confirmed at HEAD by direct read and independently by a second lane.",
+        "src/audit/orchestrator/selectiveDeepening/shared.ts:88 reads `return createHash(\"sha1\").update(value).digest(\"hex\").slice(0, 10);`",
+        "src/audit/orchestrator/reviewPackets.ts:58-61 builds `createHash(\"sha1\")` and truncates with `.slice(0, 10);`. That module already imports sanitizeSegment from selectiveDeepening/shared.ts, yet re-rolls shortHash's body.",
+        "Running scripts/check-shared-primitives.mjs at HEAD reports every tracked src file clean with both sites live, so the gate sees neither. `npm run verify:checks` passed this run with both sites present.",
+        "The mechanical backlog sweep of 2026-08-28 classified this entry owner_decision_needed on the same two-option split the entry itself states."
+      ],
+      "premise_probes": [
+        {
+          "file": "src/audit/orchestrator/reviewPackets.ts",
+          "contains": "createHash(\"sha1\")"
+        },
+        {
+          "file": "scripts/check-shared-primitives.mjs",
+          "contains": "id: 'sha256-chain'"
+        }
+      ],
+      "first_seen": "2026-08-28",
       "nights_open": 1
     }
   ],
   "applied": [
-    "NOTHING was applied to any document this run. The working tree was dirty at start — three modified tracked files (.claude/skills/ship/SKILL.md, scripts/check-memory-citations.mjs, scripts/release-and-publish.mjs) and an untracked tests/shared/memory-crosslink-gate.test.ts, which together are an interactive session mid-flight on last night's docs-1 and sol-1 answers. The clean-tree rule says review and report, apply nothing, so leg 1 landed no doc edit and no commit or push was made.",
-    "The owner ANSWERED all twelve of last night's items. partitionBySettled classified every one as settled, so the queue emptied and none is re-raised. None is marked --done, and the answers to docs-1 and sol-1 are visibly the work in the dirty tree; the other ten answers imply work not yet in the tree.",
-    "Leg 2 mechanical sweep ran to completion and covered the whole backlog: 111 of 111 entries attempted, 107 classified, 4 errored. That is 96% against last night's 59%, and it is direct evidence that the owner's sol-2 answer (the Cloudflare credential stored in account_id:api_token form) fixed the lane — 43 of last night's 45 errors were that one provider.",
-    "Leg 2 verified before deleting and deleted nothing. The sweep returned exactly one already_shipped_or_stale verdict, on the forward-tracks entry \"CI wall-clock: shard balance and the single-file floor\". Reading the entry refutes it: it says \"Implementation assigned outside this repo's agent loop by the owner 2026-08-07\", which means assigned elsewhere, not shipped. The entry is a live pointer to its single home and stays.",
-    "Sidecar state only: leg 1 stamped eleven examined docs into the scope ledger, the sweep wrote .audit-tools/nightly/triage-2026-08-27.jsonl and its coverage stamp, and the P47 proposal directory was written. No tracked document content changed."
+    "NOTHING was applied to any tracked document this run. Leg 1 found no stale-factual claim that survived verification, so there was no doc edit to make; leg 2 verified before deleting and deleted nothing; leg 3 is propose-only by contract. No commit and no push was made.",
+    "The queue emptied cleanly. All six items from the 2026-08-27 run (docs-1 through docs-5, sol-1) were ANSWERED by the owner and every answer is recorded as landed — `answer.mjs --list` returns \"No open nightly items, and every tracked answer is recorded as done.\" partitionBySettled classified all six as settled, so none is re-raised.",
+    "Both independent lanes were HEALTHY this run, which is a change from the last two. Codex answered a probe in seconds despite last run recording it quota-blocked until 2026-09-01, and the free pool lane answered with no --model override, which is direct evidence that the owner's sol-1 answer (P47) fixed the launcher. The pool lane then verified four premises independently and quoted the exact source line back for each — the fabrication failure of the last run did not recur, with the difference being a verification-shaped prompt fed from a file rather than through shell quoting.",
+    "Leg 2 mechanical sweep ran to completion over the whole backlog: 135 of 135 entries attempted, 131 classified, 4 errored, 0 aborted. Coverage stamp: .audit-tools/nightly/triage-2026-08-28-coverage.json. That is 97%, against 96% last run over 111 entries.",
+    "Leg 2 verified before deleting and deleted nothing. The sweep returned exactly one already_shipped_or_stale verdict, on the forward-tracks entry \"CI wall-clock: shard balance and the single-file floor\" — the identical false positive the last run refuted. Reading the entry refutes it again: \"Implementation assigned outside this repo's agent loop by the owner 2026-08-07\" means assigned elsewhere, not shipped. The entry stays.",
+    "The weekly /insights pass was DUE and RAN (stamp was 7.0 days old). Report: C:\\Users\\ethan\\.claude\\usage-data\\report-2026-08-28-020731.html. 16 suggestions triaged against HEAD: 13 already shipped or already decided, 3 debatable, 0 genuinely open. Its measured friction is what supplies the outside recurrence evidence for P48.",
+    "Sidecar and untracked state only: the leg-2 sweep JSONL and its coverage stamp, the leg-1 scope plan, the P48 proposal directory, and the insights stamp. No tracked document content changed."
   ],
   "skipped": [
-    "BOTH independent lanes were degraded, so leg 1 ran with reviewer coverage that a second agent only partly checked. Codex is out of quota until 2026-09-01 (\"You've hit your usage limit ... try again at Sep 1st, 2026\") and answered nothing. The free-provider pool lane was then broken by its own launcher — see sol-1 / P47 — and needed a trailing --model override before it would answer at all.",
-    "The free-pool ADVERSARY pass FABRICATED. Given five findings to agree or refute, it returned five verdicts, four of which discuss findings that were never sent (a dependency-map direction claim, an emitSystemicChallenge claim, a quoteForCmd parity claim). Only its F1 verdict addresses a real finding, and that one is recorded inside docs-1 as the counter-argument. The other four verdicts were discarded as unusable, not counted as coverage.",
-    "A re-run verification-shaped adversary prompt was MANGLED by shell quoting: four questions went out, the lane received only the first, and answered only that one. Q1 (the \"(change 3)\" literal in spec/audit/artifact-contract.md) is therefore independently confirmed with the line quoted back; the premises behind docs-3, docs-4 and docs-5 rest on this run's own direct file reads alone.",
-    "Leg 1 examined 11 of the 55 in-scope docs end-to-end this run, against 40 last run; the coverage stamp is .audit-tools/nightly/leg1-2026-08-27-coverage.json, read from the file and not eyeballed. The narrower pass is deliberate: the evidence window since the last run is five refactor commits confined to src/, so the review was scoped to the docs those commits could have invalidated plus the docs behind the escalations the last run recorded and could not queue. It is NOT a claim that the other 44 are clean.",
-    "The five refactor commits (CX-01, CX-03, CX-04, CX-05, CX-07) broke NO documented claim. That is a two-lane agreement, reached independently: a pool-lane reviewer reading the six most exposed docs returned NONE with per-commit reasoning, and this run's own grep of every doc citing a changed module found no contradiction. npm run check:doc-code-citations also passes — 407 path plus 74 directory plus 423 bare-filename citations across 55 docs all resolve.",
-    "The doc-set condensation pass (perspective 2) ran and queued one candidate (docs-1). The five candidates the 2026-08-25 run recorded, plus spec/audit/orchestration-policy.md from the last run, remain unqueued. orchestration-policy.md was examined directly this run rather than carried on the earlier claim, and it did not hold up as a pure duplicate: it is 135 lines of genuine selection-principle prose that abstracts over the code registry rather than mirroring it, and its one clear pointer is a single sentence deferring the bounded-step guarantee to entrypoint-contract.md. It is not queued because the earlier \"most of it is a pointer or a second copy\" premise did not survive reading it.",
-    "Two empty files sit in the repo root at HEAD, untracked: a file literally named \"0)\" and one named \"entry.finding_id\", both zero bytes and timestamped 2026-08-26 19:38 and 19:41 — minutes either side of commit c39a9b88. Both are the documented shell-redirect artifact class (a command redirected into a token taken from source). They belong to the concurrent session, not to this run, so this run did not delete them.",
-    "The /insights weekly pass was NOT due. The stamp .audit-tools/nightly/insights-last-run.json has ran_at 2026-08-21T09:07:15Z, exactly 6.00 days before this run, and due means seven or more. Recorded for completeness; being not-due is not a skipped leg.",
-    "Leg 2 premise confirmation stayed weak even at full coverage: of 111 entries, 23 verdicts hold their premise, 3 partial, 35 unprobed and 33 returned unusable probes. So the coverage gain is in CLASSIFICATION, not in verification — those verdicts must be re-checked against HEAD before any of them is worked."
+    "The /insights suggestions that were NOT dropped: three are debatable and are NOT queued as items this run, deliberately, because none has a code-side premise a probe can track and each is about host practice rather than this repo. They are: a subagent delegation contract requiring each lane to return the paths it wrote plus a git status snippet; a mutation-verify step on every delegated implementation; and an owner approval gate on the lane table before a wide fan-out. Recorded here so a quiet inbox does not read as \"nothing was found\".",
+    "Three further /insights suggestions were dropped as already DECIDED rather than already shipped, and the decision is named in each case: a read-only-mode rule (one cited incident, not a pattern); a self-healing provider-fallback fan-out layer inside this repo (audit-tools does NOT route — the zero-execution-adapters cut, CLAUDE.md); and upgrading the nightly into a full autonomous sprint (the standing \"redesign before scheduled autonomy\" decision). One of them, the provider fallback suggestion, names the Ox-Alpha lane, which was de-listed 2026-08-28 — the stale-report class the routine is told to check for.",
+    "Leg 1 examined 19 of the 54 in-scope docs end-to-end this run — 864 of 1773 reviewable items, 0 reviewed cold. Read from the coverage stamp .audit-tools/nightly/leg1-2026-08-28-coverage.json, not eyeballed. The evidence window is LARGE — 50 commits between the last run's HEAD c39a9b88 and 6e2f902d, touching 88 files — so the pass was scoped to the docs those commits could have invalidated plus the docs behind this run's escalations. It is NOT a claim that the other 35 are clean. Every in-scope doc was covered MECHANICALLY regardless: check:doc-code-citations, check:doc-manifest, check:doc-links, check:memory-citations, check:backlog-budget and the full verify:checks all passed at this HEAD.",
+    "The Codex leg-1 lane was dispatched over 16 documents and did NOT return within the run. It read source for roughly an hour and emitted no FINDING or CLEAN marker, so it contributed no coverage and no refutation. Leg 1's per-document conclusions therefore rest on this run's own direct reads plus the mechanical gates; the four premises behind the escalated items were independently verified by the pool lane instead. Its log is .audit-tools/nightly/leg1-codex-0828.log.",
+    "The doc-set condensation pass (perspective 2) ran and queued NOTHING. The 2026-08-27 candidate (the mechanical-analyzer spec) was answered and the file is gone at HEAD. The three thinnest remaining docs were read directly rather than carried on an earlier claim — spec/cross-tool-alignment.md, src/audit/README.md and examples/README.md — and each is dense, durable and single-homed, so none is a fold candidate. spec/audit/orchestration-policy.md remains unqueued for the reason the last run recorded after reading it.",
+    "Leg 2 premise confirmation is still the weak half even at full coverage: of 135 entries, 47 verdicts hold their premise, 4 partial, 31 unprobed and 47 returned unusable probes. The gain over the last run is in CLASSIFICATION, not verification, so those verdicts must be re-checked against HEAD before any of them is worked."
   ]
 }
