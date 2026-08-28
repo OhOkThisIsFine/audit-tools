@@ -406,13 +406,13 @@ area. `src/audit/orchestrator/` already imports `../cli/lineIndex.js` in three m
 cli" is not an available argument for where the registry lands. Decide it on the host-boundary
 policy the registry carries, which is CLI-shaped, not on a layering rule that does not exist.
 
-### The acceptance test this record says does not exist — written, and RED-validated
+### An acceptance test for CONSTRAINT 3 — written and RED-validated, and NOT one for the collapse
 
-The record states the collapse has NO test that can pass only once it lands. It has one:
-artifact-tree lock acquisition COUNT per `next-step`. Today the fold acquires and releases once per
-outer transition; under one hold it is exactly one. Unlike `one-holistic-derivation-per-scan` it
-cannot be turned green by a caching fix that leaves both drains standing, because it measures the
-LOCK, not the derivation.
+Read the last paragraph of this subsection before quoting the first: the first draft of it
+overclaimed, in precisely the way this record already documents once.
+
+Artifact-tree lock acquisition COUNT per `next-step` is a real red-green test. Today the fold
+acquires and releases once per outer transition; under one hold it is exactly one.
 
 Drafted and run against HEAD, 2026-08-28: **RED, and the count is 3** — over the
 `batch-deterministic-block` fixture, the longest guaranteed deterministic drain in the suite, so the
@@ -420,7 +420,21 @@ pre-collapse number is not one by accident. Mechanism: a `vi.mock` of `audit-too
 `withFileLock` and counting only acquisitions whose path ends `artifact-tree.lock`. That works
 because `nextStepHelpers.ts` and `auditStep.ts` both import the lock from that one subpath, and it
 cannot be inflated by the analyzer-policy or submission-ledger locks, which are different paths. The
-file is held OUT of the tree until the collapse lands, so no commit ships red.
+file is held OUT of the tree until its change lands, so no commit ships red.
+
+**What it does NOT prove — and this is the same trap the record already fell into once.** An earlier
+draft of this very subsection called it the acceptance test for the COLLAPSE. It is not. Hoist the
+lock into the fold driver and point the in-fold calls at lock-free cores, and the count goes to one
+**with both registries and both drains still standing** — that is constraint 3 alone. So it is an
+acceptance test for ONE HOLD, PERSIST ONCE, and nothing more. The record's finding stands unchanged:
+the structural collapse still has no test that can pass only once it lands, and the pinning suites
+staying green are still its only evidence.
+
+What this does establish is that **constraint 3 is SEPARABLE from the registry collapse** — it has
+its own mechanism, its own blast radius (three lock-site splits and the eleven carries) and now its
+own red-green test, none of which touch `buildDrainObligations`. Whether to land it separately is a
+scoping decision for the owner, not an implementer's convenience: the record's standing instruction
+is one atomic replace.
 
 ## Preserve list (report + refuter union)
 

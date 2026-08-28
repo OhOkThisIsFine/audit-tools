@@ -12,8 +12,8 @@
   a race — including `persistReviewPause`, on the loop's most common exit. Also corrected: two costs
   that turn out not to be costs, one reassurance in *The cost to measure* that is false at HEAD
   (synchronous `git ls-files` already runs inside the hold), the real test blast radius, and the
-  acceptance test the record says does not exist — written, and RED at a count of 3. The record is
-  the single home for all of it; read it, not this summary.
+  acceptance test for constraint 3 — written, and RED at a count of 3, though it does NOT prove the
+  collapse. The record is the single home for all of it; read it, not this summary.
 - **Repository:** `main` and `origin/main` are synchronized; every commit passed its gates and the
   full suite is green. No release is pending — `v0.50.3` is live on npm, and the tag and the local
   version match it.
@@ -49,11 +49,12 @@ results, which a plan must not do), and the pinning suites migrated in the same 
 drain-dependent `advanceAudit` call sites, while the ~29 that pass `preferredExecutor` do not move,
 because keeping `runSingleAdvanceStep` as the forced primitive holds them still.
 
-Verification is better than the record claims. It says the collapse has NO test that can pass only
-once it lands; it has one, and it is written and RED at HEAD with a count of 3 — artifact-tree lock
-acquisitions per `next-step`, which no caching fix can turn green. It is held out of the tree until
-the collapse lands so no commit ships red; the record's *acceptance test* section carries its
-mechanism.
+Verification is unchanged for the COLLAPSE: it still has no test that can pass only once it lands,
+so the pinning suites staying green remain its only evidence. What is new is that **constraint 3 has
+one** — artifact-tree lock acquisitions per `next-step`, written and RED at HEAD with a count of 3,
+held out of the tree so no commit ships red. Do not mistake it for the other: hoisting the lock
+turns it green with both drains still standing, which is why the record now says so in its own
+*acceptance test* section, next to the mechanism.
 
 ## Deliberate state, not bugs
 
