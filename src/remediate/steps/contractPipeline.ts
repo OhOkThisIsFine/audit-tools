@@ -42,6 +42,7 @@ import {
   partitionCommandsByDeclaredShape,
   normalizeRepoPath,
   repoRelativePath,
+  toPosixPath,
 } from "audit-tools/shared";
 import {
   createStepEmissionScaffold,
@@ -3861,11 +3862,18 @@ export function normalizeBlockTouchedFiles(
       refusals.push(`Block "${blockId}" declares an empty touched_files entry.`);
       continue;
     }
-    const absolute = isAbsolute(candidate) ? candidate : resolve(root, candidate);
+    const directoryIntent = /[\\/]$/u.test(candidate);
+    const portableCandidate = toPosixPath(candidate);
+    const absolute = isAbsolute(portableCandidate)
+      ? portableCandidate
+      : resolve(root, portableCandidate);
     try {
-      normalized.add(
-        repoRelativePath(root, absolute, `block "${blockId}" touched_files entry`),
+      const normalizedPath = repoRelativePath(
+        root,
+        absolute,
+        `block "${blockId}" touched_files entry`,
       );
+      normalized.add(directoryIntent ? `${normalizedPath}/` : normalizedPath);
     } catch {
       refusals.push(
         `Block "${blockId}" declares the touched_files entry ${JSON.stringify(raw)}, which ` +

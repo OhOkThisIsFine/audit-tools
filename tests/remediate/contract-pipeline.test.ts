@@ -1715,6 +1715,24 @@ describe("CP-NODE-13 inv-6: block write scope + targeted commands are normalized
     expect(scope.refusals).toEqual([]);
   });
 
+  it("POSITIVE: relative and absolute directory scopes preserve either trailing separator", () => {
+    const absoluteSlash = `${join(REPO_ROOT, "fixtures")}/`;
+    const absoluteBackslash = `${join(REPO_ROOT, "snapshots")}\\`;
+    const scope = normalizeBlockTouchedFiles(
+      REPO_ROOT,
+      ["test/", "tests\\", absoluteSlash, absoluteBackslash, "src/a.ts"],
+      "B-1",
+    );
+    expect(scope.touched_files).toEqual([
+      "fixtures/",
+      "snapshots/",
+      "src/a.ts",
+      "test/",
+      "tests/",
+    ]);
+    expect(scope.refusals).toEqual([]);
+  });
+
   it("POSITIVE: an ABSOLUTE in-repo path is NORMALIZED to its repo-relative form, case preserved", () => {
     expect(
       normalizeBlockTouchedFiles(REPO_ROOT, [join(REPO_ROOT, "src", "Shared", "X.ts")], "B-1")

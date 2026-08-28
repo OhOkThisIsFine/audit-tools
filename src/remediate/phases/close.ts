@@ -1033,14 +1033,34 @@ function extractImplicatedPaths(testOutput: string): string[] {
     const candidate = match[1]!;
     // Only keep plausible repo-relative paths (contain at least one slash or look like a file)
     if (candidate.includes("/") || candidate.includes("\\") || /\.[a-z]{1,6}$/.test(candidate)) {
-      // Normalize backslashes, strip leading ./
-      const normalized = candidate.replace(/\\/g, "/").replace(/^\.\//, "");
-      if (!normalized.startsWith("node_modules/")) {
+      const normalized = safeAttributionPath(candidate);
+      if (
+        normalized &&
+        !normalizeRepoPath(normalized).startsWith("node_modules/")
+      ) {
         paths.add(normalized);
       }
     }
   }
   return [...paths];
+}
+
+/**
+ * Normalize separators without resolving path syntax. Attribution evidence is
+ * untrusted test output. One common leading `./` test-runner prefix is
+ * removed; every later `.` segment and every `..` segment is rejected instead
+ * of being collapsed into a different block's declared scope.
+ */
+function safeAttributionPath(path: string): string | null {
+  const normalized = path.trim().replace(/\\/g, "/");
+  const withoutLeadingDot = normalized.startsWith("./")
+    ? normalized.slice(2)
+    : normalized;
+  return withoutLeadingDot
+    .split("/")
+    .some((segment) => segment === "." || segment === "..")
+    ? null
+    : withoutLeadingDot;
 }
 
 /**
@@ -1053,8 +1073,14 @@ function extractImplicatedPaths(testOutput: string): string[] {
  * what a real path-key join requires and a substring test does not give.
  */
 function touchedPathMatchesImplicated(tf: string, ip: string): boolean {
-  const a = normalizeRepoPath(tf);
-  const b = normalizeRepoPath(ip);
+  const safeTouched = safeAttributionPath(tf);
+  const safeImplicated = safeAttributionPath(ip);
+  if (!safeTouched || !safeImplicated) return false;
+  const a = normalizeRepoPath(safeTouched);
+  const b = normalizeRepoPath(safeImplicated);
+  if (a.endsWith("/")) {
+    return b.startsWith(a) || b.includes(`/${a}`);
+  }
   if (a === b) return true;
   return a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
 }

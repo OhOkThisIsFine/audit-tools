@@ -16,11 +16,66 @@ import {
   type RequiredTestFailure,
 } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 import { recoverIngestHostResults } from "../../src/remediate/steps/nextStep.js";
-import type { RemediationHostHandoffRecord } from "../../src/remediate/state/types.js";
+import {
+  RemediationHostHandoffRecordSchema,
+  type RemediationHostHandoffRecord,
+} from "../../src/remediate/state/types.js";
 import { readSubmissionLedger } from "audit-tools/shared";
 import { execFileSyncHidden } from "../helpers/spawn.mjs";
 
 const cleanupRoots: string[] = [];
+
+describe("remediation host handoff record scope semantics versions", () => {
+  const binding = {
+    run_id: "scope-version-test",
+    baseline_commit: "a".repeat(40),
+    workload_sha256: "b".repeat(64),
+    work_item_ids: ["B1"],
+  };
+
+  it("keeps v1alpha1 strict and requires explicit semantics on v1alpha2", () => {
+    expect(
+      RemediationHostHandoffRecordSchema.safeParse({
+        contract_version: "remediation-host-handoff-record/v1alpha1",
+        ...binding,
+      }).success,
+    ).toBe(true);
+    expect(
+      RemediationHostHandoffRecordSchema.safeParse({
+        contract_version: "remediation-host-handoff-record/v1alpha1",
+        scope_semantics: "explicit-directory-markers/v1",
+        ...binding,
+      }).success,
+    ).toBe(false);
+    expect(
+      RemediationHostHandoffRecordSchema.safeParse({
+        contract_version: "remediation-host-handoff-record/v1alpha2",
+        ...binding,
+      }).success,
+    ).toBe(false);
+    expect(
+      RemediationHostHandoffRecordSchema.safeParse({
+        contract_version: "remediation-host-handoff-record/v1alpha2",
+        scope_semantics: "explicit-directory-markers/v1",
+        ...binding,
+      }).success,
+    ).toBe(true);
+    expect(
+      RemediationHostHandoffRecordSchema.safeParse({
+        contract_version: "remediation-host-handoff-record/v1alpha2",
+        scope_semantics: "exact-paths-mean-directories",
+        ...binding,
+      }).success,
+    ).toBe(false);
+    expect(
+      RemediationHostHandoffRecordSchema.safeParse({
+        contract_version: "remediation-host-handoff-record/v1alpha3",
+        scope_semantics: "explicit-directory-markers/v1",
+        ...binding,
+      }).success,
+    ).toBe(false);
+  });
+});
 
 afterEach(async () => {
   await Promise.all(
@@ -49,6 +104,9 @@ interface Fixture {
 
 async function fixture(options: {
   allowedFiles?: string[];
+  otherAllowedFiles?: string[];
+  affectedFiles?: Array<{ path: string; hash_at_plan_time?: string }>;
+  otherAffectedFiles?: Array<{ path: string; hash_at_plan_time?: string }>;
   requiredTest?: string;
   runStartDirty?: string[];
   /**
@@ -65,6 +123,7 @@ async function fixture(options: {
    * makes a shared required test's spawn count observable.
    */
   twoBlocks?: boolean;
+  secondDependsOnFirst?: boolean;
   /**
    * Runs after the initial commit and BEFORE the handoff is prepared, so a test
    * can advance HEAD first and bind the trusted baseline to a non-root commit.
@@ -105,7 +164,8 @@ async function fixture(options: {
                 confidence: "high",
                 lens: "correctness",
                 summary: "Change the other exported value.",
-                affected_files: [{ path: "src/b.ts" }],
+                affected_files:
+                  options.otherAffectedFiles ?? [{ path: "src/b.ts" }],
                 evidence: ["src/b.ts:1 returns the stale value"],
               },
             ]
@@ -133,7 +193,7 @@ async function fixture(options: {
           confidence: "high",
           lens: "correctness",
           summary: "Change the exported value from one to two.",
-          affected_files: [{ path: "src/a.ts" }],
+          affected_files: options.affectedFiles ?? [{ path: "src/a.ts" }],
           evidence: ["src/a.ts:1 returns the stale value"],
         },
       ],
@@ -170,8 +230,8 @@ async function fixture(options: {
                 block_id: "B2",
                 items: ["F2"],
                 parallel_safe: true,
-                dependencies: [],
-                touched_files: ["src/b.ts"],
+                dependencies: options.secondDependsOnFirst ? ["B1"] : [],
+                touched_files: options.otherAllowedFiles ?? ["src/b.ts"],
                 targeted_commands: [
                   options.requiredTest ?? 'node -e "process.exit(0)"',
                 ],
@@ -250,6 +310,31 @@ function boundState(
   record: RemediationHostHandoffRecord = value.handoff.handoff_record,
 ): CurrentRemediationHostState {
   return { ...value.state, host_handoff: record };
+}
+
+function legacyBoundState(
+  value: Fixture,
+  record: RemediationHostHandoffRecord = value.handoff.handoff_record,
+): CurrentRemediationHostState {
+  const legacyRecord = {
+    ...record,
+    contract_version: "remediation-host-handoff-record/v1alpha1",
+  } as Record<string, unknown>;
+  delete legacyRecord.scope_semantics;
+  return boundState(value, legacyRecord as RemediationHostHandoffRecord);
+}
+
+async function persistBoundState(
+  value: Fixture,
+  state: CurrentRemediationHostState = boundState(value),
+): Promise<void> {
+  const storedState: Record<string, unknown> = { ...state };
+  delete storedState.contract_version;
+  await writeFile(
+    join(value.artifactsDir, "state.json"),
+    JSON.stringify(storedState),
+    "utf8",
+  );
 }
 
 function resultFor(
@@ -466,6 +551,327 @@ describe("remediation host handoff repository corroboration", () => {
     expect(ingested.accepted_count).toBe(1);
     expect(ingested.issues).toEqual([]);
     expect(ingested.state.applied_edit_surface).toEqual(["src/a.ts"]);
+  });
+
+  it("recovers a legacy exact scope only from the same finding's hashed directory provenance", async () => {
+    const value = await fixture({
+      allowedFiles: ["src"],
+      affectedFiles: [
+        { path: "src/", hash_at_plan_time: "a".repeat(64) },
+      ],
+    });
+    expect(value.item.allowed_files).toEqual(["src"]);
+    const state = legacyBoundState(value);
+    await persistBoundState(value, state);
+    const after = await landA(value);
+    const result = resultFor(value, after);
+
+    const binding = await remediationSubmissionBinding({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      workItemId: value.item.id,
+    });
+    expect(binding).not.toBeNull();
+    expect(binding!.validate(result)).toBeNull();
+
+    await writeResult(value, result);
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state,
+    });
+    expect(ingested).not.toBe("unsupported_retired_state");
+    if (ingested === "unsupported_retired_state") return;
+    expect(ingested.accepted_count).toBe(1);
+    expect(ingested.issues).toEqual([]);
+    expect(ingested.state.applied_edit_surface).toEqual(["src/a.ts"]);
+    expect(
+      ingested.state.plan.blocks.find((block) => block.block_id === "B1")
+        ?.touched_files,
+    ).toEqual(["src/"]);
+    expect(ingested.state.host_handoff).toBeUndefined();
+  });
+
+  it("defers legacy plan migration until the bound workload's final drain", async () => {
+    const value = await fixture({
+      allowedFiles: ["src"],
+      affectedFiles: [
+        { path: "src/", hash_at_plan_time: "9".repeat(64) },
+      ],
+      twoBlocks: true,
+    });
+    const state = legacyBoundState(value);
+    await persistBoundState(value, state);
+    const landedA = await landA(value);
+    await writeResult(value, resultFor(value, landedA));
+
+    const first = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state,
+    });
+    expect(first).not.toBe("unsupported_retired_state");
+    if (first === "unsupported_retired_state") return;
+    expect(first.accepted_count).toBe(1);
+    expect(first.pending_work_item_ids).toEqual(["B2"]);
+    expect(
+      first.state.plan.blocks.find((block) => block.block_id === "B1")
+        ?.touched_files,
+    ).toEqual(["src"]);
+    expect(first.state.host_handoff?.contract_version).toBe(
+      "remediation-host-handoff-record/v1alpha1",
+    );
+
+    const landedB = await landB(value);
+    await writeResult(
+      value,
+      resultFor(value, landedB, ["src/b.ts"], value.workItems[1]!),
+      value.workItems[1]!,
+    );
+    const second = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: first.state,
+    });
+    expect(second).not.toBe("unsupported_retired_state");
+    if (second === "unsupported_retired_state") return;
+    expect(second.accepted_count).toBe(1);
+    expect(second.issues).toEqual([]);
+    expect(
+      second.state.plan.blocks.find((block) => block.block_id === "B1")
+        ?.touched_files,
+    ).toEqual(["src/"]);
+    expect(second.state.host_handoff).toBeUndefined();
+  });
+
+  it("migrates dependency-blocked legacy blocks before minting the next v1alpha2 wave", async () => {
+    const value = await fixture({
+      allowedFiles: ["src/a.ts"],
+      affectedFiles: [{ path: "src/a.ts" }],
+      twoBlocks: true,
+      secondDependsOnFirst: true,
+      otherAllowedFiles: ["src"],
+      otherAffectedFiles: [
+        { path: "src/", hash_at_plan_time: "8".repeat(64) },
+      ],
+    });
+    expect(value.workItems.map((item) => item.id)).toEqual(["B1"]);
+    const state = legacyBoundState(value);
+    const landedA = await landA(value);
+    await writeResult(value, resultFor(value, landedA));
+
+    const firstWave = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state,
+    });
+    expect(firstWave).not.toBe("unsupported_retired_state");
+    if (firstWave === "unsupported_retired_state") return;
+    expect(firstWave.accepted_count).toBe(1);
+    expect(firstWave.state.host_handoff).toBeUndefined();
+    expect(
+      firstWave.state.plan.blocks.find((block) => block.block_id === "B2")
+        ?.touched_files,
+    ).toEqual(["src/"]);
+
+    const nextWave = await prepareRemediationHostHandoff({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      baselineCommit: git(value.root, ["rev-parse", "HEAD"]),
+      state: firstWave.state,
+    });
+    expect(nextWave).not.toBe("unsupported_retired_state");
+    if (nextWave === "unsupported_retired_state") return;
+    expect(nextWave.handoff_record).toMatchObject({
+      contract_version: "remediation-host-handoff-record/v1alpha2",
+      scope_semantics: "explicit-directory-markers/v1",
+    });
+    expect(nextWave.workload.work_items).toHaveLength(1);
+    expect(nextWave.workload.work_items[0]).toMatchObject({
+      id: "B2",
+      allowed_files: ["src/"],
+    });
+  });
+
+  it("uses recovered legacy directory scope during full no-change corroboration", async () => {
+    const value = await fixture({
+      allowedFiles: ["src"],
+      affectedFiles: [
+        { path: "src/", hash_at_plan_time: "c".repeat(64) },
+      ],
+    });
+    const state = legacyBoundState(value);
+    await persistBoundState(value, state);
+    await landA(value);
+    await writeFile(join(value.root, "outside.ts"), "export const outside = 1;\n");
+    git(value.root, ["add", "outside.ts"]);
+    git(value.root, ["commit", "-m", "add out-of-scope witness"]);
+    await writeResult(
+      value,
+      decisionFor(value, {
+        status: "resolved_no_change",
+        evidence: ["Claimed existing code already satisfied the contract."],
+      }),
+    );
+
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state,
+    });
+    expect(ingested).not.toBe("unsupported_retired_state");
+    if (ingested === "unsupported_retired_state") return;
+    expect(ingested.accepted_count).toBe(0);
+    expect(ingested.issues.map((issue) => issue.code)).toContain(
+      "changed_files_mismatch",
+    );
+    const messages = ingested.issues.map((issue) => issue.message).join("\n");
+    expect(messages).toContain("outside.ts");
+    expect(messages).toContain("inside: src/a.ts");
+  });
+
+  it("does not recover a legacy directory scope from missing or invalid plan-time hashes", async () => {
+    for (const affectedFiles of [
+      [{ path: "src/" }],
+      [{ path: "src/", hash_at_plan_time: "not-a-sha256" }],
+    ]) {
+      const value = await fixture({ allowedFiles: ["src"], affectedFiles });
+      const state = legacyBoundState(value);
+      await persistBoundState(value, state);
+      const after = await landA(value);
+      const result = resultFor(value, after);
+      const binding = await remediationSubmissionBinding({
+        root: value.root,
+        artifactsDir: value.artifactsDir,
+        runId: value.runId,
+        workItemId: value.item.id,
+      });
+      expect(binding).not.toBeNull();
+      expect(binding!.validate(result)).toMatchObject({
+        code: "submission_contract_invalid",
+      });
+
+      await writeResult(value, result);
+      const ingested = await ingestRemediationHostResults({
+        root: value.root,
+        artifactsDir: value.artifactsDir,
+        runId: value.runId,
+        state,
+      });
+      expect(ingested).not.toBe("unsupported_retired_state");
+      if (ingested === "unsupported_retired_state") continue;
+      expect(ingested.accepted_count).toBe(0);
+    }
+  });
+
+  it("does not borrow legacy directory provenance from another work item's finding", async () => {
+    const value = await fixture({
+      allowedFiles: ["src"],
+      twoBlocks: true,
+      affectedFiles: [{ path: "src/a.ts" }],
+      otherAffectedFiles: [
+        { path: "src/", hash_at_plan_time: "b".repeat(64) },
+      ],
+    });
+    const state = legacyBoundState(value);
+    await persistBoundState(value, state);
+    const after = await landA(value);
+    const result = resultFor(value, after);
+    const binding = await remediationSubmissionBinding({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      workItemId: value.item.id,
+    });
+    expect(binding).not.toBeNull();
+    expect(binding!.validate(result)).toMatchObject({
+      code: "submission_contract_invalid",
+    });
+
+    await writeResult(value, result);
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state,
+    });
+    expect(ingested).not.toBe("unsupported_retired_state");
+    if (ingested === "unsupported_retired_state") return;
+    expect(ingested.accepted_count).toBe(0);
+  });
+
+  it("does not recover legacy directory scope from an unbound persisted state", async () => {
+    const value = await fixture({
+      allowedFiles: ["src"],
+      affectedFiles: [
+        { path: "src/", hash_at_plan_time: "d".repeat(64) },
+      ],
+    });
+    await persistBoundState(
+      value,
+      legacyBoundState(value, {
+        ...value.handoff.handoff_record,
+        workload_sha256: "e".repeat(64),
+      }),
+    );
+    const after = await landA(value);
+    const result = resultFor(value, after);
+    const binding = await remediationSubmissionBinding({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      workItemId: value.item.id,
+    });
+    expect(binding).not.toBeNull();
+    expect(binding!.validate(result)).toMatchObject({
+      code: "submission_contract_invalid",
+    });
+  });
+
+  it("marks new scope semantics and never reinterprets a future exact scope", async () => {
+    const value = await fixture({
+      allowedFiles: ["src"],
+      affectedFiles: [
+        { path: "src/", hash_at_plan_time: "f".repeat(64) },
+      ],
+    });
+    expect(value.handoff.handoff_record).toMatchObject({
+      contract_version: "remediation-host-handoff-record/v1alpha2",
+      scope_semantics: "explicit-directory-markers/v1",
+    });
+    const state = boundState(value);
+    await persistBoundState(value, state);
+    const after = await landA(value);
+    const result = resultFor(value, after);
+
+    const binding = await remediationSubmissionBinding({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      workItemId: value.item.id,
+    });
+    expect(binding).not.toBeNull();
+    expect(binding!.validate(result)).toMatchObject({
+      code: "submission_contract_invalid",
+    });
+
+    await writeResult(value, result);
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state,
+    });
+    expect(ingested).not.toBe("unsupported_retired_state");
+    if (ingested === "unsupported_retired_state") return;
+    expect(ingested.accepted_count).toBe(0);
   });
 
   it("keeps directory write scopes component-aware and result paths normalized", async () => {

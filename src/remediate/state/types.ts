@@ -112,17 +112,42 @@ export type RemediationPlan = z.infer<typeof RemediationPlanSchema>;
  * rewritten prompt/baseline self-consistent. Persisting this digest in the
  * normal remediation state gives ingestion an independent value to verify.
  */
-export const RemediationHostHandoffRecordSchema = z
+export const REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1 =
+  "remediation-host-handoff-record/v1alpha1" as const;
+export const REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2 =
+  "remediation-host-handoff-record/v1alpha2" as const;
+export const REMEDIATION_HOST_SCOPE_SEMANTICS =
+  "explicit-directory-markers/v1" as const;
+
+const RemediationHostHandoffBindingFields = {
+  run_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u),
+  baseline_commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u),
+  workload_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  work_item_ids: z.array(z.string()).min(1),
+};
+
+const LegacyRemediationHostHandoffRecordSchema = z
   .object({
-    contract_version: z.literal(
-      "remediation-host-handoff-record/v1alpha1",
-    ),
-    run_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u),
-    baseline_commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u),
-    workload_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
-    work_item_ids: z.array(z.string()).min(1),
+    contract_version: z.literal(REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1),
+    ...RemediationHostHandoffBindingFields,
   })
   .strict();
+
+const ExplicitScopeRemediationHostHandoffRecordSchema = z
+  .object({
+    contract_version: z.literal(REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2),
+    scope_semantics: z.literal(REMEDIATION_HOST_SCOPE_SEMANTICS),
+    ...RemediationHostHandoffBindingFields,
+  })
+  .strict();
+
+export const RemediationHostHandoffRecordSchema = z.discriminatedUnion(
+  "contract_version",
+  [
+    LegacyRemediationHostHandoffRecordSchema,
+    ExplicitScopeRemediationHostHandoffRecordSchema,
+  ],
+);
 export type RemediationHostHandoffRecord = z.infer<
   typeof RemediationHostHandoffRecordSchema
 >;

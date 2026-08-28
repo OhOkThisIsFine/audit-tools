@@ -67,13 +67,21 @@ interface CurrentState {
   readonly host_handoff?: HandoffRecord;
 }
 
-interface HandoffRecord {
-  readonly contract_version: "remediation-host-handoff-record/v1alpha1";
+type HandoffRecord = {
   readonly run_id: string;
   readonly baseline_commit: string;
   readonly workload_sha256: string;
   readonly work_item_ids: readonly string[];
-}
+} &
+  (
+    | {
+        readonly contract_version: "remediation-host-handoff-record/v1alpha1";
+      }
+    | {
+        readonly contract_version: "remediation-host-handoff-record/v1alpha2";
+        readonly scope_semantics: "explicit-directory-markers/v1";
+      }
+  );
 
 interface PreparedHandoff {
   readonly workload: HostWorkload;

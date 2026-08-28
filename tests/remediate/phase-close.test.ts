@@ -1572,6 +1572,158 @@ describe("closing spawns do not starve event-loop liveness", () => {
 });
 
 describe("blockResolvedItemsOnCombinedFailure — per-item attribution", () => {
+  it("attributes a failing descendant to its directory-scoped block", () => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        findings: [],
+        blocks: [
+          {
+            block_id: "B1",
+            finding_ids: ["F1"],
+            dependencies: [],
+            touched_files: ["src/"],
+          },
+          {
+            block_id: "B2",
+            finding_ids: ["F2"],
+            dependencies: [],
+            touched_files: ["docs/"],
+          },
+        ],
+      },
+      items: {
+        F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
+        F2: { finding_id: "F2", status: "resolved", block_id: "B2" },
+      },
+    });
+
+    const blocked = blockResolvedItemsOnCombinedFailure(
+      state,
+      "FAIL src/nested/alpha.test.ts > it explodes",
+    );
+
+    expect(blocked).toBe(true);
+    expect(state.items!.F1!.status).toBe("blocked");
+    expect(state.items!.F2!.status).toBe("resolved");
+  });
+
+  it.each([
+    "FAIL ./src/nested/alpha.test.ts > it explodes",
+    String.raw`FAIL .\src\nested\alpha.test.ts > it explodes`,
+  ])("accepts one leading dot segment in an implicated path: %s", (output) => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        findings: [],
+        blocks: [
+          {
+            block_id: "B1",
+            finding_ids: ["F1"],
+            dependencies: [],
+            touched_files: ["src/"],
+          },
+          {
+            block_id: "B2",
+            finding_ids: ["F2"],
+            dependencies: [],
+            touched_files: ["docs/"],
+          },
+        ],
+      },
+      items: {
+        F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
+        F2: { finding_id: "F2", status: "resolved", block_id: "B2" },
+      },
+    });
+
+    expect(blockResolvedItemsOnCombinedFailure(state, output)).toBe(true);
+    expect(state.items!.F1!.status).toBe("blocked");
+    expect(state.items!.F2!.status).toBe("resolved");
+  });
+
+  it.each([
+    "FAIL /repo/src/nested/alpha.test.ts > it explodes",
+    String.raw`FAIL C:\repo\src\nested\alpha.test.ts > it explodes`,
+  ])("attributes an absolute implicated path to its directory scope: %s", (output) => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        findings: [],
+        blocks: [
+          {
+            block_id: "B1",
+            finding_ids: ["F1"],
+            dependencies: [],
+            touched_files: ["src/"],
+          },
+          {
+            block_id: "B2",
+            finding_ids: ["F2"],
+            dependencies: [],
+            touched_files: ["docs/"],
+          },
+        ],
+      },
+      items: {
+        F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
+        F2: { finding_id: "F2", status: "resolved", block_id: "B2" },
+      },
+    });
+
+    expect(blockResolvedItemsOnCombinedFailure(state, output)).toBe(true);
+    expect(state.items!.F1!.status).toBe("blocked");
+    expect(state.items!.F2!.status).toBe("resolved");
+  });
+
+  it.each([
+    "src/../outside/alpha.test.ts",
+    "src/./nested/alpha.test.ts",
+    "../src/nested/alpha.test.ts",
+    "/repo/src-other/nested/alpha.test.ts",
+  ])("rejects unsafe or non-component directory lookalike: %s", (candidate) => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        findings: [],
+        blocks: [
+          {
+            block_id: "B1",
+            finding_ids: ["F1"],
+            dependencies: [],
+            touched_files: ["src/"],
+          },
+          {
+            block_id: "B2",
+            finding_ids: ["F2"],
+            dependencies: [],
+            touched_files: ["docs/"],
+          },
+        ],
+      },
+      items: {
+        F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
+        F2: { finding_id: "F2", status: "resolved", block_id: "B2" },
+      },
+    });
+
+    expect(
+      blockResolvedItemsOnCombinedFailure(
+        state,
+        `FAIL ${candidate}\nFAIL docs/guide.test.ts`,
+      ),
+    ).toBe(true);
+    expect(state.items!.F1!.status).toBe("resolved");
+    expect(state.items!.F2!.status).toBe("blocked");
+  });
   // The attribution arm read `item.item_spec?.touched_files`. Nothing in
   // production ever WROTE an item_spec, so that expression was always `[]`,
   // `attributed` was always empty, and the ambiguous-attribution fallback

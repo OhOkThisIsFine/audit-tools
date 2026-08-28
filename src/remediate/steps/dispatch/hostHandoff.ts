@@ -40,8 +40,11 @@ import {
   type SubmissionLedgerEvent,
   type SubmissionScanMessages,
 } from "audit-tools/shared";
-import type { RemediationState } from "../../state/store.js";
+import { StateStore, type RemediationState } from "../../state/store.js";
 import {
+  REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1,
+  REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2,
+  REMEDIATION_HOST_SCOPE_SEMANTICS,
   RemediationHostHandoffRecordSchema,
   RemediationPlanSchema,
   isClarificationCategory,
@@ -63,8 +66,6 @@ import {
 } from "../types.js";
 
 const STATE_CONTRACT_VERSION = "remediate-code-state/v1alpha1" as const;
-const HANDOFF_RECORD_CONTRACT_VERSION =
-  "remediation-host-handoff-record/v1alpha1" as const;
 
 export type UnsupportedRetiredRemediationState = "unsupported_retired_state";
 
@@ -358,6 +359,125 @@ function pathIsAllowedByWriteScope(
 }
 
 /**
+ * Recover only the directory marker the pre-0.50.2 producer erased.
+ *
+ * The persisted workload remains byte-for-byte bound. This creates an
+ * in-memory consumer view only after canonical workload validation, and only
+ * when a finding assigned to this same work item carries the exact slash form
+ * plus a syntactically valid plan-time content hash. Live filesystem shape,
+ * git tree shape, and a coincidentally named directory are deliberately not
+ * evidence: any of those would turn an exact legacy file scope into a blanket
+ * widening rule.
+ */
+interface LegacyDirectoryScopeRecovery {
+  readonly workItem: RemediationHostWorkItem;
+  readonly directoryPaths: readonly string[];
+}
+
+function deriveLegacyDirectoryPathsForBlock(
+  state: CurrentRemediationHostState,
+  blockId: string,
+  declaredPaths: readonly string[],
+): string[] {
+  const binding = state.host_handoff;
+  if (binding?.contract_version !== REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1) {
+    return [];
+  }
+  const block = state.plan.blocks.find((entry) => entry.block_id === blockId);
+  if (!block) return [];
+
+  const hashedDirectoryPaths = new Set<string>();
+  for (const findingId of block.items) {
+    const finding = state.plan.findings.find((entry) => entry.id === findingId);
+    if (!finding) continue;
+    for (const affectedFile of finding.affected_files) {
+      if (
+        affectedFile.path.endsWith("/") &&
+        isSha256(affectedFile.hash_at_plan_time)
+      ) {
+        hashedDirectoryPaths.add(affectedFile.path);
+      }
+    }
+  }
+
+  return declaredPaths.flatMap((path) => {
+    const directoryPath = `${path}/`;
+    return !path.endsWith("/") && hashedDirectoryPaths.has(directoryPath)
+      ? [directoryPath]
+      : [];
+  });
+}
+
+function deriveLegacyDirectoryScopeRecovery(
+  state: CurrentRemediationHostState,
+  workItem: RemediationHostWorkItem,
+): LegacyDirectoryScopeRecovery {
+  if (!state.host_handoff?.work_item_ids.includes(workItem.id)) {
+    return { workItem, directoryPaths: [] };
+  }
+  const directoryPaths = deriveLegacyDirectoryPathsForBlock(
+    state,
+    workItem.id,
+    workItem.allowed_files,
+  );
+  const recovered = new Set(directoryPaths);
+  const allowedFiles = workItem.allowed_files.map((allowed) => {
+    const directoryPath = `${allowed}/`;
+    return recovered.has(directoryPath) ? directoryPath : allowed;
+  });
+  return {
+    workItem: sameStrings(allowedFiles, workItem.allowed_files)
+      ? workItem
+      : { ...workItem, allowed_files: allowedFiles },
+    directoryPaths,
+  };
+}
+
+function effectiveBoundWorkload(
+  state: CurrentRemediationHostState,
+  workload: RemediationHostWorkload,
+): RemediationHostWorkload {
+  if (!state.host_handoff) return workload;
+  return {
+    ...workload,
+    work_items: workload.work_items.map((workItem) =>
+      deriveLegacyDirectoryScopeRecovery(state, workItem).workItem,
+    ),
+  };
+}
+
+/**
+ * Persist the same directory intent for every block in a legacy plan before
+ * its final active workload is cleared. Dependency-blocked blocks are included
+ * because their next workload will be minted under v1alpha2 and cannot use
+ * legacy inference. This must run only on the final drain: changing a currently
+ * bound block sooner would break byte-for-byte canonical re-derivation.
+ */
+function migrateLegacyDirectoryScopesAfterFinalDrain(
+  state: CurrentRemediationHostState,
+): void {
+  state.plan.blocks = state.plan.blocks.map((block) => {
+    const recovered = new Set(
+      deriveLegacyDirectoryPathsForBlock(
+        state,
+        block.block_id,
+        block.touched_files,
+      ),
+    );
+    if (recovered.size === 0) return block;
+    const touchedFiles = block.touched_files.map((path) =>
+      !path.endsWith("/") && recovered.has(`${path}/`) ? `${path}/` : path,
+    );
+    return sameStrings(touchedFiles, block.touched_files)
+      ? block
+      : {
+          ...block,
+          touched_files: [...new Set(touchedFiles)].sort(compareCodeUnits),
+        };
+  });
+}
+
+/**
  * A block that arrived outside the shape this boundary CONSUMES.
  *
  * The producer half of the write-scope contract is owned upstream
@@ -611,10 +731,44 @@ export async function remediationSubmissionBinding(params: {
       isRecord(item) && item.id === params.workItemId,
   );
   if (workItem === undefined) return null;
+  // Legacy directory recovery is privileged by the tool-owned state binding,
+  // not by prompt text or current filesystem shape. Exact-scope validation
+  // remains available when state is absent; only canonical bound state can
+  // widen the in-memory view.
+  let validationWorkItem = workItem;
+  try {
+    const storedState = await new StateStore(paths.artifactsDir).loadState();
+    const state = storedState
+      ? parseCurrentState({
+          ...storedState,
+          contract_version: STATE_CONTRACT_VERSION,
+        })
+      : null;
+    const canonicalWorkload = state
+      ? parseWorkload(read.value, paths, params.runId, state)
+      : null;
+    const canonicalWorkItem = canonicalWorkload?.work_items.find(
+      (item) => item.id === params.workItemId,
+    );
+    if (state?.host_handoff && canonicalWorkItem) {
+      validationWorkItem = deriveLegacyDirectoryScopeRecovery(
+        state,
+        canonicalWorkItem,
+      ).workItem;
+    }
+  } catch {
+    // Invalid/missing state cannot authorize widening. The raw workload's
+    // exact scope remains the fail-closed validator for this recovery write.
+  }
   return {
     submissionDir: paths.resultDir,
     validate: (value: unknown): SubmissionIssue | null => {
-      const parsed = parseResult(value, params.runId, workItem, paths.root);
+      const parsed = parseResult(
+        value,
+        params.runId,
+        validationWorkItem,
+        paths.root,
+      );
       return parsed.ok
         ? null
         : { code: "submission_contract_invalid", message: parsed.reason };
@@ -1907,7 +2061,8 @@ export async function prepareRemediationHostHandoff(params: {
   }
   const handoffRecord: RemediationHostHandoffRecord =
     existingRecord ?? {
-      contract_version: HANDOFF_RECORD_CONTRACT_VERSION,
+      contract_version: REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2,
+      scope_semantics: REMEDIATION_HOST_SCOPE_SEMANTICS,
       run_id: params.runId,
       baseline_commit: baselineCommit,
       workload_sha256: workloadDigest,
@@ -2068,6 +2223,7 @@ export async function ingestRemediationHostResults(params: {
       state: nextState,
     };
   }
+  const effectiveWorkload = effectiveBoundWorkload(state, workload);
 
   const eligibleIds = new Set(
     (hostDependencyLevels(state)[0] ?? []).map((block) => block.block_id),
@@ -2092,7 +2248,7 @@ export async function ingestRemediationHostResults(params: {
   // documents rather than admitted on the attestation alone.
   const canCorroborate =
     state.host_handoff !== undefined || isGitRepo(paths.root);
-  for (const workItem of workload.work_items) {
+  for (const workItem of effectiveWorkload.work_items) {
     const pendingItems = workItem.finding_ids.filter(
       (findingId) => nextState.items[findingId]?.status === "pending",
     );
@@ -2309,7 +2465,7 @@ export async function ingestRemediationHostResults(params: {
     nextState.applied_edit_surface = [...landedFiles].sort(compareCodeUnits);
   }
 
-  const pendingWorkItemIds = workload.work_items
+  const pendingWorkItemIds = effectiveWorkload.work_items
     .filter((workItem) =>
       workItem.finding_ids.some(
         (findingId) => nextState.items[findingId]?.status === "pending",
@@ -2318,6 +2474,7 @@ export async function ingestRemediationHostResults(params: {
     .map((workItem) => workItem.id);
   let stateChanged = completed.length > 0;
   if (nextState.host_handoff && pendingWorkItemIds.length === 0) {
+    migrateLegacyDirectoryScopesAfterFinalDrain(nextState);
     delete nextState.host_handoff;
     stateChanged = true;
   }
