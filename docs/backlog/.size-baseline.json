@@ -1,9 +1,4 @@
 {
-  "file_ceilings": {
-    "open-bugs.md": 129162
-  },
-  "entries_over_budget": [
-    "forward-tracks.md::Free/cheap \"quota-arbitrage\" dispatch tier — extra SOURCE POOLS on existing",
-    "forward-tracks.md::Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-6"
-  ]
+  "file_ceilings": {},
+  "entries_over_budget": []
 }
