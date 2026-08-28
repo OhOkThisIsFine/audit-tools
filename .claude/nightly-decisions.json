@@ -1944,20 +1944,26 @@
     "answer": "Two consecutive quiet rounds. Add the counter in systemicChallengeExecutor.ts, state the number in the spec, and record the applied rule in the register. Owner decision 2026-08-28, taken with NEW information from the CX-02 blocker-3 refutation: a re-consumed submission yields zero new findings, so under N=1 a single duplicate flips converged=true and terminates the adversary loop permanently. N=2 does not fix that class (durable submission staging does) but it removes the single-event trigger. Cost accepted: one extra adversary round per audit.",
     "subject": "Systemic-challenge convergence: fix a number of consecutive quiet rounds, or make the current one-round rule normative?",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-28T17:16:57.500Z"
+    "decided_at": "2026-08-28T17:16:57.500Z",
+    "completed_at": "2026-08-28T23:14:12.376Z",
+    "completed_ref": "4fccdbf9"
   },
   "bd756879fbb9184a": {
     "disposition": "settled",
     "answer": "Widen the rule and migrate both sites. What is banned is the CONSTRUCTION, not the algorithm name: widen the check:shared-primitives pattern rule to match an inline createHash chain of any algorithm truncated by a bare slice, and move shortHash and packetIdFor onto the shared helper. Owner decision 2026-08-28. Cost accepted: a broader pattern has more room for false positives, and two call sites change.",
     "subject": "The shared-hash gate is keyed to the algorithm name, so two sha1 sites re-roll the pattern it bans — widen the rule, or declare short ids out of remit?",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-28T17:17:03.655Z"
+    "decided_at": "2026-08-28T17:17:03.655Z",
+    "completed_at": "2026-08-28T23:14:12.431Z",
+    "completed_ref": "bda897cb"
   },
   "7abf9b363b40d381": {
     "disposition": "settled",
     "answer": "Adopt P48 as proposed. run-vitest-gate writes a worktree-content-bound stamp on a full-suite green; closeout-challenge-gate reads it as one more piece of mechanical evidence. Not a commit refusal: a full suite is slow, and a false red at the commit boundary is corrosive. Owner decision 2026-08-28. NOTE before applying: the proposal patch in .audit-tools/nightly/proposals/P48-suite-green-stamp/ is an UNRUN draft — verify each cited site's role and run its test before landing it.",
     "subject": "P48: record every full-suite green against the tree it ran on, so a later edit cannot inherit it?",
     "path": "docs/backlog/durable-traps.md",
-    "decided_at": "2026-08-28T17:17:05.708Z"
+    "decided_at": "2026-08-28T17:17:05.708Z",
+    "completed_at": "2026-08-28T23:14:12.499Z",
+    "completed_ref": "15e45d76"
   }
 }

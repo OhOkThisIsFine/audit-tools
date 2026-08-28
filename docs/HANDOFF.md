@@ -16,8 +16,11 @@
   permanently, because a re-consumed submission reports a dry round. And the plan draw's blanket
   halt is wrong: 8 of 13 bespoke policy bodies are HYBRID, so `audit-code plan` would stop at a
   boundary that does not exist on that run. Both replacements are stated in the record.
-- **Repository:** `main` and `origin/main` are synchronized; `v0.50.3` is live on npm and the tag
-  and local version match it. No release is pending.
+- **Record landing 6 needs no work — it is already in the tree.** The audit local-command path
+  runs on `runTrackedAsync` with a 120 s deadline, so a synchronous child cannot starve the held
+  lock's heartbeat. CX-02's remaining implementation is landings 1 to 5 of the record's decided
+  shape.
+- **Repository:** `v0.50.3` is live on npm; `main` carries fixes newer than the tag.
 
 ## Immediate next
 

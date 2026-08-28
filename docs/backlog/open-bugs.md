@@ -6,19 +6,6 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **The audit local-command path spawns SYNCHRONOUSLY inside the artifact-tree lock; remediate
-  already fixed this (2026-08-28, DECIDED owner, medium).** `runFirstAvailableCommand`
-  (`src/audit/orchestrator/localCommands.ts`) calls the sync `runTracked`, so a child blocks the
-  event loop and starves every `setInterval` heartbeat, the held lock's mtime beat included.
-  `src/shared/tooling/exec.ts` records this ALREADY firing: a stalled `npx --version` probe
-  classified a live lock stale and it was stolen mid-flight. Reached from `autoFixExecutor.ts` and
-  `syntaxResolutionExecutor.ts`, inside the hold. `src/remediate/phases/close.ts` migrated to
-  `runTrackedAsync`; audit did not — one core, two draws, fixed on one side.
-  **Landing:** move it onto `runTrackedAsync` with a 120 s deadline; both callers are already
-  async. It also classifies `ETIMEDOUT` / `ENOBUFS` instead of a bare signal, and escalates to
-  SIGKILL. **Do NOT move the lock constants:** with nothing blocking the loop the heartbeat fires,
-  so `STALE_LOCK_MS` stays 30 s. Independent of CX-02.
-
 - **The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
   shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction:
   false_red).** The pre-commit `test:doc-contract` leg reported 24 of 24 tests passed and then failed
@@ -720,12 +707,6 @@
   document.
 
 - **The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](../reviews/closeout-generation-failure-2026-08-26.md)).** The render record under `.claude/hooks/.state/closeout-render/` binds to worktree CONTENT (`worktreeTree`), but its SESSION ownership rests on a timestamp: `.claude/hooks/closeout-challenge-gate.mjs` compares the record's `rendered_at` against the session registry's `registered_at`, so only a render that PREDATES this session is refused. A concurrent session's render — written after this one started — reads as this session's own, and the tree comparison catches it only when the content differs. The stated reason for the timestamp, that the renderer cannot read a session id, does not hold: `scripts/render-closeout.mjs` reads `CLAUDE_SESSION_ID`, which nothing in this harness sets, so the recorded `session_id` is always null; the environment does carry `CLAUDE_CODE_SESSION_ID`, and its value is exactly the filename of that session's record in the registry directory `readSessionRegistry` (`scripts/shared/sessionRegistry.mjs`) resolves from the hook payload. Second half of the same defect: the record is ONE repo-global file, so even a correctly-named id is last-writer-wins across concurrent sessions. **Property:** a closeout render record identifies the session that produced it, and the Stop gate accepts only a record this session wrote — never another session's render that happens to share the tree, and never on a name the environment does not supply. The false premise has a second copy, as data in the gate-scripts `uncovered` field of `scripts/guard-reach-data.mjs`; it moves in the same change. `tests/shared/closeout-render.test.ts` is the home for the pin.
-
-- **The shared-hash gate is spelled `sha256`, so an inline sha1 chain re-rolls the anti-pattern it bans (2026-08-27, refutation pass over [`shared-helper-adoption-2026-08-25`](../reviews/shared-helper-adoption-2026-08-25.md)).** `src/shared/hash.ts` is the declared single source for content hashing and bans a bare `.slice(0, N)` on a hash result, but `check:shared-primitives` matches the literal spelling `sha256` — keyed to an ALGORITHM, not to the construction. Two sites build an inline `createHash("sha1")` chain and truncate it with exactly that literal: `shortHash` in `src/audit/orchestrator/selectiveDeepening/shared.ts`, and `packetIdFor` in `src/audit/orchestrator/reviewPackets.ts`, which already imports `sanitizeSegment` from that module yet re-rolls `shortHash`'s body. The gate reports both clean.
-
-  **DECIDED (owner, 2026-08-28): widen the rule and migrate both sites.** The banned thing is the CONSTRUCTION — widen the pattern to a bare `createHash(` chain of any algorithm truncated by a bare slice, home file exempt, and move both sites onto `hashContent`. Do not re-propose the rejected alternative (declare short ids out of remit).
-
-  **Property:** no inline digest construction in `src/` is invisible to `check:shared-primitives` because of the algorithm it names — every hash-chain site is either routed through the declared home or carries a DATA exception row stating its reason, and the guard registry's uncovered half for this area states the algorithm boundary outright.
 
 - **An analysis record can identify work and reach no work queue, and every gate stays green while
   it happens (2026-08-27, medium, from the orphan-routing lap).** Seven `docs/reviews/` records
