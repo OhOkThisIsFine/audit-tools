@@ -665,6 +665,16 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   cwd it is a full session in the SHARED checkout. For bounded recon, POST to the router and skip the
   nested agent entirely.
 
+- **The MCP `pool` offload lane dies on the same hand-typed `auto` alias as `claude.ps1`, and its
+  `model` override is INERT (2026-08-27).** The lane template spawns `claude.exe -p … --model auto`;
+  Claude Code rejects `auto` client-side (71-byte `unrecognized_model` stderr, 0 stdout) while the
+  job stays `running` — cancel on that signature, don't wait for the timeout. `offload_start`'s
+  `model` parameter substitutes only into lane args that carry a `{model}` token, and this lane's
+  args carry none, so the override lands nowhere and the argv shows `--model auto` regardless.
+  Second entry point of the P47 class (nightly sol-1); the fix is the lane config in the freellmapi
+  server, outside this repo. Until it lands, Claude-pool recon has no working lane — use the agy
+  lanes.
+
 - **A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak
   model (2026-08-09).** The router's `auto` alias resolves to a reasoning model that spends its whole
   budget thinking **in the visible channel** — 7 of 7 contract-drafting jobs came back ~10,200 chars

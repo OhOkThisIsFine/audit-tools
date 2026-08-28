@@ -46,8 +46,11 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   policy draw, lock/persist granularity, the composite-cap replacement, the marker-protocol
   semantics, and the nine pinning test files — live in
   [`cx02-drain-unification-design-2026-08-26.md`](../reviews/cx02-drain-unification-design-2026-08-26.md).
-  One atomic loop-core replace; never stage half of it. Its one open design question (lock hold-time
-  around formerly-outside-the-lock work) needs a live-audit measurement before the cap is sized.
+  One atomic loop-core replace; never stage half of it. Its two open design questions — the
+  cycle-guard observation unit and lock hold-time — are ANSWERED in that record (2026-08-27), so the
+  item is ready to code. What still needs the live fresh-audit measurement is the cap sizing, and that
+  measurement must now capture HOLD TIME as well as dispatch count: the single lock hold can convert a
+  concurrent waiter from waiting into failing at 10s/20s.
   The record's four refuted claims were corrected in place 2026-08-27 by four independent
   verification lanes, so it is the single home for the constraints and nothing is restated here —
   read it, not a summary of it. Two of those repairs changed what the implementing lap must do, not

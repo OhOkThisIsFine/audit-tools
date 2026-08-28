@@ -28,9 +28,8 @@ drain's `deriveObligationState` is uncached while the inner one is WeakMap-memoi
 1. **Cycle guards (approach-B standing decision — the "Cycle guards" comment block in
    `src/audit/cli/nextStepHelpers.ts`):** `checkNoProgressBeforeDispatch` and
    `checkFinalizationCycle` STAY in audit's Ctx; the shared engine keeps NO stateSignature
-   (approach A was tried and false-tripped — do not re-add). Under one drain, prefer guards
-   observing at HOST-STEP EMISSION points, not per obligation, so thresholds keep their meaning
-   without re-derivation.
+   (approach A was tried and false-tripped — do not re-add). Its emission-point answer is REFUTED and
+   superseded — see *The two open answers*: the guards observe per DISPATCH, in dispatch slots.
 2. **`audit-code plan` is a live direct consumer of the inner drain** (`planCommand.ts`, wired at
    `cli.ts`, documented in the shipped operator guide): it becomes a POLICY DRAW over the one
    registry — deterministic-only advance, halts at the first host boundary, no workload side
@@ -39,9 +38,10 @@ drain's `deriveObligationState` is uncached while the inner one is WeakMap-memoi
    deterministic obligations in memory under one artifact-tree lock (heartbeat on), persist ONCE at
    the halt. The old outer layer's between-transition reload/ingest/materialization become
    obligations inside the one ordering. No per-obligation persist (mid-fold disk visibility; 30s
-   stale-lock self-steal risk). Open question the spec must answer first: whether work the outer
-   layer ran OUTSIDE the lock (workload materialization, result ingest) is safe inside the fold's
-   hold-time, or the fold releases/reacquires around it.
+   stale-lock self-steal risk). Its open question — whether work the outer layer ran OUTSIDE the lock
+   is safe inside the fold's hold-time, or the fold releases/reacquires around it — is ANSWERED in
+   *The two open answers*: one hold, and release/reacquire is not available. The self-steal risk named
+   here does not apply to a live holder.
 4. **Three caps in two units today, not one composite:** the OUTER fold
    (`runDeterministicForNextStep`) supplies no `maxTransitions`, so its bound is the engine's
    inherited `DEFAULT_MAX_TRANSITIONS` — 100 *engine transitions*. The INNER drain carries two of
@@ -204,6 +204,99 @@ conditional and added four results, each verified here before it was written dow
   callbacks such as `runHostDelegationObligation`, which INGESTS RESULTS and calls
   `ensureSemanticReviewRun` — side effects a plan must not have. Constraint 2's "policy draw" is
   therefore a filtered view of the one registry, and the filter is load-bearing.
+
+## The two open answers, decided 2026-08-27
+
+Constraint 1's answer was refuted and constraint 3 carried an open question. Both are settled here
+from source, and an independent adversarial lane confirmed each mechanical premise below against
+HEAD with the deciding lines quoted back. The judgments are this record's; the facts are checked.
+
+### Constraint 1, re-answered — the guards observe PER DISPATCH, in dispatch slots
+
+The mechanism the earlier answer missed: `checkFinalizationCycle` is a SLACK measure, not a counter.
+Its condition is `index + 1 - seenStateSignatures.size < tolerance` → continue
+(`nextStepHelpers.ts:1978`), and each counted event adds exactly one signature to the set. The left
+side is therefore the number of counted events that landed on an ALREADY-SEEN artifact state. So 16
+is *permitted revisits*, not permitted iterations, and it fires on the 16th. Both terms are in ONE
+unit today — outer-fold transitions, advanced once per `transition` in `countTransitions`
+(`nextStepHelpers.ts:2685-2694`) and signed once per guard call.
+
+1. **Observation point: the dispatch site.** Emission points cannot work (refuted above: `advance`
+   returns on the first emit). The obligation SCAN cannot work either — `findNextObligation` selects
+   without dispatching, so a scan produces no new state to sign. The dispatch is the only point where
+   a new artifact state exists. Identity is available there: the unified obligation's `execute` calls
+   `decideNextStep` once, as `runDeterministicExecutor` does today (`nextStepHelpers.ts:2165`), so the
+   obligation id and executor id are both in scope without re-deriving.
+2. **Unit: dispatch slots** — the unit of `MAX_DRAIN_STEPS`, which is the operative graceful cap. The
+   two terms of the subtraction must never be in different units.
+3. **Keep 16, declared once, and do NOT derive it from the cap.** `deriveEngineBound` exists because
+   the engine bound is pure slack above a cap — a quantity with no meaning of its own. The cycle
+   tolerance is the opposite: it is a domain judgment about how deep a legitimate ping-pong may run.
+   Any formula reproducing 16 from 64 is numerology fitted to the present pair, and it would state a
+   dependence that does not exist.
+4. **What IS mechanical is the ORDERING: `tolerance < MAX_DRAIN_STEPS`,** pinned by a contract test
+   beside `bounded-call-single-source`. At or above the cap the guard is dead code that can never
+   fire. This is the mirror of the invariant `deriveEngineBound` protects from the other side, and it
+   is the honest form of "single-source it" here — the relationship is enforced, the judgment is not
+   disguised as arithmetic.
+5. **Accept the tightening explicitly.** Today a cross-transition ping-pong needs ~16 outer
+   transitions, each up to 64 dispatches, to trip. Under one drain it trips after ~16 repeated-state
+   dispatches. That is intended, because the guard is no longer load-bearing for correctness: the
+   64-slot cap halts the fold gracefully whether or not the guard fires, so the guard's remaining job
+   is the better DIAGNOSTIC — it names the cycling obligations, which the cap cannot.
+6. **Checked and clear: the bootstrap window does not false-trip.** `computeArtifactStateSignature`
+   returns the literal `"no-metadata"` before any metadata exists
+   (`orchestrator/artifactMetadata.ts:66`), and unlike `checkNoProgressBeforeDispatch` the
+   finalization guard has no skip for it — so at finer granularity a long pre-metadata run would
+   accumulate slack fast. It cannot: the fold recomputes `artifact_metadata` on every step, so at most
+   the first dispatch signs `"no-metadata"`. `checkNoProgressBeforeDispatch` itself needs no
+   re-unitting — its key is `(signature, executor, obligation)` at 0 tolerance, which is unit-free.
+
+### Constraint 3, answered — ONE hold, persist once, and the reloads go
+
+The open question was whether the fold holds one lock across work the outer layer ran outside it, or
+releases and reacquires. It holds ONE. Three facts force it, and none was in the record:
+
+- **The inner drain is already this shape.** `runAuditStep` holds one tree lock across load → the
+  whole drain of up to 64 dispatches → ONE `writeCoreArtifacts` (`cli/auditStep.ts:86-107`).
+  Persist-once-under-one-hold is not new machinery; it is the existing inner contract, widened.
+- **The self-steal risk the constraint cites does not apply to a live holder.** The heartbeat
+  re-stamps the held lock at `STALE_LOCK_MS / 3` = 10s, token-checked (`shared/io/fileLock.ts:189`),
+  and a steal requires an mtime older than 30s. Hold length is irrelevant while the heartbeat beats.
+- **Release-and-reacquire is not available anyway.** `withFileLock` is non-reentrant: `acquireLock`
+  does an exclusive `wx` create (`fileLock.ts:261`), so a second acquisition from inside the hold
+  gets `EEXIST` — and the heartbeat keeping the outer hold fresh is exactly what stops the stale-steal
+  path from rescuing it. It retries to the 10s default and throws `FileLockTimeoutError`. A
+  deterministic timeout, never a success.
+
+Three consequences follow, and each is part of the same atomic replace:
+
+1. **Eleven reload sites become in-memory carries.** `nextStepHelpers.ts` returns
+   `state: await loadArtifactBundle(...)` from eleven transitions (2203, 2297, 2323, 2346, 2384,
+   2402, 2422, 2456, 2475, 2508, 2524). Under persist-once each reads the fold's own unwritten state,
+   which silently rolls back everything the fold has done — a larger break than the metadata-carry
+   loss the constraint names. The pattern needs no invention: `runDrainStep` already carries in memory
+   (`orchestrator/advance.ts:699`), and one outer transition already does too — the result-ingest arm
+   returns `ingested.updated_bundle` (`nextStepHelpers.ts:2616`).
+2. **The catch's second acquisition is deleted, not moved.** `executeAndRecord`'s failure path takes
+   the tree lock a second time to write `last_executor` / `last_obligation`
+   (`nextStepHelpers.ts:1845-1851`); inside one hold that is the guaranteed timeout above. It becomes
+   a plain in-memory mutation of the fold's bundle.
+3. **The halt-time persist must therefore cover the THROW path.** Today that catch persists before it
+   rethrows. A persist placed only on the success path drops the failure attribution the recovery
+   path reads.
+
+**The cost to measure, stated so it is not discovered later.** The hold now spans work the outer layer
+ran unlocked — result ingest, workload materialization, analyzer spawns. The heartbeat protects the
+HOLDER, not WAITERS: `withFileLock`'s default timeout is 10s (`fileLock.ts:27`) and
+`LOCKED_JSON_STORE_TIMEOUT_MS` is `STALE_LOCK_MS - 10s` = 20s (`shared/io/lockedJsonStore.ts:19`). A
+fold holding longer than those windows converts a concurrent second process — another `next-step`,
+`review-run` (`cli/reviewRun.ts:176,195`), an analyzer-policy write — from *waiting* into *failing*.
+So the live fresh-audit measurement this entry already requires before the cap is sized must measure
+HOLD TIME, not only dispatch count. The residual risk is event-loop starvation rather than staleness:
+a synchronous stretch over 30s inside the hold stops the heartbeat and the lock does go stale. Every
+folded-in operation is async IO or an awaited child process, so a new synchronous hot loop inside the
+fold is the one thing that would break it.
 
 ## Preserve list (report + refuter union)
 

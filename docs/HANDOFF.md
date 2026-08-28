@@ -42,19 +42,22 @@
 ## Immediate next
 
 **Implement CX-02's structural collapse.** One atomic loop-core replace; never stage half of it. The
-design gate is done and the record carries verified inputs, so the next lap starts by writing the
-two answers the gate left open — it does not start by coding.
+design gate is done, and **the two answers it left open are now written** into the record's *The two
+open answers* section — each premise checked against HEAD and confirmed by an independent adversarial
+lane. So this lap starts by coding. In brief, with the record as the single home:
 
-1. **Re-answer constraint 1.** Its own answer is refuted. Decide where the cycle guards observe and
-   in WHAT UNIT: `FINALIZATION_CYCLE_TOLERANCE` is 16 and today counts outer-fold transitions, each
-   of which may contain up to 64 dispatches, so carrying the literal into a per-dispatch observer
-   tightens the guard silently by up to 64x. Single-source it the way `deriveEngineBound` already
-   single-sources the cap pair — derive the threshold, never write a second literal.
-2. **Answer constraint 3's open question**, which the record says the spec must settle first: does
-   the fold hold ONE lock across the work the outer layer ran outside it, or release and reacquire?
-   Bound to it: several transitions RELOAD the bundle from disk, and keeping those reloads while
-   deferring the write to a halt-time persist discards the in-memory `artifact_metadata` carry the
-   PRIORITY-ordering guarantee depends on.
+1. **Constraint 1 is re-answered.** The guards observe per DISPATCH, counted in dispatch slots. The
+   tolerance stays 16 and is deliberately NOT derived from the cap — what becomes mechanical is the
+   ordering `tolerance < MAX_DRAIN_STEPS`, pinned by a new contract test, because at or above the cap
+   the guard is dead code.
+2. **Constraint 3 is answered: ONE hold, persist once.** Release-and-reacquire is not available —
+   `withFileLock` is non-reentrant, so a second acquisition inside the hold is a guaranteed
+   `FileLockTimeoutError`. Three consequences ride with it: eleven `loadArtifactBundle` transitions
+   become in-memory carries, the catch's second lock acquisition is deleted rather than moved, and the
+   halt-time persist must cover the throw path.
+
+Still open and owner-facing: the live fresh-audit measurement before the cap is sized must measure
+HOLD TIME as well as dispatch count — the single hold can starve a concurrent waiter at 10s/20s.
 
 Then the replace itself: one registry carrying the host-boundary policy, dispatch-local failure
 attribution, a FILTERED registry view for the `plan` draw (`runHostDelegationObligation` ingests
