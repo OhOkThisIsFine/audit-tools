@@ -161,11 +161,49 @@ only the reader's belief.
    explicitly in the spec; a fold that reuses one bundle object across steps breaks the guarantee
    silently.
 
-**The failing test.** `tests/audit/one-holistic-derivation-per-scan.test.ts` states finding 2 as an
-invariant — one fold scan performs ONE holistic audit-state derivation. It is RED at HEAD, and its
-message carries the measurement: one scan over 25 obligations derived the holistic state 25 times.
-It goes green when the two registries become one and that one registry derives through a single
-memoized read. It is the acceptance test for the unification, not a separate fix.
+**The failing test, and what it does NOT prove.** `tests/audit/one-holistic-derivation-per-scan.test.ts`
+states finding 2 as an invariant — one fold scan performs ONE holistic audit-state derivation. It is
+RED at HEAD and its message carries the measurement: one scan over 25 obligations derived the
+holistic state 25 times. An earlier draft of this paragraph called it the acceptance test for the
+unification. **That was wrong, and the second gate lane refuted it:** adding a per-bundle cache to
+the EXISTING outer registry turns it green while both registries and both drains survive. So it
+pins a SEPARABLE performance defect, and CX-02's structural collapse still has no test that can
+pass only after the two drains become one.
+
+### The second gate lane, and the constraint it refutes
+
+A second independent lane re-ran the same three questions from source. It confirmed finding 3's
+conditional and added four results, each verified here before it was written down.
+
+- **Constraint 1's design answer is REFUTED as stated.** It says that under one drain, guards should
+  prefer observing at HOST-STEP EMISSION points. They cannot: shared `advance` RETURNS on the first
+  `emit` outcome, and `runDeterministicForNextStep` builds `seenStateSignatures` and
+  `dispatchedSignatures` fresh on every invocation. So an emission-point observer sees at most ONE
+  emission per call and can never accumulate `FINALIZATION_CYCLE_TOLERANCE`, which is 16. The
+  tolerance's unit today is OUTER-FOLD transitions, counted around one `executeAndRecord` that may
+  itself contain up to 64 inner dispatches. Collapsing the layers therefore has to re-state what
+  that counter counts before it can keep its meaning — the guards staying in audit's Ctx (which
+  constraint 1 gets right) does not by itself preserve the threshold.
+- **The `stateSignature` phrasing is imprecise and reads as a false property of the engine.** Shared
+  `advance` still ACCEPTS `opts.stateSignature`, maintains its `visited` set and returns
+  `stopped: "cycle"`. What was rejected is AUDIT PASSING one, not the engine's capability;
+  `runDeterministicForNextStep` simply omits the option. Say it that way, or a reader concludes the
+  engine has no cycle detection at all.
+- **Persist-once is safe in memory but NOT across a disk reload.** `runDeterministicExecutor` and
+  several `buildAuditObligations` callbacks transition by RELOADING the bundle from disk. Keeping
+  those reloads while deferring the write to a halt-time persist discards the in-memory
+  `artifact_metadata` carry that finding 3 depends on. Every such reload has to become a
+  fold-internal transition or the guarantee breaks silently.
+- **Failure attribution has to become dispatch-local.** Shared `advance` awaits `obligation.execute`
+  and records no executor identity; today `runSingleAdvanceStep` wraps the failure and
+  `executeAndRecord` recovers it with `findExecutorFailure`. Under one drain the dispatch site must
+  attribute from its own current executor and obligation, and the second-lock catch cannot remain
+  inside the planned single lock hold.
+- **The plan draw needs a narrower registry, not the merged one.** `cmdPlan` calls `runAuditStep`
+  with no preferred executor. Making `buildAuditObligations` reachable from there also exposes
+  callbacks such as `runHostDelegationObligation`, which INGESTS RESULTS and calls
+  `ensureSemanticReviewRun` — side effects a plan must not have. Constraint 2's "policy draw" is
+  therefore a filtered view of the one registry, and the filter is load-bearing.
 
 ## Preserve list (report + refuter union)
 
