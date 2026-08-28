@@ -48,11 +48,14 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   [`cx02-drain-unification-design-2026-08-26.md`](../reviews/cx02-drain-unification-design-2026-08-26.md).
   One atomic loop-core replace; never stage half of it — and that scoping is SETTLED: landing part
   of it separately is a debugging-effort argument, which is not a cost here. Its two open design
-  questions are ANSWERED in that record (2026-08-27). **It is NOT ready to code (2026-08-28):** an
-  adversarial pass found the plan not safe to implement literally — six blockers, each with a
-  PROPOSED landing in the record, none of them yet refuted. Refute those first. Cap sizing still
+  questions are ANSWERED in that record (2026-08-27). **The six blockers are REFUTED (2026-08-28)
+  and the record now carries a decided shape for each.** Two landings were replaced outright — the
+  unlink deferral (it makes the systemic-challenge loop converge falsely and permanently) and the
+  plan draw's blanket halt (8 of 13 bespoke policy bodies are hybrid, so the policy must be
+  branch-sensitive) — and the other four survive with amendments that change the work. Read the
+  record's *Where each blocker lands* for the shape; nothing is restated here. Cap sizing still
   needs the live fresh-audit measurement, which must capture HOLD TIME as well as dispatch count:
-  the hold can turn a concurrent waiter into a failure at 10s/20s.
+  a concurrent waiter fails after `DEFAULT_TIMEOUT_MS` = 10,000 ms.
   The record's four refuted claims were corrected in place 2026-08-27 by four independent
   verification lanes, so it is the single home for the constraints and nothing is restated here —
   read it, not a summary of it. Two of those repairs changed what the implementing lap must do, not

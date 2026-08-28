@@ -13,6 +13,18 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **Parallel deep `codex exec` lanes exhaust the ChatGPT quota in well under an hour, and a lane
+  dies mid-answer with NO verdict (2026-08-28).** Five concurrent `codex exec` refutation lanes over
+  one design record burned the quota to a hard stop in roughly forty minutes; the reset was six days
+  out. Three finished, two died with `ERROR: You've hit your usage limit` after ~1 MB of transcript
+  each and returned no answer at all. The two that completed had spent ~460k and ~250k tokens.
+  The cost is asymmetric: a killed lane wastes its entire spend, because the verdict is the last
+  thing it writes. **Practice:** run deep codex lanes in small batches, not a full fan-out, and put
+  the cheapest lanes first so a quota death costs the least. `agy` has separate quota and is the
+  fallback — but it has `read_file` only, so it cannot grep or glob: name every file by absolute
+  path and hand it any enumeration it would otherwise have to search for.
+  [[design-gate-lane-depth-differs-sharply]]
+
 - **Mechanical-analyzer acquisitions decided against — do not re-propose without new evidence
   (folded here 2026-08-27 from the retired mechanical-analyzer layer spec, now deleted).**
   ast-grep: a rule engine with no shipped ruleset — zero leads unless we own a rule catalog, which

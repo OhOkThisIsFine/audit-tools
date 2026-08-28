@@ -6,6 +6,13 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The obligation engine's bound doc is off by one against its own comparison (2026-08-28, low).**
+  `obligationEngine.ts` documents `maxTransitions` as stopping "after that many consecutive
+  transitions"; the guard is `if (++transitions > maxTransitions)`, which fires on N+1. No test
+  counts executions against the bound, so nothing catches it — and CX-02 re-specifies the cap on
+  exactly this firing point. **Property:** doc and comparison agree, and a test pins which
+  transition stops the loop.
+
 - **The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
   shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction:
   false_red).** The pre-commit `test:doc-contract` leg reported 24 of 24 tests passed and then failed
@@ -791,15 +798,13 @@
   monitored and looks hung. Redirect to a file and grep it instead of piping through `tail`.
 
 - **Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code
-  site).** Shipped 2026-07-10; the scratch-pollution bug is FIXED in tooling: `buildFileDisposition` now runs an `untracked`
-  scope rule (one batched `git ls-files -z`; still-included files absent from the index → `excluded/untracked`,
-  guards mirror the gitignore rule) so untracked litter can never enter the auditable scope. A
+  site).** Shipped 2026-07-10: `buildFileDisposition` runs an `untracked` scope rule (one batched
+  `git ls-files -z`; still-included files absent from the index → `excluded/untracked`), so
+  untracked litter cannot enter the auditable scope. Still live: a
   `renderHostScratchNote`/`hostScratchDir` pair (`src/shared/prompts.ts`,
-  `src/shared/io/auditToolsPaths.ts`) never shipped: ZERO callers, only definitions plus a re-export
-  in `src/shared/index.ts` (knip's default mode counts a re-export as a consumer), so it reaches no
-  prompt — wiring it into the prompt below, or deleting it, is in scope. The unsound bounded/aggregate exclusion representation was deleted
-  outright (a missing disposition record reads as *included* downstream, so aggregation silently un-excluded
-  exactly the matched files — per-file records are now mandatory, validator-enforced). Residuals:
+  `src/shared/io/auditToolsPaths.ts`) has ZERO callers — only definitions plus a re-export in
+  `src/shared/index.ts`, which knip's default mode counts as a consumer — so it reaches no prompt.
+  Wire it into the prompt below, or delete it. Residuals:
   - (a) **Submodule / nested-repo contents are now excluded as `untracked`** (parent `ls-files` lists only the
     gitlink). Consistent with citation grounding (which also can't ground them), but a silent scope change for
     repos with first-party submodules. Ideal fix = `--recurse-submodules` in BOTH the disposition rule and the

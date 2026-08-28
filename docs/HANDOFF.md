@@ -5,72 +5,47 @@
 
 ## Live state
 
-- **CX-02's design record is repaired again, and this time the repair changes the work.** Its
-  constraint 3 DECISION (one hold, persist once) survives; its SCOPE did not. The answer planned to
-  delete one nested artifact-tree lock acquisition. The fold reaches three acquisition sites by
-  eleven paths, and `withFileLock` is non-reentrant, so each is a deterministic timeout rather than
-  a race — including `persistReviewPause`, on the loop's most common exit. Also corrected: two costs
-  that turn out not to be costs, one reassurance in *The cost to measure* that is false at HEAD
-  (synchronous `git ls-files` already runs inside the hold), the real test blast radius, and the
-  acceptance test for constraint 3 — written, and RED at a count of 3, though it does NOT prove the
-  collapse. The record is the single home for all of it; read it, not this summary.
-- **A ninety-minute adversarial lane then found the plan NOT SAFE TO IMPLEMENT LITERALLY.** It
-  reached two of the findings above independently and added six blockers and five constraints of its
-  own — among them that persist-once is not achieved by converting the eleven reloads (design review
-  writes a core artifact by hand), that deferring the persist reverses a crash-safety ordering the
-  code itself documents, and that the dispatch-slot cap stops sharing a unit with the engine bound
-  so `deriveEngineBound` is no longer the backstop. Its verdict on the DIRECTION is unchanged: one
-  registry, one drain remains viable.
-- **Repository:** `main` and `origin/main` are synchronized; every commit passed its gates and the
-  full suite is green. No release is pending — `v0.50.3` is live on npm, and the tag and the local
-  version match it.
+- **CX-02's six blockers have been through their refutation pass, and the record now carries a
+  DECIDED shape for each.** Six independent lanes ran on 2026-08-28 — four `codex exec`, two `agy`
+  — each told to break its proposal, and every claim was re-verified from source before it was
+  written down. **Two landings were refuted outright and replaced; four survive with amendments
+  that change the work.** The direction is untouched: one registry, one drain remains viable.
+  The record's *Where each blocker lands* is the single home for all of it — read it, not this.
+- **The two replacements are the reason the plan could not have been coded as written.** The
+  unlink deferral would make the systemic-challenge adversary loop converge FALSELY and
+  permanently, because a re-consumed submission reports a dry round. And the plan draw's blanket
+  halt is wrong: 8 of 13 bespoke policy bodies are HYBRID, so `audit-code plan` would stop at a
+  boundary that does not exist on that run. Both replacements are stated in the record.
+- **Repository:** `main` and `origin/main` are synchronized; `v0.50.3` is live on npm and the tag
+  and local version match it. No release is pending.
 
 ## Immediate next
 
-**Resolve CX-02's six blockers, then implement.** Do NOT start by coding: a ninety-minute
-adversarial pass found the plan **not safe to implement literally**, and the record now carries all
-six blockers with a PROPOSED landing for each in its *Where each blocker lands* section. Four are
-mechanically forced; two are judgments. None of the six proposals has been through a refutation
-pass, and the last thing this record did without one was overclaim an acceptance test — so refute
-them first, then code. It remains one atomic loop-core replace on `main`.
+**Implement CX-02, starting from the record's decided shape.** The refute-first step the previous
+handoff called for is DONE, so the next lap codes. It remains one atomic loop-core replace on
+`main`, with a temporary internal seam permitted between commits on the branch under PH-04.
 
-In brief, with the record as the single home:
+Three things the implementing lap must not rediscover:
 
-1. **Constraint 1 is re-answered.** The guards observe per DISPATCH, counted in dispatch slots. The
-   tolerance stays 16 and is deliberately NOT derived from the cap — what becomes mechanical is the
-   ordering `tolerance < MAX_DRAIN_STEPS`, pinned by a new contract test, because at or above the cap
-   the guard is dead code.
-2. **Constraint 3 is answered — ONE hold, persist once — and its SCOPE is now corrected.**
-   Release-and-reacquire is not available: `withFileLock` is non-reentrant, so any second
-   acquisition inside the hold is a guaranteed `FileLockTimeoutError`. Split the three fold-reachable
-   tree-lock sites into a locking wrapper plus a lock-free core, the idiom `auditStep.ts` already
-   uses — `auditStep.ts:86`, `nextStepHelpers.ts:1845` and `reviewRun.ts:176`. The fourth site,
-   `persistConfigErrorHandoff`, is outside the fold and is not touched. Then the eleven
-   `loadArtifactBundle` transitions become in-memory carries, which forces the `handle*Branch`
-   descriptors to return the updated bundle rather than rely on a reload; and the halt-time persist
-   must cover the throw path. Enforce the result mechanically: nothing reachable from a fold
-   `execute` may acquire `artifactTreeLockPath` — and that test must search the ALIAS
-   (`handleGraphEnrichmentBranch` binds `runStep = deps.runStep ?? runAuditStep`), or it misses a
-   call site exactly as a grep for the name did. **The split is necessary and NOT sufficient:** the
-   record's blockers 2 to 4 name the direct core writers and the unlink ordering it does not cover.
+1. **Re-derive the constraint-3 acceptance test first — it does not exist on disk.** The record
+   says it was written and RED at a count of 3. It is not tracked, not untracked, and not among
+   the stored proposal directories. Its mechanism is recorded precisely enough to rebuild (a
+   `vi.mock` of `audit-tools/shared` wrapping `withFileLock`, counting only paths ending
+   `artifact-tree.lock`,
+   over the `batch-deterministic-block` fixture). The count of 3 is unverifiable until it is
+   rebuilt, so rebuild it before quoting the number.
+2. **The blast radius is larger than "three sites".** Ten in-fold call sites in
+   `nextStepHelpers.ts` re-point to lock-free cores; the eight external top-level callers do NOT
+   move, because each already calls the locking wrapper. The error-recovery `withFileLock` at
+   `:1845` is fold-reachable and the record's old list omitted it.
+3. **A handler must not return a PARTIAL bundle.** `ArtifactBundle` is `Partial` and pruning
+   treats a missing value as an intent to delete, so a partial return destroys every artifact it
+   did not carry. Return a full authoritative bundle or a tri-state patch.
 
-Still open and owner-facing: the live fresh-audit measurement before the cap is sized must measure
-HOLD TIME as well as dispatch count — the single hold can starve a concurrent waiter at 10s/20s.
+Still open and owner-facing: the live fresh-audit measurement before the cap is sized, which must
+capture HOLD TIME as well as dispatch count — a concurrent waiter now has its number, and fails
+after `DEFAULT_TIMEOUT_MS` = 10,000 ms.
 
-Then the replace itself: one registry carrying the host-boundary policy, dispatch-local failure
-attribution (but keep the `ExecutorFailure` contract — only the chain-walking helper retires), a
-REPLACEMENT registry view for the `plan` draw — **not** a filtered one, because the engine's scan
-continues past an id with no def, so an exclusion makes `plan` step OVER the host boundary instead
-of halting at it — and the pinning suites migrated in the same commit: ~20 drain-dependent
-`advanceAudit` call sites, while the ~29 that pass `preferredExecutor` do not move, because keeping
-`runSingleAdvanceStep` as the forced primitive holds them still.
-
-Verification is unchanged for the COLLAPSE: it still has no test that can pass only once it lands,
-so the pinning suites staying green remain its only evidence. What is new is that **constraint 3 has
-one** — artifact-tree lock acquisitions per `next-step`, written and RED at HEAD with a count of 3,
-held out of the tree so no commit ships red. Do not mistake it for the other: hoisting the lock
-turns it green with both drains still standing, which is why the record now says so in its own
-*acceptance test* section, next to the mechanism.
 
 ## Deliberate state, not bugs
 

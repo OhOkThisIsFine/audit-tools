@@ -557,35 +557,157 @@ ALIAS as well as the name. That site is also where the crash-safety ordering is 
 itself: "Apply BEFORE deleting the submission: if runStep throws (locks, crash), the submission
 survives for the retry instead of being lost" (`:599-600`).
 
-## Where each blocker lands — PROPOSED, not decided
+## Where each blocker lands — REFUTED 2026-08-28, and this is the decided shape
 
-Stated so the next lap starts from a shape rather than from six open problems. Four of these are
-mechanically forced by the evidence above and are proposals only in the sense that nobody has
-adversarially checked them yet. Two are genuine judgments. **None has been through a refutation
-pass, and the last thing this record did without one was overclaim an acceptance test.**
+Every landing below went through an independent adversarial pass on 2026-08-28 (six lanes: four
+`codex exec`, two `agy`, one enumeration sweep). Each lane was told to BREAK its proposal, and
+every claim it returned was re-verified from source here before it was written down — a lane
+citation was the starting point, never the evidence.
 
-1. **Lock re-entry — forced.** Wrapper plus lock-free core at each of the three fold-reachable
-   sites, the idiom `auditStep.ts` already uses. Enforce with a contract test: nothing reachable
-   from a fold `execute` acquires `artifactTreeLockPath`. That test must search the ALIAS too.
-2. **Direct core writes — forced.** Enumerate every direct and indirect core writer, convert each to
-   an in-memory transaction result the single outer commit consumes. The handlers' return type grows
-   a bundle; today it carries only an `action`.
-3. **Unlink ordering — forced.** The fold carries a pending-deletion list and applies it only after
-   the halt persist succeeds. Do not rely on a `finally`: it does not run on process death.
-4. **Plan draw — forced.** A REPLACEMENT view, not an exclusion: every id keeps its membership and
-   order, and every host-policy `execute` is substituted with a plan-safe halt.
-5. **Cap unit — a judgment, with an obvious candidate.** Charge EVERY obligation execution to the
-   slot, not only an executor dispatch. Slots and engine transitions return to 1:1, so
-   `deriveEngineBound` is a true backstop again, and the cap has exactly one unit — which is what
-   constraint 4 demands. The cost is honest: the cap then means 64 obligation executions rather than
-   64 executor dispatches. Needs the mixed policy-transition test that nothing currently provides.
-6. **Synchronous children in the hold — a judgment, and the one to put to the owner.** The exposure
-   is NOT new: `git ls-files` / `git check-ignore` / `tsc` / `eslint` already run synchronously
-   inside today's hold, with no timeout on `runTracked` (`localCommands.ts:163-168`) reaching
-   `spawnSync` (`exec.ts:359-369`). Widening the hold does not add the class, but it does lengthen
-   the window in which a >30s synchronous stretch lets a second process steal a lock the first still
-   believes it holds. The cheap fix is a timeout on those spawns, which is worth doing on its own
-   merits and independent of CX-02.
+**Two landings were refuted outright and are replaced. Four survive with amendments that change
+the work.** The direction — one registry, one drain — is untouched.
+
+1. **Lock re-entry — STANDS, with the site list and the test replaced.** Wrapper plus lock-free
+   core at each fold-reachable site, the idiom `auditStep.ts` already uses.
+   - The site list is one longer than stated: the explicit `withFileLock` in the error-recovery
+     block at `nextStepHelpers.ts:1845` is fold-reachable and must split too.
+   - The blast radius is TEN in-fold call sites in `nextStepHelpers.ts` (601 through the `runStep`
+     alias, 1419, 1464, 1511, 1611, 1663, 1705, 1760, 1812, 2601), not three. The eight external
+     top-level callers need NO change: each calls the public `runAuditStep`, which keeps its lock.
+   - `persistReviewPause` is safe outside its own hold. It reads only in-memory parameters and
+     writes through `writeCoreArtifacts` / `writeHandoffOnly` (`reviewRun.ts:151-188`); under a
+     continuous outer hold there is no time-of-check race to reintroduce.
+   - **The proposed contract test is refuted.** "Nothing reachable from a fold `execute`" is a
+     static reachability claim over dynamic dispatch and injected callbacks — the engine calls
+     `def.execute`, `runOmittableGate` calls `descriptor.apply` (`:1375`) — so a static analyzer
+     can silently pass an unsplit path. That is the test-that-cannot-fail case. Replace it with two
+     fail-closed mechanisms: an import-boundary rule (`nextStepHelpers.ts` may not import
+     `withFileLock` or `runAuditStep`, only the lock-free cores), AND a dynamic assertion of ZERO
+     inner acquisitions across `runDeterministicForNextStep` (`:2717`) — which is what the
+     lock-count acceptance test below already measures.
+
+2. **Direct core writes — STANDS, but a bundle return is NOT a sufficient shape.**
+   - The core writer list is `:1040`, `:1146`, `:1208` and the `writeCoreArtifacts` at `:1850`.
+     `:1146` is a third raw `design_assessment.json` write this record previously missed.
+   - **A partial bundle DELETES.** `ArtifactBundle` is `Partial<ArtifactPayloadMap>`
+     (`artifacts.ts:154`) and pruning treats a missing value as an intent to unlink (`:447-458`).
+     The return must be a FULL authoritative bundle, or a tri-state patch separating untouched
+     from set from delete.
+   - **Design-review snapshots are state-critical and are not core artifacts.** They live under
+     `design-review-snapshots/`, are loaded specially (`artifacts.ts:157-162`), and
+     `writeCoreArtifacts` never writes them — while `state.ts:44-47` treats a COMPLETED pass with
+     no snapshot as `satisfied`. A snapshot lost between fold and commit silently marks the pass
+     done rather than re-firing it. Commit them with the core, not after it.
+   - The failure path throws without returning a bundle (`:1842`), so pending state must survive
+     exceptions. The submission ledger and `agent_reflections` are append-only and must never
+     round-trip through a write-back (`artifacts.ts:145-152, :173-180`).
+   - **The marker protocol is EXEMPT and must stay mid-fold.** The five
+     `steps/deterministic-progress.json` writes (`:1805, :1820, :1852, :1929, :1984`) exist so a
+     host watching the filesystem can see which executor is active DURING a long step, which the
+     preserve list protects. Their value is being visible mid-fold. So the property this landing
+     delivers is ONE CORE WRITE BOUNDARY, not "one persist boundary" — state it that way, or a
+     later lap folds the markers in and breaks the observability contract.
+   - Define "one commit". `writeCoreArtifacts` writes sequentially (`artifacts.ts:437-446`); only
+     each individual file is atomic temp-then-rename (`json.ts:99`). The result is one logical
+     locked flush, not crash-atomic all-or-nothing.
+
+3. **Unlink ordering — REFUTED. Deferral introduces a silent, permanent failure.**
+   A deferred deletion creates a re-consumption path, and one apply is not idempotent under it.
+   **Systemic challenge falsely converges, for good.** `foldChallengeRound` counts a finding as new
+   only when it is absent from `prior` (`systemicChallengeLoop.ts:107-113`) and sets
+   `dry = new_finding_ids.length === 0` (`:122`); the executor sets `converged: folded.dry`
+   (`systemicChallengeExecutor.ts:109`). Re-consuming an already-folded submission therefore
+   reports a dry round and terminates the adversary loop permanently. (This instance depends on
+   convergence being ONE dry round — open decision `backlog-1`. Answering that two-or-more blunts
+   the instance without fixing the class.)
+   Three more: an `emit` exit is the COMMON exit and returns immediately (`:2784`) while earlier
+   transitions may already have written outside `artifactsDir`; throw and guard paths
+   (`:1831-1869`, and the no-progress / blocked / cycle / stopped-fold guards) discard a staged
+   list; and `recordLaneOutcome` appends an immutable ledger event
+   (`laneSubmissions.ts:481-518`) that double-records on re-consumption.
+   **Replacement landing:** durable STAGING, not an in-memory list — atomically rename a
+   submission into a staging directory before applying, so recovery can tell whether it was
+   already folded. Commit lane outcomes and deletions in the same phase as the artifact commit,
+   applied on EVERY fold exit including `emit`. Iterative-fold executors record submission
+   identity in their own register and ignore a duplicate.
+
+4. **Plan draw — REFUTED. A blanket replacement halt is wrong; the policy must be
+   branch-sensitive.** The premise holds: `findFirstActionableObligation` skips a missing def and
+   continues (`obligationEngine.ts:63-68`), so an exclusion filter steps OVER a host boundary. But
+   of 25 definitions, 13 have bespoke policy bodies and EIGHT are HYBRID — host on one branch,
+   deterministic on another: `external_analyzers_current`, `graph_enrichment_current`,
+   `intent_equivalence_current`, `charter_extraction_current`, `charter_delta_current`,
+   `charter_clarification_current`, `systemic_challenge_current`, `synthesis_narrative_current`.
+   Counterexample: `planCommand.ts:4-10` passes no acquisition option, so
+   `pendingAnalyzerConsent` returns `[]` (`hostInputPause.ts:96`) and the obligation takes its
+   DETERMINISTIC arm. A blanket halt stops `plan` at a boundary that does not exist on that run.
+   Also: this record's exclusion list MISSES `critical_flow_fallback_current`,
+   `intent_checkpoint_current`, `intent_equivalence_current` and `systemic_challenge_current`, and
+   it OVERSTATES consent persistence — only declines are durable; grants modify the run-scoped
+   token (`:428-450`).
+   **There is no halt outcome.** `ObligationOutcome` is exactly `transition | emit`
+   (`obligationEngine.ts:109-111`), so a halt is an `emit` with a stated step. And `plan` has TWO
+   output shapes at HEAD — the accumulated last deterministic result after progress
+   (`advance.ts:644-699`), and, entered at a no-runner boundary, the host executor with the exact
+   summary `Executor <id> is selected and requires its bound host step.` (`:406-443`). A generic
+   halt changes the first.
+   **Replacement landing:** preserve every id, `derive` closure, membership and priority position;
+   enumerate all 13 bespoke ids; give the eight hybrids a PURE, branch-sensitive plan policy that
+   runs deterministic arms and halts only when the live branch needs host work or would consume or
+   persist host input; retain the last `AdvanceAuditResult` so both output shapes survive.
+   Decide EXPLICITLY whether entry-at-a-hybrid-boundary is preserved or corrected — HEAD detects
+   the pause after dispatch (`:684-699`), so a call entering there runs its deterministic runner
+   first, and both cannot be claimed at once.
+   One hazard is CLOSED: a satisfied obligation does not become actionable under a replacement
+   view, because selection derives state before `execute` and admits only `missing`/`stale`
+   (`obligationEngine.ts:313-320`).
+   Residual: the classifier cannot "peek" by calling today's handlers — several poll, quarantine,
+   apply, unlink, persist and ledger-record before returning a branch decision (`:1363-1393`). So
+   either the classifier is pure, or the policy bodies split into classify and apply halves.
+
+5. **Cap unit — STANDS, with its stated invariant corrected.** Charge every obligation execution
+   to the slot. But **"slots and engine transitions return to 1:1" is FALSE**: an `emit` returns
+   before the counter (`obligationEngine.ts:321-323`), so an emitting execution spends a slot and
+   no transition budget. The true and sufficient invariant is
+   **`engine transitions <= charged executions`** — if every execution takes a slot, every
+   transition took one first, so the engine cannot reach `cap + 2` before the execution cap.
+   The alternative (enlarge the headroom) is worse: policy obligations LOOP — charter
+   clarification and systemic challenge (`:2440-2475`), host-result ingestion (`:2547-2616`) — and
+   no fixed headroom bounds a loop. Note the margin today is TWO
+   (`ENGINE_TRANSITION_HEADROOM = 2`), so three uncharged policy transitions already invert the
+   ordering.
+   Must add: ONE wrapper owning both charging and cap enforcement over every definition; a
+   structured, resumable cap halt for policy bodies, which return only transition state
+   (`:2293-2297, :2519-2524`) and have no cap field in `AdvanceAuditResult`
+   (`advanceTypes.ts:91-100`); and an explicit supersession of the "64 dispatches" contract,
+   reframing `tests/audit/advance-drain-loop.test.ts:179-254` — its fixture has no policy
+   transitions, so it stays green either way and its MEANING changes while its number does not.
+   The mixed acceptance test: four policy-only transitions plus a perpetually-actionable
+   state-changing executor; assert exactly 64 executions, resumable, no engine-bound stop.
+
+6. **Synchronous children in the hold — unchanged as a judgment, and CHEAPER than stated.**
+   The mechanism is confirmed: the heartbeat is a `setInterval` (`fileLock.ts:204-211`) and
+   `spawnSync` (`exec.ts:359`) blocks the event loop, so a synchronous child outliving
+   `STALE_LOCK_MS` (30 s) lets another process steal a lock the holder still believes it holds.
+   Reachable into today's hold via `autoFixExecutor.ts` and `syntaxResolutionExecutor.ts`.
+   **The fix is one option at one call site, not a new facility:** `runTracked` already forwards
+   `timeout` to `spawnSync` (`exec.ts:363`); `localCommands.ts:164-168` simply omits it.
+   Contention cost of the single outer hold, now measured: a concurrent CLI blocks up to
+   `DEFAULT_TIMEOUT_MS` = 10,000 ms (`fileLock.ts:27`) before `FileLockTimeoutError`.
+
+**One correction to this record's own preservation constraints.** The in-place mutation hazard is
+real — `handleDesignReviewBranch` aliases and mutates `bundle.design_assessment`
+(`:1083, :1141-1143, :1176-1197`) while both derive caches key on bundle identity
+(`:2266`, `advance.ts:787`). But this record attributes "nested objects included" to the
+memoization, and the memoization does not require it: a shallow `{...bundle}` mints a fresh key and
+re-derives correctly. Keep the requirement; its real reason is ALIASING, so an earlier carry cannot
+observe a later mutation. Stated wrongly, the next lap satisfies it with a shallow copy and
+believes it satisfied both.
+
+**And the constraint-3 acceptance test does not exist on disk.** This record says it was written
+and RED at a count of 3. It is not in the tree, not untracked, and not among the nightly proposals.
+The mechanism above is precise enough to re-derive it, but the count of 3 is unverifiable from the
+repository until someone does. Re-derive before quoting the number again.
 
 ## Preserve list (report + refuter union)
 
