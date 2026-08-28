@@ -1063,3 +1063,24 @@
   Two answers close this and they close it differently. Either a short non-cryptographic id is legitimately outside the remit of `src/shared/hash.ts` — in which case the REACH row for this area in `scripts/guard-reach-data.mjs` must say so, since its declared uncovered halves name only the test tree and novel spellings of a banned body, never a second digest algorithm — or the two sites adopt `hashContent` and the pattern rule widens to the bare `createHash(` construction with the home file exempt. The re-rolled `packetIdFor` body is adoption debt under either answer.
 
   **Property:** no inline digest construction in `src/` is invisible to `check:shared-primitives` because of the algorithm it names — every hash-chain site is either routed through the declared home or carries a DATA exception row stating its reason, and the guard registry's uncovered half for this area states the algorithm boundary outright.
+
+- **An analysis record can identify work and reach no work queue, and every gate stays green while
+  it happens (2026-08-27, medium, from the orphan-routing lap).** Seven `docs/reviews/` records
+  dated 2026-08-20 or later were cited by nothing tracked — over 1,500 lines of identified,
+  prioritized work that no queue knew about, including a whole philosophy audit challenging four
+  standing decisions and an eight-gap workflow analysis with its own acceptance benchmark. Nothing
+  could have caught it: no gate reconciles `docs/reviews/` against `docs/backlog/`, and
+  `docs/documentation-philosophy.md` states no rule for routing a review's recommendations into a
+  queue. The failure is silent by construction — the reviews are well-formed, the backlog is
+  well-formed, and the only thing missing is the edge between them. Routing the seven took a lap of
+  agent time that a gate would have made unnecessary. **Property:** a tracked analysis record that
+  identifies work is reachable from a work queue, mechanically — not by whoever wrote it
+  remembering to file the entries. **The obvious gate is the wrong one, and the uncovered half must
+  be stated with whatever lands:** "every review is cited from somewhere" is detectable but WRONG,
+  because a dogfood log, a measurement record and a completed triage legitimately carry no forward
+  work and would each be a false red — and a false red gets the gate disabled, which is worse than
+  no gate. Whether a record identifies work is a semantic judgment, the same unscriptable class the
+  record-update gate's semantic half already declares. So the mechanism is either an explicit
+  routing declaration the author writes once (a record states its disposition: work routed, or no
+  forward work), or a periodic sweep with a declared cadence — never an existence check over the
+  whole directory.

@@ -159,6 +159,16 @@ places: remediate converged, audit did not.
 
 ## 6. The orphaned helper-adoption sweep claims a home it does not have
 
+> **Corrected 2026-08-27, same day.** This section is wrong about the sweep being unactioned. A
+> refutation lane re-counted all eight clusters at HEAD: every one was implemented across five
+> commits (`6403e766`, `2fc3f385`, `7d4caef5`, `5fc0a1d5`, `927017fb`), and the whole class is now
+> enforced by `check:shared-primitives`, which reports every tracked `src` file clean. The
+> implementing lap found MORE debt than the sweep claimed in every cluster it re-counted, so the
+> sweep's severity judgments were conservative rather than unrefuted. One residue survived and is
+> on the queue: the gate's hash rule is keyed to the spelling `sha256`, so an inline `sha1` chain
+> re-rolls the anti-pattern it bans. Read the rest of this section as the history of a routing
+> question, not as a live finding.
+
 `shared-helper-adoption-2026-08-25.md` opens by calling itself an evidence record for three
 open-bugs entries. No such entries exist. A grep over `open-bugs.md` for its subjects returns
 nothing.

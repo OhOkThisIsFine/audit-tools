@@ -115,6 +115,58 @@ drain's `deriveObligationState` is uncached while the inner one is WeakMap-memoi
    Deleting the file drops all four silently, and the load-time
    `assertExecutorRegistryCoversPriority` does not stand in for them: it walks `PRIORITY` only.
 
+## Design-gate findings, 2026-08-27 — read these before writing any code
+
+The `/design-check` pass run before implementation. Its retirement verdict is CLEAN: nothing in
+`CLAUDE.md`, `docs/backlog/durable-traps.md` or the removal history says the nesting was chosen.
+`6145a1a3 refactor(audit): inner deterministic drain adopts the shared obligation engine (C1)` says
+in its own message that the engine "was already driving audit's CLI-level fold; this closes the last
+hand-rolled copy" — so two levels are the residue of converting each level independently, not a
+decision. The one mechanism that must NOT return is approach A, a `stateSignature` on the shared
+engine; constraint 1 already pins that.
+
+The pass also found three things this record did not carry. Each changes the implementation, not
+only the reader's belief.
+
+1. **The two registries are two LAYERS, not two copies of one list.** `buildDrainObligations` is
+   homogeneous — `runDrainStep` for every id, and the module says so. `buildAuditObligations` is
+   NOT: eight entries are the plain `deterministic(...)` shape and the rest carry bespoke `execute`
+   bodies that emit a host step, consume a submission, or branch on operator consent
+   (`external_analyzers_current`, `critical_flow_fallback_current`, `charter_extraction_current`,
+   `intent_equivalence_current`, the two design-review completion polls, and others). So the outer
+   registry's real content is PER-OBLIGATION HOST-BOUNDARY POLICY. "One registry" therefore means
+   one registry that carries that policy, not one list absorbing another — and the merge has to
+   answer what a heterogeneous `execute` looks like in a registry the inner drain reaches with a
+   uniform runner.
+2. **The two `derive` functions differ SEMANTICALLY, not only in caching.** The inner
+   (`deriveObligationState` in `advance.ts`) memoizes on bundle identity AND passes
+   `emitStaleness: false`, which is what makes `advanceAudit` emit ONE consolidated staleness record
+   per call rather than one per drained step. The outer (`deriveObligationState` in
+   `nextStepHelpers.ts`) memoizes nothing and passes no options, so it takes the emit-on-stale
+   default. `findNextObligation` calls EVERY def's `derive` on every scan, so one outer scan
+   performs one holistic `deriveAuditState` PER OBLIGATION — measured 25 at HEAD. The redundant
+   stderr emission is masked only by the module-level last-key latch inside `emitStalenessRecord`;
+   the redundant WORK is not masked at all, and it is the same regression class C1 measured and
+   fixed on the inner side. The unified `derive` must therefore state its emit semantics, and the
+   preserve list's "one consolidated staleness record per call" is the constraint that decides it.
+3. **A precondition this record did not carry.** `advance.ts` owns the PRIORITY-ordering guarantee
+   stated above `SLICE_PARTICIPANT_PRODUCERS` and reconciled by `findPriorityOrderingViolations`:
+   every obligation that can rewrite a slice-projected UPSTREAM artifact is scheduled — and its
+   `artifact_metadata` persisted — strictly BEFORE the first obligation that can write the
+   downstream. The inner drain satisfies the "persisted" half IN MEMORY, by recomputing
+   `artifact_metadata` per step through `computeArtifactMetadata` and carrying it on
+   `updated_bundle`. Constraint 3's persist-once-at-the-halt is compatible with that ONLY while the
+   fold keeps that in-memory carry and keeps re-deriving obligation state per step, because the
+   memo is keyed on bundle identity and identity changes at every transition. State that
+   explicitly in the spec; a fold that reuses one bundle object across steps breaks the guarantee
+   silently.
+
+**The failing test.** `tests/audit/one-holistic-derivation-per-scan.test.ts` states finding 2 as an
+invariant — one fold scan performs ONE holistic audit-state derivation. It is RED at HEAD, and its
+message carries the measurement: one scan over 25 obligations derived the holistic state 25 times.
+It goes green when the two registries become one and that one registry derives through a single
+memoized read. It is the acceptance test for the unification, not a separate fix.
+
 ## Preserve list (report + refuter union)
 
 Deterministic frontier draining within one call; every host-input stop boundary; exactly-once
