@@ -40,6 +40,7 @@ import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
 import { closeoutReadinessFindings } from '../../scripts/shared/closeoutReadiness.mjs';
 import { sessionHasLiveBackgroundWork } from '../../scripts/shared/liveSessionWork.mjs';
 import { worktreeTree } from '../../scripts/shared/worktree-tree.mjs';
+import { readSuiteGreenStamp } from '../../scripts/shared/suiteGreenStamp.mjs';
 import {
   readSessionRegistry,
   runPorcelainStatus,
@@ -236,6 +237,10 @@ function reportReachedTheOwner(transcriptPath, rec) {
   return false;
 }
 
+// One worktree-content identity serves both content-bound checks below: the
+// closeout-render binding and the full-suite green stamp.
+const currentTree = worktreeTree(ROOT);
+
 // The hand-back itself: rendered through scripts/render-closeout.mjs, which
 // REFUSES to render until every section carries a value or an explicit "none",
 // then omits the silent ones. The record binds to the worktree CONTENT and to
@@ -256,7 +261,6 @@ try {
   const renderedAt = Date.parse(rec?.rendered_at ?? '');
   const foreignRender =
     Number.isFinite(startedAt) && Number.isFinite(renderedAt) && renderedAt < startedAt;
-  const currentTree = worktreeTree(ROOT);
   if (foreignRender) {
     findings.push(
       "the closeout render on record predates this session, so it is ANOTHER session's hand-back. " +
@@ -304,6 +308,25 @@ try {
       '(`--template` prints a blank one): it refuses until every section states content or an ' +
       'explicit "none", then omits the silent ones. A hand-written report can drop a section ' +
       'without anyone noticing; a rendered one cannot.',
+  );
+}
+
+// The enforced half of the suite-run trap covers HANDOFF only. This is the
+// general half: an edit of ANY kind after a green run invalidates that run, and
+// no local gate re-runs the full suite, so a late SOURCE edit reaches CI unseen.
+const green = readSuiteGreenStamp(ROOT);
+if (!green?.tree) {
+  findings.push(
+    'no full-suite green on record for this repo — `npm test` has not passed since the stamp ' +
+      'was last cleared. The closeout requires green on the FINAL tree, so run it after your ' +
+      'last edit, not before.',
+  );
+} else if (currentTree && green.tree !== currentTree) {
+  findings.push(
+    `the last full-suite green ran on different content than the tree being handed off ` +
+      `(green at ${String(green.tree).slice(0, 8)}, tree ${currentTree.slice(0, 8)}, ` +
+      `${green.ran_at ?? 'unknown time'}). An edit after a green run is not evidence for the ` +
+      'tree you are pushing — re-run `npm test`.',
   );
 }
 

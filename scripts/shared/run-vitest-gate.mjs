@@ -37,6 +37,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shardSuffix } from "./vitestShard.mjs";
 import { isReporterTransportFault } from "./vitestGateVerdict.mjs";
+import { worktreeTree } from "./worktree-tree.mjs";
+import { isFullSuiteRun, writeSuiteGreenStamp } from "./suiteGreenStamp.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
@@ -137,5 +139,10 @@ if (outcome.failed > 0) {
   for (const file of outcome.failedFiles) console.error(`  - ${file}`);
   process.exit(1);
 }
+
+// A full-suite green is the only run that is evidence about the WHOLE tree, so
+// only that run mints a stamp. Best-effort by construction: a stamp that cannot
+// be written leaves NO evidence, and no-evidence is the safe reading downstream.
+if (isFullSuiteRun(vitestArgs)) writeSuiteGreenStamp(repoRoot, worktreeTree(repoRoot));
 
 process.exit(0);

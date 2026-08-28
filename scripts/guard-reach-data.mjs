@@ -409,6 +409,14 @@ export const GUARDS = [
     impl: 'tests/shared/check-shared-primitives.test.ts',
     note: 'pins the rule matching semantics of check:shared-primitives on synthetic content',
   },
+  {
+    id: 'suite-green-stamp-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/suite-green-stamp.test.ts',
+    note:
+      'pins the full-suite green stamp (P48): the full-suite predicate, the tree-bound stamp path, ' +
+      'the run-vitest-gate write wiring, and the closeout-challenge-gate read wiring',
+  },
   { id: 'hook-trap-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-trap-guards.test.ts' },
   { id: 'hook-session-gates-test', kind: 'contract-test', impl: 'tests/shared/hook-session-gates.test.ts' },
   {
