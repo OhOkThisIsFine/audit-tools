@@ -895,6 +895,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   run, and no local gate runs the full suite — the pre-commit gate runs typecheck legs plus the doc
   subset. So a late SOURCE edit after a green run is still caught only by CI. That half is discipline,
   not a mechanism, which is why this entry stays open rather than being deleted.
+  **DECIDED (owner, 2026-08-28): adopt P48 as proposed** — a full-suite green writes a
+  worktree-content-bound stamp, and `closeout-challenge-gate` reads it as mechanical evidence.
+  Deliberately EVIDENCE, not a commit refusal: a full suite is slow, and a false red at the commit
+  boundary is corrosive. ⚠ The patch in `.audit-tools/nightly/proposals/P48-suite-green-stamp/` is
+  an UNRUN draft — verify each cited site's role and run its test before landing it. Delete this
+  uncovered-half paragraph once the stamp lands.
 
 - **Two offload lanes fail SUCCESS-SHAPED, and neither reports why in its status (2026-08-28).**
   Both burned a dispatch on a design gate and returned nothing usable while the job status said

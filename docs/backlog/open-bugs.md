@@ -6,6 +6,20 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The audit local-command path spawns SYNCHRONOUSLY inside the artifact-tree lock; remediate
+  already fixed this (2026-08-28, DECIDED owner, medium).** `runFirstAvailableCommand`
+  (`src/audit/orchestrator/localCommands.ts`) calls the sync `runTracked`, so a child blocks the
+  event loop and starves every `setInterval` heartbeat, the held lock's mtime beat included.
+  `src/shared/tooling/exec.ts` records that this ALREADY fired: a stalled `npx --version` probe
+  classified a live lock stale and it was stolen mid-flight. Reached from `autoFixExecutor.ts` and
+  `syntaxResolutionExecutor.ts`, both inside the hold. `src/remediate/phases/close.ts` migrated to
+  `runTrackedAsync` for this reason; audit did not — one core, two draws, fixed on one side.
+  **Landing:** move `runFirstAvailableCommand` onto `runTrackedAsync` with a 120 s deadline; both
+  callers are already async. It also upgrades the failure surface: classified `ETIMEDOUT` /
+  `ENOBUFS` instead of a bare signal, and SIGKILL escalation so a deadline is really
+  terminal. **Do NOT move the lock constants:** with nothing blocking the
+  loop the heartbeat fires, so `STALE_LOCK_MS` stays 30 s. Independent of CX-02.
+
 - **The obligation engine's bound doc is off by one against its own comparison (2026-08-28, low).**
   `obligationEngine.ts` documents `maxTransitions` as stopping "after that many consecutive
   transitions"; the guard is `if (++transitions > maxTransitions)`, which fires on N+1. No test
@@ -51,18 +65,12 @@
   agent who opens the inbox and works six settled items. **Property:** the rendered queue and its
   snapshot are derived artifacts with a freshness gate, so neither can assert an item is open that
   the ledger records as done.
-  **The predicted damage happened, same day.** A lap read the six from the snapshot and put four to
-  the owner. All six had been settled at 16:40 and COMPLETED at 17:00 (`f41d2442`) — every edit
-  already landed and
-  <!-- doc-citation-exempt: names the deleted file to state that it is gone; that is the finding -->
-  `spec/mechanical-analyzer-layer-design.md` already deleted. The owner rejected
-  two as settled and answered two anyway, and one of those answers ("keep the analyzer spec, retitle
-  it") contradicts the landed deletion of a file that no longer exists. So the cost is not only
-  wasted attention: a stale question elicits an answer that, applied, would REVERT a completed
-  decision. Nothing from the stale answers was applied, and the owner then confirmed the ORIGINAL
-  decision stands — so the ledger was already right and was not rewritten. The `start-lap` skill has
-  been repointed at `answer.mjs --list` as the authority, which closes the path that was actually
-  walked; the snapshot's own freshness gate is still the fix.
+  **The predicted damage happened the same day, and it is confirmed.** A lap read the six from the
+  snapshot and put four to the owner, though all six had been settled and COMPLETED hours earlier
+  (`f41d2442`), every edit landed. One of the answers given, if applied, would have REVERTED a
+  completed decision — so the cost is not only wasted attention. Nothing stale was applied, and the
+  ledger was already right. `start-lap` has been repointed at `answer.mjs --list` as the authority,
+  closing the path actually walked; the snapshot's own freshness gate is still the fix.
 
 - **The backlog size baseline holds amnesties for entries that no longer exist, and its file ceiling
   never ratchets down (2026-08-27, low).** `docs/backlog/.size-baseline.json` grandfathers two
@@ -1006,7 +1014,7 @@
 
 - **The pre-split design-review lane is still polled beside the two current judgment types (2026-08-27, from the philosophy audit, medium).** `GATE_LANES.design_review_legacy` is live in `src/audit/cli/laneSubmissions.ts`, accepted by `src/audit/cli/laneValidators.ts`, and polled ahead of the contract and conceptual lanes by `src/audit/cli/nextStepHelpers.ts`, which sets the old `reviewed` flag and records the lane outcome. `src/audit/orchestrator/state.ts` then reads that one flag as satisfying BOTH modern obligations — guarded only by artifact staleness — and `src/audit/orchestrator/structureExecutors.ts` carries it forward across a structure refresh, so a single pre-split verdict stands in for two different judgments for as long as the artifact stays fresh. **Property:** only contract review and conceptual review exist, and a resumed pre-split artifact directory either leaves both modern obligations unmet and forces a rerun, or is invalidated by a persisted state version at load — never translated. Fixtures, quarantine/merge behaviour and the operator's rerun message move with the lane in the same change. The exposure is every resumed pre-split directory, not only audits visibly in flight.
 
-- **The systemic-challenge convergence rule is underspecified in the spec and fixed at one round in code (2026-08-27, from the philosophy audit, low).** `spec/conceptual-design-review-design.md` states loop-until-dry as "N rounds surface no new" and never fixes or configures N; `src/audit/orchestrator/systemicChallengeExecutor.ts` sets the register's `converged` flag from a single round's dryness, so the first round with no novel finding ends the loop and the register does not say which rule produced it. Novelty itself is content-derived — `src/audit/systemic/systemicChallengeLoop.ts` keys rounds through `findingReEmissionKey` from `src/shared/findings/dedupe.ts` — so the earlier worker-id objection is spent; what is open is only how many consecutive dry rounds convergence requires. **Property:** one convergence rule exists, either a stated number of consecutive zero-novelty rounds or the single-round rule made normative in the spec, and the register records which rule it applied. Distinct from the no-ceiling entry, which is about a total-round budget: a fix for one must not silently answer the other.
+- **The systemic-challenge convergence rule is underspecified in the spec and fixed at one round in code (2026-08-27, DECIDED owner 2026-08-28, low).** `spec/conceptual-design-review-design.md` says loop-until-dry after "N rounds surface no new" and never fixes N; `src/audit/orchestrator/systemicChallengeExecutor.ts` sets `converged` from a single round's dryness, and the register does not say which rule it applied. **DECIDED: TWO consecutive quiet rounds** — add the counter, state the number in the spec, record the applied rule. Taken with new information from the CX-02 blocker-3 refutation: a re-consumed submission yields zero new findings, so under N=1 one duplicate flips `converged` and ends the adversary loop permanently. N=2 removes that single-event trigger; it does not fix the class, which durable submission staging does. **Property:** one stated convergence rule, and the register records which rule it applied. Distinct from the no-ceiling entry (a total-round budget): a fix for one must not silently answer the other.
 
 - **The release-gate gloss table is required by a gate and rendered by no consumer (2026-08-27, from the philosophy audit, low).** `scripts/gate-enumeration-data.mjs` holds `STEP_GLOSS`, one human description per gate step, and `scripts/check-gate-enumeration.mjs` fails the build when a step has no gloss — but the single registered target renders step NAMES alone, so no gloss text reaches any reader. The descriptions are write-only data that every new gate step must pay for. **Property:** a human description is held only where a named consumer renders it; otherwise the presence requirement is dropped and the enumeration derives from the executable step list alone, or the shipping doc invokes that list directly instead of restating it. The adjacent guard-reach claim — that the `GUARDS` identity and wiring fields in `scripts/guard-reach-data.mjs` are recoverable from `package.json`, `.claude/settings.json` and the tracked tree — is NOT established here: those declared fields are what makes the reconciliation bidirectional, so deriving them would weaken the check that a new guard cannot land outside the registry. Establish that before deleting a field. [[write-only-data-looks-authoritative]]
 
@@ -1101,9 +1109,9 @@
   of the kind the doc gates already use, never a bare existence check. Triage record for the prune
   that raised this: [`memory-cut-list-2026-08-25.md`](../reviews/memory-cut-list-2026-08-25.md).
 
-- **The shared-hash gate is spelled `sha256`, so an inline sha1 chain re-rolls the anti-pattern it bans (2026-08-27, refutation pass over [`shared-helper-adoption-2026-08-25`](../reviews/shared-helper-adoption-2026-08-25.md)).** `src/shared/hash.ts` declares itself the single source for content hashing and states outright that no call site should carry a bare `.slice(0, N)` literal on a hash result. `check:shared-primitives` enforces that as its sha256-chain pattern rule — but the regex matches the literal spelling `sha256`, so the rule is keyed to an ALGORITHM rather than to the construction. Two sites build an inline `createHash("sha1")` chain and truncate it with exactly that bare literal: `shortHash` in `src/audit/orchestrator/selectiveDeepening/shared.ts`, and `packetIdFor` in `src/audit/orchestrator/reviewPackets.ts` — which already imports `sanitizeSegment` from that same module, yet re-rolls `shortHash`'s body rather than importing it. Running `scripts/check-shared-primitives.mjs` reports every tracked src file clean with both sites live, so the gate sees neither.
+- **The shared-hash gate is spelled `sha256`, so an inline sha1 chain re-rolls the anti-pattern it bans (2026-08-27, refutation pass over [`shared-helper-adoption-2026-08-25`](../reviews/shared-helper-adoption-2026-08-25.md)).** `src/shared/hash.ts` is the declared single source for content hashing and bans a bare `.slice(0, N)` on a hash result, but `check:shared-primitives` matches the literal spelling `sha256` — keyed to an ALGORITHM, not to the construction. Two sites build an inline `createHash("sha1")` chain and truncate it with exactly that literal: `shortHash` in `src/audit/orchestrator/selectiveDeepening/shared.ts`, and `packetIdFor` in `src/audit/orchestrator/reviewPackets.ts`, which already imports `sanitizeSegment` from that module yet re-rolls `shortHash`'s body. The gate reports both clean.
 
-  Two answers close this and they close it differently. Either a short non-cryptographic id is legitimately outside the remit of `src/shared/hash.ts` — in which case the REACH row for this area in `scripts/guard-reach-data.mjs` must say so, since its declared uncovered halves name only the test tree and novel spellings of a banned body, never a second digest algorithm — or the two sites adopt `hashContent` and the pattern rule widens to the bare `createHash(` construction with the home file exempt. The re-rolled `packetIdFor` body is adoption debt under either answer.
+  **DECIDED (owner, 2026-08-28): widen the rule and migrate both sites.** The banned thing is the CONSTRUCTION — widen the pattern to a bare `createHash(` chain of any algorithm truncated by a bare slice, home file exempt, and move both sites onto `hashContent`. Do not re-propose the rejected alternative (declare short ids out of remit).
 
   **Property:** no inline digest construction in `src/` is invisible to `check:shared-primitives` because of the algorithm it names — every hash-chain site is either routed through the declared home or carries a DATA exception row stating its reason, and the guard registry's uncovered half for this area states the algorithm boundary outright.
 

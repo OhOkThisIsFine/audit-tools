@@ -685,13 +685,25 @@ the work.** The direction — one registry, one drain — is untouched.
    The mixed acceptance test: four policy-only transitions plus a perpetually-actionable
    state-changing executor; assert exactly 64 executions, resumable, no engine-bound stop.
 
-6. **Synchronous children in the hold — unchanged as a judgment, and CHEAPER than stated.**
+6. **Synchronous children in the hold — DECIDED (owner, 2026-08-28): migrate the audit path off
+   the synchronous runner. Do NOT move the lock constants.**
    The mechanism is confirmed: the heartbeat is a `setInterval` (`fileLock.ts:204-211`) and
    `spawnSync` (`exec.ts:359`) blocks the event loop, so a synchronous child outliving
    `STALE_LOCK_MS` (30 s) lets another process steal a lock the holder still believes it holds.
    Reachable into today's hold via `autoFixExecutor.ts` and `syntaxResolutionExecutor.ts`.
-   **The fix is one option at one call site, not a new facility:** `runTracked` already forwards
-   `timeout` to `spawnSync` (`exec.ts:363`); `localCommands.ts:164-168` simply omits it.
+   **The exposure is not hypothetical and the remedy already exists.** `exec.ts:384-392` records
+   that this already fired — "one stalled `npx --version` probe classified a LIVE lock stale and
+   stole it mid-flight" — and states that acquisition runs on the ASYNC twin for exactly that
+   reason. `runTrackedAsync` does not block the loop, classifies a deadline as `ETIMEDOUT` and an
+   overflow as `ENOBUFS` instead of a bare signal, and escalates SIGTERM to SIGKILL so a deadline
+   is actually terminal. **Remediate already migrated** (`close.ts:562, :977`); audit did not —
+   a one-core-two-draws divergence, the same defect fixed on one side only.
+   **Landing:** move `runFirstAvailableCommand` (`localCommands.ts:133`, currently sync, both
+   callers already async) onto `runTrackedAsync` with a 120 s deadline. Once nothing blocks the
+   loop the heartbeat fires and the lock cannot be stolen, so no stale-window change is needed:
+   `STALE_LOCK_MS` stays 30 s, its `/3` heartbeat ratio stays, the derived
+   `LOCKED_JSON_STORE_TIMEOUT_MS` is untouched, and the test pinning 30 s
+   (`fileLock-clock-seam.test.ts`) does not move. Independent of CX-02 and landable before it.
    Contention cost of the single outer hold, now measured: a concurrent CLI blocks up to
    `DEFAULT_TIMEOUT_MS` = 10,000 ms (`fileLock.ts:27`) before `FileLockTimeoutError`.
 
