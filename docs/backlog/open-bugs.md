@@ -6,6 +6,32 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
+  shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction:
+  false_red).** The pre-commit `test:doc-contract` leg reported 24 of 24 tests passed and then failed
+  in `tests/helpers/global-setup.ts` teardown with "This run ADDED 1 entry to the repo root:
+  `_scope-probe.mts`". That file was neither written nor read by the staged change — a docs-only
+  commit — and it was already GONE from the tree moments later, so a second live session in this same
+  checkout created and removed it inside the gate's own test window. The check diffs the root before
+  and after the run, so any foreign write during that window is attributed to the run. The existing
+  trap note frames this class as self-inflicted (editing the tree during your own gate); this is the
+  other source, and it cannot be fixed by the committing session freezing its own edits.
+  **Property:** the teardown attributes a root entry to the run only when the run could have created
+  it — scope it to the runner's own process tree, or reconcile against a baseline captured under the
+  same lock, so a concurrent session's transient file cannot red an unrelated commit.
+
+- **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
+  fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went
+  through the Bash tool in one session with the same here-string construct. The first two were NOT
+  blocked by the here-string rule and reached the pre-commit gate (which stopped them for unrelated
+  reasons); the third was blocked with the here-string message and its `commit -F` remedy. The
+  remedy works and is correct. What is unexplained is the inconsistency: a guard that admits a
+  mangled-commit-message construct twice and refuses it once is a guard whose reach cannot be relied
+  on, and the two admitted commands would have landed a truncated message had the other gates not
+  intervened. No mechanism is claimed here — the observation is the finding. **Property:** the rule
+  is deterministic over the command text, with a contract test pinning the admitted and refused
+  forms, so its reach is a property of the input rather than of the attempt.
+
 - **The rendered decision queue and its tracked snapshot can outlive the ledger that settles them,
   and nothing gates the disagreement (2026-08-27, medium, friction: tool_should_decide).**
   `docs/nightly-inbox.md` and the tracked `.audit-tools/nightly/open-items.json` both still present

@@ -665,6 +665,23 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   cwd it is a full session in the SHARED checkout. For bounded recon, POST to the router and skip the
   nested agent entirely.
 
+- **An external-delegation directive and the Workflow tool are in tension — Workflow has no external
+  lane (2026-08-27).** Workflow's agents run on the session's own model; `opts.model` selects an
+  Anthropic tier, and no `agentType` reaches `agy`, `codex`, or the freellmapi pool. So "delegate to
+  external agents" and "use a Workflow for every substantive task" cannot both be honoured by one
+  call: the external lanes are reachable only through the `mcp__freellmapi__offload_*` tools, driven
+  by hand. When the owner asks for external delegation, the offload tools are the instrument and
+  Workflow is not — reaching for Workflow spends Anthropic quota on exactly the bulk recon the
+  directive was routing away.
+
+- **agy lanes report no progress until they finish — `stdoutBytes` stays 0 for the whole run
+  (2026-08-27).** An `agy` offload job buffers its entire answer and emits it at exit, so
+  `offload_poll` distinguishes only `running` from `done`; there is no partial output to judge health
+  by. Observed runs here: 6.3 min (gemini-flash) and 8.7 min (opus-thinking) at 0 bytes throughout.
+  A shell `Monitor` cannot cover the gap either, because MCP job state is not reachable from a shell.
+  So a slow agy lane and a wedged one look identical until the timeout, and the only real signal is
+  the lane's own `timeout_s` (660s). Budget for that before dispatching a lane on the critical path.
+
 - **The MCP `pool` offload lane dies on the same hand-typed `auto` alias as `claude.ps1`, and its
   `model` override is INERT (2026-08-27).** The lane template spawns `claude.exe -p … --model auto`;
   Claude Code rejects `auto` client-side (71-byte `unrecognized_model` stderr, 0 stdout) while the
