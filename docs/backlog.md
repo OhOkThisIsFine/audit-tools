@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 215 entr(y/ies) indexed.
+> and at commit). 216 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -254,6 +254,7 @@
 - `durable-traps.md:831` — A long quoted heredoc in the Bash tool can die with "unexpected EOF while looking for matching quote", and the reported line is the last line that arrived (2026-08-27).
 - `durable-traps.md:841` — Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not come back (2026-08-27).
 - `durable-traps.md:858` — A suite run BEFORE the last doc edit is not evidence for the tree you pushed, and the live-tree tests are where that bites (2026-08-27).
+- `durable-traps.md:881` — Two offload lanes fail SUCCESS-SHAPED, and neither reports why in its status (2026-08-28).
 
 <!-- END GENERATED SEEK INDEX -->
 

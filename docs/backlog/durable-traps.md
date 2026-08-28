@@ -878,4 +878,14 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   subset. So a late SOURCE edit after a green run is still caught only by CI. That half is discipline,
   not a mechanism, which is why this entry stays open rather than being deleted.
 
+- **Two offload lanes fail SUCCESS-SHAPED, and neither reports why in its status (2026-08-28).**
+  Both burned a dispatch on a design gate and returned nothing usable while the job status said
+  `running` then finished cleanly. The `pool` lane passes `--model auto`, which this Claude Code
+  build rejects — `[claude-code:unrecognized_model]` on stderr, zero stdout, and the job runs to its
+  full 900s timeout before anyone learns it never started. The `agy-opus` lane exited 0 after 19s
+  having emitted only its own preamble ("I'll start by reading…"), 741 output tokens, no answer.
+  **Classify by OUTPUT SIZE before blaming quota**, and read `stderr_tail` on any lane whose
+  `stdoutBytes` is 0 — the status field will not tell you. Pass an explicit `model` to `pool` rather
+  than relying on its default. Neither failure is quota, and neither is the prompt.
+
 ## Doc-set hygiene (enforced)
