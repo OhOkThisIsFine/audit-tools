@@ -76,8 +76,10 @@ contested (route to more adversarial review; is itself a finding).
 Emergent nested depth would review endlessly. The bound is **not** a depth cap but two conditions:
 - **Review-worthy predicate** — a node earns a review only if it has a charter *nameably distinct
   from its parent* **and** enough coupled implementation to be judged. (Filters degenerate levels.)
-- **Convergence (loop-until-dry)** — keep seeding overlapping reviews until N rounds surface no new
-  misalignment.
+- **Convergence (loop-until-dry)** — keep seeding overlapping reviews until TWO CONSECUTIVE rounds
+  surface no new misalignment (owner decision 2026-08-28: one quiet round let a single duplicate
+  submission terminate the loop; the enforcement executor derives the rule from the persisted
+  rounds and records it on the register as `convergence_rule`).
 
 Together these are the stop rule; blast radius (below) then ranks what remains.
 
@@ -176,7 +178,8 @@ Because clean decomposition is impossible (goals overlap; reviewing each node on
 findings come from **many overlapping, differently-scoped, redundant reviews mined for
 disagreement** — a fleet across the matrix {altitude/span} × {which charter} × {adversarial role},
 independent and bounded (the provider-neutral host workload is built for exactly this), converged by
-**loop-until-dry** (keep seeding until N rounds surface nothing new).
+**loop-until-dry** (keep seeding until two consecutive rounds surface nothing new — the
+convergence rule above).
 
 ## Control surface — three currencies, three dials
 

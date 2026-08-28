@@ -2,7 +2,9 @@
 //
 // A second-order adversary (a SEPARATE agent) re-interrogates the whole system with
 // human-grade pressure and folds newly-surfaced improvements back in, LOOP-UNTIL-DRY:
-// done only when a challenge round yields NOTHING NEW (design of record
+// done only when CONSECUTIVE challenge rounds yield NOTHING NEW — this module marks
+// each round dry or not; the EXECUTOR decides convergence over the rounds register
+// (design of record
 // spec/conceptual-design-review-design.md §"Convergence (loop-until-dry)"). The
 // mandate is OPTIMIZATION / BETTER-WAY — superior alternatives to things that
 // currently work — not only defect-finding.
@@ -50,9 +52,12 @@ function resolveBlastRadius(
 export interface SystemicRoundResult {
   /** Every distinct finding across all rounds so far, blast-ranked, true-lens. */
   findings: Finding[];
-  /** The ids this round added that no prior round had (empty ⇒ dry/converged). */
+  /** The ids this round added that no prior round had (empty ⇒ dry). */
   new_finding_ids: string[];
-  /** True when this round surfaced nothing new — the loop-until-dry terminator. */
+  /**
+   * True when this round surfaced nothing new — a QUIET round. Convergence is
+   * the executor's call over CONSECUTIVE quiet rounds, not this flag alone.
+   */
   dry: boolean;
   /** Assembly notes (e.g. a finding was dropped as ungrounded), surfaced. */
   validation_issues: string[];
@@ -67,8 +72,9 @@ export interface SystemicRoundResult {
  *      PRESERVING the adversary-tagged TRUE lens.
  *   3. DEDUPE against prior rounds by finding identity (lens+category+title); a
  *      re-emission of a prior finding is NOT new.
- *   4. Determine convergence: a round that adds zero new findings is `dry` (the loop
- *      terminates); an empty submission is trivially dry.
+ *   4. Mark dryness: a round that adds zero new findings is `dry`; an empty
+ *      submission is trivially dry. The EXECUTOR converges the loop only after
+ *      consecutive dry rounds (the register's `convergence_rule`).
  * Deterministic: the returned `findings` are ordered by descending blast radius, ties
  * broken by finding id, so the register never churns on submission order.
  */
@@ -118,8 +124,9 @@ export function foldChallengeRound(params: {
     return compareCodeUnits(a.id, b.id);
   });
 
-  // A round is DRY (converged) when it surfaced nothing the prior set lacked — an
-  // empty submission is trivially dry. `new_finding_ids` already captures the newness.
+  // A round is DRY when it surfaced nothing the prior set lacked — an empty
+  // submission is trivially dry. `new_finding_ids` already captures the newness.
+  // Convergence over consecutive dry rounds is the executor's decision.
   const dry = new_finding_ids.length === 0;
 
   return { findings, new_finding_ids, dry, validation_issues };

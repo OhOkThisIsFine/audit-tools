@@ -8,7 +8,7 @@
 // duplicated, over-built; what assumption went unquestioned; is there a categorically
 // better approach (design of record spec + backlog "Systemic reviewers must be pushed
 // adversarially for improvement"). LOOP-UNTIL-DRY: this is round N of a loop that ends
-// only when a round surfaces NOTHING NEW.
+// only when CONSECUTIVE rounds surface NOTHING NEW (the register's convergence_rule).
 //
 // The aggregate-metrics digest is NECESSARY supporting evidence, explicitly NOT
 // SUFFICIENT alone — the adversary reasons from the whole system, using the counts as
@@ -20,8 +20,9 @@ import type { AggregateMetricsDigest } from "./aggregateMetricsDigest.js";
  * Render the second-order-adversary LANE prompt for one challenge round. `round` is
  * the 1-based loop ordinal; `priorFindingCount` orients the adversary on what already
  * surfaced (so it pushes for NEW improvements, not re-statements). `submissionPath`
- * is where the agent writes its findings; an EMPTY findings array is the deliberate
- * loop-until-dry terminator (this round found nothing new).
+ * is where the agent writes its findings; an EMPTY findings array marks a QUIET
+ * round (this round found nothing new) — the loop converges after consecutive
+ * quiet rounds, per the register's `convergence_rule`.
  *
  * Advance-free (design resolution 2): the lane prompt is materialized to a file
  * and carries no continue-command — the step prompt owns the advance, so a lane
@@ -66,9 +67,10 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "`architecture`. The lens routes the improvement to the right place in synthesis.",
     "",
     "## Loop-until-dry",
-    "The review is done only when a round yields NOTHING NEW — not when it first has an",
-    "answer. If, after genuine pressure, you find no NEW improvement this round, submit",
-    "an EMPTY findings array; that converges the loop. Otherwise submit the new",
+    "The review is done only when consecutive rounds yield NOTHING NEW — not when it",
+    "first has an answer. If, after genuine pressure, you find no NEW improvement this",
+    "round, submit an EMPTY findings array; that marks a quiet round, and the loop",
+    "converges after consecutive quiet rounds. Otherwise submit the new",
     "improvements (each pointing at at least one real component).",
     "",
     "## Output",

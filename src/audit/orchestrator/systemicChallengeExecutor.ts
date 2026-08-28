@@ -9,6 +9,24 @@ import { resolveCharterCeiling, ceilingRequestsCharters } from "./charterExtract
 import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
 import { foldChallengeRound } from "../systemic/systemicChallengeLoop.js";
 
+/**
+ * Convergence rule: the loop terminates only after this many CONSECUTIVE quiet
+ * (dry) rounds. Owner decision 2026-08-28: under a one-round rule, a single
+ * re-consumed or duplicate submission reports a dry round and terminates the
+ * adversary loop permanently — durable submission staging is the class fix
+ * (CX-02 blocker 3); two consecutive quiet rounds remove the single-event
+ * trigger. Cost accepted: one extra adversary round per audit. The applied
+ * rule is recorded on the register (`convergence_rule`) so the artifact is
+ * self-describing.
+ */
+const QUIET_ROUNDS_TO_CONVERGE = 2;
+
+function appliedConvergenceRule(): NonNullable<
+  SystemicChallengeRegister["convergence_rule"]
+> {
+  return { quiet_rounds_required: QUIET_ROUNDS_TO_CONVERGE };
+}
+
 function omittedRegister(ceiling: Ceiling, generated_at: string): SystemicChallengeRegister {
   return {
     generated_at,
@@ -17,6 +35,7 @@ function omittedRegister(ceiling: Ceiling, generated_at: string): SystemicChalle
     status: "omitted",
     rounds: [],
     converged: true,
+    convergence_rule: appliedConvergenceRule(),
     findings: [],
     validation_issues: [],
   };
@@ -35,8 +54,9 @@ function omittedRegister(ceiling: Ceiling, generated_at: string): SystemicChalle
  *   conversation-first default; mirrors the charter-clarification omit).
  * - **run** (`deep`/`deepest` ceiling): assemble the metrics digest and fold each
  *   submitted challenge round into the register. An EMPTY submission (a round that
- *   surfaced nothing new) marks the register `converged` — the loop terminates. A
- *   non-empty submission appends a round and keeps the loop open for the next round.
+ *   surfaced nothing new) is a QUIET round; the register marks `converged` only
+ *   after {@link QUIET_ROUNDS_TO_CONVERGE} CONSECUTIVE quiet rounds. A non-empty
+ *   submission appends a round and keeps the loop open for the next round.
  *
  * The first run (no submission yet) computes the digest and writes an OPEN register
  * (converged:false) so the relay step can dispatch the adversary; each subsequent run
@@ -74,6 +94,7 @@ export function runSystemicChallengeExecutor(
       metrics,
       rounds: priorRounds,
       converged: false,
+      convergence_rule: appliedConvergenceRule(),
       findings: priorFindings,
       validation_issues: prior?.validation_issues ?? [],
     };
@@ -99,14 +120,21 @@ export function runSystemicChallengeExecutor(
     new_finding_ids: folded.new_finding_ids,
     dry: folded.dry,
   };
+  const rounds = [...priorRounds, round];
+  // CONSECUTIVE-QUIET convergence: the loop terminates only when the last
+  // QUIET_ROUNDS_TO_CONVERGE rounds were ALL dry. Derived from the persisted
+  // rounds themselves — no separate counter state to drift.
+  const converged =
+    rounds.length >= QUIET_ROUNDS_TO_CONVERGE &&
+    rounds.slice(-QUIET_ROUNDS_TO_CONVERGE).every((r) => r.dry);
   const register: SystemicChallengeRegister = {
     generated_at,
     target: "systemic_challenge",
     ceiling,
     metrics,
-    rounds: [...priorRounds, round],
-    // LOOP-UNTIL-DRY: converged only when this round surfaced nothing new.
-    converged: folded.dry,
+    rounds,
+    converged,
+    convergence_rule: appliedConvergenceRule(),
     findings: folded.findings,
     validation_issues: [
       ...(prior?.validation_issues ?? []),
@@ -118,8 +146,10 @@ export function runSystemicChallengeExecutor(
     artifacts_written: ["systemic_challenge.json"],
     progress_summary:
       `Systemic challenge round ${round.round}: ${folded.new_finding_ids.length} new improvement(s)` +
-      (folded.dry
-        ? " — nothing new, loop converged (dry)."
-        : `, ${folded.findings.length} total; loop continues.`),
+      (converged
+        ? ` — nothing new for ${QUIET_ROUNDS_TO_CONVERGE} consecutive rounds, loop converged.`
+        : folded.dry
+          ? " — quiet round; the loop converges after the next consecutive quiet round."
+          : `, ${folded.findings.length} total; loop continues.`),
   };
 }

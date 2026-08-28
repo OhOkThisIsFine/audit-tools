@@ -284,7 +284,7 @@ describe("runSystemicChallengeExecutor", () => {
     expect(reg.metrics.rollups.length).toBeGreaterThan(0);
   });
 
-  test("folding a non-empty round keeps the loop open; an empty round converges it", () => {
+  test("one quiet round does NOT converge; two consecutive quiet rounds do", () => {
     const opened = runSystemicChallengeExecutor({
       intent_checkpoint: checkpoint("deep"),
       repo_manifest: repoManifest,
@@ -299,6 +299,9 @@ describe("runSystemicChallengeExecutor", () => {
     expect(round1.rounds).toHaveLength(1);
     expect(round1.findings).toHaveLength(1);
 
+    // First quiet round: dry, but NOT converged — the rule requires two
+    // CONSECUTIVE quiet rounds (a single duplicate submission must not be able
+    // to terminate the adversary loop).
     const round2 = runSystemicChallengeExecutor(
       {
         ...opened,
@@ -309,10 +312,65 @@ describe("runSystemicChallengeExecutor", () => {
       { findings: [] },
     ).updated.systemic_challenge;
     if (!round2) throw new Error("systemic challenge round was not written");
-    // A round that surfaced nothing new converges the loop (loop-until-dry).
-    expect(round2.converged).toBe(true);
     expect(round2.rounds).toHaveLength(2);
     expect(round2.rounds[1].dry).toBe(true);
+    expect(round2.converged).toBe(false);
+    expect(round2.convergence_rule).toEqual({ quiet_rounds_required: 2 });
+
+    // Second consecutive quiet round: converged.
+    const round3 = runSystemicChallengeExecutor(
+      {
+        ...opened,
+        systemic_challenge: round2,
+        intent_checkpoint: checkpoint("deep"),
+        repo_manifest: repoManifest,
+      },
+      { findings: [] },
+    ).updated.systemic_challenge;
+    if (!round3) throw new Error("systemic challenge round was not written");
+    expect(round3.rounds).toHaveLength(3);
+    expect(round3.converged).toBe(true);
+  });
+
+  test("a finding between two quiet rounds resets the consecutive count", () => {
+    const opened = runSystemicChallengeExecutor({
+      intent_checkpoint: checkpoint("deep"),
+      repo_manifest: repoManifest,
+    }).updated;
+
+    const quiet1 = runSystemicChallengeExecutor(
+      { ...opened, intent_checkpoint: checkpoint("deep"), repo_manifest: repoManifest },
+      { findings: [] },
+    ).updated.systemic_challenge;
+    if (!quiet1) throw new Error("round was not written");
+    expect(quiet1.converged).toBe(false);
+
+    const busy = runSystemicChallengeExecutor(
+      {
+        ...opened,
+        systemic_challenge: quiet1,
+        intent_checkpoint: checkpoint("deep"),
+        repo_manifest: repoManifest,
+      },
+      { findings: [mkFinding("t2", "performance", "Batch the graph writes")] },
+    ).updated.systemic_challenge;
+    if (!busy) throw new Error("round was not written");
+    expect(busy.converged).toBe(false);
+
+    // Quiet again — but the busy round broke the streak, so still one quiet
+    // round, not two consecutive.
+    const quiet2 = runSystemicChallengeExecutor(
+      {
+        ...opened,
+        systemic_challenge: busy,
+        intent_checkpoint: checkpoint("deep"),
+        repo_manifest: repoManifest,
+      },
+      { findings: [] },
+    ).updated.systemic_challenge;
+    if (!quiet2) throw new Error("round was not written");
+    expect(quiet2.rounds.map((r) => r.dry)).toEqual([true, false, true]);
+    expect(quiet2.converged).toBe(false);
   });
 });
 
