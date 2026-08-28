@@ -828,4 +828,19 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   and the steps a light variant drops are the ones that catch things.
   [[ph01-rejected-one-core-two-draws-stands]]
 
+- **A suite run BEFORE the last doc edit is not evidence for the tree you pushed, and the live-tree
+  tests are where that bites (2026-08-27).** The closeout pass edited `docs/HANDOFF.md` after the
+  full suite had gone green, then committed and pushed on the strength of that earlier run. CI named
+  the failure the same minute: `tests/shared/handoff-roadmap.test.ts` asserts against the LIVE tree,
+  so a documentation edit can turn it red exactly like a source change — here, hand-written text
+  about a subsystem whose generated block renders nothing while its queue is empty, which is the
+  second drifting copy that contract exists to forbid. Two commits shipped red before the challenge
+  gate surfaced it. Nothing in the local flow catches this: the pre-commit gate runs typecheck legs,
+  not the suite, and a doc-only staged set looks harmless. **The discipline is the one the closeout
+  already states and this pass got wrong — verify green on the FINAL tree, after the last edit of
+  any kind, not on the tree you were mid-edit in.** When a late edit is doc-only, the bounded check
+  is the live-tree tests rather than the whole suite: `npx vitest run tests/shared/handoff-roadmap.test.ts`
+  plus the doc gates. The general rule stands whatever the file type — an edit after the run
+  invalidates the run.
+
 ## Doc-set hygiene (enforced)
