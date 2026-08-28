@@ -83,6 +83,9 @@ turns it green with both drains still standing, which is why the record now says
   under every proposed resolution, but they are deliberately unadopted, so `check:deadcode` would red
   them at release. They are not sufficient on their own either (record blockers 2 to 4). Adopt them
   with the replace, or delete the branch and re-derive them from the record — do not merge it alone.
+  ⚠ It forked BEFORE this lap's documentation commits, so a plain merge would REVERT the design
+  record's refutation sections and the open-bugs entry. Rebase it onto `main` first, or cherry-pick
+  the two source files; never merge the branch as it stands.
 - The tracked decision-queue snapshot STILL disagrees with the ledger that settles it, and it will
   keep doing so: its writer refuses a batch that drops a record-path item on its own, so no lap can
   quietly true it up. What changed is the consumer, not the artifact — `start-lap` step 5 now asks
