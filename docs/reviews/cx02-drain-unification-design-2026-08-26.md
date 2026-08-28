@@ -444,6 +444,46 @@ isolation. One atomic replace on `main` stands, with a temporary internal seam p
 commits on the branch under PH-04. Deferring the collapse to a later lap is settled against by the
 same line.
 
+## Two more blockers, from a slow adversarial lane, 2026-08-28
+
+An independent deep lane re-ran the whole brief against HEAD. It reached the same-lock re-entry
+finding above on its own, and the synchronous-child heartbeat finding on its own, which is
+corroboration rather than news. It also found two that nothing above carries. Both are verified here
+from source before being written down, and both BLOCK the plan as written rather than constrain it.
+
+### Persist-once breaks the submission consume/persist ORDERING, and loses host submissions
+
+`runOmittableGate` consumes a lane submission in this order: `descriptor.apply(...)` — which today
+calls `runAuditStep`, so the effect is PERSISTED — then `unlink(incoming.path)` to remove the
+submission file, then `recordLaneOutcome`. That order is crash-safe in both directions. Die before
+the persist and the file survives to be re-consumed; die after it and the effect is on disk and the
+file is correctly gone.
+
+Persist-once inverts it. The apply becomes an in-memory carry, the unlink still happens immediately,
+and the core write moves to the halt — so a process killed between the two has **deleted the host's
+submission without ever persisting its effect**. That is silent loss of host input, not a lost
+derivation the next call recomputes.
+
+So the halt-time persist is not the only ordering the fold owns: every submission unlink must be
+DEFERRED behind it. The fold has to carry a pending-deletion list and apply it after the persist
+succeeds. State that in the spec; it is not implied by "persist once".
+
+### The plan draw must HALT at a host boundary, and an exclusion filter SKIPS it instead
+
+Constraint 2 calls the plan draw "a FILTERED registry view". Read literally as removing the
+host-boundary entries, it is wrong, and the engine says why:
+`findFirstActionableObligation` walks `priority` and does
+`obligations.find((o) => o.id === id)` per id, **continuing to the next id when no def matches**
+(`obligationEngine.ts:63-68`). An excluded obligation therefore does not stop the scan — the scan
+steps over it and selects a LATER obligation. A `plan` built that way would run PAST the first host
+boundary rather than halting at it, which inverts the one semantic constraint 2 gives it
+("deterministic-only advance, halts at the first host boundary").
+
+The filter must therefore be a REPLACEMENT, not a removal: every id stays in the view, and the
+host-boundary ones get an `execute` that emits a halt. That also keeps the side-effect exclusion the
+constraint actually wants — `runHostDelegationObligation` never runs, so nothing ingests results or
+calls `ensureSemanticReviewRun` — while preserving ordering and the halt point.
+
 ## Preserve list (report + refuter union)
 
 Deterministic frontier draining within one call; every host-input stop boundary; exactly-once
