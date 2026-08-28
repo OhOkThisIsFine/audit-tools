@@ -37,6 +37,7 @@ import { readFileSync, readdirSync, mkdirSync, existsSync, writeFileSync } from 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
+import { closeoutReadinessFindings } from '../../scripts/shared/closeoutReadiness.mjs';
 import { sessionHasLiveBackgroundWork } from '../../scripts/shared/liveSessionWork.mjs';
 import { worktreeTree } from '../../scripts/shared/worktree-tree.mjs';
 import {
@@ -178,30 +179,61 @@ if (unpushed) {
   );
 }
 
-// HANDOFF contains generated views of the nightly queue and backlog. A mismatch
-// means the live state or roadmap the next agent reads is stale.
-try {
-  // Absence is not a mismatch: a checkout without the generator (or a different
-  // repo entirely) must not be reported as a stale HANDOFF.
-  const script = join(ROOT, 'scripts', 'shared', 'generate-handoff-roadmap.mjs');
-  const r = existsSync(script)
-    ? spawnSync(process.execPath, [script, '--check'], {
-        cwd: ROOT,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 15_000,
-        windowsHide: true,
-      })
-    : { status: 0 };
-  if (r.status !== 0) {
-    findings.push(
-      'docs/HANDOFF.md no longer matches its generated sources ' +
-        '(nightly queue/decisions and backlog; generate-handoff-roadmap --check failed). ' +
-        'Regenerate it before handing off.',
-    );
+// Deterministic, session-independent readiness — the stale generated HANDOFF and
+// the unindexed memory files. Shared with the RENDERER, which refuses to render
+// while any is outstanding (scripts/shared/closeoutReadiness.mjs). This gate is
+// the backstop, not the first line: raising them here for the first time is what
+// used to force a second render of a report that was wrong when it was written.
+findings.push(...closeoutReadinessFindings(ROOT));
+
+/**
+ * Did the rendered report actually reach the owner — i.e. appear in an ASSISTANT
+ * message, not merely in the tool result the renderer wrote to?
+ *
+ * Checks the record's anchors (the report title and the last heading the
+ * renderer emitted) against assistant text at or after `rendered_at`. Two
+ * anchors, not the whole body, so a genuine full paste can never false-red on
+ * whitespace or on the harness re-wrapping a line — and a summary ABOUT the
+ * report, which is the failure being caught, carries neither.
+ *
+ * FAILS OPEN on every fault: an unreadable transcript, an absent path, or a
+ * pre-anchor record returns true. A gate that cannot see the evidence must not
+ * assert its absence.
+ *
+ * @param {unknown} transcriptPath
+ * @param {{ report_anchors?: unknown, rendered_at?: unknown }} rec
+ * @returns {boolean}
+ */
+function reportReachedTheOwner(transcriptPath, rec) {
+  const anchors = Array.isArray(rec?.report_anchors) ? rec.report_anchors.map(String) : [];
+  if (anchors.length === 0) return true; // pre-anchor record → nothing to check
+  if (typeof transcriptPath !== 'string' || transcriptPath.length === 0) return true;
+  let lines;
+  try {
+    lines = readFileSync(transcriptPath, 'utf8').split(/\r?\n/).filter(Boolean);
+  } catch {
+    return true;
   }
-} catch {
-  /* script missing / spawn fault → skip this check */
+  const renderedAt = Date.parse(String(rec?.rendered_at ?? ''));
+  for (const line of lines) {
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry?.type !== 'assistant') continue;
+    const at = Date.parse(String(entry?.timestamp ?? ''));
+    if (Number.isFinite(renderedAt) && Number.isFinite(at) && at < renderedAt) continue;
+    const content = entry?.message?.content;
+    if (!Array.isArray(content)) continue;
+    const text = content
+      .filter((c) => c?.type === 'text' && typeof c.text === 'string')
+      .map((c) => c.text)
+      .join('\n');
+    if (text && anchors.every((a) => text.includes(a))) return true;
+  }
+  return false;
 }
 
 // The hand-back itself: rendered through scripts/render-closeout.mjs, which
@@ -249,6 +281,21 @@ try {
           '(`node scripts/render-closeout.mjs --in <closeout.json>`).',
       );
     }
+  } else if (!reportReachedTheOwner(payload?.transcript_path, rec)) {
+    // RENDERED is not the same as DELIVERED. The renderer writes to stdout, which
+    // in an agent host is a TOOL RESULT — shown to the agent, not reliably to the
+    // person. So every check above can pass while the owner sees no hand-back at
+    // all: the agent runs the renderer, reads the output itself, and writes a
+    // summary ABOUT it. Observed 2026-08-28, twice in one session, each time
+    // followed by "that is the hand-back above" pointing at something the owner
+    // could not see. The anchors are two lines only the renderer emits.
+    findings.push(
+      'the closeout was RENDERED but never PASTED — no message in this session contains the ' +
+        "report's own heading lines. The renderer writes to stdout, which the owner does not see: " +
+        'a tool result is shown to you, not to them. Paste the rendered markdown into your reply ' +
+        'verbatim. Re-running the renderer does not fix this; the report has to appear in the ' +
+        'message you send.',
+    );
   }
 } catch {
   findings.push(
@@ -260,26 +307,8 @@ try {
   );
 }
 
-// A memory file that never reached MEMORY.md is invisible to the next session:
-// the index is what gets loaded, not the directory.
-try {
-  // Host memory lives outside the repo, keyed by a slug of the project path.
-  const slug = ROOT.replace(/[:\\/]/g, '-');
-  const memDir = join(homedir(), '.claude', 'projects', slug, 'memory');
-  const index = readFileSync(join(memDir, 'MEMORY.md'), 'utf8');
-  const orphans = readdirSync(memDir)
-    .filter((n) => n.endsWith('.md') && n !== 'MEMORY.md')
-    .filter((n) => !index.includes(n));
-  if (orphans.length > 0) {
-    findings.push(
-      `${orphans.length} memory file(s) are NOT linked from MEMORY.md — the index is what loads next ` +
-        `session, so these are invisible:\n` +
-        orphans.slice(0, 8).map((n) => `      ${n}`).join('\n'),
-    );
-  }
-} catch {
-  /* memory store absent on this box → skip */
-}
+// (the memory-index check moved into scripts/shared/closeoutReadiness.mjs above,
+// so the renderer raises it BEFORE the report is written rather than after)
 
 // CI on the default branch. The lap rule says to check it by hand at every
 // close-out; a rule that depends on remembering is the thing this project moves

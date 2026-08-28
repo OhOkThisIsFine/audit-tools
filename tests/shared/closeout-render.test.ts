@@ -5,7 +5,7 @@
 // an empty section is omitted from the report (short), but omitting it requires
 // stating "none" in the input (intentional). A test, not prose, because the
 // prose version of this rule is exactly what decayed twice.
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -185,5 +185,81 @@ describe('render-closeout: silence is stated, then omitted', () => {
     expect((git('rev-parse', 'HEAD').stdout ?? '').trim()).not.toBe(headBefore);
     // The content did not, so the record still describes the tree being handed off.
     expect(worktreeTree(dir)).toBe(record.tree);
+  });
+});
+
+describe('render-closeout: the decisions section must ASK something', () => {
+  // The heading is "Decisions needed from you". Filling it with decisions
+  // already TAKEN reads to the owner as a demand for something they have
+  // already given — reported by the owner 2026-08-28 after it happened on
+  // consecutive reports. `prompt` could not prevent it: the renderer shows a
+  // prompt only when a value is MISSING, so a section filled with the wrong
+  // KIND of content sailed straight through.
+  it('refuses a decisions section that states settled decisions instead of asking', () => {
+    const { code, stderr } = render(
+      minimal({
+        decisions:
+          'Four owner decisions were asked and are all answered and recorded. ' +
+          'Nothing is left waiting on the owner.',
+      }),
+    );
+    expect(code).not.toBe(0);
+    expect(stderr).toContain('contains no question');
+    expect(stderr).toContain('"none"');
+  });
+
+  it('accepts a decisions section that actually asks, and renders it', () => {
+    const { code, stdout } = render(
+      minimal({
+        decisions:
+          'Split docs/backlog/open-bugs.md, or keep condensing to stay under the ceiling? ' +
+          'Splitting costs an index update; condensing costs an entry every time.',
+      }),
+    );
+    expect(code).toBe(0);
+    expect(stdout).toContain('### Decisions needed from you');
+  });
+
+  it('still allows "none" — silence stays a stated, omitted disposition', () => {
+    const { code, stdout } = render(minimal({ decisions: 'none' }));
+    expect(code).toBe(0);
+    expect(stdout).not.toContain('### Decisions needed from you');
+  });
+});
+
+describe('render-closeout: readiness is checked BEFORE the report describes the tree', () => {
+  // The Stop challenge runs the same checks, but a Stop hook can only speak
+  // once a report exists — so the loop was render, get challenged, fix, RENDER
+  // AGAIN, with the first report wrong at the moment it was written. The
+  // renderer shares the deterministic half (scripts/shared/closeoutReadiness.mjs)
+  // so the fixes land before the first render.
+  it('refuses to render while the generated HANDOFF is stale', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'closeout-ready-'));
+    mkdirSync(join(dir, 'scripts', 'shared'), { recursive: true });
+    // A stand-in generator that reports STALE, so the test does not depend on
+    // the real repo's HANDOFF being out of date.
+    writeFileSync(
+      join(dir, 'scripts', 'shared', 'generate-handoff-roadmap.mjs'),
+      'process.exit(process.argv.includes("--check") ? 1 : 0);\n',
+      'utf8',
+    );
+    const file = join(dir, 'in.json');
+    writeFileSync(file, JSON.stringify(minimal()), 'utf8');
+    const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr ?? '').toContain('not ready to hand back');
+    expect(r.stderr ?? '').toContain('generate-handoff-roadmap');
+  });
+
+  it('fails OPEN when the generator is absent — a check that cannot see its evidence stays quiet', () => {
+    // No scripts/ tree at all: a different repo, or a checkout without the
+    // generator. That is not a stale HANDOFF, and reporting it as one would be
+    // a false red on a correct hand-back.
+    const { code } = render(minimal());
+    expect(code).toBe(0);
   });
 });

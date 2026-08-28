@@ -33,6 +33,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CLOSEOUT_SECTIONS } from './closeout-sections-data.mjs';
+import { closeoutReadinessFindings } from './shared/closeoutReadiness.mjs';
 import { worktreeTree } from './shared/worktree-tree.mjs';
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -86,6 +87,29 @@ function blankTemplate() {
 }
 
 if (templateOnly) {
+  // The walk goes to STDERR so `--template > closeout.json` still yields valid
+  // JSON. It is DERIVED from each section's own prompt, never a second copy of
+  // the closeout steps: a hand-copied checklist here would drift from the
+  // registry the renderer actually enforces.
+  //
+  // Why it prints at all: the Stop challenge can only prompt this walk AFTER a
+  // report exists, so the agent re-walks, finds work, and renders a second time.
+  // Surfacing the same contract at template time is what lets the fixes land
+  // before the first render.
+  process.stderr.write(
+    'Walk these BEFORE filling anything in — each line is the contract the renderer will hold\n' +
+      'the matching section to, and anything they surface is cheaper to fix now than after the\n' +
+      'report has already described it. Rendering is the LAST step of the closeout, not the first.\n\n',
+  );
+  CLOSEOUT_SECTIONS.forEach((s, i) => {
+    process.stderr.write(`  ${i + 1}. ${s.id} — ${s.prompt}\n`);
+  });
+  const pending = closeoutReadinessFindings(root);
+  process.stderr.write(
+    pending.length > 0
+      ? `\nAlready outstanding, and the render will REFUSE until each is fixed:\n  - ${pending.join('\n  - ')}\n\n`
+      : '\nDeterministic readiness checks: clean.\n\n',
+  );
   console.log(JSON.stringify(blankTemplate(), null, 2));
   process.exit(0);
 }
@@ -184,6 +208,12 @@ for (const section of CLOSEOUT_SECTIONS) {
     emptied.push({ id: section.id, required: !!section.required, prompt: section.prompt });
     continue;
   }
+  // A section may declare that its content has to be a QUESTION. `prompt` could
+  // not carry this: it is shown only when a value is missing, so a section filled
+  // with the wrong KIND of content never met it.
+  if (section.requiresQuestion && !lines.join(' ').includes('?')) {
+    fail(`section "${section.id}": ${section.requiresQuestion}`);
+  }
   disposition[section.id] = 'content';
   rendered.push({ section, lines: lines.map((l) => (l.startsWith('- ') ? l : `- ${l}`)) });
 }
@@ -218,6 +248,20 @@ if (emptied.length > 0) {
   fail(parts.join('\n\n'));
 }
 
+// ── readiness: fix it BEFORE the report describes it ─────────────────────────
+// The Stop challenge runs the same checks, but a Stop hook can only speak after
+// a report exists — so discovering these there means rendering twice, and the
+// first report was wrong when it was written. Same module, earlier boundary.
+const notReady = closeoutReadinessFindings(root);
+if (notReady.length > 0) {
+  fail(
+    'not ready to hand back — fix these first, then render ONCE:\n  - ' +
+      notReady.join('\n  - ') +
+      '\n\nThese are deterministic and would be raised at Stop anyway; catching them here is what ' +
+      'stops the report being written twice.',
+  );
+}
+
 // ── render ───────────────────────────────────────────────────────────────────
 const out = ['## Sprint closeout', ''];
 for (const { section, lines } of rendered) {
@@ -231,12 +275,22 @@ const markdown = out.join('\n').trimEnd() + '\n';
 // commits its own HANDOFF/backlog/memory updates, and a HEAD-bound record is
 // invalidated by the very commit it describes.
 const head = git(['rev-parse', 'HEAD']);
+// Anchors let the Stop gate tell a report that was RENDERED from one that
+// actually REACHED the owner. The renderer writes to stdout, which in an agent
+// host is a TOOL RESULT — shown to the agent, not reliably to the person. So an
+// agent could satisfy every check here, then summarise the report instead of
+// pasting it, and the owner would end a sprint having seen no hand-back at all.
+// Two lines the renderer alone produces: the title, and the last heading it
+// emitted. Both present in one assistant message means the body between them was
+// pasted; checking only these two cannot false-red a genuine full paste.
+const lastHeading = rendered.length > 0 ? rendered[rendered.length - 1].section.heading : null;
 const record = {
   version: 2,
   tree: worktreeTree(root),
   head: head.ok ? head.stdout : null,
   rendered_at: new Date().toISOString(),
   session_id: process.env.CLAUDE_SESSION_ID ?? null,
+  report_anchors: lastHeading ? ['## Sprint closeout', `### ${lastHeading}`] : [],
   disposition,
   silent_sections: Object.entries(disposition)
     .filter(([, d]) => d === SILENT)

@@ -59,6 +59,12 @@ const frictionCategoryBullets = FRICTION_CATEGORIES.map((id) => {
  *   bullet id; the heading renders only if at least one bullet has content
  * @property {string} prompt what this section is for — shown in --help and in
  *   the refusal when its value is missing
+ * @property {string} [requiresQuestion] a non-silent value here must contain a
+ *   question mark, and this string is the refusal shown when it does not. The
+ *   prompt alone was not enough: it is shown only when a value is MISSING, so a
+ *   section filled with the WRONG KIND of content sailed through. Declared here
+ *   rather than special-cased in the renderer, so the contract and its refusal
+ *   have one home.
  */
 
 /**
@@ -111,8 +117,15 @@ export const CLOSEOUT_SECTIONS = [
     id: 'decisions',
     heading: 'Decisions needed from you',
     prompt:
-      'every decision only the owner can make, ASKED as an answerable question with its options ' +
-      'spelled out — a pointer to a queue or a command is not a question',
+      'every decision still OPEN that only the owner can make, ASKED as an answerable question ' +
+      'with its options spelled out — a pointer to a queue or a command is not a question, and a ' +
+      'decision already made is not open. If nothing is open, the value is "none"',
+    requiresQuestion:
+      'this section is what the owner must still ANSWER, and its value contains no question. A ' +
+      'decision that was already taken belongs in "landed" (or its own backlog entry), not here — ' +
+      'under this heading it reads as a demand for something the owner has already given. If ' +
+      'every decision is settled, the correct value is the literal "none", and the section is ' +
+      'then omitted from the report.',
   },
   {
     id: 'next_steps',

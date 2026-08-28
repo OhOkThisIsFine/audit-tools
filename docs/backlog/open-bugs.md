@@ -6,32 +6,33 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **The closeout challenge fires while dispatched work is in flight, because no hook reads
-  `background_tasks` (2026-08-28, low, friction: tool_should_decide).** It challenged a hand-back
-  while two dispatched peer-CLI lanes were still running and their results were the sprint's whole
-  point. The Stop payload carries `background_tasks`; no hook in `.claude/hooks/` reads it, though
-  `CLAUDE.md` says the closeout must NEVER run mid-conversation. **Property:** a Stop gate asking
-  whether the sprint is finished consults the running-task signal it is already given.
+- **The live-work guard did not stop the closeout challenge firing mid-sprint; an ABSENT signal is
+  indistinguishable from an idle session (2026-08-28, low, friction: tool_should_decide).** The
+  challenge fired while four dispatched `codex exec` lanes were still running. The guard is not
+  missing — `sessionHasLiveBackgroundWork` (`scripts/shared/liveSessionWork.mjs`) reads
+  `background_tasks` and both Stop gates call it — so either this build omitted the field or the
+  entries had already left the array. Its own header states the degradation: absent fields make the
+  predicate false. **Property:** the predicate distinguishes "no live work" from "no signal", and a
+  missing signal does not silently degrade to challenging. Capture one Stop payload to tell which.
 
 - **The audit local-command path spawns SYNCHRONOUSLY inside the artifact-tree lock; remediate
   already fixed this (2026-08-28, DECIDED owner, medium).** `runFirstAvailableCommand`
   (`src/audit/orchestrator/localCommands.ts`) calls the sync `runTracked`, so a child blocks the
   event loop and starves every `setInterval` heartbeat, the held lock's mtime beat included.
-  `src/shared/tooling/exec.ts` records that this ALREADY fired: a stalled `npx --version` probe
+  `src/shared/tooling/exec.ts` records this ALREADY firing: a stalled `npx --version` probe
   classified a live lock stale and it was stolen mid-flight. Reached from `autoFixExecutor.ts` and
-  `syntaxResolutionExecutor.ts`, both inside the hold. `src/remediate/phases/close.ts` migrated to
-  `runTrackedAsync` for this reason; audit did not — one core, two draws, fixed on one side.
-  **Landing:** move `runFirstAvailableCommand` onto `runTrackedAsync` with a 120 s deadline; both
-  callers are already async. It also upgrades the failure surface: classified `ETIMEDOUT` /
-  `ENOBUFS` instead of a bare signal, and SIGKILL escalation so a deadline is really
-  terminal. **Do NOT move the lock constants:** with nothing blocking the
-  loop the heartbeat fires, so `STALE_LOCK_MS` stays 30 s. Independent of CX-02.
+  `syntaxResolutionExecutor.ts`, inside the hold. `src/remediate/phases/close.ts` migrated to
+  `runTrackedAsync`; audit did not — one core, two draws, fixed on one side.
+  **Landing:** move it onto `runTrackedAsync` with a 120 s deadline; both callers are already
+  async. It also classifies `ETIMEDOUT` / `ENOBUFS` instead of a bare signal, and escalates to
+  SIGKILL. **Do NOT move the lock constants:** with nothing blocking the loop the heartbeat fires,
+  so `STALE_LOCK_MS` stays 30 s. Independent of CX-02.
 
 - **The obligation engine's bound doc is off by one against its own comparison (2026-08-28, low).**
   `obligationEngine.ts` documents `maxTransitions` as stopping "after that many consecutive
-  transitions"; the guard `if (++transitions > maxTransitions)` fires on N+1. No test counts
-  executions against the bound, and CX-02 re-specifies the cap on exactly this firing point.
-  **Property:** doc and comparison agree, and a test pins which transition stops the loop.
+  transitions"; `if (++transitions > maxTransitions)` fires on N+1. Nothing counts executions
+  against the bound, and CX-02 re-specifies the cap on this exact point. **Property:** doc and
+  comparison agree, and a test pins which transition stops the loop.
 
 - **The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
   shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction:
@@ -825,9 +826,9 @@
   - (c) **Scope-rule guard decisions are invisible at the intent checkpoint** — `computeScopePreDigest` reads
     only per-file entries; a skipped rule (`root_untracked`/`share_exceeded`/git-absent fallback) never
     surfaces to the operator despite the summary existing for exactly that purpose.
-  - (e) The audit `renderEdgeReasoningDispatchPrompt` (`src/audit/cli/prompts.ts`, `edge_reasoning`
-    branch of `nextStepCommand.ts`) single-agent dispatch carries no scratch-dir note (params lack
-    run context; one bounded agent writing one results file — lowest-risk path, add if it ever litters).
+  - (e) The audit `renderEdgeReasoningDispatchPrompt` (`src/audit/cli/prompts.ts`) single-agent
+    dispatch carries no scratch-dir note — one bounded agent writing one results file, so it is the
+    lowest-risk path; add one if it ever litters.
 
 - **External shared-logic audit V1–V7 residuals** (each deliberate, low-severity, documented at the code
   site):
