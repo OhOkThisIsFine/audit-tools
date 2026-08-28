@@ -20,30 +20,35 @@
   runs on `runTrackedAsync` with a 120 s deadline, so a synchronous child cannot starve the held
   lock's heartbeat. CX-02's remaining implementation is landings 1 to 5 of the record's decided
   shape.
-- **Repository:** `v0.50.3` is live on npm; `main` carries fixes newer than the tag.
+- **Repository:** `v0.50.4` is live on npm and both global bins report it; `main`, `origin/main`
+  and the tag agree. No release is pending.
+- **Branch `cx02-impl` (pushed) is the implementation branch.** It is `main` plus the two
+  lock-site splits (`runAuditStepUnlocked`, `ensureSemanticReviewRunUnlocked`), green on typecheck
+  and the orchestrator suites; `check:deadcode` reds it at release BY DESIGN until the fold adopts
+  the splits. The constraint-3 acceptance test exists again at
+  `.audit-tools/cx02-holding/one-lock-hold-per-next-step.test.ts` — held out of the test tree so
+  no commit ships red — and its RED count against the branch is EXACTLY 3, so the record's number
+  is verified. Move it into `tests/audit/` with the replace.
 
 ## Immediate next
 
-**Implement CX-02, starting from the record's decided shape.** The refute-first step the previous
-handoff called for is DONE, so the next lap codes. It remains one atomic loop-core replace on
-`main`, with a temporary internal seam permitted between commits on the branch under PH-04.
+**Implement CX-02 landings 1 to 5 on branch `cx02-impl`, starting from the record's decided
+shape.** One atomic loop-core replace lands on `main`; a temporary internal seam is permitted
+between commits on the branch under PH-04, every commit green.
 
-Three things the implementing lap must not rediscover:
+Two things the implementing lap must not rediscover:
 
-1. **Re-derive the constraint-3 acceptance test first — it does not exist on disk.** The record
-   says it was written and RED at a count of 3. It is not tracked, not untracked, and not among
-   the stored proposal directories. Its mechanism is recorded precisely enough to rebuild (a
-   `vi.mock` of `audit-tools/shared` wrapping `withFileLock`, counting only paths ending
-   `artifact-tree.lock`,
-   over the `batch-deterministic-block` fixture). The count of 3 is unverifiable until it is
-   rebuilt, so rebuild it before quoting the number.
-2. **The blast radius is larger than "three sites".** Ten in-fold call sites in
+1. **The blast radius is larger than "three sites".** Ten in-fold call sites in
    `nextStepHelpers.ts` re-point to lock-free cores; the eight external top-level callers do NOT
-   move, because each already calls the locking wrapper. The error-recovery `withFileLock` at
-   `:1845` is fold-reachable and the record's old list omitted it.
-3. **A handler must not return a PARTIAL bundle.** `ArtifactBundle` is `Partial` and pruning
+   move, because each already calls the locking wrapper. The error-recovery `withFileLock` in
+   `executeAndRecord`'s catch is fold-reachable and the record's old list omitted it.
+2. **A handler must not return a PARTIAL bundle.** `ArtifactBundle` is `Partial` and pruning
    treats a missing value as an intent to delete, so a partial return destroys every artifact it
    did not carry. Return a full authoritative bundle or a tri-state patch.
+
+The `tolerance < MAX_DRAIN_STEPS` contract test (record, constraint-1 answer, item 4) belongs
+beside `bounded-call-single-source` and lands WITH the replace — its comparison only becomes the
+live invariant once the guards observe in dispatch slots.
 
 Still open and owner-facing: the live fresh-audit measurement before the cap is sized, which must
 capture HOLD TIME as well as dispatch count — a concurrent waiter now has its number, and fails
@@ -56,14 +61,11 @@ after `DEFAULT_TIMEOUT_MS` = 10,000 ms.
   its parallel-load timeout passes alone and is tracked as a known flake, so rebaselining it would
   hide a real regression.
 - The detached host runner is intentionally not running.
-- **Branch `cx02-one-drain` (`4aabe6c9`) holds two prepared, UNMERGED lock-site splits** —
-  `runAuditStepUnlocked` and `ensureSemanticReviewRunUnlocked`. Both typecheck and both are needed
-  under every proposed resolution, but they are deliberately unadopted, so `check:deadcode` would red
-  them at release. They are not sufficient on their own either (record blockers 2 to 4). Adopt them
-  with the replace, or delete the branch and re-derive them from the record — do not merge it alone.
-  ⚠ It forked BEFORE this lap's documentation commits, so a plain merge would REVERT the design
-  record's refutation sections and the open-bugs entry. Rebase it onto `main` first, or cherry-pick
-  the two source files; never merge the branch as it stands.
+- **The two lock-site splits live on `cx02-impl` as deliberately UNADOPTED exports** —
+  `runAuditStepUnlocked` and `ensureSemanticReviewRunUnlocked`, cherry-picked from the retired
+  `cx02-one-drain` branch (now deleted; its commit is preserved in the cherry-pick). They are not
+  sufficient on their own (record blockers 2 to 4), and `check:deadcode` reds the branch at
+  release until the fold adopts them — both intentional under PH-04.
 - The tracked decision-queue snapshot STILL disagrees with the ledger that settles it, and it will
   keep doing so: its writer refuses a batch that drops a record-path item on its own, so no lap can
   quietly true it up. What changed is the consumer, not the artifact — `start-lap` step 5 now asks

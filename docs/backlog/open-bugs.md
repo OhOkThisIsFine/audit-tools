@@ -6,6 +6,25 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Commits created by `git cherry-pick` / `git merge` / `git rebase` bypass every pre-commit gate
+  leg, the loop-core attestation, and the constitutional-doc gate (2026-08-28, medium).** The gate
+  is a PreToolUse hook matching `git commit` command text, so any OTHER commit-creating verb lands
+  ungated — observed live: a `git cherry-pick` of a loop-core WIP commit onto a branch sailed
+  through with no legs run and no attestation demanded. On a branch that is survivable (the gates
+  re-run when the work reaches `main` by ordinary commit), but a cherry-pick or merge INTO `main`
+  would land loop-core or constitutional content with zero mechanical review. **Property:** the
+  gate keys on commits being CREATED (whatever verb creates them), or the uncovered verbs are
+  refused on `main`, or the reach registry states the uncovered half as data.
+
+- **The loop-core attest preflight judges the STAGED tree with WORKING-TREE checks, so an unstaged
+  edit elsewhere reds an attestation whose commit would be green (2026-08-28, medium, friction:
+  false_red).** `attest-loop-core-review.mjs` refuses to bind when `check:guard-reach` fails, but
+  that check reads the working tree — observed: an UNSTAGED guard-registry row naming a
+  not-yet-tracked test file (both belonging to a LATER commit) refused the attestation of a staged
+  set that contained neither, forcing a commit reorder. The refusal text says "the staged tree
+  would be rejected", and for that staged tree it was false. **Property:** the preflight evaluates
+  the tree the attestation binds to — the staged tree — never the working tree around it.
+
 - **The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
   shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction:
   false_red).** The pre-commit `test:doc-contract` leg reported 24 of 24 tests passed and then failed

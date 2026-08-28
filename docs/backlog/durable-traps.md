@@ -882,6 +882,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   **Classify by OUTPUT SIZE before blaming quota**, and read `stderr_tail` on any lane whose
   `stdoutBytes` is 0 — the status field will not tell you. Pass an explicit `model` to `pool` rather
   than relying on its default. Neither failure is quota, and neither is the prompt.
+  ⚠ The `--model auto` half is INTERMITTENT, not absolute: four `pool` jobs on 2026-08-28 (same
+  build, same flag) each printed the same `[claude-code:unrecognized_model]` stderr line and still
+  returned full, correct answers in 3-11 minutes. So the warning alone is not the failure signal —
+  `stdoutBytes` is. Treat zero stdout as the trap firing; treat the warning with non-zero stdout as
+  noise.
 
 - **A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it
   before the shell ever sees it (2026-08-28).** A quoted heredoc is literal to the shell, so the
