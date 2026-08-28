@@ -323,6 +323,15 @@ enumeration:
    dispatches inside the `handle*Branch` descriptors' `apply` callbacks), 1812 (`executeAndRecord`'s
    normal path) and 2601 (the result-ingest arm).
 
+**Count the SITES, not the paths — an independent sweep sharpened this and it changes the work.**
+The whole source tree holds exactly FOUR `withFileLock(artifactTreeLockPath(...))` acquisition
+sites: `auditStep.ts:86`, `nextStepHelpers.ts:1845`, `reviewRun.ts:176` and `reviewRun.ts:195`.
+Three of the four are reachable from the fold; `reviewRun.ts:195`
+(`persistConfigErrorHandoff`) is not — its only caller is `nextStepCommand.ts:311`, the CLI error
+handler outside the fold, so it keeps its wrapper untouched. The eleven above are the eleven PATHS
+by which the fold reaches those three, and nine of them funnel through the single `auditStep.ts:86`.
+So the edit is three splits, not eleven; the eleven is what makes it unavoidable, not what sizes it.
+
 **The resolving shape is already in the tree, so this is scope rather than a new judgment.**
 `runAuditStep` is split three ways today — `runAuditStep` (lock) → `runAuditStepLocked` (load +
 persist) → `executeAdvance` (pure; its own comment says it was split out so a caller can execute it
@@ -351,6 +360,28 @@ What survives as a real cost is the one the record already states: a longer hold
 concurrent waiter into a FAILURE at the 10s `withFileLock` default and the 20s
 `LOCKED_JSON_STORE_TIMEOUT_MS`. The deferred hold-time measurement is still owed.
 
+### And one reassurance in *The cost to measure* is FALSE at HEAD
+
+That paragraph closes by saying every folded-in operation is async IO or an awaited child process,
+so a NEW synchronous hot loop inside the fold is the one thing that would break the heartbeat.
+Synchronous work is already in there, and it is child-process work:
+
+- `findingGrounding.ts:120` — `spawnSync("git", ["ls-files", "-z"])` with a 64 MB `maxBuffer`,
+  enumerating every tracked path. Reached inside the hold from `auditStep.ts:285`
+  (`verifyFindingGrounding`). On a very large repository this is the most plausible multi-second
+  synchronous stretch in the fold.
+- `disposition.ts:517` and `:522` — `spawnSync` for the VCS-ignore and untracked rules, in the
+  `file_disposition` obligation. Injectable (`options.spawn ?? spawnSync`), so the default is the
+  synchronous one.
+- `candidates.ts:452` — a synchronous `readdirSync` breadth-first walk in analyzer candidate
+  discovery. This one is SAFE by construction and should stay that way: `LIZARD_WALK_MAX_ENTRIES`
+  bounds it at 5,000 entries (`candidates.ts:433`).
+
+None of this blocks the change — all three already run inside `runAuditStep`'s hold, so the
+heartbeat is already exposed to them and persist-once does not add the exposure. What it changes is
+what the deferred measurement must look for: the risk is not a hypothetical future hot loop, it is
+`git ls-files` on a large repository today. Correct the reassurance; do not rely on it.
+
 ### The alternative granularity, stated so it is not rediscovered as an open question
 
 Today is NEITHER endpoint: one hold per OUTER transition, each covering an INNER drain. The obvious
@@ -375,13 +406,21 @@ area. `src/audit/orchestrator/` already imports `../cli/lineIndex.js` in three m
 cli" is not an available argument for where the registry lands. Decide it on the host-boundary
 policy the registry carries, which is CLI-shaped, not on a layering rule that does not exist.
 
-### And a candidate acceptance test, which this record says does not exist
+### The acceptance test this record says does not exist — written, and RED-validated
 
-The record states the collapse has NO test that can pass only once it lands. Tree-lock acquisition
-COUNT per `next-step` is one: today the fold acquires and releases once per outer transition, and
-under one hold it is exactly one. It is red before and green after, and — unlike
-`one-holistic-derivation-per-scan` — it cannot be turned green by any caching fix that leaves both
-drains standing, because it measures the lock, not the derivation.
+The record states the collapse has NO test that can pass only once it lands. It has one:
+artifact-tree lock acquisition COUNT per `next-step`. Today the fold acquires and releases once per
+outer transition; under one hold it is exactly one. Unlike `one-holistic-derivation-per-scan` it
+cannot be turned green by a caching fix that leaves both drains standing, because it measures the
+LOCK, not the derivation.
+
+Drafted and run against HEAD, 2026-08-28: **RED, and the count is 3** — over the
+`batch-deterministic-block` fixture, the longest guaranteed deterministic drain in the suite, so the
+pre-collapse number is not one by accident. Mechanism: a `vi.mock` of `audit-tools/shared` wrapping
+`withFileLock` and counting only acquisitions whose path ends `artifact-tree.lock`. That works
+because `nextStepHelpers.ts` and `auditStep.ts` both import the lock from that one subpath, and it
+cannot be inflated by the analyzer-policy or submission-ledger locks, which are different paths. The
+file is held OUT of the tree until the collapse lands, so no commit ships red.
 
 ## Preserve list (report + refuter union)
 
