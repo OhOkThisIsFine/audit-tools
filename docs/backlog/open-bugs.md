@@ -52,8 +52,10 @@
   two as settled and answered two anyway, and one of those answers ("keep the analyzer spec, retitle
   it") contradicts the landed deletion of a file that no longer exists. So the cost is not only
   wasted attention: a stale question elicits an answer that, applied, would REVERT a completed
-  decision. The `start-lap` skill has been repointed at `answer.mjs --list` as the authority, which
-  closes the path that was actually walked; the snapshot's own freshness gate is still the fix.
+  decision. Nothing from the stale answers was applied, and the owner then confirmed the ORIGINAL
+  decision stands — so the ledger was already right and was not rewritten. The `start-lap` skill has
+  been repointed at `answer.mjs --list` as the authority, which closes the path that was actually
+  walked; the snapshot's own freshness gate is still the fix.
 
 - **The backlog size baseline holds amnesties for entries that no longer exist, and its file ceiling
   never ratchets down (2026-08-27, low).** `docs/backlog/.size-baseline.json` grandfathers two

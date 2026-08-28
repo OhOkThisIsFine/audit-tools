@@ -23,21 +23,18 @@
   and the class is now enforced by `check:shared-primitives`, so the repo's own rule deletes the
   entry rather than restating the trap. The gap that let it happen is itself an open-bugs entry —
   and the obvious "every review must be cited" gate is the WRONG one, for the reason stated there.
-- **CX-02's design record is repaired AND gated, and the gate changed what the item is.** Its four
-  refuted claims are corrected in place, and a `/design-check` then found three more things it did
-  not carry plus one constraint answer that is simply wrong. The record is the single home for all
-  of it. Two results matter most: the two registries are two LAYERS (the outer carries
-  per-obligation host-boundary policy, the inner is uniform), and constraint 1's emission-point
-  cycle-guard answer cannot work, because `advance` returns on the first emit so the tolerance of 16
-  can never accumulate.
+- **CX-02's design record is repaired, gated, and now ANSWERED.** Its four refuted claims were
+  corrected in place, a `/design-check` found three more things it did not carry, and the two
+  questions that gate left open are now decided in its *The two open answers* section (`3c2835c8`).
+  The record is the single home for all of it — read it, not a summary. The item is ready to code.
 - **The separable half of CX-02 is landed.** One fold scan ran the holistic `deriveAuditState` 25
   times instead of once; the outer derive is now memoized exactly as the inner one has been since
   `6145a1a3`. Red-green validated by `tests/audit/one-holistic-derivation-per-scan.test.ts`. It is
   NOT a stage of the collapse — an independent lane established the cache makes that test pass while
   both registries and both drains survive.
 - **Repository:** `main` and `origin/main` are synchronized; every commit passed its gates and the
-  full suite is green (457 files, 6058 tests). No release is pending — `v0.50.2` is live on npm and
-  matches the local version.
+  full suite is green. No release is pending — `v0.50.3` is live on npm, and the tag and the local
+  version match it.
 
 ## Immediate next
 
@@ -71,11 +68,14 @@ the pinning suites staying green is the evidence.
   its parallel-load timeout passes alone and is tracked as a known flake, so rebaselining it would
   hide a real regression.
 - The detached host runner is intentionally not running.
-- The tracked decision-queue snapshot still disagrees with the ledger that settles it. Only the
-  rendered half — the one a human reads — was repaired this lap, deliberately: its renderer does not
-  own the snapshot file, and the writer refuses a batch that drops a record-path item on its own.
-  The disagreement is stated in full in its own [`open-bugs.md`](backlog/open-bugs.md) entry, which
-  is its home; this line exists only so the half-repair does not read as an oversight.
+- The tracked decision-queue snapshot STILL disagrees with the ledger that settles it, and it will
+  keep doing so: its writer refuses a batch that drops a record-path item on its own, so no lap can
+  quietly true it up. What changed is the consumer, not the artifact — `start-lap` step 5 now asks
+  `node scripts/nightly/answer.mjs --list` and treats it as the authority (`0ada039a`), because
+  trusting the snapshot cost a lap four questions the ledger had already recorded settled AND landed.
+  **Ask the ledger. Never read the snapshot for what is open.** The artifact's own freshness gate
+  remains the real fix and is stated in full in its [`open-bugs.md`](backlog/open-bugs.md) entry,
+  which is its home.
 - The item-6 checkJs sweep remains type-only by contract; behavioral changes are bugs, not part of
   that refactor.
 
