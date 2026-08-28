@@ -432,9 +432,17 @@ staying green are still its only evidence.
 
 What this does establish is that **constraint 3 is SEPARABLE from the registry collapse** — it has
 its own mechanism, its own blast radius (three lock-site splits and the eleven carries) and now its
-own red-green test, none of which touch `buildDrainObligations`. Whether to land it separately is a
-scoping decision for the owner, not an implementer's convenience: the record's standing instruction
-is one atomic replace.
+own red-green test, none of which touch `buildDrainObligations`.
+
+**Separable is not a reason to separate, and this is settled — do not re-open it.** The case for
+landing constraint 3 on its own was that a regression would localise to one of two changes instead
+of one large diff. That is a debugging-effort argument, and effort, complexity and refactor size are
+explicitly NOT costs here; correctness is the only thing that gates pace, and the intermediate state
+is not a correctness problem. The proof is not lost either: the lock-count test lands WITH the
+replace and still goes 3 → 1 in it, so constraint 3 is still mechanically gated — just not in
+isolation. One atomic replace on `main` stands, with a temporary internal seam permitted between
+commits on the branch under PH-04. Deferring the collapse to a later lap is settled against by the
+same line.
 
 ## Preserve list (report + refuter union)
 
