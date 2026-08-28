@@ -163,7 +163,7 @@ function snippet(value: string): string {
 
 function commandErrorResult(
   tool: string,
-  command: ReturnType<typeof runFirstAvailableCommand>,
+  command: Awaited<ReturnType<typeof runFirstAvailableCommand>>,
   results: ExternalAnalyzerResultItem[],
 ): { results: ExternalAnalyzerResultItem[]; status: ExternalAnalyzerToolStatus } {
   // A declined candidate resolves to a record with NO command and NO error —
@@ -195,15 +195,15 @@ function commandErrorResult(
   };
 }
 
-function runTsc(
+async function runTsc(
   root: string,
   analyzerConsent: AnalyzerConsentDecisions | undefined,
-): {
+): Promise<{
   results: ExternalAnalyzerResultItem[];
   status: ExternalAnalyzerToolStatus;
-} {
+}> {
   const results: ExternalAnalyzerResultItem[] = [];
-  const command = runFirstAvailableCommand(root, [
+  const command = await runFirstAvailableCommand(root, [
     ...resolveNodeTool(
       root,
       join("node_modules", "typescript", "bin", "tsc"),
@@ -279,13 +279,13 @@ function runTsc(
   };
 }
 
-function runEslint(
+async function runEslint(
   root: string,
   analyzerConsent: AnalyzerConsentDecisions | undefined,
-): {
+): Promise<{
   results: ExternalAnalyzerResultItem[];
   status: ExternalAnalyzerToolStatus;
-} {
+}> {
   const results: ExternalAnalyzerResultItem[] = [];
   const configState = resolveEslintConfigState(root);
   if (!configState.runnable) {
@@ -302,7 +302,7 @@ function runEslint(
 
   const args = eslintCommandArgs(configState.major);
   const display = ["eslint", ...args].join(" ");
-  const command = runFirstAvailableCommand(root, [
+  const command = await runFirstAvailableCommand(root, [
     ...resolveNodeTool(
       root,
       join("node_modules", "eslint", "bin", "eslint.js"),
@@ -389,11 +389,11 @@ export interface SyntaxResolutionExecutorOptions {
   analyzerConsent?: AnalyzerConsentDecisions;
 }
 
-export function runSyntaxResolutionExecutor(
+export async function runSyntaxResolutionExecutor(
   bundle: ArtifactBundle,
   root: string,
   options: SyntaxResolutionExecutorOptions = {},
-): ExecutorRunResult {
+): Promise<ExecutorRunResult> {
   const items: ExternalAnalyzerResultItem[] = [];
   const toolStatuses: ExternalAnalyzerToolStatus[] = [];
 
@@ -401,7 +401,7 @@ export function runSyntaxResolutionExecutor(
     hasTypeScriptConfig(root) &&
     bundle.file_disposition?.files.some((f) => f.path.endsWith(".ts"))
   ) {
-    const tsc = runTsc(root, options.analyzerConsent);
+    const tsc = await runTsc(root, options.analyzerConsent);
     items.push(...tsc.results);
     toolStatuses.push(tsc.status);
   }
@@ -410,7 +410,7 @@ export function runSyntaxResolutionExecutor(
       (f) => f.path.endsWith(".ts") || f.path.endsWith(".js"),
     )
   ) {
-    const eslint = runEslint(root, options.analyzerConsent);
+    const eslint = await runEslint(root, options.analyzerConsent);
     items.push(...eslint.results);
     toolStatuses.push(eslint.status);
   }

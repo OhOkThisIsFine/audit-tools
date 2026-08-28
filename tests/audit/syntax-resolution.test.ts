@@ -61,7 +61,7 @@ function createBundleWithExisting(items: ExternalAnalyzerResultItem[]): Artifact
 
 test("syntax resolution skips ESLint when no repo-local ESLint config exists", async () => {
   await withTempRepo(async (root) => {
-    const result = runSyntaxResolutionExecutor(createBundle(), root);
+    const result = await runSyntaxResolutionExecutor(createBundle(), root);
 
     expect(result.updated.external_analyzer_results![0].results).toEqual([]);
     expect(result.updated.external_analyzer_results![0].tool_statuses!.map((status) => [
@@ -78,7 +78,7 @@ test("syntax resolution runs ESLint when repo-local ESLint config exists", async
   await withTempRepo(async (root) => {
     await writeFile(join(root, "eslint.config.js"), "module.exports = [];\n");
 
-    const result = runSyntaxResolutionExecutor(createBundle(), root);
+    const result = await runSyntaxResolutionExecutor(createBundle(), root);
 
     expect(existsSync(join(root, "eslint-ran.txt"))).toBe(true);
     expect(result.updated.external_analyzer_results![0].results).toEqual([
@@ -121,7 +121,7 @@ test("syntax resolution maps ESLint severities to the canonical vocabulary (COR-
       ].join("\n"),
     );
 
-    const result = runSyntaxResolutionExecutor(createBundle(), root);
+    const result = await runSyntaxResolutionExecutor(createBundle(), root);
     const severities = result.updated.external_analyzer_results![0].results.map(
       (r) => r.severity,
     );
@@ -142,7 +142,7 @@ test("syntax resolution records unresolved tsc as analyzer diagnostics", async (
     const originalPath = process.env.PATH;
     process.env.PATH = "";
     try {
-      const result = runSyntaxResolutionExecutor(
+      const result = await runSyntaxResolutionExecutor(
         {
           file_disposition: {
             files: [{ path: "src/app.ts", status: "included" }],
@@ -171,7 +171,7 @@ test("syntax resolution stores parse failure snippets for malformed ESLint outpu
       "process.stdout.write('not json from eslint');\n",
     );
 
-    const result = runSyntaxResolutionExecutor(createBundle(), root);
+    const result = await runSyntaxResolutionExecutor(createBundle(), root);
     const eslintStatus = result.updated.external_analyzer_results![0].tool_statuses!.find(
       (status) => status.tool === "eslint",
     );
@@ -196,7 +196,7 @@ test("syntax resolution preserves existing external_analyzer_results and appends
     };
     const bundle = createBundleWithExisting([preExisting]);
 
-    const result = runSyntaxResolutionExecutor(bundle, root);
+    const result = await runSyntaxResolutionExecutor(bundle, root);
     const results = result.updated.external_analyzer_results![0].results;
 
     expect(results.length).toBe(2);
@@ -228,7 +228,7 @@ test("syntax resolution deduplicates items with matching path:line_start:rule:su
     };
     const bundle = createBundleWithExisting([duplicate]);
 
-    const result = runSyntaxResolutionExecutor(bundle, root);
+    const result = await runSyntaxResolutionExecutor(bundle, root);
     const results = result.updated.external_analyzer_results![0].results;
 
     expect(results.length).toBe(1);
@@ -239,7 +239,7 @@ test("syntax resolution deduplicates items with matching path:line_start:rule:su
 test("syntax resolution uses empty array when bundle has no external_analyzer_results", async () => {
   await withTempRepo(async (root) => {
     // No ESLint config → ESLint skipped, no new items
-    const result = runSyntaxResolutionExecutor(createBundle(), root);
+    const result = await runSyntaxResolutionExecutor(createBundle(), root);
 
     expect(result.updated.external_analyzer_results![0].results).toEqual([]);
     expect(result.updated.external_analyzer_results![0].results.length).toBe(0);
@@ -269,7 +269,7 @@ test("tsc parse-error log includes root and exit_code", async () => {
       return (originalWrite as (...args: unknown[]) => boolean)(chunk, ...rest);
     };
     try {
-      runSyntaxResolutionExecutor(
+      await runSyntaxResolutionExecutor(
         {
           file_disposition: {
             files: [{ path: "src/app.ts", status: "included" }],
@@ -309,7 +309,7 @@ test("eslint parse-error log includes root and exit_code", async () => {
       return (originalWrite as (...args: unknown[]) => boolean)(chunk, ...rest);
     };
     try {
-      runSyntaxResolutionExecutor(createBundle(), root);
+      await runSyntaxResolutionExecutor(createBundle(), root);
     } finally {
       process.stderr.write = originalWrite;
     }
@@ -329,7 +329,7 @@ test("eslint parse-error log includes root and exit_code", async () => {
 // written in one phase and read back in another.
 test("INV 11: syntaxResolutionExecutor resolves external_analyzer_results by name", async () => {
   await withTempRepo(async (root) => {
-    const result = runSyntaxResolutionExecutor(createBundle(), root);
+    const result = await runSyntaxResolutionExecutor(createBundle(), root);
     // This executor's entire output rides on the external_analyzer_results field
     // name; a rename would leave it silently writing nothing a consumer can find.
     expect(

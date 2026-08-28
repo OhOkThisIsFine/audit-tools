@@ -164,7 +164,7 @@ test("admitLocalSpawn [decline-first]: declined:{prettier} vetoes the node_modul
     await mkdir(dirname(scriptPath), { recursive: true });
     await writeFile(scriptPath, "// fake prettier entrypoint\n");
 
-    const result = runFirstAvailableCommand(
+    const result = await runFirstAvailableCommand(
       root,
       [
         {
@@ -193,7 +193,7 @@ test("a recorded decline is reported even when the tool resolves NOWHERE", async
   // stayed green.
   const root = await mkdtemp(join(tmpdir(), "admit-absent-"));
   try {
-    const result = runFirstAvailableCommand(
+    const result = await runFirstAvailableCommand(
       root,
       [
         {

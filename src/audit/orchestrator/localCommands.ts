@@ -3,7 +3,7 @@ import { delimiter, extname, isAbsolute, join } from "node:path";
 import {
   admitLocalSpawn,
   resolveExecArgv,
-  runTracked,
+  runTrackedAsync,
   type AnalyzerConsentDecisions,
 } from "audit-tools/shared";
 
@@ -119,6 +119,14 @@ function resolveCandidate(
 }
 
 /**
+ * Deadline for one local-tooling child. These spawns run inside the
+ * artifact-tree lock's hold, so a child that never exits must not be able to
+ * hang the fold: `runTrackedAsync` classifies the miss as `ETIMEDOUT` and
+ * escalates SIGTERM to SIGKILL so the deadline is terminal.
+ */
+const LOCAL_COMMAND_DEADLINE_MS = 120_000;
+
+/**
  * Run the first resolvable, ADMITTED candidate. Admission is the shared
  * decline-first veto ({@link admitLocalSpawn}): a recorded operator `declined`
  * for this tool id refuses the spawn OUTRIGHT — the remaining candidates are
@@ -126,15 +134,20 @@ function resolveCandidate(
  * being declined does not silently route formatting to `black`. The returned
  * record carries `declinedReason` when a candidate was refused for that reason.
  *
- * Spawns go through the SHARED exec boundary (`runTracked`): argv-only, the
- * control-env scrub applied, windowsHide forced — never a direct
- * `node:child_process` call with the unscrubbed parent environment.
+ * Spawns go through the SHARED exec boundary (`runTrackedAsync`): argv-only,
+ * the control-env scrub applied, windowsHide forced — never a direct
+ * `node:child_process` call with the unscrubbed parent environment. The ASYNC
+ * twin, not `runTracked`: these children run inside the artifact-tree lock's
+ * hold, and a synchronous spawn blocks the event loop, which starves every
+ * `setInterval` heartbeat in the process — the held lock's mtime beat included,
+ * so a long child let another process classify a LIVE lock stale and steal it
+ * mid-flight (the incident `runTrackedAsync`'s own doc records).
  */
-export function runFirstAvailableCommand(
+export async function runFirstAvailableCommand(
   root: string,
   candidates: LocalCommandCandidate[],
   options: { analyzerConsent?: AnalyzerConsentDecisions } = {},
-): LocalCommandResult | null {
+): Promise<LocalCommandResult | null> {
   let lastDecline: string | undefined;
   for (const candidate of candidates) {
     // Decline-first admission, BEFORE resolution and before anything spawns. A
@@ -161,11 +174,14 @@ export function runFirstAvailableCommand(
     }
 
     const spawnTarget = toSpawnTuple(resolved);
-    const result = runTracked([spawnTarget.command, ...spawnTarget.args], {
-      cwd: root,
-      encoding: "utf8",
-      stdio: "pipe",
-    });
+    const result = await runTrackedAsync(
+      [spawnTarget.command, ...spawnTarget.args],
+      {
+        cwd: root,
+        encoding: "utf8",
+        timeout: LOCAL_COMMAND_DEADLINE_MS,
+      },
+    );
 
     return {
       candidate: {

@@ -398,7 +398,7 @@ describe("the local-tooling decline veto fires through the production dispatch",
       await persistAnalyzerConsent(root, { eslint: "declined" });
       const policy = await loadAnalyzerPolicy(root);
 
-      const result = runSyntaxResolutionExecutor(
+      const result = await runSyntaxResolutionExecutor(
         bundleWith(["src/api/auth.ts"]),
         root,
         { analyzerConsent: policy.analyzer_consent },

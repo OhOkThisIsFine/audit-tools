@@ -161,6 +161,35 @@ test("next-step blocks empty or documentation-only repositories after intake val
   }
 });
 
+test("runFirstAvailableCommand keeps the event loop alive while its child runs", async () => {
+  // The defect class this pins: a SYNCHRONOUS spawn blocks the event loop for
+  // the whole child, starving every setInterval heartbeat in the process — the
+  // held artifact-tree lock's mtime beat included, which is how a stalled probe
+  // once let a LIVE lock be classified stale and stolen mid-flight. Under the
+  // sync runner the interval below cannot fire before it is cleared (the await
+  // continuation and the clearInterval run on the microtask queue, ahead of any
+  // timer), so this test is RED on the sync runner and green on the async one.
+  let ticks = 0;
+  const beat = setInterval(() => {
+    ticks += 1;
+  }, 50);
+  const root = await mkdtemp(join(tmpdir(), "local-cmd-liveness-"));
+  try {
+    const result = await runFirstAvailableCommand(root, [
+      {
+        command: process.execPath,
+        args: ["-e", "setTimeout(() => {}, 700);"],
+        display: "node (700ms child)",
+      },
+    ]);
+    expect(result?.exitCode).toBe(0);
+  } finally {
+    clearInterval(beat);
+    await rm(root, { recursive: true, force: true });
+  }
+  expect(ticks, "the heartbeat must beat while the child runs").toBeGreaterThan(0);
+});
+
 test("runFirstAvailableCommand prefers PATHEXT shims over extensionless files on Windows", async (t) => {
   if (process.platform !== "win32") {
     t.skip("PATHEXT resolution is Windows-specific.");
@@ -183,7 +212,7 @@ test("runFirstAvailableCommand prefers PATHEXT shims over extensionless files on
     process.env.PATH = `${binDir}${delimiter}${previousPath ?? ""}`;
     process.env.PATHEXT = ".CMD;.EXE";
 
-    const result = runFirstAvailableCommand(tempDir, [
+    const result = await runFirstAvailableCommand(tempDir, [
       { command: "fixture-tool", args: [] },
     ]);
 

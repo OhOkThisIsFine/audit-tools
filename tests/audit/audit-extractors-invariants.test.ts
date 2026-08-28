@@ -653,7 +653,7 @@ test("inv-3: eslint is invoked WITHOUT --ext under a flat-config eslint, so the 
     await writeFakeEslint(root, "9.24.0");
     await writeFile(join(root, "eslint.config.js"), "module.exports = [];\n");
 
-    const result = runSyntaxResolutionExecutor(JS_BUNDLE, root);
+    const result = await runSyntaxResolutionExecutor(JS_BUNDLE, root);
     const status = eslintStatus(result);
 
     const argv = JSON.parse(readFileSync(join(root, "eslint-argv.json"), "utf8")) as string[];
@@ -688,7 +688,7 @@ test("inv-4: a legacy-only .eslintrc under a flat-config eslint is a REASONED sk
       "the skip must say why",
     ).toBeTruthy();
 
-    const result = runSyntaxResolutionExecutor(JS_BUNDLE, root);
+    const result = await runSyntaxResolutionExecutor(JS_BUNDLE, root);
     const status = eslintStatus(result);
     expect(status.status, "never 'success' — the tool did not run").toBe("skipped");
     expect(status.error, "the record distinguishes this from 'no config at all'").toMatch(/legacy/i);
@@ -720,7 +720,7 @@ test("inv-4: no configuration at all is a skip with its OWN reason", async () =>
     const state = resolveEslintConfigState(root);
     expect(state.runnable).toBe(false);
     expect(state.skip_reason).toMatch(/no eslint configuration/i);
-    expect(eslintStatus(runSyntaxResolutionExecutor(JS_BUNDLE, root)).status).toBe("skipped");
+    expect(eslintStatus(await runSyntaxResolutionExecutor(JS_BUNDLE, root)).status).toBe("skipped");
   });
 });
 
@@ -733,7 +733,7 @@ test("inv-7: a tool that never ran counts as an analyzer diagnostic (classificat
     await writeFakeEslint(root, "9.24.0");
 
     // No config → 'skipped' → classification 'not_run' → no coverage was produced.
-    const result = runSyntaxResolutionExecutor(JS_BUNDLE, root);
+    const result = await runSyntaxResolutionExecutor(JS_BUNDLE, root);
     expect(eslintStatus(result).status).toBe("skipped");
     expect(
       result.progress_summary,
@@ -813,7 +813,7 @@ test("fail-2: an unresolvable tool yields not_resolved with zero results, and th
     const originalPath = process.env.PATH;
     process.env.PATH = "";
     try {
-      const result = runSyntaxResolutionExecutor(
+      const result = await runSyntaxResolutionExecutor(
         { file_disposition: { files: [{ path: "src/app.ts", status: "included" }] } },
         root,
       );
@@ -844,7 +844,7 @@ test("fail-3: malformed output and a rejected-flag run are both parse_error, tol
       await writeFakeEslint(root, "9.24.0");
       await writeFile(join(root, "eslint.config.js"), "module.exports = [];\n");
       await writeFile(join(root, "node_modules", "eslint", "bin", "eslint.js"), body);
-      return eslintStatus(runSyntaxResolutionExecutor(JS_BUNDLE, root));
+      return eslintStatus(await runSyntaxResolutionExecutor(JS_BUNDLE, root));
     });
 
   const malformed = await runWithFakeEslintOutput(

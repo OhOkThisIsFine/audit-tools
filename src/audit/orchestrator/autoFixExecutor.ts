@@ -11,12 +11,14 @@ import {
   type LocalCommandCandidate,
 } from "./localCommands.js";
 
-function tryRunConfiguredFormatter(
+async function tryRunConfiguredFormatter(
   root: string,
   candidates: LocalCommandCandidate[],
   analyzerConsent: AnalyzerConsentDecisions | undefined,
-): "not_found" | "success" | "failed" {
-  const result = runFirstAvailableCommand(root, candidates, { analyzerConsent });
+): Promise<"not_found" | "success" | "failed"> {
+  const result = await runFirstAvailableCommand(root, candidates, {
+    analyzerConsent,
+  });
   if (result === null) return "not_found";
   // A recorded operator decline refused every candidate of this formatter.
   if (result.declinedReason) return "not_found";
@@ -67,7 +69,7 @@ async function hasPrettierConfig(root: string): Promise<boolean> {
   }
 }
 
-function runFormatter(
+async function runFormatter(
   root: string,
   toolName: string,
   candidates: LocalCommandCandidate[],
@@ -75,9 +77,9 @@ function runFormatter(
   failedTools: string[],
   toolTimings: { tool: string; duration_ms: number }[],
   analyzerConsent: AnalyzerConsentDecisions | undefined,
-): void {
+): Promise<void> {
   const start = Date.now();
-  const outcome = tryRunConfiguredFormatter(root, candidates, analyzerConsent);
+  const outcome = await tryRunConfiguredFormatter(root, candidates, analyzerConsent);
   if (outcome === "success") {
     executedTools.push(toolName);
     toolTimings.push({ tool: toolName, duration_ms: Date.now() - start });
@@ -221,7 +223,7 @@ export async function runAutoFixExecutor(
     // registry and executes it against the audited tree — an acquisition the
     // consent chokepoint exists to gate, hidden inside a formatter resolution
     // order. A formatter must resolve from what the repo/machine already has.
-    runFormatter(root, "prettier", [
+    await runFormatter(root, "prettier", [
       ...resolveNodeTool(
         root,
         join("node_modules", "prettier", "bin", "prettier.cjs"),
@@ -236,7 +238,7 @@ export async function runAutoFixExecutor(
   const pythonPaths = pathsForExtensions(byExtension, ["py"]);
   if (pythonPaths.length > 0) {
     const display = `black (${pythonPaths.length} in-scope file${pythonPaths.length === 1 ? "" : "s"})`;
-    runFormatter(root, "black", [
+    await runFormatter(root, "black", [
       { command: "black", args: [...pythonPaths], display },
       // The runner-prefix arms declare their id explicitly — argv derivation
       // would key them `python`/`uvx`/`pipx` and a recorded decline of `black`
@@ -256,7 +258,7 @@ export async function runAutoFixExecutor(
   const sqlPaths = pathsForExtensions(byExtension, ["sql"]);
   if (sqlPaths.length > 0) {
     const display = `sqlfluff fix --force (${sqlPaths.length} in-scope file${sqlPaths.length === 1 ? "" : "s"})`;
-    runFormatter(root, "sqlfluff", [
+    await runFormatter(root, "sqlfluff", [
       { command: "sqlfluff", args: ["fix", "--force", ...sqlPaths], display },
       // Runner-prefix arms declare their id (see the black block above).
       {
@@ -278,7 +280,7 @@ export async function runAutoFixExecutor(
   const goPaths = pathsForExtensions(byExtension, ["go"]);
   if (goPaths.length > 0) {
     const display = `gofmt -w (${goPaths.length} in-scope file${goPaths.length === 1 ? "" : "s"})`;
-    runFormatter(root, "gofmt", [
+    await runFormatter(root, "gofmt", [
       { command: "gofmt", args: ["-w", ...goPaths], display },
     ], executedTools, failedTools, toolTimings, options.analyzerConsent);
   }
