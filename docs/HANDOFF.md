@@ -68,10 +68,11 @@ the pinning suites staying green is the evidence.
   its parallel-load timeout passes alone and is tracked as a known flake, so rebaselining it would
   hide a real regression.
 - The detached host runner is intentionally not running.
-- `.audit-tools/nightly/open-items.json` still lists six items while `answer.mjs --list` reports
-  none open. The rendered inbox was the half a human reads and it is fixed; the tracked snapshot is
-  not, because `render-inbox.mjs` does not own that file and `writeOpenItems` refuses a batch that
-  drops a record-path item on its own. The disagreement has its own open-bugs entry.
+- The tracked decision-queue snapshot still disagrees with the ledger that settles it. Only the
+  rendered half — the one a human reads — was repaired this lap, deliberately: its renderer does not
+  own the snapshot file, and the writer refuses a batch that drops a record-path item on its own.
+  The disagreement is stated in full in its own [`open-bugs.md`](backlog/open-bugs.md) entry, which
+  is its home; this line exists only so the half-repair does not read as an oversight.
 - The item-6 checkJs sweep remains type-only by contract; behavioral changes are bugs, not part of
   that refactor.
 
