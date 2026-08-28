@@ -789,4 +789,26 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 
 - **Philosophy-audit challenges already answered — do not re-propose without new evidence (2026-08-27).** From [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md). PH-01 asked to replace *one core, two draws* with "one protocol, two bounded contexts", on the grounds that remediation owns mutation and audit does not. The owner rejected it 2026-08-27: the premise is false — audit's own priority order runs an auto-fix that writes to the tree it is auditing — and a difference between the two draws is a policy axis of the shared core, never a fork justification. PH-02 asked to collapse the critic and judge phases at the low tier, calling the self-scaling design internally contradictory. It is not: `spec/self-scaling-pipeline-design.md` states the reason the three phases cannot collapse (the judge verdict is the sole admission to implementation planning, so a merged turn lets the loop certify its own exit) and records the owner taking the seven-turn low-tier cost knowingly, with per-phase measurement in [`low-tier-phase-cost-2026-08-25.md`](../reviews/low-tier-phase-cost-2026-08-25.md). Re-open either only with measurement that was not available then. [[ph01-rejected-one-core-two-draws-stands]]
 
+- **A workflow killed mid-run by the monthly spend limit reports COMPLETED, and its partial results
+  are recoverable by run id (2026-08-27).** Ten of thirteen agents died on "You've hit your monthly
+  spend limit"; the tool still returned a completed notification whose result object carried the
+  three that finished. The failures are listed, but the shape reads as success — the same
+  success-shaped-empty class that silently voided an earlier verification fan-out, and the reason a
+  reviewer must check `agents_error` rather than the status word. Recovery is cheap and exact: the
+  run's journal file holds one `{"type":"result"}` line per completed agent with its full return
+  value, and re-invoking `Workflow({scriptPath, resumeFromRunId})` after the limit resets replays
+  every unchanged agent from cache and re-runs only the dead ones. Read the journal BEFORE
+  concluding a workflow returned nothing. Locate it with a glob over
+  `~/.claude/projects/<slug>/*/subagents/workflows/<runId>` rather than retyping the session uuid.
+
+- **A long quoted heredoc in the Bash tool can die with "unexpected EOF while looking for matching
+  quote", and the reported line is the last line that arrived (2026-08-27).** A roughly 90-line
+  `cat > file <<'DELIM'` block failed to parse at its final line, with no unbalanced quote anywhere
+  in the body; the same session then ran many shorter `git commit -F - <<'MSG'` heredocs without
+  trouble. The consistent reading is that the command text was truncated before the closing
+  delimiter arrived, and a heredoc is the one shape where truncation surfaces as a confusing quoting
+  error instead of a visibly missing tail. Do not debug the quoting. Write multi-line file content
+  with the Write tool and let Bash operate on the path — that also makes the content diffable and
+  re-runnable, which the heredoc never was.
+
 ## Doc-set hygiene (enforced)

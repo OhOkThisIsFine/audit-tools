@@ -1084,3 +1084,18 @@
   routing declaration the author writes once (a record states its disposition: work routed, or no
   forward work), or a periodic sweep with a declared cadence — never an existence check over the
   whole directory.
+
+- **The masked-exit guard reaches SUITE commands only, so a rejected `git push` reads as exit 0
+  (2026-08-27, medium, friction: tool_should_decide).** `shell-trap-guard.mjs` refuses a
+  test-or-verify command piped into a filter, because the pipeline reports the FILTER's status and a
+  red suite comes back green. Its `SUITE_CMD` matcher lists npm/pnpm/yarn test-and-run forms, `npx
+  vitest`, `vitest run` and `node --test` — and nothing else. `git push origin main 2>&1 | tail -3`
+  is therefore admitted, and it produced exactly the failure the rule exists to prevent: the push was
+  refused as non-fast-forward, the hint text scrolled past in the captured tail, and the reported exit
+  status was 0. The false green is worse here than on a suite: an agent that believes a push landed
+  stops verifying, and the pipeline-ownership rule then reads as satisfied while the work sits only
+  in the local branch. The same hole covers every other status-bearing git verb — `commit`, `rebase`,
+  `merge`, `tag` — and the `pipefail` / `PIPESTATUS` escape the rule already honours would cover
+  them unchanged. **Property:** the masked-exit refusal is keyed to whether a command's EXIT STATUS
+  is load-bearing, not to whether it is a test runner — so a state-changing command piped into a
+  filter is refused the same way a suite is, with the same two escapes.
