@@ -58,13 +58,33 @@ function fixtureSources() {
   ].join('\n');
   const deferred = ['# Deferred', '', '- **Waiting on creds.** body', ''].join('\n');
   const durableTraps = ['# Traps', '', '- **A standing trap.** body', ''].join('\n');
+  // The LOW-severity split of open-bugs.md. Indexed identically to it: the
+  // severity split bounds the READ, and must never bound the index — an entry
+  // that drops out of the seek index is an entry that goes stale unseen.
+  const minorBugs = ['# Minor open bugs', '', '- **A low-severity bug.** body', ''].join('\n');
   return new Map([
     ['open-bugs.md', openBugs],
+    ['minor-bugs.md', minorBugs],
     ['forward-tracks.md', forwardTracks],
     ['deferred.md', deferred],
     ['durable-traps.md', durableTraps],
   ]);
 }
+
+describe('the fixture covers the real source list', () => {
+  // Adding a file to INDEX_SOURCES without adding it here makes FIVE unrelated
+  // tests fail deep inside collectIndex with "source ... was not supplied" —
+  // which is the generator working correctly and the fixture lagging. Bit once,
+  // when minor-bugs.md was split out of open-bugs.md. This says so directly.
+  it('supplies every file INDEX_SOURCES names', () => {
+    const supplied = new Set(fixtureSources().keys());
+    const missing = [...new Set(INDEX_SOURCES.map((s) => s.file))].filter((f) => !supplied.has(f));
+    expect(
+      missing,
+      `fixtureSources() is missing ${missing.join(', ')} — add it there when you add an INDEX_SOURCES entry`,
+    ).toEqual([]);
+  });
+});
 
 describe('anchors — the whole point of the index', () => {
   it('re-bases a section-scoped entry onto its line in the WHOLE file', () => {
