@@ -317,7 +317,9 @@ instead of a rewrite. Trivial mechanical edits skip it.
 ## Known friction & deferred fixes
 
 Tracked in the split backlog — index [`docs/backlog.md`](docs/backlog.md), with one file per section so
-each is ONE bounded read: [`open-bugs.md`](docs/backlog/open-bugs.md) (fixable defects + friction),
+each is ONE bounded read: [`open-bugs.md`](docs/backlog/open-bugs.md) (fixable defects + friction, at
+high/medium severity or untagged), [`minor-bugs.md`](docs/backlog/minor-bugs.md) (the same thing at LOW
+severity — split off 2026-08-28 on size alone, not on standard; re-tagging an entry moves it),
 [`forward-tracks.md`](docs/backlog/forward-tracks.md) (design directions),
 [`deferred.md`](docs/backlog/deferred.md) (blocked on data/env),
 [`durable-traps.md`](docs/backlog/durable-traps.md) (standing reference, not work). Add an entry when

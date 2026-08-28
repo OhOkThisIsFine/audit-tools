@@ -214,6 +214,12 @@ for (const section of CLOSEOUT_SECTIONS) {
   if (section.requiresQuestion && !lines.join(' ').includes('?')) {
     fail(`section "${section.id}": ${section.requiresQuestion}`);
   }
+  // …and it may declare that its content is a LIST. A string renders as one
+  // bullet, which is right for a section that says one thing and wrong for the
+  // ones the owner acts on item by item.
+  if (section.itemized && !Array.isArray(value)) {
+    fail(`section "${section.id}": ${section.itemized}`);
+  }
   disposition[section.id] = 'content';
   rendered.push({ section, lines: lines.map((l) => (l.startsWith('- ') ? l : `- ${l}`)) });
 }

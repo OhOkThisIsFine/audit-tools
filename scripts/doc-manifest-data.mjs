@@ -102,6 +102,7 @@ export const DOC_MANIFEST = [
     files: [
       "docs/backlog.md",
       "docs/backlog/open-bugs.md",
+      "docs/backlog/minor-bugs.md",
       "docs/backlog/forward-tracks.md",
       "docs/backlog/deferred.md",
       "docs/backlog/durable-traps.md",

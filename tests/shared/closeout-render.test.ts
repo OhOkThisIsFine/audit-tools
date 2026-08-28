@@ -211,9 +211,10 @@ describe('render-closeout: the decisions section must ASK something', () => {
   it('accepts a decisions section that actually asks, and renders it', () => {
     const { code, stdout } = render(
       minimal({
-        decisions:
+        decisions: [
           'Split docs/backlog/open-bugs.md, or keep condensing to stay under the ceiling? ' +
-          'Splitting costs an index update; condensing costs an entry every time.',
+            'Splitting costs an index update; condensing costs an entry every time.',
+        ],
       }),
     );
     expect(code).toBe(0);
@@ -260,6 +261,47 @@ describe('render-closeout: readiness is checked BEFORE the report describes the 
     // generator. That is not a stale HANDOFF, and reporting it as one would be
     // a false red on a correct hand-back.
     const { code } = render(minimal());
+    expect(code).toBe(0);
+  });
+});
+
+describe('render-closeout: the sections the owner ACTS on are itemized', () => {
+  // A bare string renders as ONE bullet. For "decisions needed from you" and
+  // "remaining next steps" that hides the item COUNT behind prose — the reader
+  // has to parse a paragraph to learn how many things are waiting, and a step
+  // dropped from the middle leaves the section still looking complete.
+  it('refuses a decisions section passed as one block of prose', () => {
+    const { code, stderr } = render(
+      minimal({ decisions: 'Split the file, or keep condensing? And also: bump the ceiling?' }),
+    );
+    expect(code).not.toBe(0);
+    expect(stderr).toContain('ONE DECISION PER ELEMENT');
+  });
+
+  it('refuses a next_steps section passed as one block of prose', () => {
+    const { code, stderr } = render(
+      minimal({ next_steps: 'Implement CX-02 (docs/HANDOFF.md); then the async-twin migration.' }),
+    );
+    expect(code).not.toBe(0);
+    expect(stderr).toContain('ONE STEP PER ELEMENT');
+  });
+
+  it('renders one bullet per element when both are arrays', () => {
+    const { code, stdout } = render(
+      minimal({
+        decisions: ['Split the file, or keep condensing?', 'Raise the ceiling instead?'],
+        next_steps: ['Implement CX-02 — docs/HANDOFF.md', 'Async-twin migration — open-bugs.md'],
+      }),
+    );
+    expect(code).toBe(0);
+    expect(stdout).toContain('- Split the file, or keep condensing?');
+    expect(stdout).toContain('- Raise the ceiling instead?');
+    expect(stdout).toContain('- Implement CX-02 — docs/HANDOFF.md');
+    expect(stdout).toContain('- Async-twin migration — open-bugs.md');
+  });
+
+  it('still accepts "none" — an itemized section may fall silent', () => {
+    const { code } = render(minimal({ decisions: 'none', next_steps: 'none' }));
     expect(code).toBe(0);
   });
 });

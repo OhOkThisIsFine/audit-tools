@@ -61,6 +61,11 @@ export const END_MARKER = "<!-- END GENERATED SEEK INDEX -->";
  */
 export const INDEX_SOURCES = [
   { file: "open-bugs.md", kind: "bullets" },
+  // The LOW-severity tail, split out of open-bugs.md when that file hit its
+  // 120,000-byte ceiling. Indexed identically: the split bounds the READ, and
+  // must not bound the sweep — an entry that leaves the index is an entry that
+  // goes stale unseen, which is the failure the budget gate exists to prevent.
+  { file: "minor-bugs.md", kind: "bullets" },
   { file: "forward-tracks.md", kind: "tracks", section: "Open tracks" },
   { file: "forward-tracks.md", kind: "bullets", section: "Forward tracks" },
   { file: "deferred.md", kind: "bullets" },

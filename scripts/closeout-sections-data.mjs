@@ -65,6 +65,12 @@ const frictionCategoryBullets = FRICTION_CATEGORIES.map((id) => {
  *   section filled with the WRONG KIND of content sailed through. Declared here
  *   rather than special-cased in the renderer, so the contract and its refusal
  *   have one home.
+ * @property {string} [itemized] a non-silent value here must be an ARRAY, one
+ *   element per item, and this string is the refusal shown when it is a bare
+ *   string. The renderer accepts a string anywhere, which renders as ONE bullet
+ *   — fine for a section that says one thing, and wrong for the two the owner
+ *   ACTS on, where a single block hides the item count and makes the reader
+ *   parse prose to find out how many things are waiting.
  */
 
 /**
@@ -126,6 +132,11 @@ export const CLOSEOUT_SECTIONS = [
       'under this heading it reads as a demand for something the owner has already given. If ' +
       'every decision is settled, the correct value is the literal "none", and the section is ' +
       'then omitted from the report.',
+    itemized:
+      'ONE DECISION PER ELEMENT — pass an array, not one block of prose. The owner answers these ' +
+      'one at a time, so the count has to be visible without reading: three bullets say "three ' +
+      'things are waiting", and a single paragraph containing three questions does not. Put each ' +
+      "question and its options in their own element, even when there is only one.",
   },
   {
     id: 'next_steps',
@@ -133,5 +144,10 @@ export const CLOSEOUT_SECTIONS = [
     prompt:
       'every remaining step WITH the document that will hold it once this session ends — a step ' +
       'living only in chat is lost',
+    itemized:
+      'ONE STEP PER ELEMENT — pass an array, not one block of prose. Each element names a step ' +
+      'AND the document that holds it. Run together in a paragraph, a step is easy to drop while ' +
+      'the section still looks complete, which is exactly the failure this section exists to ' +
+      'prevent; as separate bullets, a missing one is visible.',
   },
 ];
