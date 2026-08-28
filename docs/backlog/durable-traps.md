@@ -862,12 +862,20 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   so a documentation edit can turn it red exactly like a source change — here, hand-written text
   about a subsystem whose generated block renders nothing while its queue is empty, which is the
   second drifting copy that contract exists to forbid. Two commits shipped red before the challenge
-  gate surfaced it. Nothing in the local flow catches this: the pre-commit gate runs typecheck legs,
-  not the suite, and a doc-only staged set looks harmless. **The discipline is the one the closeout
-  already states and this pass got wrong — verify green on the FINAL tree, after the last edit of
-  any kind, not on the tree you were mid-edit in.** When a late edit is doc-only, the bounded check
-  is the live-tree tests rather than the whole suite: `npx vitest run tests/shared/handoff-roadmap.test.ts`
-  plus the doc gates. The general rule stands whatever the file type — an edit after the run
-  invalidates the run.
+  gate surfaced it. **The discipline is the one the closeout already states and this pass got wrong —
+  verify green on the FINAL tree, after the last edit of any kind, not on the tree you were mid-edit
+  in.**
+  **HALF OF THIS IS NOW ENFORCED, and half is NOT — read both before trusting either (2026-08-27).**
+  It recurred the same day, identically, and the entry did not prevent it: a closeout re-introduced
+  hand-written text naming the answer script by a path containing the banned word. Both mechanical
+  guards on a staged `HANDOFF.md` passed — `check:handoff-roadmap` covers generated-block parity and
+  its own creep heuristics, not this assertion, and the pre-commit `test:doc-contract` leg fired
+  (its trigger already matches any `.md`) but its script named only three test files. **Closed
+  (`053c4a28`): `tests/shared/handoff-roadmap.test.ts` is now in that leg**, red-green validated, so
+  the HANDOFF half can no longer reach a commit and needs no remembering.
+  **The UNCOVERED half is the general rule**: an edit of any kind after a suite run invalidates that
+  run, and no local gate runs the full suite — the pre-commit gate runs typecheck legs plus the doc
+  subset. So a late SOURCE edit after a green run is still caught only by CI. That half is discipline,
+  not a mechanism, which is why this entry stays open rather than being deleted.
 
 ## Doc-set hygiene (enforced)
