@@ -811,4 +811,21 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   with the Write tool and let Bash operate on the path — that also makes the content diffable and
   re-runnable, which the heredoc never was.
 
+- **Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not
+  come back (2026-08-27).** From [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md).
+  Each was accepted in part, and the accepted halves live in `CLAUDE.md`, the brief in
+  [`project-philosophy.md`](../project-philosophy.md) and
+  [`doc-review-guidelines.md`](../doc-review-guidelines.md) — read them there, not here. What is
+  recorded here is what was REFUSED, because a partial acceptance is exactly the shape a later lane
+  re-proposes whole. (1) PH-04: a branch-internal seam is allowed, gone before merge, every commit
+  green. Refused: counting migration risk or blast radius as a reason to choose a smaller change
+  than the ideal one. The endpoint and what lands on `main` did not move. (2) PH-05: a gate must
+  name the boundary it is authoritative at, and one guessing at a boundary it does not own is moved
+  rather than left guessing. Refused: the cost test — a working gate's avoided defects are
+  unobservable, so an avoided-defect-versus-false-positive bar cannot be applied honestly.
+  (3) PH-08: semantic doc review scales to changed documents, their declared dependents and a
+  periodic sweep. Refused outright: any lightweight closeout. The closeout runs whole, every sprint,
+  and the steps a light variant drops are the ones that catch things.
+  [[ph01-rejected-one-core-two-draws-stands]]
+
 ## Doc-set hygiene (enforced)

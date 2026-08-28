@@ -28,7 +28,9 @@ human-readable render (markdown):
 - Use mechanical, deterministic tools wherever one does the job as well as or better than a model.
 - Use LLM judgment where it clearly lifts quality — bounded, scoped and recorded. The project is not
   "100% deterministic", and it is not trying to be.
-- Whatever *can* be enforced in tooling *must* be, regardless of who does the work.
+- Whatever *can* be enforced in tooling *must* be, regardless of who does the work — at a boundary the
+  gate actually owns. A gate states where it is authoritative, and one that guesses at a boundary
+  belonging to something else is moved to the boundary that owns it, never left guessing.
 - Don't grade your own homework: anything important or complex gets an independent adversarial check
   that is allowed to refuse.
 - Keep tasks tightly bound and well defined, so the gap between weak and strong models shrinks.

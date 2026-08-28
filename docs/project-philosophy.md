@@ -46,7 +46,9 @@ wins on nuance; the brief must then be corrected, not left as a second opinion.
 - Use mechanical, deterministic tools wherever one does the job as well as or better than a model.
 - Use LLM judgment where it clearly lifts quality — bounded, scoped and recorded. The project is not
   "100% deterministic", and it is not trying to be.
-- Whatever *can* be enforced in tooling *must* be, regardless of who does the work.
+- Whatever *can* be enforced in tooling *must* be, regardless of who does the work — at a boundary the
+  gate actually owns. A gate states where it is authoritative, and one that guesses at a boundary
+  belonging to something else is moved to the boundary that owns it, never left guessing.
 - Don't grade your own homework: anything important or complex gets an independent adversarial check
   that is allowed to refuse.
 - Keep tasks tightly bound and well defined, so the gap between weak and strong models shrinks.
@@ -72,6 +74,8 @@ wins on nuance; the brief must then be corrected, not left as a second opinion.
 
 - Ideal code over compatibility; delete legacy rather than carry it. Effort, complexity and refactor
   size are NOT costs — only the endpoint matters. Correctness is the only thing that gates pace.
+  What lands on `main` is still the atomic replace; a temporary internal seam may exist BETWEEN
+  COMMITS ON A BRANCH, provided it is gone before that branch merges and every commit is green.
 - Ask on genuine ambiguity, and batch the questions. Never silently pick a default, and never quietly
   defer a decision that is the owner's.
 - A needed manual flag, or a fix that amounts to "be careful next time", is a bug signal — move the
@@ -81,7 +85,10 @@ wins on nuance; the brief must then be corrected, not left as a second opinion.
 - Green at every commit, and every regression test is red-green validated before it is trusted.
 - End-of-sprint cleanup runs unprompted, and every remaining step is stated with the document it lives
   in — a step that lives only in chat is lost.
-- Docs capture durable concepts, not current state. Absence of a thing is not staleness.
+- Docs capture durable concepts, not current state. Absence of a thing is not staleness. Semantic
+  document review scales to what changed — the changed documents, their declared dependents, and a
+  periodic sweep — never the whole corpus every pass. The end-of-sprint closeout does NOT scale: it
+  runs whole, every sprint.
 - Front-load the broad prior-art search before authoring anything — narrow scope is the top churn driver.
 - Log friction the moment you hit it, in all its categories, without being asked.
 

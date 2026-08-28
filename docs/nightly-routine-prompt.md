@@ -448,6 +448,22 @@ Docs drift; an agent that *remembers* to re-check them is a latent failure mode
 re-check into tooling: every night, against the live codebase, with three
 independent agents gating every change.
 
+## What a pass covers (owner, 2026-08-27 — PH-08 accepted for review, refused for the closeout)
+
+A pass is **not** the whole corpus. It covers the documents that CHANGED since their last ledger
+stamp, their DECLARED DEPENDENTS, and a PERIODIC SWEEP that reaches everything else on a stated
+cadence so nothing goes permanently unexamined. This is the project's own *scale the process to the
+work* conviction applied to its own docs, and it is the shape the scope ledger already supports —
+`scripts/nightly/scope-ledger.mjs` records a per-document evidence window, so an item with no entry
+is reviewed cold rather than silently counted as covered. What must not happen is a pass that quietly
+narrows and reports full coverage; coverage is read from the ledger file, never from prose.
+
+The other half of PH-08 was REFUSED. The end-of-sprint closeout does not scale and has no
+lightweight variant: it runs whole, every sprint. The steps a lightweight checkpoint would drop —
+rewalking the transcript for friction, reading the whole stretch diff, routing every durable fact —
+are precisely the ones that catch things, and they caught a masked push failure and a stale decision
+queue on the lap this was decided.
+
 ## The rubric sources: two philosophies
 
 Every judgement in this routine measures against **two** canonical rubrics, loaded at the

@@ -187,7 +187,14 @@ instead of a rewrite. Trivial mechanical edits skip it.
 - **Host prompts are cwd-explicit.** Commands must be cwd-independent or state exact workdir. Prefer `workdir` on the tool over asking workers to `cd`.
 - **PowerShell JSON generation is statement-safe.** Assign `foreach` output to a var first, then pipe to `ConvertTo-Json`.
 - **Extractors emit stable, content-derived array order.** Any artifact array field must be ordered by a stable key derived from content (e.g. path-sort), never filesystem / `readdir` / iteration order. `stableStringify` preserves array order, so an incidentally-ordered array silently churns the artifact's content hash on every re-extraction → cascades phantom staleness down the dependency DAG → redundant (expensive) downstream LLM re-runs. Any new extractor emitting an incidentally-ordered array is a latent churn source.
-- **Atomic-replace ordering invariant.** Every destructive change — deleting a fast path, phase, scheduler, cap, or monolithic pass — ships as single atomic replace: new mechanism + deletion in one commit. Never add-then-delete across commits.
+- **Atomic-replace ordering invariant.** Every destructive change — deleting a fast path, phase, scheduler, cap, or monolithic pass — ships as single atomic replace: new mechanism + deletion in one commit. Never add-then-delete across commits. **Scoped to `main` (owner, 2026-08-27, PH-04 accepted narrowly):** a temporary internal seam MAY exist between commits on a branch, provided every commit is green and the seam is gone before that branch merges. The endpoint and what lands on `main` are unchanged — this buys a large replace an intermediate review checkpoint, not a staged landing.
+- **A gate states the boundary it OWNS (owner, 2026-08-27, PH-05 accepted in part).** *Whatever can be
+  enforced in tooling must be* stands. What is added is an authority test, and only that: a new gate
+  names the boundary at which it is authoritative, and a gate that GUESSES at a boundary owned by
+  something else is moved to the boundary that owns it rather than left guessing. The named instance is
+  `pre-commit-gate.mjs` parsing arbitrary shell text to locate git's own boundary. The cost half of
+  PH-05 — a gate must also clear an avoided-defect-versus-false-positive bar — was NOT accepted: a
+  working gate's avoided defects are unobservable, so that test cannot be applied honestly.
 - **Durable traps are MECHANICALLY enforced, not remembered.** A trap that can be enforced is enforced,
   and its backlog entry is DELETED rather than restated (two copies decay independently; the mechanism
   states the trap and the fix when it fires). Enforcement is a **hook** when the trap is detectable at a

@@ -163,7 +163,6 @@
 - `forward-tracks.md:150` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
 - `forward-tracks.md:175` — Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep path, then measure.
 - `forward-tracks.md:196` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
-- `forward-tracks.md:198` — Three standing decisions the philosophy audit asks the owner to reconsider (2026-08-27, owner decision, not a defect).
 
 ### [`deferred.md`](backlog/deferred.md)
 
@@ -248,6 +247,7 @@
 - `durable-traps.md:790` — Philosophy-audit challenges already answered — do not re-propose without new evidence (2026-08-27).
 - `durable-traps.md:792` — A workflow killed mid-run by the monthly spend limit reports COMPLETED, and its partial results are recoverable by run id (2026-08-27).
 - `durable-traps.md:804` — A long quoted heredoc in the Bash tool can die with "unexpected EOF while looking for matching quote", and the reported line is the last line that arrived (2026-08-27).
+- `durable-traps.md:814` — Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not come back (2026-08-27).
 
 <!-- END GENERATED SEEK INDEX -->
 
