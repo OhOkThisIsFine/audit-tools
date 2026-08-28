@@ -17,8 +17,8 @@
   months, and both remediate `advance` sites now handle `outcome.stopped` through the new shared
   `describeStoppedFold` rather than reporting a wedged fold as a finished run. Two residues remain,
   both stated in the backlog entry.
-- **The seven orphaned `docs/reviews/` records are routed.** Nineteen entries reached
-  `docs/backlog/`, each proposed by one agent and refuted by a second against HEAD. The
+- **The seven orphaned `docs/reviews/` records are routed.** Every one is now cited from a work
+  queue, and each entry was proposed by one agent and refuted by a second against HEAD. The
   shared-helper adoption sweep produced none: all eight of its clusters landed after it was written
   and the class is now enforced by `check:shared-primitives`, so the repo's own rule deletes the
   entry rather than restating the trap. The gap that let it happen is itself an open-bugs entry —

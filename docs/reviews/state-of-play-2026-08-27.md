@@ -274,5 +274,9 @@ Ordered by leverage, not by effort.
 
 ---
 
-*This is a routing instrument, not a durable concept doc. Once every finding above has reached
-`docs/backlog/`, delete it.*
+*This was written as a routing instrument to be deleted once its findings reached `docs/backlog/`.
+They have, on 2026-08-27 — but do NOT delete it. Repairing the CX-02 design record turned this file
+into that record's cited evidence for the four claims it corrects, so it is now load-bearing
+provenance rather than a routing list. Its routing role is spent; its evidence role is not. Read
+section 6 with the correction stamped on it, and treat every other section as a dated snapshot of
+what was true that morning, not as live findings.*
