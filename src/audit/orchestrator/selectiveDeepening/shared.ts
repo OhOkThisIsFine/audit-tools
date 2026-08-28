@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import {
   SEVERITIES,
   CONFIDENCES,
   severityRank,
   confidenceRank,
   compareCodeUnits,
+  hashContent,
 } from "audit-tools/shared";
 import type { AuditResult, AuditTask, Finding, Lens } from "../../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
@@ -84,10 +84,6 @@ export function sanitizeSegment(value: string): string {
   return sanitized.length > 0 ? sanitized : "followup";
 }
 
-export function shortHash(value: string): string {
-  return createHash("sha1").update(value).digest("hex").slice(0, 10);
-}
-
 function resultLineIndex(result: AuditResult): Record<string, number> {
   return Object.fromEntries(
     result.file_coverage.map((coverage) => [
@@ -140,7 +136,10 @@ export function pathsForFinding(
 }
 
 export function taskIdFor(prefix: string, values: string[]): string {
-  return `deepening:${prefix}:${shortHash(values.join("\0"))}`;
+  // The truncated digest routes through the shared hash home. Length is
+  // explicit per hashContent's contract; a bare `.slice(0, N)` on an inline
+  // createHash chain is the banned construction (check:shared-primitives).
+  return `deepening:${prefix}:${hashContent(values.join("\0"), { length: 10 })}`;
 }
 
 export function lineCountFromSources(

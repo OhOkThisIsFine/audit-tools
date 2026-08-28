@@ -1,12 +1,14 @@
-import { createHash } from "node:crypto";
-
 import type { AuditTask } from "../types.js";
 import type {
   AuditPlanMetrics,
   ReviewPacket,
 } from "../types/reviewPlanning.js";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import { collectGraphEdges, compareCodeUnits } from "audit-tools/shared";
+import {
+  collectGraphEdges,
+  compareCodeUnits,
+  hashContent,
+} from "audit-tools/shared";
 import { priorityRank, sortLenses } from "./auditTaskUtils.js";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 import {
@@ -55,10 +57,12 @@ function canonicalTasks(tasks: readonly AuditTask[]): AuditTask[] {
 function packetIdFor(tasks: readonly AuditTask[], packetIndex: number): string {
   const unit = sanitizeSegment(tasks[0]?.unit_id ?? "review");
   const lenses = sortLenses(tasks.map((task) => task.lens)).join("-");
-  const hash = createHash("sha1")
-    .update(tasks.map((task) => task.task_id).join("\u0000"))
-    .digest("hex")
-    .slice(0, 10);
+  // Routed through the shared hash home with an explicit length — the inline
+  // createHash chain truncated by a bare slice is the banned construction.
+  const hash = hashContent(
+    tasks.map((task) => task.task_id).join("\u0000"),
+    { length: 10 },
+  );
   return `${unit}:${lenses}:packet-${packetIndex + 1}-${hash}`;
 }
 

@@ -111,6 +111,21 @@ export const PATTERN_RULES = [
     fix: 'route the digest through hashContent (src/shared/hash.ts)',
   },
   {
+    id: 'hash-chain-truncated',
+    // An inline createHash chain of ANY algorithm whose digest is truncated by
+    // a bare `.slice(0, N)` literal. What is banned is the CONSTRUCTION, not
+    // the algorithm name: the sha256-chain rule above is keyed to "sha256",
+    // and two sha1 sites re-rolled the exact pattern it bans (owner decision
+    // 2026-08-28 — widen the rule, migrate both sites). hashContent's own body
+    // does not match: its slice length is a variable and the digest is stored
+    // in a const first, which breaks the chain this regex requires.
+    regex:
+      /createHash\(\s*["'`][\w-]+["'`]\s*\)[\s\S]{0,200}?\.digest\(\s*["'`]hex["'`]\s*\)\s*\.slice\(\s*0\s*,\s*\d+\s*\)/g,
+    homes: ['src/shared/hash.ts'],
+    exceptions: [],
+    fix: 'route the truncated digest through hashContent with an explicit length (src/shared/hash.ts)',
+  },
+  {
     id: 'intl-collator',
     // The other spelling of ICU collation. Same ban, same reason.
     regex: /Intl\.Collator/g,

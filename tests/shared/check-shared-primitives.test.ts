@@ -131,6 +131,66 @@ describe("sha256-chain pattern", () => {
   });
 });
 
+describe("hash-chain-truncated pattern", () => {
+  // The two refuted re-rolls this rule exists for, verbatim shapes: the
+  // one-line sha1 helper body and the multi-line chained form. The banned
+  // thing is the CONSTRUCTION (inline createHash chain + bare slice literal),
+  // whatever the algorithm.
+  test("fires on a one-line sha1 chain truncated by a bare slice", () => {
+    expect(
+      scanFile(
+        "src/audit/somewhere.ts",
+        'return createHash("sha1").update(value).digest("hex").slice(0, 10);',
+      ).some((h) => h.rule === "hash-chain-truncated"),
+    ).toBe(true);
+  });
+
+  test("fires on a multi-line chain, any algorithm", () => {
+    const content = [
+      'const hash = createHash("md5")',
+      "  .update(parts.join(joiner))",
+      '  .digest("hex")',
+      "  .slice(0, 12);",
+    ].join("\n");
+    expect(
+      scanFile("src/audit/somewhere.ts", content).some(
+        (h) => h.rule === "hash-chain-truncated",
+      ),
+    ).toBe(true);
+  });
+
+  test("does NOT fire on a broken chain with a variable slice length (hashContent's own body shape)", () => {
+    const content = [
+      'const digest = createHash("sha256").update(content, "utf8").digest("hex");',
+      "if (length === undefined) return digest;",
+      "return digest.slice(0, length);",
+    ].join("\n");
+    expect(
+      scanFile("src/other.ts", content).filter(
+        (h) => h.rule === "hash-chain-truncated",
+      ),
+    ).toEqual([]);
+  });
+
+  test("does NOT fire on an untruncated full-digest chain", () => {
+    expect(
+      scanFile(
+        "src/other.ts",
+        'createHash("sha1").update(x).digest("hex")',
+      ).filter((h) => h.rule === "hash-chain-truncated"),
+    ).toEqual([]);
+  });
+
+  test("the hash home is exempt", () => {
+    expect(
+      scanFile(
+        "src/shared/hash.ts",
+        'createHash("sha1").update(x).digest("hex").slice(0, 8)',
+      ).filter((h) => h.rule === "hash-chain-truncated"),
+    ).toEqual([]);
+  });
+});
+
 describe("intl-collator pattern", () => {
   test("the other ICU spelling is banned too", () => {
     expect(
