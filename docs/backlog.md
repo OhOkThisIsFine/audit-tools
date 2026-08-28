@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 187 entr(y/ies) indexed.
+> and at commit). 205 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -129,6 +129,20 @@
 - `open-bugs.md:925` — A dated measurement sits inside durable routine prose (2026-08-23, low).
 - `open-bugs.md:933` — The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction: hermeticity).
 - `open-bugs.md:952` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
+- `open-bugs.md:960` — A provenance plane with no producer is still exported, advertised and documented (2026-08-27, from the philosophy audit, medium).
+- `open-bugs.md:962` — Three persisted contracts are read back without the schema that defines them (2026-08-27, from the philosophy audit, medium).
+- `open-bugs.md:964` — The pre-split design-review lane is still polled beside the two current judgment types (2026-08-27, from the philosophy audit, medium).
+- `open-bugs.md:966` — The systemic-challenge convergence rule is underspecified in the spec and fixed at one round in code (2026-08-27, from the philosophy audit, low).
+- `open-bugs.md:968` — The release-gate gloss table is required by a gate and rendered by no consumer (2026-08-27, from the philosophy audit, low).
+- `open-bugs.md:970` — HANDOFF's hand-written region and the closeout both re-narrate state the repository already holds (2026-08-27, from the philosophy audit, low).
+- `open-bugs.md:972` — Three governance vocabularies are copied per consumer instead of shared (2026-08-27, from the philosophy audit, low).
+- `open-bugs.md:974` — A pipeline warning names an internal record id as its resolution action (2026-08-27, from the philosophy audit, low).
+- `open-bugs.md:976` — The N-R13 status invariant asserts its own literal, and the status vocabulary exists in three unlinked copies (2026-08-27, low-medium).
+- `open-bugs.md:992` — The dispatch boundary strips every per-node field the contract pipeline writes onto a promoted finding but `FindingSchema` does not declare (2026-08-27, medium).
+- `open-bugs.md:1012` — The two evidence-bearing terminal dispositions have no producer — `verified_already_fixed` and `refuted` are unreachable in any real run (2026-08-27, medium, from [`reviews/wave2-dispositions-2026-08-20.md`](./reviews/wave2-dispositions-2026-08-20.md)).
+- `open-bugs.md:1037` — The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](./reviews/closeout-generation-failure-2026-08-26.md)).
+- `open-bugs.md:1039` — `check:memory-citations` gates two of the three citation directions, and its guard-reach row names the wrong uncovered half (2026-08-27, low, friction: tool_should_decide).
+- `open-bugs.md:1061` — The shared-hash gate is spelled `sha256`, so an inline sha1 chain re-rolls the anti-pattern it bans (2026-08-27, refutation pass over [`shared-helper-adoption-2026-08-25`](./reviews/shared-helper-adoption-2026-08-25.md)).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -137,14 +151,17 @@
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
 - `forward-tracks.md:43` — ▶ CX-02 — one audit obligation registry, one drain.
-- `forward-tracks.md:66` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:90` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:98` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:113` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:120` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:132` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:146` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
-- `forward-tracks.md:155` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
+- `forward-tracks.md:61` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
+- `forward-tracks.md:85` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:93` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:108` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:115` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:127` — Wave-friendly host dispatch: run identity survives partial ingest.
+- `forward-tracks.md:141` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:150` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
+- `forward-tracks.md:175` — Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep path, then measure.
+- `forward-tracks.md:196` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:198` — Three standing decisions the philosophy audit asks the owner to reconsider (2026-08-27, owner decision, not a defect).
 
 ### [`deferred.md`](backlog/deferred.md)
 
@@ -226,6 +243,7 @@
 - `durable-traps.md:772` — A subagent's Read tool can serve STALE pre-edit content for a file another agent is concurrently editing (2026-08-20).
 - `durable-traps.md:780` — A COMMENT-only edit to a graph extractor reds the graph-edge cache digest pin, and the failure text tells you to bump the cache version (2026-08-24).
 - `durable-traps.md:788` — CBM graph tools can be absent while its daemon is healthy, and the fallback CLI can be cohort-locked (2026-08-26).
+- `durable-traps.md:790` — Philosophy-audit challenges already answered — do not re-propose without new evidence (2026-08-27).
 
 <!-- END GENERATED SEEK INDEX -->
 

@@ -48,20 +48,15 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   [`cx02-drain-unification-design-2026-08-26.md`](../reviews/cx02-drain-unification-design-2026-08-26.md).
   One atomic loop-core replace; never stage half of it. Its one open design question (lock hold-time
   around formerly-outside-the-lock work) needs a live-audit measurement before the cap is sized.
-  **REPAIR THE DESIGN RECORD FIRST — owner decision 2026-08-27; it stays pinned.** Four of its
-  claims were refuted against HEAD and must be corrected before any implementation reads them:
-  (a) the marker-protocol sub-claim that `spec/audit/executor-producers.generated.md` names an
-  obligation registry — it is generated structurally from `EXECUTOR_REGISTRY[].produces` and
-  `LIFECYCLE_PRODUCTIONS`, and names no registry; (b) its cite for the lock-held read-modify-write
-  of `audit_state.last_executor` / `last_obligation` points at the SUCCESS-path progress marker's
-  fields of the same names instead — the real site is the
-  `withFileLock(artifactTreeLockPath(...))` block that reloads the bundle on the failure path;
-  (c) "`executor-registry-sync` retires with the second registry" is overstated —
-  only 2 of that file's 4 tests consume `buildAuditObligations` and the other two must survive;
-  (d) the composite cap mixes units — 100 is the OUTER engine's transition budget, 64 the INNER
-  dispatch-slot cap, and the inner engine transition bound is 66, so the product is a dispatch-slot
-  ceiling rather than a transition count. Evidence for each:
-  [`one-core-lap-scope-2026-08-27.md`](../reviews/one-core-lap-scope-2026-08-27.md).
+  The record's four refuted claims were corrected in place 2026-08-27 by four independent
+  verification lanes, so it is the single home for the constraints and nothing is restated here —
+  read it, not a summary of it. Two of those repairs changed what the implementing lap must do, not
+  only what it must believe: the `executor-producers` view is NOT an external contract the
+  unification migrates, and `executor-registry-sync` is amended rather than retired, so four of its
+  six tests must survive verbatim. Its enabling contract change is the shared `advance()` growing
+  a result that can express every legitimate stop — PH-03 in
+  [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md)
+  — which is this entry's prerequisite half, not a separate track.
 
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** A contract-valid empty result cannot be scored for quality without ground truth;
@@ -176,3 +171,28 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   shape rather than the reverse. Re-open that quarter only on a measured defect, and only after
   CX-02. Full brief, with both adversarial lanes and the limits of the measurement:
   [`one-core-lap-scope-2026-08-27.md`](../reviews/one-core-lap-scope-2026-08-27.md).
+
+- **Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep
+  path, then measure.** Pointer only — the eight confirmed gaps, the P0 rewiring sequence, its
+  contract-test plan, the conditional P1/P2 extensions, the blinded paired-benchmark gate, and the
+  explicit what-not-to-build list are ALL in
+  [`audit-tools-simplification-workflow-gap-2026-08-26.md`](../reviews/audit-tools-simplification-workflow-gap-2026-08-26.md),
+  which is deliberately the single home for this work. Nothing is restated here, so there is no
+  second copy to drift. Its verdict is that the reviewers already exist and the normal execution
+  path starves them, so P0 adds no audit phase, no objective schema, and no MCP client to
+  audit-tools core; P1 and P2 are contingencies that must each cite a failed benchmark axis, never
+  added pre-emptively. The ordering is load-bearing: implement P0, then run the acceptance gate —
+  ten pinned blinded paired trials scored on six separate non-inferiority axes — and add a durable
+  contract only where a measured axis fails. Unstarted. Acceptance corpus is the two 2026-08-26
+  standalone runs,
+  [`complexity-reduction-audit-2026-08-26.md`](../reviews/complexity-reduction-audit-2026-08-26.md)
+  (the review CX-02 draws from) and
+  [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md),
+  plus a held-out repository chosen before tuning. Gaps of its own that are already bounded defects
+  on the working queue — the systemic adversary handed a prior-finding count instead of the banked
+  set, that lane's adversary-minted finding ids, and the loop's dry-signal convergence having no
+  ceiling — are worked there, not here.
+
+- **The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).** `scripts/release-and-publish.mjs` ends at registry visibility; global reinstall, the allowed postinstall lifecycle scripts and both binary smokes live in `.claude/skills/ship/SKILL.md` as instructions an agent must remember and execute — the host-remembering shape the auditor-agnostic rule bans, applied to the project's own pipeline-ownership rule. There is also no single resumable record spanning the phases, so a stall part-way is recovered by hand. **Property:** one idempotent command owns gated ref verification, exactly-once tag/release/publish creation, delayed release observation, registry verification, reinstall with allowed lifecycle scripts, and smoke checks of both global binaries and the installed host assets — resuming only its observation and completion phases and never retrying a destructive creation. The observation half already has its own entry (the await-run timeout shorter than a release-event delivery delay); fix it inside this command rather than beside it. YAML critical-path profiling moves out of release correctness into best-effort reporting.
+
+- **Three standing decisions the philosophy audit asks the owner to reconsider (2026-08-27, owner decision, not a defect).** Each contradicts something `CLAUDE.md` states as settled, so none is agent-actionable; the argument for each is in [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md). (1) PH-04 asks that the endpoint calculus also count migration risk, reviewability, reversibility and blast radius, allowing small green commits and temporary internal seams inside a branch that are removed before it reaches its clean endpoint. It contradicts *implementation effort is NOT a cost* and the atomic-replace ordering invariant. (2) PH-05 asks that a hard gate be admitted only when its invariant protects release correctness, it runs at the narrowest authoritative boundary, detection is stable without heuristic shell parsing, and its avoided-defect cost exceeds its false-positive and maintenance cost — with host hooks giving earlier feedback but never unique correctness. It contradicts *whatever can be enforced in tooling must be*; the named example is that `.claude/hooks/pre-commit-gate.mjs` parses arbitrary shell text to locate git's own boundary. (3) PH-08 asks that semantic document review run on changed documents, their declared dependents and a periodic sweep rather than exhaustively every pass, and that the full closeout be reserved for a handoff, release or milestone with a lightweight checkpoint at a routine pause. It contradicts the exhaustive doc-review corpus and *a sprint is any coherent stretch ending at a pause*. **Property:** each is answered by the owner and the answer lands in `CLAUDE.md`; until then no agent narrows a gate, a review corpus or the closeout cadence on this record's authority.
