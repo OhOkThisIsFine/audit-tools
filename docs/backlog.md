@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 216 entr(y/ies) indexed.
+> and at commit). 217 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -147,6 +147,7 @@
 - `open-bugs.md:1099` — The shared-hash gate is spelled `sha256`, so an inline sha1 chain re-rolls the anti-pattern it bans (2026-08-27, refutation pass over [`shared-helper-adoption-2026-08-25`](./reviews/shared-helper-adoption-2026-08-25.md)).
 - `open-bugs.md:1105` — An analysis record can identify work and reach no work queue, and every gate stays green while it happens (2026-08-27, medium, from the orphan-routing lap).
 - `open-bugs.md:1126` — The masked-exit guard reaches SUITE commands only, so a rejected `git push` reads as exit 0 (2026-08-27, medium, friction: tool_should_decide).
+- `open-bugs.md:1141` — Synchronous child processes reachable from the audit fold carry NO timeout, so one hung binary can outlive the lock heartbeat (2026-08-28, medium, friction: tool_should_decide).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

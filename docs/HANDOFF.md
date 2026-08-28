@@ -14,16 +14,27 @@
   (synchronous `git ls-files` already runs inside the hold), the real test blast radius, and the
   acceptance test for constraint 3 — written, and RED at a count of 3, though it does NOT prove the
   collapse. The record is the single home for all of it; read it, not this summary.
+- **A ninety-minute adversarial lane then found the plan NOT SAFE TO IMPLEMENT LITERALLY.** It
+  reached two of the findings above independently and added six blockers and five constraints of its
+  own — among them that persist-once is not achieved by converting the eleven reloads (design review
+  writes a core artifact by hand), that deferring the persist reverses a crash-safety ordering the
+  code itself documents, and that the dispatch-slot cap stops sharing a unit with the engine bound
+  so `deriveEngineBound` is no longer the backstop. Its verdict on the DIRECTION is unchanged: one
+  registry, one drain remains viable.
 - **Repository:** `main` and `origin/main` are synchronized; every commit passed its gates and the
   full suite is green. No release is pending — `v0.50.3` is live on npm, and the tag and the local
   version match it.
 
 ## Immediate next
 
-**Implement CX-02's structural collapse.** One atomic loop-core replace; never stage half of it. The
-design gate is done, and **the two answers it left open are now written** into the record's *The two
-open answers* section — each premise checked against HEAD and confirmed by an independent adversarial
-lane. So this lap starts by coding. In brief, with the record as the single home:
+**Resolve CX-02's six blockers, then implement.** Do NOT start by coding: a ninety-minute
+adversarial pass found the plan **not safe to implement literally**, and the record now carries all
+six blockers with a PROPOSED landing for each in its *Where each blocker lands* section. Four are
+mechanically forced; two are judgments. None of the six proposals has been through a refutation
+pass, and the last thing this record did without one was overclaim an acceptance test — so refute
+them first, then code. It remains one atomic loop-core replace on `main`.
+
+In brief, with the record as the single home:
 
 1. **Constraint 1 is re-answered.** The guards observe per DISPATCH, counted in dispatch slots. The
    tolerance stays 16 and is deliberately NOT derived from the cap — what becomes mechanical is the
@@ -31,23 +42,28 @@ lane. So this lap starts by coding. In brief, with the record as the single home
    the guard is dead code.
 2. **Constraint 3 is answered — ONE hold, persist once — and its SCOPE is now corrected.**
    Release-and-reacquire is not available: `withFileLock` is non-reentrant, so any second
-   acquisition inside the hold is a guaranteed `FileLockTimeoutError`. **Start here:** split the
-   three fold-reachable tree-lock sites into a locking wrapper plus a lock-free core, the idiom
-   `auditStep.ts` already uses — `auditStep.ts:86`, `nextStepHelpers.ts:1845` and `reviewRun.ts:176`.
-   The fourth site, `persistConfigErrorHandoff`, is outside the fold and is not touched. Then the
-   eleven `loadArtifactBundle` transitions become in-memory carries, which forces the `handle*Branch`
+   acquisition inside the hold is a guaranteed `FileLockTimeoutError`. Split the three fold-reachable
+   tree-lock sites into a locking wrapper plus a lock-free core, the idiom `auditStep.ts` already
+   uses — `auditStep.ts:86`, `nextStepHelpers.ts:1845` and `reviewRun.ts:176`. The fourth site,
+   `persistConfigErrorHandoff`, is outside the fold and is not touched. Then the eleven
+   `loadArtifactBundle` transitions become in-memory carries, which forces the `handle*Branch`
    descriptors to return the updated bundle rather than rely on a reload; and the halt-time persist
    must cover the throw path. Enforce the result mechanically: nothing reachable from a fold
-   `execute` may acquire `artifactTreeLockPath`.
+   `execute` may acquire `artifactTreeLockPath` — and that test must search the ALIAS
+   (`handleGraphEnrichmentBranch` binds `runStep = deps.runStep ?? runAuditStep`), or it misses a
+   call site exactly as a grep for the name did. **The split is necessary and NOT sufficient:** the
+   record's blockers 2 to 4 name the direct core writers and the unlink ordering it does not cover.
 
 Still open and owner-facing: the live fresh-audit measurement before the cap is sized must measure
 HOLD TIME as well as dispatch count — the single hold can starve a concurrent waiter at 10s/20s.
 
 Then the replace itself: one registry carrying the host-boundary policy, dispatch-local failure
-attribution, a FILTERED registry view for the `plan` draw (`runHostDelegationObligation` ingests
-results, which a plan must not do), and the pinning suites migrated in the same commit — ~20
-drain-dependent `advanceAudit` call sites, while the ~29 that pass `preferredExecutor` do not move,
-because keeping `runSingleAdvanceStep` as the forced primitive holds them still.
+attribution (but keep the `ExecutorFailure` contract — only the chain-walking helper retires), a
+REPLACEMENT registry view for the `plan` draw — **not** a filtered one, because the engine's scan
+continues past an id with no def, so an exclusion makes `plan` step OVER the host boundary instead
+of halting at it — and the pinning suites migrated in the same commit: ~20 drain-dependent
+`advanceAudit` call sites, while the ~29 that pass `preferredExecutor` do not move, because keeping
+`runSingleAdvanceStep` as the forced primitive holds them still.
 
 Verification is unchanged for the COLLAPSE: it still has no test that can pass only once it lands,
 so the pinning suites staying green remain its only evidence. What is new is that **constraint 3 has
@@ -62,6 +78,11 @@ turns it green with both drains still standing, which is why the record now says
   its parallel-load timeout passes alone and is tracked as a known flake, so rebaselining it would
   hide a real regression.
 - The detached host runner is intentionally not running.
+- **Branch `cx02-one-drain` (`4aabe6c9`) holds two prepared, UNMERGED lock-site splits** —
+  `runAuditStepUnlocked` and `ensureSemanticReviewRunUnlocked`. Both typecheck and both are needed
+  under every proposed resolution, but they are deliberately unadopted, so `check:deadcode` would red
+  them at release. They are not sufficient on their own either (record blockers 2 to 4). Adopt them
+  with the replace, or delete the branch and re-derive them from the record — do not merge it alone.
 - The tracked decision-queue snapshot STILL disagrees with the ledger that settles it, and it will
   keep doing so: its writer refuses a batch that drops a record-path item on its own, so no lap can
   quietly true it up. What changed is the consumer, not the artifact — `start-lap` step 5 now asks

@@ -1137,3 +1137,22 @@
   them unchanged. **Property:** the masked-exit refusal is keyed to whether a command's EXIT STATUS
   is load-bearing, not to whether it is a test runner — so a state-changing command piped into a
   filter is refused the same way a suite is, with the same two escapes.
+
+- **Synchronous child processes reachable from the audit fold carry NO timeout, so one hung binary
+  can outlive the lock heartbeat (2026-08-28, medium, friction: tool_should_decide).** The
+  artifact-tree lock re-stamps its own mtime on a `setInterval` heartbeat and is considered stale at
+  30s, so a synchronous stretch that blocks the event loop past that window lets a second process
+  steal a lock the first still believes it holds. Several fold-reachable paths can produce one:
+  `runTracked` (`src/audit/orchestrator/localCommands.ts`) passes `options.timeout` straight through
+  to `execCommandSync` (`src/shared/tooling/exec.ts`) and every caller leaves it `undefined`, so a
+  hung `tsc` or `eslint` blocks indefinitely; `enumerateTrackedFilePaths`
+  (`src/shared/validation/findingGrounding.ts`) runs `git ls-files -z` through `spawnSync` with a
+  64 MB buffer and no timeout, reached inside the hold from `stampToolComputedGrounding`
+  (`src/audit/cli/auditStep.ts`); and the disposition extractor's VCS-ignore and untracked rules
+  default to `spawnSync` (`src/audit/extractors/disposition.ts`). The
+  analyzer candidate walk is synchronous too but is already safe, bounded at 5,000 entries. This is
+  a PRE-EXISTING hazard, not one CX-02 introduces — those children already run inside today's hold —
+  but CX-02 lengthens the window, and the CX-02 record wrongly reassured that every folded-in
+  operation is async or awaited. **Property:** no synchronous child process reachable while an
+  artifact-tree lock is held may run unbounded — every such spawn carries a timeout shorter than the
+  stale-lock window, so the holder can never be declared stale while it is still working.
