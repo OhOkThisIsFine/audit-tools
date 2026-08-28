@@ -5,33 +5,11 @@
 
 ## Live state
 
-- **PH-01 is DECIDED: rejected (owner, 2026-08-27).** *One core, two draws* stands — auditing and
-  remediating remain ONE logical core and a difference between them is a policy axis of that core.
-  Its central premise was false: mutation is not remediate-exclusive (`auto_fixes_applied` is third
-  in audit's own `PRIORITY`). PH-01's objection to the one-core lap falls with it; the structural
-  audit's separate *measurement* survives. Do not re-propose without new evidence.
-- **The one-core dissolution lap is RE-BASELINED, and two of its defects are fixed** (`4986b201`).
-  Both original premises were false when routed: remediate has driven the shared engine since
-  2026-06-17, and `hostHandoffCore.ts` already owns three of the four named duplications. Fixed
-  here: `PRE_INTAKE_PRIORITY` lost a dangling id the engine had been skipping in silence for two
-  months, and both remediate `advance` sites now handle `outcome.stopped` through the new shared
-  `describeStoppedFold` rather than reporting a wedged fold as a finished run. Two residues remain,
-  both stated in the backlog entry.
-- **The seven orphaned `docs/reviews/` records are routed.** Every one is now cited from a work
-  queue, and each entry was proposed by one agent and refuted by a second against HEAD. The
-  shared-helper adoption sweep produced none: all eight of its clusters landed after it was written
-  and the class is now enforced by `check:shared-primitives`, so the repo's own rule deletes the
-  entry rather than restating the trap. The gap that let it happen is itself an open-bugs entry —
-  and the obvious "every review must be cited" gate is the WRONG one, for the reason stated there.
 - **CX-02's design record is repaired, gated, and now ANSWERED.** Its four refuted claims were
   corrected in place, a `/design-check` found three more things it did not carry, and the two
   questions that gate left open are now decided in its *The two open answers* section (`3c2835c8`).
-  The record is the single home for all of it — read it, not a summary. The item is ready to code.
-- **The separable half of CX-02 is landed.** One fold scan ran the holistic `deriveAuditState` 25
-  times instead of once; the outer derive is now memoized exactly as the inner one has been since
-  `6145a1a3`. Red-green validated by `tests/audit/one-holistic-derivation-per-scan.test.ts`. It is
-  NOT a stage of the collapse — an independent lane established the cache makes that test pass while
-  both registries and both drains survive.
+  The record is the single home for all of it — read it, not a summary. The item is ready to code,
+  and its separable performance half already landed, so the collapse itself is what remains.
 - **Repository:** `main` and `origin/main` are synchronized; every commit passed its gates and the
   full suite is green. No release is pending — `v0.50.3` is live on npm, and the tag and the local
   version match it.
