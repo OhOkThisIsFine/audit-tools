@@ -69,8 +69,22 @@ Any commits listed = un-released work sitting on main (HANDOFF's "live state" us
 
 ## 5. ASK the open nightly questions — never just list them
 
-Read `.audit-tools/nightly/open-items.json` (the nightly routine's output — docs, backlog and
-recurring-problem items). Each open item already carries a `question` and ready-made `options` —
+**Ask the LEDGER what is open, never the snapshot.** Run this FIRST:
+
+```bash
+node scripts/nightly/answer.mjs --list
+```
+
+`.audit-tools/nightly/open-items.json` is a GENERATED snapshot that outlives the answers which settle
+it — it is a tracked file, it is not re-rendered when an item is answered, and the disagreement is a
+standing open-bugs entry. Trusting it costs the owner real time: on 2026-08-27 a lap read six "open"
+items from that file and asked four of them, when the ledger had recorded all six settled hours
+earlier AND their edits had already landed. One answer then contradicted a landed deletion, for a
+file that no longer existed. If `--list` reports **no open items**, there is nothing to ask — say so
+and move on; do NOT open the snapshot to find questions it still shows.
+
+Only for the ids `--list` reports OPEN, read `.audit-tools/nightly/open-items.json` for their
+presentation detail. Each such item carries a `question` and ready-made `options` —
 so ASK it: pose the actual question to the owner with the options spelled out, via the
 AskUserQuestion tool where available (batch up to 4 per call; more than that → ask the
 highest-value ones now, the rest after they answer). Naming the item, labelling it "your

@@ -44,6 +44,16 @@
   agent who opens the inbox and works six settled items. **Property:** the rendered queue and its
   snapshot are derived artifacts with a freshness gate, so neither can assert an item is open that
   the ledger records as done.
+  **The predicted damage happened, same day.** A lap read the six from the snapshot and put four to
+  the owner. All six had been settled at 16:40 and COMPLETED at 17:00 (`f41d2442`) — every edit
+  already landed and
+  <!-- doc-citation-exempt: names the deleted file to state that it is gone; that is the finding -->
+  `spec/mechanical-analyzer-layer-design.md` already deleted. The owner rejected
+  two as settled and answered two anyway, and one of those answers ("keep the analyzer spec, retitle
+  it") contradicts the landed deletion of a file that no longer exists. So the cost is not only
+  wasted attention: a stale question elicits an answer that, applied, would REVERT a completed
+  decision. The `start-lap` skill has been repointed at `answer.mjs --list` as the authority, which
+  closes the path that was actually walked; the snapshot's own freshness gate is still the fix.
 
 - **The backlog size baseline holds amnesties for entries that no longer exist, and its file ceiling
   never ratchets down (2026-08-27, low).** `docs/backlog/.size-baseline.json` grandfathers two
