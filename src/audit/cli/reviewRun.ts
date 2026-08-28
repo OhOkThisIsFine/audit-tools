@@ -116,7 +116,7 @@ function sameTaskIds(left: readonly AuditTask[], right: readonly AuditTask[]): b
   );
 }
 
-export async function ensureSemanticReviewRun(params: {
+interface ReviewPauseParams {
   root: string;
   artifactsDir: string;
   bundle: ArtifactBundle;
@@ -124,11 +124,22 @@ export async function ensureSemanticReviewRun(params: {
   obligationId: string | null;
   selfCliPath?: string;
   timeoutMs?: number;
-}): Promise<{
+}
+
+interface ReviewPause {
   state: AuditState;
   bundle: ArtifactBundle;
   activeReviewRun: ActiveReviewRun;
-}> {
+}
+
+/**
+ * Reuse the active run while its pending manifest still names the same tasks;
+ * otherwise mint a fresh one. Shared by both entry points below so the reuse
+ * rule cannot differ between the locked and lock-free halves.
+ */
+async function resolveReviewRun(
+  params: ReviewPauseParams,
+): Promise<ActiveReviewRun> {
   const currentPending = buildPendingAuditTasks(params.bundle);
   const existingRun = await loadCurrentActiveReviewRun(params.artifactsDir);
   if (existingRun) {
@@ -136,32 +147,21 @@ export async function ensureSemanticReviewRun(params: {
       const existingPending = await readJsonFile<AuditTask[]>(
         existingRun.pending_audit_tasks_path,
       );
-      if (sameTaskIds(existingPending, currentPending)) {
-        return await persistReviewPause(params, existingRun);
-      }
+      if (sameTaskIds(existingPending, currentPending)) return existingRun;
     } catch (error) {
       if (!isFileMissingError(error)) throw error;
     }
   }
 
   const { activeReviewRun } = await materializeReviewRun(params);
-  return await persistReviewPause(params, activeReviewRun);
+  return activeReviewRun;
 }
 
-async function persistReviewPause(
-  params: {
-    root: string;
-    artifactsDir: string;
-    bundle: ArtifactBundle;
-    state: AuditState;
-    obligationId: string | null;
-  },
+/** The blocked state and bundle a review pause hands back. Writes NOTHING. */
+function buildReviewPause(
+  params: ReviewPauseParams,
   activeReviewRun: ActiveReviewRun,
-): Promise<{
-  state: AuditState;
-  bundle: ArtifactBundle;
-  activeReviewRun: ActiveReviewRun;
-}> {
+): ReviewPause & { blocker: string } {
   const blocker = buildManualReviewBlocker();
   const blockedState =
     params.bundle.audit_state?.status === "blocked"
@@ -172,19 +172,61 @@ async function persistReviewPause(
           executor: "semantic_review_executor",
           blocker,
         });
-  const blockedBundle = { ...params.bundle, audit_state: blockedState };
-  await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
-    writeCoreArtifacts(params.artifactsDir, blockedBundle),
-  );
+  return {
+    state: blockedState,
+    bundle: { ...params.bundle, audit_state: blockedState },
+    activeReviewRun,
+    blocker,
+  };
+}
+
+/** Handoff artifacts only — no core artifacts, so no artifact-tree lock. */
+async function writeReviewPauseHandoff(
+  params: ReviewPauseParams,
+  pause: ReviewPause & { blocker: string },
+): Promise<void> {
   await writeHandoffOnly({
     root: params.root,
     artifactsDir: params.artifactsDir,
-    bundle: blockedBundle,
-    audit_state: blockedState,
-    progress_summary: blocker,
-    activeReviewRun,
+    bundle: pause.bundle,
+    audit_state: pause.state,
+    progress_summary: pause.blocker,
+    activeReviewRun: pause.activeReviewRun,
   });
-  return { state: blockedState, bundle: blockedBundle, activeReviewRun };
+}
+
+/**
+ * Resolve the review run and persist the blocked pause. Takes the artifact-tree
+ * lock for the core write, so it is for callers that hold no lock of their own.
+ */
+export async function ensureSemanticReviewRun(
+  params: ReviewPauseParams,
+): Promise<ReviewPause> {
+  const activeReviewRun = await resolveReviewRun(params);
+  const pause = buildReviewPause(params, activeReviewRun);
+  await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
+    writeCoreArtifacts(params.artifactsDir, pause.bundle),
+  );
+  await writeReviewPauseHandoff(params, pause);
+  return { state: pause.state, bundle: pause.bundle, activeReviewRun };
+}
+
+/**
+ * The lock-free half, for the fold — which already holds the artifact-tree lock
+ * for its whole drain, so the acquisition above would be a second one on a
+ * non-reentrant lock and would time out deterministically.
+ *
+ * It also does not persist the core artifacts: under persist-once the fold's
+ * own halt writes them, and the blocked bundle it returns is what the fold
+ * carries there.
+ */
+export async function ensureSemanticReviewRunUnlocked(
+  params: ReviewPauseParams,
+): Promise<ReviewPause> {
+  const activeReviewRun = await resolveReviewRun(params);
+  const pause = buildReviewPause(params, activeReviewRun);
+  await writeReviewPauseHandoff(params, pause);
+  return { state: pause.state, bundle: pause.bundle, activeReviewRun };
 }
 
 export async function persistConfigErrorHandoff(params: {

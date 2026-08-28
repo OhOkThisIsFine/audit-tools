@@ -91,6 +91,35 @@ export async function runAuditStep(
   );
 }
 
+/**
+ * The LOCK-FREE, PERSIST-FREE bounded step — the fold's entry point.
+ *
+ * `withFileLock` is non-reentrant (an exclusive `wx` create), so a fold that
+ * holds the artifact-tree lock for its whole drain cannot call {@link
+ * runAuditStep}: the wrapper's second acquisition would deadlock into a
+ * deterministic `FileLockTimeoutError`. The fold therefore calls this, and owns
+ * the one hold and the one persist itself.
+ *
+ * It takes the bundle rather than loading one, because under persist-once the
+ * fold's own state is not on disk yet and a reload would silently roll it back.
+ *
+ * The wrapper/core split is not new here — `executeAdvance` was already split
+ * out "so the claim path can execute this UNLOCKED". This is that seam, named
+ * and exported so the fold cannot reach the locking half by accident.
+ */
+export async function runAuditStepUnlocked(
+  options: RunAuditStepOptions,
+  bundle: ArtifactBundle,
+  runLogger?: RunLogger,
+): Promise<AdvanceAuditResult> {
+  const logger =
+    runLogger ??
+    new RunLogger(join(options.artifactsDir, "run.log.jsonl"), {
+      enabled: options.runLog ?? true,
+    });
+  return await executeAdvance(options, bundle, logger);
+}
+
 async function runAuditStepLocked(
   options: RunAuditStepOptions,
   runLogger: RunLogger,
