@@ -13,6 +13,12 @@ now stand; the superseded wording is in `git log`, not here. The evidence that r
 `state-of-play-2026-08-27.md`, section *Three problems inside the one pinned item*; the repair
 lanes verified each one from source rather than from that record.
 
+A fifth repair, 2026-08-28, is appended rather than inlined, because it corrects the SCOPE of an
+answer whose decision stands: *Constraint 3's SCOPE is refuted*, immediately before the preserve
+list. Read it before constraint 3 and before the two open answers — it changes how much work
+constraint 3 is, and it corrects constraint 6's test count. Anything above it that implies a single
+nested lock acquisition is superseded by it.
+
 ## Verified premise
 
 The nested double drain is real and live: `runDeterministicForNextStep` runs the shared
@@ -297,6 +303,85 @@ HOLD TIME, not only dispatch count. The residual risk is event-loop starvation r
 a synchronous stretch over 30s inside the hold stops the heartbeat and the lock does go stale. Every
 folded-in operation is async IO or an awaited child process, so a new synchronous hot loop inside the
 fold is the one thing that would break it.
+
+## Constraint 3's SCOPE is refuted, 2026-08-28 — it counted one nested acquisition of eleven
+
+The DECISION above survives; its scope does not. *ONE hold, persist once* names a single second
+acquisition of the artifact-tree lock — `executeAndRecord`'s catch — and plans to delete it. Under
+one fold-wide hold there are ELEVEN, and the same paragraph's own finding is what makes each one
+fatal rather than untidy: `withFileLock` is non-reentrant, so none of them can release and
+reacquire its way out. Each is a deterministic `FileLockTimeoutError`. Verified at HEAD by direct
+enumeration:
+
+1. `nextStepHelpers.ts:1845` — the catch. The one the answer found.
+2. `reviewRun.ts:176` — `persistReviewPause`, reached from `ensureSemanticReviewRun`, which
+   `runHostDelegationObligation` calls at `nextStepHelpers.ts:2620`. That is the audit loop's most
+   common exit path, so the plan as written breaks the ordinary case, not an edge case. It is also
+   the only one of the eleven on an EMIT path rather than a transition.
+3–11. Nine `runAuditStep` calls inside the fold, each locking via `auditStep.ts:82` —
+   `nextStepHelpers.ts` 1419, 1464, 1511, 1611, 1663, 1705, 1760 (the submission-apply forced
+   dispatches inside the `handle*Branch` descriptors' `apply` callbacks), 1812 (`executeAndRecord`'s
+   normal path) and 2601 (the result-ingest arm).
+
+**The resolving shape is already in the tree, so this is scope rather than a new judgment.**
+`runAuditStep` is split three ways today — `runAuditStep` (lock) → `runAuditStepLocked` (load +
+persist) → `executeAdvance` (pure; its own comment says it was split out so a caller can execute it
+UNLOCKED). Every tree-lock acquisition reachable from a fold `execute` splits the same way: a
+locking wrapper for the eight external CLI commands, a lock-free core the fold calls. The property
+is mechanically enforceable and must be enforced — a contract test that nothing reachable from a
+fold `execute` acquires `artifactTreeLockPath`.
+
+### Two costs this record implied are NOT costs, checked against HEAD
+
+Both were raised against WIDEN while writing the above, and both fail. They are recorded because a
+later reader will raise them again.
+
+- **The hold does not newly span analyzer child processes.**
+  `external_analyzer_acquisition_executor`, `graph_enrichment_executor`, `auto_fix_executor` and
+  `syntax_resolution_executor` are all `EXECUTOR_RUNNERS` entries (`executorRunners.ts:93, 103, 189,
+  197`), dispatched from inside `runAuditStep`'s existing hold. Child processes already run under the
+  tree lock. The honest delta is hold LENGTH, not a new class of work under the lock.
+- **A crash mid-fold does not newly lose much.** `runAuditStepLocked` is load → `executeAdvance` →
+  ONE `writeCoreArtifacts`, and `executeAdvance` drains up to `MAX_DRAIN_STEPS` in memory with no
+  intermediate persist. Today's worst-case loss is already a 64-dispatch drain; persist-once extends
+  the unpersisted window from one inner drain to the fold, and on a fresh deterministic run the inner
+  drain already covers nearly all of it.
+
+What survives as a real cost is the one the record already states: a longer hold converts a
+concurrent waiter into a FAILURE at the 10s `withFileLock` default and the 20s
+`LOCKED_JSON_STORE_TIMEOUT_MS`. The deferred hold-time measurement is still owed.
+
+### The alternative granularity, stated so it is not rediscovered as an open question
+
+Today is NEITHER endpoint: one hold per OUTER transition, each covering an INNER drain. The obvious
+alternative — one hold per dispatch — is rejected here rather than left implicit. It would REGRESS
+what exists, cutting the inner drain's 64-dispatch hold to one dispatch and exposing the tree
+mid-cascade far more often, to buy back a crash window the point above shows is largely already
+there. WIDEN is an extension of the existing inner contract; NARROW is a retreat from it.
+
+### Constraint 6's blast radius is understated on tests, and overstated on shape
+
+`advanceAudit` has 49 call sites across 15 test files, not nine. But roughly 29 of them pass
+`preferredExecutor`, which bypasses the engine entirely and is unaffected by the collapse —
+including the fixture driver `tests/audit/helpers/advancedBundle.mjs`, whose stages are all forced
+precisely so a bare call cannot overshoot. So the migration is the ~20 drain-dependent sites,
+concentrated in `advance-drain-loop`, `orchestration`, `finalization-convergence` and
+`orchestrator-remediation`. Keeping `runSingleAdvanceStep` as the forced single-step primitive is
+what holds the other 29 still.
+
+One layering assumption should not be made: there is no rule forcing the one registry into either
+area. `src/audit/orchestrator/` already imports `../cli/lineIndex.js` in three modules
+(`requeueFold.ts:19`, `taskBuilder.ts:16`, `trivialAudit.ts:3`), so "orchestrator must not import
+cli" is not an available argument for where the registry lands. Decide it on the host-boundary
+policy the registry carries, which is CLI-shaped, not on a layering rule that does not exist.
+
+### And a candidate acceptance test, which this record says does not exist
+
+The record states the collapse has NO test that can pass only once it lands. Tree-lock acquisition
+COUNT per `next-step` is one: today the fold acquires and releases once per outer transition, and
+under one hold it is exactly one. It is red before and green after, and — unlike
+`one-holistic-derivation-per-scan` — it cannot be turned green by any caching fix that leaves both
+drains standing, because it measures the lock, not the derivation.
 
 ## Preserve list (report + refuter union)
 
