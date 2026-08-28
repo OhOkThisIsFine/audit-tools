@@ -114,8 +114,16 @@ describe("backlog budget measures bytes", () => {
     const raw: { file_ceilings?: Record<string, number>; entries_over_budget?: string[] } = JSON.parse(
       readFileSync(join(BACKLOG_DIR, ".size-baseline.json"), "utf8"),
     );
+    //
+    // NOT "at least one ceiling exists". That was a MEASUREMENT of the corpus on the day
+    // this was written — open-bugs.md was over the file budget then — and it went red the
+    // moment the backlog came back under budget on its own and `--update-baseline`
+    // recorded no ceiling at all. An empty `file_ceilings` is the gate WORKING: nothing is
+    // over budget, so there is nothing to ratchet, and the ratchet re-arms by itself if a
+    // file goes over again. Requiring a ceiling to exist made shrinking the backlog fail
+    // the suite. The metric property stays covered non-vacuously by the synthetic-content
+    // test below, which is exactly why that one was written against synthetic content.
     const ceilings = Object.entries(raw.file_ceilings ?? {});
-    expect(ceilings.length, "at least one file is over budget and thus baselined").toBeGreaterThan(0);
     for (const [name, ceiling] of ceilings) {
       const text = readFileSync(join(BACKLOG_DIR, name), "utf8");
       const bytes = Buffer.byteLength(text, "utf8");

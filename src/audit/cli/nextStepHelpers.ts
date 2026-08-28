@@ -2213,11 +2213,33 @@ async function runDeterministicExecutor(
  */
 function deriveObligationState(
   id: string,
+  cache: WeakMap<ArtifactBundle, AuditState>,
 ): (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied" {
   return (bundle) => {
     if (bundle.audit_state?.status === "complete") return "satisfied";
-    const state = deriveAuditState(bundle, {
-    });
+    let state = cache.get(bundle);
+    if (!state) {
+      // MEMOIZED per bundle IDENTITY, exactly as the inner drain's namesake in
+      // `orchestrator/advance.ts` is — and for the same reason. `advance` scans
+      // by calling EVERY registered def's `derive`, so without this the fold
+      // ran the holistic `deriveAuditState` once PER OBLIGATION per scan: 25
+      // full staleness passes to answer one question. That is the same
+      // regression `6145a1a3` measured and memoized away on the inner side; it
+      // was simply never applied here.
+      //
+      // The key is safe for the same reason it is safe there: identity changes
+      // at every transition (each one loads or builds a fresh bundle), and the
+      // `complete` gate above can only flip via a transition. So an entry can
+      // never outlive the state it was derived under.
+      //
+      // Emission stays at the DEFAULT here, unlike the inner drain's
+      // `emitStaleness: false`. This layer IS the boundary the inner one defers
+      // its record to, so it must still emit — and now it emits once per scan
+      // rather than relying on `emitStalenessRecord`'s last-key latch to
+      // swallow 24 duplicates.
+      state = deriveAuditState(bundle);
+      cache.set(bundle, state);
+    }
     const found = state.obligations.find((o) => o.id === id);
     if (!found) return "satisfied";
     return found.state === "missing" || found.state === "stale"
@@ -2237,9 +2259,14 @@ function deriveObligationState(
  */
 export function buildAuditObligations(
 ): AuditObligationDef[] {
+  // One memo per registry construction, shared by every def in it — the same
+  // shape `buildDrainObligations` uses. Scoped to the call so it dies with the
+  // fold it was built for, and keyed on bundle identity so it cannot outlive a
+  // transition.
+  const cache = new WeakMap<ArtifactBundle, AuditState>();
   const deterministic = (id: string): AuditObligationDef => ({
     id,
-    derive: deriveObligationState(id),
+    derive: deriveObligationState(id, cache),
     execute: (bundle, ctx) => runDeterministicExecutor(bundle, ctx),
   });
 
@@ -2254,7 +2281,7 @@ export function buildAuditObligations(
       // operator offer (or consume the arrived decisions file), and only then
       // does the deterministic acquisition executor run.
       id: "external_analyzers_current",
-      derive: deriveObligationState("external_analyzers_current"),
+      derive: deriveObligationState("external_analyzers_current", cache),
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleAnalyzerConsentBranch(
@@ -2280,7 +2307,7 @@ export function buildAuditObligations(
       // always available to author the enrichment. Non-drainable (host_delegation),
       // so the drain stops here when a submission is still owed.
       id: "critical_flow_fallback_current",
-      derive: deriveObligationState("critical_flow_fallback_current"),
+      derive: deriveObligationState("critical_flow_fallback_current", cache),
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleCriticalFlowFallbackBranch(
@@ -2301,7 +2328,7 @@ export function buildAuditObligations(
       // artifacts first (emit a host step when one is needed), otherwise run the
       // deterministic enrichment executor.
       id: "graph_enrichment_current",
-      derive: deriveObligationState("graph_enrichment_current"),
+      derive: deriveObligationState("graph_enrichment_current", cache),
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleGraphEnrichmentBranch(
@@ -2330,7 +2357,7 @@ export function buildAuditObligations(
       // deriveAuditState on re-invocation), so there is no submission to
       // consume — emit the step directly.
       id: "intent_checkpoint_current",
-      derive: deriveObligationState("intent_checkpoint_current"),
+      derive: deriveObligationState("intent_checkpoint_current", cache),
       execute: async (bundle): Promise<AuditOutcome> => ({
         kind: "emit",
         step: { kind: "confirm_intent", state: deriveAuditState(bundle), bundle },
@@ -2344,7 +2371,7 @@ export function buildAuditObligations(
       // every consumer of it, so a pending judgment pauses the cascade instead
       // of racing it.
       id: "intent_equivalence_current",
-      derive: deriveObligationState("intent_equivalence_current"),
+      derive: deriveObligationState("intent_equivalence_current", cache),
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleIntentEquivalenceBranch(ctx.params, bundle, state);
@@ -2362,7 +2389,7 @@ export function buildAuditObligations(
       // omit at a shallow ceiling, or emit the host charter-extraction step at a
       // deep+ ceiling. Mirrors the synthesis-narrative branch.
       id: "charter_extraction_current",
-      derive: deriveObligationState("charter_extraction_current"),
+      derive: deriveObligationState("charter_extraction_current", cache),
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleCharterExtractionBranch(ctx.params, bundle, state);
@@ -2382,7 +2409,7 @@ export function buildAuditObligations(
       // for the INDEPENDENT delta-miner when a deltas_pending register has no
       // submission yet. Mirrors the charter-extraction branch.
       id: "charter_delta_current",
-      derive: deriveObligationState("charter_delta_current"),
+      derive: deriveObligationState("charter_delta_current", cache),
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleCharterDeltaBranch(ctx.params, bundle, state);
@@ -2399,14 +2426,14 @@ export function buildAuditObligations(
       // Contract design-review pass: poll the contract/conceptual lanes;
       // emit the dispatch step when a pass still needs to run.
       id: "design_review_contract_completed",
-      derive: deriveObligationState("design_review_contract_completed"),
+      derive: deriveObligationState("design_review_contract_completed", cache),
       execute: (bundle, ctx) => runDesignReviewObligation(bundle, ctx),
     },
     {
       // Conceptual design-review pass: same submission-poll handler (it resolves
       // which pass remains).
       id: "design_review_conceptual_completed",
-      derive: deriveObligationState("design_review_conceptual_completed"),
+      derive: deriveObligationState("design_review_conceptual_completed", cache),
       execute: (bundle, ctx) => runDesignReviewObligation(bundle, ctx),
     },
     {
@@ -2416,7 +2443,7 @@ export function buildAuditObligations(
       // interactive queue at a deep+ ceiling with attention > 0. Non-drainable
       // (host_delegation), so the drain stops here.
       id: "charter_clarification_current",
-      derive: deriveObligationState("charter_clarification_current"),
+      derive: deriveObligationState("charter_clarification_current", cache),
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleCharterClarificationBranch(ctx.params, bundle, state);
@@ -2435,7 +2462,7 @@ export function buildAuditObligations(
       // host step when the loop is open at a deep+ ceiling. Non-drainable
       // (host_delegation), so the drain stops here.
       id: "systemic_challenge_current",
-      derive: deriveObligationState("systemic_challenge_current"),
+      derive: deriveObligationState("systemic_challenge_current", cache),
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleSystemicChallengeBranch(ctx.params, bundle, state);
@@ -2453,7 +2480,7 @@ export function buildAuditObligations(
       // The audit-task dispatch obligation maps to the host-delegation
       // semantic_review_executor (no deterministic runner) → host review.
       id: "audit_tasks_completed",
-      derive: deriveObligationState("audit_tasks_completed"),
+      derive: deriveObligationState("audit_tasks_completed", cache),
       execute: (bundle, ctx) => runHostDelegationObligation(bundle, ctx),
     },
     deterministic("audit_results_ingested"),
@@ -2464,7 +2491,7 @@ export function buildAuditObligations(
       // narrative is enabled and not yet supplied, otherwise the deterministic
       // omit runs (fold on).
       id: "synthesis_narrative_current",
-      derive: deriveObligationState("synthesis_narrative_current"),
+      derive: deriveObligationState("synthesis_narrative_current", cache),
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleSynthesisNarrativeBranch(ctx.params, bundle, state);
