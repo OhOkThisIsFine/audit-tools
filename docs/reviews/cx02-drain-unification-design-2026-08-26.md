@@ -444,12 +444,17 @@ isolation. One atomic replace on `main` stands, with a temporary internal seam p
 commits on the branch under PH-04. Deferring the collapse to a later lap is settled against by the
 same line.
 
-## Two more blockers, from a slow adversarial lane, 2026-08-28
+## Six more blockers and five constraints, from a slow adversarial lane, 2026-08-28
 
-An independent deep lane re-ran the whole brief against HEAD. It reached the same-lock re-entry
-finding above on its own, and the synchronous-child heartbeat finding on its own, which is
-corroboration rather than news. It also found two that nothing above carries. Both are verified here
-from source before being written down, and both BLOCK the plan as written rather than constrain it.
+An independent deep lane re-ran the whole brief against HEAD over about ninety minutes. It reached
+the same-lock re-entry finding above on its own, and the synchronous-child heartbeat finding on its
+own — corroboration rather than news, and worth more than either would be alone. It also found four
+blockers and five constraints that nothing above carries, and it corrected two of this record's own
+claims. Its verdict on the direction is unchanged — one registry, one drain remains viable — but the
+plan **is not safe to implement literally**.
+
+Each item below was re-verified from source here before it was written down; the lane's own citations
+were the starting point, not the evidence.
 
 ### Persist-once breaks the submission consume/persist ORDERING, and loses host submissions
 
@@ -482,7 +487,75 @@ boundary rather than halting at it, which inverts the one semantic constraint 2 
 The filter must therefore be a REPLACEMENT, not a removal: every id stays in the view, and the
 host-boundary ones get an `execute` that emits a halt. That also keeps the side-effect exclusion the
 constraint actually wants — `runHostDelegationObligation` never runs, so nothing ingests results or
-calls `ensureSemanticReviewRun` — while preserving ordering and the halt point.
+calls `ensureSemanticReviewRun` — while preserving ordering and the halt point. And the exclusion
+must cover more than that one callback: other bespoke bodies persist analyzer consent and settings,
+and consume edge / review / charter / narrative submissions.
+
+### Persist-once is NOT achieved by converting the eleven reloads — there are direct core writes too
+
+The design-review consumption path writes a CORE artifact by hand, outside `writeCoreArtifacts`:
+`writeJsonFile(join(artifactsDir, "design_assessment.json"), existing)` at `nextStepHelpers.ts:1040`
+and again at `:1208`, plus the pass snapshots that follow it. So converting the reloads to carries
+leaves those writes landing mid-fold, and the "one persist boundary" claim is simply false — a later
+throw leaves a partly persisted fold. Removing them instead loses the state, because the handlers
+return an `action`, not a bundle. Every direct AND indirect core writer has to be enumerated and
+converted into an in-memory transaction result that the single outer commit consumes.
+
+### The dispatch-slot cap and the engine bound stop sharing a unit — `deriveEngineBound` stops being a backstop
+
+This is the subtlest of the set and the proposed `tolerance < MAX_DRAIN_STEPS` test does not cover
+it. The shared engine increments its transition counter on EVERY `transition`
+(`obligationEngine.ts:320-325`). Under the unified heterogeneous registry, bespoke policy bodies can
+transition WITHOUT dispatching an executor — a consumed analyzer consent returns a transition at
+`nextStepHelpers.ts:2293-2297`, a consumed design review at `:2519-2524`. If `MAX_DRAIN_STEPS`
+counts only executor dispatches, as constraint 4 says it must, those policy transitions spend engine
+budget and no slot. Four of them plus 63 dispatches crosses the 66-transition engine bound before
+the 64th dispatch can reach the graceful slot cap — so the derived bound is no longer guaranteed to
+fire second, which is the whole invariant `deriveEngineBound` exists to hold. Either charge every
+obligation execution to the same named unit, or re-specify the cap and its headroom. Either way it
+needs a mixed policy-transition test, which nothing in the blast radius currently provides.
+
+### Three preservation constraints the plan must carry
+
+- **Every transition must produce a FRESH bundle identity, and one callback currently mutates in
+  place.** Both derives memoize on bundle identity. Design review takes
+  `const existing = bundle.design_assessment` (`:1083`) and mutates it (`:1141-1143`, `:1175-1198`),
+  relying on the later reload at `:2524` to mint a new identity. Replace that reload with
+  `state: bundle` and the WeakMap hands back the PRE-mutation `AuditState`, so the just-completed
+  review can be selected again and the slice ordering premise breaks silently. Carries must be fresh
+  immutable bundles, nested objects included.
+- **The forced-executor bypass is load-bearing and must stay explicit.** `advanceAuditInner` branches
+  on `preferredExecutor` and runs exactly one step INSTEAD of entering the drain
+  (`advance.ts:763-768`). Route a forced call through the unified drain and it can execute subsequent
+  obligations, breaking the single-action contract every submission-ingest caller depends on. Keep an
+  explicit one-dispatch path and pin it with a contract test.
+- **`tests/audit/host-delegation-fold-carries-advisories.test.ts` must migrate, and the record's
+  blast radius does not name it.** It pins the transition-then-next-emission advisory carry, whose
+  accumulator is initialized once per call at `:2762-2766`. A stateless shared `execute`, or a
+  context recreated per transition, silently drops the accepted-with-warning notice.
+
+### Two smaller corrections to this record's own claims
+
+- **`findExecutorFailure` may retire; the structured error contract may NOT.** Its only production
+  consumer is `nextStepHelpers.ts:1839`, so the chain-walking helper goes once attribution is
+  dispatch-local. But dispatch still wraps failures as `ExecutorFailure` (`advance.ts:264-275, 462`),
+  and deleting that with the helper leaves a nested forced dispatch — result ingestion, say —
+  attributable only to the outer `semantic_review_executor`.
+- **`one-holistic-derivation-per-scan.test.ts`'s own header comment is now STALE.** Lines 20-22 say
+  it is RED at HEAD and goes green when the two registries become one. The outer per-bundle cache has
+  since landed, so it passes today with both registries standing — which is exactly the refutation
+  this record already records, now contradicted by the test file's own prose. Fix the comment with
+  the collapse.
+
+### And the lock-path count above is one short — an ALIAS hides a call site from grep
+
+`handleGraphEnrichmentBranch` binds `const runStep = deps.runStep ?? runAuditStep`
+(`nextStepHelpers.ts:496`) for its injected-runner seam, then applies the edge-reasoning submission
+through `runStep(...)` at `:601`. A search for `runAuditStep(` does not find it — mine did not — so
+the in-fold path list above is one short, and any future sweep for lock re-entry must search the
+ALIAS as well as the name. That site is also where the crash-safety ordering is stated in the code
+itself: "Apply BEFORE deleting the submission: if runStep throws (locks, crash), the submission
+survives for the retry instead of being lost" (`:599-600`).
 
 ## Preserve list (report + refuter union)
 
