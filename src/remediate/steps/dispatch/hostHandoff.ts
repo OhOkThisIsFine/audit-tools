@@ -869,6 +869,79 @@ export function hostDependencyLevels(
   return levels;
 }
 
+/**
+ * Pending blocks that can NEVER dispatch — the dead-end sweep's one source,
+ * kept beside {@link hostDependencyLevels} so the sweep and the workload
+ * boundary share one eligibility semantics and cannot disagree (the 2026-08-23
+ * empty-frontier incident: the old edge-only sweep predicate missed the phase
+ * barrier and dependency existence, so a frontier the builder refused looked
+ * dispatchable to the guard and next-step threw instead of pausing).
+ *
+ * Optimistic liveness fixpoint: an item counts as still SATISFIABLE while it is
+ * verified-complete, `pending`, or `needs_clarification` — an unanswered
+ * question is "awaiting an answer", never "upstream failed" (the 175cfb89
+ * pin). A block is LIVE once every one of its items is satisfiable, every
+ * declared dependency resolves to a live block, and every lower-phase block is
+ * live. What never enters the live set is exactly what can never reach the
+ * host: an obstacle chain that bottoms out in a terminal non-verified item
+ * (`blocked` or a SKIP — INV-RS-01), a dependency id that resolves to no
+ * block, or a dependency cycle.
+ */
+export function permanentlyDeadPendingBlocks(
+  state: Pick<RemediationState, "plan" | "items">,
+): RemediationBlock[] {
+  const plan = state.plan;
+  const items = state.items;
+  if (!plan || !items) return [];
+
+  const satisfiable = (status: string | undefined): boolean =>
+    isVerifiedCompleteStatus(status) ||
+    status === "pending" ||
+    status === "needs_clarification";
+  const phaseOf = (block: RemediationBlock): number => block.phase_ordinal ?? 0;
+  const blockById = new Map(plan.blocks.map((block) => [block.block_id, block]));
+
+  // Fully-verified blocks seed the live set unconditionally: their work already
+  // landed, so their own declared dependencies are history, not obstacles.
+  const live = new Set<string>(
+    plan.blocks
+      .filter((block) =>
+        block.items.every((findingId) =>
+          isVerifiedCompleteStatus(items[findingId]?.status),
+        ),
+      )
+      .map((block) => block.block_id),
+  );
+
+  // Least fixpoint: grow the live set until stable. A cycle never enters it.
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const block of plan.blocks) {
+      if (live.has(block.block_id)) continue;
+      if (!block.items.every((findingId) => satisfiable(items[findingId]?.status))) {
+        continue;
+      }
+      const dependenciesLive = (block.dependencies ?? []).every((dependencyId) => {
+        const dependency = blockById.get(dependencyId);
+        return dependency !== undefined && live.has(dependency.block_id);
+      });
+      const lowerPhasesLive = plan.blocks
+        .filter((lower) => phaseOf(lower) < phaseOf(block))
+        .every((lower) => live.has(lower.block_id));
+      if (dependenciesLive && lowerPhasesLive) {
+        live.add(block.block_id);
+        grew = true;
+      }
+    }
+  }
+
+  return plan.blocks.filter(
+    (block) =>
+      !live.has(block.block_id) &&
+      block.items.some((findingId) => items[findingId]?.status === "pending"),
+  );
+}
+
 function buildPrompt(item: {
   readonly blockId: string;
   readonly findingIds: readonly string[];

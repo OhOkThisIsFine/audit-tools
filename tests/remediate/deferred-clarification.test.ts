@@ -3,7 +3,8 @@
 //
 // A DEPENDENT of a `needs_clarification` item is NOT marked `blocked` by the
 // dead-end sweep — "awaiting an answer" must never be recorded as "upstream
-// failed". The sweep's discriminator is `dependencyAwaitingClarification`.
+// failed". The sweep's discriminator is the workload boundary's liveness
+// analysis, `permanentlyDeadPendingBlocks`.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readFile, writeFile } from "node:fs/promises";
@@ -15,7 +16,7 @@ import type {
   RemediationItemState,
 } from "../../src/remediate/state/types.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
-import { dependencyAwaitingClarification } from "../../src/remediate/steps/stepUtils.js";
+import { permanentlyDeadPendingBlocks } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 
 // ---------------------------------------------------------------------------
@@ -76,28 +77,30 @@ function stateWith(
 // The discriminator itself: awaiting an answer vs. a genuinely failed upstream
 // ===========================================================================
 
-describe("dependencyAwaitingClarification: awaiting-an-answer vs upstream-failed", () => {
+describe("permanentlyDeadPendingBlocks: awaiting-an-answer vs upstream-failed", () => {
   const blocks = [block("B1", ["F1"]), block("B2", ["F2"], ["B1"])];
+  const deadIds = (st: RemediationState): string[] =>
+    permanentlyDeadPendingBlocks(st).map((b) => b.block_id);
 
   it("holds a dependent whose prerequisite is awaiting a clarification answer", () => {
     const st = stateWith(blocks, {
       F1: item("F1", "B1", "needs_clarification"),
       F2: item("F2", "B2", "pending"),
     });
-    expect(dependencyAwaitingClarification(blocks[1], st, new Set())).toBe(true);
+    expect(deadIds(st)).toEqual([]);
   });
 
-  it("does NOT hold a dependent whose prerequisite was skipped or blocked", () => {
+  it("dead-ends a dependent whose prerequisite was skipped or blocked", () => {
     for (const failed of ["ignored", "deemed_inappropriate", "blocked"] as const) {
       const st = stateWith(blocks, {
         F1: item("F1", "B1", failed),
         F2: item("F2", "B2", "pending"),
       });
-      expect(dependencyAwaitingClarification(blocks[1], st, new Set())).toBe(false);
+      expect(deadIds(st)).toEqual(["B2"]);
     }
   });
 
-  it("propagates transitively down a chain (A→B→C, C awaiting)", () => {
+  it("propagates the hold transitively down a chain (A→B→C, C awaiting)", () => {
     const chain = [
       block("B1", ["F1"]),
       block("B2", ["F2"], ["B1"]),
@@ -108,16 +111,16 @@ describe("dependencyAwaitingClarification: awaiting-an-answer vs upstream-failed
       F2: item("F2", "B2", "pending"),
       F3: item("F3", "B3", "pending"),
     });
-    expect(dependencyAwaitingClarification(chain[2], st, new Set())).toBe(true);
+    expect(deadIds(st)).toEqual([]);
   });
 
-  it("reports a cyclic edge as NOT awaiting, so cycles still dead-end", () => {
+  it("dead-ends a dependency cycle — a cycle is never 'awaiting'", () => {
     const cyclic = [block("B1", ["F1"], ["B2"]), block("B2", ["F2"], ["B1"])];
     const st = stateWith(cyclic, {
       F1: item("F1", "B1", "pending"),
       F2: item("F2", "B2", "pending"),
     });
-    expect(dependencyAwaitingClarification(cyclic[0], st, new Set())).toBe(false);
+    expect(deadIds(st)).toEqual(["B1", "B2"]);
   });
 
   it("a verified-complete prerequisite is simply satisfied, never 'awaiting'", () => {
@@ -125,7 +128,43 @@ describe("dependencyAwaitingClarification: awaiting-an-answer vs upstream-failed
       F1: item("F1", "B1", "resolved"),
       F2: item("F2", "B2", "pending"),
     });
-    expect(dependencyAwaitingClarification(blocks[1], st, new Set())).toBe(false);
+    expect(deadIds(st)).toEqual([]);
+  });
+
+  it("holds a dependent behind a phase barrier that is merely still working", () => {
+    // A lower phase paused on a question (or simply pending) is NOT a dead
+    // barrier: the higher-phase pending block waits, it is never swept.
+    const phased = [
+      { ...block("B1", ["F1"]), phase_ordinal: 0 },
+      { ...block("B2", ["F2"]), phase_ordinal: 1 },
+    ];
+    for (const waiting of ["pending", "needs_clarification"] as const) {
+      const st = stateWith(phased, {
+        F1: item("F1", "B1", waiting),
+        F2: item("F2", "B2", "pending"),
+      });
+      expect(deadIds(st)).toEqual([]);
+    }
+  });
+
+  it("dead-ends a dependent behind a phase barrier a blocked item holds forever", () => {
+    const phased = [
+      { ...block("B1", ["F1"]), phase_ordinal: 0 },
+      { ...block("B2", ["F2"]), phase_ordinal: 1 },
+    ];
+    const st = stateWith(phased, {
+      F1: item("F1", "B1", "blocked"),
+      F2: item("F2", "B2", "pending"),
+    });
+    expect(deadIds(st)).toEqual(["B2"]);
+  });
+
+  it("dead-ends a dependent whose declared dependency resolves to no block", () => {
+    const dangling = [block("B2", ["F2"], ["B9"])];
+    const st = stateWith(dangling, {
+      F2: item("F2", "B2", "pending"),
+    });
+    expect(deadIds(st)).toEqual(["B2"]);
   });
 });
 

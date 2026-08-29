@@ -61,6 +61,7 @@ import {
 import {
   ingestRemediationHostResults,
   hostDependencyLevels,
+  permanentlyDeadPendingBlocks,
   precomputeRecoveryTestVerdicts,
   prepareRemediationHostHandoff,
   type CurrentRemediationHostState,
@@ -87,10 +88,6 @@ import {
 } from "../../shared/io/repoRoot.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
-import {
-  dependencyAwaitingClarification,
-  dependencyVerifiedComplete,
-} from "./stepUtils.js";
 import {
   isTerminalStatus,
   isVerifiedCompleteStatus,
@@ -415,10 +412,7 @@ export type {
   FindingRiskTier,
   FindingClassification,
 } from "./stepUtils.js";
-export {
-  dependencyVerifiedComplete,
-  classifyFindingRisk,
-} from "./stepUtils.js";
+export { classifyFindingRisk } from "./stepUtils.js";
 export { isTerminalStatus, isVerifiedCompleteStatus };
 export { hostDependencyLevels };
 
@@ -430,48 +424,50 @@ function documentableFindings(state: RemediationState): Finding[] {
 }
 
 /**
- * Blocks eligible for the next host handoff: those with pending
- * work AND every dependency VERIFIED-COMPLETE (INV-RS-01 — a SKIP or blocked
- * dependency never makes a dependent eligible). This dependency-frontier gate
- * replaced the old `dependenciesSatisfied` (any-terminal) check so a block whose
- * prerequisite was skipped/blocked is held back until its required surface lands.
+ * The dispatch frontier: the level-0 draw of the SAME dependency/phase
+ * partition the host workload builder emits from ({@link hostDependencyLevels}).
+ * The guard and the builder reading ONE computation is what keeps the
+ * "Cannot prepare an empty remediation host workload" throw unreachable from
+ * the scheduler: whenever this is non-empty, the builder derives the identical
+ * non-empty set (the 2026-08-23 empty-frontier incident — the retired
+ * edge-only predicate ignored the phase barrier and dependency existence, so
+ * the guard dispatched frontiers the builder refused, and next-step died
+ * instead of pausing).
  */
-function implementableBlocks(state: RemediationState): RemediationBlock[] {
-  if (!state.plan || !state.items) return [];
-  return state.plan.blocks.filter(
-    (block) =>
-      dependencyVerifiedComplete(block, state) &&
-      block.items.some((findingId) => {
-        const item = state.items?.[findingId];
-        return item?.status === "pending";
-      }),
-  );
+function dispatchFrontier(state: RemediationState): RemediationBlock[] {
+  return hostDependencyLevels(state)[0] ?? [];
 }
 
 /**
- * Pending nodes that are genuinely DEAD-ENDED: at least one dependency did not
- * reach a verified-complete disposition and never will (a prerequisite was
- * skipped or blocked, or the edges are cyclic). Once no eligible block remains,
- * these are marked `blocked` — their upstream surface never landed — rather than
- * looping forever.
- *
- * A node held only by an UNANSWERED WORKER QUESTION is deliberately excluded
- * (`dependencyAwaitingClarification`): since the clarification round is deferred
- * to the end of the implement phase, such a node reaches this sweep while its
- * answer is still outstanding, and blocking it would report "upstream failed"
- * for what is really "awaiting an answer". It stays `pending` and is re-decided
- * once the answer lands.
+ * The ONE dead-end sweep, shared by the planning→implementing transition and
+ * the implementing obligation: marks the pending items of every permanently
+ * dead block `blocked` with the INV-RS-01 reason, and reports whether anything
+ * changed. Deadness is the workload boundary's own liveness analysis
+ * ({@link permanentlyDeadPendingBlocks}), so a node held by an unanswered
+ * clarification — or by a lower phase that is merely still working — is NEVER
+ * mis-reported as an upstream failure (the 175cfb89 pin).
  */
-function blockedByUnsatisfiedDependency(
-  state: RemediationState,
-): RemediationBlock[] {
-  if (!state.plan || !state.items) return [];
-  return state.plan.blocks.filter(
-    (block) =>
-      !dependencyVerifiedComplete(block, state) &&
-      !dependencyAwaitingClarification(block, state) &&
-      block.items.some((findingId) => state.items?.[findingId]?.status === "pending"),
-  );
+function sweepPermanentlyDeadBlocks(state: RemediationState): boolean {
+  let changed = false;
+  const now = new Date().toISOString();
+  for (const block of permanentlyDeadPendingBlocks(state)) {
+    for (const findingId of block.items) {
+      const it = state.items?.[findingId];
+      if (!it || it.status !== "pending") continue;
+      it.status = "blocked";
+      it.started_at ??= now;
+      it.completed_at = now;
+      it.failure_reason =
+        it.failure_reason ??
+        "A prerequisite can never reach a verified-complete disposition " +
+        "(a dependency or lower-phase block was skipped, blocked, or abandoned; " +
+        "a declared dependency resolves to no block; or the dependencies are " +
+        "cyclic); the host handoff will not expose this node against an " +
+        "upstream surface that never landed (INV-RS-01).";
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /**
@@ -2668,7 +2664,7 @@ async function handlePlanning(
 
   // Document phase dissolved (N-R13): planning transitions directly to
   // implementing, and the host workload reads finding context directly.
-  const implementBlocks = implementableBlocks(state);
+  const implementBlocks = dispatchFrontier(state);
   if (implementBlocks.length > 0) {
     if (state.plan) {
       const integrity = await checkAffectedFileIntegrity(root, state.plan.findings);
@@ -2704,27 +2700,15 @@ async function handlePlanning(
   }
 
   // Transition directly to implementing — no separate document round.
-  // Any pending item outside every attainable host dependency frontier is
+  // Any pending item that can never enter the host dependency frontier is
   // dead-ended (INV-RS-01): a prerequisite was skipped/blocked, so its
   // verified-complete edge can never be satisfied — never dispatch a dependent
   // against an upstream surface that did not land. Mark it blocked so the run
   // advances to close rather than looping forever. A node that is merely
-  // waiting on a still-running prerequisite is NOT here (it would appear in a
-  // later eligible pass); only nodes with a permanently-unsatisfiable edge are.
+  // waiting on a still-running prerequisite — or on a clarification answer —
+  // is NOT dead; the liveness analysis behind the sweep holds it pending.
   if (implementBlocks.length === 0) {
-    for (const block of blockedByUnsatisfiedDependency(state)) {
-      for (const findingId of block.items) {
-        const it = state.items?.[findingId];
-        if (!it || it.status !== "pending") continue;
-        it.status = "blocked";
-        it.failure_reason =
-          it.failure_reason ??
-          "A dependency node did not reach a verified-complete disposition " +
-          "(a prerequisite was skipped, blocked, or the dependencies are cyclic); " +
-          "the host handoff will not expose this node against an upstream " +
-          "surface that never landed (INV-RS-01).";
-      }
-    }
+    sweepPermanentlyDeadBlocks(state);
   }
 
   state.status = "implementing";
@@ -4158,7 +4142,7 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         state != null &&
         (state.status === "implementing" || state.status === "triage") &&
         hasUnansweredClarification(state) &&
-        implementableBlocks(state).length === 0
+        dispatchFrontier(state).length === 0
           ? "missing"
           : "satisfied",
       execute: async (state) => {
@@ -4174,9 +4158,9 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         state?.status === "implementing" ? "missing" : "satisfied",
       execute: async (state) => {
         const s = requireState(state);
-        // Pending implementable blocks dispatch; triage only runs once every item
-        // has left "pending".
-        const pendingBlocks = implementableBlocks(s);
+        // A non-empty dispatch frontier dispatches; triage only runs once every
+        // item has left "pending".
+        const pendingBlocks = dispatchFrontier(s);
         if (pendingBlocks.length > 0) {
           // Per-phase boundary gate (T3): before opening a phase P > 0, run the
           // whole-repo suite once over the just-landed foundations. A red PAUSES
@@ -4199,32 +4183,12 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
             runLogger,
           });
         }
-        // Dead-end pending nodes whose dependency never reached verified-complete
-        // (INV-RS-01) so the implementing→triage loop can't livelock; transition
-        // so the engine re-scans on the updated state.
-        const deadEnded = blockedByUnsatisfiedDependency(s);
-        if (deadEnded.length > 0) {
-          const now = new Date().toISOString();
-          let changed = false;
-          for (const block of deadEnded) {
-            for (const findingId of block.items) {
-              const it = s.items?.[findingId];
-              if (!it || it.status !== "pending") continue;
-              it.status = "blocked";
-              it.started_at ??= now;
-              it.completed_at = now;
-              it.failure_reason =
-                it.failure_reason ??
-                "A dependency node did not reach a verified-complete disposition " +
-                "(a prerequisite was skipped, blocked, or the dependencies are cyclic); " +
-                "the host handoff will not expose this node (INV-RS-01).";
-              changed = true;
-            }
-          }
-          if (changed) {
-            await store.saveState(s);
-            return { kind: "transition", state: s };
-          }
+        // Dead-end pending nodes that can never enter the frontier (INV-RS-01)
+        // so the implementing→triage loop can't livelock; transition so the
+        // engine re-scans on the updated state.
+        if (sweepPermanentlyDeadBlocks(s)) {
+          await store.saveState(s);
+          return { kind: "transition", state: s };
         }
         return handleImplementing(root, artifactsDir, s, runLogger, store, options);
       },

@@ -119,15 +119,6 @@
   planner derives them; the clarification contract carries an explicit scope delta; the host never
   edits the plan.
 
-- **An empty dispatch frontier THROWS instead of pausing (2026-08-23, high, friction:
-  tool_should_decide).** With every dispatchable block resolved and the rest `needs_clarification`
-  (or one `blocked` item holding a phase barrier), `next-step` died with "Cannot prepare an empty
-  remediation host workload" (`prepareRemediationHostHandoff`) — three times in one run. Recovery
-  was hand-setting `state.status` to `waiting_for_clarification` / `waiting_for_triage` so the tool's
-  own obligation consumed the resolution. **Property:** an empty frontier with unanswered
-  clarifications emits `collect_clarifications`, with blocked dependents emits `collect_triage`, and
-  never an exception; a worker's lane-corruption report is a distinct outcome from a genuine block.
-
 - **The Implementation DAG prompt does not state the one-invocation rule for `targeted_commands`
   (2026-08-23, medium, friction: tool_should_decide).** The worker emitted `npm run build && npm run
   check` on 23 nodes; the promotion gate rejected the whole DAG twice (`MAX_DAG_REGENERATION_ATTEMPTS`
