@@ -2,8 +2,10 @@
 
 An independent worker diagnosed the 2026-08-29 mid-sprint firing of `closeout-challenge-gate` and
 measured the Stop payload on the current build (Claude Code 2.1.247). This record holds the
-evidence and the proposed fix; the open work item lives in
-[`../backlog/minor-bugs.md`](../backlog/minor-bugs.md).
+evidence and the fix design. The fix LANDED the same day, owner-approved (`f9c48223` — the
+`pendingQueuedResume` leg, the `liveSessionWorkReason` vocabulary, the debug skip-log, and the
+red-green hook cases); the two backlog entries this diagnosis merged and closed died with it. The
+uncovered halves below are ACCEPTED residuals, stated in the predicate's own doc.
 
 ## The firing, traced
 
@@ -30,7 +32,7 @@ Conclusion: the predicate `sessionHasLiveBackgroundWork` (`scripts/shared/liveSe
 correct on its own terms and blind to the case that matters — a Stop the harness will resume from
 QUEUED input. The gate's header promises to skip a wait; the implementation keys on task liveness.
 
-## Proposed fix (not yet implemented)
+## The fix (landed `f9c48223`)
 
 One edit in `scripts/shared/liveSessionWork.mjs`, additive leg on the same predicate — both Stop
 gates already pass the whole payload, so no call-site changes:

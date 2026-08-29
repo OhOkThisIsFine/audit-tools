@@ -57,24 +57,6 @@
   appends at most once per staged submission across commit re-entries — dedupe-on-append via the
   existing eventSignature machinery, or an entry sub-state recorded between the two effects.
 
-- **The closeout challenge fires on a terminated-but-unharvested background task —
-  `background_tasks` arrives present and EMPTY while the task's notification sits queued
-  (2026-08-29, low, friction: tool_should_decide; merges the 2026-08-28 live-work-guard entry and
-  the 2026-08-29 mid-skill-pause entry — one bug).** The guard exists and works:
-  `sessionHasLiveBackgroundWork` (`scripts/shared/liveSessionWork.mjs`) reads `background_tasks`,
-  both Stop gates call it, and a LIVE task does suppress — measured with a payload recorder on the
-  current build, which also measured the old "this build omitted the field" hypothesis FALSE. The
-  actual mechanism, traced on the 2026-08-29 firing: a task's entry leaves the array on process
-  EXIT, not on harvest, so a Stop that lands between the exit and the notification delivery sees an
-  empty array while the harness holds queued input it resumes seconds later — a WAIT the current
-  predicate cannot distinguish from an idle session. Trace, measured payload shapes, the proposed
-  fix (an additive `pendingQueuedResume` depth counter over the transcript's `queue-operation`
-  records — suppresses on positive evidence only, so no absent→idle inversion), and its declared
-  uncovered halves:
-  [`../reviews/closeout-gate-queued-resume-2026-08-29.md`](../reviews/closeout-gate-queued-resume-2026-08-29.md).
-  **Property:** a Stop the harness will resume from queued input does not fire the challenge and
-  does not spend the cap; a missing or unreadable signal still fires exactly as today.
-
 - **The obligation engine's bound doc is off by one against its own comparison (2026-08-28, low).**
   `obligationEngine.ts` documents `maxTransitions` as stopping "after that many consecutive
   transitions"; `if (++transitions > maxTransitions)` fires on N+1. Nothing counts executions

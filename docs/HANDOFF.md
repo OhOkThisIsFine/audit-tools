@@ -20,11 +20,6 @@ audit→remediate→PR capstone once the architecture items are worked off.
 
 ## Deliberate state, not bugs
 
-- `spec/remediate/remediation-goals.md` still names the deleted symbol
-  `dependencyAwaitingClarification` as the held-pending mechanism. The one-line rename to the
-  `permanentlyDeadPendingBlocks` liveness analysis is drafted but UNCOMMITTED BY DESIGN: the
-  constitutional-doc gate routes that file escalate-only, and the owner decision is pending (asked
-  in the 2026-08-29 hand-back). Do not "fix" the spec without that decision.
 - `tests/audit/host-delegation-fold-carries-advisories.test.ts` remains deliberately unbaselined:
   its parallel-load timeout passes alone and is tracked as a known flake, so rebaselining it would
   hide a real regression.
