@@ -11,6 +11,17 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **HANDOFF's hand-written Immediate-next can claim work that already landed, and nothing checks it
+  (2026-08-29, low, friction: ambiguous_direction).** The §6 sync-children migration landed
+  (`55f9b06d`) with its pinned backlog entry and the HANDOFF Immediate-next unchanged; the next lap
+  spent its opening recon re-deriving from `git log` that the named work was already done, and the
+  entry's supporting claims had also drifted (one cited call chain never existed at HEAD). The
+  generated roadmap block is gate-checked against the backlog pins, but the hand-written
+  Immediate-next paragraph and the pinned entry's PROSE are not checked against anything.
+  **Property:** a landed fix updates its backlog home in the same stretch that lands it — or a
+  gate/challenge surfaces the drift; a hand-written HANDOFF claim naming a specific decided change
+  should not survive the closeout of the sprint that shipped that change.
+
 - **A re-entered `commitFold` can still append ONE duplicate `accepted` event when
   `recordLaneOutcome` throws after its durable append (2026-08-28, low).** The resumable commit
   (`69613c68`) drops an entry only after `recordLaneOutcome` RETURNS, and that call is two effects:
