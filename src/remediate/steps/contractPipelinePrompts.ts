@@ -278,6 +278,7 @@ export const ROLES: Record<string, ContractPipelineRole> = {
     "addresses_counterexamples": ["<accepted counterexample id, when applicable>"],
     "addressed_critique_items": ["<advisory conceptual-critique id this node honours, when applicable>"],
     "depends_on": ["<task-id>"],
+    "output_files": ["<EVERY file this node creates or edits — the tests it must write, the source a generated artifact mirrors, new shared modules, manifests>"],
     "verification_obligation_ids": ["<obligation_id>"],
     "targeted_commands": ["<command to verify>"],
     "status": "pending"
@@ -285,7 +286,7 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "edges": [{ "from": "<id>", "to": "<id>", "kind": "dependency|verification" }]
 }`,
     description:
-      "Decompose the implementation into a bounded dependency DAG of tasks. Traceability is mandatory: every node must list at least one obligation id from the obligation ledger (in satisfies_obligations or verification_obligation_ids) or one judge-accepted counterexample id (in addresses_counterexamples) — untraceable nodes are rejected. Accepted and residual_risk counterexamples from the judge report must be covered by nodes or verification obligations.",
+      "Decompose the implementation into a bounded dependency DAG of tasks. Traceability is mandatory: every node must list at least one obligation id from the obligation ledger (in satisfies_obligations or verification_obligation_ids) or one judge-accepted counterexample id (in addresses_counterexamples) — untraceable nodes are rejected. Accepted and residual_risk counterexamples from the judge report must be covered by nodes or verification obligations. Declare in output_files EVERY file a node will create or edit — including the test files it must write, the sources generated artifacts mirror, new shared modules, and manifests: the enforced write scope derives from these declarations plus the owning module's contract, and an omitted companion file stalls the work item on a mid-run clarification.",
   },
   closing: {
     title: "Contract Pipeline Closing",

@@ -3981,20 +3981,59 @@ export async function evaluatePromotedPlanWriteScope(
   for (const block of Array.isArray(plan?.blocks) ? plan.blocks : []) {
     const blockId = typeof block.block_id === "string" ? block.block_id : "(unnamed block)";
     const touched = Array.isArray(block.touched_files) ? block.touched_files : [];
-    for (const path of touched) {
-      if (typeof path !== "string") continue;
-      const key = normalizeRepoPath(path);
-      const parent = key.includes("/") ? key.slice(0, key.lastIndexOf("/")) : "";
-      if (corpus.files.has(key) || parent === "" || corpus.directories.has(parent)) {
-        continue;
-      }
-      violations.push(
-        `Block "${blockId}" declares the write-scope path "${path}", whose directory does ` +
-          `not exist in the tracked tree.`,
-      );
-    }
+    violations.push(
+      ...writeScopeCorpusViolations(
+        corpus,
+        touched.filter((path): path is string => typeof path === "string"),
+        `Block "${blockId}"`,
+      ),
+    );
   }
   return violations.length > 0 ? { violations } : null;
+}
+
+/**
+ * The ONE tracked-tree membership rule for a declared write-scope path: legal
+ * when the file is tracked, sits at the repo root, or its parent directory
+ * exists in the tracked tree (a block legitimately creates NEW files in
+ * existing directories). Shared by the promotion gate above and the
+ * clarification scope-delta validation, so the two cannot drift.
+ */
+function writeScopeCorpusViolations(
+  corpus: { files: ReadonlySet<string>; directories: ReadonlySet<string> },
+  paths: readonly string[],
+  label: string,
+): string[] {
+  const violations: string[] = [];
+  for (const path of paths) {
+    const key = normalizeRepoPath(path);
+    const parent = key.includes("/") ? key.slice(0, key.lastIndexOf("/")) : "";
+    if (corpus.files.has(key) || parent === "" || corpus.directories.has(parent)) {
+      continue;
+    }
+    violations.push(
+      `${label} declares the write-scope path "${path}", whose directory does ` +
+        `not exist in the tracked tree.`,
+    );
+  }
+  return violations;
+}
+
+/**
+ * Tracked-tree parity for a POST-promotion write-scope widening
+ * (open-bugs.md:110): a clarification scope delta must clear the same rule the
+ * promotion gate enforced, or the delta lane becomes a bypass of it. Returns
+ * violation lines; [] on an unreadable tree (fail-open, exactly as the
+ * promotion gate degrades).
+ */
+export async function checkWriteScopePathsAgainstTrackedTree(
+  root: string,
+  paths: readonly string[],
+  label: string,
+): Promise<string[]> {
+  const corpus = await readTrackedWriteScopeCorpus(root);
+  if (!corpus) return [];
+  return writeScopeCorpusViolations(corpus, paths, label);
 }
 
 /**

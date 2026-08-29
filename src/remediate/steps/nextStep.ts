@@ -111,7 +111,10 @@ import {
   buildNextContractPipelineStep,
   shouldEnterContractPipeline,
   writePathASeedFromFindings,
+  normalizeBlockTouchedFiles,
+  checkWriteScopePathsAgainstTrackedTree,
 } from "./contractPipeline.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 import {
   contractArtifactExists,
   contractPipelineDir,
@@ -2188,6 +2191,27 @@ interface PlanClarificationResolution {
   finding_id: string;
   action: PlanClarificationAction;
   rationale?: string;
+  /**
+   * Files the answer ADDS to the owning block's write scope
+   * (open-bugs.md:110): every file the fix must create or edit beyond the
+   * promoted scope — the test a node must write, the source a generated
+   * artifact mirrors, a new shared module, a manifest. Applied only with
+   * action "clarified"; validated whole-file fail-closed BEFORE anything is
+   * applied, so the host never edits the plan by hand.
+   */
+  scope_additions?: string[];
+}
+
+/** Carry `scope_additions` through when it is an array; keep string entries. */
+function normalizedScopeAdditions(entry: Record<string, unknown>): {
+  scope_additions?: string[];
+} {
+  if (!Array.isArray(entry.scope_additions)) return {};
+  return {
+    scope_additions: entry.scope_additions.filter(
+      (p): p is string => typeof p === "string",
+    ),
+  };
 }
 
 function normalizePlanClarificationResolutions(value: unknown): PlanClarificationResolution[] {
@@ -2199,6 +2223,7 @@ function normalizePlanClarificationResolutions(value: unknown): PlanClarificatio
             finding_id: entry.finding_id,
             action: entry.action,
             rationale: typeof entry.rationale === "string" ? entry.rationale : undefined,
+            ...normalizedScopeAdditions(entry),
           },
         ];
       }
@@ -2219,8 +2244,70 @@ function normalizePlanClarificationResolutions(value: unknown): PlanClarificatio
       finding_id: typeof entry.finding_id === "string" ? entry.finding_id : findingId,
       action: entry.action,
       rationale: typeof entry.rationale === "string" ? entry.rationale : undefined,
+      ...normalizedScopeAdditions(entry),
     }];
   });
+}
+
+/**
+ * Validate every `clarified` resolution's `scope_additions` BEFORE anything is
+ * applied: each entry must normalize beneath the repository root against the
+ * finding's owning block (the one write-scope normalizer), must clear the SAME
+ * tracked-tree rule the promotion gate enforced (the delta lane must not
+ * bypass it), and a finding with no owning block has no scope to widen. ANY
+ * refusal refuses the WHOLE resolution file — the uniform id-join contract's
+ * shape: a half-applied decision record is worse than a re-ask.
+ */
+async function validateClarificationScopeAdditions(
+  root: string,
+  state: RemediationState,
+  resolutions: readonly PlanClarificationResolution[],
+): Promise<string[]> {
+  const refusals: string[] = [];
+  for (const res of resolutions) {
+    if (res.action !== "clarified" || !res.scope_additions?.length) continue;
+    const block = state.plan?.blocks?.find((b) => b.items.includes(res.finding_id));
+    if (!block) {
+      refusals.push(
+        `scope_additions for \`${res.finding_id}\`: no plan block owns this finding, so ` +
+          `there is no write scope to widen.`,
+      );
+      continue;
+    }
+    const normalized = normalizeBlockTouchedFiles(root, res.scope_additions, block.block_id);
+    refusals.push(...normalized.refusals);
+    refusals.push(
+      ...(await checkWriteScopePathsAgainstTrackedTree(
+        root,
+        normalized.touched_files,
+        `scope_additions for \`${res.finding_id}\` (block "${block.block_id}")`,
+      )),
+    );
+  }
+  return refusals;
+}
+
+/**
+ * Apply one validated scope delta: union the normalized additions into the
+ * owning block's `touched_files` (content-sorted — an incidentally-ordered
+ * scope would churn the plan hash). The workload-binding invalidation is the
+ * caller's existing `delete state.host_handoff` on any applied resolution, so
+ * the next prepare re-mints the work item with the widened `allowed_files`
+ * (the open-bugs :661 wedge class); the up-front ambiguity gate has no binding
+ * by construction.
+ */
+function applyClarificationScopeAdditions(
+  root: string,
+  state: RemediationState,
+  res: PlanClarificationResolution,
+): void {
+  if (res.action !== "clarified" || !res.scope_additions?.length) return;
+  const block = state.plan?.blocks?.find((b) => b.items.includes(res.finding_id));
+  if (!block) return; // refused upstream by validateClarificationScopeAdditions
+  const normalized = normalizeBlockTouchedFiles(root, res.scope_additions, block.block_id);
+  block.touched_files = [
+    ...new Set([...block.touched_files, ...normalized.touched_files]),
+  ].sort((left, right) => compareCodeUnits(left, right));
 }
 
 /**
@@ -2291,12 +2378,31 @@ async function applyPlanClarificationResolution(
       ),
     };
   }
+  // Scope deltas ride the same whole-file fail-closed contract as unknown ids:
+  // an invalid addition refuses everything, so a decision record never
+  // half-applies (open-bugs.md:110).
+  const scopeRefusals = await validateClarificationScopeAdditions(root, state, resolutions);
+  if (scopeRefusals.length > 0) {
+    await withFsRetry(() =>
+      rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
+    );
+    return {
+      kind: "refused",
+      step: await handleWaitingForClarification(
+        root,
+        artifactsDir,
+        state,
+        `invalid scope_additions — fix and re-submit: ${scopeRefusals.join(" | ")}`,
+      ),
+    };
+  }
   const now = new Date().toISOString();
   let appliedCount = 0;
   for (const res of resolutions) {
     const item = state.items[res.finding_id];
     if (!item || isTerminalStatus(item.status)) continue;
     applyClarificationActionToItem(item, res, now);
+    applyClarificationScopeAdditions(root, state, res);
     appliedCount += 1;
   }
   // An applied answer mutates item state that is baked into the dispatch
@@ -2618,12 +2724,45 @@ async function runPlanAmbiguityGate(
       },
     });
   }
+  // Scope deltas: the same whole-file fail-closed contract as unknown ids
+  // (open-bugs.md:110). At this up-front gate no workload binding exists yet,
+  // so an applied widening simply flows into the first dispatch.
+  const scopeRefusals = await validateClarificationScopeAdditions(root, state, resolutions);
+  if (scopeRefusals.length > 0) {
+    await withFsRetry(() =>
+      rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
+    );
+    const candidates =
+      (await readOptionalJsonFile<ClarificationRequest[]>(requestPath)) ??
+      detectPlanAmbiguities(findings, state.items);
+    return writeCurrentStep({
+      stepKind: "collect_clarifications",
+      status: "blocked",
+      runId: stateRunId(state),
+      repoRoot: root,
+      artifactsDir,
+      prompt: ambiguityReviewPrompt(
+        candidates,
+        resolutionPath,
+        findings.map((f) => f.id),
+        `invalid scope_additions — fix and re-submit: ${scopeRefusals.join(" | ")}`,
+      ),
+      allowedCommands: [loaderCommand("next-step")],
+      stopCondition:
+        "Stop after re-submitting a corrected ambiguity resolution, unless it is already written and the prompt told you to continue.",
+      artifactPaths: {
+        ambiguity_request: requestPath,
+        ambiguity_resolution: resolutionPath,
+      },
+    });
+  }
   const now = new Date().toISOString();
   let changed = false;
   for (const res of resolutions) {
     const item = state.items?.[res.finding_id];
     if (!item || isTerminalStatus(item.status)) continue;
     applyClarificationActionToItem(item, res, now);
+    applyClarificationScopeAdditions(root, state, res);
     changed = true;
   }
   await writeJsonFile(decisionPath, { resolved_at: now, resolution_count: resolutions.length });

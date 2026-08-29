@@ -69,7 +69,8 @@ After the user answers, write JSON to exactly:
   {
     "finding_id": "...",
     "action": "clarified",
-    "rationale": "..."
+    "rationale": "...",
+    "scope_additions": ["optional — files the answer ADDS to the fix's write scope"]
   }
 ]
 \`\`\`
@@ -80,6 +81,14 @@ ambiguity after all — proceed with the finding, put the answer/decision in
 issue — this DROPS it, so use it only to discard a finding, never just to say the
 question wasn't ambiguous), or \`"action": "defer"\` (the user explicitly chose to
 skip it this run).
+
+When the answer requires files outside the item's current write scope — a test
+the fix must create, the source a generated artifact mirrors, a new shared
+module, a manifest — list them (repo-relative) in \`scope_additions\`: the tool
+widens the owning block and re-mints the work item. NEVER edit the plan's
+\`touched_files\` by hand. An entry that does not resolve beneath the repository
+root, or whose directory does not exist in the tracked tree, refuses the whole
+resolution and re-presents this step.
 
 \`finding_id\` MUST be drawn from this closed set (copy, never retype):
 ${clarifications.map((c) => `\`${c.finding_id}\``).join(", ") || "_(none)_"}. An id
@@ -151,7 +160,8 @@ ambiguous), write JSON to exactly:
   {
     "finding_id": "...",
     "action": "clarified",
-    "rationale": "the user's answer / decided scope"
+    "rationale": "the user's answer / decided scope",
+    "scope_additions": ["optional — files the answer ADDS to the fix's write scope"]
   }
 ]
 \`\`\`
@@ -163,6 +173,14 @@ it; never use it merely to say a question wasn't ambiguous, or you will lose a
 finding the review gate approved), or \`"action": "defer"\` (the user explicitly
 chose to skip it this run). Deferral is the **user's** call — never decide it
 unilaterally. Write \`[]\` if nothing is genuinely ambiguous.
+
+When an answer requires files outside the finding's current write scope — a test
+the fix must create, the source a generated artifact mirrors, a new shared
+module, a manifest — list them (repo-relative) in \`scope_additions\`: the tool
+widens the owning block's write scope in-band. NEVER edit the plan's
+\`touched_files\` by hand. An entry that does not resolve beneath the repository
+root, or whose directory does not exist in the tracked tree, refuses the whole
+resolution and re-presents this step.
 
 \`finding_id\` MUST be drawn from the plan's closed id set (copy, never retype):
 ${validFindingIds.map((id) => `\`${id}\``).join(", ") || "_(none)_"}. An id outside

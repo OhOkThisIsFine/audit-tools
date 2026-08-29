@@ -113,18 +113,6 @@
 
 - **Remediation intake drops a finding with no `evidence` array, and the audit systemic-challenge lane emits findings without one (2026-08-22, medium).** Intake's no-evidence branch records only a `droppedNoEvidence` disposition in review_filter_dispositions.json and never surfaces the finding; the review gate therefore never showed MNT-c2dc7f9c (high severity, high confidence: the wrapper pair duplicates ~2,400 lines), so an operator could neither confirm nor decline the drop. The audit side's systemic-challenge lane mints findings with no evidence array, so every such finding is unremediatable by construction. **Property:** a finding the intake drops is surfaced at the review gate as a disposition the operator confirms, and a systemic-lane finding carries evidence (or an explicit grounding class the intake admits) so the pipeline can remediate it.
 
-- **The DAG-derived write scope omits the companion files a fix needs, so the host hand-widens
-  `touched_files` (2026-08-23, high, friction: tool_should_decide).** In the first-draw run 8 of 30
-  work items stopped with `needs_clarification` asking for exactly this: the test file a "pin X with
-  direct tests" node must CREATE, the zod source a generated JSON schema mirrors, the shared module a
-  "one core, two draws" extraction needs, the manifest a dependency swap touches. P38 did not cover it
-  because the DAG author never listed those outputs. A clarification answer cannot widen scope (the
-  resolution only re-opens the item with context), so `state.plan.blocks[].touched_files` was edited
-  by hand before each re-mint. **Property:** a node whose obligations are tests / snapshots / generated
-  artifacts / new shared modules declares those paths as `output_files` (validator-enforced) or the
-  planner derives them; the clarification contract carries an explicit scope delta; the host never
-  edits the plan.
-
 - **The Implementation DAG prompt does not state the one-invocation rule for `targeted_commands`
   (2026-08-23, medium, friction: tool_should_decide).** The worker emitted `npm run build && npm run
   check` on 23 nodes; the promotion gate rejected the whole DAG twice (`MAX_DAG_REGENERATION_ATTEMPTS`
@@ -667,16 +655,6 @@
   bounces forever; the host had to verify the owner pid dead and delete the lock by hand.
   **Property to hold:** a zero-timeout acquirer still runs the stale-steal check once, so a
   dead-holder lock never needs a hand deletion.
-
-- **Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run,
-  medium).** `state.host_handoff` pins the dispatched workload by `workload_sha256`; widening a
-  bound block's `touched_files` (the sanctioned hand recipe for a scope clarification) changes the
-  canonical workload, so `prepareRemediationHostHandoff` fails closed with "Trusted remediation
-  host workload no longer matches the persisted state binding" and the run cannot advance. The host
-  repair was to delete `state.host_handoff` so prepare re-minted the binding at the current HEAD —
-  a hand edit of fail-closed state. **Property to hold:** the tool offers a sanctioned re-bind for
-  a host-widened frontier block (or the clarification flow itself carries the widening), so a scope
-  answer never requires hand-editing the binding.
 
 - **A provenance plane with no producer is still exported, advertised and documented (2026-08-27, from the philosophy audit, medium).** `src/shared/types/executionRecord.ts` defines `ExecutionRecordV1Alpha1` and its Zod schema and `src/shared/index.ts` exports both, but no tracked producer or consumer calls the schema. `src/shared/types/runLedger.ts` and `src/audit/supervisor/runLedger.ts` define the run ledger and `loadRunLedger` reads it, while `src/audit/cli/statusCommand.ts` and `src/audit/supervisor/operatorHandoff.ts` advertise it — and no tracked writer ever creates it, so the loader's empty result is indistinguishable from a run that recorded nothing. `src/shared/observability/runLog.ts` is not a replacement: it can be disabled, no-ops when no path is configured, deliberately swallows append failures, and does not carry every ledger field. A third case rides along: `allowed_mcp_tools` is declared in audit's step schema in `src/audit/cli/steps.ts` and covered by producer tests, but has no reader after emission, and the single value any caller supplies is named nowhere else in tracked source — an installed host asset could still consume it, so inspect the deployed assets before deleting. **Property:** every exported or emitted contract has a live producer and a live consumer, or it is retired at one explicit versioned boundary together with the specs, status fields and operator-handoff text that advertise it. A status field derived from best-effort telemetry says so, and no absent ledger field is synthesized to fill the old shape.
 
