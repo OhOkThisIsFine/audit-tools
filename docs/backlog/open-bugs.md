@@ -11,10 +11,10 @@
   row declares `preCommit: false` for `check:tests`, and vitest does not typecheck — BIT
   2026-08-29: a new test file landed with untyped destructured defaults (`{ inputs = [] }` infers
   `never[]`), every commit gate passed, every local vitest run stayed green, and the `ci` workflow
-  was red across three commits until a follow-up annotated the parameters. **Property:** a staged
-  new or modified test file triggers the test-tree typecheck leg at commit (staged-set-derived,
-  like the other legs), or the registry row records this bite as the accepted cost of
-  `preCommit: false`.
+  was red across three commits until a follow-up annotated the parameters. **Owner-decided
+  2026-08-29: add the leg.** A staged new-or-modified test file triggers the test-tree typecheck
+  leg at commit, staged-set-derived like the other legs (flip the registry row; the derived-leg
+  and parity tests follow).
 
 - **`render-closeout.mjs --template` needs a built `dist/`, so the mandatory hand-back tool cannot
   run in a fresh worktree (2026-08-29, low, friction: inefficient_feeding).** `--template` prints a
@@ -472,10 +472,12 @@
   remains is the entry's second property: `corroborateHostResult` checks commit ancestry,
   changed-file exactness, write scope, and required tests, and CONFORMANCE to the carried contract
   is checked nowhere between received and accepted — build and targeted tests can stay green while
-  the divergence propagates to every consumer of the module. **Open design fork (owner decision):**
-  a bounded per-result LLM conformance review (token cost per accepted item), a mechanical
-  per-obligation evidence-coverage requirement on the result contract (a schema evolution of
-  `remediation-host-result`), or both. [[enforce-robustness-in-tooling-not-host-discretion]]
+  the divergence propagates to every consumer of the module. **Owner-decided 2026-08-29: BOTH.**
+  The mechanical per-obligation evidence-coverage requirement on the result contract lands first
+  (the floor — a `remediation-host-result` schema evolution: cited evidence per satisfied
+  obligation, coverage-validated at ingestion), and a bounded per-result LLM conformance review
+  follows as an opt-in per-run depth dial (per-run choices are never persisted).
+  [[enforce-robustness-in-tooling-not-host-discretion]]
 
 - **Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16,
   ambiguous-direction, low-medium).** The defect was found BY the run, and committing its fix changed
