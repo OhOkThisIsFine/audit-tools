@@ -160,17 +160,32 @@ export function phaseOrdinalForObligations(
   let max = -1;
   let matchedAny = false;
   for (const id of obligationIds) {
-    if (!id.startsWith(OBLIGATION_PREFIX)) continue;
-    const rest = id.slice(OBLIGATION_PREFIX.length);
-    for (const slug of slugsByLength) {
-      if (rest === slug || rest.startsWith(`${slug}-`)) {
-        max = Math.max(max, slugToOrdinal.get(slug) ?? 0);
-        matchedAny = true;
-        break;
-      }
-    }
+    const slug = moduleSlugForObligationId(id, slugsByLength);
+    if (slug === null) continue;
+    max = Math.max(max, slugToOrdinal.get(slug) ?? 0);
+    matchedAny = true;
   }
   return matchedAny ? max : lastOrdinal;
+}
+
+/**
+ * The ONE longest-prefix slug match for an `OBL-<moduleSlug>-…` obligation id.
+ * `slugsByLength` MUST be sorted longest-first (the callers own the sort so a
+ * hot loop sorts once). Returns the matched slug, or null when the id carries
+ * no obligation prefix or matches no known module — shared by the phase-ordinal
+ * decoder above and the promotion's module-contract attachment
+ * (open-bugs.md:474), so the two decoders cannot drift.
+ */
+export function moduleSlugForObligationId(
+  obligationId: string,
+  slugsByLength: readonly string[],
+): string | null {
+  if (!obligationId.startsWith(OBLIGATION_PREFIX)) return null;
+  const rest = obligationId.slice(OBLIGATION_PREFIX.length);
+  for (const slug of slugsByLength) {
+    if (rest === slug || rest.startsWith(`${slug}-`)) return slug;
+  }
+  return null;
 }
 
 /**

@@ -950,6 +950,7 @@ function buildPrompt(item: {
   readonly baselineCommit: string;
   readonly requiredTests: readonly string[];
   readonly resultPath: string;
+  readonly moduleContracts: readonly { module: string; contract: Record<string, unknown> }[];
 }): string {
   const assignment = stableStringify({
     allowed_files: item.allowedFiles,
@@ -957,6 +958,11 @@ function buildPrompt(item: {
     baseline_commit: item.baselineCommit,
     finding_ids: item.findingIds,
     id: item.blockId,
+    // The approved contract rides the sha-bound prompt (open-bugs.md:474):
+    // the binding then covers exactly the interface the worker saw.
+    ...(item.moduleContracts.length > 0
+      ? { module_contracts: item.moduleContracts }
+      : {}),
     required_tests: item.requiredTests,
     result_path: item.resultPath,
   });
@@ -965,6 +971,11 @@ function buildPrompt(item: {
     "The host owns execution choices. For every assignment, apply the finding and item instructions exactly, including any clarified scope or retry context.",
     "Keep every edit within allowed_files, run every required test, land one attributable commit whose changed-file set is exact, and write one JSON result at result_path.",
     'An allowed_files entry ending in "/" authorizes normalized descendant files; every other entry authorizes only that exact file.',
+    ...(item.moduleContracts.length > 0
+      ? [
+          "module_contracts carries the APPROVED contract for each module this item implements. The implementation MUST conform to every declared input, output, invariant, side effect, validation boundary, failure mode, and seam adjustment. A locally plausible interface that contradicts them is a defect even when the build and the targeted tests pass — a conformance divergence propagates to every consumer of the module.",
+        ]
+      : []),
     `Assignment: ${assignment}`,
     "The result must use remediation-host-result/v1alpha1 and contain exactly contract_version, result_id, run_id, work_item_id, prompt_sha256, changed_files, commit_evidence, test_evidence, worktree_evidence, acceptance, and merge.",
     "Bind commit_evidence.before and worktree_evidence.baseline_commit to baseline_commit; report only passed required tests; acceptance.status must be accepted and merge.status must be merged.",
@@ -1020,6 +1031,7 @@ function buildWorkItem(
     baselineCommit,
     requiredTests,
     resultPath,
+    moduleContracts: block.module_contracts ?? [],
   });
   return {
     id: block.block_id,

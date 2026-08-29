@@ -452,15 +452,20 @@
   regen:docs` (or one gate naming both) would make it one round-trip. (3) **ambiguous-direction:** none
   this lap.
 
-- **Implementation workers are never given the contract they must satisfy (2026-08-09, high).** The
-  implement-node prompt carries the DAG node's `description` and obligation ids but NOT the text of
-  `finalized_module_contracts`. A host worker can therefore implement a locally plausible interface
-  that contradicts an already-approved module contract. Build and targeted tests may stay green because
-  the divergence is CONFORMANCE, not local correctness. Properties: the emitted host work item
-  carries (or references by path) the contract for the module it implements, and a conformance check
-  sits between "host result received" and "accepted", since a foundation divergence propagates to every node that
-  imports it. Auditor-agnostic rule exactly — it worked only when the DAG author happened to restate
-  every declared value in the node description. [[enforce-robustness-in-tooling-not-host-discretion]]
+- **A conformance check between "host result received" and "accepted" is still missing — the work
+  item now CARRIES the approved contract, but nothing checks the landed result against it
+  (2026-08-09, narrowed 2026-08-29, medium).** The carriage half landed: promotion resolves each DAG
+  node's obligation-id slugs against `finalized_module_contracts` and attaches the owning contracts
+  VERBATIM to the block (`module_contracts` on `RemediationBlockSchema`), and the sha-bound dispatch
+  prompt binds the worker to them (`buildPrompt`, src/remediate/steps/dispatch/hostHandoff.ts) — the
+  auditor-agnostic root cause (a worker that never saw the approved interface) is closed. What
+  remains is the entry's second property: `corroborateHostResult` checks commit ancestry,
+  changed-file exactness, write scope, and required tests, and CONFORMANCE to the carried contract
+  is checked nowhere between received and accepted — build and targeted tests can stay green while
+  the divergence propagates to every consumer of the module. **Open design fork (owner decision):**
+  a bounded per-result LLM conformance review (token cost per accepted item), a mechanical
+  per-obligation evidence-coverage requirement on the result contract (a schema evolution of
+  `remediation-host-result`), or both. [[enforce-robustness-in-tooling-not-host-discretion]]
 
 - **Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16,
   ambiguous-direction, low-medium).** The defect was found BY the run, and committing its fix changed

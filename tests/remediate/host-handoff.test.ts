@@ -1586,3 +1586,50 @@ describe("the dispatch barrel's published export surface", () => {
     expect(retired).toBe("unsupported_retired_state");
   });
 });
+
+describe("work items carry the approved module contracts (open-bugs.md:474)", () => {
+  it("the dispatch prompt binds the worker to the block's finalized module contract", async () => {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "host-handoff-contracts-"));
+    cleanupRoots.push(root);
+    const artifactsDir = join(root, ".audit-tools", "remediation");
+    const baselineCommit = await initGitRoot(root);
+    const contract = {
+      name: "auth-module",
+      inputs: ["credentials"],
+      outputs: ["artifact:session"],
+      invariants: ["INV-1: sessions survive refresh"],
+      side_effects: [],
+      validation_boundary: "validates credentials",
+      failure_modes: ["InvalidCredentials"],
+      seam_adjustments: [],
+    };
+    const state = JSON.parse(JSON.stringify(currentState())) as CurrentState & {
+      plan: { blocks: Array<Record<string, unknown>> };
+    };
+    const withContract = state.plan.blocks.find(
+      (entry) => entry.block_id === "block-a",
+    )!;
+    withContract.module_contracts = [{ module: "auth-module", contract }];
+
+    const handoff = requirePrepared(
+      await boundary.prepareRemediationHostHandoff({
+        root,
+        artifactsDir,
+        runId: FIXTURE_RUN_ID,
+        baselineCommit,
+        state,
+      }),
+    );
+
+    const bound = handoff.workload.work_items.find((item) => item.id === "block-a")!;
+    // The approved contract rides the sha-bound prompt: the worker sees the
+    // interface it must conform to, and the binding covers what it saw.
+    expect(bound.prompt.text).toContain("module_contracts");
+    expect(bound.prompt.text).toContain("INV-1: sessions survive refresh");
+    expect(bound.prompt.text).toContain("MUST conform");
+    // A block with no owning module carries no contract section.
+    const unbound = handoff.workload.work_items.find((item) => item.id === "block-b")!;
+    expect(unbound.prompt.text).not.toContain("MUST conform");
+  });
+});

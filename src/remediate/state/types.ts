@@ -82,6 +82,25 @@ export const RemediationBlockSchema = z
      * files. It is metadata for the host, never a backend-fit claim.
      */
     token_estimate: z.number().int().nonnegative().optional(),
+    /**
+     * The APPROVED finalized module contract(s) this block implements
+     * (open-bugs.md:474). Attached VERBATIM at promotion by resolving each DAG
+     * node's obligation-id slugs against `finalized_module_contracts`, and
+     * carried into the sha-bound dispatch prompt so a worker conforms to the
+     * approved interface instead of inventing a locally plausible one that
+     * contradicts it. Optional — a plan from outside the contract pipeline has
+     * no module contracts.
+     */
+    module_contracts: z
+      .array(
+        z
+          .object({
+            module: z.string(),
+            contract: z.record(z.string(), z.unknown()),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict();
 export type RemediationBlock = z.infer<typeof RemediationBlockSchema>;

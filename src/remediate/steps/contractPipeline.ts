@@ -80,6 +80,7 @@ import {
 import {
   phaseOrdinalForObligations,
   moduleSlug,
+  moduleSlugForObligationId,
   renderPhaseCutSection,
   detectContractTokenCycles,
   type ContractTokenCycle,
@@ -4271,6 +4272,43 @@ export async function promoteImplementationDagToExtractedPlan(
   const lastOrdinal = Math.max(0, ...slugToOrdinal.values());
   const hasMultiPhase = phaseCut ? phaseCut.phases.length > 1 : false;
 
+  // Approved-contract attachment (open-bugs.md:474): resolve each node's
+  // obligation-id slugs against the finalized module contracts, so every
+  // promoted block carries VERBATIM the contract(s) it implements and the
+  // dispatch prompt can bind the worker to the approved interface — the
+  // workflow must never depend on the DAG author restating declared values.
+  const finalizedForBlocks = envelopePayload(
+    await readContractArtifact(artifactsDir, "finalized_module_contracts"),
+  ) as { module_contracts?: unknown[] } | undefined;
+  const contractByModuleName = new Map<string, Record<string, unknown>>();
+  const contractSlugToName = new Map<string, string>();
+  for (const mod of finalizedForBlocks?.module_contracts ?? []) {
+    if (isRecord(mod) && typeof mod.name === "string" && mod.name.length > 0) {
+      contractByModuleName.set(mod.name, mod);
+      contractSlugToName.set(moduleSlug(mod.name), mod.name);
+    }
+  }
+  const contractSlugsByLength = [...contractSlugToName.keys()].sort(
+    (a, b) => b.length - a.length,
+  );
+  const moduleContractsForNode = (node: {
+    satisfies_obligations?: string[];
+    verification_obligation_ids?: string[];
+  }): Array<{ module: string; contract: Record<string, unknown> }> => {
+    const names = new Set<string>();
+    for (const obligationId of [
+      ...(node.satisfies_obligations ?? []),
+      ...(node.verification_obligation_ids ?? []),
+    ]) {
+      const slug = moduleSlugForObligationId(obligationId, contractSlugsByLength);
+      const name = slug === null ? undefined : contractSlugToName.get(slug);
+      if (name !== undefined) names.add(name);
+    }
+    return [...names]
+      .sort((left, right) => compareCodeUnits(left, right))
+      .map((name) => ({ module: name, contract: contractByModuleName.get(name)! }));
+  };
+
   // Root-cause fix for scope-less nodes: the DAG's write scope
   // (`output_files`/`files_likely_touched`) is host-authored and a coarse
   // "Remediate <module>" decomposition can leave it EMPTY, which promotes a
@@ -4508,6 +4546,7 @@ export async function promoteImplementationDagToExtractedPlan(
           lastOrdinal,
         )
       : undefined;
+    const blockModuleContracts = moduleContractsForNode(node);
     return {
       block_id: toBlockId(nodeId),
       items: canonicalItemsByNodeId.get(nodeId) ?? [nodeId],
@@ -4520,6 +4559,9 @@ export async function promoteImplementationDagToExtractedPlan(
       touched_files: touchedFiles,
       ...(phaseOrdinal !== undefined ? { phase_ordinal: phaseOrdinal } : {}),
       ...(targetedCommands.length > 0 ? { targeted_commands: targetedCommands } : {}),
+      ...(blockModuleContracts.length > 0
+        ? { module_contracts: blockModuleContracts }
+        : {}),
     };
   });
 
