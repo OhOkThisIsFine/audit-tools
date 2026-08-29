@@ -102,7 +102,6 @@
 - `open-bugs.md:764` — The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](./reviews/closeout-generation-failure-2026-08-26.md)).
 - `open-bugs.md:766` — An analysis record can identify work and reach no work queue, and every gate stays green while it happens (2026-08-27, medium, from the orphan-routing lap).
 - `open-bugs.md:787` — The masked-exit guard reaches SUITE commands only, so a rejected `git push` reads as exit 0 (2026-08-27, medium, friction: tool_should_decide).
-- `open-bugs.md:802` — ▶ Remediate-side synchronous children still run under (or near) the state lock with no bound (2026-08-29, medium, friction: tool_should_decide).
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
@@ -159,6 +158,7 @@
 - `minor-bugs.md:404` — A pipeline warning names an internal record id as its resolution action (2026-08-27, from the philosophy audit, low).
 - `minor-bugs.md:406` — `check:memory-citations` gates two of the three citation directions, and its guard-reach row names the wrong uncovered half (2026-08-27, low, friction: tool_should_decide).
 - `minor-bugs.md:428` — `buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low, friction: tooling_gap).
+- `minor-bugs.md:439` — closeout-challenge-gate fires at a mid-skill pause while a background lane is live (2026-08-29, low, friction: tool_should_decide).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

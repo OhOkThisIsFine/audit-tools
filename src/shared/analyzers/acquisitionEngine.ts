@@ -50,6 +50,16 @@ import {
  */
 
 /**
+ * Deadline for one acquired-analyzer child (capability probe or the real
+ * analyzer run). Wider than the fold's `TRACKED_CHILD_DEADLINE_MS`: a real
+ * analyzer sweep over a large repository is suite-scale work, and a
+ * false-positive kill silently degrades lead quality — while the probe is
+ * sub-second and never feels the extra headroom. The miss classifies as
+ * `ETIMEDOUT` and degrades to a reported tool failure, never a hang.
+ */
+const ANALYZER_CHILD_DEADLINE_MS = 10 * 60 * 1_000;
+
+/**
  * Tool ids OWNED in-house and never acquired. Only git-history mining is OWNED — it
  * is a truly-agnostic signal with no ecosystem tool. Secret scanning is ACQUIRED
  * (gitleaks), not owned, so it is deliberately NOT listed here.
@@ -471,7 +481,12 @@ export async function runExternalAnalyzer(
   // The async shared runner (runTrackedAsync), never the synchronous twin: a
   // synchronous child would block this loop and starve every liveness /
   // file-lock heartbeat in the process for the length of one stalled probe.
-  const run = options.run ?? ((argv, cwd) => runTrackedAsync(argv, { cwd }));
+  // The deadline is declared, not inherited: without one, runTrackedAsync arms
+  // NO timer, and an analyzer that never exits hangs the awaiting fold.
+  const run =
+    options.run ??
+    ((argv, cwd) =>
+      runTrackedAsync(argv, { cwd, timeout: ANALYZER_CHILD_DEADLINE_MS }));
   const log = options.log ?? (() => {});
   const setting = settingFor(options.analyzers, candidate.id);
 

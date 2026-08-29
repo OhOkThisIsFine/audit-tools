@@ -545,7 +545,7 @@ export async function validateArtifacts(
       issues,
     );
 
-    for (const outcome of evaluateContractPipelineCrossGateOutcomes({
+    for (const outcome of await evaluateContractPipelineCrossGateOutcomes({
       payloads: cpPayloads,
       findingEnumeration,
       root,

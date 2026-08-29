@@ -27,6 +27,7 @@ import {
 } from "../../src/remediate/phases/plan.js";
 import { collectStagingFiles, executeClosingAction, runClosePhase, buildRemediationOutcomesReport } from "../../src/remediate/phases/close.js";
 import { groundExtractedFindings, groundAffectedFiles, evidenceCitesRealPath } from "../../src/remediate/phases/grounding.js";
+import { enumerateTrackedFilePaths } from "audit-tools/shared";
 import { runTriagePhase } from "../../src/remediate/phases/triage.js";
 import type { RemediationBlock } from "../../src/remediate/state/types.js";
 import { makeState } from "./test-helpers.js";
@@ -673,7 +674,8 @@ describe("groundAffectedFiles — TST-d1399aa3: dedicated unit tests for phantom
       },
     ];
 
-    const result = groundAffectedFiles(TEST_DIR, findings as any);
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    const result = groundAffectedFiles(TEST_DIR, findings as any, corpus);
 
     expect(findings[0].affected_files).toHaveLength(1);
     expect(findings[0].affected_files[0].path).toBe("src/real.ts");
@@ -699,7 +701,8 @@ describe("groundAffectedFiles — TST-d1399aa3: dedicated unit tests for phantom
       },
     ];
 
-    const result = groundAffectedFiles(TEST_DIR, findings as any);
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    const result = groundAffectedFiles(TEST_DIR, findings as any, corpus);
 
     expect(findings[0].affected_files).toHaveLength(0);
     expect(result.zeroRealPathFindingIds).toContain("F2");
@@ -720,7 +723,8 @@ describe("groundAffectedFiles — TST-d1399aa3: dedicated unit tests for phantom
       },
     ];
 
-    const result = groundAffectedFiles(TEST_DIR, findings as any);
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    const result = groundAffectedFiles(TEST_DIR, findings as any, corpus);
 
     expect(result.phantomPathsByFinding.has("F3")).toBe(false);
     expect(result.zeroRealPathFindingIds).not.toContain("F3");
@@ -741,24 +745,29 @@ describe("evidenceCitesRealPath — TST-d1399aa3: dedicated unit tests for evide
     await rm(TEST_DIR, { recursive: true, force: true });
   });
 
-  it("returns true for evidence citing a real path without line number", () => {
-    expect(evidenceCitesRealPath(TEST_DIR, "See src/auth.ts for details")).toBe(true);
+  it("returns true for evidence citing a real path without line number", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "See src/auth.ts for details", corpus)).toBe(true);
   });
 
-  it("returns true for evidence citing a real path with an in-range line number", () => {
-    expect(evidenceCitesRealPath(TEST_DIR, "src/auth.ts:2 — some issue")).toBe(true);
+  it("returns true for evidence citing a real path with an in-range line number", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/auth.ts:2 — some issue", corpus)).toBe(true);
   });
 
-  it("returns false for evidence citing a real path with an out-of-range line number", () => {
-    expect(evidenceCitesRealPath(TEST_DIR, "src/auth.ts:9999 — out of range")).toBe(false);
+  it("returns false for evidence citing a real path with an out-of-range line number", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/auth.ts:9999 — out of range", corpus)).toBe(false);
   });
 
-  it("returns false when the cited path does not exist in the repo", () => {
-    expect(evidenceCitesRealPath(TEST_DIR, "src/nonexistent.ts:1 — missing file")).toBe(false);
+  it("returns false when the cited path does not exist in the repo", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/nonexistent.ts:1 — missing file", corpus)).toBe(false);
   });
 
-  it("returns false for pure prose with no path-like tokens", () => {
-    expect(evidenceCitesRealPath(TEST_DIR, "This finding has no path reference")).toBe(false);
+  it("returns false for pure prose with no path-like tokens", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "This finding has no path reference", corpus)).toBe(false);
   });
 });
 

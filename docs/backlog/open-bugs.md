@@ -799,30 +799,3 @@
   is load-bearing, not to whether it is a test runner — so a state-changing command piped into a
   filter is refused the same way a suite is, with the same two escapes.
 
-- **▶ Remediate-side synchronous children still run under (or near) the state lock with no bound
-  (2026-08-29, medium, friction: tool_should_decide).** The AUDIT half of this hazard is CLOSED:
-  every audit-fold-reachable spawn now runs on the async exec twin with the shared 120 s deadline
-  (`TRACKED_CHILD_DEADLINE_MS`) — local tooling (`55f9b06d`), then the shared git helpers
-  (`src/shared/git.ts`), the disposition extractor's two git spawns, and `installToCache`'s
-  `npm install` — so the held lock's heartbeat keeps beating and the lock cannot be classified
-  stale mid-fold. `RunTrackedSyncOptions` makes `timeout` REQUIRED on the sync twin, and
-  `tests/shared/sync-spawn-fold-safety.test.ts` (INV-SSF) pins the three fold-reachable modules to
-  the async twin. (The old entry's claim that `stampToolComputedGrounding` reaches
-  `enumerateTrackedFilePaths` was FALSE at HEAD — that chain only reads files. A per-spawn sync
-  timeout below the 30 s stale window was also refuted as a remedy: sequential sync spawns inside
-  one synchronous stretch give the loop no turn between them, so their durations SUM.)
-  **What remains is remediate-side:** ingestion holds the remediation state lock
-  (`src/remediate/steps/dispatch/hostHandoff.ts` records this) while its corroboration git probes
-  (`gitCommitExists` / `gitCommitIsAncestor` / `gitChangedFilesSince`, `spawnSyncHidden`, no
-  timeout) run synchronously; `reverifyBlockedItemAgainstTree`
-  (`src/remediate/phases/triage.ts`) runs arbitrary `targeted_commands` through `spawnSync
-  shell:true` with no timeout; and `enumerateTrackedFilePaths` /
-  `enumerateRepoTreePaths` / `isInsideGitWorkTree`
-  (`src/shared/validation/findingGrounding.ts`, `src/remediate/validation/contractPipelineGates.ts`)
-  spawn git synchronously with no timeout from gate paths. A separate, lesser residual: the
-  acquisition engine's ASYNC spawns carry no deadline at all — no lock hazard, but a child that
-  never exits hangs the awaiting fold. **Property (unchanged, now scoped to what is left):** no
-  synchronous child process reachable while a file lock is held may run unbounded; a sync child
-  that stays sync must be short and bounded well inside the 30 s stale window with its whole
-  synchronous stretch summed, and anything that can legitimately run longer moves to the async
-  twin with a declared deadline.

@@ -33,8 +33,8 @@ import {
   sameStrings,
   scanBoundSubmission,
   stringArray,
-  spawnSyncHidden,
   stableStringify,
+  TRACKED_CHILD_DEADLINE_MS,
   writeJsonFile,
   type SubmissionIssue,
   type SubmissionLedgerEvent,
@@ -507,12 +507,12 @@ class BlockContractError extends Error {
  * issue. Runs BEFORE anything is built from the block, so a refused block never
  * becomes a work item and its commands never run.
  *
- * COVERS THE HANDOFF BOUNDARY ONLY — state the uncovered half rather than let
- * the covered half read as a close. `reverifyBlockedItemAgainstTree` in
- * `src/remediate/phases/triage.ts` spawns the SAME `block.targeted_commands`
- * through `shell: true` with no gate in front of it, so a command this boundary
- * would refuse still reaches a shell on the triage path. Routing that spawn
- * through this gate is tracked as backlog work, not covered here.
+ * COVERS THE HANDOFF BOUNDARY ONLY. The other consumer of the same
+ * `block.targeted_commands` — `reverifyBlockedItemAgainstTree` in
+ * `src/remediate/phases/triage.ts` — asks the same declared command-shape rule
+ * before spawning and then runs each command through {@link runRequiredTest}
+ * (argv-split, no shell, deadline-bounded), so a command this boundary would
+ * refuse is refused there too rather than reaching a shell.
  */
 function assertBlockContract(root: string, block: RemediationBlock): void {
   for (const raw of block.touched_files) {
@@ -1323,11 +1323,14 @@ type CorroboratedHostResult =
       readonly message: string;
     };
 
-function gitCommitExists(root: string, commit: string): boolean {
-  const result = spawnSyncHidden(
-    "git",
-    ["rev-parse", "--verify", "--quiet", `${commit}^{commit}`],
-    { cwd: root, encoding: "utf8", shell: false },
+// The corroboration probes below run while the remediation state lock (and, on
+// the fold path, the phase lock) is held — ASYNC with the shared deadline
+// (INV-SSF), so the held lock's mtime heartbeat keeps beating through each
+// probe and a git that never answers cannot hang the ingest.
+async function gitCommitExists(root: string, commit: string): Promise<boolean> {
+  const result = await runTrackedAsync(
+    ["git", "rev-parse", "--verify", "--quiet", `${commit}^{commit}`],
+    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
   );
   return !result.error && result.status === 0;
 }
@@ -1335,15 +1338,14 @@ function gitCommitExists(root: string, commit: string): boolean {
 // INV-WTS-3 (landed-node ancestry): a landed node's commit must be an ancestor
 // of the ref it claims to have landed on. `git merge-base --is-ancestor` exits 0
 // exactly when that holds.
-function gitCommitIsAncestor(
+async function gitCommitIsAncestor(
   root: string,
   ancestor: string,
   descendant: string,
-): boolean {
-  const result = spawnSyncHidden(
-    "git",
-    ["merge-base", "--is-ancestor", ancestor, descendant],
-    { cwd: root, encoding: "utf8", shell: false },
+): Promise<boolean> {
+  const result = await runTrackedAsync(
+    ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
   );
   return !result.error && result.status === 0;
 }
@@ -1365,24 +1367,26 @@ function gitCommitIsAncestor(
  * otherwise scan clean. A failed scan is not evidence of orphanhood — it fails
  * closed, so a git that cannot answer never unlocks the relaxation.
  */
-function gitCommitIsOrphaned(root: string, commit: string): boolean {
-  if (gitCommitIsAncestor(root, commit, "HEAD")) return false;
-  const result = spawnSyncHidden(
-    "git",
-    ["for-each-ref", "--contains", commit, "--format=%(refname)"],
-    { cwd: root, encoding: "utf8", shell: false },
-  );
-  if (result.error || result.status !== 0) return false;
-  return (result.stdout ?? "").trim().length === 0;
-}
-
-function gitChangedFilesOfCommit(
+async function gitCommitIsOrphaned(
   root: string,
   commit: string,
-): readonly string[] | null {
-  const result = spawnSyncHidden(
-    "git",
+): Promise<boolean> {
+  if (await gitCommitIsAncestor(root, commit, "HEAD")) return false;
+  const result = await runTrackedAsync(
+    ["git", "for-each-ref", "--contains", commit, "--format=%(refname)"],
+    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
+  );
+  if (result.error || result.status !== 0) return false;
+  return result.stdout.trim().length === 0;
+}
+
+async function gitChangedFilesOfCommit(
+  root: string,
+  commit: string,
+): Promise<readonly string[] | null> {
+  const result = await runTrackedAsync(
     [
+      "git",
       "diff-tree",
       "--root",
       "--no-commit-id",
@@ -1391,10 +1395,10 @@ function gitChangedFilesOfCommit(
       "-z",
       commit,
     ],
-    { cwd: root, encoding: "utf8", shell: false },
+    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
   );
   if (result.error || result.status !== 0) return null;
-  return [...new Set((result.stdout ?? "").split("\0").filter(Boolean))].sort(
+  return [...new Set(result.stdout.split("\0").filter(Boolean))].sort(
     compareCodeUnits,
   );
 }
@@ -1430,10 +1434,10 @@ function gitChangedFilesOfCommit(
  *    What survives both is an untracked file that appeared DURING the run — the
  *    only untracked class that can be this host's edit.
  */
-function gitChangedFilesSince(
+async function gitChangedFilesSince(
   root: string,
   baseline: string,
-): readonly string[] | null {
+): Promise<readonly string[] | null> {
   const files = new Set<string>();
   for (const args of [
     // baseline → HEAD: what the host committed.
@@ -1444,13 +1448,13 @@ function gitChangedFilesSince(
     // ignore rules authoritative.
     ["ls-files", "--others", "--exclude-standard", "-z"],
   ]) {
-    const probe = spawnSyncHidden("git", args, {
+    const probe = await runTrackedAsync(["git", ...args], {
       cwd: root,
       encoding: "utf8",
-      shell: false,
+      timeout: TRACKED_CHILD_DEADLINE_MS,
     });
     if (probe.error || probe.status !== 0) return null;
-    for (const file of (probe.stdout ?? "").split("\0").filter(Boolean)) {
+    for (const file of probe.stdout.split("\0").filter(Boolean)) {
       if (isAuditToolsArtifactPath(file)) continue;
       files.add(file);
     }
@@ -1511,7 +1515,7 @@ async function corroborateNoChangeClaim(params: {
   const { root, workItem, excusedPaths } = params;
   if (!(await isGitRepo(root))) return { ok: true };
   const baseline = workItem.baseline_commit;
-  if (!gitCommitExists(root, baseline)) {
+  if (!(await gitCommitExists(root, baseline))) {
     return {
       ok: false,
       code: "commit_missing",
@@ -1519,7 +1523,7 @@ async function corroborateNoChangeClaim(params: {
         "resolved_no_change cannot be corroborated: baseline_commit does not resolve to a real commit",
     };
   }
-  const changed = gitChangedFilesSince(root, baseline);
+  const changed = await gitChangedFilesSince(root, baseline);
   if (changed === null) {
     return {
       ok: false,
@@ -1901,14 +1905,17 @@ async function corroborateHostResult(params: {
   const baseline = workItem.baseline_commit;
   const landed = result.commit_evidence.after;
   let usedRecovery = false;
-  if (!gitCommitExists(root, baseline) || !gitCommitExists(root, landed)) {
+  if (
+    !(await gitCommitExists(root, baseline)) ||
+    !(await gitCommitExists(root, landed))
+  ) {
     return {
       ok: false,
       code: "commit_missing",
       message: "baseline_commit and commit_evidence.after must both resolve to real commits",
     };
   }
-  if (!gitCommitIsAncestor(root, baseline, landed)) {
+  if (!(await gitCommitIsAncestor(root, baseline, landed))) {
     if (!params.recovery) {
       return {
         ok: false,
@@ -1925,7 +1932,7 @@ async function corroborateHostResult(params: {
     // binding, and a landed commit that does not descend from it is exactly the
     // stale-worker case the ancestry check exists to catch; recovery refuses it
     // identically to the normal lane.
-    if (!gitCommitIsOrphaned(root, baseline)) {
+    if (!(await gitCommitIsOrphaned(root, baseline))) {
       return {
         ok: false,
         code: "baseline_not_ancestor",
@@ -1937,14 +1944,14 @@ async function corroborateHostResult(params: {
     }
     usedRecovery = true;
   }
-  if (!gitCommitIsAncestor(root, landed, "HEAD")) {
+  if (!(await gitCommitIsAncestor(root, landed, "HEAD"))) {
     return {
       ok: false,
       code: "commit_not_landed",
       message: "commit_evidence.after is not reachable from the repository HEAD",
     };
   }
-  const actualFiles = gitChangedFilesOfCommit(root, landed);
+  const actualFiles = await gitChangedFilesOfCommit(root, landed);
   if (!actualFiles || !sameStrings(actualFiles, result.changed_files)) {
     return {
       ok: false,

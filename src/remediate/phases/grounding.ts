@@ -65,10 +65,10 @@ function citedPathIsReal(
 export function groundAffectedFiles(
   root: string,
   findings: Finding[],
+  corpus: ReadonlySet<string>,
 ): AffectedFileGrounding {
   const phantomPathsByFinding = new Map<string, string[]>();
   const zeroRealPathFindingIds: string[] = [];
-  const corpus = enumerateTrackedFilePaths(root);
 
   for (const finding of findings) {
     const cited = finding.affected_files ?? [];
@@ -132,13 +132,14 @@ function resolveEvidencePath(
  * True when the evidence string cites at least one real repo path; a cited
  * line number must also exist in the file (a `path:9999` citation into a
  * 40-line file is not grounded). A bare basename resolves against the tracked
- * corpus (INV-B3-3); `corpus` is supplied by the caller so it is enumerated once
- * per pass, and defaults to a fresh enumeration for standalone callers.
+ * corpus (INV-B3-3); `corpus` is REQUIRED — the enumeration is async (INV-SSF),
+ * so a caller enumerates once per pass with `enumerateTrackedFilePaths` and
+ * threads the set through this sync predicate.
  */
 export function evidenceCitesRealPath(
   root: string,
   evidence: string,
-  corpus: ReadonlySet<string> = enumerateTrackedFilePaths(root),
+  corpus: ReadonlySet<string>,
 ): boolean {
   for (const match of evidence.matchAll(EVIDENCE_PATH_TOKEN_RE)) {
     const citedPath = match.groups?.path;
@@ -174,9 +175,9 @@ export interface EvidenceGrounding {
 export function groundEvidence(
   root: string,
   findings: Finding[],
+  corpus: ReadonlySet<string>,
 ): EvidenceGrounding {
   const ungroundedFindingIds: string[] = [];
-  const corpus = enumerateTrackedFilePaths(root);
   for (const finding of findings) {
     const grounded = (finding.evidence ?? []).some((entry) =>
       evidenceCitesRealPath(root, entry, corpus),
@@ -234,9 +235,13 @@ export async function groundExtractedFindings(
   options: GroundExtractedFindingsOptions,
 ): Promise<ExtractedFindingGrounding> {
   const { root } = options;
+  // ONE async enumeration per pass (INV-SSF); every predicate below is a sync
+  // draw over this corpus.
+  const corpus = await enumerateTrackedFilePaths(root);
   const { phantomPathsByFinding, zeroRealPathFindingIds } = groundAffectedFiles(
     root,
     findings,
+    corpus,
   );
 
   const dropped: { finding: Finding; phantomPaths: string[] }[] = [];
@@ -279,7 +284,7 @@ export async function groundExtractedFindings(
   const { ungroundedFindingIds } =
     options.evidenceGrounding === false
       ? { ungroundedFindingIds: [] }
-      : groundEvidence(root, kept);
+      : groundEvidence(root, kept, corpus);
 
   return {
     findings: kept,

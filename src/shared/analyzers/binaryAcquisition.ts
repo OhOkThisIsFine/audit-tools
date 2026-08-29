@@ -13,7 +13,11 @@ import { join, relative } from "node:path";
 import { homedir } from "node:os";
 import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
 import { resolveWithinRoot } from "../io/pathContainment.js";
-import { runTrackedAsync, type RunTrackedResult } from "../tooling/exec.js";
+import {
+  runTrackedAsync,
+  TRACKED_CHILD_DEADLINE_MS,
+  type RunTrackedResult,
+} from "../tooling/exec.js";
 
 /**
  * Generic acquisition of a standalone mature analyzer BINARY (gitleaks,
@@ -294,7 +298,13 @@ export async function resolveBinary(
 ): Promise<BinaryResolution> {
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
-  const run = options.run ?? ((argv, cwd) => runTrackedAsync(argv, { cwd }));
+  // Declared deadline (INV-SSF residual): the version probe and the archive
+  // extraction are both short; without a timeout runTrackedAsync arms no timer
+  // and a hung child hangs the resolution forever.
+  const run =
+    options.run ??
+    ((argv: string[], cwd?: string) =>
+      runTrackedAsync(argv, { cwd, timeout: TRACKED_CHILD_DEADLINE_MS }));
   const cacheDir = options.cacheDir ?? defaultCacheDir();
 
   // 1. PATH — already installed. Nothing below this point runs, so a tool the machine

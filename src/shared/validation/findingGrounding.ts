@@ -19,8 +19,8 @@
  * E3 + P7).
  */
 import { readFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import { isAbsolute, join } from "node:path";
+import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "../tooling/exec.js";
 import type { Finding, FindingGrounding } from "../types/finding.js";
 
 /** Normalize text for content-matching: drop CR, collapse whitespace, trim. */
@@ -111,25 +111,24 @@ export function resolveBasenameToTrackedPath(
  *
  * Degrades to an empty set when git is missing / not a repo (callers then fall
  * back to their existing `existsSync` check — monotonic, never a regression).
- * OS-agnostic: `shell: false`, forward-slash output.
+ * OS-agnostic: forward-slash output.
+ *
+ * ASYNC (INV-SSF): every production caller runs under the remediation phase
+ * lock, and a synchronous child starves the held lock's mtime heartbeat. The
+ * async twin keeps the loop turning; the shared deadline bounds a git that
+ * never answers.
  */
-export function enumerateTrackedFilePaths(root: string): Set<string> {
+export async function enumerateTrackedFilePaths(
+  root: string,
+): Promise<Set<string>> {
   const known = new Set<string>();
-  let result;
-  try {
-    result = spawnSync("git", ["ls-files", "-z"], {
-      cwd: root,
-      encoding: "utf8",
-      shell: false,
-      windowsHide: true,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-  } catch {
-    return known;
-  }
-  if (!result || result.status !== 0 || typeof result.stdout !== "string") {
-    return known;
-  }
+  const result = await runTrackedAsync(["git", "ls-files", "-z"], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: TRACKED_CHILD_DEADLINE_MS,
+  });
+  if (result.error || result.status !== 0) return known;
   for (const entry of result.stdout.split("\0")) {
     const path = entry.replace(/\\/g, "/");
     if (path.length > 0) known.add(path);

@@ -562,6 +562,17 @@ function commandResult(
  * taken out from under it mid-close. Awaiting {@link runTrackedAsync} keeps the
  * loop turning for the whole command, so the heartbeat keeps the lock live.
  */
+/**
+ * Deadline for one closing-phase child: a closing command (`git push`,
+ * `npm publish`, an operator `custom_command`) or a declared full/e2e suite.
+ * These legitimately run minutes, so the bound matches the final gate's
+ * one-hour suite bound — a bound against a child that never exits, not a
+ * budget. Async keeps the held phase lock's heartbeat beating throughout;
+ * without a declared timeout `runTrackedAsync` arms NO timer at all (INV-SSF
+ * residual), which is what let a hung closing child wedge the fold.
+ */
+const CLOSING_CHILD_DEADLINE_MS = 3_600_000;
+
 async function runTrackedCommand(
   root: string,
   command: string,
@@ -570,6 +581,7 @@ async function runTrackedCommand(
   const result = await runTrackedAsync([command, ...args], {
     cwd: root,
     windowsHide: true,
+    timeout: CLOSING_CHILD_DEADLINE_MS,
   });
   return commandResult([command, ...args], result);
 }
@@ -1008,6 +1020,7 @@ export async function runCombinedTestSuite(
   const result = await runTrackedAsync(parseCommandString(suiteName), {
     cwd: options.root,
     windowsHide: true,
+    timeout: CLOSING_CHILD_DEADLINE_MS,
   });
   const durationMs = Date.now() - startedAt;
   if (result.status === 0) {
@@ -1182,6 +1195,7 @@ async function runE2eTests(
     {
       cwd: options.root,
       windowsHide: true,
+      timeout: CLOSING_CHILD_DEADLINE_MS,
     },
   );
   const e2ePassed = e2eResult.status === 0;

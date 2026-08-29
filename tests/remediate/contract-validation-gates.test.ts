@@ -90,7 +90,7 @@ function decomposition(modules: Array<{ name: string; file_scope: string[] }>): 
 describe("INV-CVG-4: validateDecompositionFileScope (B5)", () => {
   it("POSITIVE: passes a module scoped at the file where real logic lives", async () => {
     const repo = await makeGitRepo({ "src/real.ts": REAL_FILE, "src/barrel.ts": SHIM_FILE });
-    const issues = validateDecompositionFileScope(
+    const issues = await validateDecompositionFileScope(
       decomposition([{ name: "installer", file_scope: ["src/real.ts"] }]),
       repo,
     );
@@ -99,7 +99,7 @@ describe("INV-CVG-4: validateDecompositionFileScope (B5)", () => {
 
   it("NEGATIVE: errors on a module scoped ONLY at a thin re-export shim/barrel", async () => {
     const repo = await makeGitRepo({ "src/real.ts": REAL_FILE, "src/barrel.ts": SHIM_FILE });
-    const issues = validateDecompositionFileScope(
+    const issues = await validateDecompositionFileScope(
       decomposition([{ name: "installer", file_scope: ["src/barrel.ts"] }]),
       repo,
     );
@@ -111,7 +111,7 @@ describe("INV-CVG-4: validateDecompositionFileScope (B5)", () => {
 
   it("does NOT reject when file_scope includes at least one real-logic file (rebuttable lead)", async () => {
     const repo = await makeGitRepo({ "src/real.ts": REAL_FILE, "src/barrel.ts": SHIM_FILE });
-    const issues = validateDecompositionFileScope(
+    const issues = await validateDecompositionFileScope(
       decomposition([{ name: "installer", file_scope: ["src/barrel.ts", "src/real.ts"] }]),
       repo,
     );
@@ -120,7 +120,7 @@ describe("INV-CVG-4: validateDecompositionFileScope (B5)", () => {
 
   it("does NOT false-reject a genuinely small non-shim module (structural check, not line-count) — fail-5", async () => {
     const repo = await makeGitRepo({ "src/tiny.ts": "export const N = 1;\n" });
-    const issues = validateDecompositionFileScope(
+    const issues = await validateDecompositionFileScope(
       decomposition([{ name: "tiny", file_scope: ["src/tiny.ts"] }]),
       repo,
     );
@@ -129,7 +129,7 @@ describe("INV-CVG-4: validateDecompositionFileScope (B5)", () => {
 
   it("degrades a valid-but-empty git tree to a WARNING, never a hard block — fail-4", async () => {
     const repo = await makeGitRepo({}); // git repo, nothing added → 0 tracked files
-    const issues = validateDecompositionFileScope(
+    const issues = await validateDecompositionFileScope(
       decomposition([{ name: "installer", file_scope: ["src/real.ts"] }]),
       repo,
     );
@@ -139,7 +139,7 @@ describe("INV-CVG-4: validateDecompositionFileScope (B5)", () => {
 
   it("fails CLOSED (error) on an unreadable tree — git missing / not a repo — fail-4", async () => {
     const notARepo = await makeTempDir(); // plain dir, no git init
-    const issues = validateDecompositionFileScope(
+    const issues = await validateDecompositionFileScope(
       decomposition([{ name: "installer", file_scope: ["src/real.ts"] }]),
       notARepo,
     );

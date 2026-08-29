@@ -62,8 +62,8 @@ afterEach(async () => {
 // ── evaluateContractPipelineCrossGateOutcomes — unit ──────────────────────────
 
 describe("evaluateContractPipelineCrossGateOutcomes", () => {
-  it("returns 8 outcomes with empty issues for an empty payload map (no false-fail on nothing)", () => {
-    const result = evaluateContractPipelineCrossGateOutcomes({
+  it("returns 8 outcomes with empty issues for an empty payload map (no false-fail on nothing)", async () => {
+    const result = await evaluateContractPipelineCrossGateOutcomes({
       payloads: new Map(),
       root: "/does/not/matter",
     });
@@ -73,7 +73,7 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
     }
   });
 
-  it("returns all-empty for a single-entry map (a lone artifact can never false-fail)", () => {
+  it("returns all-empty for a single-entry map (a lone artifact can never false-fail)", async () => {
     const payloads = new Map<ContractPipelineArtifactName, unknown>([
       [
         "test_validator_plan",
@@ -85,14 +85,14 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
         },
       ],
     ]);
-    const result = evaluateContractPipelineCrossGateOutcomes({ payloads, root: "/does/not/matter" });
+    const result = await evaluateContractPipelineCrossGateOutcomes({ payloads, root: "/does/not/matter" });
     expect(result).toHaveLength(8);
     for (const outcome of result) {
       expect(outcome.issues).toEqual([]);
     }
   });
 
-  it("gate 1 (paired obligations) fails with a CE-006 message for an unscoped negative", () => {
+  it("gate 1 (paired obligations) fails with a CE-006 message for an unscoped negative", async () => {
     const payloads = new Map<ContractPipelineArtifactName, unknown>([
       [
         "obligation_ledger",
@@ -127,7 +127,7 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
         },
       ],
     ]);
-    const result = evaluateContractPipelineCrossGateOutcomes({ payloads, root: "/does/not/matter" });
+    const result = await evaluateContractPipelineCrossGateOutcomes({ payloads, root: "/does/not/matter" });
     expect(result).toHaveLength(8);
     const pairedObligations = result.find((outcome) => outcome.gate === "paired_obligations")!;
     expect(pairedObligations.issues.length).toBeGreaterThan(0);
@@ -138,7 +138,7 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
     }
   });
 
-  it("gate 5 (design_spec invariant-coverage): a RegExp-metacharacter invariant id does not throw and reports coverage correctly (COR-cca3801c)", () => {
+  it("gate 5 (design_spec invariant-coverage): a RegExp-metacharacter invariant id does not throw and reports coverage correctly (COR-cca3801c)", async () => {
     // Before the fix, invId was interpolated into `new RegExp(...)` unescaped.
     // "INV-(1" is an unbalanced group-open — as a literal RegExp fragment it
     // throws a SyntaxError, which previously aborted the WHOLE cross-gate
@@ -168,7 +168,7 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
       ],
     ]);
     // Must not throw — this call itself is the red/green pin.
-    const coveredResult = evaluateContractPipelineCrossGateOutcomes({ payloads: covered, root: "/does/not/matter" });
+    const coveredResult = await evaluateContractPipelineCrossGateOutcomes({ payloads: covered, root: "/does/not/matter" });
     expect(coveredResult).toHaveLength(8);
     const designSpecCovered = coveredResult.find((outcome) => outcome.gate === "design_spec")!;
     expect(designSpecCovered.issues).toEqual([]); // description reference via regex → covered, no issue
@@ -187,7 +187,7 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
         },
       ],
     ]);
-    const uncoveredResult = evaluateContractPipelineCrossGateOutcomes({ payloads: uncovered, root: "/does/not/matter" });
+    const uncoveredResult = await evaluateContractPipelineCrossGateOutcomes({ payloads: uncovered, root: "/does/not/matter" });
     expect(uncoveredResult).toHaveLength(8);
     const designSpecUncovered = uncoveredResult.find((outcome) => outcome.gate === "design_spec")!;
     expect(designSpecUncovered.issues.length).toBeGreaterThan(0);
@@ -289,7 +289,7 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
       findings: [{ id: "F-UNCOVERED" }],
     }; // gate 3: F-UNCOVERED maps to no obligation
 
-    const result = evaluateContractPipelineCrossGateOutcomes({ payloads, findingEnumeration, root });
+    const result = await evaluateContractPipelineCrossGateOutcomes({ payloads, findingEnumeration, root });
     expect(result).toHaveLength(8);
     result.forEach((outcome) => {
       expect(outcome.issues.length, `gate ${outcome.gate} expected to fail`).toBeGreaterThan(0);
@@ -300,8 +300,8 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
 // ── evaluateContractPipelineCrossGateOutcomes — per-gate evaluated/skipped ─────
 
 describe("evaluateContractPipelineCrossGateOutcomes", () => {
-  it("returns 8 outcomes, all skipped with a reason, for an empty payload map (nothing evaluated)", () => {
-    const result = evaluateContractPipelineCrossGateOutcomes({
+  it("returns 8 outcomes, all skipped with a reason, for an empty payload map (nothing evaluated)", async () => {
+    const result = await evaluateContractPipelineCrossGateOutcomes({
       payloads: new Map(),
       root: "/does/not/matter",
     });
@@ -314,19 +314,19 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
     }
   });
 
-  it("a gate whose input is present and clean records evaluated:true with no issues", () => {
+  it("a gate whose input is present and clean records evaluated:true with no issues", async () => {
     const payloads = new Map<ContractPipelineArtifactName, unknown>([
       ["obligation_ledger", { obligations: [] }],
     ]);
-    const result = evaluateContractPipelineCrossGateOutcomes({ payloads, root: "/does/not/matter" });
+    const result = await evaluateContractPipelineCrossGateOutcomes({ payloads, root: "/does/not/matter" });
     const pairedObligations = result.find((o) => o.gate === "paired_obligations")!;
     expect(pairedObligations.evaluated).toBe(true);
     expect(pairedObligations.issues).toEqual([]);
     expect(pairedObligations.reason).toBeUndefined();
   });
 
-  it("a gate whose input is absent records evaluated:false with a reason (skipped, not passing)", () => {
-    const result = evaluateContractPipelineCrossGateOutcomes({
+  it("a gate whose input is absent records evaluated:false with a reason (skipped, not passing)", async () => {
+    const result = await evaluateContractPipelineCrossGateOutcomes({
       payloads: new Map(),
       root: "/does/not/matter",
     });
@@ -338,22 +338,22 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
     );
   });
 
-  it("distinguishability: an empty issues array alone cannot tell 'ran clean' from 'never ran' — evaluated does", () => {
+  it("distinguishability: an empty issues array alone cannot tell 'ran clean' from 'never ran' — evaluated does", async () => {
     // Same gate (digest_coverage), same empty `issues`, opposite `evaluated`.
-    const evaluatedClean = evaluateContractPipelineCrossGateOutcomes({
+    const evaluatedClean = (await evaluateContractPipelineCrossGateOutcomes({
       payloads: new Map<ContractPipelineArtifactName, unknown>([
         ["goal_spec", { source_type: "structured_audit" }],
       ]),
       findingEnumeration: { is_enumerable: true, findings: [] },
       root: "/does/not/matter",
-    }).find((o) => o.gate === "digest_coverage")!;
+    })).find((o) => o.gate === "digest_coverage")!;
 
-    const neverRan = evaluateContractPipelineCrossGateOutcomes({
+    const neverRan = (await evaluateContractPipelineCrossGateOutcomes({
       payloads: new Map<ContractPipelineArtifactName, unknown>([
         ["goal_spec", { source_type: "conversation" }],
       ]),
       root: "/does/not/matter",
-    }).find((o) => o.gate === "digest_coverage")!;
+    })).find((o) => o.gate === "digest_coverage")!;
 
     expect(evaluatedClean.issues).toEqual([]);
     expect(neverRan.issues).toEqual([]);

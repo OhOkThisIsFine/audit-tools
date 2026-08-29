@@ -1,14 +1,16 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { rename } from "node:fs/promises";
 import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, withFsRetry, commandLeavesDeclaredShape } from "audit-tools/shared";
 import { validateTriageResolution } from "../validation/remediationState.js";
 import { isTerminalStatus } from "../state/itemStatus.js";
 import { rationaleAsksForRetry } from "../steps/stepUtils.js";
-import { remediationHostResultFilePath } from "../steps/dispatch/hostHandoff.js";
+import {
+  remediationHostResultFilePath,
+  runRequiredTest,
+} from "../steps/dispatch/hostHandoff.js";
 
 interface TriageResolution {
   /**
@@ -106,11 +108,11 @@ function retryBlockedItem(
  *                         them leaves the declared shape, so we cannot tell
  *                         (caller falls back to the normal retry path)
  */
-function reverifyBlockedItemAgainstTree(
+async function reverifyBlockedItemAgainstTree(
   item: { finding_id: string; block_id?: string },
   state: RemediationState,
   options: OrchestratorOptions,
-): "satisfied" | "unsatisfied" | "indeterminate" {
+): Promise<"satisfied" | "unsatisfied" | "indeterminate"> {
   const block =
     (item.block_id
       ? state.plan?.blocks.find((b) => b.block_id === item.block_id)
@@ -128,25 +130,24 @@ function reverifyBlockedItemAgainstTree(
   }
   const commands = block?.targeted_commands;
   if (!commands || commands.length === 0) return "indeterminate";
-  // These strings reach a REAL shell below, so this path asks the same declared
-  // command-shape rule the producer and the host-handoff consumer ask — BEFORE
-  // spawning anything. A blocked item persists its block's commands and may
-  // predate the rule, so a refused shape is possible here even though promotion
-  // would refuse it today. Not spawning is the safe direction, and
+  // These strings become real child processes below, so this path asks the same
+  // declared command-shape rule the producer and the host-handoff consumer ask —
+  // BEFORE spawning anything. A blocked item persists its block's commands and
+  // may predate the rule, so a refused shape is possible here even though
+  // promotion would refuse it today. Not spawning is the safe direction, and
   // "indeterminate" is the honest verdict: nothing ran, so nothing was learned —
   // the caller falls through to the normal retry/triage path rather than
   // reconciling the item on a command it never executed.
   if (commands.some((command) => commandLeavesDeclaredShape(command))) {
     return "indeterminate";
   }
+  // The shared required-test runner (INV-SSF): argv-split, never a shell;
+  // async with a declared deadline, so the held phase lock's heartbeat keeps
+  // beating and a hung command cannot wedge triage. Any classified failure —
+  // exit, signal, timeout, overflow, spawn error — reads as "unsatisfied": the
+  // item stays open and retries on the normal path (fail-closed).
   for (const command of commands) {
-    const result = spawnSync(command, {
-      cwd: options.root,
-      encoding: "utf8",
-      shell: true,
-      windowsHide: true,
-    });
-    if (result.error || result.status !== 0) return "unsatisfied";
+    if (await runRequiredTest(options.root, command)) return "unsatisfied";
   }
   return "satisfied";
 }
@@ -377,7 +378,7 @@ export async function runTriagePhase(
         // finding is already satisfied — a lean/hand lap landed it, or this is an
         // obsolete run being resumed after the work shipped — so reconcile to
         // resolved_no_change rather than re-hitting an already-fixed state.
-        if (reverifyBlockedItemAgainstTree(item, state, options) === "satisfied") {
+        if ((await reverifyBlockedItemAgainstTree(item, state, options)) === "satisfied") {
           item.status = "resolved_no_change";
           markTerminal(item);
           // NB: do not write `last_successful_step` here — dispatch.ts is its

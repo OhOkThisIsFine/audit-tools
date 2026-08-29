@@ -380,6 +380,22 @@ export function runTracked(
       error: new Error("runTracked requires a non-empty argv"),
     };
   }
+  // Runtime half of the REQUIRED deadline: the type carries it for TS callers,
+  // but a JS caller (or a cast) can still omit it — and an unbounded sync child
+  // is exactly the INV-SSF hazard this twin exists to refuse.
+  if (!Number.isFinite(options.timeout) || options.timeout <= 0) {
+    return {
+      status: null,
+      stdout: "",
+      stderr: "",
+      argv: [...argv],
+      cwd: options.cwd,
+      duration_ms: 0,
+      error: new Error(
+        "runTracked requires a positive finite timeout (INV-SSF): an unbounded synchronous child starves every heartbeat in the process",
+      ),
+    };
+  }
   const resolved = resolveExecArgv(argv, {
     platform: options.platform,
   });

@@ -11,11 +11,11 @@ import { scanStringAware } from "../parsing/stringAwareScanner.js";
  * invocation whose parens are inside quotes, and refusing it would refuse the
  * normal case.
  *
- * WHAT THE RULE IS *NOT*: an escaping scheme for one particular spawn. The
- * consumers no longer agree on how they spawn — the closing suites and the
- * required-test rerun split the string with {@link parseCommandString} and
- * spawn `shell: false`, while the triage re-verification path still hands it to
- * a shell — and the rule is identical for all of them. That is the point of
+ * WHAT THE RULE IS *NOT*: an escaping scheme for one particular spawn. Every
+ * consumer — the closing suites, the required-test rerun, and the triage
+ * re-verification path (which now runs through the same required-test
+ * runner) — splits the string with {@link parseCommandString} and spawns
+ * `shell: false`, and the rule is identical for all of them. That is the point of
  * stating it once here: the property enforced belongs to the DECLARATION, not
  * to the spawner. A string carrying `&&` or a redirect declares work this
  * contract cannot faithfully run as ONE invocation, and must be refused up

@@ -13,7 +13,6 @@
  *   validateImplementationDAGIntegrity — ARC-86b18f1b-2: referential integrity
  *     and bidirectional coverage for the implementation DAG.
  */
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -29,6 +28,8 @@ import {
   resolveBasenameToTrackedPath,
   enumerateTrackedFilePaths,
   findCyclicComponents,
+  runTrackedAsync,
+  TRACKED_CHILD_DEADLINE_MS,
 } from "audit-tools/shared";
 import {
   evaluatePairing,
@@ -1136,11 +1137,25 @@ export interface ContractCitationGroundingResult {
  * unavailable or the tree is empty (caller treats empty as the fail-closed
  * unreadable-tree signal).
  */
-export function enumerateRepoTreePaths(repoRoot: string): Set<string> {
+export async function enumerateRepoTreePaths(
+  repoRoot: string,
+): Promise<Set<string>> {
+  return repoTreePathsDraw(await enumerateTrackedFilePaths(repoRoot));
+}
+
+/**
+ * The pure lowercased draw over an already-enumerated tracked corpus. Split
+ * from {@link enumerateRepoTreePaths} so a gate that needs BOTH corpora (the
+ * lowered membership set and the case-preserving one) enumerates git ONCE and
+ * derives the draw locally instead of spawning a second child.
+ */
+export function repoTreePathsDraw(
+  tracked: ReadonlySet<string>,
+): Set<string> {
   const known = new Set<string>();
-  for (const tracked of enumerateTrackedFilePaths(repoRoot)) {
-    const path = normalizeRepoPath(tracked);
-    if (path.length > 0) known.add(path);
+  for (const path of tracked) {
+    const normalized = normalizeRepoPath(path);
+    if (normalized.length > 0) known.add(normalized);
   }
   return known;
 }
@@ -1152,25 +1167,20 @@ export function enumerateRepoTreePaths(repoRoot: string): Set<string> {
  * `false` (genuinely unreadable — fail-closed); (b) a valid git work tree that
  * simply has zero tracked files yet (a fresh/never-committed repo) → `true`
  * (the citations may be sound; degrade to pass-with-warning, never hard-block).
- * OS-agnostic: `shell: false`. NEVER throws — any failure is treated as not-a-tree.
+ * NEVER throws — any failure is treated as not-a-tree. ASYNC (INV-SSF): runs
+ * under the remediation phase lock, so the child must not block the loop.
  */
-export function isInsideGitWorkTree(repoRoot: string): boolean {
-  let result;
-  try {
-    result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
+export async function isInsideGitWorkTree(repoRoot: string): Promise<boolean> {
+  const result = await runTrackedAsync(
+    ["git", "rev-parse", "--is-inside-work-tree"],
+    {
       cwd: repoRoot,
       encoding: "utf8",
-      shell: false,
-      windowsHide: true,
-    });
-  } catch {
-    return false;
-  }
+      timeout: TRACKED_CHILD_DEADLINE_MS,
+    },
+  );
   return (
-    !!result &&
-    result.status === 0 &&
-    typeof result.stdout === "string" &&
-    result.stdout.trim() === "true"
+    !result.error && result.status === 0 && result.stdout.trim() === "true"
   );
 }
 
@@ -1252,12 +1262,12 @@ function isPathShaped(token: string): boolean {
  * `affected_files` and an optional `description`). `repoRoot` is the working-tree
  * root enumerated by `git ls-files`.
  */
-export function validateContractCitationGrounding(
+export async function validateContractCitationGrounding(
   findings: readonly Finding[],
   repoRoot: string,
-): ContractCitationGroundingResult {
+): Promise<ContractCitationGroundingResult> {
   const issues: ValidationIssue[] = [];
-  const knownPaths = enumerateRepoTreePaths(repoRoot);
+  const knownPaths = await enumerateRepoTreePaths(repoRoot);
 
   // An empty path set has two distinct causes — distinguish them so a legitimately
   // new/empty git repo is not hard-blocked (the grounding edge):
@@ -1265,7 +1275,7 @@ export function validateContractCitationGrounding(
   //   - valid work tree, 0 tracked → nothing to ground against, but the citations
   //     may be sound → WARNING (pass-with-warning; callers block only on errors).
   if (knownPaths.size === 0) {
-    if (isInsideGitWorkTree(repoRoot)) {
+    if (await isInsideGitWorkTree(repoRoot)) {
       pushValidationIssue(
         issues,
         "contract_citation_grounding.repo_tree",
@@ -1425,10 +1435,10 @@ function isReExportShim(absPath: string): boolean {
  *   - Fail-closed only on an unreadable git tree (git missing / not a repo → error);
  *     a valid-but-empty tree degrades to a warning (never hard-block a fresh repo).
  */
-export function validateDecompositionFileScope(
+export async function validateDecompositionFileScope(
   moduleDecompositionPayload: unknown,
   repoRoot: string,
-): ValidationIssue[] {
+): Promise<ValidationIssue[]> {
   const issues: ValidationIssue[] = [];
   if (!canEvaluateDecompositionFileScope(moduleDecompositionPayload)) return issues;
   const modules = (moduleDecompositionPayload as Record<string, unknown>).modules as unknown[];
@@ -1444,11 +1454,12 @@ export function validateDecompositionFileScope(
   if (!anyScope) return issues;
 
   // Tree readability gate (mirror validateContractCitationGrounding): the M-B3
-  // gate's `enumerateRepoTreePaths` (lowercased) decides readable-vs-empty; the
-  // shared case-preserving corpus is what we resolve + read files against.
-  const knownLower = enumerateRepoTreePaths(repoRoot);
+  // gate's lowered draw decides readable-vs-empty; the case-preserving corpus is
+  // what we resolve + read files against. ONE git enumeration serves both.
+  const caseCorpus = await enumerateTrackedFilePaths(repoRoot);
+  const knownLower = repoTreePathsDraw(caseCorpus);
   if (knownLower.size === 0) {
-    if (isInsideGitWorkTree(repoRoot)) {
+    if (await isInsideGitWorkTree(repoRoot)) {
       pushValidationIssue(
         issues,
         "decomposition_file_scope.repo_tree",
@@ -1465,7 +1476,6 @@ export function validateDecompositionFileScope(
     return issues;
   }
 
-  const caseCorpus = enumerateTrackedFilePaths(repoRoot);
   // normalizeRepoPath(tracked) → real on-disk case, so a scoped path grounds
   // through the shared dotfile-safe normalizer without a private copy.
   const byNorm = new Map<string, string>();
@@ -1811,9 +1821,9 @@ export interface ContractPipelineCrossGateInputs {
  * self-check in an otherwise-empty run) can never false-fail: every gate
  * lacking its input contributes an empty array, not a fabricated issue.
  */
-export function evaluateContractPipelineCrossGateOutcomes(
+export async function evaluateContractPipelineCrossGateOutcomes(
   inputs: ContractPipelineCrossGateInputs,
-): GateOutcome[] {
+): Promise<GateOutcome[]> {
   const { payloads, findingEnumeration, root } = inputs;
 
   const goalSpec = payloads.get("goal_spec");
@@ -1872,7 +1882,7 @@ export function evaluateContractPipelineCrossGateOutcomes(
     gateOutcome(
       "decomposition_file_scope",
       canEvaluateDecompositionFileScope(moduleDecomposition),
-      validateDecompositionFileScope(moduleDecomposition, root),
+      await validateDecompositionFileScope(moduleDecomposition, root),
       "module_decomposition payload is absent or malformed (not a record with a modules array)",
     ),
     gateOutcome(

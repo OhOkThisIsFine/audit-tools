@@ -7,6 +7,7 @@ import {
   groundEvidence,
   groundExtractedFindings,
 } from "../../src/remediate/phases/grounding.js";
+import { enumerateTrackedFilePaths } from "audit-tools/shared";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { Finding } from "../../src/remediate/state/types.js";
 import { scratchDir } from "../helpers/scratch.js";
@@ -64,34 +65,38 @@ afterEach(async () => {
 });
 
 describe("groundAffectedFiles (WS1)", () => {
-  it("strips phantom paths and keeps real ones", () => {
+  it("strips phantom paths and keeps real ones", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
     const finding = mkFinding("F-1", { files: ["src/real.ts", "src/ghost.ts"] });
-    const result = groundAffectedFiles(TEST_DIR, [finding]);
+    const result = groundAffectedFiles(TEST_DIR, [finding], corpus);
 
     expect(finding.affected_files.map((f) => f.path)).toEqual(["src/real.ts"]);
     expect(result.phantomPathsByFinding.get("F-1")).toEqual(["src/ghost.ts"]);
     expect(result.zeroRealPathFindingIds).toEqual([]);
   });
 
-  it("flags findings whose every cited path is phantom", () => {
+  it("flags findings whose every cited path is phantom", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
     const finding = mkFinding("F-2", { files: ["nope/a.ts", "nope/b.ts"] });
-    const result = groundAffectedFiles(TEST_DIR, [finding]);
+    const result = groundAffectedFiles(TEST_DIR, [finding], corpus);
 
     expect(finding.affected_files).toEqual([]);
     expect(result.zeroRealPathFindingIds).toEqual(["F-2"]);
   });
 
-  it("leaves findings that never cited a path untouched (legitimate discovery state)", () => {
+  it("leaves findings that never cited a path untouched (legitimate discovery state)", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
     const finding = mkFinding("F-3", { files: [] });
-    const result = groundAffectedFiles(TEST_DIR, [finding]);
+    const result = groundAffectedFiles(TEST_DIR, [finding], corpus);
 
     expect(result.zeroRealPathFindingIds).toEqual([]);
     expect(result.phantomPathsByFinding.size).toBe(0);
   });
 
-  it("accepts directory paths as real", () => {
+  it("accepts directory paths as real", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
     const finding = mkFinding("F-4", { files: ["src"] });
-    const result = groundAffectedFiles(TEST_DIR, [finding]);
+    const result = groundAffectedFiles(TEST_DIR, [finding], corpus);
 
     expect(finding.affected_files.map((f) => f.path)).toEqual(["src"]);
     expect(result.phantomPathsByFinding.size).toBe(0);
@@ -99,37 +104,43 @@ describe("groundAffectedFiles (WS1)", () => {
 });
 
 describe("evidenceCitesRealPath (WS2)", () => {
-  it("accepts a real path with a valid line", () => {
-    expect(evidenceCitesRealPath(TEST_DIR, "src/real.ts:2 — broken logic")).toBe(true);
+  it("accepts a real path with a valid line", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/real.ts:2 — broken logic", corpus)).toBe(true);
   });
 
-  it("rejects a real path with an out-of-range line", () => {
-    expect(evidenceCitesRealPath(TEST_DIR, "src/real.ts:9999 — broken logic")).toBe(false);
+  it("rejects a real path with an out-of-range line", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/real.ts:9999 — broken logic", corpus)).toBe(false);
   });
 
-  it("accepts a real path without a line", () => {
-    expect(evidenceCitesRealPath(TEST_DIR, "see src/real.ts for the handler")).toBe(true);
+  it("accepts a real path without a line", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "see src/real.ts for the handler", corpus)).toBe(true);
   });
 
-  it("rejects phantom paths and bare prose", () => {
-    expect(evidenceCitesRealPath(TEST_DIR, "src/ghost.ts:1 is wrong")).toBe(false);
-    expect(evidenceCitesRealPath(TEST_DIR, "the login flow loses the session")).toBe(false);
+  it("rejects phantom paths and bare prose", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/ghost.ts:1 is wrong", corpus)).toBe(false);
+    expect(evidenceCitesRealPath(TEST_DIR, "the login flow loses the session", corpus)).toBe(false);
   });
 });
 
 describe("groundEvidence (WS2)", () => {
-  it("marks grounded findings and preserves their confidence", () => {
+  it("marks grounded findings and preserves their confidence", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
     const finding = mkFinding("F-5", { evidence: ["src/real.ts:1 — bug here"] });
-    const result = groundEvidence(TEST_DIR, [finding]);
+    const result = groundEvidence(TEST_DIR, [finding], corpus);
 
     expect(finding.evidence_grounded).toBe(true);
     expect(finding.confidence).toBe("high");
     expect(result.ungroundedFindingIds).toEqual([]);
   });
 
-  it("downgrades ungrounded findings to low confidence without dropping them", () => {
+  it("downgrades ungrounded findings to low confidence without dropping them", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
     const finding = mkFinding("F-6", { evidence: ["the auth flow feels wrong"] });
-    const result = groundEvidence(TEST_DIR, [finding]);
+    const result = groundEvidence(TEST_DIR, [finding], corpus);
 
     expect(finding.evidence_grounded).toBe(false);
     expect(finding.confidence).toBe("low");

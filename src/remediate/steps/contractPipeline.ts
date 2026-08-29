@@ -1242,7 +1242,7 @@ export async function evaluateContractObligationsPromotionGate(
   root: string = climbOutOfAuditTools(artifactsDir),
   inputs?: ContractPipelineCrossGateInputs,
 ): Promise<ContractObligationsGateResult> {
-  const outcomes = evaluateContractPipelineCrossGateOutcomes(
+  const outcomes = await evaluateContractPipelineCrossGateOutcomes(
     inputs ?? (await readCrossGateInputs(artifactsDir, root)),
   );
   return consumeGateOutcomes(outcomes, PROMOTION_GATES, PROMOTION_REQUIRED_GATES);
@@ -1273,7 +1273,7 @@ export async function evaluatePreCriticStructuralGate(
   root: string = climbOutOfAuditTools(artifactsDir),
   inputs?: ContractPipelineCrossGateInputs,
 ): Promise<{ phase: "contract_finalization" | "test_validator_plan"; errorLines: string[] } | null> {
-  const outcomes = evaluateContractPipelineCrossGateOutcomes(
+  const outcomes = await evaluateContractPipelineCrossGateOutcomes(
     inputs ?? (await readCrossGateInputs(artifactsDir, root)),
   );
 
@@ -1384,7 +1384,7 @@ async function evaluatePreCriticCitationGrounding(
   );
   const citations = decompositionModulesToCitations(decomposition);
   if (citations.length === 0) return null;
-  const result = validateContractCitationGrounding(citations, repoRoot);
+  const result = await validateContractCitationGrounding(citations, repoRoot);
   const errors = result.issues.filter((issue) => issue.severity === "error");
   if (errors.length === 0) return null;
   return { errorLines: errors.map((issue) => `- [${issue.path}] ${issue.message}`) };
@@ -1406,7 +1406,7 @@ export async function evaluatePromotedPlanCitationGrounding(
       ? (plan.findings as Finding[])
       : [];
   if (findings.length === 0) return null;
-  const result = validateContractCitationGrounding(findings, repoRoot);
+  const result = await validateContractCitationGrounding(findings, repoRoot);
   const errors = result.issues.filter((issue) => issue.severity === "error");
   if (errors.length === 0) return null;
   return { violations: errors.map((issue) => `[${issue.path}] ${issue.message}`) };
@@ -2537,7 +2537,7 @@ ${rejectionRewriteInstruction(archived)}`,
  * `evaluated` is taken, and its declared meaning here is "not yet applicable".
  */
 const finalizedModuleSetGate: ContractGate = async (ctx) => {
-  const outcomes = evaluateContractPipelineCrossGateOutcomes(
+  const outcomes = await evaluateContractPipelineCrossGateOutcomes(
     await readCrossGatePayloads(ctx),
   );
   const outcome = gateOutcomeOf(outcomes, "finalized_module_set_preserved");
@@ -2886,7 +2886,7 @@ Each node's source_finding_ids must name exactly one canonical audit work block,
   // DAG referential integrity + bidirectional coverage (ARC-86b18f1b-2), run
   // before the traceability check so specific referential violations are
   // reported first (traceability is a superset check).
-  const outcomes = evaluateContractPipelineCrossGateOutcomes(
+  const outcomes = await evaluateContractPipelineCrossGateOutcomes(
     await readCrossGatePayloads(ctx),
   );
   const integrity = gateOutcomeOf(outcomes, "implementation_dag_integrity");
@@ -3337,7 +3337,7 @@ Remove or unlock \`${contractArtifactFilePath(ctx.artifactsDir, "cyclic_seam_res
 const preCriticStructuralGate: ContractGate = async (ctx) => {
   if (ctx.nextPhase !== "critic") return null;
 
-  const outcomes = evaluateContractPipelineCrossGateOutcomes(
+  const outcomes = await evaluateContractPipelineCrossGateOutcomes(
     await readCrossGatePayloads(ctx),
   );
 
@@ -3811,12 +3811,12 @@ function deriveObligationLensAndSeverity(kinds: readonly ObligationKind[]): {
  * fresh checkout must not be bricked, only an unsound path in a REAL tree is
  * refused.
  */
-function readTrackedWriteScopeCorpus(root: string): {
+async function readTrackedWriteScopeCorpus(root: string): Promise<{
   files: ReadonlySet<string>;
   directories: ReadonlySet<string>;
-} | null {
-  if (!isInsideGitWorkTree(root)) return null;
-  const files = enumerateRepoTreePaths(root);
+} | null> {
+  if (!(await isInsideGitWorkTree(root))) return null;
+  const files = await enumerateRepoTreePaths(root);
   if (files.size === 0) return null;
   const directories = new Set<string>();
   for (const path of files) {
@@ -3912,7 +3912,7 @@ export async function evaluatePromotedPlanWriteScope(
   artifactsDir: string,
   root: string,
 ): Promise<{ violations: string[] } | null> {
-  const corpus = readTrackedWriteScopeCorpus(root);
+  const corpus = await readTrackedWriteScopeCorpus(root);
   if (!corpus) return null;
   const plan = await readOptionalJsonFile<{
     blocks?: Array<{ block_id?: unknown; touched_files?: unknown }>;

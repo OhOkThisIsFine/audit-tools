@@ -53,8 +53,8 @@ async function withUnicodeRepo<T>(fn: (dir: string) => Promise<T> | T): Promise<
 }
 
 test("enumerateTrackedFilePaths keeps a non-ASCII tracked path verbatim (NUL-delimited)", async () => {
-  await withUnicodeRepo((dir) => {
-    const corpus = enumerateTrackedFilePaths(dir);
+  await withUnicodeRepo(async (dir) => {
+    const corpus = await enumerateTrackedFilePaths(dir);
     expect(corpus.has(ASCII_PATH)).toBe(true);
     expect(
       [...corpus].filter((p) => p.includes('"')),
@@ -65,8 +65,8 @@ test("enumerateTrackedFilePaths keeps a non-ASCII tracked path verbatim (NUL-del
 });
 
 test("enumerateRepoTreePaths (M-B3 corpus) keeps a non-ASCII tracked path verbatim", async () => {
-  await withUnicodeRepo((dir) => {
-    const corpus = enumerateRepoTreePaths(dir);
+  await withUnicodeRepo(async (dir) => {
+    const corpus = await enumerateRepoTreePaths(dir);
     expect(corpus.has(ASCII_PATH)).toBe(true);
     expect(
       [...corpus].filter((p) => p.includes('"')),

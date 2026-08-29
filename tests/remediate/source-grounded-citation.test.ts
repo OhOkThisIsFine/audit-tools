@@ -21,6 +21,7 @@ import {
   evidenceCitesRealPath,
 } from "../../src/remediate/phases/grounding.js";
 import { validateContractCitationGrounding } from "../../src/remediate/validation/contractPipelineGates.js";
+import { enumerateTrackedFilePaths } from "../../src/shared/validation/findingGrounding.js";
 import type { Finding } from "../../src/remediate/state/types.js";
 
 function git(root: string, args: string[]): void {
@@ -72,25 +73,28 @@ describe("grounding.ts consumers resolve bare basenames + dotfile paths", () => 
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("INV-B3-3 POSITIVE: a bare basename for a NESTED tracked file is not stripped as phantom", () => {
+  it("INV-B3-3 POSITIVE: a bare basename for a NESTED tracked file is not stripped as phantom", async () => {
+    const corpus = await enumerateTrackedFilePaths(root);
     const finding = mkFinding("f1", ["advance.ts"]);
-    const { zeroRealPathFindingIds, phantomPathsByFinding } = groundAffectedFiles(root, [finding]);
+    const { zeroRealPathFindingIds, phantomPathsByFinding } = groundAffectedFiles(root, [finding], corpus);
     // Nested `advance.ts` resolves against the tracked corpus → kept, not phantom.
     expect(finding.affected_files.map((a) => a.path)).toContain("advance.ts");
     expect(zeroRealPathFindingIds).not.toContain("f1");
     expect(phantomPathsByFinding.has("f1")).toBe(false);
   });
 
-  it("INV-B3-3 POSITIVE: a dotfile-dir path keeps resolving (via the root join)", () => {
+  it("INV-B3-3 POSITIVE: a dotfile-dir path keeps resolving (via the root join)", async () => {
+    const corpus = await enumerateTrackedFilePaths(root);
     const finding = mkFinding("f2", [DOTFILE]);
-    const { zeroRealPathFindingIds } = groundAffectedFiles(root, [finding]);
+    const { zeroRealPathFindingIds } = groundAffectedFiles(root, [finding], corpus);
     expect(finding.affected_files.map((a) => a.path)).toContain(DOTFILE);
     expect(zeroRealPathFindingIds).not.toContain("f2");
   });
 
-  it("INV-B3-6 NEGATIVE: a hallucinated bare basename / path is still phantom-stripped", () => {
+  it("INV-B3-6 NEGATIVE: a hallucinated bare basename / path is still phantom-stripped", async () => {
+    const corpus = await enumerateTrackedFilePaths(root);
     const finding = mkFinding("f3", ["doesnotexist.ts", "made/up/dir/x.ts"]);
-    const { zeroRealPathFindingIds, phantomPathsByFinding } = groundAffectedFiles(root, [finding]);
+    const { zeroRealPathFindingIds, phantomPathsByFinding } = groundAffectedFiles(root, [finding], corpus);
     expect(finding.affected_files).toHaveLength(0);
     expect(zeroRealPathFindingIds).toContain("f3");
     expect(phantomPathsByFinding.get("f3")).toEqual([
@@ -99,16 +103,18 @@ describe("grounding.ts consumers resolve bare basenames + dotfile paths", () => 
     ]);
   });
 
-  it("INV-B3-3 POSITIVE: evidence `advance.ts:5` cites-real-path true for a nested file", () => {
+  it("INV-B3-3 POSITIVE: evidence `advance.ts:5` cites-real-path true for a nested file", async () => {
+    const corpus = await enumerateTrackedFilePaths(root);
     // Bare basename with an in-range line number resolves to the nested file.
-    expect(evidenceCitesRealPath(root, "see advance.ts:5 for the bug")).toBe(true);
+    expect(evidenceCitesRealPath(root, "see advance.ts:5 for the bug", corpus)).toBe(true);
     // Without a line number the bare basename still grounds.
-    expect(evidenceCitesRealPath(root, "look at advance.ts")).toBe(true);
+    expect(evidenceCitesRealPath(root, "look at advance.ts", corpus)).toBe(true);
   });
 
-  it("INV-B3-6 NEGATIVE: evidence with an out-of-range line or hallucinated name stays ungrounded", () => {
-    expect(evidenceCitesRealPath(root, "advance.ts:9999 does not exist")).toBe(false);
-    expect(evidenceCitesRealPath(root, "phantom in doesnotexist.ts:1")).toBe(false);
+  it("INV-B3-6 NEGATIVE: evidence with an out-of-range line or hallucinated name stays ungrounded", async () => {
+    const corpus = await enumerateTrackedFilePaths(root);
+    expect(evidenceCitesRealPath(root, "advance.ts:9999 does not exist", corpus)).toBe(false);
+    expect(evidenceCitesRealPath(root, "phantom in doesnotexist.ts:1", corpus)).toBe(false);
   });
 });
 
@@ -121,16 +127,16 @@ describe("INV-B3-4: M-B3 gate grounds a dotfile-only node end-to-end", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("POSITIVE: a finding citing only a dotfile path yields zero severity:error issues", () => {
+  it("POSITIVE: a finding citing only a dotfile path yields zero severity:error issues", async () => {
     const finding = mkFinding("d1", [DOTFILE]);
-    const { treeReadable, issues } = validateContractCitationGrounding([finding], root);
+    const { treeReadable, issues } = await validateContractCitationGrounding([finding], root);
     expect(treeReadable).toBe(true);
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
-  it("NEGATIVE: a finding citing only a hallucinated path is rejected (error)", () => {
+  it("NEGATIVE: a finding citing only a hallucinated path is rejected (error)", async () => {
     const finding = mkFinding("d2", ["made/up/nowhere/x.ts"]);
-    const { issues } = validateContractCitationGrounding([finding], root);
+    const { issues } = await validateContractCitationGrounding([finding], root);
     expect(issues.filter((i) => i.severity === "error").length).toBeGreaterThan(0);
   });
 });

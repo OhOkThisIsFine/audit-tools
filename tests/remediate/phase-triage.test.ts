@@ -599,7 +599,7 @@ describe("runTriagePhase", () => {
     const state = makeBaseState({
       status: "triage",
       plan: planWithBlocks([
-        { block_id: "B1", items: ["F1"], targeted_commands: ["exit 0"] },
+        { block_id: "B1", items: ["F1"], targeted_commands: ['node -e "process.exit(0)"'] },
       ]),
       items: {
         F1: {
@@ -624,7 +624,7 @@ describe("runTriagePhase", () => {
     const state = makeBaseState({
       status: "triage",
       plan: planWithBlocks([
-        { block_id: "B1", items: ["F1"], targeted_commands: ["exit 1"] },
+        { block_id: "B1", items: ["F1"], targeted_commands: ['node -e "process.exit(1)"'] },
       ]),
       items: {
         F1: {
@@ -652,7 +652,7 @@ describe("runTriagePhase", () => {
         {
           block_id: "B1",
           items: ["F1"],
-          targeted_commands: ["exit 0"],
+          targeted_commands: ['node -e "process.exit(0)"'],
           touched_files: ["scripts/remediate/never-created.mjs"],
         },
       ]),
@@ -675,8 +675,8 @@ describe("runTriagePhase", () => {
     const state = makeBaseState({
       status: "triage",
       plan: planWithBlocks([
-        { block_id: "B1", items: ["F1"], targeted_commands: ["exit 0"] },
-        { block_id: "B2", items: ["F2"], targeted_commands: ["exit 1"] },
+        { block_id: "B1", items: ["F1"], targeted_commands: ['node -e "process.exit(0)"'] },
+        { block_id: "B2", items: ["F2"], targeted_commands: ['node -e "process.exit(1)"'] },
       ]),
       items: {
         // Already satisfied in the tree → reconciled, not retried.

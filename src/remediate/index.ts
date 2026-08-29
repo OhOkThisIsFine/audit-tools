@@ -421,11 +421,13 @@ export async function runValidateArtifactAction(options: {
     const findingEnumeration = await readOptionalJsonFile(
       intakePaths(artifactsDir).findingEnumeration,
     );
-    crossGateIssues = evaluateContractPipelineCrossGateOutcomes({
-      payloads,
-      findingEnumeration,
-      root,
-    }).flatMap((outcome) => outcome.issues);
+    crossGateIssues = (
+      await evaluateContractPipelineCrossGateOutcomes({
+        payloads,
+        findingEnumeration,
+        root,
+      })
+    ).flatMap((outcome) => outcome.issues);
   } catch (err) {
     // readContractArtifact / readOptionalJsonFile throw on a corrupt (malformed-
     // JSON) sibling envelope — mirror the same JSON-parse-error shape/exit code

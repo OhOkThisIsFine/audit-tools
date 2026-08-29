@@ -982,7 +982,11 @@ export async function recoverIngestHostResults(options: {
     );
   }
 
-  // ── Phase 2: locked, spawn-free ──────────────────────────────────────────
+  // ── Phase 2: locked; children are async + deadline-bounded only ──────────
+  // The long-running required tests were precomputed in Phase 1, outside the
+  // lock. What still spawns under the hold is the corroboration git probes —
+  // async on the tracked twin with the shared deadline (INV-SSF), so the
+  // hold's heartbeat keeps beating through every probe.
   let ingested!: RemediationHostIngestSummary;
   await store.mutate(async (state) => {
     if (!state) {

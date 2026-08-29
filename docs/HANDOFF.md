@@ -5,23 +5,24 @@
 
 ## Live state
 
-- **CX-02 is CLOSED end-to-end.** The unification shipped (`v0.50.6`); the deferred live
-  measurement ran and shipped with fold_hold telemetry (`v0.50.7`); the owner's waiter decision
-  landed (waiter window 120 s, waiter-side only, one acquisition surface). The landed shape lives
-  in [`cx02-drain-unification-design-2026-08-26.md`](reviews/cx02-drain-unification-design-2026-08-26.md);
-  the measurement and the decided window live in
-  [`cx02-hold-time-measurement-2026-08-29.md`](reviews/cx02-hold-time-measurement-2026-08-29.md).
+- **The sync-children hazard is CLOSED on BOTH halves.** Audit half: every audit-fold-reachable
+  spawn on the async exec twin with the shared 120 s deadline (`v0.50.9`). Remediate half: the
+  ingestion corroboration probes, the triage reverify (now argv through the shared required-test
+  runner, no shell), and the grounding/contract-gate enumerations all run async with declared
+  deadlines; the acquisition default runners and the closing-phase spawns carry declared
+  deadlines too. INV-SSF pins seven fold-reachable modules;
+  `tests/shared/analyzer-default-runner-deadline.test.ts` pins the acquisition default runners
+  behaviorally (its header states the one unpinned half: close.ts's in-code deadlines).
+- **CX-02 is CLOSED end-to-end** (`v0.50.6`–`v0.50.8`; waiter window 120 s, one acquisition
+  surface). Landed shape:
+  [`cx02-drain-unification-design-2026-08-26.md`](reviews/cx02-drain-unification-design-2026-08-26.md);
+  measurement: [`cx02-hold-time-measurement-2026-08-29.md`](reviews/cx02-hold-time-measurement-2026-08-29.md).
 
 ## Immediate next
 
-**Close the remediate half of the sync-children hazard.** The audit half is DONE: every
-audit-fold-reachable spawn runs on the async exec twin with the shared 120 s deadline, the sync
-twin requires a declared timeout, and INV-SSF
-(`tests/shared/sync-spawn-fold-safety.test.ts`) pins the three fold-reachable modules. What
-remains: the remediate ingestion path's sync git probes run while the state lock is held, the
-triage reverify runs arbitrary commands through `spawnSync` unbounded, and the
-grounding/contract-gate enumerations spawn git synchronously with no timeout. Home: the
-"Remediate-side synchronous children" entry in [`open-bugs.md`](backlog/open-bugs.md).
+**Nothing is pinned.** The queue is the backlog ([`backlog.md`](backlog.md)); the standing
+program direction remains *redesign before scheduled autonomy* → the autonomous
+audit→remediate→PR capstone once the architecture items are worked off.
 
 
 ## Deliberate state, not bugs
@@ -55,10 +56,10 @@ grounding/contract-gate enumerations spawn git synchronously with no timeout. Ho
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 1 pinned item(s).
+> `verify:checks` and at commit). 0 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ Remediate-side synchronous children still run under (or near) the state lock with no bound (2026-08-29, medium, friction: tool_should_decide). · [`open-bugs.md`](backlog/open-bugs.md)
+*(nothing pinned — no immediate next step is set. Every open item is in [`docs/backlog/`](backlog/).)*
 
 <!-- END GENERATED ROADMAP -->

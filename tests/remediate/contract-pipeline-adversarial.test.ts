@@ -1000,13 +1000,13 @@ describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
       ...over,
     }) as Finding;
 
-  it("enumerates the working tree via git ls-files (TEST_DIR has src/auth.ts tracked)", () => {
-    const known = enumerateRepoTreePaths(TEST_DIR);
+  it("enumerates the working tree via git ls-files (TEST_DIR has src/auth.ts tracked)", async () => {
+    const known = await enumerateRepoTreePaths(TEST_DIR);
     expect(known.has("src/auth.ts")).toBe(true);
   });
 
-  it("passes a finding that cites a real path", () => {
-    const result = validateContractCitationGrounding(
+  it("passes a finding that cites a real path", async () => {
+    const result = await validateContractCitationGrounding(
       [mkFinding({ affected_files: [{ path: "src/auth.ts" }] })],
       TEST_DIR,
     );
@@ -1014,18 +1014,18 @@ describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
     expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
-  it("passes a symbol-only citation to a REAL symbol", () => {
+  it("passes a symbol-only citation to a REAL symbol", async () => {
     // No path cited; the summary names the symbol `authFlow`, a real segment of
     // the tracked file src/authFlow.ts.
-    const result = validateContractCitationGrounding(
+    const result = await validateContractCitationGrounding(
       [mkFinding({ summary: "Tighten the authFlow before refresh." })],
       TEST_DIR,
     );
     expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
-  it("REJECTS a symbol-only citation to a NON-existent symbol (not excused as 'cites no component')", () => {
-    const result = validateContractCitationGrounding(
+  it("REJECTS a symbol-only citation to a NON-existent symbol (not excused as 'cites no component')", async () => {
+    const result = await validateContractCitationGrounding(
       [mkFinding({ summary: "Refactor nonExistentSymbolXyz before refresh." })],
       TEST_DIR,
     );
@@ -1034,20 +1034,20 @@ describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
     expect(errors[0].message).toMatch(/cites no real component/);
   });
 
-  it("REJECTS a finding whose only cited path is under a NON-existent directory (hallucinated location)", () => {
-    const result = validateContractCitationGrounding(
+  it("REJECTS a finding whose only cited path is under a NON-existent directory (hallucinated location)", async () => {
+    const result = await validateContractCitationGrounding(
       [mkFinding({ affected_files: [{ path: "ghost-dir/does-not-exist.ts" }] })],
       TEST_DIR,
     );
     expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(1);
   });
 
-  it("GROUNDS a brand-new file under a REAL tracked directory (create-file deliverable)", () => {
+  it("GROUNDS a brand-new file under a REAL tracked directory (create-file deliverable)", async () => {
     // A module/finding that creates a new file cannot cite an existing path for
     // its deliverable — it grounds against its real parent directory instead, so
     // the citation gate no longer infinite-loops on new-file modules. A path under
     // a fabricated directory (previous test) is still rejected.
-    const result = validateContractCitationGrounding(
+    const result = await validateContractCitationGrounding(
       [mkFinding({ affected_files: [{ path: "src/brand-new-file.ts" }] })],
       TEST_DIR,
     );
@@ -1055,9 +1055,9 @@ describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
     expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
-  it("fails CLOSED only when the tree is genuinely unreadable (git unavailable / not a repo)", () => {
+  it("fails CLOSED only when the tree is genuinely unreadable (git unavailable / not a repo)", async () => {
     // A non-existent dir is not a git work tree → fail closed (error).
-    const result = validateContractCitationGrounding(
+    const result = await validateContractCitationGrounding(
       [mkFinding({ affected_files: [{ path: "src/auth.ts" }] })],
       join(TEST_DIR, "no-such-subdir"),
     );
@@ -1073,10 +1073,10 @@ describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
     await mkdir(emptyRepo, { recursive: true });
     spawnSync("git", ["init"], { cwd: emptyRepo, shell: false, encoding: "utf8" });
 
-    expect(enumerateRepoTreePaths(emptyRepo).size).toBe(0);
-    expect(isInsideGitWorkTree(emptyRepo)).toBe(true);
+    expect((await enumerateRepoTreePaths(emptyRepo)).size).toBe(0);
+    expect(await isInsideGitWorkTree(emptyRepo)).toBe(true);
 
-    const result = validateContractCitationGrounding(
+    const result = await validateContractCitationGrounding(
       [mkFinding({ affected_files: [{ path: "src/auth.ts" }] })],
       emptyRepo,
     );

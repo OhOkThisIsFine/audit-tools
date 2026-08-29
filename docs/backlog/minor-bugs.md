@@ -435,3 +435,13 @@
   per file (skip-on-ENOENT with the skip recorded in the hash input) or the failure names the
   actual condition — "dist changed during the walk; rebuild and re-run" — never a bare ENOENT from
   an internal path.
+
+- **closeout-challenge-gate fires at a mid-skill pause while a background lane is live (2026-08-29,
+  low, friction: tool_should_decide).** During a design-gate wait (an agy refutation lane running as
+  a background shell task), the Stop challenge fired and spent one of its two per-session asks on a
+  pause that was not a sprint end — the reply could only restate "mid-task, lane in flight". The
+  Stop payload carries a `background_tasks` signal (memory: `stop-payload-background-tasks-signal`),
+  so the evidence for "this Stop is a wait, not a hand-back" is mechanically available at the
+  decision point. **Property:** a Stop with live session-owned background work is a WAIT — the
+  challenge does not fire there and does not spend its cap; a Stop with no live background work
+  challenges exactly as today.
