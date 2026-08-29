@@ -5,25 +5,22 @@
 
 ## Live state
 
-- **CX-02 is IMPLEMENTED on branch `cx02-impl` (2026-08-28): one registry, one drain, one hold.**
-  The full suite is green on the replace (6114 passed, 0 failed), the constraint-3 acceptance
-  test lives in-tree (`tests/audit/one-lock-hold-per-next-step.test.ts`, 3 → 1), and
-  `check:deadcode` is green again (the fold adopted the lock-site splits). The record's
-  *IMPLEMENTED, 2026-08-28* section in
-  [`cx02-drain-unification-design-2026-08-26.md`](reviews/cx02-drain-unification-design-2026-08-26.md)
-  states the landed shape and its three self-corrections — read it, not this.
-- **Repository:** `v0.50.4` is live on npm and both global bins report it; `main`, `origin/main`
-  and the tag agree. The CX-02 work sits on `cx02-impl` awaiting the land-and-ship flow.
+- **CX-02 is SHIPPED: `v0.50.6` is live on npm (2026-08-28), both global bins report it, and
+  `main`, `origin/main` and the tag agree.** The landed shape and its self-corrections live in
+  the record's *IMPLEMENTED* section
+  ([`cx02-drain-unification-design-2026-08-26.md`](reviews/cx02-drain-unification-design-2026-08-26.md))
+  — read it, not this. The ship surfaced and fixed two Linux-only defects the Windows box could
+  not see (an absent-lane staging probe that wrote to the artifacts root, and a suite that read
+  the machine analyzer cache — now hermetic per worker), plus a commit re-entry duplicate the
+  external review lanes caught; the burned `v0.50.5` tag was deleted per the recovery path.
 
 ## Immediate next
 
-**Land `cx02-impl` on `main` and ship** (the `/ship` flow: verify green → commit with the
-loop-core attestation → push → merge → publish → verify live → reinstall bins).
-
-Then still open and owner-facing: the live fresh-audit measurement before the cap is re-sized —
-it must capture HOLD TIME as well as charged-execution count, because the single outer hold
-converts a concurrent waiter into a failure after `DEFAULT_TIMEOUT_MS` = 10,000 ms
-(`withFileLock`) / 20 s (`LOCKED_JSON_STORE_TIMEOUT_MS`).
+**The CX-02 live fresh-audit measurement before the cap is re-sized** — capture HOLD TIME as
+well as charged-execution count, because the single outer hold converts a concurrent waiter
+into a failure after `DEFAULT_TIMEOUT_MS` = 10,000 ms (`withFileLock`) / 20 s
+(`LOCKED_JSON_STORE_TIMEOUT_MS`). Spec: the pinned CX-02 entry in
+[`forward-tracks.md`](backlog/forward-tracks.md).
 
 
 ## Deliberate state, not bugs
@@ -61,6 +58,6 @@ converts a concurrent waiter into a failure after `DEFAULT_TIMEOUT_MS` = 10,000 
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ CX-02 — one audit obligation registry, one drain. IMPLEMENTED on `cx02-impl` (2026-08-28); remaining: ship + the deferred live measurement. · [`forward-tracks.md`](backlog/forward-tracks.md)
+- ▶ CX-02 — one audit obligation registry, one drain. SHIPPED in v0.50.6 (2026-08-28); remaining: the live fresh-audit measurement before the cap is re-sized. · [`forward-tracks.md`](backlog/forward-tracks.md)
 
 <!-- END GENERATED ROADMAP -->

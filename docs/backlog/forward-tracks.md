@@ -40,21 +40,15 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
 
 ## Forward tracks
 
-- **▶ CX-02 — one audit obligation registry, one drain. IMPLEMENTED on `cx02-impl` (2026-08-28);
-  remaining: ship + the deferred live measurement.** The decided shape landed as the atomic
-  replace — one PRIORITY-derived registry with a bespoke-policy overlay, one drain (the full fold
-  dispatches `runSingleAdvanceStep` per charged execution; unforced `advanceAudit` is the plan
-  draw over the shared classifier `src/audit/orchestrator/obligationPolicy.ts`), one lock hold
-  with one core commit (`commitFold`, throw path included), durable submission staging with the
-  systemic-challenge duplicate register, and the engine's `maxExecutions` budget (PH-03 in
-  [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md)).
-  The single home for constraints, refutations, and the implementation status is
+- **▶ CX-02 — one audit obligation registry, one drain. SHIPPED in v0.50.6 (2026-08-28);
+  remaining: the live fresh-audit measurement before the cap is re-sized.** The atomic replace is
+  on `main` and published; the single home for the landed shape, constraints, and refutations is
   [`cx02-drain-unification-design-2026-08-26.md`](../reviews/cx02-drain-unification-design-2026-08-26.md)
-  — read it, not a summary of it. **Open half: the live fresh-audit measurement before the cap is
-  re-sized**, which must capture HOLD TIME as well as charged-execution count — the single outer
-  hold converts a concurrent waiter into a failure after `DEFAULT_TIMEOUT_MS` = 10,000 ms
-  (`withFileLock`) / 20 s (`LOCKED_JSON_STORE_TIMEOUT_MS`), so the measurement decides both the
-  cap value and whether the waiter timeouts need widening.
+  — read it, not a summary of it. **The open half: measure a live fresh audit** capturing HOLD
+  TIME as well as charged-execution count — the single outer hold converts a concurrent waiter
+  into a failure after `DEFAULT_TIMEOUT_MS` = 10,000 ms (`withFileLock`) / 20 s
+  (`LOCKED_JSON_STORE_TIMEOUT_MS`), so the measurement decides both the cap value and whether the
+  waiter timeouts need widening.
 
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** A contract-valid empty result cannot be scored for quality without ground truth;

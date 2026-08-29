@@ -30,8 +30,11 @@
   missing — `sessionHasLiveBackgroundWork` (`scripts/shared/liveSessionWork.mjs`) reads
   `background_tasks` and both Stop gates call it — so either this build omitted the field or the
   entries had already left the array. Its own header states the degradation: absent fields make the
-  predicate false. **Property:** the predicate distinguishes "no live work" from "no signal", and a
-  missing signal does not silently degrade to challenging. Capture one Stop payload to tell which.
+  predicate false. Second instance 2026-08-28: it fired while a backgrounded Bash full-suite task and
+  two MCP offload jobs were live (the MCP jobs are server-side and plausibly never in
+  `background_tasks`; the Bash task should have been). **Property:** the predicate distinguishes "no
+  live work" from "no signal", and a missing signal does not silently degrade to challenging. Capture
+  one Stop payload to tell which.
 
 - **The obligation engine's bound doc is off by one against its own comparison (2026-08-28, low).**
   `obligationEngine.ts` documents `maxTransitions` as stopping "after that many consecutive

@@ -106,56 +106,56 @@
 
 - `minor-bugs.md:14` — A re-entered `commitFold` can still append ONE duplicate `accepted` event when `recordLaneOutcome` throws after its durable append (2026-08-28, low).
 - `minor-bugs.md:27` — The live-work guard did not stop the closeout challenge firing mid-sprint; an ABSENT signal is indistinguishable from an idle session (2026-08-28, low, friction: tool_should_decide).
-- `minor-bugs.md:36` — The obligation engine's bound doc is off by one against its own comparison (2026-08-28, low).
-- `minor-bugs.md:42` — The backlog size baseline holds amnesties for entries that no longer exist, and its file ceiling never ratchets down (2026-08-27, low).
-- `minor-bugs.md:51` — `InputResolution` is declared twice, under one name, with two different shapes (2026-08-27, low).
-- `minor-bugs.md:61` — The release script's await-run timeout (10 min) is shorter than a GitHub `release`-event delivery delay it then misreads as "no run" (2026-08-26, low, friction: tool_should_decide).
-- `minor-bugs.md:78` — The nightly clean-tree rule does not say which writes it blocks (2026-08-22, low, friction: ambiguous_direction).
-- `minor-bugs.md:80` — The backlog triage sweep needs a second manual invocation to reach its real coverage (2026-08-22, low, friction: tool_should_decide).
-- `minor-bugs.md:81` — No native way to draw a subset of a large findings file into a remediation run (2026-08-22, low, friction: tool_should_decide).
-- `minor-bugs.md:83` — A transition that ends the call drops the fold's carried advisories (2026-08-22, low).
-- `minor-bugs.md:85` — A release version bump trips the path-A seed-drift alarm (2026-08-23, low, friction: tool_should_decide).
-- `minor-bugs.md:90` — The step prompt's "Result status requiring attention" lists MISSING results with the same shape as rejections (2026-08-23, low).
-- `minor-bugs.md:95` — Dispatch-lane children still answer the Stop "closeout challenge" despite `AUDIT_TOOLS_CHILD_SESSION=1` (2026-08-23, low).
-- `minor-bugs.md:100` — The phase-boundary repository gate re-runs on EVERY `next-step` at the boundary (2026-08-23, low).
-- `minor-bugs.md:105` — Reviewer minors carried from the first-draw landings (2026-08-23, low).
-- `minor-bugs.md:113` — The friction close-out walk must be written twice under two different names (2026-08-21, low, friction: tool_should_decide).
-- `minor-bugs.md:115` — Acquisition of `actionlint` fails on extract (2026-08-21, low).
-- `minor-bugs.md:117` — Writing the nightly queue desyncs HANDOFF's generated live-status block (2026-08-20, low, friction: tool_should_decide).
-- `minor-bugs.md:125` — recover-ingest / recover-submission leave the last step contract on disk after mutating state (2026-08-19, low).
-- `minor-bugs.md:132` — `StateStore.mutate` cannot skip the write — a no-op recovery rewrites an identical state file (2026-08-19, low).
-- `minor-bugs.md:137` — Recovery phase-binding residuals from the adversarial review (2026-08-19, low, one entry — three verified residuals):
-- `minor-bugs.md:148` — recover-ingest's commander action branch is untested (2026-08-19, low).
-- `minor-bugs.md:152` — CP-NODE-10 residuals (2026-08-19, low, one entry):
-- `minor-bugs.md:160` — recover-ingest exits 1 when the only issues are `submission_missing` for genuinely-pending work items (2026-08-19, low).
-- `minor-bugs.md:164` — The citation gate's verdict depends on transient untracked files (2026-08-19, low, friction: tool_should_decide).
-- `minor-bugs.md:174` — `writeOpenItems` accepts an item with no `subject_key` and persists it; the refusal lands two steps later in the HANDOFF generator (2026-08-14, re-hit 2026-08-19, low, friction: tool_should_decide).
-- `minor-bugs.md:187` — Modularity refinement is superlinear on one large component and unpinned at scale (2026-08-19, low).
-- `minor-bugs.md:193` — The HANDOFF empty-queue projection contract is full-suite-only, so the commit gates pass a red against it (2026-08-18, low, friction; BIT 2026-08-27 — burned tag v0.50.0: a hand-written live-state edit using the word the contract bans passed every commit gate and failed only in the release run's test shard, exactly as this entry predicted).
-- `minor-bugs.md:203` — Diff-based re-review loses the verdict it must diff against (2026-08-08, low).
-- `minor-bugs.md:209` — `free_form_intent` clause splitter shreds prose on bare `;` (2026-08-08, low).
-- `minor-bugs.md:213` — Answering an intake question at the checkpoint does not clear `open_questions` (2026-08-08, low).
-- `minor-bugs.md:218` — Regex-perf triage tail from the analyzer sweep (2026-08-07, low).
-- `minor-bugs.md:225` — Contract-type coverage is derived from where TESTS live, not from the contract (2026-07-25, low, friction: inefficient-feeding).
-- `minor-bugs.md:235` — A deletion of a manifest-listed doc landed with the doc-manifest gate red (2026-08-26, low, <!-- doc-citation-exempt: the deleted file IS the subject — it no longer exists by design --> friction: tool-should-decide).
-- `minor-bugs.md:244` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
-- `minor-bugs.md:265` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
-- `minor-bugs.md:276` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
-- `minor-bugs.md:294` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
-- `minor-bugs.md:299` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
-- `minor-bugs.md:301` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `minor-bugs.md:306` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
-- `minor-bugs.md:317` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
-- `minor-bugs.md:336` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
-- `minor-bugs.md:349` — A dated measurement sits inside durable routine prose (2026-08-23, low).
-- `minor-bugs.md:357` — The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction: hermeticity).
-- `minor-bugs.md:376` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
-- `minor-bugs.md:384` — The release-gate gloss table is required by a gate and rendered by no consumer (2026-08-27, from the philosophy audit, low).
-- `minor-bugs.md:386` — HANDOFF's hand-written region and the closeout both re-narrate state the repository already holds (2026-08-27, from the philosophy audit, low).
-- `minor-bugs.md:388` — Three governance vocabularies are copied per consumer instead of shared (2026-08-27, from the philosophy audit, low).
-- `minor-bugs.md:390` — A pipeline warning names an internal record id as its resolution action (2026-08-27, from the philosophy audit, low).
-- `minor-bugs.md:392` — `check:memory-citations` gates two of the three citation directions, and its guard-reach row names the wrong uncovered half (2026-08-27, low, friction: tool_should_decide).
-- `minor-bugs.md:414` — `buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low, friction: tooling_gap).
+- `minor-bugs.md:39` — The obligation engine's bound doc is off by one against its own comparison (2026-08-28, low).
+- `minor-bugs.md:45` — The backlog size baseline holds amnesties for entries that no longer exist, and its file ceiling never ratchets down (2026-08-27, low).
+- `minor-bugs.md:54` — `InputResolution` is declared twice, under one name, with two different shapes (2026-08-27, low).
+- `minor-bugs.md:64` — The release script's await-run timeout (10 min) is shorter than a GitHub `release`-event delivery delay it then misreads as "no run" (2026-08-26, low, friction: tool_should_decide).
+- `minor-bugs.md:81` — The nightly clean-tree rule does not say which writes it blocks (2026-08-22, low, friction: ambiguous_direction).
+- `minor-bugs.md:83` — The backlog triage sweep needs a second manual invocation to reach its real coverage (2026-08-22, low, friction: tool_should_decide).
+- `minor-bugs.md:84` — No native way to draw a subset of a large findings file into a remediation run (2026-08-22, low, friction: tool_should_decide).
+- `minor-bugs.md:86` — A transition that ends the call drops the fold's carried advisories (2026-08-22, low).
+- `minor-bugs.md:88` — A release version bump trips the path-A seed-drift alarm (2026-08-23, low, friction: tool_should_decide).
+- `minor-bugs.md:93` — The step prompt's "Result status requiring attention" lists MISSING results with the same shape as rejections (2026-08-23, low).
+- `minor-bugs.md:98` — Dispatch-lane children still answer the Stop "closeout challenge" despite `AUDIT_TOOLS_CHILD_SESSION=1` (2026-08-23, low).
+- `minor-bugs.md:103` — The phase-boundary repository gate re-runs on EVERY `next-step` at the boundary (2026-08-23, low).
+- `minor-bugs.md:108` — Reviewer minors carried from the first-draw landings (2026-08-23, low).
+- `minor-bugs.md:116` — The friction close-out walk must be written twice under two different names (2026-08-21, low, friction: tool_should_decide).
+- `minor-bugs.md:118` — Acquisition of `actionlint` fails on extract (2026-08-21, low).
+- `minor-bugs.md:120` — Writing the nightly queue desyncs HANDOFF's generated live-status block (2026-08-20, low, friction: tool_should_decide).
+- `minor-bugs.md:128` — recover-ingest / recover-submission leave the last step contract on disk after mutating state (2026-08-19, low).
+- `minor-bugs.md:135` — `StateStore.mutate` cannot skip the write — a no-op recovery rewrites an identical state file (2026-08-19, low).
+- `minor-bugs.md:140` — Recovery phase-binding residuals from the adversarial review (2026-08-19, low, one entry — three verified residuals):
+- `minor-bugs.md:151` — recover-ingest's commander action branch is untested (2026-08-19, low).
+- `minor-bugs.md:155` — CP-NODE-10 residuals (2026-08-19, low, one entry):
+- `minor-bugs.md:163` — recover-ingest exits 1 when the only issues are `submission_missing` for genuinely-pending work items (2026-08-19, low).
+- `minor-bugs.md:167` — The citation gate's verdict depends on transient untracked files (2026-08-19, low, friction: tool_should_decide).
+- `minor-bugs.md:177` — `writeOpenItems` accepts an item with no `subject_key` and persists it; the refusal lands two steps later in the HANDOFF generator (2026-08-14, re-hit 2026-08-19, low, friction: tool_should_decide).
+- `minor-bugs.md:190` — Modularity refinement is superlinear on one large component and unpinned at scale (2026-08-19, low).
+- `minor-bugs.md:196` — The HANDOFF empty-queue projection contract is full-suite-only, so the commit gates pass a red against it (2026-08-18, low, friction; BIT 2026-08-27 — burned tag v0.50.0: a hand-written live-state edit using the word the contract bans passed every commit gate and failed only in the release run's test shard, exactly as this entry predicted).
+- `minor-bugs.md:206` — Diff-based re-review loses the verdict it must diff against (2026-08-08, low).
+- `minor-bugs.md:212` — `free_form_intent` clause splitter shreds prose on bare `;` (2026-08-08, low).
+- `minor-bugs.md:216` — Answering an intake question at the checkpoint does not clear `open_questions` (2026-08-08, low).
+- `minor-bugs.md:221` — Regex-perf triage tail from the analyzer sweep (2026-08-07, low).
+- `minor-bugs.md:228` — Contract-type coverage is derived from where TESTS live, not from the contract (2026-07-25, low, friction: inefficient-feeding).
+- `minor-bugs.md:238` — A deletion of a manifest-listed doc landed with the doc-manifest gate red (2026-08-26, low, <!-- doc-citation-exempt: the deleted file IS the subject — it no longer exists by design --> friction: tool-should-decide).
+- `minor-bugs.md:247` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:268` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
+- `minor-bugs.md:279` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
+- `minor-bugs.md:297` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
+- `minor-bugs.md:302` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
+- `minor-bugs.md:304` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `minor-bugs.md:309` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
+- `minor-bugs.md:320` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
+- `minor-bugs.md:339` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
+- `minor-bugs.md:352` — A dated measurement sits inside durable routine prose (2026-08-23, low).
+- `minor-bugs.md:360` — The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction: hermeticity).
+- `minor-bugs.md:379` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
+- `minor-bugs.md:387` — The release-gate gloss table is required by a gate and rendered by no consumer (2026-08-27, from the philosophy audit, low).
+- `minor-bugs.md:389` — HANDOFF's hand-written region and the closeout both re-narrate state the repository already holds (2026-08-27, from the philosophy audit, low).
+- `minor-bugs.md:391` — Three governance vocabularies are copied per consumer instead of shared (2026-08-27, from the philosophy audit, low).
+- `minor-bugs.md:393` — A pipeline warning names an internal record id as its resolution action (2026-08-27, from the philosophy audit, low).
+- `minor-bugs.md:395` — `check:memory-citations` gates two of the three citation directions, and its guard-reach row names the wrong uncovered half (2026-08-27, low, friction: tool_should_decide).
+- `minor-bugs.md:417` — `buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low, friction: tooling_gap).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -163,17 +163,17 @@
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:43` — ▶ CX-02 — one audit obligation registry, one drain. IMPLEMENTED on `cx02-impl` (2026-08-28); remaining: ship + the deferred live measurement.
-- `forward-tracks.md:59` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:83` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:91` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:106` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:113` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:125` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:139` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
-- `forward-tracks.md:148` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
-- `forward-tracks.md:173` — Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep path, then measure.
-- `forward-tracks.md:194` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:43` — ▶ CX-02 — one audit obligation registry, one drain. SHIPPED in v0.50.6 (2026-08-28); remaining: the live fresh-audit measurement before the cap is re-sized.
+- `forward-tracks.md:53` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
+- `forward-tracks.md:77` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:85` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:100` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:107` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:119` — Wave-friendly host dispatch: run identity survives partial ingest.
+- `forward-tracks.md:133` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:142` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
+- `forward-tracks.md:167` — Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep path, then measure.
+- `forward-tracks.md:188` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 
