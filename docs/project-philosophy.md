@@ -293,12 +293,12 @@ postinstall, release-CI-is-the-real-signal). *(home: `CLAUDE.md` → Release & p
 
 ## B4. End-of-sprint cleanup (standing, unprompted)
 
-Every sprint-end (pause/handoff/milestone): verify green on a clean pushed tree → scan the diff for dead
-code/debug/TODO → no half-done broken state (call out deliberate intermediate) → trim HANDOFF → update
-backlog → sync memory + index → **state remaining steps and name each one's home doc** (an explicit list: immediate-next → HANDOFF; bugs/tracks → backlog; durable design → memory+index;
-how-to → `CLAUDE.md`). The hand-back is RENDERED (`scripts/render-closeout.mjs`), which refuses until
-every section states content or an explicit "none" and then omits the silent ones — short report,
-stated silence. *(home: `CLAUDE.md` → Conventions; global `~/.claude/CLAUDE.md`)*
+The closeout runs at every sprint-end (pause/handoff/milestone), unprompted, and it runs WHOLE — it does
+not scale down with the change, and there is no lightweight variant. The conviction is that; the steps
+themselves are deliberately NOT restated here, because a third hand-written copy is the drift this
+section's own B3 sibling forbids. *(home: *Closing out work* in
+`~/.claude/portable-engineering-principles.md` for the schema; `CLAUDE.md` → Conventions for this repo's
+bindings and the renderer)*
 
 ## B5. Documentation governance
 

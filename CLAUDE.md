@@ -255,7 +255,37 @@ instead of a rewrite. Trivial mechanical edits skip it.
   `!.claude/hooks/<name>` line to `.gitignore` in the SAME commit — the commit gate blocks a settings.json
   that references a hook the commit would not carry.
 - **Green-at-every-commit.** Before any push: `npm run build && npm run check` → zero errors. Hook-enforced: PreToolUse blocks `git commit` until check is green, plus the pre-commit leg set — the legs and their staged-set triggers are DERIVED from the guard registry (`scripts/guard-reach-data.mjs`, via `buildPreCommitLegs`); read the registry, never a list here — it is what catches the checks that otherwise fail only in release CI and burn a tag. Async PostToolUse typechecks edited package after TS edits (`.claude/hooks/`). A commit whose staged set touches a loop-core path (`src/shared/loopCorePaths.ts` — orchestrator, planning, host-handoff, and result-ingestion substrate) is additionally blocked until a fresh, staged-tree-bound review attestation exists (`node .claude/hooks/attest-loop-core-review.mjs --reviewed-by <id> --attester-class <agent|human> --checked "<...>"`); the gate enforces attestation existence+freshness+binding, not review quality. The attestation is an attributable, tree-bound audit record — it RECORDS the attester's class (agent or human; required, plus detected agent-session env markers) and the reviewing identities, it does not and cannot enforce that a human reviewed. Destination-keyed: a `concerns` verdict without an override blocks only a commit that can land on `main`; on any other branch it is accepted (WIP preservation must not train the override into a reflex).
-- **End-of-sprint cleanup — run it every sprint, unprompted.** A *sprint* = any coherent stretch of work that ends at a pause, handoff, or milestone (a shipped item, "wrap up here", switching windows). **EIGHT steps, IN ORDER — the same shape, order, and count as the machine-wide schema in `~/.claude/portable-engineering-principles.md`; this is its LOCAL EXPANSION, not a second definition. Adding, dropping, or reordering a step here without changing it there is drift.** Before handing off, ALWAYS run the pass (don't wait to be asked): (1) **verify green** — `npm run build && npm run check` + the touched package's test suite, on a **clean, fully-pushed tree**; (2) **read the whole sprint diff** and remove the dead code / orphaned helpers / stray `console`/`TODO`/debug it introduced; (3) **no half-done broken state** — call out any *deliberate* intermediate state in the handoff so it isn't mistaken for a bug; (4) **route every durable fact to its one home** — open bugs / forward tracks → `docs/backlog/open-bugs.md` / `docs/backlog/forward-tracks.md`; durable design/decisions/status → project memory **and** its `~/.claude/projects/…/memory/MEMORY.md` index (the external per-project host-memory store, not an in-repo file); durable how-to → `CLAUDE.md`; and bring the backlog's program-of-record status current; (5) **trim `docs/HANDOFF.md`** to lean + accurate (correct HEAD/commits, immediate-next-only, never a changelog); (6) **state what remains, each item named with the home it now lives in** — immediate next step → `docs/HANDOFF.md`, everything else per step 4. Never leave a remaining step implied or living only in chat; (7) **ask every live owner-only decision as a direct question in the hand-back**, options spelled out with their pros and cons (AskUserQuestion where available) — "your decision: see queue X / run command Y" is a pointer, not a question; (8) **log every point of friction hit this sprint** — `docs/backlog/open-bugs.md` for a fixable defect, `docs/backlog/durable-traps.md` for a standing environment/tooling gotcha. **Do NOT do this from recall; rewalk the transcript.** RENDER the hand-back — `node scripts/render-closeout.mjs --in <closeout.json>` (`--template` for a blank input), documented in [`docs/end-of-sprint-report-template.md`](docs/end-of-sprint-report-template.md). It refuses until every section declared in `scripts/closeout-sections-data.mjs` states content or the literal `"none"`, then OMITS the silent ones — so the report stays short AND a dropped section cannot hide as a short one. Never hand-write it: the Stop challenge reads the record the renderer writes, and that record is bound to the worktree CONTENT and to the session that rendered it — so neither a later commit of what the report described nor an earlier session's render satisfies it. Never commit a filled dated copy.
+- **End-of-sprint cleanup — run it every sprint, unprompted.** A *sprint* = any coherent stretch of
+  work that ends at a pause, handoff, or milestone (a shipped item, "wrap up here", switching
+  windows). **The steps, their order and their count live in ONE place — *Closing out work* in
+  `~/.claude/portable-engineering-principles.md`, mirrored to
+  `C:/Code/portable-engineering-principles.md`. Read them there.** What follows is only what that
+  schema cannot know: this repo's BINDINGS for the steps that name a destination. It is not a second
+  statement of the schema, so it can neither drift from it nor be read instead of it.
+  - **Verify green** = `npm run build && npm run check` plus the touched area's suite, on a clean,
+    fully-pushed tree.
+  - **Route durable facts:** open bugs and friction → [`docs/backlog/open-bugs.md`](docs/backlog/open-bugs.md);
+    forward tracks → [`docs/backlog/forward-tracks.md`](docs/backlog/forward-tracks.md); a standing
+    environment or tooling gotcha → [`docs/backlog/durable-traps.md`](docs/backlog/durable-traps.md);
+    durable design, decisions and status → project memory **and** its
+    `~/.claude/projects/…/memory/MEMORY.md` index (the external per-project host-memory store, not an
+    in-repo file); durable how-to → `CLAUDE.md`. Bring the backlog's program-of-record status current.
+  - **The status doc** is [`docs/HANDOFF.md`](docs/HANDOFF.md) — lean and accurate, correct
+    HEAD/commits, immediate-next only, never a changelog. It is also where the immediate next step
+    lives when the closeout states what remains.
+  - **RENDER the hand-back** — `node scripts/render-closeout.mjs --in <closeout.json>` (`--template`
+    for a blank input), documented in
+    [`docs/end-of-sprint-report-template.md`](docs/end-of-sprint-report-template.md). It refuses until
+    every section declared in `scripts/closeout-sections-data.mjs` states content or the literal
+    `"none"`, then OMITS the silent ones — so the report stays short AND a dropped section cannot hide
+    as a short one. Never hand-write it: the Stop challenge reads the record the renderer writes, and
+    that record is bound to the worktree CONTENT and to the session that rendered it — so neither a
+    later commit of what the report described nor an earlier session's render satisfies it. Never
+    commit a filled dated copy.
+  - ⚠ **The `/closeout` skill's steps 1-2 do NOT apply here.** They record and check a
+    <!-- doc-citation-exempt: machine-wide file in ~/.agent-config, not tracked in this repo -->
+    `verify-green.mjs` ledger; this repo owns the equivalent (`suiteGreenStamp` plus the closeout Stop
+    gate). Do not double-wire them. Every other step of that skill applies as written.
 
 ## Preferences & standing decisions
 
