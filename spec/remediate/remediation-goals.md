@@ -211,8 +211,9 @@ window at the END of the implement phase, once the eligible dispatch frontier ha
 drained. Because a `needs_clarification` item is not verified-complete, its
 dependents are ineligible while the answer is outstanding — they are HELD
 `pending`, explicitly distinguished from nodes whose upstream genuinely failed
-(`dependencyAwaitingClarification`), so an unanswered question is never recorded
-as "upstream failed". Once the answer lands, a re-opened upstream makes the
+(the `permanentlyDeadPendingBlocks` liveness analysis), so an unanswered question
+is never recorded as "upstream failed". Once the answer lands, a re-opened
+upstream makes the
 dependents eligible and a disposed (skipped) upstream dead-ends them with the
 accurate reason.
 
