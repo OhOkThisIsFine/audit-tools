@@ -4,7 +4,16 @@ import { test, expect } from "vitest";
 import { EXECUTOR_REGISTRY, isHostDelegationExecutor } from "../../src/audit/orchestrator/executors.js";
 import { EXECUTOR_RUNNERS } from "../../src/audit/orchestrator/executorRunners.js";
 import { PRIORITY } from "../../src/audit/orchestrator/nextStep.js";
-import { buildAuditObligations } from "../../src/audit/cli/nextStepHelpers.js";
+
+// Two tests DISSOLVED here (CX-02, record constraint 6): the fold-array⇄PRIORITY
+// forward guard (with its friction_capture_current carve-out) and its CP-NODE-14
+// reverse. Their subject was the divergence between a HAND-ENUMERATED fold array
+// and PRIORITY; `buildAuditObligations()` now DERIVES the registry from PRIORITY
+// (`PRIORITY.map`, with a load-time assertion that every bespoke policy body
+// names a PRIORITY id), so an id can no longer be in one and absent from the
+// other. The carve-out needed no new home either: `friction_capture_current`
+// stays inert by absence — `deriveAuditState` never emits it, so its derived
+// state is always satisfied.
 
 test("every PRIORITY obligation is covered by exactly one EXECUTOR_REGISTRY entry", () => {
   for (const obligationId of PRIORITY) {
@@ -13,44 +22,6 @@ test("every PRIORITY obligation is covered by exactly one EXECUTOR_REGISTRY entr
     );
     expect(matches.length, `PRIORITY obligation "${obligationId}" should be claimed by exactly one EXECUTOR_REGISTRY entry, got ${matches.length}: [${matches.map((e) => e.id).join(", ")}]`).toBe(1);
   }
-});
-
-test("every engine-dispatched PRIORITY obligation has an entry in the CLI fold's buildAuditObligations() array", () => {
-  // The conversation-first `next-step` fold (runDeterministicForNextStep → advance)
-  // scans exactly buildAuditObligations(); an id in PRIORITY but missing here is
-  // silently skipped on the primary path (regression guard for the dropped
-  // structure_decomposition_current obligation — doc-review D-56).
-  //
-  // Exception: friction_capture_current is intentionally NOT engine-dispatched — it
-  // is absent from deriveAuditState and handled out-of-band by the friction close-out
-  // Stop-hook (see executorRunners.ts: "retained for schema compatibility but
-  // unreachable"), so it legitimately has no fold entry.
-  const OUT_OF_BAND = new Set(["friction_capture_current"]);
-  const foldIds = new Set(buildAuditObligations().map((o) => o.id));
-  for (const obligationId of PRIORITY) {
-    if (OUT_OF_BAND.has(obligationId)) continue;
-    expect(foldIds.has(obligationId), `PRIORITY obligation "${obligationId}" is missing from buildAuditObligations() — the CLI next-step fold would skip past it`).toBe(true);
-  }
-});
-
-// CP-NODE-14 (OBL-impl-block-148-contract): the REVERSE direction of the test
-// above. `findFirstActionableObligation` treats PRIORITY as the authority on
-// order AND membership — an obligation absent from it is never selected — so a
-// registration that never reaches PRIORITY is not a slow path or a fallback, it
-// is dead code that looks live at its definition site. The forward test cannot
-// see that: it walks PRIORITY, so an id missing from PRIORITY is exactly what it
-// never visits.
-test("every buildAuditObligations() registration appears in PRIORITY (an unlisted one is unreachable)", () => {
-  const prioritySet = new Set(PRIORITY);
-  const unreachable = buildAuditObligations()
-    .map((obligation) => obligation.id)
-    .filter((id) => !prioritySet.has(id));
-
-  expect(
-    unreachable,
-    "these obligations are registered in the CLI fold but absent from PRIORITY, so the engine's " +
-      "ordered scan can never select them — either add them to PRIORITY or delete the registration",
-  ).toEqual([]);
 });
 
 test("isHostDelegationExecutor recognizes the registered host-delegation executors", () => {

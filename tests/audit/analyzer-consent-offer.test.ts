@@ -8,6 +8,7 @@
  *  - persistAnalyzerConsent records decisions durably (and never a token);
  *  - the offer prompt is tool-rendered with purpose + safety + mechanism.
  */
+import { commitFold, createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { describe, it, expect, afterEach } from "vitest";
 import {
   existsSync,
@@ -227,13 +228,21 @@ describe("the consent gate refuses a submission it understands nothing in", () =
     return {
       artifactsDir,
       externalAcquisition,
-      run: () =>
-        handleAnalyzerConsentBranch(
+      // One gate turn, INCLUDING the fold's commit half: a consumed
+      // submission's deletion and its accepted ledger event land at the
+      // commit, not inside the handler (CX-02 persist-once).
+      run: async () => {
+        const tx = createFoldTransaction();
+        const branch = await handleAnalyzerConsentBranch(
           { root, artifactsDir, externalAcquisition } as never,
           {} as never,
           { status: "active", obligations: [] } as never,
           { value: undefined },
-        ),
+          tx,
+        );
+        await commitFold(artifactsDir, {}, tx);
+        return branch;
+      },
     };
   };
 

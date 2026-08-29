@@ -397,3 +397,14 @@
   uncovered. Any mechanism must absorb the archaeology class without a false red — an exemption marker
   of the kind the doc gates already use, never a bare existence check. Triage record for the prune
   that raised this: [`memory-cut-list-2026-08-25.md`](../reviews/memory-cut-list-2026-08-25.md).
+
+- **`buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low,
+  friction: tooling_gap).** `src/audit/io/toolingManifest.ts` lists the package `dist/` tree and
+  then hashes each listed file; a file that disappears between the listing and the read (a `tsc`
+  re-emit racing a parallel vitest run, or a stale incremental dist) throws a bare
+  `ENOENT: ... .d.ts.map` out of `loadArtifactBundle`, so unrelated fold tests fail with a message
+  that points at the manifest hasher instead of the race. Hit twice this lap; a solo re-run after a
+  clean rebuild was green both times. **Property:** the walk either snapshots list+read atomically
+  per file (skip-on-ENOENT with the skip recorded in the hash input) or the failure names the
+  actual condition — "dist changed during the walk; rebuild and re-run" — never a bare ENOENT from
+  an internal path.

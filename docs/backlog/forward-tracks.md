@@ -40,31 +40,21 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
 
 ## Forward tracks
 
-- **▶ CX-02 — one audit obligation registry, one drain.** The last unimplemented candidate of the
-  2026-08-26 complexity review. Premise verified and adversarially refuted (safe to proceed, heavy
-  constraints); the pinned design inputs — the approach-B cycle-guard decision, the `audit-code plan`
-  policy draw, lock/persist granularity, the composite-cap replacement, the marker-protocol
-  semantics, and the pinning test files — live in
-  [`cx02-drain-unification-design-2026-08-26.md`](../reviews/cx02-drain-unification-design-2026-08-26.md).
-  One atomic loop-core replace; never stage half of it — and that scoping is SETTLED: landing part
-  of it separately is a debugging-effort argument, which is not a cost here. Its two open design
-  questions are ANSWERED in that record (2026-08-27). **The six blockers are REFUTED (2026-08-28)
-  and the record now carries a decided shape for each.** Two landings were replaced outright — the
-  unlink deferral (it makes the systemic-challenge loop converge falsely and permanently) and the
-  plan draw's blanket halt (8 of 13 bespoke policy bodies are hybrid, so the policy must be
-  branch-sensitive) — and the other four survive with amendments that change the work. Read the
-  record's *Where each blocker lands* for the shape; nothing is restated here. Cap sizing still
-  needs the live fresh-audit measurement, which must capture HOLD TIME as well as dispatch count:
-  a concurrent waiter fails after `DEFAULT_TIMEOUT_MS` = 10,000 ms.
-  The record's four refuted claims were corrected in place 2026-08-27 by four independent
-  verification lanes, so it is the single home for the constraints and nothing is restated here —
-  read it, not a summary of it. Two of those repairs changed what the implementing lap must do, not
-  only what it must believe: the `executor-producers` view is NOT an external contract the
-  unification migrates, and `executor-registry-sync` is amended rather than retired, so four of its
-  six tests must survive verbatim. Its enabling contract change is the shared `advance()` growing
-  a result that can express every legitimate stop — PH-03 in
-  [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md)
-  — which is this entry's prerequisite half, not a separate track.
+- **▶ CX-02 — one audit obligation registry, one drain. IMPLEMENTED on `cx02-impl` (2026-08-28);
+  remaining: ship + the deferred live measurement.** The decided shape landed as the atomic
+  replace — one PRIORITY-derived registry with a bespoke-policy overlay, one drain (the full fold
+  dispatches `runSingleAdvanceStep` per charged execution; unforced `advanceAudit` is the plan
+  draw over the shared classifier `src/audit/orchestrator/obligationPolicy.ts`), one lock hold
+  with one core commit (`commitFold`, throw path included), durable submission staging with the
+  systemic-challenge duplicate register, and the engine's `maxExecutions` budget (PH-03 in
+  [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md)).
+  The single home for constraints, refutations, and the implementation status is
+  [`cx02-drain-unification-design-2026-08-26.md`](../reviews/cx02-drain-unification-design-2026-08-26.md)
+  — read it, not a summary of it. **Open half: the live fresh-audit measurement before the cap is
+  re-sized**, which must capture HOLD TIME as well as charged-execution count — the single outer
+  hold converts a concurrent waiter into a failure after `DEFAULT_TIMEOUT_MS` = 10,000 ms
+  (`withFileLock`) / 20 s (`LOCKED_JSON_STORE_TIMEOUT_MS`), so the measurement decides both the
+  cap value and whether the waiter timeouts need widening.
 
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** A contract-valid empty result cannot be scored for quality without ground truth;

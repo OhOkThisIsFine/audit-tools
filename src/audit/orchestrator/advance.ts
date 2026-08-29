@@ -5,10 +5,11 @@ import { decideNextStep, findObligation, PRIORITY } from "./nextStep.js";
 import { deriveAuditState } from "./state.js";
 import { computeArtifactMetadata } from "./artifactMetadata.js";
 import { EXECUTOR_RUNNERS } from "./executorRunners.js";
+import { EXECUTOR_BY_OBLIGATION } from "./executors.js";
 import {
-  nextStepIsDrainableRegen,
-  type HostInputPauseInputs,
-} from "./hostInputPause.js";
+  classifyObligationBranch,
+  type ObligationPolicyInputs,
+} from "./obligationPolicy.js";
 import {
   computeStaleArtifacts,
   emitStalenessRecord,
@@ -31,22 +32,21 @@ import type { AdvanceAuditOptions, AdvanceAuditResult } from "./advanceTypes.js"
 export type { AdvanceAuditOptions, AdvanceAuditResult } from "./advanceTypes.js";
 
 /**
- * Hard ceiling on the internal drain loop. The regen frontier is finite (each
- * deterministic step satisfies at least one obligation and no deterministic
- * executor re-opens an upstream one), so the loop terminates naturally when the
- * next step is a host-delegation boundary / complete / no-runner. This bound is
- * a belt-and-braces guard against an unforeseen re-opening cycle — larger than
- * the deterministic obligation frontier can ever be, so it never trips on a
- * healthy run. Chain-length/index-agnostic: it caps iterations, not a fixed
- * executor index.
+ * The per-invocation pacing cap on the ONE audit drain. Its unit is CHARGED
+ * OBLIGATION EXECUTIONS — every `execute` the shared engine dispatches spends
+ * one, whether it is a deterministic executor dispatch or a policy body that
+ * only transitions (CX-02 landing 5 superseded the older "dispatch slots"
+ * reading: charging only dispatches let uncharged policy transitions spend
+ * engine budget and invert the derived-bound ordering).
  *
- * Enforced from inside the drain obligations' `execute` (see `runDrainStep`
- * below) because this cap is about DISPATCH SLOTS — how many steps one call may
- * hand out — which is a fact about the audit drain, not about the engine's
- * transition counting. The engine bound derived from it
- * (`engineMaxTransitions`) is the outer backstop, and both now stop the fold
- * gracefully, so the two differ in what they COUNT rather than in how harshly
- * they fail.
+ * The regen frontier is finite (each deterministic step satisfies at least one
+ * obligation and no deterministic executor re-opens an upstream one), so the
+ * fold terminates naturally at a host boundary / completion; this cap is
+ * belt-and-braces pacing, never correctness — the fold suspends resumably at
+ * it. Enforced by the engine's `maxExecutions` budget (spend-before-dispatch,
+ * structured `stopped: "budget"`), with `engineMaxTransitions()` as the
+ * derived outer backstop: transitions <= charged executions by construction,
+ * so the backstop can never fire first.
  */
 export const MAX_DRAIN_STEPS = 64;
 
@@ -367,7 +367,13 @@ export function startAdvanceHeartbeat(
   };
 }
 
-async function runSingleAdvanceStep(
+/**
+ * Exported as the FORCED SINGLE-STEP primitive (CX-02): the unified `next-step`
+ * fold dispatches exactly one bounded step per obligation execution through
+ * this, and every submission-apply forces one executor through it. It never
+ * drains, never locks, never persists — the caller owns hold and commit.
+ */
+export async function runSingleAdvanceStep(
   bundle: ArtifactBundle,
   options: AdvanceAuditOptions = {},
 ): Promise<AdvanceAuditResult> {
@@ -530,61 +536,43 @@ function advanceHasRunner(executor: string): boolean {
   return Boolean(EXECUTOR_RUNNERS[executor]);
 }
 
-// ── Shared obligation-engine drain (replaces the hand-rolled while loop) ───────
+// ── The PLAN DRAW over the one obligation registry (CX-02) ────────────────────
 //
 // `PRIORITY` (single-sourced in nextStep.ts) is bound to the shared engine's
-// `advance()` exactly as the CLI `next-step` fold already does
-// (`src/audit/cli/nextStepHelpers.ts` → `runDeterministicForNextStep`, the
-// proven engine consumer this mirrors): one `ObligationDef` per PRIORITY id,
-// `derive` a plain state-only lookup off `deriveAuditState` (agnostic to
-// executor kind / pause-worthiness — each layer keeps its own trivial copy of
-// this lookup rather than sharing one across the cli/orchestrator boundary,
-// matching the CLI fold's `deriveObligationState`), `execute` the SAME
-// `runDrainStep` for every id (this layer's dispatch is fully homogeneous: it
-// always re-decides via `decideNextStep` and runs whatever that selects,
-// regardless of which def's `derive` made it actionable — the established
-// precedent for this is `runDeterministicExecutor` in the CLI fold, which
-// re-decides rather than trusting the closed-over id).
+// `advance()`: one `ObligationDef` per PRIORITY id, `derive` the memoized
+// holistic lookup below, `execute` a CLASSIFY-then-dispatch step. This is the
+// deterministic-only DRAW over the one registry — the policy that decides
+// where the host boundary sits lives in `obligationPolicy.ts` and is shared
+// verbatim with the full `next-step` fold's consuming bodies, so the two draws
+// cannot disagree on WHERE the pipeline pauses.
 //
-// The engine's own `advance(..., opts.maxTransitions)` throw-on-exceeded
-// backstop is passed explicitly (never the engine default) and DERIVED from the
-// graceful cap by `engineMaxTransitions()` — there is no second number written
-// at the call site to keep in step. That is what makes the coupling
-// self-maintaining: `runDrainStep` enforces the tighter graceful
-// MAX_DRAIN_STEPS cap itself (see the constant's doc comment) and always stops
-// the fold strictly before the engine's throwing counter could trip, no matter
-// what value MAX_DRAIN_STEPS is raised to.
+// Under `plan` (and any bare unforced `advanceAudit`), a boundary is HALTED AT,
+// never consumed: a pending lane submission, an owed operator offer, or a
+// host-delegation executor stops the fold before any dispatch could run past
+// it. Deterministic arms of hybrid obligations (the omit/assemble/settle
+// paths) still run — the refuted alternative, a blanket halt at every bespoke
+// id, would stop `plan` at boundaries that do not exist on the live branch.
 //
-// Semantics preserved vs the hand-rolled loop (adversarially reviewed):
-//   - zero-dispatch path (nothing actionable on entry): the reconstruction
-//     branch in `advanceAudit` emits the SAME single {kind:"obligation"}
-//     RunLogger event the old unconditional first `runSingleAdvanceStep`
-//     emitted, so the event stream is unchanged;
-//   - the graceful-vs-throwing cap coupling is explicit (above);
-//   - the per-scan derivation cost is memoized back to one full
-//     `deriveAuditState` per fold iteration (see `deriveObligationState`) —
-//     pure memoization, not a behavior change.
+// The pacing cap is the engine's own `maxExecutions` budget (see
+// MAX_DRAIN_STEPS); the `engineMaxTransitions()` backstop is DERIVED from the
+// same constant, so no second number exists to keep in step.
 
 /**
- * Per-call bookkeeping threaded to every drain obligation's `execute`. Mirrors
- * the CLI fold's `AuditNextStepCtx` refs pattern: mutable state the hand-rolled
- * `while` loop kept in closures (the running step-count, and the
- * artifacts/summary accumulators the loop merged after every iteration).
+ * Per-call bookkeeping threaded to every plan-draw obligation's `execute`:
+ * the artifacts/summary accumulators the drain merges after every dispatch,
+ * and the last merged result — which is both the mid-drain boundary payload
+ * (output shape 1: the accumulated last deterministic result) and the budget
+ * stop's resumable halt payload.
  */
 interface DrainCtx {
   options: AdvanceAuditOptions;
-  pauseInputs: HostInputPauseInputs;
-  /**
-   * Dispatch slots spent this `advanceAudit` call. Incremented BEFORE the
-   * dispatch it authorizes (see `runDrainStep`), so it is never less than the
-   * number of steps already dispatched — which is what makes MAX_DRAIN_STEPS a
-   * hard ceiling rather than a bound checked one step too late.
-   */
-  stepsRun: { value: number };
+  policyInputs: ObligationPolicyInputs;
   /** First-seen-order-deduplicated artifact list accumulated across the whole drain. */
   artifactsAcc: { value: string[] };
   /** Each dispatched step's own `progress_summary`, joined with "\n" at merge time. */
   summaryAcc: { value: string[] };
+  /** The last merged dispatch result; null until the first dispatch lands. */
+  lastMergedRef: { value: AdvanceAuditResult | null };
 }
 
 type DrainObligation = ObligationDef<ArtifactBundle, DrainCtx, AdvanceAuditResult>;
@@ -658,86 +646,133 @@ function mergeDrainStep(
 }
 
 /**
- * Every PRIORITY id's `execute`: dispatch ONE bounded step (`runSingleAdvanceStep`
- * unconditionally re-decides + runs whatever `decideNextStep` selects from
- * `bundle` — the identical id the engine's scan just picked, by construction),
- * merge it into the drain accumulators, then decide `transition` (keep folding)
- * vs `emit` (hand back to the host) using the SAME single-sourced
- * `nextStepIsDrainableRegen` predicate the hand loop's `while` condition used —
- * so a host-input pause (registry-level or the graph-enrichment fold-level
- * cases) or a natural "nothing left" halts the fold exactly where it did
- * before. `!result.progress_made` (no obligation selected, or the selected one
- * has no deterministic runner — a host-delegation dispatch point like
- * `semantic_review_executor`) always emits immediately, mirroring the
- * hand loop's unconditional first call.
+ * The "Executor <id> is selected and requires its bound host step." result —
+ * the plan draw's ENTRY-at-a-boundary output (output shape 2). Byte-compatible
+ * with the no-runner branch of `runSingleAdvanceStep`, which produces the same
+ * shape for a boundary whose executor has no deterministic runner; this
+ * constructor exists for the CORRECTED case — a boundary whose executor HAS a
+ * runner (a hybrid's live host branch), where HEAD used to dispatch that
+ * runner once before detecting the pause, and the classified draw halts
+ * BEFORE the dispatch instead.
  */
-async function runDrainStep(
+function hostBoundaryHandoffResult(
+  bundle: ArtifactBundle,
+  options: AdvanceAuditOptions,
+  selectedExecutor: string,
+  selectedObligation: string,
+  reason: string,
+): AdvanceAuditResult {
+  const log = options.runLogger ?? RunLogger.disabled();
+  logObligationSelection(log, createCorrelationId(), selectedObligation, reason);
+  const state = deriveAuditState(bundle, { emitStaleness: false });
+  state.last_executor = selectedExecutor;
+  state.last_obligation = selectedObligation;
+  return {
+    audit_state: state,
+    selected_obligation: selectedObligation,
+    selected_executor: selectedExecutor,
+    progress_made: false,
+    artifacts_written: ["audit_state.json"],
+    progress_summary: `Executor ${selectedExecutor} is selected and requires its bound host step.`,
+    next_likely_step: selectedObligation,
+    updated_bundle: { ...bundle, audit_state: state },
+  };
+}
+
+/**
+ * One plan-draw step for the obligation the engine scan selected: classify the
+ * boundary first, dispatch only a deterministic arm.
+ *
+ * - deterministic → ONE `runSingleAdvanceStep`, merged into the accumulators;
+ *   `transition` on its in-memory `updated_bundle` (fresh identity by
+ *   construction — the drain never reloads from disk).
+ * - a boundary reached MID-drain → emit the accumulated last result (HEAD's
+ *   pause-before-dispatch behavior, output shape 1).
+ * - a boundary ENTERED at:
+ *   - executor with no runner → dispatch once; `runSingleAdvanceStep`'s own
+ *     no-runner branch produces output shape 2 with its unchanged log stream
+ *     (nothing can run, so the dispatch is construction, not execution);
+ *   - executor WITH a runner (a hybrid's live host branch, or a pending
+ *     submission the plan must not consume) → the constructed shape-2 halt,
+ *     with NO dispatch. HEAD ran the runner once here; the classified draw
+ *     corrects that (recorded decision, CX-02 landing 4 latitude).
+ */
+async function runPlanDrawStep(
+  id: string,
   bundle: ArtifactBundle,
   ctx: DrainCtx,
 ): Promise<DrainOutcome> {
-  // HARD DISPATCH CEILING. The slot is spent BEFORE the dispatch it authorizes
-  // and the fold stops once the last slot is spent, so one call can never
-  // dispatch more than MAX_DRAIN_STEPS steps. The counter used to be bumped
-  // AFTER the step and compared with `>`, which let the 65th step run to
-  // completion before a "64" cap tripped — a silent one-step overrun of a bound
-  // stated as a maximum.
-  ctx.stepsRun.value += 1;
+  const branch = await classifyObligationBranch(
+    id,
+    bundle,
+    ctx.policyInputs,
+    advanceHasRunner,
+  );
+  if (branch.branch !== "deterministic") {
+    if (ctx.lastMergedRef.value) {
+      return { kind: "emit", step: ctx.lastMergedRef.value };
+    }
+    const executor = EXECUTOR_BY_OBLIGATION.get(id);
+    if (executor && advanceHasRunner(executor.id)) {
+      const halt = hostBoundaryHandoffResult(
+        bundle,
+        ctx.options,
+        executor.id,
+        id,
+        branch.reason,
+      );
+      return { kind: "emit", step: mergeDrainStep(halt, ctx) };
+    }
+    const result = await runSingleAdvanceStep(bundle, ctx.options);
+    return { kind: "emit", step: mergeDrainStep(result, ctx) };
+  }
   const result = await runSingleAdvanceStep(bundle, ctx.options);
   const merged = mergeDrainStep(result, ctx);
+  ctx.lastMergedRef.value = merged;
   if (!result.progress_made) {
-    return { kind: "emit", step: merged };
-  }
-  if (ctx.stepsRun.value >= MAX_DRAIN_STEPS) {
-    // Belt-and-braces cap (see MAX_DRAIN_STEPS doc) — never trips on a healthy
-    // run; stop gracefully and hand back the last good result rather than
-    // throwing, so the host simply resumes the drain on its next call.
-    return { kind: "emit", step: merged };
-  }
-  if (!nextStepIsDrainableRegen(result.updated_bundle, advanceHasRunner, ctx.pauseInputs)) {
     return { kind: "emit", step: merged };
   }
   return { kind: "transition", state: result.updated_bundle };
 }
 
 /**
- * One `ObligationDef` per PRIORITY id, all sharing `runDrainStep` (see above).
- * `cache` is the per-call derivation memo threaded into every `derive` — see
- * `deriveObligationState`.
+ * One `ObligationDef` per PRIORITY id — the registry's membership and order
+ * are DERIVED from `PRIORITY`, never a second hand-enumerated list, so an id
+ * cannot be in the scan and absent from the registry (this derivation is what
+ * dissolved the fold-array⇄PRIORITY sync tests). `cache` is the per-call
+ * derivation memo threaded into every `derive` — see `deriveObligationState`.
  */
-function buildDrainObligations(
+function buildPlanDrawObligations(
   cache: WeakMap<ArtifactBundle, AuditState>,
 ): DrainObligation[] {
   return PRIORITY.map((id) => ({
     id,
     derive: deriveObligationState(id, cache),
-    execute: runDrainStep,
+    execute: (bundle: ArtifactBundle, ctx: DrainCtx) =>
+      runPlanDrawStep(id, bundle, ctx),
   }));
 }
 
 /**
- * Advance the audit by ONE bounded step, then SAFELY DRAIN the deterministic
- * regen frontier within the SAME call: run the first bounded step, then keep
- * running consecutive deterministic runner-backed steps (re-deriving
- * decideNextStep + computeStaleArtifacts each iteration) until the next step is a
- * host-input pause, a no-runner handoff, or the run is complete. A whole staleness
- * cascade (e.g. a schema-version migration that re-stales every downstream
- * artifact) thus resolves in a single call and emits a single consolidated
- * staleness stderr record at the boundary — instead of one host round-trip (and
- * one record) per regenerated artifact.
+ * The unforced PLAN DRAW over the ONE audit obligation registry (CX-02): drain
+ * the deterministic frontier in memory — classify each engine-selected
+ * obligation's host boundary first (`obligationPolicy.ts`), dispatch only
+ * deterministic arms, and HALT at the first boundary that needs host work or
+ * would consume or persist host input. A whole staleness cascade (e.g. a
+ * schema-version migration that re-stales every downstream artifact) resolves
+ * in one call with one consolidated staleness stderr record at the boundary.
  *
- * The drain is the DEFAULT (there is no opt-in flag). It is FOLD-AWARE: the stop
- * predicate is the single-sourced `nextStepPausesForHostInput` (via
- * `nextStepIsDrainableRegen`), consumed by BOTH this loop and the `next-step`
- * fold, so the drain halts at EVERY operator-interactive pause — including the
- * fold-level ones a registry-only `isHostDelegationExecutor` gate is blind to: the
- * analyzer-install consent fold and the low-confidence edge-reasoning fold (both
- * surfaced by the `graph_enrichment_executor`, which is registered deterministic).
+ * This is the deterministic-only draw `audit-code plan` runs (through the
+ * locking `runAuditStep`) and the in-memory primitive tests drive bare. The
+ * FULL `next-step` fold does NOT nest this: its driver runs the same engine
+ * over the same registry with the consuming policy bodies, dispatching
+ * `runSingleAdvanceStep` per obligation execution.
  *
- * A forced `preferredExecutor` still runs EXACTLY ONE step: an explicit executor
- * request is a targeted single action, never a drain trigger — it bypasses the
- * shared engine entirely (the PRIORITY scan is irrelevant to a forced dispatch),
- * mirroring how the CLI fold's `runOmittableGate` handlers also dispatch a forced
- * executor directly rather than routing it through `advance()`.
+ * A forced `preferredExecutor` still runs EXACTLY ONE step: an explicit
+ * executor request is a targeted single action, never a drain trigger — it
+ * bypasses the shared engine entirely (the PRIORITY scan is irrelevant to a
+ * forced dispatch), which is the single-action contract every submission-apply
+ * caller depends on.
  */
 export async function advanceAudit(
   bundle: ArtifactBundle,
@@ -768,7 +803,7 @@ async function advanceAuditInner(
   } else {
     const ctx: DrainCtx = {
       options,
-      pauseInputs: {
+      policyInputs: {
         root: options.root,
         analyzers: options.analyzers,
         graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
@@ -777,28 +812,38 @@ async function advanceAuditInner(
         // The grant rides through TYPED (AnalyzerConsentTokenGrant): the pause
         // predicate reads its per-candidate scope, never a run-wide string.
         acquisitionConsentToken: options.externalAcquisition?.consentToken,
+        narrativeEnabled: options.narrativeEnabled,
+        submissionProbe: options.submissionProbe,
       },
-      stepsRun: { value: 0 },
       artifactsAcc: { value: [] },
       summaryAcc: { value: [] },
+      lastMergedRef: { value: null },
     };
     // Per-call derivation memo (see deriveObligationState) — created fresh here
     // so no state can leak across advanceAudit calls.
     const deriveCache = new WeakMap<ArtifactBundle, AuditState>();
     const outcome = await advanceObligations(
-      { priority: PRIORITY, obligations: buildDrainObligations(deriveCache) },
+      { priority: PRIORITY, obligations: buildPlanDrawObligations(deriveCache) },
       bundle,
       ctx,
-      // INVARIANT: the local dispatch-slot cap (MAX_DRAIN_STEPS, enforced
-      // inside runDrainStep) must always fire strictly before the engine's
-      // maxTransitions backstop. The engine bound is DERIVED from the same
-      // constant (see engineMaxTransitions), never written as a literal here,
-      // so raising MAX_DRAIN_STEPS can never silently move the stop out to the
-      // engine's coarser one.
-      { maxTransitions: engineMaxTransitions() },
+      // INVARIANT: the graceful execution budget (maxExecutions, charged by the
+      // engine spend-before-dispatch) must always fire strictly before the
+      // maxTransitions backstop. The backstop is DERIVED from the same constant
+      // (see engineMaxTransitions), never written as a literal here, and
+      // transitions <= charged executions holds by construction — so raising
+      // MAX_DRAIN_STEPS can never silently move the stop out to the coarser one.
+      {
+        maxTransitions: engineMaxTransitions(),
+        maxExecutions: MAX_DRAIN_STEPS,
+      },
     );
     if (outcome.step) {
       result = outcome.step;
+    } else if (outcome.stopped === "budget" && ctx.lastMergedRef.value) {
+      // The pacing cap: resumable, never non-convergence. The accumulated last
+      // result is the halt payload — the same value the pre-CX-02 drain emitted
+      // when its slot counter reached the cap.
+      result = ctx.lastMergedRef.value;
     } else {
       // Every PRIORITY obligation was already satisfied on entry (e.g. a fully
       // complete bundle, or nothing missing/stale) — no `execute` ever ran, so

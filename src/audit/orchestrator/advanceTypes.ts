@@ -34,6 +34,15 @@ export interface AdvanceAuditOptions {
   externalAnalyzerResults?: ExternalAnalyzerResults;
   /** Host-supplied synthesis narrative; merged by synthesis_narrative_executor. */
   narrativeResults?: SynthesisNarrative;
+  /**
+   * The session's synthesis-narrative declaration, for the unforced draw's
+   * boundary classification. TRI-STATE and the unknown arm is load-bearing:
+   * `false` takes the deterministic omit arm; `true` makes the boundary a host
+   * turn; ABSENT means "this draw carries no session" and the draw HALTS at
+   * the narrative boundary rather than durably omitting a turn the real
+   * session may be owed.
+   */
+  narrativeEnabled?: boolean;
   /** Host-supplied critical-flow fallback enrichment; persisted by critical_flow_fallback_executor (the structure phase then merges it). */
   criticalFlowFallbackResults?: CriticalFlowFallbackResult;
   /** Host judge verdict for the DD-9 intent-equivalence gate; committed by intent_equivalence_executor. */
@@ -46,6 +55,12 @@ export interface AdvanceAuditOptions {
   clarificationAnswers?: ClarificationAnswersSubmission;
   /** Host-supplied second-order-adversary challenge round (Phase E); folded by systemic_challenge_executor. */
   systemicChallenge?: SystemicChallengeSubmission;
+  /**
+   * Content hash of the systemic-challenge submission, computed by the fold at
+   * staging time. The executor's iterative-fold duplicate guard: a hash the
+   * register already folded is ignored, never counted as a quiet round.
+   */
+  systemicChallengeSubmissionHash?: string;
   /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
   analyzers?: Record<string, AnalyzerSetting>;
   /**
@@ -78,6 +93,14 @@ export interface AdvanceAuditOptions {
    */
   since?: string;
   preferredExecutor?: string;
+  /**
+   * Pure lane-file presence probe for the unforced (plan-draw) classification:
+   * a pending submission is a boundary the draw HALTS at, never consumes. The
+   * CLI seam (`executeAdvance`) injects the real bound-path probe; a bare
+   * in-memory caller leaves it unset and sees no pending submissions, which is
+   * the correct degenerate reading for a caller with no artifacts dir.
+   */
+  submissionProbe?: (lane: string) => Promise<boolean>;
   runLogger?: RunLogger;
   /**
    * INTERNAL — the liveness heartbeat `advanceAudit` creates for its own call;

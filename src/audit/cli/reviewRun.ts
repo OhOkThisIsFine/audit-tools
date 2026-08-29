@@ -196,22 +196,6 @@ async function writeReviewPauseHandoff(
 }
 
 /**
- * Resolve the review run and persist the blocked pause. Takes the artifact-tree
- * lock for the core write, so it is for callers that hold no lock of their own.
- */
-export async function ensureSemanticReviewRun(
-  params: ReviewPauseParams,
-): Promise<ReviewPause> {
-  const activeReviewRun = await resolveReviewRun(params);
-  const pause = buildReviewPause(params, activeReviewRun);
-  await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
-    writeCoreArtifacts(params.artifactsDir, pause.bundle),
-  );
-  await writeReviewPauseHandoff(params, pause);
-  return { state: pause.state, bundle: pause.bundle, activeReviewRun };
-}
-
-/**
  * The lock-free half, for the fold — which already holds the artifact-tree lock
  * for its whole drain, so the acquisition above would be a second one on a
  * non-reentrant lock and would time out deterministically.

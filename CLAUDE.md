@@ -79,17 +79,36 @@ Imported via the `audit-tools/shared` subpath export (single package — no `@au
 
 ## audit-code architecture
 
-Obligation-driven. Each invocation **drains** the deterministic obligation frontier — highest-priority-first — folding successive bounded steps into one call, halting at a host-input pause, a non-drainable step, or the `MAX_DRAIN_STEPS` ceiling. Repeated → normalized repo understanding → bounded audit tasks → verified coverage → findings report.
+Obligation-driven: **ONE obligation registry, ONE drain, ONE lock hold** (CX-02). The registry
+DERIVES from the single-sourced `PRIORITY` array (`src/audit/orchestrator/nextStep.ts`, running
+`repo_manifest` → … → `friction_capture_current`) — never a second hand-enumerated list — and each
+id carries its per-obligation host-boundary POLICY: a pure branch classifier both draws share
+(`src/audit/orchestrator/obligationPolicy.ts`), plus, in the full fold only, the consuming body.
+Two draws run the shared obligation engine over that one registry:
 
-**Core loop** (`src/audit/orchestrator/advance.ts` → `advanceAudit`):
-1. Load artifact bundle from `.audit-tools/audit/`
-2. `decideNextStep` (`src/audit/orchestrator/nextStep.ts`) — derives state, picks obligation
-3. Run one deterministic executor or emit a complete provider-neutral host workload
-4. Persist
+- **The full `next-step` fold** (`src/audit/cli/nextStepHelpers.ts` → `runDeterministicForNextStep`)
+  acquires the artifact-tree lock ONCE (`withArtifactTreeHold`), loads the bundle once, and drains
+  in memory — each deterministic dispatch is one `runSingleAdvanceStep` on the CARRIED bundle
+  (never a reload; a mid-fold reload reads the fold's own unwritten state and rolls it back). A
+  consumed host submission is STAGED first — renamed into the run's submission-staging directory
+  before it is parsed or applied; the fold then COMMITS once at its boundary (`commitFold`: the pruned core-artifact
+  write, design-review snapshots, staged deletions, and their deferred `accepted` ledger events) on
+  EVERY exit including the throw path, which also persists dispatch-local failure attribution.
+  Markers (`steps/deterministic-progress.json`), handoff, quarantine, and the durable analyzer
+  stores stay mid-fold by design — the delivered property is one CORE write boundary, not one
+  persist boundary. The cycle guards live in the fold's ctx and observe per deterministic dispatch.
+- **The plan draw** (`audit-code plan`, and any unforced `advanceAudit`) is the deterministic-only
+  draw: classify each engine-selected obligation, run deterministic arms, HALT at the first
+  boundary that needs host work or would consume or persist host input. It never consumes a
+  submission and never emits a host step of its own.
 
-Steps 2–4 **drain** — they repeat within a single `advanceAudit` call across successive deterministic obligations (the default; fold-aware, so the loop halts at every operator-interactive pause), bounded by `MAX_DRAIN_STEPS`. The call returns a single consolidated summary for the whole drain. "Bounded" therefore means *fold-aware drain of the deterministic frontier*, not one obligation per call — see *One bounded step per invocation* below.
-
-The obligation ordering is the single-sourced `PRIORITY` array in `src/audit/orchestrator/nextStep.ts` (running `repo_manifest` → … → `friction_capture_current`); `decideNextStep` walks it and picks the highest-priority unsatisfied obligation. Backend/model choice, concurrency, retries, and failover belong entirely to the conversation host and never enter the audit graph.
+The per-invocation cap is the engine's charged-execution budget
+(`maxExecutions = MAX_DRAIN_STEPS`, unit: obligation executions — policy transitions included), stopped
+structurally (`stopped: "budget"`, resumable); the derived transition bound
+(`engineMaxTransitions()`) is the backstop that can no longer fire first. A forced
+`preferredExecutor` runs EXACTLY ONE step and never enters the drain. Backend/model choice,
+concurrency, retries, and failover belong entirely to the conversation host and never enter the
+audit graph.
 
 Synthesis emits `audit-findings.json` (machine contract); `audit-report.md` is its render. `synthesis_narrative_current` is a bounded semantic host step for themes, executive summary, and top risks; the tool validates and ingests the returned narrative.
 
@@ -177,7 +196,7 @@ instead of a rewrite. Trivial mechanical edits skip it.
 - **Auditor-agnostic robustness — enforce in tooling, never host discretion.** The host/auditor agent is a variable of any strength, not a constant. Every workflow correctness property must be guaranteed by the tool itself — CLI option shape, contract validator, renderer template, dispatch-prompt text, scheduler logic, merge tolerance, write-scope enforcement — never by the host *remembering*, *noticing*, or *reasoning*. Any place the workflow only works because a capable host folded in guidance, relayed upstream evidence, paced dispatch safely, picked the right id, verified from disk, or hand-fixed a cross-block break is a **latent failure mode** → move it into the tool so it's impossible to get wrong. "Be careful" / "habit fix" / "my side" is never a fix; prefer changes that make the process *simpler*, not ones that add a step the host must remember. (Generalizes "Conversation-first" and "a needed manual flag is a bug signal".)
 - **Conversation-first.** Normal usage: no manual `--root`, provider, model, routing, quota, or worker flags. The backend emits the next complete workload; the active host owns execution.
 - **Universal host prompts, single-sourced.** Each shipped loader has ONE canonical prompt body (`skills/<bin>/<bin>.prompt.md`); every IDE/host asset is RENDERED from it (`src/shared/hostAssets.ts`), never authored per IDE. Fix the body and regenerate; a hand edit to a rendered asset is drift. (This is the canonical home of the conviction; `docs/project-philosophy.md` maps to it.)
-- **One bounded step per invocation = a fold-aware drain, not a single obligation.** "Bounded" is the *drain-with-fold-aware-halt* model: a call drains the deterministic obligation frontier (highest-priority-first, the default), folding successive steps together and halting at the first host-input pause, non-drainable step, or the `MAX_DRAIN_STEPS` ceiling. Deterministic steps that require no host judgment fold silently; anything operator-interactive breaks the fold. Neither orchestrator runs to completion in a single call, and no call crosses a host-input boundary.
+- **One bounded step per invocation = a fold-aware drain, not a single obligation.** "Bounded" is the *drain-with-fold-aware-halt* model: a call drains the deterministic obligation frontier (highest-priority-first, the default), folding successive steps together and halting at the first host-input pause, non-drainable step, or the charged-execution budget (`MAX_DRAIN_STEPS` obligation executions, the engine's `maxExecutions` — a structured resumable pause, never a throw). Deterministic steps that require no host judgment fold silently; anything operator-interactive breaks the fold. Neither orchestrator runs to completion in a single call, and no call crosses a host-input boundary.
 - **Upstream-valid before downstream-refresh.** Don't refresh a downstream artifact until its upstream dependencies are valid (staleness ordering — see *Right tool, not deterministic dogma* for the deterministic-vs-LLM choice itself).
 - **Language-neutral graph.** Edges: `from`, `to`, `kind`, optional `direction`/`confidence`/`reason`. New analyzers enrich shared artifacts, don't fork planning.
 - **No execution inventory in this package.** Model identities, windows, prices, rate limits, capability tiers, and provider rosters are host concerns. Do not discover, sync, persist, or route on them inside audit-tools; emitted workloads carry only content-derived complexity, risk, token estimates, scope, and prompt bindings.

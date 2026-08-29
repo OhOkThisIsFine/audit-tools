@@ -9,6 +9,7 @@ import {
   findNextObligation,
   advance,
   describeStoppedFold,
+  deriveEngineBound,
   DEFAULT_MAX_TRANSITIONS,
 } from "../../src/shared/engine/obligationEngine.js";
 import type {
@@ -220,6 +221,89 @@ test("a completed fold is distinguishable from a bounded one (stopped is absent)
     outcome.stopped,
     "completion and non-convergence must never look alike — both have a null step",
   ).toBeUndefined();
+});
+
+// ── advance: the charged-execution budget (PH-03 / CX-02 landing 5) ──────────
+//
+// The engine charges EVERY obligation execution to `maxExecutions`,
+// spend-before-dispatch, and stops gracefully with stopped:"budget" once the
+// budget is spent while something is still actionable. Because every
+// transition follows a charged execution, `transitions <= executions` holds by
+// construction — so a maxTransitions derived from the same cap can never fire
+// first. That ordering is the bounded-call invariant this engine owns.
+
+test("advance stops with stopped:'budget' once maxExecutions is spent (never throws)", async () => {
+  let executions = 0;
+  const engine: ObligationEngine<Record<string, never>, unknown, unknown> = {
+    priority: ["loop"],
+    // Always actionable, always transitions → the budget is the only stop.
+    obligations: [{ id: "loop", derive: () => "missing", execute: async (s) => { executions++; return { kind: "transition", state: { ...s } }; } }],
+  };
+  const outcome = await advance(engine, {}, {}, { maxExecutions: 3, maxTransitions: 100 });
+  expect(outcome.step).toBe(null);
+  expect(outcome.stopped).toBe("budget");
+  expect(outcome.lastObligationId).toBe("loop");
+  expect(outcome.stoppedBound, "the result names the limit that fired").toBe(3);
+  // Spend-before-dispatch: exactly the budget executes, never one more.
+  expect(executions).toBe(3);
+});
+
+test("a budget stop cannot be outrun by a bound derived from the same cap", async () => {
+  // transitions <= executions by construction, so with maxTransitions =
+  // deriveEngineBound(cap) the budget always fires first — including when
+  // some executions are policy-shaped transitions and none ever emits.
+  const cap = 5;
+  const engine: ObligationEngine<Record<string, never>, unknown, unknown> = {
+    priority: ["loop"],
+    obligations: [{ id: "loop", derive: () => "missing", execute: async (s) => ({ kind: "transition", state: { ...s } }) }],
+  };
+  const outcome = await advance(engine, {}, {}, {
+    maxExecutions: cap,
+    maxTransitions: deriveEngineBound(cap),
+  });
+  expect(outcome.stopped, "the graceful budget must beat the bound backstop").toBe("budget");
+});
+
+test("an emit spends its charge and returns normally — never a budget stop", async () => {
+  const engine: ObligationEngine<Record<string, never>, unknown, string> = {
+    priority: ["a"],
+    obligations: [{ id: "a", derive: () => "missing", execute: async () => ({ kind: "emit", step: "s" }) }],
+  };
+  const outcome = await advance(engine, {}, {}, { maxExecutions: 1 });
+  expect(outcome.step).toBe("s");
+  expect(outcome.stopped).toBe(undefined);
+});
+
+test("completion inside the budget reports complete, not budget", async () => {
+  interface NState { n: number }
+  const engine: ObligationEngine<NState, unknown, unknown> = {
+    priority: ["grow"],
+    obligations: [{ id: "grow", derive: (s) => (s.n < 2 ? "missing" : "satisfied"), execute: async (s) => ({ kind: "transition", state: { n: s.n + 1 } }) }],
+  };
+  const outcome = await advance(engine, { n: 0 }, {}, { maxExecutions: 10 });
+  expect(outcome.step).toBe(null);
+  expect(outcome.stopped, "a fold that finished under budget is complete").toBe(undefined);
+  expect(outcome.state.n).toBe(2);
+});
+
+test("describeStoppedFold describes a budget stop with the limit that fired", () => {
+  const described = describeStoppedFold({
+    stopped: "budget",
+    lastObligationId: "paced",
+    stoppedBound: 64,
+  });
+  expect(described?.stopped).toBe("budget");
+  expect(described?.spinning).toBe("paced");
+  expect(described?.cause).toContain("64");
+  expect(described?.cause).toContain("resumably");
+});
+
+test("describeStoppedFold prefers the result's own stoppedBound over opts.bound", () => {
+  const described = describeStoppedFold(
+    { stopped: "bound", lastObligationId: "x", stoppedBound: 66 },
+    { bound: 100 },
+  );
+  expect(described?.cause).toContain("66");
 });
 
 test("advance default transition cap is exported and finite", () => {

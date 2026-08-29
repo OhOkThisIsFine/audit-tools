@@ -165,6 +165,12 @@ test("finalization converges through the real persist/reload loop without oscill
         res = await advanceAudit(bundle, {
           root,
           lineIndex: LINE_INDEX,
+          // This driver models a session with NO narrative turn: the draw's
+          // classification is session-owned tri-state (CX-02), so the omit arm
+          // needs the session's explicit `false` — an absent value halts at
+          // the boundary rather than durably omitting a turn a real session
+          // might be owed.
+          narrativeEnabled: false,
         });
       }
       // A drain that produced the report (synthesis ran) is recorded the first

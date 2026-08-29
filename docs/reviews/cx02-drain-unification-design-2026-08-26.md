@@ -721,6 +721,33 @@ and RED at a count of 3. It is not in the tree, not untracked, and not among the
 The mechanism above is precise enough to re-derive it, but the count of 3 is unverifiable from the
 repository until someone does. Re-derive before quoting the number again.
 
+## IMPLEMENTED, 2026-08-28 — the decided shape landed on branch `cx02-impl`
+
+The atomic replace exists: one registry (derived from `PRIORITY` with a bespoke-policy overlay in
+`buildAuditObligations`; the two sync tests dissolved), one drain (the full fold dispatches
+`runSingleAdvanceStep` per obligation execution; `advanceAudit` unforced is the plan draw over the
+same classification, `src/audit/orchestrator/obligationPolicy.ts`), one hold with one core commit
+(`withArtifactTreeHold` + `commitFold`, throw path included; `submission-staging/` with
+restore-on-commit and the systemic-challenge `folded_submission_hashes` duplicate register). The
+engine grew the PH-03 half: `maxExecutions` charges EVERY execution spend-before-dispatch and
+stops `stopped:"budget"`, so `transitions <= executions` holds by construction. Guards observe per
+deterministic dispatch; tolerance stays 16 with the `tolerance < MAX_DRAIN_STEPS` contract test.
+
+Three statements above are corrected by the landing itself:
+- **The constraint-3 acceptance test EXISTS in-tree now** —
+  `tests/audit/one-lock-hold-per-next-step.test.ts`; its RED count on the pre-collapse branch was
+  re-verified at exactly 3, and it is GREEN (count 1) on the implementation.
+- **Landing 4's plan policy gained one decided refinement:** the synthesis-narrative branch is
+  SESSION-owned tri-state — a draw with no session (`narrativeEnabled` absent) HALTS at the
+  boundary instead of durably omitting a turn the real session may be owed; only an explicit
+  `false` takes the omit arm. (Found live: the full fold's inner drains briefly inherited the
+  omit and skipped the enabled narrative turn.)
+- **Entry-at-a-hybrid-boundary is CORRECTED, not preserved** (the record's stated latitude): every
+  draw classifies BEFORE dispatch, so no runner ever runs one step past a live host boundary.
+
+Still owed, unchanged: the live fresh-audit measurement (hold time + dispatch count) before the
+cap is re-sized.
+
 ## Preserve list (report + refuter union)
 
 Deterministic frontier draining within one call; every host-input stop boundary; exactly-once

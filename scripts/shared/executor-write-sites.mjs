@@ -58,6 +58,12 @@ const FILENAME_CONSTANT_RULE = /([A-Z][A-Z0-9_]*FILENAME)\s*=\s*"([^"\\/\s]+\.[A
  *   'artifactPathBinding' — `= join(<x.>artifactsDir, "name")`: the artifact path
  *                           the CLI BINDS and hands to the host, which then
  *                           performs the write itself.
+ *   'bundleFieldCarry'    — the CLI site lands the artifact by REBUILDING the
+ *                           named bundle `field` on the fold's carried bundle;
+ *                           the write itself is the fold's single core commit
+ *                           (CX-02: `commitFold` → `writeCoreArtifacts`). The
+ *                           extractor CHECKS the field is written in the named
+ *                           scope and maps it to `<field>.json`.
  *   'no-writes'           — the executor writes nothing; `reason` says why. A
  *                           `file`+`scope` makes the claim CHECKED: an
  *                           `artifacts_written` literal appearing there refuses,
@@ -80,7 +86,7 @@ const ARTIFACT_PATH_BINDING_RULE =
  *
  * Ordered by executor id (content-derived stable key).
  *
- * @type {ReadonlyArray<{executor: string, file?: string, scope?: string, rule: string, reason?: string}>}
+ * @type {ReadonlyArray<{executor: string, file?: string, scope?: string, rule: string, reason?: string, field?: string}>}
  */
 export const EXECUTOR_WRITE_SITES = [
   {
@@ -122,12 +128,16 @@ export const EXECUTOR_WRITE_SITES = [
   {
     executor: "design_review_conceptual",
     file: "src/audit/cli/nextStepHelpers.ts",
-    rule: "artifactsDirWrites",
+    scope: "handleDesignReviewBranch",
+    rule: "bundleFieldCarry",
+    field: "design_assessment",
   },
   {
     executor: "design_review_contract",
     file: "src/audit/cli/nextStepHelpers.ts",
-    rule: "artifactsDirWrites",
+    scope: "handleDesignReviewBranch",
+    rule: "bundleFieldCarry",
+    field: "design_assessment",
   },
   {
     executor: "docs_digest_executor",
@@ -471,6 +481,20 @@ export function extractExecutorWriteSets(root = repoRoot) {
     }
     const source = readSource(site.file);
     let names;
+    if (site.rule === "bundleFieldCarry") {
+      // The artifact lands through the fold's single core commit; what THIS
+      // site owns is the carried-bundle FIELD rebuild. Checked, not trusted:
+      // the field must actually be written inside the named scope.
+      const haystack = site.scope ? scopeNodeFor(site).getText() : source;
+      const fieldWrite = new RegExp(`\\b${site.field}\\b\\s*[:=]`);
+      if (!fieldWrite.test(haystack)) {
+        throw new Error(
+          `write site for ${site.executor} (bundleFieldCarry over ${site.file}${site.scope ? `#${site.scope}` : ""}) found no write of bundle field "${site.field}" — the carry moved, or the executor stopped producing it`,
+        );
+      }
+      byExecutor.set(site.executor, new Set([`${site.field}.json`]));
+      continue;
+    }
     if (site.rule === "runnerWriteSet") {
       names = collectRunnerWriteSet(scopeNodeFor(site), constants);
       if (names.size === 0) {

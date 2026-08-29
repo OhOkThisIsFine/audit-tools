@@ -180,26 +180,45 @@ export function deriveEngineBound(cap: number): number {
  * - `step` null, `stopped: "bound"` → the fold spent `maxTransitions`
  *   transitions without reaching an emit or completion. Also non-convergence,
  *   detected by counting rather than by signature.
+ * - `step` null, `stopped: "budget"` → the fold spent `maxExecutions` charged
+ *   obligation executions. This is NOT non-convergence: the budget is a pacing
+ *   cap, the stop is graceful, and the caller resumes the fold on its next
+ *   call. Only possible when `opts.maxExecutions` is supplied.
  *
  * `stopped` being ABSENT is what means "the run is complete". A caller that
  * branches on `step` alone therefore cannot tell completion from
- * non-convergence, and would report a wedged fold as a finished one — so both
- * stopped values must be handled explicitly. `lastObligationId` names the
- * obligation the fold was executing when it stopped, so a caller can say WHICH
- * obligation is spinning without parsing it out of a message.
+ * non-convergence, and would report a wedged fold as a finished one — so every
+ * stopped value must be handled explicitly. `lastObligationId` names the
+ * obligation the fold was executing (or, for `budget`, about to execute) when
+ * it stopped, so a caller can say WHICH obligation is in flight without
+ * parsing it out of a message.
  */
 export interface AdvanceResult<S, Step> {
   state: S;
   step: Step | null;
-  stopped?: "cycle" | "bound";
+  stopped?: "cycle" | "bound" | "budget";
   /** The obligation in flight when `stopped` was set; absent otherwise. */
   lastObligationId?: string;
+  /**
+   * The numeric limit that fired — `maxTransitions` for `bound`,
+   * `maxExecutions` for `budget`; absent for `cycle` (no number fired). Carried
+   * ON the result so `describeStoppedFold` reports the number that actually
+   * stopped the fold, and no caller has to know which of two limits to restate.
+   */
+  stoppedBound?: number;
 }
 
-/** A non-convergent stop, described once for every draw that can hit one. */
+/**
+ * A stop, described once for every draw that can hit one. `cycle` and `bound`
+ * are non-convergence; `budget` is the graceful pacing cap — a caller that
+ * expects the cap should branch on `stopped === "budget"` BEFORE reaching for
+ * this description, and build its own resumable pause from its accumulators.
+ * The description exists so a caller that does NOT special-case the budget
+ * still reports the stop honestly rather than as a finished run.
+ */
 export interface StoppedFoldDescription {
   /** Which backstop fired, carried through so a caller need not re-read it. */
-  stopped: "cycle" | "bound";
+  stopped: "cycle" | "bound" | "budget";
   /**
    * The obligation in flight when the fold stopped, or `"unknown"` when it
    * stopped before selecting one. Never parsed out of prose.
@@ -219,26 +238,34 @@ export interface StoppedFoldDescription {
  * null-check itself the branch: there is no way to consume the description
  * without having asked the question.
  *
- * Consumers pass the bound actually in force (`opts.bound`) rather than
- * restating a constant, so the number a host reads is the number that fired.
+ * The number reported is `outcome.stoppedBound` — the limit that actually
+ * fired, carried on the result by the engine itself. `opts.bound` remains as
+ * the fallback for callers describing an outcome from an engine that did not
+ * stamp one, so the number a host reads is still never a restated constant.
  *
  * `cause` is prose for a human terminal ONLY. Never match it: `stopped` and
  * `spinning` are the machine-readable fields, and recognizing a wedged fold by
  * its message text is the divergence this module's bounded-call invariant bans.
  */
 export function describeStoppedFold(
-  outcome: Pick<AdvanceResult<unknown, unknown>, "stopped" | "lastObligationId">,
+  outcome: Pick<
+    AdvanceResult<unknown, unknown>,
+    "stopped" | "lastObligationId" | "stoppedBound"
+  >,
   opts?: { bound?: number },
 ): StoppedFoldDescription | null {
   if (!outcome.stopped) return null;
-  const bound = opts?.bound ?? DEFAULT_MAX_TRANSITIONS;
+  const bound = outcome.stoppedBound ?? opts?.bound ?? DEFAULT_MAX_TRANSITIONS;
+  const cause =
+    outcome.stopped === "bound"
+      ? `spent the engine transition bound (${String(bound)}) without reaching a host-actionable step`
+      : outcome.stopped === "budget"
+        ? `spent its charged-execution budget (${String(bound)}) and pauses resumably at the cap`
+        : "revisited a state it had already scanned this run";
   return {
     stopped: outcome.stopped,
     spinning: outcome.lastObligationId ?? "unknown",
-    cause:
-      outcome.stopped === "bound"
-        ? `spent the engine transition bound (${String(bound)}) without reaching a host-actionable step`
-        : "revisited a state it had already scanned this run",
+    cause,
   };
 }
 
@@ -265,7 +292,19 @@ export function describeStoppedFold(
  *   signature — it stops the loop with `stopped: "bound"` after that many
  *   consecutive transitions.
  *
- * BOTH backstops terminate GRACEFULLY. The bound used to throw, which forced
+ * **Execution budget.** `opts.maxExecutions` is the consumer-facing pacing cap
+ * (PH-03: a budget stop the result expresses structurally, so no caller wraps
+ * the engine in a second drain to enforce one). The engine charges EVERY
+ * `obligation.execute` call to it, spend-before-dispatch: once the budget is
+ * spent, the next selected obligation is NOT executed and the loop returns
+ * `stopped: "budget"` naming it. Because every transition follows a charged
+ * execution, `transitions <= charged executions` holds by construction — so a
+ * `maxTransitions` derived via {@link deriveEngineBound} from the same cap can
+ * never fire first, which is the bounded-call invariant this module owns. An
+ * `emit` spends its charge and returns normally; it is never converted into a
+ * budget stop.
+ *
+ * ALL backstops terminate GRACEFULLY. The bound used to throw, which forced
  * every consumer to recognize a wedged fold by matching text in an error
  * message and to recover the spinning obligation's id with a regex over that
  * same prose — so the engine's bound was part of its contract while its only
@@ -283,13 +322,19 @@ export async function advance<S, Ctx, Step>(
   engine: ObligationEngine<S, Ctx, Step>,
   state: S,
   ctx: Ctx,
-  opts?: { maxTransitions?: number; stateSignature?: (state: S) => string },
+  opts?: {
+    maxTransitions?: number;
+    stateSignature?: (state: S) => string;
+    maxExecutions?: number;
+  },
 ): Promise<AdvanceResult<S, Step>> {
   const maxTransitions = opts?.maxTransitions ?? DEFAULT_MAX_TRANSITIONS;
+  const maxExecutions = opts?.maxExecutions;
   const stateSignature = opts?.stateSignature;
   const visited = stateSignature ? new Set<string>() : null;
   let current = state;
   let transitions = 0;
+  let executions = 0;
   // The obligation most recently selected — reported on every non-convergent
   // stop so the caller can name what is spinning.
   let lastObligationId: string | null = null;
@@ -317,6 +362,20 @@ export async function advance<S, Ctx, Step>(
     );
     if (!obligation) return { state: current, step: null };
     lastObligationId = obligation.id;
+    if (maxExecutions !== undefined && executions >= maxExecutions) {
+      // The budget is spent and another obligation is still actionable. Spend-
+      // before-dispatch: the selected obligation is NOT executed — a cap stated
+      // as a maximum must never authorize one step past itself. Graceful and
+      // resumable; the next call re-selects this same obligation.
+      return {
+        state: current,
+        step: null,
+        stopped: "budget",
+        lastObligationId,
+        stoppedBound: maxExecutions,
+      };
+    }
+    executions += 1;
     const outcome = await obligation.execute(current, ctx);
     if (outcome.kind === "emit") {
       return { state: outcome.state ?? current, step: outcome.step };
@@ -333,6 +392,7 @@ export async function advance<S, Ctx, Step>(
         step: null,
         stopped: "bound",
         lastObligationId,
+        stoppedBound: maxTransitions,
       };
     }
   }

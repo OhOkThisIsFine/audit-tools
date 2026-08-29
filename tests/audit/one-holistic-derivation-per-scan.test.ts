@@ -1,25 +1,18 @@
 import { test, expect, vi } from "vitest";
 
-// CX-02 design gate. The nested double drain leaves audit with TWO obligation
-// registries whose `derive` functions disagree on cost and on semantics:
+// CX-02 scan-cost invariant: ONE fold scan performs ONE holistic audit-state
+// derivation. `findNextObligation` calls EVERY registered def's `derive` on
+// every scan, so an unmemoized registry pays a full `deriveAuditState` per
+// obligation per scan — the ~23x regression commit 6145a1a3 measured and
+// memoized away. Under the ONE registry both draws share the per-call
+// bundle-identity memo, and this test pins that property so a future registry
+// change cannot silently reintroduce the per-obligation derivation.
 //
-//   - the INNER drain (`deriveObligationState` in orchestrator/advance.ts) is
-//     memoized on bundle IDENTITY, so one engine scan runs the holistic
-//     `deriveAuditState` ONCE and every obligation reads that one result. It
-//     also passes `emitStaleness: false`, so a regen cascade emits ONE
-//     consolidated staleness record at the boundary.
-//   - the OUTER fold (`deriveObligationState` in cli/nextStepHelpers.ts) is not
-//     memoized at all and passes no options, so it takes the emit-on-stale
-//     default.
-//
-// `findNextObligation` calls EVERY registered def's `derive` on every scan, so
-// the outer fold pays a full holistic derivation per obligation per scan — the
-// same ~23x regression commit 6145a1a3 measured and fixed on the inner side,
-// still live on the outer one. This test states the invariant that survives the
-// unification: ONE scan, ONE derivation.
-//
-// RED at HEAD by construction. It goes green when the two registries become one
-// and that one registry derives through a single memoized read.
+// History (recorded so the test's role stays honest): this test predates the
+// registry unification and was born RED against the then-outer fold; an
+// interim per-bundle cache turned it green while two registries still stood,
+// which is why the CX-02 record classifies it as pinning a SEPARABLE
+// performance defect — never the acceptance test for the structural collapse.
 
 const { deriveSpy } = vi.hoisted(() => ({ deriveSpy: vi.fn() }));
 

@@ -8,6 +8,7 @@
  * These are deterministic, in-process tests — no file system IO, no providers,
  * no LLM calls.
  */
+import { createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -51,6 +52,7 @@ test("INV-audit-cli-02: handleGraphEnrichmentBranch does not crash when analyzer
     STUB_BUNDLE_NO_MANIFEST,
     STUB_STATE,
     analyzersRef,
+    createFoldTransaction(),
   );
   expect(result.action, "no manifest → no unresolved installs → fallthrough").toBe("fallthrough");
 });
@@ -98,7 +100,7 @@ const { handleGraphEnrichmentBranch: hgeb, handleSynthesisNarrativeBranch: hsnb 
 
 test("INV-audit-cli-08: handleGraphEnrichmentBranch accepts the trimmed params shape", async () => {
   const params = { root: ".", artifactsDir: ".", graphLlmEdgeReasoning: false, since: undefined };
-  const result = await hgeb(params, {}, { status: "active", obligations: [], blockers: [] }, { value: undefined });
+  const result = await hgeb(params, {}, { status: "active", obligations: [], blockers: [] }, { value: undefined }, createFoldTransaction());
   expect(["fallthrough", "continue", "return"].includes(result.action), "expected a valid action").toBeTruthy();
 });
 
@@ -106,7 +108,7 @@ test("INV-audit-cli-08: handleSynthesisNarrativeBranch accepts the trimmed param
   const params = { root: ".", artifactsDir: "/nonexistent-dir-abc", narrativeEnabled: false };
   // narrativeEnabled false + no incoming file → run_omit (run the deterministic
   // status:omitted executor so synthesis_narrative_current is satisfied).
-  const result = await hsnb(params, {}, { status: "active", obligations: [], blockers: [] });
+  const result = await hsnb(params, {}, { status: "active", obligations: [], blockers: [] }, createFoldTransaction());
   expect(result.action, "disabled narrative with no incoming file → run_omit").toBe("run_omit");
 });
 

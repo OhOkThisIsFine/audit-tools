@@ -1,3 +1,4 @@
+import { access } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   artifactTreeLockPath,
@@ -29,6 +30,7 @@ import {
   formatAuditResultIssues,
 } from "../validation/auditResults.js";
 import { formatAuditResultValidationError } from "./workerResult.js";
+import { laneSubmissionPath } from "./laneSubmissions.js";
 import { looksLikeCliFlag, listBatchResultFiles } from "./args.js";
 import { buildLineIndex } from "./lineIndex.js";
 import type { AuditResult } from "../types.js";
@@ -60,6 +62,8 @@ export interface RunAuditStepOptions {
   charterDeltaSubmissionPath?: string;
   clarificationAnswersPath?: string;
   systemicChallengePath?: string;
+  /** Fold-computed content hash of the staged systemic-challenge submission. */
+  systemicChallengeSubmissionHash?: string;
   /**
    * Already-validated edge-reasoning rewrites. Parsed + shape-checked by the
    * caller (`handleGraphEnrichmentBranch` tolerant-unwraps or quarantines the
@@ -86,6 +90,28 @@ export async function runAuditStep(
   return await withFileLock(
     lockPath,
     () => runAuditStepLocked(options, runLogger),
+    undefined,
+    runLogger,
+  );
+}
+
+/**
+ * The ONE artifact-tree hold, exported for the unified `next-step` fold.
+ *
+ * `nextStepHelpers.ts` is banned (import-boundary contract) from importing
+ * `withFileLock` or the locking `runAuditStep`; this wrapper is its sanctioned
+ * entry to the lock, and the dynamic lock-count acceptance test keeps it
+ * honest — one deterministic fold acquires the artifact-tree lock exactly
+ * once, through here.
+ */
+export async function withArtifactTreeHold<T>(
+  artifactsDir: string,
+  runLogger: RunLogger | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return await withFileLock(
+    artifactTreeLockPath(artifactsDir),
+    fn,
     undefined,
     runLogger,
   );
@@ -270,12 +296,24 @@ async function executeAdvance(
     charterDeltaSubmission,
     clarificationAnswers,
     systemicChallenge,
+    systemicChallengeSubmissionHash: options.systemicChallengeSubmissionHash,
     edgeReasoningResults: options.edgeReasoningResults,
     analyzers: options.analyzers,
     graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
     externalAcquisition: options.externalAcquisition,
     since: options.since,
     preferredExecutor: options.preferredExecutor,
+    // The plan-draw classification's lane probe: pure presence, never a read
+    // or a consume — a pending submission is a boundary the unforced draw
+    // halts at (see AdvanceAuditOptions.submissionProbe).
+    submissionProbe: async (lane) => {
+      try {
+        await access(laneSubmissionPath(options.artifactsDir, lane));
+        return true;
+      } catch {
+        return false;
+      }
+    },
     runLogger,
   });
 

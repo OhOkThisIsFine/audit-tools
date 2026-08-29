@@ -7,11 +7,12 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   advance,
   describeStoppedFold,
+  RunLogger,
   compareCodeUnits,
   isFileMissingError,
   isJsonParseError,
@@ -33,15 +34,12 @@ import {
   type ArtifactBundle,
   loadArtifactBundle,
   promoteFinalAuditReport,
-  writeCoreArtifacts,
 } from "../io/artifacts.js";
 import {
-  artifactTreeLockPath,
   auditReportPath,
   groundDesignFindings,
   laneAssetsDir,
   promotedAuditReportPath,
-  withFileLock,
 } from "audit-tools/shared";
 import type { CharterKind, CharterSubmission } from "audit-tools/shared";
 import { charterExtractionKindsForCeiling } from "./charterExtractionPrompt.js";
@@ -60,14 +58,39 @@ import type {
 } from "../types/designAssessment.js";
 import {
   advanceAudit,
+  engineMaxTransitions,
   findExecutorFailure,
+  runSingleAdvanceStep,
+  MAX_DRAIN_STEPS,
   type AdvanceAuditResult,
 } from "../orchestrator/advance.js";
 import {
-  captureDesignReviewSnapshot,
+  buildDesignReviewSnapshot,
   isDesignReviewStale,
   type DesignReviewPass,
 } from "../orchestrator/designReviewSnapshot.js";
+import {
+  computeStaleArtifacts,
+  emitStalenessRecord,
+  isMetadataMigrationStaleness,
+  resetStalenessDedup,
+} from "../orchestrator/staleness.js";
+import {
+  commitFold,
+  createFoldTransaction,
+  markSubmissionApplied,
+  quarantineSubmissionFile,
+  recoverStagedSubmissions,
+  stageLaneSubmission,
+  type FoldTransaction,
+} from "./foldTransaction.js";
+import {
+  charterClarificationOmits,
+  charterExtractionOmits,
+  intentEquivalenceOmits,
+  synthesisNarrativeOmits,
+  systemicChallengeOmits,
+} from "../orchestrator/obligationPolicy.js";
 import { computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
 import {
   decideNextStep,
@@ -76,13 +99,8 @@ import {
   decideAuditFrictionCloseout,
 } from "../orchestrator/nextStep.js";
 import { isHostDelegationExecutor } from "../orchestrator/executors.js";
-import {
-  resolveCharterCeiling,
-  ceilingRequestsCharters,
-} from "../orchestrator/charterExtractionExecutor.js";
-import { resolveClarificationAttention } from "../orchestrator/charterClarificationExecutor.js";
+import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
 import { deriveAuditState } from "../orchestrator/state.js";
-import { deriveIntentEquivalenceStatus } from "../orchestrator/intentEquivalenceExecutor.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 import type { EdgeReasonRewrite } from "../orchestrator/edgeReasoning.js";
 import {
@@ -93,13 +111,14 @@ import {
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import type { ExternalAnalyzerCandidate } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
-import { runAuditStep } from "./auditStep.js";
+import { runAuditStepUnlocked, withArtifactTreeHold } from "./auditStep.js";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import {
   writeHandoffOnly,
-  ensureSemanticReviewRun,
+  ensureSemanticReviewRunUnlocked,
   loadCurrentActiveReviewRun,
 } from "./reviewRun.js";
+import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
 import { buildLineIndex } from "./lineIndex.js";
 import {
@@ -127,7 +146,7 @@ import {
  * not-yet-persisted results).
  */
 export type SubmissionConsumeAttempt<T> =
-  | { status: "ok"; value: T; path: string }
+  | { status: "ok"; value: T; path: string; contentHash?: string }
   | { status: "absent" }
   | { status: "malformed"; path: string; reason: string };
 
@@ -137,11 +156,33 @@ export type SubmissionConsumeAttempt<T> =
  * `absent` on ENOENT-family errors; `malformed` when the file exists but is not
  * JSON — submitted content is the CALLER's to quarantine, never an
  * infrastructure failure. All other IO errors re-throw unchanged.
+ *
+ * With a fold transaction the submission is STAGED first — renamed into
+ * `submission-staging/` before anything parses it (CX-02 landing 3), so a
+ * crash mid-consumption is recoverable and `path` names the STAGED file: the
+ * quarantine helpers move it from there, and `markSubmissionApplied` (never a
+ * direct unlink) schedules its commit-time deletion. Without a transaction the
+ * read is a pure probe of the bound path — nothing moves.
  */
 export async function tryConsumeSubmission<T>(
   artifactsDir: string,
   lane: string,
+  tx?: FoldTransaction,
 ): Promise<SubmissionConsumeAttempt<T>> {
+  if (tx) {
+    const stagedResult = await stageLaneSubmission(tx, artifactsDir, lane);
+    if (stagedResult.status === "absent") return { status: "absent" };
+    const { stagingPath, contentHash } = stagedResult.staged;
+    try {
+      const value = await readJsonFile<T>(stagingPath);
+      return { status: "ok", value, path: stagingPath, contentHash };
+    } catch (error) {
+      if (isJsonParseError(error)) {
+        return { status: "malformed", path: stagingPath, reason: error.message };
+      }
+      throw error;
+    }
+  }
   const filePath = laneSubmissionPath(artifactsDir, lane);
   try {
     const value = await readJsonFile<T>(filePath);
@@ -177,6 +218,21 @@ export type NextStepParams = {
 export type TerminalStepResult =
   | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string; triage?: import("audit-tools/shared").FrictionTriageDecision }
   | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string };
+
+/**
+ * A guard's in-fold verdict that the fold must END at a terminal — carried out
+ * of the engine as an emit and CONVERTED to the real terminal step by the fold
+ * driver AFTER the single core commit and outside the hold. The conversion
+ * cannot happen in-fold: `buildTerminalStep` can promote the final report,
+ * and promotion DELETES artifactsDir — under the fold's own hold that would
+ * destroy the lock it holds and the tree its commit is about to write.
+ */
+export interface TerminalFoldIntent {
+  kind: "terminal_intent";
+  bundle: ArtifactBundle;
+  state: AuditState;
+  reason: string;
+}
 
 /**
  * The host-actionable outcome of one `next-step` deterministic fold — the
@@ -396,6 +452,7 @@ export async function handleAnalyzerConsentBranch(
   bundle: ArtifactBundle,
   state: AuditState,
   analyzersRef: { value: Record<string, AnalyzerSetting> | undefined },
+  tx: FoldTransaction,
 ): Promise<AnalyzerConsentBranchResult> {
   const pending = pendingAnalyzerConsent({
     root: params.root,
@@ -412,6 +469,7 @@ export async function handleAnalyzerConsentBranch(
     params.artifactsDir,
     GATE_LANES.analyzer_consent,
     ANALYZER_CONSENT_VALUES,
+    tx,
   );
   if (incoming.status === "quarantined") {
     return { action: "continue" };
@@ -449,20 +507,27 @@ export async function handleAnalyzerConsentBranch(
         };
       }
     }
-    await unlink(incoming.path).catch(() => {});
-    await recordLaneOutcome(params.artifactsDir, GATE_LANES.analyzer_consent, {
-      kind: "accepted",
-      ...(incoming.ignored.length > 0
-        ? { message: describeIgnoredKeys(incoming.ignored, ANALYZER_CONSENT_VALUES) }
-        : {}),
-    });
+    // Deletion + the accepted ledger event are COMMIT-phase (the consent
+    // persist above is durable-by-design and idempotent, so a crash-replay
+    // re-applies it harmlessly while the staged file is restored).
+    markSubmissionApplied(
+      tx,
+      incoming.path,
+      incoming.ignored.length > 0
+        ? describeIgnoredKeys(incoming.ignored, ANALYZER_CONSENT_VALUES)
+        : undefined,
+    );
     return { action: "continue" };
   }
   return { action: "return", result: { kind: "analyzer_consent", state, bundle, pending } };
 }
 
 type GraphEnrichmentBranchResult =
-  | { action: "continue" }
+  | {
+      /** A submission was consumed; keep folding on the carried bundle. */
+      action: "continue";
+      bundle: ArtifactBundle;
+    }
   | { action: "return"; result: { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] } }
   | { action: "return"; result: { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] } }
   | { action: "fallthrough" };
@@ -480,8 +545,14 @@ export async function handleGraphEnrichmentBranch(
   bundle: ArtifactBundle,
   state: AuditState,
   analyzersRef: { value: Record<string, AnalyzerSetting> | undefined },
+  tx: FoldTransaction,
   deps: {
-    runStep?: typeof runAuditStep;
+    /**
+     * The LOCK-FREE forced-apply primitive. The fold holds the artifact-tree
+     * lock for its whole drain, so the injected runner (and its default) must
+     * never acquire it — the locking `runAuditStep` is banned from this module.
+     */
+    runStep?: typeof runAuditStepUnlocked;
     /**
      * Injectable so the analyzer-decisions branch is testable at all. The real
      * resolution asks the MACHINE which analyzers are installed, so a fixture
@@ -493,10 +564,10 @@ export async function handleGraphEnrichmentBranch(
     unresolvedAnalyzers?: typeof graphEnrichmentUnresolvedAnalyzers;
   } = {},
 ): Promise<GraphEnrichmentBranchResult> {
-  const runStep = deps.runStep ?? runAuditStep;
-  // Fold-level pause detection is single-sourced in `hostInputPause` so the drain
-  // stop predicate (`nextStepPausesForHostInput`) and this fold agree EXACTLY on
-  // when the analyzer-install consent / edge-reasoning turns are owed.
+  const runStep = deps.runStep ?? runAuditStepUnlocked;
+  // Fold-level pause detection is single-sourced in `hostInputPause` so the
+  // plan draw's classifier (`obligationPolicy.ts`) and this fold agree EXACTLY
+  // on when the analyzer-install consent / edge-reasoning turns are owed.
   const pauseInputs = {
     root: params.root,
     analyzers: analyzersRef.value,
@@ -511,24 +582,25 @@ export async function handleGraphEnrichmentBranch(
       params.artifactsDir,
       GATE_LANES.analyzer_decisions,
       ANALYZER_SETTING_VALUES,
+      tx,
     );
     if (incoming.status === "quarantined") {
       // A non-object top-level value used to be neither merged, deleted, nor
       // diagnosed — the file lingered at its bound path and the analyzer_install
       // step re-emitted silently forever. Quarantined + diagnosed instead.
-      return { action: "continue" };
+      return { action: "continue", bundle };
     }
     if (incoming.status === "ok") {
       const merged = await persistAnalyzerSettings(params.root, incoming.values);
       analyzersRef.value = merged.analyzers;
-      await unlink(incoming.path).catch(() => {});
-      await recordLaneOutcome(params.artifactsDir, GATE_LANES.analyzer_decisions, {
-        kind: "accepted",
-        ...(incoming.ignored.length > 0
-          ? { message: describeIgnoredKeys(incoming.ignored, ANALYZER_SETTING_VALUES) }
-          : {}),
-      });
-      return { action: "continue" };
+      markSubmissionApplied(
+        tx,
+        incoming.path,
+        incoming.ignored.length > 0
+          ? describeIgnoredKeys(incoming.ignored, ANALYZER_SETTING_VALUES)
+          : undefined,
+      );
+      return { action: "continue", bundle };
     }
     return { action: "return", result: { kind: "analyzer_install", state, bundle, unresolved } };
   }
@@ -547,6 +619,7 @@ export async function handleGraphEnrichmentBranch(
       const edgeReasoningIncoming = await tryConsumeSubmission<unknown>(
         params.artifactsDir,
         GATE_LANES.edge_reasoning,
+        tx,
       );
       if (edgeReasoningIncoming.status === "malformed") {
         const quarantinePath = await quarantineSubmissionFile(
@@ -565,7 +638,7 @@ export async function handleGraphEnrichmentBranch(
           issueCode: "submission_malformed",
           message: edgeReasoningIncoming.reason,
         });
-        return { action: "continue" };
+        return { action: "continue", bundle };
       }
       if (edgeReasoningIncoming.status === "ok") {
         // Same hazard class as the design-review quarantine fix: a malformed
@@ -594,24 +667,28 @@ export async function handleGraphEnrichmentBranch(
             issueCode: "submission_contract_invalid",
             message: unwrapped.reason,
           });
-          return { action: "continue" };
+          return { action: "continue", bundle };
         }
-        // Apply BEFORE deleting the submission: if runStep throws (locks,
-        // crash), the submission survives for the retry instead of being lost.
-        await runStep({
-          root: params.root,
-          artifactsDir: params.artifactsDir,
-          analyzers: analyzersRef.value,
-          graphLlmEdgeReasoning: true,
-          edgeReasoningResults: { rewrites: unwrapped.array as EdgeReasonRewrite[] },
-          since: params.since,
-        });
-        await unlink(edgeReasoningIncoming.path).catch(() => {});
+        // Apply BEFORE the deletion commits: if runStep throws, the staged
+        // submission is RESTORED for the retry instead of being lost. The
+        // executor is forced explicitly — the fold's engine selected this
+        // obligation, so the selection is graph enrichment by construction,
+        // and an unforced call would re-enter a drain.
+        const applied = await runStep(
+          {
+            root: params.root,
+            artifactsDir: params.artifactsDir,
+            analyzers: analyzersRef.value,
+            graphLlmEdgeReasoning: true,
+            preferredExecutor: "graph_enrichment_executor",
+            edgeReasoningResults: { rewrites: unwrapped.array as EdgeReasonRewrite[] },
+            since: params.since,
+          },
+          bundle,
+        );
+        markSubmissionApplied(tx, edgeReasoningIncoming.path);
         await clearEdgeReasoningRejection(params.artifactsDir);
-        await recordLaneOutcome(params.artifactsDir, GATE_LANES.edge_reasoning, {
-          kind: "accepted",
-        });
-        return { action: "continue" };
+        return { action: "continue", bundle: applied.updated_bundle };
       }
       return { action: "return", result: { kind: "edge_reasoning", state, bundle, candidates } };
     }
@@ -623,7 +700,11 @@ export async function handleGraphEnrichmentBranch(
 }
 
 type BranchActionResult =
-  | { action: "continue" }
+  | {
+      /** Submissions were consumed/refused; keep folding on the carried bundle. */
+      action: "continue";
+      bundle: ArtifactBundle;
+    }
   | { action: "return"; result: { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle } }
   | { action: "return"; result: { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle } }
   | { action: "return"; result: { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle } };
@@ -684,34 +765,8 @@ type ConsumeArraySubmissionResult<T> =
       reason: string;
     };
 
-/**
- * Move a refused submission to `<artifactsDir>/quarantine/` rather than
- * deleting it. Falls back to copy+unlink if `rename` fails (e.g. a cross-device
- * artifacts mount) so the content is never lost. The quarantined file is named
- * for its LANE — the bound path is a digest, which tells an operator nothing.
- */
-async function quarantineSubmissionFile(
-  artifactsDir: string,
-  filePath: string,
-  lane: string,
-): Promise<string> {
-  const quarantineDir = join(artifactsDir, "quarantine");
-  await mkdir(quarantineDir, { recursive: true });
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const quarantinePath = join(quarantineDir, `${lane}.${timestamp}.json`);
-  try {
-    await rename(filePath, quarantinePath);
-  } catch {
-    try {
-      const content = await readFile(filePath, "utf8");
-      await writeFile(quarantinePath, content, "utf8");
-    } catch {
-      // Best-effort: nothing left to quarantine if even the read failed.
-    }
-    await unlink(filePath).catch(() => {});
-  }
-  return quarantinePath;
-}
+// `quarantineSubmissionFile` moved to `foldTransaction.ts` (the staging/commit
+// module owns submission-file lifecycle mechanics); imported above.
 
 /**
  * Quarantine a submission that failed zod validation — or failed to parse as
@@ -761,8 +816,9 @@ async function quarantineMisshapedSubmission(
 export async function consumeArraySubmission<T>(
   artifactsDir: string,
   lane: string,
+  tx?: FoldTransaction,
 ): Promise<ConsumeArraySubmissionResult<T>> {
-  const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane);
+  const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane, tx);
   if (incoming.status === "absent") return { status: "absent" };
   if (incoming.status === "malformed") {
     const quarantinePath = await quarantineSubmissionFile(
@@ -808,8 +864,9 @@ type ConsumeObjectSubmissionResult =
 export async function consumeObjectSubmission(
   artifactsDir: string,
   lane: string,
+  tx?: FoldTransaction,
 ): Promise<ConsumeObjectSubmissionResult> {
-  const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane);
+  const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane, tx);
   if (incoming.status === "absent") return { status: "absent" };
   if (incoming.status === "malformed") {
     const quarantinePath = await quarantineSubmissionFile(
@@ -897,8 +954,9 @@ async function consumeEnumMapSubmission<T extends string>(
   artifactsDir: string,
   lane: string,
   allowed: readonly T[],
+  tx?: FoldTransaction,
 ): Promise<ConsumeEnumMapResult<T>> {
-  const incoming = await consumeObjectSubmission(artifactsDir, lane);
+  const incoming = await consumeObjectSubmission(artifactsDir, lane, tx);
   if (incoming.status === "absent") return { status: "absent" };
   if (incoming.status === "quarantined") return { status: "quarantined" };
   const values: Record<string, T> = {};
@@ -1016,16 +1074,15 @@ export async function renderEdgeReasoningRejectionNotice(
  * here. Two appends per refusal made a single rejection read as two on a record
  * whose whole value is counting them.
  */
-async function recordRejectedDesignReviewSubmission(
-  artifactsDir: string,
+function withRejectedDesignReviewSubmission(
   existing: DesignAssessment | undefined,
   pass: RejectedDesignReviewSubmission["pass"],
   quarantined: Extract<
     ConsumeArraySubmissionResult<unknown>,
     { status: "quarantined" }
   >,
-): Promise<void> {
-  if (!existing) return;
+): DesignAssessment | undefined {
+  if (!existing) return undefined;
   const entry: RejectedDesignReviewSubmission = {
     pass,
     lane: quarantined.lane,
@@ -1033,11 +1090,17 @@ async function recordRejectedDesignReviewSubmission(
     reason: quarantined.reason,
     rejected_at: new Date().toISOString(),
   };
-  existing.rejected_submissions = [
-    ...(existing.rejected_submissions ?? []).filter((r) => r.pass !== pass),
-    entry,
-  ];
-  await writeJsonFile(join(artifactsDir, "design_assessment.json"), existing);
+  // PURE rebuild — never a mutation of the carried assessment. Both derive
+  // memos key on bundle identity, so an in-place edit would let an earlier
+  // carry observe a later change (the aliasing hazard CX-02's record pins);
+  // the persisted write is the fold's single core commit, not this site.
+  return {
+    ...existing,
+    rejected_submissions: [
+      ...(existing.rejected_submissions ?? []).filter((r) => r.pass !== pass),
+      entry,
+    ],
+  };
 }
 
 /**
@@ -1079,8 +1142,21 @@ export async function handleDesignReviewBranch(
   params: Pick<NextStepParams, "artifactsDir">,
   bundle: ArtifactBundle,
   state: AuditState,
+  tx: FoldTransaction,
 ): Promise<BranchActionResult> {
-  const existing = bundle.design_assessment;
+  // Working copies, replaced IMMUTABLY on every change — never a mutation of
+  // the carried bundle's nested objects (the aliasing hazard the CX-02 record
+  // pins: both derive memos key on bundle identity, and an in-place edit lets
+  // an earlier carry observe a later change). `carried()` assembles the fresh
+  // bundle every path hands back.
+  let assessment = bundle.design_assessment;
+  let snapshots = bundle.design_review_snapshots;
+  const carried = (): ArtifactBundle => {
+    const next: ArtifactBundle = { ...bundle };
+    if (assessment !== undefined) next.design_assessment = assessment;
+    if (snapshots !== undefined) next.design_review_snapshots = snapshots;
+    return next;
+  };
 
   /**
    * P25-f: a valid submission with nowhere to merge it is HELD and RECORDED,
@@ -1118,12 +1194,13 @@ export async function handleDesignReviewBranch(
       issueCode: "submission_rejected",
       message: `${pass} pass: ${reason}`,
     });
-    await recordRejectedDesignReviewSubmission(params.artifactsDir, existing, pass, {
-      status: "quarantined",
-      quarantinePath,
-      lane,
-      reason,
-    });
+    assessment =
+      withRejectedDesignReviewSubmission(assessment, pass, {
+        status: "quarantined",
+        quarantinePath,
+        lane,
+        reason,
+      }) ?? assessment;
   };
 
   // Legacy: consume the old combined findings submission. Tolerant-unwrap or
@@ -1131,30 +1208,29 @@ export async function handleDesignReviewBranch(
   const legacyResult = await consumeArraySubmission<Finding>(
     params.artifactsDir,
     GATE_LANES.design_review_legacy,
+    tx,
   );
   if (legacyResult.status === "quarantined") {
-    await recordRejectedDesignReviewSubmission(params.artifactsDir, existing, "legacy", legacyResult);
-    return { action: "continue" };
+    assessment =
+      withRejectedDesignReviewSubmission(assessment, "legacy", legacyResult) ??
+      assessment;
+    return { action: "continue", bundle: carried() };
   }
   if (legacyResult.status === "ok") {
-    if (existing) {
-      existing.review_findings = groundDesignFindings(legacyResult.value, bundle.repo_manifest);
-      existing.reviewed = true;
-      existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
-        (r) => r.pass !== "legacy",
-      );
-      await writeJsonFile(
-        join(params.artifactsDir, "design_assessment.json"),
-        existing,
-      );
-      await unlink(legacyResult.path).catch(() => {});
-      await recordLaneOutcome(params.artifactsDir, GATE_LANES.design_review_legacy, {
-        kind: "accepted",
-      });
-      return { action: "continue" };
+    if (assessment) {
+      assessment = {
+        ...assessment,
+        review_findings: groundDesignFindings(legacyResult.value, bundle.repo_manifest),
+        reviewed: true,
+        rejected_submissions: (assessment.rejected_submissions ?? []).filter(
+          (r) => r.pass !== "legacy",
+        ),
+      };
+      markSubmissionApplied(tx, legacyResult.path);
+      return { action: "continue", bundle: carried() };
     }
     await holdWithoutTarget("legacy", GATE_LANES.design_review_legacy, legacyResult.path);
-    return { action: "continue" };
+    return { action: "continue", bundle: carried() };
   }
   // absent: fall through to the contract/conceptual check.
 
@@ -1162,22 +1238,29 @@ export async function handleDesignReviewBranch(
   const contractResult = await consumeArraySubmission<Finding>(
     params.artifactsDir,
     GATE_LANES.design_review_contract,
+    tx,
   );
   const conceptualResult = await consumeArraySubmission<Finding>(
     params.artifactsDir,
     GATE_LANES.design_review_conceptual,
+    tx,
   );
 
   let consumed = false;
 
   if (contractResult.status === "quarantined") {
-    await recordRejectedDesignReviewSubmission(params.artifactsDir, existing, "contract", contractResult);
-  } else if (contractResult.status === "ok" && existing) {
-    existing.contract_findings = groundDesignFindings(contractResult.value, bundle.repo_manifest);
-    existing.contract_reviewed = true;
-    existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
-      (r) => r.pass !== "contract",
-    );
+    assessment =
+      withRejectedDesignReviewSubmission(assessment, "contract", contractResult) ??
+      assessment;
+  } else if (contractResult.status === "ok" && assessment) {
+    assessment = {
+      ...assessment,
+      contract_findings: groundDesignFindings(contractResult.value, bundle.repo_manifest),
+      contract_reviewed: true,
+      rejected_submissions: (assessment.rejected_submissions ?? []).filter(
+        (r) => r.pass !== "contract",
+      ),
+    };
     consumed = true;
   } else if (contractResult.status === "ok") {
     await holdWithoutTarget(
@@ -1188,13 +1271,18 @@ export async function handleDesignReviewBranch(
   }
 
   if (conceptualResult.status === "quarantined") {
-    await recordRejectedDesignReviewSubmission(params.artifactsDir, existing, "conceptual", conceptualResult);
-  } else if (conceptualResult.status === "ok" && existing) {
-    existing.conceptual_findings = groundDesignFindings(conceptualResult.value, bundle.repo_manifest);
-    existing.conceptual_reviewed = true;
-    existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
-      (r) => r.pass !== "conceptual",
-    );
+    assessment =
+      withRejectedDesignReviewSubmission(assessment, "conceptual", conceptualResult) ??
+      assessment;
+  } else if (conceptualResult.status === "ok" && assessment) {
+    assessment = {
+      ...assessment,
+      conceptual_findings: groundDesignFindings(conceptualResult.value, bundle.repo_manifest),
+      conceptual_reviewed: true,
+      rejected_submissions: (assessment.rejected_submissions ?? []).filter(
+        (r) => r.pass !== "conceptual",
+      ),
+    };
     consumed = true;
   } else if (conceptualResult.status === "ok") {
     await holdWithoutTarget(
@@ -1204,69 +1292,66 @@ export async function handleDesignReviewBranch(
     );
   }
 
-  if (consumed && existing) {
-    await writeJsonFile(
-      join(params.artifactsDir, "design_assessment.json"),
-      existing,
-    );
+  if (consumed && assessment) {
     // Snapshot each just-completed pass (B2 parity port): record the verdict +
     // the semantic projection of the structural inputs it reviewed, so a later
     // upstream change re-stales the pass and the re-emit can be diff-scoped
-    // rather than a blind full re-run. Capture after the design_assessment write
-    // so the projection reflects the persisted findings.
+    // rather than a blind full re-run. The snapshot VALUE rides the carried
+    // bundle (so this fold's own staleness derivation sees the pass fresh) and
+    // its WRITE is staged on the transaction, committing WITH the core — a
+    // snapshot lost between fold and commit would silently mark a completed
+    // pass satisfied (CX-02 landing 2).
     const reviewedAt = new Date().toISOString();
     if (contractResult.status === "ok") {
-      await captureDesignReviewSnapshot(
-        params.artifactsDir,
+      const snapshot = buildDesignReviewSnapshot(
         "contract",
-        existing.contract_findings ?? [],
-        bundle,
+        assessment.contract_findings ?? [],
+        carried(),
         reviewedAt,
       );
-      // Unlink only now: the findings are persisted and snapshotted, so the
-      // submission's content survives its own deletion.
-      await unlink(contractResult.path).catch(() => {});
-      await recordLaneOutcome(params.artifactsDir, GATE_LANES.design_review_contract, {
-        kind: "accepted",
-      });
+      tx.pendingSnapshots.push(snapshot);
+      snapshots = { ...(snapshots ?? {}), contract: snapshot };
+      markSubmissionApplied(tx, contractResult.path);
     }
     if (conceptualResult.status === "ok") {
-      await captureDesignReviewSnapshot(
-        params.artifactsDir,
+      const snapshot = buildDesignReviewSnapshot(
         "conceptual",
-        existing.conceptual_findings ?? [],
-        bundle,
+        assessment.conceptual_findings ?? [],
+        carried(),
         reviewedAt,
       );
-      await unlink(conceptualResult.path).catch(() => {});
-      await recordLaneOutcome(params.artifactsDir, GATE_LANES.design_review_conceptual, {
-        kind: "accepted",
-      });
+      tx.pendingSnapshots.push(snapshot);
+      snapshots = { ...(snapshots ?? {}), conceptual: snapshot };
+      markSubmissionApplied(tx, conceptualResult.path);
     }
-    return { action: "continue" };
+    return { action: "continue", bundle: carried() };
   }
 
   // Determine which passes still need to run. A completed pass whose snapshot has
   // gone stale (a structural input changed in projection) is NOT done — it must
   // re-run as a diff-based re-review. This mirrors the obligation staleness in
-  // `designReviewPassState`.
+  // `designReviewPassState`. Checked against the CARRIED bundle so a rejection
+  // note recorded above reaches the re-emitted step's renderer.
+  const current = carried();
   const contractDone =
-    existing?.contract_reviewed === true && !passIsStale(bundle, "contract");
+    current.design_assessment?.contract_reviewed === true &&
+    !passIsStale(current, "contract");
   const conceptualDone =
-    existing?.conceptual_reviewed === true && !passIsStale(bundle, "conceptual");
+    current.design_assessment?.conceptual_reviewed === true &&
+    !passIsStale(current, "conceptual");
 
   if (!contractDone && !conceptualDone) {
-    return { action: "return", result: { kind: "design_review_parallel", state, bundle } };
+    return { action: "return", result: { kind: "design_review_parallel", state, bundle: current } };
   }
   if (!contractDone) {
-    return { action: "return", result: { kind: "design_review_contract", state, bundle } };
+    return { action: "return", result: { kind: "design_review_contract", state, bundle: current } };
   }
   if (!conceptualDone) {
-    return { action: "return", result: { kind: "design_review_conceptual", state, bundle } };
+    return { action: "return", result: { kind: "design_review_conceptual", state, bundle: current } };
   }
 
   // Both done — should not normally reach here (obligations would be satisfied).
-  return { action: "continue" };
+  return { action: "continue", bundle: current };
 }
 
 // ── Tier C2: consolidated "omittable host gate" engine ─────────────────────────
@@ -1304,7 +1389,11 @@ export async function handleDesignReviewBranch(
 
 /** The common action shape all four `runOmittableGate`-driven branches return. */
 type OmittableGateAction<TStepKind extends string> =
-  | { action: "continue" }
+  | {
+      /** A submission was consumed + applied; keep folding on the carried bundle. */
+      action: "continue";
+      bundle: ArtifactBundle;
+    }
   | { action: "run_omit" }
   | { action: "return"; result: { kind: TStepKind; state: AuditState; bundle: ArtifactBundle } };
 
@@ -1331,12 +1420,19 @@ interface OmittableGateDescriptor<TIncoming, TStepKind extends string> {
    * gate this engine drives.
    */
   schema: ZodTypeAny;
-  /** Apply the consumed value (the executor dispatch this gate's host turn feeds). */
+  /**
+   * Apply the consumed value: the LOCK-FREE forced single-step dispatch this
+   * gate's host turn feeds, run against the fold's carried bundle. Returns the
+   * advance result so the fold transitions on `updated_bundle` — a disk reload
+   * here would read the fold's own unwritten state and roll it back.
+   */
   apply: (
     value: TIncoming,
     path: string,
     params: Pick<NextStepParams, "root" | "artifactsDir">,
-  ) => Promise<void>;
+    bundle: ArtifactBundle,
+    staged: { contentHash?: string },
+  ) => Promise<AdvanceAuditResult>;
   /**
    * True when no host turn is owed this pass — the caller should run the
    * deterministic omit executor instead of surfacing the step. Evaluated only
@@ -1359,8 +1455,13 @@ async function runOmittableGate<TIncoming, TStepKind extends string>(
   params: Pick<NextStepParams, "root" | "artifactsDir">,
   bundle: ArtifactBundle,
   state: AuditState,
+  tx: FoldTransaction,
 ): Promise<OmittableGateAction<TStepKind>> {
-  const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, descriptor.lane);
+  const incoming = await tryConsumeSubmission<unknown>(
+    params.artifactsDir,
+    descriptor.lane,
+    tx,
+  );
   if (incoming.status === "malformed") {
     // Not-JSON submission: same quarantine-loudly lifecycle as a mis-shaped one.
     await quarantineMisshapedSubmission(
@@ -1372,10 +1473,17 @@ async function runOmittableGate<TIncoming, TStepKind extends string>(
   } else if (incoming.status === "ok") {
     const parsed = descriptor.schema.safeParse(incoming.value);
     if (parsed.success) {
-      await descriptor.apply(parsed.data as TIncoming, incoming.path, params);
-      await unlink(incoming.path).catch(() => {});
-      await recordLaneOutcome(params.artifactsDir, descriptor.lane, { kind: "accepted" });
-      return { action: "continue" };
+      const applied = await descriptor.apply(
+        parsed.data as TIncoming,
+        incoming.path,
+        params,
+        bundle,
+        { contentHash: incoming.contentHash },
+      );
+      // Deletion + the accepted event commit WITH the core write; a throw
+      // between here and the commit restores the staged submission instead.
+      markSubmissionApplied(tx, incoming.path);
+      return { action: "continue", bundle: applied.updated_bundle };
     }
     // Mis-shaped submission: quarantine loudly and fall through to
     // shouldOmit/return — never hand it to the executor to crash on or silently
@@ -1409,26 +1517,32 @@ export async function handleSynthesisNarrativeBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir" | "narrativeEnabled">,
   bundle: ArtifactBundle,
   state: AuditState,
+  tx: FoldTransaction,
 ): Promise<SynthesisNarrativeBranchResult> {
   return runOmittableGate<SynthesisNarrative, "synthesis_narrative">(
     {
       kind: "synthesis_narrative",
       lane: GATE_LANES.synthesis_narrative,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.synthesis_narrative]!,
-      apply: async (_value, path, p) => {
-        await runAuditStep({
-          root: p.root,
-          artifactsDir: p.artifactsDir,
-          preferredExecutor: "synthesis_narrative_executor",
-          narrativeResultsPath: path,
-        });
-      },
+      apply: (_value, path, p, foldBundle) =>
+        runAuditStepUnlocked(
+          {
+            root: p.root,
+            artifactsDir: p.artifactsDir,
+            preferredExecutor: "synthesis_narrative_executor",
+            narrativeResultsPath: path,
+          },
+          foldBundle,
+        ),
       // Narrative disabled: omit (run the deterministic omit executor below).
-      shouldOmit: () => !params.narrativeEnabled,
+      // Single-sourced with the plan draw's classifier (obligationPolicy.ts).
+      shouldOmit: () =>
+        synthesisNarrativeOmits({ narrativeEnabled: params.narrativeEnabled }),
     },
     params,
     bundle,
     state,
+    tx,
   );
 }
 
@@ -1447,9 +1561,10 @@ export async function handleIntentEquivalenceBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir">,
   bundle: ArtifactBundle,
   state: AuditState,
+  tx: FoldTransaction,
 ): Promise<IntentEquivalenceBranchResult> {
   const lane = GATE_LANES.intent_equivalence;
-  const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane);
+  const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane, tx);
   if (incoming.status === "malformed") {
     await quarantineMisshapedSubmission(
       params.artifactsDir,
@@ -1461,15 +1576,17 @@ export async function handleIntentEquivalenceBranch(
   } else if (incoming.status === "ok") {
     const parsed = LANE_SUBMISSION_SCHEMAS[lane]!.safeParse(incoming.value);
     if (parsed.success) {
-      await runAuditStep({
-        root: params.root,
-        artifactsDir: params.artifactsDir,
-        preferredExecutor: "intent_equivalence_executor",
-        intentEquivalenceVerdictPath: incoming.path,
-      });
-      await unlink(incoming.path).catch(() => {});
-      await recordLaneOutcome(params.artifactsDir, lane, { kind: "accepted" });
-      return { action: "continue" };
+      const applied = await runAuditStepUnlocked(
+        {
+          root: params.root,
+          artifactsDir: params.artifactsDir,
+          preferredExecutor: "intent_equivalence_executor",
+          intentEquivalenceVerdictPath: incoming.path,
+        },
+        bundle,
+      );
+      markSubmissionApplied(tx, incoming.path);
+      return { action: "continue", bundle: applied.updated_bundle };
     }
     await quarantineMisshapedSubmission(
       params.artifactsDir,
@@ -1479,7 +1596,8 @@ export async function handleIntentEquivalenceBranch(
     );
     // Fall through: no valid submission — re-emit or deterministically resolve.
   }
-  if (deriveIntentEquivalenceStatus(bundle).kind !== "prose_judgment_pending") {
+  // Single-sourced with the plan draw's classifier (obligationPolicy.ts).
+  if (intentEquivalenceOmits(bundle)) {
     return { action: "run_omit" };
   }
   return { action: "return", result: { kind: "intent_equivalence", state, bundle } };
@@ -1501,20 +1619,23 @@ export async function handleCriticalFlowFallbackBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir">,
   bundle: ArtifactBundle,
   state: AuditState,
+  tx: FoldTransaction,
 ): Promise<CriticalFlowFallbackBranchResult> {
   return runOmittableGate<CriticalFlowFallbackResult, "critical_flow_fallback">(
     {
       kind: "critical_flow_fallback",
       lane: GATE_LANES.critical_flow_fallback,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.critical_flow_fallback]!,
-      apply: async (_value, path, p) => {
-        await runAuditStep({
-          root: p.root,
-          artifactsDir: p.artifactsDir,
-          preferredExecutor: "critical_flow_fallback_executor",
-          criticalFlowFallbackResultsPath: path,
-        });
-      },
+      apply: (_value, path, p, foldBundle) =>
+        runAuditStepUnlocked(
+          {
+            root: p.root,
+            artifactsDir: p.artifactsDir,
+            preferredExecutor: "critical_flow_fallback_executor",
+            criticalFlowFallbackResultsPath: path,
+          },
+          foldBundle,
+        ),
       // Never omit: the obligation is only reached when the deterministic bar
       // failed, and the host is always available to author the enrichment.
       shouldOmit: () => false,
@@ -1522,6 +1643,7 @@ export async function handleCriticalFlowFallbackBranch(
     params,
     bundle,
     state,
+    tx,
   );
 }
 
@@ -1540,10 +1662,12 @@ export async function handleCharterExtractionBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir">,
   bundle: ArtifactBundle,
   state: AuditState,
+  tx: FoldTransaction,
 ): Promise<CharterExtractionBranchResult> {
   const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
   // Shallow ceiling (default): omit deterministically, no host turn, no lanes.
-  if (!ceilingRequestsCharters(ceiling)) {
+  // Single-sourced with the plan draw's classifier (obligationPolicy.ts).
+  if (charterExtractionOmits(bundle)) {
     return { action: "run_omit" };
   }
   // Per-kind blind lanes (design resolution 2): one submission file per kind,
@@ -1564,7 +1688,10 @@ export async function handleCharterExtractionBranch(
   let quarantinedAny = false;
   for (const kind of kinds) {
     const lane = charterExtractionLane(kind);
-    const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane);
+    // Staged per lane; an INCOMPLETE set is restored to its bound paths at
+    // commit (un-applied), which is exactly the K-of-N resume the design
+    // wants — pending lanes survive on disk until every lane is present.
+    const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane, tx);
     if (incoming.status === "absent") continue;
     if (incoming.status === "malformed") {
       quarantinedAny = true;
@@ -1608,18 +1735,20 @@ export async function handleCharterExtractionBranch(
       CHARTER_EXTRACTION_MERGED_FILENAME,
     );
     await writeJsonFile(mergedPath, merged);
-    await runAuditStep({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-      preferredExecutor: "charter_extraction_executor",
-      charterSubmissionPath: mergedPath,
-    });
+    const applied = await runAuditStepUnlocked(
+      {
+        root: params.root,
+        artifactsDir: params.artifactsDir,
+        preferredExecutor: "charter_extraction_executor",
+        charterSubmissionPath: mergedPath,
+      },
+      bundle,
+    );
     await unlink(mergedPath).catch(() => {});
-    for (const [kind, lane] of laneValues.entries()) {
-      await unlink(lane.path).catch(() => {});
-      await recordLaneOutcome(params.artifactsDir, charterExtractionLane(kind), {
-        kind: "accepted",
-      });
+    for (const lane of laneValues.values()) {
+      // Deletion + accepted events commit WITH the core write (lane.path is
+      // the STAGED file — a throw before the commit restores every lane).
+      markSubmissionApplied(tx, lane.path);
     }
     // Evidence packets are consumed inputs like the lane submissions — a stale
     // packet left behind would feed a later re-extraction yesterday's evidence.
@@ -1631,7 +1760,7 @@ export async function handleCharterExtractionBranch(
         ),
       ).catch(() => {});
     }
-    return { action: "continue" };
+    return { action: "continue", bundle: applied.updated_bundle };
   }
   // Missing or quarantined lane(s): a host turn is still owed — the emitter
   // re-materializes only the missing lanes (completed lane results stay).
@@ -1653,20 +1782,23 @@ export async function handleCharterDeltaBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir">,
   bundle: ArtifactBundle,
   state: AuditState,
+  tx: FoldTransaction,
 ): Promise<CharterDeltaBranchResult> {
   return runOmittableGate<unknown, "charter_delta">(
     {
       kind: "charter_delta",
       lane: GATE_LANES.charter_delta,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.charter_delta]!,
-      apply: async (_value, path, p) => {
-        await runAuditStep({
-          root: p.root,
-          artifactsDir: p.artifactsDir,
-          preferredExecutor: "charter_delta_executor",
-          charterDeltaSubmissionPath: path,
-        });
-      },
+      apply: (_value, path, p, foldBundle) =>
+        runAuditStepUnlocked(
+          {
+            root: p.root,
+            artifactsDir: p.artifactsDir,
+            preferredExecutor: "charter_delta_executor",
+            charterDeltaSubmissionPath: path,
+          },
+          foldBundle,
+        ),
       // Nothing to mine (extraction omitted or no subsystems): settle
       // deterministically, no host turn.
       shouldOmit: (b) => !(b.charter_register?.deltas_pending === true),
@@ -1674,6 +1806,7 @@ export async function handleCharterDeltaBranch(
     params,
     bundle,
     state,
+    tx,
   );
 }
 
@@ -1695,40 +1828,31 @@ export async function handleCharterClarificationBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir">,
   bundle: ArtifactBundle,
   state: AuditState,
+  tx: FoldTransaction,
 ): Promise<CharterClarificationBranchResult> {
   return runOmittableGate<unknown, "charter_clarification">(
     {
       kind: "charter_clarification",
       lane: GATE_LANES.charter_clarification,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.charter_clarification]!,
-      apply: async (_value, path, p) => {
-        await runAuditStep({
-          root: p.root,
-          artifactsDir: p.artifactsDir,
-          preferredExecutor: "charter_clarification_executor",
-          clarificationAnswersPath: path,
-        });
-      },
-      shouldOmit: (b) => {
-        const ceiling = resolveCharterCeiling(b.intent_checkpoint);
-        const attention = resolveClarificationAttention(b.intent_checkpoint);
-        // Shallow ceiling or autonomous (zero-attention) mode: assemble the
-        // register deterministically, no host turn (every question banks as
-        // a finding).
-        if (!ceilingRequestsCharters(ceiling) || attention === 0) return true;
-        // The loop must be COMPUTED before we can relay a queue: if no register
-        // exists yet, run the deterministic assembler this turn (it partitions/
-        // ranks/gates/splits from the charter_register), then re-scan.
-        if (!b.charter_clarification) return true;
-        // Register exists: relay the interactive queue only when there is one
-        // to ask.
-        if ((b.charter_clarification.asked?.length ?? 0) === 0) return true;
-        return false;
-      },
+      apply: (_value, path, p, foldBundle) =>
+        runAuditStepUnlocked(
+          {
+            root: p.root,
+            artifactsDir: p.artifactsDir,
+            preferredExecutor: "charter_clarification_executor",
+            clarificationAnswersPath: path,
+          },
+          foldBundle,
+        ),
+      // The omit predicate is single-sourced with the plan draw's classifier
+      // (obligationPolicy.ts) — the two draws must agree on the boundary.
+      shouldOmit: charterClarificationOmits,
     },
     params,
     bundle,
     state,
+    tx,
   );
 }
 
@@ -1750,46 +1874,53 @@ export async function handleSystemicChallengeBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir">,
   bundle: ArtifactBundle,
   state: AuditState,
+  tx: FoldTransaction,
 ): Promise<SystemicChallengeBranchResult> {
   return runOmittableGate<unknown, "systemic_challenge">(
     {
       kind: "systemic_challenge",
       lane: GATE_LANES.systemic_challenge,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.systemic_challenge]!,
-      apply: async (_value, path, p) => {
-        await runAuditStep({
-          root: p.root,
-          artifactsDir: p.artifactsDir,
-          preferredExecutor: "systemic_challenge_executor",
-          systemicChallengePath: path,
-        });
-      },
-      shouldOmit: (b) => {
-        // Shallow ceiling (default): omit deterministically, no host turn.
-        if (!ceilingRequestsCharters(resolveCharterCeiling(b.intent_checkpoint))) return true;
-        // The loop must be OPENED before we can dispatch the adversary: if no
-        // register exists yet, run the deterministic executor this turn (it
-        // computes the metrics digest + writes an open register), then re-scan.
-        if (!b.systemic_challenge) return true;
-        // A converged register is already satisfied (never reaches this branch
-        // in practice). An open register → dispatch the next
-        // second-order-adversary round.
-        if (b.systemic_challenge.converged) return true;
-        return false;
-      },
+      apply: (_value, path, p, foldBundle, staged) =>
+        runAuditStepUnlocked(
+          {
+            root: p.root,
+            artifactsDir: p.artifactsDir,
+            preferredExecutor: "systemic_challenge_executor",
+            systemicChallengePath: path,
+            // The iterative-fold duplicate guard: the executor's register
+            // records every folded submission's content hash and IGNORES a
+            // duplicate, so a crash-restored already-folded round can never
+            // read as a quiet round and converge the adversary loop falsely.
+            systemicChallengeSubmissionHash: staged.contentHash,
+          },
+          foldBundle,
+        ),
+      // Single-sourced with the plan draw's classifier (obligationPolicy.ts).
+      shouldOmit: systemicChallengeOmits,
     },
     params,
     bundle,
     state,
+    tx,
   );
 }
 
 /**
  * Execute one deterministic audit step and record its progress. Throws (with
- * cause) if the executor fails, preserving the existing throw-with-cause pattern.
- * `index` is the 0-based fold position (the transition counter), surfaced as the
- * 1-based `iteration` in the `deterministic-progress.json` marker a
- * filesystem-watching host reads.
+ * cause) if the executor fails, preserving the existing throw-with-cause
+ * pattern. `index` is the 0-based deterministic-dispatch ordinal of this fold
+ * call, surfaced as the 1-based `iteration` in the
+ * `deterministic-progress.json` marker a filesystem-watching host reads
+ * (semantics stated in the marker-protocol note on the fold driver: under one
+ * drain it counts DISPATCHES of this call, no longer outer transitions).
+ *
+ * The dispatch is `runSingleAdvanceStep` on the fold's CARRIED bundle — one
+ * step, no lock (the fold holds the one lock), no persist (the fold commits
+ * once), no reload (disk holds the fold's pre-state). Failure attribution is
+ * dispatch-local: a single step's failing identity IS its selection, recorded
+ * on `failureRef` so the fold's commit-on-throw persists it without a second
+ * lock acquisition (the deleted O2 RMW).
  */
 export async function executeAndRecord(
   params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since">,
@@ -1797,6 +1928,11 @@ export async function executeAndRecord(
   decision: ReturnType<typeof decideNextStep>,
   index: number,
   lastSummary: string,
+  bundle: ArtifactBundle,
+  ctx: {
+    manifestIndexCache: WeakMap<object, { lineIndex?: Record<string, number>; sizeIndex?: Record<string, number> }>;
+    failureRef: { value: { executor: string | null; obligation: string | null } | null };
+  },
 ): Promise<AdvanceAuditResult> {
   try {
     // Write a "started" marker before execution so a host watching the filesystem
@@ -1809,13 +1945,16 @@ export async function executeAndRecord(
       status: "running",
       started_at: startedAt,
     });
-    const result = await runAuditStep({
+    const indexes = await manifestIndexes(params.root, bundle, ctx.manifestIndexCache);
+    const result = await runSingleAdvanceStep(bundle, {
       root: params.root,
       artifactsDir: params.artifactsDir,
       analyzers,
       graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
       externalAcquisition: params.externalAcquisition,
       since: params.since,
+      lineIndex: indexes.lineIndex,
+      sizeIndex: indexes.sizeIndex,
     });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
@@ -1829,32 +1968,23 @@ export async function executeAndRecord(
     });
     return result;
   } catch (error) {
-    // `runAuditStep` → `advanceAudit` DRAINS: this one call folds through
-    // successive obligations, so `decision` names only the FIRST one. Reporting
-    // it would attribute a failure in any later fold step to an executor that
-    // already SUCCEEDED (observed: a synthesis_executor blowup recorded against
-    // runtime_validation_executor). The failing identity is read off the error
-    // that carries it; `decision` is only the fallback for a throw raised before
-    // any executor was dispatched.
+    // Dispatch-local attribution: this call ran ONE step, so its selection is
+    // the failing identity; `findExecutorFailure` still reads a wrapped
+    // `ExecutorFailure` when the runner threw one (a forced nested dispatch's
+    // structured error contract survives).
     const failure = findExecutorFailure(error);
     const failedExecutor = failure?.executor ?? decision.selected_executor;
     const failedObligation = failure?.obligation ?? decision.selected_obligation;
-    // O2: error-recovery is itself a load→modify→persist artifact-tree mutation
-    // (runAuditStep has already released its lock by the time we reach this
-    // catch), so hold the artifact-tree lock across the whole RMW.
-    await withFileLock(artifactTreeLockPath(params.artifactsDir), async () => {
-      const current = await loadArtifactBundle(params.artifactsDir);
-      const currentState = deriveAuditState(current);
-      currentState.last_executor = failedExecutor ?? undefined;
-      currentState.last_obligation = failedObligation ?? undefined;
-      await writeCoreArtifacts(params.artifactsDir, { ...current, audit_state: currentState });
-    });
+    // The fold's commit-on-throw persists this attribution in the SINGLE core
+    // commit — the old second lock acquisition here would deadlock against the
+    // fold's own hold (`withFileLock` is non-reentrant).
+    ctx.failureRef.value = { executor: failedExecutor, obligation: failedObligation };
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
       last_executor: failedExecutor,
       last_obligation: failedObligation,
-      // The obligation the drain STARTED from, kept alongside the failing one so
-      // the fold position stays reconstructable from the marker alone.
+      // The obligation the fold selected for this dispatch, kept alongside the
+      // failing one so the fold position stays reconstructable from the marker.
       selected_executor: decision.selected_executor,
       selected_obligation: decision.selected_obligation,
       prior_summary: lastSummary || null,
@@ -1867,6 +1997,30 @@ export async function executeAndRecord(
       { cause: error instanceof Error ? error : undefined },
     );
   }
+}
+
+/**
+ * Line/size indexes for a dispatch, memoized on `repo_manifest` IDENTITY: the
+ * fold dispatches many steps per call and `buildLineIndex` walks real files,
+ * so recomputing per dispatch would regress the drain's cost profile; the
+ * manifest object is replaced whenever intake re-derives it, which is exactly
+ * when the indexes must be rebuilt.
+ */
+async function manifestIndexes(
+  root: string,
+  bundle: ArtifactBundle,
+  cache: WeakMap<object, { lineIndex?: Record<string, number>; sizeIndex?: Record<string, number> }>,
+): Promise<{ lineIndex?: Record<string, number>; sizeIndex?: Record<string, number> }> {
+  const manifest = bundle.repo_manifest;
+  if (!manifest) return {};
+  const cached = cache.get(manifest);
+  if (cached) return cached;
+  const built = {
+    lineIndex: await buildLineIndex(root, manifest),
+    sizeIndex: sizeIndexFromManifest(manifest),
+  };
+  cache.set(manifest, built);
+  return built;
 }
 
 // ── Cycle guards (kept in audit's Ctx; NOT routed through advance) ─────────────
@@ -1916,7 +2070,7 @@ export async function checkNoProgressBeforeDispatch(ctx: {
   state: AuditState;
   selectedObligation: string | null | undefined;
   selectedExecutor: string | null | undefined;
-}): Promise<TerminalStepResult | undefined> {
+}): Promise<TerminalFoldIntent | undefined> {
   const signature = computeArtifactStateSignature(ctx.bundle);
   const dispatchKey = `${signature}|${ctx.selectedExecutor ?? ""}|${ctx.selectedObligation ?? ""}`;
   // "no-metadata" is the pre-artifact bootstrap state (no artifact_metadata yet
@@ -1941,16 +2095,20 @@ export async function checkNoProgressBeforeDispatch(ctx: {
         timestamp: new Date().toISOString(),
       },
     );
-    return buildTerminalStep(
-      ctx.params,
-      ctx.bundle,
-      ctx.state,
-      "No-progress guard: a deterministic executor was about to re-run on an " +
+    // A terminal INTENT, not the built terminal: `buildTerminalStep` can
+    // PROMOTE (which deletes artifactsDir), so it must run after the fold's
+    // commit and outside its hold. The marker above is the in-fold record.
+    return {
+      kind: "terminal_intent",
+      bundle: ctx.bundle,
+      state: ctx.state,
+      reason:
+        "No-progress guard: a deterministic executor was about to re-run on an " +
         "artifact state it already processed this run without changing it " +
         `(obligation ${ctx.selectedObligation ?? "unknown"}, executor ` +
         `${ctx.selectedExecutor ?? "unknown"}). Stopping to avoid an infinite ` +
         "no-progress loop.",
-    );
+    };
   }
   ctx.dispatchedSignatures.add(dispatchKey);
   return undefined;
@@ -1972,7 +2130,7 @@ export async function checkFinalizationCycle(ctx: {
   state: AuditState;
   result: AdvanceAuditResult;
   selectedObligation: string | null | undefined;
-}): Promise<TerminalStepResult | undefined> {
+}): Promise<TerminalFoldIntent | undefined> {
   ctx.obligationTrail.push(ctx.selectedObligation ?? "unknown");
   ctx.seenStateSignatures.add(computeArtifactStateSignature(ctx.result.updated_bundle));
   if (ctx.index + 1 - ctx.seenStateSignatures.size < ctx.tolerance) {
@@ -1993,14 +2151,16 @@ export async function checkFinalizationCycle(ctx: {
       timestamp: new Date().toISOString(),
     },
   );
-  return buildTerminalStep(
-    ctx.params,
-    ctx.result.updated_bundle,
-    ctx.result.audit_state,
-    "Finalization is not converging: deterministic executors kept revisiting " +
+  // Intent, not the built terminal — see checkNoProgressBeforeDispatch.
+  return {
+    kind: "terminal_intent",
+    bundle: ctx.result.updated_bundle,
+    state: ctx.result.audit_state,
+    reason:
+      "Finalization is not converging: deterministic executors kept revisiting " +
       `prior artifact states (${cycle.join(" -> ")}). Review whether these ` +
       "obligations are erroneously invalidating each other.",
-  );
+  };
 }
 
 // ── advance engine binding ────────────────────────────────────────────────────
@@ -2106,29 +2266,50 @@ interface AuditNextStepCtx {
    */
   foldAdvisoriesRef: { value: FoldAdvisories };
   /**
-   * 0-based fold position == the hand loop's `index`. Incremented AFTER each
-   * `transition` outcome (see `countTransitions`), so during any `execute` it
-   * holds the index of the current iteration. The two guards read it as `index`.
+   * 0-based ordinal of DETERMINISTIC DISPATCHES this fold call has made — the
+   * guards' `index` and the marker protocol's `iteration` source. Under the
+   * one drain (CX-02, constraint-1 re-answer) the guards observe PER DISPATCH:
+   * a policy body's transition mints no new artifact state, so it neither
+   * counts nor signs. Incremented by `runDeterministicExecutor` after a
+   * successful (transitioning) dispatch.
    */
-  iterationRef: { value: number };
+  dispatchOrdinalRef: { value: number };
   /** Pre-dispatch no-progress guard state (ARC-b8fed771): dispatched identities. */
   dispatchedSignatures: Set<string>;
   /** Finalization-cycle guard state: distinct post-execute artifact signatures. */
   seenStateSignatures: Set<string>;
   /** Finalization-cycle guard state: obligation order, for the cycle report. */
   obligationTrail: string[];
+  /** The fold's pending side effects, committed once at the boundary. */
+  tx: FoldTransaction;
+  /**
+   * The last carried bundle — what the commit-on-throw persists. Maintained by
+   * `trackFoldBundle` on every outcome, because a throw unwinds the engine
+   * before it can return its state.
+   */
+  currentBundleRef: { value: ArtifactBundle };
+  /** Dispatch-local failure attribution for the commit-on-throw. */
+  failureRef: { value: { executor: string | null; obligation: string | null } | null };
+  /** Per-manifest-identity line/size index memo (see `manifestIndexes`). */
+  manifestIndexCache: WeakMap<
+    object,
+    { lineIndex?: Record<string, number>; sizeIndex?: Record<string, number> }
+  >;
 }
 
-/** The engine state audit folds on: the in-memory bundle (reloaded per transition). */
+/** The engine state audit folds on: the in-memory CARRIED bundle (never reloaded). */
 type AuditEngineState = ArtifactBundle;
+
+/** What a fold obligation can emit: a host step, or a guard's terminal intent. */
+type AuditFoldStep = NextStepResult | TerminalFoldIntent;
 
 type AuditObligationDef = ObligationDef<
   AuditEngineState,
   AuditNextStepCtx,
-  NextStepResult
+  AuditFoldStep
 >;
 
-type AuditOutcome = ObligationOutcome<AuditEngineState, NextStepResult>;
+type AuditOutcome = ObligationOutcome<AuditEngineState, AuditFoldStep>;
 
 /**
  * A deterministic-executor `emit` of a blocked step — the `!progress_made`
@@ -2143,6 +2324,9 @@ function blockedFromResult(result: AdvanceAuditResult): AuditOutcome {
       bundle: result.updated_bundle,
       reason: result.progress_summary,
     },
+    // The emit carries the advanced bundle so the fold's single commit
+    // persists what this dispatch produced (audit_state included).
+    state: result.updated_bundle,
   };
 }
 
@@ -2162,10 +2346,12 @@ async function runDeterministicExecutor(
   bundle: ArtifactBundle,
   ctx: AuditNextStepCtx,
 ): Promise<AuditOutcome> {
-  const decision = decideNextStep(bundle);
+  // Emit-off: the fold's driver emits ONE consolidated staleness record at its
+  // boundary (the preserve-list contract), so no in-fold derivation may emit.
+  const decision = decideNextStep(bundle, { emitStaleness: false });
 
   const noProgress = await checkNoProgressBeforeDispatch({
-    index: ctx.iterationRef.value,
+    index: ctx.dispatchOrdinalRef.value,
     dispatchedSignatures: ctx.dispatchedSignatures,
     params: ctx.params,
     bundle,
@@ -2173,14 +2359,18 @@ async function runDeterministicExecutor(
     selectedObligation: decision.selected_obligation,
     selectedExecutor: decision.selected_executor,
   });
-  if (noProgress !== undefined) return { kind: "emit", step: noProgress };
+  if (noProgress !== undefined) {
+    return { kind: "emit", step: noProgress, state: bundle };
+  }
 
   const result = await executeAndRecord(
     ctx.params,
     ctx.analyzersRef.value,
     decision,
-    ctx.iterationRef.value,
+    ctx.dispatchOrdinalRef.value,
     ctx.lastSummaryRef.value,
+    bundle,
+    ctx,
   );
   ctx.lastSummaryRef.value = result.progress_summary;
   if (!result.progress_made) {
@@ -2188,7 +2378,7 @@ async function runDeterministicExecutor(
   }
 
   const cycle = await checkFinalizationCycle({
-    index: ctx.iterationRef.value,
+    index: ctx.dispatchOrdinalRef.value,
     obligationTrail: ctx.obligationTrail,
     seenStateSignatures: ctx.seenStateSignatures,
     tolerance: FINALIZATION_CYCLE_TOLERANCE,
@@ -2198,9 +2388,16 @@ async function runDeterministicExecutor(
     result,
     selectedObligation: decision.selected_obligation,
   });
-  if (cycle !== undefined) return { kind: "emit", step: cycle };
+  if (cycle !== undefined) {
+    return { kind: "emit", step: cycle, state: result.updated_bundle };
+  }
 
-  return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+  // One counted, signed dispatch — the guards' unit (CX-02 constraint 1).
+  ctx.dispatchOrdinalRef.value += 1;
+  // The IN-MEMORY carry: the dispatch's own updated bundle, fresh identity by
+  // construction. A disk reload here would read the fold's pre-state and
+  // silently roll back everything the fold has done (persist-once).
+  return { kind: "transition", state: result.updated_bundle };
 }
 
 /**
@@ -2219,25 +2416,23 @@ function deriveObligationState(
     if (bundle.audit_state?.status === "complete") return "satisfied";
     let state = cache.get(bundle);
     if (!state) {
-      // MEMOIZED per bundle IDENTITY, exactly as the inner drain's namesake in
+      // MEMOIZED per bundle IDENTITY, exactly as the plan draw's namesake in
       // `orchestrator/advance.ts` is — and for the same reason. `advance` scans
       // by calling EVERY registered def's `derive`, so without this the fold
       // ran the holistic `deriveAuditState` once PER OBLIGATION per scan: 25
-      // full staleness passes to answer one question. That is the same
-      // regression `6145a1a3` measured and memoized away on the inner side; it
-      // was simply never applied here.
+      // full staleness passes to answer one question (the regression
+      // `6145a1a3` measured and memoized away).
       //
       // The key is safe for the same reason it is safe there: identity changes
-      // at every transition (each one loads or builds a fresh bundle), and the
+      // at every transition (each one carries a fresh bundle), and the
       // `complete` gate above can only flip via a transition. So an entry can
       // never outlive the state it was derived under.
       //
-      // Emission stays at the DEFAULT here, unlike the inner drain's
-      // `emitStaleness: false`. This layer IS the boundary the inner one defers
-      // its record to, so it must still emit — and now it emits once per scan
-      // rather than relying on `emitStalenessRecord`'s last-key latch to
-      // swallow 24 duplicates.
-      state = deriveAuditState(bundle);
+      // EMIT-OFF, like every in-fold derivation (CX-02): the fold's DRIVER
+      // emits the ONE consolidated staleness record at its boundary — the
+      // preserve-list contract — so a derive that emitted per scan miss would
+      // turn one call's cascade back into a record per carried bundle.
+      state = deriveAuditState(bundle, { emitStaleness: false });
       cache.set(bundle, state);
     }
     const found = state.obligations.find((o) => o.id === id);
@@ -2259,256 +2454,233 @@ function deriveObligationState(
  */
 export function buildAuditObligations(
 ): AuditObligationDef[] {
-  // One memo per registry construction, shared by every def in it — the same
-  // shape `buildDrainObligations` uses. Scoped to the call so it dies with the
-  // fold it was built for, and keyed on bundle identity so it cannot outlive a
-  // transition.
+  // One memo per registry construction, shared by every def in it. Scoped to
+  // the call so it dies with the fold it was built for, and keyed on bundle
+  // identity so it cannot outlive a transition.
   const cache = new WeakMap<ArtifactBundle, AuditState>();
-  const deterministic = (id: string): AuditObligationDef => ({
+
+  // The 13 BESPOKE per-obligation host-boundary policy bodies — the content
+  // the one registry carries beyond its PRIORITY-derived skeleton. Their
+  // branch predicates are single-sourced with the plan draw's classifier
+  // (`obligationPolicy.ts`), so the two draws agree on WHERE the boundary is;
+  // what only this draw may do is CONSUME (stage/apply/quarantine) and EMIT.
+  //
+  // Every `emit` carries `state:` — the engine persists the outcome's state at
+  // the fold's single commit, so an emit that advanced the bundle and omitted
+  // it would silently roll its own work back. Every `transition` carries the
+  // handler's returned bundle (an in-memory carry, never a disk reload).
+  const bespoke: Readonly<Record<string, AuditObligationDef["execute"]>> = {
+    // External analyzers: the Item B consent fold runs FIRST — applicable
+    // consent-gated candidates with no recorded decision surface ONE batched
+    // operator offer (or consume the arrived decisions file), and only then
+    // does the deterministic acquisition executor run.
+    external_analyzers_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const state = deriveAuditState(bundle, { emitStaleness: false });
+      const branch = await handleAnalyzerConsentBranch(
+        ctx.params,
+        bundle,
+        state,
+        ctx.analyzersRef,
+        ctx.tx,
+      );
+      if (branch.action === "return") {
+        return { kind: "emit", step: branch.result, state: bundle };
+      }
+      if (branch.action === "continue") {
+        return { kind: "transition", state: bundle };
+      }
+      return runDeterministicExecutor(bundle, ctx);
+    },
+    // Critical-flow fallback: when deterministic flow inference fell below the
+    // confidence bar, apply the host submission against the carried bundle or
+    // emit the host step. No autonomous omit — the host is always available to
+    // author the enrichment.
+    critical_flow_fallback_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const state = deriveAuditState(bundle, { emitStaleness: false });
+      const branch = await handleCriticalFlowFallbackBranch(
+        ctx.params,
+        bundle,
+        state,
+        ctx.tx,
+      );
+      if (branch.action === "return") {
+        return { kind: "emit", step: branch.result, state: bundle };
+      }
+      if (branch.action === "run_omit") {
+        return runDeterministicExecutor(bundle, ctx);
+      }
+      return { kind: "transition", state: branch.bundle };
+    },
+    // Graph enrichment: poll the analyzer-decision / edge-reasoning lane
+    // artifacts first (emit a host step when one is needed), otherwise run the
+    // deterministic enrichment executor.
+    graph_enrichment_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const state = deriveAuditState(bundle, { emitStaleness: false });
+      const branch = await handleGraphEnrichmentBranch(
+        ctx.params,
+        bundle,
+        state,
+        ctx.analyzersRef,
+        ctx.tx,
+      );
+      if (branch.action === "return") {
+        return { kind: "emit", step: branch.result, state: bundle };
+      }
+      if (branch.action === "continue") {
+        return { kind: "transition", state: branch.bundle };
+      }
+      return runDeterministicExecutor(bundle, ctx);
+    },
+    // Confirm-intent host step: the host writes intent_checkpoint.json (read by
+    // deriveAuditState on re-invocation), so there is no submission to
+    // consume — emit the step directly.
+    intent_checkpoint_current: async (bundle): Promise<AuditOutcome> => ({
+      kind: "emit",
+      step: {
+        kind: "confirm_intent",
+        state: deriveAuditState(bundle, { emitStaleness: false }),
+        bundle,
+      },
+      state: bundle,
+    }),
+    // DD-9 intent-equivalence gate: consume a judge verdict (validated +
+    // quarantined-loudly), resolve the deterministic arms in-fold, or emit the
+    // bounded prose-equivalence judge step.
+    intent_equivalence_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const state = deriveAuditState(bundle, { emitStaleness: false });
+      const branch = await handleIntentEquivalenceBranch(
+        ctx.params,
+        bundle,
+        state,
+        ctx.tx,
+      );
+      if (branch.action === "return") {
+        return { kind: "emit", step: branch.result, state: bundle };
+      }
+      if (branch.action === "run_omit") {
+        return runDeterministicExecutor(bundle, ctx);
+      }
+      return { kind: "transition", state: branch.bundle };
+    },
+    // Charter extraction (Phase C): consume the lane submissions (ingest+gate),
+    // omit at a shallow ceiling, or emit the host charter-extraction step.
+    charter_extraction_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const state = deriveAuditState(bundle, { emitStaleness: false });
+      const branch = await handleCharterExtractionBranch(
+        ctx.params,
+        bundle,
+        state,
+        ctx.tx,
+      );
+      if (branch.action === "return") {
+        return { kind: "emit", step: branch.result, state: bundle };
+      }
+      if (branch.action === "run_omit") {
+        return runDeterministicExecutor(bundle, ctx);
+      }
+      return { kind: "transition", state: branch.bundle };
+    },
+    // Charter delta-mining (Phase C.2): consume the delta lane submission,
+    // settle deterministically when the register is not deltas_pending, or
+    // emit the independent delta-miner's host step.
+    charter_delta_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const state = deriveAuditState(bundle, { emitStaleness: false });
+      const branch = await handleCharterDeltaBranch(ctx.params, bundle, state, ctx.tx);
+      if (branch.action === "return") {
+        return { kind: "emit", step: branch.result, state: bundle };
+      }
+      if (branch.action === "run_omit") {
+        return runDeterministicExecutor(bundle, ctx);
+      }
+      return { kind: "transition", state: branch.bundle };
+    },
+    // The two design-review passes share one submission-poll handler (it
+    // resolves which pass remains).
+    design_review_contract_completed: (bundle, ctx) =>
+      runDesignReviewObligation(bundle, ctx),
+    design_review_conceptual_completed: (bundle, ctx) =>
+      runDesignReviewObligation(bundle, ctx),
+    // Charter clarification (Phase D triangulation loop).
+    charter_clarification_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const state = deriveAuditState(bundle, { emitStaleness: false });
+      const branch = await handleCharterClarificationBranch(
+        ctx.params,
+        bundle,
+        state,
+        ctx.tx,
+      );
+      if (branch.action === "return") {
+        return { kind: "emit", step: branch.result, state: bundle };
+      }
+      if (branch.action === "run_omit") {
+        return runDeterministicExecutor(bundle, ctx);
+      }
+      return { kind: "transition", state: branch.bundle };
+    },
+    // Systemic challenge (Phase E loop-until-dry).
+    systemic_challenge_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const state = deriveAuditState(bundle, { emitStaleness: false });
+      const branch = await handleSystemicChallengeBranch(
+        ctx.params,
+        bundle,
+        state,
+        ctx.tx,
+      );
+      if (branch.action === "return") {
+        return { kind: "emit", step: branch.result, state: bundle };
+      }
+      if (branch.action === "run_omit") {
+        return runDeterministicExecutor(bundle, ctx);
+      }
+      return { kind: "transition", state: branch.bundle };
+    },
+    // The audit-task dispatch obligation maps to the host-delegation
+    // semantic_review_executor (no deterministic runner) → host review.
+    audit_tasks_completed: (bundle, ctx) => runHostDelegationObligation(bundle, ctx),
+    // Synthesis narrative: consume the narrative lane; emit the host step when
+    // narrative is enabled and not yet supplied, otherwise the deterministic
+    // omit runs (fold on).
+    synthesis_narrative_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const state = deriveAuditState(bundle, { emitStaleness: false });
+      const branch = await handleSynthesisNarrativeBranch(
+        ctx.params,
+        bundle,
+        state,
+        ctx.tx,
+      );
+      if (branch.action === "return") {
+        return { kind: "emit", step: branch.result, state: bundle };
+      }
+      if (branch.action === "run_omit") {
+        // Narrative disabled: run the deterministic omit executor so the
+        // status:omitted marker is written and the obligation is satisfied.
+        return runDeterministicExecutor(bundle, ctx);
+      }
+      // continue: a narrative submission was consumed + applied — re-scan.
+      return { kind: "transition", state: branch.bundle };
+    },
+  };
+
+  // The registry's membership and order DERIVE from PRIORITY — never a second
+  // hand-enumerated list, so an id cannot be in the scan and absent from the
+  // registry (this derivation dissolved the fold-array⇄PRIORITY sync tests).
+  // `friction_capture_current` gets a plain def and stays inert by absence:
+  // `deriveAuditState` never emits it, so its derive is always satisfied.
+  for (const id of Object.keys(bespoke)) {
+    if (!PRIORITY.includes(id)) {
+      throw new Error(
+        `buildAuditObligations: bespoke policy body for "${id}" names an id absent from PRIORITY — the registry derives from PRIORITY, so this body could never run`,
+      );
+    }
+  }
+  return PRIORITY.map((id) => ({
     id,
     derive: deriveObligationState(id, cache),
-    execute: (bundle, ctx) => runDeterministicExecutor(bundle, ctx),
-  });
-
-  return [
-    deterministic("repo_manifest"),
-    deterministic("file_disposition"),
-    deterministic("auto_fixes_applied"),
-    deterministic("syntax_resolved"),
-    {
-      // External analyzers: the Item B consent fold runs FIRST — applicable
-      // consent-gated candidates with no recorded decision surface ONE batched
-      // operator offer (or consume the arrived decisions file), and only then
-      // does the deterministic acquisition executor run.
-      id: "external_analyzers_current",
-      derive: deriveObligationState("external_analyzers_current", cache),
-      execute: async (bundle, ctx): Promise<AuditOutcome> => {
-        const state = deriveAuditState(bundle);
-        const branch = await handleAnalyzerConsentBranch(
-          ctx.params,
-          bundle,
-          state,
-          ctx.analyzersRef,
-        );
-        if (branch.action === "return") {
-          return { kind: "emit", step: branch.result };
-        }
-        if (branch.action === "continue") {
-          return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
-        }
-        return runDeterministicExecutor(bundle, ctx);
-      },
-    },
-    deterministic("structure_artifacts"),
-    {
-      // Critical-flow fallback: when deterministic flow inference fell below the
-      // confidence bar, poll the host submission (persist it → structure re-merges
-      // on the next fold) or emit the host step. No autonomous omit — the host is
-      // always available to author the enrichment. Non-drainable (host_delegation),
-      // so the drain stops here when a submission is still owed.
-      id: "critical_flow_fallback_current",
-      derive: deriveObligationState("critical_flow_fallback_current", cache),
-      execute: async (bundle, ctx): Promise<AuditOutcome> => {
-        const state = deriveAuditState(bundle);
-        const branch = await handleCriticalFlowFallbackBranch(
-          ctx.params,
-          bundle,
-          state,
-        );
-        if (branch.action === "return") {
-          return { kind: "emit", step: branch.result };
-        }
-        // continue: a submission was consumed + persisted — re-scan (structure
-        // then re-stales + rebuilds critical_flows off the merged flows).
-        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
-      },
-    },
-    {
-      // Graph enrichment: poll the analyzer-decision / edge-reasoning lane
-      // artifacts first (emit a host step when one is needed), otherwise run the
-      // deterministic enrichment executor.
-      id: "graph_enrichment_current",
-      derive: deriveObligationState("graph_enrichment_current", cache),
-      execute: async (bundle, ctx): Promise<AuditOutcome> => {
-        const state = deriveAuditState(bundle);
-        const branch = await handleGraphEnrichmentBranch(
-          ctx.params,
-          bundle,
-          state,
-          ctx.analyzersRef,
-        );
-        if (branch.action === "return") {
-          return { kind: "emit", step: branch.result };
-        }
-        if (branch.action === "continue") {
-          // A decisions/edge file was consumed (and possibly applied): re-scan on
-          // the reloaded bundle without running the executor this turn.
-          return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
-        }
-        // fallthrough: run the deterministic enrichment executor.
-        return runDeterministicExecutor(bundle, ctx);
-      },
-    },
-    deterministic("design_assessment_current"),
-    deterministic("structure_decomposition_current"),
-    deterministic("docs_digest_current"),
-    {
-      // Confirm-intent host step: the host writes intent_checkpoint.json (read by
-      // deriveAuditState on re-invocation), so there is no submission to
-      // consume — emit the step directly.
-      id: "intent_checkpoint_current",
-      derive: deriveObligationState("intent_checkpoint_current", cache),
-      execute: async (bundle): Promise<AuditOutcome> => ({
-        kind: "emit",
-        step: { kind: "confirm_intent", state: deriveAuditState(bundle), bundle },
-      }),
-    },
-    {
-      // DD-9 intent-equivalence gate: consume a judge verdict (validated +
-      // quarantined-loudly), resolve the deterministic arms in-fold (baseline
-      // stamp / gate-version-stale / structured delta), or emit the bounded
-      // prose-equivalence judge step. Sits between the intent checkpoint and
-      // every consumer of it, so a pending judgment pauses the cascade instead
-      // of racing it.
-      id: "intent_equivalence_current",
-      derive: deriveObligationState("intent_equivalence_current", cache),
-      execute: async (bundle, ctx): Promise<AuditOutcome> => {
-        const state = deriveAuditState(bundle);
-        const branch = await handleIntentEquivalenceBranch(ctx.params, bundle, state);
-        if (branch.action === "return") {
-          return { kind: "emit", step: branch.result };
-        }
-        if (branch.action === "run_omit") {
-          return runDeterministicExecutor(bundle, ctx);
-        }
-        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
-      },
-    },
-    {
-      // Charter extraction (Phase C): poll the lane submissions (ingest+gate),
-      // omit at a shallow ceiling, or emit the host charter-extraction step at a
-      // deep+ ceiling. Mirrors the synthesis-narrative branch.
-      id: "charter_extraction_current",
-      derive: deriveObligationState("charter_extraction_current", cache),
-      execute: async (bundle, ctx): Promise<AuditOutcome> => {
-        const state = deriveAuditState(bundle);
-        const branch = await handleCharterExtractionBranch(ctx.params, bundle, state);
-        if (branch.action === "return") {
-          return { kind: "emit", step: branch.result };
-        }
-        if (branch.action === "run_omit") {
-          return runDeterministicExecutor(bundle, ctx);
-        }
-        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
-      },
-    },
-    {
-      // Charter delta-mining (Phase C.2): poll the delta lane submission
-      // (route+gate it), settle deterministically when the register is not
-      // deltas_pending (extraction omitted / no subsystems), or emit the host step
-      // for the INDEPENDENT delta-miner when a deltas_pending register has no
-      // submission yet. Mirrors the charter-extraction branch.
-      id: "charter_delta_current",
-      derive: deriveObligationState("charter_delta_current", cache),
-      execute: async (bundle, ctx): Promise<AuditOutcome> => {
-        const state = deriveAuditState(bundle);
-        const branch = await handleCharterDeltaBranch(ctx.params, bundle, state);
-        if (branch.action === "return") {
-          return { kind: "emit", step: branch.result };
-        }
-        if (branch.action === "run_omit") {
-          return runDeterministicExecutor(bundle, ctx);
-        }
-        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
-      },
-    },
-    {
-      // Contract design-review pass: poll the contract/conceptual lanes;
-      // emit the dispatch step when a pass still needs to run.
-      id: "design_review_contract_completed",
-      derive: deriveObligationState("design_review_contract_completed", cache),
-      execute: (bundle, ctx) => runDesignReviewObligation(bundle, ctx),
-    },
-    {
-      // Conceptual design-review pass: same submission-poll handler (it resolves
-      // which pass remains).
-      id: "design_review_conceptual_completed",
-      derive: deriveObligationState("design_review_conceptual_completed", cache),
-      execute: (bundle, ctx) => runDesignReviewObligation(bundle, ctx),
-    },
-    {
-      // Charter clarification (Phase D triangulation loop): poll the answers lane
-      // (apply + re-split), assemble the loop deterministically at a shallow ceiling
-      // / zero attention (autonomous), or emit the host step relaying the VOI-ranked
-      // interactive queue at a deep+ ceiling with attention > 0. Non-drainable
-      // (host_delegation), so the drain stops here.
-      id: "charter_clarification_current",
-      derive: deriveObligationState("charter_clarification_current", cache),
-      execute: async (bundle, ctx): Promise<AuditOutcome> => {
-        const state = deriveAuditState(bundle);
-        const branch = await handleCharterClarificationBranch(ctx.params, bundle, state);
-        if (branch.action === "return") {
-          return { kind: "emit", step: branch.result };
-        }
-        if (branch.action === "run_omit") {
-          return runDeterministicExecutor(bundle, ctx);
-        }
-        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
-      },
-    },
-    {
-      // Systemic challenge (Phase E loop-until-dry): poll the adversary lane's
-      // round (fold it), omit at a shallow ceiling, or emit the second-order-adversary
-      // host step when the loop is open at a deep+ ceiling. Non-drainable
-      // (host_delegation), so the drain stops here.
-      id: "systemic_challenge_current",
-      derive: deriveObligationState("systemic_challenge_current", cache),
-      execute: async (bundle, ctx): Promise<AuditOutcome> => {
-        const state = deriveAuditState(bundle);
-        const branch = await handleSystemicChallengeBranch(ctx.params, bundle, state);
-        if (branch.action === "return") {
-          return { kind: "emit", step: branch.result };
-        }
-        if (branch.action === "run_omit") {
-          return runDeterministicExecutor(bundle, ctx);
-        }
-        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
-      },
-    },
-    deterministic("planning_artifacts"),
-    {
-      // The audit-task dispatch obligation maps to the host-delegation
-      // semantic_review_executor (no deterministic runner) → host review.
-      id: "audit_tasks_completed",
-      derive: deriveObligationState("audit_tasks_completed", cache),
-      execute: (bundle, ctx) => runHostDelegationObligation(bundle, ctx),
-    },
-    deterministic("audit_results_ingested"),
-    deterministic("runtime_validation_current"),
-    deterministic("synthesis_current"),
-    {
-      // Synthesis narrative: poll the narrative lane; emit the host step when
-      // narrative is enabled and not yet supplied, otherwise the deterministic
-      // omit runs (fold on).
-      id: "synthesis_narrative_current",
-      derive: deriveObligationState("synthesis_narrative_current", cache),
-      execute: async (bundle, ctx): Promise<AuditOutcome> => {
-        const state = deriveAuditState(bundle);
-        const branch = await handleSynthesisNarrativeBranch(ctx.params, bundle, state);
-        if (branch.action === "return") {
-          return { kind: "emit", step: branch.result };
-        }
-        if (branch.action === "run_omit") {
-          // Narrative disabled: run the deterministic omit executor so the
-          // status:omitted marker is written and the obligation is satisfied.
-          // (A bare reload here would leave it actionable and spin the fold.)
-          return runDeterministicExecutor(bundle, ctx);
-        }
-        // continue: a narrative submission was consumed + applied — re-scan.
-        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
-      },
-    },
-  ];
+    execute:
+      bespoke[id] ??
+      ((bundle: ArtifactBundle, ctx: AuditNextStepCtx) =>
+        runDeterministicExecutor(bundle, ctx)),
+  }));
 }
 
 /** Shared design-review-pass executor (both pass obligations route here). */
@@ -2516,12 +2688,14 @@ async function runDesignReviewObligation(
   bundle: ArtifactBundle,
   ctx: AuditNextStepCtx,
 ): Promise<AuditOutcome> {
-  const state = deriveAuditState(bundle);
-  const branch = await handleDesignReviewBranch(ctx.params, bundle, state);
+  const state = deriveAuditState(bundle, { emitStaleness: false });
+  const branch = await handleDesignReviewBranch(ctx.params, bundle, state, ctx.tx);
   if (branch.action === "return") {
-    return { kind: "emit", step: branch.result };
+    // The handler's carried bundle rides BOTH the step (the renderer reads the
+    // rejection notes off it) and the emit's state (the commit persists them).
+    return { kind: "emit", step: branch.result, state: branch.result.bundle };
   }
-  return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+  return { kind: "transition", state: branch.bundle };
 }
 
 /**
@@ -2535,7 +2709,7 @@ async function runHostDelegationObligation(
   bundle: ArtifactBundle,
   ctx: AuditNextStepCtx,
 ): Promise<AuditOutcome> {
-  const decision = decideNextStep(bundle);
+  const decision = decideNextStep(bundle, { emitStaleness: false });
   const state = decision.state;
   if (!decision.selected_executor) {
     return emitNoExecutorBlocked(bundle, ctx, decision);
@@ -2598,12 +2772,17 @@ async function runHostDelegationObligation(
       pendingIds.has(result.task_id),
     );
     if (pendingAccepted.length > 0) {
-      const ingested = await runAuditStep({
-        root: ctx.params.root,
-        artifactsDir: ctx.params.artifactsDir,
-        preferredExecutor: "result_ingestion_executor",
-        auditResultsData: [...pendingAccepted],
-      });
+      // Forced, lock-free, against the CARRIED bundle: the fold owns the one
+      // hold and the one persist.
+      const ingested = await runAuditStepUnlocked(
+        {
+          root: ctx.params.root,
+          artifactsDir: ctx.params.artifactsDir,
+          preferredExecutor: "result_ingestion_executor",
+          auditResultsData: [...pendingAccepted],
+        },
+        bundle,
+      );
       // The transition returns before any emission, and the NEXT ingest skips
       // already-accepted bindings — so this fold's advisories would be a
       // one-shot loss. Carry them in the ctx ref; the semantic-review emit
@@ -2617,7 +2796,13 @@ async function runHostDelegationObligation(
     }
   }
 
-  const review = await ensureSemanticReviewRun({
+  // The UNLOCKED variant: the fold already holds the artifact-tree lock, and
+  // `withFileLock` is non-reentrant — the locking `ensureSemanticReviewRun`
+  // here would be a deterministic FileLockTimeoutError on the audit loop's
+  // most common exit path. Its blocked core state rides the emit's `state`
+  // below, so the fold's single commit persists it (the pause's own persist
+  // was the split's other half).
+  const review = await ensureSemanticReviewRunUnlocked({
     root: ctx.params.root,
     artifactsDir: ctx.params.artifactsDir,
     bundle,
@@ -2653,6 +2838,9 @@ async function runHostDelegationObligation(
             ],
           }
         : emitted,
+    // The pause's blocked core state — the fold's single commit persists it
+    // (the locking variant's own write was the other half of the split).
+    state: review.bundle,
   };
 }
 
@@ -2671,23 +2859,27 @@ async function emitNoExecutorBlocked(
     audit_state: state,
     progress_summary: reason,
   });
-  return { kind: "emit", step: { kind: "blocked", state, bundle, reason } };
+  return { kind: "emit", step: { kind: "blocked", state, bundle, reason }, state: bundle };
 }
 
 /**
- * Wrap each obligation so the transition counter advances exactly once per fold
- * iteration — the analog of the hand loop's `index++`. Incrementing AFTER a
- * `transition` (and never on an `emit`, which exits the fold) means during any
- * `execute` the counter holds the current iteration's 0-based index, which the
- * two cycle guards read as `index`. Single point of truth so a new obligation
- * cannot forget to count.
+ * Wrap each obligation so the fold's CURRENT carried bundle is always
+ * observable on the ctx — the commit-on-throw path persists it, and a throw
+ * unwinds the engine before it can return its state. Single point of truth so
+ * a new obligation cannot forget to track. (The dispatch ordinal the guards
+ * read is counted at the dispatch site, `runDeterministicExecutor` — a policy
+ * transition mints no new artifact state, so it does not count.)
  */
-function countTransitions(obligations: AuditObligationDef[]): AuditObligationDef[] {
+function trackFoldBundle(obligations: AuditObligationDef[]): AuditObligationDef[] {
   return obligations.map((obligation) => ({
     ...obligation,
     execute: async (bundle: ArtifactBundle, ctx: AuditNextStepCtx) => {
       const outcome = await obligation.execute(bundle, ctx);
-      if (outcome.kind === "transition") ctx.iterationRef.value += 1;
+      if (outcome.kind === "transition") {
+        ctx.currentBundleRef.value = outcome.state;
+      } else if (outcome.state !== undefined) {
+        ctx.currentBundleRef.value = outcome.state;
+      }
       return outcome;
     },
   }));
@@ -2765,27 +2957,126 @@ export async function runDeterministicForNextStep(
         validationWarnings: [...EMPTY_FOLD_ADVISORIES.validationWarnings],
       },
     },
-    iterationRef: { value: 0 },
+    dispatchOrdinalRef: { value: 0 },
     dispatchedSignatures: new Set<string>(),
     seenStateSignatures: new Set<string>(),
     obligationTrail: [],
+    tx: createFoldTransaction(),
+    currentBundleRef: { value: {} },
+    failureRef: { value: null },
+    manifestIndexCache: new WeakMap(),
   };
 
-  const startBundle = await loadArtifactBundle(params.artifactsDir);
-  const outcome = await advance(
-    {
-      priority: PRIORITY,
-      obligations: countTransitions(buildAuditObligations()),
+  // ONE hold, ONE core commit (CX-02 constraint 3): the whole drain runs under
+  // a single artifact-tree lock, carries its bundle in memory, and lands ONE
+  // authoritative core write at the boundary — on EVERY exit, the throw path
+  // included (a persist only on success would drop the failure attribution the
+  // recovery path reads). Non-core writes (markers, handoff, quarantine, the
+  // durable analyzer stores) stay mid-fold by design: the delivered property
+  // is one CORE write boundary, not one persist boundary.
+  resetStalenessDedup();
+  const foldLogger = new RunLogger(join(params.artifactsDir, "run.log.jsonl"), {
+    enabled: true,
+  });
+  const outcome = await withArtifactTreeHold(
+    params.artifactsDir,
+    foldLogger,
+    async () => {
+      await recoverStagedSubmissions(params.artifactsDir);
+      const startBundle = await loadArtifactBundle(params.artifactsDir);
+      ctx.currentBundleRef.value = startBundle;
+      try {
+        const engineOutcome = await advance(
+          {
+            priority: PRIORITY,
+            obligations: trackFoldBundle(buildAuditObligations()),
+          },
+          startBundle,
+          ctx,
+          {
+            maxTransitions: engineMaxTransitions(),
+            maxExecutions: MAX_DRAIN_STEPS,
+          },
+        );
+        await commitFold(params.artifactsDir, engineOutcome.state, ctx.tx);
+        return engineOutcome;
+      } catch (error) {
+        // Commit-on-throw: persist the carried bundle WITH dispatch-local
+        // failure attribution, then rethrow. This replaces the old catch's
+        // second lock acquisition (a deterministic timeout under one hold).
+        const bundle = ctx.currentBundleRef.value;
+        const failure =
+          ctx.failureRef.value ??
+          (() => {
+            const found = findExecutorFailure(error);
+            return found
+              ? { executor: found.executor, obligation: found.obligation }
+              : null;
+          })();
+        const failedState = deriveAuditState(bundle, { emitStaleness: false });
+        failedState.last_executor = failure?.executor ?? undefined;
+        failedState.last_obligation = failure?.obligation ?? undefined;
+        await commitFold(
+          params.artifactsDir,
+          { ...bundle, audit_state: failedState },
+          ctx.tx,
+        );
+        throw error;
+      }
     },
-    startBundle,
-    ctx,
   );
 
-  if (outcome.step) return outcome.step;
+  // The ONE consolidated staleness record for the whole fold (preserve list):
+  // every in-fold derivation ran emit-off, so this is the only scan-level
+  // record this call emits (forced applies keep their own per-apply records,
+  // exactly as each per-transition runAuditStep call did before the collapse).
+  const finalStale = computeStaleArtifacts(outcome.state, { emit: false });
+  emitStalenessRecord(
+    finalStale,
+    isMetadataMigrationStaleness(outcome.state)
+      ? "metadata_schema_version_migration"
+      : undefined,
+  );
 
-  // This call supplies no `maxTransitions`, so the bound in force IS the engine
-  // default — `describeStoppedFold` reads it from the same place rather than
-  // this site restating the constant.
+  if (outcome.step) {
+    if (outcome.step.kind === "terminal_intent") {
+      // Guard terminals convert POST-commit, POST-hold: buildTerminalStep can
+      // promote, and promotion deletes artifactsDir.
+      return await buildTerminalStep(
+        params,
+        outcome.step.bundle,
+        outcome.step.state,
+        outcome.step.reason,
+      );
+    }
+    return outcome.step;
+  }
+
+  if (outcome.stopped === "budget") {
+    // The pacing cap (MAX_DRAIN_STEPS charged executions), spent gracefully:
+    // the run is paused resumably — the committed state resumes on the next
+    // call. Never non-convergence; never routed through the stalled branch.
+    const bundle = outcome.state;
+    const state =
+      bundle.audit_state ?? deriveAuditState(bundle, { emitStaleness: false });
+    const reason =
+      `Pacing cap: this call spent its ${MAX_DRAIN_STEPS}-execution budget and paused. ` +
+      "Nothing is wrong — the fold's work is committed; re-run next-step to resume.";
+    await writeHandoffOnly({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      bundle,
+      audit_state: state,
+      progress_summary: reason,
+    });
+    return { kind: "blocked", state, bundle, reason };
+  }
+
+  // The engine stamps the limit that fired on the result (`stoppedBound`), so
+  // `describeStoppedFold` reports the number in force with nothing restated
+  // here. Budget stops were handled above; what reaches this branch is genuine
+  // non-convergence (the derived transition backstop, which the execution
+  // budget makes unreachable in practice — a backstop firing IS the anomaly).
   const stalled = describeStoppedFold(outcome);
   if (stalled) {
     // The engine's bound is its runaway backstop, and audit deliberately

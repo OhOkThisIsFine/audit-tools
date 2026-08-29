@@ -107,26 +107,38 @@ export async function loadDesignReviewSnapshots(
 }
 
 /**
- * Capture a design-review snapshot for a freshly-completed pass: the semantic
+ * Build the snapshot VALUE for a freshly-completed pass: the semantic
  * projection of every structural input plus the pass's own findings (verdict).
+ * Pure — the fold carries this on the bundle so its own staleness derivation
+ * sees the pass as fresh, and stages the WRITE for the single core commit
+ * (CX-02 landing 2: a snapshot lost between fold and commit silently marks a
+ * completed pass satisfied, so it commits WITH the core, never after it).
  */
-export async function captureDesignReviewSnapshot(
-  artifactsDir: string,
+export function buildDesignReviewSnapshot(
   pass: DesignReviewPass,
   priorFindings: Finding[],
   bundle: DesignReviewBundle,
   reviewedAt: string,
-): Promise<void> {
-  const reviewed_inputs = projectDesignReviewInputs(bundle);
-  const snapshot: DesignReviewSnapshot = {
+): DesignReviewSnapshot {
+  return {
     schema_version: SNAPSHOT_SCHEMA_VERSION,
     pass,
     reviewed_at: reviewedAt,
     prior_findings: priorFindings,
-    reviewed_inputs,
+    reviewed_inputs: projectDesignReviewInputs(bundle),
   };
+}
+
+/** Write one snapshot to its on-disk home (the commit-phase IO half). */
+export async function writeDesignReviewSnapshot(
+  artifactsDir: string,
+  snapshot: DesignReviewSnapshot,
+): Promise<void> {
   await mkdir(snapshotDir(artifactsDir), { recursive: true });
-  await writeJsonFile(designReviewSnapshotPath(artifactsDir, pass), snapshot);
+  await writeJsonFile(
+    designReviewSnapshotPath(artifactsDir, snapshot.pass),
+    snapshot,
+  );
 }
 
 export interface DesignReReviewDelta {

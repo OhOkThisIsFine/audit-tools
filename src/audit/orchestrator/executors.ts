@@ -76,7 +76,8 @@ export const LIFECYCLE_PRODUCTIONS: readonly LifecycleProduction[] = [
   {
     artifact: "audit_state.json",
     writer: "advanceAudit (src/audit/orchestrator/advance.ts)",
-    reason: "the derived obligation state the fold persists after each executor run",
+    reason:
+      "the derived obligation state each advance carries on its bundle; the fold persists it ONCE at its halt (CX-02 persist-once)",
   },
   {
     artifact: "tooling_manifest.json",

@@ -1,3 +1,4 @@
+import { commitFold, createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm, readdir, readFile } from "node:fs/promises";
@@ -127,7 +128,7 @@ await test("handleGraphEnrichmentBranch returns analyzer_install when unresolved
       since: undefined,
     };
 
-    const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef);
+    const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef, createFoldTransaction());
     // If unresolved is non-empty and no decisions file is present, it should
     // return the analyzer_install prompt. If pylint is not in the default
     // registry (no unresolved entries), fall through is acceptable — either
@@ -176,7 +177,7 @@ await test("handleGraphEnrichmentBranch returns continue after consuming a valid
       since: undefined,
     };
 
-    const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef);
+    const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef, createFoldTransaction());
     // With an empty repo_manifest, unresolved will be [] — the function should
     // fall through to the edge-reasoning check and return "fallthrough" (no
     // candidates, flag off). The decisions file is irrelevant in this path.
@@ -196,7 +197,7 @@ await test("handleGraphEnrichmentBranch returns fallthrough when unresolved is e
       since: undefined,
     };
 
-    const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef);
+    const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef, createFoldTransaction());
     expect(branch.action).toBe("fallthrough");
   });
 });
@@ -213,7 +214,7 @@ await test("handleDesignReviewBranch returns design_review_parallel when both pa
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    const branch = await handleDesignReviewBranch(params, bundle, state, createFoldTransaction());
     expect(branch.action).toBe("return");
     if (branch.action !== "return") throw new Error("expected action=return");
     expect(branch.result.kind).toBe("design_review_parallel");
@@ -234,8 +235,12 @@ await test("handleDesignReviewBranch returns continue after merging contract fin
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(params, bundle, state, tx);
     expect(branch.action).toBe("continue");
+    if (branch.action !== "continue") throw new Error("expected continue");
+    // The handler CARRIES the merge; the fold commit lands it (CX-02 persist-once).
+    await commitFold(artifactsDir, branch.bundle, tx);
 
     // Written design_assessment.json should have contract_reviewed === true
     const { readFile } = await import("node:fs/promises");
@@ -259,8 +264,12 @@ await test("handleDesignReviewBranch returns continue after merging conceptual f
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(params, bundle, state, tx);
     expect(branch.action).toBe("continue");
+    if (branch.action !== "continue") throw new Error("expected continue");
+    // The handler CARRIES the merge; the fold commit lands it (CX-02 persist-once).
+    await commitFold(artifactsDir, branch.bundle, tx);
 
     const { readFile } = await import("node:fs/promises");
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
@@ -284,8 +293,12 @@ await test("handleDesignReviewBranch returns continue after merging both lane su
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(params, bundle, state, tx);
     expect(branch.action).toBe("continue");
+    if (branch.action !== "continue") throw new Error("expected continue");
+    // The handler CARRIES the merge; the fold commit lands it (CX-02 persist-once).
+    await commitFold(artifactsDir, branch.bundle, tx);
 
     const { readFile } = await import("node:fs/promises");
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
@@ -302,7 +315,7 @@ await test("handleDesignReviewBranch returns single-pass design_review_conceptua
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    const branch = await handleDesignReviewBranch(params, bundle, state, createFoldTransaction());
     expect(branch.action).toBe("return");
     if (branch.action !== "return") throw new Error("expected action=return");
     expect(branch.result.kind).toBe("design_review_conceptual");
@@ -331,8 +344,12 @@ await test("handleDesignReviewBranch returns continue after merging a valid lega
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(params, bundle, state, tx);
     expect(branch.action).toBe("continue");
+    if (branch.action !== "continue") throw new Error("expected continue");
+    // The handler CARRIES the merge; the fold commit lands it (CX-02 persist-once).
+    await commitFold(artifactsDir, branch.bundle, tx);
 
     // The submitted findings file should have been deleted
     let exists = true;
@@ -424,10 +441,12 @@ await test("checkFinalizationCycle triggers terminal step after TOLERANCE repeat
       selectedObligation: "synthesis_current",
     });
 
-    // Should return a terminal result (blocked or complete)
+    // Returns a terminal INTENT — the fold driver converts it to the real
+    // terminal (blocked or complete) AFTER the commit, outside the hold.
     expect(result !== undefined).toBeTruthy();
     if (result === undefined) throw new Error("expected a terminal result");
-    expect(result.kind === "blocked" || result.kind === "complete").toBeTruthy();
+    expect(result.kind).toBe("terminal_intent");
+    expect(result.reason).toContain("not converging");
   });
 });
 
@@ -540,8 +559,12 @@ await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} 
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(params, bundle, state, tx);
     expect(branch.action).toBe("continue");
+    if (branch.action !== "continue") throw new Error("expected continue");
+    // The handler CARRIES the merge; the fold commit lands it (CX-02 persist-once).
+    await commitFold(artifactsDir, branch.bundle, tx);
 
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
     expect(written.contract_reviewed).toBe(true);
@@ -575,13 +598,16 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(params, bundle, state, tx);
 
     // Genuinely malformed → the step re-emits (nothing merged, contract pass
     // still unsatisfied) rather than silently swallowing it as "continue".
     expect(branch.action).toBe("return");
     if (branch.action !== "return") throw new Error("expected action=return");
     expect(["design_review_contract", "design_review_parallel"]).toContain(branch.result.kind);
+    // The rejection note rides the carried bundle; the fold commit lands it.
+    await commitFold(artifactsDir, branch.result.bundle, tx);
 
     // The original submission is gone from its bound path ...
     let stillInIncoming = true;
@@ -647,7 +673,11 @@ await test("handleDesignReviewBranch quarantines a syntactically malformed conce
     const params = { artifactsDir };
 
     // Must not throw: the malformed lane quarantines like any other bad shape.
-    await handleDesignReviewBranch(params, bundle, state);
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(params, bundle, state, tx);
+    expect(branch.action).toBe("continue");
+    if (branch.action !== "continue") throw new Error("expected continue");
+    await commitFold(artifactsDir, branch.bundle, tx);
 
     // The valid contract lane merged and PERSISTED.
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
@@ -692,8 +722,11 @@ await test("handleDesignReviewBranch quarantines an ambiguous two-array-property
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(params, bundle, state, tx);
     expect(branch.action).toBe("return");
+    if (branch.action !== "return") throw new Error("expected action=return");
+    await commitFold(artifactsDir, branch.result.bundle, tx);
 
     const quarantined = await quarantinedFiles(artifactsDir);
     expect(quarantined.length).toBe(1);
@@ -723,11 +756,14 @@ await test("handleDesignReviewBranch quarantines a malformed legacy findings fil
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(params, bundle, state, tx);
     // Legacy quarantine folds ("continue") — the very next fold iteration
-    // (same drain call, reloaded bundle) re-evaluates contract/conceptual and
+    // (same drain call, carried bundle) re-evaluates contract/conceptual and
     // surfaces the recorded rejection via the returned host step.
     expect(branch.action).toBe("continue");
+    if (branch.action !== "continue") throw new Error("expected continue");
+    await commitFold(artifactsDir, branch.bundle, tx);
 
     const quarantined = await quarantinedFiles(artifactsDir);
     expect(quarantined.length).toBe(1);
@@ -889,6 +925,7 @@ await test("handleGraphEnrichmentBranch applies a canonical {rewrites:[...]} sub
       edgeReasoningBundle(),
       { status: "active", obligations: [] },
       { value: undefined },
+      createFoldTransaction(),
       { runStep: async (opts) => { runStepCalls.push(opts); return STUB_ADVANCE_RESULT; } },
     );
 
@@ -917,6 +954,7 @@ await test("handleGraphEnrichmentBranch tolerant-unwraps a bare-array edge-reaso
       edgeReasoningBundle(),
       { status: "active", obligations: [] },
       { value: undefined },
+      createFoldTransaction(),
       { runStep: async (opts) => { runStepCalls.push(opts); return STUB_ADVANCE_RESULT; } },
     );
 
@@ -940,6 +978,7 @@ await test("handleGraphEnrichmentBranch quarantines a malformed edge-reasoning s
       edgeReasoningBundle(),
       { status: "active", obligations: [] },
       { value: undefined },
+      createFoldTransaction(),
       deps,
     );
 
@@ -977,6 +1016,7 @@ await test("handleGraphEnrichmentBranch quarantines a malformed edge-reasoning s
       edgeReasoningBundle(),
       { status: "active", obligations: [] },
       { value: undefined },
+      createFoldTransaction(),
       deps,
     );
     expect(reEmit.action).toBe("return");
@@ -999,6 +1039,7 @@ await test("handleGraphEnrichmentBranch clears the rejection marker once a valid
       edgeReasoningBundle(),
       { status: "active", obligations: [] },
       { value: undefined },
+      createFoldTransaction(),
       deps,
     );
     expect(await renderEdgeReasoningRejectionNotice(artifactsDir)).toBeTruthy();
@@ -1015,6 +1056,7 @@ await test("handleGraphEnrichmentBranch clears the rejection marker once a valid
       edgeReasoningBundle(),
       { status: "active", obligations: [] },
       { value: undefined },
+      createFoldTransaction(),
       deps,
     );
     expect(branch.action).toBe("continue");
@@ -1116,13 +1158,13 @@ const OMITTABLE_GATES: OmittableGateCase[] = [
     lane: GATE_LANES.synthesis_narrative,
     // narrativeEnabled:true → shouldOmit false → host turn owed ("return").
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
-      handleSynthesisNarrativeBranch({ ...params, narrativeEnabled: true }, bundle, state),
+      handleSynthesisNarrativeBranch({ ...params, narrativeEnabled: true }, bundle, state, createFoldTransaction()),
   },
   {
     kind: "critical_flow_fallback",
     lane: GATE_LANES.critical_flow_fallback,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
-      handleCriticalFlowFallbackBranch(params, bundle, state),
+      handleCriticalFlowFallbackBranch(params, bundle, state, createFoldTransaction()),
   },
   {
     kind: "charter_extraction",
@@ -1143,25 +1185,25 @@ const OMITTABLE_GATES: OmittableGateCase[] = [
       },
     } satisfies ArtifactBundle,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
-      handleCharterExtractionBranch(params, bundle, state),
+      handleCharterExtractionBranch(params, bundle, state, createFoldTransaction()),
   },
   {
     kind: "charter_delta",
     lane: GATE_LANES.charter_delta,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
-      handleCharterDeltaBranch(params, bundle, state),
+      handleCharterDeltaBranch(params, bundle, state, createFoldTransaction()),
   },
   {
     kind: "charter_clarification",
     lane: GATE_LANES.charter_clarification,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
-      handleCharterClarificationBranch(params, bundle, state),
+      handleCharterClarificationBranch(params, bundle, state, createFoldTransaction()),
   },
   {
     kind: "systemic_challenge",
     lane: GATE_LANES.systemic_challenge,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
-      handleSystemicChallengeBranch(params, bundle, state),
+      handleSystemicChallengeBranch(params, bundle, state, createFoldTransaction()),
   },
 ];
 

@@ -4,6 +4,7 @@
  *
  * Deterministic in-process tests — no LLM calls, minimal disk IO.
  */
+import { createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { test, expect, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -108,6 +109,7 @@ test("COR-0ae3577b: handleGraphEnrichmentBranch accepts the trimmed params shape
     {},
     { status: "active", obligations: [], blockers: [] } satisfies AuditState,
     { value: undefined },
+    createFoldTransaction(),
   );
   expect(["fallthrough", "continue", "return"].includes(result.action), `Expected valid action; got ${result.action}`).toBeTruthy();
 });
@@ -141,7 +143,7 @@ test("COR-03418a9f-2: handleGraphEnrichmentBranch emits stderr for all-invalid a
       const params = { root: dir, artifactsDir: dir, graphLlmEdgeReasoning: false, since: undefined };
       // With no manifest, unresolved = [] → falls to edge reasoning check → fallthrough
       // (decisions file is only consumed when unresolved.length > 0)
-      const result = await handleGraphEnrichmentBranch(params, bundle, state, { value: undefined });
+      const result = await handleGraphEnrichmentBranch(params, bundle, state, { value: undefined }, createFoldTransaction());
       // No manifest means no unresolved entries, so the decisions path is not taken
       expect(result.action, "no manifest → fallthrough").toBe("fallthrough");
     } finally {
@@ -310,6 +312,7 @@ test("COR-1faa3e31: the quarantine diagnostic actually EMITS when a misshapen de
         { value: undefined },
         // Seeded: one unresolved analyzer, so the decisions file is consumed and
         // its misshapen top-level value reaches the quarantine path.
+        createFoldTransaction(),
         { unresolvedAnalyzers: () => [{ id: "semgrep" }] as never },
       );
     } finally {

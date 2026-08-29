@@ -4,18 +4,21 @@ import { withTempDir } from "./helpers/withTempDir.mjs";
 import type { AnalyzerSetting, GraphEdge } from "audit-tools/shared";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
-// CP-NODE-7 regen-drain pins: the SINGLE fold-aware stop predicate is consumed by
-// BOTH the advanceAudit drain loop AND the next-step fold. These tests lock the two
-// FOLD-LEVEL pauses a registry-only `isHostDelegationExecutor` gate is blind to —
-// the analyzer-install consent fold and the low-confidence edge-reasoning fold —
-// plus the registry-level host-delegation stop, so the default drain can never
-// silently skip an operator-interactive step.
+// CP-NODE-7 regen-drain pins, migrated onto CX-02's ONE registry: pause policy
+// is now the per-obligation CLASSIFICATION in `obligationPolicy.ts`, consumed by
+// BOTH the plan draw (`advanceAudit` unforced) and the full `next-step` fold's
+// bespoke bodies. These tests lock the two FOLD-LEVEL pauses a registry-only
+// `isHostDelegationExecutor` gate is blind to — the analyzer-install consent
+// fold and the low-confidence edge-reasoning fold — plus the registry-level
+// host-delegation stop, so neither draw can silently run past an
+// operator-interactive boundary.
 const {
-  nextStepPausesForHostInput,
-  nextStepIsDrainableRegen,
   graphEnrichmentLowConfidenceEdges,
   graphEnrichmentUnresolvedAnalyzers,
 } = await import("../../src/audit/orchestrator/hostInputPause.js");
+const { classifyObligationBranch } = await import(
+  "../../src/audit/orchestrator/obligationPolicy.js"
+);
 const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
 
 const SKIP_ANALYZERS: Record<string, AnalyzerSetting> = {
@@ -58,11 +61,16 @@ test("the drain STOPS at the low-confidence edge-reasoning fold (flag on)", asyn
     const bundle = await graphEnrichmentBundleWithLowConfEdge(root);
     const inputs = { root, analyzers: SKIP_ANALYZERS, graphLlmEdgeReasoning: true };
 
-    // The fold-aware predicate sees the edge-reasoning fold even though
-    // graph_enrichment_executor is a deterministic (runner-backed) executor.
-    expect(nextStepPausesForHostInput(bundle, inputs)).toBe(true);
-    // So the drain refuses to resolve it in-process and hands back to the host.
-    expect(nextStepIsDrainableRegen(bundle, alwaysHasRunner, inputs)).toBe(false);
+    // The classifier sees the edge-reasoning fold even though
+    // graph_enrichment_executor is a deterministic (runner-backed) executor,
+    // so a draw halts instead of resolving it in-process.
+    const branch = await classifyObligationBranch(
+      "graph_enrichment_current",
+      bundle,
+      inputs,
+      alwaysHasRunner,
+    );
+    expect(branch.branch).toBe("host_boundary");
   });
 });
 
@@ -74,8 +82,13 @@ test("the drain PROCEEDS through graph enrichment when the edge-reasoning flag i
 
     // Flag off ⇒ no edge-reasoning turn is owed, and skip-all analyzers owe no
     // install consent, so graph enrichment is a drainable deterministic step.
-    expect(nextStepPausesForHostInput(bundle, inputs)).toBe(false);
-    expect(nextStepIsDrainableRegen(bundle, alwaysHasRunner, inputs)).toBe(true);
+    const branch = await classifyObligationBranch(
+      "graph_enrichment_current",
+      bundle,
+      inputs,
+      alwaysHasRunner,
+    );
+    expect(branch.branch).toBe("deterministic");
   });
 });
 
@@ -85,21 +98,33 @@ test("the drain STOPS at a registry-level host-delegation boundary (intent check
     const bundle = await buildAdvancedBundle(root, "intent_checkpoint_current");
     const inputs = { root, analyzers: SKIP_ANALYZERS };
 
-    expect(nextStepPausesForHostInput(bundle, inputs)).toBe(true);
-    expect(nextStepIsDrainableRegen(bundle, alwaysHasRunner, inputs)).toBe(false);
+    const branch = await classifyObligationBranch(
+      "intent_checkpoint_current",
+      bundle,
+      inputs,
+      alwaysHasRunner,
+    );
+    expect(branch.branch).toBe("host_boundary");
   });
 });
 
-test("nextStepIsDrainableRegen requires a runner regardless of the pause predicate", async () => {
+test("an unclassified obligation with no deterministic runner is a host boundary", async () => {
   await withTempDir("drain-no-runner-", async (root) => {
     await writeFixtureRepo(root);
-    const bundle = await graphEnrichmentBundleWithLowConfEdge(root);
-    const inputs = { root, analyzers: SKIP_ANALYZERS, graphLlmEdgeReasoning: false };
+    const bundle = await buildAdvancedBundle(root, "graph_enrichment_current");
+    const inputs = { root, analyzers: SKIP_ANALYZERS };
 
-    // Drainable when a runner exists (flag off ⇒ no pause), but a no-runner
-    // handoff is never drainable even though it does not pause for host input.
-    expect(nextStepIsDrainableRegen(bundle, () => true, inputs)).toBe(true);
-    expect(nextStepIsDrainableRegen(bundle, () => false, inputs)).toBe(false);
+    // A plain deterministic id is drainable while its executor has a runner…
+    expect(
+      (await classifyObligationBranch("synthesis_current", bundle, inputs, () => true))
+        .branch,
+    ).toBe("deterministic");
+    // …and a no-runner handoff is never drainable even though no fold-level
+    // pause is owed.
+    expect(
+      (await classifyObligationBranch("synthesis_current", bundle, inputs, () => false))
+        .branch,
+    ).toBe("host_boundary");
   });
 });
 

@@ -5,54 +5,25 @@
 
 ## Live state
 
-- **CX-02's six blockers have been through their refutation pass, and the record now carries a
-  DECIDED shape for each.** Six independent lanes ran on 2026-08-28 — four `codex exec`, two `agy`
-  — each told to break its proposal, and every claim was re-verified from source before it was
-  written down. **Two landings were refuted outright and replaced; four survive with amendments
-  that change the work.** The direction is untouched: one registry, one drain remains viable.
-  The record's *Where each blocker lands* is the single home for all of it — read it, not this.
-- **The two replacements are the reason the plan could not have been coded as written.** The
-  unlink deferral would make the systemic-challenge adversary loop converge FALSELY and
-  permanently, because a re-consumed submission reports a dry round. And the plan draw's blanket
-  halt is wrong: 8 of 13 bespoke policy bodies are HYBRID, so `audit-code plan` would stop at a
-  boundary that does not exist on that run. Both replacements are stated in the record.
-- **Record landing 6 needs no work — it is already in the tree.** The audit local-command path
-  runs on `runTrackedAsync` with a 120 s deadline, so a synchronous child cannot starve the held
-  lock's heartbeat. CX-02's remaining implementation is landings 1 to 5 of the record's decided
-  shape.
+- **CX-02 is IMPLEMENTED on branch `cx02-impl` (2026-08-28): one registry, one drain, one hold.**
+  The full suite is green on the replace (6114 passed, 0 failed), the constraint-3 acceptance
+  test lives in-tree (`tests/audit/one-lock-hold-per-next-step.test.ts`, 3 → 1), and
+  `check:deadcode` is green again (the fold adopted the lock-site splits). The record's
+  *IMPLEMENTED, 2026-08-28* section in
+  [`cx02-drain-unification-design-2026-08-26.md`](reviews/cx02-drain-unification-design-2026-08-26.md)
+  states the landed shape and its three self-corrections — read it, not this.
 - **Repository:** `v0.50.4` is live on npm and both global bins report it; `main`, `origin/main`
-  and the tag agree. No release is pending.
-- **Branch `cx02-impl` (pushed) is the implementation branch.** It is `main` plus the two
-  lock-site splits (`runAuditStepUnlocked`, `ensureSemanticReviewRunUnlocked`), green on typecheck
-  and the orchestrator suites; `check:deadcode` reds it at release BY DESIGN until the fold adopts
-  the splits. The constraint-3 acceptance test exists again at
-  `.audit-tools/cx02-holding/one-lock-hold-per-next-step.test.ts` — held out of the test tree so
-  no commit ships red — and its RED count against the branch is EXACTLY 3, so the record's number
-  is verified. Move it into `tests/audit/` with the replace.
+  and the tag agree. The CX-02 work sits on `cx02-impl` awaiting the land-and-ship flow.
 
 ## Immediate next
 
-**Implement CX-02 landings 1 to 5 on branch `cx02-impl`, starting from the record's decided
-shape.** One atomic loop-core replace lands on `main`; a temporary internal seam is permitted
-between commits on the branch under PH-04, every commit green.
+**Land `cx02-impl` on `main` and ship** (the `/ship` flow: verify green → commit with the
+loop-core attestation → push → merge → publish → verify live → reinstall bins).
 
-Two things the implementing lap must not rediscover:
-
-1. **The blast radius is larger than "three sites".** Ten in-fold call sites in
-   `nextStepHelpers.ts` re-point to lock-free cores; the eight external top-level callers do NOT
-   move, because each already calls the locking wrapper. The error-recovery `withFileLock` in
-   `executeAndRecord`'s catch is fold-reachable and the record's old list omitted it.
-2. **A handler must not return a PARTIAL bundle.** `ArtifactBundle` is `Partial` and pruning
-   treats a missing value as an intent to delete, so a partial return destroys every artifact it
-   did not carry. Return a full authoritative bundle or a tri-state patch.
-
-The `tolerance < MAX_DRAIN_STEPS` contract test (record, constraint-1 answer, item 4) belongs
-beside `bounded-call-single-source` and lands WITH the replace — its comparison only becomes the
-live invariant once the guards observe in dispatch slots.
-
-Still open and owner-facing: the live fresh-audit measurement before the cap is sized, which must
-capture HOLD TIME as well as dispatch count — a concurrent waiter now has its number, and fails
-after `DEFAULT_TIMEOUT_MS` = 10,000 ms.
+Then still open and owner-facing: the live fresh-audit measurement before the cap is re-sized —
+it must capture HOLD TIME as well as charged-execution count, because the single outer hold
+converts a concurrent waiter into a failure after `DEFAULT_TIMEOUT_MS` = 10,000 ms
+(`withFileLock`) / 20 s (`LOCKED_JSON_STORE_TIMEOUT_MS`).
 
 
 ## Deliberate state, not bugs
@@ -61,11 +32,6 @@ after `DEFAULT_TIMEOUT_MS` = 10,000 ms.
   its parallel-load timeout passes alone and is tracked as a known flake, so rebaselining it would
   hide a real regression.
 - The detached host runner is intentionally not running.
-- **The two lock-site splits live on `cx02-impl` as deliberately UNADOPTED exports** —
-  `runAuditStepUnlocked` and `ensureSemanticReviewRunUnlocked`, cherry-picked from the retired
-  `cx02-one-drain` branch (now deleted; its commit is preserved in the cherry-pick). They are not
-  sufficient on their own (record blockers 2 to 4), and `check:deadcode` reds the branch at
-  release until the fold adopts them — both intentional under PH-04.
 - The tracked decision-queue snapshot STILL disagrees with the ledger that settles it, and it will
   keep doing so: its writer refuses a batch that drops a record-path item on its own, so no lap can
   quietly true it up. What changed is the consumer, not the artifact — `start-lap` step 5 now asks
@@ -95,6 +61,6 @@ after `DEFAULT_TIMEOUT_MS` = 10,000 ms.
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ CX-02 — one audit obligation registry, one drain. · [`forward-tracks.md`](backlog/forward-tracks.md)
+- ▶ CX-02 — one audit obligation registry, one drain. IMPLEMENTED on `cx02-impl` (2026-08-28); remaining: ship + the deferred live measurement. · [`forward-tracks.md`](backlog/forward-tracks.md)
 
 <!-- END GENERATED ROADMAP -->

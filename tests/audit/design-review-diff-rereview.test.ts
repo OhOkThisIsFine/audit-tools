@@ -27,7 +27,8 @@ const {
   DESIGN_REVIEW_INPUTS,
 } = await import("../../src/audit/orchestrator/designReviewProjection.js");
 const {
-  captureDesignReviewSnapshot,
+  buildDesignReviewSnapshot,
+  writeDesignReviewSnapshot,
   loadDesignReviewSnapshots,
   isDesignReviewStale,
   computeDesignReReviewDelta,
@@ -317,12 +318,14 @@ test("capture → load roundtrip + buildDesignReReviewSection emits the re-revie
   const dir = await mkdtemp(join(tmpdir(), "audit-dr-snap-"));
   try {
     const base = bundle();
-    await captureDesignReviewSnapshot(
+    await writeDesignReviewSnapshot(
       dir,
-      "contract",
-      [priorFinding("DR-001", "prior", "high")],
-      base,
-      "2026-01-01T00:00:00Z",
+      buildDesignReviewSnapshot(
+        "contract",
+        [priorFinding("DR-001", "prior", "high")],
+        base,
+        "2026-01-01T00:00:00Z",
+      ),
     );
 
     const loaded = await loadDesignReviewSnapshots(dir);

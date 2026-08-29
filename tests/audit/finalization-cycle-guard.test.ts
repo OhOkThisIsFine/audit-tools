@@ -26,7 +26,7 @@ const repoRoot = join(here, "..", "..");
 const wrapperPath = join(repoRoot, "audit-code.mjs");
 
 // Import the exported helpers directly for in-process unit tests.
-const { checkFinalizationCycle } = await import("../../src/audit/cli/nextStepCommand.js");
+const { checkFinalizationCycle, buildTerminalStep } = await import("../../src/audit/cli/nextStepCommand.js");
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.js");
 const {
   loadArtifactBundle,
@@ -215,7 +215,16 @@ test("checkFinalizationCycle routes to blocked when no report is present", async
 
     expect(outcome !== undefined, "guard should fire").toBeTruthy();
     if (outcome === undefined) throw new Error("expected a terminal result");
-    expect(outcome.kind, "routes to blocked when no audit_report in bundle").toBe("blocked");
+    // The guard returns a terminal INTENT; the fold driver converts it via
+    // buildTerminalStep AFTER the commit, outside the hold (CX-02).
+    expect(outcome.kind).toBe("terminal_intent");
+    const terminal = await buildTerminalStep(
+      { artifactsDir: artDir, root: dir },
+      outcome.bundle,
+      outcome.state,
+      outcome.reason,
+    );
+    expect(terminal.kind, "routes to blocked when no audit_report in bundle").toBe("blocked");
   });
 });
 
@@ -246,10 +255,18 @@ test("checkFinalizationCycle routes to complete when audit_report is present in 
 
     expect(outcome !== undefined, "guard should fire").toBeTruthy();
     if (outcome === undefined) throw new Error("expected a terminal result");
-    // With audit_report present, buildTerminalStep routes to complete (not blocked).
-    expect(outcome.kind, "routes to complete when audit_report is present").toBe("complete");
-    if (outcome.kind !== "complete") throw new Error("expected kind=complete");
-    expect(typeof outcome.finalReportPath === "string" && outcome.finalReportPath.includes("audit-report.md"), "finalReportPath resolves to audit-report.md").toBeTruthy();
+    // Intent first; the post-hold conversion routes to complete (not blocked)
+    // because the bundle carries a rendered report.
+    expect(outcome.kind).toBe("terminal_intent");
+    const terminal = await buildTerminalStep(
+      { artifactsDir: artDir, root: dir },
+      outcome.bundle,
+      outcome.state,
+      outcome.reason,
+    );
+    expect(terminal.kind, "routes to complete when audit_report is present").toBe("complete");
+    if (terminal.kind !== "complete") throw new Error("expected kind=complete");
+    expect(typeof terminal.finalReportPath === "string" && terminal.finalReportPath.includes("audit-report.md"), "finalReportPath resolves to audit-report.md").toBeTruthy();
   });
 });
 

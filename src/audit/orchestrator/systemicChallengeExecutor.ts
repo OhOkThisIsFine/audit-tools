@@ -65,9 +65,29 @@ function omittedRegister(ceiling: Ceiling, generated_at: string): SystemicChalle
 export function runSystemicChallengeExecutor(
   bundle: ArtifactBundle,
   submission?: SystemicChallengeSubmission,
+  submissionHash?: string,
 ): ExecutorRunResult {
   const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
   const generated_at = new Date().toISOString();
+
+  // Iterative-fold duplicate guard (CX-02 landing 3): a submission whose
+  // content hash the register already folded is IGNORED — never folded again,
+  // and above all never counted as a quiet round, which is what would converge
+  // the adversary loop falsely and permanently. Reachable when a crash between
+  // the fold's core commit and its staged-submission cleanup restores an
+  // already-folded submission.
+  if (
+    submission &&
+    submissionHash &&
+    bundle.systemic_challenge?.folded_submission_hashes?.includes(submissionHash)
+  ) {
+    return {
+      updated: { ...bundle },
+      artifacts_written: ["systemic_challenge.json"],
+      progress_summary:
+        "Systemic challenge: duplicate round submission ignored (its content hash is already folded into the register).",
+    };
+  }
 
   if (!ceilingRequestsCharters(ceiling)) {
     const omitted = omittedRegister(ceiling, generated_at);
@@ -93,6 +113,9 @@ export function runSystemicChallengeExecutor(
       ceiling,
       metrics,
       rounds: priorRounds,
+      ...(prior?.folded_submission_hashes
+        ? { folded_submission_hashes: prior.folded_submission_hashes }
+        : {}),
       converged: false,
       convergence_rule: appliedConvergenceRule(),
       findings: priorFindings,
@@ -121,6 +144,9 @@ export function runSystemicChallengeExecutor(
     dry: folded.dry,
   };
   const rounds = [...priorRounds, round];
+  const foldedHashes = submissionHash
+    ? [...(prior?.folded_submission_hashes ?? []), submissionHash]
+    : prior?.folded_submission_hashes;
   // CONSECUTIVE-QUIET convergence: the loop terminates only when the last
   // QUIET_ROUNDS_TO_CONVERGE rounds were ALL dry. Derived from the persisted
   // rounds themselves — no separate counter state to drift.
@@ -133,6 +159,7 @@ export function runSystemicChallengeExecutor(
     ceiling,
     metrics,
     rounds,
+    ...(foldedHashes ? { folded_submission_hashes: foldedHashes } : {}),
     converged,
     convergence_rule: appliedConvergenceRule(),
     findings: folded.findings,

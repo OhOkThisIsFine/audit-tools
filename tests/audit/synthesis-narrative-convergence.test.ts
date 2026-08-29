@@ -30,7 +30,7 @@ import { buildAuditFindingsDeliverable } from "../../src/shared/reporting/auditD
 const { hashArtifactValue } = await import("../../src/shared/artifactFreshness.js");
 const { computeArtifactStateSignature } = await import("../../src/audit/orchestrator/artifactMetadata.js");
 const { applyNarrative } = await import("../../src/audit/reporting/synthesis.js");
-const { checkNoProgressBeforeDispatch } = await import("../../src/audit/cli/nextStepCommand.js");
+const { checkNoProgressBeforeDispatch, buildTerminalStep } = await import("../../src/audit/cli/nextStepCommand.js");
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.js");
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.js");
 
@@ -240,7 +240,17 @@ test("CE-005 convergence: no-progress guard fires when a stable narrative signat
     // loop instead of re-dispatching.
     const second = await checkNoProgressBeforeDispatch({ index: 1, ...baseCtx });
     expect(second !== undefined, "guard must fire on the recurring stable signature").toBeTruthy();
-    expect(second!.kind, "with the report already rendered, convergence resolves to complete (report promoted, working dir cleaned)").toBe("complete");
+    // The guard returns a terminal INTENT (the fold driver converts it AFTER
+    // its commit, outside the hold — CX-02); the conversion resolves to
+    // complete because the report is already rendered.
+    expect(second!.kind).toBe("terminal_intent");
+    const terminal = await buildTerminalStep(
+      { artifactsDir: artDir, root: dir },
+      second!.bundle,
+      second!.state,
+      second!.reason,
+    );
+    expect(terminal.kind, "with the report already rendered, convergence resolves to complete (report promoted, working dir cleaned)").toBe("complete");
   });
 });
 
@@ -282,7 +292,14 @@ test("CE-005: no-progress guard records no_progress_detected and stays blocked w
     expect(await checkNoProgressBeforeDispatch({ index: 0, ...baseCtx }), "first dispatch proceeds").toBe(undefined);
     const fired = await checkNoProgressBeforeDispatch({ index: 1, ...baseCtx });
     expect(fired !== undefined, "guard fires on recurrence").toBeTruthy();
-    expect(fired!.kind, "no report → blocked terminal step").toBe("blocked");
+    expect(fired!.kind).toBe("terminal_intent");
+    const terminal = await buildTerminalStep(
+      { artifactsDir: artDir, root: dir },
+      fired!.bundle,
+      fired!.state,
+      fired!.reason,
+    );
+    expect(terminal.kind, "no report → blocked terminal step").toBe("blocked");
 
     const progress = JSON.parse(
       await readFile(join(artDir, "steps", "deterministic-progress.json"), "utf8"),

@@ -57,7 +57,7 @@ its `produces`.
 |---|---|---|
 | `agent-feedback.jsonl` | audit workers (append-only) | opt-in meta-audit reflections appended by whoever ran the task; treated as always-updated when metadata is computed |
 | `artifact_metadata.json` | advanceAudit (src/audit/orchestrator/advance.ts) | the staleness bookkeeping the fold itself recomputes from every run's write-set |
-| `audit_state.json` | advanceAudit (src/audit/orchestrator/advance.ts) | the derived obligation state the fold persists after each executor run |
+| `audit_state.json` | advanceAudit (src/audit/orchestrator/advance.ts) | the derived obligation state each advance carries on its bundle; the fold persists it ONCE at its halt (CX-02 persist-once) |
 | `tooling_manifest.json` | the environment probe (src/audit/orchestrator/advance.ts) | probed from the host environment, not derived from any upstream artifact |
 
 ## Side-channel writes

@@ -6,8 +6,6 @@ import type {
   GraphEdge,
 } from "audit-tools/shared";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
-import { decideNextStep } from "./nextStep.js";
-import { isHostDelegationExecutor } from "./executors.js";
 import { collectLowConfidenceEdges } from "./edgeReasoning.js";
 import { buildPathLookup } from "../extractors/graph.js";
 import { buildDispositionMap } from "../extractors/disposition.js";
@@ -129,66 +127,9 @@ export function graphEnrichmentLowConfidenceEdges(
   return collectLowConfidenceEdges(bundle.graph_bundle);
 }
 
-/**
- * The SINGLE fold-aware stop predicate consumed by BOTH the `advanceAudit` drain
- * loop AND the `next-step` fold. True when the next step derived from `bundle`
- * pauses for HOST INPUT and must not be resolved deterministically in-process.
- *
- * Two classes of pause:
- *  1. A registry-level host-delegation executor (intent /
- *     charter checkpoints, design-review + clarification + systemic-challenge
- *     loops, synthesis narrative, dispatch handoffs). `isHostDelegationExecutor`
- *     already sees every one of these — they are `kind: "host_delegation"` in the
- *     executor registry.
- *  2. A FOLD-LEVEL interactive pause the registry cannot see: the
- *     `graph_enrichment_executor` is registered `deterministic`, but the fold
- *     emits an `analyzer_install` consent step (undecided analyzer installs) or
- *     an `edge_reasoning_dispatch` step (low-confidence edges + flag on) BEFORE running it.
- *     A registry-only gate (`isHostDelegationExecutor`) is blind to (2), so an
- *     unconditional drain would silently skip an operator-interactive step —
- *     exactly the latent failure this predicate closes. It reuses the SAME
- *     fold-detection helpers the `next-step` fold does, so the two cannot drift.
- *
- * Chain-length/index-agnostic: the decision is re-derived from `decideNextStep`
- * each call, never a fixed executor index.
- */
-export function nextStepPausesForHostInput(
-  bundle: ArtifactBundle,
-  inputs: HostInputPauseInputs = {},
-): boolean {
-  const decision = decideNextStep(bundle, { emitStaleness: false });
-  const executor = decision.selected_executor;
-  if (!executor) return false;
-  if (isHostDelegationExecutor(executor)) return true;
-  if (executor === "graph_enrichment_executor") {
-    if (graphEnrichmentUnresolvedAnalyzers(bundle, inputs).length > 0) return true;
-    if (graphEnrichmentLowConfidenceEdges(bundle, inputs).length > 0) return true;
-  }
-  // Item B fold-level pause: the acquisition executor is registered deterministic,
-  // but running it while applicable consent-gated candidates are undecided would
-  // silently skip them — the fold owes the operator the batched offer first.
-  if (executor === "external_analyzer_acquisition_executor") {
-    if (pendingAnalyzerConsent(inputs).length > 0) return true;
-  }
-  return false;
-}
-
-/**
- * True when the next step is a deterministic, runner-backed regen step the drain
- * loop may resolve in-process — i.e. it has a runner AND does NOT pause for host
- * input (neither a registry host-delegation boundary nor a fold-level interactive
- * pause). Callers pass the runner-presence check via `hasRunner` so this module
- * stays free of the executor-runner import (which would pull the whole executor
- * graph into the pause predicate).
- */
-export function nextStepIsDrainableRegen(
-  bundle: ArtifactBundle,
-  hasRunner: (executor: string) => boolean,
-  inputs: HostInputPauseInputs = {},
-): boolean {
-  const decision = decideNextStep(bundle, { emitStaleness: false });
-  const executor = decision.selected_executor;
-  if (!executor) return false;
-  if (!hasRunner(executor)) return false;
-  return !nextStepPausesForHostInput(bundle, inputs);
-}
+// The composite stop predicates (`nextStepPausesForHostInput`,
+// `nextStepIsDrainableRegen`) that used to live here were SUPERSEDED by the
+// per-obligation classification in `obligationPolicy.ts` (CX-02: pause policy
+// is a property of each obligation in the ONE registry, consumed identically
+// by the plan draw and the full fold's bespoke bodies). The helpers above
+// remain the single sources those classifiers read.

@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 221 entr(y/ies) indexed.
+> and at commit). 222 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -153,6 +153,7 @@
 - `minor-bugs.md:375` — Three governance vocabularies are copied per consumer instead of shared (2026-08-27, from the philosophy audit, low).
 - `minor-bugs.md:377` — A pipeline warning names an internal record id as its resolution action (2026-08-27, from the philosophy audit, low).
 - `minor-bugs.md:379` — `check:memory-citations` gates two of the three citation directions, and its guard-reach row names the wrong uncovered half (2026-08-27, low, friction: tool_should_decide).
+- `minor-bugs.md:401` — `buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low, friction: tooling_gap).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -160,17 +161,17 @@
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:43` — ▶ CX-02 — one audit obligation registry, one drain.
-- `forward-tracks.md:69` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:93` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:101` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:116` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:123` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:135` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:149` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
-- `forward-tracks.md:158` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
-- `forward-tracks.md:183` — Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep path, then measure.
-- `forward-tracks.md:204` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:43` — ▶ CX-02 — one audit obligation registry, one drain. IMPLEMENTED on `cx02-impl` (2026-08-28); remaining: ship + the deferred live measurement.
+- `forward-tracks.md:59` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
+- `forward-tracks.md:83` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:91` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:106` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:113` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:125` — Wave-friendly host dispatch: run identity survives partial ingest.
+- `forward-tracks.md:139` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:148` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
+- `forward-tracks.md:173` — Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep path, then measure.
+- `forward-tracks.md:194` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 

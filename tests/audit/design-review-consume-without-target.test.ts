@@ -1,3 +1,4 @@
+import { createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -111,7 +112,7 @@ describe(FAILURE_SIGNATURE, () => {
       const state: AuditState = { status: "active", obligations: [] };
       const params = { artifactsDir };
 
-      const branch = await handleDesignReviewBranch(params, bundle, state);
+      const branch = await handleDesignReviewBranch(params, bundle, state, createFoldTransaction());
 
       // The branch must still hand the host a step to run — losing the
       // submission AND stalling would be strictly worse.

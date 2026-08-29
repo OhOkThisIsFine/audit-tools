@@ -21,7 +21,7 @@ import type { AuditTask } from "../../src/audit/types.js";
 const {
   loadCurrentActiveReviewRun,
   materializeReviewRun,
-  ensureSemanticReviewRun,
+  ensureSemanticReviewRunUnlocked,
   writeHandoffOnly,
   persistConfigErrorHandoff,
 } = await import("../../src/audit/cli/reviewRun.js");
@@ -192,13 +192,13 @@ test("writeHandoffOnly writes a blocked operator handoff", async () => {
   });
 });
 
-test("ensureSemanticReviewRun creates a blocked host-review handoff for new work", async () => {
+test("ensureSemanticReviewRunUnlocked creates a blocked host-review handoff for new work", async () => {
   await withTempArtifacts(async ({ artifactsDir, root }) => {
     await mkdir(join(root, "src"), { recursive: true });
     await writeFile(join(root, "src", "index.ts"), "export const value = 1;\n");
     const pending = [auditTask("task-1", ["src/index.ts"])];
 
-    const result = await ensureSemanticReviewRun({
+    const result = await ensureSemanticReviewRunUnlocked({
       root,
       artifactsDir,
       bundle: {
@@ -230,13 +230,13 @@ test("ensureSemanticReviewRun creates a blocked host-review handoff for new work
   });
 });
 
-test("ensureSemanticReviewRun reuses a run whose pending task identities still match", async () => {
+test("ensureSemanticReviewRunUnlocked reuses a run whose pending task identities still match", async () => {
   await withTempArtifacts(async ({ artifactsDir, root }) => {
     const pending = [auditTask("task-1", ["src/index.ts"])];
     const seeded = reviewRun(artifactsDir, "SEEDED-RUN");
     await writeReviewRunFiles(artifactsDir, seeded, pending);
 
-    const result = await ensureSemanticReviewRun({
+    const result = await ensureSemanticReviewRunUnlocked({
       root,
       artifactsDir,
       bundle: {
@@ -252,7 +252,7 @@ test("ensureSemanticReviewRun reuses a run whose pending task identities still m
   });
 });
 
-test("ensureSemanticReviewRun replaces a run whose pending manifest is stale", async () => {
+test("ensureSemanticReviewRunUnlocked replaces a run whose pending manifest is stale", async () => {
   await withTempArtifacts(async ({ artifactsDir, root }) => {
     const seeded = reviewRun(artifactsDir, "STALE-RUN");
     await writeReviewRunFiles(
@@ -264,7 +264,7 @@ test("ensureSemanticReviewRun replaces a run whose pending manifest is stale", a
     await writeFile(join(root, "src", "current.ts"), "export const current = true;\n");
     const fresh = auditTask("task-fresh", ["src/current.ts"], "security");
 
-    const result = await ensureSemanticReviewRun({
+    const result = await ensureSemanticReviewRunUnlocked({
       root,
       artifactsDir,
       bundle: {

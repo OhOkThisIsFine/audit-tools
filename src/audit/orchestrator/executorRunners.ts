@@ -120,7 +120,11 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
   charter_clarification_executor: async (bundle, { options }) =>
     runCharterClarificationExecutor(bundle, options.clarificationAnswers),
   systemic_challenge_executor: async (bundle, { options }) =>
-    runSystemicChallengeExecutor(bundle, options.systemicChallenge),
+    runSystemicChallengeExecutor(
+      bundle,
+      options.systemicChallenge,
+      options.systemicChallengeSubmissionHash,
+    ),
   planning_executor: async (bundle, { options, log, correlationId, obligation }) => {
     const root = requireRoot(options.root, "planning_executor");
     const plannedScope = resolveAuditScope({ root, since: options.since, bundle });
