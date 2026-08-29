@@ -6,7 +6,8 @@
 ## Live state
 
 - **The sync-children hazard is CLOSED on BOTH halves.** Audit half: every audit-fold-reachable
-  spawn on the async exec twin with the shared 120 s deadline (`v0.50.9`). Remediate half: the
+  spawn on the async exec twin with the shared 120 s deadline (`v0.50.9`). Remediate half
+  (`v0.50.10`): the
   ingestion corroboration probes, the triage reverify (now argv through the shared required-test
   runner, no shell), and the grounding/contract-gate enumerations all run async with declared
   deadlines; the acquisition default runners and the closing-phase spawns carry declared
