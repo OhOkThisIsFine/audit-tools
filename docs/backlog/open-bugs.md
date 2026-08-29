@@ -6,6 +6,24 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The analyzer-consent prompt tells the operator a grant is durable; the enforced contract makes
+  a grant per-run (2026-08-29, medium, friction: ambiguous_direction).** The consent prompt template
+  (`src/audit/cli/prompts.ts`) renders "a decision persists across runs (`granted` runs it from now
+  on; `declined` stops this offer from repeating)". The design is asymmetric BY DESIGN and mechanically pinned
+  (`tests/shared/consent-token-not-persisted.test.ts`; `AnalyzerConsentDecisionSchema` is the
+  one-member `"declined"` enum): a decline is durable, a grant binds only the run that asked.
+  The prompt is the drifted half — an operator granting under this text believes they enabled the
+  tool from now on, and the next run's re-offer reads as a bug. **Property:** the consent prompt
+  states each decision's actual lifetime — decline durable, grant this-run-only.
+
+- **`audit-code next-step --help` executes a real step instead of printing help (2026-08-29, low,
+  friction: tool_should_decide).** Observed live: `node audit-code.mjs next-step --help` against the
+  repo checkout ran a full fold (fsIntake, agent-slot gc, step emission) and advanced the live
+  audit's step files. A help flag must never mutate state. Likely the wrapper forwards argv to the
+  built CLI without commander's help interception on the subcommand, or the subcommand treats the
+  unknown flag as noise. **Property:** `--help`/`-h` on any subcommand prints usage and exits
+  without acquiring a lock or writing a byte.
+
 - **`commitFold`'s applied-entry unlink swallows non-ENOENT, so Windows can re-consume an
   already-applied submission (2026-08-28, medium).** The applied branch runs
   `unlink(staged.stagingPath).catch(() => {})` (`src/audit/cli/foldTransaction.ts`): an EBUSY/EPERM
@@ -162,7 +180,14 @@
   (CP-NODE-6's fix), but its only production caller drops the report on exactly the
   path where nothing advanced. **Property:** every classified ingest issue reaches
   the operator through the surface that triggered the ingest — the step contract,
-  stdout, or the step prompt — never only a discarded return value.
+  stdout, or the step prompt — never only a discarded return value. **The audit draw has
+  the same class, observed live 2026-08-29** (CX-02 measurement run,
+  `docs/reviews/cx02-hold-time-measurement-2026-08-29.md`): a host result rejected on the
+  exact-key envelope check (an extra `reviewed_clean` key) produced zero diagnostic on any
+  surface; the next fold re-minted the run id with new bound paths, the step prompt then
+  reported the item as `submission_missing`, and the intact file at the OLD run's bound
+  path was never read again. Rejected-with-reason surfaced as missing-without-reason,
+  and the re-mint made the repair path non-obvious.
 
 - **Host-handoff residuals from the CP-NODE-6 landing (low, one entry).** (a) A malformed
   FRONTIER block at prepare raises a classified aggregate naming the thrower, but still a

@@ -206,6 +206,13 @@ export interface AdvanceResult<S, Step> {
    * stopped the fold, and no caller has to know which of two limits to restate.
    */
   stoppedBound?: number;
+  /**
+   * Charged obligation executions this call spent (the unit `maxExecutions`
+   * caps). Carried on every outcome so a caller can RECORD the spend — the
+   * CX-02 hold-time measurement reads it — without re-counting dispatches
+   * against a second counter that could drift from the engine's own.
+   */
+  executions: number;
 }
 
 /**
@@ -350,6 +357,7 @@ export async function advance<S, Ctx, Step>(
           state: current,
           step: null,
           stopped: "cycle",
+          executions,
           ...(lastObligationId === null ? {} : { lastObligationId }),
         };
       }
@@ -360,7 +368,7 @@ export async function advance<S, Ctx, Step>(
       engine.obligations,
       current,
     );
-    if (!obligation) return { state: current, step: null };
+    if (!obligation) return { state: current, step: null, executions };
     lastObligationId = obligation.id;
     if (maxExecutions !== undefined && executions >= maxExecutions) {
       // The budget is spent and another obligation is still actionable. Spend-
@@ -373,12 +381,13 @@ export async function advance<S, Ctx, Step>(
         stopped: "budget",
         lastObligationId,
         stoppedBound: maxExecutions,
+        executions,
       };
     }
     executions += 1;
     const outcome = await obligation.execute(current, ctx);
     if (outcome.kind === "emit") {
-      return { state: outcome.state ?? current, step: outcome.step };
+      return { state: outcome.state ?? current, step: outcome.step, executions };
     }
     current = outcome.state;
     if (++transitions > maxTransitions) {
@@ -393,6 +402,7 @@ export async function advance<S, Ctx, Step>(
         stopped: "bound",
         lastObligationId,
         stoppedBound: maxTransitions,
+        executions,
       };
     }
   }

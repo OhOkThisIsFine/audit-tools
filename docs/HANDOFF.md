@@ -16,10 +16,11 @@
 
 ## Immediate next
 
-**The CX-02 live fresh-audit measurement before the cap is re-sized** — capture HOLD TIME as
-well as charged-execution count, because the single outer hold converts a concurrent waiter
-into a failure after `DEFAULT_TIMEOUT_MS` = 10,000 ms (`withFileLock`) / 20 s
-(`LOCKED_JSON_STORE_TIMEOUT_MS`). Spec: the pinned CX-02 entry in
+**The CX-02 waiter-timeout decision.** The deferred live measurement is DONE (2026-08-29,
+[`cx02-hold-time-measurement-2026-08-29.md`](reviews/cx02-hold-time-measurement-2026-08-29.md)):
+the cap stays 64 (worst fold charged 7 of 64), and frontier folds held 22–58.5 s against the
+10 s / 20 s waiter windows — so the open item is the owner's call on widening the
+artifact-tree-lock waiter timeout. Spec and evidence: the pinned CX-02 entry in
 [`forward-tracks.md`](backlog/forward-tracks.md).
 
 
@@ -58,6 +59,6 @@ into a failure after `DEFAULT_TIMEOUT_MS` = 10,000 ms (`withFileLock`) / 20 s
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ CX-02 — one audit obligation registry, one drain. SHIPPED in v0.50.6 (2026-08-28); remaining: the live fresh-audit measurement before the cap is re-sized. · [`forward-tracks.md`](backlog/forward-tracks.md)
+- ▶ CX-02 — one audit obligation registry, one drain. SHIPPED in v0.50.6; the deferred live measurement is DONE (2026-08-29); remaining: the owner's waiter-timeout decision. · [`forward-tracks.md`](backlog/forward-tracks.md)
 
 <!-- END GENERATED ROADMAP -->

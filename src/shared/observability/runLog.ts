@@ -30,6 +30,8 @@ export interface RunLogEvent {
   artifact?: string;
   tokens_est?: number;
   duration_ms?: number;
+  /** Charged obligation executions a fold spent (CX-02 hold measurement). */
+  executions?: number;
   note?: string;
   /** Run- or request-scoped token for correlating log events across a single invocation. */
   correlationId?: string;

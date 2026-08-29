@@ -23,84 +23,86 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 224 entr(y/ies) indexed.
+> and at commit). 226 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
-- `open-bugs.md:9` — `commitFold`'s applied-entry unlink swallows non-ENOENT, so Windows can re-consume an already-applied submission (2026-08-28, medium).
-- `open-bugs.md:20` — Commits created by `git cherry-pick` / `git merge` / `git rebase` bypass every pre-commit gate leg, the loop-core attestation, and the constitutional-doc gate (2026-08-28, medium).
-- `open-bugs.md:30` — The loop-core attest preflight judges the STAGED tree with WORKING-TREE checks, so an unstaged edit elsewhere reds an attestation whose commit would be green (2026-08-28, medium, friction: false_red).
-- `open-bugs.md:39` — The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction: false_red).
-- `open-bugs.md:53` — `shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then fired on a third near-identical one (2026-08-27, medium).
-- `open-bugs.md:65` — The rendered decision queue and its tracked snapshot can outlive the ledger that settles them, and nothing gates the disagreement (2026-08-27, medium, friction: tool_should_decide).
-- `open-bugs.md:84` — The critique-driven contract repair step renders the judge-repair template (2026-08-22, medium).
-- `open-bugs.md:86` — Remediation intake drops a finding with no `evidence` array, and the audit systemic-challenge lane emits findings without one (2026-08-22, medium).
-- `open-bugs.md:88` — The contract-pipeline phase cut unions the drafted `neighbor_needs` into the finalized contracts' dependency graph, so symmetric coordination prose overrides every declared token edge (2026-08-22, high).
-- `open-bugs.md:90` — The contract-pipeline adversarial judge can demand what the finalized-contract schema cannot express, and its convergence guard then blocks the run on the host (2026-08-22, high).
-- `open-bugs.md:92` — The DAG-derived write scope omits the companion files a fix needs, so the host hand-widens `touched_files` (2026-08-23, high, friction: tool_should_decide).
-- `open-bugs.md:104` — An empty dispatch frontier THROWS instead of pausing (2026-08-23, high, friction: tool_should_decide).
-- `open-bugs.md:113` — The Implementation DAG prompt does not state the one-invocation rule for `targeted_commands` (2026-08-23, medium, friction: tool_should_decide).
-- `open-bugs.md:120` — The per-item required tests and the host landing gate do not include the tree-wide guard suites or the cheap release gates, and every landing's evidence is Windows-local (2026-08-23, medium).
-- `open-bugs.md:130` — The systemic-challenge lane prompt withholds the banked findings it asks the adversary to beat (2026-08-21, medium).
-- `open-bugs.md:132` — Conceptual-review DEPTH is still modelled as durable when it must be per-run (2026-08-21, owner directive, medium).
-- `open-bugs.md:134` — Promotion and close residuals from the CP-NODE-3/15 reviews (low, one entry).
-- `open-bugs.md:154` — next-step discards a rejected submission's classified issues (2026-08-20, medium, friction: tool_should_decide).
-- `open-bugs.md:167` — Host-handoff residuals from the CP-NODE-6 landing (low, one entry).
-- `open-bugs.md:191` — Analyzer-boundary residuals from the CP-NODE-1 review (low).
-- `open-bugs.md:208` — Staleness third-state residuals from the CP-NODE-10 review (low).
-- `open-bugs.md:216` — Emission-scaffold and gate residuals from the CP-NODE-12/13 reviews (low).
-- `open-bugs.md:227` — Charter and route residuals from the CP-NODE-18/19 reviews (low).
-- `open-bugs.md:240` — Drift-guard residuals from the CP-NODE-25 review (low).
-- `open-bugs.md:250` — `fixture-generator-drift-guard` is not hermetic (low, friction).
-- `open-bugs.md:256` — A scoped wave item that coins an invariant id in `src/` is structurally unable to satisfy the id-glossary gate (2026-08-20, medium, friction: tool_should_decide).
-- `open-bugs.md:267` — The remediate-side submission ledger has no reader — `accepted_via_recovery` marks are write-only (2026-08-19, low-medium).
-- `open-bugs.md:275` — The pre-commit round-trip journal is not bound to the HEAD it was captured under, so crash recovery can time-travel the tree backward (2026-08-19, high).
-- `open-bugs.md:288` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:295` — `runCommand` buffers child output unboundedly (2026-08-13, medium).
-- `open-bugs.md:302` — `shell-trap-guard` misses `git stash push <pathspec>` eating uncommitted work (2026-08-12, medium).
-- `open-bugs.md:308` — Contract-pipeline fan-out names a mechanism the host may not have (2026-08-08, medium).
-- `open-bugs.md:316` — Sweep the test tree for tests that re-implement their subject (2026-08-08, medium).
-- `open-bugs.md:325` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
-- `open-bugs.md:344` — Remediation pause/recovery is not durable (2026-08-03, medium).
-- `open-bugs.md:352` — Graph heuristics are promoted to findings without a semantic lead boundary (2026-08-03, medium).
-- `open-bugs.md:359` — Tool-owned gate reds are unattributed — foreign live-tree dirt pauses the run (2026-07-30, shrunk 2026-08-20; was "Phase-boundary gate false abandonment", HIGH).
-- `open-bugs.md:373` — Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction).
-- `open-bugs.md:383` — ⬇ Live-run watch (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim.
-- `open-bugs.md:391` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
-- `open-bugs.md:412` — A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.
-- `open-bugs.md:432` — Friction walk (determinations-execution lap, 2026-07-29):
-- `open-bugs.md:446` — Friction walk (duplicated-guard lap, 2026-07-25):
-- `open-bugs.md:458` — Implementation workers are never given the contract they must satisfy (2026-08-09, high).
-- `open-bugs.md:468` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
-- `open-bugs.md:484` — Friction walk (niggle-fix lap, 2026-08-07):
-- `open-bugs.md:502` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
-- `open-bugs.md:514` — Friction walk (nightly-determinations lap, 2026-07-26):
-- `open-bugs.md:526` — Friction walk (touched_files load-gate lap, 2026-07-25):
-- `open-bugs.md:532` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:545` — Friction walk (second backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:554` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
-- `open-bugs.md:576` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:588` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:594` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:602` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
-- `open-bugs.md:611` — `StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.
-- `open-bugs.md:617` — systemic_challenge findings ids are adversary-invented and round-colliding.
-- `open-bugs.md:624` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
-- `open-bugs.md:631` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:636` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
-- `open-bugs.md:646` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
-- `open-bugs.md:653` — A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run, medium).
-- `open-bugs.md:662` — Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run, medium).
-- `open-bugs.md:672` — A provenance plane with no producer is still exported, advertised and documented (2026-08-27, from the philosophy audit, medium).
-- `open-bugs.md:674` — Three persisted contracts are read back without the schema that defines them (2026-08-27, from the philosophy audit, medium).
-- `open-bugs.md:676` — The pre-split design-review lane is still polled beside the two current judgment types (2026-08-27, from the philosophy audit, medium).
-- `open-bugs.md:678` — The N-R13 status invariant asserts its own literal, and the status vocabulary exists in three unlinked copies (2026-08-27, low-medium).
-- `open-bugs.md:694` — The dispatch boundary strips every per-node field the contract pipeline writes onto a promoted finding but `FindingSchema` does not declare (2026-08-27, medium).
-- `open-bugs.md:714` — The two evidence-bearing terminal dispositions have no producer — `verified_already_fixed` and `refuted` are unreachable in any real run (2026-08-27, medium, from [`reviews/wave2-dispositions-2026-08-20.md`](./reviews/wave2-dispositions-2026-08-20.md)).
-- `open-bugs.md:739` — The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](./reviews/closeout-generation-failure-2026-08-26.md)).
-- `open-bugs.md:741` — An analysis record can identify work and reach no work queue, and every gate stays green while it happens (2026-08-27, medium, from the orphan-routing lap).
-- `open-bugs.md:762` — The masked-exit guard reaches SUITE commands only, so a rejected `git push` reads as exit 0 (2026-08-27, medium, friction: tool_should_decide).
-- `open-bugs.md:777` — Synchronous child processes reachable from the audit fold carry NO timeout, so one hung binary can outlive the lock heartbeat (2026-08-28, medium, friction: tool_should_decide).
+- `open-bugs.md:9` — The analyzer-consent prompt tells the operator a grant is durable; the enforced contract makes a grant per-run (2026-08-29, medium, friction: ambiguous_direction).
+- `open-bugs.md:19` — `audit-code next-step --help` executes a real step instead of printing help (2026-08-29, low, friction: tool_should_decide).
+- `open-bugs.md:27` — `commitFold`'s applied-entry unlink swallows non-ENOENT, so Windows can re-consume an already-applied submission (2026-08-28, medium).
+- `open-bugs.md:38` — Commits created by `git cherry-pick` / `git merge` / `git rebase` bypass every pre-commit gate leg, the loop-core attestation, and the constitutional-doc gate (2026-08-28, medium).
+- `open-bugs.md:48` — The loop-core attest preflight judges the STAGED tree with WORKING-TREE checks, so an unstaged edit elsewhere reds an attestation whose commit would be green (2026-08-28, medium, friction: false_red).
+- `open-bugs.md:57` — The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction: false_red).
+- `open-bugs.md:71` — `shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then fired on a third near-identical one (2026-08-27, medium).
+- `open-bugs.md:83` — The rendered decision queue and its tracked snapshot can outlive the ledger that settles them, and nothing gates the disagreement (2026-08-27, medium, friction: tool_should_decide).
+- `open-bugs.md:102` — The critique-driven contract repair step renders the judge-repair template (2026-08-22, medium).
+- `open-bugs.md:104` — Remediation intake drops a finding with no `evidence` array, and the audit systemic-challenge lane emits findings without one (2026-08-22, medium).
+- `open-bugs.md:106` — The contract-pipeline phase cut unions the drafted `neighbor_needs` into the finalized contracts' dependency graph, so symmetric coordination prose overrides every declared token edge (2026-08-22, high).
+- `open-bugs.md:108` — The contract-pipeline adversarial judge can demand what the finalized-contract schema cannot express, and its convergence guard then blocks the run on the host (2026-08-22, high).
+- `open-bugs.md:110` — The DAG-derived write scope omits the companion files a fix needs, so the host hand-widens `touched_files` (2026-08-23, high, friction: tool_should_decide).
+- `open-bugs.md:122` — An empty dispatch frontier THROWS instead of pausing (2026-08-23, high, friction: tool_should_decide).
+- `open-bugs.md:131` — The Implementation DAG prompt does not state the one-invocation rule for `targeted_commands` (2026-08-23, medium, friction: tool_should_decide).
+- `open-bugs.md:138` — The per-item required tests and the host landing gate do not include the tree-wide guard suites or the cheap release gates, and every landing's evidence is Windows-local (2026-08-23, medium).
+- `open-bugs.md:148` — The systemic-challenge lane prompt withholds the banked findings it asks the adversary to beat (2026-08-21, medium).
+- `open-bugs.md:150` — Conceptual-review DEPTH is still modelled as durable when it must be per-run (2026-08-21, owner directive, medium).
+- `open-bugs.md:152` — Promotion and close residuals from the CP-NODE-3/15 reviews (low, one entry).
+- `open-bugs.md:172` — next-step discards a rejected submission's classified issues (2026-08-20, medium, friction: tool_should_decide).
+- `open-bugs.md:192` — Host-handoff residuals from the CP-NODE-6 landing (low, one entry).
+- `open-bugs.md:216` — Analyzer-boundary residuals from the CP-NODE-1 review (low).
+- `open-bugs.md:233` — Staleness third-state residuals from the CP-NODE-10 review (low).
+- `open-bugs.md:241` — Emission-scaffold and gate residuals from the CP-NODE-12/13 reviews (low).
+- `open-bugs.md:252` — Charter and route residuals from the CP-NODE-18/19 reviews (low).
+- `open-bugs.md:265` — Drift-guard residuals from the CP-NODE-25 review (low).
+- `open-bugs.md:275` — `fixture-generator-drift-guard` is not hermetic (low, friction).
+- `open-bugs.md:281` — A scoped wave item that coins an invariant id in `src/` is structurally unable to satisfy the id-glossary gate (2026-08-20, medium, friction: tool_should_decide).
+- `open-bugs.md:292` — The remediate-side submission ledger has no reader — `accepted_via_recovery` marks are write-only (2026-08-19, low-medium).
+- `open-bugs.md:300` — The pre-commit round-trip journal is not bound to the HEAD it was captured under, so crash recovery can time-travel the tree backward (2026-08-19, high).
+- `open-bugs.md:313` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:320` — `runCommand` buffers child output unboundedly (2026-08-13, medium).
+- `open-bugs.md:327` — `shell-trap-guard` misses `git stash push <pathspec>` eating uncommitted work (2026-08-12, medium).
+- `open-bugs.md:333` — Contract-pipeline fan-out names a mechanism the host may not have (2026-08-08, medium).
+- `open-bugs.md:341` — Sweep the test tree for tests that re-implement their subject (2026-08-08, medium).
+- `open-bugs.md:350` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
+- `open-bugs.md:369` — Remediation pause/recovery is not durable (2026-08-03, medium).
+- `open-bugs.md:377` — Graph heuristics are promoted to findings without a semantic lead boundary (2026-08-03, medium).
+- `open-bugs.md:384` — Tool-owned gate reds are unattributed — foreign live-tree dirt pauses the run (2026-07-30, shrunk 2026-08-20; was "Phase-boundary gate false abandonment", HIGH).
+- `open-bugs.md:398` — Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction).
+- `open-bugs.md:408` — ⬇ Live-run watch (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim.
+- `open-bugs.md:416` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
+- `open-bugs.md:437` — A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.
+- `open-bugs.md:457` — Friction walk (determinations-execution lap, 2026-07-29):
+- `open-bugs.md:471` — Friction walk (duplicated-guard lap, 2026-07-25):
+- `open-bugs.md:483` — Implementation workers are never given the contract they must satisfy (2026-08-09, high).
+- `open-bugs.md:493` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
+- `open-bugs.md:509` — Friction walk (niggle-fix lap, 2026-08-07):
+- `open-bugs.md:527` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
+- `open-bugs.md:539` — Friction walk (nightly-determinations lap, 2026-07-26):
+- `open-bugs.md:551` — Friction walk (touched_files load-gate lap, 2026-07-25):
+- `open-bugs.md:557` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:570` — Friction walk (second backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:579` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
+- `open-bugs.md:601` — External shared-logic audit V1–V7 residuals
+- `open-bugs.md:613` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:619` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:627` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:636` — `StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.
+- `open-bugs.md:642` — systemic_challenge findings ids are adversary-invented and round-colliding.
+- `open-bugs.md:649` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
+- `open-bugs.md:656` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:661` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
+- `open-bugs.md:671` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
+- `open-bugs.md:678` — A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run, medium).
+- `open-bugs.md:687` — Host-widened scope on a live-bound block wedges `next-step` (2026-08-23, remediation run, medium).
+- `open-bugs.md:697` — A provenance plane with no producer is still exported, advertised and documented (2026-08-27, from the philosophy audit, medium).
+- `open-bugs.md:699` — Three persisted contracts are read back without the schema that defines them (2026-08-27, from the philosophy audit, medium).
+- `open-bugs.md:701` — The pre-split design-review lane is still polled beside the two current judgment types (2026-08-27, from the philosophy audit, medium).
+- `open-bugs.md:703` — The N-R13 status invariant asserts its own literal, and the status vocabulary exists in three unlinked copies (2026-08-27, low-medium).
+- `open-bugs.md:719` — The dispatch boundary strips every per-node field the contract pipeline writes onto a promoted finding but `FindingSchema` does not declare (2026-08-27, medium).
+- `open-bugs.md:739` — The two evidence-bearing terminal dispositions have no producer — `verified_already_fixed` and `refuted` are unreachable in any real run (2026-08-27, medium, from [`reviews/wave2-dispositions-2026-08-20.md`](./reviews/wave2-dispositions-2026-08-20.md)).
+- `open-bugs.md:764` — The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](./reviews/closeout-generation-failure-2026-08-26.md)).
+- `open-bugs.md:766` — An analysis record can identify work and reach no work queue, and every gate stays green while it happens (2026-08-27, medium, from the orphan-routing lap).
+- `open-bugs.md:787` — The masked-exit guard reaches SUITE commands only, so a rejected `git push` reads as exit 0 (2026-08-27, medium, friction: tool_should_decide).
+- `open-bugs.md:802` — Synchronous child processes reachable from the audit fold carry NO timeout, so one hung binary can outlive the lock heartbeat (2026-08-28, medium, friction: tool_should_decide).
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
@@ -163,17 +165,17 @@
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:43` — ▶ CX-02 — one audit obligation registry, one drain. SHIPPED in v0.50.6 (2026-08-28); remaining: the live fresh-audit measurement before the cap is re-sized.
-- `forward-tracks.md:53` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:77` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:85` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:100` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:107` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:119` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:133` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
-- `forward-tracks.md:142` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
-- `forward-tracks.md:167` — Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep path, then measure.
-- `forward-tracks.md:188` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:43` — ▶ CX-02 — one audit obligation registry, one drain. SHIPPED in v0.50.6; the deferred live measurement is DONE (2026-08-29); remaining: the owner's waiter-timeout decision.
+- `forward-tracks.md:58` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
+- `forward-tracks.md:82` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:90` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:105` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:112` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:124` — Wave-friendly host dispatch: run identity survives partial ingest.
+- `forward-tracks.md:138` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:147` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
+- `forward-tracks.md:172` — Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep path, then measure.
+- `forward-tracks.md:193` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 

@@ -2982,6 +2982,11 @@ export async function runDeterministicForNextStep(
     params.artifactsDir,
     foldLogger,
     async () => {
+      // CX-02 hold measurement: time the IN-HOLD span (acquire→release, this
+      // callback), and record the engine's own charged-execution count. The
+      // `finally` below runs on the throw path too, still under the hold.
+      const holdStartMs = Date.now();
+      let chargedExecutions: number | undefined;
       await recoverStagedSubmissions(params.artifactsDir);
       const startBundle = await loadArtifactBundle(params.artifactsDir);
       ctx.currentBundleRef.value = startBundle;
@@ -2998,6 +3003,7 @@ export async function runDeterministicForNextStep(
             maxExecutions: MAX_DRAIN_STEPS,
           },
         );
+        chargedExecutions = engineOutcome.executions;
         await commitFold(params.artifactsDir, engineOutcome.state, ctx.tx);
         return engineOutcome;
       } catch (error) {
@@ -3022,6 +3028,15 @@ export async function runDeterministicForNextStep(
           ctx.tx,
         );
         throw error;
+      } finally {
+        foldLogger.event({
+          kind: "outcome",
+          note: "fold_hold",
+          duration_ms: Date.now() - holdStartMs,
+          ...(chargedExecutions === undefined
+            ? {}
+            : { executions: chargedExecutions }),
+        });
       }
     },
   );
