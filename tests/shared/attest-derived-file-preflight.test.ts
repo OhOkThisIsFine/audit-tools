@@ -107,10 +107,10 @@ describe("the leg set is the gate's, derived from the registry — single-source
     expect(scriptWired(REPO_ROOT, "check:guard-reach")).toBe(true);
   });
 
-  it("a loop-core-only staged set triggers no doc/backlog legs — only the src-reach primitive gate plus the unconditional guard-reach", () => {
+  it("a loop-core-only staged set triggers no doc/backlog legs — only the src-reach legs (test-tree typecheck, primitive gate) plus the unconditional guard-reach", () => {
     const root = makeFixture();
     const ids = triggeredIds(root, ["src/audit/orchestrator/advance.ts"]);
-    expect(ids).toEqual(["check:shared-primitives", "check:guard-reach"]);
+    expect(ids).toEqual(["check:tests", "check:shared-primitives", "check:guard-reach"]);
   });
 
   it("a staged backlog doc triggers the whole backlog family plus the md-corpus gates", () => {

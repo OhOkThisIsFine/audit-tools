@@ -6,16 +6,6 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **`check:tests` has no pre-commit leg, so a type-invalid NEW test file passes every commit gate
-  and reds only release CI (2026-08-29, medium, friction: tool_should_decide).** The guard registry
-  row declares `preCommit: false` for `check:tests`, and vitest does not typecheck — BIT
-  2026-08-29: a new test file landed with untyped destructured defaults (`{ inputs = [] }` infers
-  `never[]`), every commit gate passed, every local vitest run stayed green, and the `ci` workflow
-  was red across three commits until a follow-up annotated the parameters. **Owner-decided
-  2026-08-29: add the leg.** A staged new-or-modified test file triggers the test-tree typecheck
-  leg at commit, staged-set-derived like the other legs (flip the registry row; the derived-leg
-  and parity tests follow).
-
 - **`render-closeout.mjs --template` needs a built `dist/`, so the mandatory hand-back tool cannot
   run in a fresh worktree (2026-08-29, low, friction: inefficient_feeding).** `--template` prints a
   static blank JSON and needs no product code, but `scripts/render-closeout.mjs` imports

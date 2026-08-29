@@ -64,7 +64,16 @@ import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror
 export const GUARDS = [
   // ── gates (npm scripts reachable from verify:release) ──────────────────────
   { id: 'build', kind: 'gate', impl: 'build', preCommit: false, note: 'tsc over src/ + data-asset copy; the pre-commit gate hand-codes its `npm run check` leg' },
-  { id: 'check:tests', kind: 'gate', impl: 'check:tests', preCommit: false, note: 'tsc over the test tree (tsconfig.test.json)' },
+  {
+    id: 'check:tests',
+    kind: 'gate',
+    impl: 'check:tests',
+    preCommit: 'reach',
+    fix:
+      'the test tree failed its typecheck (tsconfig.test.json) — fix the staged type error; ' +
+      'untyped destructured test params infer never[] and red only this leg and release CI',
+    note: 'tsc over the test tree (tsconfig.test.json); ~7s, so the src-reach widening is deliberate',
+  },
   {
     id: 'check:control-bytes',
     kind: 'gate',

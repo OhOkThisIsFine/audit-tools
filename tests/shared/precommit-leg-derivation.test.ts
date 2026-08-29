@@ -151,8 +151,18 @@ describe('every retired hand-coded trigger is reproduced', () => {
     }
   });
 
-  it('a src-only staged set stays fast: the sub-second src-reach primitive gate plus the unconditional guard-reach leg', () => {
+  it('a staged test file triggers the test-tree typecheck leg (the 2026-08-29 BIT class)', () => {
+    expect(triggeredIds(['tests/audit/some-new.test.ts'])).toContain('check:tests');
+  });
+
+  it('the test-tree typecheck leg fires on its config and on src (the tests row, the toolchain row, and the src row all cite it)', () => {
+    expect(triggeredIds(['tsconfig.test.json'])).toContain('check:tests');
+    expect(triggeredIds(['src/shared/types/lens.ts'])).toContain('check:tests');
+  });
+
+  it('a src-only staged set triggers exactly the src-reach legs: test-tree typecheck, the primitive gate, and the unconditional guard-reach leg', () => {
     expect(triggeredIds(['src/audit/orchestrator/advance.ts'])).toEqual([
+      'check:tests',
       'check:shared-primitives',
       'check:guard-reach',
     ]);
