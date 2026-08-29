@@ -112,7 +112,7 @@ async function runSingleAnalyzer(
   disposition: ArtifactBundle["file_disposition"],
   cacheRoot?: string,
 ): Promise<SingleAnalyzerResult> {
-  const run = resolveForRun(analyzer, root, setting, cacheRoot);
+  const run = await resolveForRun(analyzer, root, setting, cacheRoot);
   if (run.resolution === "absent") {
     return { ok: false, note: run.note ?? "Dependency absent.", resolution: "absent" };
   }
@@ -174,12 +174,12 @@ function buildEnrichedGraph(
  * Resolve a dependency for actual execution (may install for ephemeral/permanent).
  * `auto`/`repo` with an absent dependency falls back to the regex floor.
  */
-function resolveForRun(
+async function resolveForRun(
   analyzer: LanguageAnalyzer,
   root: string,
   setting: AnalyzerSetting,
   cacheRoot?: string,
-): RunResolution {
+): Promise<RunResolution> {
   if (!analyzer.dependency) {
     return { resolution: "repo" };
   }
@@ -189,7 +189,7 @@ function resolveForRun(
     return { resolution: resolved.via, path: resolved.path };
   }
   if (setting === "ephemeral" || setting === "permanent") {
-    const install = installToCache(analyzer.dependency, options);
+    const install = await installToCache(analyzer.dependency, options);
     if (install.ok && install.path) {
       return { resolution: "installed", path: install.path };
     }

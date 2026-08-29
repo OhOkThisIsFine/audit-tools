@@ -1,7 +1,11 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { runTracked, type RunTrackedResult } from "./exec.js";
+import {
+  runTrackedAsync,
+  TRACKED_CHILD_DEADLINE_MS,
+  type RunTrackedResult,
+} from "./exec.js";
 
 // Optional analyzer-dependency resolution (Phase 5). Heavy graph analyzers
 // (the `typescript` compiler API, tree-sitter grammars) are optional: resolve
@@ -139,8 +143,15 @@ export function resolveAnalyzerDep(
 
 export interface InstallToCacheOptions {
   cacheRoot?: string;
-  /** Injectable command runner; defaults to the shared runTracked. */
-  run?: (argv: string[], cwd: string) => RunTrackedResult;
+  /**
+   * Injectable command runner; defaults to the shared `runTrackedAsync` with
+   * the fold child deadline. ASYNC by contract: the install is fold-reachable
+   * (graph enrichment runs inside the artifact-tree lock's hold), and a
+   * synchronous `npm install` blocks the event loop — starving the held
+   * lock's mtime heartbeat until another process classifies the LIVE lock
+   * stale and steals it (INV-SSF).
+   */
+  run?: (argv: string[], cwd: string) => Promise<RunTrackedResult>;
   /**
    * Injectable logger for observability output. Defaults to `console.error`
    * so existing behaviour is preserved when callers do not supply one.
@@ -161,17 +172,20 @@ export interface InstallToCacheResult {
  * installed package directory. Requires an explicit version so the cache stays
  * reproducible. Never writes into any audited project.
  */
-export function installToCache(
+export async function installToCache(
   pkgAtVersion: string,
   options: InstallToCacheOptions = {},
-): InstallToCacheResult {
+): Promise<InstallToCacheResult> {
   const { name, version } = parseAnalyzerSpec(pkgAtVersion);
   if (!version) {
     return { ok: false, error: "installToCache requires an explicit version (name@version)" };
   }
   const cacheRoot = options.cacheRoot ?? analyzerCacheRoot();
   const installDir = join(cacheRoot, cacheKey(name, version));
-  const run = options.run ?? ((argv, cwd) => runTracked(argv, { cwd }));
+  const run =
+    options.run ??
+    ((argv: string[], cwd: string) =>
+      runTrackedAsync(argv, { cwd, timeout: TRACKED_CHILD_DEADLINE_MS }));
   const log = options.log ?? ((...args: unknown[]) => { console.error(...args); });
 
   try {
@@ -185,7 +199,7 @@ export function installToCache(
       );
     }
     log("[analyzerDeps] installing %s into cache: %s", pkgAtVersion, installDir);
-    const result = run(
+    const result = await run(
       ["npm", "install", pkgAtVersion, "--no-audit", "--no-fund", "--save-exact"],
       installDir,
     );

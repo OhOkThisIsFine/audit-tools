@@ -35,10 +35,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 
 test("isGitRepo: true inside the repo, false in a fresh temp dir", async () => {
-  expect(isGitRepo(repoRoot)).toBe(true);
+  expect(await isGitRepo(repoRoot)).toBe(true);
   const dir = await mkdtemp(join(tmpdir(), "audit-tools-git-"));
   try {
-    expect(isGitRepo(dir)).toBe(false);
+    expect(await isGitRepo(dir)).toBe(false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -47,9 +47,9 @@ test("isGitRepo: true inside the repo, false in a fresh temp dir", async () => {
 test("git helpers degrade to empty results outside a repo", async () => {
   const dir = await mkdtemp(join(tmpdir(), "audit-tools-git-"));
   try {
-    expect(changedFiles(dir, "HEAD")).toEqual([]);
-    expect(stagedAndUntracked(dir)).toEqual([]);
-    const commits = fileCommits(dir, "anything.ts");
+    expect(await changedFiles(dir, "HEAD")).toEqual([]);
+    expect(await stagedAndUntracked(dir)).toEqual([]);
+    const commits = await fileCommits(dir, "anything.ts");
     expect(commits instanceof Set).toBeTruthy();
     expect(commits.size).toBe(0);
   } finally {
@@ -59,13 +59,13 @@ test("git helpers degrade to empty results outside a repo", async () => {
 
 test("gitRefExists distinguishes a valid ref, an unknown ref, and a non-repo dir", async () => {
   await withTempRepo(async (repoRoot) => {
-    expect(gitRefExists(repoRoot, "HEAD")).toBe(true);
-    expect(gitRefExists(repoRoot, "no-such-ref-xyz")).toBe(false);
+    expect(await gitRefExists(repoRoot, "HEAD")).toBe(true);
+    expect(await gitRefExists(repoRoot, "no-such-ref-xyz")).toBe(false);
   });
   // Out of a repo it must degrade to false without throwing.
   const dir = await mkdtemp(join(tmpdir(), "audit-tools-git-"));
   try {
-    expect(gitRefExists(dir, "HEAD")).toBe(false);
+    expect(await gitRefExists(dir, "HEAD")).toBe(false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -74,7 +74,7 @@ test("gitRefExists distinguishes a valid ref, an unknown ref, and a non-repo dir
 test("changedFiles/fileCommits/stagedAndUntracked report real changes inside a temp repo", async () => {
   await withTempRepo(async (repoRoot, git) => {
     // fileCommits on the committed file returns at least one 40-hex SHA.
-    const commits = fileCommits(repoRoot, "tracked.ts");
+    const commits = await fileCommits(repoRoot, "tracked.ts");
     expect(commits instanceof Set).toBeTruthy();
     expect(commits.size >= 1).toBeTruthy();
     for (const sha of commits) {
@@ -86,10 +86,10 @@ test("changedFiles/fileCommits/stagedAndUntracked report real changes inside a t
     const firstRef = git("rev-parse", "HEAD").trim();
     await writeFile(join(repoRoot, "tracked.ts"), "export const a = 2;\n", "utf8");
     git("commit", "-q", "-am", "second");
-    expect(changedFiles(repoRoot, firstRef).includes("tracked.ts")).toBeTruthy();
+    expect((await changedFiles(repoRoot, firstRef)).includes("tracked.ts")).toBeTruthy();
 
     // A newly written, never-added file is reported by stagedAndUntracked.
     await writeFile(join(repoRoot, "fresh.ts"), "export const b = 3;\n", "utf8");
-    expect(stagedAndUntracked(repoRoot).includes("fresh.ts")).toBeTruthy();
+    expect((await stagedAndUntracked(repoRoot)).includes("fresh.ts")).toBeTruthy();
   });
 });

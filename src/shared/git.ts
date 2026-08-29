@@ -1,16 +1,35 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { runTracked } from "./tooling/exec.js";
+import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "./tooling/exec.js";
 import { compareCodeUnits } from "./compareCodeUnits.js";
 
 // Git helpers shared by both orchestrators. The remediator previously issued
 // `git` calls inline in close.ts and plan.ts; the auditor's Phase 3 delta mode
-// needs the same primitives. All run through the shared `runTracked` so the
-// one Windows-wrapping implementation applies, and all degrade to empty/false
-// when git is unavailable or the command fails (never throw).
+// needs the same primitives. All run through the shared `runTrackedAsync` so
+// the one Windows-wrapping implementation applies, and all degrade to
+// empty/false when git is unavailable or the command fails (never throw).
+// ASYNC twin, never `runTracked`: these helpers are fold-reachable (intake,
+// scope, structure executors run inside the artifact-tree lock's hold), and a
+// synchronous child blocks the event loop, which starves the held lock's
+// mtime heartbeat until another process classifies the LIVE lock stale and
+// steals it (INV-SSF, tests/shared/sync-spawn-fold-safety.test.ts).
 
-function gitLines(root: string, args: string[]): string[] {
-  const result = runTracked(["git", ...args], { cwd: root, encoding: "utf8" });
+/**
+ * Output bound for one git child. Declared (not the 10MiB capture backstop) so
+ * a large-but-legitimate output — a monorepo's `git log --name-only` walk —
+ * returns COMPLETE, while a larger one dies as a classified `ENOBUFS` and the
+ * caller takes its documented degrade-to-empty path instead of silently
+ * consuming a truncated stream.
+ */
+const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+
+async function gitLines(root: string, args: string[]): Promise<string[]> {
+  const result = await runTrackedAsync(["git", ...args], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: TRACKED_CHILD_DEADLINE_MS,
+    maxBuffer: GIT_MAX_BUFFER,
+  });
   if (result.status !== 0) return [];
   return result.stdout
     .split(/\r?\n/)
@@ -19,12 +38,12 @@ function gitLines(root: string, args: string[]): string[] {
 }
 
 /** True when `root` is inside a git working tree. */
-export function isGitRepo(root: string): boolean {
+export async function isGitRepo(root: string): Promise<boolean> {
   if (existsSync(join(root, ".git"))) return true;
-  const result = runTracked(["git", "rev-parse", "--is-inside-work-tree"], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  const result = await runTrackedAsync(
+    ["git", "rev-parse", "--is-inside-work-tree"],
+    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
+  );
   return result.status === 0 && result.stdout.trim() === "true";
 }
 
@@ -33,10 +52,10 @@ export function isGitRepo(root: string): boolean {
  * mistyped/unknown `--since` ref (fall back to a full audit) from a valid ref
  * with no changes (`changedFiles` returns `[]` in both cases otherwise).
  */
-export function gitRefExists(root: string, ref: string): boolean {
-  const result = runTracked(
+export async function gitRefExists(root: string, ref: string): Promise<boolean> {
+  const result = await runTrackedAsync(
     ["git", "rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
-    { cwd: root, encoding: "utf8" },
+    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
   );
   return result.status === 0 && result.stdout.trim().length > 0;
 }
@@ -48,10 +67,11 @@ export function gitRefExists(root: string, ref: string): boolean {
  * HEAD, so an unchanged HEAD means an unchanged mine, letting the structure
  * executor skip the expensive `git log` walk. Never throws.
  */
-export function headCommit(root: string): string | null {
-  const result = runTracked(["git", "rev-parse", "HEAD"], {
+export async function headCommit(root: string): Promise<string | null> {
+  const result = await runTrackedAsync(["git", "rev-parse", "HEAD"], {
     cwd: root,
     encoding: "utf8",
+    timeout: TRACKED_CHILD_DEADLINE_MS,
   });
   if (result.status !== 0) return null;
   const sha = result.stdout.trim();
@@ -62,13 +82,19 @@ export function headCommit(root: string): string | null {
  * Files differing between `since` (a ref/SHA) and the current working tree —
  * committed, staged, and unstaged. Backs the auditor's `--since` delta mode.
  */
-export function changedFiles(root: string, since: string): string[] {
+export async function changedFiles(
+  root: string,
+  since: string,
+): Promise<string[]> {
   return gitLines(root, ["diff", "--name-only", since]);
 }
 
 /** The set of commit SHAs that have touched `path`, newest first. */
-export function fileCommits(root: string, path: string): Set<string> {
-  return new Set(gitLines(root, ["log", "--format=%H", "--", path]));
+export async function fileCommits(
+  root: string,
+  path: string,
+): Promise<Set<string>> {
+  return new Set(await gitLines(root, ["log", "--format=%H", "--", path]));
 }
 
 /**
@@ -194,12 +220,12 @@ const DEFAULT_MAX_COCHANGE_FILES_PER_COMMIT = 100;
  * Degrades to empty (`{co_change:[],churn:[],authorship:[]}`) when `root` is not
  * a git repo or the log command fails — never throws.
  */
-export function mineGitHistory(
+export async function mineGitHistory(
   root: string,
   options: MineGitHistoryOptions = {},
-): GitHistory {
+): Promise<GitHistory> {
   const empty: GitHistory = { co_change: [], churn: [], authorship: [] };
-  if (!isGitRepo(root)) return empty;
+  if (!(await isGitRepo(root))) return empty;
 
   const maxCommits = options.maxCommits ?? DEFAULT_MAX_COMMITS;
   const minCoChange =
@@ -207,7 +233,7 @@ export function mineGitHistory(
   const maxCoChangeFiles =
     options.maxCoChangeFilesPerCommit ?? DEFAULT_MAX_COCHANGE_FILES_PER_COMMIT;
 
-  const result = runTracked(
+  const result = await runTrackedAsync(
     [
       "git",
       "log",
@@ -222,7 +248,12 @@ export function mineGitHistory(
       "--name-only",
       "--format=%H%x00%aN",
     ],
-    { cwd: root, encoding: "utf8" },
+    {
+      cwd: root,
+      encoding: "utf8",
+      timeout: TRACKED_CHILD_DEADLINE_MS,
+      maxBuffer: GIT_MAX_BUFFER,
+    },
   );
   if (result.status !== 0) return empty;
 
@@ -296,12 +327,12 @@ export function mineGitHistory(
 }
 
 /** Working-tree changes vs HEAD plus untracked (non-ignored) files. */
-export function stagedAndUntracked(root: string): string[] {
+export async function stagedAndUntracked(root: string): Promise<string[]> {
   const files = new Set<string>();
-  for (const file of gitLines(root, ["diff", "--name-only", "HEAD"])) {
+  for (const file of await gitLines(root, ["diff", "--name-only", "HEAD"])) {
     files.add(file);
   }
-  for (const file of gitLines(root, [
+  for (const file of await gitLines(root, [
     "ls-files",
     "--others",
     "--exclude-standard",

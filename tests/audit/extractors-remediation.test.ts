@@ -492,7 +492,7 @@ test("buildRepoManifest infers languages from normalized extensions and leaves e
   });
 });
 
-test("buildFileDisposition stays stable for Windows-style absolute paths and overlapping matches", () => {
+test("buildFileDisposition stays stable for Windows-style absolute paths and overlapping matches", async () => {
   const repoManifest = makeRepoManifest([
     "C:\\repo\\Docs\\Runbook.MD",
     "C:\\repo\\DIST\\bundle.js",
@@ -501,7 +501,7 @@ test("buildFileDisposition stays stable for Windows-style absolute paths and ove
     "C:\\repo\\docs\\package-lock.json",
     "C:\\repo\\archive.TAR.GZ",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   expect(getDispositionItem(disposition, "C:\\repo\\Docs\\Runbook.MD")?.status).toBe("doc_only");
   expect(getDispositionItem(disposition, "C:\\repo\\DIST\\bundle.js")?.status).toBe("generated");
@@ -517,7 +517,7 @@ test("buildFileDisposition stays stable for Windows-style absolute paths and ove
   expect(getDispositionItem(disposition, "C:\\repo\\archive.TAR.GZ")?.status).toBe("binary");
 });
 
-test("buildFileDisposition excludes generated install and test artifacts before they reach planning", () => {
+test("buildFileDisposition excludes generated install and test artifacts before they reach planning", async () => {
   const repoManifest = makeRepoManifest([
     ".audit-tools/audit/dispatch/current-task.json",
     ".audit-tools/audit/dispatch/audit-result.schema.json",
@@ -528,7 +528,7 @@ test("buildFileDisposition excludes generated install and test artifacts before 
     ".audit-code/install/GETTING-STARTED.md",
     "tests/.test-plan-artifacts/remediation_plan.json",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   expect(getDispositionItem(disposition, ".audit-tools/audit/dispatch/current-task.json")?.status).toBe("generated");
   expect(getDispositionItem(
@@ -552,13 +552,13 @@ test("buildFileDisposition excludes generated install and test artifacts before 
     )?.status).toBe("generated");
 });
 
-test("buildFileDisposition excludes bundled .tmp artifacts (e.g. .tmp/cache)", () => {
+test("buildFileDisposition excludes bundled .tmp artifacts (e.g. .tmp/cache)", async () => {
   const repoManifest = makeRepoManifest([
     ".tmp/cache/index.js",
     ".tmp/cache/package.json",
     "src/index.ts",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   expect(getDispositionItem(disposition, ".tmp/cache/index.js")?.status).toBe("excluded");
   expect(getDispositionItem(disposition, ".tmp/cache/package.json")?.status).toBe("excluded");
@@ -566,7 +566,7 @@ test("buildFileDisposition excludes bundled .tmp artifacts (e.g. .tmp/cache)", (
   expect(getDispositionItem(disposition, "src/index.ts")?.status).toBe("included");
 });
 
-test("buildFileDisposition excludes archives, package caches, nested .audit-artifacts, and pipeline output contracts", () => {
+test("buildFileDisposition excludes archives, package caches, nested .audit-artifacts, and pipeline output contracts", async () => {
   const repoManifest = makeRepoManifest([
     "packages/remediate-code/remediator-lambda-0.3.5.tgz",
     "release/payload.tar",
@@ -577,7 +577,7 @@ test("buildFileDisposition excludes archives, package caches, nested .audit-arti
     "audit/audit-report.md",
     "src/index.ts",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   expect(getDispositionItem(disposition, "packages/remediate-code/remediator-lambda-0.3.5.tgz")?.status).toBe("binary");
   expect(getDispositionItem(disposition, "release/payload.tar")?.status).toBe("binary");
@@ -603,7 +603,7 @@ test("buildFileDisposition excludes archives, package caches, nested .audit-arti
   }
 });
 
-test("buildFileDisposition excludes extension binary and source map artifacts", () => {
+test("buildFileDisposition excludes extension binary and source map artifacts", async () => {
   const repoManifest = makeRepoManifest([
     "service/main.js",
     "download_worker/codec.wasm",
@@ -612,7 +612,7 @@ test("buildFileDisposition excludes extension binary and source map artifacts", 
     "bitmaps/logo-128.png",
     "content/sidebar.html",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   expect(getDispositionItem(disposition, "service/main.js")?.status).toBe("included");
   expect(getDispositionItem(disposition, "content/sidebar.html")?.status).toBe("included");
@@ -622,13 +622,13 @@ test("buildFileDisposition excludes extension binary and source map artifacts", 
   expect(getDispositionItem(disposition, "bitmaps/logo-128.png")?.status).toBe("binary");
 });
 
-test("buildSurfaceManifest excludes generated files and preserves the documented heuristic note", () => {
+test("buildSurfaceManifest excludes generated files and preserves the documented heuristic note", async () => {
   const repoManifest = makeRepoManifest([
     "src\\API\\route.ts",
     "workers\\EmailJob.ts",
     "dist\\generated-cli.js",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const manifest = buildSurfaceManifest(repoManifest, disposition);
 
   expect(manifest.surfaces).toEqual([
@@ -655,7 +655,7 @@ test("buildSurfaceManifest excludes generated files and preserves the documented
       .includes("dist\\generated-cli.js")).toBe(true);
 });
 
-test("buildCriticalFlowManifest links normalized related paths and dedupes duplicate surface entries", () => {
+test("buildCriticalFlowManifest links normalized related paths and dedupes duplicate surface entries", async () => {
   const repoManifest = makeRepoManifest([
     "src\\API\\auth.ts",
     "src\\lib\\session.ts",
@@ -668,7 +668,7 @@ test("buildCriticalFlowManifest links normalized related paths and dedupes dupli
     "src\\workers\\retryTask.ts",
     "infra\\deploy.yml",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const surfaceManifest: SurfaceManifest = {
     surfaces: [
       {
@@ -767,9 +767,9 @@ function makeChromeExtensionFixture() {
   return { repoManifest, fileContents };
 }
 
-test("buildGraphBundle understands Chrome extension manifests and HTML resources", () => {
+test("buildGraphBundle understands Chrome extension manifests and HTML resources", async () => {
   const { repoManifest, fileContents } = makeChromeExtensionFixture();
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition, { fileContents });
 
   const references = graph.graphs.references!.map((edge) => [
@@ -804,9 +804,9 @@ test("buildGraphBundle understands Chrome extension manifests and HTML resources
   expect(references.some(([, to]) => to === "bitmaps/logo-128.png")).toBe(false);
 });
 
-test("buildSurfaceManifest understands Chrome extension manifests and HTML resources", () => {
+test("buildSurfaceManifest understands Chrome extension manifests and HTML resources", async () => {
   const { repoManifest, fileContents } = makeChromeExtensionFixture();
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition, { fileContents });
 
   const surfaces = buildSurfaceManifest(repoManifest, disposition, {
@@ -824,9 +824,9 @@ test("buildSurfaceManifest understands Chrome extension manifests and HTML resou
     ]);
 });
 
-test("buildUnitManifest understands Chrome extension manifests", () => {
+test("buildUnitManifest understands Chrome extension manifests", async () => {
   const { repoManifest } = makeChromeExtensionFixture();
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const unitManifest = buildUnitManifest(repoManifest, disposition);
   const serviceUnit = unitManifest.units.find((unit) =>
@@ -836,7 +836,7 @@ test("buildUnitManifest understands Chrome extension manifests", () => {
   expect(serviceUnit?.required_lenses.includes("security")).toBeTruthy();
 });
 
-test("buildGraphBundle resolves code imports and literal path references", () => {
+test("buildGraphBundle resolves code imports and literal path references", async () => {
   const repoManifest = makeRepoManifest([
     "src/api/auth.ts",
     "src/lib/session.ts",
@@ -844,7 +844,7 @@ test("buildGraphBundle resolves code imports and literal path references", () =>
     "src/config/load.ts",
     "node_modules/vendor/index.js",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -900,7 +900,7 @@ test("buildGraphBundle resolves code imports and literal path references", () =>
     )).toBe(false);
 });
 
-test("buildGraphBundle maps TypeScript runtime js specifiers to source files", () => {
+test("buildGraphBundle maps TypeScript runtime js specifiers to source files", async () => {
   const repoManifest = makeRepoManifest([
     "src/index.ts",
     "src/state/store.ts",
@@ -908,7 +908,7 @@ test("buildGraphBundle maps TypeScript runtime js specifiers to source files", (
     "src/mcp/server.mts",
     "src/legacy/loader.cts",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -941,7 +941,7 @@ test("buildGraphBundle maps TypeScript runtime js specifiers to source files", (
   expect(graph.graphs.references!.some((edge) => edge.from === "src/index.ts")).toBe(false);
 });
 
-test("buildGraphBundle resolves Python imports to local modules and packages", () => {
+test("buildGraphBundle resolves Python imports to local modules and packages", async () => {
   const repoManifest = makeRepoManifest([
     "src/app/__init__.py",
     "src/app/api.py",
@@ -955,7 +955,7 @@ test("buildGraphBundle resolves Python imports to local modules and packages", (
     "services/billing/app/reports/daily.py",
     "services/billing/app/store.py",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1001,7 +1001,7 @@ test("buildGraphBundle resolves Python imports to local modules and packages", (
     )).toBeTruthy();
 });
 
-test("buildGraphBundle links deterministic test files to their source files", () => {
+test("buildGraphBundle links deterministic test files to their source files", async () => {
   const repoManifest = makeRepoManifest([
     "src/api/auth.ts",
     "src/api/auth.test.ts",
@@ -1011,7 +1011,7 @@ test("buildGraphBundle links deterministic test files to their source files", ()
     "tests/workers/queueJob.test.ts",
     "tests/helpers/testHarness.ts",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition);
   const testSourceEdges = graph.graphs.references!.filter(
@@ -1032,7 +1032,7 @@ test("buildGraphBundle links deterministic test files to their source files", ()
   expect(testSourceEdges.some((edge) => edge.from === "tests/helpers/testHarness.ts")).toBe(false);
 });
 
-test("buildGraphBundle links pytest-style test files to Python source files", () => {
+test("buildGraphBundle links pytest-style test files to Python source files", async () => {
   const repoManifest = makeRepoManifest([
     "src/app/api.py",
     "src/app/models.py",
@@ -1042,7 +1042,7 @@ test("buildGraphBundle links pytest-style test files to Python source files", ()
     "tests/app/test_api.py",
     "tests/helpers/test_harness.py",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition);
   const testSourceEdges = graph.graphs.references!.filter(
@@ -1059,13 +1059,13 @@ test("buildGraphBundle links pytest-style test files to Python source files", ()
     )).toBe(false);
 });
 
-test("buildGraphBundle imports analyzer ownership roots as graph references", () => {
+test("buildGraphBundle imports analyzer ownership roots as graph references", async () => {
   const repoManifest = makeRepoManifest([
     "services/billing/api/invoices.py",
     "services/billing/store/invoices.py",
     "services/legacy/old.py",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     externalAnalyzerResults: [{
@@ -1103,7 +1103,7 @@ test("buildGraphBundle imports analyzer ownership roots as graph references", ()
     )).toBeTruthy();
 });
 
-test("buildGraphBundle extracts package entrypoints and route handler relationships", () => {
+test("buildGraphBundle extracts package entrypoints and route handler relationships", async () => {
   const repoManifest = makeRepoManifest([
     "package.json",
     "scripts/release-and-publish.mjs",
@@ -1114,7 +1114,7 @@ test("buildGraphBundle extracts package entrypoints and route handler relationsh
     "src/handlers/auth.ts",
     "src/app/api/health/route.ts",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1213,7 +1213,7 @@ test("buildGraphBundle extracts package entrypoints and route handler relationsh
     ]);
 });
 
-test("buildGraphBundle extracts JSON Schema refs and bounded suite links", () => {
+test("buildGraphBundle extracts JSON Schema refs and bounded suite links", async () => {
   const repoManifest = makeRepoManifest([
     "schemas/finding.schema.json",
     "schemas/remediation_block.schema.json",
@@ -1221,7 +1221,7 @@ test("buildGraphBundle extracts JSON Schema refs and bounded suite links", () =>
     ".github/workflows/ci.yml",
     ".github/workflows/publish-package.yml",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1295,13 +1295,13 @@ test("buildGraphBundle extracts JSON Schema refs and bounded suite links", () =>
     ]);
 });
 
-test("buildGraphBundle links schema contract tests to exact schema files", () => {
+test("buildGraphBundle links schema contract tests to exact schema files", async () => {
   const repoManifest = makeRepoManifest([
     "schemas/finding.schema.json",
     "schemas/remediation_plan.schema.json",
     "tests/schema-contracts.test.ts",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1330,14 +1330,14 @@ test("buildGraphBundle links schema contract tests to exact schema files", () =>
     )).toBeTruthy();
 });
 
-test("buildGraphBundle links bounded TypeScript type contract suites", () => {
+test("buildGraphBundle links bounded TypeScript type contract suites", async () => {
   const repoManifest = makeRepoManifest([
     "src/types/auditState.ts",
     "src/types/runLedger.ts",
     "src/types/sessionConfig.ts",
     "src/runtime/runLedger.ts",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1363,7 +1363,7 @@ test("buildGraphBundle links bounded TypeScript type contract suites", () => {
     )).toBeTruthy();
 });
 
-test("buildGraphBundle extracts workspace package manifest links", () => {
+test("buildGraphBundle extracts workspace package manifest links", async () => {
   const repoManifest = makeRepoManifest([
     "package.json",
     "packages/auth/package.json",
@@ -1372,7 +1372,7 @@ test("buildGraphBundle extracts workspace package manifest links", () => {
     "packages/billing/src/index.ts",
     "tools/migration/package.json",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1396,7 +1396,7 @@ test("buildGraphBundle extracts workspace package manifest links", () => {
     )).toBeTruthy();
 });
 
-test("buildGraphBundle extracts pnpm workspace package manifest links", () => {
+test("buildGraphBundle extracts pnpm workspace package manifest links", async () => {
   const repoManifest = makeRepoManifest([
     "pnpm-workspace.yaml",
     "packages/auth/package.json",
@@ -1406,7 +1406,7 @@ test("buildGraphBundle extracts pnpm workspace package manifest links", () => {
     "tools/migration/package.json",
     "tools/migration/src/index.ts",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1436,7 +1436,7 @@ test("buildGraphBundle extracts pnpm workspace package manifest links", () => {
     )).toBeTruthy();
 });
 
-test("buildGraphBundle extracts TypeScript project reference links", () => {
+test("buildGraphBundle extracts TypeScript project reference links", async () => {
   const repoManifest = makeRepoManifest([
     "tsconfig.json",
     "packages/auth/tsconfig.json",
@@ -1445,7 +1445,7 @@ test("buildGraphBundle extracts TypeScript project reference links", () => {
     "packages/billing/src/index.ts",
     "packages/legacy/tsconfig.json",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1477,7 +1477,7 @@ test("buildGraphBundle extracts TypeScript project reference links", () => {
     )).toBeTruthy();
 });
 
-test("buildGraphBundle extracts Go workspace module links", () => {
+test("buildGraphBundle extracts Go workspace module links", async () => {
   const repoManifest = makeRepoManifest([
     "go.work",
     "services/auth/go.mod",
@@ -1488,7 +1488,7 @@ test("buildGraphBundle extracts Go workspace module links", () => {
     "tools/migration/main.go",
     "legacy/go.mod",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1520,7 +1520,7 @@ test("buildGraphBundle extracts Go workspace module links", () => {
     )).toBeTruthy();
 });
 
-test("buildGraphBundle extracts Cargo workspace member links", () => {
+test("buildGraphBundle extracts Cargo workspace member links", async () => {
   const repoManifest = makeRepoManifest([
     "Cargo.toml",
     "crates/auth/Cargo.toml",
@@ -1530,7 +1530,7 @@ test("buildGraphBundle extracts Cargo workspace member links", () => {
     "tools/xtask/Cargo.toml",
     "tools/xtask/src/main.rs",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1563,7 +1563,7 @@ test("buildGraphBundle extracts Cargo workspace member links", () => {
     )).toBeTruthy();
 });
 
-test("buildGraphBundle extracts Maven reactor module links", () => {
+test("buildGraphBundle extracts Maven reactor module links", async () => {
   const repoManifest = makeRepoManifest([
     "pom.xml",
     "services/auth/pom.xml",
@@ -1574,7 +1574,7 @@ test("buildGraphBundle extracts Maven reactor module links", () => {
     "tools/migration/src/main/java/MigrationTool.java",
     "legacy/pom.xml",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
@@ -1607,7 +1607,7 @@ test("buildGraphBundle extracts Maven reactor module links", () => {
     )).toBeTruthy();
 });
 
-test("buildGraphBundle links pytest conftest to Python files in its scope directory", () => {
+test("buildGraphBundle links pytest conftest to Python files in its scope directory", async () => {
   const repoManifest = makeRepoManifest([
     "src/module.py",
     "tests/conftest.py",
@@ -1617,7 +1617,7 @@ test("buildGraphBundle links pytest conftest to Python files in its scope direct
     "tests/integration/conftest.py",
     "tests/integration/test_pipeline.py",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition, {});
 
   const conftestEdges = graph.graphs.references!.filter(
@@ -1639,14 +1639,14 @@ test("buildGraphBundle links pytest conftest to Python files in its scope direct
     )).toBeTruthy();
 });
 
-test("buildGraphBundle links pyproject.toml testpaths to conftest in test directory", () => {
+test("buildGraphBundle links pyproject.toml testpaths to conftest in test directory", async () => {
   const repoManifest = makeRepoManifest([
     "pyproject.toml",
     "src/module.py",
     "tests/conftest.py",
     "tests/test_module.py",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
       "pyproject.toml": [
@@ -1669,14 +1669,14 @@ test("buildGraphBundle links pyproject.toml testpaths to conftest in test direct
     )).toBeTruthy();
 });
 
-test("buildGraphBundle emits yaml-path-reference-link edges for YAML files referencing config files by path", () => {
+test("buildGraphBundle emits yaml-path-reference-link edges for YAML files referencing config files by path", async () => {
   const repoManifest = makeRepoManifest([
     "configs/benchmark.yaml",
     "configs/templates/cifar10_base.yaml",
     "configs/templates/sst2_base.yaml",
     "src/train.py",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
       "configs/benchmark.yaml": [
@@ -1706,7 +1706,7 @@ test("buildGraphBundle emits yaml-path-reference-link edges for YAML files refer
     )).toBeTruthy();
 });
 
-test("buildGraphBundle links Python files in test utility directories with python-test-util-suite-link", () => {
+test("buildGraphBundle links Python files in test utility directories with python-test-util-suite-link", async () => {
   const repoManifest = makeRepoManifest([
     "tests/utils/assertions.py",
     "tests/utils/mocks.py",
@@ -1715,7 +1715,7 @@ test("buildGraphBundle links Python files in test utility directories with pytho
     "src/utils/helpers.py",
     "src/utils/config.py",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition, {});
 
   const utilEdges = graph.graphs.references!.filter(
@@ -1734,7 +1734,7 @@ test("buildGraphBundle links Python files in test utility directories with pytho
     )).toBeTruthy();
 });
 
-test("buildGraphBundle python-test-util-suite-link matches helpers/ and support/ in test directories", () => {
+test("buildGraphBundle python-test-util-suite-link matches helpers/ and support/ in test directories", async () => {
   const repoManifest = makeRepoManifest([
     "tests/helpers/fixtures.py",
     "tests/helpers/builders.py",
@@ -1742,7 +1742,7 @@ test("buildGraphBundle python-test-util-suite-link matches helpers/ and support/
     "spec/support/factories.py",
     "src/helpers/utils.py",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition, {});
 
   const utilEdges = graph.graphs.references!.filter(
@@ -1757,13 +1757,13 @@ test("buildGraphBundle python-test-util-suite-link matches helpers/ and support/
   expect(utilEdges.filter((e) => e.from === "src/helpers/utils.py" || e.to === "src/helpers/utils.py").length, "does not link files in src/helpers/").toBe(0);
 });
 
-test("buildGraphBundle python-test-util-suite-link skips conftest.py and non-.py files", () => {
+test("buildGraphBundle python-test-util-suite-link skips conftest.py and non-.py files", async () => {
   const repoManifest = makeRepoManifest([
     "tests/utils/conftest.py",
     "tests/utils/helpers.py",
     "tests/utils/README.md",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition, {});
 
   const utilEdges = graph.graphs.references!.filter(
@@ -1773,12 +1773,12 @@ test("buildGraphBundle python-test-util-suite-link skips conftest.py and non-.py
   expect(utilEdges.length, "single non-conftest .py file does not form a suite").toBe(0);
 });
 
-test("buildGraphBundle yaml-path-reference-link does not match non-config paths or absolute URLs", () => {
+test("buildGraphBundle yaml-path-reference-link does not match non-config paths or absolute URLs", async () => {
   const repoManifest = makeRepoManifest([
     "ci/pipeline.yaml",
     "ci/helpers.yaml",
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
       "ci/pipeline.yaml": [

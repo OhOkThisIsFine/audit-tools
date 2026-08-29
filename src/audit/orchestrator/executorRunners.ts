@@ -127,7 +127,7 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     ),
   planning_executor: async (bundle, { options, log, correlationId, obligation }) => {
     const root = requireRoot(options.root, "planning_executor");
-    const plannedScope = resolveAuditScope({ root, since: options.since, bundle });
+    const plannedScope = await resolveAuditScope({ root, since: options.since, bundle });
     log.event({
       phase: "advance",
       kind: "scope",

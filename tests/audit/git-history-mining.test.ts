@@ -93,7 +93,7 @@ test("F6 inv-7: git_history.json declares upstream deps exactly {repo_manifest, 
 test("mineGitHistory degrades to empty on a non-git directory", async () => {
   const dir = await mkdtemp(join(tmpdir(), "no-git-"));
   try {
-    const history = mineGitHistory(dir);
+    const history = await mineGitHistory(dir);
     expect(history).toEqual({ co_change: [], churn: [], authorship: [] });
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -130,13 +130,13 @@ test("F6 fail-3: a malformed git-log row is skipped, mining continues for well-f
 
     // Must never throw, and both paths are aggregated across both commits.
     let history: GitHistory;
-    assert.doesNotThrow(() => {
-      history = mineGitHistory(dir);
+    await assert.doesNotReject(async () => {
+      history = await mineGitHistory(dir);
     });
     expect(history!.churn.find((c) => c.path === "plain.ts")?.commits, "well-formed path still mined despite a hard-to-parse sibling row").toBe(2);
     expect(history!.churn.some((c) => c.commits === 2), "the offending path degrades to empty if unparseable but never aborts mining").toBeTruthy();
     // Deterministic + non-throwing on repeat.
-    expect(mineGitHistory(dir)).toEqual(history!);
+    expect(await mineGitHistory(dir)).toEqual(history!);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -151,8 +151,8 @@ test("F6 fail-3: an unminable repo state degrades to empty, never throws", async
   const dir = await makeRepo();
   try {
     let history: GitHistory;
-    assert.doesNotThrow(() => {
-      history = mineGitHistory(dir);
+    await assert.doesNotReject(async () => {
+      history = await mineGitHistory(dir);
     });
     expect(history!, "no-commit repo (git log fails) degrades to the empty aggregate").toEqual({ co_change: [], churn: [], authorship: [] });
   } finally {
@@ -167,8 +167,8 @@ test("mineGitHistory is deterministic and sorted (co_change/churn/authorship)", 
     await commit(dir, { "a.ts": "2", "b.ts": "2" }, { name: "Author B", email: "b@example.com" });
     await commit(dir, { "a.ts": "3" }, { name: "Author A", email: "a@example.com" });
 
-    const first = mineGitHistory(dir);
-    const second = mineGitHistory(dir);
+    const first = await mineGitHistory(dir);
+    const second = await mineGitHistory(dir);
     expect(first, "identical history → identical output").toEqual(second);
 
     // a.ts: 3 commits, b.ts: 2 → churn sorted by count desc.
@@ -200,7 +200,7 @@ test("mineGitHistory is language-agnostic: churn/authorship for every touched pa
     const bump = Object.fromEntries(paths.map((p) => [p, "2"]));
     await commit(dir, bump, { name: "Author B", email: "b@example.com" });
 
-    const history = mineGitHistory(dir);
+    const history = await mineGitHistory(dir);
 
     // Every touched path appears in churn (2 commits each), no language gating.
     // Order is collation-dependent, so compare as a path→count map.
@@ -241,7 +241,7 @@ test("F6 inv-6: co-change is gated by min joint-commit support; confidence is a 
       { name: "Author A", email: "a@example.com" },
     );
 
-    const history = mineGitHistory(dir);
+    const history = await mineGitHistory(dir);
     const pairs = new Set(history.co_change.map((p) => `${p.a}|${p.b}`));
     // Below-threshold pair (1 shared commit) omitted.
     expect(pairs.has("a.ts|b.ts"), "single-commit pair below threshold is omitted").toBe(false);
@@ -279,7 +279,7 @@ test("F6 fail-5: maxCommits bounds the scanned window (older commits outside the
     await commit(dir, { "new.ts": "2" }, { name: "Author B", email: "b@example.com" });
 
     // Window of 2 (newest first) excludes the oldest commit entirely.
-    const bounded = mineGitHistory(dir, { maxCommits: 2 });
+    const bounded = await mineGitHistory(dir, { maxCommits: 2 });
     expect(bounded.churn.some((c) => c.path === "old.ts"), "commit outside the bounded window does not contribute to churn").toBe(false);
     expect(bounded.authorship.some((a) => a.path === "old.ts"), "commit outside the bounded window does not contribute to authorship").toBe(false);
     expect(bounded.co_change.length, "the old co-change pair is excluded; no in-window pair reaches threshold").toBe(0);
@@ -287,7 +287,7 @@ test("F6 fail-5: maxCommits bounds the scanned window (older commits outside the
 
     // Unbounded scan DOES see the old commit — proving the window, not absence
     // of history, is what excludes it.
-    const full = mineGitHistory(dir);
+    const full = await mineGitHistory(dir);
     expect(full.churn.some((c) => c.path === "old.ts"), "without the bound the old commit is in scope (the window is the guard)").toBe(true);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -317,7 +317,7 @@ test("F6 fail-5b: maxCoChangeFilesPerCommit bounds per-commit pair expansion (wi
     await commit(dir, { "a.ts": "1", "b.ts": "1" }, { name: "Author A", email: "a@example.com" });
     await commit(dir, { "a.ts": "2", "b.ts": "2" }, { name: "Author A", email: "a@example.com" });
 
-    const history = mineGitHistory(dir, { maxCoChangeFilesPerCommit: 3 });
+    const history = await mineGitHistory(dir, { maxCoChangeFilesPerCommit: 3 });
 
     // No pair explosion from the wide commit: none of its C(5,2)=10 pairs
     // appear; co_change is bounded to the narrow commit's single pair.
@@ -354,7 +354,7 @@ test("mineGitHistory: no over-cap commit => skipped_cochange_commits is absent/z
   try {
     await commit(dir, { "a.ts": "1", "b.ts": "1" }, { name: "Author A", email: "a@example.com" });
     await commit(dir, { "a.ts": "2", "b.ts": "2" }, { name: "Author A", email: "a@example.com" });
-    const history = mineGitHistory(dir);
+    const history = await mineGitHistory(dir);
     expect(
       history.skipped_cochange_commits ?? 0,
       "no commit exceeded the cap, so no skip is recorded",
@@ -370,7 +370,7 @@ test("mineGitHistoryArtifact drops out-of-scope and excluded paths", async () =>
     await commit(dir, { "a.ts": "1", "vendor.ts": "1" }, { name: "Author A", email: "a@example.com" });
     await commit(dir, { "a.ts": "2", "vendor.ts": "2" }, { name: "Author A", email: "a@example.com" });
     // vendor.ts is not in the manifest → must be dropped everywhere.
-    const history = mineGitHistoryArtifact(dir, manifest(["a.ts"]));
+    const history = await mineGitHistoryArtifact(dir, manifest(["a.ts"]));
     expect(history.churn).toEqual([{ path: "a.ts", commits: 2 }]);
     expect(history.co_change).toEqual([]);
     expect(history.authorship).toEqual([{ path: "a.ts", authors: 1 }]);
@@ -397,7 +397,7 @@ test("F6 inv-5: co-change pair with an unknown endpoint is dropped, in-scope pai
       { "in.ts": "2", "also.ts": "2", "vendor.ts": "2" },
       { name: "Author A", email: "a@example.com" },
     );
-    const history = mineGitHistoryArtifact(dir, manifest(["in.ts", "also.ts"]));
+    const history = await mineGitHistoryArtifact(dir, manifest(["in.ts", "also.ts"]));
     // Only the fully in-scope pair survives; every pair touching vendor.ts dropped.
     expect(history.co_change).toEqual([
       { a: "also.ts", b: "in.ts", commits: 2 },
@@ -500,7 +500,7 @@ test("mergeAnalyzerRiskSignals degrades to a clone on an empty map", () => {
 // without first resolving the seam imports. This test makes that land-order
 // mechanical, not host-remembered (additive to the CE-006 apply-ordering test).
 
-test("F6 inv-9: the pre-shipped merge-helper seam pair lands first (statically importable)", () => {
+test("F6 inv-9: the pre-shipped merge-helper seam pair lands first (statically importable)", async () => {
   // The seam pair is the only sanctioned append path. If either symbol were
   // unshipped, the top-level `await import(...)` at the head of this file would
   // have thrown before any F6 consumer test could run — so a half-shipped state
@@ -575,8 +575,8 @@ test("F6 inv-3 [CP-NODE-79]: non-git/shallow => mined:false empty, graph/risk un
 
     // 1) The scoped artifact never throws and degrades to the empty aggregate.
     let history: GitHistory;
-    assert.doesNotThrow(() => {
-      history = mineGitHistoryArtifact(dir, repoManifest);
+    await assert.doesNotReject(async () => {
+      history = await mineGitHistoryArtifact(dir, repoManifest);
     }, "non-git directory must not throw");
     expect(history!, "non-git / shallow clone mines to the empty aggregate (mined:false)").toEqual({ co_change: [], churn: [], authorship: [] });
 
@@ -648,7 +648,7 @@ test("F6 fail-6 [CP-NODE-91]: out-of-manifest paths dropped at path-lookup gate,
     // Manifest scopes ONLY a.ts and b.ts. vendored.js and gone.ts are
     // out-of-manifest (stand-ins for vendored / deleted / renamed paths).
     const repoManifest = manifest(["a.ts", "b.ts"]);
-    const history = mineGitHistoryArtifact(dir, repoManifest);
+    const history = await mineGitHistoryArtifact(dir, repoManifest);
 
     // 1) Every mined list is scoped: not a single row references an
     //    out-of-manifest path.
@@ -740,7 +740,7 @@ test("F6 fail-10 [CP-NODE-95]: git_history.json upstream-dep set matches F1 regi
 // ZERO graph edges and ZERO risk signals, and never throws. This is the
 // gate-at-isGitRepo() sibling of fail-3's status!==0 => [] degrade: when there is
 // no git working tree at all (binary absent, or a plain directory), the first
-// guard in mineGitHistory (`if (!isGitRepo(root)) return empty`) already yields
+// guard in mineGitHistory (`if (!(await isGitRepo(root))) return empty`) already yields
 // the empty aggregate without touching the log. A non-git temp dir is the
 // canonical stand-in: isGitRepo() is false there exactly as it is when the git
 // binary cannot be found.
@@ -750,18 +750,18 @@ test("F6 fail-1 [CP-NODE-86]: git absent/isGitRepo false => mined:false empty, n
     // Precondition: this directory is genuinely not a git working tree, so the
     // isGitRepo() gate is the code path under test (same false verdict the
     // miner would see if the git binary were absent entirely).
-    expect(isGitRepo(dir), "temp dir is not a git working tree").toBe(false);
+    expect(await isGitRepo(dir), "temp dir is not a git working tree").toBe(false);
 
     // 1) Both mining surfaces degrade to the empty aggregate and never throw.
     let history: GitHistory;
-    assert.doesNotThrow(() => {
-      history = mineGitHistory(dir);
+    await assert.doesNotReject(async () => {
+      history = await mineGitHistory(dir);
     }, "non-git/git-absent must not throw (raw miner)");
     expect(history!, "isGitRepo() false => empty aggregate (mined:false)").toEqual({ co_change: [], churn: [], authorship: [] });
 
     let scoped: GitHistory;
-    assert.doesNotThrow(() => {
-      scoped = mineGitHistoryArtifact(dir, manifest(["a.ts", "b.ts"]));
+    await assert.doesNotReject(async () => {
+      scoped = await mineGitHistoryArtifact(dir, manifest(["a.ts", "b.ts"]));
     }, "non-git/git-absent must not throw (scoped artifact)");
     expect(scoped!, "scoped artifact also degrades to the empty aggregate").toEqual({ co_change: [], churn: [], authorship: [] });
 
@@ -800,7 +800,7 @@ test("F6 fail-1 [CP-NODE-86]: git absent/isGitRepo false => mined:false empty, n
     expect(mergedRisk.items.map((i) => i.signals), "empty contribution adds zero risk signals").toEqual([["security_relevant"], []]);
 
     // 4) Deterministic + non-throwing on repeat.
-    expect(mineGitHistory(dir)).toEqual(history!);
+    expect(await mineGitHistory(dir)).toEqual(history!);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -954,10 +954,10 @@ test("F6 inv-8 [CP-NODE-84]: author identity is mailmap-canonical (output change
       { name: "Alias Two", email: "alias2@example.com" },
     );
 
-    const history = mineGitHistory(dir);
+    const history = await mineGitHistory(dir);
     expect(history.authorship.find((a) => a.path === "f.ts")?.authors, "two mailmap-aliased names for one person collapse to ONE distinct author").toBe(1);
     // Determinism preserved through the mailmap path.
-    expect(mineGitHistory(dir)).toEqual(history);
+    expect(await mineGitHistory(dir)).toEqual(history);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -982,7 +982,7 @@ test("F6 fail-4 [CP-NODE-89]: author split/collision prevented by mailmap roll-u
     await commit(dir, { "shared.ts": "2" }, { name: "Alias Two", email: "alias2@example.com" });
     await commit(dir, { "shared.ts": "3" }, { name: "Distinct Human", email: "other@example.com" });
 
-    const history = mineGitHistory(dir);
+    const history = await mineGitHistory(dir);
     expect(history.authorship.find((a) => a.path === "shared.ts")?.authors, "one human under two names does NOT inflate the count; a second human is NOT collapsed").toBe(2);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -1009,14 +1009,14 @@ test("F6 fail-7 [CP-NODE-92]: fixed co-change support threshold keeps git_histor
       { name: "Author A", email: "a@example.com" },
     );
 
-    const first = JSON.stringify(mineGitHistory(dir).co_change);
-    const second = JSON.stringify(mineGitHistory(dir).co_change);
-    const third = JSON.stringify(mineGitHistory(dir).co_change);
+    const first = JSON.stringify((await mineGitHistory(dir)).co_change);
+    const second = JSON.stringify((await mineGitHistory(dir)).co_change);
+    const third = JSON.stringify((await mineGitHistory(dir)).co_change);
     expect(first, "fixed threshold => byte-identical co_change across re-mines").toBe(second);
     expect(second, "fixed threshold => byte-identical co_change across re-mines").toBe(third);
     // The threshold actually gated: the above-support pair is in, the single-
     // commit pair is out — proving stability is of a real, non-empty result.
-    const pairs = new Set(mineGitHistory(dir).co_change.map((p) => `${p.a}|${p.b}`));
+    const pairs = new Set((await mineGitHistory(dir)).co_change.map((p) => `${p.a}|${p.b}`));
     expect(pairs.has("x.ts|y.ts"), "above-support pair included").toBe(true);
     expect(pairs.has("x.ts|z.ts"), "below-support pair excluded by the fixed threshold").toBe(false);
   } finally {

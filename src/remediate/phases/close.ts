@@ -719,11 +719,11 @@ export interface StagingSelection {
  * run. Closing it fully requires per-edit git ground truth, which that flow
  * does not have.
  */
-export function collectStagingFiles(
+export async function collectStagingFiles(
   root: string,
   manifest: string[],
   deliverables: string[] = [],
-): StagingSelection {
+): Promise<StagingSelection> {
   const entries = [...manifest, ...deliverables];
   // Two-tier membership: EXACT (case-preserving) match first; the lowercased
   // normalizeRepoPath key only as a fallback, and only when it is UNAMBIGUOUS —
@@ -737,7 +737,7 @@ export function collectStagingFiles(
   const foldedKeys = new Set(entries.map(normalizeRepoPath));
   const exactDeliverableKeys = new Set(deliverables.map(repoPathExactKey));
   const foldedDeliverableKeys = new Set(deliverables.map(normalizeRepoPath));
-  const dirty = [...stagedAndUntracked(root)];
+  const dirty = [...(await stagedAndUntracked(root))];
   const foldedDirtyCount = new Map<string, number>();
   for (const f of dirty) {
     const k = normalizeRepoPath(f);
@@ -811,14 +811,16 @@ const PREVIEW_ACTIONS = new Set<string>(["commit", "push", "open-pr", "publish"]
  * proceed immediately (pre_authorized, action === 'none'/'tag'/'custom', or
  * no files to stage).
  */
-function checkClosingPreview(
+async function checkClosingPreview(
   state: RemediationState,
   options: OrchestratorOptions,
-): { files: string[]; commit_message: string; leftover_files?: string[] } | undefined {
+): Promise<
+  { files: string[]; commit_message: string; leftover_files?: string[] } | undefined
+> {
   const closingPlan = state.closing_plan!;
   if (closingPlan.pre_authorized === true) return undefined;
   if (!PREVIEW_ACTIONS.has(closingPlan.action)) return undefined;
-  const { files, leftover } = collectStagingFiles(
+  const { files, leftover } = await collectStagingFiles(
     options.root,
     resolveEditSurfaceManifest(state),
     toolDeliverablePaths(options),
@@ -869,7 +871,7 @@ export async function executeClosingAction(
     // the same manifest ∪ deliverables the preview used, never a wider sweep
     // (see collectStagingFiles's doc comment: this is the TOCTOU fix, not a
     // TOCTOU reintroduction).
-    const staging = collectStagingFiles(
+    const staging = await collectStagingFiles(
       options.root,
       resolveEditSurfaceManifest(state),
       toolDeliverablePaths(options),
@@ -1808,7 +1810,7 @@ export async function runClosePhase(
   // commit message, attach them to closing_plan.closing_action_preview, and
   // return the updated state so the host can present the preview. The host sets
   // closing_plan.pre_authorized = true before the next next-step call.
-  const preview = checkClosingPreview(state, options);
+  const preview = await checkClosingPreview(state, options);
   if (preview) {
     runLogger?.event({
       phase: "close",

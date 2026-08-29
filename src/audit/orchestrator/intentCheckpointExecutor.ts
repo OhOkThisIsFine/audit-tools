@@ -395,12 +395,12 @@ function buildLensPropositions(
   });
 }
 
-export function computeScopePreDigest(
+export async function computeScopePreDigest(
   bundle: ArtifactBundle,
   root: string,
   since?: string,
-): ScopePreDigest {
-  const scope = resolveAuditScope({ root, since, bundle });
+): Promise<ScopePreDigest> {
+  const scope = await resolveAuditScope({ root, since, bundle });
   const dispositionFiles = bundle.file_disposition?.files ?? [];
 
   const auditable = dispositionFiles.filter(
@@ -446,6 +446,6 @@ export function computeScopePreDigest(
     disposition_override_proposals,
     lens_propositions,
     docs_digest: bundle.docs_digest?.docs ?? [],
-    mis_scope_smells: detectMisScopeSmells(root),
+    mis_scope_smells: await detectMisScopeSmells(root),
   };
 }

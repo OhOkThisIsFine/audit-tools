@@ -1,10 +1,10 @@
-import { spawnSync } from "node:child_process";
-import type {
-  SpawnSyncOptionsWithStringEncoding,
-  SpawnSyncReturns,
-} from "node:child_process";
 import type { RepoManifest } from "../types.js";
-import { normalizeRepoPath, toPosixPath } from "audit-tools/shared";
+import {
+  normalizeRepoPath,
+  toPosixPath,
+  runTrackedAsync,
+  TRACKED_CHILD_DEADLINE_MS,
+} from "audit-tools/shared";
 import type { FileDisposition, FileDispositionItem, FileDispositionStatus } from "audit-tools/shared";
 import {
   isNodeModulesOrGit,
@@ -168,12 +168,36 @@ export interface FileDispositionWithScopeRules extends FileDisposition {
   untracked?: ScopeRuleSummary;
 }
 
-/** Injection seam for the batched git spawns (tests). */
+/** The result subset the disposition rules read from a git child. */
+export interface GitSpawnResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error?: Error;
+}
+
+/**
+ * Injection seam for the batched git spawns (tests). ASYNC by contract:
+ * `buildFileDisposition` is fold-reachable (intake and structure executors run
+ * inside the artifact-tree lock's hold), and a synchronous child blocks the
+ * event loop — starving the held lock's mtime heartbeat until another process
+ * classifies the LIVE lock stale and steals it (INV-SSF). The default runs
+ * through the shared async exec boundary with the fold child deadline.
+ */
 export type GitSpawn = (
   command: string,
   args: readonly string[],
-  options: SpawnSyncOptionsWithStringEncoding,
-) => SpawnSyncReturns<string>;
+  options: { cwd: string; input?: string; maxBuffer: number },
+) => Promise<GitSpawnResult>;
+
+const defaultGitSpawn: GitSpawn = (command, args, options) =>
+  runTrackedAsync([command, ...args], {
+    cwd: options.cwd,
+    input: options.input,
+    maxBuffer: options.maxBuffer,
+    encoding: "utf8",
+    timeout: TRACKED_CHILD_DEADLINE_MS,
+  });
 
 export interface BuildFileDispositionOptions {
   /**
@@ -183,9 +207,9 @@ export interface BuildFileDispositionOptions {
    * untracked files out of scope. Omit for the heuristics-only disposition.
    */
   root?: string;
-  /** Test seam: replacement for child_process.spawnSync on `git check-ignore`. */
+  /** Test seam: replacement for the async git spawn on `git check-ignore`. */
   spawn?: GitSpawn;
-  /** Test seam: replacement for child_process.spawnSync on `git ls-files`. */
+  /** Test seam: replacement for the async git spawn on `git ls-files`. */
   lsFilesSpawn?: GitSpawn;
 }
 
@@ -201,22 +225,20 @@ type VcsIgnoreEvaluation =
  * anything else (128 / git absent / not a work tree) = clean fallback —
  * the caller keeps only the existing targeted exclusions. Never throws.
  */
-function evaluateVcsIgnored(
+async function evaluateVcsIgnored(
   root: string,
   candidatePosixPaths: readonly string[],
   spawn: GitSpawn,
-): VcsIgnoreEvaluation {
+): Promise<VcsIgnoreEvaluation> {
   if (candidatePosixPaths.length === 0) {
     return { ok: true, ignored: new Set() };
   }
-  let result: SpawnSyncReturns<string>;
+  let result: GitSpawnResult;
   try {
-    result = spawn("git", ["check-ignore", "--stdin", "-z"], {
+    result = await spawn("git", ["check-ignore", "--stdin", "-z"], {
       cwd: root,
       input: candidatePosixPaths.map((path) => `${path}\0`).join(""),
-      encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,
-      windowsHide: true,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -259,17 +281,15 @@ type TrackedFilesEvaluation =
  * Anything other than exit 0 (git absent, not a work tree) = clean fallback —
  * the caller skips the untracked rule. Never throws.
  */
-function evaluateTrackedFiles(
+async function evaluateTrackedFiles(
   root: string,
   spawn: GitSpawn,
-): TrackedFilesEvaluation {
-  let result: SpawnSyncReturns<string>;
+): Promise<TrackedFilesEvaluation> {
+  let result: GitSpawnResult;
   try {
-    result = spawn("git", ["ls-files", "-z"], {
+    result = await spawn("git", ["ls-files", "-z"], {
       cwd: root,
-      encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,
-      windowsHide: true,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -344,13 +364,13 @@ function applyRuleExclusions(params: {
   return { files, summary: { applied: true, ignored_count: matchedCount } };
 }
 
-function applyVcsIgnoreRule(
+async function applyVcsIgnoreRule(
   baseline: FileDispositionItem[],
   candidatePosix: string[],
   root: string,
   spawn: GitSpawn,
-): { files: FileDispositionItem[]; summary: ScopeRuleSummary } {
-  const evaluation = evaluateVcsIgnored(root, candidatePosix, spawn);
+): Promise<{ files: FileDispositionItem[]; summary: ScopeRuleSummary }> {
+  const evaluation = await evaluateVcsIgnored(root, candidatePosix, spawn);
 
   if (!evaluation.ok) {
     // Clean fallback: keep the existing targeted exclusions only.
@@ -425,12 +445,12 @@ function applyVcsIgnoreRule(
  * (e.g. a repository with no commits yet) skips the rule rather than emptying
  * the audit.
  */
-function applyUntrackedRule(
+async function applyUntrackedRule(
   items: FileDispositionItem[],
   root: string,
   spawn: GitSpawn,
-): { files: FileDispositionItem[]; summary: ScopeRuleSummary } {
-  const evaluation = evaluateTrackedFiles(root, spawn);
+): Promise<{ files: FileDispositionItem[]; summary: ScopeRuleSummary }> {
+  const evaluation = await evaluateTrackedFiles(root, spawn);
 
   if (!evaluation.ok) {
     return {
@@ -498,10 +518,10 @@ function applyUntrackedRule(
  * `git ls-files` pass — each with clean fallback to the disposition built so
  * far whenever git is unavailable or a safety guard fires.
  */
-export function buildFileDisposition(
+export async function buildFileDisposition(
   repoManifest: RepoManifest,
   options: BuildFileDispositionOptions = {},
-): FileDispositionWithScopeRules {
+): Promise<FileDispositionWithScopeRules> {
   const baseline = repoManifest.files.map((file) => inferDisposition(file.path));
   if (!options.root) {
     return { files: baseline };
@@ -510,16 +530,16 @@ export function buildFileDisposition(
   const candidatePosix = repoManifest.files.map((file) =>
     toPosixPath(file.path),
   );
-  const vcsStage = applyVcsIgnoreRule(
+  const vcsStage = await applyVcsIgnoreRule(
     baseline,
     candidatePosix,
     options.root,
-    options.spawn ?? spawnSync,
+    options.spawn ?? defaultGitSpawn,
   );
-  const untrackedStage = applyUntrackedRule(
+  const untrackedStage = await applyUntrackedRule(
     vcsStage.files,
     options.root,
-    options.lsFilesSpawn ?? spawnSync,
+    options.lsFilesSpawn ?? defaultGitSpawn,
   );
   return {
     files: untrackedStage.files,

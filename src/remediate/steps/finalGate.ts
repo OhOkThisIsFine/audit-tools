@@ -207,6 +207,11 @@ export async function runToolOwnedFinalGate(
       const result = runTracked([command, ...args], {
         cwd: effectiveCwd,
         stdio: ["ignore", "pipe", "pipe"],
+        // Declared bound (required by the sync twin): full suites legitimately
+        // run minutes; one hour is a bound, not a budget. This runner executes
+        // outside any held file lock, so the bound guards only against a child
+        // that never exits.
+        timeout: 3_600_000,
       });
       // `runTracked` has always returned the captured streams; this used to read
       // `status` alone and discard them, which is why a red gate persisted

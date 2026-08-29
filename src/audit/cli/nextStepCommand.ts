@@ -1006,7 +1006,7 @@ const emitConfirmIntent = emissionRow<"confirm_intent">(
   async ({ root, artifactsDir, argv }, result) => {
     const intentCheckpointPath = join(artifactsDir, "intent_checkpoint.json");
     const continueCommand = nextStepCommand(root, artifactsDir);
-    const preDigest = computeScopePreDigest(
+    const preDigest = await computeScopePreDigest(
       result.bundle,
       root,
       getFlag(argv, "--since"),

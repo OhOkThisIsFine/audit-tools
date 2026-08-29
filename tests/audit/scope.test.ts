@@ -246,15 +246,15 @@ test("computeAuditScope: two-hop expansion succeeds when accumulated confidence 
   expect(!scope.expanded_files.includes("src/e.ts"), "src/e.ts should NOT be in expanded_files (4 hops, 0.41 < 0.5)").toBeTruthy();
 });
 
-test("resolveAuditScope: no --since → full audit", () => {
-  const scope = resolveAuditScope({ root: ".", bundle: {} });
+test("resolveAuditScope: no --since → full audit", async () => {
+  const scope = await resolveAuditScope({ root: ".", bundle: {} });
   expect(scope.mode).toBe("full");
   expect(scope.since).toBe(null);
   expect(scope.dropped_note).toBe(undefined);
 });
 
-test("resolveAuditScope: --since with no root falls back to full with a note", () => {
-  const scope = resolveAuditScope({ since: "HEAD~1", bundle: {} });
+test("resolveAuditScope: --since with no root falls back to full with a note", async () => {
+  const scope = await resolveAuditScope({ since: "HEAD~1", bundle: {} });
   expect(scope.mode).toBe("full");
   expect(scope.dropped_note ?? "").toMatch(/full audit/);
 });
@@ -306,13 +306,13 @@ test("resolveAuditScope: real git repo — changed file + graph neighbour, misty
       },
     };
 
-    const scope = resolveAuditScope({ root, since: "HEAD", bundle });
+    const scope = await resolveAuditScope({ root, since: "HEAD", bundle });
     expect(scope.mode).toBe("delta");
     expect(scope.seed_files).toEqual(["a.ts"]);
     expect(scope.expanded_files).toEqual(["b.ts"]);
 
     // A mistyped ref must not silently audit nothing — fall back to full.
-    const fallback = resolveAuditScope({
+    const fallback = await resolveAuditScope({
       root,
       since: "definitely-not-a-ref",
       bundle,
@@ -344,11 +344,22 @@ function countingSpawn() {
   const calls: Array<{
     command: string;
     args: readonly string[];
-    options: SpawnSyncOptionsWithStringEncoding & { input?: string };
+    options: { cwd: string; input?: string; maxBuffer: number };
   }> = [];
-  const spawn: GitSpawn = (command, args, options) => {
-    calls.push({ command, args: args as readonly string[], options: options as SpawnSyncOptionsWithStringEncoding & { input?: string } });
-    return spawnSync(command, args, options);
+  const spawn: GitSpawn = async (command, args, options) => {
+    calls.push({ command, args: args as readonly string[], options });
+    const result = spawnSync(command, args as string[], {
+      cwd: options.cwd,
+      input: options.input,
+      maxBuffer: options.maxBuffer,
+      encoding: "utf8",
+    });
+    return {
+      status: result.status,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+      ...(result.error ? { error: result.error } : {}),
+    };
   };
   return { calls, spawn };
 }
@@ -377,7 +388,7 @@ test("disposition: batched check-ignore classifies ignored files as vcs_ignored 
     // alpha\b.ts uses Windows backslash separators on purpose: normalization
     // to forward slashes must happen before the batch reaches git, and the
     // ignored-set lookup must still match the original manifest entry.
-    const disposition = buildFileDisposition(
+    const disposition = await buildFileDisposition(
       manifest(["alpha/a.ts", "alpha\\b.ts", "src/keep.ts"]),
       { root, spawn },
     );
@@ -408,7 +419,7 @@ test("disposition: check-ignore exit 1 (nothing ignored) is success; targeted ex
   const root = await makeGitRoot(t, "does-not-match-anything/\n");
   if (!root) return;
   try {
-    const disposition = buildFileDisposition(
+    const disposition = await buildFileDisposition(
       manifest(["src/a.ts", "dist/bundle.js"]),
       { root },
     );
@@ -424,18 +435,15 @@ test("disposition: check-ignore exit 1 (nothing ignored) is success; targeted ex
   }
 });
 
-test("disposition: git absent (spawn ENOENT) falls back cleanly to targeted exclusions", () => {
-  const enoentSpawn: GitSpawn = () => ({
+test("disposition: git absent (spawn ENOENT) falls back cleanly to targeted exclusions", async () => {
+  const enoentSpawn: GitSpawn = async () => ({
     error: Object.assign(new Error("spawn git ENOENT"), { code: "ENOENT" }),
     status: null,
     stdout: "",
     stderr: "",
-    output: [],
-    pid: 0,
-    signal: null,
   });
   // Must not throw.
-  const disposition = buildFileDisposition(
+  const disposition = await buildFileDisposition(
     manifest(["src/a.ts", "dist/bundle.js"]),
     { root: tmpdir(), spawn: enoentSpawn },
   );
@@ -467,7 +475,7 @@ test("disposition: not a git work tree (exit 128) falls back cleanly and records
       return;
     }
 
-    const disposition = buildFileDisposition(
+    const disposition = await buildFileDisposition(
       manifest(["src/a.ts", "dist/bundle.js"]),
       { root },
     );
@@ -487,7 +495,7 @@ test("disposition: every ignored file keeps a per-file excluded record", async (
   if (!root) return;
   try {
     const ignored = Array.from({ length: 5 }, (_, i) => `alpha/f${i}.ts`);
-    const disposition = buildFileDisposition(
+    const disposition = await buildFileDisposition(
       manifest([...ignored, "src/keep.ts"]),
       { root },
     );
@@ -522,7 +530,7 @@ test("disposition: large ignored sets keep per-file records — no record is eve
       ...Array.from({ length: includedCount }, (_, i) => `src/s${i}.ts`),
     ];
 
-    const disposition = buildFileDisposition(manifest(paths), { root });
+    const disposition = await buildFileDisposition(manifest(paths), { root });
 
     expect(disposition.files.length).toBe(paths.length);
     const perFile = disposition.files.filter(
@@ -541,7 +549,7 @@ test("disposition: root-ignored guard skips the rule and records root_ignored", 
   const root = await makeGitRoot(t, "*\n");
   if (!root) return;
   try {
-    const disposition = buildFileDisposition(
+    const disposition = await buildFileDisposition(
       manifest(["src/a.ts", "src/b.ts", "lib/c.ts"]),
       { root },
     );
@@ -565,7 +573,7 @@ test("disposition: share guard skips the rule and records share_exceeded", async
       ...Array.from({ length: 19 }, (_, i) => `alpha/f${i}.ts`),
       "src/keep.ts",
     ];
-    const disposition = buildFileDisposition(manifest(paths), { root });
+    const disposition = await buildFileDisposition(manifest(paths), { root });
     expect(disposition.files.some((f) => f.reason === VCS_IGNORED_REASON)).toBe(false);
     expect(disposition.files.length).toBe(20);
     expect(disposition.vcs_ignore!.applied).toBe(false);
@@ -596,7 +604,7 @@ test("disposition: untracked scratch is excluded; tracked + gitignored files kee
     const { calls, spawn: lsFilesSpawn } = countingSpawn();
     // src\app.ts uses Windows backslash separators on purpose: the tracked-set
     // lookup must match ls-files' forward-slash output for the same file.
-    const disposition = buildFileDisposition(
+    const disposition = await buildFileDisposition(
       manifest([
         ".gitignore",
         "src\\app.ts",
@@ -634,7 +642,7 @@ test("disposition: repository with no tracked files skips the untracked rule (ro
   const root = await makeGitRoot(t);
   if (!root) return;
   try {
-    const disposition = buildFileDisposition(
+    const disposition = await buildFileDisposition(
       manifest(["src/a.ts", "src/b.ts"]),
       { root },
     );
@@ -653,8 +661,8 @@ test("disposition: untracked share guard skips the rule and records share_exceed
   try {
     // Fake index: only 1 of 20 included candidates tracked → untracked share
     // 0.95 > VCS_IGNORED_MAX_SHARE, but not every candidate (root_untracked).
-    const lsFilesSpawn: GitSpawn = () => ({ status: 0, stdout: "src/f0.ts\0", stderr: "", output: [], pid: 0, signal: null });
-    const disposition = buildFileDisposition(
+    const lsFilesSpawn: GitSpawn = async () => ({ status: 0, stdout: "src/f0.ts\0", stderr: "", output: [], pid: 0, signal: null });
+    const disposition = await buildFileDisposition(
       manifest(Array.from({ length: 20 }, (_, i) => `src/f${i}.ts`)),
       { root, lsFilesSpawn },
     );
@@ -668,18 +676,15 @@ test("disposition: untracked share guard skips the rule and records share_exceed
   }
 });
 
-test("disposition: git absent for ls-files falls back cleanly and records why", () => {
-  const enoentSpawn: GitSpawn = () => ({
+test("disposition: git absent for ls-files falls back cleanly and records why", async () => {
+  const enoentSpawn: GitSpawn = async () => ({
     error: Object.assign(new Error("spawn git ENOENT"), { code: "ENOENT" }),
     status: null,
     stdout: "",
     stderr: "",
-    output: [],
-    pid: 0,
-    signal: null,
   });
   // Must not throw; both rules fall back independently.
-  const disposition = buildFileDisposition(manifest(["src/a.ts"]), {
+  const disposition = await buildFileDisposition(manifest(["src/a.ts"]), {
     root: tmpdir(),
     spawn: enoentSpawn,
     lsFilesSpawn: enoentSpawn,
@@ -706,15 +711,12 @@ test("disposition: large untracked sets keep per-file records — no record is e
       { length: untrackedCount },
       (_, i) => `scratch/f${i}.json`,
     );
-    const lsFilesSpawn: GitSpawn = () => ({
+    const lsFilesSpawn: GitSpawn = async () => ({
       status: 0,
       stdout: tracked.map((p) => `${p}\0`).join(""),
       stderr: "",
-      output: [],
-      pid: 0,
-      signal: null,
     });
-    const disposition = buildFileDisposition(manifest([...tracked, ...scratch]), {
+    const disposition = await buildFileDisposition(manifest([...tracked, ...scratch]), {
       root,
       lsFilesSpawn,
     });
@@ -739,15 +741,12 @@ test("disposition: tracked files whose on-disk case drifted from the index are N
     // case) happens on case-insensitive filesystems (`core.ignorecase`
     // renames). Membership is case-normalized (normalizeRepoPath) so the file
     // stays included; only the genuinely-untracked scratch is excluded.
-    const lsFilesSpawn: GitSpawn = () => ({
+    const lsFilesSpawn: GitSpawn = async () => ({
       status: 0,
       stdout: "src/Foo.ts\0src/other.ts\0",
       stderr: "",
-      output: [],
-      pid: 0,
-      signal: null,
     });
-    const disposition = buildFileDisposition(
+    const disposition = await buildFileDisposition(
       manifest(["src/foo.ts", "src/other.ts", "batch_1.json"]),
       { root, lsFilesSpawn },
     );

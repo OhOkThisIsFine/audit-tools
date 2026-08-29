@@ -469,6 +469,20 @@ export const GUARDS = [
   { id: 'doc-manifest-gate-test', kind: 'contract-test', impl: 'tests/shared/doc-manifest-gate.test.ts' },
   { id: 'guard-reach-gate-test', kind: 'contract-test', impl: 'tests/shared/guard-reach-gate.test.ts' },
   {
+    id: 'sync-spawn-fold-safety-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/sync-spawn-fold-safety.test.ts',
+    note:
+      'INV-SSF: the fold-reachable modules (shared git helpers, the disposition extractor, the ' +
+      'analyzer-dep installer) spawn children only through the async exec twin — a synchronous child ' +
+      'starves the held file lock’s mtime heartbeat until another process steals the LIVE lock; ' +
+      'the sync twin itself requires a declared timeout at the type level (RunTrackedSyncOptions). ' +
+      'UNCOVERED: the module list is the reviewed reachability claim — a NEW fold-reachable module ' +
+      'must be added to the test by hand; and the remediate-side sync spawns (triage verify ' +
+      'commands, hostHandoff git probes, findingGrounding / contractPipelineGates enumerations) are ' +
+      'outside the scan — tracked in the open-bugs entry',
+  },
+  {
     id: 'submission-no-sizing-identity-test',
     kind: 'contract-test',
     impl: 'tests/shared/submission-contract-has-no-sizing-identity.test.ts',

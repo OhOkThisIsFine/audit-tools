@@ -1223,41 +1223,41 @@ describe("collectStagingFiles", () => {
   // V2 fix: collectStagingFiles now takes the run's manifest explicitly — it
   // stages `manifest ∩ dirty`, never a repo-wide sweep. Non-manifest dirty
   // files are reported as `leftover`, never staged.
-  it("stages only manifest files that are dirty; non-manifest dirty files are reported as leftover, never staged", () => {
+  it("stages only manifest files that are dirty; non-manifest dirty files are reported as leftover, never staged", async () => {
     writeFileSync(join(GIT_DIR, "initial.txt"), "modified");
     writeFileSync(join(GIT_DIR, "new-file.ts"), "code");
     writeFileSync(join(GIT_DIR, "pre-existing-dirt.txt"), "not this run's work");
 
-    const { files, leftover } = collectStagingFiles(GIT_DIR, ["initial.txt", "new-file.ts"]);
+    const { files, leftover } = await collectStagingFiles(GIT_DIR, ["initial.txt", "new-file.ts"]);
     expect(files).toEqual(["initial.txt", "new-file.ts"]);
     expect(leftover).toEqual(["pre-existing-dirt.txt"]);
   });
 
-  it("never sweeps the repo: an empty manifest stages nothing, even with dirty files present", () => {
+  it("never sweeps the repo: an empty manifest stages nothing, even with dirty files present", async () => {
     writeFileSync(join(GIT_DIR, "initial.txt"), "modified");
     writeFileSync(join(GIT_DIR, "new-file.ts"), "code");
 
-    const { files, leftover } = collectStagingFiles(GIT_DIR, []);
+    const { files, leftover } = await collectStagingFiles(GIT_DIR, []);
     expect(files).toEqual([]);
     expect(leftover).toEqual(["initial.txt", "new-file.ts"]);
   });
 
-  it("excludes .audit-tools/ scratch paths even when declared in the manifest", () => {
+  it("excludes .audit-tools/ scratch paths even when declared in the manifest", async () => {
     mkdirSync(join(GIT_DIR, ".audit-tools/remediation"), { recursive: true });
     writeFileSync(join(GIT_DIR, ".audit-tools/remediation", "state.json"), "{}");
 
-    const { files, leftover } = collectStagingFiles(GIT_DIR, [".audit-tools/remediation/state.json"]);
+    const { files, leftover } = await collectStagingFiles(GIT_DIR, [".audit-tools/remediation/state.json"]);
     expect(files).toEqual([]);
     // Hard-excluded paths are dropped outright — never staged, never reported
     // as leftover either (they were never eligible to stage, manifest or not).
     expect(leftover).toEqual([]);
   });
 
-  it("excludes .env / .env.local even when declared in the manifest (secrets safety net)", () => {
+  it("excludes .env / .env.local even when declared in the manifest (secrets safety net)", async () => {
     writeFileSync(join(GIT_DIR, ".env"), "SECRET=x");
     writeFileSync(join(GIT_DIR, ".env.local"), "SECRET=y");
 
-    const { files } = collectStagingFiles(GIT_DIR, [".env", ".env.local"]);
+    const { files } = await collectStagingFiles(GIT_DIR, [".env", ".env.local"]);
     expect(files).toEqual([]);
   });
 
@@ -1265,12 +1265,12 @@ describe("collectStagingFiles", () => {
   // the two paths .gitignore re-includes for tracking) are always eligible to
   // stage when dirty — the blanket .audit-tools/ exclude carves them out via the
   // `deliverables` param, never a hardcoded path literal.
-  it("stages a tool deliverable passed via `deliverables` even though it lives under .audit-tools/, but not a sibling .audit-tools/ path", () => {
+  it("stages a tool deliverable passed via `deliverables` even though it lives under .audit-tools/, but not a sibling .audit-tools/ path", async () => {
     mkdirSync(join(GIT_DIR, ".audit-tools/remediation"), { recursive: true });
     writeFileSync(join(GIT_DIR, ".audit-tools", "remediation-report.md"), "# report");
     writeFileSync(join(GIT_DIR, ".audit-tools/remediation", "state.json"), "{}");
 
-    const { files, leftover } = collectStagingFiles(
+    const { files, leftover } = await collectStagingFiles(
       GIT_DIR,
       [],
       [".audit-tools/remediation-report.md"],
@@ -1279,8 +1279,8 @@ describe("collectStagingFiles", () => {
     expect(leftover).toEqual([]);
   });
 
-  it("returns empty files and leftover when nothing changed", () => {
-    const { files, leftover } = collectStagingFiles(GIT_DIR, ["initial.txt"]);
+  it("returns empty files and leftover when nothing changed", async () => {
+    const { files, leftover } = await collectStagingFiles(GIT_DIR, ["initial.txt"]);
     expect(files).toEqual([]);
     expect(leftover).toEqual([]);
   });
@@ -1289,20 +1289,20 @@ describe("collectStagingFiles", () => {
   // normalizeRepoPath key (forward-slash, ./-stripped, lowercased — win32
   // case-insensitive semantics), while the STAGED path keeps git's original
   // casing (`git add` needs the real on-disk case, not the lowercased key).
-  it("matches a manifest entry differing in case and ./ prefix (normalizeRepoPath key), staging git's ORIGINAL-cased path", () => {
+  it("matches a manifest entry differing in case and ./ prefix (normalizeRepoPath key), staging git's ORIGINAL-cased path", async () => {
     mkdirSync(join(GIT_DIR, "Src"), { recursive: true });
     writeFileSync(join(GIT_DIR, "Src", "Foo.ts"), "code");
 
     // Declared with a ./ prefix and entirely different casing.
-    const { files, leftover } = collectStagingFiles(GIT_DIR, ["./src/foo.ts"]);
+    const { files, leftover } = await collectStagingFiles(GIT_DIR, ["./src/foo.ts"]);
     expect(files).toEqual(["Src/Foo.ts"]); // original case, never "src/foo.ts"
     expect(leftover).toEqual([]);
   });
 
-  it("tests the hard excludes against the NORMALIZED key so casing games cannot bypass them", () => {
+  it("tests the hard excludes against the NORMALIZED key so casing games cannot bypass them", async () => {
     writeFileSync(join(GIT_DIR, ".ENV"), "SECRET=x");
 
-    const { files, leftover } = collectStagingFiles(GIT_DIR, [".ENV"]);
+    const { files, leftover } = await collectStagingFiles(GIT_DIR, [".ENV"]);
     expect(files).toEqual([]);
     expect(leftover).toEqual([]);
   });
@@ -1312,7 +1312,7 @@ describe("collectStagingFiles", () => {
   // case-sibling of a manifest file — exact match wins, ambiguous fold stages
   // nothing extra. Only constructible on a case-sensitive fs (Linux CI); the
   // probe skips on win32/mac where the fs collapses the pair.
-  it("does not stage a case-sibling of a manifest file when both exist (ambiguous fold)", () => {
+  it("does not stage a case-sibling of a manifest file when both exist (ambiguous fold)", async () => {
     writeFileSync(join(GIT_DIR, "CaseA.ts"), "the run's file");
     writeFileSync(join(GIT_DIR, "casea.ts"), "the user's separate file");
     const caseSensitive =
@@ -1320,7 +1320,7 @@ describe("collectStagingFiles", () => {
         .length === 2;
     if (!caseSensitive) return; // fs collapsed the pair — scenario impossible here
 
-    const { files, leftover } = collectStagingFiles(GIT_DIR, ["CaseA.ts"]);
+    const { files, leftover } = await collectStagingFiles(GIT_DIR, ["CaseA.ts"]);
     expect(files).toEqual(["CaseA.ts"]); // exact tier only
     expect(leftover).toEqual(["casea.ts"]); // never admitted via the fold
   });

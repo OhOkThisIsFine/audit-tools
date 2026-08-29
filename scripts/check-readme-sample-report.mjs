@@ -43,8 +43,8 @@ export function sliceSection(lines, heading) {
  * verbatim renderer line; a renderer heading change reds this gate instead of
  * silently drifting the README.
  */
-export function renderSampleExcerpt() {
-  const { auditReport } = buildSampleAuditBundle([SAMPLE_REPORT_FINDING]);
+export async function renderSampleExcerpt() {
+  const { auditReport } = await buildSampleAuditBundle([SAMPLE_REPORT_FINDING]);
   const lines = auditReport.split('\n');
   const h1 = lines.indexOf('# Audit Report');
   if (h1 === -1) {
@@ -66,14 +66,14 @@ export function renderSampleExcerpt() {
 }
 
 /** The exact README block, markers included. */
-export function renderReadmeBlock() {
+export async function renderReadmeBlock() {
   return [
     README_BEGIN,
     '',
     '*(Illustrative excerpt — rendered by the real report renderer from a fabricated sample repo and one fixture finding; the cited src/api/auth.ts path belongs to that fabricated repo, not to this repository. A real report carries more sections between Summary and Findings.)*',
     '',
     '```text',
-    renderSampleExcerpt(),
+    await renderSampleExcerpt(),
     '```',
     '',
     README_END,
@@ -81,7 +81,7 @@ export function renderReadmeBlock() {
 }
 
 /** Replace the README's marked block. Pure — returns the new file text. */
-export function applyToReadme(readmeText) {
+export async function applyToReadme(readmeText) {
   const begin = readmeText.indexOf(README_BEGIN);
   const end = readmeText.indexOf(README_END);
   if (begin === -1 || end === -1 || end < begin) {
@@ -90,7 +90,9 @@ export function applyToReadme(readmeText) {
     );
   }
   return (
-    readmeText.slice(0, begin) + renderReadmeBlock() + readmeText.slice(end + README_END.length)
+    readmeText.slice(0, begin) +
+    (await renderReadmeBlock()) +
+    readmeText.slice(end + README_END.length)
   );
 }
 
@@ -103,7 +105,7 @@ if (invokedDirectly) {
   try {
     const readmePath = join(ROOT, TARGET);
     const readme = readFileSync(readmePath, 'utf8');
-    const next = applyToReadme(readme);
+    const next = await applyToReadme(readme);
 
     if (write) {
       if (next !== readme) writeFileSync(readmePath, next);

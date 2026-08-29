@@ -132,23 +132,23 @@ test("resolveExecArgv tolerates an empty argv", () => {
 // ── runTracked result fields ──────────────────────────────────────────────────
 
 test("runTracked result includes cwd when option is provided", () => {
-  const result = runTracked(["node", "--version"], { cwd: process.cwd() });
+  const result = runTracked(["node", "--version"], { cwd: process.cwd(), timeout: 30_000 });
   expect(result.cwd).toBe(process.cwd());
 });
 
 test("runTracked result has cwd undefined when no cwd option is passed", () => {
-  const result = runTracked(["node", "--version"]);
+  const result = runTracked(["node", "--version"], { timeout: 30_000 });
   expect(result.cwd).toBe(undefined);
 });
 
 test("runTracked result includes duration_ms as a non-negative number", () => {
-  const result = runTracked(["node", "--version"]);
+  const result = runTracked(["node", "--version"], { timeout: 30_000 });
   expect(typeof result.duration_ms).toBe("number");
   expect(result.duration_ms >= 0).toBeTruthy();
 });
 
 test("runTracked empty-argv early-return path includes duration_ms of 0", () => {
-  const result = runTracked([]);
+  const result = runTracked([], { timeout: 30_000 });
   expect(result.duration_ms).toBe(0);
   expect(result.cwd).toBe(undefined);
 });
@@ -178,6 +178,7 @@ test("runTracked child does not inherit the wrapper caller-cwd stamp", () => {
   const script = "process.stdout.write(String(process.env.AUDIT_TOOLS_CALLER_CWD))";
   const result = runTracked(["node", "-e", script], {
     env: { ...process.env, AUDIT_TOOLS_CALLER_CWD: "C:/driver" },
+    timeout: 30_000,
   });
   expect(result.status, `node exited non-zero: ${result.stderr}`).toBe(0);
   expect(result.stdout).toBe("undefined");

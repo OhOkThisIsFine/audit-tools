@@ -73,12 +73,12 @@ export function gitHistoryInScopeKeys(
   return keys;
 }
 
-export function mineGitHistoryArtifact(
+export async function mineGitHistoryArtifact(
   root: string,
   repoManifest: RepoManifest,
   disposition?: FileDisposition,
-): GitHistory {
-  const history = mineGitHistory(root);
+): Promise<GitHistory> {
+  const history = await mineGitHistory(root);
   const inScope = new Set<string>(gitHistoryInScopeKeys(repoManifest, disposition));
 
   const known = (path: string): boolean => inScope.has(graphLookupKey(path));

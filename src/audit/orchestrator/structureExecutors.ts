@@ -49,7 +49,7 @@ export async function runStructureExecutor(
   const externalAnalyzerResults = bundle.external_analyzer_results;
   const disposition =
     bundle.file_disposition ??
-    buildFileDisposition(bundle.repo_manifest, root ? { root } : {});
+    (await buildFileDisposition(bundle.repo_manifest, root ? { root } : {}));
   const unitManifest = buildUnitManifest(bundle.repo_manifest, disposition);
   // C2 incremental graph-build: feed the prior per-file edge cache and collect a
   // refreshed one. buildGraphBundle reuses each file's cached contribution while
@@ -110,7 +110,7 @@ export async function runStructureExecutor(
   // step here, but its output is a pure function of (HEAD commit graph, in-scope
   // file set). When neither moved since the carried baseline, REUSE the prior
   // `git_history` instead of re-spawning git — any drift re-mines (fail-safe).
-  const gitHistoryHead = root ? headCommit(root) : null;
+  const gitHistoryHead = root ? await headCommit(root) : null;
   const gitHistoryScopeKey = deriveGitHistoryScopeKey(
     bundle.repo_manifest,
     disposition,
@@ -127,7 +127,7 @@ export async function runStructureExecutor(
     reuseGitHistory && bundle.git_history
       ? bundle.git_history
       : root
-        ? mineGitHistoryArtifact(root, bundle.repo_manifest, disposition)
+        ? await mineGitHistoryArtifact(root, bundle.repo_manifest, disposition)
         : { co_change: [], churn: [], authorship: [] };
   // Record a refreshed baseline only when HEAD is known (git available). Reuse
   // keeps the prior baseline (head/scope already matched); a re-mine stamps the

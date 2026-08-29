@@ -218,9 +218,9 @@ export interface ResolveAuditScopeInput {
  * file set from the repo manifest + disposition (the same lookup the graph
  * extractor uses) and the dependency graph from the bundle.
  */
-export function resolveAuditScope(
+export async function resolveAuditScope(
   input: ResolveAuditScopeInput,
-): AuditScopeManifest {
+): Promise<AuditScopeManifest> {
   const since = input.since?.trim();
   if (!since) {
     return fullAuditScope(input.budget);
@@ -231,13 +231,13 @@ export function resolveAuditScope(
       `--since '${since}' was ignored: no repository root was available, so a full audit ran.`,
     );
   }
-  if (!isGitRepo(input.root)) {
+  if (!(await isGitRepo(input.root))) {
     return fullAuditScope(
       input.budget,
       `--since '${since}' was ignored: '${input.root}' is not a git repository, so a full audit ran.`,
     );
   }
-  if (!gitRefExists(input.root, since)) {
+  if (!(await gitRefExists(input.root, since))) {
     return fullAuditScope(
       input.budget,
       `--since '${since}' could not be resolved to a commit, so a full audit ran.`,
@@ -255,7 +255,7 @@ export function resolveAuditScope(
 
   return computeAuditScope({
     since,
-    changed: changedFiles(input.root, since),
+    changed: await changedFiles(input.root, since),
     includedFiles,
     graphBundle: input.bundle.graph_bundle,
     budget: input.budget,

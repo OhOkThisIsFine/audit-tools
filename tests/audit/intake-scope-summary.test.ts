@@ -24,7 +24,7 @@ describe("detectMisScopeSmells: no-.git root whose ancestor is a git repo", () =
     const root = join(base, "sub", "leaf");
     await mkdir(root, { recursive: true });
 
-    const smells = detectMisScopeSmells(root);
+    const smells = await detectMisScopeSmells(root);
     const ancestorSmells = smells.filter((s) => s.includes("git repository"));
     expect(ancestorSmells.length, `smells: ${JSON.stringify(smells)}`).toBe(1);
     // The smell names the ancestor's absolute path.
@@ -37,7 +37,7 @@ test("detectMisScopeSmells: root with its own .git → no smell", async () => {
   onTestFinished(async () => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, ".git"), { recursive: true });
 
-  const smells = detectMisScopeSmells(root);
+  const smells = await detectMisScopeSmells(root);
   expect(smells.length, `smells: ${JSON.stringify(smells)}`).toBe(0);
 });
 
@@ -61,7 +61,7 @@ test("detectMisScopeSmells: workspace-member root → exactly one smell naming t
     JSON.stringify({ name: "member-pkg" }),
   );
 
-  const smells = detectMisScopeSmells(root);
+  const smells = await detectMisScopeSmells(root);
   const wsSmells = smells.filter((s) => s.includes("workspace member"));
   expect(wsSmells.length, `smells: ${JSON.stringify(smells)}`).toBe(1);
   expect(wsSmells[0].includes(parent), wsSmells[0]).toBeTruthy();
@@ -79,7 +79,7 @@ test("detectMisScopeSmells: parent has package.json but no workspaces → no wor
   await mkdir(root, { recursive: true });
   await writeFile(join(root, "package.json"), JSON.stringify({ name: "member" }));
 
-  const smells = detectMisScopeSmells(root);
+  const smells = await detectMisScopeSmells(root);
   expect(smells.filter((s) => s.includes("workspace member")).length, `smells: ${JSON.stringify(smells)}`).toBe(0);
 });
 
@@ -90,7 +90,7 @@ test("detectMisScopeSmells: root with no package.json → no workspace smell", a
   const root = join(parent, "member");
   await mkdir(root, { recursive: true });
 
-  const smells = detectMisScopeSmells(root);
+  const smells = await detectMisScopeSmells(root);
   expect(smells.filter((s) => s.includes("workspace member")).length, `smells: ${JSON.stringify(smells)}`).toBe(0);
 });
 
@@ -125,7 +125,7 @@ test("detectMisScopeSmells: nested workspace member (packages/ subdirectory) →
     JSON.stringify({ name: "my-member-pkg" }),
   );
 
-  const smells = detectMisScopeSmells(root);
+  const smells = await detectMisScopeSmells(root);
   const wsSmells = smells.filter((s) => s.includes("workspace member"));
   expect(wsSmells.length, `smells: ${JSON.stringify(smells)}`).toBe(1);
   // The smell must reference the monorepo root (the ancestor with workspaces)
@@ -156,7 +156,7 @@ test("detectMisScopeSmells: nested workspace member under apps/ subdirectory →
     JSON.stringify({ name: "my-app" }),
   );
 
-  const smells = detectMisScopeSmells(root);
+  const smells = await detectMisScopeSmells(root);
   const wsSmells = smells.filter((s) => s.includes("workspace member"));
   expect(wsSmells.length, `smells: ${JSON.stringify(smells)}`).toBe(1);
   expect(wsSmells[0].includes(monorepoRoot), `expected monorepo root '${monorepoRoot}' in smell: ${wsSmells[0]}`).toBeTruthy();

@@ -59,9 +59,9 @@ export const SAMPLE_REPORT_FINDING: Finding = {
  * SAMPLE_REPORT_FINDING through it so the rendered report exercises the
  * per-finding template.
  */
-export function buildSampleAuditBundle(findings: Finding[] = []) {
+export async function buildSampleAuditBundle(findings: Finding[] = []) {
   const repoManifest = buildRepoManifest("sample-repo", SAMPLE_REPO_FILES);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const unitManifest = buildUnitManifest(repoManifest, disposition);
   const surfaceManifest = buildSurfaceManifest(repoManifest, disposition);
   const criticalFlows = buildCriticalFlowManifest(
@@ -152,7 +152,7 @@ export async function runSample(argv: string[] = process.argv): Promise<void> {
     runtimeValidationReport,
     sampleResults,
     auditReport,
-  } = buildSampleAuditBundle();
+  } = await buildSampleAuditBundle();
   const auditState = deriveAuditState({
     repo_manifest: repoManifest,
     file_disposition: disposition,

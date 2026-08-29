@@ -84,7 +84,7 @@ test("MNT-fe5e6061: installToCache routes install log through injected log funct
     const captured: string[] = [];
     const log = (...args: unknown[]) => { captured.push(args.map(String).join(" ")); };
 
-    const run = (_argv: string[], cwd: string): RunTrackedResult => {
+    const run = async (_argv: string[], cwd: string): Promise<RunTrackedResult> => {
       const pkgDir = join(cwd, "node_modules", "typescript");
       mkdirSync(pkgDir, { recursive: true });
       writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "typescript" }));
@@ -95,7 +95,7 @@ test("MNT-fe5e6061: installToCache routes install log through injected log funct
     const consoleCapture: string[] = [];
     console.error = (...args: unknown[]) => { consoleCapture.push(args.map(String).join(" ")); };
     try {
-      const result = installToCache("typescript@5.8.0", { cacheRoot, run, log });
+      const result = await installToCache("typescript@5.8.0", { cacheRoot, run, log });
       expect(result.ok).toBe(true);
       expect(captured.some((l) => l.includes("[analyzerDeps]") && l.includes("installing")), `expected install-start in injected log; got: ${JSON.stringify(captured)}`).toBeTruthy();
       expect(captured.some((l) => l.includes("[analyzerDeps]") && l.includes("installed")), `expected install-done in injected log; got: ${JSON.stringify(captured)}`).toBeTruthy();
@@ -111,13 +111,13 @@ test("MNT-fe5e6061: installToCache routes failure log through injected log funct
     const captured: string[] = [];
     const log = (...args: unknown[]) => { captured.push(args.map(String).join(" ")); };
 
-    const run = (): RunTrackedResult => ({ status: 1, stdout: "", stderr: "E404 not found", argv: [], duration_ms: 0 });
+    const run = async (): Promise<RunTrackedResult> => ({ status: 1, stdout: "", stderr: "E404 not found", argv: [], duration_ms: 0 });
 
     const origError = console.error;
     const consoleCapture: string[] = [];
     console.error = (...args: unknown[]) => { consoleCapture.push(args.map(String).join(" ")); };
     try {
-      const result = installToCache("typescript@5.8.0", { cacheRoot, run, log });
+      const result = await installToCache("typescript@5.8.0", { cacheRoot, run, log });
       expect(result.ok).toBe(false);
       expect(captured.some((l) => l.includes("[analyzerDeps]") && l.includes("failed")), `expected failure log in injected log; got: ${JSON.stringify(captured)}`).toBeTruthy();
       expect(!consoleCapture.some((l) => l.includes("[analyzerDeps]")), `console.error should not receive analyzerDeps output when log is injected`).toBeTruthy();

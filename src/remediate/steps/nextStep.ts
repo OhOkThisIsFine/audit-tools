@@ -969,7 +969,7 @@ export async function recoverIngestHostResults(options: {
       `No remediation state at ${artifactsDir} — there is nothing to ingest.`,
     );
   }
-  const headBeforeTests = headCommit(root);
+  const headBeforeTests = await headCommit(root);
   const requiredTestVerdicts = await precomputeRecoveryTestVerdicts({
     root,
     artifactsDir,
@@ -990,7 +990,7 @@ export async function recoverIngestHostResults(options: {
         `No remediation state at ${artifactsDir} — there is nothing to ingest.`,
       );
     }
-    const headNow = headCommit(root);
+    const headNow = await headCommit(root);
     if (headNow !== headBeforeTests) {
       ingested = {
         accepted_count: 0,
@@ -1060,7 +1060,7 @@ async function buildImplementDispatchStep(ctx: {
     return { kind: "transition", state: persistableState };
   }
 
-  const baselineCommit = headCommit(root);
+  const baselineCommit = await headCommit(root);
   if (!baselineCommit) {
     throw new Error("Cannot prepare remediation host work without a repository HEAD commit.");
   }
@@ -1417,7 +1417,7 @@ async function handlePendingExtractedPlan(
   if (!existing.run_start_dirty) {
     existing = {
       ...existing,
-      run_start_dirty: [...stagedAndUntracked(root)].sort(),
+      run_start_dirty: [...(await stagedAndUntracked(root))].sort(),
     };
   }
   // Discarded on mismatch, so the gate re-asks rather than replaying operator

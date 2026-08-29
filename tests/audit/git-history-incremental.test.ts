@@ -72,8 +72,8 @@ function repoManifestFor(...paths: string[]): RepoManifest {
   };
 }
 
-function requireHead(root: string): string {
-  const head = headCommit(root);
+async function requireHead(root: string): Promise<string> {
+  const head = await headCommit(root);
   if (head === null) {
     throw new Error(`fixture repository at ${root} has no HEAD`);
   }
@@ -140,7 +140,7 @@ test("structure executor records a git-history baseline (head + scope_key)", asy
     const result = await runStructureExecutor({ repo_manifest: repoManifest }, dir);
     const baseline = readGitHistoryBaseline(result.updated.artifact_metadata);
     expect(baseline, "baseline recorded").toBeTruthy();
-    expect(baseline.head).toBe(headCommit(dir));
+    expect(baseline.head).toBe(await headCommit(dir));
     expect(baseline.scope_key).toBe(deriveGitHistoryScopeKey(repoManifest));
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -152,7 +152,7 @@ test("structure executor REUSES the prior mine when HEAD + scope are unchanged",
   try {
     await commit(dir, { "a.ts": "export const a=1;", "b.ts": "export const b=1;" });
     const repoManifest = await buildRepoManifestFromFs({ root: dir });
-    const head = requireHead(dir);
+    const head = await requireHead(dir);
     // Bundle carries a sentinel prior git_history + a baseline matching live state.
     const bundle = {
       repo_manifest: repoManifest,
@@ -173,7 +173,7 @@ test("structure executor RE-MINES when HEAD moved (new commit)", async () => {
   const dir = await makeRepo();
   try {
     await commit(dir, { "a.ts": "export const a=1;", "b.ts": "export const b=1;" });
-    const staleHead = requireHead(dir);
+    const staleHead = await requireHead(dir);
     // A second commit moves HEAD, so the carried baseline is stale.
     await commit(dir, { "a.ts": "export const a=2;", "b.ts": "export const b=2;" });
     const repoManifest = await buildRepoManifestFromFs({ root: dir });
@@ -188,7 +188,7 @@ test("structure executor RE-MINES when HEAD moved (new commit)", async () => {
     const result = await runStructureExecutor(bundle, dir);
     expect(result.updated.git_history, "moved HEAD ⇒ re-mined, sentinel discarded").not.toEqual(SENTINEL);
     // And the refreshed baseline tracks the new HEAD.
-    expect(readGitHistoryBaseline(result.updated.artifact_metadata).head).toBe(headCommit(dir));
+    expect(readGitHistoryBaseline(result.updated.artifact_metadata).head).toBe(await headCommit(dir));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -199,7 +199,7 @@ test("structure executor RE-MINES when the in-scope file set changed (same HEAD)
   try {
     await commit(dir, { "a.ts": "export const a=1;", "b.ts": "export const b=1;" });
     const repoManifest = await buildRepoManifestFromFs({ root: dir });
-    const head = requireHead(dir);
+    const head = await requireHead(dir);
     const bundle = {
       repo_manifest: repoManifest,
       git_history: SENTINEL,

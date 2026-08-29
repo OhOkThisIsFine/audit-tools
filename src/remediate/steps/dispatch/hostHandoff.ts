@@ -1495,20 +1495,21 @@ function isAuditToolsArtifactPath(path: string): boolean {
  * Fails CLOSED, like every other corroboration here: a git that cannot answer
  * refuses the claim rather than admitting it.
  */
-function corroborateNoChangeClaim(params: {
+async function corroborateNoChangeClaim(params: {
   readonly root: string;
   readonly workItem: RemediationHostWorkItem;
   /** Repo-relative paths whose movement is already accounted for. */
   readonly excusedPaths: ReadonlySet<string>;
-}):
+}): Promise<
   | { readonly ok: true }
   | {
       readonly ok: false;
       readonly code: RemediationHostIngestIssue["code"];
       readonly message: string;
-    } {
+    }
+> {
   const { root, workItem, excusedPaths } = params;
-  if (!isGitRepo(root)) return { ok: true };
+  if (!(await isGitRepo(root))) return { ok: true };
   const baseline = workItem.baseline_commit;
   if (!gitCommitExists(root, baseline)) {
     return {
@@ -2006,8 +2007,8 @@ export async function prepareRemediationHostHandoff(params: {
   if (existingRecord && existingRecord.run_id !== params.runId) {
     throw new Error("Trusted remediation host handoff belongs to another run");
   }
-  if (!existingRecord && isGitRepo(paths.root)) {
-    const currentHead = headCommit(paths.root);
+  if (!existingRecord && (await isGitRepo(paths.root))) {
+    const currentHead = await headCommit(paths.root);
     if (currentHead !== params.baselineCommit) {
       throw new Error(
         "Remediation host baselineCommit must equal the repository HEAD when the workload is created",
@@ -2183,7 +2184,7 @@ export async function ingestRemediationHostResults(params: {
   // bound block fails the workload parse and its commands never run.
   issues.push(...planBlockIssues(paths.root, state));
 
-  if (isGitRepo(paths.root) && !state.host_handoff) {
+  if ((await isGitRepo(paths.root)) && !state.host_handoff) {
     issues.push({
       code: "trusted_binding_missing",
       message:
@@ -2247,7 +2248,7 @@ export async function ingestRemediationHostResults(params: {
   // claim under test. That branch is REFUSED for both result and decision
   // documents rather than admitted on the attestation alone.
   const canCorroborate =
-    state.host_handoff !== undefined || isGitRepo(paths.root);
+    state.host_handoff !== undefined || (await isGitRepo(paths.root));
   for (const workItem of effectiveWorkload.work_items) {
     const pendingItems = workItem.finding_ids.filter(
       (findingId) => nextState.items[findingId]?.status === "pending",
@@ -2300,7 +2301,7 @@ export async function ingestRemediationHostResults(params: {
           });
           continue;
         }
-        const noChange = corroborateNoChangeClaim({
+        const noChange = await corroborateNoChangeClaim({
           root: paths.root,
           workItem,
           // Ground truth only: pre-existing dirt plus the edit surface this run

@@ -589,10 +589,15 @@ export {
 } from "./reReview/projectionDiff.js";
 
 // Tooling: command execution
-export type { RunTrackedOptions, RunTrackedResult } from "./tooling/exec.js";
+export type {
+  RunTrackedOptions,
+  RunTrackedSyncOptions,
+  RunTrackedResult,
+} from "./tooling/exec.js";
 export {
   runTracked,
   runTrackedAsync,
+  TRACKED_CHILD_DEADLINE_MS,
   spawnSyncHidden,
   spawnHidden,
   resolveExecArgv,

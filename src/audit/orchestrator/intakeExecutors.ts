@@ -37,10 +37,10 @@ function walkAncestorDirs(
 }
 
 /** Detect signals that the resolved audit root may be the wrong directory. */
-export function detectMisScopeSmells(root: string): string[] {
+export async function detectMisScopeSmells(root: string): Promise<string[]> {
   const smells: string[] = [];
 
-  if (!isGitRepo(root)) {
+  if (!(await isGitRepo(root))) {
     walkAncestorDirs(root, (ancestor) => {
       if (existsSync(join(ancestor, ".git"))) {
         smells.push(
@@ -98,7 +98,7 @@ export async function runIntakeExecutor(
     ignore,
     hash_files: true,
   });
-  const disposition = buildFileDisposition(repoManifest, { root });
+  const disposition = await buildFileDisposition(repoManifest, { root });
   const auditableCount = disposition.files.filter(
     (file) => !isAuditExcludedStatus(file.status),
   ).length;
@@ -112,8 +112,8 @@ export async function runIntakeExecutor(
   const scopeSummary: ScopeSummary = {
     repo_root: root,
     auditable_file_count: auditableCount,
-    git_available: isGitRepo(root),
-    mis_scope_smells: detectMisScopeSmells(root),
+    git_available: await isGitRepo(root),
+    mis_scope_smells: await detectMisScopeSmells(root),
   };
 
   const artifactsWritten = ["repo_manifest.json", "file_disposition.json"];

@@ -14,11 +14,14 @@
 
 ## Immediate next
 
-**Land the decided sync-children migration** (owner, 2026-08-28, CX-02 record §6): move
-`runFirstAvailableCommand` onto `runTrackedAsync` with a 120 s deadline so no synchronous child
-inside the hold can outlive the lock heartbeat — remediate already migrated, audit did not. Home:
-the "Synchronous child processes reachable from the audit fold carry NO timeout" entry in
-[`open-bugs.md`](backlog/open-bugs.md).
+**Close the remediate half of the sync-children hazard.** The audit half is DONE: every
+audit-fold-reachable spawn runs on the async exec twin with the shared 120 s deadline, the sync
+twin requires a declared timeout, and INV-SSF
+(`tests/shared/sync-spawn-fold-safety.test.ts`) pins the three fold-reachable modules. What
+remains: the remediate ingestion path's sync git probes run while the state lock is held, the
+triage reverify runs arbitrary commands through `spawnSync` unbounded, and the
+grounding/contract-gate enumerations spawn git synchronously with no timeout. Home: the
+"Remediate-side synchronous children" entry in [`open-bugs.md`](backlog/open-bugs.md).
 
 
 ## Deliberate state, not bugs
@@ -56,6 +59,6 @@ the "Synchronous child processes reachable from the audit fold carry NO timeout"
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ Synchronous child processes reachable from the audit fold carry NO timeout, so one hung binary can outlive the lock heartbeat (2026-08-28, medium, friction: tool_should_decide). · [`open-bugs.md`](backlog/open-bugs.md)
+- ▶ Remediate-side synchronous children still run under (or near) the state lock with no bound (2026-08-29, medium, friction: tool_should_decide). · [`open-bugs.md`](backlog/open-bugs.md)
 
 <!-- END GENERATED ROADMAP -->

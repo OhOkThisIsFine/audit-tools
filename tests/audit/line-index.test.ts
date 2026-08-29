@@ -163,7 +163,7 @@ test("buildLineIndex keys round-trip against coverage.files[].path (same repo_ma
     const weirdPath = "src/Weird Dir/File Name.TS";
     writeLines(dir, weirdPath, 3);
     const manifest = makeManifest([weirdPath]);
-    const disposition = buildFileDisposition(manifest);
+    const disposition = await buildFileDisposition(manifest);
     const unitManifest = buildUnitManifest(manifest, disposition);
     const coverage = initializeCoverageFromPlan(manifest, unitManifest, disposition);
 

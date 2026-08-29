@@ -139,7 +139,7 @@ describe("mergeBlocksSharingFiles — INV-remediate-phases-02: dep-serialized bl
     };
   }
 
-  it("does not merge two blocks ordered by dependency even when they share a file", () => {
+  it("does not merge two blocks ordered by dependency even when they share a file", async () => {
     const findings = [
       mkFinding("F1", ["src/shared.ts"]),
       mkFinding("F2", ["src/shared.ts"]),
@@ -155,7 +155,7 @@ describe("mergeBlocksSharingFiles — INV-remediate-phases-02: dep-serialized bl
     expect(ids).toEqual(["B1", "B2"]);
   });
 
-  it("A3: two independent parallel-safe blocks sharing a file stay SEPARATE, each flagged", () => {
+  it("A3: two independent parallel-safe blocks sharing a file stay SEPARATE, each flagged", async () => {
     const findings = [
       mkFinding("F1", ["src/shared.ts"]),
       mkFinding("F2", ["src/shared.ts"]),
@@ -170,7 +170,7 @@ describe("mergeBlocksSharingFiles — INV-remediate-phases-02: dep-serialized bl
     for (const b of merged) expect(b.cofile_parallel_safe).toBe(true);
   });
 
-  it("singleton block is returned unchanged", () => {
+  it("singleton block is returned unchanged", async () => {
     const findings = [mkFinding("F1", ["src/a.ts"])];
     const blocks: RemediationBlock[] = [
       { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
@@ -201,7 +201,7 @@ describe("buildCoverageLedger — INV-remediate-phases-04: every source finding 
     };
   }
 
-  it("accounts for all five disposition cases without overlap", () => {
+  it("accounts for all five disposition cases without overlap", async () => {
     const sourceFindings = [
       mkFinding("PLANNED"),
       mkFinding("FOLDED"),
@@ -256,7 +256,7 @@ describe("buildCoverageLedger — INV-remediate-phases-04: every source finding 
     expect(byId["DROPPED-PH"].disposition).toBe("dropped_phantom_paths");
   });
 
-  it("an empty source set produces a ledger with all counts zero", () => {
+  it("an empty source set produces a ledger with all counts zero", async () => {
     const ledger = buildCoverageLedger({
       planId: "P-EMPTY",
       sourceFindings: [],
@@ -394,7 +394,7 @@ describe("collectStagingFiles — INV-remediate-phases-07: exclusion patterns", 
     await rm(GIT_DIR, { recursive: true, force: true });
   });
 
-  it("excludes all .audit-tools/ subtree paths (both audit and remediation)", () => {
+  it("excludes all .audit-tools/ subtree paths (both audit and remediation)", async () => {
     mkdirSync(join(GIT_DIR, ".audit-tools", "audit"), { recursive: true });
     mkdirSync(join(GIT_DIR, ".audit-tools", "remediation"), { recursive: true });
     writeFileSync(join(GIT_DIR, ".audit-tools", "audit", "audit-findings.json"), "{}");
@@ -403,7 +403,7 @@ describe("collectStagingFiles — INV-remediate-phases-07: exclusion patterns", 
 
     // V2 signature: staging is manifest-scoped; declaring the .audit-tools
     // paths in the manifest must STILL not stage them (hard exclude wins).
-    const { files } = collectStagingFiles(GIT_DIR, [
+    const { files } = await collectStagingFiles(GIT_DIR, [
       "src.ts",
       ".audit-tools/audit/audit-findings.json",
       ".audit-tools/remediation/state.json",
@@ -412,14 +412,14 @@ describe("collectStagingFiles — INV-remediate-phases-07: exclusion patterns", 
     expect(files.some((f) => f.includes(".audit-tools"))).toBe(false);
   });
 
-  it("excludes .env and .env.* credential files", () => {
+  it("excludes .env and .env.* credential files", async () => {
     writeFileSync(join(GIT_DIR, ".env"), "SECRET=x");
     writeFileSync(join(GIT_DIR, ".env.local"), "LOCAL_SECRET=y");
     writeFileSync(join(GIT_DIR, ".env.production"), "PROD=z");
     writeFileSync(join(GIT_DIR, "src.ts"), "code");
 
     // Declared in the manifest on purpose — the .env* hard exclude must win.
-    const { files } = collectStagingFiles(GIT_DIR, [
+    const { files } = await collectStagingFiles(GIT_DIR, [
       "src.ts",
       ".env",
       ".env.local",
@@ -431,8 +431,8 @@ describe("collectStagingFiles — INV-remediate-phases-07: exclusion patterns", 
     expect(files).not.toContain(".env.production");
   });
 
-  it("returns empty when nothing is modified", () => {
-    const { files, leftover } = collectStagingFiles(GIT_DIR, ["src.ts"]);
+  it("returns empty when nothing is modified", async () => {
+    const { files, leftover } = await collectStagingFiles(GIT_DIR, ["src.ts"]);
     expect(files).toEqual([]);
     expect(leftover).toEqual([]);
   });
@@ -655,7 +655,7 @@ describe("groundAffectedFiles — TST-d1399aa3: dedicated unit tests for phantom
     await rm(TEST_DIR, { recursive: true, force: true });
   });
 
-  it("strips phantom paths and preserves real paths in place", () => {
+  it("strips phantom paths and preserves real paths in place", async () => {
     const findings = [
       {
         id: "F1",
@@ -681,7 +681,7 @@ describe("groundAffectedFiles — TST-d1399aa3: dedicated unit tests for phantom
     expect(result.zeroRealPathFindingIds).not.toContain("F1");
   });
 
-  it("records finding as zero-real-path when all paths are phantom", () => {
+  it("records finding as zero-real-path when all paths are phantom", async () => {
     const findings = [
       {
         id: "F2",
@@ -705,7 +705,7 @@ describe("groundAffectedFiles — TST-d1399aa3: dedicated unit tests for phantom
     expect(result.zeroRealPathFindingIds).toContain("F2");
   });
 
-  it("leaves findings with no affected_files untouched (empty-files is legitimate)", () => {
+  it("leaves findings with no affected_files untouched (empty-files is legitimate)", async () => {
     const findings = [
       {
         id: "F3",

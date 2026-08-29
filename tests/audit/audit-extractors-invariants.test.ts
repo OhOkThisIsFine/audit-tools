@@ -70,7 +70,7 @@ test("INV-02: extractors emit edges that conform to shared GraphEdge shape", asy
     { path: "package.json", size_bytes: 100 },
     { path: "src/cli.ts", size_bytes: 100 },
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition, {
     fileContents: {
       "src/api/auth.ts": "import { createSession } from '../lib/session.ts';\n",
@@ -271,7 +271,7 @@ test("INV-06: buildFileDisposition surfaces root_ignored guard branch", async ()
     signal: null,
   });
 
-  const result = buildFileDisposition(repoManifest, {
+  const result = await buildFileDisposition(repoManifest, {
     root: "/fake/root",
     spawn: fakeSpawn,
   });
@@ -306,7 +306,7 @@ test("INV-06: buildFileDisposition surfaces share_exceeded guard branch", async 
     signal: null,
   });
 
-  const result = buildFileDisposition(repoManifest, {
+  const result = await buildFileDisposition(repoManifest, {
     root: "/fake/root",
     spawn: fakeSpawn,
   });
@@ -376,7 +376,7 @@ test("INV-09: heuristicAuthSession edges connect only auth-named to session-name
     { path: "src/user/profile.ts", size_bytes: 10 },     // unrelated (must NOT be linked)
     { path: "src/auth/session.ts", size_bytes: 10 },     // contains both "auth" and "session" in path
   ]);
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition);
 
   const authSessionEdges = graph.graphs.heuristics.filter(

@@ -4,6 +4,7 @@ import {
   admitLocalSpawn,
   resolveExecArgv,
   runTrackedAsync,
+  TRACKED_CHILD_DEADLINE_MS,
   type AnalyzerConsentDecisions,
 } from "audit-tools/shared";
 
@@ -118,13 +119,9 @@ function resolveCandidate(
   return null;
 }
 
-/**
- * Deadline for one local-tooling child. These spawns run inside the
- * artifact-tree lock's hold, so a child that never exits must not be able to
- * hang the fold: `runTrackedAsync` classifies the miss as `ETIMEDOUT` and
- * escalates SIGTERM to SIGKILL so the deadline is terminal.
- */
-const LOCAL_COMMAND_DEADLINE_MS = 120_000;
+// The single fold-child deadline lives at the shared exec boundary
+// (`TRACKED_CHILD_DEADLINE_MS`): these spawns run inside the artifact-tree
+// lock's hold, and a child that never exits must not be able to hang the fold.
 
 /**
  * Run the first resolvable, ADMITTED candidate. Admission is the shared
@@ -179,7 +176,7 @@ export async function runFirstAvailableCommand(
       {
         cwd: root,
         encoding: "utf8",
-        timeout: LOCAL_COMMAND_DEADLINE_MS,
+        timeout: TRACKED_CHILD_DEADLINE_MS,
       },
     );
 

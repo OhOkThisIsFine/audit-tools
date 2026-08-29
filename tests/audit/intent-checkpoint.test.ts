@@ -98,24 +98,24 @@ function validCheckpoint(): IntentCheckpoint {
 
 // ── Obligation reachability ─────────────────────────────────────────────────
 
-await test("intent_checkpoint_current: missing when the checkpoint is absent", () => {
+await test("intent_checkpoint_current: missing when the checkpoint is absent", async () => {
   expect(obligationState(readyForIntentBundle(), "intent_checkpoint_current")).toBe("missing");
 });
 
-await test("intent_checkpoint_current: satisfied once the checkpoint is present", () => {
+await test("intent_checkpoint_current: satisfied once the checkpoint is present", async () => {
   const bundle = { ...readyForIntentBundle(), intent_checkpoint: validCheckpoint() };
   expect(obligationState(bundle, "intent_checkpoint_current")).toBe("satisfied");
 });
 
 // ── Priority ordering: after design_assessment_current, before design_review_contract_completed ───────
 
-await test("decideNextStep selects intent_checkpoint after design assessment, before design review", () => {
+await test("decideNextStep selects intent_checkpoint after design assessment, before design review", async () => {
   const decision = decideNextStep(readyForIntentBundle());
   expect(decision.selected_obligation).toBe("intent_checkpoint_current");
   expect(decision.selected_executor).toBe("intent_checkpoint_executor");
 });
 
-await test("decideNextStep advances to charter_extraction once the checkpoint exists", () => {
+await test("decideNextStep advances to charter_extraction once the checkpoint exists", async () => {
   // Phase C: the charter-extraction pass sits between the checkpoint and the
   // design-review passes (it needs the confirmed ceiling). Once charter extraction
   // is satisfied (omitted at a shallow ceiling), design_review_contract is next.
@@ -129,7 +129,7 @@ await test("decideNextStep advances to charter_extraction once the checkpoint ex
 
 // ── Deterministic scope pre-digest ──────────────────────────────────────────
 
-await test("computeScopePreDigest counts auditable files and surfaces auto-exclusions", () => {
+await test("computeScopePreDigest counts auditable files and surfaces auto-exclusions", async () => {
   const bundle: ArtifactBundle = {
     repo_manifest: {
       repository: { name: "fixture" },
@@ -152,7 +152,7 @@ await test("computeScopePreDigest counts auditable files and surfaces auto-exclu
       ],
     },
   };
-  const pre = computeScopePreDigest(bundle, "/repo");
+  const pre = await computeScopePreDigest(bundle, "/repo");
   expect(pre.mode).toBe("full");
   expect(pre.since).toBe(null);
   expect(pre.files_in_scope).toBe(3);
@@ -182,7 +182,7 @@ await test("computeScopePreDigest counts auditable files and surfaces auto-exclu
 // pipeline. Both tests were pinned RED (`test.fails`) by the design-check and
 // flipped green by the implementation.
 
-await test("computeScopePreDigest reads design_assessment: a lens-tagged structural finding flips that lens's heuristic exclude", () => {
+await test("computeScopePreDigest reads design_assessment: a lens-tagged structural finding flips that lens's heuristic exclude", async () => {
   const bundle: ArtifactBundle = {
     ...readyForIntentBundle(),
     design_assessment: {
@@ -205,17 +205,17 @@ await test("computeScopePreDigest reads design_assessment: a lens-tagged structu
   // disposition (intentCheckpointExecutor.ts), so maintainability stays an
   // unconditional recommend_exclude even when the deterministic design
   // assessment carries direct lens-tagged evidence for it.
-  const pre = computeScopePreDigest(bundle, "/repo");
+  const pre = await computeScopePreDigest(bundle, "/repo");
   expect(
     pre.lens_propositions.find((p) => p.lens === "maintainability")?.disposition,
   ).toBe("recommend_include");
 });
 
-await test("docs_digest is a registered artifact feeding the confirm-intent prompt", () => {
+await test("docs_digest is a registered artifact feeding the confirm-intent prompt", async () => {
   expect(Object.keys(ARTIFACT_DEFINITIONS)).toContain("docs_digest");
 });
 
-await test("renderConfirmIntentPrompt renders the docs digest as the repo's stated purpose, and omits the section when empty", () => {
+await test("renderConfirmIntentPrompt renders the docs digest as the repo's stated purpose, and omits the section when empty", async () => {
   const base = {
     mode: "full" as const,
     since: null,
@@ -251,7 +251,7 @@ await test("renderConfirmIntentPrompt renders the docs digest as the repo's stat
   expect(withoutDocs).not.toMatch(/Repository purpose/);
 });
 
-await test("renderConfirmIntentPrompt surfaces mis_scope_smells at the confirm-intent pause, and omits the section when empty", () => {
+await test("renderConfirmIntentPrompt surfaces mis_scope_smells at the confirm-intent pause, and omits the section when empty", async () => {
   const base = {
     mode: "full" as const,
     since: null,
@@ -292,7 +292,7 @@ await test("renderConfirmIntentPrompt surfaces mis_scope_smells at the confirm-i
 
 // ── Confirm-intent prompt rendering ─────────────────────────────────────────
 
-await test("renderConfirmIntentPrompt includes the scope picture, target path, and the JSON shape", () => {
+await test("renderConfirmIntentPrompt includes the scope picture, target path, and the JSON shape", async () => {
   const prompt = renderConfirmIntentPrompt(
     {
       mode: "full",
@@ -319,7 +319,7 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
   expect(prompt).toMatch(/audit-code next-step/);
 });
 
-await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDATORY_LENSES, not hardcoded (MNT-df8c4551)", () => {
+await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDATORY_LENSES, not hardcoded (MNT-df8c4551)", async () => {
   const prompt = renderConfirmIntentPrompt(
     {
       mode: "full",
@@ -347,7 +347,7 @@ await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDA
   expect(prompt).toMatch(new RegExp(`Mandatory lenses \\(${MANDATORY_LENSES.join(", ")}\\)`));
 });
 
-await test("renderConfirmIntentPrompt asks for conceptual design-review depth (default shallow) and offers it in the JSON shape", () => {
+await test("renderConfirmIntentPrompt asks for conceptual design-review depth (default shallow) and offers it in the JSON shape", async () => {
   const prompt = renderConfirmIntentPrompt(
     {
       mode: "full",
@@ -375,14 +375,14 @@ await test("renderConfirmIntentPrompt asks for conceptual design-review depth (d
 
 // ── Validation ──────────────────────────────────────────────────────────────
 
-await test("validateArtifactBundle accepts a well-formed checkpoint", () => {
+await test("validateArtifactBundle accepts a well-formed checkpoint", async () => {
   const issues = validateArtifactBundle({
     intent_checkpoint: validCheckpoint(),
   }).filter((i) => JSON.stringify(i).includes("intent_checkpoint"));
   expect(issues.length).toBe(0);
 });
 
-await test("validateArtifactBundle rejects a checkpoint missing a required key", () => {
+await test("validateArtifactBundle rejects a checkpoint missing a required key", async () => {
   const { confirmed_by, ...missingConfirmedBy } = validCheckpoint();
   const issues = validateArtifactBundle({
     // Deliberate wrong-shaped-input probe: confirmed_by is a required key, and
@@ -412,7 +412,7 @@ function coverageFile(path: string): CoverageFileRecord {
   };
 }
 
-await test("applyIntentExclusionsToCoverage prunes matching files with directory-prefix semantics", () => {
+await test("applyIntentExclusionsToCoverage prunes matching files with directory-prefix semantics", async () => {
   const coverage: CoverageMatrix = {
     files: [
       coverageFile("src/a.ts"),
@@ -432,7 +432,7 @@ await test("applyIntentExclusionsToCoverage prunes matching files with directory
   expect(coverage.files.find((f) => f.path === "src/scratchpad.ts")!.audit_status).toBe("pending");
 });
 
-await test("applyIntentExclusionsToCoverage is a no-op without exclusions", () => {
+await test("applyIntentExclusionsToCoverage is a no-op without exclusions", async () => {
   const coverage: CoverageMatrix = { files: [coverageFile("src/a.ts")] };
   expect(applyIntentExclusionsToCoverage(coverage, undefined)).toEqual([]);
   expect(applyIntentExclusionsToCoverage(coverage, [])).toEqual([]);
@@ -455,7 +455,7 @@ function emptyRenderableReport(): RenderableAuditReport {
   };
 }
 
-await test("renderAuditReportMarkdown surfaces excluded scope when the checkpoint has exclusions", () => {
+await test("renderAuditReportMarkdown surfaces excluded scope when the checkpoint has exclusions", async () => {
   const md = renderAuditReportMarkdown(emptyRenderableReport(), {
     intent_checkpoint: {
       ...validCheckpoint(),
@@ -466,14 +466,14 @@ await test("renderAuditReportMarkdown surfaces excluded scope when the checkpoin
   expect(md).toMatch(/`dist` — build output/);
 });
 
-await test("renderAuditReportMarkdown omits the excluded section without exclusions", () => {
+await test("renderAuditReportMarkdown omits the excluded section without exclusions", async () => {
   const md = renderAuditReportMarkdown(emptyRenderableReport(), {});
   expect(md).not.toMatch(/Excluded \/ Out-of-Scope/);
 });
 
 // ── AU-5: observability lens rationale (evidence-grounded) ─────────────────────
 
-await test("buildLensPropositions detects logging/metrics surfaces and makes observability recommendation evidence-based", () => {
+await test("buildLensPropositions detects logging/metrics surfaces and makes observability recommendation evidence-based", async () => {
   const bundle: ArtifactBundle = {
     ...readyForIntentBundle(),
     unit_manifest: {
@@ -495,20 +495,20 @@ await test("buildLensPropositions detects logging/metrics surfaces and makes obs
       ],
     },
   };
-  const pre = computeScopePreDigest(bundle, "/repo");
+  const pre = await computeScopePreDigest(bundle, "/repo");
   const obs = pre.lens_propositions.find((p) => p.lens === "observability");
   expect(obs?.disposition).toBe("recommend_include");
   expect(obs?.reason).toContain("detected in scope");
 });
 
-await test("buildLensPropositions marks observability as heuristic exclude when no evidence (au-5)", () => {
+await test("buildLensPropositions marks observability as heuristic exclude when no evidence (au-5)", async () => {
   // When no logging/metrics surfaces are detected, the rationale must state
   // it is a heuristic default (no assertion of factual absence).
   const bundle: ArtifactBundle = {
     ...readyForIntentBundle(),
     unit_manifest: { units: [] },
   };
-  const pre = computeScopePreDigest(bundle, "/repo");
+  const pre = await computeScopePreDigest(bundle, "/repo");
   const obs = pre.lens_propositions.find((p) => p.lens === "observability");
   expect(obs?.disposition).toBe("recommend_exclude");
   // The rationale should NOT claim absence as fact, only as heuristic default

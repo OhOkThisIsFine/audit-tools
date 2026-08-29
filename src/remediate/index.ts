@@ -613,6 +613,9 @@ export function runValidateCommand(
   const result = run(["npx", "tsc", "--noEmit"], {
     cwd: pkgRoot,
     stdio: "inherit",
+    // Declared bound (required by the sync twin): a full typecheck runs
+    // minutes at worst; this command runs outside any held file lock.
+    timeout: 3_600_000,
   });
   if (result.status !== 0) {
     error("Type check failed.");

@@ -20,6 +20,19 @@ export interface RunTrackedOptions {
   platform?: NodeJS.Platform;
 }
 
+/**
+ * Options for the SYNC twin. `timeout` is REQUIRED, not optional: a
+ * synchronous child blocks the event loop for its whole run, which starves
+ * every `setInterval` heartbeat in the process — a held file lock's mtime beat
+ * included — so an unbounded sync child lets another process classify a LIVE
+ * lock stale and steal it (INV-SSF). The type makes the bound a declared
+ * choice at every call site; a long out-of-hold run declares a long bound.
+ * Note the bound is per spawn: sequential sync spawns inside one synchronous
+ * stretch SUM against the 30s stale window, so fold-reachable work belongs on
+ * {@link runTrackedAsync} regardless (`tests/shared/sync-spawn-fold-safety.test.ts`).
+ */
+export type RunTrackedSyncOptions = RunTrackedOptions & { timeout: number };
+
 export interface RunTrackedResult {
   status: number | null;
   stdout: string;
@@ -52,6 +65,18 @@ const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
  * child which ignores SIGTERM cannot hang the awaiting caller.
  */
 const KILL_ESCALATION_GRACE_MS = 2_000;
+
+/**
+ * Deadline for one fold-reachable tracked child. These spawns run inside the
+ * artifact-tree lock's hold (or the remediation state lock's), always through
+ * {@link runTrackedAsync} — the async twin keeps the event loop turning, so the
+ * held lock's mtime heartbeat beats through the child's whole run and the
+ * deadline may safely exceed the 30s stale-lock window. The bound exists so a
+ * child that never exits cannot hang the fold: the miss is classified
+ * `ETIMEDOUT` and SIGTERM escalates to SIGKILL, so the deadline is terminal.
+ * Matches the artifact-tree waiter window (`ARTIFACT_TREE_LOCK_TIMEOUT_MS`).
+ */
+export const TRACKED_CHILD_DEADLINE_MS = 120_000;
 
 // --- cmd.exe quoting helpers ---
 //
@@ -336,10 +361,13 @@ export function stripAuditToolsControlEnv(
   return out;
 }
 
-/** Run a command synchronously. argv[0] is the command, the rest are args. */
+/**
+ * Run a command synchronously. argv[0] is the command, the rest are args.
+ * The deadline is required — see {@link RunTrackedSyncOptions}.
+ */
 export function runTracked(
   argv: string[],
-  options: RunTrackedOptions = {},
+  options: RunTrackedSyncOptions,
 ): RunTrackedResult {
   if (argv.length === 0) {
     return {
@@ -439,8 +467,13 @@ export async function runTrackedAsync(
     let killedBy: "timeout" | "overflow" | null = null;
     // Bounded: a hostile/oversized emitter cannot grow the heap without limit.
     // An explicit `maxBuffer` is the caller's stricter bound and is REPORTED as
-    // an overflow; the 10MiB default is the silent backstop.
-    const MAX_CAPTURE = 10 * 1024 * 1024;
+    // an overflow; the 10MiB default is the silent backstop. A caller that
+    // DECLARES a larger `maxBuffer` raises the capture bound with it — the
+    // sync twin returns everything under the declared bound, and a 10MiB
+    // capture ceiling under a 256MiB declaration would silently truncate a
+    // legitimate large output (a big repo's `git ls-files -z`) with exit 0,
+    // which corrupts the caller where a refusal would have degraded cleanly.
+    const MAX_CAPTURE = Math.max(10 * 1024 * 1024, options.maxBuffer ?? 0);
     const overflowLimit = options.maxBuffer;
 
     let killTimer: NodeJS.Timeout | null = null;
@@ -491,9 +524,10 @@ export async function runTrackedAsync(
      *    as an overflow that the sync twin admits verbatim, and this module's
      *    claim that one classification serves both twins would be false.
      *  - against bytes seen, because the MAX_CAPTURE backstop stops APPENDING
-     *    at 10MiB. Counting kept characters instead would make ENOBUFS
-     *    unreachable for any caller whose `maxBuffer` exceeds MAX_CAPTURE — the
-     *    output would silently truncate where the contract says it refuses.
+     *    (at 10MiB when no `maxBuffer` was declared; a declared `maxBuffer`
+     *    raises the capture bound with it). Counting kept characters instead
+     *    would under-count once appending stops — the output would silently
+     *    truncate where the contract says it refuses.
      */
     const capture = (
       chunk: Buffer,
