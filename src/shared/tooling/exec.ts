@@ -572,6 +572,15 @@ export async function runTrackedAsync(
     // stdin is CLOSED (optionally after `input`), never left open: a command
     // that reads stdin would otherwise block forever on a pipe nothing writes,
     // turning an ordinary test invocation into a hang.
+    //
+    // The stream error is SWALLOWED, deliberately: a child that exits before
+    // (or while) `input` is written — `git check-ignore --stdin` in a non-repo
+    // exits 128 without reading — raises EPIPE on the stdin stream, and an
+    // unhandled stream 'error' event crashes the whole process (observed as a
+    // worker-killing `write EPIPE` cascade on Linux CI; Windows pipe buffering
+    // masks it). The child's own exit code / spawn error on the `close` path
+    // is the real outcome and reports the failure.
+    child.stdin?.on("error", () => {});
     if (options.input !== undefined) child.stdin?.write(options.input);
     child.stdin?.end();
 

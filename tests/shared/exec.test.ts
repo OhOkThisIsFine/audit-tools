@@ -8,6 +8,7 @@ const {
   shellQuote,
   platformCommand,
   runTracked,
+  runTrackedAsync,
   stripAuditToolsControlEnv,
   renderPromptCommand,
   toPromptPathToken,
@@ -172,6 +173,21 @@ test("stripAuditToolsControlEnv does not mutate the input object", () => {
   const copy = { ...input };
   stripAuditToolsControlEnv(input);
   expect(input).toEqual(copy);
+});
+
+test("runTrackedAsync survives a child that exits without reading its input (EPIPE)", async () => {
+  // A child that exits immediately never reads stdin, so writing `input`
+  // raises EPIPE on the stdin stream on POSIX. Unhandled, that stream error
+  // crashed the whole process (observed as a worker-killing `write EPIPE`
+  // cascade on Linux CI — `git check-ignore --stdin` in a non-repo exits 128
+  // without reading). The runner must settle with the child's own exit code
+  // instead. Windows pipe buffering can mask the EPIPE, so this test is
+  // load-bearing on POSIX and benign on win32.
+  const result = await runTrackedAsync(["node", "-e", "process.exit(3)"], {
+    input: "x".repeat(1024 * 1024),
+    timeout: 30_000,
+  });
+  expect(result.status).toBe(3);
 });
 
 test("runTracked child does not inherit the wrapper caller-cwd stamp", () => {
