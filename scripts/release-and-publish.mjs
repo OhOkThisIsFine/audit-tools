@@ -3,7 +3,7 @@
 // pushes, creates a GitHub Release (which triggers the OIDC trusted-publishing
 // workflow), then waits for the publish run + npm registry propagation.
 //
-// Usage: node scripts/release-and-publish.mjs <patch|minor|major> [--bump-only] [--dry-run]
+// Usage: node scripts/release-and-publish.mjs <patch|minor|major> [--bump-only] [--dry-run] [--skip-ci-green]
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -14,6 +14,7 @@ import { parse as parseYaml } from "yaml";
 import { shouldLogPollAttempt } from "./poll-log-throttle.mjs";
 import { toSeconds, writeProfileLedger } from "./shared/profile.mjs";
 import { resolveSpawn } from "./shared/spawn-shell.mjs";
+import { latestFailedWorkflows } from "./shared/ciRedWorkflows.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -26,9 +27,20 @@ const dryRun = process.argv.includes("--dry-run");
 // publish CI run + npm propagation (~minutes). CI still publishes asynchronously;
 // confirm with `npm view audit-tools version` before reinstalling the global bin.
 const noWait = process.argv.includes("--no-wait");
+// --skip-ci-green: bypass the pre-tag CI-green gate (ensureCiGreenOnHeadSha below),
+// loudly. Tagging a SHA GitHub Actions never confirmed risks shipping a broken
+// release, so bypassing it must never be the quiet default.
+const skipCiGreen = process.argv.includes("--skip-ci-green");
 const pollIntervalMs = 5_000;
 const releaseRunTimeoutMs = 10 * 60 * 1000;
 const registryTimeoutMs = 2 * 60 * 1000;
+// Tag-trigger watchdog: the publish-package run for a just-pushed tag must be
+// DETECTED within this window, or the trigger itself is broken — never silently
+// keep waiting the full releaseRunTimeoutMs for a run that will never appear, and
+// never dispatch it by hand (a workflow_dispatch run would not carry this
+// release's tag/SHA provenance). Only gates detection; once a run is found,
+// waitForRunCompletion's unchanged 10-minute watch takes over.
+const tagTriggerTimeoutMs = 60_000;
 
 // Consecutive-failure budget for `gh api` polls (401/403/5xx/network/timeout, etc.)
 // during the CI-monitoring phase. The run's status on GitHub is ground truth, so a
@@ -292,6 +304,107 @@ export function resolveReleasePushRefspec({ branch, defaultBranch } = {}) {
   return { target: `HEAD:refs/heads/${defaultBranch}` };
 }
 
+// Normalizes `gh api .../actions/runs` rows onto the shape
+// `latestFailedWorkflows` (scripts/shared/ciRedWorkflows.mjs) expects. That
+// helper exists because `ci` sat green for three commits while
+// `audit-code-test-suite` — the only workflow that runs vitest — was red
+// (2026-07-25): reading one workflow is not reading CI. The pre-tag gate below
+// reuses the SAME exhaustive-by-inversion red/green split for a single commit
+// SHA instead of re-deriving a parallel one.
+function toWorkflowRedGreenRows(rawRuns) {
+  return (Array.isArray(rawRuns) ? rawRuns : []).map((runEntry) => ({
+    workflowName: typeof runEntry?.name === "string" ? runEntry.name : null,
+    status: typeof runEntry?.status === "string" ? runEntry.status : null,
+    conclusion: typeof runEntry?.conclusion === "string" ? runEntry.conclusion : null,
+    createdAt: typeof runEntry?.created_at === "string" ? runEntry.created_at : null,
+  }));
+}
+
+// Pure CI-green verdict for one exact commit SHA. Green requires BOTH:
+//   1. at least one completed run with conclusion=success on this SHA — a SHA
+//      with zero matching runs is "CI never ran here", not green; and
+//   2. no workflow's most-recent completed run on this SHA is red
+//      (latestFailedWorkflows — cancelled/skipped carry no signal either way).
+// `rawRuns` is the `workflow_runs` array from
+// `gh api repos/{owner}/{repo}/actions/runs?head_sha=<sha>`; filtered here
+// defensively by headSha rather than trusting the query param alone.
+// Every branch returns the same keys (redWorkflows/successfulRuns default to
+// `[]`) rather than a strict discriminated union: TS's inferred return type
+// for this file (checkJs, no return-type annotation) does not narrow
+// `verdict.successfulRuns` from `!verdict.ok` reliably, and a uniform shape
+// sidesteps that instead of fighting it.
+/** @param {any[]} rawRuns @param {{headSha?: string}} [options] */
+export function evaluateCiGreenForSha(rawRuns, { headSha } = {}) {
+  const runs = (Array.isArray(rawRuns) ? rawRuns : []).filter(
+    (runEntry) => runEntry != null && runEntry.head_sha === headSha,
+  );
+  const redWorkflows = latestFailedWorkflows(toWorkflowRedGreenRows(runs));
+  if (redWorkflows.length > 0) {
+    return { ok: false, reason: "red_workflows", redWorkflows, successfulRuns: [] };
+  }
+  const successfulRuns = runs.filter(
+    (runEntry) => runEntry.status === "completed" && runEntry.conclusion === "success",
+  );
+  if (successfulRuns.length === 0) {
+    return { ok: false, reason: "no_successful_run", redWorkflows: [], successfulRuns: [] };
+  }
+  return { ok: true, reason: "green", redWorkflows: [], successfulRuns };
+}
+
+// Pre-tag CI-green gate. Resolves the exact SHA `bumpVersionAndTag` is about to
+// build the tag commit on top of (the tag itself lands on a NEW bump commit
+// that CI deliberately never runs on — see ci.yml's release-bump skip guard —
+// so gating on this pre-bump HEAD is gating on the code actually being shipped)
+// and requires GitHub Actions to have already confirmed it green. `skip`
+// defaults to the --skip-ci-green flag; tests override it directly.
+/** @param {string} repoSlug @param {{skip?: boolean}} [options] */
+export async function ensureCiGreenOnHeadSha(repoSlug, { skip = skipCiGreen } = {}) {
+  const headSha = run("git", ["rev-parse", "HEAD"], { capture: true }).stdout.trim();
+  if (skip) {
+    console.warn(
+      `WARNING: --skip-ci-green set — bypassing the pre-tag CI-green gate for ${headSha}. ` +
+        "Tagging without a confirmed green CI run risks shipping a broken release.",
+    );
+    return { headSha, skipped: true };
+  }
+
+  console.log(`[release] pre-tag CI-green gate: checking GitHub Actions runs for HEAD ${headSha}`);
+  let response;
+  try {
+    response = runJson("gh", [
+      "api",
+      `repos/${repoSlug}/actions/runs?head_sha=${headSha}&per_page=100`,
+    ]);
+  } catch (error) {
+    throw new Error(
+      `Pre-tag CI-green gate: failed to query GitHub Actions runs for ${headSha} (` +
+        `${error instanceof Error ? error.message : String(error)}). Refusing to tag an ` +
+        "unverified commit — retry, or bypass with --skip-ci-green (not recommended).",
+    );
+  }
+
+  const verdict = evaluateCiGreenForSha(response.workflow_runs, { headSha });
+  if (!verdict.ok) {
+    const detail =
+      verdict.reason === "red_workflows"
+        ? `the latest completed run of ${verdict.redWorkflows.length} workflow(s) on this SHA failed: ` +
+          verdict.redWorkflows.join(", ")
+        : "no completed run with conclusion=success was found for this SHA";
+    throw new Error(
+      `Pre-tag CI-green gate FAILED for HEAD ${headSha}: ${detail}. Refusing to tag an ` +
+        "unverified commit. Push and wait for CI (or the in-flight run) to complete, then " +
+        "retry, or bypass with --skip-ci-green (not recommended).",
+    );
+  }
+
+  for (const successRun of verdict.successfulRuns) {
+    console.log(
+      `[release] CI green: ${successRun.name ?? "workflow"} ${successRun.html_url} (head_sha ${headSha})`,
+    );
+  }
+  return { headSha, successfulRuns: verdict.successfulRuns };
+}
+
 function bumpVersionAndTag(npm) {
   run(npm, ["version", bump, "--no-git-tag-version"]);
   const packageAfter = readPackageJson();
@@ -360,10 +473,19 @@ export function selectReleaseRun(runs, { tag, tagPushedAtMs, headSha } = {}) {
   return [...fresh].sort(newerFirst)[0];
 }
 
-/** @param {string} repoSlug @param {string} tag @param {{tagPushedAtMs?: number, headSha?: string|null}} [options] */
-async function waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha } = {}) {
+// Watchdog wrapper: `detectionTimeoutMs` defaults to the 60s tag-trigger window
+// (requirement 2), not releaseRunTimeoutMs — this function only detects that the
+// run exists; waitForRunCompletion (unchanged) does the 10-minute completion
+// watch once a run is found. Tests override detectionTimeoutMs to avoid a real
+// 60s wait.
+/** @param {string} repoSlug @param {string} tag @param {{tagPushedAtMs?: number, headSha?: string|null, detectionTimeoutMs?: number}} [options] */
+export async function waitForReleaseRun(
+  repoSlug,
+  tag,
+  { tagPushedAtMs, headSha, detectionTimeoutMs = tagTriggerTimeoutMs } = {},
+) {
   run("gh", ["workflow", "view", "publish-package.yml"]);
-  const deadline = Date.now() + releaseRunTimeoutMs;
+  const deadline = Date.now() + detectionTimeoutMs;
   const startedAt = Date.now();
   let attempt = 0;
   let lastLoggedStatusKey = null;
@@ -421,9 +543,13 @@ async function waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha } = {})
       ? new Date(tagPushedAtMs).toISOString()
       : "unknown";
   throw new Error(
-    `Timed out waiting for publish-package release run for ${tag} ` +
-      `(tag pushed at ${pushedAtIso}; no run matched by SHA or post-push timestamp — ` +
-      `refusing to match a stale same-name run).`,
+    `The publish-package workflow did not trigger for ${tag} within ` +
+      `${Math.round(detectionTimeoutMs / 1000)}s of pushing the tag (pushed at ${pushedAtIso}). ` +
+      `The tag and GitHub Release already exist — this means the trigger itself did not fire, not ` +
+      `that it is slow. Not dispatching it manually (a workflow_dispatch run would not carry this ` +
+      `release's tag/SHA provenance) and not extending the wait. Inspect ` +
+      `.github/workflows/publish-package.yml's trigger config and ` +
+      `https://github.com/${repoSlug}/actions, then retry once the run appears.`,
   );
 }
 
@@ -729,6 +855,11 @@ async function main() {
 
   if (dryRun) {
     console.log(`[release] --dry-run: would bump ${bump}, tag v<next>, push, GitHub Release, await publish.`);
+    console.log(
+      "[release] --dry-run: would verify GitHub Actions has a completed, successful CI run on " +
+        "HEAD (git rev-parse HEAD) before tagging" +
+        (skipCiGreen ? " — --skip-ci-green is set, so this check would be bypassed." : "."),
+    );
     return;
   }
 
@@ -771,6 +902,9 @@ async function main() {
   // destructured binding or a newly-dead import, which is exactly what a refactor
   // leaves. The vitest suite stays in CI (sharded, parallel) — this adds the ~27
   // non-test gates, not minutes of tests, and it fails BEFORE the tag exists.
+  console.log("[release] checking pre-tag CI-green gate");
+  await runPhase("pre-tag-gate(ci-green)", () => ensureCiGreenOnHeadSha(repoSlug));
+
   console.log("[release] running local pre-tag gate (verify:checks)");
   await runPhase("pre-tag-gate(verify:checks)", () => run(npm, ["run", "verify:checks"]));
 
