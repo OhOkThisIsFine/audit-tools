@@ -248,6 +248,11 @@ export async function recoverStagedSubmissions(
  * 3. applied staged submissions: delete + `accepted` ledger event — only now,
  *    so a crash before (1) leaves the submission restorable and event-free;
  * 4. un-applied staged submissions: restore to their bound paths for the retry.
+ *
+ * Each deferred entry leaves the transaction the moment it completes, because
+ * the throw path re-runs commitFold on the SAME transaction: a re-entry after
+ * a mid-loop I/O error must RESUME at the failed entry, never re-record an
+ * `accepted` event the first attempt already appended.
  */
 export async function commitFold(
   artifactsDir: string,
@@ -255,10 +260,12 @@ export async function commitFold(
   tx: FoldTransaction,
 ): Promise<void> {
   await writeCoreArtifacts(artifactsDir, bundle, { prune: true });
-  for (const snapshot of tx.pendingSnapshots) {
-    await writeDesignReviewSnapshot(artifactsDir, snapshot);
+  while (tx.pendingSnapshots.length > 0) {
+    await writeDesignReviewSnapshot(artifactsDir, tx.pendingSnapshots[0]!);
+    tx.pendingSnapshots.shift();
   }
-  for (const staged of tx.staged) {
+  while (tx.staged.length > 0) {
+    const staged = tx.staged[0]!;
     if (staged.applied) {
       await unlink(staged.stagingPath).catch(() => {});
       await recordLaneOutcome(artifactsDir, staged.lane, {
@@ -272,7 +279,6 @@ export async function commitFold(
         if (!isFileMissingError(error)) throw error;
       }
     }
+    tx.staged.shift();
   }
-  tx.staged = [];
-  tx.pendingSnapshots = [];
 }

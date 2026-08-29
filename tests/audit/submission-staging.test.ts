@@ -162,6 +162,46 @@ test("the recovery sweep quarantines the staged copy when the host has resubmitt
   });
 });
 
+test("a re-entered commit RESUMES: an entry the first attempt processed is never re-recorded", async () => {
+  await withArtifactsDir(async (artifactsDir) => {
+    const acceptedLane = GATE_LANES.synthesis_narrative;
+    const restoredLane = GATE_LANES.charter_delta;
+    await writeFile(
+      laneSubmissionPath(artifactsDir, acceptedLane),
+      JSON.stringify({ themes: [] }),
+      "utf8",
+    );
+    const restoredBound = laneSubmissionPath(artifactsDir, restoredLane);
+    await writeFile(restoredBound, JSON.stringify({ deltas: ["kept"] }), "utf8");
+
+    const tx = createFoldTransaction();
+    const first = await stageLaneSubmission(tx, artifactsDir, acceptedLane);
+    if (first.status !== "staged") throw new Error("expected staged");
+    markSubmissionApplied(tx, first.staged.stagingPath);
+    const second = await stageLaneSubmission(tx, artifactsDir, restoredLane);
+    if (second.status !== "staged") throw new Error("expected staged");
+
+    // A directory squatting on the restore destination makes the staged loop
+    // throw AFTER the accepted entry was processed — the mid-commit I/O error
+    // the catch-path re-commit then runs into.
+    await mkdir(restoredBound);
+    await expect(commitFold(artifactsDir, {}, tx)).rejects.toThrow();
+
+    await rm(restoredBound, { recursive: true, force: true });
+    await commitFold(artifactsDir, {}, tx);
+
+    // The re-entered commit resumed at the failed entry: exactly one accepted
+    // event, and the un-applied submission restored for the retry.
+    const accepted = (await readSubmissionLedger(artifactsDir)).filter(
+      (e) => e.kind === "accepted",
+    );
+    expect(accepted).toHaveLength(1);
+    expect(JSON.parse(await readFile(restoredBound, "utf8"))).toEqual({
+      deltas: ["kept"],
+    });
+  });
+});
+
 test("a systemic-challenge round whose hash is already folded is IGNORED — never a quiet round", async () => {
   const bundle: ArtifactBundle = {
     intent_checkpoint: {
