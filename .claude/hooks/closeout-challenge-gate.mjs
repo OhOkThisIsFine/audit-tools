@@ -38,7 +38,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
 import { closeoutReadinessFindings } from '../../scripts/shared/closeoutReadiness.mjs';
-import { sessionHasLiveBackgroundWork } from '../../scripts/shared/liveSessionWork.mjs';
+import { liveSessionWorkReason } from '../../scripts/shared/liveSessionWork.mjs';
 import { worktreeTree } from '../../scripts/shared/worktree-tree.mjs';
 import { readSuiteGreenStamp } from '../../scripts/shared/suiteGreenStamp.mjs';
 import {
@@ -65,11 +65,33 @@ try {
 }
 if ((payload?.hook_event_name ?? 'Stop') !== 'Stop') process.exit(0);
 
-// A wait is not a closeout: with live background tasks (or scheduled crons) the
-// harness re-invokes this session, so the challenge belongs to a later, real
-// stop. Exit BEFORE any cap/state accounting — a skipped wait must leave both
-// untouched.
-if (sessionHasLiveBackgroundWork(payload)) process.exit(0);
+// A wait is not a closeout: with live background tasks, scheduled crons, or
+// queued input the harness has yet to deliver, the harness re-invokes this
+// session, so the challenge belongs to a later, real stop. Exit BEFORE any
+// cap/state accounting — a skipped wait must leave both untouched. The skip is
+// silent by design (a Stop hook's exit-0 must say nothing); under
+// AUDIT_TOOLS_HOOK_DEBUG it leaves one JSONL line so a disputed skip is a
+// one-file lookup instead of a probe campaign (the 2026-08-29 diagnosis cost).
+const liveReason = liveSessionWorkReason(payload);
+if (liveReason) {
+  if (process.env.AUDIT_TOOLS_HOOK_DEBUG) {
+    try {
+      mkdirSync(STATE_DIR, { recursive: true });
+      writeFileSync(
+        join(STATE_DIR, 'skips.jsonl'),
+        JSON.stringify({
+          at: new Date().toISOString(),
+          session_id: typeof payload?.session_id === 'string' ? payload.session_id : null,
+          reason: liveReason,
+        }) + '\n',
+        { flag: 'a' },
+      );
+    } catch {
+      /* debug log only — never block the skip */
+    }
+  }
+  process.exit(0);
+}
 
 const sessionId = sanitizeSessionId(payload?.session_id);
 if (!sessionId) process.exit(0); // no session key → cannot cap → fail open

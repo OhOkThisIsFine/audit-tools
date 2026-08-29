@@ -12,7 +12,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
 import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
-import { sessionHasLiveBackgroundWork } from '../../scripts/shared/liveSessionWork.mjs';
+import {
+  liveSessionWorkReason,
+  pendingQueuedResume,
+  sessionHasLiveBackgroundWork,
+} from '../../scripts/shared/liveSessionWork.mjs';
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, delimiter } from 'node:path';
@@ -335,6 +339,49 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
     it('skips while session crons are scheduled — a loop session stop is not an end', () => {
       const cron = { ...stop(sid('cron')), session_crons: [{ id: 'c1' }] };
       expect(runHook(CLOSEOUT_GATE, cron, { root: repo }).code).toBe(0);
+    });
+
+    // The terminated-but-unharvested window (2026-08-29 firing, diagnosed in
+    // docs/reviews/closeout-gate-queued-resume-2026-08-29.md): a task's entry
+    // leaves `background_tasks` on process EXIT, not on harvest, so a Stop
+    // landing between the exit and the notification delivery sees an empty
+    // array while the harness holds queued input it resumes seconds later.
+    // The transcript's queue-operation depth is the positive evidence.
+    function queueTranscript(lines: Array<Record<string, unknown>>): string {
+      const dir = mkdtempSync(join(tmpdir(), 'closeout-queue-'));
+      const t = join(dir, 'transcript.jsonl');
+      writeFileSync(t, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+      return t;
+    }
+
+    it('does not fire — and spends nothing — while a task notification is queued but unabsorbed', () => {
+      const session = sid('queued-resume');
+      const transcript = queueTranscript([
+        {
+          type: 'queue-operation',
+          operation: 'enqueue',
+          content: '<task-notification>\n<task-id>b1</task-id>\n<status>failed</status>\n</task-notification>',
+        },
+      ]);
+      const waiting = { ...stop(session), background_tasks: [], transcript_path: transcript };
+      expect(runHook(CLOSEOUT_GATE, waiting, { root: repo }).code).toBe(0);
+      // Same session, no queued input: the skipped wait left the cap and the
+      // state-dedupe untouched, so the REAL stop still challenges.
+      expect(runHook(CLOSEOUT_GATE, stop(session), { root: repo }).code).toBe(2);
+    });
+
+    it('fires once the queued notification has been absorbed', () => {
+      const transcript = queueTranscript([
+        {
+          type: 'queue-operation',
+          operation: 'enqueue',
+          content: '<task-notification>\n<task-id>b1</task-id>\n</task-notification>',
+        },
+        // As the harness writes it: dequeue records carry no content, no task-id.
+        { type: 'queue-operation', operation: 'dequeue' },
+      ]);
+      const absorbed = { ...stop(sid('absorbed')), background_tasks: [], transcript_path: transcript };
+      expect(runHook(CLOSEOUT_GATE, absorbed, { root: repo }).code).toBe(2);
     });
   });
 
@@ -908,5 +955,61 @@ describe('sessionHasLiveBackgroundWork: the wait-vs-end predicate', () => {
   it('treats a scheduled session cron as live work', () => {
     expect(sessionHasLiveBackgroundWork({ session_crons: [{ id: 'c1' }] })).toBe(true);
     expect(sessionHasLiveBackgroundWork({ session_crons: [] })).toBe(false);
+  });
+
+  describe('queued-resume leg — positive evidence only, no absent→idle inversion', () => {
+    function transcriptOf(lines: Array<Record<string, unknown> | string>): string {
+      const dir = mkdtempSync(join(tmpdir(), 'queue-depth-'));
+      const t = join(dir, 'transcript.jsonl');
+      writeFileSync(
+        t,
+        lines.map((l) => (typeof l === 'string' ? l : JSON.stringify(l))).join('\n') + '\n',
+      );
+      return t;
+    }
+
+    it('a missing, empty, or unreadable transcript_path is FALSE — the gates fire as today', () => {
+      expect(pendingQueuedResume(undefined)).toBe(false);
+      expect(pendingQueuedResume('')).toBe(false);
+      expect(pendingQueuedResume(join(tmpdir(), 'definitely-not-here.jsonl'))).toBe(false);
+      expect(liveSessionWorkReason({ background_tasks: [] })).toBe(null);
+    });
+
+    it('an unabsorbed enqueue reads as queued_resume; its dequeue clears it', () => {
+      const pending = transcriptOf([
+        { type: 'queue-operation', operation: 'enqueue', content: '<task-notification>…</task-notification>' },
+      ]);
+      expect(pendingQueuedResume(pending)).toBe(true);
+      expect(liveSessionWorkReason({ background_tasks: [], transcript_path: pending })).toBe('queued_resume');
+
+      const absorbed = transcriptOf([
+        { type: 'queue-operation', operation: 'enqueue', content: '<task-notification>…</task-notification>' },
+        { type: 'queue-operation', operation: 'dequeue' }, // no content/id, as the harness writes it
+      ]);
+      expect(pendingQueuedResume(absorbed)).toBe(false);
+    });
+
+    it('a remove drains depth like a dequeue, the floor is zero, and junk lines are skipped', () => {
+      const removed = transcriptOf([
+        { type: 'queue-operation', operation: 'dequeue' }, // stray drain below zero
+        'not json at all {{{',
+        { type: 'assistant', message: { role: 'assistant' } },
+        { type: 'queue-operation', operation: 'enqueue', content: '<task-notification>…</task-notification>' },
+        { type: 'queue-operation', operation: 'remove', reason: 'absorbed_mid_turn' },
+      ]);
+      expect(pendingQueuedResume(removed)).toBe(false);
+    });
+
+    it('a live task outranks the queue in the reason vocabulary', () => {
+      const pending = transcriptOf([
+        { type: 'queue-operation', operation: 'enqueue', content: '<task-notification>…</task-notification>' },
+      ]);
+      expect(
+        liveSessionWorkReason({
+          background_tasks: [{ status: 'running', type: 'shell' }],
+          transcript_path: pending,
+        }),
+      ).toBe('live_background_task');
+    });
   });
 });
