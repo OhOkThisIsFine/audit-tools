@@ -6,6 +6,16 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **`render-closeout.mjs --template` needs a built `dist/`, so the mandatory hand-back tool cannot
+  run in a fresh worktree (2026-08-29, low, friction: inefficient_feeding).** `--template` prints a
+  static blank JSON and needs no product code, but `scripts/render-closeout.mjs` imports
+  `scripts/closeout-sections-data.mjs`, which imports `FRICTION_CATEGORIES` from
+  `audit-tools/shared` — i.e. `dist/shared/index.js`. In a fresh worktree that is
+  `ERR_MODULE_NOT_FOUND`, so the closeout every sprint must end with is blocked behind
+  `npm install` plus a full `tsc`. **Property:** the closeout renderer's template and section list
+  resolve from source, not from `dist/` — a hand-back is possible in a checkout that has never been
+  built.
+
 - **The analyzer-consent prompt tells the operator a grant is durable; the enforced contract makes
   a grant per-run (2026-08-29, medium, friction: ambiguous_direction).** The consent prompt template
   (`src/audit/cli/prompts.ts`) renders "a decision persists across runs (`granted` runs it from now
