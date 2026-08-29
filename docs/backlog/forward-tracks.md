@@ -40,21 +40,6 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
 
 ## Forward tracks
 
-- **▶ CX-02 — one audit obligation registry, one drain. SHIPPED in v0.50.6; the deferred live
-  measurement is DONE (2026-08-29); remaining: the owner's waiter-timeout decision.** The landed
-  shape lives in
-  [`cx02-drain-unification-design-2026-08-26.md`](../reviews/cx02-drain-unification-design-2026-08-26.md);
-  the measurement evidence lives in
-  [`cx02-hold-time-measurement-2026-08-29.md`](../reviews/cx02-hold-time-measurement-2026-08-29.md)
-  — read those, not a summary. Its two decisions: **the cap stays 64** (worst observed fold
-  charged 7 executions; the budget stop is graceful, so an unused cap costs zero), and **the
-  waiter timeouts are the live exposure** — frontier folds held 22–58.5 s against the 10 s
-  `withFileLock` / 20 s `LOCKED_JSON_STORE_TIMEOUT_MS` waiter windows on a 1,051-file repo, so a
-  concurrent CLI during the frontier fails deterministically. Open: whether to widen the
-  artifact-tree-lock WAITER timeout (waiter-side only — the 30 s stale window and heartbeat stay,
-  per the owner's 2026-08-28 lock-constants decision). Un-pin once the owner decides and the
-  chosen arm lands.
-
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** A contract-valid empty result cannot be scored for quality without ground truth;
   raw finding yield is a noisy signal. Its affirmation half (`reviewed_clean`) is shipped. The

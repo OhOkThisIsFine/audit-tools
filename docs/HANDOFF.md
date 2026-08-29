@@ -5,23 +5,20 @@
 
 ## Live state
 
-- **CX-02 is SHIPPED: `v0.50.6` is live on npm (2026-08-28), both global bins report it, and
-  `main`, `origin/main` and the tag agree.** The landed shape and its self-corrections live in
-  the record's *IMPLEMENTED* section
-  ([`cx02-drain-unification-design-2026-08-26.md`](reviews/cx02-drain-unification-design-2026-08-26.md))
-  — read it, not this. The ship surfaced and fixed two Linux-only defects the Windows box could
-  not see (an absent-lane staging probe that wrote to the artifacts root, and a suite that read
-  the machine analyzer cache — now hermetic per worker), plus a commit re-entry duplicate the
-  external review lanes caught; the burned `v0.50.5` tag was deleted per the recovery path.
+- **CX-02 is CLOSED end-to-end.** The unification shipped (`v0.50.6`); the deferred live
+  measurement ran and shipped with fold_hold telemetry (`v0.50.7`); the owner's waiter decision
+  landed (waiter window 120 s, waiter-side only, one acquisition surface). The landed shape lives
+  in [`cx02-drain-unification-design-2026-08-26.md`](reviews/cx02-drain-unification-design-2026-08-26.md);
+  the measurement and the decided window live in
+  [`cx02-hold-time-measurement-2026-08-29.md`](reviews/cx02-hold-time-measurement-2026-08-29.md).
 
 ## Immediate next
 
-**The CX-02 waiter-timeout decision.** The deferred live measurement is DONE (2026-08-29,
-[`cx02-hold-time-measurement-2026-08-29.md`](reviews/cx02-hold-time-measurement-2026-08-29.md)):
-the cap stays 64 (worst fold charged 7 of 64), and frontier folds held 22–58.5 s against the
-10 s / 20 s waiter windows — so the open item is the owner's call on widening the
-artifact-tree-lock waiter timeout. Spec and evidence: the pinned CX-02 entry in
-[`forward-tracks.md`](backlog/forward-tracks.md).
+**Land the decided sync-children migration** (owner, 2026-08-28, CX-02 record §6): move
+`runFirstAvailableCommand` onto `runTrackedAsync` with a 120 s deadline so no synchronous child
+inside the hold can outlive the lock heartbeat — remediate already migrated, audit did not. Home:
+the "Synchronous child processes reachable from the audit fold carry NO timeout" entry in
+[`open-bugs.md`](backlog/open-bugs.md).
 
 
 ## Deliberate state, not bugs
@@ -59,6 +56,6 @@ artifact-tree-lock waiter timeout. Spec and evidence: the pinned CX-02 entry in
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ CX-02 — one audit obligation registry, one drain. SHIPPED in v0.50.6; the deferred live measurement is DONE (2026-08-29); remaining: the owner's waiter-timeout decision. · [`forward-tracks.md`](backlog/forward-tracks.md)
+- ▶ Synchronous child processes reachable from the audit fold carry NO timeout, so one hung binary can outlive the lock heartbeat (2026-08-28, medium, friction: tool_should_decide). · [`open-bugs.md`](backlog/open-bugs.md)
 
 <!-- END GENERATED ROADMAP -->

@@ -83,17 +83,25 @@ export async function runAuditStep(
   const runLogger = new RunLogger(join(options.artifactsDir, "run.log.jsonl"), {
     enabled: options.runLog ?? true,
   });
-  const lockPath = artifactTreeLockPath(options.artifactsDir);
   // Deterministic bundle mutation is one heartbeat-protected critical section.
   // Host semantic review never runs here: it is emitted as a workload and this
   // lock only covers local artifact derivation and result ingestion.
-  return await withFileLock(
-    lockPath,
-    () => runAuditStepLocked(options, runLogger),
-    undefined,
-    runLogger,
+  return await withArtifactTreeHold(options.artifactsDir, runLogger, () =>
+    runAuditStepLocked(options, runLogger),
   );
 }
+
+/**
+ * Waiter window for the artifact-tree lock (owner decision, 2026-08-29, from
+ * the CX-02 live measurement — `docs/reviews/cx02-hold-time-measurement-2026-08-29.md`):
+ * frontier folds legitimately hold this lock for 22–58.5 s on a 1,051-file
+ * repo, and hold time scales with repo size, so the 10 s `withFileLock`
+ * default converted every concurrent waiter into a deterministic failure.
+ * WAITER-SIDE ONLY: `STALE_LOCK_MS` (30 s) and the heartbeat are untouched
+ * (owner, 2026-08-28) — a wedged holder is still detected at the same speed;
+ * a live one is simply waited out.
+ */
+export const ARTIFACT_TREE_LOCK_TIMEOUT_MS = 120_000;
 
 /**
  * The ONE artifact-tree hold, exported for the unified `next-step` fold.
@@ -103,6 +111,11 @@ export async function runAuditStep(
  * entry to the lock, and the dynamic lock-count acceptance test keeps it
  * honest — one deterministic fold acquires the artifact-tree lock exactly
  * once, through here.
+ *
+ * It is also the ONLY acquisition surface for this lock anywhere in the tree
+ * (contract test: `tests/audit/artifact-tree-lock-single-surface.test.ts`), so
+ * the widened waiter window ({@link ARTIFACT_TREE_LOCK_TIMEOUT_MS}) cannot be
+ * missed by a new call site.
  */
 export async function withArtifactTreeHold<T>(
   artifactsDir: string,
@@ -112,7 +125,7 @@ export async function withArtifactTreeHold<T>(
   return await withFileLock(
     artifactTreeLockPath(artifactsDir),
     fn,
-    undefined,
+    ARTIFACT_TREE_LOCK_TIMEOUT_MS,
     runLogger,
   );
 }

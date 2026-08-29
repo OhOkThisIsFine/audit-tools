@@ -1,10 +1,6 @@
 import { join } from "node:path";
-import {
-  artifactTreeLockPath,
-  isFileMissingError,
-  readJsonFile,
-  withFileLock,
-} from "audit-tools/shared";
+import { isFileMissingError, readJsonFile } from "audit-tools/shared";
+import { withArtifactTreeHold } from "./auditStep.js";
 import {
   type ArtifactBundle,
   loadArtifactBundle,
@@ -218,7 +214,7 @@ export async function persistConfigErrorHandoff(params: {
   artifactsDir: string;
   progressSummary: string;
 }): Promise<void> {
-  await withFileLock(artifactTreeLockPath(params.artifactsDir), async () => {
+  await withArtifactTreeHold(params.artifactsDir, undefined, async () => {
     const bundle = await loadArtifactBundle(params.artifactsDir);
     const blockedState = buildBlockedAuditState({
       state: bundle.audit_state ?? deriveAuditState(bundle),

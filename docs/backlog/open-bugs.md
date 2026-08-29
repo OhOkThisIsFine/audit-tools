@@ -799,7 +799,7 @@
   is load-bearing, not to whether it is a test runner — so a state-changing command piped into a
   filter is refused the same way a suite is, with the same two escapes.
 
-- **Synchronous child processes reachable from the audit fold carry NO timeout, so one hung binary
+- **▶ Synchronous child processes reachable from the audit fold carry NO timeout, so one hung binary
   can outlive the lock heartbeat (2026-08-28, medium, friction: tool_should_decide).** The
   artifact-tree lock re-stamps its own mtime on a `setInterval` heartbeat and is considered stale at
   30s, so a synchronous stretch that blocks the event loop past that window lets a second process

@@ -45,11 +45,13 @@ Wall clock per invocation ran 1.0–1.9 s above hold time (CLI startup + render,
    exceed BOTH waiter windows; even steady-state ingest folds (6–9 s) graze the 10 s lock
    timeout. Any concurrent CLI — a second `next-step`, `review-run`, an analyzer-policy write —
    during the frontier fails deterministically with `FileLockTimeoutError`. This confirms the
-   CX-02 record's contention cost on a real run. Whether to widen (e.g. a fold-aware waiter
-   timeout ≥ 120 s on the artifact-tree lock, waiter-side only — the 30 s stale window and the
-   heartbeat stay per the owner's 2026-08-28 decision) is an owner decision; this run is the
-   evidence input. Hold time scales with repo size and granted analyzers, so 58.5 s on a
-   1,051-file repo is a floor for larger targets, not a ceiling.
+   CX-02 record's contention cost on a real run. Hold time scales with repo size and granted
+   analyzers, so 58.5 s on a 1,051-file repo is a floor for larger targets, not a ceiling.
+   **DECIDED (owner, 2026-08-29) and landed the same day:** the waiter window widens to
+   `ARTIFACT_TREE_LOCK_TIMEOUT_MS` (120 s), WAITER-SIDE ONLY — the 30 s stale window and the
+   heartbeat stay per the owner's 2026-08-28 decision. `withArtifactTreeHold` is now the single
+   acquisition surface for this lock and carries the window; the contract test
+   `tests/audit/artifact-tree-lock-single-surface.test.ts` pins both halves.
 3. **Ingest folds charge per batch, not per result** (1 result → 2 executions; 2 results → 2
    executions), so host batch size cannot push a fold into the cap.
 4. **Ingest-fold hold is O(pending), not O(ingested).** Every partial ingest re-materializes the
