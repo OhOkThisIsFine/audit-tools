@@ -5,19 +5,11 @@
 
 ## Live state
 
-- **The sync-children hazard is CLOSED on BOTH halves.** Audit half: every audit-fold-reachable
-  spawn on the async exec twin with the shared 120 s deadline (`v0.50.9`). Remediate half
-  (`v0.50.10`): the
-  ingestion corroboration probes, the triage reverify (now argv through the shared required-test
-  runner, no shell), and the grounding/contract-gate enumerations all run async with declared
-  deadlines; the acquisition default runners and the closing-phase spawns carry declared
-  deadlines too. INV-SSF pins seven fold-reachable modules;
-  `tests/shared/analyzer-default-runner-deadline.test.ts` pins the acquisition default runners
-  behaviorally (its header states the one unpinned half: close.ts's in-code deadlines).
-- **CX-02 is CLOSED end-to-end** (`v0.50.6`–`v0.50.8`; waiter window 120 s, one acquisition
-  surface). Landed shape:
-  [`cx02-drain-unification-design-2026-08-26.md`](reviews/cx02-drain-unification-design-2026-08-26.md);
-  measurement: [`cx02-hold-time-measurement-2026-08-29.md`](reviews/cx02-hold-time-measurement-2026-08-29.md).
+- **v0.50.11 is live** — the empty-frontier fix: the dispatch guard, the deferred-clarification
+  derive, the planning transition, and the dead-end sweep all draw from the workload builder's own
+  partition (`dispatchFrontier` + the `permanentlyDeadPendingBlocks` liveness fixpoint), so an
+  empty frontier pauses (`collect_triage` / `collect_clarifications`) instead of throwing
+  (`f9c736c8`).
 
 ## Immediate next
 
@@ -28,6 +20,11 @@ audit→remediate→PR capstone once the architecture items are worked off.
 
 ## Deliberate state, not bugs
 
+- `spec/remediate/remediation-goals.md` still names the deleted symbol
+  `dependencyAwaitingClarification` as the held-pending mechanism. The one-line rename to the
+  `permanentlyDeadPendingBlocks` liveness analysis is drafted but UNCOMMITTED BY DESIGN: the
+  constitutional-doc gate routes that file escalate-only, and the owner decision is pending (asked
+  in the 2026-08-29 hand-back). Do not "fix" the spec without that decision.
 - `tests/audit/host-delegation-fold-carries-advisories.test.ts` remains deliberately unbaselined:
   its parallel-load timeout passes alone and is tracked as a known flake, so rebaselining it would
   hide a real regression.

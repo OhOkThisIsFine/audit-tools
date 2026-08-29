@@ -11,6 +11,28 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **A refactor that deletes a symbol NAMED in an escalate-only constitutional doc leaves the doc
+  citing a dead symbol, and no gate notices the dangling state (2026-08-29, low, friction:
+  tool_should_decide).** The frontier unification (`f9c736c8`) deleted
+  `dependencyAwaitingClarification`; `spec/remediate/remediation-goals.md` names that symbol as the
+  held-pending mechanism. The constitutional-doc gate correctly refused the mechanical rename
+  without an owner decision (working as designed), so the spec now cites a symbol absent from the
+  tree while the escalation is open — and `check:doc-code-citations` stayed green on it, so nothing
+  tracks that the dangling reference exists or that an escalation is pending. **Property:** a
+  backticked symbol citation in `spec/**` that resolves to nothing in the tree is surfaced by a
+  gate (as a warning or a tracked escalation), so a constitutional doc cannot silently drift from
+  the code it measures while an owner decision is outstanding.
+
+- **The release pre-tag CI-green gate fails hard on an IN-FLIGHT run instead of watching it
+  (2026-08-29, low, friction: tool_should_decide).** `release:patch:publish` minutes after a push
+  died at `ensureCiGreenOnHeadSha` (`scripts/release-and-publish.mjs`) with "no completed run with
+  conclusion=success" while both CI runs for that exact SHA were `in_progress`; the recovery was a
+  hand-built `gh run watch <id> --exit-status && npm run release:patch:publish` chain — agent prose
+  re-implementing a wait the script already knows how to do (its own await-run phase polls a run to
+  completion). **Property:** when the gate finds an in-flight run for the HEAD SHA it waits for that
+  run's conclusion (bounded, with the existing profile phase) instead of refusing, and refuses only
+  on absent or red runs.
+
 - **HANDOFF's hand-written Immediate-next can claim work that already landed, and nothing checks it
   (2026-08-29, low, friction: ambiguous_direction).** The §6 sync-children migration landed
   (`55f9b06d`) with its pinned backlog entry and the HANDOFF Immediate-next unchanged; the next lap
@@ -35,17 +57,23 @@
   appends at most once per staged submission across commit re-entries — dedupe-on-append via the
   existing eventSignature machinery, or an entry sub-state recorded between the two effects.
 
-- **The live-work guard did not stop the closeout challenge firing mid-sprint; an ABSENT signal is
-  indistinguishable from an idle session (2026-08-28, low, friction: tool_should_decide).** The
-  challenge fired while four dispatched `codex exec` lanes were still running. The guard is not
-  missing — `sessionHasLiveBackgroundWork` (`scripts/shared/liveSessionWork.mjs`) reads
-  `background_tasks` and both Stop gates call it — so either this build omitted the field or the
-  entries had already left the array. Its own header states the degradation: absent fields make the
-  predicate false. Second instance 2026-08-28: it fired while a backgrounded Bash full-suite task and
-  two MCP offload jobs were live (the MCP jobs are server-side and plausibly never in
-  `background_tasks`; the Bash task should have been). **Property:** the predicate distinguishes "no
-  live work" from "no signal", and a missing signal does not silently degrade to challenging. Capture
-  one Stop payload to tell which.
+- **The closeout challenge fires on a terminated-but-unharvested background task —
+  `background_tasks` arrives present and EMPTY while the task's notification sits queued
+  (2026-08-29, low, friction: tool_should_decide; merges the 2026-08-28 live-work-guard entry and
+  the 2026-08-29 mid-skill-pause entry — one bug).** The guard exists and works:
+  `sessionHasLiveBackgroundWork` (`scripts/shared/liveSessionWork.mjs`) reads `background_tasks`,
+  both Stop gates call it, and a LIVE task does suppress — measured with a payload recorder on the
+  current build, which also measured the old "this build omitted the field" hypothesis FALSE. The
+  actual mechanism, traced on the 2026-08-29 firing: a task's entry leaves the array on process
+  EXIT, not on harvest, so a Stop that lands between the exit and the notification delivery sees an
+  empty array while the harness holds queued input it resumes seconds later — a WAIT the current
+  predicate cannot distinguish from an idle session. Trace, measured payload shapes, the proposed
+  fix (an additive `pendingQueuedResume` depth counter over the transcript's `queue-operation`
+  records — suppresses on positive evidence only, so no absent→idle inversion), and its declared
+  uncovered halves:
+  [`../reviews/closeout-gate-queued-resume-2026-08-29.md`](../reviews/closeout-gate-queued-resume-2026-08-29.md).
+  **Property:** a Stop the harness will resume from queued input does not fire the challenge and
+  does not spend the cap; a missing or unreadable signal still fires exactly as today.
 
 - **The obligation engine's bound doc is off by one against its own comparison (2026-08-28, low).**
   `obligationEngine.ts` documents `maxTransitions` as stopping "after that many consecutive
@@ -436,12 +464,3 @@
   actual condition — "dist changed during the walk; rebuild and re-run" — never a bare ENOENT from
   an internal path.
 
-- **closeout-challenge-gate fires at a mid-skill pause while a background lane is live (2026-08-29,
-  low, friction: tool_should_decide).** During a design-gate wait (an agy refutation lane running as
-  a background shell task), the Stop challenge fired and spent one of its two per-session asks on a
-  pause that was not a sprint end — the reply could only restate "mid-task, lane in flight". The
-  Stop payload carries a `background_tasks` signal (memory: `stop-payload-background-tasks-signal`),
-  so the evidence for "this Stop is a wait, not a hand-back" is mechanically available at the
-  decision point. **Property:** a Stop with live session-owned background work is a WAIT — the
-  challenge does not fire there and does not spend its cap; a Stop with no live background work
-  challenges exactly as today.
