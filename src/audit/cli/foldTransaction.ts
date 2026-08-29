@@ -34,6 +34,7 @@ import {
   readFile,
   readdir,
   rename,
+  stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -146,6 +147,16 @@ export async function stageLaneSubmission(
 ): Promise<StageResult> {
   const boundPath = laneSubmissionPath(artifactsDir, lane);
   const stagingPath = join(submissionStagingDir(artifactsDir), stagedFileName(lane));
+  // Probe the bound path BEFORE creating anything: every gate polls its lane
+  // on every pass, so the absent case must stay a pure read — an unconditional
+  // mkdir turns the poll into a write (EACCES on an unwritable artifacts root,
+  // a planted directory on a writable one).
+  try {
+    await stat(boundPath);
+  } catch (error) {
+    if (isFileMissingError(error)) return { status: "absent" };
+    throw error;
+  }
   await mkdir(submissionStagingDir(artifactsDir), { recursive: true });
   try {
     await moveFile(boundPath, stagingPath);

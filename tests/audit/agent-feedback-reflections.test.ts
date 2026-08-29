@@ -150,7 +150,14 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
       const bundle = await loadArtifactBundle(artDir);
       const decision = decideNextStep(bundle);
       if (decision.state.status === "complete") return null;
-      const options: AdvanceAuditOptions = { root, lineIndex };
+      // The hermetic analyzer cache resolves typescript@5 ABSENT and the plan
+      // draw halts on an undecided install — model the operator's recorded
+      // decision so the deterministic loop stays deterministic.
+      const options: AdvanceAuditOptions = {
+        root,
+        lineIndex,
+        analyzers: { typescript: "skip" },
+      };
       if (decision.selected_executor === "semantic_review_executor") {
         const have = new Set((bundle.audit_results ?? []).map((r) => r.task_id));
         options.preferredExecutor = "result_ingestion_executor";

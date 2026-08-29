@@ -17,10 +17,21 @@ import { join } from "node:path";
 const stateDir = mkdtempSync(join(tmpdir(), "audit-tools-test-state-"));
 process.env.AUDIT_CODE_STATE_DIR = stateDir;
 
+// Same hermeticity for the analyzer-dependency cache (~/.audit-tools/
+// analyzer-cache, single-sourced in src/shared/tooling/analyzerDeps.ts):
+// a box whose cache holds typescript@5 resolves analyzers other machines
+// report absent, so a test can go green here and red on CI. Every test sees
+// an EMPTY per-worker cache; a test that wants a populated cache builds one
+// and passes its own cacheRoot.
+const analyzerCache = mkdtempSync(join(tmpdir(), "audit-tools-test-analyzer-cache-"));
+process.env.AUDIT_TOOLS_ANALYZER_CACHE = analyzerCache;
+
 process.on("exit", () => {
-  try {
-    rmSync(stateDir, { recursive: true, force: true });
-  } catch {
-    // Best-effort cleanup; the OS temp dir is the backstop.
+  for (const dir of [stateDir, analyzerCache]) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup; the OS temp dir is the backstop.
+    }
   }
 });

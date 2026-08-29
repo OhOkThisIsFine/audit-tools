@@ -110,6 +110,14 @@ test("INV-audit-cli-08: handleSynthesisNarrativeBranch accepts the trimmed param
   // status:omitted executor so synthesis_narrative_current is satisfied).
   const result = await hsnb(params, {}, { status: "active", obligations: [], blockers: [] }, createFoldTransaction());
   expect(result.action, "disabled narrative with no incoming file → run_omit").toBe("run_omit");
+  // Probing an absent lane is a pure READ: nothing may create the artifacts
+  // root. On an unwritable root (Linux CI, `/…`) a stray mkdir is EACCES; on a
+  // writable one it silently plants the directory — assert neither happens.
+  const { stat } = await import("node:fs/promises");
+  await expect(
+    stat("/nonexistent-dir-abc"),
+    "an absent-lane probe must not create the artifacts root",
+  ).rejects.toThrow();
 });
 
 // ── INV-audit-cli-09: ExternalAnalyzerResults null guard (COR-df0bf37c) ────────

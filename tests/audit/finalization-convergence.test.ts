@@ -22,6 +22,12 @@ const LINE_INDEX: Record<string, number> = {
   "package.json": 5,
 };
 
+// The hermetic per-worker analyzer cache resolves every dep-carrying analyzer
+// ABSENT, and the plan draw halts on an undecided install (CX-02: every draw
+// classifies before dispatch). Model the operator's recorded decision the same
+// way the intent confirmation is modeled — typescript stays skipped.
+const ANALYZERS = { typescript: "skip" } as const;
+
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
 async function writeFixture(root: string): Promise<void> {
@@ -128,7 +134,7 @@ test("finalization converges through the real persist/reload loop without oscill
               intent_summary: "complete audit",
             },
           },
-          { root, lineIndex: LINE_INDEX },
+          { root, lineIndex: LINE_INDEX, analyzers: ANALYZERS },
         );
       } else if (
         decision.selected_executor === "design_review_contract" ||
@@ -150,7 +156,7 @@ test("finalization converges through the real persist/reload loop without oscill
               [`${pass}_reviewed`]: true,
             },
           },
-          { root, lineIndex: LINE_INDEX },
+          { root, lineIndex: LINE_INDEX, analyzers: ANALYZERS },
         );
       } else if (decision.selected_executor === "semantic_review_executor") {
         const results = resultsForPending(bundle);
@@ -158,6 +164,7 @@ test("finalization converges through the real persist/reload loop without oscill
         res = await advanceAudit(bundle, {
           root,
           lineIndex: LINE_INDEX,
+          analyzers: ANALYZERS,
           preferredExecutor: "result_ingestion_executor",
           auditResults: results,
         });
@@ -165,6 +172,7 @@ test("finalization converges through the real persist/reload loop without oscill
         res = await advanceAudit(bundle, {
           root,
           lineIndex: LINE_INDEX,
+          analyzers: ANALYZERS,
           // This driver models a session with NO narrative turn: the draw's
           // classification is session-owned tri-state (CX-02), so the omit arm
           // needs the session's explicit `false` — an absent value halts at
