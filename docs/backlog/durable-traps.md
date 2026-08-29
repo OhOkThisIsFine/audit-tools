@@ -205,6 +205,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   halves: the file that would GRANT trust belongs to the launcher outside this repo, trust can change
   between session start and dispatch (a stale green is possible), and a config dir that cannot be read
   at all answers unknown rather than untrusted, so it stays silent.
+  Every fresh lap WORKTREE re-hits the wall (trust keys on the exact forward-slash project path, so
+  the trusted repo root does not cover `.claude/worktrees/<lap>`). Working repair (2026-08-29): back
+  up `claude-config/.claude.json` in the freellmapi dir, set
+  `projects["<worktree path>"].hasTrustDialogAccepted = true` with a node one-liner, then verify with
+  a content probe only a repo read can answer (the package.json `version` value). The class fix —
+  the launcher trusting worktrees of an already-trusted repo — belongs to freellmapi, not this repo.
   [[pool-lane-fabricates-when-untrusted]]
 
 - **The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look
@@ -706,15 +712,15 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   So a slow agy lane and a wedged one look identical until the timeout, and the only real signal is
   the lane's own `timeout_s` (660s). Budget for that before dispatching a lane on the critical path.
 
-- **The MCP `pool` offload lane dies on the same hand-typed `auto` alias as `claude.ps1`, and its
-  `model` override is INERT (2026-08-27).** The lane template spawns `claude.exe -p … --model auto`;
-  Claude Code rejects `auto` client-side (71-byte `unrecognized_model` stderr, 0 stdout) while the
-  job stays `running` — cancel on that signature, don't wait for the timeout. `offload_start`'s
-  `model` parameter substitutes only into lane args that carry a `{model}` token, and this lane's
-  args carry none, so the override lands nowhere and the argv shows `--model auto` regardless.
-  Second entry point of the P47 class (nightly sol-1); the fix is the lane config in the freellmapi
-  server, outside this repo. Until it lands, Claude-pool recon has no working lane — use the agy
-  lanes.
+- **The MCP `pool` offload lane's `--model auto` alias warns, and its `model` override is INERT
+  (2026-08-27, mechanism corrected 2026-08-29).** The lane template spawns
+  `claude.exe -p … --model auto`. On 2026-08-27 the alias read as fatal: the 71-byte
+  `unrecognized_model` stderr with 0 stdout while the job stayed `running`. On 2026-08-29 the SAME
+  stderr signature appeared on two runs and BOTH completed with correct repo-grounded answers — so
+  the signature alone is not death; check whether stdout arrives before cancelling. Still true:
+  `offload_start`'s `model` parameter substitutes only into lane args that carry a `{model}` token,
+  and this lane's args carry none, so the override lands nowhere and the argv shows `--model auto`
+  regardless. The lane-config fix stays in the freellmapi server, outside this repo.
 
 - **A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak
   model (2026-08-09).** The router's `auto` alias resolves to a reasoning model that spends its whole
