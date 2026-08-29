@@ -5,11 +5,14 @@
 
 ## Live state
 
-- **v0.50.11 is live** — the empty-frontier fix: the dispatch guard, the deferred-clarification
-  derive, the planning transition, and the dead-end sweep all draw from the workload builder's own
-  partition (`dispatchFrontier` + the `permanentlyDeadPendingBlocks` liveness fixpoint), so an
-  empty frontier pauses (`collect_triage` / `collect_clarifications`) instead of throwing
-  (`f9c736c8`).
+- **v0.50.12 is live** — the high-severity queue lap: the pre-commit round-trip journal binds to
+  its HEAD and history-moving verbs skip the materializing round-trip (`f117ac02`);
+  implementation ordering derives from artifact tokens alone, with a cyclic declared graph a
+  validation error (`6a196c4d`); the judge escalation has a recorded owner-waiver verb, and
+  waived counterexamples leave the convergence math and the DAG coverage gates (`f3962a8b`);
+  clarification resolutions carry a validated `scope_additions` delta and the planning prompt
+  demands `output_files` (`3f196631`); promoted blocks carry the approved module contracts into
+  the sha-bound dispatch prompt (`e72539b4`).
 
 ## Immediate next
 

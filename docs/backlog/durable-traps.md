@@ -13,6 +13,12 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **`gh run list --commit <short-sha>` silently returns an EMPTY set — the flag matches the FULL
+  40-character sha only (2026-08-29).** A short sha is not rejected; the listing just comes back
+  empty, so a watcher polling it for run completion waits on nothing (a 20-minute silent loop,
+  2026-08-29). Pass `$(git rev-parse <short>)`, or filter a plain `gh run list --json headSha,...`
+  client-side.
+
 - **Parallel deep `codex exec` lanes exhaust the ChatGPT quota in well under an hour, and a lane
   dies mid-answer with NO verdict (2026-08-28).** Five concurrent `codex exec` refutation lanes over
   one design record burned the quota to a hard stop in roughly forty minutes; the reset was six days

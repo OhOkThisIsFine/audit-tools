@@ -11,6 +11,13 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer
+  unlocated (2026-08-29, low, friction: hermeticity).** Both zero bytes, timestamped during
+  targeted vitest invocations in a live session, deleted by hand; the suite's added-root-entry
+  teardown attributed nothing. The redirect-artifact CLASS is a known durable trap — what is new
+  is an apparent in-repo producer during test/build spawns. A lead, not a verdict: watch for
+  recurrence before hunting.
+
 - **A refactor that deletes a symbol NAMED in an escalate-only constitutional doc leaves the doc
   citing a dead symbol, and no gate notices the dangling state (2026-08-29, low, friction:
   tool_should_decide).** The frontier unification (`f9c736c8`) deleted
