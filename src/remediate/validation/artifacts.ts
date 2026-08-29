@@ -37,6 +37,10 @@ import {
 // issues array from a gate whose input was absent is not read as proof-of-clean.
 import { evaluateContractPipelineCrossGateOutcomes } from "./contractPipelineGates.js";
 import {
+  readRepairState,
+  waivedJudgeAcceptedIds,
+} from "../contractPipeline/repairState.js";
+import {
   CP_ARTIFACT_NAMES,
   type ContractPipelineArtifactName,
   contractPipelineDir,
@@ -549,6 +553,13 @@ export async function validateArtifacts(
       payloads: cpPayloads,
       findingEnumeration,
       root,
+      // Owner-waived counterexamples are excluded from the coverage gates
+      // (open-bugs.md:108) — the sweep must agree with next-step's own gating.
+      waivedCounterexampleIds: waivedJudgeAcceptedIds(
+        await readRepairState(artifactsDir),
+        cpPayloads.get("judge_report"),
+        cpPayloads.get("counterexample"),
+      ),
     })) {
       if (outcome.evaluated) gatesEvaluated += 1;
       else gatesSkipped += 1;

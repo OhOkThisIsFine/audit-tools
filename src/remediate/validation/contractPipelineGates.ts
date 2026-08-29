@@ -314,6 +314,7 @@ export function validateImplementationDAGIntegrity(
   obligationLedgerPayload: unknown,
   counterexamplePayload: unknown,
   judgeReportPayload: unknown,
+  waivedCounterexampleIds?: ReadonlySet<string>,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   if (!canEvaluateImplementationDagIntegrity(dagPayload)) return issues;
@@ -344,7 +345,10 @@ export function validateImplementationDAGIntegrity(
         isRecord(cls) &&
         cls.classification === "accepted" &&
         typeof cls.counterexample_id === "string" &&
-        cls.counterexample_id.length > 0
+        cls.counterexample_id.length > 0 &&
+        // A waived counterexample is resolved by a recorded owner decision —
+        // coverage must not be demanded for it (open-bugs.md:108).
+        !waivedCounterexampleIds?.has(cls.counterexample_id)
       ) {
         acceptedCounterexampleIds.add(cls.counterexample_id);
       }
@@ -650,6 +654,7 @@ export function validateEvidenceThreaded(
   assessmentReportPayload: unknown,
   judgeReportPayload: unknown,
   dagPayload: unknown,
+  waivedCounterexampleIds?: ReadonlySet<string>,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -673,7 +678,9 @@ export function validateEvidenceThreaded(
     }
   }
 
-  // 2. accepted counterexamples must be threaded into the DAG.
+  // 2. accepted counterexamples must be threaded into the DAG. A waived
+  // counterexample is resolved by a recorded owner decision and is not
+  // demanded here (open-bugs.md:108).
   const acceptedCounterexampleIds = new Set<string>();
   if (isRecord(judgeReportPayload) && Array.isArray(judgeReportPayload.classifications)) {
     for (const cls of judgeReportPayload.classifications as unknown[]) {
@@ -681,7 +688,8 @@ export function validateEvidenceThreaded(
         isRecord(cls) &&
         cls.classification === "accepted" &&
         typeof cls.counterexample_id === "string" &&
-        cls.counterexample_id.length > 0
+        cls.counterexample_id.length > 0 &&
+        !waivedCounterexampleIds?.has(cls.counterexample_id)
       ) {
         acceptedCounterexampleIds.add(cls.counterexample_id);
       }
@@ -1779,6 +1787,13 @@ export interface ContractPipelineCrossGateInputs {
   /** Working-tree root, used by validateDecompositionFileScope's git-tree
    *  enumeration. */
   root: string;
+  /** Judge-accepted counterexample ids covered by a recorded owner waiver
+   *  (open-bugs.md:108). The DAG coverage and evidence-threading gates exclude
+   *  them: a waived counterexample is resolved by decision, so demanding a DAG
+   *  node for it would recreate the judge-gate wedge one gate later. Absent =
+   *  no waivers. Computed by the caller from the repair-state ledger
+   *  (contractPipeline/repairState.ts → waivedJudgeAcceptedIds). */
+  waivedCounterexampleIds?: ReadonlySet<string>;
 }
 
 /**
@@ -1852,7 +1867,7 @@ export async function evaluateContractPipelineCrossGateOutcomes(
     gateOutcome(
       "evidence_threaded",
       canEvaluateEvidenceThreaded(assessment, judge, dag),
-      validateEvidenceThreaded(assessment, judge, dag),
+      validateEvidenceThreaded(assessment, judge, dag, inputs.waivedCounterexampleIds),
       "all three input payloads (contract_assessment_report, judge_report, implementation_dag) are absent or malformed",
     ),
     gateOutcome(
@@ -1876,7 +1891,13 @@ export async function evaluateContractPipelineCrossGateOutcomes(
     gateOutcome(
       "implementation_dag_integrity",
       canEvaluateImplementationDagIntegrity(dag),
-      validateImplementationDAGIntegrity(dag, obligationLedger, counterexample, judge),
+      validateImplementationDAGIntegrity(
+        dag,
+        obligationLedger,
+        counterexample,
+        judge,
+        inputs.waivedCounterexampleIds,
+      ),
       "implementation_dag payload is absent or malformed (not a record with a nodes array)",
     ),
     gateOutcome(

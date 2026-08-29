@@ -657,6 +657,97 @@ describe("repair cycle: failing verdict triggers one targeted repair and re-deri
     expect(existsSync(join(ARTIFACTS_DIR, "extracted-plan.json"))).toBe(false);
   });
 
+  it("a recorded owner waiver resolves a stalled counterexample: the run proceeds and the file is consumed", async () => {
+    // Same stall setup as above: a prior repair already addressed CE-1 and the
+    // fresh judge re-accepts it (open-bugs.md:108 — the recorded resolution verb).
+    await writeRawChainThroughJudge({ judge: NEEDS_REPAIR_JUDGE });
+    await mkdir(contractPipelineDir(ARTIFACTS_DIR), { recursive: true });
+    await writeFile(
+      join(contractPipelineDir(ARTIFACTS_DIR), "repair-state.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1",
+        repairs: [
+          {
+            judge_hash: "prior-judge-1",
+            target: "finalized_module_contracts",
+            at: CREATED_AT,
+            accepted_ce_ids: ["CE-1"],
+          },
+        ],
+        critique_repairs: [],
+        dag_regenerations: [],
+      }),
+      "utf8",
+    );
+
+    // Invocation 1: blocked, and the escalation names the waiver lane.
+    const blocked = await buildNextContractPipelineStep(STEP_OPTIONS);
+    expect(blocked!.status).toBe("blocked");
+    expect(await promptOf(blocked!)).toMatch(/counterexample-waivers\.json/);
+
+    // The operator's decision lands at the tool-named path.
+    await writeFile(
+      join(contractPipelineDir(ARTIFACTS_DIR), "counterexample-waivers.json"),
+      JSON.stringify({
+        waivers: [
+          {
+            ce_id: "CE-1",
+            rationale: "Accepted as a known limitation of this run.",
+            waived_by: "operator",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    // Invocation 2: the waiver folds and the gate proceeds to planning.
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    expect(await promptOf(step!)).toMatch(/Implementation Planning/);
+    // Recorded in the ledger (attributable) and the file consumed.
+    const repairState = JSON.parse(
+      await readFile(join(contractPipelineDir(ARTIFACTS_DIR), "repair-state.json"), "utf8"),
+    );
+    expect(repairState.waivers).toHaveLength(1);
+    expect(repairState.waivers[0].ce_id).toBe("CE-1");
+    expect(repairState.waivers[0].waived_by).toBe("operator");
+    expect(repairState.waivers[0].rationale.length).toBeGreaterThan(0);
+    expect(
+      existsSync(join(contractPipelineDir(ARTIFACTS_DIR), "counterexample-waivers.json")),
+    ).toBe(false);
+  });
+
+  it("an invalid waiver file never half-applies: blocked with the issues named, nothing recorded", async () => {
+    await writeRawChainThroughJudge({ judge: NEEDS_REPAIR_JUDGE });
+    await mkdir(contractPipelineDir(ARTIFACTS_DIR), { recursive: true });
+    // Empty rationale + a ce_id that matches nothing: both named; NOTHING applied.
+    await writeFile(
+      join(contractPipelineDir(ARTIFACTS_DIR), "counterexample-waivers.json"),
+      JSON.stringify({
+        waivers: [
+          { ce_id: "CE-1", rationale: "", waived_by: "operator" },
+          { ce_id: "CE-does-not-exist", rationale: "x", waived_by: "operator" },
+        ],
+      }),
+      "utf8",
+    );
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    expect(step!.status).toBe("blocked");
+    const prompt = await promptOf(step!);
+    expect(prompt).toMatch(/Waiver File Was Refused/);
+    expect(prompt).toMatch(/rationale/);
+    expect(prompt).toMatch(/CE-does-not-exist/);
+    // The file stays for correction; the ledger records nothing.
+    expect(
+      existsSync(join(contractPipelineDir(ARTIFACTS_DIR), "counterexample-waivers.json")),
+    ).toBe(true);
+    const statePath = join(contractPipelineDir(ARTIFACTS_DIR), "repair-state.json");
+    if (existsSync(statePath)) {
+      const repairState = JSON.parse(await readFile(statePath, "utf8"));
+      expect(repairState.waivers ?? []).toHaveLength(0);
+    }
+  });
+
   it("keeps repairing past the former N=2 cap while each round surfaces a NEW accepted counterexample", async () => {
     // Three prior repairs already addressed CE-1..CE-3 (the old fixed cap would
     // have cut this run off long ago). The fresh judge accepts a genuinely NEW

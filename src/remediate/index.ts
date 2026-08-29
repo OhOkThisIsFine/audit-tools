@@ -7,6 +7,10 @@ import { validateArtifacts } from "./validation/artifacts.js";
 import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
 import { evaluateContractPipelineCrossGateOutcomes } from "./validation/contractPipelineGates.js";
 import {
+  readRepairState,
+  waivedJudgeAcceptedIds,
+} from "./contractPipeline/repairState.js";
+import {
   CP_ARTIFACT_NAMES,
   isEnvelope,
   stampToolCreatedAt,
@@ -426,6 +430,13 @@ export async function runValidateArtifactAction(options: {
         payloads,
         findingEnumeration,
         root,
+        // Owner-waived counterexamples are excluded from the coverage gates
+        // (open-bugs.md:108) — the self-check must agree with next-step.
+        waivedCounterexampleIds: waivedJudgeAcceptedIds(
+          await readRepairState(artifactsDir),
+          payloads.get("judge_report"),
+          payloads.get("counterexample"),
+        ),
       })
     ).flatMap((outcome) => outcome.issues);
   } catch (err) {

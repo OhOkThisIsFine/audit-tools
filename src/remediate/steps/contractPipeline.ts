@@ -33,7 +33,6 @@ import {
   type JudgeReport,
   type ImplementationDAG,
   type ObligationLedger,
-  type CounterexampleReport,
   type WorkBlock,
   type WorkBlockSeam,
   projectApprovedFindings,
@@ -48,7 +47,6 @@ import {
   createStepEmissionScaffold,
   type StepGateHandler,
 } from "../../shared/steps/stepEmissionScaffold.js";
-import { counterexampleFingerprint } from "../contractPipeline/counterexampleFingerprint.js";
 import {
   OBLIGATION_KIND_PRIORITY,
   type ObligationKind,
@@ -114,6 +112,16 @@ import {
   captureTestPlanCarry,
   readTestPlanCarry,
 } from "../contractPipeline/testPlanCarry.js";
+import {
+  readRepairState,
+  writeRepairState,
+  counterexamplesByIdOf,
+  counterexampleKeyOf,
+  counterexampleWaiversPath,
+  foldCounterexampleWaivers,
+  waivedAcceptedIds,
+  waivedJudgeAcceptedIds,
+} from "../contractPipeline/repairState.js";
 import {
   renderContractPipelinePrompt,
   renderContractRepairPrompt,
@@ -239,71 +247,9 @@ export const MAX_DAG_REGENERATION_ATTEMPTS = 2;
 export const MAX_CYCLIC_SEAM_RESOLUTION_ATTEMPTS = 2;
 
 // ── Repair-state ledger ───────────────────────────────────────────────────────
-
-interface ContractRepairState {
-  schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1";
-  /**
-   * One entry per judge-ordered repair step emission (keyed by judge hash).
-   * `accepted_ce_ids` records the judge-accepted counterexample ids this repair
-   * was dispatched to address, for human debugging/display only.
-   * `addressed_ce_fingerprints` is the CONTENT-keyed form the convergence gate
-   * actually diffs against — see `keyOf` in `evaluateJudgeGate`: raw reviewer
-   * ids are not stable cross-round identity (two independent adversarial
-   * rounds commonly both label their top counterexample "CE-001"), so the gate
-   * resolves each accepted id against the live counterexample artifact and
-   * keys on content (violated_obligation_ids + normalized claim) instead,
-   * falling back to raw-id keying only when an id cannot be resolved. The
-   * cumulative union of fingerprints across repairs is the "already-addressed"
-   * set; a re-accepted (un-converged) counterexample is detected as a stall
-   * rather than silently re-repaired. Entries written before this field
-   * existed lack it — they default to `[]` (fail-open: at most one extra
-   * repair round on an in-flight upgrade, never a false stall).
-   */
-  repairs: {
-    judge_hash: string;
-    target: string;
-    at: string;
-    accepted_ce_ids?: string[];
-    addressed_ce_fingerprints?: string[];
-  }[];
-  /**
-   * One entry per conceptual-design-critique-driven design repair (keyed by
-   * critique hash). `blocking_ids` records the blocking critique-item ids the
-   * repair was dispatched to address — the cumulative union is the
-   * "already-addressed" set the critique convergence gate diffs each fresh
-   * critique against, so a re-raised (un-resolved) blocking concern is detected
-   * as a stall rather than silently re-repaired forever.
-   */
-  critique_repairs: { critique_hash: string; at: string; blocking_ids: string[] }[];
-  /** One entry per implementation_dag traceability rejection. */
-  dag_regenerations: { violations: string[]; at: string }[];
-}
-
-function repairStatePath(artifactsDir: string): string {
-  return join(contractPipelineDir(artifactsDir), "repair-state.json");
-}
-
-async function readRepairState(artifactsDir: string): Promise<ContractRepairState> {
-  const state = await readOptionalJsonFile<ContractRepairState>(
-    repairStatePath(artifactsDir),
-  );
-  return (
-    state ?? {
-      schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1",
-      repairs: [],
-      critique_repairs: [],
-      dag_regenerations: [],
-    }
-  );
-}
-
-async function writeRepairState(
-  artifactsDir: string,
-  state: ContractRepairState,
-): Promise<void> {
-  await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
-  await writeJsonFile(repairStatePath(artifactsDir), state);
-}
+// Moved to ../contractPipeline/repairState.ts (open-bugs.md:108) so the
+// validation sweep and the CLI self-check import the one ledger home the judge
+// gate writes; the counterexample-waiver lane lives beside it there.
 
 // ── Cyclic-seam repair-state ledger ──────────────────────────────────────────
 
@@ -921,7 +867,15 @@ function inferRepairDirective(judge: JudgeReport): { target: ExtendedRepairTarge
 
 type JudgeGate =
   | { kind: "proceed" }
-  | { kind: "escalate"; reason: "stall" | "runaway"; outstanding: string[]; note: string }
+  | {
+      kind: "escalate";
+      reason: "stall" | "runaway" | "invalid_waivers";
+      /** Accepted counterexample ids still standing — waived ones excluded. */
+      outstanding: string[];
+      note: string;
+      /** Present only for reason "invalid_waivers": why the file was refused. */
+      waiverIssues?: string[];
+    }
   | {
       kind: "repair";
       directive: { target: ExtendedRepairTarget; instruction: string };
@@ -958,7 +912,54 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
   const judge = envelopePayload(judgeEnvelope) as JudgeReport | undefined;
   if (!judge || judge.verdict === "approved") return { kind: "proceed" };
 
+  // Content-fingerprint keying (not raw id): two independent adversarial
+  // rounds may each label their genuinely-distinct top counterexample with
+  // the SAME reviewer id string (e.g. "CE-001", the prompt schema's own
+  // example value). Keying convergence on the raw id would then read "same CE
+  // re-accepted after a repair" and falsely escalate while a real new defect
+  // is being correctly repaired. Resolve each accepted id against the live
+  // counterexample artifact and key on content instead; an id with no
+  // matching counterexample falls back to raw-id keying — today's behavior —
+  // so nothing regresses when content can't be resolved. The keying is
+  // single-sourced with the waiver ledger (counterexampleKeyOf).
+  const cePayload = envelopePayload(
+    await readContractArtifact(artifactsDir, "counterexample"),
+  );
+  const ceById = counterexamplesByIdOf(cePayload);
+  const keyOf = (rawId: string): string => counterexampleKeyOf(ceById, rawId);
+
+  const acceptedIds = acceptedCeIdsOf(judge);
+
+  // Owner waivers (open-bugs.md:108, the recorded resolution verb): fold the
+  // host-written waiver file BEFORE any convergence math, so a waiver recorded
+  // against a blocked escalation unblocks this same invocation — including one
+  // recorded after a repair for this judge hash was already dispatched. An
+  // invalid file escalates loudly and applies NOTHING (never half-applied).
+  const fold = await foldCounterexampleWaivers(artifactsDir, {
+    counterexamplesById: ceById,
+    judgeAcceptedIds: new Set(acceptedIds),
+  });
+  if (fold.issues.length > 0) {
+    return {
+      kind: "escalate",
+      reason: "invalid_waivers",
+      outstanding: acceptedIds,
+      waiverIssues: fold.issues,
+      note:
+        "The counterexample waiver file was refused and nothing was applied. " +
+        "Fix or delete it, then re-run next-step.",
+    };
+  }
+
   const repairState = await readRepairState(artifactsDir);
+  const waived = waivedAcceptedIds(repairState, ceById, acceptedIds);
+  const unwaivedAccepted = acceptedIds.filter((id) => !waived.has(id));
+  // Every accepted counterexample carries a recorded owner waiver → the
+  // needs_repair verdict is resolved by decision: proceed.
+  if (acceptedIds.length > 0 && unwaivedAccepted.length === 0) {
+    return { kind: "proceed" };
+  }
+
   const judgeHash = judgeEnvelope.content_hash;
   const alreadyHandled = repairState.repairs.some(
     (repair) => repair.judge_hash === judgeHash,
@@ -975,28 +976,6 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
       }
     : inferRepairDirective(judge);
 
-  const acceptedIds = acceptedCeIdsOf(judge);
-
-  // Content-fingerprint keying (not raw id): two independent adversarial
-  // rounds may each label their genuinely-distinct top counterexample with
-  // the SAME reviewer id string (e.g. "CE-001", the prompt schema's own
-  // example value). Keying convergence on the raw id would then read "same CE
-  // re-accepted after a repair" and falsely escalate while a real new defect
-  // is being correctly repaired. Resolve each accepted id against the live
-  // counterexample artifact and key on content instead; an id with no
-  // matching counterexample falls back to raw-id keying — today's behavior —
-  // so nothing regresses when content can't be resolved.
-  const cePayload = envelopePayload(
-    await readContractArtifact(artifactsDir, "counterexample"),
-  ) as CounterexampleReport | undefined;
-  const ceById = new Map(
-    (cePayload?.counterexamples ?? []).map((ce) => [ce.id, ce] as const),
-  );
-  const keyOf = (rawId: string): string => {
-    const ce = ceById.get(rawId);
-    return ce ? `fp:${counterexampleFingerprint(ce)}` : `id:${rawId}`;
-  };
-
   const addressed = new Set(
     repairState.repairs.flatMap(
       (r) =>
@@ -1004,7 +983,7 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
         (r.accepted_ce_ids ?? []).map((id) => `id:${id}`),
     ),
   );
-  const newAccepted = acceptedIds.filter((id) => !addressed.has(keyOf(id)));
+  const newAccepted = unwaivedAccepted.filter((id) => !addressed.has(keyOf(id)));
   const newAcceptedFingerprints = newAccepted.map(keyOf);
 
   // Idempotent re-entry: this exact judge report already drove a repair (its hash
@@ -1025,7 +1004,7 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
     return {
       kind: "escalate",
       reason: "runaway",
-      outstanding: acceptedIds,
+      outstanding: unwaivedAccepted,
       note: `The judge↔repair loop reached its runaway backstop (${repairState.repairs.length} repair rounds) without converging. Each round was still surfacing accepted counterexamples. This is pathological non-convergence — review the outstanding counterexamples and the contract design with the user before proceeding.`,
     };
   }
@@ -1046,8 +1025,8 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
   return {
     kind: "escalate",
     reason: "stall",
-    outstanding: acceptedIds,
-    note: `The judge re-accepted counterexample(s) that a prior repair already addressed (${acceptedIds.join(", ") || "none newly accepted"}), with no new accepted counterexample this round. The repair loop is not converging on these items. Resolve them with the user — adjust the contract design or accept the counterexamples as known limitations — before the plan can be promoted.`,
+    outstanding: unwaivedAccepted,
+    note: `The judge re-accepted counterexample(s) that a prior repair already addressed (${unwaivedAccepted.join(", ") || "none newly accepted"}), with no new accepted counterexample this round. The repair loop is not converging on these items. Resolve them with the user — adjust the contract design, or record an owner waiver accepting them as known limitations — before the plan can be promoted.`,
   };
 }
 
@@ -2190,7 +2169,20 @@ async function readCrossGateInputs(
   const findingEnumeration = await readOptionalJsonFile<unknown>(
     intakePaths(artifactsDir).findingEnumeration,
   );
-  return { payloads, findingEnumeration, root };
+  // Waived counterexamples (open-bugs.md:108): the coverage gates must not
+  // demand DAG nodes for a counterexample the owner recorded as an accepted
+  // limitation — that would recreate the judge-gate wedge one gate later.
+  const repairState = await readRepairState(artifactsDir);
+  return {
+    payloads,
+    findingEnumeration,
+    root,
+    waivedCounterexampleIds: waivedJudgeAcceptedIds(
+      repairState,
+      payloads.get("judge_report"),
+      payloads.get("counterexample"),
+    ),
+  };
 }
 
 /**
@@ -2834,13 +2826,24 @@ const judgeRepairGate: ContractGate = async (ctx) => {
       },
       "remediate-code",
     );
+    const waiversPath = counterexampleWaiversPath(ctx.artifactsDir);
+    const waiverIssuesSection =
+      gate.waiverIssues && gate.waiverIssues.length > 0
+        ? `\n\n## Waiver file refused — fix these first\n\n${gate.waiverIssues
+            .map((issue) => `- ${issue}`)
+            .join("\n")}`
+        : "";
+    const heading =
+      gate.reason === "invalid_waivers"
+        ? "# The Counterexample Waiver File Was Refused"
+        : "# Judge↔Repair Loop Did Not Converge";
     return {
       via: "blocked",
-      prompt: `# Judge↔Repair Loop Did Not Converge
+      prompt: `${heading}
 
-${gate.note}
+${gate.note}${waiverIssuesSection}
 
-## Outstanding accepted counterexamples
+## Outstanding accepted counterexamples (unwaived)
 
 ${
   gate.outstanding.length > 0
@@ -2848,7 +2851,23 @@ ${
     : "_(none newly accepted this round)_"
 }
 
-Read the judge_report and counterexample artifacts, decide with the user how to resolve each outstanding counterexample (revise the contract design and re-run, or accept it as a known limitation), then re-run next-step.`,
+## Record an owner waiver (the recorded resolution verb)
+
+To accept an outstanding counterexample as a KNOWN LIMITATION of this run, write the operator's decision to:
+
+\`${waiversPath}\`
+
+\`\`\`json
+{
+  "waivers": [
+    { "ce_id": "<id from the list above>", "rationale": "<why this is acceptable>", "waived_by": "<who decided>" }
+  ]
+}
+\`\`\`
+
+The next next-step validates the file, records each waiver in repair-state.json (attributable, content-fingerprint-keyed), consumes the file, and proceeds once every outstanding counterexample is repaired or waived. Record a waiver ONLY for a decision the operator actually made — the record names its decider.
+
+Read the judge_report and counterexample artifacts, decide with the user how to resolve each outstanding counterexample (revise the contract design and re-run, or record a waiver as above), then re-run next-step.`,
       stopCondition:
         "Stop — the contract pipeline is blocked on a non-converging judge↔repair loop pending a user decision.",
     };
