@@ -18,9 +18,10 @@
  * 3. The constant is at least 120_000 ms.
  */
 import { readFile } from "node:fs/promises";
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { test, expect } from "vitest";
+
+import { execFileSyncHidden } from "../helpers/spawn.mjs";
 
 import { ARTIFACT_TREE_LOCK_TIMEOUT_MS } from "../../src/audit/cli/auditStep.js";
 
@@ -34,10 +35,10 @@ const ALLOWED_REFERENCING_FILES = new Set([
 ]);
 
 function trackedSourceFilesReferencing(needle: string): string[] {
-  const listing = execFileSync("git", ["grep", "-l", needle, "--", "src"], {
+  const listing = execFileSyncHidden("git", ["grep", "-l", needle, "--", "src"], {
     cwd: ROOT,
     encoding: "utf8",
-  });
+  }) as string;
   return listing
     .split(/\r?\n/)
     .filter((line) => line.length > 0)
