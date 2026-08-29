@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { execFileHidden } from "../helpers/spawn.mjs";
 
 import { DISPATCH_BARREL_EXPORTS } from "../helpers/dispatchBarrelBaseline.js";
+import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
 
 const FAILURE_SIGNATURE =
   "contract:remediation-zero-adapter-boundary:not-yet-satisfied";
@@ -385,7 +386,7 @@ function resultShape(
 ): Record<string, unknown> {
   const changedFiles = [item.allowed_files[0]!];
   return {
-    contract_version: "remediation-host-result/v1alpha1",
+    contract_version: RESULT_VERSION,
     result_id: `result-${item.id}-${after.slice(0, 8)}`,
     run_id: runId,
     work_item_id: item.id,
@@ -396,6 +397,7 @@ function resultShape(
       command,
       status: "passed",
     })),
+    obligation_evidence: [],
     worktree_evidence: {
       baseline_commit: item.baseline_commit,
       changed_files: changedFiles,
@@ -478,7 +480,7 @@ describe(FAILURE_SIGNATURE, () => {
       .sort();
     expect(expected).toEqual(["block-a", "block-b"]);
     expect(handoff.workload.contract_version).toBe(
-      "remediation-host-workload/v1alpha1",
+      "remediation-host-workload/v1alpha2",
     );
     expect(handoff.workload.run_id).toBe(runId);
     expect(handoff.workload.work_items.map((entry) => entry.id)).toEqual(expected);
@@ -1527,7 +1529,7 @@ describe("an empty scan is not a pass", () => {
     await writeFile(
       join(submissionDir, `${"a".repeat(64)}.json`),
       JSON.stringify({
-        contract_version: "remediation-host-result/v1alpha1",
+        contract_version: RESULT_VERSION,
         result_id: `result-${item.block_id}`,
         run_id: runId,
         work_item_id: item.block_id,
@@ -1538,6 +1540,7 @@ describe("an empty scan is not a pass", () => {
           command,
           status: "passed",
         })),
+        obligation_evidence: [],
         worktree_evidence: {
           baseline_commit: BASELINE_COMMIT,
           changed_files: [...item.touched_files],

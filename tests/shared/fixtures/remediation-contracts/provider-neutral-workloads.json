@@ -308,7 +308,7 @@
       ],
       "positive_event": "bound-remediation-result-validated",
       "payload": {
-        "contract_version": "remediation-host-result/v1alpha1",
+        "contract_version": "remediation-host-result/v1alpha2",
         "result_id": "remediation-result-001",
         "work_item_id": "remediation-item-001",
         "prompt_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -326,6 +326,7 @@
             "status": "passed"
           }
         ],
+        "obligation_evidence": [],
         "worktree_evidence": {
           "baseline_commit": "1111111111111111111111111111111111111111",
           "changed_files": [
@@ -348,7 +349,7 @@
       ],
       "positive_event": "complete-remediation-frontier-emitted",
       "payload": {
-        "contract_version": "remediation-host-workload/v1alpha1",
+        "contract_version": "remediation-host-workload/v1alpha2",
         "run_id": "remediation-run-fixture",
         "work_items": [
           {
@@ -361,6 +362,7 @@
             "finding_ids": [
               "finding-a"
             ],
+            "obligation_ids": [],
             "prompt": {
               "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
               "text": "Implement the bounded item and return prompt-bound evidence."

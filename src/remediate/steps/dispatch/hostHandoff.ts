@@ -81,6 +81,14 @@ export interface RemediationHostWorkItem {
   readonly finding_ids: readonly string[];
   readonly allowed_files: readonly string[];
   readonly baseline_commit: string;
+  /**
+   * The contract obligation ids this item's landed work must satisfy — the
+   * sorted, deduplicated union of `contract_obligation_ids` over the block's
+   * findings (what promotion mints from each DAG node's
+   * `satisfies_obligations`). Empty for a plan without contract overlays. The
+   * result's `obligation_evidence` must cover exactly this set.
+   */
+  readonly obligation_ids: readonly string[];
   readonly prompt: {
     readonly text: string;
     readonly sha256: string;
@@ -202,6 +210,18 @@ interface RemediationHostResult {
   readonly test_evidence: readonly {
     readonly command: string;
     readonly status: "passed";
+  }[];
+  /**
+   * Cited evidence per satisfied contract obligation — the evidence-coverage
+   * floor between "received" and "accepted". Must cover exactly the work
+   * item's bound `obligation_ids` (empty when none are bound); each entry
+   * cites at least one non-empty string. Coverage is validated mechanically at
+   * ingestion; judging the citations' semantic sufficiency is the per-run
+   * conformance review's job, never this parser's.
+   */
+  readonly obligation_evidence: readonly {
+    readonly obligation_id: string;
+    readonly evidence: readonly string[];
   }[];
   readonly worktree_evidence: {
     readonly baseline_commit: string;
@@ -950,6 +970,7 @@ function buildPrompt(item: {
   readonly baselineCommit: string;
   readonly requiredTests: readonly string[];
   readonly resultPath: string;
+  readonly obligationIds: readonly string[];
   readonly moduleContracts: readonly { module: string; contract: Record<string, unknown> }[];
 }): string {
   const assignment = stableStringify({
@@ -958,10 +979,14 @@ function buildPrompt(item: {
     baseline_commit: item.baselineCommit,
     finding_ids: item.findingIds,
     id: item.blockId,
-    // The approved contract rides the sha-bound prompt (open-bugs.md:474):
-    // the binding then covers exactly the interface the worker saw.
+    // The approved contract rides the sha-bound prompt (the evidence-coverage
+    // entry in docs/backlog/open-bugs.md): the binding then covers exactly the
+    // interface the worker saw.
     ...(item.moduleContracts.length > 0
       ? { module_contracts: item.moduleContracts }
+      : {}),
+    ...(item.obligationIds.length > 0
+      ? { obligation_ids: item.obligationIds }
       : {}),
     required_tests: item.requiredTests,
     result_path: item.resultPath,
@@ -977,9 +1002,12 @@ function buildPrompt(item: {
         ]
       : []),
     `Assignment: ${assignment}`,
-    "The result must use remediation-host-result/v1alpha1 and contain exactly contract_version, result_id, run_id, work_item_id, prompt_sha256, changed_files, commit_evidence, test_evidence, worktree_evidence, acceptance, and merge.",
+    `The result must use ${RESULT_CONTRACT_VERSION} and contain exactly contract_version, result_id, run_id, work_item_id, prompt_sha256, changed_files, commit_evidence, test_evidence, obligation_evidence, worktree_evidence, acceptance, and merge.`,
+    item.obligationIds.length > 0
+      ? `obligation_evidence must contain exactly one entry per bound obligation id — ${item.obligationIds.join(", ")} — each an object {obligation_id, evidence} whose evidence array cites at least one non-empty string (file, symbol, or test) showing the landed implementation satisfies that obligation. Ingestion refuses the result when any bound obligation is uncovered.`
+      : "obligation_evidence must be an empty array — this item binds no contract obligations.",
     "Bind commit_evidence.before and worktree_evidence.baseline_commit to baseline_commit; report only passed required tests; acceptance.status must be accepted and merge.status must be merged.",
-    "If no edit should land, write remediation-host-decision/v1alpha1 instead with exactly contract_version, result_id, run_id, work_item_id, prompt_sha256, outcome. outcome must be one of: {status: resolved_no_change, evidence: [non-empty strings]}, {status: blocked, failure_reason: non-empty string}, or {status: needs_clarification, question: non-empty string, optional category}.",
+    `If no edit should land, write ${DECISION_CONTRACT_VERSION} instead with exactly contract_version, result_id, run_id, work_item_id, prompt_sha256, outcome. outcome must be one of: {status: resolved_no_change, evidence: [non-empty strings]}, {status: blocked, failure_reason: non-empty string}, or {status: needs_clarification, question: non-empty string, optional category}.`,
   ].join("\n");
 }
 
@@ -1023,12 +1051,26 @@ function buildWorkItem(
   const resultPath = resultPathFor(paths, block.block_id);
   const requiredTests = [...(block.targeted_commands ?? [])];
   const assignments = buildFindingAssignments(state, block);
+  // The obligation demand is bound here, once, from the same plan findings the
+  // assignments render — ingestion then re-derives this exact set through the
+  // byte-for-byte work-item comparison, so the result's evidence coverage is
+  // checked against a tool-owned binding, never the result's own claim.
+  const obligationIds = [
+    ...new Set(
+      block.items.flatMap(
+        (findingId) =>
+          state.plan.findings.find((entry) => entry.id === findingId)
+            ?.contract_obligation_ids ?? [],
+      ),
+    ),
+  ].sort(compareCodeUnits);
   const promptText = buildPrompt({
     blockId: block.block_id,
     findingIds: block.items,
     assignments,
     allowedFiles,
     baselineCommit,
+    obligationIds,
     requiredTests,
     resultPath,
     moduleContracts: block.module_contracts ?? [],
@@ -1038,6 +1080,7 @@ function buildWorkItem(
     finding_ids: [...block.items],
     allowed_files: allowedFiles,
     baseline_commit: baselineCommit,
+    obligation_ids: obligationIds,
     prompt: { text: promptText, sha256: promptSha256(promptText) },
     required_tests: requiredTests,
     result_path: resultPath,
@@ -1090,6 +1133,7 @@ function parseWorkItem(
       "baseline_commit",
       "finding_ids",
       "id",
+      "obligation_ids",
       "prompt",
       "required_tests",
       "result_path",
@@ -1099,6 +1143,8 @@ function parseWorkItem(
     !isCommit(value.baseline_commit) ||
     !Array.isArray(value.finding_ids) ||
     !value.finding_ids.every((entry) => typeof entry === "string") ||
+    !Array.isArray(value.obligation_ids) ||
+    !value.obligation_ids.every((entry) => typeof entry === "string") ||
     !Array.isArray(value.allowed_files) ||
     !value.allowed_files.every((entry) => typeof entry === "string") ||
     !Array.isArray(value.required_tests) ||
@@ -1288,6 +1334,7 @@ function parseResult(
       "commit_evidence",
       "contract_version",
       "merge",
+      "obligation_evidence",
       "prompt_sha256",
       "result_id",
       "run_id",
@@ -1353,6 +1400,61 @@ function parseResult(
         `test_evidence[${index}] must echo the bound command with status passed`,
       );
     }
+  }
+
+  // The evidence-coverage floor: the cited obligation set must equal the
+  // work item's tool-owned binding exactly. Shape and coverage only — judging
+  // whether a citation SUFFICES is the per-run conformance review's job.
+  const obligationEvidence = value.obligation_evidence;
+  if (!Array.isArray(obligationEvidence)) {
+    return invalidResult(
+      "obligation_evidence must be an array with one entry per bound obligation",
+    );
+  }
+  const citedIds: string[] = [];
+  for (const [index, entry] of obligationEvidence.entries()) {
+    const citations = isRecord(entry) ? stringArray(entry.evidence) : null;
+    if (
+      !isRecord(entry) ||
+      !hasExactKeys(entry, ["evidence", "obligation_id"]) ||
+      typeof entry.obligation_id !== "string" ||
+      entry.obligation_id.trim().length === 0 ||
+      !citations ||
+      citations.length === 0 ||
+      citations.some((citation) => citation.trim().length === 0)
+    ) {
+      const named =
+        isRecord(entry) && typeof entry.obligation_id === "string"
+          ? ` (obligation_id: ${entry.obligation_id})`
+          : "";
+      return invalidResult(
+        `obligation_evidence[${index}] must cite at least one non-empty evidence string for a named obligation${named}`,
+      );
+    }
+    citedIds.push(entry.obligation_id);
+  }
+  const cited = new Set(citedIds);
+  if (citedIds.length !== cited.size) {
+    const duplicates = [
+      ...new Set(citedIds.filter((id, i) => citedIds.indexOf(id) !== i)),
+    ];
+    return invalidResult(
+      `obligation_evidence cites an obligation more than once: ${duplicates.join(", ")}`,
+    );
+  }
+  const uncovered = workItem.obligation_ids.filter((id) => !cited.has(id));
+  if (uncovered.length > 0) {
+    return invalidResult(
+      `obligation_evidence must cover every prompt-bound obligation; uncovered: ${uncovered.join(", ")}`,
+    );
+  }
+  const unknown = citedIds.filter(
+    (id) => !workItem.obligation_ids.includes(id),
+  );
+  if (unknown.length > 0) {
+    return invalidResult(
+      `obligation_evidence cites obligations the work item does not bind: ${unknown.join(", ")}`,
+    );
   }
 
   if (

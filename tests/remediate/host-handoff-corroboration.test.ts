@@ -16,6 +16,7 @@ import {
   type RequiredTestFailure,
 } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 import { recoverIngestHostResults } from "../../src/remediate/steps/nextStep.js";
+import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
 import {
   RemediationHostHandoffRecordSchema,
   type RemediationHostHandoffRecord,
@@ -125,6 +126,12 @@ async function fixture(options: {
   twoBlocks?: boolean;
   secondDependsOnFirst?: boolean;
   /**
+   * Give F1 contract-pipeline overlay obligation ids (deliberately unsorted)
+   * and B1 the carried approved module contract — the shape promotion writes,
+   * which the obligation evidence-coverage floor binds and enforces.
+   */
+  contractOverlays?: boolean;
+  /**
    * Runs after the initial commit and BEFORE the handoff is prepared, so a test
    * can advance HEAD first and bind the trusted baseline to a non-root commit.
    */
@@ -195,6 +202,15 @@ async function fixture(options: {
           summary: "Change the exported value from one to two.",
           affected_files: options.affectedFiles ?? [{ path: "src/a.ts" }],
           evidence: ["src/a.ts:1 returns the stale value"],
+          // Deliberately unsorted: the work-item binding must sort them.
+          ...(options.contractOverlays
+            ? {
+                contract_obligation_ids: [
+                  "mod-a:output:2",
+                  "mod-a:invariant:1",
+                ],
+              }
+            : {}),
         },
       ],
       blocks: [
@@ -223,6 +239,24 @@ async function fixture(options: {
           ],
           phase_ordinal: 0,
           token_estimate: 250,
+          ...(options.contractOverlays
+            ? {
+                module_contracts: [
+                  {
+                    module: "mod-a",
+                    contract: {
+                      name: "mod-a",
+                      inputs: [],
+                      outputs: ["src/a.ts exports value"],
+                      invariants: ["the export name stays value"],
+                      side_effects: [],
+                      validation_boundary: "none",
+                      failure_modes: [],
+                    },
+                  },
+                ],
+              }
+            : {}),
         },
         ...(options.twoBlocks
           ? [
@@ -344,7 +378,7 @@ function resultFor(
   item: RemediationHostWorkItem = value.item,
 ): Record<string, unknown> {
   return {
-    contract_version: "remediation-host-result/v1alpha1",
+    contract_version: RESULT_VERSION,
     result_id: `result-${item.id}-${after.slice(0, 12)}`,
     run_id: value.runId,
     work_item_id: item.id,
@@ -355,6 +389,7 @@ function resultFor(
       command,
       status: "passed",
     })),
+    obligation_evidence: [],
     worktree_evidence: {
       baseline_commit: value.baseline,
       changed_files: changedFiles,
@@ -1777,7 +1812,7 @@ describe("remediation host handoff repository corroboration", () => {
     await writeFile(
       resultPath,
       JSON.stringify({
-        contract_version: "remediation-host-result/v1alpha1",
+        contract_version: RESULT_VERSION,
         result_id: "result-B1",
         run_id: runId,
         work_item_id: item.id,
@@ -1788,6 +1823,7 @@ describe("remediation host handoff repository corroboration", () => {
           command,
           status: "passed",
         })),
+        obligation_evidence: [],
         worktree_evidence: {
           baseline_commit: item.baseline_commit,
           changed_files: ["src/a.ts"],
@@ -2047,5 +2083,150 @@ describe("remediation host handoff repository corroboration", () => {
     ]);
     expect(refused.issues[0]!.message).toMatch(/UNKNOWN/u);
     expect(refused.issues[0]!.message).toContain("the last of a very long log");
+  });
+});
+
+// ── Obligation evidence-coverage floor (open-bugs "conformance check between
+// received and accepted"): the work item BINDS the block's contract obligation
+// ids, the result must cite evidence per bound obligation, and ingestion
+// validates the coverage mechanically before any acceptance. ───────────────────
+describe("obligation evidence-coverage floor", () => {
+  function evidenceFor(
+    value: Fixture,
+    after: string,
+    obligationEvidence: readonly Record<string, unknown>[],
+  ): Record<string, unknown> {
+    return {
+      ...resultFor(value, after),
+      contract_version: RESULT_VERSION,
+      obligation_evidence: obligationEvidence,
+    };
+  }
+
+  async function ingest(value: Fixture) {
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+    });
+    if (ingested === "unsupported_retired_state") {
+      throw new Error("fixture state unexpectedly rejected");
+    }
+    return ingested;
+  }
+
+  it("binds the block's contract obligation ids onto the work item, sorted and deduplicated", async () => {
+    const value = await fixture({ contractOverlays: true });
+    expect(value.item.obligation_ids).toEqual([
+      "mod-a:invariant:1",
+      "mod-a:output:2",
+    ]);
+  });
+
+  it("binds an empty obligation set for a plan without contract overlays", async () => {
+    const value = await fixture();
+    expect(value.item.obligation_ids).toEqual([]);
+  });
+
+  it("accepts a result whose obligation_evidence covers every bound obligation", async () => {
+    const value = await fixture({ contractOverlays: true });
+    const after = await landA(value);
+    await writeResult(
+      value,
+      evidenceFor(value, after, [
+        {
+          obligation_id: "mod-a:invariant:1",
+          evidence: ["src/a.ts:1 keeps the export named value"],
+        },
+        {
+          obligation_id: "mod-a:output:2",
+          evidence: ["src/a.ts:1 still exports value"],
+        },
+      ]),
+    );
+    const ingested = await ingest(value);
+    expect(ingested.issues).toEqual([]);
+    expect(ingested.accepted_count).toBe(1);
+    expect(ingested.state.items.F1!.status).toBe("resolved");
+  });
+
+  it("refuses a result that omits evidence for a bound obligation, naming the uncovered id", async () => {
+    const value = await fixture({ contractOverlays: true });
+    const after = await landA(value);
+    await writeResult(
+      value,
+      evidenceFor(value, after, [
+        {
+          obligation_id: "mod-a:invariant:1",
+          evidence: ["src/a.ts:1 keeps the export named value"],
+        },
+      ]),
+    );
+    const refused = await ingest(value);
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.issues).toHaveLength(1);
+    expect(refused.issues[0]!.message).toContain("mod-a:output:2");
+  });
+
+  it("refuses evidence for an obligation the work item does not bind, naming the unknown id", async () => {
+    const value = await fixture({ contractOverlays: true });
+    const after = await landA(value);
+    await writeResult(
+      value,
+      evidenceFor(value, after, [
+        {
+          obligation_id: "mod-a:invariant:1",
+          evidence: ["src/a.ts:1 keeps the export named value"],
+        },
+        {
+          obligation_id: "mod-a:output:2",
+          evidence: ["src/a.ts:1 still exports value"],
+        },
+        {
+          obligation_id: "mod-b:invariant:9",
+          evidence: ["src/a.ts:1 unrelated claim"],
+        },
+      ]),
+    );
+    const refused = await ingest(value);
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.issues).toHaveLength(1);
+    expect(refused.issues[0]!.message).toContain("mod-b:invariant:9");
+  });
+
+  it("refuses an evidence entry with no non-empty citation strings", async () => {
+    const value = await fixture({ contractOverlays: true });
+    const after = await landA(value);
+    await writeResult(
+      value,
+      evidenceFor(value, after, [
+        { obligation_id: "mod-a:invariant:1", evidence: ["   "] },
+        {
+          obligation_id: "mod-a:output:2",
+          evidence: ["src/a.ts:1 still exports value"],
+        },
+      ]),
+    );
+    const refused = await ingest(value);
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.issues).toHaveLength(1);
+    expect(refused.issues[0]!.message).toContain("mod-a:invariant:1");
+  });
+
+  it("accepts an unburdened result (empty coverage) only when no obligations are bound", async () => {
+    const value = await fixture();
+    const after = await landA(value);
+    await writeResult(value, evidenceFor(value, after, []));
+    const ingested = await ingest(value);
+    expect(ingested.issues).toEqual([]);
+    expect(ingested.accepted_count).toBe(1);
+  });
+
+  it("the dispatch prompt enumerates the bound obligation ids it demands evidence for", async () => {
+    const value = await fixture({ contractOverlays: true });
+    expect(value.item.prompt.text).toContain("obligation_evidence");
+    expect(value.item.prompt.text).toContain("mod-a:invariant:1");
+    expect(value.item.prompt.text).toContain("mod-a:output:2");
   });
 });

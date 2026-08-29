@@ -83,8 +83,8 @@ export const RemediationBlockSchema = z
      */
     token_estimate: z.number().int().nonnegative().optional(),
     /**
-     * The APPROVED finalized module contract(s) this block implements
-     * (open-bugs.md:474). Attached VERBATIM at promotion by resolving each DAG
+     * The APPROVED finalized module contract(s) this block implements (the
+     * evidence-coverage entry in docs/backlog/open-bugs.md). Attached VERBATIM at promotion by resolving each DAG
      * node's obligation-id slugs against `finalized_module_contracts`, and
      * carried into the sha-bound dispatch prompt so a worker conforms to the
      * approved interface instead of inventing a locally plausible one that

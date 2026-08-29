@@ -9,11 +9,15 @@ export const REMEDIATION_STEP_CONTRACT_VERSION =
 // for names nothing writes, which is precisely how its discovery filters came
 // to match zero files on every live run.
 
+// v1alpha2 (obligation evidence-coverage floor): the work item BINDS the
+// block's contract obligation ids (`obligation_ids`), and the result must cite
+// evidence per bound obligation (`obligation_evidence`), coverage-validated at
+// ingestion. A v1alpha1 document refuses closed as stale — re-prepare.
 export const REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION =
-  "remediation-host-workload/v1alpha1" as const;
+  "remediation-host-workload/v1alpha2" as const;
 
 export const REMEDIATION_HOST_RESULT_CONTRACT_VERSION =
-  "remediation-host-result/v1alpha1" as const;
+  "remediation-host-result/v1alpha2" as const;
 
 export const REMEDIATION_HOST_DECISION_CONTRACT_VERSION =
   "remediation-host-decision/v1alpha1" as const;

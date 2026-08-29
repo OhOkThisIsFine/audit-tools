@@ -452,21 +452,15 @@
   regen:docs` (or one gate naming both) would make it one round-trip. (3) **ambiguous-direction:** none
   this lap.
 
-- **A conformance check between "host result received" and "accepted" is still missing — the work
-  item now CARRIES the approved contract, but nothing checks the landed result against it
-  (2026-08-09, narrowed 2026-08-29, medium).** The carriage half landed: promotion resolves each DAG
-  node's obligation-id slugs against `finalized_module_contracts` and attaches the owning contracts
-  VERBATIM to the block (`module_contracts` on `RemediationBlockSchema`), and the sha-bound dispatch
-  prompt binds the worker to them (`buildPrompt`, src/remediate/steps/dispatch/hostHandoff.ts) — the
-  auditor-agnostic root cause (a worker that never saw the approved interface) is closed. What
-  remains is the entry's second property: `corroborateHostResult` checks commit ancestry,
-  changed-file exactness, write scope, and required tests, and CONFORMANCE to the carried contract
-  is checked nowhere between received and accepted — build and targeted tests can stay green while
-  the divergence propagates to every consumer of the module. **Owner-decided 2026-08-29: BOTH.**
-  The mechanical per-obligation evidence-coverage requirement on the result contract lands first
-  (the floor — a `remediation-host-result` schema evolution: cited evidence per satisfied
-  obligation, coverage-validated at ingestion), and a bounded per-result LLM conformance review
-  follows as an opt-in per-run depth dial (per-run choices are never persisted).
+- **The per-result LLM conformance review — the opt-in depth dial half of the owner decision — is
+  unbuilt, so semantic conformance to the carried module contracts is still judged by nothing
+  (2026-08-09, narrowed 2026-08-29, medium).** The mechanical floor half is enforced: the work item
+  binds `obligation_ids`, the result cites evidence per bound obligation (`obligation_evidence`,
+  `remediation-host-result/v1alpha2`), and ingestion refuses uncovered, unknown, duplicated, or
+  uncited obligations (`parseResult`, src/remediate/steps/dispatch/hostHandoff.ts). What remains is
+  the decision's second half: a bounded per-result LLM conformance review as an opt-in per-run
+  depth dial (per-run choices are never persisted) that judges whether the cited evidence actually
+  demonstrates conformance to the carried contracts — coverage is mechanical, sufficiency is not.
   [[enforce-robustness-in-tooling-not-host-discretion]]
 
 - **Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16,
