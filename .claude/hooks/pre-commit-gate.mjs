@@ -29,7 +29,7 @@
 // restore, git error) — never wedge the session; FAIL-CLOSED on gate results
 // (a real `npm run check` / doc-contract failure blocks the commit).
 import { execSync, spawnSync } from 'node:child_process';
-import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync, realpathSync } from 'node:fs';
+import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync, realpathSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -169,6 +169,37 @@ function recoverInterruptedRoundTrip() {
     /* corrupt journal — fall through to removal */
   }
   if (j?.worktreeTree && j?.stagedTree) {
+    // The journal binds to the HEAD it was captured under. A killed hook does
+    // NOT stop the tool call — the git command can still run and MOVE HEAD —
+    // and restoring the journaled trees over a moved HEAD time-travels the
+    // checkout backward (observed live: a pre-rebase snapshot restored over
+    // the rebased tree; open-bugs.md:291). On a HEAD mismatch: REFUSE,
+    // quarantine the journal (its SHAs are the only pointers to the pre-crash
+    // trees), and hand the operator the manual restore path. A journal with no
+    // `head` field (an older gate version's shape) cannot prove it is safe to
+    // apply — same refusal.
+    const headNow = git(['rev-parse', 'HEAD']);
+    const currentHead = headNow.ok ? headNow.stdout.trim() : null;
+    if (!j.head || !currentHead || j.head !== currentHead) {
+      const quarantine = join(
+        STATE_DIR,
+        `gate-roundtrip-journal.quarantine-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
+      );
+      try {
+        renameSync(RT_JOURNAL, quarantine);
+      } catch {
+        try { rmSync(RT_JOURNAL, { force: true }); } catch { /* ignore */ }
+      }
+      console.error(
+        `[pre-commit gate] REFUSED to auto-recover an interrupted staged-snapshot round-trip: the ` +
+          `journal was captured under HEAD ${j.head ?? '(unrecorded — an older gate version wrote it)'} ` +
+          `but HEAD is now ${currentHead ?? '(unreadable)'}. Applying it would move the checkout ` +
+          `backward. Journal quarantined at ${quarantine}. If you need the pre-crash state: worktree ` +
+          `tree ${j.worktreeTree}, staged tree ${j.stagedTree} — inspect with \`git ls-tree -r <sha>\`, ` +
+          `restore single files with \`git checkout <tree-sha> -- <path>\` after checking \`git status\`.`,
+      );
+      return;
+    }
     const scratch = join(tmpdir(), `audit-tools-gate-recover-${randomBytes(6).toString('hex')}`);
     const union = new Set([...(listTreePaths(j.worktreeTree) ?? []), ...(listTreePaths(j.stagedTree) ?? [])]);
     const restoredWt = checkoutTreeExact(scratch, j.worktreeTree, union);
@@ -227,6 +258,19 @@ const isGitSubcommand = (name) => (s) => gitSubcommandRe(name).test(collapseQuot
 // and the hook-bypass vectors are refused on every history-writing form.
 const COMMIT_CREATING_SUBCOMMANDS = ['commit', 'merge', 'rebase', 'cherry-pick', 'revert', 'am'];
 const isCommitCreating = (s) => COMMIT_CREATING_SUBCOMMANDS.some((name) => isGitSubcommand(name)(s));
+
+// History-MOVING verbs (every commit-creating verb except `commit`) rewrite the
+// very tree the round-trip would restore, and a killed hook does not stop the
+// tool call — so a mid-round-trip crash followed by the command executing turns
+// the journaled restore into time-travel (open-bugs.md:291). These verbs keep
+// every gate LEG via the direct worktree check below; only the
+// materialize/restore machinery is off-limits for them. The direct check is an
+// approximation of the index a `--continue` form commits — accepted in
+// exchange for zero tree mutation around history rewrites.
+const HISTORY_MOVING_SUBCOMMANDS = COMMIT_CREATING_SUBCOMMANDS.filter((name) => name !== 'commit');
+const hasHistoryMovingCommand = subCmds.some((s) =>
+  HISTORY_MOVING_SUBCOMMANDS.some((name) => isGitSubcommand(name)(s)),
+);
 
 // Build 1 (P23): `git push` is detected ONLY for the child-session refusal
 // below. It must never enter the commit machinery — no hook-bypass scan, no
@@ -1150,11 +1194,14 @@ function committedPathsForDirectCheck() {
   return paths === null ? null : new Set(paths);
 }
 
-if (!diverges || hasStageCommand) {
+if (!diverges || hasStageCommand || hasHistoryMovingCommand) {
   // Working tree == staged index (nothing to materialize), OR the command
   // itself stages the working tree before committing (`git add -A && git
   // commit`, `git commit -a`/`-am`) — in both cases the WORKING TREE is the
-  // snapshot that lands, so check it directly. (For a PARTIAL `git add <paths>`
+  // snapshot that lands, so check it directly. History-MOVING verbs also land
+  // here regardless of divergence: the round-trip must never rewrite the tree
+  // around a command whose own execution rewrites it (see
+  // HISTORY_MOVING_SUBCOMMANDS above). (For a PARTIAL `git add <paths>`
   // chain the worktree is an approximation — exactness would need simulating
   // the add — but the old behavior checked the PRE-add index, which is wrong in
   // strictly more cases and let a chained add+commit land unchecked content.)
@@ -1222,9 +1269,26 @@ const unionPaths = new Set([...stagedPaths, ...worktreePaths]);
 // Journal the round-trip BEFORE the first worktree mutation: if this process is
 // killed anywhere past this point, the next gate invocation restores both trees
 // from these SHAs (they live in the object db and survive the crash).
+// The journal also records the HEAD it was captured under: recovery refuses to
+// apply it under any OTHER HEAD (see recoverInterruptedRoundTrip). A null head
+// (unborn HEAD, git fault) journals anyway — recovery then refuses and
+// quarantines, which is the announced-manual path, never a silent misapply.
+const headRevForJournal = git(['rev-parse', 'HEAD']);
 try {
   mkdirSync(STATE_DIR, { recursive: true });
-  writeFileSync(RT_JOURNAL, JSON.stringify({ worktreeTree, stagedTree, at: new Date().toISOString() }, null, 2));
+  writeFileSync(
+    RT_JOURNAL,
+    JSON.stringify(
+      {
+        worktreeTree,
+        stagedTree,
+        head: headRevForJournal.ok ? headRevForJournal.stdout.trim() : null,
+        at: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
 } catch {
   // Can't journal → don't take an unrecoverable risk: skip the check (fail-open).
   try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }

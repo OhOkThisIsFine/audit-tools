@@ -77,7 +77,15 @@ describe("pre-commit gate: commit detection is subcommand-positional", () => {
     mkdirSync(join(repo, ".claude", "hooks", ".state"), { recursive: true });
     writeFileSync(
       join(repo, ".claude", "hooks", ".state", "gate-roundtrip-journal.json"),
-      JSON.stringify({ worktreeTree, stagedTree, at: new Date().toISOString() }),
+      // `head` mirrors what the gate's journal writer records; recovery applies
+      // a journal only under the HEAD it was captured under (open-bugs.md:291
+      // fix). HEAD does not move in this simulated crash, so recovery heals.
+      JSON.stringify({
+        worktreeTree,
+        stagedTree,
+        head: g("rev-parse", "HEAD").stdout.trim(),
+        at: new Date().toISOString(),
+      }),
     );
 
     const r = runGate("echo hi"); // NOT a commit — recovery must still run

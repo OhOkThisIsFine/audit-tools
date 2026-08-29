@@ -288,19 +288,6 @@
   from a clean one in a rendered surface, not only in raw NDJSON — surface recovered items at the
   close-phase report. [[write-only-data-looks-authoritative]]
 
-- **The pre-commit round-trip journal is not bound to the HEAD it was captured under, so crash
-  recovery can time-travel the tree backward (2026-08-19, high).** Observed live: a `git rebase` call's
-  gate took the round-trip path (a background task's untracked log made the tree diverge), the hook
-  died before its `finally` restore (killed mid-`npm run check` — the hook-timeout class the journal
-  exists for), the rebase then moved HEAD — and the NEXT invocation's `recoverInterruptedRoundTrip`
-  restored the journaled PRE-REBASE worktree and index over the new commit. The one file the old trees
-  lacked survived as an orphan, and compiling it against the reverted schema manufactured a phantom
-  type error that read as "remote main is red" and nearly shipped a wrong-headed forward "repair" of a
-  green commit. **Property:** a journal records the HEAD (and index tree) it was captured under, and
-  recovery REFUSES — announced, journal quarantined — when current HEAD differs; additionally the
-  round-trip has no business materializing snapshots for history-MOVING commands (`rebase`, `merge`,
-  `am`, …) whose own execution rewrites the tree it would restore.
-
 - **The TASK draw's coherence eligibility is still disjunctive and has never been measured for
   collapse (2026-08-19, medium).** The findings draw moved to `shared_file AND same_lens`;
   `TASK_DRAW_COHERENCE_POLICY` keeps `weighted_score_threshold` deliberately, because no measurement

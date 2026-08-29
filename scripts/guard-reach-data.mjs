@@ -511,6 +511,14 @@ export const GUARDS = [
     note: 'commit-detection + crash-recovery + live-lock leg of the pre-commit-gate family',
   },
   {
+    id: 'pre-commit-roundtrip-journal-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/pre-commit-gate-roundtrip-journal.test.ts',
+    note:
+      'round-trip journal HEAD binding: recovery refuses + quarantines on a moved or unrecorded HEAD, ' +
+      'and history-moving verbs take the direct check instead of the materializing round-trip',
+  },
+  {
     id: 'pre-commit-commit-creating-test',
     kind: 'contract-test',
     impl: 'tests/shared/pre-commit-gate-commit-creating.test.ts',
