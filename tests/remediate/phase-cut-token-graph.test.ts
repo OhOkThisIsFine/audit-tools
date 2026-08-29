@@ -36,7 +36,11 @@ const AT = new Date().toISOString();
 /** A full drafted module contract; token edges come from the caller. */
 function moduleContract(
   name: string,
-  { inputs = [], outputs = [], neighbor_needs = [] as unknown[] } = {},
+  {
+    inputs = [],
+    outputs = [],
+    neighbor_needs = [],
+  }: { inputs?: string[]; outputs?: string[]; neighbor_needs?: unknown[] } = {},
 ) {
   return {
     name,

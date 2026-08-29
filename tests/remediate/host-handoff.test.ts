@@ -1604,9 +1604,9 @@ describe("work items carry the approved module contracts (open-bugs.md:474)", ()
       failure_modes: ["InvalidCredentials"],
       seam_adjustments: [],
     };
-    const state = JSON.parse(JSON.stringify(currentState())) as CurrentState & {
-      plan: { blocks: Array<Record<string, unknown>> };
-    };
+    const state = JSON.parse(JSON.stringify(currentState())) as {
+      plan: { blocks: Array<{ block_id: string; module_contracts?: unknown }> };
+    } & Record<string, unknown>;
     const withContract = state.plan.blocks.find(
       (entry) => entry.block_id === "block-a",
     )!;
