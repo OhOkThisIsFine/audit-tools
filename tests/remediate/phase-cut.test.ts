@@ -109,19 +109,6 @@ describe("derivePhaseCut", () => {
 });
 
 describe("phaseCutModulesFromContracts", () => {
-  it("derives depends_on from each module's directional neighbor_needs", () => {
-    const modules = phaseCutModulesFromContracts({
-      module_contracts: [
-        { name: "core", neighbor_needs: [] },
-        { name: "api", neighbor_needs: [{ neighbor: "core", needs: "the store" }] },
-      ],
-    });
-    expect(modules).toEqual([
-      { name: "core", depends_on: [] },
-      { name: "api", depends_on: ["core"] },
-    ]);
-  });
-
   it("degrades to empty on a malformed payload", () => {
     expect(phaseCutModulesFromContracts(null)).toEqual([]);
     expect(phaseCutModulesFromContracts({})).toEqual([]);
@@ -143,20 +130,15 @@ describe("phaseCutModulesFromContracts", () => {
     ]);
   });
 
-  it("unions neighbor_needs with artifact-token edges and matches artifact names case-insensitively", () => {
+  it("matches artifact names case-insensitively", () => {
     const modules = phaseCutModulesFromContracts({
       module_contracts: [
         { name: "core", outputs: ["artifact:Store"] },
-        { name: "seed", neighbor_needs: [], outputs: [] },
-        {
-          name: "api",
-          neighbor_needs: [{ neighbor: "seed", needs: "seed data" }],
-          inputs: ["artifact:store for reads"],
-        },
+        { name: "api", inputs: ["artifact:store for reads"] },
       ],
     });
     const api = modules.find((m) => m.name === "api")!;
-    expect([...api.depends_on].sort()).toEqual(["core", "seed"]);
+    expect(api.depends_on).toEqual(["core"]);
   });
 
   it("ignores an artifact token consumed and produced by the same module (no self-edge)", () => {
@@ -284,15 +266,17 @@ describe("auto-phasing wired into the critique step", () => {
       ],
       created_at: "2026-01-01T00:00:00.000Z",
     });
+    // Dependencies are declared as artifact tokens — the only ordering signal
+    // (open-bugs.md:106): each module produces artifact:<own-name> and consumes
+    // artifact:<needed-name>.
     const moduleContract = (name: string, needs: string[]) => ({
       name,
-      inputs: [],
-      outputs: [],
+      inputs: needs.map((n) => `artifact:${n}`),
+      outputs: [`artifact:${name}`],
       invariants: [],
       side_effects: [],
       validation_boundary: "self",
       failure_modes: [],
-      neighbor_needs: needs.map((n) => ({ neighbor: n, needs: "x" })),
     });
     await writeContractArtifact(artifactsDir, "module_contracts", {
       contract_version: CV("module-contracts"),

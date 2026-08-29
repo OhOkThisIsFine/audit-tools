@@ -64,8 +64,8 @@ function moduleContract(name: string) {
     side_effects: [],
     validation_boundary: "none",
     failure_modes: [],
-    // neighbor_needs is preserved into the finalized contract — it is one of the
-    // two module-dependency signals the phase-cut / DAG ordering derivation reads.
+    // Drafts carry neighbor_needs (the seam-negotiation vocabulary); finalization
+    // DROPS it — ordering derives from artifact tokens alone (open-bugs.md:106).
     neighbor_needs: [],
   };
 }
@@ -130,9 +130,9 @@ describe("degenerate-phase collapse — single-module decomposition", () => {
     expect(finalized.module_contracts).toHaveLength(1);
     expect(finalized.module_contracts[0].name).toBe("A");
     // Deterministic derive records empty seam_adjustments (no seams for one
-    // module) and PRESERVES neighbor_needs verbatim (the ordering signal).
+    // module) and DROPS neighbor_needs (ordering derives from tokens alone).
     expect(finalized.module_contracts[0].seam_adjustments).toEqual([]);
-    expect(finalized.module_contracts[0].neighbor_needs).toEqual([]);
+    expect(finalized.module_contracts[0]).not.toHaveProperty("neighbor_needs");
 
     // ...so the next host phase is critique, NOT seam/finalization.
     expect(step).not.toBeNull();

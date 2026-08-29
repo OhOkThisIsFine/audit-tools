@@ -83,6 +83,8 @@ import {
   phaseOrdinalForObligations,
   moduleSlug,
   renderPhaseCutSection,
+  detectContractTokenCycles,
+  type ContractTokenCycle,
 } from "../contractPipeline/phaseCut.js";
 import { ensurePhaseCutArtifact, readPhaseCutArtifact } from "../contractPipeline/phaseCutArtifact.js";
 import {
@@ -2715,22 +2717,61 @@ const degenerateSeamReconciliationGate: ContractGate = async (ctx) => {
   return { via: "rederive" };
 };
 
+/** Render the cycle section for the LLM finalization step: every declared-graph
+ *  cycle, its members, and the exact artifact tokens forming each edge. */
+function renderTokenCycleSection(cycles: ContractTokenCycle[]): string {
+  const parts = cycles.map((cycle, i) => {
+    const edges = cycle.edges
+      .map(
+        (e) =>
+          `- \`${e.consumer}\` depends on \`${e.producer}\` via \`artifact:${e.artifact}\` ` +
+          `(${e.consumer} consumes it; ${e.producer} produces it)`,
+      )
+      .join("\n");
+    return `### Cycle ${i + 1}: [${cycle.members.join(", ")}]\n\n${edges}`;
+  });
+  return `## Cyclic Artifact-Token Dependencies — Resolve These In Your Output
+
+The drafted contracts declare a CYCLIC artifact-token flow. Implementation ordering derives from
+producer/consumer \`artifact:<name>\` tokens ALONE, so the declared flow must be acyclic — a cycle
+cannot be phased, and the finalized contracts are REJECTED at validation while one remains.
+
+${parts.join("\n\n")}
+
+Rewrite the finalized \`inputs\`/\`outputs\` so one direction owns each flow: move an artifact token
+to the module that genuinely produces it, split a shared primitive into an earlier module's output,
+or drop a token that does not describe a real data handoff. Keep the module SET unchanged — do not
+add, drop, rename, or merge modules.`;
+}
+
 /**
  * Deterministic contract_finalization (all module counts). Finalization is a
- * mechanical merge, not fresh authoring: carry each drafted module contract
- * verbatim (preserving neighbor_needs for the ordering derivation) and attach
+ * mechanical merge, not fresh authoring: carry each drafted module contract's
+ * interface fields verbatim (dropping neighbor_needs — ordering derives from
+ * the artifact-token graph alone, open-bugs.md:106) and attach
  * the agreed_interface of every seam that touches the module as a
  * seam_adjustment. The judgment already happened at seam_reconciliation.
  * Attaching each agreed interface verbatim guarantees the INV-CO-12
  * reconciliation-derivation gate passes. A downstream gate that still finds the
  * merge inadequate re-emits contract_finalization as an LLM step — the only path
- * that still needs judgment.
+ * that still needs judgment. A CYCLIC declared token graph takes that LLM path
+ * up front: the mechanical merge would carry the cycle verbatim into an
+ * artifact validation refuses, so the gate emits the finalization step with the
+ * cycle named instead of deriving.
  */
 const contractFinalizationDerivationGate: ContractGate = async (ctx) => {
   if (ctx.nextPhase !== "contract_finalization") return null;
   const drafted = envelopePayload(
     await readContractArtifact(ctx.artifactsDir, "module_contracts"),
   );
+  const cycles = detectContractTokenCycles(drafted);
+  if (cycles.length > 0) {
+    return {
+      via: "phase",
+      phase: "contract_finalization",
+      extraSection: renderTokenCycleSection(cycles),
+    };
+  }
   const seamReport = envelopePayload(
     await readContractArtifact(ctx.artifactsDir, "seam_reconciliation_report"),
   );
@@ -3507,7 +3548,7 @@ const parallelModuleWaveGate: ContractGate = async (ctx) => {
  * dependency-ordered foundations→consumers phasing, instead of rejecting an
  * arbitrary N-goal change as "over-scoped" and forcing the host to re-scope by
  * hand at intake. The cut is derived from the finalized module contracts'
- * directional neighbor_needs edges and PERSISTED as `phase_cut.json`, so the cut
+ * producer/consumer artifact-token edges and PERSISTED as `phase_cut.json`, so the cut
  * the critic sees and the cut the implementation-DAG promotion enforces are one
  * source. Only injected when there is a genuine multi-phase cut to communicate.
  */

@@ -10,6 +10,7 @@ import {
   findFirstCycleWitness,
 } from "audit-tools/shared";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
+import { detectContractTokenCycles } from "../contractPipeline/phaseCut.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
@@ -300,6 +301,23 @@ export function validateFinalizedModuleContracts(
         continue;
       }
       validateModuleContractEntry(mod, `${path}.module_contracts[${i}]`, issues);
+    }
+    // A cycle in the DECLARED artifact-token graph is a validation error, not a
+    // silently dropped edge (open-bugs.md:106): implementation ordering derives
+    // from these tokens alone, and the fail-toward-later tiering would place
+    // token consumers ahead of their producers. Naming members and edges makes
+    // the ingestion re-emit actionable.
+    for (const cycle of detectContractTokenCycles(v)) {
+      pushValidationIssue(
+        issues,
+        `${path}.module_contracts`,
+        `${path}.module_contracts declares a CYCLIC artifact-token dependency graph; implementation ` +
+          `ordering derives from these tokens alone, so the declared flow must be acyclic. Cycle ` +
+          `members: [${cycle.members.join(", ")}]. Edges: ${cycle.edges
+            .map((e) => `${e.consumer} depends on ${e.producer} via artifact:${e.artifact}`)
+            .join("; ")}. Adjust inputs/outputs so one direction owns each flow; keep the module set ` +
+          `unchanged.`,
+      );
     }
   }
   requireString(v.created_at, `${path}.created_at`, issues);

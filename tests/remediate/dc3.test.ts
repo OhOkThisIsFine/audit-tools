@@ -369,8 +369,9 @@ describe("contract_finalization — deterministic derivation (no wave)", () => {
     expect(issues).toEqual([]);
   });
 
-  it("carries the draft interface verbatim, preserves neighbor_needs, and attaches touching-seam adjustments", async () => {
-    // A drafting contract with a neighbor edge, to prove neighbor_needs survives.
+  it("carries the draft interface verbatim, DROPS neighbor_needs, and attaches touching-seam adjustments", async () => {
+    // A drafting contract with a neighbor edge, to prove finalization drops it
+    // (open-bugs.md:106 — ordering derives from artifact tokens alone).
     await writeRaw("module_contracts", {
       contract_version: CP_MODULE_CONTRACTS_VERSION,
       goal_id: "G1",
@@ -406,10 +407,9 @@ describe("contract_finalization — deterministic derivation (no wave)", () => {
     // Interface fields copied verbatim from the draft.
     expect(byName("mod-alpha").inputs).toEqual(["x"]);
     expect(byName("mod-alpha").outputs).toEqual(["y"]);
-    // neighbor_needs preserved for the phase-cut / DAG ordering derivation.
-    expect(byName("mod-alpha").neighbor_needs).toEqual([
-      { neighbor: "mod-beta", needs: "y" },
-    ]);
+    // neighbor_needs never reaches the finalized contract — ordering comes from
+    // the artifact-token graph alone.
+    expect(byName("mod-alpha")).not.toHaveProperty("neighbor_needs");
     // The seam's agreed interface is attached to BOTH touched modules...
     expect(byName("mod-alpha").seam_adjustments.some((s: string) => s.includes(AGREED))).toBe(
       true,

@@ -4,8 +4,9 @@
  * When `/remediate-code` is pointed at an arbitrary N-goal input (e.g. the whole
  * backlog), the independent conceptual-design critique used to reject the run as
  * "over-scoped" and the HOST had to manually re-scope to a phase at intake. That
- * is the tool's job, not the host's: given the module-dependency DAG (each module
- * declares the neighbours it `needs`), the tool derives a foundations→consumers
+ * is the tool's job, not the host's: given the module-dependency DAG (the
+ * producer/consumer `artifact:<name>` token edges declared in the contracts'
+ * inputs/outputs), the tool derives a foundations→consumers
  * phase cut MECHANICALLY — ordered tiers where every module sits one tier below
  * the modules that depend on it. The critique is then handed the derived cut, so
  * it assesses design quality WITHIN a mechanically dependency-ordered phasing
@@ -20,6 +21,7 @@
 
 import { OBLIGATION_PREFIX } from "./idRegistry.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
+import { findCyclicComponents } from "../../shared/graph/directedCycles.js";
 
 /** One module + the names of the other modules it depends on (its foundations). */
 export interface PhaseCutModule {
@@ -200,17 +202,30 @@ function extractArtifactNames(entries: unknown): Set<string> {
   return names;
 }
 
+/** One producer→consumer pairing and the artifact token that links it. */
+interface ArtifactTokenEdge {
+  /** The depending module — it consumes the artifact. */
+  consumer: string;
+  /** The module it depends on — it produces the artifact. */
+  producer: string;
+  /** The normalized artifact name from the `artifact:<name>` token. */
+  artifact: string;
+}
+
 /**
- * Derive directional module-dependency edges from producer/consumer artifact
- * tokens in the finalized contracts' `inputs`/`outputs`. For each module M and
- * each artifact M consumes (an `artifact:<name>` token in M's `inputs`), M depends
- * on every OTHER module that produces that artifact (the token in its `outputs`).
- * Returns module name → set of module names it depends on (must run first).
- * Tolerant of malformed payloads: anything unparseable contributes no edge.
+ * Derive the DECLARED module-dependency graph from producer/consumer artifact
+ * tokens in the contracts' `inputs`/`outputs`. For each module M and each
+ * artifact M consumes (an `artifact:<name>` token in M's `inputs`), M depends
+ * on every OTHER module that produces that artifact (the token in its
+ * `outputs`). Returns both the dependency map (module name → set of module
+ * names that must run first) and the per-edge artifact attribution, so a cycle
+ * can be reported with the exact tokens that form it. Tolerant of malformed
+ * payloads: anything unparseable contributes no edge.
  */
-function deriveModuleArtifactDependencies(
-  contractsPayload: unknown,
-): Map<string, Set<string>> {
+function deriveModuleArtifactGraph(contractsPayload: unknown): {
+  deps: Map<string, Set<string>>;
+  edges: ArtifactTokenEdge[];
+} {
   const root = contractsPayload as { module_contracts?: unknown } | undefined;
   const list = Array.isArray(root?.module_contracts) ? root!.module_contracts : [];
   const producers = new Map<string, Set<string>>(); // artifact name → producing modules
@@ -229,48 +244,75 @@ function deriveModuleArtifactDependencies(
     consumes.set(m.name, extractArtifactNames(m.inputs));
   }
   const deps = new Map<string, Set<string>>();
+  const edges: ArtifactTokenEdge[] = [];
   for (const name of moduleNames) {
     const set = new Set<string>();
     for (const artifact of consumes.get(name) ?? []) {
       for (const producer of producers.get(artifact) ?? []) {
-        if (producer !== name) set.add(producer);
+        if (producer === name) continue;
+        set.add(producer);
+        edges.push({ consumer: name, producer, artifact });
       }
     }
     deps.set(name, set);
   }
-  return deps;
+  return { deps, edges };
 }
 
 /**
- * Build {@link PhaseCutModule}s from drafted/finalized module contracts. A module's
- * `depends_on` is the UNION of two tool-derived signals: (1) any directional
- * `neighbor_needs` (`{ neighbor, needs }` — this module needs `neighbor`, present
- * on DRAFT contracts) and (2) producer/consumer artifact-token matching over
- * `inputs`/`outputs` (present on FINALIZED contracts, which drop `neighbor_needs`).
- * A module that needs/consumes from another is one tier ABOVE it. Tolerant of
+ * Build {@link PhaseCutModule}s from finalized module contracts. A module's
+ * `depends_on` derives from producer/consumer artifact-token matching over
+ * `inputs`/`outputs` ALONE. Drafted `neighbor_needs` never enter this graph
+ * (open-bugs.md:106): they are symmetric coordination prose whose directions
+ * per-module drafting agents routinely invert, and unioning them in let prose
+ * override every declared token edge — finalization drops the field instead.
+ * A module that consumes from another is one tier ABOVE it. Tolerant of
  * malformed payloads: anything unparseable contributes no module/edge.
  */
 export function phaseCutModulesFromContracts(contractsPayload: unknown): PhaseCutModule[] {
   const root = contractsPayload as { module_contracts?: unknown } | undefined;
   const list = Array.isArray(root?.module_contracts) ? root!.module_contracts : [];
-  const artifactDeps = deriveModuleArtifactDependencies(contractsPayload);
+  const { deps } = deriveModuleArtifactGraph(contractsPayload);
   const out: PhaseCutModule[] = [];
   for (const mod of list) {
     if (typeof mod !== "object" || mod === null) continue;
-    const m = mod as { name?: unknown; neighbor_needs?: unknown };
+    const m = mod as { name?: unknown };
     if (typeof m.name !== "string" || m.name.length === 0) continue;
-    const needs = Array.isArray(m.neighbor_needs) ? m.neighbor_needs : [];
-    const depends_on = new Set<string>();
-    for (const need of needs) {
-      if (typeof need === "object" && need !== null) {
-        const neighbor = (need as { neighbor?: unknown }).neighbor;
-        if (typeof neighbor === "string" && neighbor.length > 0) depends_on.add(neighbor);
-      }
-    }
-    for (const dep of artifactDeps.get(m.name) ?? []) depends_on.add(dep);
-    out.push({ name: m.name, depends_on: [...depends_on] });
+    out.push({ name: m.name, depends_on: [...(deps.get(m.name) ?? [])] });
   }
   return out;
+}
+
+/** One declared-graph cycle: its member modules and the token edges among them. */
+export interface ContractTokenCycle {
+  /** Cycle members, in stable input order. */
+  members: string[];
+  /** The consumer→producer token edges between cycle members. */
+  edges: ArtifactTokenEdge[];
+}
+
+/**
+ * Detect cycles in the DECLARED module-dependency graph — the producer/consumer
+ * `artifact:` token edges of a module-contracts payload (drafted or finalized;
+ * finalization copies `inputs`/`outputs` verbatim, so the two graphs are equal).
+ * A cycle here is a VALIDATION error at the contract boundary (open-bugs.md:106):
+ * the phase cut must never be derived over a cyclic declared graph, because the
+ * fail-toward-later tiering silently drops a back-edge and places token
+ * consumers ahead of their producers. Members and their linking edges are
+ * reported so the repair prompt can name exactly which tokens form each cycle.
+ */
+export function detectContractTokenCycles(contractsPayload: unknown): ContractTokenCycle[] {
+  const { deps, edges } = deriveModuleArtifactGraph(contractsPayload);
+  const components = findCyclicComponents(
+    [...deps.entries()].map(([id, dependsOn]) => ({ id, depends_on: [...dependsOn] })),
+  );
+  return components.map((members) => {
+    const memberSet = new Set(members);
+    return {
+      members,
+      edges: edges.filter((e) => memberSet.has(e.consumer) && memberSet.has(e.producer)),
+    };
+  });
 }
 
 /**

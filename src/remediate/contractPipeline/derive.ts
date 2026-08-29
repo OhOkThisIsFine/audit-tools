@@ -164,15 +164,17 @@ export function deriveObligationLedger(
 // gate (INV-CO-12) passes, since its corpus is the union of every module's
 // inputs/outputs/invariants/side_effects/seam_adjustments/validation_boundary.
 //
-// `neighbor_needs` is PRESERVED from the draft (the finalized schema tolerates the
-// extra field): it is one of the two module-dependency signals `phaseCutModules
-// FromContracts` / `applyModuleDependencyEdges` read (unioned with `artifact:<name>`
-// producer/consumer tokens), so preserving it keeps the phase cut and node
-// ordering intact without the tool having to synthesize artifact tokens. A weaker
-// draft that leaves inputs/outputs empty, or a seam report referencing a module
-// not in scope, surfaces at the downstream design/reconciliation gate and routes
-// to an LLM re-author of `contract_finalization` — the only path that still needs
-// judgment.
+// `neighbor_needs` is DROPPED at finalization (open-bugs.md:106). It is the
+// drafting phase's seam-negotiation vocabulary — symmetric coordination prose
+// whose directions per-module agents routinely invert — and when it was
+// preserved and unioned into the dependency graph, prose overrode every
+// declared `artifact:<name>` token edge and manufactured cycles the
+// fail-toward-later tiering then mis-phased. Implementation ordering derives
+// from the producer/consumer token graph ALONE. A weaker draft that leaves
+// inputs/outputs token-free simply declares no ordering constraint; a seam
+// report referencing a module not in scope still surfaces at the downstream
+// design/reconciliation gate and routes to an LLM re-author of
+// `contract_finalization` — the only path that still needs judgment.
 
 /** The seam-reconciliation `agreed_interface`s that touch a given module name. */
 function seamAdjustmentsForModule(
@@ -207,11 +209,11 @@ function seamAdjustmentsForModule(
  * staleness DAG stays well-behaved.
  *
  * Each finalized entry copies the draft's interface fields verbatim (already
- * validated `string[]` / string shapes, so no coercion is needed) and PRESERVES
- * `neighbor_needs` for the ordering derivation, then sets `seam_adjustments` to
- * the `agreed_interface`(s) of the seams that touch the module. A draft entry
- * that is not an object is passed through unchanged (the downstream validator
- * reports it).
+ * validated `string[]` / string shapes, so no coercion is needed) and DROPS
+ * `neighbor_needs` (ordering derives from the artifact-token graph alone), then
+ * sets `seam_adjustments` to the `agreed_interface`(s) of the seams that touch
+ * the module. A draft entry that is not an object is passed through unchanged
+ * (the downstream validator reports it).
  */
 export function deriveFinalizedModuleContracts(
   draftedModuleContracts: unknown,
@@ -243,9 +245,6 @@ export function deriveFinalizedModuleContracts(
       failure_modes: mod.failure_modes,
       seam_adjustments: seamAdjustmentsForModule(mod.name, seamReconciliationReport),
     };
-    // Preserve the draft's directional neighbor edges when present — one of the
-    // two module-dependency signals the phase-cut / DAG ordering derivation reads.
-    if (Array.isArray(mod.neighbor_needs)) finalized.neighbor_needs = mod.neighbor_needs;
     return finalized;
   });
   return {
@@ -459,8 +458,8 @@ export function acceptedCounterexampleIds(judgeReport: unknown): string[] {
  *
  * `depends_on` is DERIVED, not left for the host: when `finalizedContracts` is
  * supplied, each module node depends on the nodes of the modules it needs first
- * (producer/consumer `artifact:<name>` matching over `inputs`/`outputs`, unioned
- * with `neighbor_needs` — the same module-dependency DAG `phase_cut` uses). This
+ * (producer/consumer `artifact:<name>` matching over `inputs`/`outputs` — the
+ * same module-dependency DAG `phase_cut` uses). This
  * makes cross-node ordering tool-enforced instead of a thing the host must
  * remember to hand-add. Edges are oriented by phase ordinal so the result is
  * acyclic by construction: only an edge to a strictly-earlier-phase module is
@@ -532,7 +531,7 @@ export function buildImplementationDagScaffold(
 
 /**
  * Fill each module node's `depends_on` from the finalized contracts'
- * module-dependency DAG (producer/consumer artifact tokens ∪ neighbor_needs), the
+ * module-dependency DAG (producer/consumer artifact tokens alone), the
  * SAME source `phase_cut` uses so the node ordering and the phase barrier agree.
  * Only a group keyed on a real module can be a dependency target (obligation- and
  * counterexample-only nodes have no module home). Edges are oriented by phase
