@@ -8,6 +8,22 @@
 
 ## Open tracks
 
+**The enforcement layer is exempt from the repo's own single-source gates, and gates have no
+retirement path (2026-08-29).** Full evidence, 33 ranked items and the measurement method:
+[`ceremony-complexity-review-2026-08-29.md`](../reviews/ceremony-complexity-review-2026-08-29.md).
+Two mechanisms cause the rest: `check:shared-primitives` scans `git ls-files 'src/**/*.ts'` only, so
+`scripts/` and `.claude/hooks/` are the one tree exempt from the one-definition rule they enforce
+(hence the generated-artifact pattern written 15 times); and `knip.json`'s `include` omits `"files"`
+while `project` counts tests as consumers, so unreferenced modules are invisible (1,515 lines, after
+5,300 of the same class were deleted once with no mechanism added). A walk of every commit that
+changed the gate list shows 32 gates added since 2026-07-25 and zero ever removed. **Property:** the
+single-source and orphan-module gates reach the governance tree, so a consolidation lands once
+instead of refilling. ⚠ Not the refused half of PH-05 — no gate is weakened and no
+avoided-defect bar is proposed; the substrate underneath simply stops being written N times.
+Tier 0 first: `tests/shared/generator-gates-run-at-commit.test.ts` filters on a `fix` field the two
+rows it was written to catch do not carry, so its offender list is empty and an unregenerated
+`src/shared/loopCorePaths.ts` edit passes a green commit gate today.
+
 **The audit draw WRITES to the audited tree, and the read-only framing does not say so
 (2026-08-24, raised by CP-NODE-7's refutation lane).** `docs/project-philosophy.md` and CLAUDE.md
 describe auditing as "the read-only selection" and remediating as "the write/apply selection", but
