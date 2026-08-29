@@ -3,7 +3,6 @@ import { execFileSyncHidden as execFileSync, spawnSyncHidden as spawnSync } from
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 
 import {
   computeAuditScope,
