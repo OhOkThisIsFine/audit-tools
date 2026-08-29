@@ -11,6 +11,19 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **A re-entered `commitFold` can still append ONE duplicate `accepted` event when
+  `recordLaneOutcome` throws after its durable append (2026-08-28, low).** The resumable commit
+  (`69613c68`) drops an entry only after `recordLaneOutcome` RETURNS, and that call is two effects:
+  `appendSubmissionEvent`, then the expected-set store mutate (`src/audit/cli/laneSubmissions.ts`).
+  A throw between them — the mutate's lock/write failing, or `withFileLock` surfacing a release
+  error after success — leaves the entry in `tx.staged`, and the catch-path re-commit re-appends.
+  Every mechanical consumer tolerates the duplicate (last-event-per-id, signature dedupe,
+  set-membership), so the damage is archived-ledger fidelity; in the same window a second mid-loop
+  throw can leave an accepted event recorded with its expected-set drop unrun (the lane lingers
+  owed until a later event clears it). The window is untested. **Property:** an `accepted` event
+  appends at most once per staged submission across commit re-entries — dedupe-on-append via the
+  existing eventSignature machinery, or an entry sub-state recorded between the two effects.
+
 - **The live-work guard did not stop the closeout challenge firing mid-sprint; an ABSENT signal is
   indistinguishable from an idle session (2026-08-28, low, friction: tool_should_decide).** The
   challenge fired while four dispatched `codex exec` lanes were still running. The guard is not

@@ -6,6 +6,17 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **`commitFold`'s applied-entry unlink swallows non-ENOENT, so Windows can re-consume an
+  already-applied submission (2026-08-28, medium).** The applied branch runs
+  `unlink(staged.stagingPath).catch(() => {})` (`src/audit/cli/foldTransaction.ts`): an EBUSY/EPERM
+  (e.g. an AV scan holding the file) leaves the staging file on disk while the `accepted` ledger
+  event records. The next fold's `recoverStagedSubmissions` then restores that file to its bound
+  path and the fold re-consumes it; only iterative lanes (`systemic_challenge`) are guarded by the
+  content-hash register. Pre-existing before the CX-02 resumable-commit fix (`69613c68`); surfaced
+  by the 3-lens refute panel over that fix. **Property:** an applied entry either deletes its
+  staging file or fails the commit — a swallowed unlink error can never leave a consumed submission
+  in a recoverable location.
+
 - **Commits created by `git cherry-pick` / `git merge` / `git rebase` bypass every pre-commit gate
   leg, the loop-core attestation, and the constitutional-doc gate (2026-08-28, medium).** The gate
   is a PreToolUse hook matching `git commit` command text, so any OTHER commit-creating verb lands
