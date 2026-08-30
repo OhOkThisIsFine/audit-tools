@@ -6,6 +6,17 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The closeout gate calls pushed commits "UNPUSHED" — it tests against `main` and says something
+  different from what it means (2026-08-29, low, friction: false_red).**
+  `closeout-challenge-gate.mjs` lists commits absent from `main` under the heading "UNPUSHED
+  commit(s) — the next agent clones origin/main and will not see these". The second clause is true and
+  is the useful part. The label is not: a lap that pushed every commit to its own branch, upstream
+  current, reads a flat assertion it can check and disprove in one command. A gate whose HEADLINE is
+  falsifiable teaches the reader to discount it and skim the accurate clause underneath, which is the
+  same corrosion a false red causes anywhere else. **Property:** the gate names the condition it
+  actually tested — not merged into `main` — and when a branch upstream exists and is current, it says
+  so instead of implying the work is only local.
+
 - **The gate fixture helper `stageLoopCoreFile` arms NOTHING, and its own comment says it arms the
   loop-core gate (2026-08-29, medium, friction: false_green).**
   <!-- doc-citation-exempt: a path written INTO a throwaway fixture repo, never a file of this tree -->

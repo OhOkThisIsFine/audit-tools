@@ -5,22 +5,29 @@
 
 ## Live state
 
-- **v0.50.15 is live** — the offload-lane lap: the four 2026-08-29 open-bugs entries worked
-  through the Codex, AGY, and llm-relay lanes. The consent prompt states the real decision
-  lifetimes (`9fe21eb5`); `--help`/`-h` on every audit-code subcommand is informational — no
-  lock, no directory, no byte (`9227c37c`); the src-reach leg-set pin lives ONCE in
-  `tests/helpers/precommitLegExpectations.ts` (`19aa3c69`); and the closeout renderer chain runs
-  in a never-built checkout via a generated friction-category sibling +
-  `check:friction-categories` gate (`4a6d6bc1`). The literal-pin entry narrows to its open
-  discovery arm; the codex-lane lap-record ceremony trap is recorded in durable-traps. The
-  ceremony remainder (Tier 2/3 + the `check:shared-primitives` governance reach) stays the open
-  track in the backlog.
+- **v0.50.15 is live. HEAD is `ac3939a7` on `main`** — the gate-integrity lap: three defects in the
+  enforcement layer itself. The masked-exit refusal keys on a load-bearing EXIT STATUS rather than on
+  test runners, so a piped `git push`/`commit`/`merge`/`rebase`/`cherry-pick`/`tag` or `npm publish`
+  is refused exactly like a suite (`a5d4a83d`). The attestation checks judge what a commit will
+  CONTAIN — a cherry-pick or merge now contributes the paths its named ref INTRODUCES, closing the
+  blind spot where a fresh history-moving verb staged nothing and every check read an empty set
+  (`35f9b03a`, owner decision). A repo that owns its green mechanism declares it in
+  `.claude/green-mechanism.json`, and the machine-wide `verify-green` ledger then DEFERS its `check`
+  and REFUSES its `record`, so no second contradicting ledger can exist (`ac3939a7`, owner decision).
+  One backlog entry was corrected rather than worked: the cherry-pick escape's stated mechanism was
+  false, and the real one is the pre-hoc blind spot above (`3bf45786`).
 
 ## Immediate next
 
 **Nothing is pinned.** The queue is the backlog ([`backlog.md`](backlog.md)); the standing
 program direction remains *redesign before scheduled autonomy* → the autonomous
 audit→remediate→PR capstone once the architecture items are worked off.
+
+The gate-integrity lap left two of its four items unworked, both in
+[`open-bugs.md`](backlog/open-bugs.md): the attest preflight judging the STAGED tree with
+WORKING-TREE checks, and the added-root-entry teardown check that is not hermetic against a
+concurrent session. The first touches the staged-snapshot round-trip machinery, which carries a
+documented crash-safety hazard and changed in `f117ac02` — run `/design-check` before editing it.
 
 
 ## Deliberate state, not bugs
