@@ -47,7 +47,10 @@ import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror
  *               (check:doc-links only — the broadest trigger in the gate must
  *               never mask a more specific refusal behind it).
  * @property {string} [fix] one-line remediation hint printed by the pre-commit
- *   gate leg and the attest preflight when this gate fails.
+ *   gate leg and the attest preflight when this gate fails. Gates: REQUIRED
+ *   (reconciled — the regenerate-shaped meta-test
+ *   tests/shared/generator-gates-run-at-commit.test.ts filters on this string,
+ *   so a fixless gate row is invisible to it; the F2 hole, 2026-08-29).
  * @property {string} [note]
  */
 
@@ -63,7 +66,16 @@ import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror
 /** @type {GuardRow[]} */
 export const GUARDS = [
   // ── gates (npm scripts reachable from verify:release) ──────────────────────
-  { id: 'build', kind: 'gate', impl: 'build', preCommit: false, note: 'tsc over src/ + data-asset copy; the pre-commit gate hand-codes its `npm run check` leg' },
+  {
+    id: 'build',
+    kind: 'gate',
+    impl: 'build',
+    preCommit: false,
+    fix:
+      'tsc failed over src/ — fix the reported type error; in a fresh checkout or worktree run ' +
+      '`npm install` first (a stale dist/ fakes "no exported member" errors)',
+    note: 'tsc over src/ + data-asset copy; the pre-commit gate hand-codes its `npm run check` leg',
+  },
   {
     id: 'check:tests',
     kind: 'gate',
@@ -79,6 +91,9 @@ export const GUARDS = [
     kind: 'gate',
     impl: 'check:control-bytes',
     preCommit: false,
+    fix:
+      'a tracked file carries raw control bytes — strip them at the named offsets; this gate covers ' +
+      'the merge/import paths the tool-input-guard write-time hook never sees',
     note: 'preCommit false is deliberate (CI-only; the tool-input-guard hook already refuses control bytes at write time) — cheap, flip to reach if wanted',
   },
   {
@@ -94,7 +109,17 @@ export const GUARDS = [
       'single-definition rules plus defect-class pattern rules (comparator body, containment ' +
       'predicate, sha256 chain, localeCompare/ICU collation) over tracked src/**/*.ts',
   },
-  { id: 'check:deadcode', kind: 'gate', impl: 'check:deadcode', preCommit: false, note: 'knip, default mode' },
+  {
+    id: 'check:deadcode',
+    kind: 'gate',
+    impl: 'check:deadcode',
+    preCommit: false,
+    fix:
+      'knip reports an exported symbol with zero consumers anywhere (tests included) — delete the ' +
+      'symbol and its orphaned tests, or land the consumer in the same commit; an additive export ' +
+      'with no adopter reds this gate',
+    note: 'knip, default mode',
+  },
   {
     id: 'check:doc-manifest',
     kind: 'gate',
@@ -182,8 +207,25 @@ export const GUARDS = [
       'docs/nightly-routine-prompt.md is generated from docs/nightly-routine.md + ' +
       'docs/doc-review-guidelines.md — run `node scripts/check-nightly-routine-prompt.mjs --write`, then re-stage the target',
   },
-  { id: 'check:loop-core-patterns', kind: 'gate', impl: 'check:loop-core-patterns', preCommit: false },
-  { id: 'check:constitutional-doc-paths', kind: 'gate', impl: 'check:constitutional-doc-paths', preCommit: false },
+  {
+    id: 'check:loop-core-patterns',
+    kind: 'gate',
+    impl: 'check:loop-core-patterns',
+    preCommit: 'reach',
+    fix:
+      '.claude/hooks/loop-core-patterns.mjs is stale against src/shared/loopCorePaths.ts — ' +
+      'run `node scripts/shared/generate-loop-core-patterns.mjs`, then re-stage it',
+  },
+  {
+    id: 'check:constitutional-doc-paths',
+    kind: 'gate',
+    impl: 'check:constitutional-doc-paths',
+    preCommit: 'reach',
+    fix:
+      'scripts/shared/constitutional-doc-paths.generated.mjs is stale against ' +
+      'src/shared/constitutionalDocPaths.ts — run ' +
+      '`node scripts/shared/generate-constitutional-doc-paths.mjs`, then re-stage it',
+  },
   {
     id: 'check:runtime-artifact-names',
     kind: 'gate',
@@ -305,6 +347,10 @@ export const GUARDS = [
     kind: 'gate',
     impl: 'check:version-gates',
     preCommit: false,
+    fix:
+      'a schema version is stamped on write but never compared where the payload is read back — ' +
+      'add the version check at the read site (discardOnSchemaVersionMismatch or an explicit ' +
+      'compare); never silence the constant by widening the scan rules',
     note: 'preCommit false is deliberate (CI-only) — cheap, flip to reach if wanted',
   },
   {
@@ -353,6 +399,9 @@ export const GUARDS = [
     kind: 'gate',
     impl: 'check:lint',
     preCommit: false,
+    fix:
+      'eslint failed — fix the named violation; the ruleset is curated zero-tolerance, so prefer ' +
+      'the fix over a disable comment, and a disable carries its reason on the same line',
     note:
       'eslint, curated zero-tolerance ruleset (eslint.config.js): unused-vars + verified sonarjs ' +
       'correctness rules over src (type-aware), tests (type-aware, unused-vars only) and the ' +
@@ -373,6 +422,9 @@ export const GUARDS = [
     kind: 'gate',
     impl: 'check:dup',
     preCommit: false,
+    fix:
+      'jscpd is over the .jscpd.json threshold — extract the duplicated logic into its shared ' +
+      'home instead of raising the threshold',
     note: 'jscpd duplication ratchet (.jscpd.json threshold) over src+scripts+tests',
   },
   {
@@ -380,22 +432,85 @@ export const GUARDS = [
     kind: 'gate',
     impl: 'check:depgraph',
     preCommit: false,
+    fix:
+      'dependency-cruiser found a runtime import cycle in src/, or src/shared importing an ' +
+      'orchestrator — break the cycle or invert the dependency; never widen .dependency-cruiser.cjs',
     note:
       'dependency-cruiser (.dependency-cruiser.cjs): no runtime import cycles in src; ' +
       'src/shared never imports src/audit|src/remediate',
   },
-  { id: 'verify:hosts', kind: 'gate', impl: 'verify:hosts', preCommit: false },
-  { id: 'verify:remediate-hosts', kind: 'gate', impl: 'verify:remediate-hosts', preCommit: false },
-  { id: 'pack:smoke', kind: 'gate', impl: 'pack:smoke', preCommit: false },
-  { id: 'smoke:packaged-audit-code', kind: 'gate', impl: 'smoke:packaged-audit-code', preCommit: false },
-  { id: 'smoke:packaged-remediate-code', kind: 'gate', impl: 'smoke:packaged-remediate-code', preCommit: false },
-  { id: 'smoke:linked-audit-code', kind: 'gate', impl: 'smoke:linked-audit-code', preCommit: false },
-  { id: 'smoke:linked-remediate-code', kind: 'gate', impl: 'smoke:linked-remediate-code', preCommit: false },
+  {
+    id: 'verify:hosts',
+    kind: 'gate',
+    impl: 'verify:hosts',
+    preCommit: 'reach',
+    fix:
+      'an audit host asset failed its isolated deploy+verify — regenerate the rendered assets from ' +
+      'the canonical prompt body (src/shared/hostAssets.ts render path); never hand-edit a rendered asset',
+  },
+  {
+    id: 'verify:remediate-hosts',
+    kind: 'gate',
+    impl: 'verify:remediate-hosts',
+    preCommit: 'reach',
+    fix:
+      'a remediate host asset failed its isolated deploy+verify — regenerate the rendered assets from ' +
+      'the canonical prompt body (src/shared/hostAssets.ts render path); never hand-edit a rendered asset',
+  },
+  {
+    id: 'pack:smoke',
+    kind: 'gate',
+    impl: 'pack:smoke',
+    preCommit: false,
+    fix:
+      'the packed tarball failed its smoke — packaged/global drift is caught ONLY by the pack/smoke ' +
+      'family, never by dev checks, so fix the packaging (package.json files, requiredPackagedPaths), ' +
+      'not the smoke',
+  },
+  {
+    id: 'smoke:packaged-audit-code',
+    kind: 'gate',
+    impl: 'smoke:packaged-audit-code',
+    preCommit: false,
+    fix:
+      'the packaged audit-code bin failed its installed-tarball smoke — fix the packaging or the bin ' +
+      'entry it names, never the smoke',
+  },
+  {
+    id: 'smoke:packaged-remediate-code',
+    kind: 'gate',
+    impl: 'smoke:packaged-remediate-code',
+    preCommit: false,
+    fix:
+      'the packaged remediate-code bin failed its installed-tarball smoke — fix the packaging or the ' +
+      'bin entry it names, never the smoke',
+  },
+  {
+    id: 'smoke:linked-audit-code',
+    kind: 'gate',
+    impl: 'smoke:linked-audit-code',
+    preCommit: false,
+    fix:
+      'the npm-linked audit-code bin failed its smoke — a link-only failure is resolution drift ' +
+      '(junction / global-bin shadowing); fix the wrapper resolution, not the smoke',
+  },
+  {
+    id: 'smoke:linked-remediate-code',
+    kind: 'gate',
+    impl: 'smoke:linked-remediate-code',
+    preCommit: false,
+    fix:
+      'the npm-linked remediate-code bin failed its smoke — a link-only failure is resolution drift ' +
+      '(junction / global-bin shadowing); fix the wrapper resolution, not the smoke',
+  },
   {
     id: 'vitest-gate',
     kind: 'gate',
     impl: 'scripts/shared/run-vitest-gate.mjs',
     preCommit: false,
+    fix:
+      'the full suite is red — rerun the failing file alone before calling it a regression ' +
+      '(passing alone = hermeticity flake; fix the test), and never mask the exit code behind a pipe',
     note: 'the full suite, invoked by path in verify:release',
   },
 
@@ -696,6 +811,29 @@ export const REACH = [
       'scripts/shared/runtime-artifact-names.generated.mjs',
     ],
     guardedBy: ['check:runtime-artifact-names'],
+  },
+  {
+    area: 'loop-core pattern parity sources',
+    files: [
+      'src/shared/loopCorePaths.ts',
+      'scripts/shared/generate-loop-core-patterns.mjs',
+      '.claude/hooks/loop-core-patterns.mjs',
+    ],
+    guardedBy: ['check:loop-core-patterns'],
+    note:
+      'the F2 hole (ceremony review 2026-08-29): the generated hook copy is what the pre-build ' +
+      'commit gate matches loop-core paths against, so an unregenerated loopCorePaths.ts edit must ' +
+      'red AT COMMIT, not first in release CI',
+  },
+  {
+    area: 'constitutional doc-path parity sources',
+    files: [
+      'src/shared/constitutionalDocPaths.ts',
+      'scripts/shared/generate-constitutional-doc-paths.mjs',
+      'scripts/shared/constitutional-doc-paths.generated.mjs',
+    ],
+    guardedBy: ['check:constitutional-doc-paths'],
+    note: 'same parity class as the loop-core patterns row above',
   },
   {
     area: 'executor→artifact producer relation',

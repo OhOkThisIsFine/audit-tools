@@ -141,6 +141,14 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
             `scans, or set preCommit: false.`,
         );
       }
+      if (typeof g.fix !== 'string' || g.fix.trim() === '') {
+        errors.push(
+          `Gate guard "${g.id}" declares no fix — the regenerate-shaped meta-test ` +
+            `(tests/shared/generator-gates-run-at-commit.test.ts) filters on the fix string, so a ` +
+            `fixless gate row is invisible to it (the F2 hole, 2026-08-29), and a failing derived ` +
+            `leg would print no remedy. State the one-line remedy. (${DATA_FILE})`,
+        );
+      }
     } else if ((g.kind === 'hook' || g.kind === 'contract-test') && 'preCommit' in g) {
       errors.push(
         `Guard "${g.id}" (kind "${g.kind}") carries a preCommit flag — only gates run as derived ` +

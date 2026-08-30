@@ -75,9 +75,9 @@ const HOOK_COMMANDS = [
   'node "$CLAUDE_PROJECT_DIR/.claude/hooks/beta-guard.mjs"',
 ];
 const GUARDS: GuardRow[] = [
-  { id: 'check:alpha', kind: 'gate', impl: 'check:alpha', preCommit: 'reach' },
-  { id: 'build', kind: 'gate', impl: 'build', preCommit: false },
-  { id: 'vitest-gate', kind: 'gate', impl: 'scripts/shared/run-vitest-gate.mjs', preCommit: false },
+  { id: 'check:alpha', kind: 'gate', impl: 'check:alpha', preCommit: 'reach', fix: 'fix alpha' },
+  { id: 'build', kind: 'gate', impl: 'build', preCommit: false, fix: 'fix the build' },
+  { id: 'vitest-gate', kind: 'gate', impl: 'scripts/shared/run-vitest-gate.mjs', preCommit: false, fix: 'fix the suite' },
   { id: 'beta-guard', kind: 'hook', impl: '.claude/hooks/beta-guard.mjs' },
   { id: 'gamma-contract', kind: 'contract-test', impl: 'tests/shared/gamma.test.ts' },
 ];
@@ -160,7 +160,7 @@ describe('registry rot — dead patterns and phantom guards', () => {
 describe('wiring — a script in no gate is not a gate', () => {
   it('a gate row whose npm script is not reachable from verify:release is an error', () => {
     const errors = run({
-      guards: [...GUARDS, { id: 'check:stray', kind: 'gate', impl: 'check:stray', preCommit: false }],
+      guards: [...GUARDS, { id: 'check:stray', kind: 'gate', impl: 'check:stray', preCommit: false, fix: 'fix stray' }],
       packageScripts: { ...SCRIPTS, 'check:stray': 'node scripts/check-stray.mjs' },
     });
     expect(errors.some((e) => e.includes('check:stray'))).toBe(true);
@@ -303,5 +303,16 @@ describe('preCommit flag discipline (P34) — the derived leg set is stated, nev
       reach: REACH.map((r) => (r.area === 'gates' ? { ...r, guardedBy: ['build'] } : r)),
     });
     expect(errors).toEqual([]);
+  });
+
+  it('a gate row without a fix is an error — a fixless gate is invisible to the regenerate-shaped meta-test (F2)', () => {
+    const errors = run({
+      guards: GUARDS.map((g) => {
+        if (g.id !== 'check:alpha') return g;
+        const { fix: _dropped, ...rest } = g;
+        return rest;
+      }),
+    });
+    expect(errors.some((e) => e.includes('check:alpha') && e.includes('declares no fix'))).toBe(true);
   });
 });
