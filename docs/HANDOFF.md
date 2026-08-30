@@ -23,8 +23,10 @@
 
 ## Immediate next
 
-**Nothing is pinned.** The roadmap block below is the authority, and an empty one is a statement
-rather than an omission.
+**Nothing is pinned, by owner decision 2026-08-30.** The empty roadmap below was reviewed and chosen
+at the hand-back, against pinning either the fresh-worktree disarm or the session-registry liveness
+signal. It is a statement, not an omission — the next session picks from the backlog on its own
+judgement.
 
 Three live residuals are in [`open-bugs.md`](backlog/open-bugs.md), none pinned. The largest was
 found while verifying this lap's own worker and is new: the child-session commit/push refusal is
