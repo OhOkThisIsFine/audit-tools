@@ -6,6 +6,17 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **A literal pinned in a test outside the change's neighborhood reds only in CI — three instances
+  in one lap (2026-08-29, medium, friction: tool_should_decide).** The ceremony lap's refactors hit
+  the class three times: the derived pre-commit leg set is pinned as a literal in BOTH
+  `tests/shared/precommit-leg-derivation.test.ts` and `tests/shared/attest-derived-file-preflight.test.ts`
+  (the second copy surfaced only in a CI shard); a friction-closure row grepped `probeLane\(` and
+  missed the optional-call rewrite; `loop-core-paths.test.ts` pinned a deleted pattern member. Each
+  pin is legitimate alone; the defect is the SECOND copy of the same literal, which no local gate
+  runs when the change's own neighborhood is green. **Property:** a derived literal is pinned in ONE
+  test (the second consumer imports the same fixture/constant), or the commit legs run the pinning
+  tests whose SUBJECT a staged file feeds — never discovered shard-by-shard in CI.
+
 - **`render-closeout.mjs --template` needs a built `dist/`, so the mandatory hand-back tool cannot
   run in a fresh worktree (2026-08-29, low, friction: inefficient_feeding).** `--template` prints a
   static blank JSON and needs no product code, but `scripts/render-closeout.mjs` imports

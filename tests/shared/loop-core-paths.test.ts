@@ -8,7 +8,6 @@ describe("loopCorePaths — the single-sourced loop-core path set", () => {
 
   it("matches audit + remediate orchestrator step machines and drivers", () => {
     expect(isLoopCorePath("src/audit/orchestrator/nextStep.ts")).toBe(true);
-    expect(isLoopCorePath("src/audit/cli/dispatch.ts")).toBe(true);
     expect(isLoopCorePath("src/audit/cli/dispatch/hostHandoff.ts")).toBe(true);
     expect(isLoopCorePath("src/remediate/steps/nextStep.ts")).toBe(true);
     expect(isLoopCorePath("src/remediate/steps/dispatch/writeScope.ts")).toBe(true);

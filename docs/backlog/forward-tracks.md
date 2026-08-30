@@ -8,21 +8,20 @@
 
 ## Open tracks
 
-**The enforcement layer is exempt from the repo's own single-source gates, and gates have no
-retirement path (2026-08-29).** Full evidence, 33 ranked items and the measurement method:
+**Ceremony-review remainder — Tier 2/3 consolidations, plus the one unlanded Part-5 mechanism
+(2026-08-29).** Full evidence and the ranked plan:
 [`ceremony-complexity-review-2026-08-29.md`](../reviews/ceremony-complexity-review-2026-08-29.md).
-Two mechanisms cause the rest: `check:shared-primitives` scans `git ls-files 'src/**/*.ts'` only, so
-`scripts/` and `.claude/hooks/` are the one tree exempt from the one-definition rule they enforce
-(hence the generated-artifact pattern written 15 times); and `knip.json`'s `include` omits `"files"`
-while `project` counts tests as consumers, so unreferenced modules are invisible (1,515 lines, after
-5,300 of the same class were deleted once with no mechanism added). A walk of every commit that
-changed the gate list shows 32 gates added since 2026-07-25 and zero ever removed. **Property:** the
-single-source and orphan-module gates reach the governance tree, so a consolidation lands once
-instead of refilling. ⚠ Not the refused half of PH-05 — no gate is weakened and no
-avoided-defect bar is proposed; the substrate underneath simply stops being written N times.
-Tier 0 first: `tests/shared/generator-gates-run-at-commit.test.ts` filters on a `fix` field the two
-rows it was written to catch do not carry, so its offender list is empty and an unregenerated
-`src/shared/loopCorePaths.ts` edit passes a green commit gate today.
+The 2026-08-29 lap landed Tier 0, Tier 1, F8, F10 (registry moved to `~/.agent-config`), and both
+anti-refill mechanisms for the orphan-module class (`check:orphan-modules` + knip `files`). What
+remains open: **`check:shared-primitives` still scans `git ls-files 'src/**/*.ts'` only**, so the
+governance tree stays exempt from the one-definition rule it enforces (the F1 substrate removed
+today's duplicates; the gate reach is what stops them re-growing); and the review's Tier 2
+(CY-02/05/06 vocabulary copies, CY-15 collectFiles, CY-14, CY-13, F5 one-backlog-process, F4
+test:doc-contract registration, F6 Stop-gate preamble, CY-08 line-index memo, C-05, C-09) and
+Tier 3 (CY-04, CY-07, CY-12, CY-09, F3 attestation dedup, C-03 philosophy map, C-11 traps sweep,
+CY-11, F9 pre-commit boundary split) stay as ranked in the review. **Property:** the single-source
+gate reaches the governance tree, so a consolidation lands once instead of refilling. ⚠ Not the
+refused half of PH-05 — no gate is weakened; the substrate stops being written N times.
 
 **The audit draw WRITES to the audited tree, and the read-only framing does not say so
 (2026-08-24, raised by CP-NODE-7's refutation lane).** `docs/project-philosophy.md` and CLAUDE.md
