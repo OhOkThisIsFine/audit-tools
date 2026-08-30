@@ -222,29 +222,10 @@ instead of a rewrite. Trivial mechanical edits skip it.
   NOT deletable: state the uncovered half outright, or the covered half reads as a close (a live
   example in [`durable-traps.md`](docs/backlog/durable-traps.md) — the `.mjs` test holdout
   `checkJs:false` excludes from `check:tests`). Current guards in `.claude/hooks/`:
-  `shell-trap-guard.mjs` (PreToolUse Bash/PowerShell — `codex exec` with open stdin; a `git checkout --` /
-  `git restore` that would eat unstaged work; Bash-tool Windows-backslash paths, PowerShell here-strings and
-  `mktemp`; a live backtick, which command-substitutes inside double quotes too, so markdown backticks in a
-  quoted message are executed rather than written; agy headless flag/stdin traps; a refusal of a suite/verify
-  exit code masked by a pipe),
-  `tool-input-guard.mjs` (PreToolUse Edit/Write/Agent — raw control bytes in written content, Agent
-  `isolation:"worktree"` on a dispatch node, a deny-once when HEAD is behind remote main),
-  `session-start-guards.mjs` (SessionStart — stale-main probe, missing `node_modules`, a stale git
-  `index.lock`/`shallow.lock`, offload-lane liveness so a down proxy is a known constraint at lap start
-  rather than a mid-lap stall, the one leg that MUTATES the filesystem — reaping agent worktrees
-  that are an ancestor of a main ref, idle ≥6h, and clean — and session registration: a
-  per-`session_id` record with the tree-dirt baseline at session start, the substrate the Stop gates
-  scope themselves by (a dispatched child sets `AUDIT_TOOLS_CHILD_SESSION=1` and is not registered)),
-  `nightly-surface.mjs` (SessionStart — surfaces the nightly routine's open items),
-  `friction-stop-gate.mjs` (Stop — the blocking friction-walk backstop; `process.exit(2)`),
-  `question-philosophy-gate.mjs` (PreToolUse AskUserQuestion + Stop — a question is about to reach the owner,
-  so THE BRIEF in `docs/project-philosophy.md` is EXTRACTED, never copied, and injected once per session; it
-  does not suppress asking — *ask on ambiguity* still holds, and the retry goes through),
-  `closeout-challenge-gate.mjs` (Stop — asks "are you sure that was all taken care of, and will the handoff
-  be clear for the next agent?" with the mechanical evidence attached: uncommitted work, unpushed commits, a
-  HANDOFF generated state that no longer matches the nightly queue / decision ledger or backlog,
-  memory files missing from the `~/.claude/…/memory/MEMORY.md` index; capped at 2 per session; dirt present at session start is
-  reported as pre-session (not yours), never challenged).
+  `shell-trap-guard.mjs`, `tool-input-guard.mjs`, `session-start-guards.mjs`, `nightly-surface.mjs`,
+  `friction-stop-gate.mjs`, `question-philosophy-gate.mjs`, `closeout-challenge-gate.mjs` — what each
+  fires on and refuses is stated in its registry row and its own header, never in this paragraph
+  (a dispatched child sets `AUDIT_TOOLS_CHILD_SESSION=1` and is exempt from the session-scoped Stop gates).
   **Guard wiring + reach are DECLARED DATA, never prose:** `scripts/guard-reach-data.mjs` registers every
   guard (gate / hook / contract-test), how it is wired, and the file set it scans — with every known
   uncovered half stated as data. `npm run check:guard-reach` (in `verify:checks`, plus an unconditional
@@ -310,28 +291,16 @@ instead of a rewrite. Trivial mechanical edits skip it.
   to *remember* to update it — a drift test made of memory, which is the thing this project bans.
 - **Docs capture durable concepts, not current state.** Timeless conceptual docs only. Exception: single handoff doc for immediate next steps. Full statement (one-home-per-concept, status-noise, condensation bias) in [`docs/documentation-philosophy.md`](docs/documentation-philosophy.md) — the canonical philosophy the nightly maintenance routine's doc leg enforces ([`docs/nightly-routine.md`](docs/nightly-routine.md)).
 - **audit-tools does NOT route — it reports task metadata and the HOST dispatches** (owner directive,
-  2026-08-09). The tool's job is to characterize work: per-task risk, complexity, local token
-  estimates, scope and lens. Choosing *which backend runs it* — pools, capability tiers, failover,
-  cost-first admission, provider rosters — is the host's, and owning any of it here is pollution.
-  This is the same inversion as *Conversation-first* and *never hand-maintain a model/price table*,
-  applied to selection itself: those rules say don't own the model FACTS, this one says don't own the
-  CHOICE. **The cut is (d) — ZERO execution adapters, metadata only** (owner, 2026-08-09, superseding
-  the same day's "one execution adapter"): the tool atomizes work and emits per-task metadata,
-  mandating nothing, so every provider class, `PROVIDER_NAMES`, auto-resolution, the launch contract
-  and the spawn substrate go — and **quota goes entirely** (the verb, the sources, the learned slope,
-  cooldowns, RPM/TPM, reservations); a backend's allowance is never the tool's business. **The
-  declared sizing window goes with them** (owner, 2026-08-09, superseding the same day's "the single
-  host-declared window stays"): asked which config field should carry it, the owner rejected the
-  premise — *"audit-tools should not be involved in dispatching, routing, or transport"* — and a
-  config block describing a backend's context and output caps IS transport config. So the tool
-  partitions on **content coherence** and reports a **token estimate**; it never partitions to fit a
-  backend's window, and the host bundles for the backend only it knows. Work blocks survive; "reasonable
-  size" stops meaning "fits model X". What stays is result **ingestion** (consumption, not execution)
-  and the right to faithfully RECORD what the host says ran — *not routing does not mean not knowing*.
-  ⚠ Consequence: `work_blocks` in `audit-findings.json` stops being a FIT CLAIM and becomes a
-  coherence grouping plus an estimate.
-  ⚠ Internal autonomous execution is deliberately given up. The old provider, quota, routing,
-  backend-sizing, and launch substrate was retired as one architectural cut; do not recreate it.
+  2026-08-09: ZERO execution adapters, metadata only). The tool characterizes work — per-task risk,
+  complexity, local token estimates, scope, lens — and partitions on **content coherence**; choosing
+  which backend runs it, and every provider, quota, sizing, and launch fact behind that choice, is
+  the host's. A backend's context or output cap is transport config and never enters the tool, so
+  `work_blocks` in `audit-findings.json` is a coherence grouping plus an estimate, never a fit
+  claim. What stays is result **ingestion** (consumption, not execution) and the right to faithfully
+  RECORD what the host says ran — *not routing does not mean not knowing*.
+  ⚠ The old provider, quota, routing, backend-sizing, and launch substrate was retired as ONE
+  architectural cut; do not recreate it. Provenance (the three same-day supersessions): git log,
+  2026-08-09.
 - **A needed manual flag is a bug signal.** Fix canonical root/state resolution; do not document a workflow flag. Execution choices are host-owned inputs to neither CLI.
 - **Resolve toward durable contract.** LLM-vs-deterministic → deterministic; graph/language → language-neutral contract.
 - **Budget context before LLM dispatch.** Small obligation-specific packets; expand only when genuinely needed.
@@ -341,7 +310,7 @@ instead of a rewrite. Trivial mechanical edits skip it.
 - **Token/context policy lives in `~/.claude/CLAUDE.md`.** Don't duplicate here.
 - **Token estimates stay local and deterministic.** Never API-call token counting in planning or host-handoff generation. No tokenizer dependency — shared `estimateTokensFromBytes` is the standard. An estimate describes content size only; it is never a backend-fit claim.
 - **Two-tier dependency policy — import vetted libs for correctness-sensitive parsing/schema/lock; own only tiny domain bits.** A format whose grammar we don't fully own (TOML, YAML, lockfiles, schema validation) is *correctness-sensitive*: a hand-rolled scanner silently drops what it doesn't understand (e.g. the TOML line scanner missed inline-table / dotted-key / quoted forms → dropped dependency-graph edges). Import a vetted, pure-JS, well-maintained parser there (`smol-toml`, `yaml`) — pure-JS so OS-agnostic, no native build. Keep hand-rolled only for *tiny, fully-owned* domain bits (e.g. our `.audit-tools` path tokens, the work-block id grammar). When importing: wrap the parser so malformed input degrades to empty (the graph/extractors never throw on a bad manifest), and single-source the parse + safe accessors in one module.
-- **Own-vs-acquire analyzer engine — own the agnostic extractors, acquire + normalize the rest.** OWN only truly language-agnostic extractors in-house (git-history mining); ACQUIRE ecosystem-native analyzers (clippy / rubocop / semgrep / eslint / gitleaks secret-scan) on demand and NORMALIZE their output into *leads*, never direct findings (npm-audit is not acquired — an npm-audit JSON report enters as imported external-analyzer input (`src/audit/cli/importExternalAnalyzerCommand.ts`), never a spawn). Every acquired-tool spawn routes through the single `admitSpawn` chokepoint, where a recorded operator `declined` decision (or an analyzer setting of `skip`) refuses the spawn OUTRIGHT — even for a curated default-set tool, and no consent token overrides an operator refusal; below that veto, the curated DEFAULT set is admitted WITHOUT a token and every other candidate — including pre-installed `permanent`/`ephemeral` tools — requires the PER-RUN consent token (`consentToken` on `AcquisitionEngineOptions` / `ExternalAcquisitionAdvanceOptions`, consumed by `admitSpawn`) — there is no durable-grant arm, because a grant binds only the run that was asked (a mechanical run-safety gate + curated default set + per-run consent, never a maintained allowlist). **Consent binds the ACQUIRED-analyzer role, not the binary.** The same executable invoked as repo-local tooling — a resolver/formatter/syntax check the repo already owns — is admitted by the decline-only local gate (`admitLocalSpawn`, `src/audit/orchestrator/localCommands.ts`) instead: a recorded operator `declined` for that tool id still refuses the spawn outright, but no consent is required to run it; a consent token authorizes ONE run and is never persisted. **The two consent lifetimes are asymmetric by design:** a DECLINE is durable and vetoes every later spawn of that tool; a GRANT binds the run that asked and dies with it, because a standing grant keeps granting itself to runs whose operator never saw the offer — for a network-egress analyzer that converts one consent into standing consent. Both halves are mechanical, not remembered, and pinned by `tests/shared/consent-token-not-persisted.test.ts`: the persisted schemas (`SessionIntentV1Schema`, `AnalyzerPolicySchema`) are `.strict()` and admit no token-shaped field, `AnalyzerConsentDecisionSchema` is a ONE-MEMBER enum (`"declined"`) so a grant has no durable shape to be written into, and the analyzer-policy store re-validates on write. The operator still answers grants and declines on one lane; `handleAnalyzerConsentBranch` splits them, persisting the declines and folding the grants into the run's scoped consent token. Two recorded design deviations from the original mechanical-analyzer item-C text (their spec was folded away 2026-08-27; the decided-against acquisition list lives in [`durable-traps.md`](docs/backlog/durable-traps.md)): the candidate registry lives in `src/shared/analyzers/candidates.ts` because the remediation verify draw re-runs the same pinned spec — keeping it audit-side would force a banned remediate→audit import (audit keeps orchestration and re-exports through `src/audit/extractors/analyzers/registry.ts`); and `verify_analyzer_leads` is a close-gate verify leg, never a `CLOSING_ACTIONS` entry — that enum is the operator's one-per-plan repo-landing choice. [[deterministic-analyzers-own-vs-acquire]]
+- **Own-vs-acquire analyzer engine — own the agnostic extractors, acquire + normalize the rest.** OWN only truly language-agnostic extractors in-house (git-history mining); ACQUIRE ecosystem-native analyzers on demand and NORMALIZE their output into *leads*, never direct findings (npm-audit is not acquired — an npm-audit JSON report enters as imported external-analyzer input, `src/audit/cli/importExternalAnalyzerCommand.ts`, never a spawn). Every acquired-tool spawn routes through the single `admitSpawn` chokepoint: a recorded operator `declined` refuses OUTRIGHT and no consent token overrides it; the curated DEFAULT set is admitted without a token; every other candidate requires the PER-RUN consent token. **Consent binds the ACQUIRED-analyzer role, not the binary** — the same executable invoked as repo-local tooling is admitted by the decline-only local gate (`admitLocalSpawn`, `src/audit/orchestrator/localCommands.ts`). **The two consent lifetimes are asymmetric by design:** a DECLINE is durable; a GRANT binds the run that asked and dies with it. Both halves are mechanical, pinned by `tests/shared/consent-token-not-persisted.test.ts` (a grant has no durable shape to be written into) — the full argument lives in that test and [[deterministic-analyzers-own-vs-acquire]], not here. The candidate registry lives in `src/shared/analyzers/candidates.ts` (the remediation verify draw re-runs the same pinned spec; audit re-exports through `src/audit/extractors/analyzers/registry.ts`), and `verify_analyzer_leads` is a close-gate verify leg, never a `CLOSING_ACTIONS` entry. Decided-against acquisitions: [`durable-traps.md`](docs/backlog/durable-traps.md).
 - **Dead-code release gate — default-mode knip, not `--production`.** `npm run check:deadcode`
   (runs `knip --no-config-hints`, with `include: ["exports","types","nsExports","nsTypes"]` set in
   `knip.json`; wired into `verify:release`) fails the build on any
