@@ -6,19 +6,6 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **The closeout suite-green check lives only in the Stop gate, so a stale stamp surfaces AFTER the
-  render exists and the challenge forces double generation (2026-08-29, medium, friction:
-  tool_should_decide).** The renderer refuses an un-ready render through `closeoutReadinessFindings`
-  (`scripts/shared/closeoutReadiness.mjs`, landed `4661195a` as the anti-double-generation seam),
-  but the P48 `readSuiteGreenStamp` tree comparison landed only in `closeout-challenge-gate.mjs`
-  (`15e45d76`) — so a suite stamp bound to an older tree is discoverable only at Stop, after
-  `render-closeout.mjs` wrote its record, and the challenge's mandatory re-render doubles the
-  closeout (hit this lap; Codex-verified against the commits). **Property:** every mechanical
-  readiness check that CAN run pre-render — the suite-green tree comparison included — lives in
-  `closeoutReadinessFindings`, which the renderer consults before writing, so the first render
-  already carries the corrections; the Stop gate keeps the same function as its backstop plus the
-  necessarily-post-render evidence (`reportReachedTheOwner`).
-
 - **`render-closeout.mjs --template` needs a built `dist/`, so the mandatory hand-back tool cannot
   run in a fresh worktree (2026-08-29, low, friction: inefficient_feeding).** `--template` prints a
   static blank JSON and needs no product code, but `scripts/render-closeout.mjs` imports

@@ -36,8 +36,66 @@ describe('full-suite green is recorded as tree-bound evidence', () => {
     expect(gate).toContain('writeSuiteGreenStamp');
   });
 
-  it('is read by the closeout challenge, so a stale green cannot pass in silence', () => {
+  it('is read by the PRE-RENDER readiness seam, so a stale green refuses the FIRST render', () => {
+    // The seam owns the read; both consumers reach it through
+    // closeoutReadinessFindings — the renderer before writing a record, the
+    // Stop gate as its backstop. The gate holding its OWN copy is exactly the
+    // double-generation defect (the challenge could only speak post-render).
+    const readiness = readFileSync(resolve(ROOT, 'scripts/shared/closeoutReadiness.mjs'), 'utf8');
+    expect(readiness).toContain('readSuiteGreenStamp');
+    const renderer = readFileSync(resolve(ROOT, 'scripts/render-closeout.mjs'), 'utf8');
+    expect(renderer).toContain('closeoutReadinessFindings');
     const hook = readFileSync(resolve(ROOT, '.claude/hooks/closeout-challenge-gate.mjs'), 'utf8');
-    expect(hook).toContain('readSuiteGreenStamp');
+    expect(hook).toContain('closeoutReadinessFindings');
+    expect(hook).not.toContain('readSuiteGreenStamp');
+  });
+
+  it('readiness reports a missing or tree-mismatched stamp, and accepts a matching one', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { execFileSync } = await import('node:child_process');
+    const readinessModule = await import(
+      /* @vite-ignore */ pathToFileURL(resolve(ROOT, 'scripts/shared/closeoutReadiness.mjs')).href
+    );
+    const treeModule = await import(
+      /* @vite-ignore */ pathToFileURL(resolve(ROOT, 'scripts/shared/worktree-tree.mjs')).href
+    );
+    const stampModule = await import(/* @vite-ignore */ MODULE);
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'suite-green-readiness-'));
+    try {
+      const git = (args: string[]) =>
+        execFileSync('git', args, { cwd: fixtureRoot, encoding: 'utf8', windowsHide: true });
+      mkdirSync(join(fixtureRoot, 'src'), { recursive: true });
+      writeFileSync(join(fixtureRoot, 'src', 'a.txt'), 'content\n');
+      // Mirror the real repo: the stamp lives under .claude/, which is ignored,
+      // so writing it never changes the tree identity it is compared against.
+      writeFileSync(join(fixtureRoot, '.gitignore'), '.claude/\n');
+      git(['init']);
+      git(['config', 'user.email', 'test@example.com']);
+      git(['config', 'user.name', 'Test']);
+      git(['add', 'src/a.txt', '.gitignore']);
+      git(['commit', '-m', 'baseline']);
+
+      const suiteFindings = () =>
+        readinessModule
+          .closeoutReadinessFindings(fixtureRoot)
+          .filter((f: string) => /full-suite green|different content/u.test(f));
+
+      // No stamp at all → the missing-green finding.
+      expect(suiteFindings().some((f: string) => f.includes('no full-suite green'))).toBe(true);
+
+      // A stamp bound to a DIFFERENT tree → the stale finding.
+      stampModule.writeSuiteGreenStamp(fixtureRoot, 'f'.repeat(40));
+      expect(suiteFindings().some((f: string) => f.includes('different content'))).toBe(true);
+
+      // A stamp bound to the CURRENT tree → no suite finding.
+      const currentTree = treeModule.worktreeTree(fixtureRoot);
+      expect(currentTree).toBeTruthy();
+      stampModule.writeSuiteGreenStamp(fixtureRoot, currentTree);
+      expect(suiteFindings()).toEqual([]);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 });

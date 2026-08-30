@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
 import { worktreeTree } from '../../scripts/shared/worktree-tree.mjs';
+import { writeSuiteGreenStamp } from '../../scripts/shared/suiteGreenStamp.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const SCRIPT = join(REPO_ROOT, 'scripts', 'render-closeout.mjs');
@@ -167,6 +168,11 @@ describe('render-closeout: silence is stated, then omitted', () => {
     writeFileSync(join(dir, 'HANDOFF.md'), 'next: nothing pending', 'utf8');
     const file = join(dir, 'in.json');
     writeFileSync(file, JSON.stringify(minimal()), 'utf8');
+    // The pre-render readiness seam demands a full-suite green bound to the
+    // tree being handed off — stamp the fixture's current tree (in.json
+    // included, since it sits unignored in the worktree), the same act a real
+    // `npm test` performs through the vitest gate.
+    writeSuiteGreenStamp(dir, worktreeTree(dir));
     const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
       cwd: dir,
       encoding: 'utf8',

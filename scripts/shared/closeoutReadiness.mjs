@@ -22,6 +22,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { readSuiteGreenStamp } from './suiteGreenStamp.mjs';
+import { worktreeTree } from './worktree-tree.mjs';
 
 /**
  * Deterministic, session-independent reasons a hand-back is not ready.
@@ -60,6 +62,38 @@ export function closeoutReadinessFindings(root) {
     }
   } catch {
     /* spawn fault → fail open */
+  }
+
+  // The full-suite green must bind to the tree being handed off. This check
+  // used to live only in the Stop gate (P48, `15e45d76`), which could speak
+  // only AFTER a render existed — the double-generation loop this module's
+  // header describes. It is a pure function of the tree, so it belongs here:
+  // a stale stamp refuses the FIRST render, and the gate keeps it as backstop.
+  try {
+    // Evidence-bound: with no worktree tree identity (not a repository, no
+    // commits, git fault) neither half can assert anything — fail open, per
+    // this module's rule. With an identity, a MISSING stamp is itself the
+    // meaningful absence.
+    const currentTree = worktreeTree(root);
+    if (currentTree) {
+      const green = readSuiteGreenStamp(root);
+      if (!green?.tree) {
+        findings.push(
+          'no full-suite green on record for this repo — `npm test` has not passed since the stamp ' +
+            'was last cleared. The closeout requires green on the FINAL tree, so run it after your ' +
+            'last edit, not before.',
+        );
+      } else if (green.tree !== currentTree) {
+        findings.push(
+          `the last full-suite green ran on different content than the tree being handed off ` +
+            `(green at ${String(green.tree).slice(0, 8)}, tree ${currentTree.slice(0, 8)}, ` +
+            `${green.ran_at ?? 'unknown time'}). An edit after a green run is not evidence for the ` +
+            'tree you are pushing — re-run `npm test`.',
+        );
+      }
+    }
+  } catch {
+    /* stamp or tree unreadable → fail open */
   }
 
   // A memory file that never reached MEMORY.md is invisible to the next

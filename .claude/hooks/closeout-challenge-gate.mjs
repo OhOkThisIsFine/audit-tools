@@ -40,7 +40,6 @@ import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
 import { closeoutReadinessFindings } from '../../scripts/shared/closeoutReadiness.mjs';
 import { liveSessionWorkReason } from '../../scripts/shared/liveSessionWork.mjs';
 import { worktreeTree } from '../../scripts/shared/worktree-tree.mjs';
-import { readSuiteGreenStamp } from '../../scripts/shared/suiteGreenStamp.mjs';
 import {
   readSessionRegistry,
   runPorcelainStatus,
@@ -333,27 +332,10 @@ try {
   );
 }
 
-// The enforced half of the suite-run trap covers HANDOFF only. This is the
-// general half: an edit of ANY kind after a green run invalidates that run, and
-// no local gate re-runs the full suite, so a late SOURCE edit reaches CI unseen.
-const green = readSuiteGreenStamp(ROOT);
-if (!green?.tree) {
-  findings.push(
-    'no full-suite green on record for this repo — `npm test` has not passed since the stamp ' +
-      'was last cleared. The closeout requires green on the FINAL tree, so run it after your ' +
-      'last edit, not before.',
-  );
-} else if (currentTree && green.tree !== currentTree) {
-  findings.push(
-    `the last full-suite green ran on different content than the tree being handed off ` +
-      `(green at ${String(green.tree).slice(0, 8)}, tree ${currentTree.slice(0, 8)}, ` +
-      `${green.ran_at ?? 'unknown time'}). An edit after a green run is not evidence for the ` +
-      'tree you are pushing — re-run `npm test`.',
-  );
-}
-
-// (the memory-index check moved into scripts/shared/closeoutReadiness.mjs above,
-// so the renderer raises it BEFORE the report is written rather than after)
+// (the suite-green tree comparison and the memory-index check both live in
+// scripts/shared/closeoutReadiness.mjs — the pre-render seam — so the renderer
+// raises them BEFORE a report is written and this gate keeps them as backstop
+// through the closeoutReadinessFindings call above)
 
 // CI on the default branch. The lap rule says to check it by hand at every
 // close-out; a rule that depends on remembering is the thing this project moves
