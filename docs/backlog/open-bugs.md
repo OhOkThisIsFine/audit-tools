@@ -6,6 +6,18 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The closeout Stop gate demands a hand-back at a lap START, where a closeout is forbidden
+  (2026-08-29, medium, friction: tool_should_decide).** `closeout-challenge-gate.mjs` fired at step 8
+  of `/start-lap` — the approval pause, before the lap's own work had begun — and asked for a rendered
+  closeout. Two instruction sources forbid one at that boundary: the global CLAUDE.md bans a closeout
+  at "a 'pause' that is really just the next step loading", and `/closeout` CONSUMES
+  `.claude/lap-start.json`, so obeying the challenge deletes the lap record written minutes earlier.
+  The gate's stated reason — the record on file predates this session — holds for every session before
+  its sprint ends, so it cannot separate the two cases. An agent that obeys corrupts the lap; an agent
+  that refuses learns to argue with a gate, which is the same corrosion any false demand causes.
+  **Property:** the gate demands a hand-back only at a boundary where a closeout is permitted, and it
+  distinguishes a sprint that ended from a lap that has not yet begun.
+
 - **The closeout gate calls pushed commits "UNPUSHED" — it tests against `main` and says something
   different from what it means (2026-08-29, low, friction: false_red).**
   `closeout-challenge-gate.mjs` lists commits absent from `main` under the heading "UNPUSHED
