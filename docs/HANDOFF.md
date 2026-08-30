@@ -21,8 +21,17 @@
 
 ## Immediate next
 
-**Nothing is pinned.** The queue is the backlog ([`backlog.md`](backlog.md)); the standing
-program direction remains *redesign before scheduled autonomy* → the autonomous
+**The dispatched-lane sprint-ceremony detection is pinned** (owner decision 2026-08-30) — see the
+generated list below, which is the authority. It ships with a `shell-trap-guard` REFUSAL as its
+stopgap: refuse at the tool call any lane invocation whose cwd is inside this repo while it carries
+write or push tools. A prose rule in `CLAUDE.md` was considered and REJECTED, because it would be a
+second copy that drifts.
+
+Approved as a lap of its own, not pinned yet: a real liveness signal in the session registry — pid
+plus heartbeat, the shape `withFileLock` already uses — after which the added-root-entry teardown fix
+rides on top of it. Both entries are in [`open-bugs.md`](backlog/open-bugs.md).
+
+The standing program direction remains *redesign before scheduled autonomy* → the autonomous
 audit→remediate→PR capstone once the architecture items are worked off.
 
 
@@ -66,10 +75,10 @@ audit→remediate→PR capstone once the architecture items are worked off.
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 0 pinned item(s).
+> `verify:checks` and at commit). 1 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-*(nothing pinned — no immediate next step is set. Every open item is in [`docs/backlog/`](backlog/).)*
+- ▶ A dispatched lane launched into this repo runs the repo's OWN sprint ceremony, and the only exemption is an env var the CALLER must remember (2026-08-29, high, friction: tool_should_decide). · [`open-bugs.md`](backlog/open-bugs.md)
 
 <!-- END GENERATED ROADMAP -->

@@ -20,8 +20,13 @@
   reaches the same store as its main checkout; a store it genuinely cannot find is a RED or a
   non-✓ warning, never a tick.
 
-- **A dispatched lane launched into this repo runs the repo's OWN sprint ceremony, and the only
+- **▶ A dispatched lane launched into this repo runs the repo's OWN sprint ceremony, and the only
   exemption is an env var the CALLER must remember (2026-08-29, high, friction: tool_should_decide).**
+  OWNER DECISION 2026-08-30: this is the NEXT lap's work, and it ships with a `shell-trap-guard`
+  REFUSAL as its stopgap — refuse at the tool call any lane invocation whose cwd is inside this repo
+  while it carries write or push tools. The refusal was chosen over a CLAUDE.md rule precisely because
+  prose would be a second copy that drifts, and over doing nothing because nothing else stops the
+  mistake until the detection lands. Both halves are this entry's scope.
   Measured this lap: a `claude -p` lane given `--permission-mode acceptEdits` and Bash/Write tools,
   with its cwd inside a worktree of this repo, never answered its prompt. It became a session IN this
   repo, obeyed the closeout ceremony, ran the full suite three times, overwrote
@@ -150,9 +155,11 @@
   instead of throw" is silence at the seam that reported this, because the pre-commit
   `test:doc-contract` leg reads the child's streams only in `catch`; (iii) nothing binds `teardown()`'s
   composition — `repoRootProblems` has one caller and zero test observers, so a fix can ship UNWIRED
-  with every pinned case green. **The one live direction:** give the session registry a real liveness
-  signal (pid + heartbeat, the shape `withFileLock` already uses), then scope the verdict to its
-  absence — enforcement-machinery work, to be judged on its own merits before it is spent here.
+  with every pinned case green. **OWNER DECISION 2026-08-30 — build the one live direction:** give
+  the session registry a real liveness signal (pid + heartbeat, the shape `withFileLock` already
+  uses) as a lap of its own, then scope the teardown verdict to its absence. Chosen over leaving the
+  false red open, so the observed-once frequency is no longer the argument; the three constraints
+  above still bind whatever lands on top.
 
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
   fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went
