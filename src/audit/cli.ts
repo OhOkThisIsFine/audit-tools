@@ -94,6 +94,14 @@ export const COMMAND_ROUTES: ReadonlyArray<
 
 async function main(argv: string[]): Promise<void> {
   const command = argv[2] ?? "sample-run";
+  const route = COMMAND_ROUTES.find(([verb]) => verb === command);
+  if (argv.slice(2).some((arg) => arg === "--help" || arg === "-h")) {
+    console.log(`Usage: audit-code ${route ? command : "<command>"} [options]`);
+    console.log(
+      `Available commands: ${COMMAND_ROUTES.map(([verb]) => verb).join(", ")}`,
+    );
+    return;
+  }
   assertCliCommandAllowedFromCwd({
     cliName: "audit-code",
     commandName: command,
@@ -102,7 +110,6 @@ async function main(argv: string[]): Promise<void> {
     // worktree evidence, so the guard must see the unanchored value.
     rawRoot: getFlag(argv, "--root"),
   });
-  const route = COMMAND_ROUTES.find(([verb]) => verb === command);
   if (!route) {
     console.error(`Unknown command: ${command}`);
     console.error(

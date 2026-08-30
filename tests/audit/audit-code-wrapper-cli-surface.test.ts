@@ -159,6 +159,25 @@ test.concurrent("audit-code wrapper bare invocation prints help and exits 0 with
   }
 });
 
+test.concurrent.each(["--help", "-h"])(
+  "audit-code wrapper subcommand %s skips artifact directory creation",
+  async (helpFlag) => {
+    const tempDir = await mkdtemp(join(tmpdir(), "audit-code-subcommand-help-"));
+    const artifactsDir = join(tempDir, "artifacts");
+    try {
+      const { stdout } = await runWrapper(
+        ["next-step", helpFlag, "--root", tempDir, "--artifacts-dir", artifactsDir],
+        { cwd: tempDir },
+      );
+      expect(stdout).toContain("Usage: audit-code next-step [options]");
+      await assert.rejects(() => stat(artifactsDir));
+      await assert.rejects(() => stat(join(tempDir, ".audit-tools")));
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  },
+);
+
 test.concurrent("audit-code wrapper rejects unknown commands with exit 1 and authoritative guidance", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-unknown-cmd-"));
   try {

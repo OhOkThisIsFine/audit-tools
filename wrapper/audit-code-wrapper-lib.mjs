@@ -399,13 +399,16 @@ export async function runAuditCodeWrapper({
   //  - the artifact-dir-bootstrapping commands pass { ensureArtifactsDir: true }
   //    because they may be the FIRST call in a fresh repo and must create the
   //    run directory before dist reads it.
+  const commandArgv = argv.slice(1);
+  // Help is informational: it must not create the artifacts directory.
+  const ensureArtifactsDir = !commandArgv.some((arg) => arg === '--help' || arg === '-h');
   if (argv[0] === 'mcp') {
-    await runDistCommandInline('mcp', argv.slice(1), { ensureArtifactsDir: true });
+    await runDistCommandInline('mcp', commandArgv, { ensureArtifactsDir });
     return;
   }
 
   if (argv[0] === 'next-step') {
-    await runDistCommand('next-step', argv.slice(1), { ensureArtifactsDir: true });
+    await runDistCommand('next-step', commandArgv, { ensureArtifactsDir });
     return;
   }
 
