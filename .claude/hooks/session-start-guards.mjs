@@ -8,8 +8,9 @@
 // git faults degrade to silence.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { OFFLOAD_LANES, checkLaneTrust, probeLane } from '../../scripts/shared/offload-lane-data.mjs';
+import { pathToFileURL } from 'node:url';
 import {
   baselineFromEntries,
   pruneStaleSessionRecords,
@@ -287,17 +288,34 @@ try {
 }
 
 // ── Offload-lane liveness ────────────────────────────────────────────────────
-// The delegation lanes are DECLARED DATA (scripts/shared/offload-lane-data.mjs,
-// reconciled by check:offload-lanes the way guard reach is) and this leg probes
-// every probeable row CONCURRENTLY, each bounded by its own timeout, so a dead
-// lane is a named constraint at session start rather than a mid-lap stall.
+// The delegation lanes are DECLARED DATA in the MACHINE registry
+// (~/.agent-config/offload-lane-data.mjs — moved out of the repo 2026-08-29,
+// owner decision F10: lane inventory is machine-scoped; llm-relay is the
+// eventual owner) and this leg probes every probeable row CONCURRENTLY, each
+// bounded by its own timeout, so a dead lane is a named constraint at session
+// start rather than a mid-lap stall. An ABSENT registry means this machine
+// declares no lanes: both lane legs skip silently (fresh machine, CI).
+// AUDIT_TOOLS_OFFLOAD_LANE_REGISTRY overrides the path for hermetic tests.
 // Probe only; bringing a lane up is the owner's call — each down note carries
 // its row's remedy verbatim. Silent-unless-down: unprobeable rows state their
 // reasons as registry data and produce no every-session line (the reap leg
 // above states why — a note that fires every session gets read past).
+/** @type {{ OFFLOAD_LANES: any[], probeLane: Function, checkLaneTrust: Function } | null} */
+let laneRegistry = null;
+try {
+  const registryPath =
+    process.env.AUDIT_TOOLS_OFFLOAD_LANE_REGISTRY ||
+    join(homedir(), '.agent-config', 'offload-lane-data.mjs');
+  if (existsSync(registryPath)) {
+    laneRegistry = await import(pathToFileURL(registryPath).href);
+  }
+} catch {
+  /* an unreadable registry must never block a session — both lane legs skip */
+}
+const { OFFLOAD_LANES = [], probeLane, checkLaneTrust } = laneRegistry ?? {};
 try {
   const probed = await Promise.all(
-    OFFLOAD_LANES.map(async (lane) => ({ lane, up: await probeLane(lane, process.env) })),
+    OFFLOAD_LANES.map(async (lane) => ({ lane, up: await probeLane?.(lane, process.env) })),
   );
   for (const { lane, up } of probed) {
     if (up !== false) continue; // up, or unprobeable (null) — silent either way
@@ -321,7 +339,7 @@ try {
 // exists and does not list this workspace — unknown is silence, not a guess.
 try {
   const trust = await Promise.all(
-    OFFLOAD_LANES.map(async (lane) => ({ lane, trusted: await checkLaneTrust(lane, ROOT, process.env) })),
+    OFFLOAD_LANES.map(async (lane) => ({ lane, trusted: await checkLaneTrust?.(lane, ROOT, process.env) })),
   );
   for (const { lane, trusted } of trust) {
     if (trusted !== false) continue; // trusted, or unchecked/unknown — silent

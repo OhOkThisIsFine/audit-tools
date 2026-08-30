@@ -34,7 +34,6 @@ export const STEP_GLOSS = {
   "check:version-gates": "version-gate scan",
   "check:guard-reach": "guard wiring/reach reconciliation",
   "check:ci-trigger-paths": "CI trigger-path parity (derived from guard-reach)",
-  "check:offload-lanes": "offload-lane registry reconciliation",
   "check:loop-core-patterns": "loop-core pattern-list drift check",
   "check:constitutional-doc-paths": "constitutional-doc-path parity",
   "check:runtime-artifact-names": "runtime artifact-name set parity",

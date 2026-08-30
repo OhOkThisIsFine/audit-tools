@@ -391,25 +391,6 @@ export const GUARDS = [
       'base, so a new claimed tree cannot land outside the CI trigger set',
   },
   {
-    id: 'check:offload-lanes',
-    kind: 'gate',
-    impl: 'check:offload-lanes',
-    preCommit: 'reach',
-    fix:
-      'reconcile scripts/shared/offload-lane-data.mjs: every lane row needs a valid bounded probe or an ' +
-      'unprobeableReason, plus a remedy, plus a configDirTrust check or a trustUncheckableReason; the ' +
-      'session-start hook must iterate the registry (no /health, no hardcoded lane URL); ' +
-      'DOC_LANE_MARKERS must map every documented lane spelling to a live row',
-    note:
-      'uncovered halves, stated as data: ~/.claude/CLAUDE.md is the true lane authority but untracked — ' +
-      'a gate must not ask the local disk, so its lane list is NOT reconciled (scanned docs: ' +
-      'docs/nightly-routine.md + docs/backlog/durable-traps.md only); a probe proves reachable ' +
-      'TRANSPORT only, never that a model, quota, or dispatched session will serve; and the ' +
-      'configDirTrust rows are reconciled for SHAPE only — the session-start leg reads the trust state ' +
-      'and REPORTS it, while the file that would grant trust belongs to the launcher outside this repo, ' +
-      'so trust can also change between session start and dispatch',
-  },
-  {
     id: 'check:lint',
     kind: 'gate',
     impl: 'check:lint',
@@ -750,14 +731,6 @@ export const GUARDS = [
       'invented row, and pins the splice refusals for a missing / duplicated marker pair',
   },
   {
-    id: 'offload-lane-probe-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/offload-lane-probe.test.ts',
-    note:
-      'P36 red-green: a catch-all 200 classifies DOWN, the registry declares the headroom lane, the live ' +
-      'registry/hook/docs reconcile clean, and the hook lane leg runs end-to-end against fake lane servers',
-  },
-  {
     id: 'lane-dispatch-driver-test',
     kind: 'contract-test',
     impl: 'tests/shared/lane-dispatch.test.ts',
@@ -999,8 +972,6 @@ export const REACH = [
       'pre-commit-target-repo-test',
       'pre-commit-derived-legs-test',
       'loop-core-gate-parity-test',
-      'offload-lane-probe-test',
-      'check:offload-lanes',
       'check:loop-core-patterns',
       'check:guard-reach',
       'check:scripts',
@@ -1106,14 +1077,6 @@ export const REACH = [
       'decision to escalate-vs-apply, and whether a run actually CALLS `stamp` for the docs it claims ' +
       'to have examined all remain behavioural, guarded by docs/nightly-routine.md and the three-agent ' +
       'gate rather than by a test.',
-  },
-  {
-    area: 'offload lane registry',
-    files: ['scripts/shared/offload-lane-data.mjs'],
-    guardedBy: ['check:offload-lanes', 'offload-lane-probe-test', 'check:lint', 'check:dup'],
-    note:
-      'lane rows + probe substrate the session-start lane-liveness leg iterates; reconciled against the ' +
-      'hook source and the two tracked docs by check:offload-lanes',
   },
   {
     area: 'rendered host assets',
@@ -1232,12 +1195,6 @@ export const REACH = [
     files: ['docs/nightly-routine.md', 'docs/doc-review-guidelines.md', 'docs/nightly-routine-prompt.md'],
     guardedBy: ['check:nightly-routine-prompt'],
     note: 'the generated scheduler prompt and its two canonical sources — either direction of drift fails the gate',
-  },
-  {
-    area: 'offload-lane doc markers',
-    files: ['docs/nightly-routine.md', 'docs/backlog/durable-traps.md'],
-    guardedBy: ['check:offload-lanes'],
-    note: 'the two TRACKED docs the lane reconciler scans for DOC_LANE_MARKERS (SCANNED_DOCS in the registry)',
   },
   {
     area: 'philosophy pair',

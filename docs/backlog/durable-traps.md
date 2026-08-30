@@ -200,7 +200,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   executed (recorded as the symptom in `23d2a1e8`; cause found two nights later). For a
   corroboration lane this is worse than silence: it manufactures agreement
   ([[lane-agreement-is-not-evidence]]). REPORTED, NOT REPAIRED — each lane row declares
-  `configDirTrust` (or states why the question is uncheckable) in `scripts/shared/offload-lane-data.mjs`,
+  `configDirTrust` (or states why the question is uncheckable) in the machine registry
+  `~/.agent-config/offload-lane-data.mjs` (moved out of the repo 2026-08-29, owner decision F10),
   and the session-start lane leg names an untrusted lane UNUSABLE before any dispatch. The uncovered
   halves: the file that would GRANT trust belongs to the launcher outside this repo, trust can change
   between session start and dispatch (a stale green is possible), and a config dir that cannot be read
@@ -236,8 +237,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   in seconds. Rank-1 is no default for a blocking call. Re-confirmed 2026-07-28: an 836-line analytical
   call to `nim/z-ai/glm-5.2` died `HTTP 504 backend timed out` where small probes answered instantly.
   ⚠ Dead-lane detection at SESSION START is mechanical again (P36): `session-start-guards.mjs`
-  iterates the declared lane registry (`scripts/shared/offload-lane-data.mjs`, reconciled by
-  `npm run check:offload-lanes`) and names each down lane with its remedy. That is a lap-start
+  iterates the declared machine lane registry (`~/.agent-config/offload-lane-data.mjs`; absent
+  file = no declared lanes, leg skips) and names each down lane with its remedy. That is a lap-start
   snapshot only — before a LONG mid-lap dispatch, probe the router yourself (`/v1/models`;
   200-with-JSON or 401 = up), or a lane that died mid-lap is indistinguishable from a slow one.
   **OPEN:** the lane states its concurrency nowhere a caller reads it, and a call it cannot serve
@@ -602,7 +603,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
     the freellmapi MCP offload pool lane (`claude.exe -p`, repo cwd, server-side env; observed
     2026-08-18: child self-registered, Stop closeout-challenge REPLACED the final answer;
     `claude.ps1` fixed same day. FIXED 2026-08-19, config-only, no restart — detail on the
-    `mcp-pool` row of `scripts/shared/offload-lane-data.mjs`).
+    `mcp-pool` row of `~/.agent-config/offload-lane-data.mjs`).
   - Script-mediated commits: `node scripts/release-and-publish.mjs` and `npm version` run git in
     a child process the PreToolUse hook never sees.
   - The refusal is a footgun guard, not an adversary gate: the allow token and recovery CLI are
