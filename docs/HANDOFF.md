@@ -26,10 +26,13 @@
 **Nothing is pinned.** The roadmap block below is the authority, and an empty one is a statement
 rather than an omission.
 
-The two live residuals are both in [`open-bugs.md`](backlog/open-bugs.md), neither pinned: the
-closeout gate still cannot tell a mid-lap PAUSE from a sprint that ended — once a lap has committed
-anything, its own commits are at-or-after `registered_at`, so any later stop is challenged; and the
-lane-DETECTION half stays open under the abstention above.
+Three live residuals are in [`open-bugs.md`](backlog/open-bugs.md), none pinned. The largest was
+found while verifying this lap's own worker and is new: the child-session commit/push refusal is
+STRUCTURALLY INERT in a dedicated worktree, because `enforcementArmed` reads a gitignored per-worktree
+directory that starts empty — so giving a lane its own worktree, the correct answer to every other
+hazard here, is exactly what removes that guard. The other two: the closeout gate still cannot tell a
+mid-lap PAUSE from a sprint that ended, since once a lap has committed anything its own commits are
+at-or-after `registered_at`; and the lane-DETECTION half stays open under the abstention above.
 
 Approved as a lap of its own, not pinned yet: a real liveness signal in the session registry — pid
 plus heartbeat, the shape `withFileLock` already uses — after which the added-root-entry teardown fix

@@ -20,6 +20,23 @@
   reaches the same store as its main checkout; a store it genuinely cannot find is a RED or a
   non-✓ warning, never a tick.
 
+- **The child-session commit/push refusal is STRUCTURALLY INERT in a dedicated worktree, and the
+  safe practice is what disarms it (2026-08-30, high, friction: false_green).**
+  `enforcementArmed(root)` reads `<root>/.claude/hooks/.state/sessions/`, which is gitignored, so a
+  freshly-created git worktree holds no records and the registry is never armed there.
+  `isUnregisteredChild` requires `armed`, so `pre-commit-gate.mjs`'s commit/push refusal cannot fire.
+  Measured 2026-08-30: `enforcementArmed` returned `false` for a lane's fresh worktree and `true` for
+  the dispatching one, and the lane committed freely while carrying `AUDIT_TOOLS_CHILD_SESSION=1`.
+  The marker is not the cause, and neither branch saves it: a lane that registers is not a child, and
+  a lane that does not register leaves the registry unarmed. So the refusal can only ever fire for a
+  session sharing a checkout ANOTHER session already registered in — it protects a shared checkout
+  and is inert in a dedicated one. That inverts the advice: giving a lane its own worktree, which is
+  the correct answer to every other hazard here, is exactly what removes this guard. The
+  `shell-trap-guard` repo-lane refusal shipped 2026-08-30 is currently the only thing standing
+  between a fresh-worktree lane and a push to origin.
+  **Property:** a lane cannot commit or push from any worktree of this repo, whatever the session
+  registry happens to hold in that particular worktree.
+
 - **The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the
   dispatching tool call (2026-08-29, high, friction: tool_should_decide).**
   The stopgap half SHIPPED 2026-08-30: `shell-trap-guard.mjs` refuses a write-capable lane invocation
