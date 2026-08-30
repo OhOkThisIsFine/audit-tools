@@ -40,7 +40,7 @@ Use independent lanes wherever they preserve coverage:
 | Leg | Scope | May act alone | Escalates |
 |---|---|---|---|
 | **docs** | Every in-scope doc, routed by the type table in `doc-review-guidelines.md` | Stale-factual fixes with a code anchor (never instruction files) | Design decisions, instruction-file edits, condensation proposals |
-| **backlog** | `docs/backlog/open-bugs.md`, `docs/backlog/forward-tracks.md`, `docs/backlog/deferred.md` | Mechanical cleanup only: delete an entry whose fix verifiably shipped, strip status-noise from a live entry, correct a stale file/symbol reference | Any genuine disambiguation — turning a vague item into a spec is the owner's call |
+| **backlog** | `docs/backlog/open-bugs.md`, `docs/backlog/minor-bugs.md`, `docs/backlog/forward-tracks.md`, `docs/backlog/deferred.md` | Mechanical cleanup only: delete an entry whose fix verifiably shipped, strip status-noise from a live entry, correct a stale file/symbol reference | Any genuine disambiguation — turning a vague item into a spec is the owner's call |
 | **solutions** | Project + global memory, backlog *Durable traps* and *Open bugs*, friction records | **Nothing.** Proposal-only | Every proposal, with evidence and a ready-to-apply patch |
 
 The asymmetry is deliberate. A doc fix is reversible prose; a backlog rewrite can
@@ -60,6 +60,14 @@ the reason it exists: until it shipped, leg 1 reported its own coverage from
 prose, so the number was whatever the agent believed. Stamp a doc only after an
 agent actually examined it; an item with no ledger entry has no window and is
 reviewed cold, which is the honest answer rather than a defect.
+
+*Review-archive retirement (C-10).* `docs/reviews/` is excluded from the doc
+manifest by construction, so no staleness pass can ever mark a dated record
+spent — which is how 27 files came to hold zero citations from anywhere. Run
+`node scripts/nightly/review-retirement-candidates.mjs` once per pass: each
+candidate it names (a dated review older than 14 days that nothing outside the
+archive cites) becomes a retirement PROPOSAL in the inbox — an owner decision,
+never an auto-delete. Git history keeps every retired record.
 
 ### Leg 2 — backlog
 
