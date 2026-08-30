@@ -84,26 +84,33 @@ if (vitestExit !== 0) {
   } catch {
     // No readable ledger — nothing to appeal to; the nonzero exit stands.
   }
-  if (isReporterTransportFault({ record: transportRecord, token, stderrText })) {
-    console.error(
-      `[vitest-gate] vitest exited ${vitestExit}, but this run's own ledger reports ` +
-        `${transportRecord.outcome.passed} passed / 0 failed and stderr carries a vitest-worker ` +
-        `RPC timeout — a REPORTER-TRANSPORT fault, not a test failure. Treating as PASS.`,
-    );
-    console.error(
-      "[vitest-gate] (if this becomes frequent, raise the worker RPC timeout — a suite that " +
-        "routinely reports red while green is the same false-signal class as a false green.)",
-    );
-    process.exit(0);
+  if (!isReporterTransportFault({ record: transportRecord, token, stderrText })) {
+    process.exit(vitestExit);
   }
-  process.exit(vitestExit);
+  console.error(
+    `[vitest-gate] vitest exited ${vitestExit}, but this run's own ledger reports ` +
+      `${transportRecord.outcome.passed} passed / 0 failed and stderr carries a vitest-worker ` +
+      `RPC timeout — a REPORTER-TRANSPORT fault, not a test failure. Treating as PASS.`,
+  );
+  console.error(
+    "[vitest-gate] (if this becomes frequent, raise the worker RPC timeout — a suite that " +
+      "routinely reports red while green is the same false-signal class as a false green.)",
+  );
+  // FALL THROUGH to the single success boundary below rather than exiting here.
+  // A tolerated run is full evidence by construction — the predicate already
+  // proved this run's own token, zero failed and zero unfinished leaves — so it
+  // must mint the same stamp every other PASS does. Exiting 0 here instead left
+  // the one run class the gate goes out of its way to call green as the one
+  // class carrying no evidence it was, which is the tolerance's own false
+  // signal relocated to the closeout. The checks below re-confirm the ledger
+  // this path already read; that redundancy is free and keeps ONE success exit.
 }
 
 function failClosed(message) {
   console.error(`[vitest-gate] ${message}`);
   console.error(
-    "[vitest-gate] vitest exited 0 but its outcome could not be confirmed from the ledger — " +
-      "treating this run as FAILED rather than trusting a possibly stale result.",
+    "[vitest-gate] this run's outcome could not be confirmed from the ledger — treating it as " +
+      "FAILED rather than trusting a possibly stale result.",
   );
   process.exit(1);
 }

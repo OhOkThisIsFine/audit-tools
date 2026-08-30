@@ -36,6 +36,24 @@ describe('full-suite green is recorded as tree-bound evidence', () => {
     expect(gate).toContain('writeSuiteGreenStamp');
   });
 
+  it('reaches the stamp from EVERY path it exits as a PASS', () => {
+    // The assertion above only proves the gate MENTIONS the stamp, and that is
+    // how this shipped: the reporter-transport tolerance path printed "Treating
+    // as PASS" and exited 0 BEFORE the stamp write, so the one run class the
+    // gate goes out of its way to call green was the one class leaving no
+    // evidence it was. A tolerated run is full evidence by construction —
+    // isReporterTransportFault demands this run's own token, zero failed AND
+    // zero unfinished leaves — so withholding the stamp there is the same false
+    // signal the tolerance exists to prevent, relocated to the closeout.
+    //
+    // ONE success exit is the property, not a style preference: a second one is
+    // a second place to forget the evidence, which is exactly what happened.
+    const gate = readFileSync(resolve(ROOT, 'scripts/shared/run-vitest-gate.mjs'), 'utf8');
+    const successExits = [...gate.matchAll(/process\.exit\(0\)/g)].map((m) => m.index ?? -1);
+    expect(successExits).toHaveLength(1);
+    expect(gate.indexOf('writeSuiteGreenStamp(')).toBeLessThan(successExits[0]);
+  });
+
   it('is read by the PRE-RENDER readiness seam, so a stale green refuses the FIRST render', () => {
     // The seam owns the read; both consumers reach it through
     // closeoutReadinessFindings — the renderer before writing a record, the
