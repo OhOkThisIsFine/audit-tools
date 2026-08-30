@@ -1013,6 +1013,11 @@ export const REACH = [
       '.claude/hooks/friction-stop-gate.mjs re-implements the friction-dir *.json listing by hand ' +
       '(readdirSync + .endsWith(".json")) because a pre-build hook cannot import built src — a ' +
       'hand-maintained duplicate of listFrictionRecordFilenames that drifts independently.' +
+      ' hook-trap-guards-test pins tool-input-guard cases to a temp root (runInputGuard) so rule 3 ' +
+      'cannot consume the live stale-main marker, and scans for REPO_ROOT source paths to keep the ' +
+      'payloads inside that root — but BOTH halves are scoped to that ONE file. A future test file ' +
+      'that spawns tool-input-guard.mjs against the real repository is not covered, and today ' +
+      'nothing but hook-trap-guards-test references that hook, so the gap is latent rather than open.' +
       ' The repo-lane refusal in shell-trap-guard REFUSES a recognizable lane invocation at the ' +
       'dispatching tool call; it does NOT detect a delegated lane, which remains unsolved. Its ' +
       'uncovered halves: a lane launched from a shell no PreToolUse hook sees; a dispatch reaching ' +

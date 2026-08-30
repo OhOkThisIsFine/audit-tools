@@ -26,6 +26,20 @@
   re-registers — `node scripts/shared/sessionRegistry.mjs --register <session-id>`. This session did
   exactly that. The copied records left in a worktree's own `.claude/hooks/.state/sessions/` are now
   read by nothing; they are gitignored, so they are litter rather than a hazard.
+- **A lap that opened BEHIND main used to red `npm test` once, then pass — and eat the guard that
+  warned it.** `tests/shared/hook-trap-guards.test.ts` aimed source-shaped payloads at the REAL
+  repository, so `tool-input-guard` rule 3 (stale-main deny-once) refused where rule 1 was under
+  test, and `rmSync`-CONSUMED `.claude/hooks/.state/stale-main.json` on the way out. The guard is
+  deny-ONCE, so the suite silently spent the lap's only warning. Both halves are measured, not
+  inferred: under the original root AND paths a planted marker came back CONSUMED; under the fix it
+  SURVIVED. Found at this lap's own baseline.
+- **That fix binds ONE hook, and the asymmetry is the whole point.** `runInputGuard` pins a
+  per-invocation temp root; `runHook`'s default stays `REPO_ROOT`. `tool-input-guard.mjs` spawns no
+  git, so a temp root is exactly equivalent there. `shell-trap-guard.mjs` resolves the repo family
+  with `git rev-parse --git-common-dir` at `cwd: ROOT` and is FAIL-OPEN — measured with one payload
+  and two roots: real root exit 2, temp non-git root exit 0. A shared temp default would therefore
+  have turned that guard's negative cases into false GREENs, which is worse than the false RED it
+  would have fixed. That measurement is why the obvious fix was rejected.
 - **The owner-approved session-registry liveness sketch is DEAD (`6e4b0f12`).** See *Immediate next*.
 
 ## Immediate next

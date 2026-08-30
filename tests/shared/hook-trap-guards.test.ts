@@ -7,9 +7,9 @@
 //
 // The guards are spawned as real processes with a real hook payload on stdin —
 // the same contract Claude Code uses. Exit 2 = blocked, exit 0 = allowed.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -830,6 +830,42 @@ describe('shell-trap-guard: destructive restore (silently discards unstaged work
   });
 });
 
+// ── The tool-input-guard chokepoint ─────────────────────────────────────────
+// Every case for this guard runs against a per-invocation TEMP root, never the real
+// repository, and `runInputGuard` is the only way in. Rule 3 CONSUMES the live
+// stale-main marker — see the note above the hermeticity describe below for the
+// measurement and both defects it caused.
+//
+// This binds ONE hook rather than flipping `runHook`'s default, and the asymmetry is
+// load-bearing:
+//   * tool-input-guard.mjs spawns NO git. Its only uses of ROOT are `inProject()` path
+//     containment and the marker path, so a temp root is exactly equivalent.
+//   * shell-trap-guard.mjs resolves the repo family with `git rev-parse --git-common-dir`
+//     at `cwd: ROOT` (line ~579) and documents itself FAIL-OPEN — no git answer means the
+//     lane-refusal rule STANDS DOWN. Measured 2026-08-30 with one payload and two roots:
+//     real root exit 2 (refused), temp non-git root exit 0 (allowed). A shared temp
+//     default would therefore have turned that guard's negative cases into false GREENs,
+//     which is worse than the false RED being fixed here.
+let inputGuardRoot: string;
+
+beforeAll(() => {
+  inputGuardRoot = mkdtempSync(join(tmpdir(), 'input-guard-root-'));
+});
+
+afterAll(() => {
+  rmSync(inputGuardRoot, { recursive: true, force: true });
+});
+
+/** A source path inside the guard's temp root — matches rule 3's `^(src|tests|scripts)/`. */
+const guardSourcePath = (rel: string) => join(inputGuardRoot, rel);
+
+function runInputGuard(
+  payload: HookPayload,
+  { root = inputGuardRoot, env = {} }: RunHookOptions = {},
+): { code: number | null; stderr: string } {
+  return runHook(INPUT_GUARD, payload, { root, env });
+}
+
 describe('tool-input-guard: raw control byte at write time', () => {
   // Built with String.fromCharCode, never a backslash-u escape: the escape
   // decodes on the way through tool-call JSON, which is the trap itself.
@@ -838,9 +874,9 @@ describe('tool-input-guard: raw control byte at write time', () => {
   it('blocks a Write whose content carries a raw NUL', () => {
     const payload = {
       tool_name: 'Write',
-      tool_input: { file_path: join(REPO_ROOT, 'src/shared/x.ts'), content: `const k = a + "${NUL}" + b;\n` },
+      tool_input: { file_path: guardSourcePath('src/shared/x.ts'), content: `const k = a + "${NUL}" + b;\n` },
     };
-    const { code, stderr } = runHook(INPUT_GUARD, payload);
+    const { code, stderr } = runInputGuard(payload);
     expect(code).toBe(2);
     expect(stderr).toMatch(/BINARY/);
   });
@@ -849,20 +885,20 @@ describe('tool-input-guard: raw control byte at write time', () => {
     const payload = {
       tool_name: 'Edit',
       tool_input: {
-        file_path: join(REPO_ROOT, 'src/shared/x.ts'),
+        file_path: guardSourcePath('src/shared/x.ts'),
         old_string: 'a',
         new_string: `b${String.fromCharCode(31)}c`,
       },
     };
-    expect(runHook(INPUT_GUARD, payload).code).toBe(2);
+    expect(runInputGuard(payload).code).toBe(2);
   });
 
   it('allows tab, LF and CR', () => {
     const payload = {
       tool_name: 'Write',
-      tool_input: { file_path: join(REPO_ROOT, 'src/shared/x.ts'), content: 'a\tb\r\nc\n' },
+      tool_input: { file_path: guardSourcePath('src/shared/x.ts'), content: 'a\tb\r\nc\n' },
     };
-    expect(runHook(INPUT_GUARD, payload).code).toBe(0);
+    expect(runInputGuard(payload).code).toBe(0);
   });
 
   it('ignores writes outside the project tree (scratchpad is not source)', () => {
@@ -870,7 +906,64 @@ describe('tool-input-guard: raw control byte at write time', () => {
       tool_name: 'Write',
       tool_input: { file_path: join(tmpdir(), 'scratch.bin'), content: `x${NUL}y` },
     };
-    expect(runHook(INPUT_GUARD, payload).code).toBe(0);
+    expect(runInputGuard(payload).code).toBe(0);
+  });
+});
+
+// Rule 3 of tool-input-guard (`stale-main deny-once`) READS and then rmSync-CONSUMES
+// `<ROOT>/.claude/hooks/.state/stale-main.json` for any Edit/Write whose path matches
+// `SOURCE_EDIT = /^(src|tests|scripts)\//`. So a case that aims a SOURCE path at the REAL
+// repository does two bad things at once, and this file did it three times.
+//
+// Measured 2026-08-30. The session opened 4 commits behind origin/main, so SessionStart had
+// armed the marker. `npm test` then failed exactly one case — 'allows tab, LF and CR' — with
+// exit 2 from RULE 3, not from the control-byte rule the case exists to pin. The rerun passed
+// only because the first run had already eaten the marker. Two defects, one mechanism:
+//   (a) a false RED that clears itself, which trains a rerun-until-green reflex; and
+//   (b) the suite SPENDS the live session's one stale-main refusal — the guard is deny-ONCE,
+//       so the lap silently loses the warning it was armed with.
+//
+// The fix is a temp root for this guard's cases, NOT a new default for `runHook`: see the
+// note on `runInputGuard`.
+describe('tool-input-guard cases never aim a source path at the live repository', () => {
+  // What actually keeps rule 3 off live state is the temp ROOT that `runInputGuard` binds —
+  // measured both ways: with the original root AND paths restored the planted marker came back
+  // CONSUMED, and with the temp root it SURVIVED even when the paths were wrong. This scan is
+  // the agreement check on top of that: a REPO_ROOT source path under a temp root is not a
+  // live-state read, it is a payload that has fallen OUT of the root it is aimed at, and
+  // `inProject` then skips every rule — which silently guts the control-byte cases above.
+  it('no payload builds a SOURCE path from REPO_ROOT, so every case stays inside its own root', () => {
+    const self = readFileSync(import.meta.filename, 'utf8');
+    const offenders = self
+      .split('\n')
+      .map((line, i) => ({ line: i + 1, text: line }))
+      .filter(({ text }) => /join\(\s*REPO_ROOT\s*,\s*['"](?:src|tests|scripts)\//.test(text))
+      .map(({ line }) => line);
+    expect(offenders).toEqual([]);
+  });
+
+  // The mechanism the assertion above depends on: the guard resolves the marker under the
+  // root it was INVOKED with. If that ever stopped being true, the cases would silently be
+  // reading live state again while the source scan above still passed.
+  it('rule 3 reads the marker from the invocation root, not from the real repository', () => {
+    const root = mkdtempSync(join(tmpdir(), 'input-guard-marker-'));
+    try {
+      mkdirSync(join(root, '.claude', 'hooks', '.state'), { recursive: true });
+      writeFileSync(
+        join(root, '.claude', 'hooks', '.state', 'stale-main.json'),
+        JSON.stringify({ behind: 3, remote: 'origin', at: new Date().toISOString() }),
+        'utf8',
+      );
+      const payload = {
+        tool_name: 'Write',
+        tool_input: { file_path: join(root, 'src/shared/x.ts'), content: 'a\tb\r\nc\n' },
+      };
+      const { code, stderr } = runInputGuard(payload, { root });
+      expect(code).toBe(2);
+      expect(stderr).toMatch(/BEHIND/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -883,7 +976,7 @@ describe('tool-input-guard: Agent worktree isolation on a dispatch node', () => 
         prompt: 'Implement node N-12 for the remediate-code run; the dispatch plan names the workdir.',
       },
     };
-    const { code, stderr } = runHook(INPUT_GUARD, payload);
+    const { code, stderr } = runInputGuard(payload);
     expect(code).toBe(2);
     expect(stderr).toMatch(/bound result ingestion sees no change/);
   });
@@ -893,7 +986,7 @@ describe('tool-input-guard: Agent worktree isolation on a dispatch node', () => 
       tool_name: 'Agent',
       tool_input: { isolation: 'worktree', prompt: 'Refactor the README examples into a table.' },
     };
-    expect(runHook(INPUT_GUARD, payload).code).toBe(0);
+    expect(runInputGuard(payload).code).toBe(0);
   });
 
   it('allows a dispatch prompt with no isolation flag', () => {
@@ -901,7 +994,7 @@ describe('tool-input-guard: Agent worktree isolation on a dispatch node', () => 
       tool_name: 'Agent',
       tool_input: { prompt: 'Implement node N-12 for the remediate-code run.' },
     };
-    expect(runHook(INPUT_GUARD, payload).code).toBe(0);
+    expect(runInputGuard(payload).code).toBe(0);
   });
 
   it('"Implement Node.js …" is ordinary work, not a dispatch node', () => {
@@ -909,7 +1002,7 @@ describe('tool-input-guard: Agent worktree isolation on a dispatch node', () => 
       tool_name: 'Agent',
       tool_input: { isolation: 'worktree', prompt: 'Implement Node.js stream parsing in src/shared/io.ts.' },
     };
-    expect(runHook(INPUT_GUARD, payload).code).toBe(0);
+    expect(runInputGuard(payload).code).toBe(0);
   });
 });
 
