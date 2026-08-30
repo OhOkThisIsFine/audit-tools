@@ -5,13 +5,17 @@
 
 ## Live state
 
-- **v0.50.13 is live** — the two-decision lap: `check:tests` joined the derived pre-commit legs,
-  so a staged test, src, or toolchain file triggers the test-tree typecheck at commit
-  (`f2819391`); and the evidence-coverage conformance floor landed — the work item binds
-  `obligation_ids`, the result cites evidence per bound obligation (`obligation_evidence`), and
-  ingestion validates the coverage, with the host workload/result contracts at v1alpha2
-  (`ed033294`). The floor's remainder (the opt-in per-run LLM conformance dial) stays in the
-  backlog.
+- **v0.50.14 is live** — the ceremony lap: the review's Tier 0 + Tier 1 + F10, net ~9.7k lines
+  removed with no gate weakened. The orphan-module class is emptied AND gated
+  (`check:orphan-modules` + knip `files`, one commit, `224c8d4d`); every gate row states its
+  remedy and the regenerate-shaped set runs on commit legs (`f00d4309`); the offload-lane
+  registry lives at `~/.agent-config/` with llm-relay the recorded eventual owner (`47562f14`,
+  owner-decided); the pre-joined scheduler prompt and 28 uncited review docs are retired, with a
+  Leg-1 retirement valve in their place (`7afb99a3`, `f639de04`); the re-export shims are
+  gone (`30ddc47d`); CLAUDE.md dropped 4.9KB of history to rule-plus-pointer form (`7fc551f3`);
+  and ONE generated-artifact substrate sits under eight generators (`85c284a6`). The ceremony
+  remainder (Tier 2/3 + the `check:shared-primitives` governance reach) is the trimmed open track
+  in the backlog.
 
 ## Immediate next
 
