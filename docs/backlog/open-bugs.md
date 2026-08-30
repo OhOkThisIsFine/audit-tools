@@ -110,28 +110,49 @@
   verbs onto `main` are refused. OWNER DECISION: closing it reverses a recorded acceptance, and
   refusing merges onto `main` would change the documented ship flow.
 
-- **The loop-core attest preflight judges the STAGED tree with WORKING-TREE checks, so an unstaged
-  edit elsewhere reds an attestation whose commit would be green (2026-08-28, medium, friction:
-  false_red).** `attest-loop-core-review.mjs` refuses to bind when `check:guard-reach` fails, but
-  that check reads the working tree — observed: an UNSTAGED guard-registry row naming a
-  not-yet-tracked test file (both belonging to a LATER commit) refused the attestation of a staged
-  set that contained neither, forcing a commit reorder. The refusal text says "the staged tree
-  would be rejected", and for that staged tree it was false. **Property:** the preflight evaluates
-  the tree the attestation binds to — the staged tree — never the working tree around it.
+- **The attest preflight's REFUSAL is now sound, but the divergent case gets no verdict at all
+  (2026-08-28, narrowed 2026-08-30, medium, friction: false_red).** The legs read the working tree
+  while the attestation binds the staged tree; an UNSTAGED guard-registry row naming a not-yet-tracked
+  test file once refused the attestation of a staged set containing neither. **Covered:** a refusal is
+  issued only when the worktree tree equals the staged tree BEFORE and AFTER the legs run, so the
+  refusal text's "the staged tree would be rejected" is true when it appears. **Uncovered, all three
+  stated outright:** (a) on any divergence the preflight ABSTAINS — a genuine staged-tree failure is
+  missed and surfaces at the gate, costing one P19 double-attestation; (b) even an attributable verdict
+  is a PREDICTION, since gitignored state, `$HOME` (`check:memory-citations` resolves a path under the
+  home dir and exits 0 when absent) and cwd can all change between attest and commit; (c) per-leg
+  attribution by declared REACH is permanently off the table — `check-guard-reach.mjs` states verbatim
+  that a row's reach may be narrower than its guard's true inputs, so reach is sound as a TRIGGER
+  (under-declaration means a leg does not fire) and unsound as ATTRIBUTION (under-declaration would
+  stamp a refusal as proven). Two measured instances: `check:scripts` reach carries no `src/**` while
+  its tsconfig maps the shared subpath into `src/shared`, and `check:tests` reach carries no
+  `wrapper/**` or `.claude/hooks/**` while its tsconfig sets `allowJs` and tests import from both.
+  **Property:** the preflight never issues a verdict about the staged tree that it did not establish.
 
 - **The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
   shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction:
-  false_red).** The pre-commit `test:doc-contract` leg reported 24 of 24 tests passed and then failed
-  in `tests/helpers/global-setup.ts` teardown with "This run ADDED 1 entry to the repo root:
-  `_scope-probe.mts`". That file was neither written nor read by the staged change — a docs-only
-  commit — and it was already GONE from the tree moments later, so a second live session in this same
-  checkout created and removed it inside the gate's own test window. The check diffs the root before
-  and after the run, so any foreign write during that window is attributed to the run. The existing
-  trap note frames this class as self-inflicted (editing the tree during your own gate); this is the
-  other source, and it cannot be fixed by the committing session freezing its own edits.
-  **Property:** the teardown attributes a root entry to the run only when the run could have created
-  it — scope it to the runner's own process tree, or reconcile against a baseline captured under the
-  same lock, so a concurrent session's transient file cannot red an unrelated commit.
+  false_red).** `tests/helpers/global-setup.ts` teardown diffs the repo root before and after the run,
+  so a foreign write inside that window is attributed to the run: a second session's `_scope-probe.mts`
+  failed a docs-only commit whose own 24 tests passed. **Property:** the teardown asserts a verdict
+  about a root entry only where that verdict can be true.
+  **Two designs are DEAD by measurement (2026-08-30); a third must clear the bar they failed.**
+  1. *Attribute the writer.* No supported OS offers post-hoc file→writer attribution, and write-time
+     interception is unavailable in ESM: patching `node:fs` is BYPASSED by named imports (measured:
+     `{"defaultObj":"GUARDED","namedSync":"BYPASSED"}`), which all 399 files here use. Permanent false
+     GREEN.
+  2. *Assert only where the run is the sole writer.* No exclusivity predicate exists. Session records
+     carry no pid and live 30 days, so they answer "did a session start here this month"; `git worktree
+     add` does not materialize the gitignored state dir, so 2 of 3 live lap worktrees read EXCLUSIVE —
+     the fatal branch, in exactly the checkouts laps run in; and the suite lock sees only vitest
+     invocations, never the agent session that is the offender.
+  **Three measured constraints on any future design:** (i) the throw is part of the repo's DECLARED
+  green mechanism — the vitest gate exits on nonzero and never mints the suite-green stamp, so
+  downgrading the local verdict makes `npm test` stamp a tree that CONTAINS the leak; (ii) "notice
+  instead of throw" is silence at the seam that reported this, because the pre-commit
+  `test:doc-contract` leg reads the child's streams only in `catch`; (iii) nothing binds `teardown()`'s
+  composition — `repoRootProblems` has one caller and zero test observers, so a fix can ship UNWIRED
+  with every pinned case green. **The one live direction:** give the session registry a real liveness
+  signal (pid + heartbeat, the shape `withFileLock` already uses), then scope the verdict to its
+  absence — enforcement-machinery work, to be judged on its own merits before it is spent here.
 
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
   fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went

@@ -157,7 +157,10 @@ if (loopCoreFiles.length === 0) {
 // repo un-attestable.
 // No `git` passed: the module's own runner carries `.status`, which the
 // staged-pickaxe scans branch on; this script's local helper does not.
-const preflight = runDerivedFilePreflight({ root, staged });
+// The legs read the WORKING tree; this attestation binds the STAGED tree. The
+// preflight therefore refuses only when the two are the same object before AND
+// after the legs run, and otherwise ABSTAINS — see the module's header.
+const preflight = runDerivedFilePreflight({ root, staged, stagedTree: sha });
 for (const s of preflight.skipped) console.error(`attest-loop-core-review: note — ${s}`);
 if (preflight.failures.length > 0) {
   for (const f of preflight.failures) {
@@ -165,7 +168,27 @@ if (preflight.failures.length > 0) {
   }
   fail(
     'refusing to bind: the staged tree would be rejected by the pre-commit gate\'s derived-file ' +
-      'checks above. Fix + re-stage, THEN attest — nothing was written, so nothing is wasted.',
+      'checks above — verified against the staged tree (working tree is identical). ' +
+      'Fix + re-stage, THEN attest — nothing was written, so nothing is wasted.',
+  );
+}
+if (preflight.unattributed.length > 0) {
+  for (const u of preflight.unattributed) {
+    console.error(
+      `\n… ${u.script} ${u.outcome.toUpperCase()} — NOT a verdict about the staged tree` +
+        (u.tail ? `\n${u.tail}` : ''),
+    );
+  }
+  console.error(
+    `\nattest-loop-core-review: the working tree is NOT identical to the staged tree ` +
+      `(staged ${preflight.stagedTree}, worktree ${preflight.worktreeTreeBefore ?? 'unknown'}` +
+      `${
+        preflight.worktreeTreeAfter !== preflight.worktreeTreeBefore
+          ? ` then ${preflight.worktreeTreeAfter ?? 'unknown'}`
+          : ''
+      }), so the results above describe the DISK, not the tree being bound. ` +
+      `The pre-commit gate materializes the staged tree and judges it exactly at commit. ` +
+      `Stage or set aside the divergence and re-run for a judged verdict.`,
   );
 }
 
@@ -190,6 +213,18 @@ const record = {
   verdict,
   override: override ?? null,
   loop_core_files: loopCoreFiles,
+  // What the preflight was actually able to establish about THIS tree. An
+  // abstention is recorded as data rather than passing silently, so "the legs
+  // were run" and "the legs judged the bound tree" stay distinguishable after
+  // the fact. No schema_version bump: the field has no reader — the gate reads
+  // staged_tree, verdict, override and freshness only.
+  preflight: {
+    attributable: preflight.attributable,
+    staged_tree: preflight.stagedTree,
+    worktree_tree_before: preflight.worktreeTreeBefore,
+    worktree_tree_after: preflight.worktreeTreeAfter,
+    unattributed: preflight.unattributed.map((u) => ({ id: u.id, outcome: u.outcome })),
+  },
   git_head: gitHead,
   created_at: new Date().toISOString(),
 };

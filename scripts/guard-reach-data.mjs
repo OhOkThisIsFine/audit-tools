@@ -688,7 +688,10 @@ export const GUARDS = [
     id: 'attest-derived-file-preflight-test',
     kind: 'contract-test',
     impl: 'tests/shared/attest-derived-file-preflight.test.ts',
-    note: 'P19: attest scripts run the gate-shared derived-file checks before binding and refuse a tree the gate would reject',
+    note:
+      'P19: attest scripts run the gate-shared derived-file checks before binding and refuse a tree ' +
+      'the gate would reject — and since 2026-08-30 they refuse ONLY when the worktree tree equals ' +
+      'the staged tree before and after the legs, abstaining otherwise',
   },
   {
     id: 'precommit-leg-derivation-test',
@@ -1076,7 +1079,16 @@ export const REACH = [
       'poll-log-throttle run only at release/maintenance time — no build gate executes them ' +
       "(triage-backlog's sweep driver is now shared lane-dispatch.mjs, gate-executed via " +
       "tests/shared/lane-dispatch.test.ts — the uncovered half is triage-backlog's HTTP lane + CLI " +
-      'shell only)',
+      'shell only). derived-file-preflight refuses only when the worktree tree equals the staged ' +
+      'tree before AND after its legs; three halves stay open, all stated in the open-bugs entry: ' +
+      'the DIVERGENT case gets no verdict at all (the preflight abstains, so a genuine staged-tree ' +
+      'failure reaches the gate at commit and costs one P19 double-attestation); even an ' +
+      'attributable verdict is a PREDICTION, since gitignored state, $HOME and cwd can change ' +
+      'between attest and commit; and per-leg attribution by declared REACH is permanently ' +
+      "unavailable, because this reconciler verifies existence and wiring, not guard internals — a " +
+      "row's reach may be narrower than its guard's true inputs, which is sound for a TRIGGER " +
+      '(under-declaration means a leg does not fire) and unsound for ATTRIBUTION (under-declaration ' +
+      'would stamp a refusal as proven)',
   },
 
   {

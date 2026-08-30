@@ -34,6 +34,7 @@ import { execSync, spawnSync } from 'node:child_process';
 import { isGlob, globToRegExp } from '../check-doc-manifest.mjs';
 import { GUARDS, REACH } from '../guard-reach-data.mjs';
 import { OPEN_ITEMS_RELPATH, PREMISE_GREP_PATHSPECS } from '../nightly/items.mjs';
+import { worktreeTree } from './worktree-tree.mjs';
 
 const norm = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '');
 
@@ -215,12 +216,58 @@ function readPackageScripts(root) {
  * doc-links failure forces a tracked-file edit and voids an attestation the
  * same way a stale index does). An unwired leg FAILS OPEN with an announcement
  * (matching the gate's noteFailOpen parity) — a missing script must never make
- * a repo un-attestable. Returns { failures, skipped }; the caller refuses to
- * bind when failures is non-empty.
+ * a repo un-attestable.
+ *
+ * ── ATTRIBUTABILITY: why a leg result is not always a verdict ────────────────
+ * The legs run `npm run <script>` in the real root, so every one of them reads
+ * the WORKING TREE. The attestation binds to the STAGED tree (`git write-tree`).
+ * When those two trees differ, a leg's result describes the disk and not the
+ * object being bound — and refusing on it is a false red. That is not
+ * hypothetical: an UNSTAGED guard-registry row naming a not-yet-tracked test
+ * file (both belonging to a LATER commit) refused an attestation of a staged set
+ * that contained neither, and forced a commit reorder.
+ *
+ * The fix is a TREE-IDENTITY gate, not an attribution heuristic. A refusal is
+ * issued only when the worktree tree equals `stagedTree` BEFORE and AFTER the
+ * legs run. Under that equality every tracked byte on disk IS the staged tree,
+ * and equality also implies zero untracked files (`add -A` would otherwise move
+ * the hash) — so even the legs that enumerate `git ls-files --others` see the
+ * bound object. cwd, $HOME and gitignored state are the same ones the gate will
+ * see. The AFTER snapshot is not decoration: it closes the window in which a
+ * concurrent session edits this shared checkout while the legs run.
+ *
+ * Per-leg attribution by declared REACH was measured and REJECTED. Reach is safe
+ * as a TRIGGER, because an under-declaration only means a leg does not fire; it
+ * is unsound as ATTRIBUTION, because an under-declaration would stamp a refusal
+ * as proven. `check-guard-reach.mjs` states verbatim that a row's stated reach
+ * may be narrower than its guard's true inputs, so the registry explicitly
+ * declines to maintain the invariant such attribution would need.
+ *
+ * Every failure mode degrades toward ABSTENTION, never toward refusal: a null
+ * tree id, a torn read, a git fault. The mechanism cannot manufacture a false
+ * red — which is the defect class it exists to remove.
+ *
+ * Returns `{ failures, skipped, attributable, stagedTree, worktreeTreeBefore,
+ * worktreeTreeAfter, unattributed }`. `failures` is non-empty ONLY when
+ * attributable, so the caller's existing refusal is now sound as written. On the
+ * abstaining path every executed leg — failed AND passed — lands in
+ * `unattributed`, because the false-GREEN half (an unstaged fix masking a broken
+ * staged tree) is today completely silent.
  */
-/** @param {{root: string, staged: string[], git?: Function}} options */
-export function runDerivedFilePreflight({ root, staged, git }) {
-  const failures = [];
+/**
+ * @param {{root: string, staged: string[], stagedTree: string, git?: Function}} options
+ */
+export function runDerivedFilePreflight({ root, staged, stagedTree, git }) {
+  if (typeof stagedTree !== 'string' || stagedTree.trim() === '') {
+    // The object judged must be the object bound. A caller that cannot name it
+    // has no business receiving a verdict about it.
+    throw new TypeError(
+      'runDerivedFilePreflight requires `stagedTree` — the tree id the attestation binds to',
+    );
+  }
+  const worktreeTreeBefore = worktreeTree(root);
+  /** @type {{id: string, script: string, fix: string, tail: string, outcome: 'passed'|'failed'}[]} */
+  const executed = [];
   const skipped = [];
   for (const leg of buildPreCommitLegs({ packageScripts: readPackageScripts(root) })) {
     if (!leg.triggered(git ? { root, staged, git } : { root, staged })) continue;
@@ -228,6 +275,9 @@ export function runDerivedFilePreflight({ root, staged, git }) {
       skipped.push(`${leg.script} is not wired in this repo — preflight leg SKIPPED (fail-open)`);
       continue;
     }
+    // The legs run even on the abstaining path: their output is still the
+    // advisory the operator wants, and short-circuiting would create a second
+    // code path that can drift from the gate's leg set.
     try {
       execSync(`npm run ${leg.script}`, /** @type {any} */ ({
         cwd: root,
@@ -236,10 +286,30 @@ export function runDerivedFilePreflight({ root, staged, git }) {
         timeout: 60_000,
         windowsHide: true,
       }));
+      executed.push({ id: leg.id, script: leg.script, fix: leg.fix, tail: '', outcome: 'passed' });
     } catch (err) {
     const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`.trim().split('\n').slice(-12).join('\n');
-      failures.push({ id: leg.id, script: leg.script, fix: leg.fix, tail });
+      executed.push({ id: leg.id, script: leg.script, fix: leg.fix, tail, outcome: 'failed' });
     }
   }
-  return { failures, skipped };
+  const worktreeTreeAfter = worktreeTree(root);
+  const attributable =
+    worktreeTreeBefore !== null &&
+    worktreeTreeAfter !== null &&
+    worktreeTreeBefore === stagedTree &&
+    worktreeTreeAfter === stagedTree;
+  const failures = attributable
+    ? executed
+        .filter((e) => e.outcome === 'failed')
+        .map(({ id, script, fix, tail }) => ({ id, script, fix, tail }))
+    : [];
+  return {
+    failures,
+    skipped,
+    attributable,
+    stagedTree,
+    worktreeTreeBefore,
+    worktreeTreeAfter,
+    unattributed: attributable ? [] : executed,
+  };
 }
