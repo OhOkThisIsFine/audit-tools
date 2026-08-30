@@ -6,6 +6,19 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **A full-suite green that the vitest gate TOLERATES mints no green stamp — the tolerance path
+  returns before the stamp write (2026-08-30, medium, friction: false_red).** In
+  `scripts/shared/run-vitest-gate.mjs`, the `isReporterTransportFault` branch prints "Treating as
+  PASS" and exits 0 immediately; `writeSuiteGreenStamp` is called only on the fall-through path far
+  below it. So the one run class the gate goes out of its way to call green is the one class that
+  leaves no evidence it was. Measured at this lap's baseline: 469 files, 6059 passed, 0 failed,
+  tolerated after a vitest-worker RPC timeout — and the stamp still bound a tree 13 hours old rather
+  than the tree just tested. The stamp is this repo's DECLARED green mechanism, the one
+  `.claude/green-mechanism.json` tells the machine-wide ledger to defer to, so the closeout gate then
+  reports no evidence for a tree that is genuinely green. Absent evidence is the safe reading, which
+  is why this is survivable and also why nothing noticed. **Property:** every path the gate exits as
+  PASS mints the same evidence, or a path that mints none is not a PASS.
+
 - **`check:memory-citations` is INERT in every lap worktree, and announces the skip as a pass
   (2026-08-29, medium, friction: false_green).** Observed directly this lap: the gate printed
   "✓ memory-citations: SKIPPED — no memory store at …codex-agy-llm-relay-offload-1ec492\memory".
