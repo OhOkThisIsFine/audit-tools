@@ -394,6 +394,68 @@ describe('shell-trap-guard: a masked suite exit code is REFUSED (manufactured fa
   });
 });
 
+// The rule above keyed on TEST RUNNERS, which is the wrong axis: what makes the
+// mask dangerous is that the command's EXIT STATUS is load-bearing, not that it
+// runs tests. Observed 2026-08-27: `git push origin main 2>&1 | tail -3` was
+// ADMITTED. The push was refused as non-fast-forward, the hint scrolled past
+// inside the captured tail, and the reported status was 0. The false green is
+// worse here than on a suite — an agent that believes a push landed stops
+// verifying, and the pipeline-ownership rule then reads as satisfied while the
+// work sits only on the local branch.
+describe('shell-trap-guard: a masked STATE-CHANGING exit code is REFUSED (same class, wider axis)', () => {
+  it('blocks the observed incident: `git push` piped into tail', () => {
+    const { code, stderr } = runHook(SHELL_GUARD, bash('git push origin main 2>&1 | tail -3'));
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/masked state-changing exit code/);
+  });
+
+  it('covers every other status-bearing git verb', () => {
+    for (const cmd of [
+      'git commit -m "wip" 2>&1 | tail -3',
+      'git merge origin/main 2>&1 | grep -i conflict',
+      'git rebase main 2>&1 | tail -5',
+      'git cherry-pick abc1234 2>&1 | head -5',
+      'git tag v1.2.3 2>&1 | wc -l',
+    ]) {
+      expect(runHook(SHELL_GUARD, bash(cmd)).code, cmd).toBe(2);
+    }
+  });
+
+  it('covers publish — the ship pipeline other load-bearing status', () => {
+    expect(runHook(SHELL_GUARD, bash('npm publish --access public 2>&1 | tail -5')).code).toBe(2);
+  });
+
+  it('honors the SAME two escapes, and the same bypass, as the suite rule', () => {
+    expect(
+      runHook(SHELL_GUARD, bash('set -o pipefail; git push origin main 2>&1 | tail -3')).code,
+    ).toBe(0);
+    expect(
+      runHook(SHELL_GUARD, bash('git push origin main 2>&1 | tail -3; exit ${PIPESTATUS[0]}')).code,
+    ).toBe(0);
+    expect(
+      runHook(SHELL_GUARD, bash('git push origin main 2>&1 | tail -3'), {
+        env: { AUDIT_TOOLS_ALLOW_MASKED_EXIT: '1' },
+      }).code,
+    ).toBe(0);
+  });
+
+  it('leaves READ-ONLY git verbs alone — a false red here costs as much as the false green', () => {
+    for (const cmd of [
+      'git log --oneline | head -20',
+      'git status --short | grep src',
+      'git diff --stat | tail -5',
+      'git show HEAD --stat | head -20',
+      'git branch -a | grep remediation',
+    ]) {
+      expect(runHook(SHELL_GUARD, bash(cmd)).code, cmd).toBe(0);
+    }
+  });
+
+  it('does not fire on a QUOTED mention of the shape', () => {
+    expect(runHook(SHELL_GUARD, bash('rg "git push origin main | tail" docs/')).code).toBe(0);
+  });
+});
+
 describe('shell-trap-guard: a BACKGROUNDED suite exit laundered by a trailing statement (2026-08-12)', () => {
   // Under run_in_background the harness completion notice reads the COMPOUND's
   // exit — the LAST statement's — so `suite > log; echo "EXIT=$?"` reported

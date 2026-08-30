@@ -729,18 +729,20 @@
   forward work), or a periodic sweep with a declared cadence — never an existence check over the
   whole directory.
 
-- **The masked-exit guard reaches SUITE commands only, so a rejected `git push` reads as exit 0
-  (2026-08-27, medium, friction: tool_should_decide).** `shell-trap-guard.mjs` refuses a
-  test-or-verify command piped into a filter, because the pipeline reports the FILTER's status and a
-  red suite comes back green. Its `SUITE_CMD` matcher lists npm/pnpm/yarn test-and-run forms, `npx
-  vitest`, `vitest run` and `node --test` — and nothing else. `git push origin main 2>&1 | tail -3`
-  is therefore admitted, and it produced exactly the failure the rule exists to prevent: the push was
-  refused as non-fast-forward, the hint text scrolled past in the captured tail, and the reported exit
-  status was 0. The false green is worse here than on a suite: an agent that believes a push landed
-  stops verifying, and the pipeline-ownership rule then reads as satisfied while the work sits only
-  in the local branch. The same hole covers every other status-bearing git verb — `commit`, `rebase`,
-  `merge`, `tag` — and the `pipefail` / `PIPESTATUS` escape the rule already honours would cover
-  them unchanged. **Property:** the masked-exit refusal is keyed to whether a command's EXIT STATUS
-  is load-bearing, not to whether it is a test runner — so a state-changing command piped into a
-  filter is refused the same way a suite is, with the same two escapes.
+- **The masked-exit guard keyed on TEST RUNNERS, not on whether the exit status is load-bearing —
+  NARROWED to its curated-list half (2026-08-27, narrowed 2026-08-29, medium, friction:
+  tool_should_decide).** `git push origin main 2>&1 | tail -3` was admitted and reported exit 0 for a
+  push refused as non-fast-forward, its hint scrolled past inside the captured tail. The false green
+  is worse than on a suite: an agent that believes a push landed stops verifying, and
+  pipeline-ownership then reads as satisfied while the work sits only on the local branch.
+  **Enforced half:** `shell-trap-guard.mjs` runs ONE rule over two families (`MASK_FAMILIES`) — the
+  suite family unchanged, plus a state-changing family (`git push|commit|merge|rebase|cherry-pick|tag`,
+  `npm|pnpm|yarn publish`) — in BOTH the pipe rule and the background-laundering rule, with the same
+  two escapes (`pipefail`, `PIPESTATUS`) and the same `AUDIT_TOOLS_ALLOW_MASKED_EXIT` bypass.
+  Read-only verbs (`log`, `status`, `diff`, `show`, `branch`) stay admitted, pinned so the fix cannot
+  become a false red. **Open half:** the family is a CURATED LIST, because "is this exit status
+  load-bearing" is not derivable from command text. Every state-changing command outside the list is
+  still admitted — `gh pr merge`, `gh release create`, `npm version`, `docker push`, `terraform apply`.
+  **Property for the remainder:** a command that changes state outside this repo's working tree is
+  refused when piped into a filter, or the registry states which verbs the list claims.
 

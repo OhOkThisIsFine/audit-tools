@@ -377,6 +377,49 @@ if (isBash) {
 // form for every use, so it is a DENY ([[false-red-is-as-corrosive-as-false-green]]).
 const SUITE_CMD =
   /\b(?:npm|pnpm|yarn)\s+(?:test|run\s+(?:check|build|verify|test|ci|smoke|lint|fixtures)[\w:-]*)|\bnpx\s+vitest\b|\bvitest\s+run\b|\bnode\s+--test\b/;
+// The OTHER half of the same class. What makes the mask dangerous is that the
+// exit status is LOAD-BEARING — not that the command runs tests. Keying on test
+// runners was the wrong axis: `git push origin main 2>&1 | tail -3` was admitted
+// and reported EXIT 0 for a push refused as non-fast-forward, its hint scrolled
+// past inside the captured tail (2026-08-27). The false green is worse here than
+// on a suite, because an agent that believes a push landed stops verifying.
+// Read-only verbs (`log`, `status`, `diff`, `show`, `branch`) are deliberately
+// ABSENT: piping those into a filter is correct usage, and a false red would
+// cost as much as the false green this rule exists to stop.
+const STATE_CHANGING_CMD =
+  /\bgit\s+(?:push|commit|merge|rebase|cherry-pick|tag)\b|\b(?:npm|pnpm|yarn)\s+publish\b/;
+// ONE rule, two families. They differ only in their example command and their
+// consequence sentence, so the skeleton stays single-sourced and the family is a
+// policy axis of it — never a second copy of the rule.
+const MASK_FAMILIES = [
+  {
+    name: 'suite',
+    match: SUITE_CMD,
+    subject: 'a test/verify command',
+    example: 'npm test',
+    exitNoun: "suite's",
+    consequence:
+      'so a RED suite comes back EXIT 0. `tail` also buffers to EOF, so the captured text holds ' +
+      'only the early build notices: green status AND green-looking output, both false.',
+  },
+  {
+    name: 'state-changing',
+    match: STATE_CHANGING_CMD,
+    subject: 'a state-changing command',
+    example: 'git push origin main',
+    exitNoun: "command's",
+    consequence:
+      'so a REFUSED push/commit/merge comes back EXIT 0, its rejection hint scrolled past inside ' +
+      'the captured tail. An agent that believes the push landed stops verifying, and ' +
+      'pipeline-ownership then reads as satisfied while the work sits only on the local branch.',
+  },
+];
+/**
+ * Is this statement one whose exit status is load-bearing?
+ * @param {string} text statement text, already quote-stripped
+ * @returns {boolean}
+ */
+const isStatusBearing = (text) => MASK_FAMILIES.some((f) => f.match.test(text));
 const FILTER_PIPE = /\|\s*(?:grep|rg|tail|head|wc|sed|awk|Select-String|Select-Object|more|less)\b/;
 // The masking is defeated when the statement propagates the pipeline's real
 // status: bash `set -o pipefail` / `${PIPESTATUS[0]}`. Those are correct usage.
@@ -386,22 +429,23 @@ const FILTER_PIPE = /\|\s*(?:grep|rg|tail|head|wc|sed|awk|Select-String|Select-O
 const PIPE_STATUS_PRESERVED = /\bpipefail\b|\bPIPESTATUS\b/.test(stripQuoted(cmd));
 for (const sub of subCmds) {
   const stripped = stripQuoted(sub);
-  if (!SUITE_CMD.test(stripped) || !FILTER_PIPE.test(stripped)) continue;
+  const family = MASK_FAMILIES.find((f) => f.match.test(stripped));
+  if (!family || !FILTER_PIPE.test(stripped)) continue;
   if (PIPE_STATUS_PRESERVED) continue;
   if (bypassEnabled('AUDIT_TOOLS_ALLOW_MASKED_EXIT', cmd)) continue;
   denials.push(
-    'masked suite exit code — a test/verify command piped into a filter reports the FILTER\'s status, ' +
-      'so a RED suite comes back EXIT 0. `tail` also buffers to EOF, so the captured text holds only the ' +
-      'early build notices: green status AND green-looking output, both false.\n' +
+    `masked ${family.name} exit code — ${family.subject} piped into a filter reports the FILTER's ` +
+      `status, ${family.consequence}\n` +
       // Background-safe remedies ONLY: the old `; echo "EXIT=$?"` suggestion
       // IS the laundering trap when the command is backgrounded (the rule
       // below), so the guard must never prescribe it.
       (isBash
-        ? "  fix: `npm test > run.log 2>&1` — let the suite's exit BE the command's exit (no " +
-          "trailing `; echo`: backgrounded, a trailing statement becomes the compound's exit and " +
-          'fakes green), then read/grep `run.log` in a separate call (`set -o pipefail` also ' +
-          'propagates the real status if you must pipe).\n'
-        : '  fix: `npm test *> run.log; exit $LASTEXITCODE` then read/grep `run.log` in a separate call.\n') +
+        ? `  fix: \`${family.example} > run.log 2>&1\` — let the ${family.exitNoun} exit BE the ` +
+          "command's exit (no trailing `; echo`: backgrounded, a trailing statement becomes the " +
+          "compound's exit and fakes green), then read/grep `run.log` in a separate call " +
+          '(`set -o pipefail` also propagates the real status if you must pipe).\n'
+        : `  fix: \`${family.example} *> run.log; exit $LASTEXITCODE\` then read/grep \`run.log\` in a ` +
+          'separate call.\n') +
       `  offending statement: ${sub.slice(0, 200)}`,
   );
   break;
@@ -485,7 +529,9 @@ for (const sub of subCmds) {
 // errors sitting in the unread log; CI caught it, the notice did not. This is
 // the GENERAL status-laundering rule: detected from exit-status FLOW (the
 // statement sequence's last exit-producing element), never a third named
-// syntactic instance. A statement matching SUITE_CMD followed transitively by
+// syntactic instance. A statement matching either MASK_FAMILIES entry — a suite
+// OR a state-changing command, the same load-bearing-exit axis as the pipe rule
+// above — followed transitively by
 // any non-`&&` separator (`;`, `||`, newline) can have its red replaced by
 // the trailing statement's status; `&&` chains short-circuit and PRESERVE a
 // failure, and a terminal `exit $?` / `exit $LASTEXITCODE` /
@@ -503,12 +549,12 @@ if (runInBackground && !bypassEnabled('AUDIT_TOOLS_ALLOW_MASKED_EXIT', cmd)) {
     !finalPassesThrough &&
     seq.some(
       (part, i) =>
-        SUITE_CMD.test(stripQuoted(part.text)) &&
+        isStatusBearing(stripQuoted(part.text)) &&
         seq.slice(i + 1).some((later) => later.sepBefore !== '&&'),
     );
   if (laundered) {
     denials.push(
-      'backgrounded suite exit LAUNDERED by a trailing statement — under run_in_background the ' +
+      'backgrounded exit status LAUNDERED by a trailing statement — under run_in_background the ' +
         "harness completion notice reads the LAST statement's exit, so a RED suite reports 0 " +
         '(2026-08-12: two TS2345 errors sat in an unread log while the notice said exit 0).\n' +
         (isBash
