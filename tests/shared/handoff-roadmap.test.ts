@@ -312,13 +312,6 @@ describe('nightly queue — generated live state, absent when empty', () => {
     expect(cleared).not.toContain('OLD');
   });
 
-  it('refuses duplicate live-status slots rather than leaving a stale copy behind', () => {
-    const slot = `${LIVE_STATUS_BEGIN_MARKER}\nOLD\n${LIVE_STATUS_END_MARKER}`;
-    expect(() => spliceLiveStatus(`${slot}\n${slot}\n`, renderNightlyQueue(items))).toThrow(
-      /multiple generated-live-status markers/,
-    );
-  });
-
   it('escapes marker-shaped queue content before it can wedge the next regeneration', () => {
     const handoff = `${LIVE_STATUS_BEGIN_MARKER}\nOLD\n${LIVE_STATUS_END_MARKER}`;
     const injected = renderNightlyQueue([
@@ -349,17 +342,11 @@ describe('splicing — only the delimited block is touched', () => {
     expect(out).toBe(`# HANDOFF\n\nhand-written above\n\n${BEGIN_MARKER}\nNEW\n${END_MARKER}\n\nhand-written below\n`);
   });
 
-  it('refuses a HANDOFF with no markers rather than appending a second copy', () => {
-    expect(() => spliceRoadmap('# HANDOFF\n\nno markers\n', `${BEGIN_MARKER}\nX\n${END_MARKER}`)).toThrow(
-      /missing the generated-roadmap markers/,
-    );
-  });
+  // (Missing-pair / wrong-order / duplicated-pair refusals are pinned once, in
+  // tests/shared/generated-artifacts-splice.test.ts — the cross-slot and
+  // marker-escape behaviors above stay here because they are this generator's
+  // own policy, layered on the shared splice.)
 
-  it('refuses markers in the wrong order', () => {
-    expect(() =>
-      spliceRoadmap(`${END_MARKER}\n${BEGIN_MARKER}\n`, `${BEGIN_MARKER}\nX\n${END_MARKER}`),
-    ).toThrow(/out of order/);
-  });
 });
 
 describe('the live tree', () => {

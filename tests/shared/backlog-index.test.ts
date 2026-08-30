@@ -157,9 +157,8 @@ describe('splicing — hand-written prose is untouched', () => {
     expect(out).not.toContain('OLD');
   });
 
-  it('names the missing markers rather than silently appending', () => {
-    expect(() => spliceIndex('# Backlog\n', 'block')).toThrow(/missing the generated seek-index markers/);
-  });
+  // (Splice refusals are pinned once, in
+  // tests/shared/generated-artifacts-splice.test.ts.)
 });
 
 describe('the gate fires at COMMIT, not only in verify:checks', () => {

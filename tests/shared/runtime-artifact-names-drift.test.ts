@@ -7,12 +7,6 @@ import {
   REMEDIATION_OUTCOMES_FILENAME,
 } from "../../src/shared/io/auditToolsPaths.js";
 import { RUNTIME_ARTIFACT_NAMES } from "../../scripts/shared/runtime-artifact-names.generated.mjs";
-import {
-  extractRuntimeArtifactNames,
-  renderRuntimeArtifactNamesModule,
-} from "../../scripts/shared/generate-runtime-artifact-names.mjs";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 /**
  * Drift pin for the generated run-artifact name set the doc-citation gate
@@ -24,15 +18,6 @@ import { resolve } from "node:path";
  * red (or a silently exempt citation) in the doc gate.
  */
 describe("runtime-artifact-names.generated.mjs — drift against the layout sources", () => {
-  it("the tracked generated file matches a fresh render from the live sources", () => {
-    const rendered = renderRuntimeArtifactNamesModule(extractRuntimeArtifactNames());
-    const tracked = readFileSync(
-      resolve(process.cwd(), "scripts/shared/runtime-artifact-names.generated.mjs"),
-      "utf8",
-    );
-    expect(tracked).toBe(rendered);
-  });
-
   it("every ARTIFACT_DEFINITIONS filename and deliverable name is in the set", () => {
     const names = new Set<string>(RUNTIME_ARTIFACT_NAMES);
     for (const [key, definition] of Object.entries(ARTIFACT_DEFINITIONS)) {

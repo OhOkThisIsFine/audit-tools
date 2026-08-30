@@ -37,11 +37,12 @@
 // `--check` is wired into BOTH `verify:checks` and `.claude/hooks/pre-commit-gate.mjs`
 // — the pre-commit hook does NOT run `verify:checks`, so a gate wired only there
 // fails first in RELEASE CI and burns a tag.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parseBulletEntries, parseTrackEntries, sectionText } from "./generate-handoff-roadmap.mjs";
+import { runGeneratedArtifactCli, spliceGeneratedBlock } from "./generatedArtifacts.mjs";
 import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -155,15 +156,11 @@ export function renderIndex(groups) {
 
 /** Replace the delimited block, leaving every hand-written line byte-identical. */
 export function spliceIndex(indexText, block) {
-  const begin = indexText.indexOf(BEGIN_MARKER);
-  const end = indexText.indexOf(END_MARKER);
-  if (begin === -1 || end === -1 || end < begin) {
-    throw new Error(
-      `docs/backlog.md is missing the generated seek-index markers (or they are out of order).\n` +
-        `Restore this pair around the index:\n  ${BEGIN_MARKER}\n  ${END_MARKER}`,
-    );
-  }
-  return indexText.slice(0, begin) + block + indexText.slice(end + END_MARKER.length);
+  return spliceGeneratedBlock(indexText, block, {
+    begin: BEGIN_MARKER,
+    end: END_MARKER,
+    target: "docs/backlog.md",
+  });
 }
 
 function readSources() {
@@ -172,26 +169,17 @@ function readSources() {
 }
 
 function main() {
-  const block = renderIndex(collectIndex(readSources()));
-  const current = readFileSync(indexPath, "utf8");
-  const rendered = spliceIndex(current, block);
-
-  if (process.argv.includes("--check")) {
-    if (current !== rendered) {
-      process.stderr.write(
-        `\ndocs/backlog.md's generated seek index is STALE — its anchors no longer match docs/backlog/.\n` +
-          `A stale anchor is worse than no anchor: it sends the reader to confidently wrong prose.\n` +
-          `Fix: node scripts/shared/generate-backlog-index.mjs\n\n`,
-      );
-      process.exit(1);
-    }
-    const count = (rendered.match(/^- `[^`]+:\d+` — /gm) ?? []).length;
-    process.stdout.write(`✓ backlog-index: docs/backlog.md matches the backlog (${count} anchor(s))\n`);
-    process.exit(0);
-  }
-
-  writeFileSync(indexPath, rendered, "utf8");
-  process.stdout.write(`wrote ${indexPath}\n`);
+  const rendered = spliceIndex(readFileSync(indexPath, "utf8"), renderIndex(collectIndex(readSources())));
+  const count = (rendered.match(/^- `[^`]+:\d+` — /gm) ?? []).length;
+  runGeneratedArtifactCli({
+    repoRoot,
+    files: [{ target: "docs/backlog.md", next: rendered }],
+    staleMessage:
+      `The generated seek index's anchors no longer match docs/backlog/. A stale anchor is worse ` +
+      `than no anchor: it sends the reader to confidently wrong prose.`,
+    fixCommand: "node scripts/shared/generate-backlog-index.mjs",
+    okMessage: `backlog-index: docs/backlog.md matches the backlog (${count} anchor(s))`,
+  });
 }
 
 // Importable as a library (the contract test drives the pure functions with

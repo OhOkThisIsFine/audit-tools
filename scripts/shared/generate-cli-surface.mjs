@@ -21,9 +21,10 @@
 //
 //   node scripts/shared/generate-cli-surface.mjs           # write
 //   node scripts/shared/generate-cli-surface.mjs --check    # verify only
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runGeneratedArtifactCli, spliceGeneratedBlock } from "./generatedArtifacts.mjs";
 
 import { INSTALLER_VERBS, installerVerbSummary } from "../../wrapper/installer-verb-help.mjs";
 
@@ -58,44 +59,20 @@ export function renderCliSurface() {
 
 /** Replace the delimited block, leaving every other byte of the page untouched. */
 export function spliceCliSurface(pageText, block) {
-  const begin = pageText.indexOf(BEGIN_MARKER);
-  const end = pageText.indexOf(END_MARKER);
-  if (begin === -1 || end === -1 || end < begin) {
-    throw new Error(
-      `${RENDER_FILE} is missing the generated CLI-surface markers (or they are out of order).\n` +
-        `Restore this pair around the generated block:\n  ${BEGIN_MARKER}\n  ${END_MARKER}`,
-    );
-  }
-  if (
-    pageText.indexOf(BEGIN_MARKER, begin + BEGIN_MARKER.length) !== -1 ||
-    pageText.indexOf(END_MARKER, end + END_MARKER.length) !== -1
-  ) {
-    throw new Error(`${RENDER_FILE} contains multiple CLI-surface markers; refusing to choose one block.`);
-  }
-  return pageText.slice(0, begin) + block + pageText.slice(end + END_MARKER.length);
+  return spliceGeneratedBlock(pageText, block, { begin: BEGIN_MARKER, end: END_MARKER, target: RENDER_FILE });
 }
 
 function main() {
-  const outputPath = join(repoRoot, RENDER_FILE);
-  const current = readFileSync(outputPath, "utf8");
-  const next = spliceCliSurface(current, renderCliSurface());
-
-  if (process.argv.includes("--check")) {
-    if (current !== next) {
-      process.stderr.write(
-        `\n${RENDER_FILE}'s CLI-surface block is stale.\n` +
-          `It no longer matches the verbs declared in ${SOURCE_FILE}, so the page describes a ` +
-          `surface the bins do not route.\n` +
-          `Fix: node scripts/shared/generate-cli-surface.mjs, then re-stage ${RENDER_FILE}\n\n`,
-      );
-      process.exit(1);
-    }
-    process.stdout.write("✓ cli-surface: product.md matches the declared installer verbs\n");
-    return;
-  }
-
-  writeFileSync(outputPath, next, "utf8");
-  process.stdout.write(`wrote ${outputPath}\n`);
+  const current = readFileSync(join(repoRoot, RENDER_FILE), "utf8");
+  runGeneratedArtifactCli({
+    repoRoot,
+    files: [{ target: RENDER_FILE, next: spliceCliSurface(current, renderCliSurface()) }],
+    staleMessage:
+      `The CLI-surface block no longer matches the verbs declared in ${SOURCE_FILE}, so the page ` +
+      `describes a surface the bins do not route.`,
+    fixCommand: `node scripts/shared/generate-cli-surface.mjs, then re-stage ${RENDER_FILE}`,
+    okMessage: "cli-surface: product.md matches the declared installer verbs",
+  });
 }
 
 // Importable as a library (the drift test re-runs the render), so the CLI body

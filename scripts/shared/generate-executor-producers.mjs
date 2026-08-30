@@ -24,10 +24,11 @@
 //
 //   node scripts/shared/generate-executor-producers.mjs           # write
 //   node scripts/shared/generate-executor-producers.mjs --check   # verify only
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
+import { runGeneratedArtifactCli } from "./generatedArtifacts.mjs";
 
 const repoRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 
@@ -216,31 +217,15 @@ export function renderProducerTable({ executors, lifecycle }) {
 }
 
 function main() {
-  const outputPath = join(repoRoot, RENDER_FILE);
-  const rendered = renderProducerTable(readProducerDeclaration());
-
-  if (process.argv.includes("--check")) {
-    let current = null;
-    try {
-      current = readFileSync(outputPath, "utf8");
-    } catch {
-      /* missing */
-    }
-    if (current !== rendered) {
-      process.stderr.write(
-        `\n${RENDER_FILE} is stale or missing.\n` +
-          `The rendered producer table no longer matches EXECUTOR_REGISTRY[].produces, so the ` +
-          `spec would credit the wrong executor with writing an artifact.\n` +
-          `Fix: node scripts/shared/generate-executor-producers.mjs, then re-stage ${RENDER_FILE}\n\n`,
-      );
-      process.exit(1);
-    }
-    process.stdout.write("✓ executor-producers: the rendered table matches the registry declaration\n");
-    return;
-  }
-
-  writeFileSync(outputPath, rendered, "utf8");
-  process.stdout.write(`wrote ${outputPath}\n`);
+  runGeneratedArtifactCli({
+    repoRoot,
+    files: [{ target: RENDER_FILE, next: renderProducerTable(readProducerDeclaration()) }],
+    staleMessage:
+      `The rendered producer table no longer matches EXECUTOR_REGISTRY[].produces, so the ` +
+      `spec would credit the wrong executor with writing an artifact.`,
+    fixCommand: `node scripts/shared/generate-executor-producers.mjs, then re-stage ${RENDER_FILE}`,
+    okMessage: "executor-producers: the rendered table matches the registry declaration",
+  });
 }
 
 // Importable as a library (the drift test re-runs the render), so the CLI body

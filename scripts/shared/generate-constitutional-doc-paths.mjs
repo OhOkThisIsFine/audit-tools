@@ -21,13 +21,13 @@
 //
 // Wire `--check` into verify:checks so a stale generated file fails the build
 // rather than silently narrowing the refusal.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runGeneratedArtifactCli } from "./generatedArtifacts.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const sourcePath = join(repoRoot, "src", "shared", "constitutionalDocPaths.ts");
-const outputPath = join(repoRoot, "scripts", "shared", "constitutional-doc-paths.generated.mjs");
 
 /** Pull the string entries out of the canonical `CONSTITUTIONAL_DOC_PATHS` literal. */
 export function extractConstitutionalPaths(tsSource) {
@@ -78,32 +78,17 @@ export function renderConstitutionalModule(paths) {
 
 function main() {
   const paths = extractConstitutionalPaths(readFileSync(sourcePath, "utf8"));
-  const rendered = renderConstitutionalModule(paths);
-
-  if (process.argv.includes("--check")) {
-    let current = null;
-    try {
-      current = readFileSync(outputPath, "utf8");
-    } catch {
-      /* missing */
-    }
-    if (current !== rendered) {
-      process.stderr.write(
-        `\n${outputPath} is stale or missing.\n` +
-          `The constitutional-doc refusal would run against a DIFFERENT path list than the source of truth, ` +
-          `which silently narrows or widens which commits are refused.\n` +
-          `Fix: node scripts/shared/generate-constitutional-doc-paths.mjs\n\n`,
-      );
-      process.exit(1);
-    }
-    process.stdout.write(
-      `✓ constitutional-doc-paths: generated list matches ${paths.length} canonical path(s)\n`,
-    );
-    process.exit(0);
-  }
-
-  writeFileSync(outputPath, rendered, "utf8");
-  process.stdout.write(`wrote ${outputPath} (${paths.length} paths)\n`);
+  runGeneratedArtifactCli({
+    repoRoot,
+    files: [
+      { target: "scripts/shared/constitutional-doc-paths.generated.mjs", next: renderConstitutionalModule(paths) },
+    ],
+    staleMessage:
+      `The constitutional-doc refusal would run against a DIFFERENT path list than the source of ` +
+      `truth, which silently narrows or widens which commits are refused.`,
+    fixCommand: "node scripts/shared/generate-constitutional-doc-paths.mjs",
+    okMessage: `constitutional-doc-paths: generated list matches ${paths.length} canonical path(s)`,
+  });
 }
 
 // Importable as a library (the contract test exercises the render directly), so

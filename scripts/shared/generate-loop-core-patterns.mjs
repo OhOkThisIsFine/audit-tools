@@ -26,13 +26,13 @@
 //
 // `--check` is wired into verify:checks so a stale generated file fails the
 // build rather than silently narrowing the gate.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runGeneratedArtifactCli } from "./generatedArtifacts.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const sourcePath = join(repoRoot, "src", "shared", "loopCorePaths.ts");
-const outputPath = join(repoRoot, ".claude", "hooks", "loop-core-patterns.mjs");
 
 /** Pull the string entries out of the canonical `LOOP_CORE_PATTERNS` literal. */
 export function extractPatterns(tsSource) {
@@ -80,32 +80,15 @@ export function renderModule(patterns) {
 
 function main() {
   const patterns = extractPatterns(readFileSync(sourcePath, "utf8"));
-  const rendered = renderModule(patterns);
-
-  if (process.argv.includes("--check")) {
-    let current = null;
-    try {
-      current = readFileSync(outputPath, "utf8");
-    } catch {
-      /* missing */
-    }
-    if (current !== rendered) {
-      process.stderr.write(
-        `\n${outputPath} is stale or missing.\n` +
-          `The loop-core gate would run against a DIFFERENT path list or predicate than the source of truth, ` +
-          `which silently narrows or widens which commits require review attestation.\n` +
-          `Fix: node scripts/shared/generate-loop-core-patterns.mjs\n\n`,
-      );
-      process.exit(1);
-    }
-    process.stdout.write(
-      `✓ loop-core-patterns: generated hook module matches ${patterns.length} canonical pattern(s) + predicate\n`,
-    );
-    process.exit(0);
-  }
-
-  writeFileSync(outputPath, rendered, "utf8");
-  process.stdout.write(`wrote ${outputPath} (${patterns.length} patterns)\n`);
+  runGeneratedArtifactCli({
+    repoRoot,
+    files: [{ target: ".claude/hooks/loop-core-patterns.mjs", next: renderModule(patterns) }],
+    staleMessage:
+      `The loop-core gate would run against a DIFFERENT path list or predicate than the source of ` +
+      `truth, which silently narrows or widens which commits require review attestation.`,
+    fixCommand: "node scripts/shared/generate-loop-core-patterns.mjs",
+    okMessage: `loop-core-patterns: generated hook module matches ${patterns.length} canonical pattern(s) + predicate`,
+  });
 }
 
 // Importable as a library (the parity test exercises `renderModule` directly),

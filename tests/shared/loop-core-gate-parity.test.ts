@@ -31,7 +31,6 @@ import {
   LOOP_CORE_PATTERNS as GENERATED,
   isLoopCorePath as generatedIsLoopCorePath,
 } from "../../.claude/hooks/loop-core-patterns.mjs";
-import { renderModule } from "../../scripts/shared/generate-loop-core-patterns.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(HERE, "..", "..");
@@ -66,15 +65,9 @@ test.each(HOOKS)("%s imports the generated predicate and declares no copy of its
   ).toBe(false);
 });
 
-test("the generator's --check mode fails when the generated file is stale", async () => {
-  // The check is what makes the invariant enforced rather than merely true
-  // today, so it must actually be able to FAIL. Verified by feeding the renderer
-  // a different list and confirming it does not match what is on disk. The
-  // byte-equality also pins the emitted PREDICATE body, not just the list.
-  const onDisk = await readFile(join(repoRoot, ".claude", "hooks", "loop-core-patterns.mjs"), "utf8");
-  expect(renderModule([...LOOP_CORE_PATTERNS])).toBe(onDisk);
-  expect(renderModule(["src/shared/not-loop-core/"])).not.toBe(onDisk);
-});
+// (The tracked-render byte-parity assertion that lived here was F8's named
+// redundancy: check:loop-core-patterns asserts the same bytes at commit and in
+// verify:checks, so the test duplicated the gate it was titled after.)
 
 test("the generated predicate agrees with the TS isLoopCorePath over a derived probe corpus", () => {
   // Derived mechanically from the pattern list itself (plus a handful of fixed

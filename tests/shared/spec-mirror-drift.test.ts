@@ -17,7 +17,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   beginMarker,
-  endMarker,
   readRegistries,
   reconcileRegions,
   renderRegion,
@@ -124,18 +123,9 @@ describe("the reconciliation refuses a declaration the registries do not support
 
 describe("splicing refuses a doc whose markers it cannot trust", () => {
   const region = SPEC_MIRROR_REGIONS[0];
-  const block = renderRegion(region, registries);
 
-  it("refuses a doc with no marker pair", () => {
-    expect(() => spliceRegion("# Contract\n\nno markers here\n", region.id, block)).toThrow(
-      /is missing \(or its markers are out of order\)/,
-    );
-  });
-
-  it("refuses a doc carrying the pair twice", () => {
-    const doubled = `${beginMarker(region.id)}\n${endMarker(region.id)}\n${beginMarker(region.id)}\n${endMarker(region.id)}\n`;
-    expect(() => spliceRegion(doubled, region.id, block)).toThrow(/multiple .* markers/);
-  });
+  // (Splice refusals are pinned once, in
+  // tests/shared/generated-artifacts-splice.test.ts.)
 
   it("names the generator in the banner a reader is told not to edit past", () => {
     expect(beginMarker(region.id)).toContain("scripts/shared/generate-spec-mirrors.mjs");

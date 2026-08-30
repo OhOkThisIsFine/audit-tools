@@ -13,8 +13,7 @@
 // So this asserts the render against the declaration rather than against
 // itself, and pins the splice refusals — a missing or duplicated marker pair
 // must fail loudly instead of picking a block.
-import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -23,21 +22,14 @@ import {
   RENDER_FILE,
   SOURCE_FILE,
   renderCliSurface,
-  spliceCliSurface,
 } from "../../scripts/shared/generate-cli-surface.mjs";
 import { INSTALLER_VERBS, installerVerbSummary } from "../../wrapper/installer-verb-help.mjs";
 
-const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const PRODUCT = "/audit-code";
 
 const renderedBlock: string = renderCliSurface();
-const pageText = readFileSync(join(REPO_ROOT, RENDER_FILE), "utf8").replace(/\r\n/g, "\n");
 
 describe("the product page's installer-verb block is rendered, not restated", () => {
-  it("matches the block currently in the page", () => {
-    expect(spliceCliSurface(pageText, renderedBlock)).toBe(pageText);
-  });
-
   it("renders every declared verb with the summary the bins print", () => {
     for (const verb of INSTALLER_VERBS) {
       expect(renderedBlock).toContain(`- \`audit-code ${verb}\` — ${installerVerbSummary(verb, PRODUCT)}`);
@@ -54,12 +46,7 @@ describe("the product page's installer-verb block is rendered, not restated", ()
     expect(renderedBlock.endsWith(END_MARKER)).toBe(true);
   });
 
-  it("refuses to splice a page with no marker pair, or with more than one", () => {
-    expect(() => spliceCliSurface("# Product\n\nno markers here\n", renderedBlock)).toThrow(
-      /missing the generated CLI-surface markers/,
-    );
-    expect(() => spliceCliSurface(`${pageText}\n${BEGIN_MARKER}\n${END_MARKER}\n`, renderedBlock)).toThrow(
-      /multiple CLI-surface markers/,
-    );
-  });
+  // (Splice refusals are pinned once, in
+  // tests/shared/generated-artifacts-splice.test.ts — the shared substrate
+  // owns the splice since F1.)
 });

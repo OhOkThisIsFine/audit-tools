@@ -29,12 +29,12 @@
 //
 //   node scripts/shared/generate-runtime-artifact-names.mjs           # write
 //   node scripts/shared/generate-runtime-artifact-names.mjs --check   # verify only
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runGeneratedArtifactCli } from "./generatedArtifacts.mjs";
 
 const repoRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
-const outputPath = join(repoRoot, "scripts", "shared", "runtime-artifact-names.generated.mjs");
 
 /**
  * The runtime-layout source modules and which extraction rules apply to each.
@@ -109,31 +109,21 @@ export function renderRuntimeArtifactNamesModule(names) {
 }
 
 function main() {
-  const rendered = renderRuntimeArtifactNamesModule(extractRuntimeArtifactNames());
-
-  if (process.argv.includes("--check")) {
-    let current = null;
-    try {
-      current = readFileSync(outputPath, "utf8");
-    } catch {
-      /* missing */
-    }
-    if (current !== rendered) {
-      process.stderr.write(
-        `\n${outputPath} is stale or missing.\n` +
-          `The doc-citation gate would classify run-artifact names against a DIFFERENT set than ` +
-          `the runtime layout actually uses — a renamed artifact turns into false reds (or a ` +
-          `retired name stays silently exempt).\n` +
-          `Fix: node scripts/shared/generate-runtime-artifact-names.mjs\n\n`,
-      );
-      process.exit(1);
-    }
-    process.stdout.write(`✓ runtime-artifact-names: generated set matches the layout sources\n`);
-    return;
-  }
-
-  writeFileSync(outputPath, rendered, "utf8");
-  process.stdout.write(`wrote ${outputPath}\n`);
+  runGeneratedArtifactCli({
+    repoRoot,
+    files: [
+      {
+        target: "scripts/shared/runtime-artifact-names.generated.mjs",
+        next: renderRuntimeArtifactNamesModule(extractRuntimeArtifactNames()),
+      },
+    ],
+    staleMessage:
+      `The doc-citation gate would classify run-artifact names against a DIFFERENT set than ` +
+      `the runtime layout actually uses — a renamed artifact turns into false reds (or a ` +
+      `retired name stays silently exempt).`,
+    fixCommand: "node scripts/shared/generate-runtime-artifact-names.mjs",
+    okMessage: "runtime-artifact-names: generated set matches the layout sources",
+  });
 }
 
 // Importable as a library (the drift test re-runs the extraction), so the CLI

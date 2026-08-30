@@ -60,6 +60,7 @@ import {
 } from "../nightly/items.mjs";
 import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
 import { splitBacklogEntries } from "./backlog-entry-grammar.mjs";
+import { spliceGeneratedBlock as sharedSpliceGeneratedBlock } from "./generatedArtifacts.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -382,50 +383,19 @@ export function renderRoadmap(groups) {
 }
 
 /** Replace one delimited block in HANDOFF, leaving all other bytes untouched. */
-function spliceGeneratedBlock(handoffText, block, beginMarker, endMarker, label) {
-  const blockBegin = block.indexOf(beginMarker);
-  const blockEnd = block.indexOf(endMarker);
-  if (
-    blockBegin !== 0 ||
-    blockEnd === -1 ||
-    blockEnd + endMarker.length !== block.length ||
-    block.indexOf(beginMarker, beginMarker.length) !== -1 ||
-    block.indexOf(endMarker, blockEnd + endMarker.length) !== -1
-  ) {
-    throw new Error(
-      `replacement generated-${label} block must contain exactly one outer marker pair; ` +
-        `refusing marker-shaped generated content.`,
-    );
-  }
-  for (const marker of GENERATED_MARKERS) {
-    if (marker !== beginMarker && marker !== endMarker && block.includes(marker)) {
-      throw new Error(
-        `replacement generated-${label} block contains a marker owned by another generated slot; ` +
-          `refusing marker-shaped generated content.`,
-      );
-    }
-  }
-  const begin = handoffText.indexOf(beginMarker);
-  const end = handoffText.indexOf(endMarker);
-  if (begin === -1 || end === -1 || end < begin) {
-    throw new Error(
-      `docs/HANDOFF.md is missing the generated-${label} markers (or they are out of order).\n` +
-        `Restore this pair around the generated block:\n  ${beginMarker}\n  ${endMarker}`,
-    );
-  }
-  const anotherBegin = handoffText.indexOf(beginMarker, begin + beginMarker.length);
-  const anotherEnd = handoffText.indexOf(endMarker, end + endMarker.length);
-  if (anotherBegin !== -1 || anotherEnd !== -1) {
-    throw new Error(
-      `docs/HANDOFF.md contains multiple generated-${label} markers; refusing to choose one block.`,
-    );
-  }
-  return handoffText.slice(0, begin) + block + handoffText.slice(end + endMarker.length);
+function spliceHandoffBlock(handoffText, block, beginMarker, endMarker, label) {
+  return sharedSpliceGeneratedBlock(handoffText, block, {
+    begin: beginMarker,
+    end: endMarker,
+    target: `docs/HANDOFF.md (generated-${label})`,
+    validateBlock: true,
+    foreignMarkers: GENERATED_MARKERS,
+  });
 }
 
 /** Replace the live-status slot without touching the hand-written Live state. */
 export function spliceLiveStatus(handoffText, block) {
-  return spliceGeneratedBlock(
+  return spliceHandoffBlock(
     handoffText,
     block,
     LIVE_STATUS_BEGIN_MARKER,
@@ -436,7 +406,7 @@ export function spliceLiveStatus(handoffText, block) {
 
 /** Replace the roadmap slot without touching the hand-written HANDOFF text. */
 export function spliceRoadmap(handoffText, block) {
-  return spliceGeneratedBlock(handoffText, block, BEGIN_MARKER, END_MARKER, "roadmap");
+  return spliceHandoffBlock(handoffText, block, BEGIN_MARKER, END_MARKER, "roadmap");
 }
 
 /** Assert that the two generated slots occur once each and never nest/overlap. */

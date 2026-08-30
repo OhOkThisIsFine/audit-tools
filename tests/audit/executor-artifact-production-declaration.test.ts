@@ -46,18 +46,9 @@ import {
   extractExecutorWriteSets,
   resolveScopeNode,
 } from "../../scripts/shared/executor-write-sites.mjs";
-import {
-  RENDER_FILE,
-  parseProducerDeclaration,
-  readProducerDeclaration,
-  renderProducerTable,
-} from "../../scripts/shared/generate-executor-producers.mjs";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { parseProducerDeclaration } from "../../scripts/shared/generate-executor-producers.mjs";
 import { FRICTION_CAPTURE_DIRNAME } from "../../src/shared/io/frictionCapture.js";
 import { AUDIT_FRICTION_RUN_ID } from "../../src/audit/orchestrator/nextStep.js";
-
-const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 
 const KNOWN_FILENAMES = new Set(
   Object.values(ARTIFACT_DEFINITIONS).map((definition) => definition.fileName),
@@ -270,14 +261,6 @@ describe("executor→artifact production declaration", () => {
     expect(() =>
       parseProducerDeclaration(scratch('artifact: `repo_manifest.json`, role: "primary"')),
     ).toThrow(/property "artifact" is not a readable literal/);
-  });
-
-  it("DECL-8: the tracked producer table matches a fresh render of the declaration", () => {
-    const tracked = readFileSync(resolve(REPO_ROOT, RENDER_FILE), "utf8");
-    expect(
-      tracked,
-      `${RENDER_FILE} is stale — run node scripts/shared/generate-executor-producers.mjs`,
-    ).toBe(renderProducerTable(readProducerDeclaration()));
   });
 
   it("DECL-9: every declaration array is in its documented content-derived order", () => {

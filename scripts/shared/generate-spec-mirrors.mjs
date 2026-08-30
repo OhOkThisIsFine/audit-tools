@@ -43,6 +43,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
+import { spliceGeneratedBlock } from "./generatedArtifacts.mjs";
 
 import {
   ARTIFACT_REGISTRY_FILE,
@@ -548,23 +549,11 @@ export function renderRegion(region, registries) {
 
 /** Replace one delimited region, leaving every other byte of the doc untouched. */
 export function spliceRegion(docText, id, block) {
-  const begin = beginMarker(id);
-  const end = endMarker(id);
-  const start = docText.indexOf(begin);
-  const stop = docText.indexOf(end);
-  if (start === -1 || stop === -1 || stop < start) {
-    throw new Error(
-      `the generated region "${id}" is missing (or its markers are out of order).\n` +
-        `Restore this pair around the table:\n  ${begin}\n  ${end}`,
-    );
-  }
-  if (
-    docText.indexOf(begin, start + begin.length) !== -1 ||
-    docText.indexOf(end, stop + end.length) !== -1
-  ) {
-    throw new Error(`the doc carries multiple "${id}" markers; refusing to choose one region.`);
-  }
-  return docText.slice(0, start) + block + docText.slice(stop + end.length);
+  return spliceGeneratedBlock(docText, block, {
+    begin: beginMarker(id),
+    end: endMarker(id),
+    target: `the generated region "${id}"`,
+  });
 }
 
 /** Every mirror doc's fully-rendered text, keyed by repo-relative path. */
