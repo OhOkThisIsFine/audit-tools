@@ -17,6 +17,7 @@ const {
   renderConceptualPerspectivePrompt,
   selectPerspectives,
   DEFAULT_CONCEPTUAL_PERSPECTIVES,
+  CONCEPTUAL_PERSPECTIVES,
 } = await import("../../src/audit/orchestrator/designReviewPrompt.js");
 
 function baseBundle(charterRegister: CharterRegister | undefined): ArtifactBundle {
@@ -218,21 +219,30 @@ test("deep perspective prompt is byte-identical when the register is absent vs o
 });
 
 // P0, simplification workflow gap: the deep fan-out must CONTAIN the two reviewers the
-// workflow depends on, not merely list them in the roster.
+// workflow is built around, not merely list them in the roster.
 //
-// `selectPerspectives` takes the first N of CONCEPTUAL_PERSPECTIVES in LIST ORDER, and
-// the default N is 5 against a 7-entry roster. `Minimalist` — the purpose/telos
-// challenger — is last, so at the default count it is structurally unreachable, as is
-// `Maintainer inheriting this cold`. That is the concrete mechanism behind "the
-// reviewers already exist and the normal execution path starves them": a slice, not a
-// missing capability.
-//
-// Pinned on the DEFAULT count deliberately. A test that passes an explicit 7 would prove
-// only that the roster is complete, which was never in doubt.
-test("a default deep fan-out selects both required simplification reviewers", () => {
-  const names = selectPerspectives(DEFAULT_CONCEPTUAL_PERSPECTIVES).map((p) => p.name);
+// Pinned at a NARROWED count, which is the only place the reservation can be observed.
+// The default now covers the whole roster, so asserting against the default would pass
+// against `slice(0, count)` too — a vacuous test that proves the roster is complete,
+// which was never in doubt. 3 is the smallest count above the clamp floor that still
+// leaves room for a non-required perspective, so it distinguishes "reserved" from
+// "happens to fit". [[test-must-reach-the-code-it-claims]]
+test("a narrowed deep fan-out still selects both required simplification reviewers", () => {
+  const names = selectPerspectives(3).map((p) => p.name);
   expect(names, "the structural-simplification reviewer must be selected").toContain(
     "Mathematician seeking elegance",
   );
   expect(names, "the purpose/telos challenger must be selected").toContain("Minimalist");
+  expect(names, "a narrowed count must still honour the count").toHaveLength(3);
+});
+
+// The default dispatches every perspective. It was 5 against a 7-entry roster with no
+// recorded reason, which silently encoded a judgement about which reviewers matter least
+// — a judgement nothing in this repo can support, because findings record a `lens` and
+// never the perspective that produced them.
+test("the default deep fan-out dispatches the whole roster", () => {
+  expect(selectPerspectives()).toHaveLength(DEFAULT_CONCEPTUAL_PERSPECTIVES);
+  expect(selectPerspectives(), "the default must not silently drop a perspective").toEqual(
+    CONCEPTUAL_PERSPECTIVES,
+  );
 });

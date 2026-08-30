@@ -205,10 +205,17 @@ export interface ConceptualPerspective {
 }
 
 /**
- * Built-in conceptual perspectives, ordered most-to-least commonly useful. The
- * deep fan-out takes the first `perspectives` of these. Each is a maximally
- * dissimilar value system so the union covers angles no single pass would. A
- * reviewer may sharpen its lens to the codebase, but stays in character.
+ * Built-in conceptual perspectives. Each is a maximally dissimilar value system
+ * so the union covers angles no single pass would. A reviewer may sharpen its
+ * lens to the codebase, but stays in character.
+ *
+ * ORDER CARRIES NO MEANING. This list used to be documented as "ordered
+ * most-to-least commonly useful", and the fan-out took the first N — which made
+ * the last entries unreachable at any narrowed count. That ranking was never
+ * measured: findings record a `lens`, never the perspective that produced them,
+ * so nothing in this repo can say which reviewer contributes what. The claim was
+ * removed rather than re-stated (owner, 2026-08-30), and per-perspective
+ * attribution is the work that would let a future ordering be earned.
  */
 export const CONCEPTUAL_PERSPECTIVES: readonly ConceptualPerspective[] = [
   {
@@ -248,8 +255,19 @@ export const CONCEPTUAL_PERSPECTIVES: readonly ConceptualPerspective[] = [
   },
 ];
 
-/** Default number of deep-review perspectives when the host does not specify. */
-export const DEFAULT_CONCEPTUAL_PERSPECTIVES = 5;
+/**
+ * Default number of deep-review perspectives when the host does not specify: the
+ * WHOLE roster.
+ *
+ * It was 5 against a 7-entry roster, with no recorded reason — the constant never
+ * arrived in a commit of its own, and its comment only restated its own name. A
+ * default that silently drops two reviewers is a judgement about which reviewers
+ * matter least, and nothing measures that (see the roster note above). Derived
+ * from the roster length so adding a perspective cannot silently re-introduce a
+ * cut. An operator who wants a cheaper run still narrows the count explicitly,
+ * which is a choice they made rather than one made for them.
+ */
+export const DEFAULT_CONCEPTUAL_PERSPECTIVES = CONCEPTUAL_PERSPECTIVES.length;
 
 /**
  * Clamp a requested perspective count into the supported range: at least 2
@@ -268,13 +286,19 @@ export function clampPerspectiveCount(requested?: number): number {
  * structural simplification and the purpose/telos challenge. They are named, not
  * indexed, so reordering the roster cannot silently drop one.
  *
- * WHY THIS EXISTS. Selection used to be `slice(0, count)` over the roster in list
- * order. With a 7-entry roster and a default of 5, the last two entries were
- * structurally unreachable at the default — and `Minimalist`, the purpose/telos
- * challenger, is last. So the reviewer the simplification workflow depends on most
- * was never dispatched unless an operator happened to ask for 7. That is the
- * mechanism behind "the reviewers already exist and the normal execution path
- * starves them": a slice, not a missing capability.
+ * WHY THIS EXISTS, stated accurately. Selection was `slice(0, count)` over the
+ * roster in list order, and that slice was DELIBERATE — the roster documented
+ * itself as ranked by usefulness, so taking the first N was the intended design,
+ * not an oversight. An earlier version of this comment called it accidental
+ * starvation; that was wrong.
+ *
+ * What was never true is the RANKING the slice relied on. Nothing measured it,
+ * and nothing can today: findings carry a `lens`, never the perspective that
+ * produced them. The default now covers the whole roster, so this reservation
+ * binds only when an operator deliberately narrows the count — and then it keeps
+ * the two perspectives this workflow is built around rather than whichever two
+ * an unmeasured ordering happened to favour. Matched by NAME, so reordering the
+ * roster cannot silently drop one.
  */
 const REQUIRED_PERSPECTIVE_NAMES: readonly string[] = [
   "Mathematician seeking elegance",
