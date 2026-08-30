@@ -59,6 +59,14 @@
   the correct answer to every other hazard here, is exactly what removes this guard. The
   `shell-trap-guard` repo-lane refusal shipped 2026-08-30 is currently the only thing standing
   between a fresh-worktree lane and a push to origin.
+  ⚠ **The premise holds only for `git worktree add`, and the harness does something else
+  (measured 2026-08-30).** The Claude Code worktree mechanism COPIES the gitignored
+  `.claude/hooks/.state` directory: a lap worktree opened that day carried 121 session records
+  byte-identical to the main checkout's, plus its own, and `enforcementArmed` returned TRUE there.
+  So the refusal is inert in a `git worktree add` worktree and ARMED in a harness-made one. That is
+  worse than either alone — the guard's arming is a property of how the worktree was created, which
+  nothing states and nothing checks, and the records arming it describe sessions that never ran in
+  that checkout.
   **Property:** a lane cannot commit or push from any worktree of this repo, whatever the session
   registry happens to hold in that particular worktree.
 
@@ -191,19 +199,21 @@
 - **The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
   shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction:
   false_red).** `tests/helpers/global-setup.ts` teardown diffs the repo root before and after the run,
-  so a foreign write inside that window is attributed to the run: a second session's `_scope-probe.mts`
-  failed a docs-only commit whose own 24 tests passed. **Property:** the teardown asserts a verdict
-  about a root entry only where that verdict can be true.
+  so a foreign write inside that window is attributed to the run. **Property:** the teardown asserts a
+  verdict about a root entry only where that verdict can be true.
   **Two designs are DEAD by measurement (2026-08-30); a third must clear the bar they failed.**
   1. *Attribute the writer.* No supported OS offers post-hoc file→writer attribution, and write-time
-     interception is unavailable in ESM: patching `node:fs` is BYPASSED by named imports (measured:
-     `{"defaultObj":"GUARDED","namedSync":"BYPASSED"}`), which all 399 files here use. Permanent false
-     GREEN.
-  2. *Assert only where the run is the sole writer.* No exclusivity predicate exists. Session records
-     carry no pid and live 30 days, so they answer "did a session start here this month"; `git worktree
-     add` does not materialize the gitignored state dir, so 2 of 3 live lap worktrees read EXCLUSIVE —
-     the fatal branch, in exactly the checkouts laps run in; and the suite lock sees only vitest
-     invocations, never the agent session that is the offender.
+     interception is unavailable in ESM: patching `node:fs` is BYPASSED by the named imports this
+     tree uses throughout. Permanent false GREEN.
+  2. *Assert only where the run is the sole writer.* No exclusivity predicate exists over AGENT
+     SESSIONS: records carry no pid and live 30 days, so they answer "did a session start here this
+     month", and the suite lock sees only vitest invocations. The state dir is unreliable in BOTH
+     directions (corrected 2026-08-30): `git worktree add` leaves it empty, while the HARNESS
+     mechanism COPIES it, so that worktree reads non-exclusive on foreign records.
+     Prior art missed here: `tests/helpers/suiteLock.ts` solves the storage half —
+     `suiteLockDir` keys holders by `sha256(repoRoot)` in the OS temp dir (immune to a state-dir
+     copy), and `processAlive` is the probe. It cannot supply a pid for an AGENT session, because a
+     hook process dies at once — so that liveness signal must be a heartbeat, not a pid probe.
   **Three measured constraints on any future design:** (i) the throw is part of the repo's DECLARED
   green mechanism — the vitest gate exits on nonzero and never mints the suite-green stamp, so
   downgrading the local verdict makes `npm test` stamp a tree that CONTAINS the leak; (ii) "notice
@@ -212,8 +222,7 @@
   composition — `repoRootProblems` has one caller and zero test observers, so a fix can ship UNWIRED
   with every pinned case green. **OWNER DECISION 2026-08-30 — build the one live direction:** give
   the session registry a real liveness signal (pid + heartbeat, the shape `withFileLock` already
-  uses) as a lap of its own, then scope the teardown verdict to its absence. Chosen over leaving the
-  false red open, so the observed-once frequency is no longer the argument; the three constraints
+  uses) as a lap of its own, then scope the teardown verdict to its absence. The three constraints
   above still bind whatever lands on top.
 
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
