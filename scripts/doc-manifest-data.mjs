@@ -210,17 +210,6 @@ export const DOC_MANIFEST = [
     autoApply: "Yes — with the renderer drift tests re-run.",
   },
   {
-    type: "generated scheduler prompt",
-    files: ["docs/nightly-routine-prompt.md"],
-    check:
-      "WHOLE-FILE GENERATED from `docs/nightly-routine.md` (cross-leg routine) + " +
-      "`docs/doc-review-guidelines.md` (leg-1 rubric) by `scripts/check-nightly-routine-prompt.mjs`. " +
-      "Never hand-edit or resolve a conflict in the target; edit the owning source and regenerate. " +
-      "`check:nightly-routine-prompt` gates byte parity plus its `package.json` check/release wiring " +
-      "in `verify:checks` and at commit.",
-    autoApply: "**No — generator-owned.**",
-  },
-  {
     type: "generated decision inbox",
     files: ["docs/nightly-inbox.md"],
     check:

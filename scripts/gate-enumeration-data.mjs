@@ -53,7 +53,6 @@ export const STEP_GLOSS = {
   "check:readme-sample-report": "README sample-report render parity",
   "check:scripts": "checkJs typecheck over the script trees",
   "check:proposal-red-at": "proposal-test measured-RED record gate",
-  "check:nightly-routine-prompt": "nightly scheduler-prompt parity",
   "check:handoff-roadmap": "HANDOFF roadmap parity",
   "check:backlog-index": "backlog seek-index parity",
   "check:memory-citations": "memory-citation check",

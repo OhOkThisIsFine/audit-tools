@@ -436,8 +436,8 @@
   review) with zero lane-side failures. (4) **tool-should-decide (small,
   cost: one burned tag v0.34.40):** a doc edit has no edit-time surface naming the TESTS that
   assert its content — `nightly-routine.md`'s approved lane swap was green through every local
-  doc gate and failed release CI on `nightly-routine-prompt-gate.test.ts`, which pinned the
-  retired helper invocation verbatim. Grep tests for a doc's path/content before shipping a
+  doc gate and failed release CI on the nightly-prompt parity test (since deleted with its
+  generated target, C-08), which pinned the retired helper invocation verbatim. Grep tests for a doc's path/content before shipping a
   contract-bearing doc edit; the durable fix would be a declared doc→test consumer map.
 
 - **Friction walk (duplicated-guard lap, 2026-07-25):** (1) **inefficient-feeding (medium):** the

@@ -99,17 +99,6 @@ describe('every retired hand-coded trigger is reproduced', () => {
     expect(triggeredIds(['docs/backlog.md'])).toContain('check:backlog-index');
   });
 
-  it('the nightly-prompt sources and the check script itself fire check:nightly-routine-prompt', () => {
-    for (const p of [
-      'docs/nightly-routine.md',
-      'docs/doc-review-guidelines.md',
-      'docs/nightly-routine-prompt.md',
-      'scripts/check-nightly-routine-prompt.mjs', // impl-path auto-rule
-    ]) {
-      expect(triggeredIds([p]), `${p} must trigger the nightly-prompt leg`).toContain('check:nightly-routine-prompt');
-    }
-  });
-
   it('the HANDOFF fixed inputs fire check:handoff-roadmap (custom widening intact)', () => {
     for (const p of [
       'docs/HANDOFF.md',
@@ -160,10 +149,11 @@ describe('every retired hand-coded trigger is reproduced', () => {
     expect(triggeredIds(['src/shared/types/lens.ts'])).toContain('check:tests');
   });
 
-  it('a src-only staged set triggers exactly the src-reach legs: test-tree typecheck, the primitive gate, and the unconditional guard-reach leg', () => {
+  it('a src-only staged set triggers exactly the src-reach legs: test-tree typecheck, the primitive gate, the orphan-module gate, and the unconditional guard-reach leg', () => {
     expect(triggeredIds(['src/audit/orchestrator/advance.ts'])).toEqual([
       'check:tests',
       'check:shared-primitives',
+      'check:orphan-modules',
       'check:guard-reach',
     ]);
   });

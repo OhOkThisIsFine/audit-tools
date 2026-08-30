@@ -214,15 +214,6 @@ export const GUARDS = [
       'cannot run at HEAD)',
   },
   {
-    id: 'check:nightly-routine-prompt',
-    kind: 'gate',
-    impl: 'check:nightly-routine-prompt',
-    preCommit: 'reach',
-    fix:
-      'docs/nightly-routine-prompt.md is generated from docs/nightly-routine.md + ' +
-      'docs/doc-review-guidelines.md — run `node scripts/check-nightly-routine-prompt.mjs --write`, then re-stage the target',
-  },
-  {
     id: 'check:loop-core-patterns',
     kind: 'gate',
     impl: 'check:loop-core-patterns',
@@ -948,7 +939,7 @@ export const REACH = [
     guardedBy: ['check:doc-manifest', 'check:doc-links', 'check:doc-code-citations', 'check:memory-citations'],
     note:
       'the four whole-corpus doc gates (memory-citations scans every tracked *.md for memory-file ' +
-      'cites); backlog, HANDOFF, README and the nightly-prompt sources are additionally claimed by ' +
+      'cites); backlog, HANDOFF and README are additionally claimed by ' +
       'their own precise rows below',
   },
   {
@@ -1189,12 +1180,6 @@ export const REACH = [
       'the GENERATED router/index file — only the index-parity gate reads it (the budget, status and ' +
       'roadmap gates read the split entry files above, deliberately: firing the roadmap check on the ' +
       'generated index would train the regenerate step into noise)',
-  },
-  {
-    area: 'nightly-prompt sources',
-    files: ['docs/nightly-routine.md', 'docs/doc-review-guidelines.md', 'docs/nightly-routine-prompt.md'],
-    guardedBy: ['check:nightly-routine-prompt'],
-    note: 'the generated scheduler prompt and its two canonical sources — either direction of drift fails the gate',
   },
   {
     area: 'philosophy pair',

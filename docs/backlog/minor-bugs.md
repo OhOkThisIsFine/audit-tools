@@ -378,7 +378,7 @@
   between.
 
 - **A dated measurement sits inside durable routine prose (2026-08-23, low).**
-  `docs/nightly-routine.md`, `docs/nightly-routine-prompt.md` and `docs/backlog.md` each carry the
+  `docs/nightly-routine.md` and `docs/backlog.md` both carry the
   same "a 2026-07-19 pass found ~21% of entries stale or already closed" as the motivation for the
   re-check-at-presentation rule. The rule is durable; the measured share and its date are a status
   reading pinned into a concept doc, and it rots silently in three places at once. **Property to
