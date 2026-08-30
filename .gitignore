@@ -38,6 +38,10 @@ dist/
 # record of what the owner has settled, and its whole job is to outlive runs,
 # branches and machines so a settled question is never asked again.
 !.claude/nightly-decisions.json
+# Declares that THIS repo owns its green mechanism, so the machine-wide
+# verify-green ledger defers instead of answering. Tracked on purpose: a fresh
+# clone must carry the declaration, or that checkout gets the false red back.
+!.claude/green-mechanism.json
 # Loop-core adversarial-review attestations — local, ephemeral, per-staged-tree-hash
 # state produced by attest-loop-core-review.mjs; never a tracked deliverable.
 .claude/loop-core-review/

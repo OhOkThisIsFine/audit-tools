@@ -1,0 +1,4 @@
+{
+  "ownedBy": "scripts/shared/suiteGreenStamp.mjs — a full-suite stamp bound to the worktree tree — plus the closeout Stop gate that reads it",
+  "reason": "CLAUDE.md forbids double-wiring. A second ledger recorded in another checkout contradicts the stamp, and nothing tells a reader which one is authoritative."
+}

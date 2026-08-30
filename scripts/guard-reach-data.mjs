@@ -539,6 +539,11 @@ export const GUARDS = [
       'the run-vitest-gate write wiring, and the closeout-challenge-gate read wiring',
   },
   { id: 'hook-trap-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-trap-guards.test.ts' },
+  {
+    id: 'green-mechanism-declaration-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/green-mechanism-declaration.test.ts',
+  },
   { id: 'hook-session-gates-test', kind: 'contract-test', impl: 'tests/shared/hook-session-gates.test.ts' },
   {
     id: 'session-registry-test',
@@ -1258,6 +1263,18 @@ export const REACH = [
     files: ['docs/backlog/.size-baseline.json'],
     guardedBy: ['check:backlog-budget'],
     note: 'the per-file ratchet data the budget gate compares against',
+  },
+  {
+    area: 'green-mechanism declaration',
+    files: ['.claude/green-mechanism.json'],
+    guardedBy: ['green-mechanism-declaration-test'],
+    note:
+      'read by the MACHINE-WIDE ~/.agent-config/verify-green.mjs, which defers its `check` and ' +
+      'refuses its `record` while this file declares a non-empty ownedBy — so no second green ' +
+      'ledger can exist beside scripts/shared/suiteGreenStamp.mjs. UNCOVERED HALF: the consumer ' +
+      'lives outside this repo and cannot be gated from here, so the test pins the SHAPE only. ' +
+      'That a deferral actually happens is verified by running `verify-green.mjs check` in this ' +
+      'checkout, never by this tree.',
   },
   {
     area: 'nightly determinations ledger',
