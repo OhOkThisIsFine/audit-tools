@@ -2,7 +2,7 @@
 // rationale in pre-commit-gate-harness.ts (shared across the
 // pre-commit-gate-*.test.ts family).
 import { test, describe, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   g as gIn,
@@ -85,5 +85,61 @@ describe("pre-commit gate: every commit-creating subcommand is gated (P9)", () =
         0,
       );
     }
+  });
+});
+
+// The gate reads the INDEX, so a fresh cherry-pick or merge stages NOTHING: the
+// loop-core attestation used to read an empty set and demand nothing while the
+// command landed the incoming tree. The gate recorded that as an accepted limit
+// until the owner reversed it (2026-08-29), because the incoming path set IS
+// derivable before the command runs, from the ref the command names.
+describe("pre-commit gate: a history-moving verb is judged on its INCOMING paths", () => {
+  // Put the loop-core change on a SIDE BRANCH and come back with a clean index,
+  // so the only way to see that content is to resolve the ref.
+  // NOT the harness `stageLoopCoreFile` helper: it writes src/shared/quota/x.ts,
+  // which isLoopCorePath returns FALSE for, so it does not arm the gate on its
+  // own (docs/backlog/open-bugs.md). src/shared/engine/ is a real loop-core path.
+  function sideBranchWithLoopCore(): string {
+    g("checkout", "-q", "-b", "side");
+    mkdirSync(join(repo, "src", "shared", "engine"), { recursive: true });
+    writeFileSync(join(repo, "src", "shared", "engine", "x.ts"), "export const x = 1;\n");
+    g("add", "-A");
+    g("commit", "-qm", "loop-core change");
+    const sha = g("rev-parse", "HEAD").stdout.trim();
+    g("checkout", "-q", "-");
+    return sha;
+  }
+
+  test("a cherry-pick of a loop-core commit demands an attestation", () => {
+    const sha = sideBranchWithLoopCore();
+    expect(g("status", "--porcelain").stdout.trim(), "index must be clean").toBe("");
+    const r = runGate(`git cherry-pick ${sha}`);
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/loop-core/i);
+  });
+
+  test("a merge that introduces a loop-core path demands an attestation", () => {
+    sideBranchWithLoopCore();
+    const r = runGate("git merge side");
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/loop-core/i);
+  });
+
+  test("a cherry-pick introducing NO loop-core path is left alone (not a false red)", () => {
+    g("checkout", "-q", "-b", "plain");
+    writeFileSync(join(repo, "notes.md"), "hello\n");
+    g("add", "-A");
+    g("commit", "-qm", "docs only");
+    const sha = g("rev-parse", "HEAD").stdout.trim();
+    g("checkout", "-q", "-");
+    const r = runGate(`git cherry-pick ${sha}`);
+    expect(r.status, `expected pass (0); stderr:\n${r.stderr}`).toBe(0);
+  });
+
+  test("an unresolvable ref FAILS OPEN and NAMES the check it skipped", () => {
+    const r = runGate("git cherry-pick deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+    expect(r.status, `expected pass (0); stderr:\n${r.stderr}`).toBe(0);
+    expect(r.stderr).toMatch(/FAIL-OPEN/);
+    expect(r.stderr).toMatch(/incoming ref/i);
   });
 });

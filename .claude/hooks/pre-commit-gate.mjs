@@ -624,6 +624,77 @@ function git(args) {
   };
 }
 
+// ── Incoming content for history-moving verbs (owner decision, 2026-08-29) ───
+// This gate reads the INDEX, and a fresh `git cherry-pick <sha>` / `git merge
+// <branch>` stages NOTHING — so the loop-core and constitutional attestation
+// checks read an empty set and demanded nothing while the command landed the
+// incoming tree. On a branch that is survivable (the gates re-run when the work
+// reaches `main` by ordinary commit); onto `main` it lands loop-core or
+// constitutional content with zero mechanical review. The gate used to record
+// this as an accepted limit; the owner reversed that acceptance, because the
+// incoming path set IS derivable before the command runs, from the ref it names.
+//
+// Covered: cherry-pick and revert (`git show --name-only`), merge (`git diff
+// --name-only HEAD...<ref>`). NOT covered, and stated in the backlog entry:
+// `git am <mailbox>` names no ref at all, and the `--continue`/`--abort`/`--skip`
+// forms carry no incoming ref either — for `--continue` the index already holds
+// the resolved result, which the staged set already covers.
+const INCOMING_REF_VERBS = { 'cherry-pick': 'show', revert: 'show', merge: 'diff' };
+const REF_LESS_FLAGS = new Set(['--continue', '--abort', '--skip', '--quit', '--edit-todo']);
+
+/**
+ * The ref a history-moving statement names, or null when it names none that can
+ * be trusted. Null is always "cannot tell", never "introduces nothing".
+ * @param {string} statement quote-COLLAPSED statement text
+ * @param {string} verb the git subcommand that was matched
+ * @returns {string | null}
+ */
+function incomingRefOf(statement, verb) {
+  const tokens = statement.trim().split(/\s+/);
+  const at = tokens.indexOf(verb);
+  if (at < 0) return null;
+  for (const tok of tokens.slice(at + 1)) {
+    if (REF_LESS_FLAGS.has(tok)) return null;
+    if (tok.startsWith('-')) continue;
+    // A collapsed quote or a shell metacharacter is not a ref we can resolve.
+    if (tok === '""' || tok === "''" || /[;&|<>$`()]/.test(tok)) return null;
+    return tok;
+  }
+  return null;
+}
+
+/**
+ * Paths the pending history-moving commands will INTRODUCE.
+ * @param {string[]} statements commit-creating statements targeting this repo
+ * @returns {{ paths: string[], unresolved: string[] }} unresolved names the
+ *   refs git could not read, so the caller can fail OPEN and say so.
+ */
+function incomingPaths(statements) {
+  const paths = new Set();
+  const unresolved = [];
+  for (const s of statements) {
+    for (const [verb, mode] of Object.entries(INCOMING_REF_VERBS)) {
+      if (!isGitSubcommand(verb)(s)) continue;
+      const ref = incomingRefOf(collapseQuoted(s), verb);
+      if (!ref) continue;
+      const r =
+        mode === 'show'
+          ? git(['show', '--name-only', '--pretty=format:', ref])
+          : git(['diff', '--name-only', `HEAD...${ref}`]);
+      if (!r.ok) {
+        unresolved.push(`${verb} ${ref}`);
+        continue;
+      }
+      for (const line of r.stdout.split(/\r?\n/)) {
+        const p = line.trim();
+        if (p) paths.add(p.replace(/\\/g, '/'));
+      }
+    }
+  }
+  // Stable, content-derived order — never git's emission order.
+  return { paths: [...paths].sort(), unresolved };
+}
+
 // Run a git subcommand with a SCRATCH index (GIT_INDEX_FILE) so it never touches
 // the real staged state. Same shape as git(); used to build/apply worktree trees.
 function gitWithIndex(indexFile, args) {
@@ -786,6 +857,21 @@ function runGate(committedPaths) {
     return { blocked: false };
   }
 
+  // What the commit will CONTAIN: the staged set, plus — for a history-moving
+  // verb — the paths its named ref introduces. Only the two ATTESTATION checks
+  // read this; the legs below deliberately keep reading `staged` alone, because
+  // they judge the staged snapshot's own validity (is the derived index fresh,
+  // does the doc contract hold) rather than the incoming content.
+  const incoming = incomingPaths(commitSubCmds);
+  if (incoming.unresolved.length > 0) {
+    noteFailOpen(
+      `cannot resolve the incoming ref(s) ${incoming.unresolved.join(', ')} (\`git show\`/\`git diff\` failed) — ` +
+        'the LOOP-CORE and CONSTITUTIONAL attestation checks read the STAGED set ONLY for this command.',
+    );
+  }
+  const attestationPaths =
+    incoming.paths.length > 0 ? Array.from(new Set([...staged, ...incoming.paths])) : staged;
+
   // The docs/assets the doc-contract subset pins: any markdown (docs/**.md,
   // CLAUDE.md, AGENTS.md, copilot-instructions.md, auditor.agent.md) plus the
   // rendered host assets (opencode.json, .gemini/*).
@@ -931,7 +1017,7 @@ function runGate(committedPaths) {
   // second one: a record bound to the exact staged tree, naming who issued it and
   // what the owner decided. FAIL-CLOSED on a missing/stale/incomplete record;
   // FAIL-OPEN only on a genuine git write-tree fault.
-  const constitutionalStaged = staged.filter(isConstitutionalDocPath);
+  const constitutionalStaged = attestationPaths.filter(isConstitutionalDocPath);
   if (constitutionalStaged.length > 0) {
     const sha = bindStagedTreeSha();
     const overrideHint =
@@ -1005,8 +1091,8 @@ function runGate(committedPaths) {
   // enforce that a human reviewed (the honest limit). FAIL-CLOSED on a
   // missing/stale attestation for loop-core; FAIL-OPEN only on a genuine git
   // write-tree fault.
-  if (staged.some(isLoopCorePath)) {
-    const loopCoreStaged = staged.filter(isLoopCorePath);
+  if (attestationPaths.some(isLoopCorePath)) {
+    const loopCoreStaged = attestationPaths.filter(isLoopCorePath);
     const sha = bindStagedTreeSha();
     if (!sha) {
       noteFailOpen(

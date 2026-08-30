@@ -6,6 +6,20 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The gate fixture helper `stageLoopCoreFile` arms NOTHING, and its own comment says it arms the
+  loop-core gate (2026-08-29, medium, friction: false_green).**
+  <!-- doc-citation-exempt: a path written INTO a throwaway fixture repo, never a file of this tree -->
+  `tests/shared/pre-commit-gate-harness.ts` writes `src/shared/quota/x.ts` under the comment "so the
+  loop-core attestation gate arms". `isLoopCorePath` returns FALSE for that path: the quota substrate
+  was retired and the pattern list moved on without the fixture. Nothing is broken today — the one
+  <!-- doc-citation-exempt: a path written INTO a throwaway fixture repo, never a file of this tree -->
+  consumer, `pre-commit-gate-attestation.test.ts`, wraps the helper and adds `src/shared/engine/x.ts`,
+  which IS loop-core, so those tests arm the gate through a file the helper does not supply. The trap
+  is latent and already cost one debugging pass: a NEW test that calls the helper alone arms nothing
+  and passes VACUOUSLY against a gate that never fired. **Property:** the fixture helper writes a path
+  the loop-core matcher accepts, and a test asserts that it does — so a future narrowing of the
+  pattern list reds the fixture instead of silently emptying it.
+
 - **A literal pinned in a test outside the change's neighborhood reds only in CI — the general
   discovery arm stays open (2026-08-29, medium, friction: tool_should_decide).** The lap's three
   known instances are closed (one shared pin in `tests/helpers/precommitLegExpectations.ts`,
