@@ -6,20 +6,6 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **`check:memory-citations` is INERT in every lap worktree, and announces the skip as a pass
-  (2026-08-29, medium, friction: false_green).** Observed directly this lap: the gate printed
-  "✓ memory-citations: SKIPPED — no memory store at …codex-agy-llm-relay-offload-1ec492\memory".
-  It derives the store path by slugifying `process.cwd()`, so a linked worktree produces a slug that
-  no store matches, and the leg passes without checking anything. Every lap runs in a worktree, and
-  the gate is wired into `verify:checks` AND the pre-commit leg set — so the one check that stops a
-  dangling `[[memory]]` citation has been green-by-absence for exactly the sessions that edit
-  memories. Re-run with `AUDIT_TOOLS_MEMORY_DIR` pointed at the real store and it does the work and
-  passes honestly (189 docs), which is the proof the skip is environmental, not empty input. A
-  ✓-prefixed SKIP also reads as a pass in a scrolled log, which is how it survived. **Property:** the
-  gate resolves the store from the repository identity rather than the checkout path, so a worktree
-  reaches the same store as its main checkout; a store it genuinely cannot find is a RED or a
-  non-✓ warning, never a tick.
-
 - **`durable-traps.md` documents RETIRED infrastructure as though it were live (2026-08-30, medium,
   friction: false_green).** Eight entries describe the FreeLLMAPI router on `127.0.0.1:3001`,
   its `claude.ps1` launcher, and the `mcp__freellmapi__offload_*` tools. FreeLLMAPI was retired

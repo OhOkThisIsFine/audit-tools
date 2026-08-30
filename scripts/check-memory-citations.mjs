@@ -19,17 +19,50 @@
  * are actually authored, so the guard fires where it can act.
  *
  * Resolution order for the store: $AUDIT_TOOLS_MEMORY_DIR, else the host's
- * default per-project path derived from cwd.
+ * default per-project path derived from the REPOSITORY, never from cwd.
+ *
+ * WHY REPOSITORY IDENTITY, NOT cwd. One store serves a repository, but a
+ * cwd-derived slug names a different one in every linked worktree — and every lap
+ * runs in a worktree. The gate then found no store, skipped, and exited 0, so the
+ * one check that stops a dangling `[[memory]]` citation was green-by-absence for
+ * exactly the sessions that edit memories (2026-08-29). The common git dir is
+ * shared by every worktree of a repository, which is the identity the store
+ * already keys on, so a worktree reaches its main checkout's store.
+ *
+ * AND AN UNFOUND STORE NEVER TICKS. The skip announced itself with a ✓, which
+ * reads as a pass in a scrolled log — that is how the inert years survived. A
+ * store that cannot be found is a ⚠ that says NOT CHECKED. It stays exit 0
+ * because a fresh CI clone genuinely has no store, and asserting against a path
+ * CI cannot see would be a false RED on every CI run.
  */
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, basename, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { isGeneratedRender } from "./shared/generated-renders.mjs";
 
+/**
+ * The main checkout's root — the identity every worktree of this repository
+ * shares. Falls back to cwd when git cannot answer, which is "cannot tell", and
+ * a store then simply goes unfound rather than being asserted against wrongly.
+ */
+function repositoryRoot() {
+  try {
+    const commonDir = execFileSync(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { encoding: "utf8", windowsHide: true },
+    ).trim();
+    // `<main>/.git` in an ordinary checkout and in every linked worktree alike.
+    return basename(commonDir) === ".git" ? dirname(commonDir) : process.cwd();
+  } catch {
+    return process.cwd();
+  }
+}
+
 /** The host derives its per-project dir by replacing every non-alphanumeric char. */
 function defaultMemoryDir() {
-  const slug = resolve(process.cwd()).replace(/[^a-zA-Z0-9]/g, "-");
+  const slug = resolve(repositoryRoot()).replace(/[^a-zA-Z0-9]/g, "-");
   return join(homedir(), ".claude", "projects", slug, "memory");
 }
 
@@ -37,7 +70,7 @@ const memoryDir = process.env["AUDIT_TOOLS_MEMORY_DIR"] ?? defaultMemoryDir();
 
 if (!existsSync(memoryDir)) {
   console.log(
-    `✓ memory-citations: SKIPPED — no memory store at ${memoryDir} ` +
+    `⚠ memory-citations: NOT CHECKED — no memory store at ${memoryDir} ` +
       `(expected off the authoring machine; set AUDIT_TOOLS_MEMORY_DIR to enforce)`,
   );
   process.exit(0);

@@ -354,7 +354,11 @@ export const GUARDS = [
     preCommit: 'reach',
     fix: 'a staged doc cites a memory file that does not exist — fix the citation or restore the memory file',
     note:
-      'uncovered halves: [[name]] cross-links between memory files are not checked; generated ' +
+      'the store is resolved from the REPOSITORY (its common git dir), so every linked worktree ' +
+      'reaches its main checkout store — a cwd-derived slug made this gate inert in every lap ' +
+      'worktree and ticked the skip (2026-08-30); uncovered half: a store that cannot be found ' +
+      'is a non-tick warning at exit 0, never a RED, because a fresh CI clone genuinely has none, ' +
+      'so an authoring machine whose store MOVED is announced but not failed; generated ' +
       'deliverable renders (.audit-tools/audit-report.md, remediation-report.md) are excluded — ' +
       'their worker-authored prose may quote citation-shaped text (2026-08-18)',
   },
