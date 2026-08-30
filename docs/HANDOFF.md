@@ -36,9 +36,12 @@ hazard here, is exactly what removes that guard. The other two: the closeout gat
 mid-lap PAUSE from a sprint that ended, since once a lap has committed anything its own commits are
 at-or-after `registered_at`; and the lane-DETECTION half stays open under the abstention above.
 
-Approved as a lap of its own, not pinned yet: a real liveness signal in the session registry — pid
-plus heartbeat, the shape `withFileLock` already uses — after which the added-root-entry teardown fix
-rides on top of it.
+⚠ **That "approved as a lap of its own" liveness signal is DEAD as sketched (2026-08-30).** It was
+put through the design gate and stopped there before any code: `pid` cannot live on the session
+record, because only hooks write it and a hook is dead before anything reads its pid. The owner
+STOPPED the lap rather than substitute a design, so the replacement shape is UNCHOSEN and is the
+next decision on that entry. The dead sketch and the storage prior art
+(`tests/helpers/suiteLock.ts`) are recorded in [`open-bugs.md`](backlog/open-bugs.md).
 
 The standing program direction remains *redesign before scheduled autonomy* → the autonomous
 audit→remediate→PR capstone once the architecture items are worked off.

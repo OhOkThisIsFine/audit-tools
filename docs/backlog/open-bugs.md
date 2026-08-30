@@ -201,29 +201,29 @@
   false_red).** `tests/helpers/global-setup.ts` teardown diffs the repo root before and after the run,
   so a foreign write inside that window is attributed to the run. **Property:** the teardown asserts a
   verdict about a root entry only where that verdict can be true.
-  **Two designs are DEAD by measurement (2026-08-30); a third must clear the bar they failed.**
+  **Two designs are DEAD by measurement (2026-08-30); a third must clear their bar.**
   1. *Attribute the writer.* No supported OS offers post-hoc file→writer attribution, and write-time
      interception is unavailable in ESM: patching `node:fs` is BYPASSED by the named imports this
      tree uses throughout. Permanent false GREEN.
   2. *Assert only where the run is the sole writer.* No exclusivity predicate exists over AGENT
-     SESSIONS: records carry no pid and live 30 days, so they answer "did a session start here this
-     month", and the suite lock sees only vitest invocations. The state dir is unreliable in BOTH
-     directions (corrected 2026-08-30): `git worktree add` leaves it empty, while the HARNESS
-     mechanism COPIES it, so that worktree reads non-exclusive on foreign records.
-     Prior art missed here: `tests/helpers/suiteLock.ts` solves the storage half —
-     `suiteLockDir` keys holders by `sha256(repoRoot)` in the OS temp dir (immune to a state-dir
-     copy), and `processAlive` is the probe. It cannot supply a pid for an AGENT session, because a
-     hook process dies at once — so that liveness signal must be a heartbeat, not a pid probe.
-  **Three measured constraints on any future design:** (i) the throw is part of the repo's DECLARED
+     SESSIONS: records carry no pid and live 30 days, and the suite lock sees only vitest
+     invocations. The state dir is unreliable BOTH ways (corrected 2026-08-30): `git worktree add`
+     leaves it empty, the HARNESS mechanism COPIES it, so that worktree reads non-exclusive on
+     foreign records. `tests/helpers/suiteLock.ts` already solves the STORAGE half — `suiteLockDir`
+     keys holders by `sha256(repoRoot)` in the OS temp dir, immune to that copy, and `processAlive`
+     is the probe.
+  **Three constraints on any future design:** (i) the throw is part of the repo's DECLARED
   green mechanism — the vitest gate exits on nonzero and never mints the suite-green stamp, so
   downgrading the local verdict makes `npm test` stamp a tree that CONTAINS the leak; (ii) "notice
   instead of throw" is silence at the seam that reported this, because the pre-commit
   `test:doc-contract` leg reads the child's streams only in `catch`; (iii) nothing binds `teardown()`'s
   composition — `repoRootProblems` has one caller and zero test observers, so a fix can ship UNWIRED
-  with every pinned case green. **OWNER DECISION 2026-08-30 — build the one live direction:** give
-  the session registry a real liveness signal (pid + heartbeat, the shape `withFileLock` already
-  uses) as a lap of its own, then scope the teardown verdict to its absence. The three constraints
-  above still bind whatever lands on top.
+  with every pinned case green. **OWNER DECISION 2026-08-30 — build the one live direction:** a real
+  session liveness signal as a lap of its own, then scope the teardown verdict to its absence.
+  ⚠ **That sketch is DEAD — killed at the design gate before any code.** `pid` cannot live on the
+  session record: only hooks write it, and a hook is dead before anything reads its pid. A session
+  pid would need `process.ppid`: untried, OS-specific. The owner STOPPED the lap rather than
+  substitute a design; the replacement shape is UNCHOSEN and is the next decision.
 
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
   fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went
