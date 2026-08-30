@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { buildPreCommitLegs } from '../../scripts/shared/derived-file-preflight.mjs';
 import { GUARDS } from '../../scripts/guard-reach-data.mjs';
+import { EXPECTED_SRC_REACH_LEG_IDS } from '../helpers/precommitLegExpectations.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const PACKAGE_SCRIPTS = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')).scripts as Record<
@@ -150,12 +151,7 @@ describe('every retired hand-coded trigger is reproduced', () => {
   });
 
   it('a src-only staged set triggers exactly the src-reach legs: test-tree typecheck, the primitive gate, the orphan-module gate, and the unconditional guard-reach leg', () => {
-    expect(triggeredIds(['src/audit/orchestrator/advance.ts'])).toEqual([
-      'check:tests',
-      'check:shared-primitives',
-      'check:orphan-modules',
-      'check:guard-reach',
-    ]);
+    expect(triggeredIds(['src/audit/orchestrator/advance.ts'])).toEqual([...EXPECTED_SRC_REACH_LEG_IDS]);
   });
 
   it('backslashed staged paths normalize before matching (win32)', () => {

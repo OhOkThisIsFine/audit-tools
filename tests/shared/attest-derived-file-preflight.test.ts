@@ -18,6 +18,7 @@ import {
   buildPreCommitLegs,
   scriptWired,
 } from "../../scripts/shared/derived-file-preflight.mjs";
+import { EXPECTED_SRC_REACH_LEG_IDS } from "../helpers/precommitLegExpectations.js";
 
 const REPO_ROOT = join(__dirname, "..", "..");
 const ATTEST_LOOP_CORE = join(REPO_ROOT, ".claude", "hooks", "attest-loop-core-review.mjs");
@@ -110,7 +111,7 @@ describe("the leg set is the gate's, derived from the registry — single-source
   it("a loop-core-only staged set triggers no doc/backlog legs — only the src-reach legs (test-tree typecheck, primitive gate, orphan-module gate) plus the unconditional guard-reach", () => {
     const root = makeFixture();
     const ids = triggeredIds(root, ["src/audit/orchestrator/advance.ts"]);
-    expect(ids).toEqual(["check:tests", "check:shared-primitives", "check:orphan-modules", "check:guard-reach"]);
+    expect(ids).toEqual([...EXPECTED_SRC_REACH_LEG_IDS]);
   });
 
   it("a staged backlog doc triggers the whole backlog family plus the md-corpus gates", () => {
