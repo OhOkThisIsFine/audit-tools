@@ -263,9 +263,42 @@ export function clampPerspectiveCount(requested?: number): number {
   return Math.max(2, Math.min(CONCEPTUAL_PERSPECTIVES.length, Math.floor(requested)));
 }
 
-/** The first `count` (clamped) built-in perspectives for a deep fan-out. */
+/**
+ * The two perspectives a deep fan-out must ALWAYS contain, whatever the count:
+ * structural simplification and the purpose/telos challenge. They are named, not
+ * indexed, so reordering the roster cannot silently drop one.
+ *
+ * WHY THIS EXISTS. Selection used to be `slice(0, count)` over the roster in list
+ * order. With a 7-entry roster and a default of 5, the last two entries were
+ * structurally unreachable at the default — and `Minimalist`, the purpose/telos
+ * challenger, is last. So the reviewer the simplification workflow depends on most
+ * was never dispatched unless an operator happened to ask for 7. That is the
+ * mechanism behind "the reviewers already exist and the normal execution path
+ * starves them": a slice, not a missing capability.
+ */
+const REQUIRED_PERSPECTIVE_NAMES: readonly string[] = [
+  "Mathematician seeking elegance",
+  "Minimalist",
+];
+
+/**
+ * `count` (clamped) built-in perspectives for a deep fan-out, with the two required
+ * perspectives reserved and the remaining slots filled in roster order.
+ *
+ * Emission stays in ROSTER order rather than required-first, so the prompt sequence
+ * an operator sees does not change shape — only its membership does. The clamp floor
+ * of 2 is exactly the reserved count, so the guarantee holds at every legal count.
+ */
 export function selectPerspectives(count?: number): ConceptualPerspective[] {
-  return CONCEPTUAL_PERSPECTIVES.slice(0, clampPerspectiveCount(count));
+  const limit = clampPerspectiveCount(count);
+  const chosen = new Set(
+    CONCEPTUAL_PERSPECTIVES.filter((p) => REQUIRED_PERSPECTIVE_NAMES.includes(p.name)),
+  );
+  for (const perspective of CONCEPTUAL_PERSPECTIVES) {
+    if (chosen.size >= limit) break;
+    chosen.add(perspective);
+  }
+  return CONCEPTUAL_PERSPECTIVES.filter((p) => chosen.has(p));
 }
 
 /**
