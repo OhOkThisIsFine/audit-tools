@@ -6,6 +6,19 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The machine-wide `verify-green` ledger reports a meaningless FAIL in this repo, and only
+  `/closeout` is exempted from it (2026-08-29, low-medium, friction: false_red).** `CLAUDE.md`
+  exempts the `/closeout` skill's steps 1-2, because this repo owns the equivalent (`suiteGreenStamp`
+  plus the closeout Stop gate) and must not double-wire. `/start-lap` step 3 runs the SAME
+  `verify-green.mjs check` and is NOT exempted, so a lap opens on a FAIL whose listed "changes" are
+  merely the commits since a ledger recorded in another checkout. A lap that trusts it reads the
+  baseline as red and either re-records (double-wiring the mechanism the exemption forbids) or
+  discounts a real red next time. **Scope is an OWNER question**, because the two fixes sit at
+  different layers: narrow it here by extending the `CLAUDE.md` exemption to `/start-lap` step 3, or
+  fix it machine-wide by teaching `~/.agent-config/verify-green.mjs` to defer to a repo that declares
+  its own green mechanism — the second helps every repo that owns one. **Property:** a repo that owns
+  its green mechanism is never asked for a second, contradicting one.
+
 - **The gate fixture helper `stageLoopCoreFile` arms NOTHING, and its own comment says it arms the
   loop-core gate (2026-08-29, medium, friction: false_green).**
   <!-- doc-citation-exempt: a path written INTO a throwaway fixture repo, never a file of this tree -->
