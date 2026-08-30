@@ -17,6 +17,15 @@
   The harness worktree mechanism COPIES the gitignored `.claude/hooks/.state`, so this worktree held
   121 session records byte-identical to the main checkout's and `enforcementArmed` returned TRUE.
   `git worktree add` leaves it empty; the harness does not. Both entries reasoned from one case.
+- **Two gates that keyed on the CHECKOUT now key on the REPOSITORY.** `check:memory-citations` was
+  inert in every lap worktree and ticked the skip; the session registry's arming was a property of
+  how the worktree was made. Both resolve through the common git dir now, and contract tests state
+  each trap.
+  ⚠ **Cutover, stated because it is silent:** a session that registered in a worktree BEFORE this
+  change has no record in the repository store and is classified an unregistered child until it
+  re-registers — `node scripts/shared/sessionRegistry.mjs --register <session-id>`. This session did
+  exactly that. The copied records left in a worktree's own `.claude/hooks/.state/sessions/` are now
+  read by nothing; they are gitignored, so they are litter rather than a hazard.
 - **The owner-approved session-registry liveness sketch is DEAD (`6e4b0f12`).** See *Immediate next*.
 
 ## Immediate next

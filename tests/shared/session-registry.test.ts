@@ -420,3 +420,76 @@ describe('sessionRegistry CLI: --register <session-id>, no discovery mode', () =
     expect(existsSync(sessionsDir(root))).toBe(false);
   });
 });
+
+// The registry keys on the REPOSITORY, never on the checkout it is read from.
+//
+// It used to key on the checkout, and that made the child refusal's arming a
+// property of HOW a worktree was made (measured 2026-08-30). `git worktree add`
+// leaves the gitignored state dir empty, so the registry was unarmed and
+// `pre-commit-gate`'s commit/push refusal could not fire — giving a lane its own
+// worktree, the correct answer to every other hazard here, was exactly what
+// removed the guard. The harness worktree mechanism instead COPIES that dir, so
+// the same guard came up ARMED there, on 121 records describing sessions that
+// never ran in that checkout. Nothing stated which, and nothing checked it.
+//
+// The common git dir is shared by every worktree of a repository, so it is the
+// identity the registry should have keyed on all along. There is deliberately NO
+// fallback to a checkout-local store: a fallback would keep a copied record able
+// to arm a worktree, which is the defect itself, softened.
+describe('the registry keys on the repository, not on the checkout', () => {
+  /** A repository plus one linked worktree made by `git worktree add`. */
+  function linkedWorktree(main: string): string {
+    const linked = join(main, 'wt');
+    const r = spawnSyncHidden('git', ['worktree', 'add', '-q', '-b', 'lap', linked], {
+      cwd: main,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 30_000,
+    });
+    expect(r.status, `${r.stdout ?? ''}${r.stderr ?? ''}`).toBe(0);
+    return linked;
+  }
+
+  it('arms a linked worktree from the main checkout, so provenance cannot disarm the refusal', () => {
+    const main = gitRepo();
+    const linked = linkedWorktree(main);
+    expect(enforcementArmed(linked)).toBe(false);
+
+    writeSessionRecord(main, record('owner-sid', ['dirt.txt']));
+
+    expect(enforcementArmed(linked)).toBe(true);
+    // The owner is recognized in the worktree it dispatched from...
+    const owner = readSessionRegistry(linked, 'owner-sid');
+    expect(owner.recordState).toBe('ok');
+    expect(owner.isUnregisteredChild).toBe(false);
+    // ...and an unregistered session in that worktree is a child, as it is at the root.
+    expect(readSessionRegistry(linked, 'stranger').isUnregisteredChild).toBe(true);
+  });
+
+  it('ignores records that exist ONLY in the checkout — a copied state dir arms nothing', () => {
+    const main = gitRepo();
+    const linked = linkedWorktree(main);
+    // Written to the literal per-checkout path the harness copy would produce,
+    // bypassing sessionsDir() so the test states the path rather than trusting it.
+    const copied = join(linked, '.claude', 'hooks', '.state', 'sessions');
+    mkdirSync(copied, { recursive: true });
+    writeFileSync(join(copied, 'ghost.json'), JSON.stringify(record('ghost')));
+
+    expect(enforcementArmed(linked)).toBe(false);
+    expect(readSessionRegistry(linked, 'ghost').recordState).toBe('absent');
+  });
+
+  it('registers into the repository store, so a worktree session is seen from the root', () => {
+    const main = gitRepo();
+    const linked = linkedWorktree(main);
+    writeSessionRecord(linked, record('worktree-sid'));
+
+    expect(readSessionRegistry(main, 'worktree-sid').recordState).toBe('ok');
+    expect(existsSync(join(linked, '.claude', 'hooks', '.state', 'sessions'))).toBe(false);
+  });
+
+  it('falls back to the given root outside a repository, so non-repo callers are unchanged', () => {
+    const root = scratchRoot();
+    expect(sessionsDir(root)).toBe(join(root, '.claude', 'hooks', '.state', 'sessions'));
+  });
+});

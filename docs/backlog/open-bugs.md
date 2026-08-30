@@ -18,37 +18,16 @@
   deleted or dated when that infrastructure retires, driven by the retirement rather than by someone
   later noticing.
 
-- **The child-session commit/push refusal is STRUCTURALLY INERT in a dedicated worktree, and the
-  safe practice is what disarms it (2026-08-30, high, friction: false_green).**
-  `enforcementArmed(root)` reads `<root>/.claude/hooks/.state/sessions/`, which is gitignored, so a
-  freshly-created git worktree holds no records and the registry is never armed there.
-  `isUnregisteredChild` requires `armed`, so `pre-commit-gate.mjs`'s commit/push refusal cannot fire.
-  Measured 2026-08-30: `enforcementArmed` returned `false` for a lane's fresh worktree and `true` for
-  the dispatching one, and the lane committed freely while carrying `AUDIT_TOOLS_CHILD_SESSION=1`.
-  The marker is not the cause, and neither branch saves it: a lane that registers is not a child, and
-  a lane that does not register leaves the registry unarmed. So the refusal can only ever fire for a
-  session sharing a checkout ANOTHER session already registered in — it protects a shared checkout
-  and is inert in a dedicated one. That inverts the advice: giving a lane its own worktree, which is
-  the correct answer to every other hazard here, is exactly what removes this guard. The
-  `shell-trap-guard` repo-lane refusal shipped 2026-08-30 is currently the only thing standing
-  between a fresh-worktree lane and a push to origin.
-  ⚠ **The premise holds only for `git worktree add`, and the harness does something else
-  (measured 2026-08-30).** The Claude Code worktree mechanism COPIES the gitignored
-  `.claude/hooks/.state` directory: a lap worktree opened that day carried 121 session records
-  byte-identical to the main checkout's, plus its own, and `enforcementArmed` returned TRUE there.
-  So the refusal is inert in a `git worktree add` worktree and ARMED in a harness-made one. That is
-  worse than either alone — the guard's arming is a property of how the worktree was created, which
-  nothing states and nothing checks, and the records arming it describe sessions that never ran in
-  that checkout.
-  **Property:** a lane cannot commit or push from any worktree of this repo, whatever the session
-  registry happens to hold in that particular worktree.
-
 - **The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the
   dispatching tool call (2026-08-29, high, friction: tool_should_decide).**
   The stopgap half SHIPPED 2026-08-30: `shell-trap-guard.mjs` refuses a write-capable lane invocation
   that would run inside any worktree of this repo, in both shell dialects, unless it declares
   `AUDIT_TOOLS_CHILD_SESSION=1`, carries read-only tools, or is pointed outside the repository. That
   mechanism states its own trap and its uncovered halves, so neither is restated here.
+  A precondition also closed 2026-08-30: the registry keyed on the CHECKOUT, so the child refusal's
+  arming depended on how a worktree was made. `sessionsDir` now resolves the repository through its
+  common git dir (`tests/shared/session-registry.test.ts`). That is not detection — a lane registers
+  itself at SessionStart, so it is never `absent` and never a child.
   **What remains open is the detection itself.** OWNER DECISION 2026-08-30: ABSTAIN and record —
   ship the refusal as the whole answer for now, and keep this entry open rather than close it on the
   half that shipped. Three alternatives were put and declined: sanctioning one lane path by shipping

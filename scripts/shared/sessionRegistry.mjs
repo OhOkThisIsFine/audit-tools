@@ -23,13 +23,58 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const SESSIONS_DIR_SEGMENTS = ['.claude', 'hooks', '.state', 'sessions'];
 
+// The registry keys on the REPOSITORY, never on the checkout it is read from.
+//
+// Keying on the checkout made the child-session refusal's arming a property of
+// HOW a worktree was made (measured 2026-08-30). `git worktree add` leaves this
+// gitignored dir empty, so the registry was unarmed and pre-commit-gate's
+// commit/push refusal could not fire — giving a lane its own worktree, the
+// correct answer to every other hazard here, was exactly what removed the guard.
+// The harness worktree mechanism instead COPIES the dir, so the same guard came
+// up ARMED there, on records describing sessions that never ran in that
+// checkout. Nothing stated which of the two applied, and nothing checked it.
+//
+// The common git dir is shared by every worktree of a repository, which is the
+// identity the registry should have keyed on all along — the same resolution
+// `fb341ae8` gave the pre-commit gate's target repo. There is deliberately NO
+// fallback to a checkout-local store: a fallback would leave a copied record
+// able to arm a worktree, which is the defect itself, softened.
+//
+// Memoized per root because every gate invocation resolves this, and the answer
+// cannot change inside one process. A git fault returns the root unchanged —
+// "cannot tell" degrades to today's per-checkout path, never to a throw.
+const repositoryRootCache = new Map();
+
+function repositoryRoot(root) {
+  const key = resolve(root);
+  const cached = repositoryRootCache.get(key);
+  if (cached !== undefined) return cached;
+  let resolved = key;
+  try {
+    const r = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+      cwd: key,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000,
+      windowsHide: true,
+    });
+    const commonDir = r.error || r.status !== 0 ? '' : (r.stdout ?? '').trim();
+    // `<main>/.git` in an ordinary checkout and in every linked worktree alike.
+    if (commonDir && basename(commonDir) === '.git') resolved = resolve(dirname(commonDir));
+  } catch {
+    /* not a repository, or git absent — keep the root as given */
+  }
+  repositoryRootCache.set(key, resolved);
+  return resolved;
+}
+
 export function sessionsDir(root) {
-  return join(root, ...SESSIONS_DIR_SEGMENTS);
+  return join(repositoryRoot(root), ...SESSIONS_DIR_SEGMENTS);
 }
 
 // The same `[^\w.-]` strip the session-keyed gates use — the id doubles as a
