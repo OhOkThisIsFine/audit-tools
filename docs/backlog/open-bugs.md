@@ -6,6 +6,34 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The session-start offload-trust guard suppresses a WORKING lane on a premise that measurement
+  refutes (2026-08-29, high, friction: false_red).** `session-start-guards.mjs` reports "OFFLOAD LANE
+  UNUSABLE … It will not fail: it runs with no repo tools and answers from nothing" whenever the lane's
+  isolated `CLAUDE_CONFIG_DIR` holds no `projects[<workspace>]` entry. Measured this lap, three
+  independent ways: a read-only lane (`--allowedTools Read,Glob,Grep`) launched in exactly such a
+  workspace read a GITIGNORED file and returned its unguessable 40-hex content; the same lane did it
+  again from a directory under no repository and named in no projects list; and a third lane ran git
+  there. Workspace trust does not gate tools for a headless `claude -p` at all, so the guard's stated
+  consequence never follows from its stated condition. A guard that is wrong in the SAFE direction is
+  still a false red, and this one cost a whole lap planned around a lane that worked. The claim also
+  has a second home — the lane registry's `untrustedRemedy` in `~/.agent-config` — so the correction is
+  not repo-local. **Property:** the guard asserts only what it can test; a precondition whose
+  consequence it has not measured is reported as unknown, never as a stated outcome.
+
+- **A dispatched lane launched into this repo runs the repo's OWN sprint ceremony, and the only
+  exemption is an env var the CALLER must remember (2026-08-29, high, friction: tool_should_decide).**
+  Measured this lap: a `claude -p` lane given `--permission-mode acceptEdits` and Bash/Write tools,
+  with its cwd inside a worktree of this repo, never answered its prompt. It became a session IN this
+  repo, obeyed the closeout ceremony, ran the full suite three times, overwrote
+  `.claude/hooks/.state/suite-green/latest.json` with its own tree — voiding the dispatching session's
+  green baseline — and pushed the branch to origin. `AUDIT_TOOLS_CHILD_SESSION=1` exempts a child from
+  the session-scoped Stop gates, but nothing SETS it: not the dispatch ladder's rendered command, not
+  the session-start guard that recommends the lane, and not any repo affordance. An exemption that
+  works only when the caller remembers is host discretion, which this repo bans everywhere else. The
+  blast radius is not theoretical — an unattended lane pushed a branch and rewrote green evidence.
+  **Property:** the repo DETECTS a delegated lane rather than being told about one, so a lane cannot
+  run the ceremony merely because its dispatcher forgot a variable.
+
 - **The closeout Stop gate demands a hand-back at a lap START, where a closeout is forbidden
   (2026-08-29, medium, friction: tool_should_decide).** `closeout-challenge-gate.mjs` fired at step 8
   of `/start-lap` — the approval pause, before the lap's own work had begun — and asked for a rendered
