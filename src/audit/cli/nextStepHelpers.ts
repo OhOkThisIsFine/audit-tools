@@ -119,7 +119,7 @@ import {
   loadCurrentActiveReviewRun,
 } from "./reviewRun.js";
 import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
-import { buildPendingAuditTasks } from "./dispatch.js";
+import { buildPendingAuditTasks } from "./dispatch/packetFilter.js";
 import { buildLineIndex } from "./lineIndex.js";
 import {
   ingestAuditHostResults,

@@ -103,7 +103,7 @@ afterEach(async () => {
 async function loadBoundary(): Promise<HostBoundary> {
   try {
     const loaded = (await import(
-      "../../src/audit/cli/dispatch.js"
+      "../../src/audit/cli/dispatch/hostHandoff.js"
     )) as unknown as Partial<HostBoundary>;
     if (
       typeof loaded.prepareAuditHostHandoff !== "function" ||

@@ -149,9 +149,9 @@ pending → planning → implementing → closing → complete
   of `finding.affected_files` rather than a derivation of it; or, on the no-blocks branch of
   `normalizeExtractedPlan` (`src/remediate/steps/nextStep.ts`) — reached by a plan supplied from OUTSIDE
   the pipeline — copied straight from `finding.affected_files`. Both gates
-  in `src/remediate/steps/nextStep.ts`; dispatch in `src/remediate/steps/dispatch.ts` (a barrel over the
-  host-handoff module above).
-- implement phase (dispatches implementation with test execution + verification) — in `src/remediate/steps/dispatch.ts`
+  in `src/remediate/steps/nextStep.ts`; dispatch in `src/remediate/steps/dispatch/` (the
+  host-handoff module above — the re-export barrel was deleted, CY-03; import the submodules directly).
+- implement phase (dispatches implementation with test execution + verification) — in `src/remediate/steps/dispatch/`
 - `src/remediate/phases/triage.ts` — failed items; retry vs. block
 - `close.ts` — closing actions (test suites, build, lint)
 

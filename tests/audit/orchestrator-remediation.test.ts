@@ -30,7 +30,7 @@ const { buildFlowRequeueTasks } =
   await import("../../src/audit/orchestrator/flowRequeue.js");
 const { buildRequeueTasks } = await import("../../src/audit/orchestrator/requeue.js");
 const { buildSelectiveDeepeningTasks } =
-  await import("../../src/audit/orchestrator/selectiveDeepening.js");
+  await import("../../src/audit/orchestrator/selectiveDeepening/index.js");
 const { ingestAuditResults } =
   await import("../../src/audit/orchestrator/resultIngestion.js");
 

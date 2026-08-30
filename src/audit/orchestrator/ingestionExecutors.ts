@@ -29,7 +29,7 @@ import {
 import { updateRuntimeValidationReport } from "./runtimeValidationUpdate.js";
 import { resolveIntentLensSelection } from "./lensSelection.js";
 import { foldPendingRequeueTasks } from "./requeueFold.js";
-import { buildSelectiveDeepeningTasks } from "./selectiveDeepening.js";
+import { buildSelectiveDeepeningTasks } from "./selectiveDeepening/index.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import { buildTaskAffinityGraph } from "./taskAffinityGraph.js";
 import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";

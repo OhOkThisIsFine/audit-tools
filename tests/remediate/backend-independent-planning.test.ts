@@ -80,7 +80,7 @@ vi.mock("../../src/remediate/state/store.js", async (importOriginal) => {
 // test loads — a mock of one symbol silently blanking the rest of a barrel is a
 // failure mode that hides behind a green suite until an unrelated path needs one
 // of them.
-vi.mock("../../src/remediate/steps/dispatch.js", async (importOriginal) => {
+vi.mock("../../src/remediate/steps/dispatch/hostHandoff.js", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
@@ -568,9 +568,9 @@ describe("the dispatch barrel mock covers the real surface, and the surface itse
     // barrel, so a normal import here would return the mock and the assertion
     // would compare the mock against itself.
     const live = await vi.importActual<Record<string, unknown>>(
-      "../../src/remediate/steps/dispatch.js",
+      "../../src/remediate/steps/dispatch/hostHandoff.js",
     );
-    const mocked = await import("../../src/remediate/steps/dispatch.js");
+    const mocked = await import("../../src/remediate/steps/dispatch/hostHandoff.js");
 
     const blanked = Object.keys(live).filter(
       (key) => (mocked as Record<string, unknown>)[key] === undefined,
@@ -583,7 +583,7 @@ describe("the dispatch barrel mock covers the real surface, and the surface itse
 
   it("(b) matches the committed export-set baseline", async () => {
     const live = await vi.importActual<Record<string, unknown>>(
-      "../../src/remediate/steps/dispatch.js",
+      "../../src/remediate/steps/dispatch/hostHandoff.js",
     );
     requireEqual(
       Object.keys(live).sort(),

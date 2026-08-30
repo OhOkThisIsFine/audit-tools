@@ -19,7 +19,7 @@ import {
   dropAcceptedResults,
   ingestAuditHostResults,
   prepareAuditHostHandoff,
-} from "../../src/audit/cli/dispatch.js";
+} from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { readSubmissionLedger } from "../../src/shared/submission/submissionLedger.js";
 import { currentStepPath } from "../../src/shared/io/stepContractWriter.js";
 import type { AuditTask } from "../../src/audit/types.js";

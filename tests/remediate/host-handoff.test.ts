@@ -143,7 +143,7 @@ afterEach(async () => {
 async function loadBoundary(): Promise<HostBoundary> {
   try {
     const loaded = (await import(
-      "../../src/remediate/steps/dispatch.js"
+      "../../src/remediate/steps/dispatch/hostHandoff.js"
     )) as unknown as Partial<HostBoundary>;
     if (
       typeof loaded.prepareRemediationHostHandoff !== "function" ||
@@ -707,7 +707,7 @@ describe(FAILURE_SIGNATURE, () => {
     const root = resolve(new URL("../..", import.meta.url).pathname.replace(/^\/(\p{L}:)/u, "$1"));
     const boundaryFiles = [
       "src/remediate/index.ts",
-      "src/remediate/steps/dispatch.ts",
+      "src/remediate/steps/dispatch/hostHandoff.ts",
       "src/remediate/steps/nextStep.ts",
     ];
     const source = (
@@ -1557,33 +1557,30 @@ describe("an empty scan is not a pass", () => {
   });
 });
 
-describe("the dispatch barrel's published export surface", () => {
-  it("names the barrel's real exports, derived from the module rather than copied", async () => {
-    // Consumer-side pin (CDC-03). src/remediate/steps/dispatch.ts is in no
+describe("the dispatch host-handoff module's published export surface", () => {
+  it("names the module's real exports, derived from the module rather than copied", async () => {
+    // Consumer-side pin (CDC-03). The host-handoff module is in no other
     // module's write scope, so the surface is READ here and compared against
-    // the set this design publishes as artifact:dispatch-barrel-export-surface.
-    // A mock written without an `...actual` spread drifts from this the moment
-    // the barrel gains or loses an export.
-    const barrel = await import("../../src/remediate/steps/dispatch.js");
+    // the committed baseline. A mock written without an `...actual` spread
+    // drifts from this the moment the module gains or loses an export.
+    // (Until CY-03 this pinned the steps/dispatch.ts barrel; the barrel was
+    // deleted, and the mocks now target this module.)
+    const barrel = await import("../../src/remediate/steps/dispatch/hostHandoff.js");
     expect(Object.keys(barrel).sort()).toEqual(
       [...DISPATCH_BARREL_EXPORTS].sort(),
     );
-    // hostDependencyLevels and remediationSubmissionBinding are re-exported
-    // elsewhere, NOT by this barrel; a pin claiming either would be wrong.
-    expect(Object.keys(barrel)).not.toContain("hostDependencyLevels");
-    expect(Object.keys(barrel)).not.toContain("remediationSubmissionBinding");
   });
 
   it("publishes the six type exports the surface claims", async () => {
     // Type-only, so it is the typecheck gate (`npm run check:tests`) that binds
     // this — a removed type export makes this file fail to compile.
     type Surface = {
-      state: import("../../src/remediate/steps/dispatch.js").CurrentRemediationHostState;
-      prepared: import("../../src/remediate/steps/dispatch.js").PreparedRemediationHostHandoff;
-      summary: import("../../src/remediate/steps/dispatch.js").RemediationHostIngestSummary;
-      item: import("../../src/remediate/steps/dispatch.js").RemediationHostWorkItem;
-      workload: import("../../src/remediate/steps/dispatch.js").RemediationHostWorkload;
-      retired: import("../../src/remediate/steps/dispatch.js").UnsupportedRetiredRemediationState;
+      state: import("../../src/remediate/steps/dispatch/hostHandoff.js").CurrentRemediationHostState;
+      prepared: import("../../src/remediate/steps/dispatch/hostHandoff.js").PreparedRemediationHostHandoff;
+      summary: import("../../src/remediate/steps/dispatch/hostHandoff.js").RemediationHostIngestSummary;
+      item: import("../../src/remediate/steps/dispatch/hostHandoff.js").RemediationHostWorkItem;
+      workload: import("../../src/remediate/steps/dispatch/hostHandoff.js").RemediationHostWorkload;
+      retired: import("../../src/remediate/steps/dispatch/hostHandoff.js").UnsupportedRetiredRemediationState;
     };
     const retired: Surface["retired"] = "unsupported_retired_state";
     expect(retired).toBe("unsupported_retired_state");

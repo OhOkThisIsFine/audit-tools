@@ -57,7 +57,7 @@ import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";
 import {
   readExtractedPlanIfPresent,
-} from "./dispatch.js";
+} from "./dispatch/marshal.js";
 import {
   ingestRemediationHostResults,
   hostDependencyLevels,

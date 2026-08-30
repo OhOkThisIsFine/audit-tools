@@ -39,7 +39,6 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   //     the audit draw of the submission core, not a helper beside it)
   //   • remediate step machine + host-handoff/landing + risk/pipeline core
   //   • shared obligation engine + submission core
-  "src/audit/cli/dispatch.ts",
   "src/audit/cli/dispatch/",
   "src/audit/cli/laneSubmissions.ts",
   "src/audit/cli/laneValidators.ts",

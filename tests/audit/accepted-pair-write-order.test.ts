@@ -56,7 +56,7 @@ const AUDIT_TASK = {
 
 async function setup() {
   const { prepareAuditHostHandoff } = await import(
-    "../../src/audit/cli/dispatch.js"
+    "../../src/audit/cli/dispatch/hostHandoff.js"
   );
   const root = await mkdtemp(join(tmpdir(), "audit-pair-order-"));
   cleanupRoots.push(root);
@@ -110,7 +110,7 @@ async function setup() {
 
   const ingest = async () => {
     const { ingestAuditHostResults } = await import(
-      "../../src/audit/cli/dispatch.js"
+      "../../src/audit/cli/dispatch/hostHandoff.js"
     );
     return ingestAuditHostResults({
       root,
@@ -149,7 +149,7 @@ describe("contract:accepted-pair-writes-the-ledger-first", () => {
     // The stale render is repaired by the pair's NEXT SUCCESSFUL write — here,
     // the operator drop rewriting both files together.
     const { dropAcceptedResults } = await import(
-      "../../src/audit/cli/dispatch.js"
+      "../../src/audit/cli/dispatch/hostHandoff.js"
     );
     await dropAcceptedResults({
       root: ctx.root,

@@ -184,19 +184,21 @@ describe("N-R13: CLI command removal", () => {
 // 4. dispatch.ts: document exports removed
 // ---------------------------------------------------------------------------
 
-describe("N-R13: steps/dispatch.ts removed exports", () => {
+// (The steps/dispatch.ts barrel itself was deleted in CY-03 — the dispatch
+// surface is now the hostHandoff submodule, so the retirement pin holds there.)
+describe("N-R13: dispatch surface removed exports", () => {
   it("prepareDocumentDispatch is not exported", async () => {
-    const dispatch = await import("../../src/remediate/steps/dispatch.js");
+    const dispatch = await import("../../src/remediate/steps/dispatch/hostHandoff.js");
     expect((dispatch as Record<string, unknown>)["prepareDocumentDispatch"]).toBeUndefined();
   });
 
   it("mergeDocumentResults is not exported", async () => {
-    const dispatch = await import("../../src/remediate/steps/dispatch.js");
+    const dispatch = await import("../../src/remediate/steps/dispatch/hostHandoff.js");
     expect((dispatch as Record<string, unknown>)["mergeDocumentResults"]).toBeUndefined();
   });
 
   it("buildDocumentModelHint is not exported", async () => {
-    const dispatch = await import("../../src/remediate/steps/dispatch.js");
+    const dispatch = await import("../../src/remediate/steps/dispatch/hostHandoff.js");
     expect((dispatch as Record<string, unknown>)["buildDocumentModelHint"]).toBeUndefined();
   });
 });

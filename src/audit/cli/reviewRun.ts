@@ -21,7 +21,7 @@ import {
 } from "../supervisor/operatorHandoff.js";
 import { ActiveReviewRunSchema, type ActiveReviewRun } from "../contracts/wrapperResponse.js";
 import { addFileLineCountHints } from "./lineIndex.js";
-import { buildPendingAuditTasks } from "./dispatch.js";
+import { buildPendingAuditTasks } from "./dispatch/packetFilter.js";
 import { buildBlockedAuditState, buildManualReviewBlocker } from "./envelope.js";
 
 function isActiveReviewRun(value: unknown): value is ActiveReviewRun {

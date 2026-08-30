@@ -1,10 +1,10 @@
 import { test, expect } from "vitest";
 import type { FindingSeverity } from "audit-tools/shared";
 
-// findingRanks.ts re-exports the single-source rank functions from
-// audit-tools/shared; this test pins both the values and that the re-export
-// surface (including severityCompare) stays wired.
-const { severityRank, confidenceRank, severityCompare } = await import("../../src/audit/reporting/findingRanks.js");
+// The rank functions are single-sourced in audit-tools/shared (the audit-side
+// findingRanks.ts re-export shim was deleted in CY-03); this test pins the
+// values and that the shared surface (including severityCompare) stays wired.
+const { severityRank, confidenceRank, severityCompare } = await import("../../src/shared/index.js");
 
 test("severityRank returns correct ordinal for each severity level", () => {
   expect(severityRank("critical")).toBe(5);

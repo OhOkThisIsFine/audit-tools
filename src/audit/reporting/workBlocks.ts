@@ -19,7 +19,7 @@ import {
 } from "../../shared/decompose/contentCoherence.js";
 import { deriveWorkBlockSeams } from "../../shared/decompose/workBlockSeams.js";
 import { toPosixPath } from "../../shared/paths.js";
-import { severityRank } from "./findingRanks.js";
+import { severityRank } from "audit-tools/shared";
 
 export type { WorkBlock } from "audit-tools/shared";
 

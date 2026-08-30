@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ingestAuditHostResults,
   prepareAuditHostHandoff,
-} from "../../src/audit/cli/dispatch.js";
+} from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { runAuditStep } from "../../src/audit/cli/auditStep.js";
 import { recordHostResultOutcomes } from "../../src/audit/cli/laneSubmissions.js";
 import { readSubmissionLedger } from "audit-tools/shared";

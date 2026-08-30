@@ -7,7 +7,6 @@
 // home. Run the generator (or `npm run check:loop-core-patterns`) after
 // editing the source.
 export const LOOP_CORE_PATTERNS = [
-  "src/audit/cli/dispatch.ts",
   "src/audit/cli/dispatch/",
   "src/audit/cli/laneSubmissions.ts",
   "src/audit/cli/laneValidators.ts",
