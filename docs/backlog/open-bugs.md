@@ -20,6 +20,18 @@
   reaches the same store as its main checkout; a store it genuinely cannot find is a RED or a
   non-✓ warning, never a tick.
 
+- **`durable-traps.md` documents RETIRED infrastructure as though it were live (2026-08-30, medium,
+  friction: false_green).** Eight entries describe the FreeLLMAPI router on `127.0.0.1:3001`,
+  its `claude.ps1` launcher, and the `mcp__freellmapi__offload_*` tools. FreeLLMAPI was retired
+  2026-08-29 and llm-relay on `127.0.0.1:8791` replaced it; the machine-wide `CLAUDE.md` warns that running
+  `claude.ps1` RESURRECTS the retired service. A ninth entry says the relay "dies with the
+  dispatching session, and nothing restarts it", which the same file contradicts — it autostarts at
+  logon. This file is a standing REFERENCE, so a stale entry costs a future session a wrong action,
+  not merely a wasted read. Found incidentally by a scope audit looking for something else, which is
+  the point: nothing checks it. **Property:** an entry naming infrastructure that no longer exists is
+  deleted or dated when that infrastructure retires, driven by the retirement rather than by someone
+  later noticing.
+
 - **The child-session commit/push refusal is STRUCTURALLY INERT in a dedicated worktree, and the
   safe practice is what disarms it (2026-08-30, high, friction: false_green).**
   `enforcementArmed(root)` reads `<root>/.claude/hooks/.state/sessions/`, which is gitignored, so a
