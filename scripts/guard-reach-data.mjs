@@ -121,6 +121,21 @@ export const GUARDS = [
     note: 'knip, default mode',
   },
   {
+    id: 'check:orphan-modules',
+    kind: 'gate',
+    impl: 'check:orphan-modules',
+    preCommit: 'reach',
+    fix:
+      'a src module is unreachable from every production root (the three package entries plus ' +
+      'dist-referenced files) — delete it with its orphaned tests, wire the intended consumer, or ' +
+      'add an ORPHAN_ALLOW row with the reason (a wiring the resolver cannot see)',
+    note:
+      'closes the orphan-module class that refilled after the 2026-08-12 slimdown (CY-01, ceremony ' +
+      'review): knip cannot see the class — its vitest plugin makes test files entries, so a module ' +
+      'consumed only by its own test counts as used. UNCOVERED: a non-literal dynamic import of an ' +
+      'in-repo module is unresolvable (today both such sites load external packages)',
+  },
+  {
     id: 'check:doc-manifest',
     kind: 'gate',
     impl: 'check:doc-manifest',
@@ -930,6 +945,7 @@ export const REACH = [
       'check:tests',
       'vitest-gate',
       'check:deadcode',
+      'check:orphan-modules',
       'check:lint',
       'check:dup',
       'check:depgraph',

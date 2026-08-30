@@ -166,9 +166,7 @@ Tier the grounding by claim type:
   ingest by `ingestAuditHostResults` in `src/audit/cli/dispatch/hostHandoff.ts` for every audit finding, and the equivalent
   design-review grounding (`groundDesignFinding`, `src/shared/validation/designFindingGrounding.ts`)
   is enforced at ingest by `nextStepHelpers.ts` for design findings. Executable anchors reuse the
-  runtime-validation path (`runtime_validation_report.json`). `src/audit/orchestrator/fileAnchors.ts`
-  is a **separate, unrelated** module (large-file review-prompt anchor extraction) — do not conflate
-  it with grounding enforcement, despite the name.
+  runtime-validation path (`runtime_validation_report.json`).
 - **Effect:** a hallucinated or stale finding cannot be admitted — its anchor either re-verifies
   against disk or it's quarantined. Proportionate (anchor the claims that matter, not every read),
   ungameable, and it degrades gracefully for a weak auditor instead of producing confident-but-fake

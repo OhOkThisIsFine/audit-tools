@@ -42,6 +42,7 @@ export const STEP_GLOSS = {
   "check:spec-mirrors": "spec/audit registry-mirror table parity",
   "check:cli-surface": "installer-verb surface parity in the shipped product page",
   "check:deadcode": "dead-code export gate",
+  "check:orphan-modules": "production-reachability gate over src modules",
   "check:lint": "curated lint gate (eslint, zero-tolerance)",
   "check:dup": "duplication ratchet (jscpd)",
   "check:depgraph": "dependency-graph rules (dependency-cruiser)",

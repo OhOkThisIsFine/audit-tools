@@ -4,7 +4,7 @@ import type { AuditTask } from "../../src/audit/types.js";
 import type { ReviewPacket } from "../../src/audit/types/reviewPlanning.js";
 
 const { computeContinuityScores } = await import(
-  "../../src/audit/orchestrator/continuityScore.js"
+  "../../src/shared/index.js"
 );
 const { buildReviewPacketPlanningData, orderReviewPackets } = await import(
   "../../src/audit/orchestrator/reviewPackets.js"

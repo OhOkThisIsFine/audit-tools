@@ -55,8 +55,8 @@ beforeEach(() => {
 
 test("CRIT internal gate: a refused ANCHOR argv with NO prior caller-side check resolves a structured refusal and NEVER spawns", async () => {
   // rg --pre is on the adversarial-refusal list (preprocessor exec) — this is
-  // called DIRECTLY, with no isAllowedAnchorCommand() call first, unlike
-  // anchorGrounding.ts's caller-gated path.
+  // called DIRECTLY, with no isAllowedAnchorCommand() call first, unlike a
+  // caller-gated path.
   const outcome = await runAllowlistedReadOnlyCommand(
     ["rg", "--pre", "x"],
     process.cwd(),

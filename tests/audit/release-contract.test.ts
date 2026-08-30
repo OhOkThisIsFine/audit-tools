@@ -337,7 +337,7 @@ test("audit-code postinstall fails non-zero when an install step fails (parity w
 
 test("dead-code gate config is single-sourced in knip.json, not split into the npm script", async () => {
   const knip = JSON.parse(await readText("knip.json"));
-  expect(knip.include).toEqual(["exports", "types", "nsExports", "nsTypes"]);
+  expect(knip.include).toEqual(["files", "exports", "types", "nsExports", "nsTypes"]);
   const packageJson = JSON.parse(await readText("package.json"));
   expect(packageJson.scripts?.["check:deadcode"]).toBe("knip --no-config-hints");
   expect(packageJson.scripts?.["check:deadcode"] ?? "", "issue-type filter must live in knip.json, not inline in the script").not.toMatch(/--include/);

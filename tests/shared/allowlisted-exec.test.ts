@@ -159,8 +159,8 @@ test("runAllowlistedReadOnlyCommand reports a spawn error for an ALLOWLISTED exe
 
 // ── internal gate idempotence (invariants[2]) ───────────────────────────────
 // runAllowlistedReadOnlyCommand now enforces isAllowedAnchorCommand on itself,
-// unconditionally, before spawning. A caller-side pre-check (the
-// anchorGrounding.ts pattern) becomes a redundant, OPTIONAL fast path —
+// unconditionally, before spawning. A caller-side pre-check becomes a
+// redundant, OPTIONAL fast path —
 // double-gating must be OBSERVATIONALLY IDENTICAL to single-gating for an
 // already-allowed command: the internal gate must never additionally refuse,
 // alter timing semantics, or change the outcome shape for a command the
@@ -168,7 +168,7 @@ test("runAllowlistedReadOnlyCommand reports a spawn error for an ALLOWLISTED exe
 test("internal gate idempotence: a pre-gated allowed command behaves identically with and without the caller-side check", async () => {
   const allowedCommand = ["git", "rev-parse", "--is-inside-work-tree"];
 
-  // Caller-side pre-check, THEN run (today's anchorGrounding.ts pattern).
+  // Caller-side pre-check, THEN run (the caller-gated pattern).
   expect(isAllowedAnchorCommand(allowedCommand)).toBe(true);
   const withCallerCheck = await runAllowlistedReadOnlyCommand(
     allowedCommand,

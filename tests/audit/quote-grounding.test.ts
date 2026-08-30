@@ -3,9 +3,9 @@ import {
   normalizeForMatch,
   quoteMatches,
   verifyFindingGrounding,
-} from "../../src/audit/validation/quoteGrounding.js";
+} from "../../src/shared/index.js";
 import type { Finding } from "../../src/audit/types.js";
-import type { SourceReader } from "../../src/audit/validation/quoteGrounding.js";
+import type { SourceReader } from "../../src/shared/index.js";
 
 function finding(affected_files: Finding["affected_files"]): Finding {
   return {

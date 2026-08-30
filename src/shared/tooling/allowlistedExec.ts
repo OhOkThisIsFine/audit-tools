@@ -24,9 +24,9 @@
  * wrapper-only control env stripped (`stripAuditToolsControlEnv`), platform-resolved via the
  * shared `resolveExecArgv`, and SIGTERM→SIGKILL on timeout. The runner ENFORCES
  * `isAllowedAnchorCommand` on itself, unconditionally, before ever spawning
- * (invariants[2]) — a caller-side pre-check (e.g. `anchorGrounding.ts`) is now
- * an OPTIONAL fast path, never the sole guarantee: correctness must not rest on
- * every call site remembering to gate first.
+ * (invariants[2]) — a caller-side pre-check is only an OPTIONAL fast path,
+ * never the sole guarantee: correctness must not rest on every call site
+ * remembering to gate first.
  */
 import { spawn } from "node:child_process";
 import { resolveExecArgv, stripAuditToolsControlEnv } from "./exec.js";
@@ -352,10 +352,10 @@ export type AllowlistedExecRunner = (
  * pure, total, and non-throwing, so this check is cheap and correctness no
  * longer depends on every call site remembering to gate first. A refused
  * command resolves a structured refusal (`refused: true`); it is NEVER spawned
- * and this function NEVER throws for a refusal. A caller-side pre-check (e.g.
- * `anchorGrounding.ts`'s `isAllowedAnchorCommand` call before invoking this
- * function) is now a redundant, OPTIONAL fast path: double-gating is
- * observationally identical to single-gating, since the check is idempotent.
+ * and this function NEVER throws for a refusal. A caller-side
+ * `isAllowedAnchorCommand` pre-check before invoking this function is a
+ * redundant, OPTIONAL fast path: double-gating is observationally identical
+ * to single-gating, since the check is idempotent.
  *
  * Its reach is the model-authored anchor/targeted command class ONLY — it does
  * NOT reach `runtimeCommand.ts`'s project-test spawn (a discovered, non-model-

@@ -250,7 +250,7 @@ export const DOC_MANIFEST = [
   },
   {
     type: "package READMEs (non-`docs/`)",
-    files: ["src/audit/README.md", "src/audit/adapters/README.md", "examples/README.md"],
+    files: ["src/audit/README.md", "examples/README.md"],
     check:
       "Claims vs code; do documented commands, paths, provider-neutral host-workload contracts, and result-ingestion " +
       "boundaries still resolve. These docs must not reintroduce a provider registry, execution adapter, or quota surface.",

@@ -9,7 +9,6 @@ picks the highest-priority unsatisfied obligation, runs one bounded unit, persis
 - `extractors/` — deterministic repo analysis (graph, git-history, structure).
 - `decompose/` — structure-layer decomposition (overlay-and-delta operator over behavior-graph + intent
   sources), emitting `structure_decomposition.json` and the two non-co-localization findings.
-- `adapters/` — normalize external analyzer output (semgrep / eslint / npm-audit / ast-grep / CodeQL / coverage-summary) to shared contracts.
 - `clarification/` — Phase D charter-clarification/triangulation loop: blast radius, attention
   dial, VOI-ranked question queue, risk gate over the queue.
 - `systemic/` — Phase E systemic improvement-seeking challenge loop: aggregate-metrics digest +

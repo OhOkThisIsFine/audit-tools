@@ -68,13 +68,8 @@ test("grounding-single-source/1b: no other src module declares its own anchor al
   expect(offenders, `Only shared/src/tooling/allowlistedExec.ts may declare the anchor allowlist; re-declared in: ${offenders.join(", ")}`).toEqual([]);
 });
 
-test("grounding-single-source/1c: anchorGrounding does not spawn an inspection command itself", () => {
-  // The runner is shared; audit-code's anchorGrounding must not carry its own
-  // child_process spawn (the prior local defaultAnchorRunner is gone).
-  const anchorGrounding = read(join(AUDIT_SRC, "validation", "anchorGrounding.ts"));
-  expect(!/from\s+["']node:child_process["']/.test(anchorGrounding), "anchorGrounding.ts must not import node:child_process — it uses the shared runAllowlistedReadOnlyCommand").toBeTruthy();
-  expect(anchorGrounding, "anchorGrounding.ts must consume the shared runner").toMatch(/runAllowlistedReadOnlyCommand/);
-});
+// (The former 1c pinned the deleted src/audit/validation/anchorGrounding.ts —
+// the orphan-module sweep removed that module and its consumer test, CY-01.)
 
 // ── Guard 2: single grounding primitives + path normalizer ────────────────────
 
@@ -92,28 +87,13 @@ test("grounding-single-source/2a: shared owns the quote-grounding primitives + p
   }
 });
 
-test("grounding-single-source/2b: audit-code does not reimplement the grounding primitives", () => {
-  // quoteGrounding.ts is now a thin re-export; designFindingGrounding.ts imports
-  // the shared normalizeRepoPath. Neither may define its own implementation.
-  const quote = read(join(AUDIT_SRC, "validation", "quoteGrounding.ts"));
-  expect(!/export\s+async\s+function\s+verifyFindingGrounding\s*\(/.test(quote), "quoteGrounding.ts must re-export verifyFindingGrounding from shared, not define it").toBeTruthy();
-  expect(quote, "quoteGrounding.ts must source the primitives from shared").toMatch(/audit-tools\/shared/);
-
-  // designFindingGrounding.ts now lives in shared (next to findingGrounding.ts)
+test("grounding-single-source/2b: designFindingGrounding consumes the shared path normalizer", () => {
+  // designFindingGrounding.ts lives in shared (next to findingGrounding.ts)
   // so both orchestrators consume the single primitive with no cross-area import;
   // it imports normalizeRepoPath from the sibling shared module, never redefines it.
+  // (The former audit-side quoteGrounding.ts re-export shim was deleted in the
+  // orphan-module sweep, CY-01 — consumers import audit-tools/shared directly.)
   const design = read(join(SHARED_SRC, "validation", "designFindingGrounding.ts"));
   expect(!/function\s+normalizeRepoPath\s*\(/.test(design), "designFindingGrounding.ts must import normalizeRepoPath from shared, not define it").toBeTruthy();
   expect(design, "designFindingGrounding.ts must import normalizeRepoPath from the shared findingGrounding module").toMatch(/normalizeRepoPath[^]*from\s+["']\.\/findingGrounding\.js["']/);
-});
-
-// ── Guard 3: audit-code imports the shared grounding/runner ──────────────────
-
-test("grounding-single-source/3a: audit-code imports the shared runner + allowlist + quote grounding", () => {
-  const anchorGrounding = read(join(AUDIT_SRC, "validation", "anchorGrounding.ts"));
-  for (const sym of ["isAllowedAnchorCommand", "runAllowlistedReadOnlyCommand"]) {
-    expect(new RegExp(`${sym}[^]*from\\s+["']audit-tools/shared["']`).test(anchorGrounding), `anchorGrounding.ts must import ${sym} from shared`).toBeTruthy();
-  }
-  const quote = read(join(AUDIT_SRC, "validation", "quoteGrounding.ts"));
-  expect(quote, "quoteGrounding.ts must import verifyFindingGrounding from shared").toMatch(/verifyFindingGrounding[^]*from\s+["']audit-tools\/shared["']/);
 });
