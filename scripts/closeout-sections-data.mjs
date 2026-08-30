@@ -17,11 +17,13 @@
 // itself the message: a closeout with no Verification line is not reporting
 // "nothing to verify", it is reporting that nobody looked.
 
-import { FRICTION_CATEGORIES } from "audit-tools/shared";
+import { FRICTION_CATEGORIES } from "./shared/friction-categories.generated.mjs";
 
 // Labels for the REAL friction categories. The IDS are the single-sourced
-// vocabulary (src/shared/friction/frictionRecord.ts, via the shared barrel);
-// only the presentation label lives here, keyed by that vocabulary. A category
+// vocabulary (src/shared/friction/frictionRecord.ts, via its generated sibling
+// — this chain must run in a never-built checkout, so it cannot import
+// audit-tools/shared, which resolves dist/); only the presentation label lives
+// here, keyed by that vocabulary. A category
 // added there without a label here throws at load, so the two cannot drift
 // silently; a category removed there drops out of the bullets automatically.
 const FRICTION_CATEGORY_LABELS = {

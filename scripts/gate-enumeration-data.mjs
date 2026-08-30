@@ -37,6 +37,7 @@ export const STEP_GLOSS = {
   "check:loop-core-patterns": "loop-core pattern-list drift check",
   "check:constitutional-doc-paths": "constitutional-doc-path parity",
   "check:runtime-artifact-names": "runtime artifact-name set parity",
+  "check:friction-categories": "friction-category vocabulary parity",
   "check:executor-producers": "executor→artifact producer-table parity",
   "check:spec-mirrors": "spec/audit registry-mirror table parity",
   "check:cli-surface": "installer-verb surface parity in the shipped product page",

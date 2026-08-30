@@ -240,6 +240,16 @@ export const GUARDS = [
     fix: 'runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs',
   },
   {
+    id: 'check:friction-categories',
+    kind: 'gate',
+    impl: 'check:friction-categories',
+    preCommit: 'reach',
+    fix:
+      'scripts/shared/friction-categories.generated.mjs is stale against ' +
+      'src/shared/friction/frictionRecord.ts — run ' +
+      '`node scripts/shared/generate-friction-categories.mjs`, then re-stage it',
+  },
+  {
     id: 'check:executor-producers',
     kind: 'gate',
     impl: 'check:executor-producers',
@@ -803,6 +813,18 @@ export const REACH = [
       'the F2 hole (ceremony review 2026-08-29): the generated hook copy is what the pre-build ' +
       'commit gate matches loop-core paths against, so an unregenerated loopCorePaths.ts edit must ' +
       'red AT COMMIT, not first in release CI',
+  },
+  {
+    area: 'friction-category parity sources',
+    files: [
+      'src/shared/friction/frictionRecord.ts',
+      'scripts/shared/generate-friction-categories.mjs',
+      'scripts/shared/friction-categories.generated.mjs',
+    ],
+    guardedBy: ['check:friction-categories'],
+    note:
+      'the closeout renderer chain must run in a never-built checkout, so it imports the ' +
+      'generated sibling, never audit-tools/shared (backlog 2026-08-29)',
   },
   {
     area: 'constitutional doc-path parity sources',
