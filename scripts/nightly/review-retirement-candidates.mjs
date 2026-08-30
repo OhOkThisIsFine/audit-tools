@@ -28,7 +28,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const norm = (/** @type {string} */ p) => p.replace(/\\/g, "/");
 
 function trackedFiles() {
-  const out = execFileSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "utf8" });
+  const out = execFileSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "utf8", windowsHide: true });
   return out.split("\0").filter(Boolean).map(norm);
 }
 
