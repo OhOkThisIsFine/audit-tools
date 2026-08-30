@@ -36,6 +36,13 @@ export function isFullSuiteRun(vitestArgs) {
 }
 
 /**
+ * ⚠ This stays keyed on the CHECKOUT, and that is deliberate — do not "fix" it to
+ * match the session registry beside it. The registry keys on the REPOSITORY (its
+ * common git dir) because a session is a fact about the repository, and keying it
+ * on the checkout made its arming a property of how a worktree was created. This
+ * stamp is the opposite case: it binds a TREE, and two worktrees of one repository
+ * have different trees, so a repository-wide stamp would certify one worktree's
+ * green as evidence for another's content. Two identities, two reasons.
  * @param {string} root
  * @returns {string}
  */

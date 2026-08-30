@@ -505,6 +505,23 @@
   (e.g. from a baseline coverage/ownership map), or the gate measures "the suite went red" again — the
   exact fail-open it exists to catch. Until then its output is not admissible as attestation evidence.
 
+- **Friction walk (two-identities lap, 2026-08-30):** (1) **ambiguous-direction:** none — both
+  approved goals stated a testable property, and the one live owner decision (which goals) was
+  asked before work started. (2) **tool-should-decide (medium):** nothing validates that a backlog
+  entry is WELL-FORMED, so deleting one by line index silently ate the next entry's `- **` opener.
+  `check:backlog-index` cannot catch it — the generator counts entries from the same damaged bytes,
+  so it regenerates an index that agrees with the damage. Anchor a deletion on the next `- **`
+  instead of a line count. **Property:** an entry that lost its opener, or a stray continuation line
+  belonging to no entry, is a RED. (3) **inefficient-feeding:** the full suite ran three times
+  (~3.2 min each) because the green stamp binds the tree and two doc commits changed it after the
+  first two runs; batching the doc commits before the final run would have cost one. (4) **guards
+  that fired CORRECTLY, recorded so they are not mistaken for friction:** `worktree-deps-guard`
+  caught an empty `node_modules` before any check ran; `shell-trap-guard` refused a piped `npm test`
+  and a piped `git commit` (both mask the real exit code); `shell-conventions-guard` refused two
+  heredoc writes; `question-philosophy-gate` fired once and the question survived it, as its own
+  text says it should. `check:backlog-budget` refused a 2709/2600-byte entry without naming what to
+  cut — already tracked, confirmed live.
+
 - **Friction walk (determinations-execution lap, 2026-07-29):** (1) **ambiguous-direction:** none —
   the 16 nightly-ledger answers were executable as written; the two left unexecuted (premise probe
   `ea4e616f`, guard-reach-as-declared-data `ec64d159`) are full-lap builds awaiting a design pass,
