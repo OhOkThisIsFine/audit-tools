@@ -25,8 +25,9 @@
 // export extraction refuses outright (an empty pin would read as coverage).
 //
 //   node scripts/shared/generate-filelock-export-surface.mjs           # write
-//   node scripts/shared/generate-filelock-export-surface.mjs --check   # verify
 //
+// There is deliberately NO --check arm (an unwired one existed and was deleted —
+// F7, ceremony review 2026-08-29): enforcement is the drift test alone.
 // Drift is pinned by tests/shared/filelock-export-surface.test.ts, which
 // re-runs the extraction against the live source, diffs it against the tracked
 // render, and holds mutation controls proving the diff actually fires.
@@ -228,28 +229,6 @@ export function renderSurfacePin(surface) {
 
 function main() {
   const rendered = renderSurfacePin(extractFileLockExportSurface());
-
-  if (process.argv.includes("--check")) {
-    let current = null;
-    try {
-      current = readFileSync(join(repoRoot, RENDER_FILE), "utf8");
-    } catch {
-      /* missing */
-    }
-    if (current !== rendered) {
-      process.stderr.write(
-        `\n${RENDER_FILE} is stale or missing.\n` +
-          `The cdc-06 export-surface pin no longer matches src/shared/io/fileLock.ts — an exported\n` +
-          `name, kind, or signature changed without the pin being refreshed, so CP-NODE-18's\n` +
-          `"surface unchanged" proof would be inspection, not mechanism.\n` +
-          `Fix: node scripts/shared/generate-filelock-export-surface.mjs\n\n`,
-      );
-      process.exit(1);
-    }
-    process.stdout.write(`✓ filelock-export-surface: pin matches the live export surface\n`);
-    return;
-  }
-
   writeFileSync(join(repoRoot, RENDER_FILE), rendered, "utf8");
   process.stdout.write(`wrote ${RENDER_FILE}\n`);
 }
