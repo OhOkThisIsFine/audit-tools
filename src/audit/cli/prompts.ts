@@ -77,9 +77,9 @@ export function renderAnalyzerConsentPrompt(params: {
   return `# External Analyzer Consent
 
 This repo is applicable to ${params.pending.length} consent-gated analyzer(s) with no recorded
-decision. Present EACH candidate below to the operator and record their choices — a decision
-persists across runs (\`granted\` runs it from now on; \`declined\` stops this offer from
-repeating). Do not decide on the operator's behalf.
+decision. Present EACH candidate below to the operator and record their choices —
+\`declined\` persists across runs; \`granted\` covers this run only, and the next run re-offers.
+Do not decide on the operator's behalf.
 
 ${rows}
 

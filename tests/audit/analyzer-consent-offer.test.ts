@@ -201,6 +201,9 @@ describe("renderAnalyzerConsentPrompt — tool-rendered offer", () => {
     expect(prompt).toContain("`eslint`");
     expect(prompt).toContain(eslint.purpose!);
     expect(prompt).toContain("config can execute repo code");
+    expect(prompt).toContain(
+      "`declined` persists across runs; `granted` covers this run only, and the next run re-offers.",
+    );
     expect(prompt).toContain("X:/artifacts/submissions/0000000000000000000000000000000000000000000000000000000000000000.json");
     expect(prompt).toContain('"eslint": "granted"');
     expect(prompt).toContain("audit-code next-step");
