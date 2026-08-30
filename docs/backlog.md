@@ -10,6 +10,7 @@
 | File | What lives there |
 |---|---|
 | [`backlog/open-bugs.md`](backlog/open-bugs.md) | Fixable defects and friction — the working queue |
+| [`backlog/minor-bugs.md`](backlog/minor-bugs.md) | The same fixable defects at LOW severity — split off on size alone; re-tagging an entry moves it |
 | [`backlog/forward-tracks.md`](backlog/forward-tracks.md) | Open tracks + design-level directions |
 | [`backlog/deferred.md`](backlog/deferred.md) | Blocked on data, a live run, creds or a toolchain |
 | [`backlog/durable-traps.md`](backlog/durable-traps.md) | Standing environment reference + doc-set hygiene |

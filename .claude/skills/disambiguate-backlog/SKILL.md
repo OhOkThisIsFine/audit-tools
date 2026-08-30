@@ -26,7 +26,7 @@ the resolved spec is written back so the ambiguity is closed for good.
 
 Scope is two raw-signal sources, nothing else:
 
-- **`docs/backlog/`** — every entry in *open-bugs.md*, *forward-tracks.md*, *deferred.md*. (Skip *Durable traps* — it's reference, not
+- **`docs/backlog/`** — every entry in *open-bugs.md*, *minor-bugs.md*, *forward-tracks.md*, *deferred.md*. (Skip *Durable traps* — it's reference, not
   work-to-spec; only touch a trap if the owner asks.)
 - **meta-audit reflections** — worker feedback:
   <!-- doc-citation-exempt: meta-audit-log.md is untracked by convention -->
