@@ -5,21 +5,19 @@
 
 ## Live state
 
-- **v0.50.15 is live. The lap head is `07c8cdce`** — the dispatched-lane and closeout-gate lap. Two
-  session-attribution defects closed, one half deliberately abstained.
-  `shell-trap-guard.mjs` now REFUSES a write-capable lane invocation that would run inside any
-  worktree of this repo, unless the lane declares `AUDIT_TOOLS_CHILD_SESSION=1` in either shell
-  dialect, carries read-only tools, or is pointed outside the repository (`1f9da704`). Neither
-  pre-existing lane pattern matched a BARE `claude -p`, which is exactly what the relay ladder
-  renders and what caused the incident.
-  The DETECTION half ABSTAINS by owner decision (`674fa682`): two independent refutation lanes and a
-  source pass agreed that no honest failing test can be written for it, and the dead designs are
-  recorded in the entry so a next attempt starts ahead.
-  `closeout-challenge-gate.mjs` no longer attributes another session's commit to this one
-  (`6db20e2c`, `07c8cdce`). Its `headMovedRecently` was a 12-hour wall-clock proxy, so at a lap START
-  the previous lap's closing commit made it fire with nothing to close; it now compares HEAD's commit
-  time against the session's `registered_at`, single-sourced with the closeout-render test that
-  already asked the same question.
+- **v0.50.15 is live, and this lap published nothing** — no file in the package's `files` list
+  changed, so a release would ship an identical artifact under a new version.
+- **The vitest gate now has exactly ONE success exit (`e7a8c559`).** Its reporter-transport
+  tolerance path printed "Treating as PASS" and exited before `writeSuiteGreenStamp`, so the one run
+  class the gate goes out of its way to call green was the one class leaving no evidence it was.
+  Found at this lap's own baseline: a green run left the declared green mechanism pointing at a tree
+  13 hours old. The contract test in `tests/shared/suite-green-stamp.test.ts` pins the property and
+  states its uncovered structural half; the backlog entry is deleted rather than restated.
+- **A lap worktree is NOT the empty-state-dir checkout two backlog entries assumed (`1484c895`).**
+  The harness worktree mechanism COPIES the gitignored `.claude/hooks/.state`, so this worktree held
+  121 session records byte-identical to the main checkout's and `enforcementArmed` returned TRUE.
+  `git worktree add` leaves it empty; the harness does not. Both entries reasoned from one case.
+- **The owner-approved session-registry liveness sketch is DEAD (`6e4b0f12`).** See *Immediate next*.
 
 ## Immediate next
 
@@ -28,13 +26,12 @@ at the hand-back, against pinning either the fresh-worktree disarm or the sessio
 signal. It is a statement, not an omission — the next session picks from the backlog on its own
 judgement.
 
-Three live residuals are in [`open-bugs.md`](backlog/open-bugs.md), none pinned. The largest was
-found while verifying this lap's own worker and is new: the child-session commit/push refusal is
-STRUCTURALLY INERT in a dedicated worktree, because `enforcementArmed` reads a gitignored per-worktree
-directory that starts empty — so giving a lane its own worktree, the correct answer to every other
-hazard here, is exactly what removes that guard. The other two: the closeout gate still cannot tell a
-mid-lap PAUSE from a sprint that ended, since once a lap has committed anything its own commits are
-at-or-after `registered_at`; and the lane-DETECTION half stays open under the abstention above.
+Three live residuals are in [`open-bugs.md`](backlog/open-bugs.md), none pinned. The child-session
+commit/push refusal is armed or inert depending on HOW the worktree was made — `git worktree add`
+leaves the registry empty and disarms it, the harness copy arms it on foreign records — and nothing
+states or checks which. The closeout gate still cannot tell a mid-lap PAUSE from a sprint that
+ended, since once a lap has committed anything its own commits are at-or-after `registered_at`. The
+lane-DETECTION half stays open under the abstention above.
 
 ⚠ **That "approved as a lap of its own" liveness signal is DEAD as sketched (2026-08-30).** It was
 put through the design gate and stopped there before any code: `pid` cannot live on the session
