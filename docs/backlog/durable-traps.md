@@ -13,15 +13,20 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
-- **A delegated `codex exec` lane runs this repo's sprint ceremony and CONSUMES the session's lap
-  record (2026-08-29).** The lane reads the generated `AGENTS.md` (the shared CLAUDE.md region,
-  end-of-sprint cleanup included), so mid-run it rewrote `.claude/lap-start.json` with its OWN task
-  as the goal, and its stop-time closeout ritual then DELETED the file — the /closeout contract
-  consumes it. A "do not touch files outside scope" line in the task file prevented neither write;
-  the ceremony instruction, not the task, drives it. The lap record belongs to the ORCHESTRATING
-  session: re-check `.claude/lap-start.json` after every codex lane and restore it before
-  /closeout. Open half: delegated lane prompts should declare the child role — the repo Stop-gate
-  exemption env `AUDIT_TOOLS_CHILD_SESSION=1` does not reach a peer CLI's own ritual.
+- **A delegated `codex exec` lane runs the sprint ceremony and CONSUMES the session's lap record
+  (2026-08-29, ENFORCED IN PART).** The lane reads the generated `AGENTS.md` (the shared global
+  CLAUDE.md region, end-of-sprint cleanup included), so mid-run it rewrote `.claude/lap-start.json`
+  with its OWN task as the goal, and its stop-time closeout then DELETED the file — the /closeout
+  contract consumes it. A "do not touch files outside scope" line in the task file prevented
+  neither write: the ceremony instruction drives it, not the task, and the instruction never named
+  its addressee. **Covered:** the ceremony now states that it addresses the owning session only and
+  that a delegated lane must not run it or touch the lap record; the paragraph propagates to every
+  host file, and the generator
+  <!-- doc-citation-exempt: machine-wide files outside this repo — ~/.agent-config/sync.mjs and ~/.claude/CLAUDE.md -->
+  (`sync.mjs`) REFUSES to render any host file while it is missing (red-green validated).
+  **Uncovered:** prose cannot bind a peer CLI — a lane may still disregard it, and the assertion
+  guards the GLOBAL source only, so a project CLAUDE.md that restates a ceremony is unguarded.
+  Re-check `.claude/lap-start.json` after a lane before relying on it.
 
 - **`gh run list --commit <short-sha>` silently returns an EMPTY set — the flag matches the FULL
   40-character sha only (2026-08-29).** A short sha is not rejected; the listing just comes back
