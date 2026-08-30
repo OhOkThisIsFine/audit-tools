@@ -25,12 +25,15 @@ Use independent lanes wherever they preserve coverage:
 - **Codex** has repo access and performs its own source inspection:
   `codex exec --skip-git-repo-check "<prompt>" < /dev/null`. Closing stdin is
   load-bearing; an open stdin makes the process wait indefinitely.
-- **The second independent lane** is a separate free-provider session:
-  `powershell -File C:\Users\ethan\freellmapi\claude.ps1 -p "<prompt>"`. The
-  launcher owns the routing mechanics (endpoint, key, model alias), so this doc
-  never restates them and cannot drift from them. Treat every reply as an
-  advisory lead and verify it against source; quoted evidence is especially
-  fallible.
+- **The second independent lane** is a separate free-provider session through
+  the llm-relay dispatch ladder (freellmapi and its `claude.ps1` launcher were
+  retired 2026-08-29; running them resurrects the retired router):
+  `llm-relay dispatch -t "<prompt>"` renders the ladder with the prompt
+  substituted — run the first ready lane's printed command (rendered for pwsh;
+  `--shell` changes that). The relay owns the routing mechanics (lane order,
+  endpoint, model, env), so this doc never restates them and cannot drift from
+  them. Treat every reply as an advisory lead and verify it against source;
+  quoted evidence is especially fallible.
 - If a lane is unavailable, route the work elsewhere. A dead lane may not
   silently shrink coverage; any coverage that still could not run belongs in
   the inbox's `skipped` list.

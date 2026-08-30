@@ -50,8 +50,9 @@ retirement still holds.
 
 Delegate — do not self-assess; the point is a reader who did not author the plan. Pick an
 independent lane and run it yourself: `codex exec --skip-git-repo-check "<prompt>" < /dev/null`
-(closing stdin is load-bearing), `agy -p "<prompt>"`, or a free-provider session via
-`powershell -File C:\Users\ethan\freellmapi\claude.ps1 -p "<prompt>"`. Pass the plan plus the
+(closing stdin is load-bearing), `agy -p "<prompt>"`, or a free-provider session via the llm-relay
+ladder: `llm-relay dispatch -t "<prompt>"` renders the ready lane's exact command — run that
+(freellmapi and its `claude.ps1` launcher were retired 2026-08-29). Pass the plan plus the
 evidence files from step 2 as file PATHS in the prompt; never paste file bodies into it.
 
 **Hand the lane the recon rather than the job of redoing it.** What a round must not do is judge work

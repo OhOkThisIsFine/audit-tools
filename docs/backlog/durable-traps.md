@@ -85,7 +85,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 
 - **Each `dispatch_review` `next-step` re-mints EVERY outstanding binding (measured 2026-08-21).** One partial ingest published a new run directory and changed `prompt_sha256` for 494/494 carried-over items and `result_path` for 494/494; only `work_item_id` stayed stable. A host holding bindings from before that call has 100% stale identity, so results written against them are refused. Two consequences: do not call `next-step` while work is in flight, and prefer a dispatch shape where workers return FINDINGS ONLY while the host binds identity and `file_coverage` mechanically from the CURRENT `host-task-bindings.json` — that shape is immune by construction and is what made a 498-item fan-out survivable. Evidence for the "Wave-friendly host dispatch" forward track.
 
-- **The llm-relay process dies with the dispatching session, and nothing restarts it (2026-08-21).** A dropped connection took the relay down; every offloaded child then failed with `API Error: 502 backend unreachable` until it was restarted by hand. There is no Startup entry for it (only `freellmapi.vbs` and `headroom.vbs`). Probe `127.0.0.1:8791/telemetry` before and during a long fan-out.
+- **The llm-relay process dies with the dispatching session, and nothing restarts it (2026-08-21).** A dropped connection took the relay down; every offloaded child then failed with `API Error: 502 backend unreachable` until it was restarted by hand. There is no Startup entry for it (only `freellmapi.vbs` and `headroom.vbs`). Probe `127.0.0.1:8791/telemetry` before and during a long fan-out. (Update 2026-08-29: `Startup\llm-relay.vbs` has existed since 2026-08-27, so a logon restores the relay, and freellmapi plus its `.vbs` are retired. The probe advice stands — a mid-session relay death still needs a hand restart, via `wscript.exe` on that `.vbs`.)
 
 - **A tracked generated doc that links to an UNTRACKED file blocks every docs-touching commit
   (2026-08-20).** The commit gate materializes the STAGED tree — untracked files vanish — before
@@ -208,11 +208,13 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   at all answers unknown rather than untrusted, so it stays silent.
   Every fresh lap WORKTREE re-hits the wall (trust keys on the exact forward-slash project path, so
   the trusted repo root does not cover `.claude/worktrees/<lap>`). Working repair (2026-08-29): back
-  up `claude-config/.claude.json` in the freellmapi dir, set
+  up the lane config dir's `.claude.json`, set
   `projects["<worktree path>"].hasTrustDialogAccepted = true` with a node one-liner, then verify with
   a content probe only a repo read can answer (the package.json `version` value). Owner ruling
-  2026-08-29: no launcher class fix — freellmapi is planned for retirement in favor of llm-relay,
-  so the per-lap hand recipe above is the accepted state until that migration lands.
+  2026-08-29: no launcher class fix — and freellmapi was RETIRED the same day. The recipe carries
+  over unchanged to the llm-relay pool lane, whose config dir is `C:\Users\ethan\.llm-relay-claude`
+  (registry row `relay-pool-lane` in `~/.agent-config/offload-lane-data.mjs`; the session-start
+  lane leg reads its trust from there).
   [[pool-lane-fabricates-when-untrusted]]
 
 - **The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look
@@ -319,8 +321,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   failure — confident output with fake support.)
 
 - **The free offload lane is a local router — it must be RUNNING, and callers should request the
-  `auto` alias.** Requests go to `127.0.0.1:3001`; start it with
-  `powershell -File C:\Users\ethan\freellmapi\start.ps1`. ⚠ This lane has now outlived THREE
+  `auto` alias.** ⚠ **RETIRED (2026-08-29): this router is stopped and its autostart removed —
+  the free lane is llm-relay on `127.0.0.1:8791` (`llm-relay dispatch`; liveness `GET /telemetry`
+  — `/health` is 403 BY DESIGN). `claude.ps1`/`start.ps1` would START it again; do not run them.
+  The record below stands.** Requests went to `127.0.0.1:3001`. ⚠ This lane has now outlived THREE
   transports — two earlier local brokers on other ports were each retired within weeks — so treat
   any endpoint, port or model name written down here as stale until probed. Three consequences:
   (a) there is no standalone fallback — every offload call goes to that one endpoint, so a failing
@@ -695,7 +699,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `claude.ps1` is not evidence the pool is down — probe the router directly before concluding
   anything about lane health. It compounds with the nested-session trap below: launched from the repo
   cwd it is a full session in the SHARED checkout. For bounded recon, POST to the router and skip the
-  nested agent entirely.
+  nested agent entirely. (2026-08-29: the launcher is retired; the lesson TRANSFERS to the llm-relay
+  pool lane — a rendered `claude -p` lane command still pays nested session startup, so probe
+  `127.0.0.1:8791/telemetry` directly before concluding anything about the pool.)
 
 - **An external-delegation directive and the Workflow tool are in tension — Workflow has no external
   lane (2026-08-27).** Workflow's agents run on the session's own model; `opts.model` selects an
