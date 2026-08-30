@@ -6,44 +6,15 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **A literal pinned in a test outside the change's neighborhood reds only in CI — three instances
-  in one lap (2026-08-29, medium, friction: tool_should_decide).** The ceremony lap's refactors hit
-  the class three times: the derived pre-commit leg set is pinned as a literal in BOTH
-  `tests/shared/precommit-leg-derivation.test.ts` and `tests/shared/attest-derived-file-preflight.test.ts`
-  (the second copy surfaced only in a CI shard); a friction-closure row grepped `probeLane\(` and
-  missed the optional-call rewrite; `loop-core-paths.test.ts` pinned a deleted pattern member. Each
-  pin is legitimate alone; the defect is the SECOND copy of the same literal, which no local gate
-  runs when the change's own neighborhood is green. **Property:** a derived literal is pinned in ONE
-  test (the second consumer imports the same fixture/constant), or the commit legs run the pinning
-  tests whose SUBJECT a staged file feeds — never discovered shard-by-shard in CI.
-
-- **`render-closeout.mjs --template` needs a built `dist/`, so the mandatory hand-back tool cannot
-  run in a fresh worktree (2026-08-29, low, friction: inefficient_feeding).** `--template` prints a
-  static blank JSON and needs no product code, but `scripts/render-closeout.mjs` imports
-  `scripts/closeout-sections-data.mjs`, which imports `FRICTION_CATEGORIES` from
-  `audit-tools/shared` — i.e. `dist/shared/index.js`. In a fresh worktree that is
-  `ERR_MODULE_NOT_FOUND`, so the closeout every sprint must end with is blocked behind
-  `npm install` plus a full `tsc`. **Property:** the closeout renderer's template and section list
-  resolve from source, not from `dist/` — a hand-back is possible in a checkout that has never been
-  built.
-
-- **The analyzer-consent prompt tells the operator a grant is durable; the enforced contract makes
-  a grant per-run (2026-08-29, medium, friction: ambiguous_direction).** The consent prompt template
-  (`src/audit/cli/prompts.ts`) renders "a decision persists across runs (`granted` runs it from now
-  on; `declined` stops this offer from repeating)". The design is asymmetric BY DESIGN and mechanically pinned
-  (`tests/shared/consent-token-not-persisted.test.ts`; `AnalyzerConsentDecisionSchema` is the
-  one-member `"declined"` enum): a decline is durable, a grant binds only the run that asked.
-  The prompt is the drifted half — an operator granting under this text believes they enabled the
-  tool from now on, and the next run's re-offer reads as a bug. **Property:** the consent prompt
-  states each decision's actual lifetime — decline durable, grant this-run-only.
-
-- **`audit-code next-step --help` executes a real step instead of printing help (2026-08-29, low,
-  friction: tool_should_decide).** Observed live: `node audit-code.mjs next-step --help` against the
-  repo checkout ran a full fold (fsIntake, agent-slot gc, step emission) and advanced the live
-  audit's step files. A help flag must never mutate state. Likely the wrapper forwards argv to the
-  built CLI without commander's help interception on the subcommand, or the subcommand treats the
-  unknown flag as noise. **Property:** `--help`/`-h` on any subcommand prints usage and exits
-  without acquiring a lock or writing a byte.
+- **A literal pinned in a test outside the change's neighborhood reds only in CI — the general
+  discovery arm stays open (2026-08-29, medium, friction: tool_should_decide).** The lap's three
+  known instances are closed (one shared pin in `tests/helpers/precommitLegExpectations.ts`,
+  <!-- doc-citation-exempt: the deleted member IS the subject — the pin was re-pointed because this file no longer exists -->
+  imported by both leg-set consumers; the stale `writeScope.ts` pattern-member pin re-pointed; the
+  probeLane and barrel pins fixed earlier, `a8daeef9`). Open: nothing makes the NEXT duplicated
+  derived literal red locally. **Property (open half):** the commit legs run the pinning tests
+  whose SUBJECT a staged file feeds, or an equivalent gate makes a duplicated derived literal red
+  before CI.
 
 - **`commitFold`'s applied-entry unlink swallows non-ENOENT, so Windows can re-consume an
   already-applied submission (2026-08-28, medium).** The applied branch runs

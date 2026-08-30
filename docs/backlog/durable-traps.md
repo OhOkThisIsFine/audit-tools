@@ -13,6 +13,16 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **A delegated `codex exec` lane runs this repo's sprint ceremony and CONSUMES the session's lap
+  record (2026-08-29).** The lane reads the generated `AGENTS.md` (the shared CLAUDE.md region,
+  end-of-sprint cleanup included), so mid-run it rewrote `.claude/lap-start.json` with its OWN task
+  as the goal, and its stop-time closeout ritual then DELETED the file — the /closeout contract
+  consumes it. A "do not touch files outside scope" line in the task file prevented neither write;
+  the ceremony instruction, not the task, drives it. The lap record belongs to the ORCHESTRATING
+  session: re-check `.claude/lap-start.json` after every codex lane and restore it before
+  /closeout. Open half: delegated lane prompts should declare the child role — the repo Stop-gate
+  exemption env `AUDIT_TOOLS_CHILD_SESSION=1` does not reach a peer CLI's own ritual.
+
 - **`gh run list --commit <short-sha>` silently returns an EMPTY set — the flag matches the FULL
   40-character sha only (2026-08-29).** A short sha is not rejected; the listing just comes back
   empty, so a watcher polling it for run completion waits on nothing (a 20-minute silent loop,
