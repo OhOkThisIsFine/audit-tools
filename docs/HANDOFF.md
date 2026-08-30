@@ -5,17 +5,16 @@
 
 ## Live state
 
-- **v0.50.14 is live** — the ceremony lap: the review's Tier 0 + Tier 1 + F10, net ~9.7k lines
-  removed with no gate weakened. The orphan-module class is emptied AND gated
-  (`check:orphan-modules` + knip `files`, one commit, `224c8d4d`); every gate row states its
-  remedy and the regenerate-shaped set runs on commit legs (`f00d4309`); the offload-lane
-  registry lives at `~/.agent-config/` with llm-relay the recorded eventual owner (`47562f14`,
-  owner-decided); the pre-joined scheduler prompt and 28 uncited review docs are retired, with a
-  Leg-1 retirement valve in their place (`7afb99a3`, `f639de04`); the re-export shims are
-  gone (`30ddc47d`); CLAUDE.md dropped 4.9KB of history to rule-plus-pointer form (`7fc551f3`);
-  and ONE generated-artifact substrate sits under eight generators (`85c284a6`). The ceremony
-  remainder (Tier 2/3 + the `check:shared-primitives` governance reach) is the trimmed open track
-  in the backlog.
+- **v0.50.15 is live** — the offload-lane lap: the four 2026-08-29 open-bugs entries worked
+  through the Codex, AGY, and llm-relay lanes. The consent prompt states the real decision
+  lifetimes (`9fe21eb5`); `--help`/`-h` on every audit-code subcommand is informational — no
+  lock, no directory, no byte (`9227c37c`); the src-reach leg-set pin lives ONCE in
+  `tests/helpers/precommitLegExpectations.ts` (`19aa3c69`); and the closeout renderer chain runs
+  in a never-built checkout via a generated friction-category sibling +
+  `check:friction-categories` gate (`4a6d6bc1`). The literal-pin entry narrows to its open
+  discovery arm; the codex-lane lap-record ceremony trap is recorded in durable-traps. The
+  ceremony remainder (Tier 2/3 + the `check:shared-primitives` governance reach) stays the open
+  track in the backlog.
 
 ## Immediate next
 
