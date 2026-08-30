@@ -5,29 +5,25 @@
 
 ## Live state
 
-- **v0.50.15 is live. HEAD is `ac3939a7` on `main`** — the gate-integrity lap: three defects in the
-  enforcement layer itself. The masked-exit refusal keys on a load-bearing EXIT STATUS rather than on
-  test runners, so a piped `git push`/`commit`/`merge`/`rebase`/`cherry-pick`/`tag` or `npm publish`
-  is refused exactly like a suite (`a5d4a83d`). The attestation checks judge what a commit will
-  CONTAIN — a cherry-pick or merge now contributes the paths its named ref INTRODUCES, closing the
-  blind spot where a fresh history-moving verb staged nothing and every check read an empty set
-  (`35f9b03a`, owner decision). A repo that owns its green mechanism declares it in
-  `.claude/green-mechanism.json`, and the machine-wide `verify-green` ledger then DEFERS its `check`
-  and REFUSES its `record`, so no second contradicting ledger can exist (`ac3939a7`, owner decision).
-  One backlog entry was corrected rather than worked: the cherry-pick escape's stated mechanism was
-  false, and the real one is the pre-hoc blind spot above (`3bf45786`).
+- **v0.50.15 is live. HEAD is `93d0a8ee` on `main`** — the offload-lane and attest-preflight lap.
+  Two fixes landed, and three defects were logged rather than worked. The offload workspace-trust
+  leg is DELETED in both homes — this repo's `session-start-guards.mjs` and the machine registry
+  `~/.agent-config/offload-lane-data.mjs` — because its stated consequence never followed from its
+  condition: measured four ways, a lane in an UNTRUSTED workspace reads a gitignored file and
+  returns its content, with the tool flag, without it, and from a directory in no `projects` map
+  (`a239dc68`, owner decision). The attest preflight now refuses only when the worktree tree equals
+  the staged tree BEFORE and AFTER its legs run, and otherwise abstains — recording unattributed
+  passes as well as failures, because the false-green half was silent (`93d0a8ee`). Logged, not
+  worked: the closeout Stop gate demands a hand-back at a lap START (`ad4a9cd9`); a dispatched lane
+  runs this repo's sprint ceremony unless its caller sets `AUDIT_TOOLS_CHILD_SESSION=1`
+  (`f9e9cc3d`); `check:memory-citations` is inert in every lap worktree and ticks the skip
+  (`18c71faf`).
 
 ## Immediate next
 
 **Nothing is pinned.** The queue is the backlog ([`backlog.md`](backlog.md)); the standing
 program direction remains *redesign before scheduled autonomy* → the autonomous
 audit→remediate→PR capstone once the architecture items are worked off.
-
-The gate-integrity lap left two of its four items unworked, both in
-[`open-bugs.md`](backlog/open-bugs.md): the attest preflight judging the STAGED tree with
-WORKING-TREE checks, and the added-root-entry teardown check that is not hermetic against a
-concurrent session. The first touches the staged-snapshot round-trip machinery, which carries a
-documented crash-safety hazard and changed in `f117ac02` — run `/design-check` before editing it.
 
 
 ## Deliberate state, not bugs
@@ -46,6 +42,15 @@ documented crash-safety hazard and changed in `f117ac02` — run `/design-check`
   which is its home.
 - The item-6 checkJs sweep remains type-only by contract; behavioral changes are bugs, not part of
   that refactor.
+- The added-root-entry teardown false red is LEFT OPEN on purpose. Two adversarial rounds killed
+  both candidate mechanisms by measurement — writer attribution is unavailable in ESM, and no
+  exclusivity predicate exists — so nothing was changed rather than shipping a false green. The
+  entry in [`open-bugs.md`](backlog/open-bugs.md) carries the dead designs and the three constraints
+  a third attempt must satisfy, so the next try starts ahead rather than repeating these two.
+- The attest preflight now ABSTAINS whenever the worktree and staged trees differ. That is a
+  deliberate coverage reduction, not an oversight: it trades unreliable refusals for a recorded
+  abstention, and its three uncovered halves are stated in the backlog entry and as `uncovered` data
+  in the guard-reach registry.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
