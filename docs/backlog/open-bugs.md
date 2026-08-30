@@ -27,15 +27,23 @@
   staging file or fails the commit — a swallowed unlink error can never leave a consumed submission
   in a recoverable location.
 
-- **Commits created by `git cherry-pick` / `git merge` / `git rebase` bypass every pre-commit gate
-  leg, the loop-core attestation, and the constitutional-doc gate (2026-08-28, medium).** The gate
-  is a PreToolUse hook matching `git commit` command text, so any OTHER commit-creating verb lands
-  ungated — observed live: a `git cherry-pick` of a loop-core WIP commit onto a branch sailed
-  through with no legs run and no attestation demanded. On a branch that is survivable (the gates
-  re-run when the work reaches `main` by ordinary commit), but a cherry-pick or merge INTO `main`
-  would land loop-core or constitutional content with zero mechanical review. **Property:** the
-  gate keys on commits being CREATED (whatever verb creates them), or the uncovered verbs are
-  refused on `main`, or the reach registry states the uncovered half as data.
+- **A history-moving commit lands its INCOMING content unreviewed — the gate can only read the
+  STAGED snapshot (2026-08-28, mechanism corrected 2026-08-29, medium).** The original entry said
+  the gate matches `git commit` text only, so other commit-creating verbs land ungated. That half is
+  FALSE and was already false when written: `COMMIT_CREATING_SUBCOMMANDS` has covered
+  `commit|merge|rebase|cherry-pick|revert|am` since `d81a86f4` (2026-08-06), and
+  `tests/shared/pre-commit-gate-commit-creating.test.ts` pins that a BAD staged sentinel blocks every
+  one of them. The observed escape has a DIFFERENT mechanism: a fresh `git cherry-pick <sha>` or
+  `git merge <branch>` stages nothing, so the legs, the loop-core attestation and the
+  constitutional-doc gate all read an EMPTY staged set and demand nothing, while the command still
+  lands the incoming tree. `pre-commit-gate.mjs` states this as a known accepted limit at its
+  `COMMIT_CREATING_SUBCOMMANDS` definition. **Open half:** on a branch it is survivable — the gates
+  re-run when the work reaches `main` by ordinary commit — but a cherry-pick or merge INTO `main`
+  lands loop-core or constitutional content with zero mechanical review. **Property:** the
+  attestation checks read the paths the command will INTRODUCE — derivable pre-hoc from the named
+  ref (`git show --name-only <sha>`, `git diff --name-only HEAD...<branch>`) — or history-moving
+  verbs onto `main` are refused. OWNER DECISION: closing it reverses a recorded acceptance, and
+  refusing merges onto `main` would change the documented ship flow.
 
 - **The loop-core attest preflight judges the STAGED tree with WORKING-TREE checks, so an unstaged
   edit elsewhere reds an attestation whose commit would be green (2026-08-28, medium, friction:
