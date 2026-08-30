@@ -509,6 +509,29 @@
   (e.g. from a baseline coverage/ownership map), or the gate measures "the suite went red" again — the
   exact fail-open it exists to catch. Until then its output is not admissible as attestation evidence.
 
+- **Friction walk (commitFold unlink lap, 2026-08-30):** (1) **ambiguous-direction:** none — the
+  goal was picked from the backlog with the owner, and the one live owner decision (the session
+  liveness shape) was asked and answered before any edit. (2) **inefficient-feeding (medium): a
+  release invalidates the green stamp BY CONSTRUCTION, and no batching avoids it.** The stamp binds
+  worktree CONTENT; `release-and-publish.mjs` bumps `package.json` and `package-lock.json` AFTER its
+  pre-tag gate, so every release ends with a stamp pointing at the pre-bump tree and costs one extra
+  full local suite (~3.2 min) to re-certify a two-line version change that the publish run's own
+  4-way sharded suite already ran. Distinct from the two-identities lap's batching case, which WAS
+  avoidable. **Property:** the release script mints the stamp on the tree it bumped, or the
+  mechanism recognises a bump-only delta as content it already certified.
+  (3) **inefficient-feeding (low):** the `claude-free-pool` (pool/medium) refutation lane ran 14 min
+  with no answer and was cancelled; an `agy` lane given the identical prompt returned a fully-cited
+  verdict in ~4 min, and its two novel claims both held against source. For a repo-reading
+  refutation, prefer agy and hand it the recon map. (4) **guards that fired CORRECTLY, recorded so
+  they are not mistaken for friction:** `shell-trap-guard` refused a piped `npx vitest` and a piped
+  `git push`, both of which mask the real exit code, and each refusal stated its fix;
+  `question-philosophy-gate` challenged the `/start-lap` approval question the skill MANDATES —
+  already tracked in [`minor-bugs.md`](minor-bugs.md), confirmed live again.
+  (5) **machine-wide, filed OUTSIDE this repo:** `verify-green.mjs check` defers to this repo's
+  mechanism and names no runnable substitute, so step 3 of the lap had to hand-compute
+  `worktreeTree` to learn whether the baseline was green. Its home is `C:\Code\docs\backlog.md`,
+  because the declaration schema and its reader are machine-wide.
+
 - **Friction walk (guard-test-hermeticity lap, 2026-08-30):** (1) **ambiguous-direction:** none —
   the lap's goal came from its own baseline red and was approved before any edit. (2) **false_red
   (high):** the lap's subject — `npm test` red once on any lap opening behind main, then green on a

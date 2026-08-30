@@ -14,38 +14,17 @@
   The entry is deleted rather than restated; the same class at
   `quarantineSubmissionFile` and `moveFile` is a NEW entry, and it needs its own design pass
   because `moveFile` runs at fold-start recovery.
-- **v0.50.15 is live.** Recent laps have published nothing, and correctly: no file in the package's
-  `files` list changed and `src/` was untouched, so a release would ship an identical artifact under
-  a new version. Check that before assuming a lap owes a publish.
-- **The vitest gate now has exactly ONE success exit (`e7a8c559`).** Its reporter-transport
-  tolerance path printed "Treating as PASS" and exited before `writeSuiteGreenStamp`, so the one run
-  class the gate goes out of its way to call green was the one class leaving no evidence it was.
-  Found at this lap's own baseline: a green run left the declared green mechanism pointing at a tree
-  13 hours old. The contract test in `tests/shared/suite-green-stamp.test.ts` pins the property and
-  states its uncovered structural half; the backlog entry is deleted rather than restated.
-- **A lap worktree is NOT the empty-state-dir checkout two backlog entries assumed (`1484c895`).**
-  The harness worktree mechanism COPIES the gitignored `.claude/hooks/.state`, so this worktree held
-  121 session records byte-identical to the main checkout's and `enforcementArmed` returned TRUE.
-  `git worktree add` leaves it empty; the harness does not. Both entries reasoned from one case.
-- **Two gates that keyed on the CHECKOUT now key on the REPOSITORY.** `check:memory-citations` was
-  inert in every lap worktree and ticked the skip; the session registry's arming was a property of
-  how the worktree was made. Both resolve through the common git dir now, and contract tests state
-  each trap.
-  ⚠ **Cutover, stated because it is silent:** a session that registered in a worktree BEFORE this
-  change has no record in the repository store and is classified an unregistered child until it
-  re-registers — `node scripts/shared/sessionRegistry.mjs --register <session-id>`. This session did
-  exactly that. The copied records left in a worktree's own `.claude/hooks/.state/sessions/` are now
-  read by nothing; they are gitignored, so they are litter rather than a hazard.
-- **The guard suite no longer eats the stale-main marker it was armed with (`cccda994`).** A lap
-  opening BEHIND main red `npm test` once and then passed, because `tool-input-guard` rule 3
-  refused where rule 1 was under test and CONSUMED the deny-ONCE marker on the way out — a false
-  red that cleared itself, and a lap that silently lost its only warning. Found at this lap's own
-  baseline. `runInputGuard` now binds a per-invocation temp root and is the only way into that
-  guard's cases.
-  ⚠ **`runHook`'s default deliberately STAYS `REPO_ROOT`, and that asymmetry reads as a cleanup
-  opportunity.** Unifying the two defaults silently disarms `shell-trap-guard`'s ROOT-dependent
-  rules, which are FAIL-OPEN on a non-git root. The measurement and the argument live in the test
-  file's own header and in memory [[hook-test-roots-are-asymmetric-by-hook]] — not restated here.
+- **v0.50.16 is live**, published from `4a29aea6`. It carries the fold-commit fix above — the first
+  lap in several to owe a publish, because earlier laps left `src/` and the package's `files` list
+  untouched and would have shipped an identical artifact under a new version. Check that before
+  assuming a lap owes one.
+  ⚠ **A release ends with the green stamp STALE by construction:** the bump commit changes the tree
+  after the pre-tag gate, so a closeout after a release needs one more full suite run. Tracked in
+  [`open-bugs.md`](backlog/open-bugs.md).
+- ⚠ **Session-registry cutover, stated because it is silent:** a session that registered in a
+  worktree BEFORE the registry moved to the repository store has no record there, and is classified
+  an unregistered child until it re-registers —
+  `node scripts/shared/sessionRegistry.mjs --register <session-id>`.
 - **The owner-approved session-registry liveness sketch is DEAD (`6e4b0f12`).** See *Immediate next*.
 
 ## Immediate next
