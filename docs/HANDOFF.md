@@ -35,12 +35,15 @@ at the hand-back, against pinning either the fresh-worktree disarm or the sessio
 signal. It is a statement, not an omission — the next session picks from the backlog on its own
 judgement.
 
-Three live residuals are in [`open-bugs.md`](backlog/open-bugs.md), none pinned. The child-session
-commit/push refusal is armed or inert depending on HOW the worktree was made — `git worktree add`
-leaves the registry empty and disarms it, the harness copy arms it on foreign records — and nothing
-states or checks which. The closeout gate still cannot tell a mid-lap PAUSE from a sprint that
-ended, since once a lap has committed anything its own commits are at-or-after `registered_at`. The
-lane-DETECTION half stays open under the abstention above.
+Of the three residuals this section used to list, ONE remains in
+[`open-bugs.md`](backlog/open-bugs.md), unpinned: the lane-DETECTION half, still open under the
+abstention above. The child-session refusal's arming-by-worktree-provenance defect is closed, and
+its entry was deleted rather than restated — after the fix its property was word-for-word the
+detection entry's, and two entries stating one property is the duplication this repo bans.
+⚠ **The mid-lap PAUSE-versus-END residual LEFT this repo** (owner ruling 2026-08-30: it is a global
+issue, not an audit-tools one). Its home is now the machine-wide backlog, `C:\Code\docs\backlog.md`,
+created that day because the machine-wide scope had no work tracker at all. `~/.claude/CLAUDE.md`
+carries the pointer and the belongs-here test.
 
 ⚠ **That "approved as a lap of its own" liveness signal is DEAD as sketched (2026-08-30).** It was
 put through the design gate and stopped there before any code: `pid` cannot live on the session

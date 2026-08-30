@@ -46,26 +46,6 @@
   **Property:** the repo DETECTS a delegated lane rather than being told about one, so a lane cannot
   run the ceremony merely because its dispatcher forgot a variable.
 
-- **The closeout Stop gate cannot tell a mid-lap PAUSE from a sprint that ended (2026-08-29,
-  medium, friction: tool_should_decide).**
-  The lap-START half is CLOSED mechanically 2026-08-30: `headMovedRecently` was a 12-hour wall-clock
-  window that attributed the PREVIOUS lap's closing commit to the new session, so `/start-lap` was
-  challenged every time. It now compares HEAD's commit time against the session's `registered_at`,
-  single-sourced with the closeout-render test that already asked the same question. Two contract
-  tests in `hook-session-gates.test.ts` state that trap, so it is not restated here.
-  **The residual is the other direction, and it is NOT covered.** Once a lap has committed anything,
-  its own commits are at-or-after `registered_at`, so any later stop is challenged — including a
-  pause that is, in the global CLAUDE.md's words, "really just the next step loading". Only
-  `liveSessionWorkReason` suppresses those, and it fires solely where the HARNESS will resume the
-  session (a live background task, queued input); an ordinary turn boundary mid-lap looks exactly
-  like a sprint end. Obeying there corrupts the lap, because `/closeout` CONSUMES
-  `.claude/lap-start.json`; refusing teaches the agent to argue with a gate, which is the corrosion
-  any false demand causes.
-  **Property:** the gate distinguishes a sprint that ENDED from a pause inside a lap still running —
-  `.claude/lap-start.json` is present exactly while a lap is open and is the obvious candidate
-  signal, but it is deliberately not yet wired, because nothing currently marks a lap's END apart
-  from the closeout the gate is asking for.
-
 - **The closeout gate calls pushed commits "UNPUSHED" — it tests against `main` and says something
   different from what it means (2026-08-29, low, friction: false_red).**
   `closeout-challenge-gate.mjs` lists commits absent from `main` under the heading "UNPUSHED
