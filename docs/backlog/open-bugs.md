@@ -20,7 +20,7 @@
   reaches the same store as its main checkout; a store it genuinely cannot find is a RED or a
   non-✓ warning, never a tick.
 
-- **▶ The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the
+- **The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the
   dispatching tool call (2026-08-29, high, friction: tool_should_decide).**
   The stopgap half SHIPPED 2026-08-30: `shell-trap-guard.mjs` refuses a write-capable lane invocation
   that would run inside any worktree of this repo, in both shell dialects, unless it declares
@@ -44,17 +44,25 @@
   **Property:** the repo DETECTS a delegated lane rather than being told about one, so a lane cannot
   run the ceremony merely because its dispatcher forgot a variable.
 
-- **The closeout Stop gate demands a hand-back at a lap START, where a closeout is forbidden
-  (2026-08-29, medium, friction: tool_should_decide).** `closeout-challenge-gate.mjs` fired at step 8
-  of `/start-lap` — the approval pause, before the lap's own work had begun — and asked for a rendered
-  closeout. Two instruction sources forbid one at that boundary: the global CLAUDE.md bans a closeout
-  at "a 'pause' that is really just the next step loading", and `/closeout` CONSUMES
-  `.claude/lap-start.json`, so obeying the challenge deletes the lap record written minutes earlier.
-  The gate's stated reason — the record on file predates this session — holds for every session before
-  its sprint ends, so it cannot separate the two cases. An agent that obeys corrupts the lap; an agent
-  that refuses learns to argue with a gate, which is the same corrosion any false demand causes.
-  **Property:** the gate demands a hand-back only at a boundary where a closeout is permitted, and it
-  distinguishes a sprint that ended from a lap that has not yet begun.
+- **The closeout Stop gate cannot tell a mid-lap PAUSE from a sprint that ended (2026-08-29,
+  medium, friction: tool_should_decide).**
+  The lap-START half is CLOSED mechanically 2026-08-30: `headMovedRecently` was a 12-hour wall-clock
+  window that attributed the PREVIOUS lap's closing commit to the new session, so `/start-lap` was
+  challenged every time. It now compares HEAD's commit time against the session's `registered_at`,
+  single-sourced with the closeout-render test that already asked the same question. Two contract
+  tests in `hook-session-gates.test.ts` state that trap, so it is not restated here.
+  **The residual is the other direction, and it is NOT covered.** Once a lap has committed anything,
+  its own commits are at-or-after `registered_at`, so any later stop is challenged — including a
+  pause that is, in the global CLAUDE.md's words, "really just the next step loading". Only
+  `liveSessionWorkReason` suppresses those, and it fires solely where the HARNESS will resume the
+  session (a live background task, queued input); an ordinary turn boundary mid-lap looks exactly
+  like a sprint end. Obeying there corrupts the lap, because `/closeout` CONSUMES
+  `.claude/lap-start.json`; refusing teaches the agent to argue with a gate, which is the corrosion
+  any false demand causes.
+  **Property:** the gate distinguishes a sprint that ENDED from a pause inside a lap still running —
+  `.claude/lap-start.json` is present exactly while a lap is open and is the obvious candidate
+  signal, but it is deliberately not yet wired, because nothing currently marks a lap's END apart
+  from the closeout the gate is asking for.
 
 - **The closeout gate calls pushed commits "UNPUSHED" — it tests against `main` and says something
   different from what it means (2026-08-29, low, friction: false_red).**

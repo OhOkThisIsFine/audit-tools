@@ -11,6 +11,18 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **`question-philosophy-gate` challenges the `/start-lap` approval question, which a skill MANDATES
+  and philosophy cannot settle (2026-08-30, low, friction: false_red).** Step 8 of `/start-lap`
+  requires ending the turn with a direct request to approve the lap plan. The gate fired on it and
+  asked whether a standing conviction already answers it. None can: the question asks for scope
+  AUTHORIZATION, not for how to proceed, and the brief it prints is about the latter. The gate is
+  self-clearing — it states that a surviving question goes through on a re-ask, and it spends only
+  one slot per session — so the cost is one wasted round trip, not a wedge. That is why this is low
+  and not medium. **Property:** the gate does not challenge a question whose asking is itself
+  required by an invoked skill. The same signal the closeout gate now uses is available here —
+  `.claude/lap-start.json` present with no commit at or after the session's `registered_at` is a lap
+  that has not begun, and the only question at that boundary is the approval request.
+
 - **Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer
   unlocated (2026-08-29, low, friction: hermeticity).** Both zero bytes, timestamped during
   targeted vitest invocations in a live session, deleted by hand; the suite's added-root-entry

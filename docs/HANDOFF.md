@@ -5,31 +5,35 @@
 
 ## Live state
 
-- **v0.50.15 is live. HEAD is `93d0a8ee` on `main`** — the offload-lane and attest-preflight lap.
-  Two fixes landed, and three defects were logged rather than worked. The offload workspace-trust
-  leg is DELETED in both homes — this repo's `session-start-guards.mjs` and the machine registry
-  `~/.agent-config/offload-lane-data.mjs` — because its stated consequence never followed from its
-  condition: measured four ways, a lane in an UNTRUSTED workspace reads a gitignored file and
-  returns its content, with the tool flag, without it, and from a directory in no `projects` map
-  (`a239dc68`, owner decision). The attest preflight now refuses only when the worktree tree equals
-  the staged tree BEFORE and AFTER its legs run, and otherwise abstains — recording unattributed
-  passes as well as failures, because the false-green half was silent (`93d0a8ee`). Logged, not
-  worked: the closeout Stop gate demands a hand-back at a lap START (`ad4a9cd9`); a dispatched lane
-  runs this repo's sprint ceremony unless its caller sets `AUDIT_TOOLS_CHILD_SESSION=1`
-  (`f9e9cc3d`); `check:memory-citations` is inert in every lap worktree and ticks the skip
-  (`18c71faf`).
+- **v0.50.15 is live. The lap head is `07c8cdce`** — the dispatched-lane and closeout-gate lap. Two
+  session-attribution defects closed, one half deliberately abstained.
+  `shell-trap-guard.mjs` now REFUSES a write-capable lane invocation that would run inside any
+  worktree of this repo, unless the lane declares `AUDIT_TOOLS_CHILD_SESSION=1` in either shell
+  dialect, carries read-only tools, or is pointed outside the repository (`1f9da704`). Neither
+  pre-existing lane pattern matched a BARE `claude -p`, which is exactly what the relay ladder
+  renders and what caused the incident.
+  The DETECTION half ABSTAINS by owner decision (`674fa682`): two independent refutation lanes and a
+  source pass agreed that no honest failing test can be written for it, and the dead designs are
+  recorded in the entry so a next attempt starts ahead.
+  `closeout-challenge-gate.mjs` no longer attributes another session's commit to this one
+  (`6db20e2c`, `07c8cdce`). Its `headMovedRecently` was a 12-hour wall-clock proxy, so at a lap START
+  the previous lap's closing commit made it fire with nothing to close; it now compares HEAD's commit
+  time against the session's `registered_at`, single-sourced with the closeout-render test that
+  already asked the same question.
 
 ## Immediate next
 
-**The dispatched-lane sprint-ceremony detection is pinned** (owner decision 2026-08-30) — see the
-generated list below, which is the authority. It ships with a `shell-trap-guard` REFUSAL as its
-stopgap: refuse at the tool call any lane invocation whose cwd is inside this repo while it carries
-write or push tools. A prose rule in `CLAUDE.md` was considered and REJECTED, because it would be a
-second copy that drifts.
+**Nothing is pinned.** The roadmap block below is the authority, and an empty one is a statement
+rather than an omission.
+
+The two live residuals are both in [`open-bugs.md`](backlog/open-bugs.md), neither pinned: the
+closeout gate still cannot tell a mid-lap PAUSE from a sprint that ended — once a lap has committed
+anything, its own commits are at-or-after `registered_at`, so any later stop is challenged; and the
+lane-DETECTION half stays open under the abstention above.
 
 Approved as a lap of its own, not pinned yet: a real liveness signal in the session registry — pid
 plus heartbeat, the shape `withFileLock` already uses — after which the added-root-entry teardown fix
-rides on top of it. Both entries are in [`open-bugs.md`](backlog/open-bugs.md).
+rides on top of it.
 
 The standing program direction remains *redesign before scheduled autonomy* → the autonomous
 audit→remediate→PR capstone once the architecture items are worked off.
@@ -75,10 +79,10 @@ audit→remediate→PR capstone once the architecture items are worked off.
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 1 pinned item(s).
+> `verify:checks` and at commit). 0 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the dispatching tool call (2026-08-29, high, friction: tool_should_decide). · [`open-bugs.md`](backlog/open-bugs.md)
+*(nothing pinned — no immediate next step is set. Every open item is in [`docs/backlog/`](backlog/).)*
 
 <!-- END GENERATED ROADMAP -->

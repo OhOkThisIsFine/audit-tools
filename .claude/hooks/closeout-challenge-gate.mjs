@@ -47,15 +47,25 @@ import {
   SESSIONS_DIR_SEGMENTS,
 } from '../../scripts/shared/sessionRegistry.mjs';
 
-// A timestamp counts as "at or after session start" when it is >= registered_at.
-// Returns true if the timestamp is at/after session start (our work), false if before (foreign).
-// If registry is not armed or registered_at is unparseable, safe direction is true (treat as our work).
-function isAtOrAfterSessionStart(tsMs, registryRecord, registryArmed) {
-  if (!registryArmed) return true;                    // transitional window: no session records
+// Does a timestamp fall at or after THIS session's start? The ONE definition
+// both session-attribution checks below read — the HEAD-commit test and the
+// closeout-render test — so the two cannot drift into disagreeing about whose
+// work a timestamp represents.
+//
+// The direction on missing evidence is deliberate, and it is NOT symmetric.
+// An unparseable `registered_at` means the registry cannot say whose work this
+// is, and the safe answer there is OURS: that keeps the challenge firing rather
+// than silently disarming it. An unparseable timestamp is the opposite case —
+// there is nothing to attribute, so it is not ours.
+//
+// Compared at SECOND granularity because git's `%ct` carries seconds while
+// `registered_at` carries milliseconds. Without the floor, a commit made in the
+// same second as registration reads as OLDER than the session that made it.
+function isAtOrAfterSessionStart(tsMs, registryRecord) {
   const startedAt = Date.parse(registryRecord?.registered_at ?? '');
-  if (!Number.isFinite(startedAt)) return true;       // unparseable registered_at -> safe: our work
-  if (!Number.isFinite(tsMs)) return false;           // unparseable timestamp -> not our work
-  return tsMs >= startedAt;                           // at or after session start
+  if (!Number.isFinite(startedAt)) return true;
+  if (!Number.isFinite(tsMs)) return false;
+  return Math.floor(tsMs / 1000) >= Math.floor(startedAt / 1000);
 }
 
 if (process.env.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE) process.exit(0);
@@ -162,26 +172,22 @@ const isForeign = (entry) => entry.paths.every((p) => baseline.has(p));
 const foreign = entries.filter(isForeign);
 const sessionDirt = entries.filter((entry) => !isForeign(entry));
 
-// Single-source the foreign-commit test: a HEAD commit counts as this
-// session's work only when its commit time is at or after the session's
-// registered_at. A commit older than the session start is FOREIGN --
-// exactly as a foreign render is (line 283).
-// git %ct has second precision; registered_at has ms precision. Compare at
-// second granularity so a commit in the same second as registration counts.
-// When registry is NOT armed (no session records), fall back to wall-clock
-// behavior (the transitional-window guarantee). When armed but registered_at
-// is missing/unparseable, safe direction is to treat commit as our work.
+// A HEAD commit is THIS session's work only when it was made at or after the
+// session registered. What this replaced was a 12-hour wall-clock window, which
+// is a PROXY for "this session committed" and attributes another session's
+// commit to this one. At a lap START the previous lap's closing commit is recent
+// by construction, so `/start-lap` fired the challenge every time with nothing
+// to close — measured 2026-08-30 on a clean tree, level with origin, that had
+// committed nothing (HEAD was 8h old, the window 12h).
+//
+// The wall-clock proxy survives for an UNARMED registry ONLY. No session records
+// at all is the documented pre-feature state (a fresh clone, a wiped
+// `.claude/hooks/.state/`), where there is no `registered_at` to compare against
+// and the gate must behave exactly as it did before the registry existed.
 const headTs = Number(git(['log', '-1', '--format=%ct']).out) * 1000;
-let headMovedRecently;
-if (registry.armed) {
-  const startedAt = Number.isFinite(headTs)
-    ? Math.floor(Date.parse(registry.record?.registered_at ?? '') / 1000) * 1000
-    : NaN;
-  headMovedRecently = Number.isFinite(headTs) && (!Number.isFinite(startedAt) || headTs >= startedAt);
-} else {
-  // Transitional window: no session records yet, use wall-clock proxy
-  headMovedRecently = Number.isFinite(headTs) && Date.now() - headTs < RECENT_MS;
-}
+const headMovedRecently = registry.armed
+  ? Number.isFinite(headTs) && isAtOrAfterSessionStart(headTs, registry.record)
+  : Number.isFinite(headTs) && Date.now() - headTs < RECENT_MS;
 
 const remotes = git(['remote']).out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 const remote = remotes.includes('audit-tools') ? 'audit-tools' : remotes[0];
@@ -307,10 +313,9 @@ try {
   // had rendered and pass in silence: 19 of 29 challenged sessions hand-wrote the
   // report and only 3 were caught
   // (docs/reviews/closeout-generation-failure-2026-08-26.md).
-  const startedAt = Date.parse(registry.record?.registered_at ?? '');
   const renderedAt = Date.parse(rec?.rendered_at ?? '');
   const foreignRender =
-    Number.isFinite(startedAt) && Number.isFinite(renderedAt) && renderedAt < startedAt;
+    Number.isFinite(renderedAt) && !isAtOrAfterSessionStart(renderedAt, registry.record);
   if (foreignRender) {
     findings.push(
       "the closeout render on record predates this session, so it is ANOTHER session's hand-back. " +
