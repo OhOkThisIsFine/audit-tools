@@ -47,6 +47,17 @@ import {
   SESSIONS_DIR_SEGMENTS,
 } from '../../scripts/shared/sessionRegistry.mjs';
 
+// A timestamp counts as "at or after session start" when it is >= registered_at.
+// Returns true if the timestamp is at/after session start (our work), false if before (foreign).
+// If registry is not armed or registered_at is unparseable, safe direction is true (treat as our work).
+function isAtOrAfterSessionStart(tsMs, registryRecord, registryArmed) {
+  if (!registryArmed) return true;                    // transitional window: no session records
+  const startedAt = Date.parse(registryRecord?.registered_at ?? '');
+  if (!Number.isFinite(startedAt)) return true;       // unparseable registered_at -> safe: our work
+  if (!Number.isFinite(tsMs)) return false;           // unparseable timestamp -> not our work
+  return tsMs >= startedAt;                           // at or after session start
+}
+
 if (process.env.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE) process.exit(0);
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -151,8 +162,26 @@ const isForeign = (entry) => entry.paths.every((p) => baseline.has(p));
 const foreign = entries.filter(isForeign);
 const sessionDirt = entries.filter((entry) => !isForeign(entry));
 
+// Single-source the foreign-commit test: a HEAD commit counts as this
+// session's work only when its commit time is at or after the session's
+// registered_at. A commit older than the session start is FOREIGN --
+// exactly as a foreign render is (line 283).
+// git %ct has second precision; registered_at has ms precision. Compare at
+// second granularity so a commit in the same second as registration counts.
+// When registry is NOT armed (no session records), fall back to wall-clock
+// behavior (the transitional-window guarantee). When armed but registered_at
+// is missing/unparseable, safe direction is to treat commit as our work.
 const headTs = Number(git(['log', '-1', '--format=%ct']).out) * 1000;
-const headMovedRecently = Number.isFinite(headTs) && Date.now() - headTs < RECENT_MS;
+let headMovedRecently;
+if (registry.armed) {
+  const startedAt = Number.isFinite(headTs)
+    ? Math.floor(Date.parse(registry.record?.registered_at ?? '') / 1000) * 1000
+    : NaN;
+  headMovedRecently = Number.isFinite(headTs) && (!Number.isFinite(startedAt) || headTs >= startedAt);
+} else {
+  // Transitional window: no session records yet, use wall-clock proxy
+  headMovedRecently = Number.isFinite(headTs) && Date.now() - headTs < RECENT_MS;
+}
 
 const remotes = git(['remote']).out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 const remote = remotes.includes('audit-tools') ? 'audit-tools' : remotes[0];

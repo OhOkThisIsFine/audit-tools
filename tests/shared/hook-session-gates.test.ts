@@ -721,6 +721,88 @@ describe('closeout-challenge-gate: headMovedRecently is independently sufficient
   });
 });
 
+// This is the bug fix test: a NEW session registered AFTER an old commit
+// should NOT be challenged by headMovedRecently. The HEAD commit time must
+// be compared against the session's registered_at, not wall-clock time.
+// This is the same comparison used for foreign render detection (line 283
+// in closeout-challenge-gate.mjs).
+describe('closeout-challenge-gate: HEAD time vs session registered_at (foreign commit detection)', () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* windows lock — leave it to the temp reaper */
+      }
+    }
+  });
+
+  async function register(root: string, sessionId: string, baseline: string[]): Promise<void> {
+    const lib = await import('../../scripts/shared/sessionRegistry.mjs');
+    lib.writeSessionRecord(root, {
+      version: 1,
+      session_id: sessionId,
+      registered_at: new Date().toISOString(),
+      source: 'test',
+      baseline,
+    });
+  }
+
+  function isolatedRepo(backdatedHours: number): string {
+    const root = mkdtempSync(join(tmpdir(), 'closeout-headtime-'));
+    roots.push(root);
+    const g = (args: string[], env: NodeJS.ProcessEnv = {}) =>
+      spawnSyncHidden('git', args, {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 30_000,
+        env: { ...process.env, ...env },
+      });
+    g(['init', '-q']);
+    g(['config', 'user.email', 'test@example.com']);
+    g(['config', 'user.name', 'test']);
+    g(['config', 'commit.gpgsign', 'false']);
+    writeFileSync(join(root, 'a.txt'), 'one\n');
+    g(['add', '.']);
+    const when = new Date(Date.now() - backdatedHours * 60 * 60 * 1000).toISOString();
+    g(['commit', '-qm', 'initial'], backdatedHours > 0 ? { GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } : {});
+    return root;
+  }
+
+  // Bug: RECENT_MS = 12h. A commit 8h ago is "recent" by wall clock, but if the
+  // session registered NOW (after that commit), the commit is FOREIGN. The buggy
+  // gate challenges because it only checks wall clock. The fix compares commit
+  // time against session registered_at.
+  it('a session registered after an 8h-old commit does NOT challenge — HEAD is foreign to this session', async () => {
+    const repo = isolatedRepo(8); // commit 8h ago (within 12h RECENT_MS)
+    const session = sid('session-after-8h-commit');
+    await register(repo, session, []); // register NOW
+    const { code } = runHook(CLOSEOUT_GATE, { hook_event_name: 'Stop', session_id: session }, { root: repo });
+    expect(code).toBe(0); // should NOT challenge - HEAD is foreign to this session
+  });
+
+  // Session registered first, then a fresh commit made - HEAD time >=
+  // registered_at (commit happens after registration, so it's this session's work)
+  it('a session registered before a fresh commit DOES challenge — HEAD time >= session registered_at', async () => {
+    const repo = isolatedRepo(24); // old commit, won't trigger
+    const session = sid('session-before-fresh-commit');
+    await register(repo, session, []); // register NOW
+    // Small delay to ensure commit time > registered_at
+    await new Promise((r) => setTimeout(r, 50));
+    // Now make a FRESH commit (after registration) with explicit future timestamp
+    const g = (args: string[], env: NodeJS.ProcessEnv = {}) =>
+      spawnSyncHidden('git', args, { cwd: repo, encoding: 'utf8', windowsHide: true, timeout: 30_000, env: { ...process.env, ...env } });
+    writeFileSync(join(repo, 'fresh.txt'), 'fresh work\n');
+    g(['add', '.']);
+    const when = new Date(Date.now() + 1000).toISOString(); // 1 second in future
+    g(['commit', '-qm', 'fresh commit'], { GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when });
+    const { code } = runHook(CLOSEOUT_GATE, { hook_event_name: 'Stop', session_id: session }, { root: repo });
+    expect(code).toBe(2); // SHOULD challenge - HEAD is this session's work
+  });
+});
+
 // The question gate's Build 1 leg: the unregistered-child skip is STOP-LEG ONLY.
 // A child's closing question is part of its returned deliverable — exit-2'ing it
 // hijacks the hand-back (P23). A child that explicitly calls AskUserQuestion is
