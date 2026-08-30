@@ -5,6 +5,15 @@
 
 ## Live state
 
+- **The fold commit no longer records `accepted` over a staging file that survived.** The applied
+  branch swallowed every `unlink` error, so an EBUSY/EPERM left the ledger saying consumed while
+  the file was still there for recovery to restore. It now rethrows anything but ENOENT.
+  ⚠ **This does NOT close the re-consumption**, and the test says so at the site: the core
+  artifacts are already written, so a failed commit lands the ALREADY-ACCEPTED crash window the
+  module header documents. What the throw removes is the ledger lie, which no crash produces.
+  The entry is deleted rather than restated; the same class at
+  `quarantineSubmissionFile` and `moveFile` is a NEW entry, and it needs its own design pass
+  because `moveFile` runs at fold-start recovery.
 - **v0.50.15 is live.** Recent laps have published nothing, and correctly: no file in the package's
   `files` list changed and `src/` was untouched, so a release would ship an identical artifact under
   a new version. Check that before assuming a lap owes a publish.

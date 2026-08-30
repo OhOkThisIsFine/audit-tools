@@ -102,6 +102,45 @@ test("commit deletes an APPLIED staged submission and records its accepted event
   });
 });
 
+test("a FAILED delete of an applied staged file fails the commit — it never records accepted over a surviving file", async () => {
+  await withArtifactsDir(async (artifactsDir) => {
+    const bound = laneSubmissionPath(artifactsDir, LANE);
+    await writeFile(bound, JSON.stringify({ themes: [] }), "utf8");
+
+    const tx = createFoldTransaction();
+    const staged = await stageLaneSubmission(tx, artifactsDir, LANE);
+    if (staged.status !== "staged") throw new Error("expected staged");
+    markSubmissionApplied(tx, staged.staged.stagingPath);
+
+    // A non-empty DIRECTORY at the staging path makes the delete fail with a
+    // real, non-ENOENT error on every platform (EPERM/EISDIR) — the honest
+    // stand-in for the EBUSY an AV scan produces on Windows. A runtime patch
+    // of node:fs would not work: this tree imports fs through NAMED imports.
+    await rm(staged.staged.stagingPath, { force: true });
+    await mkdir(staged.staged.stagingPath, { recursive: true });
+    await writeFile(join(staged.staged.stagingPath, "held"), "x", "utf8");
+
+    // An `accepted` event over a file that SURVIVED is the state the crash
+    // window cannot produce: recovery would restore the file and re-consume
+    // it while the ledger already called it consumed. Fail the commit instead.
+    //
+    // ⚠ What this does NOT close, stated so the absence is not read as a fix:
+    // the re-consumption itself. The core artifacts are already written, the
+    // staging file still survives, and the next fold's recovery sweep still
+    // restores it. That is the ACCEPTED crash window this module's header
+    // documents — harmless for a one-shot lane (the same content folds to the
+    // same bundle) and suppressed for an iterative one by the content-hash
+    // register. What the throw removes is the LEDGER LIE, which no crash
+    // produces: a recorded consumption over a file that is still there.
+    await expect(commitFold(artifactsDir, {}, tx)).rejects.toThrow();
+
+    const accepted = (await readSubmissionLedger(artifactsDir)).filter(
+      (e) => e.kind === "accepted",
+    );
+    expect(accepted).toEqual([]);
+  });
+});
+
 test("commit RESTORES an un-applied staged submission to its bound path (the throw-before-apply retry)", async () => {
   await withArtifactsDir(async (artifactsDir) => {
     const bound = laneSubmissionPath(artifactsDir, LANE);

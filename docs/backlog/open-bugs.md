@@ -81,16 +81,20 @@
   whose SUBJECT a staged file feeds, or an equivalent gate makes a duplicated derived literal red
   before CI.
 
-- **`commitFold`'s applied-entry unlink swallows non-ENOENT, so Windows can re-consume an
-  already-applied submission (2026-08-28, medium).** The applied branch runs
-  `unlink(staged.stagingPath).catch(() => {})` (`src/audit/cli/foldTransaction.ts`): an EBUSY/EPERM
-  (e.g. an AV scan holding the file) leaves the staging file on disk while the `accepted` ledger
-  event records. The next fold's `recoverStagedSubmissions` then restores that file to its bound
-  path and the fold re-consumes it; only iterative lanes (`systemic_challenge`) are guarded by the
-  content-hash register. Pre-existing before the CX-02 resumable-commit fix (`69613c68`); surfaced
-  by the 3-lens refute panel over that fix. **Property:** an applied entry either deletes its
-  staging file or fails the commit — a swallowed unlink error can never leave a consumed submission
-  in a recoverable location.
+- **Two more swallowed deletes in `foldTransaction.ts` leave a file a later pass re-processes
+  (2026-08-30, medium).** The applied-commit instance of this class is CLOSED — its property is
+  pinned in `tests/audit/submission-staging.test.ts`, which also states what the throw does not
+  close. These two are the same class and are not.
+  `quarantineSubmissionFile`'s copy fallback swallows `unlink(filePath)`, so a quarantined file
+  survives at its source and every later pass quarantines it again and appends another `rejected`
+  event — an unbounded repeat, reachable from 11 call sites (10 of them in `nextStepHelpers.ts`).
+  `moveFile`'s copy-plus-unlink fallback swallows `unlink(from)`, so the source survives beside the
+  destination: through `stageLaneSubmission` the bound file stays and the next fold consumes it
+  again. `moveFile` has three call sites including fold-start recovery, where a throw would turn a
+  recoverable duplicate into a hard failure — so this needs its own design pass, not the one-line
+  edit that closed the applied-commit instance.
+  **Property:** a copy-then-delete fallback that cannot delete its source fails, or records that
+  the source survived — it never reports success while leaving a file a later pass re-processes.
 
 - **A history-moving commit lands its INCOMING content unreviewed — the gate can only read the
   STAGED snapshot (2026-08-28, mechanism corrected 2026-08-29, medium).** The original entry said

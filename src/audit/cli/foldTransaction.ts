@@ -278,7 +278,19 @@ export async function commitFold(
   while (tx.staged.length > 0) {
     const staged = tx.staged[0]!;
     if (staged.applied) {
-      await unlink(staged.stagingPath).catch(() => {});
+      // The delete must SUCCEED before the `accepted` event records. A swallowed
+      // EBUSY/EPERM (an AV scan holding the file on Windows) left the ledger
+      // saying consumed while the file survived for the next fold's recovery
+      // sweep to restore — a disagreement the crash window cannot produce, and
+      // the one state where the ledger is affirmatively wrong. Failing the
+      // commit instead lands the ALREADY-ACCEPTED crash state: no event, file
+      // restorable, duplicates suppressed per lane by the content-hash register.
+      // ENOENT stays ignored: the file is gone, which is the outcome asked for.
+      try {
+        await unlink(staged.stagingPath);
+      } catch (error) {
+        if (!isFileMissingError(error)) throw error;
+      }
       await recordLaneOutcome(artifactsDir, staged.lane, {
         kind: "accepted",
         ...(staged.acceptedMessage ? { message: staged.acceptedMessage } : {}),
