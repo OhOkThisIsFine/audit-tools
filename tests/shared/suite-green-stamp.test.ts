@@ -48,6 +48,13 @@ describe('full-suite green is recorded as tree-bound evidence', () => {
     //
     // ONE success exit is the property, not a style preference: a second one is
     // a second place to forget the evidence, which is exactly what happened.
+    //
+    // UNCOVERED HALF, stated rather than implied: this is STRUCTURAL. It pins
+    // that the gate has one success boundary and that the stamp call precedes
+    // it — not that the call RUNS on a given path. The stamp is deliberately
+    // conditional (isFullSuiteRun), so a future guard added around it would
+    // still pass here. A functional proof needs a real worker-RPC timeout,
+    // which vitestGateVerdict.mjs records as not reproducible on demand.
     const gate = readFileSync(resolve(ROOT, 'scripts/shared/run-vitest-gate.mjs'), 'utf8');
     const successExits = [...gate.matchAll(/process\.exit\(0\)/g)].map((m) => m.index ?? -1);
     expect(successExits).toHaveLength(1);
