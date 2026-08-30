@@ -209,8 +209,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   the trusted repo root does not cover `.claude/worktrees/<lap>`). Working repair (2026-08-29): back
   up `claude-config/.claude.json` in the freellmapi dir, set
   `projects["<worktree path>"].hasTrustDialogAccepted = true` with a node one-liner, then verify with
-  a content probe only a repo read can answer (the package.json `version` value). The class fix —
-  the launcher trusting worktrees of an already-trusted repo — belongs to freellmapi, not this repo.
+  a content probe only a repo read can answer (the package.json `version` value). Owner ruling
+  2026-08-29: no launcher class fix — freellmapi is planned for retirement in favor of llm-relay,
+  so the per-lap hand recipe above is the accepted state until that migration lands.
   [[pool-lane-fabricates-when-untrusted]]
 
 - **The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look
