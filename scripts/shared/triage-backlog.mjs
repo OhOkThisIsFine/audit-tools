@@ -50,8 +50,9 @@
 //                              /v1/models, preferring the `auto` alias — a
 //                              hardcoded model name is a hand-held copy of the
 //                              router's roster and went stale twice before.
-//   TRIAGE_ENDPOINT=<url>      router origin, default http://127.0.0.1:3001
-//   FREELLMAPI_API_KEY=<key>   router bearer key (dashboard -> Keys)
+//   TRIAGE_ENDPOINT=<url>      router origin, default http://127.0.0.1:8791
+//   TRIAGE_API_KEY=<key>       router bearer key. OPTIONAL: llm-relay serves
+//                              loopback with no key, so leave it unset.
 //   TRIAGE_CONCURRENCY=<n>     default 3
 //
 // HEALTH CONTRACT (P11, owner decision sol-4 2026-08-06). Three consecutive
@@ -106,8 +107,8 @@ if (IS_CLI && (OUT_ARG === '-h' || OUT_ARG === '--help')) {
   console.log(USAGE);
   console.log('  outPath                  default .audit-tools/backlog-triage.jsonl');
   console.log('  TRIAGE_MODEL=<spec>      model id; the default is discovered live');
-  console.log('  TRIAGE_ENDPOINT=<url>    router origin, default http://127.0.0.1:3001');
-  console.log('  FREELLMAPI_API_KEY=<key> router bearer key');
+  console.log('  TRIAGE_ENDPOINT=<url>    router origin, default http://127.0.0.1:8791');
+  console.log('  TRIAGE_API_KEY=<key>     router bearer key; optional on loopback');
   console.log('  TRIAGE_CONCURRENCY=<n>   default 3');
   process.exit(0);
 }
@@ -123,12 +124,21 @@ const OUT = OUT_ARG && !OUT_ARG.startsWith('-')
   : join(ROOT, '.audit-tools', 'backlog-triage.jsonl');
 const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
 
-// The router is a local OpenAI-compatible gateway (FreeLLMAPI on :3001 by
-// default). This lane has now outlived two transports — LiteLLM on :4000 and
-// a previous local router — so nothing about it is hardcoded beyond the
-// origin, which TRIAGE_ENDPOINT overrides.
-const ENDPOINT = new URL(process.env.TRIAGE_ENDPOINT || 'http://127.0.0.1:3001');
-const API_KEY = process.env.FREELLMAPI_API_KEY || '';
+// The router is a local OpenAI-compatible gateway (llm-relay on :8791 by
+// default). This lane has now outlived THREE transports — LiteLLM on :4000,
+// an earlier local router, and FreeLLMAPI on :3001 — so nothing about it is
+// hardcoded beyond the origin, which TRIAGE_ENDPOINT overrides.
+//
+// ⚠ FreeLLMAPI was RETIRED 2026-08-29 and :3001 is dead, so the old default
+// gave every unconfigured run an ECONNREFUSED. TRIAGE_ENDPOINT is set nowhere
+// on this machine, so the default is what actually runs — it is the live
+// value, not a fallback.
+//
+// The key is optional: llm-relay serves loopback with no bearer token
+// (/v1/models answers 200 unauthenticated), so an unset TRIAGE_API_KEY is the
+// normal case rather than a misconfiguration.
+const ENDPOINT = new URL(process.env.TRIAGE_ENDPOINT || 'http://127.0.0.1:8791');
+const API_KEY = process.env.TRIAGE_API_KEY || '';
 
 function defaultRosterSource() {
   const r = spawnSync(

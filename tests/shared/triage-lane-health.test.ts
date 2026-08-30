@@ -43,7 +43,7 @@ describe("resolveTriageModel", () => {
   it("aborts loudly when discovery fails, naming the escape", () => {
     expect(() =>
       resolveTriageModel({}, () => {
-        throw new Error("connect ECONNREFUSED 127.0.0.1:3001");
+        throw new Error("connect ECONNREFUSED 127.0.0.1:8791");
       }),
     ).toThrow(/DEAD, not slow.*TRIAGE_MODEL=/s);
   });
