@@ -26,9 +26,14 @@
   that would run inside any worktree of this repo, in both shell dialects, unless it declares
   `AUDIT_TOOLS_CHILD_SESSION=1`, carries read-only tools, or is pointed outside the repository. That
   mechanism states its own trap and its uncovered halves, so neither is restated here.
-  **What remains open is the detection itself**, and it needs an owner decision, because two
-  independent refutation lanes and a source pass all reached the same verdict: no honest failing test
-  can be written for it. Dead designs, so a next attempt starts ahead rather than repeating these:
+  **What remains open is the detection itself.** OWNER DECISION 2026-08-30: ABSTAIN and record —
+  ship the refusal as the whole answer for now, and keep this entry open rather than close it on the
+  half that shipped. Three alternatives were put and declined: sanctioning one lane path by shipping
+  the `lane-dispatch` shell adapter, process-ancestry detection, and closing the entry on Half A. The
+  abstention was chosen because two independent refutation lanes and a source pass all reached the
+  same verdict — no honest failing test can be written for detection — and this repo's own precedent
+  is that a gate which cannot establish its verdict abstains and records rather than approximating.
+  Dead designs, so a next attempt starts ahead rather than repeating these:
   reading `ANTHROPIC_BASE_URL` or `CLAUDE_CONFIG_DIR` to recognize a relay lane re-imports the host
   execution facts `467b1e8f` and `3bea76ee` retired and *No execution inventory in this package* bans;
   `CLAUDECODE` / `CLAUDE_CODE_ENTRYPOINT` absence does not separate the cases, because a lane's own
