@@ -206,30 +206,27 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   reached through the caller's transport instead), and of the wider caller-not-callee class in
   memory: `offload-lane-failures-are-usually-the-caller`.
 
-- **A Claude lane whose isolated `CLAUDE_CONFIG_DIR` has not TRUSTED the workspace answers from
-  nothing rather than failing (2026-08-15).** The dir is trusted per-project and trust is NOT
-  inherited from a parent path, so `C:/Code` being listed does not cover `C:/Code/audit-tools`. The
-  run opens with `Ignoring N permissions.allow entries … this workspace has not been trusted`, then
-  proceeds with no repo tools and **fabricates a confident, well-formed answer** — a doc-review
-  request came back as a sprint closeout claiming zero findings and a green 5111-test run it never
-  executed (recorded as the symptom in `23d2a1e8`; cause found two nights later). For a
-  corroboration lane this is worse than silence: it manufactures agreement
-  ([[lane-agreement-is-not-evidence]]). REPORTED, NOT REPAIRED — each lane row declares
-  `configDirTrust` (or states why the question is uncheckable) in the machine registry
-  `~/.agent-config/offload-lane-data.mjs` (moved out of the repo 2026-08-29, owner decision F10),
-  and the session-start lane leg names an untrusted lane UNUSABLE before any dispatch. The uncovered
-  halves: the file that would GRANT trust belongs to the launcher outside this repo, trust can change
-  between session start and dispatch (a stale green is possible), and a config dir that cannot be read
-  at all answers unknown rather than untrusted, so it stays silent.
-  Every fresh lap WORKTREE re-hits the wall (trust keys on the exact forward-slash project path, so
-  the trusted repo root does not cover `.claude/worktrees/<lap>`). Working repair (2026-08-29): back
-  up the lane config dir's `.claude.json`, set
-  `projects["<worktree path>"].hasTrustDialogAccepted = true` with a node one-liner, then verify with
-  a content probe only a repo read can answer (the package.json `version` value). Owner ruling
-  2026-08-29: no launcher class fix — and freellmapi was RETIRED the same day. The recipe carries
-  over unchanged to the llm-relay pool lane, whose config dir is `C:\Users\ethan\.llm-relay-claude`
-  (registry row `relay-pool-lane` in `~/.agent-config/offload-lane-data.mjs`; the session-start
-  lane leg reads its trust from there).
+- **A lane that lost its tools FABRICATES a confident answer instead of failing — but workspace
+  trust is NOT what takes them away (2026-08-15, premise corrected by measurement 2026-08-29).**
+  The fabrication half is real and unchanged: a toolless lane answers from nothing, in the right
+  shape, with invented supporting quotes. A doc-review request came back as a sprint closeout
+  claiming zero findings and a green 5111-test run it never executed (symptom recorded in
+  `23d2a1e8`). For a corroboration lane that is worse than silence, because it manufactures
+  agreement ([[lane-agreement-is-not-evidence]]). This repeated on 2026-08-29: a probe lane
+  answered with a fabricated closeout for the DISPATCHING session, naming its branch and commit.
+  **What was wrong was the CAUSE.** This entry used to say an untrusted `CLAUDE_CONFIG_DIR`
+  workspace is what strips the tools, and a machine-registry `configDirTrust` row plus a
+  session-start leg reported such a workspace UNUSABLE before dispatch. Measured four ways against
+  the live relay pool lane on 2026-08-29, that consequence never follows: a lane in an UNTRUSTED
+  workspace read a GITIGNORED file and returned its unguessable 40-hex content — with an explicit
+  `--allowedTools` flag, without any flag, and from a directory named in no `projects` map at all;
+  a fourth lane ran `git push` there. The isolated config dir holds no `settings.json` and no
+  `permissions` block, so the `Ignoring N permissions.allow entries` line this entry once quoted
+  belongs to an EARLIER config dir. The trust leg was deleted from both homes — the machine
+  registry and the session-start guard — with the measurement recorded beside the removal.
+  **What to keep doing:** verify any lane answer with a content probe only a real repo read can
+  satisfy (an unguessable value, not a value the model could infer). That is what settled this,
+  and it is the only check that distinguishes a working lane from a fluent one.
   [[pool-lane-fabricates-when-untrusted]]
 
 - **The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look

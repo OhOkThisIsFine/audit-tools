@@ -300,7 +300,19 @@ try {
 // its row's remedy verbatim. Silent-unless-down: unprobeable rows state their
 // reasons as registry data and produce no every-session line (the reap leg
 // above states why — a note that fires every session gets read past).
-/** @type {{ OFFLOAD_LANES: any[], probeLane: Function, checkLaneTrust: Function } | null} */
+//
+// There is NO workspace-trust leg beside this one. One existed until 2026-08-29
+// and reported an untrusted CLAUDE_CONFIG_DIR workspace as "OFFLOAD LANE
+// UNUSABLE … it runs with no repo tools and answers from nothing" (P43). That
+// consequence does not follow from that condition: measured four ways against
+// the live relay pool lane, a lane in an UNTRUSTED workspace read a gitignored
+// file and returned its unguessable content — with the tool flag, without it,
+// and from a directory in no projects map at all. The leg was deleted here and
+// in the machine registry together; the full measurement is recorded in
+// ~/.agent-config/offload-lane-data.mjs beside the removal. Do not reinstate it
+// on the strength of the P43 proposal still on disk — reinstate it only with a
+// measurement showing trust gating tools again.
+/** @type {{ OFFLOAD_LANES: any[], probeLane: Function } | null} */
 let laneRegistry = null;
 try {
   const registryPath =
@@ -312,7 +324,7 @@ try {
 } catch {
   /* an unreadable registry must never block a session — both lane legs skip */
 }
-const { OFFLOAD_LANES = [], probeLane, checkLaneTrust } = laneRegistry ?? {};
+const { OFFLOAD_LANES = [], probeLane } = laneRegistry ?? {};
 try {
   const probed = await Promise.all(
     OFFLOAD_LANES.map(async (lane) => ({ lane, up: await probeLane?.(lane, process.env) })),
@@ -326,32 +338,6 @@ try {
   }
 } catch {
   /* lane probing is best-effort — a probe must never block a session */
-}
-
-// ── Offload-lane workspace trust ─────────────────────────────────────────────
-// A second, independent precondition (P43 / sol-4): a Claude lane launched with
-// an isolated CLAUDE_CONFIG_DIR that has not trusted THIS workspace does not
-// error — it runs with no repo tools and answers from nothing, in the right
-// shape and with fabricated supporting quotes. Trust is per-project and not
-// inherited from a parent path, it is readable before dispatch (so this costs
-// no quota), and the file that would REPAIR it belongs to the launcher outside
-// this repo: this leg reports, it never repairs. Silent unless a config dir
-// exists and does not list this workspace — unknown is silence, not a guess.
-try {
-  const trust = await Promise.all(
-    OFFLOAD_LANES.map(async (lane) => ({ lane, trusted: await checkLaneTrust?.(lane, ROOT, process.env) })),
-  );
-  for (const { lane, trusted } of trust) {
-    if (trusted !== false) continue; // trusted, or unchecked/unknown — silent
-    notes.push(
-      `OFFLOAD LANE UNUSABLE — ${lane.label} launches with an isolated config dir ` +
-        `(${/** @type {NonNullable<typeof lane.configDirTrust>} */ (lane.configDirTrust).configDir}) that has NOT trusted this workspace (${ROOT}). It will not ` +
-        `fail: it runs with no repo tools and answers from nothing. Do not delegate to it until:\n    ` +
-        /** @type {NonNullable<typeof lane.configDirTrust>} */ (lane.configDirTrust).untrustedRemedy,
-    );
-  }
-} catch {
-  /* trust reading is best-effort — it must never block a session */
 }
 
 if (notes.length > 0) {
