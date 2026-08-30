@@ -29,7 +29,7 @@
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
 - `open-bugs.md:9` — `check:memory-citations` is INERT in every lap worktree, and announces the skip as a pass (2026-08-29, medium, friction: false_green).
-- `open-bugs.md:23` — ▶ A dispatched lane launched into this repo runs the repo's OWN sprint ceremony, and the only exemption is an env var the CALLER must remember (2026-08-29, high, friction: tool_should_decide).
+- `open-bugs.md:23` — ▶ The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the dispatching tool call (2026-08-29, high, friction: tool_should_decide).
 - `open-bugs.md:42` — The closeout Stop gate demands a hand-back at a lap START, where a closeout is forbidden (2026-08-29, medium, friction: tool_should_decide).
 - `open-bugs.md:54` — The closeout gate calls pushed commits "UNPUSHED" — it tests against `main` and says something different from what it means (2026-08-29, low, friction: false_red).
 - `open-bugs.md:65` — The gate fixture helper `stageLoopCoreFile` arms NOTHING, and its own comment says it arms the loop-core gate (2026-08-29, medium, friction: false_green).

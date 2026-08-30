@@ -72,6 +72,7 @@ const BYPASS_VARS = [
   'AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH',
   'AUDIT_TOOLS_ALLOW_INLINE_SCRIPT',
   'AUDIT_TOOLS_ALLOW_LONG_DISPATCH',
+  'AUDIT_TOOLS_ALLOW_REPO_LANE',
 ];
 
 interface HookPayload {
@@ -971,5 +972,91 @@ describe('the harness itself cannot be disabled by the ambient shell', () => {
     const used = [...guard.matchAll(/bypassEnabled\('([A-Z_]+)', cmd\)/g)].map((m) => m[1]);
     expect(used.length).toBeGreaterThan(0);
     for (const name of new Set(used)) expect(BYPASS_VARS).toContain(name);
+  });
+});
+
+// A lane dispatched INTO this repo becomes a session in it: it fires SessionStart,
+// self-registers as an owner, and then obeys this repo's sprint ceremony. Measured
+// 2026-08-29: such a lane ran the full suite three times, overwrote the dispatching
+// session's suite-green stamp with its own tree, and pushed the branch to origin.
+// `AUDIT_TOOLS_CHILD_SESSION=1` exempts it, but nothing SETS that — not the relay
+// ladder's rendered command, not scripts/shared/lane-dispatch.mjs (which is
+// lane-agnostic and spawns no process at all). An exemption that works only when
+// the caller remembers is host discretion, which this repo bans everywhere else.
+//
+// The dispatching session's tool call is the ONE boundary this repo owns, so the
+// refusal lives here. Note what the two existing lane patterns miss: CLI_DISPATCH_CMD
+// covers `codex exec` / `agy -p`, and CLI_DISPATCH_PROMPT_CMD adds only
+// `claude.ps1 -p`. A BARE `claude -p` — the exact form the relay ladder renders, and
+// the form that caused the incident — matches neither.
+describe('shell-trap-guard: a write-capable lane dispatched into this repo', () => {
+  const LANE_BASH =
+    "claude -p 'fix the gate' --permission-mode acceptEdits --allowedTools Bash,Read,Edit,Write";
+  // The relay ladder's own rendering: PowerShell, env assignments, then a bare lane.
+  const LANE_PS =
+    "$env:ANTHROPIC_BASE_URL = 'http://127.0.0.1:8791'; " +
+    "claude -p 'fix the gate' --permission-mode acceptEdits --allowedTools Bash,Read,Write";
+
+  it('refuses a bare `claude -p` lane carrying write tools', () => {
+    const { code, stderr } = runHook(SHELL_GUARD, bash(LANE_BASH));
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/lane/iu);
+  });
+
+  it('refuses the PowerShell ladder form too', () => {
+    const { code, stderr } = runHook(SHELL_GUARD, ps(LANE_PS));
+    expect(code, stderr).toBe(2);
+  });
+
+  it('refuses a lane carrying push capability even without Write', () => {
+    const { code } = runHook(
+      SHELL_GUARD,
+      bash("claude -p 'ship it' --allowedTools Bash --permission-mode acceptEdits"),
+    );
+    expect(code).toBe(2);
+  });
+
+  // The three shapes below must NOT be refused. A false red here costs as much as
+  // the false green the rule exists to stop: it would block every correct lane.
+  it('allows a READ-ONLY lane — it cannot commit, push, or rewrite the stamp', () => {
+    const { code, stderr } = runHook(
+      SHELL_GUARD,
+      bash("claude -p 'review this' --allowedTools Read,Grep,Glob"),
+    );
+    expect(code, stderr).toBe(0);
+  });
+
+  it('allows a write-capable lane that declares itself a child — bash inline form', () => {
+    const { code, stderr } = runHook(
+      SHELL_GUARD,
+      bash(`AUDIT_TOOLS_CHILD_SESSION=1 ${LANE_BASH}`),
+    );
+    expect(code, stderr).toBe(0);
+  });
+
+  // durable-traps records that the PowerShell-form inline token is NOT recognized by
+  // bypassEnabled. This rule must recognize it anyway: the relay ladder renders
+  // PowerShell, so a bash-only marker test would false-red every correct PS lane.
+  it('allows a write-capable lane that declares itself a child — PowerShell form', () => {
+    const { code, stderr } = runHook(
+      SHELL_GUARD,
+      ps(`$env:AUDIT_TOOLS_CHILD_SESSION = '1'; ${LANE_PS}`),
+    );
+    expect(code, stderr).toBe(0);
+  });
+
+  it('allows a lane explicitly pointed OUTSIDE this repo', () => {
+    const { code, stderr } = runHook(
+      SHELL_GUARD,
+      bash(`cd /tmp/elsewhere && ${LANE_BASH}`),
+    );
+    expect(code, stderr).toBe(0);
+  });
+
+  it('honors its declared bypass', () => {
+    const { code } = runHook(SHELL_GUARD, bash(LANE_BASH), {
+      env: { AUDIT_TOOLS_ALLOW_REPO_LANE: '1' },
+    });
+    expect(code).toBe(0);
   });
 });

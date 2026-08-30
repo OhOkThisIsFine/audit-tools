@@ -17,6 +17,7 @@
 // Failure policy: FAIL-OPEN on anything unexpected (unparseable payload, git
 // fault). A guard must never wedge the session.
 import { spawnSync } from 'node:child_process';
+import { resolve as resolvePath } from 'node:path';
 import {
   stripQuoted,
   splitShellStatements,
@@ -520,6 +521,97 @@ for (const sub of subCmds) {
       '  deliberate: re-run with AUDIT_TOOLS_ALLOW_LONG_DISPATCH=1.',
   );
   break;
+}
+
+// ── Rule: a write-capable lane dispatched INTO this repo ─────────────────────
+// A lane launched with this repo as its cwd does not stay a lane. It fires
+// SessionStart, self-registers as an OWNER, and then obeys this repo's own
+// sprint ceremony. Measured 2026-08-29: a `claude -p` lane given acceptEdits
+// plus Bash/Write never answered its prompt — it ran the full suite three
+// times, overwrote the DISPATCHING session's suite-green stamp with its own
+// tree (voiding that session's green baseline), and pushed the branch to
+// origin.
+//
+// `AUDIT_TOOLS_CHILD_SESSION=1` exempts a child from the session-scoped Stop
+// gates, but NOTHING sets it: not the relay ladder's rendered command, not
+// scripts/shared/lane-dispatch.mjs (lane-agnostic by construction — its shell
+// adapter is deliberately unshipped, so it spawns no process and can set no
+// env), and not any repo affordance. An exemption that works only when the
+// caller remembers is host discretion, which this repo bans everywhere else.
+//
+// WHY HERE. The dispatching session's tool call is the one boundary this repo
+// owns. The lane's own process cannot be asked: nothing inside it distinguishes
+// a lane from an owner, and the signals that look like they might (a loopback
+// ANTHROPIC_BASE_URL, a lane-specific CLAUDE_CONFIG_DIR) are exactly the host
+// execution facts `467b1e8f` and `3bea76ee` retired. A gate states the boundary
+// it owns rather than guessing at one owned by something else.
+//
+// UNCOVERED, stated rather than implied: a lane launched from a shell this hook
+// never sees, and any dispatch reaching git through a script rather than a tool
+// call (`scripts/release-and-publish.mjs`) — both already-declared halves of the
+// same session-registry split in docs/backlog/durable-traps.md.
+const LANE_CMD =
+  /\bcodex\s+exec\b|\bagy\b[^|;&]*\s(?:-p|--print)\b|\bclaude(?:\.ps1|\.exe)?\b[^|;&]*\s(?:-p|--print)\b/;
+// Write OR push capability. `Bash` alone qualifies: a lane holding a shell can
+// run `git push` no matter what its other tools are.
+const LANE_WRITE_CAPABLE =
+  /--allowedTools[\s=]+\S*\b(?:Bash|Edit|Write|NotebookEdit)\b|--permission-mode[\s=]+(?:acceptEdits|bypassPermissions)\b|--dangerously-skip-permissions\b/;
+// The child marker in BOTH dialects. Matched on STRIPPED text, so the shape of
+// the assignment must sit outside quotes — a prompt that merely names the token
+// is blanked to spaces and cannot switch the rule off. durable-traps records
+// that `bypassEnabled` does not recognize the PowerShell form; this rule must,
+// because the relay ladder renders PowerShell and a bash-only test would
+// false-red every correctly-marked lane.
+const CHILD_MARKER =
+  /(?:^|[\s;&|(])AUDIT_TOOLS_CHILD_SESSION\s*=|\$env:AUDIT_TOOLS_CHILD_SESSION\s*=/;
+const CD_STATEMENT = /^\s*(?:cd|pushd|Set-Location|sl)\b/i;
+const strippedCmd = stripQuoted(cmd);
+if (
+  LANE_CMD.test(strippedCmd) &&
+  LANE_WRITE_CAPABLE.test(strippedCmd) &&
+  !CHILD_MARKER.test(strippedCmd) &&
+  !bypassEnabled('AUDIT_TOOLS_ALLOW_REPO_LANE', cmd)
+) {
+  // Every worktree of this repository counts as "in this repo": they share one
+  // object store, so a lane in a sibling worktree can still push. The common
+  // git dir's parent is that family's root.
+  const norm = (p) => resolvePath(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const common = git(['rev-parse', '--git-common-dir']);
+  // FAIL-OPEN: no git answer means no family to compare against, so the rule
+  // stands down rather than guessing.
+  const family = common.ok && common.stdout.trim() ? norm(resolvePath(ROOT, common.stdout.trim(), '..')) : null;
+  if (family) {
+    // An explicit cd/Set-Location retargets the lane. Targets are read from the
+    // RAW statement (stripQuoted blanks a quoted path), but only from statements
+    // whose stripped form BEGINS with the verb — so a `cd` inside a prompt is
+    // never mistaken for a real one.
+    const targets = [];
+    for (const st of splitShellStatements(cmd)) {
+      if (!CD_STATEMENT.test(stripQuoted(st))) continue;
+      const m = st.match(/^\s*(?:cd|pushd|Set-Location|sl)\s+(?:-\S+\s+)*(?:'([^']+)'|"([^"]+)"|(\S+))/i);
+      const target = m && (m[1] || m[2] || m[3]);
+      if (target) targets.push(target);
+    }
+    const inFamily = (p) => {
+      const abs = norm(resolvePath(ROOT, p));
+      return abs === family || abs.startsWith(family + '/');
+    };
+    // No cd at all: the lane inherits THIS session's cwd, which is this repo.
+    if (targets.length === 0 || targets.some(inFamily)) {
+      denials.push(
+        'a write-capable lane dispatched INTO this repo — it will not stay a lane. It fires ' +
+          'SessionStart, self-registers as an OWNER, and then runs this repo\'s sprint ceremony. ' +
+          'Measured 2026-08-29: such a lane never answered its prompt; it ran the full suite three ' +
+          "times, overwrote the DISPATCHING session's suite-green stamp with its own tree, and " +
+          'pushed the branch to origin.\n' +
+          '  fix: pick ONE — mark it a child (`AUDIT_TOOLS_CHILD_SESSION=1` inline, or ' +
+          "`$env:AUDIT_TOOLS_CHILD_SESSION = '1';` in PowerShell); or give it READ-ONLY tools " +
+          '(`--allowedTools Read,Grep,Glob`), which cannot commit, push, or rewrite the stamp; or ' +
+          'point it at a directory outside this repository.\n' +
+          '  deliberate: re-run with AUDIT_TOOLS_ALLOW_REPO_LANE=1.',
+      );
+    }
+  }
 }
 
 // ── Rule: a backgrounded suite exit LAUNDERED by a trailing statement ────────

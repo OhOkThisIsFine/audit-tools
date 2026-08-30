@@ -79,6 +79,6 @@ audit→remediate→PR capstone once the architecture items are worked off.
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ A dispatched lane launched into this repo runs the repo's OWN sprint ceremony, and the only exemption is an env var the CALLER must remember (2026-08-29, high, friction: tool_should_decide). · [`open-bugs.md`](backlog/open-bugs.md)
+- ▶ The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the dispatching tool call (2026-08-29, high, friction: tool_should_decide). · [`open-bugs.md`](backlog/open-bugs.md)
 
 <!-- END GENERATED ROADMAP -->

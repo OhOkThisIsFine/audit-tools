@@ -1008,7 +1008,16 @@ export const REACH = [
       '(blanked before scanning) escapes measurement; scripts/shared/lane-dispatch.mjs is the primary fix. ' +
       '.claude/hooks/friction-stop-gate.mjs re-implements the friction-dir *.json listing by hand ' +
       '(readdirSync + .endsWith(".json")) because a pre-build hook cannot import built src — a ' +
-      'hand-maintained duplicate of listFrictionRecordFilenames that drifts independently.',
+      'hand-maintained duplicate of listFrictionRecordFilenames that drifts independently.' +
+      ' The repo-lane refusal in shell-trap-guard REFUSES a recognizable lane invocation at the ' +
+      'dispatching tool call; it does NOT detect a delegated lane, which remains unsolved. Its ' +
+      'uncovered halves: a lane launched from a shell no PreToolUse hook sees; a dispatch reaching ' +
+      'git through a script rather than a tool call (scripts/release-and-publish.mjs); and a lane ' +
+      'whose invocation LANE_CMD does not match (a new CLI, or an unusual flag spelling), which ' +
+      'still self-registers as an owner exactly as before. Inside the lane process nothing ' +
+      'distinguishes it from an owner, and the signals that appear to (a loopback ' +
+      'ANTHROPIC_BASE_URL, a lane-specific CLAUDE_CONFIG_DIR) are the host execution facts 467b1e8f ' +
+      'and 3bea76ee retired, so they are not available to this repo.',
   },
   {
     area: 'gate scripts (the guards themselves)',

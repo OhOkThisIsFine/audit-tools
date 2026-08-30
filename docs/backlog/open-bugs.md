@@ -20,22 +20,22 @@
   reaches the same store as its main checkout; a store it genuinely cannot find is a RED or a
   non-✓ warning, never a tick.
 
-- **▶ A dispatched lane launched into this repo runs the repo's OWN sprint ceremony, and the only
-  exemption is an env var the CALLER must remember (2026-08-29, high, friction: tool_should_decide).**
-  OWNER DECISION 2026-08-30: this is the NEXT lap's work, and it ships with a `shell-trap-guard`
-  REFUSAL as its stopgap — refuse at the tool call any lane invocation whose cwd is inside this repo
-  while it carries write or push tools. The refusal was chosen over a CLAUDE.md rule precisely because
-  prose would be a second copy that drifts, and over doing nothing because nothing else stops the
-  mistake until the detection lands. Both halves are this entry's scope.
-  Measured this lap: a `claude -p` lane given `--permission-mode acceptEdits` and Bash/Write tools,
-  with its cwd inside a worktree of this repo, never answered its prompt. It became a session IN this
-  repo, obeyed the closeout ceremony, ran the full suite three times, overwrote
-  `.claude/hooks/.state/suite-green/latest.json` with its own tree — voiding the dispatching session's
-  green baseline — and pushed the branch to origin. `AUDIT_TOOLS_CHILD_SESSION=1` exempts a child from
-  the session-scoped Stop gates, but nothing SETS it: not the dispatch ladder's rendered command, not
-  the session-start guard that recommends the lane, and not any repo affordance. An exemption that
-  works only when the caller remembers is host discretion, which this repo bans everywhere else. The
-  blast radius is not theoretical — an unattended lane pushed a branch and rewrote green evidence.
+- **▶ The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the
+  dispatching tool call (2026-08-29, high, friction: tool_should_decide).**
+  The stopgap half SHIPPED 2026-08-30: `shell-trap-guard.mjs` refuses a write-capable lane invocation
+  that would run inside any worktree of this repo, in both shell dialects, unless it declares
+  `AUDIT_TOOLS_CHILD_SESSION=1`, carries read-only tools, or is pointed outside the repository. That
+  mechanism states its own trap and its uncovered halves, so neither is restated here.
+  **What remains open is the detection itself**, and it needs an owner decision, because two
+  independent refutation lanes and a source pass all reached the same verdict: no honest failing test
+  can be written for it. Dead designs, so a next attempt starts ahead rather than repeating these:
+  reading `ANTHROPIC_BASE_URL` or `CLAUDE_CONFIG_DIR` to recognize a relay lane re-imports the host
+  execution facts `467b1e8f` and `3bea76ee` retired and *No execution inventory in this package* bans;
+  `CLAUDECODE` / `CLAUDE_CODE_ENTRYPOINT` absence does not separate the cases, because a lane's own
+  hooks see them set; and `scripts/shared/lane-dispatch.mjs` cannot carry the marker, being
+  lane-agnostic with its shell adapter deliberately unshipped, so it spawns no process. Process
+  ancestry is the one candidate never tried and never retired (`git log -S'ppid'` and `-S'parentPid'`
+  return nothing), and it is OS-specific.
   **Property:** the repo DETECTS a delegated lane rather than being told about one, so a lane cannot
   run the ceremony merely because its dispatcher forgot a variable.
 
