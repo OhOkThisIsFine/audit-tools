@@ -49,15 +49,17 @@ creations / 2.216 s, and one reuse makes a dead session's entry claim liveness f
 and workers, and survive `npm exec`** — so the consumer names its own session with no ancestry walk
 at all.
 
-**The proposal replaces the LIVENESS question with an OVERLAP question** — did another session act
-inside this suite's window — which needs no pid and no per-OS branch. The design gate refuted it
-twice, and both breaks were re-verified against source: `run-vitest-gate.mjs:153` means an abstention
-would let `npm test` certify a tree containing the leak, and a path-spelling mismatch would make the
-fix ship INERT. Both have stated revisions in the entry.
+**The design half ran and the design DIED — a fourth one, at the gate, before any code.** The
+proposal replaced the LIVENESS question with an activity-OVERLAP question. Two independent refutation
+rounds killed it, both re-verified against source. The fatal flaw: hook fires track TOOL ACTIVITY,
+not writes, so a concurrent session that merely READS during the suite window marks it overlapped and
+silently excuses a leak the suite itself created. It converts the false red into a **false green**.
 
-**OWNER DECISION PENDING — implement the revised design, or leave it proposed.** The first
-implementation step is fixed either way: extract the attribution decision out of `repoRootProblems`
-into a pure exported function, because nothing can be tested until it exists.
+**Immediate next is the extraction, and it is design-independent.** Pull the attribution decision out
+of `repoRootProblems` into a pure exported function. Nothing here is testable until it exists — that
+is why no failing test could be written this lap — and every candidate design needs it. Two assets
+survive for whatever comes after: `samePath` (`.claude/hooks/session-start-guards.mjs`) is the
+correct checkout-comparison primitive, and the consumer already knows its own session.
 
 Of the three residuals this section used to list, ONE remains in
 [`open-bugs.md`](backlog/open-bugs.md), unpinned: the lane-DETECTION half, still open under the

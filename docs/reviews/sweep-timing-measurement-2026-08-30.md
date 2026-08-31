@@ -365,6 +365,55 @@ spelling to its existing entry rather than filed again.
    `Invalid argument/option - 'C:/Program Files/Git/FI'`, while the same call as argv from Node
    (`spawnSync("tasklist", ["/FI", …])`) is unaffected — so the trap is the SHELL, not the tool.
 
+### Second refutation — the revisions were checked independently, and the design DIED
+
+Owner decision, taken on reading the first refutation: **refute the revisions before writing any
+code**, because the revisions above answered the first refutation but were written by the proposal's
+own author. A second independent lane (`agy-gemini`, 50 s) was asked to attack them. It returned
+`fatal: true` on all three questions. Each checkable claim was re-verified against source before
+being accepted; the two that were verifiable are verified, and one improves on the proposal.
+
+**Revision B is dead, and the correct primitive already exists.** `normalizeRepoPath` is
+`p.trim().replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase()`
+(`src/shared/validation/findingGrounding.ts`). It never calls `resolve()`, so it cannot reconcile two
+absolute spellings; it lowercases unconditionally, which is wrong off win32; and it lives in the
+TypeScript tree, so a `.mjs` hook importing it takes a dependency on a built `dist/` — in a repo
+that already warns a fresh worktree resolves a STALE `dist/`. **`samePath`
+(`.claude/hooks/session-start-guards.mjs`) is the right tool and is already in the writing file**:
+`resolve()`, forward-slash, trailing-slash strip, and a case-fold guarded by
+`process.platform === 'win32'`. It has no `dist/` dependency. Verified by reading both.
+
+**Revision A is dead.** Two of the three counts hold. The closeout's missing-stamp finding says
+*"`npm test` has not passed since the stamp was last cleared … run it after your last edit"*, which
+for an abstention is simply FALSE — the suite passed and merely could not attribute — so the
+abstention reaches a reader wearing the wrong diagnosis. And a re-run does not clear it: while the
+other session keeps acting, every re-run abstains again, and the operator is told to do the one thing
+that cannot help. *(Stated accurately rather than as the lane put it: this is not an infinite loop —
+it clears once the other session goes quiet. The defect is that nothing tells the operator that, so
+they cannot know to wait.)* The lane's first count — that the gate stamps after vitest exits, so
+teardown cannot reach the decision — is a cost rather than an impossibility, since the gate already
+reads a per-run ledger; but with the other two counts standing it does not need to be settled.
+
+**The whole overlap design is dead, on a flaw neither refutation round had reached.** Hook fires
+track TOOL ACTIVITY, not filesystem writes. A concurrent session that merely READS a file during the
+suite window updates its `last_active`, the window reads as overlapped, and **a genuine leak created
+by the suite itself is silently excused**. Confirmed against this lap's own cadence probe, whose
+matcher was `*` and which fired on every tool call. So the design does not remove the false red — it
+**converts it into a false green**, which is the exact direction constraint (i) exists to forbid.
+That is fatal, and it is not repairable by narrowing the matcher: a `Bash` call cannot be classified
+as read-only from a hook.
+
+### What survives the death, so the next attempt starts ahead
+
+- **Every measurement above.** R1–R5 are facts about the machine and the repo, not about this design.
+- **`samePath` is the checkout-comparison primitive**, already written, already in the hook.
+- **The consumer knows its own session** (R5). That remains true and useful to any design.
+- **A sixth constraint, added by this lap.** Any future design must satisfy it:
+  **(vi) an abstention trigger must be correlated with WRITES, not with activity — and an abstention
+  must never become a green.** A trigger that fires on read-only activity converts the false red into
+  a false green; an abstention routed through a missing stamp reaches the operator as a false
+  diagnosis and cannot be cleared by the action it recommends.
+
 ### What this lap did NOT do
 
 **No failing test was written, and no code changed.** The design gate's step 4 asks for the failing

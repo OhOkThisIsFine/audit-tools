@@ -144,27 +144,29 @@
   false_red).** `tests/helpers/global-setup.ts` teardown diffs the repo root before and after the run,
   so a foreign write inside that window is attributed to the run. **Property:** the teardown asserts a
   verdict about a root entry only where that verdict can be true.
-  **Three constraints bind, and two are VERIFIED BREAKS rather than risks.** (i) the throw is part of
-  the DECLARED green mechanism — `writeSuiteGreenStamp` (`scripts/shared/run-vitest-gate.mjs`, guarded
-  only by `isFullSuiteRun`) stamps any full-suite run that reaches it,
-  so an abstention makes `npm test` certify a tree containing the leak; (ii) "notice instead of throw"
-  is silence, the pre-commit `test:doc-contract` leg reading the child's streams only in `catch`;
-  (iii) `repoRootProblems` has one caller and zero test observers — and an unnormalized checkout
-  compare ships INERT, because `global-setup.ts` computes `C:\Code\audit-tools` while the hook carries
-  `C:/Code/audit-tools`.
-  **MEASURED over two laps** — the three dead designs, the proposal and its refutation are in
+  **FOUR designs are now dead** — attribute-the-writer, sole-writer, stored-pid liveness, and
+  activity-OVERLAP (the last at the design gate, 2026-08-30: refuted twice, both rounds re-verified
+  against source). All four, the measurements and the refutations live in
   [sweep timing](../reviews/sweep-timing-measurement-2026-08-30.md) and
   [ppid](../reviews/ppid-liveness-measurement-2026-08-30.md); this entry points rather than retells.
-  The two results that bind any design: **`processAlive` alone is NOT a sufficient sweep** — pid reuse
-  floors at 270 creations / 2.216 s, and one reuse makes a dead entry claim liveness forever — and
-  **the consumer already knows its own session**, since `CLAUDE_CODE_SESSION_ID` and a live
-  `CLAUDE_PID` reach vitest `globalSetup`, `teardown` and workers and survive `npm exec`. The latter
-  dissolved the two older constraints, that ancestry cannot name a checkout and that the walk is
-  platform-specific.
-  **Next step whichever way this goes:** extract the attribution decision out of `repoRootProblems`
-  into a pure exported function — nothing here is testable until it exists, and no failing test can be
-  written before it. **Owner decision pending: implement the proposed overlap design, or leave it
-  proposed.**
+  **Constraints on any next attempt.** (i) the throw is part of the DECLARED green mechanism —
+  `writeSuiteGreenStamp` (`scripts/shared/run-vitest-gate.mjs`) stamps any full-suite run that reaches
+  it, so an abstention certifies a tree containing the leak; (ii) "notice instead of throw" is silence,
+  the pre-commit `test:doc-contract` leg reading the child's streams only in `catch`; (iii)
+  `repoRootProblems` has one caller and zero test observers; **(vi, NEW) an abstention trigger must
+  correlate with WRITES, not activity, and an abstention must never become a green.** Hook fires track
+  TOOL ACTIVITY, so a concurrent session that merely READS during the window excuses a real leak, and a
+  withheld stamp reaches the operator as a FALSE diagnosis the recommended re-run cannot clear. That
+  pair killed design four.
+  **Measured facts that bind.** `processAlive` alone is NOT a sufficient sweep — pid reuse floors at
+  270 creations / 2.216 s, and one reuse makes a dead entry claim liveness forever. And the consumer
+  already knows its own session: `CLAUDE_CODE_SESSION_ID` and a live `CLAUDE_PID` reach vitest
+  `globalSetup`, `teardown` and workers and survive `npm exec`, which retired the two older ancestry
+  constraints.
+  **First step, design-independent:** extract the attribution decision out of `repoRootProblems` into a
+  pure exported function — nothing here is testable until it exists. `samePath`
+  (`.claude/hooks/session-start-guards.mjs`) is the correct checkout-comparison primitive;
+  `normalizeRepoPath` is not.
 
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
   fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went
