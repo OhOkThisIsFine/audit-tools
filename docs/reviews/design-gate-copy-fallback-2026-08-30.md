@@ -41,8 +41,12 @@ Three call sites, all in `foldTransaction.ts`:
 - **The recovery sweep (line 250).** Runs inside the artifact-tree hold but *outside* the
   commit-on-throw `try`, before `loadArtifactBundle`. A throw aborts the whole `next-step` with
   nothing staged and nothing lost, and the next invocation retries recovery.
-  ⚠ **Residual risk:** a *persistently* undeletable staging file would abort every future
-  invocation at the same point. Transient EBUSY self-heals; a permission fault does not.
+  ⚠ **This section first claimed a persistently undeletable staging file would abort EVERY future
+  invocation at the same point. That was WRONG, and the independent lane caught it** (§5). The next
+  run does not repeat the throw: run 1's `writeFile` already landed the content at the bound path,
+  so run 2's `readFile(boundPath)` succeeds, `boundOccupied` is true, and the sweep takes the
+  quarantine branch instead — which RECORDS rather than throws, and `continue`s. The failure mode is
+  a recorded repeat, not a wedge. Confirmed at source.
 - **`commitFold`'s un-applied restore (line 300).** The caller already rethrows any non-missing
   error, so a throw escapes `commitFold`. Note the restore's own goal is already met when the unlink
   fails: the copy put the content at the bound path. What survives is the staging duplicate.
@@ -96,5 +100,31 @@ file whose own header calls `commitFold` "THE commit — the fold's one core wri
 EVERY fold exit including the throw path" is not covered by the gate that governs loop-core commits.
 No `guard-reach-data.mjs` row claims it either.
 
-This is a gate-reach defect, not a retirement. It is stated here rather than fixed here, because
-widening the loop-core set changes which future commits require an attestation — an owner call.
+This is a gate-reach defect, not a retirement. The owner widened the set in this lap
+(2026-08-30), which closes the instance; the CLASS — a symbol leaving loop-core coverage by being
+moved — is an [`open-bugs.md`](../backlog/open-bugs.md) entry.
+
+## 5. Independent refutation — ran late, and it CORRECTED this record
+
+Step 3 of the gate did not run before the code, and that is stated rather than hidden. The
+`claude-free-pool` lane was dispatched first and ran **23 minutes without returning**, so the
+design work above was done by the authoring session alone. The `agy-claude-opus` lane was then tried
+and came back quota-exhausted in 16s. `agy-gemini` answered in **45 seconds**, fully cited.
+
+⚠ **This repeated a mistake the record already held.** The friction walk of the *two-identities*
+lap, in this same backlog, states: the pool lane ran 14 min with no answer while agy answered the
+identical prompt in ~4 min, and *"for a repo-reading refutation, prefer agy and hand it the recon
+map"*. That instruction was not followed here, and the same 20+ minutes were spent again.
+
+Its verdict, each claim re-verified against source before being accepted:
+
+1. **The asymmetry is correct**, and it supplied a stronger argument for it than this record had: if
+   `moveFile` swallowed the failure in the recovery sweep, the surviving staging file would make the
+   NEXT pass read `boundOccupied` as true — because the copy already wrote the bound path — and it
+   would then quarantine and reject a submission that is perfectly valid.
+2. **Corrected the wedge claim** — folded into §2 above.
+3. **The survival note reaches a durable record, not just the console.** Verified:
+   `recordLaneOutcome` forwards `message` into `appendSubmissionEvent`, which persists to the
+   submission ledger. It also confirmed no operator command in this repo targets
+   `submission-staging/` — `grep` over `recoverSubmissionCommand.ts` and `cleanupCommand.ts` returns
+   nothing.

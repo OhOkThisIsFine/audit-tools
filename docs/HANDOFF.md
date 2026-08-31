@@ -5,22 +5,27 @@
 
 ## Live state
 
-- **The fold commit no longer records `accepted` over a staging file that survived.** The applied
-  branch swallowed every `unlink` error, so an EBUSY/EPERM left the ledger saying consumed while
-  the file was still there for recovery to restore. It now rethrows anything but ENOENT.
-  ⚠ **This does NOT close the re-consumption**, and the test says so at the site: the core
-  artifacts are already written, so a failed commit lands the ALREADY-ACCEPTED crash window the
-  module header documents. What the throw removes is the ledger lie, which no crash produces.
-  The entry is deleted rather than restated; the same class at
-  `quarantineSubmissionFile` and `moveFile` is a NEW entry, and it needs its own design pass
-  because `moveFile` runs at fold-start recovery.
-- **v0.50.16 is live**, published from `4a29aea6`. It carries the fold-commit fix above — the first
-  lap in several to owe a publish, because earlier laps left `src/` and the package's `files` list
-  untouched and would have shipped an identical artifact under a new version. Check that before
-  assuming a lap owes one.
+- **Both copy-then-delete fallbacks in `foldTransaction.ts` now report what they achieved, and they
+  take OPPOSITE arms — the asymmetry is the design, not an inconsistency.** `moveFile` THROWS on a
+  non-ENOENT unlink failure: all three call sites already rethrow non-missing errors and none has
+  consumed or recorded anything, so the fold fails and retries with the content intact.
+  `quarantineSubmissionFile` RECORDS instead, returning `sourceSurvived`, because every caller
+  awaits it and THEN records the `rejected` event — a throw would suppress that event and leave the
+  file bound, wedging the fold with nothing on the ledger. `quarantineSurvivalNote` is the one home
+  for the wording and reaches the durable ledger message, not only stderr. The reasoning, the
+  independent refutation, and one claim that refutation corrected are in
+  [`design-gate-copy-fallback-2026-08-30.md`](reviews/design-gate-copy-fallback-2026-08-30.md).
+- **`src/audit/cli/foldTransaction.ts` is now loop-core** (owner decision 2026-08-30). It never was,
+  although `quarantineSubmissionFile` moved into it out of `nextStepHelpers.ts` at `b4a3eb4a` — so
+  the fold's one core write boundary sat outside attestation coverage. The instance is closed; the
+  CLASS (a symbol leaving coverage by being moved) is an open entry.
+- **v0.50.17 is live**, published from `514cd31c`. The lap changed `src/`, so `dist/` differed and
+  the publish was owed — check that before assuming a lap owes one.
   ⚠ **A release ends with the green stamp STALE by construction:** the bump commit changes the tree
   after the pre-tag gate, so a closeout after a release needs one more full suite run. Tracked in
   [`open-bugs.md`](backlog/open-bugs.md).
+  ⚠ **The pre-tag CI gate refuses an IN-FLIGHT run rather than waiting for it**, so a release fired
+  straight after a push fails and must be retried once CI is green. Now an open entry.
 - ⚠ **Session-registry cutover, stated because it is silent:** a session that registered in a
   worktree BEFORE the registry moved to the repository store has no record there, and is classified
   an unregistered child until it re-registers —

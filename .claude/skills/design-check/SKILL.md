@@ -48,12 +48,25 @@ retirement still holds.
 
 ## 3. Have an independent lane try to refute the plan
 
-Delegate — do not self-assess; the point is a reader who did not author the plan. Pick an
-independent lane and run it yourself: `codex exec --skip-git-repo-check "<prompt>" < /dev/null`
-(closing stdin is load-bearing), `agy -p "<prompt>"`, or a free-provider session via the llm-relay
-ladder: `llm-relay dispatch -t "<prompt>"` renders the ready lane's exact command — run that
-(freellmapi and its `claude.ps1` launcher were retired 2026-08-29). Pass the plan plus the
-evidence files from step 2 as file PATHS in the prompt; never paste file bodies into it.
+Delegate — do not self-assess; the point is a reader who did not author the plan. Pass the plan plus
+the evidence files from step 2 as file PATHS in the prompt; never paste file bodies into it.
+
+⚠ **Use an `agy` lane, and do NOT lead with `claude-free-pool`.** Measured twice, on two different
+laps: the pool lane ran 14 min and then 23 min without returning, and both times an agy lane given
+the identical prompt answered in under a minute with a fully-cited verdict that held against source.
+The second lap re-spent those 20 minutes because this instruction lived only in a friction walk.
+Prefer, in order:
+
+1. `dispatch(task: "…", lane: "agy-gemini")` — 45s, fully cited, on the run that established this.
+2. `dispatch(task: "…", lane: "agy-claude-opus")` — stronger, but the AGY account's quota is shared,
+   so it can return `Individual quota reached` in ~16s. Record that death in llm-relay rather than
+   in prose (`llm-relay dispatch -x <rung> --outcome quota_exhausted --retry-after-ms <n>`), then
+   drop to the gemini rung.
+3. `codex exec --skip-git-repo-check "<prompt>" < /dev/null` — closing stdin is load-bearing.
+
+`claude-free-pool` is the LAST resort here, not the default the bare ladder hands you. agy reads
+files but cannot grep, which is exactly why the recon map below is handed to it rather than
+rediscovered.
 
 **Hand the lane the recon rather than the job of redoing it.** What a round must not do is judge work
 it authored — that is independence of *verdict*, and it is the whole point of delegating. Independence

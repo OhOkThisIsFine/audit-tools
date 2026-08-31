@@ -515,6 +515,33 @@
   (e.g. from a baseline coverage/ownership map), or the gate measures "the suite went red" again — the
   exact fail-open it exists to catch. Until then its output is not admissible as attestation evidence.
 
+- **Friction walk (copy-fallback lap, 2026-08-30):** (1) **ambiguous-direction:** none — the goal
+  came from the backlog and was approved, and the one scope decision it raised (widening the
+  loop-core set) was asked and answered before the edit. (2) **inefficient-feeding (medium): the
+  recorded lane lesson did not reach the point of use, so the SAME 20 minutes were spent again.**
+  The *two-identities* walk below already said to prefer agy over the pool lane for a repo-reading
+  refutation. It lived only in a friction walk, so this lap dispatched `claude-free-pool` anyway and
+  it ran 23 min without returning. `.claude/skills/design-check/SKILL.md` step 3 now names the agy
+  rungs and demotes the pool lane to last resort, so the preference is read where the lane is
+  chosen. Measurements:
+  [`design-gate-copy-fallback-2026-08-30.md`](../reviews/design-gate-copy-fallback-2026-08-30.md). (3) **inefficient-feeding (low): the release
+  refuses on an IN-FLIGHT CI run rather than waiting for it.** `release-and-publish.mjs`
+  `ensureCiGreenOnHeadSha` failed the whole release ~2 min after the push, and its own message says
+  "wait for CI (or the in-flight run) to complete, then retry" — so it knows an in-flight run may
+  exist and declines to wait on it. The retry then re-ran the full pre-tag gate from scratch.
+  **Property:** the pre-tag gate waits out a run already in flight for that SHA, and refuses only
+  when none exists or one has concluded red. (4) **guards that fired CORRECTLY, recorded so they are
+  not mistaken for friction:** `shell-conventions-guard` refused a heredoc file write;
+  `shell-trap-guard` refused a piped `npx vitest` and a piped `git commit`, each stating its fix;
+  `check:backlog-line-numbers` caught a bare line-number citation in a new entry, then caught the
+  first attempt to DESCRIBE that catch, because the description repeated the offending form;
+  `unasked-decision-gate` refused an owner decision posed in prose instead of through
+  `AskUserQuestion`. (5) **already tracked, hit again, deliberately NOT restated:** the closeout Stop
+  gate challenged a mid-lap pause, and `verify-green.mjs check` deferred without naming a runnable
+  check — both are open entries in the machine-wide `C:\Code\docs\backlog.md`. (6) **filed
+  machine-wide this lap:** three merged, clean `start-lap-*` worktrees survived their laps and cost
+  this lap-start an inspection each; the owner ruled worktree cleanup machine-wide.
+
 - **Friction walk (commitFold unlink lap, 2026-08-30):** (1) **ambiguous-direction:** none — the
   goal was picked from the backlog with the owner, and the one live owner decision (the session
   liveness shape) was asked and answered before any edit. (2) **inefficient-feeding (medium): a
