@@ -45,8 +45,12 @@ intake
 The deterministic obligations (auto_fix → syntax_resolved → external_analyzers → structure_artifacts
 → graph_enrichment → design_assessment → structure_decomposition → docs_digest) run in a single next-step call. The orchestrator advances
 through all pending deterministic obligations before returning. No separate
-roundtrip per step. Execution halts at the first host_delegation obligation or
-when all obligations are satisfied.
+roundtrip per step. Execution halts at the first obligation that needs host
+input — a `host_delegation` obligation, or a deterministic one sitting on a host
+boundary (`external_analyzers_current`'s consent offer,
+`graph_enrichment_current`'s analyzer-install and edge-reasoning decisions) —
+when all obligations are satisfied, or when the call spends its per-call
+charged-execution budget (`MAX_DRAIN_STEPS`), which pauses resumably.
 
 ---
 
@@ -219,8 +223,9 @@ Auditor workers, by contrast, retain hard grants for both.
 - Design simplification or under-design
 - Integration and generalization opportunities
 - Missing capabilities
-- Categories: `tool_opportunity`, `architecture_pattern`,
-  `design_simplification`, `integration`, `missing_capability`
+- Categories: `fundamental_approach`, `core_assumption`, `structural_risk`,
+  `architecture_pattern`, `design_simplification`, `tool_opportunity`,
+  `integration`, `missing_capability`
 
 **Conceptual review depth (shallow / deep).** Depth is a repository-intent
 checkpoint field (`design_review.conceptual_depth: "shallow" | "deep"`, default

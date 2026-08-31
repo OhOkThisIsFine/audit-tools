@@ -6,6 +6,26 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Four code and CI comments assert a shape the tree no longer has, and nothing checks a comment
+  against the code it describes (2026-08-31, medium, friction: tool_should_decide).**
+  The header of `src/shared/continuityScore.ts` says audit "re-exports `computeContinuityScores` …
+  and biases review-packet ORDERING with it"; `grep` over `src/audit` finds no consumer at all, only
+  `access_memory.json` writers — and `spec/audit/dependency-map.md` separately calls that artifact
+  write-only, so the comment is what makes the spec look self-contradictory. The `jobs:` preamble in
+  `.github/workflows/ci.yml` says the suite runs "once per Node line (20 + 22), each sharded 4
+  ways", and `orchestration-tests` in `.github/workflows/audit-code-test-suite.yml` calls it an
+  "8-job matrix"; that workflow has ONE job, a `shard: [1,2,3,4]` matrix and `node-version:
+  "22.14.0"`, so it claims Node-20 coverage that does not exist. The doc comments on
+  `renderConceptualReviewPrompt` (`src/audit/orchestrator/designReviewPrompt.ts`) and on
+  `conceptual_findings` (`src/audit/types/designAssessment.ts`) both list five conceptual-review
+  categories where `conceptualOutputFormat` has emitted eight since `e9b0ae77`, and
+  `findingsEnvelopeExample` names a "combined" pass that exists nowhere else in the tree. All four
+  were found by a doc-review lane
+  reading code to check a DOC, which is the point: the docs are gated by
+  `check:doc-code-citations`, and comments are gated by nothing. **Property:** a comment that names a
+  symbol, a workflow shape or an enumeration the code owns is reconciled against it mechanically, or
+  it does not state one.
+
 - **`durable-traps.md` documents RETIRED infrastructure as though it were live (2026-08-30, medium,
   friction: false_green).** Eight entries describe the FreeLLMAPI router on `127.0.0.1:3001`,
   its `claude.ps1` launcher, and the `mcp__freellmapi__offload_*` tools. FreeLLMAPI was retired

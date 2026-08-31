@@ -299,7 +299,7 @@ bulk-dispositioned invisibly. The gate operates before that collapse.
 ## Host implementation handoff — dependency-safe and evidence-verified
 
 The backend emits every currently eligible DAG node in one
-`remediation-host-workload/v1alpha1` artifact. Eligibility is deterministic: a
+`remediation-host-workload/v1alpha2` artifact. Eligibility is deterministic: a
 node is emitted only after every dependency and lower phase is verified complete.
 Each work item contains its obligations, declared write scope, complete prompt,
 prompt digest, baseline commit, workload digest, and repository-contained result
