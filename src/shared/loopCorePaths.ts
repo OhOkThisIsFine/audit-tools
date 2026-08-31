@@ -40,6 +40,11 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   //   • remediate step machine + host-handoff/landing + risk/pipeline core
   //   • shared obligation engine + submission core
   "src/audit/cli/dispatch/",
+  // The fold's staging and commit core. It is here because `quarantineSubmissionFile`
+  // MOVED into it out of `nextStepHelpers.ts` (b4a3eb4a, CX-02) — a loop-core path then
+  // and now — which took the fold's one core write boundary out of attestation coverage
+  // silently. A symbol does not leave this set by being relocated.
+  "src/audit/cli/foldTransaction.ts",
   "src/audit/cli/laneSubmissions.ts",
   "src/audit/cli/laneValidators.ts",
   "src/audit/cli/nextStepHelpers.ts",

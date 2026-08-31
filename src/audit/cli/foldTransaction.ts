@@ -89,17 +89,52 @@ export function createFoldTransaction(): FoldTransaction {
   return { staged: [], pendingSnapshots: [] };
 }
 
+/** What a quarantine actually achieved, as opposed to what it attempted. */
+export interface QuarantineOutcome {
+  /** Where the refused content now lives. Always written. */
+  readonly quarantinePath: string;
+  /**
+   * The source could NOT be deleted, so it survives at its original path and a
+   * later pass will quarantine it again, appending one more `rejected` event
+   * each time. A caller that reports the quarantine states this, so the repeat
+   * is attributable rather than silent.
+   *
+   * This half takes the RECORD arm rather than throwing, and the asymmetry with
+   * {@link moveFile} is deliberate: every caller here awaits the quarantine and
+   * THEN records the refusal, so a throw would suppress the very event that
+   * explains it and leave the refused file bound for the next fold to fail on
+   * identically — a permanent wedge with nothing on the ledger.
+   */
+  readonly sourceSurvived: boolean;
+}
+
+/**
+ * The clause a refusal states when the quarantined source survived, and the
+ * empty string when it did not. ONE home for the wording, so the fact cannot be
+ * reported by one caller and dropped by another. It appends to both halves of a
+ * refusal — the operator's stderr line and the LEDGER message, which is the
+ * durable record the property actually asks for.
+ */
+export function quarantineSurvivalNote(outcome: QuarantineOutcome): string {
+  return outcome.sourceSurvived
+    ? " — the quarantined source could NOT be deleted and survives at its original " +
+        "path, so a later pass will quarantine it again"
+    : "";
+}
+
 /**
  * Move a refused submission to `<artifactsDir>/quarantine/` rather than
  * deleting it. Falls back to copy+unlink if `rename` fails (e.g. a cross-device
  * artifacts mount) so the content is never lost. The quarantined file is named
  * for its LANE — the bound path is a digest, which tells an operator nothing.
+ *
+ * Reports whether the source survived; see {@link QuarantineOutcome}.
  */
 export async function quarantineSubmissionFile(
   artifactsDir: string,
   filePath: string,
   lane: string,
-): Promise<string> {
+): Promise<QuarantineOutcome> {
   const quarantineDir = join(artifactsDir, "quarantine");
   await mkdir(quarantineDir, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -113,12 +148,30 @@ export async function quarantineSubmissionFile(
     } catch {
       // Best-effort: nothing left to quarantine if even the read failed.
     }
-    await unlink(filePath).catch(() => {});
+    try {
+      await unlink(filePath);
+    } catch (error) {
+      // ENOENT is the outcome asked for: the source is gone.
+      if (!isFileMissingError(error)) {
+        return { quarantinePath, sourceSurvived: true };
+      }
+    }
   }
-  return quarantinePath;
+  return { quarantinePath, sourceSurvived: false };
 }
 
-/** Rename with a copy+unlink fallback for cross-device artifact mounts. */
+/**
+ * Rename with a copy+unlink fallback for cross-device artifact mounts.
+ *
+ * The copy has landed by the time the unlink runs, so the content is safe at
+ * `to` and only the source deletion can fail. That failure THROWS rather than
+ * resolving over it: every call site treats a surviving source as a file to
+ * process again, so resolving would report a move that did not happen. All
+ * three callers already rethrow anything that is not a missing file, and none
+ * has consumed or recorded anything by that point — so the fold simply fails
+ * and retries, with the content intact at both paths. ENOENT stays ignored: the
+ * source is gone, which is the outcome asked for.
+ */
 async function moveFile(from: string, to: string): Promise<void> {
   try {
     await rename(from, to);
@@ -126,7 +179,11 @@ async function moveFile(from: string, to: string): Promise<void> {
     if (isFileMissingError(error)) throw error;
     const content = await readFile(from);
     await writeFile(to, content);
-    await unlink(from).catch(() => {});
+    try {
+      await unlink(from);
+    } catch (unlinkError) {
+      if (!isFileMissingError(unlinkError)) throw unlinkError;
+    }
   }
 }
 
@@ -233,7 +290,7 @@ export async function recoverStagedSubmissions(
       boundOccupied = false;
     }
     if (boundOccupied) {
-      const quarantinePath = await quarantineSubmissionFile(
+      const quarantine = await quarantineSubmissionFile(
         artifactsDir,
         stagingPath,
         lane,
@@ -243,7 +300,8 @@ export async function recoverStagedSubmissions(
         issueCode: "submission_rejected",
         message:
           `a crashed fold held this submission staged while a newer one arrived at the bound path; ` +
-          `the staged copy is quarantined at ${quarantinePath} and the newer submission is consumed instead`,
+          `the staged copy is quarantined at ${quarantine.quarantinePath} and the newer submission is consumed instead` +
+          quarantineSurvivalNote(quarantine),
       });
       continue;
     }

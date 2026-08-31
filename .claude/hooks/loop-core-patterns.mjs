@@ -8,6 +8,7 @@
 // editing the source.
 export const LOOP_CORE_PATTERNS = [
   "src/audit/cli/dispatch/",
+  "src/audit/cli/foldTransaction.ts",
   "src/audit/cli/laneSubmissions.ts",
   "src/audit/cli/laneValidators.ts",
   "src/audit/cli/nextStepHelpers.ts",

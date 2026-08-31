@@ -81,20 +81,26 @@
   whose SUBJECT a staged file feeds, or an equivalent gate makes a duplicated derived literal red
   before CI.
 
-- **Two more swallowed deletes in `foldTransaction.ts` leave a file a later pass re-processes
-  (2026-08-30, medium).** The applied-commit instance of this class is CLOSED — its property is
-  pinned in `tests/audit/submission-staging.test.ts`, which also states what the throw does not
-  close. These two are the same class and are not.
-  `quarantineSubmissionFile`'s copy fallback swallows `unlink(filePath)`, so a quarantined file
-  survives at its source and every later pass quarantines it again and appends another `rejected`
-  event — an unbounded repeat, reachable from 11 call sites (10 of them in `nextStepHelpers.ts`).
-  `moveFile`'s copy-plus-unlink fallback swallows `unlink(from)`, so the source survives beside the
-  destination: through `stageLaneSubmission` the bound file stays and the next fold consumes it
-  again. `moveFile` has three call sites including fold-start recovery, where a throw would turn a
-  recoverable duplicate into a hard failure — so this needs its own design pass, not the one-line
-  edit that closed the applied-commit instance.
-  **Property:** a copy-then-delete fallback that cannot delete its source fails, or records that
-  the source survived — it never reports success while leaving a file a later pass re-processes.
+- **`quarantineSubmissionFile` still reports a quarantine path when the COPY itself failed
+  (2026-08-30, medium, friction: false_green).** Surfaced by the design gate that closed the
+  swallowed-delete class beside it, and it is a different property, so it is its own entry. When
+  `rename` fails and the `readFile` of the source then fails too, the inner `catch` swallows it —
+  "nothing left to quarantine if even the read failed" — and the function returns a
+  `quarantinePath` naming a file it never wrote. Callers put that path in the operator's stderr line
+  and in the `rejected` ledger message, so the record points at nothing. The surviving-source half
+  is now reported (`sourceSurvived`); this half is still silent.
+  **Property:** a quarantine reports the path only when the content is actually at it — a failed
+  copy is distinguishable from a successful one by the caller, not swallowed inside.
+
+- **A symbol that MOVES out of a loop-core file leaves attestation coverage silently
+  (2026-08-30, medium, friction: false_green).** `src/audit/cli/foldTransaction.ts` was added to
+  `LOOP_CORE_PATTERNS` this lap (owner decision 2026-08-30), which closes the instance. The CLASS is
+  open: `quarantineSubmissionFile` moved there out of `src/audit/cli/nextStepHelpers.ts` at `b4a3eb4a`
+  (CX-02), and nothing noticed that the fold's one core write boundary had left the set the same
+  code was governed by before the move. `check:guard-reach` did not catch it either — no row claims
+  the file. Any future extraction out of a loop-core module can repeat this exactly.
+  **Property:** moving a symbol out of a loop-core file either carries the coverage with it or fails
+  a check — the set's reach is a property of the code, not of the refactorer noticing.
 
 - **A history-moving commit lands its INCOMING content unreviewed — the gate can only read the
   STAGED snapshot (2026-08-28, mechanism corrected 2026-08-29, medium).** The original entry said

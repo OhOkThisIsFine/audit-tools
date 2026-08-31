@@ -80,6 +80,7 @@ import {
   createFoldTransaction,
   markSubmissionApplied,
   quarantineSubmissionFile,
+  quarantineSurvivalNote,
   recoverStagedSubmissions,
   stageLaneSubmission,
   type FoldTransaction,
@@ -622,21 +623,22 @@ export async function handleGraphEnrichmentBranch(
         tx,
       );
       if (edgeReasoningIncoming.status === "malformed") {
-        const quarantinePath = await quarantineSubmissionFile(
+        const quarantine = await quarantineSubmissionFile(
           params.artifactsDir,
           edgeReasoningIncoming.path,
           GATE_LANES.edge_reasoning,
         );
         await recordEdgeReasoningRejection(params.artifactsDir, {
           lane: GATE_LANES.edge_reasoning,
-          quarantine_path: quarantinePath,
+          quarantine_path: quarantine.quarantinePath,
           reason: edgeReasoningIncoming.reason,
           rejected_at: new Date().toISOString(),
         });
         await recordLaneOutcome(params.artifactsDir, GATE_LANES.edge_reasoning, {
           kind: "rejected",
           issueCode: "submission_malformed",
-          message: edgeReasoningIncoming.reason,
+          message:
+            edgeReasoningIncoming.reason + quarantineSurvivalNote(quarantine),
         });
         return { action: "continue", bundle };
       }
@@ -651,21 +653,21 @@ export async function handleGraphEnrichmentBranch(
         // quarantined and named in the re-emitted step's prompt.
         const unwrapped = unwrapSubmissionArray(edgeReasoningIncoming.value);
         if (!unwrapped.ok) {
-          const quarantinePath = await quarantineSubmissionFile(
+          const quarantine = await quarantineSubmissionFile(
             params.artifactsDir,
             edgeReasoningIncoming.path,
             GATE_LANES.edge_reasoning,
           );
           await recordEdgeReasoningRejection(params.artifactsDir, {
             lane: GATE_LANES.edge_reasoning,
-            quarantine_path: quarantinePath,
+            quarantine_path: quarantine.quarantinePath,
             reason: unwrapped.reason,
             rejected_at: new Date().toISOString(),
           });
           await recordLaneOutcome(params.artifactsDir, GATE_LANES.edge_reasoning, {
             kind: "rejected",
             issueCode: "submission_contract_invalid",
-            message: unwrapped.reason,
+            message: unwrapped.reason + quarantineSurvivalNote(quarantine),
           });
           return { action: "continue", bundle };
         }
@@ -789,18 +791,19 @@ async function quarantineMisshapedSubmission(
     : error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; ");
-  const quarantinePath = await quarantineSubmissionFile(artifactsDir, filePath, lane);
+  const quarantine = await quarantineSubmissionFile(artifactsDir, filePath, lane);
   process.stderr.write(
-    `[audit-code] ${lane} submission quarantined to ${quarantinePath}: ${reason}. ` +
+    `[audit-code] ${lane} submission quarantined to ${quarantine.quarantinePath}` +
+      `${quarantineSurvivalNote(quarantine)}: ${reason}. ` +
       `Fix the shape and resubmit.\n`,
   );
   await recordLaneOutcome(artifactsDir, lane, {
     kind: "rejected",
     issueCode:
       typeof error === "string" ? "submission_malformed" : "submission_contract_invalid",
-    message: reason,
+    message: reason + quarantineSurvivalNote(quarantine),
   });
-  return quarantinePath;
+  return quarantine.quarantinePath;
 }
 
 /**
@@ -821,7 +824,7 @@ export async function consumeArraySubmission<T>(
   const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane, tx);
   if (incoming.status === "absent") return { status: "absent" };
   if (incoming.status === "malformed") {
-    const quarantinePath = await quarantineSubmissionFile(
+    const quarantine = await quarantineSubmissionFile(
       artifactsDir,
       incoming.path,
       lane,
@@ -829,22 +832,32 @@ export async function consumeArraySubmission<T>(
     await recordLaneOutcome(artifactsDir, lane, {
       kind: "rejected",
       issueCode: "submission_malformed",
-      message: incoming.reason,
+      message: incoming.reason + quarantineSurvivalNote(quarantine),
     });
-    return { status: "quarantined", quarantinePath, lane, reason: incoming.reason };
+    return {
+      status: "quarantined",
+      quarantinePath: quarantine.quarantinePath,
+      lane,
+      reason: incoming.reason,
+    };
   }
   const { value, path } = incoming;
   const unwrapped = unwrapSubmissionArray(value);
   if (unwrapped.ok) {
     return { status: "ok", value: unwrapped.array as T[], path };
   }
-  const quarantinePath = await quarantineSubmissionFile(artifactsDir, path, lane);
+  const quarantine = await quarantineSubmissionFile(artifactsDir, path, lane);
   await recordLaneOutcome(artifactsDir, lane, {
     kind: "rejected",
     issueCode: "submission_contract_invalid",
-    message: unwrapped.reason,
+    message: unwrapped.reason + quarantineSurvivalNote(quarantine),
   });
-  return { status: "quarantined", quarantinePath, lane, reason: unwrapped.reason };
+  return {
+    status: "quarantined",
+    quarantinePath: quarantine.quarantinePath,
+    lane,
+    reason: unwrapped.reason,
+  };
 }
 
 type ConsumeObjectSubmissionResult =
@@ -869,38 +882,48 @@ export async function consumeObjectSubmission(
   const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane, tx);
   if (incoming.status === "absent") return { status: "absent" };
   if (incoming.status === "malformed") {
-    const quarantinePath = await quarantineSubmissionFile(
+    const quarantine = await quarantineSubmissionFile(
       artifactsDir,
       incoming.path,
       lane,
     );
     process.stderr.write(
-      `[audit-code] ${lane} submission quarantined to ${quarantinePath}: ${incoming.reason}. ` +
+      `[audit-code] ${lane} submission quarantined to ${quarantine.quarantinePath}` +
+        `${quarantineSurvivalNote(quarantine)}: ${incoming.reason}. ` +
         `Fix the JSON and resubmit.\n`,
     );
     await recordLaneOutcome(artifactsDir, lane, {
       kind: "rejected",
       issueCode: "submission_malformed",
-      message: incoming.reason,
+      message: incoming.reason + quarantineSurvivalNote(quarantine),
     });
-    return { status: "quarantined", quarantinePath, reason: incoming.reason };
+    return {
+      status: "quarantined",
+      quarantinePath: quarantine.quarantinePath,
+      reason: incoming.reason,
+    };
   }
   const { value, path } = incoming;
   if (isRecord(value)) {
     return { status: "ok", value, path };
   }
   const reason = describeSubmissionShapeMismatch(value);
-  const quarantinePath = await quarantineSubmissionFile(artifactsDir, path, lane);
+  const quarantine = await quarantineSubmissionFile(artifactsDir, path, lane);
   process.stderr.write(
-    `[audit-code] ${lane} submission quarantined to ${quarantinePath}: expected a JSON object, got ${reason}. ` +
+    `[audit-code] ${lane} submission quarantined to ${quarantine.quarantinePath}` +
+      `${quarantineSurvivalNote(quarantine)}: expected a JSON object, got ${reason}. ` +
       `Fix the shape and resubmit.\n`,
   );
   await recordLaneOutcome(artifactsDir, lane, {
     kind: "rejected",
     issueCode: "submission_contract_invalid",
-    message: reason,
+    message: reason + quarantineSurvivalNote(quarantine),
   });
-  return { status: "quarantined", quarantinePath, reason };
+  return {
+    status: "quarantined",
+    quarantinePath: quarantine.quarantinePath,
+    reason,
+  };
 }
 
 /** The two decision vocabularies the operator-facing analyzer gates accept. */
@@ -974,19 +997,20 @@ async function consumeEnumMapSubmission<T extends string>(
   const reason =
     `no recognized values (got: ${Object.keys(incoming.value).join(", ") || "(none)"}). ` +
     `Valid values are: ${allowed.join(", ")}.`;
-  const quarantinePath = await quarantineSubmissionFile(
+  const quarantine = await quarantineSubmissionFile(
     artifactsDir,
     incoming.path,
     lane,
   );
   process.stderr.write(
-    `[audit-code] ${lane} submission quarantined to ${quarantinePath}: ${reason} ` +
+    `[audit-code] ${lane} submission quarantined to ${quarantine.quarantinePath}` +
+      `${quarantineSurvivalNote(quarantine)}: ${reason} ` +
       `Fix the values and resubmit.\n`,
   );
   await recordLaneOutcome(artifactsDir, lane, {
     kind: "rejected",
     issueCode: "submission_contract_invalid",
-    message: reason,
+    message: reason + quarantineSurvivalNote(quarantine),
   });
   return { status: "quarantined" };
 }
@@ -1174,13 +1198,14 @@ export async function handleDesignReviewBranch(
     path: string,
   ): Promise<void> => {
     const reason = "no design assessment exists yet to merge this submission into";
-    const quarantinePath = await quarantineSubmissionFile(
+    const quarantine = await quarantineSubmissionFile(
       params.artifactsDir,
       path,
       lane,
     );
     process.stderr.write(
-      `[audit-code] ${lane} submission quarantined to ${quarantinePath}: no design ` +
+      `[audit-code] ${lane} submission quarantined to ${quarantine.quarantinePath}` +
+        `${quarantineSurvivalNote(quarantine)}: no design ` +
         `assessment exists yet to merge it into. Re-run next-step; the assessment is ` +
         `built by a higher-priority obligation.\n`,
     );
@@ -1192,12 +1217,12 @@ export async function handleDesignReviewBranch(
     await recordLaneOutcome(params.artifactsDir, lane, {
       kind: "rejected",
       issueCode: "submission_rejected",
-      message: `${pass} pass: ${reason}`,
+      message: `${pass} pass: ${reason}` + quarantineSurvivalNote(quarantine),
     });
     assessment =
       withRejectedDesignReviewSubmission(assessment, pass, {
         status: "quarantined",
-        quarantinePath,
+        quarantinePath: quarantine.quarantinePath,
         lane,
         reason,
       }) ?? assessment;
