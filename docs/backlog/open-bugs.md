@@ -139,35 +139,6 @@
   `wrapper/**` or `.claude/hooks/**` while its tsconfig sets `allowJs` and tests import from both.
   **Property:** the preflight never issues a verdict about the staged tree that it did not establish.
 
-- **▶ The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
-  shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction:
-  false_red).** `tests/helpers/global-setup.ts` teardown diffs the repo root before and after the run,
-  so a foreign write inside that window is attributed to the run. **Property:** the teardown asserts a
-  verdict about a root entry only where that verdict can be true.
-  ⚠ **The PRODUCER is measured, and it reframes this entry.** The real root artifacts are empty files
-  named from code fragments, written by **cmd.exe** when a command STRING reaches a shell, and they
-  appear *"while an AGENT session works in the main checkout"*
-  ([[repo-root-empty-files-are-shell-redirect-artifacts]]; the suite is exonerated by 6,496
-  instrumented spawns carrying zero `>`). The foreign writes arrive through SHELL tool calls.
-  **FIVE designs are dead** — attribute-the-writer, sole-writer, stored-pid liveness, activity-overlap
-  and input-attributed writes; the last two at the design gate, 2026-08-30, each re-verified against
-  source. Design 1 proved post-hoc file→writer attribution UNAVAILABLE, and 3, 4 and 5 were each a
-  proxy for it that excused an entry without establishing who wrote it. **So the open direction is
-  PREVENTION at the producing boundary, not attribution at the consuming one** — by this repo's own
-  rule the teardown is not the boundary that owns this. Everything is in
-  [sweep timing](../reviews/sweep-timing-measurement-2026-08-30.md) and
-  [ppid](../reviews/ppid-liveness-measurement-2026-08-30.md); this entry points rather than retells.
-  **Constraints that bind any next attempt.** (i) the throw is part of the DECLARED green mechanism —
-  `writeSuiteGreenStamp` stamps any full-suite run reaching it,
-  so an abstention certifies a tree containing the leak; (ii) "notice instead of throw" is silence;
-  (iii) `repoRootProblems` has one caller and zero test observers; **(vi) an abstention trigger must
-  correlate with WRITES, not activity, and an abstention must never become a green.**
-  **Two assets survive for whatever comes next.** `samePath` (`.claude/hooks/session-start-guards.mjs`)
-  is the correct checkout-comparison primitive — `normalizeRepoPath` is not. And the consumer knows
-  its own session: `CLAUDE_CODE_SESSION_ID` and a live `CLAUDE_PID` reach vitest and survive
-  `npm exec`. The `repoRootProblems` extraction remains the first step for any ATTRIBUTION design,
-  but none is live, so alone it reds `check:deadcode`.
-
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
   fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went
   through the Bash tool in one session with the same here-string construct. The first two were NOT

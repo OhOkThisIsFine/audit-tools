@@ -563,14 +563,24 @@ export const GUARDS = [
     kind: 'contract-test',
     impl: 'tests/shared/run-hermeticity.test.ts',
     note:
-      'the two teardown checks in tests/helpers/global-setup.ts: a run that ADDED a repo-root entry ' +
-      'it does not own fails with the entry named (the shell-redirect artifacts — an empty ' +
-      '`o.testId)` / `60s` / `0)` — are the observed shape), and a run whose own spawned child is ' +
-      'still alive fails with pid and command named (ledger: tests/helpers/trackedSpawn.ts). ' +
+      'the live-child teardown check in tests/helpers/global-setup.ts: a run whose own spawned ' +
+      'child is still alive fails with pid and command named (ledger: tests/helpers/trackedSpawn.ts). ' +
       'UNCOVERED: a `shell: true` grandchild, since the ledger holds the pid of the cmd.exe its ' +
-      'parent actually spawned, not of what cmd.exe started; sync spawns, which cannot straggle; ' +
-      'and the CONTENT of root entries that were already there — the root check is a delta of ' +
-      'names, so a run that rewrites a tracked root file passes it',
+      'parent actually spawned, not of what cmd.exe started; and sync spawns, which cannot straggle. ' +
+      'UNCOVERED, NEW 2026-08-30: the repo ROOT is no longer observed by any suite check — the ' +
+      'root-delta half (repoRootProblems / unexpectedRootEntries / RUN_OWNED_ROOT_ENTRIES) was ' +
+      'DELETED on the owner ruling that this project no longer produces the artifacts, which its own ' +
+      'creation commit f3cac01b had already measured (6,496 spawns, zero carrying `>`). Consequences, ' +
+      'stated rather than discovered later: npm test can now mint a suite-green stamp over a tree ' +
+      'that contains an unignored root leak; a future regression in THIS project spawn discipline ' +
+      'leaks a zero-byte root file that nothing names; and the nearest remaining reader is the ' +
+      "closeout Stop gate's session-dirt line, which is session-scoped, capped, skipped for " +
+      'unregistered child sessions, absent in CI, and cleared by committing. A leak matching an ' +
+      'ignore rule (*.log, /result.json, /temp*.json, /part*.txt, .audit-code-build.lock) is seen by ' +
+      'NOTHING at all, including the `git add -A` tree the suite-green stamp binds. ' +
+      '⚠ check-guard-reach.mjs never reads this `note` field — it validates only that `impl` is a ' +
+      'tracked file under tests/ — so this text is unenforced: read the row, never trust a green gate ' +
+      'to have checked it. Diagnosis and remedy: docs/backlog/durable-traps.md',
   },
   { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
   { id: 'nightly-items-mandatory-fields-test', kind: 'contract-test', impl: 'tests/shared/nightly-items-mandatory-fields.test.ts' },

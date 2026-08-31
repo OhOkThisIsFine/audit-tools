@@ -271,6 +271,23 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   So a long peer-CLI call needs `run_in_background: true` — passing `timeout` in the shell buys
   nothing, and the kill again looks like a dead lane rather than a clamp.
 
+- **Empty repo-root files named from code or prose are cmd.exe REDIRECT artifacts, and since
+  2026-08-30 NOTHING in this repo watches for them (relanded here as its guard was deleted).**
+  `o.testId)`, `60s`, `0)`, `entry.tool` — each is a command STRING that reached a shell, where `>`
+  redirects at any point in the line, quoted source included, and the target token ends at
+  whitespace, `;`, `,` or `=`. So `.map((o) => o.testId);` writes `o.testId)`, and prose reading
+  `the >60s blocking worker` writes `60s`. **Remedy: route every spawn through argv**
+  (`resolveExecArgv` / `parseCommandString`, never `shell: true`). ⚠ **This suite is NOT the
+  producer** — 6,496 instrumented spawns carried zero `>`, measured in the guard's own creation
+  commit `f3cac01b`; an AGENT session sharing this checkout writes them, which no run can attribute.
+  That is why the teardown's root-delta check was deleted rather than repaired, after five designs
+  died: it charged foreign writes to this project's runs, and it also blocked commits through the
+  pre-commit doc-contract leg with a misattributed message. **The artifact is empty and tracked by
+  nothing**, so it survives every content-based clean-tree check; the nearest reader left is the
+  closeout Stop gate's session-dirt line, which is session-scoped and blind to any name an ignore
+  rule covers. Full record: [`sweep-timing-measurement-2026-08-30.md`](../reviews/sweep-timing-measurement-2026-08-30.md),
+  memory [[repo-root-empty-files-are-shell-redirect-artifacts]].
+
 - **Git Bash MANGLES a leading-slash argument into a Windows path (2026-07-25).** `claude -p "/insights"`
   through the Bash tool reached the nested session as `C:/Program Files/Git/insights`, which answered
   "there is no such slash command" — and that reads exactly like the feature not existing. It does exist

@@ -425,10 +425,13 @@
   `.map((o) => o.testId);` writes `o.testId)` and prose reading `the >60s blocking worker` writes
   `60s`. The `tests/remediate`+`tests/shared` sweep is NOT the producer: an instrumented run logging
   every `child_process` entry point saw 6,496 spawns, none carrying `>`, and left both checkout
-  roots unchanged. Teardown now fails a run that ADDED a root entry it does not own, or that still
-  owns a live child, naming either (`tests/helpers/global-setup.ts`, ledger in
-  `tests/helpers/trackedSpawn.ts`). **Still open:** the producer is unnamed, and it is outside both
-  checks — they bound what a vitest run can leave, not what an agent lane can. Measurement in
+  roots unchanged. ⚠ **The root half is GONE (2026-08-30, owner decision).** Teardown now fails only
+  on a live child of the run and on in-tree fixtures (`tests/helpers/global-setup.ts`, ledger in
+  `tests/helpers/trackedSpawn.ts`); nothing in the suite observes the repo root any more, because the
+  root check charged foreign writes to this project's runs and no run can attribute a writer. The
+  mechanism and the remedy now live in [`durable-traps.md`](durable-traps.md) rather than here.
+  **Still open:** the producer is unnamed, and it is outside every remaining check — they bound what
+  a vitest run can leave, not what an agent lane can. Measurement in
   project memory (memory: repo-root-empty-files-are-shell-redirect-artifacts). Producer lead
   (2026-08-27 lap): nine more appeared, each materializing DURING a codex-exec or delegated-agent
   run — one timestamped mid-run by the lane that saw it appear. Codex 0.150.0 runs its shell as

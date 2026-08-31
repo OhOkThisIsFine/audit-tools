@@ -18,9 +18,19 @@
 //      ordinary parallel work for a hazard that no longer exists. See
 //      tests/helpers/suiteLock.ts for the full rationale.
 //
-//   3. REPO-ROOT BASELINE — the root's entry list as this run found it, so
-//      teardown can refuse a run that ADDED anything to it. See
-//      {@link unexpectedRootEntries}.
+// ⚠ There was a third responsibility here — a REPO-ROOT BASELINE, taken in
+// `setup` so `teardown` could refuse a run that added an entry to the repo root.
+// It was DELETED on 2026-08-30 by owner decision, and it is not coming back
+// without one. Its whole purpose was to catch empty shell-redirect artifacts,
+// and its OWN creation commit (`f3cac01b`) already recorded that this suite does
+// not produce them: 6,496 instrumented spawns, none carrying `>`. The producer is
+// an agent session working in this shared checkout, which the teardown cannot
+// attribute — five designs died proving post-hoc file→writer attribution
+// unavailable — so every firing was a foreign write charged to this run. The
+// diagnosis it carried now lives in docs/backlog/durable-traps.md.
+//
+// What remains here is deliberately narrower and is the part this suite CAN
+// answer for: its own fixture leaks, and its own children.
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -31,11 +41,7 @@ import { settleTrackedChildren, type LiveChild } from "./trackedSpawn.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-/** The repo root's entry list as `setup` found it — teardown's baseline. */
-let rootEntriesAtSetup: readonly string[] = [];
-
 export async function setup(): Promise<void> {
-  rootEntriesAtSetup = readdirSync(repoRoot);
   const root = mkdtempSync(join(tmpdir(), "audit-tools-tests-"));
   process.env[TEST_RUN_ROOT_ENV] = root;
   // Marks every descendant of this run. Workers inherit process.env and the
@@ -59,14 +65,10 @@ export async function teardown(): Promise<void> {
       // Best-effort; the OS temp dir is the backstop.
     }
   }
-  // EVERY report, never the first one only: the three say different things about
-  // the same run, and a fixture tree in `tests/` must not hide a leaked file in
-  // the root, or a child still running, behind it.
-  const problems = [
-    ...inTreeFixtureProblems(),
-    ...repoRootProblems(),
-    ...liveChildProblems(liveChildren),
-  ];
+  // BOTH reports, never the first one only: the two say different things about
+  // the same run, and a fixture tree in `tests/` must not hide a child that is
+  // still running behind it.
+  const problems = [...inTreeFixtureProblems(), ...liveChildProblems(liveChildren)];
   if (problems.length > 0) throw new Error(problems.join("\n\n"));
 }
 
@@ -114,84 +116,15 @@ function inTreeFixtureProblems(): string[] {
 }
 
 /**
- * Repo-root entries a run may legitimately ADD, DECLARED rather than inferred.
- *
- * Deliberately not "whatever `.gitignore` covers": an ignore rule HIDES a leak —
- * the root's own ignore list already carries `/temp*.json`, `/part*.txt` and a
- * row of one-off script names, each one a leak somebody silenced instead of
- * fixing. A declaration states which entries are tool-owned; anything else is
- * reported by name.
- */
-export const RUN_OWNED_ROOT_ENTRIES: readonly string[] = [
-  ".audit-tools", // CLI artifacts, when a test drives a bin at the repo root
-  ".audit-tools-profile", // the always-on vitest timing ledger
-  ".tmp",
-  "dist", // a suite-owned rebuild (the dev wrapper auto-builds)
-  "node_modules",
-];
-
-/**
- * The root entries this run ADDED and does not own — the leak report.
- *
- * `before`/`after` are entry-name lists, so the check is a pure set difference
- * and testable without a suite. Entries that were already there are never
- * reported: the property is "a run leaves the root as it found it", not "the
- * root is clean", and a pre-existing artifact belongs to whoever made it.
- */
-export function unexpectedRootEntries(
-  before: readonly string[],
-  after: readonly string[],
-): string[] {
-  const owned = new Set([...before, ...RUN_OWNED_ROOT_ENTRIES]);
-  return after
-    .filter((entry) => !owned.has(entry) && !entry.endsWith(".tsbuildinfo"))
-    .sort();
-}
-
-/**
- * Fail the run if it added anything to the repo root.
- *
- * THE OBSERVED SHAPE, and why the name of the file is the diagnosis: a command
- * STRING handed to a shell carries the shell's own grammar, and `cmd.exe` reads
- * `>` as a redirect anywhere in the line — including inside quoted source text —
- * while `;` `,` `=` end the target token. So a line of code or prose that merely
- * CONTAINS `>` writes an empty file named from the fragment after it:
- * `… .map((o) => o.testId);` leaves a file called `o.testId)`, and prose saying
- * `the >60s blocking worker` leaves one called `60s`. The file is empty, tracked
- * by nothing, and names its own producer — which is why this reports rather than
- * deletes it.
- *
- * A child that OUTLIVES the run writes after this check has already passed, so
- * the root delta alone cannot see it — {@link liveChildProblems} is the half
- * that does, by naming the child instead of waiting for its artifact.
- */
-function repoRootProblems(): string[] {
-  // No baseline means `setup` never ran, and a repo root is never empty — so an
-  // empty baseline is "cannot tell", and reporting every entry in the root as
-  // leaked is the one output guaranteed to be wrong.
-  if (rootEntriesAtSetup.length === 0) return [];
-  const leaked = unexpectedRootEntries(rootEntriesAtSetup, readdirSync(repoRoot));
-  if (leaked.length === 0) return [];
-  return [
-    `This run ADDED ${leaked.length} entr${leaked.length === 1 ? "y" : "ies"} to the repo root:\n` +
-      leaked.map((entry) => `  - ${entry}`).join("\n") +
-      `\nA suite must leave the root as it found it. A name that looks like a fragment of code or ` +
-      `prose is a shell-redirect artifact: some spawn handed a command STRING to a shell, so route ` +
-      `it through argv (\`resolveExecArgv\` / \`parseCommandString\`, never \`shell: true\`). A name ` +
-      `that looks deliberate is a test writing outside its scratch dir — root it with scratchDir() ` +
-      `(tests/helpers/scratch.ts). Declare a genuinely tool-owned entry in RUN_OWNED_ROOT_ENTRIES.`,
-  ];
-}
-
-/**
  * Fail the run if a child it spawned is STILL RUNNING.
  *
- * The other half of the same property, caught at the only moment it is still
- * attributable: a straggler writes into the checkout minutes after vitest
- * exits, when the run that spawned it is gone and its artifact belongs to
- * nobody. The ledger (`tests/helpers/trackedSpawn.ts`) knows which pids this run
- * started, so the report names the child and its command rather than the file it
- * will eventually leave.
+ * Caught at the only moment it is still ATTRIBUTABLE, and that word is the whole
+ * reason this check survived the 2026-08-30 deletion of the repo-root baseline:
+ * the ledger (`tests/helpers/trackedSpawn.ts`) knows which pids THIS run started,
+ * so the run is answering for its own children rather than guessing who wrote a
+ * file. A straggler writes into the checkout minutes after vitest exits, when the
+ * run that spawned it is gone and its artifact belongs to nobody — so the report
+ * names the child and its command rather than the file it will eventually leave.
  *
  * REPORTS, never kills: a pid outlives the process that owned it and the OS
  * reuses it, so killing by pid can hit an unrelated process. The failing run is
