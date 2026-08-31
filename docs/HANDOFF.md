@@ -30,25 +30,34 @@
   worktree BEFORE the registry moved to the repository store has no record there, and is classified
   an unregistered child until it re-registers —
   `node scripts/shared/sessionRegistry.mjs --register <session-id>`.
-- **The owner-approved session-registry liveness sketch is DEAD (`6e4b0f12`).** See *Immediate next*.
+- **The session-registry liveness sketch stays dead (`6e4b0f12`), but its replacement is now
+  proposed and refuted, not unchosen.** See *Immediate next*. `6e4b0f12` changed only docs — no code
+  for that sketch ever existed, so nothing was retired that a new design would be adding back.
 
 ## Immediate next
 
-**The `process.ppid` measurement is DONE (2026-08-30) — full record in
-[`ppid-liveness-measurement-2026-08-30.md`](reviews/ppid-liveness-measurement-2026-08-30.md), result
-folded into the pinned [`open-bugs.md`](backlog/open-bugs.md) entry. No code changed, which is what
-the owner decision asked for.** A durable session pid is obtainable from a HOOK (which also carries
-`CLAUDE_PROJECT_DIR`) and survives the session, but the walk dies through `npm` — the shape
-`npm test` has — so the teardown must READ a stored pid, never walk for one. The `suiteLock` storage
-is proven for exactly that read: shared temp dir, keyed per checkout, outside the tree, and
-`processAlive` works on foreign pids.
+**The sweep-timing measurement is DONE (2026-08-30) — full record in
+[`sweep-timing-measurement-2026-08-30.md`](reviews/sweep-timing-measurement-2026-08-30.md), result
+folded into the pinned [`open-bugs.md`](backlog/open-bugs.md) entry.** The lap was approved to
+measure and THEN design, so it also carries a proposal. **No code changed and no failing test was
+written.**
 
-**MEASURE SWEEP TIMING — owner decision 2026-08-30, taken on reading the ppid result, and the next
-lap is that measurement.** Establish what removes a stored entry when a session dies without a clean
-exit, and whether `processAlive` alone is a sufficient sweep. **A lap ending in a measurement and no
-code satisfies this**, exactly as the ppid lap did. Two constraints the ppid probes ADDED must ride
-any eventual design — the process table cannot attribute a session to a CHECKOUT, and the ancestry
-walk is platform-specific against this repo's OS-agnostic invariant.
+Three results decide the shape. **Nothing removes a stored entry on an unclean death** — the sweep is
+reader-driven only. **`processAlive` alone is NOT a sufficient sweep**: pid reuse floors at 270
+creations / 2.216 s, and one reuse makes a dead session's entry claim liveness forever. And
+**`CLAUDE_CODE_SESSION_ID` plus a live `CLAUDE_PID` are present in vitest `globalSetup`, `teardown`
+and workers, and survive `npm exec`** — so the consumer names its own session with no ancestry walk
+at all.
+
+**The proposal replaces the LIVENESS question with an OVERLAP question** — did another session act
+inside this suite's window — which needs no pid and no per-OS branch. The design gate refuted it
+twice, and both breaks were re-verified against source: `run-vitest-gate.mjs:153` means an abstention
+would let `npm test` certify a tree containing the leak, and a path-spelling mismatch would make the
+fix ship INERT. Both have stated revisions in the entry.
+
+**OWNER DECISION PENDING — implement the revised design, or leave it proposed.** The first
+implementation step is fixed either way: extract the attribution decision out of `repoRootProblems`
+into a pure exported function, because nothing can be tested until it exists.
 
 Of the three residuals this section used to list, ONE remains in
 [`open-bugs.md`](backlog/open-bugs.md), unpinned: the lane-DETECTION half, still open under the
@@ -60,11 +69,13 @@ issue, not an audit-tools one). Its home is now the machine-wide backlog, `C:\Co
 created that day because the machine-wide scope had no work tracker at all. `~/.claude/CLAUDE.md`
 carries the pointer and the belongs-here test.
 
-⚠ **The reason that sketch was declared dead is now HALF WRONG, and the correction matters more than
+⚠ **Both reasons that sketch was declared dead are now WRONG, and the correction matters more than
 the sketch.** It died on "a hook is dead before anything reads its pid" — true of the hook's OWN pid,
-false of the SESSION's, which a hook can read by walking up and which outlives it by the whole
-session (measured 3/3). What actually blocks the design is different and was not known then: the
-consumer runs under `npm`, where the walk dies. The replacement shape is still UNCHOSEN.
+false of the SESSION's. The `ppid` lap then replaced that with "the consumer runs under `npm`, where
+the walk dies", and the sweep-timing lap retired THAT too: the consumer never needed to walk, because
+`CLAUDE_PID` and `CLAUDE_CODE_SESSION_ID` arrive in its environment and survive `npm`. **The lesson
+outlives the sketch — twice a stated blocking cause was an untested premise.** A replacement shape now
+exists and is proposed rather than chosen.
 
 The standing program direction remains *redesign before scheduled autonomy* → the autonomous
 audit→remediate→PR capstone once the architecture items are worked off.

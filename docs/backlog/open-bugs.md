@@ -144,28 +144,27 @@
   false_red).** `tests/helpers/global-setup.ts` teardown diffs the repo root before and after the run,
   so a foreign write inside that window is attributed to the run. **Property:** the teardown asserts a
   verdict about a root entry only where that verdict can be true.
-  **Dead designs, so a next one must clear their bar.** (1) *Attribute the writer* — no OS offers
-  post-hoc file→writer attribution, and ESM named imports bypass a `node:fs` patch. (2) *Assert only
-  where the run is sole writer* — the state dir is unreliable both ways: `git worktree add` leaves it
-  empty while the harness mechanism COPIES it.
-  **Constraints on any design:** (i) the throw is part of the repo's DECLARED green mechanism, so
-  downgrading the local verdict makes `npm test` stamp a tree that CONTAINS the leak; (ii) "notice
-  instead of throw" is silence, the pre-commit `test:doc-contract` leg reading the child's streams only
-  in `catch`; (iii) nothing binds `teardown()`'s composition — `repoRootProblems` has one caller and
-  zero test observers, so a fix can ship UNWIRED with every pinned case green; (iv) the process table
-  cannot attribute a session to a CHECKOUT, so ancestry alone abstains on any session anywhere; (v) the
-  walk is platform-specific, against the OS-agnostic invariant.
-  **MEASURED 2026-08-30** ([record](../reviews/ppid-liveness-measurement-2026-08-30.md)): a durable
-  session pid IS obtainable and DOES survive the session, read from a HOOK, which also carries
-  `CLAUDE_PROJECT_DIR`. That RETIRES the old third design's stated cause — "a hook is dead before
-  anything reads its pid" is true of the hook's OWN pid and false of the session's. What blocks it is
-  different: the walk dies through `npm`, the shape `npm test` has, so the consumer must READ a stored
-  pid rather than walk. The fallback STORAGE is proven for that read — `suiteLockDir` keys by
-  `sha256(repoRoot)` in a shared temp dir outside the tree, and `processAlive` works on foreign pids.
-  **OWNER DECISION 2026-08-30, on reading the above: MEASURE SWEEP TIMING FIRST — again, before any
-  design.** The next lap establishes what removes a stored entry when a session dies uncleanly, and
-  whether `processAlive` alone sweeps sufficiently. A lap ending in a measurement and no code
-  satisfies this, exactly as the ppid lap did.
+  **Three constraints bind, and two are VERIFIED BREAKS rather than risks.** (i) the throw is part of
+  the DECLARED green mechanism — `writeSuiteGreenStamp` (`scripts/shared/run-vitest-gate.mjs`, guarded
+  only by `isFullSuiteRun`) stamps any full-suite run that reaches it,
+  so an abstention makes `npm test` certify a tree containing the leak; (ii) "notice instead of throw"
+  is silence, the pre-commit `test:doc-contract` leg reading the child's streams only in `catch`;
+  (iii) `repoRootProblems` has one caller and zero test observers — and an unnormalized checkout
+  compare ships INERT, because `global-setup.ts` computes `C:\Code\audit-tools` while the hook carries
+  `C:/Code/audit-tools`.
+  **MEASURED over two laps** — the three dead designs, the proposal and its refutation are in
+  [sweep timing](../reviews/sweep-timing-measurement-2026-08-30.md) and
+  [ppid](../reviews/ppid-liveness-measurement-2026-08-30.md); this entry points rather than retells.
+  The two results that bind any design: **`processAlive` alone is NOT a sufficient sweep** — pid reuse
+  floors at 270 creations / 2.216 s, and one reuse makes a dead entry claim liveness forever — and
+  **the consumer already knows its own session**, since `CLAUDE_CODE_SESSION_ID` and a live
+  `CLAUDE_PID` reach vitest `globalSetup`, `teardown` and workers and survive `npm exec`. The latter
+  dissolved the two older constraints, that ancestry cannot name a checkout and that the walk is
+  platform-specific.
+  **Next step whichever way this goes:** extract the attribution decision out of `repoRootProblems`
+  into a pure exported function — nothing here is testable until it exists, and no failing test can be
+  written before it. **Owner decision pending: implement the proposed overlap design, or leave it
+  proposed.**
 
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
   fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went

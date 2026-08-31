@@ -280,7 +280,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   callee reports a sensible-sounding error about the mangled value, so the wrong conclusion is the
   DEFAULT one. Verify a "that command does not exist" answer against the binary before believing it.
   Same class, own spelling: `cmd /c "…"` arrives as `cmd C:/c`, so cmd opens an interactive banner
-  and runs nothing — double the slash (`cmd //c`) to reach cmd.exe from the Bash tool at all.
+  and runs nothing — double the slash (`cmd //c`) to reach cmd.exe from the Bash tool at all. And
+  again for native `/FLAG` arguments (2026-08-30): `tasklist /FI "PID eq N"` fails with
+  `Invalid argument/option - 'C:/Program Files/Git/FI'`. The same call as argv from Node —
+  `spawnSync("tasklist", ["/FI", …])` — is unaffected, so the trap is the SHELL, not the tool.
 
 - **Concurrent agent sessions can share the ONE primary checkout (2026-07-23).** Two live
   sessions worked `C:\Code\audit-tools` simultaneously: files changed under each other mid-turn,
