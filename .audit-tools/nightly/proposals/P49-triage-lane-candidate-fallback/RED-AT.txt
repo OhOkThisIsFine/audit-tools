@@ -1,0 +1,49 @@
+RED at HEAD — observed, not predicted.
+
+HEAD:    5b634c7d21aab1ab62d6009eb0e661bf0c38f782
+Date:    2026-08-31
+Command: cp .audit-tools/nightly/proposals/P49-triage-lane-candidate-fallback/triage-lane-candidate-fallback.test.ts \
+           tests/shared/triage-lane-candidate-fallback.test.ts
+         node scripts/shared/run-vitest-gate.mjs tests/shared/triage-lane-candidate-fallback.test.ts
+         (the copy is removed again immediately; `git status --short` showed only the
+          untracked proposal directory before and after)
+Exit:    1
+
+Verbatim failure (4 of 4 tests failed, each for the intended reason):
+
+  tests/shared/triage-lane-candidate-fallback.test.ts (4 tests | 4 failed) 7ms
+   x resolveTriageCandidates > returns the whole roster in the router's own order, not just its head
+     -> TypeError: (0 , resolveTriageCandidates) is not a function
+   x resolveTriageCandidates > puts the router's auto alias first when the roster advertises one
+     -> TypeError: (0 , resolveTriageCandidates) is not a function
+   x resolveTriageCandidates > honours an explicit TRIAGE_MODEL as the ONLY candidate, never touching discovery
+     -> TypeError: (0 , resolveTriageCandidates) is not a function
+   x resolveTriageCandidates > still aborts loudly on an empty roster, naming the escape
+     -> expected [Function] to throw error matching /TRIAGE_MODEL=/ but got '(0 , resolveTri...'
+
+  Test Files  1 failed (1)
+       Tests  4 failed (4)
+   outcome: 0 passed, 4 failed, 0 skipped, 0 unfinished (total 4)
+   parallel-flake baseline: 4 UNRECOGNIZED - these stay RED
+
+A FIRST attempt produced a DIFFERENT, FALSE red and is recorded here so it is not
+mistaken for evidence. The test was first run from inside the proposal directory
+with a `../../../../scripts/...` import, and failed with
+"Cannot find module '../../../../scripts/shared/triage-backlog.mjs'". That proves
+the relative path was wrong, NOT that the symbol is missing. Running it in place
+is impossible anyway: `vitest.config.ts` excludes `.audit-tools/**`, so vitest
+answered "No test files found, exiting with code 1" - the same class the routine
+already records for `.claude/**`. The test now carries the import path it will
+have at its shipping location, `tests/shared/`, and the red above is the missing
+export.
+
+The production failure this test is about was ALSO observed tonight, separately,
+and is not a prediction either. The leg-2 sweep aborted at entry 0:
+
+  .audit-tools/nightly/triage-2026-08-31-coverage.json (first run)
+    "model": "anthropic",
+    "aborted": "preflight failed: HTTP 401 authentication_error: x-api-key header is required",
+    "total_entries": 89, "attempted": 0, "classified": 0
+
+Re-running with TRIAGE_MODEL=pool/medium classified the backlog with zero errors,
+which is what identifies the model CHOICE as the fault rather than the router.

@@ -99,6 +99,20 @@ audit→remediate→PR capstone once the architecture items are worked off.
   in the guard-reach registry.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **11 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `docs-1` — development.md points at release.md for what verify:release covers — repoint it at the ship skill, or leave the pointer?
+  - `docs-2` — glossary-ids.md states a contiguous CE-001..CE-011 range that asserts a CE-003 the source never cites — de-status the sentence, or keep an exact list?
+  - `docs-3` — instruction-file edit: project-philosophy.md cites a memory file that does not exist — repoint it at the skill that holds the conviction?
+  - `docs-4` — The doc manifest still orders a regeneration of the scheduler prompt deleted at C-08 — drop that instruction?
+  - `spec-1` — normative: remediation-goals requires project-type and closing-action DETECTION that does not exist — build it, or retire the requirement?
+  - `spec-2` — normative: audit-goals states ONE cleanup-eligibility rule, but the two callers now differ — adopt the split, or is the pre-run narrowing wrong?
+  - `spec-3` — normative: dependency-map names computeBlockContinuityScores, a symbol that no longer exists — repoint it at the shared scorer?
+  - `spec-4` — normative: two dependency-map examples hand-list artifacts and omit rows their own generated tables carry — state the invariant instead of re-listing?
+  - `sol-1` — P49: let the leg-2 sweep preflight DOWN the roster instead of dying on its first entry?
+  - `docs-6` — release.md claims CI varies Node majors and a CONTRACT TEST pins that sentence — correct both, or is Node-major coverage what should be restored?
+  - `docs-5` — Retire 18 dated review records that nothing outside the archive cites, or keep the archive growing?
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
