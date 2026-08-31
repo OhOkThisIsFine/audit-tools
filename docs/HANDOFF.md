@@ -19,13 +19,15 @@
   although `quarantineSubmissionFile` moved into it out of `nextStepHelpers.ts` at `b4a3eb4a` — so
   the fold's one core write boundary sat outside attestation coverage. The instance is closed; the
   CLASS (a symbol leaving coverage by being moved) is an open entry.
-- **v0.50.17 is live**, published from `514cd31c`. The lap changed `src/`, so `dist/` differed and
+- **v0.50.18 is live**, published from `0dfa00b6`. The lap changed `src/`, so `dist/` differed and
   the publish was owed — check that before assuming a lap owes one.
   ⚠ **A release ends with the green stamp STALE by construction:** the bump commit changes the tree
   after the pre-tag gate, so a closeout after a release needs one more full suite run. Tracked in
   [`open-bugs.md`](backlog/open-bugs.md).
   ⚠ **The pre-tag CI gate refuses an IN-FLIGHT run rather than waiting for it**, so a release fired
-  straight after a push fails and must be retried once CI is green. Now an open entry.
+  straight after a push fails and must be retried once CI is green. Now an open entry. The 0.50.18
+  release WAITED on the two push-triggered runs first (`gh run watch`), and the gate then accepted
+  the SHA on its first attempt — waiting is the working recipe, not a retry loop.
 - ⚠ **Session-registry cutover, stated because it is silent:** a session that registered in a
   worktree BEFORE the registry moved to the repository store has no record there, and is classified
   an unregistered child until it re-registers —
