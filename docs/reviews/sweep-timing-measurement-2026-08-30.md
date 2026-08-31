@@ -414,6 +414,54 @@ as read-only from a hook.
   a false green; an abstention routed through a missing stamp reaches the operator as a false
   diagnosis and cannot be cleared by the action it recommends.
 
+### A FIFTH design died the same day — and it exposed why all five failed
+
+Owner decision after reading the fourth death: **authorise a fifth attempt on a WRITE-correlated
+trigger**, which is what constraint (vi) demands. It was designed, refuted, and died. Recorded here
+rather than in a second dated record, so this file is the ONE home for the defect's design history.
+
+**v1, killed by its own author before review.** A `PostToolUse` hook `readdir`s the repo root per
+tool call and records entries that APPEARED. Cost is not the objection — `readdirSync` on this root
+is **0.036 ms** mean over 2,000 calls, 47 entries. The objection is that observing an entry APPEAR
+does not establish that the observing session CREATED it, so a concurrent session would observe the
+suite's own leak and excuse it. That is design four again at finer granularity.
+
+**v2, the one reviewed.** Record only what a session can attribute from its OWN tool input: a
+`PostToolUse` hook on `Write|Edit` reads the path the payload carries, and the teardown suppresses an
+entry only on positive, input-derived evidence naming that exact entry in-window. Bash was
+deliberately excluded, because a readdir delta around a shell call is observation, not input.
+
+**Two breaks, one fatal.**
+
+- **It fixes nothing that actually happens. FATAL, and verified against project memory
+  ([[repo-root-empty-files-are-shell-redirect-artifacts]]).** The real root artifacts are empty files
+  named from code fragments — `o.testId)`, `60s`, `0)`, `entry.tool` — and their producer is
+  **measured**: a command STRING reaching **cmd.exe**, where `>` redirects anywhere in the line. The
+  same record exonerates the suite outright: 6,496 instrumented spawns, **zero** carrying `>`. And it
+  states who does produce them — *"the artifacts appear while an AGENT session works in the main
+  checkout"*. So the foreign writes this defect is about arrive through **shell** tool calls, which is
+  exactly what v2 declines to attribute. v2 covers a case that does not occur.
+- **Write-then-delete re-collision.** A foreign session Writes a root entry and deletes it, both
+  in-window; the suite then leaks a file of the SAME NAME. The name matches an in-window record, so
+  the entry is suppressed — a false green. Repairable in principle by binding the record to the file's
+  birthtime rather than its name, but moot given the fatal break.
+
+### The pattern across five deaths, which is the lap's real finding
+
+Dead design 1 established that **post-hoc file→writer attribution is unavailable**. Designs 3, 4 and
+5 were each an attempt to *proxy* for it — by liveness, by activity overlap, by tool input — and each
+proxy failed in the same direction: it either could not see the real writer, or it excused an entry
+without having established who wrote it.
+
+**So the teardown's question may be the wrong question.** The producer is now known and measured: an
+agent session's `cmd.exe` redirect, from a command string that carries the shell's own grammar. That
+is a defect with a SOURCE, and the repo already guards that class at the source
+(`shell-trap-guard.mjs`, and the standing rule to route through argv — `resolveExecArgv` /
+`parseCommandString`, never `shell: true`). A sixth attempt aimed at *attribution* should be regarded
+as the fourth proxy for something already proven unavailable. **The open direction is prevention at
+the producing boundary, not attribution at the consuming one** — and per the repo's own rule that a
+gate states the boundary it OWNS, the teardown is not that boundary.
+
 ### What this lap did NOT do
 
 **No failing test was written, and no code changed.** The design gate's step 4 asks for the failing

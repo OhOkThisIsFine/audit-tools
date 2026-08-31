@@ -55,11 +55,24 @@ rounds killed it, both re-verified against source. The fatal flaw: hook fires tr
 not writes, so a concurrent session that merely READS during the suite window marks it overlapped and
 silently excuses a leak the suite itself created. It converts the false red into a **false green**.
 
-**Immediate next is the extraction, and it is design-independent.** Pull the attribution decision out
-of `repoRootProblems` into a pure exported function. Nothing here is testable until it exists — that
-is why no failing test could be written this lap — and every candidate design needs it. Two assets
-survive for whatever comes after: `samePath` (`.claude/hooks/session-start-guards.mjs`) is the
-correct checkout-comparison primitive, and the consumer already knows its own session.
+**A FIFTH design died the same day, and it reframes the entry.** The owner authorised one more
+attempt on a write-correlated trigger; it was designed, refuted and killed. The decisive fact is the
+PRODUCER, which project memory already had measured: these root artifacts are written by **cmd.exe**
+when a command string reaches a shell, *"while an AGENT session works in the main checkout"* — the
+suite is exonerated by 6,496 instrumented spawns carrying zero `>`. So the foreign writes arrive
+through SHELL tool calls, which the fifth design deliberately did not attribute. It covered a case
+that does not occur.
+
+**The pattern is the finding.** Design 1 proved post-hoc file→writer attribution unavailable.
+Designs 3, 4 and 5 were each a PROXY for it and each failed the same way. **The open direction is
+PREVENTION at the producing boundary, not attribution at the consuming one** — the repo already
+guards that class at the source, and by its own rule the teardown is not the boundary that owns it.
+
+**Immediate next is an owner decision, not a task** — whether to pursue prevention, or to stop and
+de-pin. Two assets survive either way: `samePath` (`.claude/hooks/session-start-guards.mjs`) is the
+correct checkout-comparison primitive, and the consumer already knows its own session. The
+`repoRootProblems` extraction remains the first step for any ATTRIBUTION design, but no attribution
+design is live, so it now has no consumer and `check:deadcode` would red it on its own.
 
 Of the three residuals this section used to list, ONE remains in
 [`open-bugs.md`](backlog/open-bugs.md), unpinned: the lane-DETECTION half, still open under the
