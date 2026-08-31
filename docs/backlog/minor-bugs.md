@@ -485,3 +485,12 @@
   actual condition — "dist changed during the walk; rebuild and re-run" — never a bare ENOENT from
   an internal path.
 
+- **The repo owns its green mechanism but exposes no way to ASK it, so a lap re-derives the answer by
+  hand (2026-08-30, low, friction: tool_should_decide).** `verify-green.mjs check` correctly DEFERS
+  here and says *"Ask that mechanism, not this ledger"* — but no command asks it. This lap read
+  `scripts/shared/suiteGreenStamp.mjs` for the stamp path, printed the JSON, then ran a one-off import
+  of `scripts/shared/worktree-tree.mjs` to compute the current tree and compared the two by eye. That
+  is a manual derivation of a verdict the repo already holds, and a needed manual step is a bug
+  signal. **Property:** the green mechanism answers "is this tree green" in one command, so no lap
+  hand-compares a tree id against a stamp.
+

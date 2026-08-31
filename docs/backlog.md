@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 234 entr(y/ies) indexed.
+> and at commit). 235 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -166,6 +166,7 @@
 - `minor-bugs.md:453` — A pipeline warning names an internal record id as its resolution action (2026-08-27, from the philosophy audit, low).
 - `minor-bugs.md:455` — `check:memory-citations` gates two of the three citation directions, and its guard-reach row names the wrong uncovered half (2026-08-27, low, friction: tool_should_decide).
 - `minor-bugs.md:477` — `buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low, friction: tooling_gap).
+- `minor-bugs.md:488` — The repo owns its green mechanism but exposes no way to ASK it, so a lap re-derives the answer by hand (2026-08-30, low, friction: tool_should_decide).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
