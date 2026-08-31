@@ -41,8 +41,9 @@
   `CLAUDECODE` / `CLAUDE_CODE_ENTRYPOINT` absence does not separate the cases, because a lane's own
   hooks see them set; and `scripts/shared/lane-dispatch.mjs` cannot carry the marker, being
   lane-agnostic with its shell adapter deliberately unshipped, so it spawns no process. Process
-  ancestry is the one candidate never tried and never retired (`git log -S'ppid'` and `-S'parentPid'`
-  return nothing), and it is OS-specific.
+  ancestry has now been MEASURED
+  ([record](../reviews/ppid-liveness-measurement-2026-08-30.md), 2026-08-30) and does not help here:
+  it separates *a session* from *no session*, never a delegated lane from an owning one.
   **Property:** the repo DETECTS a delegated lane rather than being told about one, so a lane cannot
   run the ceremony merely because its dispatcher forgot a variable.
 
@@ -143,23 +144,26 @@
   false_red).** `tests/helpers/global-setup.ts` teardown diffs the repo root before and after the run,
   so a foreign write inside that window is attributed to the run. **Property:** the teardown asserts a
   verdict about a root entry only where that verdict can be true.
-  **Three designs are DEAD by measurement, so a fourth must clear their bar.** (1) *Attribute the
-  writer* — no OS offers post-hoc file→writer attribution, and ESM named imports bypass a `node:fs`
-  patch. (2) *Assert only where the run is sole writer* — no exclusivity predicate exists over agent
-  SESSIONS; the state dir is unreliable both ways, since `git worktree add` leaves it empty while the
-  harness mechanism COPIES it. (3) *`pid` on the session record* — only hooks write it, and a hook is
-  dead before anything reads its pid.
-  **Three constraints on any future design:** (i) the throw is part of the repo's DECLARED green
-  mechanism, so downgrading the local verdict makes `npm test` stamp a tree that CONTAINS the leak;
-  (ii) "notice instead of throw" is silence, because the pre-commit `test:doc-contract` leg reads the
-  child's streams only in `catch`; (iii) nothing binds `teardown()`'s composition — `repoRootProblems`
-  has one caller and zero test observers, so a fix can ship UNWIRED with every pinned case green.
-  **OWNER DECISION 2026-08-30 — MEASURE BEFORE DESIGNING.** All three sketches died because a shape
-  was chosen before anything was measured, so the next lap establishes ONE fact and stops: is a
-  session pid readable via `process.ppid` WITHOUT a hook, and does it survive the session. Design
-  follows from the result, and a lap ending in a measurement and no code satisfies this. Fallback if
-  the probe fails: `tests/helpers/suiteLock.ts`, whose `suiteLockDir` already keys holders by
-  `sha256(repoRoot)` in the OS temp dir — immune to that copy — with `processAlive` as its probe.
+  **Dead designs, so a next one must clear their bar.** (1) *Attribute the writer* — no OS offers
+  post-hoc file→writer attribution, and ESM named imports bypass a `node:fs` patch. (2) *Assert only
+  where the run is sole writer* — the state dir is unreliable both ways: `git worktree add` leaves it
+  empty while the harness mechanism COPIES it.
+  **Constraints on any design:** (i) the throw is part of the repo's DECLARED green mechanism, so
+  downgrading the local verdict makes `npm test` stamp a tree that CONTAINS the leak; (ii) "notice
+  instead of throw" is silence, the pre-commit `test:doc-contract` leg reading the child's streams only
+  in `catch`; (iii) nothing binds `teardown()`'s composition — `repoRootProblems` has one caller and
+  zero test observers, so a fix can ship UNWIRED with every pinned case green; (iv) the process table
+  cannot attribute a session to a CHECKOUT, so ancestry alone abstains on any session anywhere; (v) the
+  walk is platform-specific, against the OS-agnostic invariant.
+  **MEASURED 2026-08-30** ([record](../reviews/ppid-liveness-measurement-2026-08-30.md)): a durable
+  session pid IS obtainable and DOES survive the session, read from a HOOK, which also carries
+  `CLAUDE_PROJECT_DIR`. That RETIRES the old third design's stated cause — "a hook is dead before
+  anything reads its pid" is true of the hook's OWN pid and false of the session's. What blocks it is
+  different: the walk dies through `npm`, the shape `npm test` has, so the consumer must READ a stored
+  pid rather than walk. The fallback STORAGE is proven for that read — `suiteLockDir` keys by
+  `sha256(repoRoot)` in a shared temp dir outside the tree, and `processAlive` works on foreign pids.
+  **Next question, unmeasured:** write-and-sweep timing — what removes an entry when a session dies
+  uncleanly, and whether `processAlive` alone sweeps sufficiently.
 
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
   fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went

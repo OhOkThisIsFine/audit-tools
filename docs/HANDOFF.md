@@ -34,13 +34,21 @@
 
 ## Immediate next
 
-**MEASURE `process.ppid` — pinned by owner decision 2026-08-30, and the measurement IS the lap.**
-The teardown-hermeticity entry is pinned in the roadmap below. Both of its earlier sketches died
-because a shape was chosen before anything was measured, so the next lap establishes one fact and
-stops: is a session pid readable WITHOUT a hook, and does it survive the session. Design follows
-from the result. **A lap that ends with a measurement and no code is a success here** — that is the
-point of the decision, not a shortfall against it. `tests/helpers/suiteLock.ts` storage is the
-fallback if the probe fails.
+**The `process.ppid` measurement is DONE (2026-08-30) — full record in
+[`ppid-liveness-measurement-2026-08-30.md`](reviews/ppid-liveness-measurement-2026-08-30.md), result
+folded into the pinned [`open-bugs.md`](backlog/open-bugs.md) entry. No code changed, which is what
+the owner decision asked for.** A durable session pid is obtainable from a HOOK (which also carries
+`CLAUDE_PROJECT_DIR`) and survives the session, but the walk dies through `npm` — the shape
+`npm test` has — so the teardown must READ a stored pid, never walk for one. The `suiteLock` storage
+is proven for exactly that read: shared temp dir, keyed per checkout, outside the tree, and
+`processAlive` works on foreign pids.
+
+**The next question on that entry is write-and-sweep timing**, and it is the only unmeasured half
+left: what removes a stored entry when a session dies without a clean exit, and whether
+`processAlive` alone is a sufficient sweep. Two constraints the probes ADDED must ride any design —
+the process table cannot attribute a session to a CHECKOUT, and the ancestry walk is
+platform-specific against this repo's OS-agnostic invariant. **A design decision is now owed**, and
+it is the owner's: the measurement stopped where the decision starts.
 
 Of the three residuals this section used to list, ONE remains in
 [`open-bugs.md`](backlog/open-bugs.md), unpinned: the lane-DETECTION half, still open under the
@@ -52,12 +60,11 @@ issue, not an audit-tools one). Its home is now the machine-wide backlog, `C:\Co
 created that day because the machine-wide scope had no work tracker at all. `~/.claude/CLAUDE.md`
 carries the pointer and the belongs-here test.
 
-⚠ **That "approved as a lap of its own" liveness signal is DEAD as sketched (2026-08-30).** It was
-put through the design gate and stopped there before any code: `pid` cannot live on the session
-record, because only hooks write it and a hook is dead before anything reads its pid. The owner
-STOPPED the lap rather than substitute a design, so the replacement shape is UNCHOSEN and is the
-next decision on that entry. The dead sketch and the storage prior art
-(`tests/helpers/suiteLock.ts`) are recorded in [`open-bugs.md`](backlog/open-bugs.md).
+⚠ **The reason that sketch was declared dead is now HALF WRONG, and the correction matters more than
+the sketch.** It died on "a hook is dead before anything reads its pid" — true of the hook's OWN pid,
+false of the SESSION's, which a hook can read by walking up and which outlives it by the whole
+session (measured 3/3). What actually blocks the design is different and was not known then: the
+consumer runs under `npm`, where the walk dies. The replacement shape is still UNCHOSEN.
 
 The standing program direction remains *redesign before scheduled autonomy* → the autonomous
 audit→remediate→PR capstone once the architecture items are worked off.
