@@ -34,10 +34,13 @@
 
 ## Immediate next
 
-**Nothing is pinned, by owner decision 2026-08-30.** The empty roadmap below was reviewed and chosen
-at the hand-back, against pinning either the fresh-worktree disarm or the session-registry liveness
-signal. It is a statement, not an omission — the next session picks from the backlog on its own
-judgement.
+**MEASURE `process.ppid` — pinned by owner decision 2026-08-30, and the measurement IS the lap.**
+The teardown-hermeticity entry is pinned in the roadmap below. Both of its earlier sketches died
+because a shape was chosen before anything was measured, so the next lap establishes one fact and
+stops: is a session pid readable WITHOUT a hook, and does it survive the session. Design follows
+from the result. **A lap that ends with a measurement and no code is a success here** — that is the
+point of the decision, not a shortfall against it. `tests/helpers/suiteLock.ts` storage is the
+fallback if the probe fails.
 
 Of the three residuals this section used to list, ONE remains in
 [`open-bugs.md`](backlog/open-bugs.md), unpinned: the lane-DETECTION half, still open under the
@@ -100,10 +103,10 @@ audit→remediate→PR capstone once the architecture items are worked off.
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 0 pinned item(s).
+> `verify:checks` and at commit). 1 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-*(nothing pinned — no immediate next step is set. Every open item is in [`docs/backlog/`](backlog/).)*
+- ▶ The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction: false_red). · [`open-bugs.md`](backlog/open-bugs.md)
 
 <!-- END GENERATED ROADMAP -->

@@ -138,34 +138,28 @@
   `wrapper/**` or `.claude/hooks/**` while its tsconfig sets `allowJs` and tests import from both.
   **Property:** the preflight never issues a verdict about the staged tree that it did not establish.
 
-- **The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
+- **▶ The suite's added-root-entry teardown check is not hermetic against a CONCURRENT session in the
   shared checkout, and it reds a commit whose own tests all passed (2026-08-27, medium, friction:
   false_red).** `tests/helpers/global-setup.ts` teardown diffs the repo root before and after the run,
   so a foreign write inside that window is attributed to the run. **Property:** the teardown asserts a
   verdict about a root entry only where that verdict can be true.
-  **Two designs are DEAD by measurement (2026-08-30); a third must clear their bar.**
-  1. *Attribute the writer.* No supported OS offers post-hoc file→writer attribution, and write-time
-     interception is unavailable in ESM: patching `node:fs` is BYPASSED by the named imports this
-     tree uses throughout. Permanent false GREEN.
-  2. *Assert only where the run is the sole writer.* No exclusivity predicate exists over AGENT
-     SESSIONS: records carry no pid and live 30 days, and the suite lock sees only vitest
-     invocations. The state dir is unreliable BOTH ways (corrected 2026-08-30): `git worktree add`
-     leaves it empty, the HARNESS mechanism COPIES it, so that worktree reads non-exclusive on
-     foreign records. `tests/helpers/suiteLock.ts` already solves the STORAGE half — `suiteLockDir`
-     keys holders by `sha256(repoRoot)` in the OS temp dir, immune to that copy, and `processAlive`
-     is the probe.
-  **Three constraints on any future design:** (i) the throw is part of the repo's DECLARED
-  green mechanism — the vitest gate exits on nonzero and never mints the suite-green stamp, so
-  downgrading the local verdict makes `npm test` stamp a tree that CONTAINS the leak; (ii) "notice
-  instead of throw" is silence at the seam that reported this, because the pre-commit
-  `test:doc-contract` leg reads the child's streams only in `catch`; (iii) nothing binds `teardown()`'s
-  composition — `repoRootProblems` has one caller and zero test observers, so a fix can ship UNWIRED
-  with every pinned case green. **OWNER DECISION 2026-08-30 — build the one live direction:** a real
-  session liveness signal as a lap of its own, then scope the teardown verdict to its absence.
-  ⚠ **That sketch is DEAD — killed at the design gate before any code.** `pid` cannot live on the
-  session record: only hooks write it, and a hook is dead before anything reads its pid. A session
-  pid would need `process.ppid`: untried, OS-specific. The owner STOPPED the lap rather than
-  substitute a design; the replacement shape is UNCHOSEN and is the next decision.
+  **Three designs are DEAD by measurement, so a fourth must clear their bar.** (1) *Attribute the
+  writer* — no OS offers post-hoc file→writer attribution, and ESM named imports bypass a `node:fs`
+  patch. (2) *Assert only where the run is sole writer* — no exclusivity predicate exists over agent
+  SESSIONS; the state dir is unreliable both ways, since `git worktree add` leaves it empty while the
+  harness mechanism COPIES it. (3) *`pid` on the session record* — only hooks write it, and a hook is
+  dead before anything reads its pid.
+  **Three constraints on any future design:** (i) the throw is part of the repo's DECLARED green
+  mechanism, so downgrading the local verdict makes `npm test` stamp a tree that CONTAINS the leak;
+  (ii) "notice instead of throw" is silence, because the pre-commit `test:doc-contract` leg reads the
+  child's streams only in `catch`; (iii) nothing binds `teardown()`'s composition — `repoRootProblems`
+  has one caller and zero test observers, so a fix can ship UNWIRED with every pinned case green.
+  **OWNER DECISION 2026-08-30 — MEASURE BEFORE DESIGNING.** All three sketches died because a shape
+  was chosen before anything was measured, so the next lap establishes ONE fact and stops: is a
+  session pid readable via `process.ppid` WITHOUT a hook, and does it survive the session. Design
+  follows from the result, and a lap ending in a measurement and no code satisfies this. Fallback if
+  the probe fails: `tests/helpers/suiteLock.ts`, whose `suiteLockDir` already keys holders by
+  `sha256(repoRoot)` in the OS temp dir — immune to that copy — with `processAlive` as its probe.
 
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
   fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went
