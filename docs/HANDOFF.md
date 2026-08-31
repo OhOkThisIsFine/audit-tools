@@ -43,12 +43,12 @@ the owner decision asked for.** A durable session pid is obtainable from a HOOK 
 is proven for exactly that read: shared temp dir, keyed per checkout, outside the tree, and
 `processAlive` works on foreign pids.
 
-**The next question on that entry is write-and-sweep timing**, and it is the only unmeasured half
-left: what removes a stored entry when a session dies without a clean exit, and whether
-`processAlive` alone is a sufficient sweep. Two constraints the probes ADDED must ride any design —
-the process table cannot attribute a session to a CHECKOUT, and the ancestry walk is
-platform-specific against this repo's OS-agnostic invariant. **A design decision is now owed**, and
-it is the owner's: the measurement stopped where the decision starts.
+**MEASURE SWEEP TIMING — owner decision 2026-08-30, taken on reading the ppid result, and the next
+lap is that measurement.** Establish what removes a stored entry when a session dies without a clean
+exit, and whether `processAlive` alone is a sufficient sweep. **A lap ending in a measurement and no
+code satisfies this**, exactly as the ppid lap did. Two constraints the ppid probes ADDED must ride
+any eventual design — the process table cannot attribute a session to a CHECKOUT, and the ancestry
+walk is platform-specific against this repo's OS-agnostic invariant.
 
 Of the three residuals this section used to list, ONE remains in
 [`open-bugs.md`](backlog/open-bugs.md), unpinned: the lane-DETECTION half, still open under the

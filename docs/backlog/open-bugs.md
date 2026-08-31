@@ -162,8 +162,10 @@
   different: the walk dies through `npm`, the shape `npm test` has, so the consumer must READ a stored
   pid rather than walk. The fallback STORAGE is proven for that read — `suiteLockDir` keys by
   `sha256(repoRoot)` in a shared temp dir outside the tree, and `processAlive` works on foreign pids.
-  **Next question, unmeasured:** write-and-sweep timing — what removes an entry when a session dies
-  uncleanly, and whether `processAlive` alone sweeps sufficiently.
+  **OWNER DECISION 2026-08-30, on reading the above: MEASURE SWEEP TIMING FIRST — again, before any
+  design.** The next lap establishes what removes a stored entry when a session dies uncleanly, and
+  whether `processAlive` alone sweeps sufficiently. A lap ending in a measurement and no code
+  satisfies this, exactly as the ppid lap did.
 
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
   fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went
