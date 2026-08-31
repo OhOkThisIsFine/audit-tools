@@ -627,13 +627,26 @@ export function renderAuditReportMarkdown(
   lines.push(
     ...renderConceptualAttributionSection(options.conceptual_adjudication),
   );
-  const feedbackLines = renderProcessFeedbackSection(options.reflections ?? []);
+  const reflections = options.reflections ?? [];
+  // Structural capability limitations are report limitations, not process
+  // feedback. Keep the machine contract untouched: this only partitions the
+  // human-readable render.
+  const capabilityLimitations = reflections.filter(
+    (reflection) =>
+      reflection.task_id === "audit-capability-preflight" &&
+      (reflection.severity === "high" || reflection.severity === "critical"),
+  );
+  const processFeedback = reflections.filter(
+    (reflection) => !capabilityLimitations.includes(reflection),
+  );
+  const limitationLines = renderProcessFeedbackSection(capabilityLimitations);
+  if (limitationLines.length > 0) limitationLines[0] = "## Audit Limitations";
+  const feedbackLines = renderProcessFeedbackSection(processFeedback);
+  lines.push(...limitationLines, ...feedbackLines);
   if (driftLines.length > 0 && feedbackLines.length === 0) {
-    // The drift block lives UNDER the process heading; with no reflections
-    // there is no heading yet, so it brings its own.
     lines.push("## Process Feedback", "");
   }
-  lines.push(...feedbackLines, ...driftLines);
+  lines.push(...driftLines);
 
   const excludedScope = options.intent_checkpoint?.excluded_scope ?? [];
   if (excludedScope.length > 0) {

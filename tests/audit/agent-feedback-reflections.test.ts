@@ -16,6 +16,7 @@ const { loadArtifactBundle, writeCoreArtifacts, getArtifactValue } =
 const { computeArtifactMetadata } = await import("../../src/audit/orchestrator/artifactMetadata.js");
 const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/staleness.js");
 const { runSynthesisExecutor } = await import("../../src/audit/orchestrator/synthesisExecutors.js");
+const { renderAuditReportMarkdown } = await import("../../src/audit/reporting/synthesis.js");
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.js");
 const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
@@ -58,6 +59,33 @@ test("loadArtifactBundle parses agent-feedback.jsonl leniently and persist never
     await writeCoreArtifacts(dir, { repo_manifest: { repository: { name: "t" }, generated_at: "t", files: [] } }, { prune: true });
     expect(await readFile(join(dir, FEEDBACK_FILE), "utf8")).toBe(raw);
   });
+});
+
+test("capability preflight reflections render as detailed audit limitations", () => {
+  const preflight: AgentReflection = {
+    task_id: "audit-capability-preflight",
+    instruction_clarity: "clear",
+    severity: "high",
+    tool_friction: ["No structural graph tool was available on this host."],
+    ambiguities: ["Coverage of call relationships could not be established."],
+    suggestions: ["Run a structural-capability-enabled host before claiming comprehensive coverage."],
+  };
+  const run = runSynthesisExecutor({ coverage_matrix: { files: [] }, agent_reflections: [REFLECTION, preflight] }, undefined);
+  expect(run.updated.audit_report).toMatch(/## Audit Limitations/);
+  expect(run.updated.audit_report).toMatch(/No structural graph tool was available/);
+  expect(run.updated.audit_report).toMatch(/## Process Feedback[\s\S]*packet path was stale/);
+  expect((run.updated.audit_report.match(/## Audit Limitations/g) ?? []).length).toBe(1);
+});
+
+test("audit limitations precede process feedback when drift is present", () => {
+  const preflight: AgentReflection = { task_id: "audit-capability-preflight", instruction_clarity: "clear", severity: "critical", tool_friction: ["missing graph"] };
+  const report = renderAuditReportMarkdown({ summary: { finding_count: 0, work_block_count: 0, severity_breakdown: {}, audited_file_count: 0, excluded_file_count: 0, runtime_validation_status_breakdown: {} }, findings: [], work_blocks: [], work_block_seams: [] }, {
+    reflections: [preflight],
+    submission_ledger: [{ contract_version: "submission-ledger-event/v1alpha1", run_id: "r", submission_id: "s", lane: "x", kind: "rejected", recorded_at: "2026-01-01T00:00:00Z", issue_code: "bad" }],
+  });
+  expect(report.indexOf("## Audit Limitations")).toBeLessThan(report.indexOf("## Process Feedback"));
+  expect(report).toMatch(/## Audit Limitations[\s\S]*missing graph/);
+  expect(report).toMatch(/## Process Feedback[\s\S]*Submission drift/);
 });
 
 test("synthesis renders Process Feedback from bundle reflections; machine contract carries none", () => {
