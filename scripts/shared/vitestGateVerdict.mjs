@@ -50,3 +50,92 @@ export function isReporterTransportFault({ record, token, stderrText }) {
   if (outcome.unfinished !== 0) return false;
   return HARNESS_FAULT.test(stderrText ?? "");
 }
+
+// ─── Failure attribution ───────────────────────────────────────────────────
+// A caller that only sees this gate's EXIT CODE knows a run failed and nothing
+// else. `.claude/hooks/pre-commit-gate.mjs` used to close that gap by asserting
+// a cause — "a staged doc/asset broke a test that pins its exact content" — for
+// every failure of `npm run test:doc-contract`, including a globalSetup fault,
+// a live child of the run, or an ordinary flake. It was confidently wrong above
+// real evidence, and it also named three files while that run has four.
+//
+// The gate RUNNER is the boundary that owns this: it alone holds the ledger it
+// can prove belongs to this run (the run token). So it STATES the attribution
+// on one machine-readable line and its callers relay what it said, rather than
+// scraping vitest's human output or guessing. PH-05 — a gate states the
+// boundary it is authoritative at.
+
+/** The one-line contract between the gate runner and anything reading its output. */
+export const ATTRIBUTION_PREFIX = "[vitest-gate] ATTRIBUTION:";
+
+/**
+ * What this run's own ledger can prove about WHICH files failed.
+ *
+ * Unattributable is a first-class verdict, never a guess: a ledger this run
+ * cannot prove it wrote, or a nonzero exit carrying zero counted failures, both
+ * mean the failure happened somewhere the test results do not describe.
+ *
+ * @param {{record: unknown, token: string}} input
+ * @returns {{attributable: true, failedFiles: string[]} | {attributable: false, reason: string}}
+ */
+export function attributeFailure({ record, token }) {
+  if (!record || typeof record !== "object") {
+    return { attributable: false, reason: "this run wrote no readable ledger" };
+  }
+  const typedRecord = /** @type {any} */ (record);
+  if (typedRecord.runToken !== token) {
+    return {
+      attributable: false,
+      reason: "the ledger does not carry this run's token, so it cannot be trusted to describe it",
+    };
+  }
+  const outcome = typedRecord.outcome;
+  if (!outcome || typeof outcome !== "object") {
+    return { attributable: false, reason: "this run's ledger has no structured outcome" };
+  }
+  const failedFiles = Array.isArray(outcome.failedFiles) ? outcome.failedFiles : [];
+  if (failedFiles.length === 0) {
+    return {
+      attributable: false,
+      reason:
+        "this run recorded no failing test file, so it failed OUTSIDE the tests " +
+        "(setup, teardown, a lost worker, or the runner itself)",
+    };
+  }
+  return { attributable: true, failedFiles };
+}
+
+/**
+ * Render {@link attributeFailure}'s verdict as the single line callers parse.
+ * @param {{attributable: true, failedFiles: string[]} | {attributable: false, reason: string}} verdict
+ * @returns {string}
+ */
+export function formatAttributionLine(verdict) {
+  return verdict.attributable
+    ? `${ATTRIBUTION_PREFIX} files=${verdict.failedFiles.join(",")}`
+    : `${ATTRIBUTION_PREFIX} unattributable — ${verdict.reason}`;
+}
+
+/**
+ * Read back the line {@link formatAttributionLine} wrote, from a block of
+ * output. Returns null when the runner stated nothing — which a caller must
+ * treat as unattributable rather than as permission to assert a cause.
+ *
+ * @param {string} text
+ * @returns {{attributable: true, failedFiles: string[]} | {attributable: false, reason: string} | null}
+ */
+export function parseAttributionLine(text) {
+  const line = (text ?? "")
+    .split(/\r?\n/)
+    .reverse()
+    .find((l) => l.includes(ATTRIBUTION_PREFIX));
+  if (!line) return null;
+  const body = line.slice(line.indexOf(ATTRIBUTION_PREFIX) + ATTRIBUTION_PREFIX.length).trim();
+  if (body.startsWith("files=")) {
+    const failedFiles = body.slice("files=".length).split(",").map((f) => f.trim()).filter(Boolean);
+    if (failedFiles.length > 0) return { attributable: true, failedFiles };
+    return { attributable: false, reason: "the runner reported an empty file list" };
+  }
+  const reason = body.replace(/^unattributable\s*[—-]\s*/, "");
+  return { attributable: false, reason: reason || "the runner did not say why" };
+}

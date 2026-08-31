@@ -91,8 +91,18 @@ export function createFoldTransaction(): FoldTransaction {
 
 /** What a quarantine actually achieved, as opposed to what it attempted. */
 export interface QuarantineOutcome {
-  /** Where the refused content now lives. Always written. */
-  readonly quarantinePath: string;
+  /**
+   * Where the refused content now lives, and `null` when it does not live
+   * anywhere: the `rename` failed AND the copy fallback failed too, so nothing
+   * was ever written to the quarantine directory.
+   *
+   * Nullable rather than a bare string BECAUSE the type is the enforcement.
+   * Every consumer puts this value into an operator line, a rendered notice, or
+   * a persisted `quarantine_path` field; a non-null string let all of them
+   * report a path naming no file, and no amount of care at the call sites would
+   * have caught it. The typechecker catches it instead.
+   */
+  readonly quarantinePath: string | null;
   /**
    * The source could NOT be deleted, so it survives at its original path and a
    * later pass will quarantine it again, appending one more `rejected` event
@@ -116,10 +126,35 @@ export interface QuarantineOutcome {
  * durable record the property actually asks for.
  */
 export function quarantineSurvivalNote(outcome: QuarantineOutcome): string {
+  if (outcome.quarantinePath === null) {
+    return (
+      " — the content could NOT be copied to quarantine, so nothing was written " +
+      "there and the file survives at its original path, where a later pass will " +
+      "attempt the quarantine again"
+    );
+  }
   return outcome.sourceSurvived
     ? " — the quarantined source could NOT be deleted and survives at its original " +
         "path, so a later pass will quarantine it again"
     : "";
+}
+
+/**
+ * How a refusal NAMES the quarantine location, from a stored path. The one home
+ * for the phrasing, so a failed copy cannot read as a successful one at any
+ * call site that interpolated the path itself — which is what every operator
+ * line and rendered host notice used to do, and why a `null` would otherwise
+ * reach a prompt as the literal word "null".
+ */
+export function describeQuarantineLocation(quarantinePath: string | null): string {
+  return quarantinePath === null
+    ? "NOT quarantined — the copy failed, so the content is still at its bound path"
+    : `quarantined to ${quarantinePath}`;
+}
+
+/** {@link describeQuarantineLocation} for a fresh outcome. */
+export function quarantineLocationPhrase(outcome: QuarantineOutcome): string {
+  return describeQuarantineLocation(outcome.quarantinePath);
 }
 
 /**
@@ -146,7 +181,13 @@ export async function quarantineSubmissionFile(
       const content = await readFile(filePath, "utf8");
       await writeFile(quarantinePath, content, "utf8");
     } catch {
-      // Best-effort: nothing left to quarantine if even the read failed.
+      // The copy did NOT land, so there is nothing at `quarantinePath` and the
+      // delete below MUST NOT run. The old comment here read "nothing left to
+      // quarantine if even the read failed", which holds only for the READ: a
+      // `writeFile` failure — a full disk, or permissions on the quarantine
+      // directory — leaves the source perfectly readable, and unlinking it then
+      // DESTROYED a submission while the caller reported a path naming no file.
+      return { quarantinePath: null, sourceSurvived: true };
     }
     try {
       await unlink(filePath);

@@ -44,6 +44,9 @@ import {
 // The child-session refusal below keys on the payload's session_id against the
 // registry SessionStart writes; the same lib serves the three Stop gates.
 import { readSessionRegistry, sanitizeSessionId } from '../../scripts/shared/sessionRegistry.mjs';
+// The doc-contract leg RELAYS the gate runner's own attribution line rather
+// than asserting a cause; the contract for that line has one home.
+import { parseAttributionLine } from '../../scripts/shared/vitestGateVerdict.mjs';
 
 // ── Loop-core adversarial-review gate ────────────────────────────────────────
 // Hand-authored (non-node) edits to the dispatch / admission / quota / rolling /
@@ -887,17 +890,31 @@ function runGate(committedPaths) {
         windowsHide: true,
       }));
     } catch (err) {
-      const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`
-        .trim()
-        .split('\n')
-        .slice(-40)
-        .join('\n');
+      const full = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`.trim();
+      const tail = full.split('\n').slice(-40).join('\n');
+      // RELAY what the gate runner stated; never assert a cause this hook did
+      // not observe. The old headline named "a staged doc/asset broke a test
+      // that pins its exact content (release-contract / *-doc-sync /
+      // host-asset-renderer-drift)" for EVERY failure of this run — including a
+      // globalSetup fault, a live child, or a flake — and it named three files
+      // while the run has four. The runner owns attribution because it alone
+      // holds the run-token-validated ledger; a missing line means it said
+      // nothing, which is unattributable, not permission to guess.
+      // Read the FULL output, not the 40-line tail: a noisy failure could push
+      // the runner's one attribution line out of the excerpt, and the hook
+      // would then read a stated verdict as silence.
+      const attribution = parseAttributionLine(full);
+      const cause = attribution?.attributable
+        ? `The run reports ${attribution.failedFiles.length} failing file(s): ` +
+          `${attribution.failedFiles.join(', ')}.`
+        : `The gate could not tell WHICH file failed — ${
+            attribution?.reason ?? 'the runner stated no attribution'
+          }. Read the output below rather than assuming a staged doc broke a content pin.`;
       return {
         blocked: true,
         message:
-          `pre-commit gate: doc-contract tests FAILED — commit blocked. A staged doc/asset broke a test that ` +
-          `pins its exact content (release-contract / *-doc-sync / host-asset-renderer-drift). ` +
-          `Fix the doc or the test, then retry.\n${tail}`,
+          `pre-commit gate: doc-contract tests FAILED — commit blocked. ${cause} ` +
+          `Fix the cause, then retry.\n${tail}`,
       };
     }
   }

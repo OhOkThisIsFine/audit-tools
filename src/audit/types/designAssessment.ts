@@ -17,8 +17,13 @@ export interface RejectedDesignReviewSubmission {
    * bound path is a digest, which would tell an operator nothing.
    */
   lane: string;
-  /** Absolute path the malformed submission was moved to. */
-  quarantine_path: string;
+  /**
+   * Absolute path the malformed submission was moved to, and `null` when the
+   * copy to quarantine failed so nothing was written there. Nullable in the
+   * PERSISTED record too: a durable rejection that names a path holding no file
+   * is worse than one that states plainly that the content was never moved.
+   */
+  quarantine_path: string | null;
   /** Human-readable shape-mismatch description. */
   reason: string;
   /** ISO-8601 timestamp of the rejection. */

@@ -35,6 +35,7 @@ export const STEP_GLOSS = {
   "check:guard-reach": "guard wiring/reach reconciliation",
   "check:ci-trigger-paths": "CI trigger-path parity (derived from guard-reach)",
   "check:loop-core-patterns": "loop-core pattern-list drift check",
+  "check:loop-core-closure": "loop-core reach: a module imported only by loop-core is core, or declared",
   "check:constitutional-doc-paths": "constitutional-doc-path parity",
   "check:runtime-artifact-names": "runtime artifact-name set parity",
   "check:friction-categories": "friction-category vocabulary parity",

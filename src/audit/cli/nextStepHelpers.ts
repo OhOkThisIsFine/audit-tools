@@ -79,6 +79,8 @@ import {
   commitFold,
   createFoldTransaction,
   markSubmissionApplied,
+  describeQuarantineLocation,
+  quarantineLocationPhrase,
   quarantineSubmissionFile,
   quarantineSurvivalNote,
   recoverStagedSubmissions,
@@ -762,7 +764,8 @@ type ConsumeArraySubmissionResult<T> =
   | { status: "ok"; value: T[]; path: string }
   | {
       status: "quarantined";
-      quarantinePath: string;
+      /** `null` when the copy to quarantine failed — see `QuarantineOutcome`. */
+      quarantinePath: string | null;
       lane: string;
       reason: string;
     };
@@ -778,14 +781,16 @@ type ConsumeArraySubmissionResult<T> =
  * stays distinguishable from a clean one. The single loud-quarantine path
  * shared by every schema-validated gate (`runOmittableGate` +
  * `handleIntentEquivalenceBranch` + the charter lane loop) so the "quarantine
- * loudly" property cannot drift between them. Returns the quarantine path.
+ * loudly" property cannot drift between them. Returns the quarantine path, or
+ * `null` when the copy to quarantine failed and the content is still at its
+ * original path — see `QuarantineOutcome`.
  */
 async function quarantineMisshapedSubmission(
   artifactsDir: string,
   filePath: string,
   lane: string,
   error: ZodError | string,
-): Promise<string> {
+): Promise<string | null> {
   const reason = typeof error === "string"
     ? error
     : error.issues
@@ -793,7 +798,7 @@ async function quarantineMisshapedSubmission(
       .join("; ");
   const quarantine = await quarantineSubmissionFile(artifactsDir, filePath, lane);
   process.stderr.write(
-    `[audit-code] ${lane} submission quarantined to ${quarantine.quarantinePath}` +
+    `[audit-code] ${lane} submission ${quarantineLocationPhrase(quarantine)}` +
       `${quarantineSurvivalNote(quarantine)}: ${reason}. ` +
       `Fix the shape and resubmit.\n`,
   );
@@ -863,7 +868,12 @@ export async function consumeArraySubmission<T>(
 type ConsumeObjectSubmissionResult =
   | { status: "absent" }
   | { status: "ok"; value: Record<string, unknown>; path: string }
-  | { status: "quarantined"; quarantinePath: string; reason: string };
+  | {
+      status: "quarantined";
+      /** `null` when the copy to quarantine failed — see `QuarantineOutcome`. */
+      quarantinePath: string | null;
+      reason: string;
+    };
 
 /**
  * Read a lane submission expected to be a plain top-level object (a
@@ -888,7 +898,7 @@ export async function consumeObjectSubmission(
       lane,
     );
     process.stderr.write(
-      `[audit-code] ${lane} submission quarantined to ${quarantine.quarantinePath}` +
+      `[audit-code] ${lane} submission ${quarantineLocationPhrase(quarantine)}` +
         `${quarantineSurvivalNote(quarantine)}: ${incoming.reason}. ` +
         `Fix the JSON and resubmit.\n`,
     );
@@ -910,7 +920,7 @@ export async function consumeObjectSubmission(
   const reason = describeSubmissionShapeMismatch(value);
   const quarantine = await quarantineSubmissionFile(artifactsDir, path, lane);
   process.stderr.write(
-    `[audit-code] ${lane} submission quarantined to ${quarantine.quarantinePath}` +
+    `[audit-code] ${lane} submission ${quarantineLocationPhrase(quarantine)}` +
       `${quarantineSurvivalNote(quarantine)}: expected a JSON object, got ${reason}. ` +
       `Fix the shape and resubmit.\n`,
   );
@@ -1003,7 +1013,7 @@ async function consumeEnumMapSubmission<T extends string>(
     lane,
   );
   process.stderr.write(
-    `[audit-code] ${lane} submission quarantined to ${quarantine.quarantinePath}` +
+    `[audit-code] ${lane} submission ${quarantineLocationPhrase(quarantine)}` +
       `${quarantineSurvivalNote(quarantine)}: ${reason} ` +
       `Fix the values and resubmit.\n`,
   );
@@ -1025,7 +1035,13 @@ async function consumeEnumMapSubmission<T extends string>(
 
 interface EdgeReasoningRejection {
   lane: string;
-  quarantine_path: string;
+  /**
+   * Where the refused submission was moved, and `null` when the copy to
+   * quarantine failed so nothing was written there. Nullable in the PERSISTED
+   * record too: a durable rejection that names a path holding no file is worse
+   * than one that states plainly that the content was never moved.
+   */
+  quarantine_path: string | null;
   reason: string;
   rejected_at: string;
 }
@@ -1071,7 +1087,7 @@ export async function renderEdgeReasoningRejectionNotice(
     "Your last edge-reasoning submission did not match the expected shape and was " +
       "quarantined (not applied, not silently discarded). Fix the shape and resubmit:",
     "",
-    `- lane \`${rejection.lane}\` quarantined to \`${rejection.quarantine_path}\` (${rejection.rejected_at}): ${rejection.reason}`,
+    `- lane \`${rejection.lane}\` ${describeQuarantineLocation(rejection.quarantine_path)} (${rejection.rejected_at}): ${rejection.reason}`,
     "",
     'Expected shape: {"rewrites":[{"from":"...","to":"...","kind":"...","reason":"..."}]} — ' +
       "a bare JSON array of rewrites is also accepted.",
@@ -1151,7 +1167,7 @@ export function renderDesignReviewRejectionNotice(
   ];
   for (const r of rejected) {
     lines.push(
-      `- **${r.pass}** — lane \`${r.lane}\` quarantined to \`${r.quarantine_path}\` (${r.rejected_at}): ${r.reason}`,
+      `- **${r.pass}** — lane \`${r.lane}\` ${describeQuarantineLocation(r.quarantine_path)} (${r.rejected_at}): ${r.reason}`,
     );
   }
   lines.push(
@@ -1204,7 +1220,7 @@ export async function handleDesignReviewBranch(
       lane,
     );
     process.stderr.write(
-      `[audit-code] ${lane} submission quarantined to ${quarantine.quarantinePath}` +
+      `[audit-code] ${lane} submission ${quarantineLocationPhrase(quarantine)}` +
         `${quarantineSurvivalNote(quarantine)}: no design ` +
         `assessment exists yet to merge it into. Re-run next-step; the assessment is ` +
         `built by a higher-priority obligation.\n`,

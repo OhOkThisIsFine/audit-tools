@@ -223,6 +223,16 @@ export const GUARDS = [
       'run `node scripts/shared/generate-loop-core-patterns.mjs`, then re-stage it',
   },
   {
+    id: 'check:loop-core-closure',
+    kind: 'gate',
+    impl: 'check:loop-core-closure',
+    preCommit: 'reach',
+    fix:
+      'a module is reachable ONLY through loop-core but is neither in LOOP_CORE_PATTERNS nor ' +
+      'declared — add it to src/shared/loopCorePaths.ts (then regenerate) if it is core, or add a ' +
+      'row with its reason to scripts/shared/loopCoreClosureData.mjs if it is not',
+  },
+  {
     id: 'check:constitutional-doc-paths',
     kind: 'gate',
     impl: 'check:constitutional-doc-paths',
@@ -835,6 +845,26 @@ export const REACH = [
       'the F2 hole (ceremony review 2026-08-29): the generated hook copy is what the pre-build ' +
       'commit gate matches loop-core paths against, so an unregenerated loopCorePaths.ts edit must ' +
       'red AT COMMIT, not first in release CI',
+  },
+  {
+    area: 'loop-core closure sources',
+    files: [
+      'scripts/check-loop-core-closure.mjs',
+      'scripts/shared/loopCoreClosure.mjs',
+      'scripts/shared/loopCoreClosureData.mjs',
+    ],
+    guardedBy: ['check:loop-core-closure'],
+    note:
+      'the loop-core SET is hand-maintained, so a symbol moving into a new module left attestation ' +
+      'coverage silently (quarantineSubmissionFile at b4a3eb4a). This gate makes the reach a ' +
+      'property of the import graph instead: a module imported only by loop-core is core, or it ' +
+      'is declared with a reason',
+    uncovered:
+      'the rule claims a module only when EVERY importer is loop-core, so a genuinely-core module ' +
+      'that also has one ordinary consumer is not claimed and must still be added by hand. The 25 ' +
+      'modules declared at the gate\'s landing are grandfathered by measurement, not by ' +
+      'classification: the gate is forward-looking, and it does not assert that today\'s 25 are ' +
+      'correctly outside the set',
   },
   {
     area: 'friction-category parity sources',

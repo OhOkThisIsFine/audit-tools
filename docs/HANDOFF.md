@@ -38,44 +38,36 @@
 
 ## Immediate next
 
-**SETTLED 2026-08-30 — the root-delta check is DELETED, and root cleanliness is now owned by
-nothing inside this repo.** The owner ruled that the artifacts are no longer this project's problem,
-and the guard's own creation commit `f3cac01b` had already measured exactly that. So the guard was
-removed rather than repaired: `repoRootProblems`, `rootEntriesAtSetup`, `unexpectedRootEntries` and
-`RUN_OWNED_ROOT_ENTRIES` are gone from `tests/helpers/global-setup.ts`, with their pinned cases and
-docblocks. `inTreeFixtureProblems` and `liveChildProblems` still THROW — those are the halves a run
-can answer for, because it can establish what it started.
+**Nothing pending.** The 2026-08-30 report-truth lap closed three entries and left one narrower
+one behind, stated in [`open-bugs.md`](backlog/open-bugs.md).
 
-The snapshot-at-the-commit-boundary track was **retired in the same decision**, not left paused: no
-mechanism is queued to take the property back, and that is recorded rather than implied.
+What landed, and the property each now holds mechanically:
 
-**Three costs were accepted knowingly**, and the guard-reach row carries them as data: `npm test` can
-now mint green over a tree containing an unignored root leak; a future regression in this project's
-own spawn discipline goes unwatched at test time; and any leak matching an ignore rule is invisible
-to every gate, including the `git add -A` tree the stamp binds. The diagnosis and remedy moved to
-[`durable-traps.md`](backlog/durable-traps.md) before their carriers were deleted.
+- `quarantineSubmissionFile` reports a `quarantinePath` only when the content is at it. The type
+  is the enforcement — `string | null` reached all eight consumers through the typechecker, and
+  `describeQuarantineLocation` is the one home for how a refusal names the location, including in
+  the two persisted `quarantine_path` fields, which are nullable with it. ⚠ The entry understated
+  the defect: after a failed copy the `unlink` still ran, so a `writeFile` failure over a readable
+  source DESTROYED the submission while the ledger named a path holding nothing. That is why the
+  red proof fails on `existsSync(sourcePath)` first.
+- The pre-commit doc-contract leg RELAYS an attribution instead of asserting a cause.
+  `run-vitest-gate.mjs` owns it, because it alone holds the run-token-validated ledger; it states
+  one machine-readable line on every failing exit it owns, and the hook reports what that line
+  said or says it could not tell. The old headline also named three files while that run has four.
+- `check:loop-core-closure` makes the loop-core set's reach a property of the import graph: a
+  module imported only by loop-core is core, or it is declared with a reason. Proven by inverting
+  the historical fix — with `foldTransaction.ts` removed from the set, the gate names it and its
+  single importer.
 
-Two assets survive for unrelated work: `samePath` (`.claude/hooks/session-start-guards.mjs`) is the
-correct checkout-comparison primitive, and a tool child already knows its own session
-(`CLAUDE_CODE_SESSION_ID` plus a live `CLAUDE_PID`, surviving `npm exec`).
-
-Of the three residuals this section used to list, ONE remains in
-[`open-bugs.md`](backlog/open-bugs.md), unpinned: the lane-DETECTION half, still open under its own
-recorded abstention. The child-session refusal's arming-by-worktree-provenance defect is closed, and
-its entry was deleted rather than restated — after the fix its property was word-for-word the
-detection entry's, and two entries stating one property is the duplication this repo bans.
-⚠ **The mid-lap PAUSE-versus-END residual LEFT this repo** (owner ruling 2026-08-30: it is a global
-issue, not an audit-tools one). Its home is now the machine-wide backlog, `C:\Code\docs\backlog.md`,
-created that day because the machine-wide scope had no work tracker at all. `~/.claude/CLAUDE.md`
-carries the pointer and the belongs-here test.
-
-⚠ **One lesson outlives all of it, and it is why this closed the way it did:** three separate times a
-stated BLOCKING CAUSE for a design turned out to be an untested premise, and the last one was the
-guard's own justification. Check the premise before designing against it.
+⚠ **The first design for each of the last two was REFUTED before any code existed**, by an
+`agy-gemini` lane in 109s. The doc-contract fix would have passed `--reporter=json` into a runner
+that inherits stdout and would have corrupted every interactive run; the loop-core fix was a
+staged-diff symbol check that would not have caught its own motivating case, because `commitFold`
+was a NEW symbol at `b4a3eb4a`, not a moved one. Hand the lane the recon map and it earns its
+minute.
 
 The standing program direction remains *redesign before scheduled autonomy* → the autonomous
 audit→remediate→PR capstone once the architecture items are worked off.
-
 
 ## Deliberate state, not bugs
 

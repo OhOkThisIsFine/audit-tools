@@ -36,7 +36,11 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shardSuffix } from "./vitestShard.mjs";
-import { isReporterTransportFault } from "./vitestGateVerdict.mjs";
+import {
+  attributeFailure,
+  formatAttributionLine,
+  isReporterTransportFault,
+} from "./vitestGateVerdict.mjs";
 import { worktreeTree } from "./worktree-tree.mjs";
 import { isFullSuiteRun, writeSuiteGreenStamp } from "./suiteGreenStamp.mjs";
 
@@ -85,6 +89,12 @@ if (vitestExit !== 0) {
     // No readable ledger — nothing to appeal to; the nonzero exit stands.
   }
   if (!isReporterTransportFault({ record: transportRecord, token, stderrText })) {
+    // STATE what this run can prove about the failure before leaving. A caller
+    // sees only the exit code otherwise, and the one that mattered — the
+    // pre-commit doc-contract leg — filled that silence by asserting a cause it
+    // had not observed. Attribution belongs here, where the run token proves
+    // the ledger describes THIS run.
+    console.error(formatAttributionLine(attributeFailure({ record: transportRecord, token })));
     process.exit(vitestExit);
   }
   console.error(
@@ -112,6 +122,10 @@ function failClosed(message) {
     "[vitest-gate] this run's outcome could not be confirmed from the ledger — treating it as " +
       "FAILED rather than trusting a possibly stale result.",
   );
+  // Every exit this script owns states its attribution, so a caller never has
+  // to infer one from silence. Here the verdict is always unattributable by
+  // construction: the ledger is what could not be trusted.
+  console.error(formatAttributionLine({ attributable: false, reason: message.trim() }));
   process.exit(1);
 }
 
@@ -144,6 +158,7 @@ if (outcome.failed > 0) {
       `across ${outcome.failedFiles.length} file(s) — this is the false-green defect; failing the gate:`,
   );
   for (const file of outcome.failedFiles) console.error(`  - ${file}`);
+  console.error(formatAttributionLine(attributeFailure({ record, token })));
   process.exit(1);
 }
 
