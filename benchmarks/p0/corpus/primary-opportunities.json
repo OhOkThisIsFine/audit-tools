@@ -1,0 +1,29 @@
+{
+  "source_reports": ["docs/reviews/complexity-reduction-audit-2026-08-26.md", "docs/reviews/philosophy-simplification-audit-2026-08-26.md"],
+  "opportunities": [
+    {"id":"O-01","title":"One directed-cycle core","mechanism":"Four traversal implementations; Kahn remainder over-reports tails","anchor":"src/shared/types/obligationLedger.ts; src/remediate/contractPipeline/cyclicSeamResolution.ts"},
+    {"id":"O-02","title":"One audit obligation registry and drain","mechanism":"Nested outer and inner drains duplicate selection and caps","anchor":"src/audit/cli/nextStepHelpers.ts; src/audit/orchestrator/advance.ts"},
+    {"id":"O-03","title":"Delete tested-only production APIs","mechanism":"Exports have test-only or no production consumers","anchor":"src/audit/io/artifacts.ts; src/remediate/steps/contractPipeline.ts"},
+    {"id":"O-04","title":"Cross-gate outcomes as sole evaluator","mechanism":"Two paths invoke the same eight validators","anchor":"src/remediate/validation/contractPipelineGates.ts"},
+    {"id":"O-05","title":"One finding-survivor fold","mechanism":"Shared lifecycle with two matching policies","anchor":"src/shared/findings/dedupe.ts"},
+    {"id":"O-06","title":"Share host-submission scan","mechanism":"Repeated path/read/classify plumbing","anchor":"src/shared/submission/hostHandoffCore.ts"},
+    {"id":"O-07","title":"Table-drive required-entry gates","mechanism":"Repeated six-check field validation","anchor":"src/remediate/validation/contractPipelineGates.ts"},
+    {"id":"O-08","title":"One protocol and shared primitives","mechanism":"Audit and remediation have real bounded-context safety differences","anchor":"docs/project-philosophy.md PH-01"},
+    {"id":"O-09","title":"Risk-scaled adversarial policy","mechanism":"Fixed ceremony floor multiplies low-risk work","anchor":"docs/project-philosophy.md PH-02"},
+    {"id":"O-10","title":"Single advance-until-blocked contract","mechanism":"Audit-specific outer drain duplicates shared advance","anchor":"docs/project-philosophy.md PH-03"},
+    {"id":"O-11","title":"Optimize lifetime cost and reviewability","mechanism":"Endpoint purity discounts transition blast radius","anchor":"docs/project-philosophy.md PH-04"},
+    {"id":"O-12","title":"Authority and lifecycle-cost gate test","mechanism":"Every mechanically detectable rule need not be a hard gate","anchor":"docs/project-philosophy.md PH-05"},
+    {"id":"O-13","title":"Derive secondary inventories","mechanism":"Secondary policy inventories require parity maintenance","anchor":"docs/project-philosophy.md PH-06"},
+    {"id":"O-14","title":"Generated minimal handoff","mechanism":"Manual state narration duplicates trusted local facts","anchor":"docs/project-philosophy.md PH-07"},
+    {"id":"O-15","title":"Risk-scaled semantic documentation review","mechanism":"Every document receives the same semantic ceremony","anchor":"docs/project-philosophy.md PH-08"},
+    {"id":"O-16","title":"Typed descriptors for parallel surfaces","mechanism":"Host/governance adapters reconstruct policy","anchor":"docs/project-philosophy.md PH-09"},
+    {"id":"O-17","title":"One resumable ship command","mechanism":"Release flow leaves observation and reinstall to prose","anchor":"docs/project-philosophy.md PH-10"},
+    {"id":"O-18","title":"Delete producerless provenance plane","mechanism":"Execution-record and run-ledger contracts lack producers","anchor":"docs/project-philosophy.md DC-01"},
+    {"id":"O-19","title":"Strict remediation state schema","mechanism":"Several partial state authorities validate asymmetrically","anchor":"docs/project-philosophy.md DC-02"},
+    {"id":"O-20","title":"Shared emitted-step schema","mechanism":"Writer and readers disagree about agent_id","anchor":"docs/project-philosophy.md DC-03"},
+    {"id":"O-21","title":"Delete design-review compatibility lane","mechanism":"Legacy lane is polled beside modern judgment types","anchor":"docs/project-philosophy.md DC-04"},
+    {"id":"O-22","title":"Structured submission provenance","mechanism":"Ledger recovery parses identity from free text","anchor":"docs/project-philosophy.md DC-05"},
+    {"id":"O-23","title":"Strict contract envelope","mechanism":"Canonical and staging views have split validation authority","anchor":"docs/project-philosophy.md DC-06"},
+    {"id":"O-24","title":"Retain bounded-context negatives","mechanism":"Intentional duplication and safety gates are not simplification targets","anchor":"negative retention bundle"}
+  ]
+}

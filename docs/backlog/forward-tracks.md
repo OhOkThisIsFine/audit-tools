@@ -169,8 +169,7 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   CX-02. Full brief, with both adversarial lanes and the limits of the measurement:
   [`one-core-lap-scope-2026-08-27.md`](../reviews/one-core-lap-scope-2026-08-27.md).
 
-- **Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep
-  path, then measure.** Pointer only — the eight confirmed gaps, the P0 rewiring sequence, its
+- **▶ Audit-tools deep-review acceptance benchmark still needs its external run.** Pointer only — the eight confirmed gaps, the P0 rewiring sequence, its
   contract-test plan, the conditional P1/P2 extensions, the blinded paired-benchmark gate, and the
   explicit what-not-to-build list are ALL in
   [`audit-tools-simplification-workflow-gap-2026-08-26.md`](../reviews/audit-tools-simplification-workflow-gap-2026-08-26.md),
@@ -178,9 +177,11 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   second copy to drift. Its verdict is that the reviewers already exist and the normal execution
   path starves them, so P0 adds no audit phase, no objective schema, and no MCP client to
   audit-tools core; P1 and P2 are contingencies that must each cite a failed benchmark axis, never
-  added pre-emptively. The ordering is load-bearing: implement P0, then run the acceptance gate —
-  ten pinned blinded paired trials scored on six separate non-inferiority axes — and add a durable
-  contract only where a measured axis fails. Unstarted. Acceptance corpus is the two 2026-08-26
+  added pre-emptively. P0 and its provider-neutral harness are implemented; that harness is not
+  acceptance evidence. The remaining work is the real acceptance gate — ten pinned, blinded paired
+  trials scored on six separate non-inferiority axes — using an operator-supplied external executor
+  and credentials plus two independent blinded evaluators, then adding a durable contract only where
+  a measured axis fails. Acceptance corpus is the two 2026-08-26
   standalone runs,
   [`complexity-reduction-audit-2026-08-26.md`](../reviews/complexity-reduction-audit-2026-08-26.md)
   (the review CX-02 draws from) and

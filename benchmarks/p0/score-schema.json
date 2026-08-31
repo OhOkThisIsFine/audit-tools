@@ -1,0 +1,6 @@
+{
+  "protocol": "p0-score-v1",
+  "outcomes": {"recovered": 1, "validly_subsumed": 1, "partial": 0.5, "evidence_refuted": 1, "missed": 0},
+  "axes": ["structural_recall", "philosophy_telos_recall", "grounding_precision", "telos_to_code_linkage", "reduction_value", "false_positive_discipline"],
+  "evaluation": {"two_independent_blinded": true, "disagreement_requires": "third_blinded_adjudicator", "identity_map_excluded_from_packets": true}
+}

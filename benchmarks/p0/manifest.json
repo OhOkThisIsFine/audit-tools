@@ -1,0 +1,301 @@
+{
+  "version": 1,
+  "shared": {
+    "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+    "host_build": "agy@1.1.22",
+    "model": "gemini-3.7-flash",
+    "reasoning_effort": "high",
+    "tool_inventory": [
+      "codebase-memory"
+    ],
+    "budgets": {
+      "context": 100000,
+      "output": 12000,
+      "turns": 20,
+      "timeout_ms": 300000
+    }
+  },
+  "primary": {
+    "accepted_reports": [
+      "docs/reviews/complexity-reduction-audit-2026-08-26.md",
+      "docs/reviews/philosophy-simplification-audit-2026-08-26.md"
+    ],
+    "normalized_opportunity_ids": [
+      "O-01",
+      "O-02",
+      "O-03",
+      "O-04",
+      "O-05",
+      "O-06",
+      "O-07",
+      "O-08",
+      "O-09",
+      "O-10",
+      "O-11",
+      "O-12",
+      "O-13",
+      "O-14",
+      "O-15",
+      "O-16",
+      "O-17",
+      "O-18",
+      "O-19",
+      "O-20",
+      "O-21",
+      "O-22",
+      "O-23",
+      "O-24"
+    ],
+    "strongest_opportunity_ids": [
+      "O-01",
+      "O-02",
+      "O-04",
+      "O-05"
+    ],
+    "pairs": [
+      {
+        "id": "primary-1",
+        "pinned": {
+          "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+          "host_build": "agy@1.1.22",
+          "model": "gemini-3.7-flash",
+          "reasoning_effort": "high",
+          "tool_inventory": [
+            "codebase-memory"
+          ],
+          "budgets": {
+            "context": 100000,
+            "output": 12000,
+            "turns": 20,
+            "timeout_ms": 300000
+          }
+        },
+        "control_prompt": "Use codebase-memory to hunt down unnecessary complexity that could be reduced with elegant code solutions. In parallel, examine the project's philosophy, choices, goals, and subsystem goals, and look for categorically better ways to achieve them.",
+        "candidate_prompt": "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior."
+      },
+      {
+        "id": "primary-2",
+        "pinned": {
+          "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+          "host_build": "agy@1.1.22",
+          "model": "gemini-3.7-flash",
+          "reasoning_effort": "high",
+          "tool_inventory": [
+            "codebase-memory"
+          ],
+          "budgets": {
+            "context": 100000,
+            "output": 12000,
+            "turns": 20,
+            "timeout_ms": 300000
+          }
+        },
+        "control_prompt": "Use codebase-memory to hunt down unnecessary complexity that could be reduced with elegant code solutions. In parallel, examine the project's philosophy, choices, goals, and subsystem goals, and look for categorically better ways to achieve them.",
+        "candidate_prompt": "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior."
+      },
+      {
+        "id": "primary-3",
+        "pinned": {
+          "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+          "host_build": "agy@1.1.22",
+          "model": "gemini-3.7-flash",
+          "reasoning_effort": "high",
+          "tool_inventory": [
+            "codebase-memory"
+          ],
+          "budgets": {
+            "context": 100000,
+            "output": 12000,
+            "turns": 20,
+            "timeout_ms": 300000
+          }
+        },
+        "control_prompt": "Use codebase-memory to hunt down unnecessary complexity that could be reduced with elegant code solutions. In parallel, examine the project's philosophy, choices, goals, and subsystem goals, and look for categorically better ways to achieve them.",
+        "candidate_prompt": "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior."
+      },
+      {
+        "id": "primary-4",
+        "pinned": {
+          "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+          "host_build": "agy@1.1.22",
+          "model": "gemini-3.7-flash",
+          "reasoning_effort": "high",
+          "tool_inventory": [
+            "codebase-memory"
+          ],
+          "budgets": {
+            "context": 100000,
+            "output": 12000,
+            "turns": 20,
+            "timeout_ms": 300000
+          }
+        },
+        "control_prompt": "Use codebase-memory to hunt down unnecessary complexity that could be reduced with elegant code solutions. In parallel, examine the project's philosophy, choices, goals, and subsystem goals, and look for categorically better ways to achieve them.",
+        "candidate_prompt": "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior."
+      },
+      {
+        "id": "primary-5",
+        "pinned": {
+          "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+          "host_build": "agy@1.1.22",
+          "model": "gemini-3.7-flash",
+          "reasoning_effort": "high",
+          "tool_inventory": [
+            "codebase-memory"
+          ],
+          "budgets": {
+            "context": 100000,
+            "output": 12000,
+            "turns": 20,
+            "timeout_ms": 300000
+          }
+        },
+        "control_prompt": "Use codebase-memory to hunt down unnecessary complexity that could be reduced with elegant code solutions. In parallel, examine the project's philosophy, choices, goals, and subsystem goals, and look for categorically better ways to achieve them.",
+        "candidate_prompt": "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior."
+      }
+    ]
+  },
+  "held_out": {
+    "pairs": [
+      {
+        "id": "held-out-1",
+        "pinned": {
+          "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+          "host_build": "agy@1.1.22",
+          "model": "gemini-3.7-flash",
+          "reasoning_effort": "high",
+          "tool_inventory": [
+            "codebase-memory"
+          ],
+          "budgets": {
+            "context": 100000,
+            "output": 12000,
+            "turns": 20,
+            "timeout_ms": 300000
+          }
+        },
+        "control_prompt": "Use codebase-memory to hunt down unnecessary complexity that could be reduced with elegant code solutions. In parallel, examine the project's philosophy, choices, goals, and subsystem goals, and look for categorically better ways to achieve them.",
+        "candidate_prompt": "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior."
+      },
+      {
+        "id": "held-out-2",
+        "pinned": {
+          "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+          "host_build": "agy@1.1.22",
+          "model": "gemini-3.7-flash",
+          "reasoning_effort": "high",
+          "tool_inventory": [
+            "codebase-memory"
+          ],
+          "budgets": {
+            "context": 100000,
+            "output": 12000,
+            "turns": 20,
+            "timeout_ms": 300000
+          }
+        },
+        "control_prompt": "Use codebase-memory to hunt down unnecessary complexity that could be reduced with elegant code solutions. In parallel, examine the project's philosophy, choices, goals, and subsystem goals, and look for categorically better ways to achieve them.",
+        "candidate_prompt": "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior."
+      },
+      {
+        "id": "held-out-3",
+        "pinned": {
+          "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+          "host_build": "agy@1.1.22",
+          "model": "gemini-3.7-flash",
+          "reasoning_effort": "high",
+          "tool_inventory": [
+            "codebase-memory"
+          ],
+          "budgets": {
+            "context": 100000,
+            "output": 12000,
+            "turns": 20,
+            "timeout_ms": 300000
+          }
+        },
+        "control_prompt": "Use codebase-memory to hunt down unnecessary complexity that could be reduced with elegant code solutions. In parallel, examine the project's philosophy, choices, goals, and subsystem goals, and look for categorically better ways to achieve them.",
+        "candidate_prompt": "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior."
+      },
+      {
+        "id": "held-out-4",
+        "pinned": {
+          "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+          "host_build": "agy@1.1.22",
+          "model": "gemini-3.7-flash",
+          "reasoning_effort": "high",
+          "tool_inventory": [
+            "codebase-memory"
+          ],
+          "budgets": {
+            "context": 100000,
+            "output": 12000,
+            "turns": 20,
+            "timeout_ms": 300000
+          }
+        },
+        "control_prompt": "Use codebase-memory to hunt down unnecessary complexity that could be reduced with elegant code solutions. In parallel, examine the project's philosophy, choices, goals, and subsystem goals, and look for categorically better ways to achieve them.",
+        "candidate_prompt": "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior."
+      },
+      {
+        "id": "held-out-5",
+        "pinned": {
+          "repo_commit": "09b0f4e4d0794507e88d45c781f7c02f08a944e1",
+          "host_build": "agy@1.1.22",
+          "model": "gemini-3.7-flash",
+          "reasoning_effort": "high",
+          "tool_inventory": [
+            "codebase-memory"
+          ],
+          "budgets": {
+            "context": 100000,
+            "output": 12000,
+            "turns": 20,
+            "timeout_ms": 300000
+          }
+        },
+        "control_prompt": "Use codebase-memory to hunt down unnecessary complexity that could be reduced with elegant code solutions. In parallel, examine the project's philosophy, choices, goals, and subsystem goals, and look for categorically better ways to achieve them.",
+        "candidate_prompt": "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior."
+      }
+    ],
+    "seeded_positive_classes": [
+      "duplicated_machinery",
+      "duplicated_advancement_state_ownership",
+      "goal_conflict",
+      "disproportionate_lifecycle_ceremony"
+    ],
+    "negative_controls": [
+      "intentional_bounded_context_duplication",
+      "safety_gate_removal_increases_risk"
+    ],
+    "corpus": {
+      "sha256": "5601be44f427ac06228911ac79349f125b200401b0fa1900cdf8c1a89dda802f",
+      "path": "benchmarks/p0/held-out-corpus",
+      "deterministic_tree_digest": true,
+      "labels_outside_root": true,
+      "labels_path": "benchmarks/p0/corpus/held-out/labels.json"
+    }
+  },
+  "graph_disabled_trial": {
+    "graph_enabled": false,
+    "expected_outcome": "abort_before_comprehensive",
+    "notice": "degraded/non-comprehensive: graph is disabled; abort before comprehensive audit"
+  },
+  "randomization": {
+    "pair_order": "randomized",
+    "masking": "A/B",
+    "seed": "p0-20260831-c7f91a2e"
+  },
+  "evaluation": {
+    "independent_evaluators": 2,
+    "adjudicator": 1
+  },
+  "axes": [
+    "structural_recall",
+    "philosophy_telos_recall",
+    "grounding_precision",
+    "telos_to_code_linkage",
+    "reduction_value",
+    "false_positive_discipline"
+  ]
+}

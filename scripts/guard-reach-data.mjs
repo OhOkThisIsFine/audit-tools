@@ -1402,4 +1402,22 @@ export const REACH = [
       'inert by content or npm-owned; the .gitignore hook-whitelist half is enforced by the pre-commit ' +
       'gate (a settings.json referencing a hook the commit does not carry is refused)',
   },
+  {
+    area: 'P0 benchmark contracts and corpus',
+    files: ['benchmarks/p0/manifest.json', 'benchmarks/p0/score-schema.json', 'benchmarks/p0/corpus/**', 'benchmarks/p0/held-out-corpus/**', 'tests/shared/p0-benchmark-*.test.ts'],
+    guardedBy: ['vitest-gate', 'check:guard-reach', 'check:scripts'],
+    note: 'P0 manifest, score schema, primary/held-out labels and real fixture snapshot are exercised by benchmark contract tests; runner preflight validates the same inputs',
+  },
+  {
+    area: 'P0 benchmark runner',
+    files: ['benchmarks/p0/runner.mjs'],
+    guardedBy: ['check:scripts', 'vitest-gate'],
+    note: 'CLI runner is checked by the script typecheck and benchmark contract tests',
+  },
+  {
+    area: 'P0 benchmark result placeholder',
+    files: ['benchmarks/p0/results/.gitignore'],
+    guardedBy: 'declared-gap',
+    note: 'empty result directory marker; no runtime guard reads it',
+  },
 ];

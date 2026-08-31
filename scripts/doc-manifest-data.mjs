@@ -80,7 +80,7 @@ export const DOC_MANIFEST = [
   },
   {
     type: "ops / usage",
-    files: ["README.md"],
+    files: ["README.md", "benchmarks/p0/README.md"],
     check: "Do the documented commands / paths still resolve and run.",
     autoApply: "factual-stale → yes",
   },
@@ -164,6 +164,10 @@ export const DOC_MANIFEST = [
       [
         ".audit-tools/remediation-report.md",
         "runtime run-artifact — a remediate-code run output per `CLAUDE.md`'s Artifact layout; tracked but never reviewed",
+      ],
+      [
+        "benchmarks/p0/held-out-corpus/docs/goals.md",
+        "held-out benchmark fixture content — seeded project goals, not audit-tools documentation",
       ],
       [
         "tests/audit/fixtures/simple-app/README.md",

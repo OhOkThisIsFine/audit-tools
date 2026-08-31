@@ -182,8 +182,8 @@
 - `forward-tracks.md:124` — Wave-friendly host dispatch: run identity survives partial ingest.
 - `forward-tracks.md:138` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
 - `forward-tracks.md:147` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
-- `forward-tracks.md:172` — Audit-tools does not reach the standalone prompt's simplification quality — rewire the deep path, then measure.
-- `forward-tracks.md:193` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:172` — ▶ Audit-tools deep-review acceptance benchmark still needs its external run.
+- `forward-tracks.md:194` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 
