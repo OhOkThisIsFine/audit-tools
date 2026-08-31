@@ -8,6 +8,28 @@
 
 ## Open tracks
 
+**Root-cleanliness as a SNAPSHOT at the commit boundary, replacing the suite's window diff
+(2026-08-30, surfaced after the fifth design died).** Every design for the pinned teardown false-red
+in [`open-bugs.md`](open-bugs.md) accepted one unexamined assumption: that the check runs inside the
+suite, across a `[setup, teardown]` window. **The window is what creates the attribution problem** —
+it forces the guard to decide WHO wrote an entry, and five designs died proving that fact is not
+obtainable. The property actually wanted is not *"this run added nothing"* but **"the repo root holds
+no undeclared entry"**: a snapshot predicate — is an entry neither tracked by git nor listed in
+`RUN_OWNED_ROOT_ENTRIES`? — which needs no baseline, no window and no writer, and is always
+answerable. At the COMMIT boundary a foreign artifact still blocks, but the refusal is then TRUE and
+actionable ("the root holds an undeclared entry — delete it") rather than the false and unactionable
+"this run ADDED 1 entry". It also satisfies the repo's own rule that a gate states the boundary it
+OWNS: the commit boundary owns "the tree is clean"; a test run does not.
+**Three costs to weigh, not yet weighed.** (1) It stops catching a suite that leaks and then cleans
+up after itself — measurement suggests that case does not occur, since these artifacts persist and
+6,496 instrumented spawns produced none. (2) It removes root cleanliness from what `npm test`
+certifies, which is what constraint (i) protects — the property moves rather than disappears, so it
+still needs a stated owner. (3) It needs the declaration list, never `.gitignore`; the guard's own
+docstring explains that an ignore rule HIDES a leak.
+⚠ **NOT approved and NOT designed.** The owner paused on 2026-08-30 to consider the direction, having
+rejected both prevention-at-the-producer and de-pinning. Reasoning and the five dead designs:
+[`sweep-timing-measurement-2026-08-30.md`](../reviews/sweep-timing-measurement-2026-08-30.md).
+
 **Ceremony-review remainder — Tier 2/3 consolidations, plus the one unlanded Part-5 mechanism
 (2026-08-29).** Full evidence and the ranked plan:
 [`ceremony-complexity-review-2026-08-29.md`](../reviews/ceremony-complexity-review-2026-08-29.md).

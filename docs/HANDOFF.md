@@ -68,8 +68,12 @@ Designs 3, 4 and 5 were each a PROXY for it and each failed the same way. **The 
 PREVENTION at the producing boundary, not attribution at the consuming one** — the repo already
 guards that class at the source, and by its own rule the teardown is not the boundary that owns it.
 
-**Immediate next is an owner decision, not a task** — whether to pursue prevention, or to stop and
-de-pin. Two assets survive either way: `samePath` (`.claude/hooks/session-start-guards.mjs`) is the
+**Immediate next is an owner decision, not a task, and it is PAUSED.** The owner rejected both
+options offered on 2026-08-30 — prevention at the producer, and de-pinning — and paused to consider a
+third that surfaced while explaining the situation: **drop the window and make root cleanliness a
+SNAPSHOT predicate at the COMMIT boundary.** The window is what forces the guard to identify a
+writer, which is the fact five designs proved unobtainable. That direction is recorded, unapproved
+and undesigned, in [`forward-tracks.md`](backlog/forward-tracks.md). Do not start it unasked. Two assets survive either way: `samePath` (`.claude/hooks/session-start-guards.mjs`) is the
 correct checkout-comparison primitive, and the consumer already knows its own session. The
 `repoRootProblems` extraction remains the first step for any ATTRIBUTION design, but no attribution
 design is live, so it now has no consumer and `check:deadcode` would red it on its own.

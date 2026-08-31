@@ -462,6 +462,35 @@ as the fourth proxy for something already proven unavailable. **The open directi
 the producing boundary, not attribution at the consuming one** — and per the repo's own rule that a
 gate states the boundary it OWNS, the teardown is not that boundary.
 
+### The assumption every design shared, and the direction it opens
+
+The owner rejected BOTH options offered after the fifth death — prevention at the producer, and
+de-pinning — and paused. Restating the situation surfaced an assumption that all five designs, and
+both of those options, had accepted without examining it.
+
+**Every design assumed the check must run inside the suite, across a `[setup, teardown]` window.**
+The window is what creates the attribution problem. A window forces the guard to ask *who wrote this
+entry*, and that is precisely the fact dead design 1 proved unobtainable.
+
+The property actually wanted is not *"this run added nothing"*. It is **"the repo root holds no
+undeclared entry"** — a snapshot predicate with no baseline, no window and no writer:
+
+> Is there an entry in the root that is neither tracked by git nor listed in `RUN_OWNED_ROOT_ENTRIES`?
+
+At the COMMIT boundary that question is always answerable. A foreign artifact still blocks, but the
+refusal becomes TRUE and actionable — *the root holds an undeclared entry, delete it* — instead of
+the false and unactionable *this run ADDED 1 entry*. It also satisfies the repo's own rule that a
+gate states the boundary it OWNS: the commit boundary owns "the tree is clean", and a test run
+does not.
+
+Costs, stated because none has been weighed: it stops catching a suite that leaks then cleans up
+after itself (measurement says that case does not occur); it moves root cleanliness out of what
+`npm test` certifies, which is what constraint (i) protects, so the property needs a restated owner;
+and it needs the declaration list rather than `.gitignore`, because an ignore rule HIDES a leak.
+
+**Unapproved and undesigned.** Recorded as an open track in
+[`forward-tracks.md`](../backlog/forward-tracks.md), not started.
+
 ### What this lap did NOT do
 
 **No failing test was written, and no code changed.** The design gate's step 4 asks for the failing
