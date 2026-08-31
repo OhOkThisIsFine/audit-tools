@@ -17,6 +17,8 @@ import {
   readOptionalTextFile,
 } from "audit-tools/shared";
 import type { AuditFindingsReport } from "audit-tools/shared";
+import { readOptionalJsonFile } from "audit-tools/shared";
+import type { ConceptualReviewAdjudication } from "../types/conceptualAdjudication.js";
 import { outputJson } from "./cliHelpers.js";
 
 export async function cmdResynthesize(argv: string[]): Promise<void> {
@@ -58,6 +60,10 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
   );
   const markdown = renderAuditReportMarkdown(normalized, {
     reflections: feedbackText ? parseReflectionsNdjson(feedbackText) : undefined,
+    conceptual_adjudication:
+      await readOptionalJsonFile<ConceptualReviewAdjudication>(
+        join(artifactsDir, "conceptual_review_adjudication.json"),
+      ),
   });
 
   await mkdir(auditToolsDir, { recursive: true });

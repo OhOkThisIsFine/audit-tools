@@ -380,9 +380,10 @@ describe("renderSecondOrderAdversaryPrompt", () => {
   test("frames the optimization/better-way mandate + loop-until-dry, not defect-finding", () => {
     const prompt = renderSecondOrderAdversaryPrompt({
       round: 1,
-      priorFindingCount: 0,
       metrics: aggregateMetricsDigest({ repo_manifest: repoManifest }),
       submissionPath: "/x/incoming/systemic-challenge.json",
+      bundle: { repo_manifest: repoManifest },
+      evidencePaths: ["/x/charter_register.json", "/x/p1.json", "/x/judge.json"],
     });
     expect(prompt).toMatch(/optimization/i);
     expect(prompt).toMatch(/redundant/i);
@@ -391,6 +392,9 @@ describe("renderSecondOrderAdversaryPrompt", () => {
     expect(prompt).toMatch(/true lens/i);
     // The metrics are flagged as supporting-but-not-sufficient evidence.
     expect(prompt).toMatch(/necessary, NOT sufficient/i);
+    expect(prompt).toContain("/x/p1.json");
+    expect(prompt).toContain("/x/judge.json");
+    expect(prompt).toMatch(/callers and callees in both directions/i);
     // The lane is advance-free — a 2026-07-16 systemic_challenge worker
     // followed an embedded next-step command and advanced the loop itself;
     // the always-materialized fan-out (2625563f) removed the command from

@@ -13,6 +13,11 @@ import {
 import { materializeFanoutLanes } from "./fanoutLanes.js";
 import type { FanoutLaneSpec } from "./fanoutLanes.js";
 import {
+  clearConceptualReviewRoundManifest,
+  conceptualReviewRoundManifestPath,
+  writeConceptualReviewRoundManifest,
+} from "../types/conceptualAdjudication.js";
+import {
   AUDIT_GATE_SUBMISSION_SCOPE,
   GATE_LANES,
   conceptualPerspectiveLane,
@@ -182,6 +187,7 @@ export async function prepareConceptualDispatch(opts: {
       ],
     });
     const conceptualPromptPath = fanout.lanes[0]!.promptPath;
+    await clearConceptualReviewRoundManifest(artifactsDir);
     return {
       deep: false,
       conceptualResultsPath,
@@ -241,7 +247,12 @@ export async function prepareConceptualDispatch(opts: {
 
   const judgePromptText =
     renderConceptualJudgePrompt(
-      perspectiveFiles.map((f) => ({ name: f.name, path: f.resultsPath })),
+      perspectiveFiles.map((f) => ({
+        name: f.name,
+        path: f.resultsPath,
+        contributor_id: f.lane,
+      })),
+      roundToken,
     ) + reReviewSuffix;
 
   const laneSpecs: FanoutLaneSpec[] = [
@@ -277,6 +288,25 @@ export async function prepareConceptualDispatch(opts: {
     promptPath: promptPathFor(f.lane),
   }));
 
+  await writeConceptualReviewRoundManifest(artifactsDir, {
+    schema_version: 1,
+    mode: "deep",
+    round_id: roundToken,
+    perspectives: perspectivePrompts.map((perspective) => ({
+      contributor_id: perspective.lane,
+      perspective: perspective.name,
+      lane_id: perspective.lane,
+      prompt_path: perspective.promptPath,
+      result_path: perspective.resultsPath,
+    })),
+    judge: {
+      contributor_id: GATE_LANES.design_review_conceptual,
+      lane_id: GATE_LANES.design_review_conceptual,
+      prompt_path: judgePromptPath,
+      result_path: conceptualResultsPath,
+    },
+  });
+
   // Resume (COR-4c8bd93a) narrows the INSTRUCTION surface only. writePaths/
   // readPaths/artifactPaths below stay the full, stable perspective set —
   // round identity (conceptual-perspective-round-identity.test.ts) pins a
@@ -301,6 +331,8 @@ export async function prepareConceptualDispatch(opts: {
   const artifactPaths: Record<string, string> = {
     conceptual_results: conceptualResultsPath,
     conceptual_judge_prompt: judgePromptPath,
+    conceptual_round_manifest:
+      conceptualReviewRoundManifestPath(artifactsDir),
   };
   perspectivePrompts.forEach((f, i) => {
     artifactPaths[`conceptual_perspective_${i + 1}_prompt`] = f.promptPath;

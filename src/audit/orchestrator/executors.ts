@@ -80,6 +80,12 @@ export const LIFECYCLE_PRODUCTIONS: readonly LifecycleProduction[] = [
       "the derived obligation state each advance carries on its bundle; the fold persists it ONCE at its halt (CX-02 persist-once)",
   },
   {
+    artifact: "conceptual_review_adjudication.json",
+    writer: "design-review fold (src/audit/cli/nextStepHelpers.ts)",
+    reason:
+      "validated deep conceptual judge attribution is committed atomically with the conceptual findings it explains",
+  },
+  {
     artifact: "tooling_manifest.json",
     writer: "the environment probe (src/audit/orchestrator/advance.ts)",
     reason: "probed from the host environment, not derived from any upstream artifact",

@@ -932,14 +932,23 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
       artifactsDir,
       GATE_LANES.systemic_challenge,
     );
-    const metrics =
-      result.bundle.systemic_challenge?.metrics ?? aggregateMetricsDigest(result.bundle);
-    const adversaryPrompt = renderSecondOrderAdversaryPrompt({
-      round: (result.bundle.systemic_challenge?.rounds.length ?? 0) + 1,
-      priorFindingCount: result.bundle.systemic_challenge?.findings.length ?? 0,
-      metrics,
-      submissionPath,
-    });
+  const metrics =
+    result.bundle.systemic_challenge?.metrics ?? aggregateMetricsDigest(result.bundle);
+  const evidencePaths = [
+    join(artifactsDir, "charter_register.json"),
+    join(artifactsDir, "design_assessment.json"),
+    join(artifactsDir, "conceptual_review_adjudication.json"),
+    ...(result.bundle.conceptual_review_adjudication?.contributors.map(
+      (contributor) => contributor.result_path,
+    ) ?? []),
+  ];
+  const adversaryPrompt = renderSecondOrderAdversaryPrompt({
+    round: (result.bundle.systemic_challenge?.rounds.length ?? 0) + 1,
+    metrics,
+    submissionPath,
+    bundle: result.bundle,
+    evidencePaths,
+  });
     // Always-materialized (design resolution 2): the adversary prompt is a lane
     // FILE — the adversary is a SEPARATE agent by lane class, on every host.
     const fanout = await materializeFanoutLanes({
@@ -963,7 +972,14 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
       stopCondition:
         "Execute the second-order-adversary lane prompt (a separate agent from the one that drove this audit), write its findings to the results path, then run next-step. An empty findings array converges the loop.",
       repoRoot: root,
-      artifactPaths: fanout.artifactPaths,
+    artifactPaths: {
+      ...fanout.artifactPaths,
+      systemic_charter_register: join(artifactsDir, "charter_register.json"),
+      conceptual_review_adjudication: join(
+        artifactsDir,
+        "conceptual_review_adjudication.json",
+      ),
+    },
       prompt: [
         "# audit-code systemic challenge (second-order adversary)",
         "",
@@ -991,10 +1007,11 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
         "",
       ].join("\n"),
       access: {
-        read_paths: [
-          ...fanout.readPaths,
-          join(artifactsDir, "systemic_challenge.json"),
-        ],
+      read_paths: [
+        ...fanout.readPaths,
+        join(artifactsDir, "systemic_challenge.json"),
+        ...evidencePaths,
+      ],
         write_paths: fanout.writePaths,
       },
       submissionShortfall: fanout.shortfall,

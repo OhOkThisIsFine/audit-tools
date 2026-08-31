@@ -29,6 +29,7 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "charter_register.json",
   "clarification_request.json",
   "clarification_resolution.json",
+  "conceptual_review_adjudication.json",
   "confirm_resume_ack.json",
   "conversation-start.md",
   "coverage_matrix.json",

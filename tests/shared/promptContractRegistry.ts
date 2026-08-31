@@ -247,7 +247,7 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     file: "src/audit/systemic/secondOrderAdversaryPrompt.ts",
     disposition: "derived",
     schema: { name: "SystemicChallengeSubmissionSchema", file: "src/shared/decompose/systemicChallenge.ts", object: SystemicChallengeSubmissionSchema },
-    render: () => renderSecondOrderAdversaryPrompt({ round: 1, priorFindingCount: 0, metrics: { rollups: [], max_fan_out: 0, total_edges: 0, metric_covered_nodes: 0 }, submissionPath: "registry-fixture/submission.json" }),
+    render: () => renderSecondOrderAdversaryPrompt({ round: 1, metrics: { rollups: [], max_fan_out: 0, total_edges: 0, metric_covered_nodes: 0 }, submissionPath: "registry-fixture/submission.json", bundle: {}, evidencePaths: [] }),
   },
   {
     builder: "renderSynthesisNarrativePrompt",

@@ -2,6 +2,7 @@ import type { AuditResult, CoverageMatrix, Finding, UnitManifest } from "../type
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { IntentCheckpoint, SubmissionLedgerEvent } from "audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
+import type { ConceptualReviewAdjudication } from "../types/conceptualAdjudication.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import type { CharterRegister } from "../types/charterRegister.js";
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
@@ -330,6 +331,8 @@ export interface RenderAuditReportOptions {
    * executors.
    */
   reflections?: AgentReflection[];
+  /** Deep conceptual judge provenance and semantic attribution record. */
+  conceptual_adjudication?: ConceptualReviewAdjudication;
   /**
    * The accepted intent checkpoint; its `excluded_scope` is surfaced in an
    * "Excluded / Out-of-Scope" section so omissions are explicit in the report.
@@ -427,6 +430,48 @@ function renderSubmissionDriftSection(
  */
 function pushFindingBlock(finding: SharedFinding, lines: string[]): void {
   lines.push(...renderFindingBlockLines(finding));
+}
+
+function renderConceptualAttributionSection(
+  adjudication: ConceptualReviewAdjudication | undefined,
+): string[] {
+  if (!adjudication) return [];
+  const contributors = new Map(
+    adjudication.contributors.map((contributor) => [
+      contributor.contributor_id,
+      contributor,
+    ]),
+  );
+  const lines = [
+    "## Conceptual Review Attribution",
+    "",
+    `Round: \`${adjudication.round_id}\`. Contribution and modification percentages are judge-authored semantic estimates; tooling verified references, bounds, complete candidate coverage, and 100% contribution totals.`,
+    "",
+  ];
+  for (const finalShare of adjudication.final_finding_shares) {
+    lines.push(`### ${finalShare.final_finding_id}`, "");
+    for (const share of finalShare.contributors) {
+      const contributor = contributors.get(share.contributor_id);
+      const label = contributor?.perspective
+        ? `${contributor.perspective} (${share.contributor_id})`
+        : `Judge (${share.contributor_id})`;
+      lines.push(
+        `- **${label}: ${share.contribution_percent}%** — ${share.rationale}`,
+      );
+      if (share.source_candidate_ids.length > 0) {
+        lines.push(`  - Source candidates: ${share.source_candidate_ids.join(", ")}`);
+      }
+    }
+    lines.push("");
+  }
+  lines.push("### Candidate dispositions", "");
+  for (const disposition of adjudication.candidate_dispositions) {
+    lines.push(
+      `- \`${disposition.candidate_id}\` — **${disposition.disposition}**; modified ${disposition.modification_percent}%; targets ${disposition.target_final_finding_ids.join(", ") || "none"}. ${disposition.rationale}`,
+    );
+  }
+  lines.push("");
+  return lines;
 }
 
 export function renderAuditReportMarkdown(
@@ -579,6 +624,9 @@ export function renderAuditReportMarkdown(
   }
 
   const driftLines = renderSubmissionDriftSection(options.submission_ledger ?? []);
+  lines.push(
+    ...renderConceptualAttributionSection(options.conceptual_adjudication),
+  );
   const feedbackLines = renderProcessFeedbackSection(options.reflections ?? []);
   if (driftLines.length > 0 && feedbackLines.length === 0) {
     // The drift block lives UNDER the process heading; with no reflections

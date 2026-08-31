@@ -41,6 +41,7 @@ import type {
   RuntimeValidationTaskManifest,
 } from "../types/runtimeValidation.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
+import type { ConceptualReviewAdjudication } from "../types/conceptualAdjudication.js";
 import type { DocsDigest } from "../types/docsDigest.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import type { CharterRegister } from "../types/charterRegister.js";
@@ -107,6 +108,7 @@ type ArtifactPayloadMap = {
   risk_register: RiskRegister;
   git_history: GitHistory;
   design_assessment: DesignAssessment;
+  conceptual_review_adjudication: ConceptualReviewAdjudication;
   docs_digest: DocsDigest;
   structure_decomposition: StructureDecomposition;
   charter_register: CharterRegister;
@@ -273,6 +275,10 @@ export const ARTIFACT_DEFINITIONS = {
   risk_register: jsonArtifact("risk_register.json", "analysis"),
   git_history: jsonArtifact("git_history.json", "analysis"),
   design_assessment: jsonArtifact("design_assessment.json", "analysis"),
+  conceptual_review_adjudication: jsonArtifact(
+    "conceptual_review_adjudication.json",
+    "analysis",
+  ),
   docs_digest: jsonArtifact("docs_digest.json", "analysis"),
   structure_decomposition: jsonArtifact(
     "structure_decomposition.json",

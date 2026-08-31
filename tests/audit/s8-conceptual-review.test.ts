@@ -66,11 +66,22 @@ test("conceptual prompt asks general first-principles questions and says orient-
 });
 
 // ── fix 3: a judging judge that flags what was missed ──
-test("conceptual judge is evaluative and flags what perspectives collectively missed", () => {
-  const p = renderConceptualJudgePrompt([{ name: "Pragmatist", path: "/tmp/p.json" }]);
+test("conceptual judge is evaluative, complete, and attributable", () => {
+  const p = renderConceptualJudgePrompt([
+    {
+      name: "Pragmatist",
+      path: "/tmp/p.json",
+      contributor_id: "design_review_conceptual_p1_round",
+    },
+  ], "round");
   expect(p).toMatch(/MISSED/);
   expect(p).toMatch(/judge-added/);
   expect(p).toMatch(/final reviewer/i);
+  expect(p).toMatch(/candidate_dispositions/);
+  expect(p).toMatch(/final_finding_shares/);
+  expect(p).toMatch(/modification_percent/);
+  expect(p).toMatch(/round_id/);
+  expect(p).toMatch(/exactly one explicit .*judge share/i);
   // It is no longer a merge-only pass.
   expect(p).not.toMatch(/you are merging, not reviewing/);
 });

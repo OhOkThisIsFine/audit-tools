@@ -90,6 +90,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "file_disposition.json",
   ],
   "design_assessment.json": ["unit_manifest.json", "critical_flows.json"],
+  "conceptual_review_adjudication.json": ["design_assessment.json"],
   // Change 3 (scope-confirmation context): bounded deterministic telos
   // extraction over the doc universe, rendered into the confirm-intent prompt.
   // Depends on what the extractor actually reads — the disposition (doc
@@ -144,6 +145,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   // charter_clarification so the two conceptual-review outputs stale together.
   "systemic_challenge.json": [
     "charter_register.json",
+    "conceptual_review_adjudication.json",
     "intent_checkpoint.json",
     "repo_manifest.json",
   ],
@@ -246,6 +248,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "surface_manifest.json",
     "critical_flows.json",
     "design_assessment.json",
+    "conceptual_review_adjudication.json",
     "structure_decomposition.json",
     "charter_register.json",
     "charter_clarification.json",

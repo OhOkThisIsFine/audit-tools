@@ -57,6 +57,13 @@ import type {
   RejectedDesignReviewSubmission,
 } from "../types/designAssessment.js";
 import {
+  ConceptualJudgeSubmissionSchema,
+  buildConceptualReviewAdjudication,
+  loadConceptualPerspectiveFindings,
+  readConceptualReviewRoundManifest,
+  type ConceptualReviewAdjudication,
+} from "../types/conceptualAdjudication.js";
+import {
   advanceAudit,
   engineMaxTransitions,
   findExecutorFailure,
@@ -936,6 +943,88 @@ export async function consumeObjectSubmission(
   };
 }
 
+type ConsumeConceptualSubmissionResult =
+  | { status: "absent" }
+  | {
+      status: "ok";
+      findings: Finding[];
+      adjudication?: ConceptualReviewAdjudication;
+      path: string;
+    }
+  | {
+      status: "quarantined";
+      quarantinePath: string | null;
+      lane: string;
+      reason: string;
+    };
+
+/**
+ * Deep conceptual judges return a richer object than the shallow single-agent
+ * pass. The tool-owned current-round manifest selects the exact perspective
+ * files to validate and makes stale round output fail closed. Without a
+ * manifest this remains the shallow findings-array contract.
+ */
+async function consumeConceptualSubmission(
+  artifactsDir: string,
+  tx: FoldTransaction,
+): Promise<ConsumeConceptualSubmissionResult> {
+  const lane = GATE_LANES.design_review_conceptual;
+  const manifest = await readConceptualReviewRoundManifest(artifactsDir);
+  if (!manifest) {
+    const result = await consumeArraySubmission<Finding>(artifactsDir, lane, tx);
+    return result.status === "ok"
+      ? { status: "ok", findings: result.value, path: result.path }
+      : result;
+  }
+
+  const incoming = await consumeObjectSubmission(artifactsDir, lane, tx);
+  if (incoming.status === "absent") return incoming;
+  if (incoming.status === "quarantined") {
+    return { ...incoming, lane };
+  }
+  const parsed = ConceptualJudgeSubmissionSchema.safeParse(incoming.value);
+  if (!parsed.success) {
+    const quarantinePath = await quarantineMisshapedSubmission(
+      artifactsDir,
+      incoming.path,
+      lane,
+      parsed.error,
+    );
+    return {
+      status: "quarantined",
+      quarantinePath,
+      lane,
+      reason: parsed.error.message,
+    };
+  }
+
+  try {
+    const perspectiveFindings =
+      await loadConceptualPerspectiveFindings(manifest);
+    const adjudication = buildConceptualReviewAdjudication({
+      manifest,
+      perspectiveFindings,
+      submission: parsed.data,
+      generatedAt: new Date().toISOString(),
+    });
+    return {
+      status: "ok",
+      findings: parsed.data.findings,
+      adjudication,
+      path: incoming.path,
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const quarantinePath = await quarantineMisshapedSubmission(
+      artifactsDir,
+      incoming.path,
+      lane,
+      reason,
+    );
+    return { status: "quarantined", quarantinePath, lane, reason };
+  }
+}
+
 /** The two decision vocabularies the operator-facing analyzer gates accept. */
 const ANALYZER_CONSENT_VALUES = ["granted", "declined"] as const;
 const ANALYZER_SETTING_VALUES = [
@@ -1191,10 +1280,16 @@ export async function handleDesignReviewBranch(
   // bundle every path hands back.
   let assessment = bundle.design_assessment;
   let snapshots = bundle.design_review_snapshots;
+  let conceptualAdjudication = bundle.conceptual_review_adjudication;
   const carried = (): ArtifactBundle => {
     const next: ArtifactBundle = { ...bundle };
     if (assessment !== undefined) next.design_assessment = assessment;
     if (snapshots !== undefined) next.design_review_snapshots = snapshots;
+    if (conceptualAdjudication !== undefined) {
+      next.conceptual_review_adjudication = conceptualAdjudication;
+    } else {
+      delete next.conceptual_review_adjudication;
+    }
     return next;
   };
 
@@ -1281,9 +1376,8 @@ export async function handleDesignReviewBranch(
     GATE_LANES.design_review_contract,
     tx,
   );
-  const conceptualResult = await consumeArraySubmission<Finding>(
+  const conceptualResult = await consumeConceptualSubmission(
     params.artifactsDir,
-    GATE_LANES.design_review_conceptual,
     tx,
   );
 
@@ -1318,12 +1412,16 @@ export async function handleDesignReviewBranch(
   } else if (conceptualResult.status === "ok" && assessment) {
     assessment = {
       ...assessment,
-      conceptual_findings: groundDesignFindings(conceptualResult.value, bundle.repo_manifest),
+      conceptual_findings: groundDesignFindings(
+        conceptualResult.findings,
+        bundle.repo_manifest,
+      ),
       conceptual_reviewed: true,
       rejected_submissions: (assessment.rejected_submissions ?? []).filter(
         (r) => r.pass !== "conceptual",
       ),
     };
+    conceptualAdjudication = conceptualResult.adjudication;
     consumed = true;
   } else if (conceptualResult.status === "ok") {
     await holdWithoutTarget(

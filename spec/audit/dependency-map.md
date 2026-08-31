@@ -54,11 +54,12 @@ different analyzer version can classify files differently).
 | `git_history.json` | `repo_manifest.json`, `file_disposition.json` |
 | `external_analyzer_acquisition.json` | `repo_manifest.json`, `file_disposition.json` |
 | `design_assessment.json` | `unit_manifest.json`, `critical_flows.json` |
+| `conceptual_review_adjudication.json` | `design_assessment.json` |
 | `docs_digest.json` | `repo_manifest.json`, `file_disposition.json` |
 | `structure_decomposition.json` | `repo_manifest.json`, `file_disposition.json`, `graph_bundle.json` |
 | `charter_register.json` | `structure_decomposition.json`, `intent_checkpoint.json`, `repo_manifest.json`, `graph_bundle.json` |
 | `charter_clarification.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json` |
-| `systemic_challenge.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json` |
+| `systemic_challenge.json` | `charter_register.json`, `conceptual_review_adjudication.json`, `intent_checkpoint.json`, `repo_manifest.json` |
 <!-- END GENERATED spec-mirror dependency-map#phase-2 -->
 
 `charter_clarification.json` (Phase D charter-alignment triangulation loop) and
@@ -169,7 +170,7 @@ note the extension: this is **not** a `.json` array.
 <!-- BEGIN GENERATED spec-mirror dependency-map#phase-4 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Depends on |
 |---|---|
-| `audit-report.md` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `design_assessment.json`, `structure_decomposition.json`, `charter_register.json`, `charter_clarification.json`, `systemic_challenge.json`, `syntax_resolution_status.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `runtime_validation_report.json`, `audit_results.jsonl`, `agent-feedback.jsonl` |
+| `audit-report.md` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `design_assessment.json`, `conceptual_review_adjudication.json`, `structure_decomposition.json`, `charter_register.json`, `charter_clarification.json`, `systemic_challenge.json`, `syntax_resolution_status.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `runtime_validation_report.json`, `audit_results.jsonl`, `agent-feedback.jsonl` |
 | `synthesis-narrative.json` | `audit-findings.json` |
 <!-- END GENERATED spec-mirror dependency-map#phase-4 -->
 

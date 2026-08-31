@@ -645,10 +645,16 @@ export function renderConceptualPerspectivePrompt(
  * single merged conceptual-review result the orchestrator ingests.
  */
 export function renderConceptualJudgePrompt(
-  perspectiveResults: Array<{ name: string; path: string }>,
+  perspectiveResults: Array<{
+    name: string;
+    path: string;
+    contributor_id: string;
+  }>,
+  roundId: string,
 ): string {
   const sources = perspectiveResults.map(
-    (p, i) => `${i + 1}. **${p.name}** — \`${p.path}\``,
+    (p, i) =>
+      `${i + 1}. **${p.name}** — contributor \`${p.contributor_id}\` — \`${p.path}\``,
   );
 
   return [
@@ -672,6 +678,9 @@ export function renderConceptualJudgePrompt(
     "- **Drop only genuine noise:** vague, unactionable, unsupported, or out-of-scope assertions — regardless of how many perspectives raised them.",
     "- **Flag what the perspectives MISSED.** You are the final reviewer, not only a merger. If, across every perspective, a significant whole-system issue went unraised — a shared assumption none of them questioned, a structural risk no lens covered, a doubt about whether the fundamental approach is even right — add it as a finding, mark its title with `(judge-added)`, and hold it to the same evidence and grounding bar as any other finding. Add only what genuinely matters and is genuinely absent; do not pad.",
     "",
+    "- **Account for every candidate.** A candidate is one perspective finding, identified as `<contributor_id>::<source finding id>`. Record exactly one `retained`, `merged`, or `rejected` disposition for every candidate. Retained/merged candidates name every final finding they feed; rejected candidates name none. State a 0-100 `modification_percent` estimating how much the source changed in the final result, plus a concrete transformation/rejection rationale.",
+    "- **Attribute every final finding.** Allocate contributor shares totaling exactly 100%. Perspective shares cite their candidate IDs. Include exactly one explicit `design_review_conceptual` judge share (zero is allowed when the judge only selected unchanged work; positive when the judge added or materially synthesized content). State a rationale for every share.",
+    `- Set top-level \`round_id\` to exactly \`${roundId}\`. In the SAME top-level object as \`findings\`, include \`candidate_dispositions\` entries with \`candidate_id\`, \`contributor_id\`, \`source_finding_id\`, \`disposition\`, \`target_final_finding_ids\`, \`modification_percent\`, and \`rationale\`; and \`final_finding_shares\` entries with \`final_finding_id\` plus \`contributors\`, each carrying \`contributor_id\`, \`source_candidate_ids\`, \`contribution_percent\`, and \`rationale\`.`,
     ...conceptualOutputFormat(
       "Produce ONE merged, ranked object. Renumber finding IDs sequentially from DR-001.",
     ),

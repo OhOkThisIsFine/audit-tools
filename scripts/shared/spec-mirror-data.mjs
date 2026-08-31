@@ -158,6 +158,10 @@ export const SPEC_MIRROR_REGIONS = [
         purpose: "Deterministic + optional host-delegated design assessment (see below).",
       },
       {
+        artifact: "conceptual_review_adjudication.json",
+        purpose: "Validated adjudication of deep conceptual-review findings, candidate dispositions, and final finding shares.",
+      },
+      {
         artifact: "docs_digest.json",
         purpose: "Deterministic bounded telos extraction over the doc universe; rendered into the confirm-intent prompt. NO downstream edge, and never an upstream of `intent_checkpoint.json` (checkpoint stays a leaf).",
       },
@@ -438,6 +442,7 @@ export const SPEC_MIRROR_REGIONS = [
       { artifact: "git_history.json" },
       { artifact: "external_analyzer_acquisition.json" },
       { artifact: "design_assessment.json" },
+      { artifact: "conceptual_review_adjudication.json" },
       { artifact: "docs_digest.json" },
       { artifact: "structure_decomposition.json" },
       { artifact: "charter_register.json" },

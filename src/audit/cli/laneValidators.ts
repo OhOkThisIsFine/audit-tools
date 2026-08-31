@@ -27,6 +27,7 @@ import {
   type SubmissionIssue,
 } from "audit-tools/shared";
 import { IntentEquivalenceVerdictSchema } from "../orchestrator/intentEquivalenceExecutor.js";
+import { ConceptualJudgeSubmissionSchema } from "../types/conceptualAdjudication.js";
 import {
   CONCEPTUAL_PERSPECTIVE_LANE_PREFIX,
   GATE_LANES,
@@ -142,6 +143,11 @@ function arrayIssue(value: unknown): SubmissionIssue | null {
     : { code: "submission_contract_invalid", message: unwrapped.reason };
 }
 
+function conceptualIssue(value: unknown): SubmissionIssue | null {
+  if (ConceptualJudgeSubmissionSchema.safeParse(value).success) return null;
+  return arrayIssue(value);
+}
+
 function objectMapIssue(value: unknown): SubmissionIssue | null {
   return isRecord(value)
     ? null
@@ -176,10 +182,13 @@ export function laneSubmissionValidator(
     return (value) => schemaIssue(laneSchema, value);
   }
 
+  if (lane === GATE_LANES.design_review_conceptual) {
+    return conceptualIssue;
+  }
+
   if (
     lane === GATE_LANES.design_review_legacy ||
     lane === GATE_LANES.design_review_contract ||
-    lane === GATE_LANES.design_review_conceptual ||
     lane === GATE_LANES.edge_reasoning ||
     lane.startsWith(CONCEPTUAL_PERSPECTIVE_LANE_PREFIX)
   ) {
