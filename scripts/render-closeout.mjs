@@ -59,12 +59,22 @@ function git(args) {
 const argv = process.argv.slice(2);
 let inPath = '';
 let templateOnly = false;
+// The sprint's start commit. `/start-lap` records it in `.claude/lap-start.json`
+// and the shared renderer (`~/.agent-config/render-closeout.mjs`) has always taken
+// it as `--start`, so the closeout SKILL instructs it for every repo. This
+// renderer used to answer `unknown argument: --start` and exit 1, which made a
+// run that followed the skill verbatim fail here. Accepting it is not enough —
+// a flag that parses and does nothing is worse than one that errors — so it
+// DERIVES the sprint's commit range and renders it as evidence the author did
+// not type. (owner decision 2026-08-30: fix the renderer, one interface.)
+let startCommit = '';
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === '--in') inPath = argv[++i] ?? '';
+  else if (a === '--start') startCommit = argv[++i] ?? '';
   else if (a === '--template') templateOnly = true;
   else if (a === '--help' || a === '-h') {
-    console.log('usage: render-closeout.mjs --in <closeout.json|-> | --template');
+    console.log('usage: render-closeout.mjs --in <closeout.json|-> [--start <commit>] | --template');
     for (const s of CLOSEOUT_SECTIONS) {
       console.log(`  ${s.id}${s.required ? ' (required — may not be "none")' : ''}: ${s.prompt}`);
     }
@@ -272,6 +282,26 @@ if (notReady.length > 0) {
 const out = ['## Sprint closeout', ''];
 for (const { section, lines } of rendered) {
   out.push(`### ${section.heading}`, ...lines, '');
+}
+if (startCommit) {
+  // Derived, never authored: this is the one part of the report the author
+  // cannot phrase. A range that disagrees with what `landed` claims is exactly
+  // the discrepancy a reader should see without re-running git.
+  const range = git(['log', '--oneline', `${startCommit}..HEAD`]);
+  if (!range.ok) {
+    fail(
+      `--start ${startCommit}: git could not resolve ${startCommit}..HEAD. Pass the sprint's ` +
+        `start commit (\`/start-lap\` records it in .claude/lap-start.json).`,
+    );
+  }
+  const commits = range.stdout.split(/\r?\n/).filter(Boolean);
+  out.push(
+    `### Commits in this sprint (derived from \`${startCommit}..HEAD\`)`,
+    ...(commits.length > 0
+      ? commits.map((c) => `- ${c}`)
+      : ['- none — HEAD is unchanged since the sprint started']),
+    '',
+  );
 }
 const markdown = out.join('\n').trimEnd() + '\n';
 

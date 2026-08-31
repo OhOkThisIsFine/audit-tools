@@ -18,14 +18,17 @@ import { writeSuiteGreenStamp } from '../../scripts/shared/suiteGreenStamp.mjs';
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const SCRIPT = join(REPO_ROOT, 'scripts', 'render-closeout.mjs');
 
-function render(input: unknown): { code: number; stdout: string; stderr: string } {
+function render(
+  input: unknown,
+  extraArgs: string[] = [],
+): { code: number; stdout: string; stderr: string } {
   const dir = mkdtempSync(join(tmpdir(), 'closeout-'));
   const file = join(dir, 'in.json');
   writeFileSync(file, JSON.stringify(input), 'utf8');
   // CLAUDE_PROJECT_DIR points at the temp dir on purpose: the renderer writes a
   // HEAD-bound record the closeout Stop gate reads, and a test run must not
   // forge one for the real repo.
-  const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+  const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file, ...extraArgs], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
     env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
@@ -52,6 +55,67 @@ function minimal(overrides: Record<string, unknown> = {}): Record<string, unknow
     ...overrides,
   };
 }
+
+describe('render-closeout: --start, the flag the closeout SKILL instructs', () => {
+  // `/start-lap` records the sprint's start commit in `.claude/lap-start.json`,
+  // and step 5 of the machine-wide closeout skill tells every repo to pass it as
+  // `--start`. This renderer answered `unknown argument: --start` and exited 1,
+  // so a run following that skill verbatim failed here. Accepting the flag is
+  // only half the fix — a flag that parses and does nothing is worse than one
+  // that errors — so it must DERIVE something the report's author cannot type.
+  it('accepts --start and renders the commit range it derives', () => {
+    // A REAL throwaway repo with two commits: the range has to come from git,
+    // so a test that could pass against a non-repo would prove nothing.
+    const dir = mkdtempSync(join(tmpdir(), 'closeout-range-'));
+    const g = (...args: string[]) =>
+      spawnSyncHidden('git', args, { cwd: dir, encoding: 'utf8' });
+    g('init', '-q');
+    g('config', 'user.email', 't@t');
+    g('config', 'user.name', 't');
+    g('config', 'commit.gpgsign', 'false');
+    // Mirror the real repo: the renderer writes its record — and the suite-green
+    // stamp lives — under .claude/hooks/, which is ignored, so neither can
+    // perturb the tree identity the readiness seam just took.
+    writeFileSync(join(dir, '.gitignore'), '.claude/hooks/*\n', 'utf8');
+    writeFileSync(join(dir, 'a.txt'), 'one\n', 'utf8');
+    g('add', '-A');
+    g('commit', '-qm', 'first commit of the sprint');
+    writeFileSync(join(dir, 'a.txt'), 'two\n', 'utf8');
+    g('add', '-A');
+    g('commit', '-qm', 'the work this sprint landed');
+
+    const file = join(dir, 'in.json');
+    writeFileSync(file, JSON.stringify(minimal()), 'utf8');
+    // The pre-render readiness seam demands a full-suite green bound to the tree
+    // being handed off — the same act a real `npm test` performs through the
+    // vitest gate. A real repo fixture has to satisfy it like a real repo does.
+    writeSuiteGreenStamp(dir, worktreeTree(dir));
+    const r = spawnSyncHidden(
+      process.execPath,
+      [SCRIPT, '--in', file, '--start', 'HEAD~1'],
+      { cwd: dir, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: dir } },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('### Commits in this sprint');
+    expect(r.stdout).toContain('HEAD~1..HEAD');
+    // The DERIVED half: the subject line came from git, not from the input.
+    expect(r.stdout).toContain('the work this sprint landed');
+    expect(r.stdout).not.toContain('first commit of the sprint');
+  });
+
+  it('REFUSES a start commit git cannot resolve, rather than rendering a silent empty range', () => {
+    const { code, stderr } = render(minimal(), ['--start', 'not-a-real-commit']);
+    expect(code).toBe(1);
+    expect(stderr).toContain('not-a-real-commit');
+  });
+
+  it('renders no commit section at all when --start is omitted', () => {
+    const { code, stdout } = render(minimal());
+    expect(code).toBe(0);
+    expect(stdout).not.toContain('### Commits in this sprint');
+  });
+});
 
 describe('render-closeout: silence is stated, then omitted', () => {
   it('omits every silent section — no "none" line survives into the report', () => {
