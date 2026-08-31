@@ -16,6 +16,25 @@ function isAggregatedRow(row: { prefix?: string; path?: string }): row is Aggreg
 const RENDERED_DOCS_MAX = 6;
 const RENDERED_EXCERPT_CHARS = 500;
 
+/** Choose the proposed conceptual-review depth from the user's intent wording.
+ * Broad, unqualified repository reviews warrant the deeper pass; explicit
+ * bounded/cheap requests stay shallow. This is a proposal only: confirmation
+ * remains the authority and may choose either option on every run.
+ */
+export function proposeConceptualDepth(
+  intentSummary?: string,
+  freeFormIntent?: string,
+): "shallow" | "deep" {
+  const text = `${intentSummary ?? ""} ${freeFormIntent ?? ""}`.toLowerCase();
+  if (/\b(?:src|lib|test|tests|app|packages?)\/[\w./-]+\b|\bnamed files?\b|\btightly scoped\b|\b(?:the )?(?:api layer|authentication module|subsystem|module)\b/.test(text)) return "shallow";
+  if (/\b(quick|brief|low[- ]?cost|cheap|named[- ]file|specific file|tightly scoped|single file|targeted)\b/.test(text)) {
+    return "shallow";
+  }
+  return /\b(?:full[- ]audit|complete[- ]audit|full audit|complete audit|comprehensive|(?:repository|codebase)[- ]wide audit|full[- ]repository|whole[- ]repository|whole[- ]codebase|entire (?:repository|codebase|project)|whole repo|whole codebase)\b/.test(text)
+    ? "deep"
+    : "shallow";
+}
+
 /** Trim an excerpt to the render cap on a line boundary (never mid-word). */
 function trimExcerptForPrompt(excerpt: string): string {
   if (excerpt.length <= RENDERED_EXCERPT_CHARS) return excerpt;
@@ -61,6 +80,8 @@ export function renderConfirmIntentPrompt(
      * deterministically from the single shared intent interpreter.
      */
     unresolvedConstraintClauses?: Array<{ clause_id: string; text: string; checkpoint_question: string }>;
+    intentSummary?: string;
+    freeFormIntent?: string;
   },
 ): string {
   const dirLines =
@@ -110,9 +131,10 @@ export function renderConfirmIntentPrompt(
   const mandatoryLensList = MANDATORY_LENSES.join(", ");
   const unresolvedClauses = opts.unresolvedConstraintClauses ?? [];
   const hasBlockingClauses = unresolvedClauses.length > 0;
+  const proposedDepth = proposeConceptualDepth(opts.intentSummary, opts.freeFormIntent);
 
   return [
-    "# Confirm Audit Scope and Intent",
+    `# Confirm Audit Scope and Intent\n\nConceptual review depth proposed for this intent: **${proposedDepth}**. Confirm or change it; this choice is fresh for each run.`,
     "",
     ...(hasBlockingClauses
       ? [
@@ -309,5 +331,11 @@ export function renderConfirmIntentPrompt(
     "",
     `Then run: ${opts.continueCommand}`,
     "",
-  ].join("\n");
+  ].join("\n").replace(
+    "3. Ask conceptual design-review depth (default **shallow**).",
+    `3. Ask conceptual design-review depth (default **shallow**; proposed **${proposedDepth}** for this intent). The choice is fresh each run and remains the user's confirmation.`,
+  ).replace(
+    '"design_review": { "conceptual_depth": "shallow", "perspectives": 5 }',
+    `"design_review": { "conceptual_depth": "${proposedDepth}", "perspectives": 5 }`,
+  );
 }

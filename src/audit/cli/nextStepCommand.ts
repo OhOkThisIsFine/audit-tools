@@ -1046,6 +1046,8 @@ const emitConfirmIntent = emissionRow<"confirm_intent">(
         unresolvedConstraintClauses: unresolvedConstraintClauses(
           result.bundle.intent_checkpoint,
         ),
+        intentSummary: result.bundle.intent_checkpoint?.intent_summary,
+        freeFormIntent: result.bundle.intent_checkpoint?.free_form_intent,
       }),
     });
   },

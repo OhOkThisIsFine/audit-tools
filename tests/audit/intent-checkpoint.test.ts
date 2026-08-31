@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
 import { decideNextStep } from "../../src/audit/orchestrator/nextStep.js";
 import { computeScopePreDigest } from "../../src/audit/orchestrator/intentCheckpointExecutor.js";
-import { renderConfirmIntentPrompt } from "../../src/audit/cli/confirmIntentStep.js";
+import { renderConfirmIntentPrompt, proposeConceptualDepth } from "../../src/audit/cli/confirmIntentStep.js";
 import { MANDATORY_LENSES } from "../../src/audit/orchestrator/lensSelection.js";
 import { validateArtifactBundle } from "../../src/audit/validation/artifacts.js";
 import { applyIntentExclusionsToCoverage } from "../../src/audit/orchestrator/scope.js";
@@ -513,4 +513,24 @@ await test("buildLensPropositions marks observability as heuristic exclude when 
   expect(obs?.disposition).toBe("recommend_exclude");
   // The rationale should NOT claim absence as fact, only as heuristic default
   expect(obs?.reason).not.toMatch(/no logging.*detected/);
+});
+await test("proposeConceptualDepth escalates bare whole-repository intent only", async () => {
+  expect(proposeConceptualDepth("full-audit", undefined)).toBe("deep");
+  expect(proposeConceptualDepth("comprehensive review", undefined)).toBe("deep");
+  expect(proposeConceptualDepth("quick review", undefined)).toBe("shallow");
+  expect(proposeConceptualDepth("audit these named files", "src/a.ts only")).toBe("shallow");
+  expect(proposeConceptualDepth("full audit of src/a.ts", undefined)).toBe("shallow");
+  expect(proposeConceptualDepth("complete review of the authentication module", undefined)).toBe("shallow");
+  expect(proposeConceptualDepth("full audit of the API layer", undefined)).toBe("shallow");
+  expect(proposeConceptualDepth("repository-wide audit", undefined)).toBe("deep");
+  expect(proposeConceptualDepth("codebase-wide audit", undefined)).toBe("deep");
+});
+
+await test("confirm prompt renders depth proposal from intent inputs", async () => {
+  const prompt = renderConfirmIntentPrompt(
+    { mode: "full", since: null, files_in_scope: 1, scope_dirs: [{ dir: "src", files: 1 }], excluded_summary: [], disposition_override_proposals: [], lens_propositions: [], docs_digest: [], mis_scope_smells: [] },
+    { intentCheckpointPath: "/repo/intent.json", continueCommand: "next", intentSummary: "comprehensive whole-repository review" },
+  );
+  expect(prompt).toMatch(/proposed.*deep/i);
+  expect(prompt).toMatch(/"conceptual_depth": "deep"/);
 });
