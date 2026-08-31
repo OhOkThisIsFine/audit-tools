@@ -1965,5 +1965,82 @@
     "decided_at": "2026-08-28T17:17:05.708Z",
     "completed_at": "2026-08-28T23:14:12.499Z",
     "completed_ref": "15e45d76"
+  },
+  "c0dc10138087d836": {
+    "disposition": "settled",
+    "answer": "Reject P49 in audit-tools. Lane readiness, availability, and best-lane selection belong to llm-relay, which is intended to own that machinery. Do not add a parallel roster-preflight or fallback policy here; route the remaining gap to llm-relay.",
+    "subject": "P49: let the leg-2 sweep preflight DOWN the roster instead of dying on its first entry?",
+    "path": "scripts/shared/triage-backlog.mjs",
+    "decided_at": "2026-08-31T15:27:21.178Z"
+  },
+  "92b0e2dd7cfdc06d": {
+    "disposition": "settled",
+    "answer": "Build project-type and candidate closing-action detection, but never use it to autonomously select the closing action. Use the detected facts only to present appropriate closing-action options to the user; the user always chooses.",
+    "subject": "normative: remediation-goals requires project-type and closing-action DETECTION that does not exist — build it, or retire the requirement?",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-08-31T15:27:23.349Z"
+  },
+  "74c89b226ab9b9cd": {
+    "disposition": "settled",
+    "answer": "Revert the pre-run narrowing so the explicit cleanup command and automatic pre-run cleanup use one eligibility rule. Make the deletion contract explicit: cleanup removes transient run state but preserves every promoted final canonical report, both machine-readable and human-readable: audit-findings.json, audit-report.md, remediation-outcomes.json, and remediation-report.md.",
+    "subject": "normative: audit-goals states ONE cleanup-eligibility rule, but the two callers now differ — adopt the split, or is the pre-run narrowing wrong?",
+    "path": "spec/audit/audit-goals.md",
+    "decided_at": "2026-08-31T15:27:25.225Z"
+  },
+  "f86315b46e7f352e": {
+    "disposition": "settled",
+    "answer": "Repoint the B6 reference to .claude/skills/disambiguate-backlog/SKILL.md Hard rules, and widen check:memory-citations to recognize the bare Memory: <name> list form so this class of dangling reference becomes mechanically red.",
+    "subject": "instruction-file edit: project-philosophy.md cites a memory file that does not exist — repoint it at the skill that holds the conviction?",
+    "path": "docs/project-philosophy.md",
+    "decided_at": "2026-08-31T15:27:27.373Z"
+  },
+  "b789256441d2ccf9": {
+    "disposition": "settled",
+    "answer": "Repoint development.md to .claude/skills/ship/SKILL.md for what verify:release covers and when to run it. Keep release.md referenced only for the manual host-validation and troubleshooting half; do not duplicate the ship workflow.",
+    "subject": "development.md points at release.md for what verify:release covers — repoint it at the ship skill, or leave the pointer?",
+    "path": "docs/audit-pkg/development.md",
+    "decided_at": "2026-08-31T15:33:33.423Z"
+  },
+  "309bbbfff0ff6b89": {
+    "disposition": "settled",
+    "answer": "Stop hand-enumerating live counterexample IDs. State that the ID set is sparse and each ID is resolved through its citing module, and apply the same de-status treatment to comparable hand-maintained ID enumerations in the glossary.",
+    "subject": "glossary-ids.md states a contiguous CE-001..CE-011 range that asserts a CE-003 the source never cites — de-status the sentence, or keep an exact list?",
+    "path": "docs/glossary-ids.md",
+    "decided_at": "2026-08-31T15:33:35.360Z"
+  },
+  "076315de56b74b0b": {
+    "disposition": "settled",
+    "answer": "Remove the retired scheduler-prompt regeneration clauses, re-render the manifest, and perform a bounded sweep of the manifest data for any other row that names an artifact which no longer exists.",
+    "subject": "The doc manifest still orders a regeneration of the scheduler prompt deleted at C-08 — drop that instruction?",
+    "path": "scripts/doc-manifest-data.mjs",
+    "decided_at": "2026-08-31T15:33:37.371Z"
+  },
+  "b4faa22d74fb56e3": {
+    "disposition": "settled",
+    "answer": "Remove the consumer symbol from the dependency-map sentence. Preserve only the durable invariant that the audit side writes continuity information and does not consume it; do not name the current downstream function or consumer.",
+    "subject": "normative: dependency-map names computeBlockContinuityScores, a symbol that no longer exists — repoint it at the shared scorer?",
+    "path": "spec/audit/dependency-map.md",
+    "decided_at": "2026-08-31T15:33:39.029Z"
+  },
+  "cde41c31f1c6a7f3": {
+    "disposition": "settled",
+    "answer": "Replace the two hand-maintained artifact enumerations with the durable invariant: every artifact whose generated dependency row lists the changed upstream artifact. Keep the examples explanatory while making the generated tables the sole authoritative enumeration.",
+    "subject": "normative: two dependency-map examples hand-list artifacts and omit rows their own generated tables carry — state the invariant instead of re-listing?",
+    "path": "spec/audit/dependency-map.md",
+    "decided_at": "2026-08-31T16:25:27.238Z"
+  },
+  "b175a773958b1b4d": {
+    "disposition": "settled",
+    "answer": "Restore real Node-major CI coverage so the published engines.node >=22 support claim is exercised rather than correcting the documentation down to single-version coverage. Keep the workflow and contract test aligned with the restored matrix.",
+    "subject": "release.md claims CI varies Node majors and a CONTRACT TEST pins that sentence — correct both, or is Node-major coverage what should be restored?",
+    "path": "docs/audit-pkg/release.md",
+    "decided_at": "2026-08-31T16:25:28.989Z"
+  },
+  "c47dc1bf930484be": {
+    "disposition": "settled",
+    "answer": "Adopt a standing retirement rule: retire a dated review after 30 days when no tracked canonical document, backlog item, or current handoff cites it. Git remains the historical archive. Apply the rule automatically rather than returning each batch for another owner decision.",
+    "subject": "Retire 18 dated review records that nothing outside the archive cites, or keep the archive growing?",
+    "path": "docs/reviews/dogfood-run-2026-07-30.md",
+    "decided_at": "2026-08-31T16:27:09.511Z"
   }
 }

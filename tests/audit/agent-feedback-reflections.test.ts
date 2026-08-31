@@ -74,14 +74,14 @@ test("capability preflight reflections render as detailed audit limitations", ()
   expect(run.updated.audit_report).toMatch(/## Audit Limitations/);
   expect(run.updated.audit_report).toMatch(/No structural graph tool was available/);
   expect(run.updated.audit_report).toMatch(/## Process Feedback[\s\S]*packet path was stale/);
-  expect((run.updated.audit_report.match(/## Audit Limitations/g) ?? []).length).toBe(1);
+  expect((run.updated.audit_report?.match(/## Audit Limitations/g) ?? []).length).toBe(1);
 });
 
 test("audit limitations precede process feedback when drift is present", () => {
   const preflight: AgentReflection = { task_id: "audit-capability-preflight", instruction_clarity: "clear", severity: "critical", tool_friction: ["missing graph"] };
   const report = renderAuditReportMarkdown({ summary: { finding_count: 0, work_block_count: 0, severity_breakdown: {}, audited_file_count: 0, excluded_file_count: 0, runtime_validation_status_breakdown: {} }, findings: [], work_blocks: [], work_block_seams: [] }, {
     reflections: [preflight],
-    submission_ledger: [{ contract_version: "submission-ledger-event/v1alpha1", run_id: "r", submission_id: "s", lane: "x", kind: "rejected", recorded_at: "2026-01-01T00:00:00Z", issue_code: "bad" }],
+    submission_ledger: [{ contract_version: "submission-ledger-event/v1alpha1", run_id: "r", submission_id: "s", lane: "x", kind: "rejected", recorded_at: "2026-01-01T00:00:00Z", issue_code: "submission_rejected" }],
   });
   expect(report.indexOf("## Audit Limitations")).toBeLessThan(report.indexOf("## Process Feedback"));
   expect(report).toMatch(/## Audit Limitations[\s\S]*missing graph/);

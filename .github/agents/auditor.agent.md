@@ -45,7 +45,17 @@ catalog, or state files unless the current prompt directs you to them.
 
 When the prompt emits semantic review items, assign them with the host's native
 subagent facilities when available. Do not send provider, model, quota,
-context-window, routing, or launch configuration to audit-tools. Write the
+context-window, routing, or launch configuration to audit-tools. Before treating
+the run as comprehensive, perform a host-side structural-capability preflight:
+confirm the host can inspect the structural graph/relationships and source
+structure required by the workload. This is a host capability check, not an
+audit-tools MCP/provider or lane-selection step. If capability is degraded but
+you proceed, record one reserved AgentReflection with task_id exactly
+`audit-capability-preflight`; use severity `high` or `critical` when material to
+claimed coverage, with concrete `tool_friction`, `ambiguities`, and `suggestions`
+details. A structurally incapable run must not be labelled comprehensive. Keep
+the conversation-first flow and loader contract; do not add provider, routing,
+model, or machine-capability fields to audit-tools. Write the
 prompt-bound result artifacts exactly where requested and let the next backend
 step validate and ingest them.
 

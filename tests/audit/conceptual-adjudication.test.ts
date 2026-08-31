@@ -423,7 +423,7 @@ describe("conceptual review adjudication", () => {
     const branch = await handleDesignReviewBranch(
       { artifactsDir },
       bundle,
-      { phase: "analysis", stale_artifacts: [] },
+      { status: "active", obligations: [], blockers: [] },
       tx,
     );
     expect(branch.action).toBe("continue");
