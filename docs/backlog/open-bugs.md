@@ -139,6 +139,21 @@
   `wrapper/**` or `.claude/hooks/**` while its tsconfig sets `allowJs` and tests import from both.
   **Property:** the preflight never issues a verdict about the staged tree that it did not establish.
 
+- **The pre-commit doc-contract leg ASSERTS a cause it did not observe, so any failure inside that
+  vitest run is reported as a staged doc breaking a content pin (2026-08-30, medium, friction:
+  tool_should_decide).** `.claude/hooks/pre-commit-gate.mjs` runs `npm run test:doc-contract` inside
+  `git commit` whenever a `.md`, `opencode.json` or `.gemini/*` is staged — nearly every commit here.
+  Its `catch` returns one fixed headline: *"A staged doc/asset broke a test that pins its exact
+  content (release-contract / *-doc-sync / host-asset-renderer-drift)"*. That run also carries
+  `globalSetup`/`teardown`, so an in-tree fixture leak, a live child of the run, or an ordinary flake
+  in any of those four files produces the same headline naming three files that are not the problem.
+  Found while deleting the repo-root delta check, whose firings reached commits through exactly this
+  path; the defect is INDEPENDENT of that deletion and outlived it. ⚠ Correction to `9e36db33`'s
+  commit message, which said the true cause "never surfaced": it does — the handler appends the last
+  40 lines of stdout+stderr — so the defect is the confidently WRONG headline above real evidence,
+  not the absence of evidence. **Property:** the refusal names the cause it actually observed, or says
+  it could not tell — it never asserts one of several possible causes as fact.
+
 - **`shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then
   fired on a third near-identical one (2026-08-27, medium).** Three `git commit -m @'…'@` calls went
   through the Bash tool in one session with the same here-string construct. The first two were NOT
