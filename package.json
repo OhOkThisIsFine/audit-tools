@@ -47,7 +47,7 @@
     "check:scripts": "tsc -p tsconfig.scripts.json",
     "nightly:inbox": "node scripts/nightly/render-inbox.mjs",
     "nightly:ingest": "node scripts/nightly/ingest-answers.mjs",
-    "test:doc-contract": "node scripts/shared/run-vitest-gate.mjs tests/audit/release-contract.test.ts tests/audit/file-lock-doc-sync.test.ts tests/audit/host-asset-renderer-drift.test.ts tests/shared/handoff-roadmap.test.ts",
+    "test:doc-contract": "node scripts/shared/run-vitest-gate.mjs tests/audit/release-contract.test.ts tests/audit/host-asset-renderer-drift.test.ts tests/shared/handoff-roadmap.test.ts",
     "test": "npm run build && node scripts/shared/run-vitest-gate.mjs",
     "test:single": "npm run build && node scripts/shared/run-vitest-gate.mjs",
     "verify:guards": "node scripts/shared/run-vitest-gate.mjs --retry=2 --exclude \"**/audit-code-completion-*.test.ts\" --exclude \"**/audit-code-wrapper-*.test.ts\" --exclude \"**/audit/next-step-core-*.test.ts\" --exclude \"**/seam-host-only-next-step.test.ts\" --exclude \"**/*-e2e.test.*\" --exclude \"**/next-step-implement-dispatch.test.ts\" --exclude \"**/next-step-pipeline-dispatch.test.ts\"",

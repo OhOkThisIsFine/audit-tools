@@ -341,7 +341,8 @@ export async function recoverStagedSubmissions(
         issueCode: "submission_rejected",
         message:
           `a crashed fold held this submission staged while a newer one arrived at the bound path; ` +
-          `the staged copy is quarantined at ${quarantine.quarantinePath} and the newer submission is consumed instead` +
+          `the staged copy is ${quarantineLocationPhrase(quarantine)} and the newer submission is ` +
+          `consumed instead` +
           quarantineSurvivalNote(quarantine),
       });
       continue;
