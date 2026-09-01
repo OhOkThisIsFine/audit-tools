@@ -5,13 +5,14 @@
 
 ## Live state
 
-- **v0.50.20 is live**, published from `6e9259c4`; the release workflow passed and the
+- **v0.50.21 is live**, published from `2431e007`; the release workflow passed and the
   registry artifact is installed globally. Both `audit-code --version` and
-  `remediate-code --version` report `0.50.20`.
+  `remediate-code --version` report `0.50.21`.
 - **The P0 deep-review rewiring is implemented.** Broad/comprehensive audit intent now
   offers deep review without selecting it autonomously; synthesis preserves detailed
   contributor attribution and reports structural capability limitations. The pinned
-  5+5 benchmark harness, evaluator packets, and scoring/adjudication contracts are in
+  5+5 benchmark harness, generic-claim evaluator packets, private-gold adjudication,
+  and derived scoring contracts are in
   [`benchmarks/p0/`](../benchmarks/p0/) and the design gate is recorded in
   [`p0-deep-review-design-gate-2026-08-31.md`](reviews/p0-deep-review-design-gate-2026-08-31.md).
 - **Acceptance is not yet claimed.** The harness and seeded controls are green, but the
