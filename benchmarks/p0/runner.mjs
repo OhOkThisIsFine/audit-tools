@@ -96,6 +96,19 @@ export const buildCandidateInvocation = ({ audit_code, snapshot_root }) => [
   snapshot_root,
 ];
 
+export function currentStepPathFromCliOutput(output) {
+  let contract;
+  try {
+    contract = JSON.parse(output);
+  } catch {
+    throw Error("next-step did not emit a JSON contract");
+  }
+  const path = contract?.artifact_paths?.current_step;
+  if (!isStr(path))
+    throw Error("next-step contract lacks artifact_paths.current_step");
+  return path;
+}
+
 function git(repoRoot, args) {
   return spawnSync("git", ["-C", repoRoot, ...args], {
     encoding: "utf8",
@@ -634,6 +647,7 @@ function external(executor, executorArgs, request, dir) {
   return response;
 }
 async function candidate({ root, profile, executor, executorArgs, results }) {
+  let currentStepPath;
   return runCandidateArm({
     auditCode: resolve("audit-code.mjs"),
     snapshotRoot: root,
@@ -643,12 +657,11 @@ async function candidate({ root, profile, executor, executorArgs, results }) {
         encoding: "utf8",
         shell: false,
       });
+      if (!child.error && child.status === 0)
+        currentStepPath = currentStepPathFromCliOutput(child.stdout);
       return { status: child.status, error: child.error?.message };
     },
-    readCurrentStep: () =>
-      readJson(
-        join(root, ".audit-tools", "audit", "steps", "current-step.json"),
-      ),
+    readCurrentStep: () => readJson(currentStepPath),
     readPrompt: (promptPath) => readFileSync(resolve(root, promptPath), "utf8"),
     executeExternal: (request) => {
       const boundRequest = { protocol: "p0-step-request-v1", ...request };

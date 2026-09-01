@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   buildCandidateInvocation,
+  currentStepPathFromCliOutput,
   driveCandidateLoop,
   runCandidateArm,
   evaluateBenchmarkScores,
@@ -184,6 +185,22 @@ describe("P0 benchmark harness manifest", () => {
     const argv = buildCandidateInvocation({ audit_code: "audit-code.mjs", snapshot_root: "C:/snapshots/held-out" });
     expect(argv).toEqual(["node", "audit-code.mjs", "next-step", "--root", "C:/snapshots/held-out"]);
     expect(argv.join(" ")).not.toMatch(/rubric|label|opportunity/i);
+  });
+
+  test("reads the authoritative agent-scoped current-step path from CLI output", () => {
+    const path =
+      "C:/snapshot/.audit-tools/audit/steps/agent-1/current-step.json";
+    expect(
+      currentStepPathFromCliOutput(
+        JSON.stringify({ artifact_paths: { current_step: path } }),
+      ),
+    ).toBe(path);
+    expect(() => currentStepPathFromCliOutput("not json")).toThrow(
+      /JSON contract/,
+    );
+    expect(() => currentStepPathFromCliOutput("{}")).toThrow(
+      /artifact_paths\.current_step/,
+    );
   });
 
   test("drives candidate steps through injected seams and fails closed on non-advancement", async () => {
