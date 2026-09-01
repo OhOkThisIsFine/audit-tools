@@ -1,6 +1,74 @@
 {
-  "protocol": "p0-score-v1",
-  "outcomes": {"recovered": 1, "validly_subsumed": 1, "partial": 0.5, "evidence_refuted": 1, "missed": 0},
-  "axes": ["structural_recall", "philosophy_telos_recall", "grounding_precision", "telos_to_code_linkage", "reduction_value", "false_positive_discipline"],
-  "evaluation": {"two_independent_blinded": true, "disagreement_requires": "third_blinded_adjudicator", "identity_map_excluded_from_packets": true}
+  "protocol": "p0-score-v2",
+  "outcomes": {
+    "recovered": 1,
+    "validly_subsumed": 1,
+    "partial": 0.5,
+    "evidence_refuted": 1,
+    "missed": 0
+  },
+  "axes": [
+    "structural_recall",
+    "philosophy_telos_recall",
+    "grounding_precision",
+    "telos_to_code_linkage",
+    "reduction_value",
+    "false_positive_discipline"
+  ],
+  "evaluation": {
+    "two_independent_blinded": true,
+    "disagreement_requires": "third arm-blind private adjudicator",
+    "identity_map_excluded_from_packets": true,
+    "public_randomization_seed": false,
+    "packet_report_paths": "blinded packet-local report copies with bound SHA-256 digests",
+    "packet_exact_shape": true,
+    "packet_private_binding": "packet id + evaluator slot + path + full digest",
+    "packet_protocol": "p0-blinded-evaluator-packet-v2",
+    "packet_content": [
+      "generic axis rubric",
+      "generic claim instructions",
+      "blinded reports"
+    ],
+    "evaluation_protocol": "p0-blinded-evaluation-v2",
+    "reviewer_identity_comparison": "NFKC + trim + lowercase",
+    "claim_fields": [
+      "normalized_finding_text",
+      "treatment",
+      "support",
+      "confidence",
+      "evidence"
+    ],
+    "claim_treatments": [
+      "finding",
+      "validly_subsumed",
+      "explicitly_defended"
+    ],
+    "claim_support_levels": [
+      "supported",
+      "partial",
+      "unsupported"
+    ],
+    "row_fields": [
+      "axes",
+      "claims"
+    ]
+  },
+  "derivation": {
+    "private_provenance_protocol": "p0-private-scoring-provenance-v2",
+    "private_provenance": "manifest + raw request/execution evidence + graph + identity + private gold path/digest + source/copy report hashes + private report groups + full packet bindings",
+    "adjudication_protocol": "p0-private-adjudication-v2",
+    "claim_mapping": "each evaluator claim is referenced exactly once, grouped arm-blind, and mapped to a runtime private-gold id or null",
+    "caller_supplied_aggregate": "rejected",
+    "pair_noninferiority": "candidate >= control on every axis",
+    "strongest_recovery": "all privately marked strongest outcomes weight 1 in a candidate run",
+    "unsupported_count": "derived from high-confidence unsupported, unmatched, or negative-case finding claims in candidate reports",
+    "unmatched_false_positive_count": "derived from high-confidence finding claims mapped to null",
+    "positive_recovery_rate": "mean outcome weight over privately classified held-out cases",
+    "negative_false_positive_rate": "negative-case and unmatched finding claims derived from validated private mappings",
+    "held_out_quality_floors": {
+      "candidate_axis_median_min": 0.6,
+      "candidate_positive_rate_min": 0.8,
+      "candidate_negative_false_positive_rate_max": 0.1
+    }
+  }
 }

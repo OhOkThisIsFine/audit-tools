@@ -23,8 +23,11 @@ const { commitFold, createFoldTransaction } = await import(
   "../../src/audit/cli/foldTransaction.js"
 );
 const { readJsonFile } = await import("../../src/shared/io/json.js");
-const { renderAuditReportMarkdown } = await import(
+const { canonicalizeConceptualAttributionIds, renderAuditReportMarkdown } = await import(
   "../../src/audit/reporting/synthesis.js"
+);
+const { runSynthesisExecutor, runSynthesisNarrativeExecutor } = await import(
+  "../../src/audit/orchestrator/synthesisExecutors.js"
 );
 
 const cleanups: string[] = [];
@@ -129,6 +132,76 @@ function validSubmission() {
             source_candidate_ids: [],
             contribution_percent: 15,
             rationale: "Judge reconciled and synthesized the final framing.",
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function collidingFinalSubmission() {
+  return {
+    round_id: "round-current",
+    findings: [
+      finding("FINAL-001", "One shared canonical core"),
+      finding("FINAL-002", "One shared canonical core"),
+    ],
+    candidate_dispositions: [
+      {
+        candidate_id: `${manifest.perspectives[0]!.contributor_id}::DR-001`,
+        contributor_id: manifest.perspectives[0]!.contributor_id,
+        source_finding_id: "DR-001",
+        disposition: "retained" as const,
+        target_final_finding_ids: ["FINAL-001"],
+        modification_percent: 20,
+        rationale: "First candidate retained in FINAL-001.",
+      },
+      {
+        candidate_id: `${manifest.perspectives[1]!.contributor_id}::DR-002`,
+        contributor_id: manifest.perspectives[1]!.contributor_id,
+        source_finding_id: "DR-002",
+        disposition: "merged" as const,
+        target_final_finding_ids: ["FINAL-002"],
+        modification_percent: 60,
+        rationale: "Second candidate merged into FINAL-002.",
+      },
+    ],
+    final_finding_shares: [
+      {
+        final_finding_id: "FINAL-001",
+        contributors: [
+          {
+            contributor_id: manifest.perspectives[0]!.contributor_id,
+            source_candidate_ids: [
+              `${manifest.perspectives[0]!.contributor_id}::DR-001`,
+            ],
+            contribution_percent: 70,
+            rationale: "First perspective supplied FINAL-001.",
+          },
+          {
+            contributor_id: manifest.judge.contributor_id,
+            source_candidate_ids: [],
+            contribution_percent: 30,
+            rationale: "Judge refined FINAL-001.",
+          },
+        ],
+      },
+      {
+        final_finding_id: "FINAL-002",
+        contributors: [
+          {
+            contributor_id: manifest.perspectives[1]!.contributor_id,
+            source_candidate_ids: [
+              `${manifest.perspectives[1]!.contributor_id}::DR-002`,
+            ],
+            contribution_percent: 40,
+            rationale: "Second perspective supplied FINAL-002.",
+          },
+          {
+            contributor_id: manifest.judge.contributor_id,
+            source_candidate_ids: [],
+            contribution_percent: 60,
+            rationale: "Judge reconciled FINAL-002.",
           },
         ],
       },
@@ -437,23 +510,24 @@ describe("conceptual review adjudication", () => {
   });
 
   it("renders contribution and modification detail in the human report", () => {
+    const submission = validSubmission();
     const adjudication = buildConceptualReviewAdjudication({
       manifest,
       perspectiveFindings,
-      submission: validSubmission(),
+      submission,
       generatedAt: "now",
     });
     const markdown = renderAuditReportMarkdown(
       {
         summary: {
-          finding_count: 0,
+          finding_count: 1,
           work_block_count: 0,
           severity_breakdown: {},
           audited_file_count: 0,
           excluded_file_count: 0,
           runtime_validation_status_breakdown: {},
         },
-        findings: [],
+        findings: submission.findings,
         work_blocks: [],
         work_block_seams: [],
       },
@@ -464,5 +538,315 @@ describe("conceptual review adjudication", () => {
     expect(markdown).toContain("55%");
     expect(markdown).toContain("modified 60%");
     expect(markdown).toContain("Judge (design_review_conceptual)");
+  });
+
+  it("renders conceptual attribution against the canonical synthesis finding id", () => {
+    const submission = validSubmission();
+    const adjudication = buildConceptualReviewAdjudication({
+      manifest,
+      perspectiveFindings,
+      submission,
+      generatedAt: "now",
+    });
+    const run = runSynthesisExecutor({
+      design_assessment: {
+        generated_at: "now",
+        findings: [],
+        contract_reviewed: true,
+        conceptual_reviewed: true,
+        conceptual_findings: submission.findings,
+      },
+      conceptual_review_adjudication: adjudication,
+    });
+
+    const canonicalId = run.updated.audit_findings?.findings[0]?.id;
+    expect(canonicalId).toBeDefined();
+    expect(canonicalId).not.toBe("FINAL-001");
+    expect(run.updated.audit_report).toContain(`### ${canonicalId}`);
+    expect(run.updated.audit_report).toContain(`targets ${canonicalId}.`);
+    expect(run.updated.audit_report).not.toContain("### FINAL-001");
+    expect(run.updated.audit_report).not.toContain("targets FINAL-001.");
+    expect(JSON.stringify(run.updated.audit_findings)).not.toContain(
+      "conceptual-final-id",
+    );
+    expect(
+      run.updated.conceptual_review_adjudication?.final_finding_shares[0]
+        ?.final_finding_id,
+    ).toBe(canonicalId);
+    expect(
+      run.updated.conceptual_review_adjudication?.candidate_dispositions.map(
+        (disposition) => disposition.target_final_finding_ids,
+      ),
+    ).toEqual([[canonicalId], [canonicalId]]);
+    expect(run.updated.audit_report).toContain("55%");
+    expect(run.updated.audit_report).toContain("modified 60%");
+    expect(run.updated.audit_report).toContain(
+      "Judge (design_review_conceptual)",
+    );
+
+    const reloaded = JSON.parse(JSON.stringify(run.updated)) as ArtifactBundle;
+    const narrativeRun = runSynthesisNarrativeExecutor(reloaded, {
+      themes: [],
+      executive_summary: "Canonical attribution survives artifact reload.",
+    });
+    expect(narrativeRun.updated.audit_report).toContain(`### ${canonicalId}`);
+    expect(narrativeRun.updated.audit_report).toContain(
+      `targets ${canonicalId}.`,
+    );
+    expect(narrativeRun.updated.audit_report).not.toContain("FINAL-001");
+  });
+
+  it("coalesces judge-final shares that dedupe to one canonical finding", () => {
+    const submission = collidingFinalSubmission();
+    const adjudication = buildConceptualReviewAdjudication({
+      manifest,
+      perspectiveFindings,
+      submission,
+      generatedAt: "now",
+    });
+    const run = runSynthesisExecutor({
+      design_assessment: {
+        generated_at: "now",
+        findings: [],
+        contract_reviewed: true,
+        conceptual_reviewed: true,
+        conceptual_findings: submission.findings,
+      },
+      conceptual_review_adjudication: adjudication,
+    });
+
+    const canonicalId = run.updated.audit_findings?.findings[0]?.id;
+    const canonicalShares =
+      run.updated.conceptual_review_adjudication?.final_finding_shares;
+    expect(run.updated.audit_findings?.findings).toHaveLength(1);
+    expect(canonicalShares).toHaveLength(1);
+    expect(canonicalShares?.[0]?.final_finding_id).toBe(canonicalId);
+    expect(
+      canonicalShares?.[0]?.contributors.reduce(
+        (total, contributor) => total + contributor.contribution_percent,
+        0,
+      ),
+    ).toBe(100);
+    const attributionShares = run.updated.audit_report
+      ?.split("## Conceptual Review Attribution")[1]
+      ?.split("### Candidate dispositions")[0];
+    expect(attributionShares?.split(`### ${canonicalId}`).length).toBe(2);
+
+    const contributors = new Map(
+      canonicalShares?.[0]?.contributors.map((contributor) => [
+        contributor.contributor_id,
+        contributor,
+      ]),
+    );
+    expect(
+      contributors.get(manifest.perspectives[0]!.contributor_id),
+    ).toMatchObject({
+      contribution_percent: 35,
+      source_candidate_ids: [
+        `${manifest.perspectives[0]!.contributor_id}::DR-001`,
+      ],
+    });
+    expect(
+      contributors.get(manifest.perspectives[0]!.contributor_id)?.rationale,
+    ).toContain("FINAL-001 (70%): First perspective supplied FINAL-001.");
+    expect(
+      contributors.get(manifest.perspectives[1]!.contributor_id),
+    ).toMatchObject({
+      contribution_percent: 20,
+      source_candidate_ids: [
+        `${manifest.perspectives[1]!.contributor_id}::DR-002`,
+      ],
+    });
+    expect(contributors.get(manifest.judge.contributor_id)).toMatchObject({
+      contribution_percent: 45,
+      source_candidate_ids: [],
+    });
+    expect(
+      contributors.get(manifest.judge.contributor_id)?.rationale,
+    ).toContain("FINAL-001 (30%): Judge refined FINAL-001.");
+    expect(
+      contributors.get(manifest.judge.contributor_id)?.rationale,
+    ).toContain("FINAL-002 (60%): Judge reconciled FINAL-002.");
+    expect(
+      run.updated.conceptual_review_adjudication?.candidate_dispositions,
+    ).toMatchObject([
+      {
+        target_final_finding_ids: [canonicalId],
+        modification_percent: 20,
+        rationale: "First candidate retained in FINAL-001.",
+      },
+      {
+        target_final_finding_ids: [canonicalId],
+        modification_percent: 60,
+        rationale: "Second candidate merged into FINAL-002.",
+      },
+    ]);
+  });
+
+  it("migrates pre-fix persisted local attribution ids before narrative render", () => {
+    const submission = validSubmission();
+    const designAssessment = {
+      generated_at: "now",
+      findings: [],
+      contract_reviewed: true,
+      conceptual_reviewed: true,
+      conceptual_findings: submission.findings,
+    };
+    const synthesized = runSynthesisExecutor({
+      design_assessment: designAssessment,
+    });
+    const legacyAdjudication = buildConceptualReviewAdjudication({
+      manifest,
+      perspectiveFindings,
+      submission,
+      generatedAt: "before-fix",
+    });
+    const persisted = JSON.parse(
+      JSON.stringify({
+        ...synthesized.updated,
+        conceptual_review_adjudication: legacyAdjudication,
+      }),
+    ) as ArtifactBundle;
+
+    const migrated = runSynthesisNarrativeExecutor(persisted, {
+      themes: [],
+      executive_summary: "Resume a pre-fix persisted bundle.",
+    });
+    const canonicalId = migrated.updated.audit_findings?.findings[0]?.id;
+    expect(migrated.updated.audit_report).toContain(`### ${canonicalId}`);
+    expect(migrated.updated.audit_report).toContain(`targets ${canonicalId}.`);
+    expect(migrated.updated.audit_report).not.toContain("FINAL-001");
+    expect(
+      migrated.updated.conceptual_review_adjudication?.final_finding_shares[0]
+        ?.final_finding_id,
+    ).toBe(canonicalId);
+  });
+
+  it("keeps largest-remainder collision allocations bounded and exactly 100%", () => {
+    const perspectives = Array.from({ length: 7 }, (_, index) => ({
+      contributor_id: `edge-p${index + 1}`,
+      perspective: `Edge ${index + 1}`,
+      lane_id: `edge-p${index + 1}`,
+      prompt_path: `C:/tmp/edge-p${index + 1}-prompt.md`,
+      result_path: `C:/tmp/edge-p${index + 1}-result.json`,
+    }));
+    const edgeManifest = {
+      schema_version: 1 as const,
+      mode: "deep" as const,
+      round_id: "round-edge",
+      perspectives,
+      judge: {
+        contributor_id: "edge-judge",
+        lane_id: "edge-judge",
+        prompt_path: "C:/tmp/edge-judge-prompt.md",
+        result_path: "C:/tmp/edge-judge-result.json",
+      },
+    };
+    const edgePerspectiveFindings = new Map(
+      perspectives.map((perspective, index) => [
+        perspective.contributor_id,
+        [finding(`DR-${index + 1}`, `Perspective ${index + 1}`)],
+      ]),
+    );
+    const edgeSubmission = {
+      round_id: edgeManifest.round_id,
+      findings: perspectives.map((_, index) =>
+        finding(`FINAL-${index + 1}`, "One edge canonical core"),
+      ),
+      candidate_dispositions: perspectives.map((perspective, index) => ({
+        candidate_id: `${perspective.contributor_id}::DR-${index + 1}`,
+        contributor_id: perspective.contributor_id,
+        source_finding_id: `DR-${index + 1}`,
+        disposition: "retained" as const,
+        target_final_finding_ids: [`FINAL-${index + 1}`],
+        modification_percent: index,
+        rationale: `Disposition ${index + 1}.`,
+      })),
+      final_finding_shares: perspectives.map((perspective, index) => {
+        const perspectivePercent = index < 6 ? 4 : 0;
+        return {
+          final_finding_id: `FINAL-${index + 1}`,
+          contributors: [
+            {
+              contributor_id: perspective.contributor_id,
+              source_candidate_ids: [
+                `${perspective.contributor_id}::DR-${index + 1}`,
+              ],
+              contribution_percent: perspectivePercent,
+              rationale: `Perspective share ${index + 1}.`,
+            },
+            {
+              contributor_id: edgeManifest.judge.contributor_id,
+              source_candidate_ids: [],
+              contribution_percent: 100 - perspectivePercent,
+              rationale: `Judge share ${index + 1}.`,
+            },
+          ],
+        };
+      }),
+    };
+    const adjudication = buildConceptualReviewAdjudication({
+      manifest: edgeManifest,
+      perspectiveFindings: edgePerspectiveFindings,
+      submission: edgeSubmission,
+      generatedAt: "now",
+    });
+    const run = runSynthesisExecutor({
+      design_assessment: {
+        generated_at: "now",
+        findings: [],
+        contract_reviewed: true,
+        conceptual_reviewed: true,
+        conceptual_findings: edgeSubmission.findings,
+      },
+      conceptual_review_adjudication: adjudication,
+    });
+
+    const contributors =
+      run.updated.conceptual_review_adjudication?.final_finding_shares[0]
+        ?.contributors ?? [];
+    expect(contributors).toHaveLength(8);
+    expect(
+      contributors.every(
+        (contributor) =>
+          contributor.contribution_percent >= 0 &&
+          contributor.contribution_percent <= 100,
+      ),
+    ).toBe(true);
+    expect(
+      contributors.reduce(
+        (sum, contributor) => sum + contributor.contribution_percent,
+        0,
+      ),
+    ).toBe(100);
+  });
+
+  it("leaves adjudication unchanged when canonicalization cannot resolve every target", () => {
+    const submission = validSubmission();
+    const synthesized = runSynthesisExecutor({
+      design_assessment: {
+        generated_at: "now",
+        findings: [],
+        contract_reviewed: true,
+        conceptual_reviewed: true,
+        conceptual_findings: submission.findings,
+      },
+    });
+    const adjudication = buildConceptualReviewAdjudication({
+      manifest,
+      perspectiveFindings,
+      submission,
+      generatedAt: "before-fix",
+    });
+    adjudication.candidate_dispositions[1]!.target_final_finding_ids = [
+      "FINAL-UNKNOWN",
+    ];
+    const before = JSON.stringify(adjudication);
+    const report = synthesized.updated.audit_findings!;
+
+    expect(() =>
+      canonicalizeConceptualAttributionIds(report, adjudication, report),
+    ).toThrow(/FINAL-UNKNOWN/);
+    expect(JSON.stringify(adjudication)).toBe(before);
   });
 });

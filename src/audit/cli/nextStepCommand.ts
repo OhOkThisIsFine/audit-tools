@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   loadAnalyzerPolicy,
@@ -938,9 +938,9 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
     join(artifactsDir, "charter_register.json"),
     join(artifactsDir, "design_assessment.json"),
     join(artifactsDir, "conceptual_review_adjudication.json"),
-    ...(result.bundle.conceptual_review_adjudication?.contributors.map(
-      (contributor) => contributor.result_path,
-    ) ?? []),
+    ...(result.bundle.conceptual_review_adjudication?.contributors
+      .filter((contributor) => contributor.role === "perspective")
+      .map((contributor) => contributor.result_path) ?? []),
   ];
   const adversaryPrompt = renderSecondOrderAdversaryPrompt({
     round: (result.bundle.systemic_challenge?.rounds.length ?? 0) + 1,
@@ -1028,6 +1028,18 @@ const emitConfirmIntent = emissionRow<"confirm_intent">(
       root,
       getFlag(argv, "--since"),
     );
+    let bootstrappedGuidance: string | undefined;
+    if (!result.bundle.intent_checkpoint) {
+      try {
+        const guidance = await readFile(
+          join(artifactsDir, "intake", "conversation-start.md"),
+          "utf8",
+        );
+        bootstrappedGuidance = guidance.trim() || undefined;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
     return currentStepPlan({
       artifactsDir,
       stepKind: "confirm_intent",
@@ -1047,7 +1059,9 @@ const emitConfirmIntent = emissionRow<"confirm_intent">(
           result.bundle.intent_checkpoint,
         ),
         intentSummary: result.bundle.intent_checkpoint?.intent_summary,
-        freeFormIntent: result.bundle.intent_checkpoint?.free_form_intent,
+        freeFormIntent:
+          result.bundle.intent_checkpoint?.free_form_intent ??
+          bootstrappedGuidance,
       }),
     });
   },

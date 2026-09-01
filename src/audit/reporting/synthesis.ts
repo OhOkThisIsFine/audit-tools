@@ -35,6 +35,15 @@ import { mergeFindings } from "./mergeFindings.js";
 import { selectCurrentResults } from "../orchestrator/ledger.js";
 import { assignStableFindingIds } from "./findingIdentity.js";
 
+const CONCEPTUAL_ATTRIBUTION_IDS = Symbol("conceptual-attribution-ids");
+const CONCEPTUAL_ID_MARKER_PREFIX = "\u0000audit-tools:conceptual-final-id:";
+
+type ConceptualAttributionIdMap = ReadonlyMap<string, string>;
+type ConceptualAttributionCarrier = {
+  [CONCEPTUAL_ATTRIBUTION_IDS]?: ConceptualAttributionIdMap;
+};
+type AttributionAwareReport = AuditFindingsReport & ConceptualAttributionCarrier;
+
 /**
  * Contract version stamped onto the canonical `audit-findings.json`.
  * Single-sourced from `audit-tools/shared` so the auditor's output and the
@@ -88,6 +97,63 @@ export interface AuditReportModel {
   work_block_seams: WorkBlockSeam[];
   /** Tool-REFUTED findings (S7 tier-2 disproof) excluded from the admitted set. */
   quarantined_findings?: Finding[];
+}
+
+type AttributionAwareModel = AuditReportModel & {
+  [CONCEPTUAL_ATTRIBUTION_IDS]?: ConceptualAttributionIdMap;
+};
+
+function markConceptualFindingIds(designAssessment: DesignAssessment | undefined): {
+  designAssessment: DesignAssessment | undefined;
+  findingIdByMarker: ReadonlyMap<string, string>;
+} {
+  const conceptualFindings = designAssessment?.conceptual_findings ?? [];
+  if (conceptualFindings.length === 0) {
+    return { designAssessment, findingIdByMarker: new Map() };
+  }
+
+  const findingIdByMarker = new Map<string, string>();
+  const markedFindings = conceptualFindings.map((finding, index) => {
+    const marker = `${CONCEPTUAL_ID_MARKER_PREFIX}${index}:${finding.id}\u0000`;
+    findingIdByMarker.set(marker, finding.id);
+    return {
+      ...finding,
+      evidence: [...(finding.evidence ?? []), marker],
+    };
+  });
+
+  return {
+    designAssessment: { ...designAssessment!, conceptual_findings: markedFindings },
+    findingIdByMarker,
+  };
+}
+
+function extractConceptualAttributionIds(
+  mergedFindings: Finding[],
+  findingIdByMarker: ReadonlyMap<string, string>,
+): string[][] {
+  if (findingIdByMarker.size === 0) return mergedFindings.map(() => []);
+
+  let recoveredMarkerCount = 0;
+  const localIdsByFinding = mergedFindings.map((finding) => {
+    const localIds: string[] = [];
+    const evidence = (finding.evidence ?? []).filter((entry) => {
+      const localId = findingIdByMarker.get(entry);
+      if (localId === undefined) return true;
+      localIds.push(localId);
+      recoveredMarkerCount += 1;
+      return false;
+    });
+    finding.evidence = evidence;
+    return localIds;
+  });
+
+  if (recoveredMarkerCount !== findingIdByMarker.size) {
+    throw new Error(
+      "Conceptual attribution identity markers were not conserved through finding merge.",
+    );
+  }
+  return localIdsByFinding;
 }
 
 function severityBreakdown(findings: Finding[]): Record<string, number> {
@@ -164,6 +230,7 @@ export function buildAuditReportModel(params: {
   /** Intake manifest byte sizes used to estimate remediation source context. */
   sizeIndex?: Readonly<Record<string, number>>;
 }): AuditReportModel {
+  const markedConceptual = markConceptualFindingIds(params.designAssessment);
   // Re-key the finalized findings with globally-unique, content-addressed ids
   // before anything addresses them by id. mergeFindings emits exactly one
   // finding per file-independent identity (exact normalized lens|category|
@@ -177,17 +244,33 @@ export function buildAuditReportModel(params: {
   // before merging, so a re-dispatched result's fresh findings replace the stale
   // base record they superseded — including findings the re-audit dropped, which
   // a finding-id upsert alone would leave behind.
-  const allFindings = assignStableFindingIds(
-    mergeFindings(
-      selectCurrentResults(params.results),
-      params.runtimeValidationReport,
-      params.externalAnalyzerResults,
-      params.designAssessment,
-      params.structureDecomposition,
-      params.charterRegister,
-      params.systemicChallenge,
-    ),
+  const mergedFindings = mergeFindings(
+    selectCurrentResults(params.results),
+    params.runtimeValidationReport,
+    params.externalAnalyzerResults,
+    markedConceptual.designAssessment,
+    params.structureDecomposition,
+    params.charterRegister,
+    params.systemicChallenge,
   );
+  const conceptualIdsByFinding = extractConceptualAttributionIds(
+    mergedFindings,
+    markedConceptual.findingIdByMarker,
+  );
+  const allFindings = assignStableFindingIds(mergedFindings);
+  const conceptualAttributionIds = new Map<string, string>();
+  for (const [index, localIds] of conceptualIdsByFinding.entries()) {
+    const canonicalId = allFindings[index]!.id;
+    for (const localId of localIds) {
+      const existing = conceptualAttributionIds.get(localId);
+      if (existing !== undefined && existing !== canonicalId) {
+        throw new Error(
+          `Conceptual finding id "${localId}" resolved to multiple canonical findings.`,
+        );
+      }
+      conceptualAttributionIds.set(localId, canonicalId);
+    }
+  }
   // B4: a tool-executable anchor that REFUTED a claim (status `refuted`, distinct
   // from `ungrounded`) is quarantined-EXCLUDED — kept out of the admitted findings
   // AND the work blocks so a disproven claim never merges as actionable fact. The
@@ -208,7 +291,7 @@ export function buildAuditReportModel(params: {
   // Count grounding over ALL findings (incl. quarantined-refuted) so the `refuted`
   // tally reflects findings dropped from the admitted set.
   const groundingBreakdown = groundingStatusBreakdown(allFindings);
-  const model: AuditReportModel = {
+  const model: AttributionAwareModel = {
     summary: {
       finding_count: findings.length,
       work_block_count: workBlocks.blocks.length,
@@ -230,6 +313,9 @@ export function buildAuditReportModel(params: {
     work_block_seams: workBlocks.seams,
     ...(quarantinedRefuted.length > 0 ? { quarantined_findings: quarantinedRefuted } : {}),
   };
+  if (conceptualAttributionIds.size > 0) {
+    model[CONCEPTUAL_ATTRIBUTION_IDS] = conceptualAttributionIds;
+  }
   return model;
 }
 
@@ -241,7 +327,7 @@ export function buildAuditReportModel(params: {
 export function buildAuditFindingsReport(
   model: AuditReportModel,
 ): AuditFindingsReport {
-  const report: AuditFindingsReport = {
+  const report: AttributionAwareReport = {
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
     summary: { ...model.summary },
     findings: model.findings,
@@ -252,6 +338,12 @@ export function buildAuditFindingsReport(
       ? { quarantined_findings: model.quarantined_findings }
       : {}),
   };
+  const conceptualAttributionIds = (model as AttributionAwareModel)[
+    CONCEPTUAL_ATTRIBUTION_IDS
+  ];
+  if (conceptualAttributionIds) {
+    report[CONCEPTUAL_ATTRIBUTION_IDS] = conceptualAttributionIds;
+  }
   return report;
 }
 
@@ -432,10 +524,188 @@ function pushFindingBlock(finding: SharedFinding, lines: string[]): void {
   lines.push(...renderFindingBlockLines(finding));
 }
 
+export function canonicalizeConceptualAttributionIds(
+  report: RenderableAuditReport,
+  adjudication: ConceptualReviewAdjudication,
+  idSource: RenderableAuditReport = report,
+): void {
+  const canonicalIds = new Set([
+    ...report.findings.map((finding) => finding.id),
+    ...(report.quarantined_findings ?? []).map((finding) => finding.id),
+  ]);
+  const idMap = (idSource as RenderableAuditReport & ConceptualAttributionCarrier)[
+    CONCEPTUAL_ATTRIBUTION_IDS
+  ];
+  const resolve = (id: string): string => {
+    if (canonicalIds.has(id)) return id;
+    const canonicalId = idMap?.get(id);
+    if (canonicalId !== undefined && canonicalIds.has(canonicalId)) {
+      return canonicalId;
+    }
+    throw new Error(
+      `Conceptual attribution refused: final finding id "${id}" does not resolve ` +
+        "to a canonical finding in audit-findings.json.",
+    );
+  };
+
+  // Canonicalize the carried adjudication itself, not only the markdown text.
+  // The fold persists every carried core artifact, so subsequent narrative and
+  // resynthesis renders reload canonical targets rather than reviving the
+  // judge-local ids that existed before the synthesis boundary.
+  const sharesByCanonicalId = new Map<
+    string,
+    Array<{
+      sourceFinalFindingId: string;
+      share: ConceptualReviewAdjudication["final_finding_shares"][number];
+    }>
+  >();
+  for (const share of adjudication.final_finding_shares) {
+    const sourceFinalFindingId = share.final_finding_id;
+    const canonicalId = resolve(sourceFinalFindingId);
+    const entries = sharesByCanonicalId.get(canonicalId) ?? [];
+    entries.push({ sourceFinalFindingId, share });
+    sharesByCanonicalId.set(canonicalId, entries);
+  }
+  const resolvedFinalFindingShares = [...sharesByCanonicalId.entries()]
+    .sort(([left], [right]) => compareCodeUnits(left, right))
+    .map(([canonicalId, entries]) => {
+      if (entries.length === 1) {
+        return { ...entries[0]!.share, final_finding_id: canonicalId };
+      }
+
+      const orderedEntries = [...entries].sort((left, right) =>
+        compareCodeUnits(left.sourceFinalFindingId, right.sourceFinalFindingId),
+      );
+      const contributions = new Map<
+        string,
+        Array<{
+          sourceFinalFindingId: string;
+          contribution: ConceptualReviewAdjudication["final_finding_shares"][number]["contributors"][number];
+        }>
+      >();
+      for (const entry of orderedEntries) {
+        for (const contribution of entry.share.contributors) {
+          const contributorEntries =
+            contributions.get(contribution.contributor_id) ?? [];
+          contributorEntries.push({
+            sourceFinalFindingId: entry.sourceFinalFindingId,
+            contribution,
+          });
+          contributions.set(contribution.contributor_id, contributorEntries);
+        }
+      }
+
+      const orderedContributions = [...contributions.entries()].sort(
+        ([left], [right]) => compareCodeUnits(left, right),
+      );
+      // Each judge-local final has its own 100% allocation. Once several local
+      // finals collapse to one canonical finding, the canonical allocation is
+      // their equal-weight mean (a missing contributor contributes 0%). Allocate
+      // power-of-two micro-percent units by largest remainder: division back to
+      // numbers is exact in binary, every result stays bounded, and the common
+      // denominator makes the sum exactly 100 rather than approximately 100.
+      // Source-local percentages/rationales remain verbatim in rationale below.
+      const unitsPerPercent = 2 ** 20;
+      const totalUnits = 100 * unitsPerPercent;
+      const allocationInputs = orderedContributions.map(
+        ([contributorId, contributorEntries]) => {
+          const sourcePercent = contributorEntries.reduce(
+            (sum, entry) => sum + entry.contribution.contribution_percent,
+            0,
+          );
+          return { contributorId, contributorEntries, sourcePercent };
+        },
+      );
+      const totalSourcePercent = allocationInputs.reduce(
+        (sum, item) => sum + item.sourcePercent,
+        0,
+      );
+      if (!Number.isFinite(totalSourcePercent) || totalSourcePercent <= 0) {
+        throw new Error(
+          "Conceptual attribution percentage allocation has no positive total.",
+        );
+      }
+      const allocations = allocationInputs.map(
+        ({ contributorId, contributorEntries, sourcePercent }) => {
+          const exactUnits =
+            (sourcePercent / totalSourcePercent) * totalUnits;
+          const units = Math.floor(exactUnits);
+          return {
+            contributorId,
+            contributorEntries,
+            units,
+            remainder: exactUnits - units,
+          };
+        },
+      );
+      const remainingUnits =
+        totalUnits - allocations.reduce((sum, item) => sum + item.units, 0);
+      if (remainingUnits < 0 || remainingUnits > allocations.length) {
+        throw new Error(
+          "Conceptual attribution percentage allocation exceeded bounded remainder.",
+        );
+      }
+      const remainderOrder = [...allocations].sort(
+        (left, right) =>
+          right.remainder - left.remainder ||
+          compareCodeUnits(left.contributorId, right.contributorId),
+      );
+      for (let index = 0; index < remainingUnits; index += 1) {
+        remainderOrder[index]!.units += 1;
+      }
+      const contributors = orderedContributions.map(
+        ([contributorId, contributorEntries]) => {
+          const allocation = allocations.find(
+            (item) => item.contributorId === contributorId,
+          )!;
+          return {
+            contributor_id: contributorId,
+            source_candidate_ids: [
+              ...new Set(
+                contributorEntries.flatMap(
+                  (entry) => entry.contribution.source_candidate_ids,
+                ),
+              ),
+            ].sort(compareCodeUnits),
+            contribution_percent: allocation.units / unitsPerPercent,
+            rationale: contributorEntries
+              .map(
+                (entry) =>
+                  `${entry.sourceFinalFindingId} ` +
+                  `(${entry.contribution.contribution_percent}%): ` +
+                  entry.contribution.rationale,
+              )
+              .join(" | "),
+          };
+        },
+      );
+      return {
+        final_finding_id: canonicalId,
+        contributors,
+      };
+    });
+  const resolvedCandidateDispositions = adjudication.candidate_dispositions.map(
+    (disposition) => ({
+      ...disposition,
+      target_final_finding_ids: [
+        ...new Set(disposition.target_final_finding_ids.map(resolve)),
+      ],
+    }),
+  );
+
+  // Commit both reference-bearing arrays only after every share and target has
+  // resolved. A late unknown disposition target cannot leave half-canonical
+  // attribution in the caller's carried bundle.
+  adjudication.final_finding_shares = resolvedFinalFindingShares;
+  adjudication.candidate_dispositions = resolvedCandidateDispositions;
+}
+
 function renderConceptualAttributionSection(
+  report: RenderableAuditReport,
   adjudication: ConceptualReviewAdjudication | undefined,
 ): string[] {
   if (!adjudication) return [];
+  canonicalizeConceptualAttributionIds(report, adjudication);
   const contributors = new Map(
     adjudication.contributors.map((contributor) => [
       contributor.contributor_id,
@@ -625,7 +895,7 @@ export function renderAuditReportMarkdown(
 
   const driftLines = renderSubmissionDriftSection(options.submission_ledger ?? []);
   lines.push(
-    ...renderConceptualAttributionSection(options.conceptual_adjudication),
+    ...renderConceptualAttributionSection(report, options.conceptual_adjudication),
   );
   const reflections = options.reflections ?? [];
   // Structural capability limitations are report limitations, not process

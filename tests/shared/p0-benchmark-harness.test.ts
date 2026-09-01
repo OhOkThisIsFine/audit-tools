@@ -18,11 +18,15 @@ const pairs = (prefix: string) => Array.from({ length: 5 }, (_, i) => ({ id: `${
 const validManifest = {
   version: 1,
   shared,
-  primary: { accepted_reports: ["audit-tools-simplification-workflow-gap-2026-08-26-report-a", "audit-tools-simplification-workflow-gap-2026-08-26-report-b"], normalized_opportunity_ids: ["opportunity-1", "opportunity-2"], pairs: pairs("primary") },
-  held_out: { pairs: pairs("held-out"), seeded_positive_classes: ["duplicated_machinery", "duplicated_advancement_state_ownership", "goal_conflict", "disproportionate_lifecycle_ceremony"], negative_controls: ["intentional_bounded_context_duplication", "safety_gate_removal_increases_risk"] },
+  primary: { pairs: pairs("primary") },
+  held_out: { pairs: pairs("held-out") },
   graph_disabled_trial: { graph_enabled: false, expected_outcome: "abort_before_comprehensive", notice: "degraded/non-comprehensive" },
   randomization: { pair_order: "randomized", masking: "A/B" },
-  evaluation: { independent_evaluators: 2, adjudicator: 1 },
+  evaluation: {
+    independent_evaluators: 2,
+    adjudicator: 1,
+    private_gold_schema: "benchmarks/p0/private-gold.schema.json",
+  },
   axes: [
     "structural_recall", "philosophy_telos_recall", "grounding_precision", "telos_to_code_linkage", "reduction_value", "false_positive_discipline",
   ],
@@ -36,42 +40,144 @@ describe("P0 benchmark harness manifest", () => {
   test.each([
     ["primary pair count", { primary: { ...validManifest.primary, pairs: validManifest.primary.pairs.slice(0, 4) } }],
     ["held-out pair count", { held_out: { ...validManifest.held_out, pairs: validManifest.held_out.pairs.slice(0, 4) } }],
-    ["seeded positives", { held_out: { ...validManifest.held_out, seeded_positive_classes: [] } }],
-    ["negative controls", { held_out: { ...validManifest.held_out, negative_controls: [] } }],
     ["graph-disabled outcome", { graph_disabled_trial: { ...validManifest.graph_disabled_trial, expected_outcome: "run_comprehensive" } }],
     ["blinding", { randomization: { pair_order: "fixed", masking: "none" } }],
     ["evaluators", { evaluation: { independent_evaluators: 1, adjudicator: 0 } }],
+    [
+      "private gold schema",
+      {
+        evaluation: {
+          ...validManifest.evaluation,
+          private_gold_schema: "benchmarks/p0/other.schema.json",
+        },
+      },
+    ],
     ["axes", { axes: validManifest.axes.slice(0, 5) }],
   ])("fails closed for %s", (_label, change) => expect(validateBenchmarkManifest({ ...validManifest, ...change })).toBe(false));
 
-  test("rejects sentinel operator placeholders in host, model, effort, or seed", () => {
+  test("rejects sentinel operator placeholders and any public randomization seed", () => {
     for (const field of ["host_build", "model", "reasoning_effort"] as const) {
       expect(validateBenchmarkManifest({ ...validManifest, shared: { ...shared, [field]: "operator-pinned" } })).toBe(false);
     }
-    expect(validateBenchmarkManifest({ ...validManifest, randomization: { ...validManifest.randomization, seed: "operator-pinned" } })).toBe(false);
+    expect(validateBenchmarkManifest({ ...validManifest, randomization: { ...validManifest.randomization, seed: "public-seed" } })).toBe(false);
   });
 
-  test("requires the real O-01..O-24 manifest and directory snapshot corpus", () => {
+  test.each([
+    ["accepted reports", "primary", "accepted_reports"],
+    ["scored primary subset", "primary", "normalized_opportunity_ids"],
+    ["strongest primary cases", "primary", "strongest_opportunity_ids"],
+    ["held signs", "held_out", "seeded_positive_classes"],
+    ["held controls", "held_out", "negative_controls"],
+  ] as const)("rejects deprecated public gold field %s", (_label, section, field) => {
+    expect(
+      validateBenchmarkManifest({
+        ...validManifest,
+        [section]: { ...validManifest[section], [field]: ["public-gold"] },
+      }),
+    ).toBe(false);
+  });
+
+  test("prepare generates private randomization without a public seed", () => {
+    const root = mkdtempSync(resolve(tmpdir(), "p0-prepare-"));
+    try {
+      const runner = resolve("benchmarks/p0/runner.mjs");
+      const manifestPath = resolve("benchmarks/p0/manifest.json");
+      const first = resolve(root, "first");
+      const second = resolve(root, "second");
+      for (const output of [first, second]) {
+        const prepared = spawnSyncHidden(
+          process.execPath,
+          [runner, "prepare", "--manifest", manifestPath, "--output", output],
+          { encoding: "utf8" },
+        );
+        expect(prepared.status).toBe(0);
+      }
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      const publicRequests = JSON.parse(
+        readFileSync(resolve(first, "requests.public.json"), "utf8"),
+      );
+      const firstIdentity = JSON.parse(
+        readFileSync(resolve(first, "identity.private.json"), "utf8"),
+      );
+      const secondIdentity = JSON.parse(
+        readFileSync(resolve(second, "identity.private.json"), "utf8"),
+      );
+      expect(manifest.randomization).not.toHaveProperty("seed");
+      expect(JSON.stringify(publicRequests)).not.toContain(
+        firstIdentity.randomization_seed,
+      );
+      expect(firstIdentity.randomization_seed).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+      expect(secondIdentity.randomization_seed).not.toBe(
+        firstIdentity.randomization_seed,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("requires the checked-in pair manifest and directory snapshot corpus", () => {
     const manifestPath = resolve("benchmarks/p0/manifest.json");
     const corpusPath = resolve("benchmarks/p0/held-out-corpus");
     expect(existsSync(manifestPath)).toBe(true);
     expect(validateBenchmarkManifest(manifestPath)).toBe(true);
     expect(existsSync(corpusPath) && statSync(corpusPath).isDirectory()).toBe(true);
-    expect(validateBenchmarkManifest({ ...validManifest, held_out: { ...validManifest.held_out, corpus: { path: corpusPath, labels_outside_root: true, deterministic_tree_digest: true } } })).toBe(true);
+    expect(validateBenchmarkManifest({ ...validManifest, held_out: { ...validManifest.held_out, corpus: { path: corpusPath, deterministic_tree_digest: true } } })).toBe(true);
   });
 
   test("rejects incomplete, disputed, or non-inferior score records and accepts a complete pass", () => {
-    const passing = { evaluator_coverage: { independent: 2, adjudicated: true }, primary: { ties_or_wins: 4, candidate_runs_recovering_strongest: 4, median_by_axis: Object.fromEntries(validManifest.axes.map((axis) => [axis, { candidate: 1, control: 1 }])) }, admitted_high_confidence_unsupported: 0, held_out: { seeded_positive_rate: { candidate: 1, control: 1 }, negative_control_false_positive_rate: { candidate: 0, control: 0 } } };
+    const passing = {
+      evaluator_coverage: { independent: 2, adjudicated: true },
+      primary: {
+        ties_or_wins: 4,
+        candidate_runs_recovering_strongest: 4,
+        median_by_axis: Object.fromEntries(
+          validManifest.axes.map((axis) => [
+            axis,
+            { candidate: 1, control: 1 },
+          ]),
+        ),
+      },
+      admitted_high_confidence_unsupported: 0,
+      held_out: {
+        ties_or_wins: 4,
+        median_by_axis: Object.fromEntries(
+          validManifest.axes.map((axis) => [
+            axis,
+            { candidate: 1, control: 1 },
+          ]),
+        ),
+        seeded_positive_rate: { candidate: 1, control: 1 },
+        negative_control_false_positive_rate: { candidate: 0, control: 0 },
+      },
+    };
     expect(evaluateBenchmarkScores(passing)).toBe(true);
     for (const bad of [
       { evaluator_coverage: { independent: 1, adjudicated: false } },
       { primary: { ...passing.primary, ties_or_wins: 3 } },
       { primary: { ...passing.primary, candidate_runs_recovering_strongest: 3 } },
       { admitted_high_confidence_unsupported: 1 },
+      { held_out: { ...passing.held_out, ties_or_wins: 3 } },
       { held_out: { ...passing.held_out, seeded_positive_rate: { candidate: 0, control: 1 } } },
       { held_out: { ...passing.held_out, negative_control_false_positive_rate: { candidate: 1, control: 0 } } },
+      { held_out: { ...passing.held_out, seeded_positive_rate: { candidate: 0, control: 0 } } },
+      { held_out: { ...passing.held_out, negative_control_false_positive_rate: { candidate: 1, control: 1 } } },
     ]) expect(evaluateBenchmarkScores({ ...passing, ...bad })).toBe(false);
     expect(evaluateBenchmarkScores({ ...passing, primary: { ...passing.primary, median_by_axis: { ...passing.primary.median_by_axis, structural_recall: { candidate: 0, control: 1 } } } })).toBe(false);
+    expect(evaluateBenchmarkScores({ ...passing, held_out: { ...passing.held_out, median_by_axis: { ...passing.held_out.median_by_axis, structural_recall: { candidate: 0, control: 1 } } } })).toBe(false);
+    expect(evaluateBenchmarkScores({
+      ...passing,
+      held_out: {
+        ...passing.held_out,
+        median_by_axis: Object.fromEntries(
+          validManifest.axes.map((axis) => [
+            axis,
+            { candidate: 0, control: 0 },
+          ]),
+        ),
+      },
+    })).toBe(false);
   });
 
   test("builds an ordinary audit invocation without rubric or labels", () => {
@@ -169,34 +275,29 @@ describe("P0 benchmark harness manifest", () => {
     expect(result.status).toBe(0);
   });
 
-  test("preflight validates held-out label paths and exactly one of each seeded class", () => {
+  test("preflight validates only the unlabeled held-out snapshot digest", () => {
     const root = resolve(process.cwd());
     const checkedIn = JSON.parse(readFileSync(resolve(root, "benchmarks/p0/manifest.json"), "utf8"));
-    const labels = JSON.parse(readFileSync(resolve(root, "benchmarks/p0/corpus/held-out/labels.json"), "utf8"));
     const corpusRoot = resolve(root, checkedIn.held_out.corpus.path);
-    const expected = ["duplicated_machinery", "duplicated_advancement_state_ownership", "goal_conflict", "disproportionate_lifecycle_ceremony", "intentional_bounded_context_duplication", "safety_gate_removal_increases_risk"];
     expect(statSync(corpusRoot).isDirectory()).toBe(true);
-    expect(labels).toHaveLength(expected.length);
-    expect(labels.map((label: { class: string }) => label.class).sort()).toEqual([...expected].sort());
-    for (const label of labels) {
-      const file = resolve(corpusRoot, label.path);
-      expect(file.startsWith(`${corpusRoot}${require("node:path").sep}`)).toBe(true);
-      expect(statSync(file).isFile()).toBe(true);
-    }
+    expect(checkedIn.held_out.corpus).not.toHaveProperty("labels_path");
+    expect(checkedIn.held_out).not.toHaveProperty("seeded_positive_classes");
+    expect(checkedIn.held_out).not.toHaveProperty("negative_controls");
     const checkedInPreflight = spawnSyncHidden(process.execPath, ["benchmarks/p0/runner.mjs", "preflight", "benchmarks/p0/manifest.json"], { encoding: "utf8" });
     expect(checkedInPreflight.status).toBe(0);
 
     const tempRoot = mkdtempSync(resolve(tmpdir(), "p0-corpus-") );
     try {
       cpSync(resolve(root, "benchmarks/p0"), resolve(tempRoot, "benchmarks/p0"), { recursive: true });
-      const tempLabelsPath = resolve(tempRoot, "benchmarks/p0/corpus/held-out/labels.json");
-      const tempLabels = JSON.parse(readFileSync(tempLabelsPath, "utf8"));
-      tempLabels[0].path = "missing-label-file.js";
-      writeFileSync(tempLabelsPath, JSON.stringify(tempLabels));
+      const corpusFile = resolve(
+        tempRoot,
+        "benchmarks/p0/held-out-corpus/src/duplicate.js",
+      );
+      writeFileSync(corpusFile, `${readFileSync(corpusFile, "utf8")}\n// tampered\n`);
       const runner = resolve(root, "benchmarks/p0/runner.mjs");
       const stale = spawnSyncHidden(process.execPath, [runner, "preflight", resolve(tempRoot, "benchmarks/p0/manifest.json")], { cwd: tempRoot, encoding: "utf8" });
       expect(stale.status).not.toBe(0);
-      expect(`${stale.stdout}\n${stale.stderr}`).toMatch(/label|path|file/i);
+      expect(`${stale.stdout}\n${stale.stderr}`).toMatch(/digest|corpus/i);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

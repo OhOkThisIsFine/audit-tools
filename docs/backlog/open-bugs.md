@@ -417,7 +417,12 @@
   sweep: [`reviews/rpc-starvation-candidates-2026-08-07.md`](../reviews/rpc-starvation-candidates-2026-08-07.md)
   — its one confirmed instance (sync full-CLI `next-step` children in
   `next-step-pipeline-dispatch.test.ts`) was converted to async spawn; gate-script spawns in
-  `tests/shared/*-gate.test.ts` are the next leads. ⚠ Standing trap from the reverted 2026-08-06 attempt: `projects:`
+  `tests/shared/*-gate.test.ts` are the next leads. **Re-hit 2026-08-31:** the final
+  pre-release and released-tree `npm test` runs each recorded 6,119 passed / 0 failed,
+  then emitted the same `onTaskUpdate` timeout; `run-vitest-gate.mjs` correctly
+  rendered REPORTER-TRANSPORT PASS both times. This satisfies the recurrence trigger:
+  instrument the remaining synchronous gate-script spawns next. ⚠ Standing trap from
+  the reverted 2026-08-06 attempt: `projects:`
   at the TOP LEVEL of `vitest.config.ts` is silently ignored and voids the whole test config
   (false GREEN); any config split must nest under `test.projects` and prove both exit
   polarities. **Property:** no test worker blocks its event loop ≥60s continuously; until then
@@ -933,4 +938,3 @@
   still admitted — `gh pr merge`, `gh release create`, `npm version`, `docker push`, `terraform apply`.
   **Property for the remainder:** a command that changes state outside this repo's working tree is
   refused when piped into a filter, or the registry states which verbs the list claims.
-

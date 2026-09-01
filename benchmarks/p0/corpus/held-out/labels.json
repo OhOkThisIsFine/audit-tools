@@ -1,8 +1,0 @@
-[
-  { "path": "src/duplicate.js", "class": "duplicated_machinery" },
-  { "path": "src/state.js", "class": "duplicated_advancement_state_ownership" },
-  { "path": "docs/goals.md", "class": "goal_conflict" },
-  { "path": "src/lifecycle.js", "class": "disproportionate_lifecycle_ceremony" },
-  { "path": "src/bounded-context.js", "class": "intentional_bounded_context_duplication" },
-  { "path": "src/safety-gate.js", "class": "safety_gate_removal_increases_risk" }
-]

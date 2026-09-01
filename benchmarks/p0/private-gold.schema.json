@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://audit-tools.local/schemas/p0-private-gold.schema.json",
+  "title": "P0 private benchmark gold",
+  "description": "Structure-only contract. The runtime additionally enforces normalized private-id uniqueness, external file placement, manifest binding, exact classifications, and required case counts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "manifest_digest", "cases"],
+  "properties": {
+    "protocol": { "const": "p0-private-gold-v1" },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "private_id",
+          "group",
+          "subject",
+          "evidence_focus",
+          "sign",
+          "strongest"
+        ],
+        "properties": {
+          "private_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "group": {
+            "type": "string",
+            "enum": ["primary", "held_out"]
+          },
+          "subject": { "type": "string", "minLength": 16 },
+          "evidence_focus": { "type": "string", "minLength": 24 },
+          "sign": {
+            "type": "string",
+            "enum": ["positive", "negative", "unscored"]
+          },
+          "strongest": { "type": "boolean" }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["group"],
+              "properties": { "group": { "const": "primary" } }
+            },
+            "then": {
+              "properties": {
+                "sign": { "enum": ["positive", "unscored"] }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": ["strongest"],
+              "properties": { "strongest": { "const": true } }
+            },
+            "then": {
+              "required": ["group", "sign"],
+              "properties": {
+                "group": { "const": "primary" },
+                "sign": { "const": "positive" }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "contains": {
+        "required": ["group", "sign"],
+        "properties": {
+          "group": { "const": "primary" },
+          "sign": { "const": "positive" }
+        }
+      },
+      "minContains": 4
+    },
+    {
+      "contains": {
+        "required": ["group", "sign"],
+        "properties": {
+          "group": { "const": "primary" },
+          "sign": { "const": "unscored" }
+        }
+      },
+      "minContains": 1
+    },
+    {
+      "contains": {
+        "required": ["group", "sign"],
+        "properties": {
+          "group": { "const": "held_out" },
+          "sign": { "const": "positive" }
+        }
+      },
+      "minContains": 1
+    },
+    {
+      "contains": {
+        "required": ["group", "sign"],
+        "properties": {
+          "group": { "const": "held_out" },
+          "sign": { "const": "negative" }
+        }
+      },
+      "minContains": 1
+    },
+    {
+      "contains": {
+        "required": ["group", "sign"],
+        "properties": {
+          "group": { "const": "held_out" },
+          "sign": { "const": "unscored" }
+        }
+      },
+      "minContains": 1
+    },
+    {
+      "contains": {
+        "required": ["strongest"],
+        "properties": { "strongest": { "const": true } }
+      },
+      "minContains": 4,
+      "maxContains": 4
+    }
+  ]
+}

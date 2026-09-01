@@ -6,6 +6,7 @@ import {
   applyNarrative,
   buildAuditFindingsReport,
   buildAuditReportModel,
+  canonicalizeConceptualAttributionIds,
   renderAuditReportMarkdown,
 } from "../reporting/synthesis.js";
 import type { SynthesisNarrative } from "audit-tools/shared";
@@ -43,6 +44,37 @@ function buildBaseFindingsReport(
   return excludedScope && excludedScope.length > 0
     ? { ...report, excluded_scope: excludedScope }
     : report;
+}
+
+function migratePersistedConceptualAttribution(
+  bundle: ArtifactBundle,
+  report: NonNullable<ArtifactBundle["audit_findings"]>,
+  results: AuditResult[],
+  options: SynthesisOptions,
+): void {
+  const adjudication = bundle.conceptual_review_adjudication;
+  if (!adjudication) return;
+
+  const canonicalIds = new Set([
+    ...report.findings.map((finding) => finding.id),
+    ...(report.quarantined_findings ?? []).map((finding) => finding.id),
+  ]);
+  const referencedIds = [
+    ...adjudication.final_finding_shares.map(
+      (share) => share.final_finding_id,
+    ),
+    ...adjudication.candidate_dispositions.flatMap(
+      (disposition) => disposition.target_final_finding_ids,
+    ),
+  ];
+  if (referencedIds.every((id) => canonicalIds.has(id))) return;
+
+  // Pre-fix persisted bundles contain canonical audit findings but judge-local
+  // attribution ids. Rebuild only the deterministic identity carrier from the
+  // still-authoritative design assessment/results, then apply it to the
+  // persisted report. Nothing extra enters audit-findings.json.
+  const identitySource = buildBaseFindingsReport(bundle, results, options);
+  canonicalizeConceptualAttributionIds(report, adjudication, identitySource);
 }
 
 export function runSynthesisExecutor(
@@ -94,6 +126,14 @@ export function runSynthesisNarrativeExecutor(
     bundle.audit_findings ??
     buildBaseFindingsReport(bundle, bundle.audit_results ?? [], options);
   const needsBaseWrite = !bundle.audit_findings;
+  if (bundle.audit_findings) {
+    migratePersistedConceptualAttribution(
+      bundle,
+      baseReport,
+      bundle.audit_results ?? [],
+      options,
+    );
+  }
 
   const hasNarrative = Boolean(
     narrative &&
