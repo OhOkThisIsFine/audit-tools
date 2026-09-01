@@ -203,6 +203,52 @@ describe("P0 benchmark harness manifest", () => {
     );
   });
 
+  test("drives the emitted agent-scoped step contract without legacy fields", async () => {
+    const requests: unknown[] = [];
+    const steps = [
+      {
+        step_kind: "analyzer_consent",
+        status: "ready",
+        run_id: null,
+        stop_condition: "Write the decisions artifact, then continue.",
+        prompt: "Choose analyzer consent.",
+        artifact_paths: {
+          analyzer_consent_decisions: "C:/snapshot/.audit-tools/audit/submissions/decisions.json",
+          current_step: "C:/snapshot/.audit-tools/audit/steps/agent-1/current-step.json",
+          current_prompt: "C:/snapshot/.audit-tools/audit/steps/agent-1/current-prompt.md",
+        },
+      },
+      {
+        step_kind: "present_report",
+        complete: true,
+        artifact_paths: {
+          audit_report: "C:/snapshot/.audit-tools/audit/audit-report.md",
+        },
+      },
+    ];
+    let cursor = 0;
+    const result = await driveCandidateLoop({
+      snapshot_root: "C:/snapshot",
+      pinned_profile: shared,
+      maxSteps: 2,
+      nextStep: async () => steps[cursor++],
+      executePrompt: async (request: unknown) => requests.push(request),
+    });
+
+    expect(result.step.step_kind).toBe("present_report");
+    expect(requests).toEqual([
+      expect.objectContaining({
+        step_id: expect.stringMatching(/^analyzer_consent:[0-9a-f]{24}$/),
+        step_kind: "analyzer_consent",
+        artifact_path: undefined,
+        artifact_paths: expect.objectContaining({
+          analyzer_consent_decisions:
+            "C:/snapshot/.audit-tools/audit/submissions/decisions.json",
+        }),
+      }),
+    ]);
+  });
+
   test("drives candidate steps through injected seams and fails closed on non-advancement", async () => {
     const requests: unknown[] = [];
     const steps = [

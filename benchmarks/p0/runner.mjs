@@ -164,22 +164,44 @@ export async function removePinnedPrimary({ repoRoot, destination }) {
   git(root, ["worktree", "prune"]);
 }
 
-function assertStep(step, seen) {
-  if (!isObj(step) || !isStr(step.step_id))
+function stepIdentity(step) {
+  if (!isObj(step) || (!isStr(step.step_id) && !isStr(step.step_kind)))
     throw Error("missing or malformed current step");
-  if (seen.has(step.step_id))
+  if (isStr(step.step_id)) return step.step_id;
+  const artifact_paths = Object.fromEntries(
+    Object.entries(isObj(step.artifact_paths) ? step.artifact_paths : {})
+      .filter(
+        ([key, value]) =>
+          !["current_step", "current_prompt"].includes(key) && isStr(value),
+      )
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+  return `${step.step_kind}:${digest({
+    artifact_paths,
+    run_id: step.run_id ?? null,
+    step_kind: step.step_kind,
+    stop_condition: step.stop_condition ?? null,
+  }).slice(0, 24)}`;
+}
+function assertStep(step, seen) {
+  const identity = stepIdentity(step);
+  if (seen.has(identity))
     throw Error("non-advancing or repeated step identity");
-  seen.add(step.step_id);
+  seen.add(identity);
 }
 function terminal(step) {
   return step.complete === true || step.step_kind === "present_report";
 }
 function stepRequest(step, prompt, snapshot_root, pinned_profile) {
-  if (!isStr(prompt)) throw Error(`missing prompt for step ${step.step_id}`);
+  const step_id = stepIdentity(step);
+  if (!isStr(prompt)) throw Error(`missing prompt for step ${step_id}`);
   return {
-    step_id: step.step_id,
+    step_id,
+    step_kind: step.step_kind,
     prompt,
     artifact_path: step.artifact_path,
+    artifact_paths: step.artifact_paths,
+    stop_condition: step.stop_condition,
     snapshot_root,
     pinned_profile,
   };
