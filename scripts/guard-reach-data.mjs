@@ -1404,9 +1404,9 @@ export const REACH = [
   },
   {
     area: 'P0 benchmark contracts and corpus',
-    files: ['benchmarks/p0/manifest.json', 'benchmarks/p0/score-schema.json', 'benchmarks/p0/corpus/**', 'benchmarks/p0/held-out-corpus/**', 'tests/shared/p0-benchmark-*.test.ts'],
+    files: ['benchmarks/p0/manifest.json', 'benchmarks/p0/private-gold.schema.json', 'benchmarks/p0/score-schema.json', 'benchmarks/p0/held-out-corpus/**', 'tests/shared/p0-benchmark-*.test.ts'],
     guardedBy: ['vitest-gate', 'check:guard-reach', 'check:scripts'],
-    note: 'P0 manifest, score schema, primary/held-out labels and real fixture snapshot are exercised by benchmark contract tests; runner preflight validates the same inputs',
+    note: 'P0 manifest, public schemas, and held-out fixture snapshot are exercised by benchmark contract tests; runner preflight validates the same inputs',
   },
   {
     area: 'P0 benchmark runner',

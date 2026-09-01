@@ -197,7 +197,8 @@ test("production systemic dispatch never advertises the deleted deep-review judg
       step.artifact_paths.systemic_challenge_prompt,
       "utf8",
     );
-    expect(prompt).toContain(perspectiveResultPath);
-    expect(prompt).not.toContain(deletedJudgeResultPath);
+    const normalizedPrompt = prompt.replace(/\\+/g, "/");
+    expect(normalizedPrompt).toContain(perspectiveResultPath.replace(/\\+/g, "/"));
+    expect(normalizedPrompt).not.toContain(deletedJudgeResultPath.replace(/\\+/g, "/"));
   });
 });

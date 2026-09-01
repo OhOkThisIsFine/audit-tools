@@ -80,7 +80,11 @@ function renderAdjudication(bundle: ArtifactBundle): string[] {
     "```json",
     JSON.stringify(
       {
-        contributors: adjudication.contributors,
+        contributors: adjudication.contributors.map((contributor) =>
+          contributor.role === "judge"
+            ? { ...contributor, result_path: undefined }
+            : contributor,
+        ),
         candidate_dispositions: adjudication.candidate_dispositions,
         final_finding_shares: adjudication.final_finding_shares,
       },
@@ -94,7 +98,8 @@ function renderAdjudication(bundle: ArtifactBundle): string[] {
 /**
  * Render one systemic challenge round. `evidencePaths` are also granted in the
  * host step's read set; the prompt names them so the adversary can inspect the
- * full perspective/judge artifacts rather than reasoning from counts.
+ * full perspective artifacts and persisted judge adjudication rather than
+ * reasoning from counts.
  */
 export function renderSecondOrderAdversaryPrompt(opts: {
   round: number;
@@ -128,7 +133,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "",
     "## Required evidence files",
     "",
-    "Read these full artifacts before concluding the round. They include the charter register, conceptual judge/adjudication record, and every current-round perspective/judge result:",
+    "Read these full artifacts before concluding the round. They include the charter register, persisted conceptual judge/adjudication record, and every current-round perspective result:",
     ...evidencePaths.map((path) => `- \`${path}\``),
     "",
     "## Stated-purpose / goal / delta projection",
