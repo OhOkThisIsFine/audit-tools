@@ -160,6 +160,40 @@ export const FindingGroundingSchema = z.object({
 export type FindingGrounding = z.infer<typeof FindingGroundingSchema>;
 
 /**
+ * Whether the DEFECT a conceptual finding names is present at HEAD — the third
+ * axis, orthogonal to `grounding` (does it cite something real) and to the
+ * remediation outcome (what did we do about it). Grounding on the conceptual
+ * path certifies only that a cited component path exists, so it reads as
+ * confirmation while certifying far less; this field carries the presence claim.
+ *
+ * EVERY value here is JUDGE-AUTHORED. `judge_confirmed` is deliberately NOT
+ * spelled `confirmed`: the bare word is already taken by the executable-anchor
+ * contract above, where "the confirmed bit is the tool's run, never the model's
+ * word". This one is the opposite provenance — a judge's reading of HEAD, never
+ * a tool run — and the name must say so wherever it is read.
+ *
+ * - `judge_confirmed`: the judge checked the named defect against current code
+ *   and it holds. The tool guarantees the claim is PRESENT, CONSISTENT and
+ *   PUBLISHED (and that a non-`asserted` claim carries a note); never that it is
+ *   true.
+ * - `asserted`: not checked. The default, and it is stated explicitly rather
+ *   than left absent — an optional field defaults to silence, which is the
+ *   failure this vocabulary exists to end.
+ * - `refuted_at_head`: the judge checked and the defect is absent or already
+ *   remediated. It can NEVER appear on an admitted finding: the adjudication
+ *   validator forces a `refuted_at_head` candidate to `rejected`, and a rejected
+ *   candidate maps to no final finding.
+ */
+export const FindingVerificationStatusSchema = z.enum([
+  "judge_confirmed",
+  "asserted",
+  "refuted_at_head",
+]);
+export type FindingVerificationStatus = z.infer<
+  typeof FindingVerificationStatusSchema
+>;
+
+/**
  * What outcome of an executable anchor's command CONFIRMS the finding's claim.
  * The worker declares the falsifiable condition; the tool runs the command and
  * checks it, so the confirmed bit is the tool's run, never the model's word.
@@ -231,6 +265,15 @@ export const FindingSchema = z.object({
    * grounding pass runs at ingest.
    */
   grounding: FindingGroundingSchema.optional(),
+  /**
+   * Whether the defect this finding names is present at HEAD. TOOL-DERIVED at
+   * conceptual ingest from the judge's per-candidate verification claims — host
+   * supply is REFUSED, exactly as for `grounding`, so the value can always be
+   * cross-checked against the adjudication record. Optional because the per-file
+   * audit workers have no verification concept; absent outside the conceptual
+   * design-review path.
+   */
+  verification_status: FindingVerificationStatusSchema.optional(),
   /**
    * Optional executable anchor for a behavior claim (S7 tier-2). The tool runs
    * the read-only `command` at ingest and folds the verdict into `grounding`: a

@@ -3,8 +3,11 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import {
+  countBy,
   FindingSchema,
+  FindingVerificationStatusSchema,
   isFileMissingError,
+  isRecord,
   laneAssetsDir,
   readJsonFile,
   readOptionalJsonFile,
@@ -94,8 +97,53 @@ export const ConceptualCandidateDispositionSchema = z
     target_final_finding_ids: z.array(z.string().min(1)),
     modification_percent: PercentageSchema,
     rationale: z.string().trim().min(1),
+    /**
+     * The judge's claim about whether this candidate's named defect is present
+     * at HEAD. REQUIRED, never optional: an optional field defaults to silence,
+     * and silence is the defect (134 candidates across two live runs, zero
+     * rejections, one of them a candidate the judge itself reported as already
+     * fixed and merged at 70% modification).
+     */
+    verification_status: FindingVerificationStatusSchema,
+    /**
+     * What the judge checked, and what it found. Required exactly when the
+     * status is not `asserted` and REFUSED when it is: that makes a
+     * `judge_confirmed` or `refuted_at_head` claim cost something and leaves
+     * `asserted` the cheap path, so the note cannot decay into boilerplate
+     * stamped on every candidate.
+     */
+    verification_note: z.string().trim().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((disposition, ctx) => {
+    const asserted = disposition.verification_status === "asserted";
+    if (asserted && disposition.verification_note !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["verification_note"],
+        message: `candidate ${disposition.candidate_id}: verification_note is not permitted on an asserted candidate`,
+      });
+    }
+    if (!asserted && disposition.verification_note === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["verification_note"],
+        message: `candidate ${disposition.candidate_id}: verification_status "${disposition.verification_status}" requires a verification_note stating what was checked`,
+      });
+    }
+  });
+
+/**
+ * The findings a judge or perspective may SUBMIT. `verification_status` is
+ * omitted for the same reason `WorkerFindingSchema` omits `grounding`: it is
+ * derived by the tool at ingest from the per-candidate claims, so a supplied
+ * value would bypass the derivation and be un-cross-checkable. The omit keeps it
+ * out of the parsed value; `refuseSuppliedVerificationStatus` NAMES it, because
+ * a silently stripped field teaches the host nothing.
+ */
+export const ConceptualSubmittedFindingSchema = FindingSchema.omit({
+  verification_status: true,
+});
 
 export const ConceptualFinalFindingShareSchema = z
   .object({
@@ -118,7 +166,7 @@ export const ConceptualFinalFindingShareSchema = z
 export const ConceptualJudgeSubmissionSchema = z
   .object({
     round_id: z.string().min(1),
-    findings: z.array(FindingSchema),
+    findings: z.array(ConceptualSubmittedFindingSchema),
     candidate_dispositions: z.array(ConceptualCandidateDispositionSchema),
     final_finding_shares: z.array(ConceptualFinalFindingShareSchema),
   })
@@ -144,6 +192,20 @@ export interface ConceptualReviewAdjudication {
   contributors: ConceptualReviewContributor[];
   candidate_dispositions: ConceptualJudgeSubmission["candidate_dispositions"];
   final_finding_shares: ConceptualJudgeSubmission["final_finding_shares"];
+  /**
+   * CANDIDATE-scoped counts, DERIVED by `buildConceptualReviewAdjudication` and
+   * never read from the submission — an aggregate a judge supplied would let the
+   * artifact self-certify its own outcome. Both are required, so an adjudication
+   * that publishes no rejection rate cannot exist.
+   *
+   * These do NOT reconcile with the finding-scoped
+   * `AuditFindingsSummary.verification_status_breakdown`, and are not meant to:
+   * a merged candidate's final finding can still be quarantined ungrounded
+   * downstream. Each is labelled by its population rather than reconciled into
+   * one number that would have to hide the quarantine.
+   */
+  candidate_disposition_breakdown: Record<string, number>;
+  candidate_verification_status_breakdown: Record<string, number>;
 }
 
 export function conceptualCandidateId(
@@ -156,8 +218,8 @@ export function conceptualCandidateId(
 function submissionFindings(value: unknown, path: string): Finding[] {
   const envelope = z
     .union([
-      z.array(FindingSchema),
-      z.object({ findings: z.array(FindingSchema) }).passthrough(),
+      z.array(ConceptualSubmittedFindingSchema),
+      z.object({ findings: z.array(ConceptualSubmittedFindingSchema) }).passthrough(),
     ])
     .safeParse(value);
   if (!envelope.success) {
@@ -198,6 +260,25 @@ function fail(message: string): never {
 }
 
 /**
+ * The judge's own door into the finding contract. `ConceptualJudgeSubmissionSchema`
+ * parses `findings` with `verification_status` OMITTED, which strips a supplied
+ * value SILENTLY — so this pre-schema check names the field, exactly as the
+ * per-file host handoff does for `grounding`. Stated before the schema parse for
+ * the same reason: the strict envelope would report only a stripped/unknown key.
+ */
+function refuseSuppliedVerificationStatus(submission: unknown): void {
+  if (!isRecord(submission) || !Array.isArray(submission.findings)) return;
+  for (const [index, finding] of submission.findings.entries()) {
+    if (isRecord(finding) && "verification_status" in finding) {
+      fail(
+        `findings[${index}].verification_status: verification_status is derived at ingest and must not be supplied`,
+      );
+    }
+  }
+}
+
+
+/**
  * Apply semantic invariants a schema alone cannot express. Percentages remain
  * judge-authored estimates; tooling verifies references, completeness, and
  * arithmetic rather than pretending to derive semantic credit mechanically.
@@ -209,6 +290,7 @@ export function buildConceptualReviewAdjudication(params: {
   generatedAt: string;
 }): ConceptualReviewAdjudication {
   const manifest = ConceptualReviewRoundManifestSchema.parse(params.manifest);
+  refuseSuppliedVerificationStatus(params.submission);
   const submission = ConceptualJudgeSubmissionSchema.parse(params.submission);
   if (submission.round_id !== manifest.round_id) {
     fail(
@@ -291,6 +373,20 @@ export function buildConceptualReviewAdjudication(params: {
       disposition.target_final_finding_ids.length > 0
     ) {
       fail(`rejected candidate ${disposition.candidate_id} maps to a final finding`);
+    }
+    // The single rule that closes NO-REJECTION-OUTCOME. A judge that has already
+    // checked the named defect against HEAD and found it absent cannot then
+    // launder the candidate into the final set at a high `modification_percent`
+    // — the observed case. Rejection is the only disposition a refutation admits,
+    // and `rejected` maps to no final finding, so `refuted_at_head` can never
+    // reach `findings[]`.
+    if (
+      disposition.verification_status === "refuted_at_head" &&
+      disposition.disposition !== "rejected"
+    ) {
+      fail(
+        `refuted_at_head candidate ${disposition.candidate_id} must be rejected, not ${disposition.disposition}`,
+      );
     }
     if (
       disposition.disposition !== "rejected" &&
@@ -411,5 +507,13 @@ export function buildConceptualReviewAdjudication(params: {
     ],
     candidate_dispositions: submission.candidate_dispositions,
     final_finding_shares: submission.final_finding_shares,
+    candidate_disposition_breakdown: countBy(
+      submission.candidate_dispositions,
+      (disposition) => disposition.disposition,
+    ),
+    candidate_verification_status_breakdown: countBy(
+      submission.candidate_dispositions,
+      (disposition) => disposition.verification_status,
+    ),
   };
 }

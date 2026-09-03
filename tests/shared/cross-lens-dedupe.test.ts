@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  absorbFinding,
   crossLensDedupe,
   mergeGrounding,
   sameLensDedupe,
@@ -478,6 +479,59 @@ describe("mergeGrounding — precedence grounded > refuted > ungrounded > absent
     const grounded: Finding["grounding"] = { status: "grounded" };
     expect(mergeGrounding(grounded, { status: "ungrounded", reason: "x" })).toEqual({ status: "grounded" });
     expect(mergeGrounding(grounded, undefined)).toEqual({ status: "grounded" });
+  });
+});
+
+// ── verification_status survives absorption (NO-REJECTION-OUTCOME) ────────────
+//
+// `grounding` is merged by precedence at BOTH absorb sites. A second tool-owned
+// verdict added to `Finding` without the same treatment is silently DROPPED when
+// two findings collapse: the survivor keeps whatever it happened to carry, so a
+// judge-confirmed claim can vanish into an `asserted` survivor.
+
+describe("mergeVerificationStatus — judge_confirmed outranks asserted at both absorb sites", () => {
+  it("a judge_confirmed status survives absorption into an asserted survivor", () => {
+    const survivor = makeFinding({
+      id: "F-1",
+      verification_status: "asserted",
+      affected_files: [{ path: "src/foo.ts" }],
+    });
+    const absorbed = makeFinding({
+      id: "F-2",
+      verification_status: "judge_confirmed",
+      affected_files: [{ path: "src/foo.ts" }],
+    });
+
+    absorbFinding(survivor, absorbed, {
+      mergeGrounding: true,
+      sortAffectedFiles: true,
+    });
+    expect(survivor.verification_status).toBe("judge_confirmed");
+  });
+
+  it("the identity-key upsert lane merges the status too", () => {
+    const merged = new Map<string, Finding>();
+    upsertFindingByIdentity(
+      merged,
+      makeFinding({ id: "F-1", verification_status: "asserted" }),
+    );
+    upsertFindingByIdentity(
+      merged,
+      makeFinding({ id: "F-1", verification_status: "judge_confirmed" }),
+    );
+    expect([...merged.values()][0]?.verification_status).toBe("judge_confirmed");
+  });
+
+  it("an absent status never downgrades a judge_confirmed survivor", () => {
+    const survivor = makeFinding({
+      id: "F-1",
+      verification_status: "judge_confirmed",
+    });
+    absorbFinding(survivor, makeFinding({ id: "F-2" }), {
+      mergeGrounding: true,
+      sortAffectedFiles: true,
+    });
+    expect(survivor.verification_status).toBe("judge_confirmed");
   });
 });
 

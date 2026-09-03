@@ -843,6 +843,16 @@ function parseFindings(
         detail: `findings[${index}].grounding: grounding is tool-computed at ingest and must not be supplied`,
       };
     }
+    // The same refusal for the second tool-owned verdict: `verification_status`
+    // is DERIVED at conceptual ingest from the judge's per-candidate claims, so a
+    // worker-supplied value would bypass the derivation and be
+    // un-cross-checkable against the adjudication record.
+    if (isRecord(finding) && "verification_status" in finding) {
+      return {
+        ok: false,
+        detail: `findings[${index}].verification_status: verification_status is tool-derived at ingest and must not be supplied`,
+      };
+    }
     // The STRICT WORKER PROJECTION — the same contract the dispatch prompt
     // renders (`findingContractPromptLines`). Parsing the lenient base schema
     // here accepted a prompt-obedient submission that downstream validation

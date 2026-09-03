@@ -173,6 +173,8 @@ test("production systemic dispatch never advertises the deleted deep-review judg
         ],
         candidate_dispositions: [],
         final_finding_shares: [],
+        candidate_disposition_breakdown: {},
+        candidate_verification_status_breakdown: {},
       },
     };
     await writeCoreArtifacts(artifactsDir, bundle);

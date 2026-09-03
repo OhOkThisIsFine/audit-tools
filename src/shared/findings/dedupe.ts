@@ -109,6 +109,24 @@ export function mergeGrounding(
 }
 
 /**
+ * Precedence for the defect-presence claim when two findings collapse:
+ * `judge_confirmed` > `asserted` > absent. Without it the survivor silently
+ * keeps whatever it happened to carry, so a judge-confirmed claim vanishes into
+ * an `asserted` survivor — the same silent-drop `mergeGrounding` exists to
+ * prevent. `refuted_at_head` is deliberately NOT ranked: the adjudication
+ * validator forces a refuted candidate to `rejected`, and a rejected candidate
+ * maps to no final finding, so it can never reach a finding that is deduped.
+ */
+export function mergeVerificationStatus(
+  existing: Finding["verification_status"],
+  incoming: Finding["verification_status"],
+): Finding["verification_status"] {
+  const rank = (status: Finding["verification_status"]): number =>
+    status === "judge_confirmed" ? 2 : status === "asserted" ? 1 : 0;
+  return rank(incoming) > rank(existing) ? incoming : existing;
+}
+
+/**
  * Union `absorbed`'s affected_files into `survivor` (dedup by
  * path:line_start:line_end:symbol), optionally sorting by path then line. Shared by
  * the absorb mechanics AND audit's identity-key exact merge (`upsertFinding`).
@@ -152,6 +170,10 @@ export function absorbFinding(survivor: Finding, absorbed: Finding, opts: Absorb
     ...new Set([...(survivor.evidence ?? []), ...(absorbed.evidence ?? [])]),
   ];
   survivor.systemic = Boolean(survivor.systemic || absorbed.systemic);
+  survivor.verification_status = mergeVerificationStatus(
+    survivor.verification_status,
+    absorbed.verification_status,
+  );
   if (opts.mergeGrounding) {
     survivor.grounding = mergeGrounding(survivor.grounding, absorbed.grounding);
   }
@@ -721,6 +743,10 @@ export function upsertFindingByIdentity(merged: Map<string, Finding>, finding: F
   }
   existing.systemic = Boolean(existing.systemic || finding.systemic);
   existing.grounding = mergeGrounding(existing.grounding, finding.grounding);
+  existing.verification_status = mergeVerificationStatus(
+    existing.verification_status,
+    finding.verification_status,
+  );
   existing.impact = existing.impact ?? finding.impact;
   existing.likelihood = existing.likelihood ?? finding.likelihood;
   existing.summary =

@@ -105,6 +105,8 @@ test("systemic challenge receives charter projection, actual findings, and conce
           target_final_finding_ids: ["DR-1"],
           modification_percent: 20,
           rationale: "Retained after source verification",
+          verification_status: "judge_confirmed",
+          verification_note: "Re-read the cited module at HEAD; the split is still there.",
         },
       ],
       final_finding_shares: [
@@ -126,6 +128,8 @@ test("systemic challenge receives charter projection, actual findings, and conce
           ],
         },
       ],
+      candidate_disposition_breakdown: { retained: 1 },
+      candidate_verification_status_breakdown: { judge_confirmed: 1 },
     },
   };
 

@@ -18,12 +18,18 @@ import { AuditCodeResponseSchema } from "./wrapperResponse.js";
 export const WorkerFindingLocationSchema =
   FindingLocationObjectSchema.strict().superRefine(refineFindingLocationLines);
 
-// `grounding` is OMITTED, not merely left un-extended: it is the tool's own
-// re-check of the worker's quote (computed at ingest by `ingestAuditHostResults`),
-// so the worker-facing contract must not advertise it. `.extend` inherits the
-// parent's optional field, so the omit is what makes the trailing `.strict()`
-// — and the generated `additionalProperties: false` — reject a supplied verdict.
-export const WorkerFindingSchema = FindingSchema.omit({ grounding: true })
+// `grounding` and `verification_status` are OMITTED, not merely left
+// un-extended: each is a TOOL-owned verdict — the re-check of the worker's quote
+// (computed at ingest by `ingestAuditHostResults`) and the defect-presence claim
+// derived at conceptual ingest — so the worker-facing contract must not
+// advertise either. `.extend` inherits the parent's optional field, and
+// `.strict()` rejects only UNKNOWN keys, so an inherited optional field would be
+// silently ACCEPTED: the omit is what makes the trailing `.strict()` — and the
+// generated `additionalProperties: false` — reject a supplied verdict.
+export const WorkerFindingSchema = FindingSchema.omit({
+  grounding: true,
+  verification_status: true,
+})
   .extend({
     category: z.string().min(1),
     // Optionality itself is stated by the prompt renderer (`… is optional:`);

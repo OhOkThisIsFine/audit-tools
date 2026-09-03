@@ -96,6 +96,7 @@ function validSubmission() {
         target_final_finding_ids: ["FINAL-001"],
         modification_percent: 20,
         rationale: "Core mechanism retained with narrower scope.",
+        verification_status: "asserted" as const,
       },
       {
         candidate_id: `${manifest.perspectives[1]!.contributor_id}::DR-002`,
@@ -105,6 +106,7 @@ function validSubmission() {
         target_final_finding_ids: ["FINAL-001"],
         modification_percent: 60,
         rationale: "Merged as supporting evidence for the same reduction.",
+        verification_status: "asserted" as const,
       },
     ],
     final_finding_shares: [
@@ -155,6 +157,7 @@ function collidingFinalSubmission() {
         target_final_finding_ids: ["FINAL-001"],
         modification_percent: 20,
         rationale: "First candidate retained in FINAL-001.",
+        verification_status: "asserted" as const,
       },
       {
         candidate_id: `${manifest.perspectives[1]!.contributor_id}::DR-002`,
@@ -164,6 +167,7 @@ function collidingFinalSubmission() {
         target_final_finding_ids: ["FINAL-002"],
         modification_percent: 60,
         rationale: "Second candidate merged into FINAL-002.",
+        verification_status: "asserted" as const,
       },
     ],
     final_finding_shares: [
@@ -401,6 +405,7 @@ describe("conceptual review adjudication", () => {
         target_final_finding_ids: ["FINAL-001"],
         modification_percent: index === 0 ? 10 : 50,
         rationale: `candidate ${index + 1} disposition`,
+        verification_status: "asserted" as const,
       })),
       final_finding_shares: [
         {
@@ -761,6 +766,7 @@ describe("conceptual review adjudication", () => {
         target_final_finding_ids: [`FINAL-${index + 1}`],
         modification_percent: index,
         rationale: `Disposition ${index + 1}.`,
+        verification_status: "asserted" as const,
       })),
       final_finding_shares: perspectives.map((perspective, index) => {
         const perspectivePercent = index < 6 ? 4 : 0;
@@ -848,5 +854,123 @@ describe("conceptual review adjudication", () => {
       canonicalizeConceptualAttributionIds(report, adjudication, report),
     ).toThrow(/FINAL-UNKNOWN/);
     expect(JSON.stringify(adjudication)).toBe(before);
+  });
+});
+
+// ── Judge verification of every candidate (NO-REJECTION-OUTCOME) ─────────────
+//
+// 134 candidates across two live runs produced ZERO rejections: one candidate
+// whose two named defects the judge itself reported as ALREADY FIXED at HEAD
+// was merged at 70% modification. The disposition enum could always express
+// `rejected`; what was missing was a field recording the verification claim and
+// a rule that makes a refutation UNMERGEABLE. These pin the rule, not the judge.
+describe("conceptual adjudication — candidate verification status", () => {
+  it("refuses a refuted_at_head candidate that is not rejected", () => {
+    const merged = validSubmission();
+    const disposition = merged.candidate_dispositions[1] as unknown as {
+      verification_status: string;
+      verification_note: string;
+    };
+    disposition.verification_status = "refuted_at_head";
+    disposition.verification_note =
+      "Both named defects are already fixed at HEAD.";
+
+    // The regex is load-bearing: a bare `toThrow()` is GREEN on the unfixed tree
+    // for the wrong reason (`.strict()` refuses the unknown key first).
+    expect(() =>
+      buildConceptualReviewAdjudication({
+        manifest,
+        perspectiveFindings,
+        submission: merged,
+        generatedAt: "now",
+      }),
+    ).toThrow(/refuted_at_head candidate .* must be rejected/);
+  });
+
+  it("requires a verification_status on every candidate disposition", () => {
+    const silent = validSubmission();
+    delete (
+      silent.candidate_dispositions[0] as unknown as {
+        verification_status?: unknown;
+      }
+    ).verification_status;
+
+    expect(() =>
+      buildConceptualReviewAdjudication({
+        manifest,
+        perspectiveFindings,
+        submission: silent,
+        generatedAt: "now",
+      }),
+    ).toThrow(/verification_status/);
+  });
+
+  it("requires a verification_note iff the status is not `asserted`", () => {
+    const notedAssertion = validSubmission();
+    (
+      notedAssertion.candidate_dispositions[0] as unknown as {
+        verification_note: string;
+      }
+    ).verification_note = "boilerplate stamped on everything";
+    expect(() =>
+      buildConceptualReviewAdjudication({
+        manifest,
+        perspectiveFindings,
+        submission: notedAssertion,
+        generatedAt: "now",
+      }),
+    ).toThrow(/verification_note is not permitted on an asserted candidate/);
+
+    const unnotedConfirmation = validSubmission();
+    const confirmed = unnotedConfirmation
+      .candidate_dispositions[0] as unknown as {
+      verification_status: string;
+      verification_note?: unknown;
+    };
+    confirmed.verification_status = "judge_confirmed";
+    delete confirmed.verification_note;
+    expect(() =>
+      buildConceptualReviewAdjudication({
+        manifest,
+        perspectiveFindings,
+        submission: unnotedConfirmation,
+        generatedAt: "now",
+      }),
+    ).toThrow(/judge_confirmed[\s\S]*requires a verification_note/);
+  });
+
+  it("refuses a judge-supplied verification_status on a final finding", () => {
+    const selfCertifying = validSubmission();
+    (
+      selfCertifying.findings[0] as unknown as { verification_status: string }
+    ).verification_status = "judge_confirmed";
+
+    expect(() =>
+      buildConceptualReviewAdjudication({
+        manifest,
+        perspectiveFindings,
+        submission: selfCertifying,
+        generatedAt: "now",
+      }),
+    ).toThrow(
+      /findings\[0\]\.verification_status[\s\S]*derived at ingest and must not be supplied/,
+    );
+  });
+
+  it("publishes candidate-scoped disposition and verification counts it derived itself", () => {
+    const adjudication = buildConceptualReviewAdjudication({
+      manifest,
+      perspectiveFindings,
+      submission: validSubmission(),
+      generatedAt: "now",
+    });
+
+    expect(adjudication.candidate_disposition_breakdown).toEqual({
+      retained: 1,
+      merged: 1,
+    });
+    expect(adjudication.candidate_verification_status_breakdown).toEqual({
+      asserted: 2,
+    });
   });
 });

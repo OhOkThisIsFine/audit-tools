@@ -254,6 +254,30 @@ describe(FAILURE_SIGNATURE, () => {
     expect(issue?.message).toMatch(/tool-computed/u);
   });
 
+  // `verification_status` is the SECOND tool-owned bit on a finding, derived at
+  // conceptual ingest from the judge's per-candidate claim. It rides the same
+  // two-layer refusal as `grounding`: the omit in `WorkerFindingSchema` keeps it
+  // out of the worker-facing contract, and this pre-schema check NAMES it — the
+  // strict schema alone would report only an unrecognized key.
+  it("T3b: refuses a submission that SUPPLIES its own verification status", async () => {
+    const published = await publishOneWorkItem();
+    const ingest = await submitFinding(published, {
+      ...baseFinding([{ path: "src/a.ts", quoted_text: "one\ntwo" }]),
+      verification_status: "judge_confirmed",
+    });
+
+    expect(
+      ingest.completed_work_item_ids,
+      "a self-reported verification status must not be accepted",
+    ).toEqual([]);
+    const issue = (ingest.issues ?? [])[0];
+    expect(issue, `the rejection must be classified: ${JSON.stringify(ingest.issues)}`)
+      .toBeDefined();
+    expect(issue?.code).toBe("submission_contract_invalid");
+    expect(issue?.message).toMatch(/findings\[0\]\.verification_status/u);
+    expect(issue?.message).toMatch(/tool-derived/u);
+  });
+
   it("T4: stamps `ungrounded` when no affected_files entry carries a quote", async () => {
     const published = await publishOneWorkItem();
     const ingest = await submitFinding(published, baseFinding([{ path: "src/a.ts" }]));
@@ -266,7 +290,7 @@ describe(FAILURE_SIGNATURE, () => {
     );
   });
 
-  it("T5: the worker-facing finding schema does not advertise `grounding`", async () => {
+  it("T5: the worker-facing finding schema does not advertise the tool-owned verdicts", async () => {
     const { renderWorkerJsonSchema } = await import(
       "../../src/audit/contracts/workerSchemas.js"
     );
@@ -276,6 +300,12 @@ describe(FAILURE_SIGNATURE, () => {
       Object.keys(properties),
       "a worker must not be told it may supply a grounding verdict",
     ).not.toContain("grounding");
+    // `.strict()` rejects only UNKNOWN keys, so an optional field inherited from
+    // `FindingSchema` would be silently ACCEPTED. The omit is what refuses it.
+    expect(
+      Object.keys(properties),
+      "a worker must not be told it may supply a verification status",
+    ).not.toContain("verification_status");
   });
 
   it("T6: the dispatch prompt states that grounding must not be supplied", async () => {
