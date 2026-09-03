@@ -227,7 +227,7 @@ function fullBundle(extra: Partial<ArtifactBundle> = {}): ArtifactBundle {
     file_disposition: { files: [] },
     auto_fixes_applied: { executed_tools: [] },
     syntax_resolution_status: { completed_at: "2026-01-01T00:00:00Z" },
-    analyzer_capability: { status: "omitted", analyzers: [] },
+    analyzer_capability: { coverage: "not_applicable", analyzers: [] },
     intent_checkpoint: {
       schema_version: "intent-checkpoint/v1",
       confirmed_at: "2026-01-01T00:00:00Z",

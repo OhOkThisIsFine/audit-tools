@@ -298,6 +298,18 @@ export {
   AnalyzerSettingSchema,
 } from "./analyzerPolicy.js";
 
+// The measured-outcome vocabulary — one word set for "what did this measurement
+// actually produce", shared by the analyzer-capability, lane-outcome and
+// lens-coverage bindings.
+export {
+  MEASURED_OUTCOMES,
+  MeasuredOutcomeSchema,
+  outcomeIsApplicable,
+  outcomeLostCoverage,
+  worstMeasuredOutcome,
+} from "./measurement/measuredOutcome.js";
+export type { MeasuredOutcome } from "./measurement/measuredOutcome.js";
+
 // Contracts
 export { AUDITOR_REPORT_MARKER } from "./contracts.js";
 

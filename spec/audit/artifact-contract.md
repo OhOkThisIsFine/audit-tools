@@ -72,7 +72,7 @@ generator.
 | `charter_register.json` | JSON | Phase-C charter layer (carries a stamped schema version and is discarded on mismatch, DISCARD read policy — regenerable analysis state): three channel-pure estimator charters with per-kind teleologies joined by file-set overlap over the structure-decomposition hint, plus the miner's deltas, triangulated teloses, and tool-counted disagreement density; gated by the confirmed intent-checkpoint ceiling. |
 | `charter_clarification.json` | JSON | Phase-D charter-alignment triangulation loop over the charter register, gated by the confirmed intent-checkpoint ceiling. |
 | `systemic_challenge.json` | JSON | Phase-E second-order-adversary improvement-seeking challenge loop over the charter register, gated by the confirmed intent-checkpoint ceiling. |
-| `analyzer_capability.json` | JSON | Marker: outcome of the optional graph-enrichment pass (`applied`/`omitted`) + per-analyzer provenance. |
+| `analyzer_capability.json` | JSON | Marker: what the optional graph-enrichment pass actually produced (`coverage`, in the shared measured-outcome vocabulary, derived from the entries over the analyzers that were ASKED FOR) + per-analyzer provenance. |
 | `external_analyzer_acquisition.json` | JSON | Marker: external-analyzer acquisition run record over the curated `EXTERNAL_ANALYZER_CANDIDATES` registry in `src/shared/analyzers/candidates.ts` — `defaultRun: true` members run without the per-run consent token; every other candidate requires it. |
 <!-- END GENERATED spec-mirror artifact-contract#analysis -->
 

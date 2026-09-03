@@ -247,12 +247,14 @@ export async function prepareConceptualDispatch(opts: {
 
   const judgePromptText =
     renderConceptualJudgePrompt(
+      bundle,
       perspectiveFiles.map((f) => ({
         name: f.name,
         path: f.resultsPath,
         contributor_id: f.lane,
       })),
       roundToken,
+      reviewOptions,
     ) + reReviewSuffix;
 
   const laneSpecs: FanoutLaneSpec[] = [

@@ -67,7 +67,7 @@ test("conceptual prompt asks general first-principles questions and says orient-
 
 // ── fix 3: a judging judge that flags what was missed ──
 test("conceptual judge is evaluative, complete, and attributable", () => {
-  const p = renderConceptualJudgePrompt([
+  const p = renderConceptualJudgePrompt({} as ArtifactBundle, [
     {
       name: "Pragmatist",
       path: "/tmp/p.json",

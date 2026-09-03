@@ -15,9 +15,10 @@ import type {
   AnalyzerResolution,
   LanguageAnalyzer,
 } from "../extractors/analyzers/types.js";
-import type {
-  AnalyzerCapabilityEntry,
-  AnalyzerCapabilityRecord,
+import {
+  analyzerCapabilityCoverage,
+  type AnalyzerCapabilityEntry,
+  type AnalyzerCapabilityRecord,
 } from "../types/analyzerCapability.js";
 import {
   applyEdgeReasoning,
@@ -282,9 +283,15 @@ export async function runGraphEnrichmentExecutor(
     entries.push({ id: analyzer.id, resolution, setting, edges_added: edges.length, routes_added: routes.length });
   }
 
+  // `applied` answers a DIFFERENT question from the record's coverage, and both
+  // are kept: it decides which graph to build below (did any analyzer actually
+  // contribute edges), which is a fact about the graph, not a claim about the
+  // channel's capability. Using it as the record's status was the defect — it
+  // read `applied` whenever ONE analyzer contributed, whatever had failed
+  // alongside it.
   const applied = analyzersUsed.length > 0;
   const record: AnalyzerCapabilityRecord = {
-    status: applied ? "applied" : "omitted",
+    coverage: analyzerCapabilityCoverage(entries),
     analyzers: entries,
   };
 

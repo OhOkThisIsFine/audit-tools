@@ -5,6 +5,10 @@ import type { DesignAssessment } from "../types/designAssessment.js";
 import type { ConceptualReviewAdjudication } from "../types/conceptualAdjudication.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import type { CharterRegister } from "../types/charterRegister.js";
+import {
+  degradedAnalyzerEntries,
+  type AnalyzerCapabilityRecord,
+} from "../types/analyzerCapability.js";
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type {
@@ -460,6 +464,40 @@ export interface RenderAuditReportOptions {
    * opening the ledger itself.
    */
   submission_ledger?: readonly SubmissionLedgerEvent[];
+  /**
+   * The graph-enrichment capability record. Read for its DEGRADED entries,
+   * which become *Audit Limitations* lines: a requested analyzer that could not
+   * run means the dependency graph these findings were reasoned over is the
+   * regex floor for those languages, and a report that does not say so lets a
+   * weaker run read as a complete one.
+   */
+  analyzer_capability?: AnalyzerCapabilityRecord;
+}
+
+/**
+ * The *Audit Limitations* body for a degraded graph-enrichment channel.
+ *
+ * Names each analyzer that was ASKED FOR and could not run, with its own note —
+ * the honest per-analyzer row that `analyzer_capability.json` has always carried
+ * and that, until now, nothing in the tree ever opened. The scalar roll-up is
+ * deliberately not the sentence: it cannot say "1932 edges added AND two
+ * analyzers degraded", so the entries are listed rather than summarized.
+ */
+function renderAnalyzerDegradationLines(
+  record: AnalyzerCapabilityRecord | undefined,
+): string[] {
+  const degraded = degradedAnalyzerEntries(record);
+  if (degraded.length === 0) return [];
+  return [
+    `${degraded.length} language analyzer(s) were requested and could not run, so parser-grade extraction was OFF for them and the weaker deterministic regex floor was used instead. Findings that depend on the dependency graph are correspondingly weaker for these languages:`,
+    "",
+    ...degraded.map(
+      (entry) =>
+        `- \`${entry.id}\` (requested \`${entry.setting}\`, resolution \`${entry.resolution}\`)` +
+        (entry.note ? ` — ${entry.note}` : ""),
+    ),
+    "",
+  ];
 }
 
 /**
@@ -946,8 +984,31 @@ export function renderAuditReportMarkdown(
   const processFeedback = reflections.filter(
     (reflection) => !capabilityLimitations.includes(reflection),
   );
-  const limitationLines = renderProcessFeedbackSection(capabilityLimitations);
-  if (limitationLines.length > 0) limitationLines[0] = "## Audit Limitations";
+  // *Audit Limitations* states what this run could NOT do. It has two sources
+  // now, and the section is CREATED by either — it used to be the process-
+  // feedback heading renamed, so it existed only when a capability-preflight
+  // reflection happened to be present.
+  const analyzerLimitationLines = renderAnalyzerDegradationLines(
+    options.analyzer_capability,
+  );
+  const reflectionLimitationLines =
+    renderProcessFeedbackSection(capabilityLimitations);
+  if (reflectionLimitationLines.length > 0) {
+    reflectionLimitationLines[0] = "## Audit Limitations";
+  }
+  const limitationLines =
+    analyzerLimitationLines.length > 0
+      ? [
+          "## Audit Limitations",
+          "",
+          ...analyzerLimitationLines,
+          // A reflection-sourced block that follows keeps its own body but must
+          // not re-open the heading it is now inside.
+          ...reflectionLimitationLines.slice(
+            reflectionLimitationLines.length > 0 ? 2 : 0,
+          ),
+        ]
+      : reflectionLimitationLines;
   const feedbackLines = renderProcessFeedbackSection(processFeedback);
   lines.push(...limitationLines, ...feedbackLines);
   if (driftLines.length > 0 && feedbackLines.length === 0) {

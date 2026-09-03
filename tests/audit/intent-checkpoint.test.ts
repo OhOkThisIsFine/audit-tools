@@ -71,7 +71,7 @@ function readyForIntentBundle(): ArtifactBundle {
     graph_bundle: { graphs: {} },
     critical_flows: { flows: [] },
     risk_register: { items: [] },
-    analyzer_capability: { status: "omitted", analyzers: [] },
+    analyzer_capability: { coverage: "not_applicable", analyzers: [] },
     design_assessment: { generated_at: "2026-01-01T00:00:00.000Z", findings: [], reviewed: false },
     docs_digest: { generated_at: "2026-01-01T00:00:00.000Z", docs: [] },
     structure_decomposition: {

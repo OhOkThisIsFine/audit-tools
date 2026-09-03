@@ -88,7 +88,7 @@ function makePostDesignAssessmentBundle(opts: PostDesignAssessmentOptions = {}):
     graph_bundle: { graphs: {} },
     critical_flows: { flows: [] },
     risk_register: { items: [] },
-    analyzer_capability: { status: "omitted", analyzers: [] },
+    analyzer_capability: { coverage: "not_applicable", analyzers: [] },
     design_assessment: {
       generated_at: "2026-01-01T00:00:00Z",
       findings: [],
@@ -239,7 +239,7 @@ test("S1: decideNextStep does NOT return intent_checkpoint before design_assessm
     graph_bundle: { graphs: {} },
     critical_flows: { flows: [] },
     risk_register: { items: [] },
-    analyzer_capability: { status: "omitted", analyzers: [] },
+    analyzer_capability: { coverage: "not_applicable", analyzers: [] },
     // design_assessment deliberately absent
   };
   const decision = decideNextStep(bundleNoDa);
@@ -287,7 +287,7 @@ test("S2: disposition_override excludes a file before coverage initialises — t
         critical_flows: { flows: [] },
         risk_register: { items: [] },
         graph_bundle: { graphs: {} },
-        analyzer_capability: { status: "omitted", analyzers: [] },
+        analyzer_capability: { coverage: "not_applicable", analyzers: [] },
       },
     });
 
@@ -317,7 +317,7 @@ test("S2: lens_selection restricts tasks to effective lenses (mandatory always i
         critical_flows: { flows: [] },
         risk_register: { items: [] },
         graph_bundle: { graphs: {} },
-        analyzer_capability: { status: "omitted", analyzers: [] },
+        analyzer_capability: { coverage: "not_applicable", analyzers: [] },
       },
     });
 
@@ -523,7 +523,7 @@ test("S5: omitted narrative run terminates cleanly — audit_report present, syn
     graph_bundle: { graphs: {} },
     critical_flows: { flows: [] },
     risk_register: { items: [] },
-    analyzer_capability: { status: "omitted", analyzers: [] },
+    analyzer_capability: { coverage: "not_applicable", analyzers: [] },
     design_assessment: {
       generated_at: "2026-01-01T00:00:00Z",
       findings: [],

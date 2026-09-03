@@ -1,6 +1,7 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
 import type { CharterRegister } from "../types/charterRegister.js";
+import { degradedAnalyzerEntries } from "../types/analyzerCapability.js";
 import {
   charterReviewDisposition,
 } from "audit-tools/shared";
@@ -479,6 +480,36 @@ export function renderCharterContext(bundle: ArtifactBundle): string {
 }
 
 /**
+ * How the dependency graph below was actually EXTRACTED.
+ *
+ * Empty when every requested analyzer ran, so a clean run's prompt is
+ * byte-identical to the prompt it rendered before this block existed. When an
+ * analyzer was requested and could not run, the lane is told BY NAME which
+ * language lost parser-grade extraction and that the weaker regex floor stood in
+ * — otherwise a lane reasoning over the graph is silently reasoning over a
+ * degraded one, which is precisely what happened when `web-tree-sitter` failed
+ * to install for `html` and `css` and no prompt disclosed it.
+ */
+function renderGraphProvenance(bundle: ArtifactBundle): string[] {
+  const degraded = degradedAnalyzerEntries(bundle.analyzer_capability);
+  if (degraded.length === 0) return [];
+  return [
+    "### Graph provenance — READ THIS BEFORE TRUSTING THE GRAPH",
+    "",
+    `Parser-grade extraction was requested and could NOT run for ${degraded.length} language analyzer(s); ` +
+      "the weaker deterministic regex floor was used for those files instead. The dependency graph above " +
+      "is therefore INCOMPLETE for them — treat a missing edge in these languages as unknown, not as absent, " +
+      "and do not raise a finding whose only evidence is that the graph shows no connection:",
+    "",
+    ...degraded.map(
+      (entry) =>
+        `- \`${entry.id}\`${entry.note ? ` — ${entry.note}` : " — the analyzer dependency did not resolve."}`,
+    ),
+    "",
+  ];
+}
+
+/**
  * Render the shared structural context block that is identical for both the
  * contract-review and conceptual-review passes. Placing it first in both
  * prompts makes it cache-eligible when the same bundle is used for both agents.
@@ -495,6 +526,7 @@ export function renderSharedStructuralContext(
     "",
     `Repository: ${bundle.repo_manifest?.repository?.name ?? "unknown"}`,
     "",
+    ...renderGraphProvenance(bundle),
     "### File inventory",
     "",
     summarizeFiles(bundle),
@@ -655,13 +687,18 @@ export function renderConceptualPerspectivePrompt(
  * single merged conceptual-review result the orchestrator ingests.
  */
 export function renderConceptualJudgePrompt(
+  bundle: ArtifactBundle,
   perspectiveResults: Array<{
     name: string;
     path: string;
     contributor_id: string;
   }>,
   roundId: string,
+  options: DesignReviewOptions = {},
 ): string {
+  const unitCount = bundle.unit_manifest?.units.length ?? 0;
+  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
+  const maxUnits = options.max_units ?? defaultMaxUnits;
   const sources = perspectiveResults.map(
     (p, i) =>
       `${i + 1}. **${p.name}** — contributor \`${p.contributor_id}\` — \`${p.path}\``,
@@ -672,6 +709,12 @@ export function renderConceptualJudgePrompt(
     "",
     `You are an **independent judge and final reviewer**. Several reviewers each examined this project through a different value system and wrote their findings to separate files. You did **not** author any of them — your job is to evaluate them on merit, merge them into one ranked, deduplicated result, AND add anything significant they collectively missed.`,
     "",
+    // The judge is a lens-open, graph-reading lane like every other conceptual
+    // one — it is asked to ADD what the perspectives missed, and it PRODUCES the
+    // submission the tool ingests. Rendering the shared structural context here
+    // was the omission that left the deep pass's only ingested lane without the
+    // graph's provenance (and, below, without the operator's lens selection).
+    renderSharedStructuralContext(bundle, maxUnits),
     "## Perspective result files",
     "",
     "Read each of these JSON finding submissions (each a `{ \"findings\": [ ... ] }` object):",

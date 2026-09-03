@@ -76,7 +76,7 @@ test("runGraphEnrichmentExecutor merges analyzer edges and records provenance", 
   });
 
   expect(result.updated.graph_bundle!.analyzers_used).toEqual(["fake"]);
-  expect(result.updated.analyzer_capability!.status).toBe("applied");
+  expect(result.updated.analyzer_capability!.coverage).toBe("findings");
   const entry = result.updated.analyzer_capability!.analyzers.find((a) => a.id === "fake");
   expect(entry!.resolution).toBe("repo");
   expect(entry!.edges_added).toBe(1);
@@ -109,7 +109,7 @@ test("runGraphEnrichmentExecutor omits and leaves the floor byte-identical when 
       analyzers: { typescript: "auto" },
     });
 
-    expect(result.updated.analyzer_capability!.status).toBe("omitted");
+    expect(result.updated.analyzer_capability!.coverage).toBe("degraded");
     expect(result.updated.graph_bundle!.analyzers_used).toBe(undefined);
     expect(JSON.stringify(result.updated.graph_bundle), "regex floor is unchanged when the analyzer is absent").toBe(floorJson);
     expect(result.artifacts_written).toEqual(["analyzer_capability.json"]);
@@ -135,7 +135,9 @@ test("runGraphEnrichmentExecutor records not_applicable when no in-scope files a
     root: "/virtual/root",
     registry: [typescriptAnalyzer],
   });
-  expect(result.updated.analyzer_capability!.status).toBe("omitted");
+  // Nothing in scope is supported, so nothing was owed: `not_applicable`, not a
+  // degradation and not a success.
+  expect(result.updated.analyzer_capability!.coverage).toBe("not_applicable");
   const entry = result.updated.analyzer_capability!.analyzers.find((a) => a.id === "typescript");
   expect(entry!.resolution).toBe("not_applicable");
 });
@@ -161,7 +163,7 @@ test("runSingleAnalyzer (via executor): returns ok:false with note when dependen
     expect(entry!.resolution, "absent dep → ok:false with resolution absent").toBe("absent");
     expect(entry!.edges_added, "no edges added for absent dep").toBe(0);
     // analyze() should not have contributed any edge
-    expect(result.updated.analyzer_capability!.status).toBe("omitted");
+    expect(result.updated.analyzer_capability!.coverage).toBe("degraded");
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });

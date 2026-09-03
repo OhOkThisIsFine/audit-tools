@@ -159,7 +159,7 @@ async function setup() {
     graph_bundle: { graphs: { imports: [], calls: [] } },
     critical_flows: { flows: [], fallback_required: false },
     risk_register: { items: [] },
-    analyzer_capability: { status: "omitted", analyzers: [] },
+    analyzer_capability: { coverage: "not_applicable", analyzers: [] },
     design_assessment: {
       generated_at: "2026-04-22T00:00:00Z",
       findings: [],

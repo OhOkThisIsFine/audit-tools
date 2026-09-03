@@ -183,7 +183,7 @@ export const SPEC_MIRROR_REGIONS = [
       },
       {
         artifact: "analyzer_capability.json",
-        purpose: "Marker: outcome of the optional graph-enrichment pass (`applied`/`omitted`) + per-analyzer provenance.",
+        purpose: "Marker: what the optional graph-enrichment pass actually produced (`coverage`, in the shared measured-outcome vocabulary, derived from the entries over the analyzers that were ASKED FOR) + per-analyzer provenance.",
       },
       {
         artifact: "external_analyzer_acquisition.json",

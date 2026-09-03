@@ -305,7 +305,7 @@ test("tree-sitter analyzer omits and keeps the floor when web-tree-sitter is abs
       cacheRoot,
       analyzers: { python: "auto" },
     });
-    expect(result.updated.analyzer_capability!.status).toBe("omitted");
+    expect(result.updated.analyzer_capability!.coverage).toBe("degraded");
     expect(JSON.stringify(result.updated.graph_bundle)).toBe(floorJson);
     const entry = result.updated.analyzer_capability!.analyzers.find((a) => a.id === "python");
     expect(entry!.resolution).toBe("absent");
