@@ -199,13 +199,31 @@ export function extractCommentText(source: string, path: string): string {
 function maskCommentSpans(source: string, path: string): string {
   const spans = scanCommentSpans(source, path);
   if (spans.length === 0) return source;
-  const chars = [...source];
+  // SLICE-based, exactly like `stripCommentText` — so the mask and the strip
+  // partition the file identically and cannot disagree about a span boundary.
+  //
+  // ⚠ Every offset `scanCommentSpans` emits is a UTF-16 CODE UNIT index: it
+  // walks with `source[i]` and `String.prototype.indexOf`. Indexing the mask by
+  // code POINT (`[...source]`) drifts one position left per astral character
+  // preceding a comment, so the comment text stops being masked and real code is
+  // blanked in its place — the revealed channel then ships the comment it exists
+  // to remove, and the structural channel publishes it as a declaration. Three of
+  // the 123 `src/` files in the repo that motivated this carry emoji. `slice`
+  // takes the same code-unit indices the scanner produced, so the two agree by
+  // construction rather than by luck.
+  const parts: string[] = [];
+  let cursor = 0;
   for (const span of spans) {
-    for (let i = span.outerStart; i < span.outerEnd && i < chars.length; i += 1) {
-      if (chars[i] !== "\n") chars[i] = " ";
-    }
+    parts.push(source.slice(cursor, span.outerStart));
+    // Blank the span's content while KEEPING its newlines, so every later line
+    // keeps its true number.
+    parts.push(
+      source.slice(span.outerStart, span.outerEnd).replace(/[^\n]/g, " "),
+    );
+    cursor = span.outerEnd;
   }
-  return chars.join("");
+  parts.push(source.slice(cursor));
+  return parts.join("");
 }
 
 /** One source line with its TRUE 1-based number. */

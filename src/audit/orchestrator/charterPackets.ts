@@ -738,7 +738,6 @@ function renderPacket(
 }
 
 const OMISSION_PROSE: Record<OmissionReason, string> = {
-  per_file_cap: "capped at the per-file limit",
   total_budget: "no room left in this channel's budget",
   unreadable_or_oversized: "unreadable or oversized",
   no_content: "no content of this evidence class in the file",

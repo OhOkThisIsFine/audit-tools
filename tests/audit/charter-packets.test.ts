@@ -9,9 +9,12 @@ import { join } from "node:path";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { StructureDecomposition } from "../../src/audit/types/structureDecomposition.js";
 
-const { extractCommentText, stripCommentText } = await import(
-  "../../src/audit/extractors/commentDecomposition.js"
-);
+const {
+  extractCommentText,
+  stripCommentText,
+  strippedSourceLines,
+  extractCommentLines,
+} = await import("../../src/audit/extractors/commentDecomposition.js");
 const {
   charterPacketReadSet,
   topLevelDeclarationLines,
@@ -60,6 +63,98 @@ describe("stripCommentText — the extract complement (one grammar, two views)",
 
   it("returns comment-free source unchanged", () => {
     expect(stripCommentText("const x = 1;\n", "f.ts")).toBe("const x = 1;\n");
+  });
+});
+
+describe("every OmissionReason has a producer", () => {
+  it("names no reason the builder can never emit", async () => {
+    // A vocabulary value with no producer is a claim the data can never make.
+    // `per_file_cap` was exactly that: PER_FILE_CHARS is a delivery clamp, so a
+    // candidate it truncates is DELIVERED with `truncated: true`, and one left
+    // below MIN_EXCERPT_CHARS is omitted as `total_budget`.
+    const { readFile } = await import("node:fs/promises");
+    const typeSource = await readFile(
+      "src/shared/types/charterPacket.ts",
+      "utf8",
+    );
+    const builderSource = await readFile(
+      "src/audit/orchestrator/charterPackets.ts",
+      "utf8",
+    );
+    const declared = [
+      ...typeSource
+        .slice(typeSource.indexOf("export type OmissionReason"))
+        .slice(0, 300)
+        .matchAll(/"([a-z_]+)"/g),
+    ].map((m) => m[1]!);
+
+    // OMISSION_PROSE is the RENDER table — exhaustive by its `Record` type, so a
+    // value appearing only there is precisely the producerless case. Strip it,
+    // and what remains is producing sites (`note(...)` arguments and
+    // `reason:` fields).
+    const proseAt = builderSource.indexOf("const OMISSION_PROSE");
+    const producers =
+      proseAt === -1 ? builderSource : builderSource.slice(0, proseAt);
+
+    expect(declared.length).toBeGreaterThan(0);
+    for (const reason of declared) {
+      expect(
+        producers,
+        `OmissionReason "${reason}" is declared and rendered but nothing EMITS it — ` +
+          `delete the value or emit it where it is the honest reason`,
+      ).toContain(`"${reason}"`);
+    }
+  });
+});
+
+describe("the line-true twins index by CODE UNIT, not code point", () => {
+  // `scanCommentSpans` walks the source with `source[i]` and `indexOf`, so every
+  // offset it emits is a UTF-16 CODE UNIT index. A mask that indexes by code
+  // POINT (`[...source]`) drifts left by one position per astral character that
+  // precedes a comment: the comment text stops being masked and real code is
+  // blanked instead. Three of the 123 `src/` files in the motivating repo carry
+  // emoji, so this fires on the repo that produced the entry.
+  const EMOJI = "\u{1F389}".repeat(12); // 12 code points, 24 code units
+  const SECRET_LINE = "lineCommentSecret";
+  const SECRET_BLOCK = "blockCommentSecret";
+  const ASTRAL_SOURCE = [
+    `export const party = "${EMOJI}"; // ${SECRET_LINE}`,
+    "export const after = 1;",
+    `/* ${SECRET_BLOCK} */`,
+    "export const beta = 2;",
+  ].join("\n");
+
+  it("keeps comment text out of the revealed channel and leaves the code intact", () => {
+    const revealed = strippedSourceLines(ASTRAL_SOURCE, "f.ts");
+    const text = revealed.map((entry) => entry.text).join("\n");
+
+    expect(text, "a comment's text must never survive into the revealed channel")
+      .not.toContain(SECRET_LINE);
+    expect(text).not.toContain(SECRET_BLOCK);
+    expect(text, "the comment DELIMITER must not survive either").not.toContain("//");
+    expect(text).not.toContain("/*");
+
+    // …and the real code on that line is not blanked in the comment's place.
+    expect(text).toContain(`export const party = "${EMOJI}";`);
+    expect(text).toContain("export const after = 1;");
+    expect(text).toContain("export const beta = 2;");
+  });
+
+  it("does not publish a comment as a top-level declaration", () => {
+    const decls = topLevelDeclarationLines(
+      strippedSourceLines(ASTRAL_SOURCE, "f.ts"),
+    );
+    const texts = decls.map((entry) => entry.text);
+    expect(texts.join("\n")).not.toContain(SECRET_LINE);
+    expect(texts.join("\n")).not.toContain(SECRET_BLOCK);
+    expect(texts).toContain("export const after = 1;");
+  });
+
+  it("numbers the comment excerpt against the astral-bearing source", () => {
+    const comments = extractCommentLines(ASTRAL_SOURCE, "f.ts");
+    const byLine = new Map(comments.map((entry) => [entry.line, entry.text]));
+    expect(byLine.get(1)).toContain(SECRET_LINE);
+    expect(byLine.get(3)).toContain(SECRET_BLOCK);
   });
 });
 

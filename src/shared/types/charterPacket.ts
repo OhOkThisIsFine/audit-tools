@@ -44,9 +44,15 @@ export const EVIDENCE_CLASSES: readonly EvidenceClass[] = [
  * that closes the two SILENT skips: a member with no comments and a file with no
  * top-level declarations used to appear in neither the delivered nor the omitted
  * list, so `delivered + omitted === named` could not be reconciled at all.
+ *
+ * EVERY value here has a producer, and a contract test pins that. There is no
+ * `per_file_cap`: `PER_FILE_CHARS` is a delivery CLAMP, not an omission cause —
+ * a candidate it truncates is DELIVERED with `truncated: true`, and one the
+ * clamp leaves below `MIN_EXCERPT_CHARS` is omitted as `total_budget`. A
+ * vocabulary value with no producer is a claim the data can never make, so it
+ * would only ever mislead a reader of the coverage record.
  */
 export type OmissionReason =
-  | "per_file_cap"
   | "total_budget"
   | "unreadable_or_oversized"
   | "no_content";
