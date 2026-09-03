@@ -497,3 +497,26 @@
   signal. **Property:** the green mechanism answers "is this tree green" in one command, so no lap
   hand-compares a tree id against a stamp.
 
+- **`refuseSuppliedVerificationStatus` cannot fire on the production judge path (2026-09-03, low).**
+  It exists to NAME a host-supplied `verification_status` rather than strip it silently, and it runs
+  first inside `buildConceptualReviewAdjudication` (`src/audit/types/conceptualAdjudication.ts`). But
+  `src/audit/cli/nextStepHelpers.ts` `safeParse`s the submission through
+  `ConceptualJudgeSubmissionSchema` — whose findings use the omitting
+  `ConceptualSubmittedFindingSchema` — and passes `parsed.data` in, so the field is already gone by
+  the time the refusal looks. The PROPERTY still holds twice over (omit, plus unconditional
+  derivation at ingest); what does not hold is the doc comment's claim that the host is told, and only
+  a direct caller (a test) ever reaches the message. **Property:** either the refusal reads the raw
+  incoming value before the parse, or the comment stops claiming a reach it does not have.
+
+- **The runtime-artifact-name generator's source list omits two modules that mint runtime names
+  (2026-09-03, low).** `RUNTIME_NAME_SOURCES` in
+  `scripts/shared/generate-runtime-artifact-names.mjs` does not include
+  `src/audit/cli/laneSubmissions.ts` or `src/audit/orchestrator/charterPacketArchive.ts`, so
+  `CHARTER_EXTRACTION_MERGED_FILENAME` and the charter-packet archive names never enter the generated
+  set — and a doc citing one of those basenames is red for naming a repo file that does not exist,
+  which is the exact false red the generated set exists to prevent. `tests/shared/runtime-artifact-names-drift.test.ts`
+  cannot catch it: it cross-checks `ARTIFACT_DEFINITIONS` coverage only, and neither name is in that
+  registry. Pre-existing; widened by the charter-packet archive. **Property:** a module that mints a
+  runtime artifact basename is in the generator's source list, or the omission is a declared,
+  mechanically-checked exclusion.
+

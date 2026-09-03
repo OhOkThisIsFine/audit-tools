@@ -938,3 +938,27 @@
   still admitted — `gh pr merge`, `gh release create`, `npm version`, `docker push`, `terraform apply`.
   **Property for the remainder:** a command that changes state outside this repo's working tree is
   refused when piped into a filter, or the registry states which verbs the list claims.
+
+- **An agent push to `main` is not gated on a full-suite stamp, and the "touched area's suite" rule
+  cannot see a cross-area invariant (2026-09-03, medium, friction: tool_should_decide).** P50 landed
+  RED on `main`: its lander ran build, typecheck and the touched area's suite — exactly what
+  `CLAUDE.md` requires — and pushed. The new test imported `execSync` directly, which the cross-area
+  `INV-WH` windowless-spawn invariant (`tests/helpers/trackedSpawn.ts`) refuses; that invariant lives
+  in another area, so no touched-area suite could reach it and only release CI did. `main` stayed red
+  across two commits until the repair rode with an unrelated cluster. The commit gate's staged-set
+  legs have the same blind spot by construction — they are derived from the staged paths. **Property:**
+  a push to `main` from an agent session is refused unless a suite-green stamp binds the pushed tree —
+  a PreToolUse gate on `git push`, or the commit gate running the full suite for any commit that can
+  land on `main`.
+
+- **The backlog's own gates run only at commit, so a writer sees the refusal long after the text is
+  cold (2026-09-03, medium, friction: tool_should_decide).** Nine entries written in an earlier
+  session hit `check:doc-code-citations` (13 unresolved backticked paths — the audited repository's
+  files and runtime artifact names) and then, on the next attempt, `check:backlog-line-numbers`
+  (3 `path:line` forms, two of them quoted measurements) in sequence at landing, in a different
+  session from the one that wrote them. Both fixes were exemption markers and rewording, which is
+  cheap AT THE KEYSTROKE and expensive as a serialized gate-fix-retry loop against text nobody
+  present had authored. The typecheck hook already proves the shape works. **Property:** the backlog
+  gates run at write time for `docs/backlog/` — a PostToolUse check on Edit/Write, as
+  `.claude/hooks/async-typecheck.mjs` does for TypeScript — so the writer sees the refusal while the
+  text is still theirs.

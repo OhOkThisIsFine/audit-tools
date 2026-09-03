@@ -667,6 +667,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   the current completion files alone, then re-run the FULL suite on the same tree. Two greens plus a mechanism argument
   is the bar — a single alone-pass is not, because these are the slowest files in the suite
   and spin real audit runs through real subprocesses.
+  ⚠ **A second pair flakes the same way but with the TIMEOUT symptom (2026-09-03).**
+  `tests/audit/io-remediation.test.ts` and `tests/audit/finalization-convergence.test.ts` each hit the
+  120s per-file vitest timeout in one full-suite run on this machine and passed alone immediately
+  after. Same protocol, different tell: a bare timeout on one of these two under full-suite load is a
+  load flake first and a regression second.
 
 - **An offload recon lane reading a file you are concurrently editing reports the POST-edit tree
   (2026-08-07).** An offload lane dispatched to analyze a duplication and left running while the
