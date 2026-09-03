@@ -43,6 +43,7 @@ import {
 } from "audit-tools/shared";
 import type { CharterKind, CharterSubmission } from "audit-tools/shared";
 import { charterExtractionKindsForCeiling } from "./charterExtractionPrompt.js";
+import { archiveCharterPackets } from "../orchestrator/charterPacketArchive.js";
 import {
   LANE_SUBMISSION_SCHEMAS,
   charterLaneSchema,
@@ -141,7 +142,6 @@ import {
   CHARTER_EXTRACTION_MERGED_FILENAME,
   GATE_LANES,
   charterExtractionLane,
-  charterExtractionPacketFilename,
   closeDispatchedLaneOutcomes,
   laneSubmissionPath,
   recordHostResultOutcomes,
@@ -1909,14 +1909,16 @@ export async function handleCharterExtractionBranch(
     }
     // Evidence packets are consumed inputs like the lane submissions — a stale
     // packet left behind would feed a later re-extraction yesterday's evidence.
-    for (const kind of kinds) {
-      await unlink(
-        join(
-          laneAssetsDir(params.artifactsDir),
-          charterExtractionPacketFilename(kind),
-        ),
-      ).catch(() => {});
-    }
+    // That property is preserved verbatim (the emitter's read path is empty
+    // afterwards); what changed is that the bytes are ARCHIVED by content hash
+    // first, so "what exactly did this lane read" stays answerable instead of
+    // resting on the lane's own testimony. Never throws — the submission is
+    // already applied here, so a retention failure is RECORDED (an
+    // `archived: false` index row that keeps the source), never a fold abort.
+    await archiveCharterPackets({
+      artifactsDir: params.artifactsDir,
+      kinds,
+    });
     return { action: "continue", bundle: applied.updated_bundle };
   }
   // Missing or quarantined lane(s): a host turn is still owed — the emitter
