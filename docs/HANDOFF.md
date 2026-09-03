@@ -32,11 +32,6 @@ evaluator protocol; do not substitute an inferred or self-scored acceptance resu
   one explicit forward track, not an incomplete local implementation.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
-
-- **2 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `sol-1` — The leg-2 sweep asks the router for ids[0], which is the one roster entry that needs a real API key — name a target instead?
-  - `sol-2` — P50: two code comments still name five conceptual categories where the prompt emits eight — single-source the list and guard it?
-
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

@@ -2042,5 +2042,19 @@
     "subject": "Retire 18 dated review records that nothing outside the archive cites, or keep the archive growing?",
     "path": "docs/reviews/dogfood-run-2026-07-30.md",
     "decided_at": "2026-08-31T16:27:09.511Z"
+  },
+  "133f4f815b608ea4": {
+    "disposition": "settled",
+    "answer": "Route through llm-relay dispatch — Stop naming a model. Send each entry through the llm-relay dispatch tool so the relay owns lane choice end to end, consistent with the P49 answer that best-lane selection belongs to llm-relay.",
+    "subject": "The leg-2 sweep asks the router for ids[0], which is the one roster entry that needs a real API key — name a target instead?",
+    "path": "scripts/shared/triage-backlog.mjs",
+    "decided_at": "2026-09-03T15:39:21.514Z"
+  },
+  "1ed1beee5024b166": {
+    "disposition": "settled",
+    "answer": "Adopt P50 whole — Extract CONCEPTUAL_FINDING_CATEGORIES, build the line-408 enum from it, replace both stale comments with a pointer to the constant, and ship the drift guard as tests/audit/conceptual-category-comment-drift.test.ts with its guard-reach registry row. One commit, per atomic-replace.",
+    "subject": "P50: two code comments still name five conceptual categories where the prompt emits eight — single-source the list and guard it?",
+    "path": "src/audit/types/designAssessment.ts",
+    "decided_at": "2026-09-03T15:39:24.464Z"
   }
 }
