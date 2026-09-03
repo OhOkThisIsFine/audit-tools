@@ -8,10 +8,12 @@
 
 ## ⚠ TOP PRIORITY — the 2026-09-02/03 live-run defect set (owner-directed, fix first)
 
-Seven entries below were found by running two full audits of `C:\Code\llm-relay` (335 files) back
-to back, differing only in lane capability. They are grouped here because they share one shape:
+Seven entries were found by running two full audits of `C:\Code\llm-relay` (335 files) back to
+back, differing only in lane capability. They are grouped here because they share one shape:
 **the tool reports success while delivering less than it claims**, and each was invisible from
-inside the run. Ordered by consequence. Full evidence lives in each entry.
+inside the run. Ordered by consequence. Full evidence lives in each entry. Numbering is positional
+and never reused, so a closed entry leaves its number vacant rather than shifting the rest — item 4
+(`NO-REJECTION-OUTCOME`) is closed.
 
 1. **Nine lenses were selected; two produced findings.** `SELECTED-LENSES-IGNORED` below. The most
    consequential of the set — it silently voids the operator's own scope decision.
@@ -19,8 +21,6 @@ inside the run. Ordered by consequence. Full evidence lives in each entry.
    source-comment blocks delivered; a lane characterises intent from evidence it never received.
 3. **`charter_register.json` self-certifies.** `REGISTER-SELF-CERTIFIES` — printed
    `validation_issues: []` at 1-of-15 correct citations and again at 75-of-75.
-4. **Adjudication has no rejection outcome.** `NO-REJECTION-OUTCOME` — 60 of 60 candidates
-   survived, so no run publishes a false-positive rate.
 5. **Packets are consumed at ingest.** `PACKETS-CONSUMED` — lane inputs cannot be audited after
    the fact; a three-lane claim about missing coverage could not be checked.
 6. **Capability status is asserted, not measured.** `CAPABILITY-ASSERTED` — failed analyzer
@@ -47,18 +47,6 @@ capability to stated task demand).
   runs, so it is not lane-quality. **Property:** a lens selected in intent either produces findings
   attributed to it, or the run reports that lens as un-exercised — in the artifacts and in the
   final report — so absence of a finding is never silently readable as absence of a defect.
-
-- **NO-REJECTION-OUTCOME — adjudication cannot reject, so no run publishes a false-positive rate
-  (2026-09-03, high, friction: false_green).** Measured: 60 candidates in, `merged: 50` +
-  `retained: 10` = 60 of 60 survived; the prior run scored 74 in, `merged: 57` + `retained: 17` =
-  74 of 74. Across two independent runs and 134 candidates, zero were rejected. One candidate whose
-  two named defects the judge itself verified as ALREADY FIXED at HEAD was merged at 70%
-  modification rather than rejected, because no rejection disposition exists to record it. There is
-  no verification-status field on a finding either. ⚠ Consequence: quality is unmeasurable. A
-  reader cannot tell a finding the judge confirmed from one it merely reworded, and the tool cannot
-  report how often its reviewers are wrong. **Property:** adjudication carries a rejection
-  disposition and a per-finding verification status, and the run reports both counts, so a
-  remediator can rank by confirmed-versus-asserted.
 
 - **CAPABILITY-ASSERTED — a failed analyzer install records `"status": "applied"`, and a gate with
   nothing to check records `satisfied` (2026-09-03, medium, friction: false_green).** The html and

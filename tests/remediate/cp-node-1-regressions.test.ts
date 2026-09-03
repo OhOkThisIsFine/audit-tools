@@ -1119,6 +1119,51 @@ describe("OBL-item-status-partition-and-close-inv-10: INV-ISC-FINDING-BLOCK-SHAP
     expect(result.findings.map((f) => f.id)).toEqual(["F-CRIT", "F-LOW"]);
     expect(result.blocks.map((b) => b.block_id)).toEqual(["B-CRIT", "B-LOW"]);
   });
+
+  // NO-REJECTION-OUTCOME: the remediate-side READER of `verification_status`.
+  // Without one the field is write-only data that still reads as authoritative.
+  it("orders a judge_confirmed finding ahead of an asserted one at equal severity", () => {
+    const asserted = mkFinding("F-ASSERTED", "src/a.ts", {
+      severity: "high",
+      verification_status: "asserted",
+    });
+    const confirmed = mkFinding("F-CONFIRMED", "src/b.ts", {
+      severity: "high",
+      verification_status: "judge_confirmed",
+    });
+    const intent = {
+      lensWeights: {},
+      prioritySignals: ["urgent"],
+      scopeEmphasis: [],
+    } as unknown as Parameters<typeof applyIntentOrdering>[2];
+
+    // Input order puts the asserted one first, so a pass-through would keep it
+    // first: the tie-break is what moves the confirmed finding ahead.
+    const result = applyIntentOrdering([asserted, confirmed], [], intent);
+    expect(result.findings.map((f) => f.id)).toEqual([
+      "F-CONFIRMED",
+      "F-ASSERTED",
+    ]);
+  });
+
+  it("never lets verification override severity", () => {
+    const criticalAsserted = mkFinding("F-CRIT", "src/a.ts", {
+      severity: "critical",
+      verification_status: "asserted",
+    });
+    const lowConfirmed = mkFinding("F-LOW", "src/b.ts", {
+      severity: "low",
+      verification_status: "judge_confirmed",
+    });
+    const intent = {
+      lensWeights: {},
+      prioritySignals: ["urgent"],
+      scopeEmphasis: [],
+    } as unknown as Parameters<typeof applyIntentOrdering>[2];
+
+    const result = applyIntentOrdering([lowConfirmed, criticalAsserted], [], intent);
+    expect(result.findings.map((f) => f.id)).toEqual(["F-CRIT", "F-LOW"]);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

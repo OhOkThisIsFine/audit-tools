@@ -440,6 +440,20 @@ export const AuditFindingsSummarySchema = z.object({
    * dropped from the admitted set. Absent when no finding carried a verdict.
    */
   grounding_status_breakdown: z.record(z.string(), z.number()).optional(),
+  /**
+   * Per-status counts of the judge's defect-presence claim, over the FINDINGS —
+   * `judge_confirmed` versus `asserted`, which is what lets a remediator rank
+   * one above the other. `refuted_at_head` never appears here: the adjudication
+   * validator forces a refuted candidate to `rejected`, and a rejected candidate
+   * maps to no final finding. Absent when no finding carried a status.
+   *
+   * Finding-scoped, and deliberately NOT reconciled with the CANDIDATE-scoped
+   * counts on `conceptual_review_adjudication.json`: the post-adjudication
+   * grounding quarantine can drop a merged candidate's final finding, so the two
+   * populations legitimately differ. One reconciled number would have to pick a
+   * population and would hide the quarantine.
+   */
+  verification_status_breakdown: z.record(z.string(), z.number()).optional(),
 });
 export type AuditFindingsSummary = z.infer<typeof AuditFindingsSummarySchema>;
 

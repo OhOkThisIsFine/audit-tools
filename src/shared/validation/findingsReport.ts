@@ -599,6 +599,22 @@ export function projectAuditFindingsReportSubset(
               ),
             ),
           }),
+      // Same conditional-on-presence shape as grounding: re-count over the
+      // PROJECTED set, because an approved subset that reported the whole run's
+      // counts would overstate itself. Counted over the admitted findings only —
+      // a quarantined finding is not part of what the subset claims.
+      ...(report.summary.verification_status_breakdown === undefined
+        ? {}
+        : {
+            verification_status_breakdown: projectedBreakdown(
+              report.summary.verification_status_breakdown,
+              findings.flatMap((finding) =>
+                finding.verification_status === undefined
+                  ? []
+                  : [finding.verification_status],
+              ),
+            ),
+          }),
     },
   };
 

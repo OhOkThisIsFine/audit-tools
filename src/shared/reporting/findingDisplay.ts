@@ -33,6 +33,8 @@ export interface FindingBadge {
   affected_files?: ReadonlyArray<FindingFileRef>;
   evidence?: readonly string[];
   grounding?: { status: string; reason?: string };
+  /** Whether the named defect is present at HEAD (conceptual findings only). */
+  verification_status?: string;
   systemic?: boolean;
   impact?: string;
   likelihood?: string;
@@ -114,10 +116,34 @@ export function findingGroundingLine(finding: FindingBadge): string {
 }
 
 /**
+ * Verification line — whether the DEFECT is present at HEAD, which is a
+ * different question from grounding (does the finding cite something real).
+ * Rendered only when a status exists: every deterministic finding has none, and
+ * a "not assessed" line on all of them would be noise. The wording says
+ * `judge-confirmed`, never a bare `confirmed`, because the claim is a judge's
+ * reading and not the tool's own run.
+ */
+export function findingVerificationLine(
+  finding: FindingBadge,
+): string | undefined {
+  switch (finding.verification_status) {
+    case "judge_confirmed":
+      return "- Verification: judge-confirmed against HEAD (a judge's reading, not a tool run)";
+    case "asserted":
+      return "- Verification: asserted — not checked against HEAD";
+    case undefined:
+      return undefined;
+    default:
+      return `- Verification: ${finding.verification_status}`;
+  }
+}
+
+/**
  * The fixed-order labelled badge body — the `- ...` lines, no heading, no lead.
  * Same labels, same order, every finding: Severity → Confidence → Lens →
- * Grounding → [Systemic] → [Impact] → [Likelihood] → [Files] → [Details] →
- * [Evidence]. Callers compose a heading / lead / context-specific lines around it.
+ * Grounding → [Verification] → [Systemic] → [Impact] → [Likelihood] → [Files] →
+ * [Details] → [Evidence]. Callers compose a heading / lead / context-specific
+ * lines around it.
  */
 export function renderFindingBadgeBody(
   finding: FindingBadge,
@@ -143,6 +169,12 @@ export function renderFindingBadgeBody(
   lines.push(`- Lens: ${finding.lens}`);
   if (showGrounding) {
     lines.push(findingGroundingLine(finding));
+    // Beside grounding, never instead of it: the two answer different questions
+    // and a reader who sees only `grounded` reads path existence as confirmation.
+    const verification = findingVerificationLine(finding);
+    if (verification !== undefined) {
+      lines.push(verification);
+    }
   }
   if (showAdvisoryMeta) {
     if (finding.systemic === true) {

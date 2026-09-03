@@ -331,6 +331,7 @@ export {
   findingLead,
   formatFindingFileRef,
   findingGroundingLine,
+  findingVerificationLine,
   renderFindingBadgeBody,
   renderFindingBlockLines,
   renderFindingBlock,

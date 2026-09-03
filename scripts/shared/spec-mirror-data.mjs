@@ -159,7 +159,7 @@ export const SPEC_MIRROR_REGIONS = [
       },
       {
         artifact: "conceptual_review_adjudication.json",
-        purpose: "Validated adjudication of deep conceptual-review findings, candidate dispositions, and final finding shares.",
+        purpose: "Validated adjudication of deep conceptual-review findings, candidate dispositions (each carrying the judge's `verification_status`), final finding shares, and the tool-derived candidate disposition/verification breakdowns.",
       },
       {
         artifact: "docs_digest.json",

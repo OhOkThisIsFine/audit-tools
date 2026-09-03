@@ -32,6 +32,23 @@ const SCOPE_EMPHASIS_BOOST = 5;
 /** Flat boost when the intent carried any priority/urgency signal at all. */
 const PRIORITY_SIGNAL_BOOST = 3;
 
+/**
+ * Tie-break rank for the audit judge's defect-presence claim. Deliberately NOT
+ * a weight boost: verification must never outrank severity, so it is applied
+ * only between findings the intent weighting AND severity already call equal.
+ * A finding the judge checked against HEAD is worth doing before one it merely
+ * asserted, at the same severity.
+ *
+ * ⚠ REACH: above risk tier `low` the remediate contract pipeline RE-MINTS
+ * `state.plan.findings` from DAG nodes rather than carrying the audit `Finding`
+ * objects through, so this tie-break reaches only the path where the audit
+ * findings survive. That is a pre-existing class, not one this ordering
+ * introduces, and closing it means changing what the contract pipeline carries.
+ */
+function verificationRank(finding: Finding): number {
+  return finding.verification_status === "judge_confirmed" ? 1 : 0;
+}
+
 // Leading scope-verb phrases (focus on / prioritise / ignore / …) that prefix a
 // scope-emphasis clause; stripped so the needles are the path/identifier targets,
 // not the directive verb. Mirrors the shared SCOPE_PATTERNS lead-ins.
@@ -188,7 +205,17 @@ export function applyIntentOrdering(
     .sort((a, b) => {
       const wa = weightByFinding.get(a.finding.id) ?? 0;
       const wb = weightByFinding.get(b.finding.id) ?? 0;
-      return wb - wa || a.index - b.index;
+      if (wb !== wa) return wb - wa;
+      // Gated on EQUAL SEVERITY as well as equal weight. Weight folds severity
+      // in with the boosts, so two different severities can still tie on weight
+      // (e.g. critical+nothing against low+priority); requiring equal severity
+      // is what makes "never overrides severity" true rather than nearly true.
+      if (a.finding.severity === b.finding.severity) {
+        const va = verificationRank(a.finding);
+        const vb = verificationRank(b.finding);
+        if (vb !== va) return vb - va;
+      }
+      return a.index - b.index;
     })
     .map((entry) => entry.finding);
 

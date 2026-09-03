@@ -66,7 +66,7 @@ generator.
 | `risk_register.json` | JSON | Per-unit risk signals (see `src/audit/extractors/risk.ts` for the full signal list). |
 | `git_history.json` | JSON | Deterministic co-change/churn/authorship mined from the commit log. |
 | `design_assessment.json` | JSON | Deterministic + optional host-delegated design assessment (see below). |
-| `conceptual_review_adjudication.json` | JSON | Validated adjudication of deep conceptual-review findings, candidate dispositions, and final finding shares. |
+| `conceptual_review_adjudication.json` | JSON | Validated adjudication of deep conceptual-review findings, candidate dispositions (each carrying the judge's `verification_status`), final finding shares, and the tool-derived candidate disposition/verification breakdowns. |
 | `docs_digest.json` | JSON | Deterministic bounded telos extraction over the doc universe; rendered into the confirm-intent prompt. NO downstream edge, and never an upstream of `intent_checkpoint.json` (checkpoint stays a leaf). |
 | `structure_decomposition.json` | JSON | Deterministic structure-layer decomposition (overlay-and-delta operator over behavior-graph + intent sources); emits non-co-localization findings. |
 | `charter_register.json` | JSON | Phase-C charter layer (carries a stamped schema version and is discarded on mismatch, DISCARD read policy — regenerable analysis state): three channel-pure estimator charters with per-kind teleologies joined by file-set overlap over the structure-decomposition hint, plus the miner's deltas, triangulated teloses, and tool-counted disagreement density; gated by the confirmed intent-checkpoint ceiling. |

@@ -105,6 +105,97 @@ test("grounding_status_breakdown is omitted with no verdict and counted otherwis
   assertMatchesAuditFindings(mixed, "mixed");
 });
 
+// ── verification_status_breakdown (NO-REJECTION-OUTCOME) ─────────────────────
+//
+// The FINDING-scoped population. It deliberately does NOT reconcile with the
+// adjudication's candidate-scoped counts — a merged candidate's final finding
+// can still be quarantined ungrounded downstream — so each is labelled by its
+// population rather than folded into one number that would hide the quarantine.
+//
+// Three build sites, and a breakdown missing from any one of them is silently
+// dropped by the next stage, which is why all three are asserted here.
+
+test("verification_status_breakdown is omitted with no status and counted otherwise", () => {
+  const plain = report([finding({ title: "Plain" })]);
+  expect(plain.summary.verification_status_breakdown).toBe(undefined);
+  assertMatchesAuditFindings(plain, "plain");
+
+  const mixed = report([
+    finding({
+      title: "Confirmed one",
+      category: "a",
+      verification_status: "judge_confirmed",
+    }),
+    finding({
+      title: "Asserted one",
+      category: "b",
+      affected_files: [{ path: "src/b.ts" }],
+      verification_status: "asserted",
+    }),
+  ]);
+  expect(mixed.summary.verification_status_breakdown).toEqual({
+    judge_confirmed: 1,
+    asserted: 1,
+  });
+  assertMatchesAuditFindings(mixed, "mixed");
+});
+
+test("normalizeExistingFindingsReport re-derives verification_status_breakdown", async () => {
+  const { normalizeExistingFindingsReport } = await import(
+    "../../src/audit/reporting/synthesis.js"
+  );
+  const built = report([
+    finding({ title: "Confirmed one", verification_status: "judge_confirmed" }),
+  ]);
+  // Drop the field, then normalize: a promoted audit-findings.json re-read from
+  // disk must come back carrying the count, not silently without it.
+  const stripped = {
+    ...built,
+    summary: { ...built.summary, verification_status_breakdown: undefined },
+  } as AuditFindingsReport;
+  const normalized = normalizeExistingFindingsReport(stripped);
+  expect(normalized.summary.verification_status_breakdown).toEqual({
+    judge_confirmed: 1,
+  });
+});
+
+test("the approved-findings projection re-counts verification over the PROJECTED set", async () => {
+  const { projectAuditFindingsReportSubset } = await import(
+    "../../src/shared/validation/findingsReport.js"
+  );
+  const built = report([
+    finding({
+      title: "Confirmed one",
+      category: "a",
+      verification_status: "judge_confirmed",
+    }),
+    finding({
+      title: "Asserted one",
+      category: "b",
+      affected_files: [{ path: "src/b.ts" }],
+      verification_status: "asserted",
+    }),
+  ]);
+  expect(built.summary.verification_status_breakdown).toEqual({
+    judge_confirmed: 1,
+    asserted: 1,
+  });
+
+  const kept = built.findings.find((entry) => entry.title === "Confirmed one");
+  expect(kept).toBeDefined();
+  const projected = projectAuditFindingsReportSubset(built, [kept!]);
+
+  // The count must describe the PROJECTED set, not the input set — an approved
+  // subset that still reported the full run's counts would overstate itself.
+  // `asserted: 0` rather than an absent key is `projectedBreakdown`'s own
+  // convention, shared with every other breakdown: the key set stays stable so a
+  // status that dropped to zero is VISIBLE instead of silently disappearing.
+  expect(projected.summary.verification_status_breakdown).toEqual({
+    judge_confirmed: 1,
+    asserted: 0,
+  });
+});
+
 test("grounded-wins: a grounded re-emission keeps the merged finding out of quarantine", () => {
   // Same lens|category|title => one merged finding. One emission grounded, the
   // other ungrounded; grounded must win so a verified finding is not quarantined.
@@ -224,4 +315,126 @@ test("a fully grounded report shows the grounding line but no quarantine section
   expect(md).not.toMatch(/## Ungrounded Findings/);
   expect(md).toMatch(/- Grounding \(S7\): grounded: 1/);
   expect(md).not.toMatch(/quarantined below/);
+});
+
+// ── the report publishes both populations, and says what `grounded` certifies ─
+
+test("the Summary carries a verification line beside the grounding line", () => {
+  const md = renderAuditReportMarkdown(
+    report([
+      finding({
+        title: "Confirmed",
+        category: "a",
+        verification_status: "judge_confirmed",
+      }),
+      finding({
+        title: "Asserted",
+        category: "b",
+        affected_files: [{ path: "src/b.ts" }],
+        verification_status: "asserted",
+      }),
+    ]),
+  );
+  expect(md).toMatch(/- Verification: .*judge_confirmed: 1/);
+  expect(md).toMatch(/asserted: 1/);
+  // The badge body carries it per finding too, so a reader of one finding does
+  // not have to infer its status from an aggregate.
+  expect(md).toMatch(/- Verification: judge-confirmed against HEAD/);
+  expect(md).toMatch(/- Verification: asserted/);
+});
+
+test("the conceptual attribution section publishes candidate counts and narrows what `grounded` certifies", async () => {
+  const { buildConceptualReviewAdjudication } = await import(
+    "../../src/audit/types/conceptualAdjudication.js"
+  );
+  const manifest = {
+    schema_version: 1 as const,
+    mode: "deep" as const,
+    round_id: "round-1",
+    perspectives: [
+      {
+        contributor_id: "p1",
+        perspective: "Minimalist",
+        lane_id: "p1",
+        prompt_path: "/x/p1-prompt.md",
+        result_path: "/x/p1.json",
+      },
+    ],
+    judge: {
+      contributor_id: "design_review_conceptual",
+      lane_id: "design_review_conceptual",
+      prompt_path: "/x/judge-prompt.md",
+      result_path: "/x/judge.json",
+    },
+  };
+  const candidate = finding({ id: "DR-1", title: "Candidate" });
+  const final = finding({ id: "FINAL-1", title: "Final" });
+  const adjudication = buildConceptualReviewAdjudication({
+    manifest,
+    perspectiveFindings: new Map([["p1", [candidate]]]),
+    submission: {
+      round_id: "round-1",
+      findings: [final],
+      candidate_dispositions: [
+        {
+          candidate_id: "p1::DR-1",
+          contributor_id: "p1",
+          source_finding_id: "DR-1",
+          disposition: "merged" as const,
+          target_final_finding_ids: ["FINAL-1"],
+          modification_percent: 20,
+          rationale: "Merged into the final framing.",
+          verification_status: "judge_confirmed" as const,
+          verification_note: "Re-read the cited module at HEAD.",
+        },
+      ],
+      final_finding_shares: [
+        {
+          final_finding_id: "FINAL-1",
+          contributors: [
+            {
+              contributor_id: "p1",
+              source_candidate_ids: ["p1::DR-1"],
+              contribution_percent: 70,
+              rationale: "Supplied the reduction.",
+            },
+            {
+              contributor_id: "design_review_conceptual",
+              source_candidate_ids: [],
+              contribution_percent: 30,
+              rationale: "Judge reconciled it.",
+            },
+          ],
+        },
+      ],
+    },
+    generatedAt: "now",
+  });
+
+  const md = renderAuditReportMarkdown(
+    {
+      summary: {
+        finding_count: 1,
+        work_block_count: 0,
+        severity_breakdown: {},
+        audited_file_count: 0,
+        excluded_file_count: 0,
+        runtime_validation_status_breakdown: {},
+      },
+      findings: [final],
+      work_blocks: [],
+      work_block_seams: [],
+    },
+    { conceptual_adjudication: adjudication },
+  );
+
+  // The aggregate the live run had to be counted BY HAND to obtain.
+  expect(md).toMatch(/Candidate dispositions: .*merged: 1/);
+  expect(md).toMatch(/Candidate verification: .*judge_confirmed: 1/);
+  // Each disposition bullet states its own verification claim.
+  expect(md).toMatch(/judge_confirmed/);
+  // And the section-scoped caveat says what `grounded` does NOT certify here —
+  // a conceptual finding's grounded verdict is component-path existence only.
+  expect(md).toMatch(/component[- ]path existence/i);
+  expect(md).toMatch(/verification_status/);
 });

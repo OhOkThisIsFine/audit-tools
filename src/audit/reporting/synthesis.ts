@@ -87,6 +87,12 @@ export interface AuditReportSummary {
    * assignable to this render shape; absent when no finding carried a verdict.
    */
   grounding_status_breakdown?: Record<string, number>;
+  /**
+   * Per-status counts of the judge's defect-presence claim over the findings.
+   * Optional for the same reason as the grounding breakdown — the shared
+   * `AuditFindingsSummary` makes it optional, so this render shape must too.
+   */
+  verification_status_breakdown?: Record<string, number>;
 }
 
 export interface AuditReportModel {
@@ -171,6 +177,18 @@ function lensBreakdown(findings: Finding[]): Record<string, number> {
  */
 function groundingStatusBreakdown(findings: Finding[]): Record<string, number> {
   return countBy(findings, (finding) => finding.grounding?.status);
+}
+
+/**
+ * Per-status counts of the judge's defect-presence claim. Findings with no
+ * status (every deterministic finding — the conceptual pass is the only
+ * producer) are skipped by `countBy`, so an empty result means "no finding
+ * carried a claim" and the caller omits the field, exactly as for grounding.
+ */
+function verificationStatusBreakdown(
+  findings: Finding[],
+): Record<string, number> {
+  return countBy(findings, (finding) => finding.verification_status);
 }
 
 function runtimeStatusBreakdown(
@@ -291,6 +309,7 @@ export function buildAuditReportModel(params: {
   // Count grounding over ALL findings (incl. quarantined-refuted) so the `refuted`
   // tally reflects findings dropped from the admitted set.
   const groundingBreakdown = groundingStatusBreakdown(allFindings);
+  const verificationBreakdown = verificationStatusBreakdown(allFindings);
   const model: AttributionAwareModel = {
     summary: {
       finding_count: findings.length,
@@ -301,6 +320,9 @@ export function buildAuditReportModel(params: {
       excluded_file_count: coverage.excluded_file_count,
       ...(Object.keys(groundingBreakdown).length > 0
         ? { grounding_status_breakdown: groundingBreakdown }
+        : {}),
+      ...(Object.keys(verificationBreakdown).length > 0
+        ? { verification_status_breakdown: verificationBreakdown }
         : {}),
       runtime_validation_status_breakdown: runtimeStatusBreakdown(
         params.runtimeValidationReport,
@@ -715,7 +737,15 @@ function renderConceptualAttributionSection(
   const lines = [
     "## Conceptual Review Attribution",
     "",
-    `Round: \`${adjudication.round_id}\`. Contribution and modification percentages are judge-authored semantic estimates; tooling verified references, bounds, complete candidate coverage, and 100% contribution totals.`,
+    `Round: \`${adjudication.round_id}\`. Contribution and modification percentages are judge-authored semantic estimates; tooling verified references, bounds, complete candidate coverage, and 100% contribution totals. \`verification_status\` is likewise judge-authored — the tool enforces that a claim is present, consistent and published, never that it is true. Note that a conceptual finding's \`grounded\` verdict certifies component-path existence ONLY; the defect-presence claim is carried by \`verification_status\`, not by grounding.`,
+    "",
+    // The aggregate the live run had to be obtained by counting the artifact by
+    // hand. Both populations are CANDIDATE-scoped here and are not reconciled
+    // with the finding-scoped Summary counts: the post-adjudication grounding
+    // quarantine can drop a merged candidate's final finding, so they
+    // legitimately differ and each is labelled by its population.
+    `- Candidate dispositions: ${formatCountList(adjudication.candidate_disposition_breakdown)}`,
+    `- Candidate verification: ${formatCountList(adjudication.candidate_verification_status_breakdown)}`,
     "",
   ];
   for (const finalShare of adjudication.final_finding_shares) {
@@ -737,7 +767,7 @@ function renderConceptualAttributionSection(
   lines.push("### Candidate dispositions", "");
   for (const disposition of adjudication.candidate_dispositions) {
     lines.push(
-      `- \`${disposition.candidate_id}\` — **${disposition.disposition}**; modified ${disposition.modification_percent}%; targets ${disposition.target_final_finding_ids.join(", ") || "none"}. ${disposition.rationale}`,
+      `- \`${disposition.candidate_id}\` — **${disposition.disposition}**; \`${disposition.verification_status}\`; modified ${disposition.modification_percent}%; targets ${disposition.target_final_finding_ids.join(", ") || "none"}. ${disposition.rationale}${disposition.verification_note ? ` _Verified:_ ${disposition.verification_note}` : ""}`,
     );
   }
   lines.push("");
@@ -781,6 +811,13 @@ export function renderAuditReportMarkdown(
             ]
               .filter(Boolean)
               .reduce((acc, note, i) => acc + (i === 0 ? " — " : "; ") + note, ""),
+        ]
+      : []),
+    ...(report.summary.verification_status_breakdown &&
+    Object.keys(report.summary.verification_status_breakdown).length > 0
+      ? [
+          `- Verification: ${formatCountList(report.summary.verification_status_breakdown)}` +
+            " — judge-authored claims about whether each defect is present at HEAD, not tool runs",
         ]
       : []),
     `- Fully audited files: ${report.summary.audited_file_count}`,
@@ -962,6 +999,9 @@ export function normalizeExistingFindingsReport(
   report: AuditFindingsReport,
 ): AuditFindingsReport {
   const groundingBreakdown = groundingStatusBreakdown(report.findings as Finding[]);
+  const verificationBreakdown = verificationStatusBreakdown(
+    report.findings as Finding[],
+  );
   return {
     ...report,
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
@@ -974,6 +1014,9 @@ export function normalizeExistingFindingsReport(
       lens_breakdown: lensBreakdown(report.findings as Finding[]),
       ...(Object.keys(groundingBreakdown).length > 0
         ? { grounding_status_breakdown: groundingBreakdown }
+        : {}),
+      ...(Object.keys(verificationBreakdown).length > 0
+        ? { verification_status_breakdown: verificationBreakdown }
         : {}),
     },
   };
