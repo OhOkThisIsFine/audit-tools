@@ -87,6 +87,15 @@ function renderAdjudication(bundle: ArtifactBundle): string[] {
         ),
         candidate_dispositions: adjudication.candidate_dispositions,
         final_finding_shares: adjudication.final_finding_shares,
+        // The adversary's whole job is to challenge what the round produced, so
+        // it must see the round's own outcome rates. A zero rejection rate over
+        // every candidate is exactly the kind of too-good-to-be-true signal this
+        // pass exists to notice, and it is invisible from the per-candidate
+        // records alone.
+        candidate_disposition_breakdown:
+          adjudication.candidate_disposition_breakdown,
+        candidate_verification_status_breakdown:
+          adjudication.candidate_verification_status_breakdown,
       },
       null,
       2,

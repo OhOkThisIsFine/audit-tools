@@ -86,6 +86,33 @@ test("conceptual judge is evaluative, complete, and attributable", () => {
   expect(p).not.toMatch(/you are merging, not reviewing/);
 });
 
+// ── the rejection ground that was missing (NO-REJECTION-OUTCOME) ──
+//
+// LIMIT, stated so it is not read as more than it is: this proves the
+// instruction SHIPS, not that a judge obeys it. The behavioural half is the
+// validator's refusal of a refuted_at_head candidate that is not rejected
+// (`conceptual-adjudication.test.ts`), which holds against any judge.
+test("conceptual judge is told to reject what HEAD has already fixed", () => {
+  const p = renderConceptualJudgePrompt([
+    {
+      name: "Pragmatist",
+      path: "/tmp/p.json",
+      contributor_id: "design_review_conceptual_p1_round",
+    },
+  ], "round");
+  // The four pre-existing grounds were all about the FORM of an assertion
+  // (vague / unactionable / unsupported / out-of-scope). None covered a
+  // well-argued, actionable, in-scope claim whose defect is simply not there.
+  expect(p).toMatch(/already (fixed|remediated)/i);
+  expect(p).toMatch(/refuted_at_head/);
+  expect(p).toMatch(/verification_status/);
+  expect(p).toMatch(/verification_note/);
+  expect(p).toMatch(/judge_confirmed/);
+  // And it must say what a refutation costs: rejection, not a high-modification
+  // merge, which is exactly what the live run did instead.
+  expect(p).toMatch(/reject/i);
+});
+
 // ── fix 4a: ground design findings against real repo components ──
 test("groundDesignFinding: grounded iff a cited affected_files path exists in the repo", () => {
   const known = new Set(["src/a.ts", "src/b.ts"]);

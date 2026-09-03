@@ -59,6 +59,7 @@ import type {
 import {
   ConceptualJudgeSubmissionSchema,
   buildConceptualReviewAdjudication,
+  deriveConceptualVerificationStatus,
   loadConceptualPerspectiveFindings,
   readConceptualReviewRoundManifest,
   type ConceptualReviewAdjudication,
@@ -1412,9 +1413,16 @@ export async function handleDesignReviewBranch(
   } else if (conceptualResult.status === "ok" && assessment) {
     assessment = {
       ...assessment,
-      conceptual_findings: groundDesignFindings(
-        conceptualResult.findings,
-        bundle.repo_manifest,
+      // Two TOOL-computed verdicts, stamped side by side at the one ingest
+      // boundary, on the two different questions a reader conflates otherwise:
+      // grounding asks whether the finding CITES something real (and on this
+      // path certifies only that a component path exists), verification asks
+      // whether the DEFECT is present at HEAD. The verification fold reads the
+      // judge's per-candidate claims, so it must run against the adjudication
+      // this same submission produced — never a host-supplied value.
+      conceptual_findings: deriveConceptualVerificationStatus(
+        groundDesignFindings(conceptualResult.findings, bundle.repo_manifest),
+        conceptualResult.adjudication,
       ),
       conceptual_reviewed: true,
       rejected_submissions: (assessment.rejected_submissions ?? []).filter(

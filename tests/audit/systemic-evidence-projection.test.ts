@@ -158,6 +158,12 @@ test("systemic challenge receives charter projection, actual findings, and conce
   expect(prompt).toContain("triangulated");
   expect(prompt).toContain("candidate_dispositions");
   expect(prompt).toContain("contribution_percent");
+  // The adversary challenges the round's OUTCOME, so it must see the round's own
+  // rates — a zero rejection rate over every candidate is invisible from the
+  // per-candidate records alone.
+  expect(prompt).toContain("candidate_disposition_breakdown");
+  expect(prompt).toContain("candidate_verification_status_breakdown");
+  expect(prompt).toContain("judge_confirmed");
   expect(prompt).toContain("/x/p1.json");
   expect(prompt).toContain("/x/judge.json");
   expect(prompt).toMatch(/callers and callees in both directions/i);

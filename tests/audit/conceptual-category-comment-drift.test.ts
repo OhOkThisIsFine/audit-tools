@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { resolve } from "node:path";
+
+// INV-WH: a raw `node:child_process` entry point flashes a console window when
+// the parent is windowless on win32. The hidden wrapper is the only door.
+import { execSyncHidden } from "../helpers/spawn.mjs";
 import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
@@ -22,7 +25,7 @@ const CANONICAL = [
 ] as const;
 
 function trackedTsSources(): string[] {
-  return execSync('git ls-files "src/**/*.ts"', {
+  return execSyncHidden('git ls-files "src/**/*.ts"', {
     cwd: REPO_ROOT,
     encoding: "utf8",
   })

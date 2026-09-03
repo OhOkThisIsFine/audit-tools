@@ -2,12 +2,19 @@ import { test, expect } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { prepareConceptualDispatch } from "../../src/audit/cli/conceptualDispatch.js";
+import {
+  commitFold,
+  createFoldTransaction,
+} from "../../src/audit/cli/foldTransaction.js";
 import { cmdNextStep } from "../../src/audit/cli/nextStepCommand.js";
+import { handleDesignReviewBranch } from "../../src/audit/cli/nextStepHelpers.js";
 import {
   writeCoreArtifacts,
   type ArtifactBundle,
 } from "../../src/audit/io/artifacts.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
+import { readConceptualReviewRoundManifest } from "../../src/audit/types/conceptualAdjudication.js";
 import { persistAnalyzerConsent } from "../../src/shared/analyzerPolicy.js";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 
@@ -202,5 +209,126 @@ test("production systemic dispatch never advertises the deleted deep-review judg
     const normalizedPrompt = prompt.replace(/\\+/g, "/");
     expect(normalizedPrompt).toContain(perspectiveResultPath.replace(/\\+/g, "/"));
     expect(normalizedPrompt).not.toContain(deletedJudgeResultPath.replace(/\\+/g, "/"));
+  });
+});
+
+// The WIRING proof for NO-REJECTION-OUTCOME. `deriveConceptualVerificationStatus`
+// has its own unit pins; this one runs the REAL ingest fold and reads the
+// COMMITTED artifact, because a derivation nothing calls is write-only data that
+// still reads as authoritative.
+//
+// The candidate set must be NON-EMPTY and asserted to be: `.every()` over an
+// empty array is vacuously true, so the same assertion over the fixture's
+// `conceptual_findings: []` would have been green on the unfixed tree.
+test("the conceptual ingest fold stamps a verification status on every admitted finding", async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+
+    const bundle: ArtifactBundle = {
+      ...readyForIntentBundle(),
+      design_assessment: {
+        generated_at: "2026-01-01T00:00:00.000Z",
+        findings: [],
+        contract_reviewed: true,
+        conceptual_reviewed: false,
+      },
+    };
+    const dispatch = await prepareConceptualDispatch({
+      artifactsDir,
+      bundle,
+      settings: { conceptual_depth: "deep", perspectives: 2 },
+    });
+    const round = await readConceptualReviewRoundManifest(artifactsDir);
+    if (!round) throw new Error("missing conceptual round manifest");
+
+    function conceptualFinding(id: string): Record<string, unknown> {
+      return {
+        id,
+        title: id,
+        category: "design_simplification",
+        severity: "medium",
+        confidence: "high",
+        lens: "architecture",
+        summary: `${id} summary`,
+        affected_files: [{ path: "src/api/auth.ts" }],
+      };
+    }
+
+    await Promise.all(
+      round.perspectives.map((contributor, index) =>
+        writeFile(
+          contributor.result_path,
+          JSON.stringify({ findings: [conceptualFinding(`DR-00${index + 1}`)] }),
+          "utf8",
+        ),
+      ),
+    );
+    await writeFile(
+      dispatch.conceptualResultsPath,
+      JSON.stringify({
+        round_id: round.round_id,
+        findings: [conceptualFinding("FINAL-001")],
+        candidate_dispositions: round.perspectives.map((contributor, index) => ({
+          candidate_id: `${contributor.contributor_id}::DR-00${index + 1}`,
+          contributor_id: contributor.contributor_id,
+          source_finding_id: `DR-00${index + 1}`,
+          disposition: index === 0 ? "retained" : "merged",
+          target_final_finding_ids: ["FINAL-001"],
+          modification_percent: index === 0 ? 10 : 50,
+          rationale: `candidate ${index + 1} disposition`,
+          verification_status: index === 0 ? "judge_confirmed" : "asserted",
+          ...(index === 0
+            ? { verification_note: "Re-read the cited module at HEAD." }
+            : {}),
+        })),
+        final_finding_shares: [
+          {
+            final_finding_id: "FINAL-001",
+            contributors: [
+              ...round.perspectives.map((contributor, index) => ({
+                contributor_id: contributor.contributor_id,
+                source_candidate_ids: [
+                  `${contributor.contributor_id}::DR-00${index + 1}`,
+                ],
+                contribution_percent: index === 0 ? 55 : 30,
+                rationale: `perspective ${index + 1} share`,
+              })),
+              {
+                contributor_id: round.judge.contributor_id,
+                source_candidate_ids: [],
+                contribution_percent: 15,
+                rationale: "judge share",
+              },
+            ],
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(
+      { artifactsDir },
+      bundle,
+      { status: "active", obligations: [] },
+      tx,
+    );
+    if (branch.action !== "continue") throw new Error("expected continue");
+    await commitFold(artifactsDir, branch.bundle, tx);
+
+    const committed = JSON.parse(
+      await readFile(join(artifactsDir, "design_assessment.json"), "utf8"),
+    ) as { conceptual_findings?: { verification_status?: string }[] };
+    const conceptual = committed.conceptual_findings ?? [];
+    expect(
+      conceptual.length,
+      "a vacuous `.every()` over an empty set would be green on the unfixed tree",
+    ).toBeGreaterThan(0);
+    expect(
+      conceptual.every((entry) => entry.verification_status !== undefined),
+      "every admitted conceptual finding must carry a status after ingest",
+    ).toBe(true);
+    expect(conceptual[0]?.verification_status).toBe("judge_confirmed");
   });
 });

@@ -215,6 +215,40 @@ export function conceptualCandidateId(
   return `${contributorId}::${findingId}`;
 }
 
+/**
+ * Fold the judge's per-CANDIDATE verification claims into a per-FINDING status.
+ * A final finding is `judge_confirmed` when at least one candidate that fed it
+ * was; otherwise `asserted`. The fold is TOTAL by construction — a judge-added
+ * finding has no candidate, and the shallow pass has no adjudication at all, and
+ * both land on `asserted` rather than on an absent field, because absence is the
+ * silence this vocabulary exists to end.
+ *
+ * `refuted_at_head` can never be emitted here: the validator forces a refuted
+ * candidate to `rejected`, and a rejected candidate maps to no final finding.
+ *
+ * Derived, never host-supplied — the reason `verification_status` is omitted
+ * from every submission schema. Returns new finding objects; the input is not
+ * mutated.
+ */
+export function deriveConceptualVerificationStatus(
+  findings: readonly Finding[],
+  adjudication: ConceptualReviewAdjudication | undefined,
+): Finding[] {
+  const confirmedFinalIds = new Set<string>();
+  for (const disposition of adjudication?.candidate_dispositions ?? []) {
+    if (disposition.verification_status !== "judge_confirmed") continue;
+    for (const finalId of disposition.target_final_finding_ids) {
+      confirmedFinalIds.add(finalId);
+    }
+  }
+  return findings.map((finding) => ({
+    ...finding,
+    verification_status: confirmedFinalIds.has(finding.id)
+      ? ("judge_confirmed" as const)
+      : ("asserted" as const),
+  }));
+}
+
 function submissionFindings(value: unknown, path: string): Finding[] {
   const envelope = z
     .union([
