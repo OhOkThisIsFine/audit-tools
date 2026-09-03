@@ -39,7 +39,7 @@ export interface DesignAssessment {
   reviewed?: boolean;
   /** Contract-assessment pass (adversarial): inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap */
   contract_findings?: Finding[];
-  /** Conceptual-design pass (generative): tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability */
+  /** Conceptual-design pass (generative); categories are CONCEPTUAL_FINDING_CATEGORIES. */
   conceptual_findings?: Finding[];
   /** True when the contract review pass has been completed */
   contract_reviewed?: boolean;

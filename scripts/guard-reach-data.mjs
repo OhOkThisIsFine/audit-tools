@@ -806,6 +806,15 @@ export const GUARDS = [
       'reasons. A recursive fs-only source reconciliation makes every exported /Prompt/ builder ' +
       'claim exactly one row. The two P40 behavioral/source pins remain.',
   },
+  {
+    id: 'conceptual-category-comment-drift-test',
+    kind: 'contract-test',
+    impl: 'tests/audit/conceptual-category-comment-drift.test.ts',
+    note:
+      'P50: conceptual finding categories are single-sourced; scans tracked src/**/*.ts comment ' +
+      'lines for 3+ canonical token enumerations. Uncovered: comments naming 1-2 tokens (accepted ' +
+      'as topical discussion rather than enumeration) and non-.ts files are outside the scan',
+  },
 ];
 
 /** @type {ReachRow[]} */
@@ -990,6 +999,7 @@ export const REACH = [
       'pre-commit-gate',
       'prompt-capability-test',
       'prompt-renders-its-contract-test',
+      'conceptual-category-comment-drift-test',
     ],
     uncovered:
       'the loop-core attestation half of pre-commit-gate covers only LOOP_CORE_PATTERNS prefixes ' +

@@ -397,6 +397,17 @@ function findingsEnvelopeExample(categoryEnum: string): string[] {
   ];
 }
 
+export const CONCEPTUAL_FINDING_CATEGORIES = [
+  "fundamental_approach",
+  "core_assumption",
+  "structural_risk",
+  "architecture_pattern",
+  "design_simplification",
+  "tool_opportunity",
+  "integration",
+  "missing_capability",
+] as const;
+
 /** Shared finding-output-format block for any conceptual-review prompt. */
 function conceptualOutputFormat(resultsPathNote: string): string[] {
   return [
@@ -405,7 +416,7 @@ function conceptualOutputFormat(resultsPathNote: string): string[] {
     "Produce a JSON object with a top-level `findings` array. Each finding in that array must conform to:",
     "",
     ...findingsEnvelopeExample(
-      "one of: fundamental_approach, core_assumption, structural_risk, architecture_pattern, design_simplification, tool_opportunity, integration, missing_capability",
+      `one of: ${CONCEPTUAL_FINDING_CATEGORIES.join(", ")}`,
     ),
     "",
     "**Ground every finding.** Cite at least one real `affected_files` path that exists in this repository — the component your observation is actually about. A finding that cites no real component is surfaced as ungrounded (quarantined), not admitted as confirmed: point at the code, do not invent paths. A whole-system observation should anchor on the file(s) where the structure is clearest.",
@@ -568,8 +579,7 @@ export function renderContractReviewPrompt(
 /**
  * Conceptual-design review prompt (generative pass — shallow / single agent).
  * Produces broad architectural and design improvement observations.
- * Categories: tool_opportunity, architecture_pattern, design_simplification,
- * integration, missing_capability.
+ * Categories: see CONCEPTUAL_FINDING_CATEGORIES.
  *
  * The deep multi-perspective variant is real dispatch fan-out, not an in-prompt
  * instruction — see `renderConceptualPerspectivePrompt` /
