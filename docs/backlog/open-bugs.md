@@ -6,6 +6,153 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+## ⚠ TOP PRIORITY — the 2026-09-02/03 live-run defect set (owner-directed, fix first)
+
+Seven entries below were found by running two full audits of `C:\Code\llm-relay` (335 files) back
+to back, differing only in lane capability. They are grouped here because they share one shape:
+**the tool reports success while delivering less than it claims**, and each was invisible from
+inside the run. Ordered by consequence. Full evidence lives in each entry.
+
+1. **Nine lenses were selected; two produced findings.** `SELECTED-LENSES-IGNORED` below. The most
+   consequential of the set — it silently voids the operator's own scope decision.
+2. **A charter packet ships a manifest instead of evidence.** `PACKET-SHIPS-MANIFEST` — 0 of 72
+   source-comment blocks delivered; a lane characterises intent from evidence it never received.
+3. **`charter_register.json` self-certifies.** `REGISTER-SELF-CERTIFIES` — printed
+   `validation_issues: []` at 1-of-15 correct citations and again at 75-of-75.
+4. **Adjudication has no rejection outcome.** `NO-REJECTION-OUTCOME` — 60 of 60 candidates
+   survived, so no run publishes a false-positive rate.
+5. **Packets are consumed at ingest.** `PACKETS-CONSUMED` — lane inputs cannot be audited after
+   the fact; a three-lane claim about missing coverage could not be checked.
+6. **Capability status is asserted, not measured.** `CAPABILITY-ASSERTED` — failed analyzer
+   installs record `"status": "applied"`; a gate with zero planned tasks records `satisfied`.
+7. **Lane outcomes are not recorded per lane.** `LANE-OUTCOMES-UNRECORDED` — run 1's five
+   "exit 0, wrote nothing" lanes are invisible in every artifact.
+
+Cross-repo siblings, already filed: `docs/backlog/forward-tracks.md` Track 3 (emit size, complexity
+and risk per lane) and `C:\Code\docs\backlog.md` (host must query the live ladder, and match model
+capability to stated task demand).
+
+- **SELECTED-LENSES-IGNORED — nine lenses were selected and two produced findings, with nothing
+  reporting the gap (2026-09-03, high, friction: false_green).** `intent_checkpoint.json` recorded
+  `lens_selection.include = [architecture, maintainability, performance, tests, operability,
+  config_deployment, observability, provenance_labelling, concurrency_races]`, `exclude: []`.
+  Measured across the delivered artifacts: `design_assessment.json` carries `architecture 97,
+  maintainability 511`; `charter_register.json` carries `architecture 16`; all 27 merged conceptual
+  findings and all 16 charter deltas are `architecture`. The other SEVEN produced zero findings —
+  including two custom lenses the operator added and one canonical lens the host flipped from
+  exclude to include on stated evidence. ⚠ The only enforcement is prose in the lane prompt telling
+  the model not to default to `architecture`; nothing checks the output against the selection. So a
+  run advertises the operator's chosen scope and delivers a fraction of it, and the report cannot
+  distinguish "reviewed, nothing found" from "never reviewed". Reproduced identically across both
+  runs, so it is not lane-quality. **Property:** a lens selected in intent either produces findings
+  attributed to it, or the run reports that lens as un-exercised — in the artifacts and in the
+  final report — so absence of a finding is never silently readable as absence of a defect.
+
+- **NO-REJECTION-OUTCOME — adjudication cannot reject, so no run publishes a false-positive rate
+  (2026-09-03, high, friction: false_green).** Measured: 60 candidates in, `merged: 50` +
+  `retained: 10` = 60 of 60 survived; the prior run scored 74 in, `merged: 57` + `retained: 17` =
+  74 of 74. Across two independent runs and 134 candidates, zero were rejected. One candidate whose
+  two named defects the judge itself verified as ALREADY FIXED at HEAD was merged at 70%
+  modification rather than rejected, because no rejection disposition exists to record it. There is
+  no verification-status field on a finding either. ⚠ Consequence: quality is unmeasurable. A
+  reader cannot tell a finding the judge confirmed from one it merely reworded, and the tool cannot
+  report how often its reviewers are wrong. **Property:** adjudication carries a rejection
+  disposition and a per-finding verification status, and the run reports both counts, so a
+  remediator can rank by confirmed-versus-asserted.
+
+- **CAPABILITY-ASSERTED — a failed analyzer install records `"status": "applied"`, and a gate with
+  nothing to check records `satisfied` (2026-09-03, medium, friction: false_green).** The html and
+  css analyzers were requested `ephemeral` in both runs; `web-tree-sitter` never installed, the run
+  logged `analyzer 'html' … is ABSENT — parser-grade extraction is OFF … the weaker regex floor
+  will run instead`, and `analyzer_capability.json` nonetheless records `"status": "applied"` while
+  `audit_state.json` records the obligation `satisfied`. No lane prompt discloses the degradation,
+  yet lanes rank on `external_analyzer_signal`. Separately `runtime_validation_current: satisfied`
+  is recorded while `planning_artifacts` is still `missing` — the gate passed because zero tasks
+  existed to validate. ⚠ Both are the same shape: a status field asserts an intent rather than
+  recording a measurement. **Property:** capability and gate statuses are derived from what
+  actually ran; a degraded analyzer is surfaced to every lane that ranks on its signal, and a gate
+  with an empty input set reports `not-applicable`, never `satisfied`.
+
+- **LANE-OUTCOMES-UNRECORDED — a lane that reports success and writes nothing leaves no trace
+  (2026-09-03, medium, friction: missing_affordance).** `submission-ledger.jsonl` is round-scoped: <!-- doc-citation-exempt: runtime artifact names, not tracked files -->
+  eight design-review lanes produced two rows. The only per-lane roster is inside the judge's own
+  submission, and its self-reference to the judge result file already dangles once that submission
+  is consumed. Measured in run 1: of 8 dispatched lanes, 5 reported process exit 0 while writing no
+  artifact at all (one returned the single word "Let" after 909 s), 2 failed outright, 1 succeeded.
+  None of that is recoverable from any audit artifact — it survives only in the host's transcript.
+  **Property:** the ledger records one row per dispatched lane with its outcome (artifact written,
+  empty, failed) so a run's real delivery rate is auditable from its own artifacts.
+
+- **REGISTER-SELF-CERTIFIES — `charter_register.json` prints `validation_issues: []` whether its citations are right or wrong
+  (2026-09-02, high, friction: false_green).** Measured as a controlled A/B on one repo, same
+  prompts and same schema, varying only lane capability. Run 1 register: 15 line-ranged citations,
+  **1 in range, 14 overshooting** their file's real length — `dashboard/src/main.tsx` lines 467-469 in a <!-- doc-citation-exempt: paths in the audited repo C:/Code/llm-relay, not this tree -->
+  9-line file (52x), `src/kernel/request-lifecycle.ts` lines 1346-1355 in a 112-line file (12x). Run 2 <!-- doc-citation-exempt: paths in the audited repo C:/Code/llm-relay, not this tree -->
+  register: **75 citations, 75 in range, 0 overshoots.** BOTH printed `validation_issues: []`. The
+  field therefore carries no information in either direction and reads as an assurance. ⚠ The
+  overshoot starts cluster tightly (1072, 1227, 1234, 1317, 1343, 1346, 1360, 1372, 1506, 1554,
+  1606) across files of 112 to 587 lines — they are offsets into the CONCATENATED packet, not into
+  the files named, which is a packet-format defect and not merely a careless lane: the lazy answer
+  is the wrong one. **Property:** a citation whose end line exceeds its file's length fails the
+  register, and `validation_issues` is populated by an actual check — or the field is removed
+  rather than left as a false assurance.
+
+- **A lane must hand-build its own citation resolver because the packet carries no per-file line
+  provenance (2026-09-02, medium, friction: tool_should_decide).** The packet is one concatenated
+  document, so emitting a correct `path:line` requires the lane to independently open each real
+  file and substring-match its quote. Two run-2 lanes each invented that procedure from scratch
+  (one ran three verification batches of 86+40+15 needles; another checked path, end-line and
+  verbatim quote three ways), and a run-1 lane did not, producing the 14 overshoots above. The
+  correct behaviour is currently a property of the model rather than of the tool. **Property:** the
+  packet carries each excerpt's source file and its true start line, so a lane can emit a correct
+  citation by copying provenance it was given instead of reconstructing it.
+
+- **PACKET-SHIPS-MANIFEST — a charter packet ships a MANIFEST where evidence should be, and no coverage flag records it
+  (2026-09-02, high, friction: false_green).** Measured on a live `llm-relay` audit (335 files).
+  The stated packet's final 80 lines (2612-2691 of 2691) are a bare list of omitted items — all 72
+  `Comments extracted from: <path>` entries appear as names with NO content, alongside dozens of
+  `Doc:` entries; every delivered doc is additionally cut at 6000 chars. The revealed packet listed
+  50 paths the same way, delivering 31 of 81 files' source. So the "stated" channel — whose whole
+  job is to capture what the project says about itself, source comments included — supplied ZERO
+  source comments, and nothing downstream marks the channel as partial. ⚠ This is worse than a
+  wrong citation: a wrong citation can be validated, whereas ABSENT evidence is indistinguishable
+  from thorough work. A weak-lane pass consumed the truncated packet silently; an Opus pass hit the
+  identical cap, said so, and lowered two nodes to `medium`/`low` in consequence — i.e. the defect
+  is currently caught only by whichever model happens to notice. **Property:** a packet either
+  delivers the evidence it names, or every consumer of that charter carries an explicit coverage
+  figure (delivered vs named, per evidence class) that survives into the register and the report.
+
+- **PACKETS-CONSUMED — charter packets are CONSUMED at ingest, so nobody can audit what a lane was actually given
+  (2026-09-02, medium, friction: missing_affordance).** After `charter_extraction` ingests, the
+  `*-packet.md` files are deleted from `audit/lanes/`; only the prompts remain, in the live run and <!-- doc-citation-exempt: runtime artifact names, not tracked files -->
+  in an archived one alike. When three independent lanes each reported that the request path
+  (`server.ts`, `routes/*`, `candidate-runner.ts`, `config.ts`, `circuit-breaker.ts`, <!-- doc-citation-exempt: paths in the audited repo C:/Code/llm-relay, not this tree -->
+  `target-facts.ts`) was absent from their packet and that coverage was 36 of 123 `src/` files, the <!-- doc-citation-exempt: paths in the audited repo C:/Code/llm-relay, not this tree -->
+  orchestrator could not confirm it — the evidence had already been removed. A glob against the
+  deleted names silently matched nothing and produced a confident but meaningless "0 of 3" result,
+  which is its own trap. **Property:** the exact packet each lane received is retained (or hashed
+  and reproducible) for the life of the run, so a claim about lane inputs is checkable after the
+  fact rather than resting on the lane's own testimony.
+
+- **The backlog seek index silently omits 4 of the 5 `## Open tracks` entries, and `--check` passes
+  anyway because it re-runs the same blind parse (2026-09-02, medium, friction: false_green).**
+  `parseTrackEntries` in `scripts/shared/generate-handoff-roadmap.mjs` matches
+  `/^\*\*Track \d+\b/`, so ONLY a lead-in beginning literally `**Track <digits>` is indexed. Four
+  entries in `docs/backlog/forward-tracks.md` do not start that way — the ceremony-review remainder,
+  the audit-draw read-only framing, the metric-pool empirical program, and Track 2.5's neighbours —
+  so `docs/backlog.md` lists `Open tracks` as a section holding one entry. The generator's own doc
+  comment asserts the grammar the file does not follow: "`## Open tracks` writes `**Track N — …**`
+  paragraphs". Nothing reconciles the two, and `generate-backlog-index.mjs --check` cannot: it
+  compares the rendered index against the SAME parse, so an entry the parse cannot see is absent
+  from both sides and the gate is green. Found while adding a new entry that landed in the file and
+  never reached the index; it was renamed `Track 3` to become findable, which is a workaround, not
+  a fix. ⚠ This is the exact failure the index preamble names — "an entry that leaves the index is
+  an entry that goes stale unseen" — reached through the writer rather than through neglect.
+  **Property:** either every `## Open tracks` paragraph entry is indexed whatever its lead-in, or a
+  check FAILS on a bold paragraph in that section that the entry grammar cannot parse. A gate that
+  validates the index against its own parser cannot detect this class; the check must compare
+  against the file's paragraphs.
+
 - **Four code and CI comments assert a shape the tree no longer has, and nothing checks a comment
   against the code it describes (2026-08-31, medium, friction: tool_should_decide).**
   The header of `src/shared/continuityScore.ts` says audit "re-exports `computeContinuityScores` …

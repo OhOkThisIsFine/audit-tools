@@ -8,6 +8,25 @@
 
 ## Open tracks
 
+**Track 3 — every emitted lane should carry a size, complexity and risk ranking, so the host can match a model to the work (2026-09-02, owner-directed).** A step contract tells the host WHICH lanes to
+run and WHERE to write, but says nothing about how demanding each lane is — so the host infers
+demand from the prompt, and infers it badly. Measured on a live `llm-relay` audit (335 files):
+the host placed 5 of 8 design-review lanes plus both charter lanes on a free `pool/medium` tier,
+and one conceptual perspective on Gemini Flash. That lane's MEASUREMENTS were accurate — it cited
+`src/config.ts` at "nearly 2,500 lines" against an actual 2,486, and `src/backend.ts` at 1,864 <!-- doc-citation-exempt: paths in the audited repo C:/Code/llm-relay, not this tree -->
+against 1,863 — but its JUDGMENT was stale: it recommended decoupling `src/server.ts` from its <!-- doc-citation-exempt: paths in the audited repo C:/Code/llm-relay, not this tree -->
+route implementations, work that had already shipped, leaving `server.ts` at 894 lines beside an <!-- doc-citation-exempt: paths in the audited repo C:/Code/llm-relay, not this tree -->
+existing `src/routes/`. Charter extraction and design review are whole-repo, cross-cutting and <!-- doc-citation-exempt: paths in the audited repo C:/Code/llm-relay, not this tree -->
+high-consequence — they set the frame every later step reasons inside — so a weak reviewer's MISS
+is unrecoverable downstream: the merge judge can discard a wrong finding, but it cannot restore
+one nobody saw. **Property:** every step contract that emits a lane states that lane's size,
+complexity and risk, so a host selects a model from a stated ranking instead of guessing from
+prompt length. ⚠ The ranking stays provider-neutral by construction — it names DEMAND, never a
+model, a provider, a tier or a lane, which is the same boundary the loader already draws when it
+forbids sending provider, model, quota, context-window, routing or launch configuration to
+audit-tools. Machine-side sibling: `C:\Code\docs\backlog.md` carries the host-side half, since the
+host is what must act on the ranking.
+
 **Ceremony-review remainder — Tier 2/3 consolidations, plus the one unlanded Part-5 mechanism
 (2026-08-29).** Full evidence and the ranked plan:
 [`ceremony-complexity-review-2026-08-29.md`](../reviews/ceremony-complexity-review-2026-08-29.md).
