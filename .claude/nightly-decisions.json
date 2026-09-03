@@ -2055,6 +2055,8 @@
     "answer": "Adopt P50 whole — Extract CONCEPTUAL_FINDING_CATEGORIES, build the line-408 enum from it, replace both stale comments with a pointer to the constant, and ship the drift guard as tests/audit/conceptual-category-comment-drift.test.ts with its guard-reach registry row. One commit, per atomic-replace.",
     "subject": "P50: two code comments still name five conceptual categories where the prompt emits eight — single-source the list and guard it?",
     "path": "src/audit/types/designAssessment.ts",
-    "decided_at": "2026-09-03T15:39:24.464Z"
+    "decided_at": "2026-09-03T15:39:24.464Z",
+    "completed_at": "2026-09-03T15:49:18.338Z",
+    "completed_ref": "507bcc98 — P50 landed: constant + pointers + drift guard"
   }
 }
