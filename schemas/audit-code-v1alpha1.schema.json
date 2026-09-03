@@ -47,7 +47,8 @@
                   "present",
                   "stale",
                   "blocked",
-                  "satisfied"
+                  "satisfied",
+                  "not_applicable"
                 ]
               },
               "reason": {

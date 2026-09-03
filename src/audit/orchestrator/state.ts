@@ -467,38 +467,50 @@ export function deriveAuditState(
     obligations.push(obligation("audit_tasks_completed", "satisfied"));
   }
 
+  // An EMPTY input set is `not_applicable`, never `satisfied`. Nothing was
+  // planned, so no result is owed and none was produced — and this arm did not
+  // even carry a reason string, so the artifact asserted a success it had not
+  // measured with nothing beside it to say otherwise.
+  const plannedAuditTasks = bundle.audit_tasks?.length ?? 0;
   obligations.push(
-    obligation(
-      "audit_results_ingested",
-      (bundle.audit_tasks?.length ?? 0) === 0 || has(bundle.audit_results)
-        ? "satisfied"
-        : "missing",
-    ),
+    plannedAuditTasks === 0
+      ? obligation(
+          "audit_results_ingested",
+          "not_applicable",
+          "No audit tasks were planned, so no results are owed.",
+        )
+      : obligation(
+          "audit_results_ingested",
+          has(bundle.audit_results) ? "satisfied" : "missing",
+        ),
   );
   const runtimeTasks = bundle.runtime_validation_tasks?.tasks ?? [];
   const runtimeResults = bundle.runtime_validation_report?.results ?? [];
-  const runtimeReady =
-    runtimeTasks.length === 0 ||
-    (runtimeTasks.length > 0 &&
-      runtimeTasks.every((task) =>
-        runtimeResults.some(
-          (result) =>
-            result.task_id === task.id &&
-            result.status !== "pending",
-        ),
-      ));
-  obligations.push(
-    obligation(
-      "runtime_validation_current",
-      runtimeReady
-        ? "satisfied"
-        : has(bundle.runtime_validation_report)
-          ? "stale"
-          : "missing",
-      runtimeTasks.length === 0
-        ? "No deterministic runtime validation tasks were planned."
-        : undefined,
+  // Same empty-set shape as `audit_results_ingested` four lines above, and the
+  // instance the live run surfaced: `runtime_validation_current: satisfied` was
+  // recorded while `planning_artifacts` was still `missing` — the gate passed
+  // because zero tasks existed to validate. The `reason` here was already
+  // honest; only the `state` was not.
+  const runtimeReady = runtimeTasks.every((task) =>
+    runtimeResults.some(
+      (result) => result.task_id === task.id && result.status !== "pending",
     ),
+  );
+  obligations.push(
+    runtimeTasks.length === 0
+      ? obligation(
+          "runtime_validation_current",
+          "not_applicable",
+          "No deterministic runtime validation tasks were planned.",
+        )
+      : obligation(
+          "runtime_validation_current",
+          runtimeReady
+            ? "satisfied"
+            : has(bundle.runtime_validation_report)
+              ? "stale"
+              : "missing",
+        ),
   );
   obligations.push(
     obligation(

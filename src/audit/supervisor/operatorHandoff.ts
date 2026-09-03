@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   SESSION_INTENT_RELATIVE_PATH,
   frictionCapturePath,
+  isActionableObligationState,
   renderPromptCommand,
   writeJsonFile,
 } from "audit-tools/shared";
@@ -11,7 +12,6 @@ import { AUDIT_FRICTION_RUN_ID } from "../orchestrator/nextStep.js";
 import type {
   AuditState,
   AuditTopLevelStatus,
-  ObligationState,
 } from "../types/auditState.js";
 
 export interface AuditCodeHandoffInput {
@@ -79,14 +79,22 @@ export const AUDIT_TASKS_FILENAME = "audit_tasks.json";
 export const RUNTIME_VALIDATION_TASKS_FILENAME = "runtime_validation_tasks.json";
 
 const BLOCKED_STATUS: AuditTopLevelStatus = "blocked";
-const NON_PENDING_OBLIGATION_STATES = new Set<ObligationState>([
-  "present",
-  "satisfied",
-]);
 
+/**
+ * What the operator is still owed: exactly the obligations the drain can still
+ * act on.
+ *
+ * DERIVED from the engine's own actionability question, never a second
+ * membership list. It was `new Set<ObligationState>(["present", "satisfied"])`
+ * — a Set LITERAL, which the type system does not force to grow when the state
+ * union does, so a new non-actionable member (`not_applicable`) fell straight
+ * through to pending and shipped on the host-facing handoff as work still owed.
+ * `isActionableObligationState` is an exhaustive `Record`, so the same widening
+ * is now a compile error at its one home.
+ */
 function buildPendingObligations(state: AuditState): string[] {
   return state.obligations
-    .filter((item) => !NON_PENDING_OBLIGATION_STATES.has(item.state))
+    .filter((item) => isActionableObligationState(item.state))
     .map((item) => item.id);
 }
 

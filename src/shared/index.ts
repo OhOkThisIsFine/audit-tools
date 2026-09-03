@@ -1090,6 +1090,7 @@ export type {
 export {
   ObligationStateSchema,
   ObligationSchema,
+  isActionableObligationState,
   findFirstActionableObligation,
   findNextObligation,
   advance,

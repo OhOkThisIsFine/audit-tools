@@ -13,7 +13,8 @@
  * INV-05: the dependency graph (ARTIFACT_DEPENDENCIES_MAP) is acyclic; every present
  *         artifact set can be dependency-first-ordered without a cycle
  * INV-06: obligation derivation reflects real content: audit_results_ingested is
- *         satisfied on zero-task runs; missing when tasks present but results absent
+ *         not_applicable on zero-task runs (nothing owed, so nothing achieved);
+ *         missing when tasks present but results absent
  * INV-07: obligation/planning code stays language-neutral — no per-ecosystem branches
  * INV-08: no hardcoded model identities anywhere in orchestrator source
  */
@@ -339,23 +340,26 @@ test("INV-05: computeArtifactMetadata processes a full planning bundle without t
 // INV-06: obligation derivation reflects real content
 // ---------------------------------------------------------------------------
 
-test("INV-06: audit_results_ingested is satisfied for a zero-task run (no tasks, no results needed)", () => {
-  // When audit_tasks is empty (or absent), audit_results_ingested must be
-  // satisfied regardless of whether audit_results is present. This is the
-  // zero-task bypass: no work to ingest = trivially complete.
+test("INV-06: audit_results_ingested is not_applicable for a zero-task run (nothing was owed)", () => {
+  // When audit_tasks is empty (or absent), nothing is owed and nothing was
+  // ingested. The zero-task bypass is unchanged BEHAVIOURALLY — the obligation
+  // is still non-actionable, so the drain still passes over it — but it no
+  // longer SAYS `satisfied`, which read as "results were ingested" on a run
+  // where none existed.
   const zeroTaskBundle: ArtifactBundle = { audit_tasks: [] };
   const state = deriveAuditState(zeroTaskBundle);
   const obligation = state.obligations.find((o) => o.id === "audit_results_ingested");
   expect(obligation, "audit_results_ingested obligation must be present").toBeTruthy();
-  expect(obligation!.state, "audit_results_ingested must be 'satisfied' when audit_tasks is empty (zero-task bypass)").toBe("satisfied");
+  expect(obligation!.state, "audit_results_ingested must be 'not_applicable' when audit_tasks is empty (nothing to ingest)").toBe("not_applicable");
+  expect(obligation!.reason, "the empty input set must be STATED, not left to be inferred from the state").toBe("No audit tasks were planned, so no results are owed.");
 });
 
-test("INV-06: audit_results_ingested is satisfied when audit_tasks is absent (no tasks planned)", () => {
+test("INV-06: audit_results_ingested is not_applicable when audit_tasks is absent (no tasks planned)", () => {
   const bundle: ArtifactBundle = {};
   const state = deriveAuditState(bundle);
   const obligation = state.obligations.find((o) => o.id === "audit_results_ingested");
   expect(obligation, "audit_results_ingested must be derived").toBeTruthy();
-  expect(obligation!.state, "audit_results_ingested must be 'satisfied' when no tasks are planned").toBe("satisfied");
+  expect(obligation!.state, "audit_results_ingested must be 'not_applicable' when no tasks are planned").toBe("not_applicable");
 });
 
 test("INV-06: audit_results_ingested is missing when tasks are present but audit_results is absent", () => {

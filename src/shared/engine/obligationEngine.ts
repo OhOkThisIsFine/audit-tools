@@ -21,8 +21,17 @@ import { z } from "zod";
 
 /**
  * Satisfaction state of a single ordered obligation. `missing` and `stale` are
- * the *actionable* states the scan selects on; `present`, `satisfied`, and
- * `blocked` are non-actionable.
+ * the *actionable* states the scan selects on; `present`, `satisfied`,
+ * `blocked`, and `not_applicable` are non-actionable.
+ *
+ * `not_applicable` is the answer for an obligation whose INPUT SET IS EMPTY —
+ * there was nothing to do, so nothing was achieved either. It is not a success
+ * member: a gate with zero planned tasks used to report `satisfied`, which read
+ * as "checked, and it passed" when the truth was "there was nothing to check".
+ * The word is the shared measured-outcome vocabulary's
+ * (`src/shared/measurement/measuredOutcome.ts`) and its RULE — an empty input
+ * set is never a success member — but not its type: this enum governs the
+ * drain's actionability scan, which that vocabulary knows nothing about.
  */
 export const ObligationStateSchema = z.enum([
   "missing",
@@ -30,8 +39,36 @@ export const ObligationStateSchema = z.enum([
   "stale",
   "blocked",
   "satisfied",
+  "not_applicable",
 ]);
 export type ObligationState = z.infer<typeof ObligationStateSchema>;
+
+/**
+ * Which states the ordered scan may select. Exhaustive by construction, so
+ * widening {@link ObligationStateSchema} without classifying the new member is
+ * a COMPILE error rather than a silent fall-through — in EITHER direction: a
+ * new member cannot become actionable by accident, and cannot become pending on
+ * a host-facing surface by accident either.
+ */
+const OBLIGATION_STATE_IS_ACTIONABLE: Record<ObligationState, boolean> = {
+  missing: true,
+  stale: true,
+  present: false,
+  blocked: false,
+  satisfied: false,
+  not_applicable: false,
+};
+
+/**
+ * True when an obligation in this state is work the drain can pick up. The ONE
+ * home for that question: the scan below asks it, and so does every consumer
+ * that partitions obligations into "still owed" and "not" — which used to
+ * re-spell the partition as its own membership set and therefore could not
+ * notice the vocabulary widening underneath it.
+ */
+export function isActionableObligationState(state: ObligationState): boolean {
+  return OBLIGATION_STATE_IS_ACTIONABLE[state];
+}
 
 /** A single ordered obligation carrying its precomputed satisfaction state. */
 export const ObligationSchema = z
@@ -62,7 +99,7 @@ export function findFirstActionableObligation<T extends Obligation>(
 ): T | undefined {
   for (const id of priority) {
     const item = obligations.find((o) => o.id === id);
-    if (item && (item.state === "missing" || item.state === "stale")) {
+    if (item && isActionableObligationState(item.state)) {
       return item;
     }
   }

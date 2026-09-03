@@ -113,9 +113,12 @@ test("committed fixture repo supports external analyzer import and deterministic
     }
     expect(planning.updated_bundle.runtime_validation_tasks.tasks.length).toBe(0);
     expect(planning.updated_bundle.runtime_validation_report).toBe(undefined);
+    // Zero planned tasks: the gate has nothing to check, so it reports
+    // `not_applicable` rather than the `satisfied` that used to read as
+    // "checked, and it passed".
     expect(planning.audit_state.obligations.find(
         (item) => item.id === "runtime_validation_current",
-      )?.state).toBe("satisfied");
+      )?.state).toBe("not_applicable");
   });
 });
 

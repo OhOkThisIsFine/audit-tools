@@ -275,7 +275,9 @@ test("advanceAudit planning stage builds tasks without requiring runtime validat
     }
     expect(planning.selected_executor).toBe("planning_executor");
     expect(planning.updated_bundle.audit_tasks.length > 0).toBeTruthy();
-    expect(findObligation(planning.audit_state, "runtime_validation_current")?.state).toBe("satisfied");
+    // No runtime validation tasks were planned, so the gate is `not_applicable`
+    // — an empty input set is never a success member.
+    expect(findObligation(planning.audit_state, "runtime_validation_current")?.state).toBe("not_applicable");
     expect(planning.next_likely_step).toBe("audit_tasks_completed");
   });
 });

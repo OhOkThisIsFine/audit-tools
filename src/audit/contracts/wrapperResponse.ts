@@ -9,6 +9,7 @@
 // schemas/audit-code-v1alpha1.schema.json projection.
 
 import { z } from "zod";
+import { ObligationStateSchema } from "audit-tools/shared";
 
 const AuditStateStatusSchema = z.enum([
   "not_started",
@@ -17,10 +18,17 @@ const AuditStateStatusSchema = z.enum([
   "complete",
 ]);
 
+// The obligation state vocabulary is DERIVED, never re-listed. This projection
+// ships as schemas/audit-code-v1alpha1.schema.json — the contract a host
+// validates a wrapper response against — and a hand copy of the five state
+// names meant a widened union produced persisted `audit_state.json` obligations
+// the SHIPPED schema would refuse, silently, with no cross-check test relating
+// the two enums. Same drift class as the hand-copied lens list
+// (`src/shared/types/lens.ts`), one contract over.
 const ObligationViewSchema = z
   .object({
     id: z.string(),
-    state: z.enum(["missing", "present", "stale", "blocked", "satisfied"]),
+    state: ObligationStateSchema,
     reason: z.string().optional(),
   })
   .strict();
