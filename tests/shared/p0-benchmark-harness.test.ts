@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  bindCandidateTerminalStep,
   buildCandidateInvocation,
   currentStepPathFromCliOutput,
   driveCandidateLoop,
@@ -217,12 +218,18 @@ describe("P0 benchmark harness manifest", () => {
           current_step: "C:/snapshot/.audit-tools/audit/steps/agent-1/current-step.json",
           current_prompt: "C:/snapshot/.audit-tools/audit/steps/agent-1/current-prompt.md",
         },
+        access: {
+          read_paths: [],
+          write_paths: [
+            "C:/snapshot/.audit-tools/audit/submissions/decisions.json",
+          ],
+        },
       },
       {
         step_kind: "present_report",
-        complete: true,
+        status: "complete",
         artifact_paths: {
-          audit_report: "C:/snapshot/.audit-tools/audit/audit-report.md",
+          final_report: "C:/snapshot/.audit-tools/audit/audit-report.md",
         },
       },
     ];
@@ -245,8 +252,32 @@ describe("P0 benchmark harness manifest", () => {
           analyzer_consent_decisions:
             "C:/snapshot/.audit-tools/audit/submissions/decisions.json",
         }),
+        access: {
+          read_paths: [],
+          write_paths: [
+            "C:/snapshot/.audit-tools/audit/submissions/decisions.json",
+          ],
+        },
       }),
     ]);
+  });
+
+  test("binds a modern completed terminal to benchmark provenance", () => {
+    expect(
+      bindCandidateTerminalStep({
+        step_kind: "present_report",
+        status: "complete",
+        artifact_paths: {
+          final_report: "C:/snapshot/.audit-tools/audit-report.md",
+        },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        complete: true,
+        step_id: expect.stringMatching(/^present_report:[0-9a-f]{24}$/),
+        artifact_path: "C:/snapshot/.audit-tools/audit-report.md",
+      }),
+    );
   });
 
   test("drives candidate steps through injected seams and fails closed on non-advancement", async () => {

@@ -190,7 +190,26 @@ function assertStep(step, seen) {
   seen.add(identity);
 }
 function terminal(step) {
-  return step.complete === true || step.step_kind === "present_report";
+  return (
+    step.complete === true ||
+    (step.step_kind === "present_report" && step.status === "complete")
+  );
+}
+export function bindCandidateTerminalStep(step) {
+  const artifactPaths = isObj(step?.artifact_paths) ? step.artifact_paths : {};
+  const artifact_path = isStr(step?.artifact_path)
+    ? step.artifact_path
+    : isStr(artifactPaths.final_report)
+      ? artifactPaths.final_report
+      : isStr(artifactPaths.audit_report)
+        ? artifactPaths.audit_report
+        : undefined;
+  return {
+    ...step,
+    step_id: stepIdentity(step),
+    artifact_path,
+    complete: step?.complete === true || step?.status === "complete",
+  };
 }
 function stepRequest(step, prompt, snapshot_root, pinned_profile) {
   const step_id = stepIdentity(step);
@@ -201,6 +220,9 @@ function stepRequest(step, prompt, snapshot_root, pinned_profile) {
     prompt,
     artifact_path: step.artifact_path,
     artifact_paths: step.artifact_paths,
+    access: step.access,
+    allowed_commands: step.allowed_commands,
+    status: step.status,
     stop_condition: step.stop_condition,
     snapshot_root,
     pinned_profile,
@@ -228,7 +250,7 @@ export async function driveCandidateLoop({
     );
   }
   throw Error(
-    `max-step exhaustion after ${maxSteps} steps; last=${last?.step_id ?? "none"}`,
+    `max-step exhaustion after ${maxSteps} steps; last=${last ? stepIdentity(last) : "none"}`,
   );
 }
 
@@ -272,7 +294,7 @@ export async function runCandidateArm({
     last = step;
     if (terminal(step)) return step;
     if (!isStr(step.prompt_path))
-      throw Error(`missing prompt_path for step ${step.step_id}`);
+      throw Error(`missing prompt_path for step ${stepIdentity(step)}`);
     await executeExternal(
       stepRequest(
         step,
@@ -283,7 +305,7 @@ export async function runCandidateArm({
     );
   }
   throw Error(
-    `max-step exhaustion after ${maxSteps} steps; last=${last?.step_id ?? "none"}`,
+    `max-step exhaustion after ${maxSteps} steps; last=${last ? stepIdentity(last) : "none"}`,
   );
 }
 
@@ -757,15 +779,16 @@ async function run(path, requestsPath, identityPath, executor, executorArgs) {
             executorArgs,
             results: step_responses,
           });
+        const boundFinalStep = bindCandidateTerminalStep(final_step);
         if (
-          final_step.complete !== true ||
-          final_step.step_kind !== "present_report" ||
-          !isStr(final_step.artifact_path)
+          boundFinalStep.complete !== true ||
+          boundFinalStep.step_kind !== "present_report" ||
+          !isStr(boundFinalStep.artifact_path)
         )
           throw Error("candidate terminal step lacks bound report evidence");
         const sourceReport = resolve(
           root,
-          final_step.artifact_path ?? ".audit-tools/audit/audit-report.md",
+          boundFinalStep.artifact_path,
         );
         if (!existsSync(sourceReport))
           throw Error(
@@ -789,7 +812,7 @@ async function run(path, requestsPath, identityPath, executor, executorArgs) {
         records.push({
           request_id: request.request_id,
           request_digest: digest(request),
-          final_step,
+          final_step: boundFinalStep,
           step_responses,
           snapshot_commit: primary ? manifest.shared.repo_commit : null,
           source_tree_clean: true,
