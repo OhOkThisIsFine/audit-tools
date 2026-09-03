@@ -10,9 +10,11 @@
  * are already grounded, and dropping a since-deleted path there is the
  * integrity check's replan concern, not a grounding concern.
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import {
+  checkCitations,
   enumerateTrackedFilePaths,
+  extractCitationRefs,
   isBareBasename,
   resolveBasenameToTrackedPath,
 } from "audit-tools/shared";
@@ -92,73 +94,34 @@ export function groundAffectedFiles(
 // ── Evidence grounding (WS2) ──────────────────────────────────────────────────
 
 /**
- * Candidate `path[:line]` citations inside an evidence string. A token must
- * look like a path (contains a separator or a dot-extension) to be considered;
- * bare prose words never match.
- */
-const EVIDENCE_PATH_TOKEN_RE =
-  /(?<path>[A-Za-z0-9_@.-]*[/\\][A-Za-z0-9_@./\\-]+|[A-Za-z0-9_@-]+\.[A-Za-z0-9_-]+)(?::(?<line>\d+))?/g;
-
-function fileLineCount(absolutePath: string): number {
-  const content = readFileSync(absolutePath, "utf8");
-  if (content.length === 0) return 0;
-  return content.split("\n").length;
-}
-
-/**
- * Resolve a cited evidence path to an existing absolute path, or `undefined`.
- * A full/dotfile path resolves by the `root` join; a bare basename that is not a
- * top-level file resolves against the tracked-path `corpus` (INV-B3-3) so a
- * nested `advance.ts` is not false-negatived by a naive `root/advance.ts` join.
- */
-function resolveEvidencePath(
-  root: string,
-  citedPath: string,
-  corpus: ReadonlySet<string>,
-): string | undefined {
-  const direct = resolveAffectedPath(root, citedPath);
-  if (existsSync(direct)) return direct;
-  if (isBareBasename(citedPath)) {
-    const tracked = resolveBasenameToTrackedPath(citedPath, corpus);
-    if (tracked) {
-      const resolved = resolveAffectedPath(root, tracked);
-      if (existsSync(resolved)) return resolved;
-    }
-  }
-  return undefined;
-}
-
-/**
  * True when the evidence string cites at least one real repo path; a cited
  * line number must also exist in the file (a `path:9999` citation into a
- * 40-line file is not grounded). A bare basename resolves against the tracked
- * corpus (INV-B3-3); `corpus` is REQUIRED — the enumeration is async (INV-SSF),
- * so a caller enumerates once per pass with `enumerateTrackedFilePaths` and
- * threads the set through this sync predicate.
+ * 40-line file is not grounded), and a cited RANGE must exist at BOTH ends (a
+ * `path:2-9999` citation into a 3-line file is not grounded either — the start
+ * being real never certifies the end). A bare basename resolves against the
+ * tracked corpus (INV-B3-3); `corpus` is REQUIRED — the enumeration is async
+ * (INV-SSF), so a caller enumerates once per pass with
+ * `enumerateTrackedFilePaths` and threads the set through this sync predicate.
+ *
+ * ONE CORE, TWO DRAWS: this is the existential DRAW over the shared citation
+ * core (`audit-tools/shared` → `checkCitations`) — the same core the audit draw
+ * uses per-citation over a charter register's provenance. The grammar, the path
+ * resolution and the line counting live there in one copy, so the two draws
+ * cannot disagree about what a citation is or how long a file is.
  */
 export function evidenceCitesRealPath(
   root: string,
   evidence: string,
   corpus: ReadonlySet<string>,
 ): boolean {
-  for (const match of evidence.matchAll(EVIDENCE_PATH_TOKEN_RE)) {
-    const citedPath = match.groups?.path;
-    if (!citedPath) continue;
-    const absolute = resolveEvidencePath(root, citedPath.trim(), corpus);
-    if (!absolute) continue;
-
-    const line = match.groups?.line;
-    if (line === undefined) return true;
-    try {
-      if (!statSync(absolute).isFile()) continue;
-      if (Number(line) >= 1 && Number(line) <= fileLineCount(absolute)) {
-        return true;
-      }
-    } catch {
-      continue;
-    }
-  }
-  return false;
+  const refs = extractCitationRefs(evidence);
+  if (refs.length === 0) return false;
+  const { checks } = checkCitations({
+    root,
+    corpus,
+    citations: refs.map((ref) => ({ owner_id: "evidence", ref })),
+  });
+  return checks.some((check) => check.verdict === "ok");
 }
 
 export interface EvidenceGrounding {

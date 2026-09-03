@@ -51,6 +51,9 @@ beforeEach(async () => {
   await mkdir(ARTIFACTS_DIR, { recursive: true });
   await writeFile(join(TEST_DIR, "src", "real.ts"), "line1\nline2\nline3\n", "utf8");
   await writeFile(join(TEST_DIR, "src", "other.ts"), "const x = 1;\n", "utf8");
+  // Three CRLF lines with a trailing terminator — the shape a Windows checkout
+  // produces, and the one a naive `split("\n").length` over-counts.
+  await writeFile(join(TEST_DIR, "src", "crlf.ts"), "a\r\nb\r\nc\r\n", "utf8");
   await writeFile(
     join(TEST_DIR, "session-config.json"),
     JSON.stringify({
@@ -112,6 +115,27 @@ describe("evidenceCitesRealPath (WS2)", () => {
   it("rejects a real path with an out-of-range line", async () => {
     const corpus = await enumerateTrackedFilePaths(TEST_DIR);
     expect(evidenceCitesRealPath(TEST_DIR, "src/real.ts:9999 — broken logic", corpus)).toBe(false);
+  });
+
+  it("rejects a real path whose cited range END is out of range", async () => {
+    // The start line alone is in range; only the END overshoots. A citation
+    // grammar that stops at `:2` validates half the claim and passes the other.
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/real.ts:2-9999 — broken logic", corpus)).toBe(false);
+  });
+
+  it("rejects the line one past the end of a file with a trailing newline", async () => {
+    // `line1\nline2\nline3\n` is THREE lines; a trailing empty split segment is
+    // not a fourth.
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/real.ts:3 — real line", corpus)).toBe(true);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/real.ts:4 — past the end", corpus)).toBe(false);
+  });
+
+  it("counts CRLF lines correctly", async () => {
+    const corpus = await enumerateTrackedFilePaths(TEST_DIR);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/crlf.ts:3 — real line", corpus)).toBe(true);
+    expect(evidenceCitesRealPath(TEST_DIR, "src/crlf.ts:4 — past the end", corpus)).toBe(false);
   });
 
   it("accepts a real path without a line", async () => {

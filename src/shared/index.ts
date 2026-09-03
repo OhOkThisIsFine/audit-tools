@@ -992,6 +992,16 @@ export {
   findingNeedsVerificationBeforeFix,
 } from "./validation/findingGrounding.js";
 
+// Validation: citation grounding — ONE synchronous core, two draws. The
+// remediate draw asks the existential question through `evidenceCitesRealPath`;
+// the audit draw checks a charter register's provenance per citation. The
+// grammar, the path resolution and the TRUE line count live here in one copy so
+// the two draws cannot disagree. It REJECTS, never REPAIRS.
+export {
+  checkCitations,
+  extractCitationRefs,
+} from "./validation/citationGrounding.js";
+
 // Validation: design-finding grounding (S8 = S7 applied to the reviewer; cites a
 // real component path rather than a verbatim span). Single source for both
 // orchestrators so neither forks design-grounding nor cross-area imports it.
