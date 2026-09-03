@@ -93,7 +93,7 @@ test("conceptual judge is evaluative, complete, and attributable", () => {
 // validator's refusal of a refuted_at_head candidate that is not rejected
 // (`conceptual-adjudication.test.ts`), which holds against any judge.
 test("conceptual judge is told to reject what HEAD has already fixed", () => {
-  const p = renderConceptualJudgePrompt([
+  const p = renderConceptualJudgePrompt({} as ArtifactBundle, [
     {
       name: "Pragmatist",
       path: "/tmp/p.json",

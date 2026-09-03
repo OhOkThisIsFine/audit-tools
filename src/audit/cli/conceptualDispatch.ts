@@ -15,11 +15,13 @@ import type { FanoutLaneSpec } from "./fanoutLanes.js";
 import {
   clearConceptualReviewRoundManifest,
   conceptualReviewRoundManifestPath,
+  readConceptualReviewRoundManifest,
   writeConceptualReviewRoundManifest,
 } from "../types/conceptualAdjudication.js";
 import {
   AUDIT_GATE_SUBMISSION_SCOPE,
   GATE_LANES,
+  closeDispatchedLaneOutcomes,
   conceptualPerspectiveLane,
   conceptualRoundToken,
   laneSubmissionPath,
@@ -171,6 +173,18 @@ export async function prepareConceptualDispatch(opts: {
     GATE_LANES.design_review_conceptual,
   );
   const reviewOptions: DesignReviewOptions = { max_units: settings.max_units };
+  // A round that is about to be superseded — by a re-review, or by a switch to
+  // the shallow pass — will never be ingested, so this is the last moment its
+  // perspectives' dispatch rows can be closed with what they actually
+  // delivered. Read from the manifest the tool wrote; no lane id is parsed.
+  const priorRound = await readConceptualReviewRoundManifest(artifactsDir);
+  const closePriorRound = async (currentRoundId?: string): Promise<void> => {
+    if (!priorRound || priorRound.round_id === currentRoundId) return;
+    await closeDispatchedLaneOutcomes(artifactsDir, {
+      lanes: priorRound.perspectives.map((perspective) => perspective.lane_id),
+      roundId: priorRound.round_id,
+    });
+  };
 
   if (settings.conceptual_depth !== "deep") {
     const fanout = await materializeFanoutLanes({
@@ -187,6 +201,7 @@ export async function prepareConceptualDispatch(opts: {
       ],
     });
     const conceptualPromptPath = fanout.lanes[0]!.promptPath;
+    await closePriorRound();
     await clearConceptualReviewRoundManifest(artifactsDir);
     return {
       deep: false,
@@ -277,9 +292,11 @@ export async function prepareConceptualDispatch(opts: {
       promptText: judgePromptText,
     },
   ];
+  await closePriorRound(roundToken);
   const fanout = await materializeFanoutLanes({
     artifactsDir,
     runId: AUDIT_GATE_SUBMISSION_SCOPE,
+    roundId: roundToken,
     lanes: laneSpecs,
   });
   const promptPathFor = (laneId: string): string =>

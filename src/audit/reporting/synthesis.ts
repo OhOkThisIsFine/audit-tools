@@ -28,7 +28,9 @@ import {
   renderFindingBlockLines,
   compareCodeUnits,
   countBy,
+  isIngestEvent,
   type AgentReflection,
+  type MeasuredOutcome,
 } from "audit-tools/shared";
 import type {
   RuntimeValidationReport,
@@ -517,6 +519,76 @@ function renderAnalyzerDegradationLines(
  * ambiguity. Totals are sorted by content, never arrival: a derived summary may
  * sort; the ledger file it derives from may not.
  */
+/**
+ * What this run actually DISPATCHED, and how much of it came back.
+ *
+ * The drift section below renders only when something was refused, so a run in
+ * which five lanes silently under-delivered — exit 0, nothing written, then
+ * re-dispatched until they succeeded — produced zero `rejected` events and read
+ * as clean. This is the other half: dispatched versus delivered, per round, so
+ * a lane that reported success and wrote nothing is a printed fact rather than
+ * something recoverable only from the host's transcript.
+ *
+ * A dispatch is DELIVERED when its submission has any terminal record other
+ * than a `lane_outcome` of `not_run`: an ingest event (the tool consumed it) or
+ * an observed outcome. No terminal row at all is `not_run` too — the absence IS
+ * the record, never an inference that something arrived.
+ */
+function renderLaneDeliverySection(
+  events: readonly SubmissionLedgerEvent[],
+): string[] {
+  const dispatched = events.filter((event) => event.kind === "dispatched");
+  if (dispatched.length === 0) return [];
+  const outcomeById = new Map<string, MeasuredOutcome>();
+  for (const event of events) {
+    if (event.kind === "lane_outcome" && event.outcome !== undefined) {
+      outcomeById.set(event.submission_id, event.outcome);
+    } else if (isIngestEvent(event.kind) && !outcomeById.has(event.submission_id)) {
+      // The tool ingested it, so it was delivered; the ledger does not record
+      // how much was in it, and this must not invent a count.
+      outcomeById.set(event.submission_id, "findings");
+    }
+  }
+  const byRound = new Map<string, SubmissionLedgerEvent[]>();
+  for (const event of dispatched) {
+    const round = event.round_id ?? "";
+    const bucket = byRound.get(round);
+    if (bucket) bucket.push(event);
+    else byRound.set(round, [event]);
+  }
+  const lines = [
+    "### Lane dispatch and delivery",
+    "",
+    `${dispatched.length} lane(s) were dispatched this run. A dispatched lane that wrote nothing at the bound path the tool declared is recorded \`not_run\` — the absence is the record, not an inference.`,
+    "",
+  ];
+  // Sorted by content, never arrival: a derived summary may sort; the ledger
+  // file it derives from may not.
+  for (const round of [...byRound.keys()].sort(compareCodeUnits)) {
+    const rows = byRound.get(round)!;
+    const outcomes = rows.map(
+      (event) => outcomeById.get(event.submission_id) ?? "not_run",
+    );
+    const delivered = outcomes.filter(
+      (outcome) => outcome !== "not_run",
+    ).length;
+    const tally = new Map<MeasuredOutcome, number>();
+    for (const outcome of outcomes) {
+      tally.set(outcome, (tally.get(outcome) ?? 0) + 1);
+    }
+    const breakdown = [...tally.entries()]
+      .sort(([left], [right]) => compareCodeUnits(left, right))
+      .map(([outcome, count]) => `${outcome} ${count}`)
+      .join(", ");
+    lines.push(
+      `- ${round === "" ? "this run's gate lanes" : `round \`${round}\``}: ` +
+        `${delivered} of ${rows.length} delivered (${breakdown})`,
+    );
+  }
+  lines.push("");
+  return lines;
+}
+
 function renderSubmissionDriftSection(
   events: readonly SubmissionLedgerEvent[],
 ): string[] {
@@ -531,11 +603,15 @@ function renderSubmissionDriftSection(
       .map((event) => event.submission_id),
   );
   if (refusedIds.size === 0 && handRepairedIds.size === 0) return [];
-  // Trailing state per submission: a refusal followed by an acceptance or a
-  // hand recovery is RESOLVED; one that is still the last word is not.
+  // Trailing state per submission, over the INGEST events only: a refusal
+  // followed by an acceptance or a hand recovery is RESOLVED; one that is still
+  // the last word is not. It used to be "everything except `expected`", so a
+  // `dispatched` row appended when the still-pending lane was re-materialized
+  // would have become the trailing event and made this claim the refusal "was
+  // later accepted or re-landed by hand" when nothing had accepted it.
   const trailing = new Map<string, string>();
   for (const event of events) {
-    if (event.kind === "expected") continue;
+    if (!isIngestEvent(event.kind)) continue;
     trailing.set(event.submission_id, event.kind);
   }
   const resolved = [...refusedIds].filter(
@@ -968,7 +1044,11 @@ export function renderAuditReportMarkdown(
     }
   }
 
-  const driftLines = renderSubmissionDriftSection(options.submission_ledger ?? []);
+  const ledgerEvents = options.submission_ledger ?? [];
+  const driftLines = [
+    ...renderLaneDeliverySection(ledgerEvents),
+    ...renderSubmissionDriftSection(ledgerEvents),
+  ];
   lines.push(
     ...renderConceptualAttributionSection(report, options.conceptual_adjudication),
   );

@@ -507,9 +507,11 @@ export type {
   SubmissionLedgerEvent,
 } from "./submission/submissionLedger.js";
 export {
+  INGEST_EVENT_KINDS,
   SUBMISSION_EVENT_KINDS,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   appendSubmissionEvent,
+  isIngestEvent,
   readSubmissionLedger,
   submissionLedgerPath,
 } from "./submission/submissionLedger.js";

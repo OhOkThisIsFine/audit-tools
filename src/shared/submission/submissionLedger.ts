@@ -23,6 +23,7 @@ import { siblingLockPath } from "../io/lockedJsonStore.js";
 import { withFileLock } from "../io/fileLock.js";
 import { discardOnSchemaVersionMismatch } from "../io/schemaVersion.js";
 import { submissionsDir } from "../io/auditToolsPaths.js";
+import type { MeasuredOutcome } from "../measurement/measuredOutcome.js";
 import type { SubmissionIssueCode } from "./submissionClassifier.js";
 
 export const SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION =
@@ -54,9 +55,74 @@ export const SUBMISSION_EVENT_KINDS = [
    * is: a second event after a recorded withdrawal.
    */
   "removed_by_operator",
+  /**
+   * The tool WROTE this lane's prompt and declared its bound path — the lane
+   * was dispatched.
+   *
+   * Deliberately disjoint from `expected`. *Expecting* an artifact is a claim
+   * the tool will be owed something and will re-ask until it arrives;
+   * *dispatching* is a fact about the past. The perspective lanes of a deep
+   * conceptual pass are un-expected by design (P25: the tool never reads their
+   * findings, so an expectation against one could never be satisfied or
+   * dropped and accumulated as a permanent, false shortfall) — and were
+   * therefore invisible, so a lane that exited 0 having written nothing left no
+   * trace in any artifact. A dispatch row can never become a shortfall:
+   * shortfall is a diff over the expected SET, a path that never reads ledger
+   * events.
+   */
+  "dispatched",
+  /**
+   * What a dispatched lane actually delivered, observed once at the fold that
+   * ingests its round's terminal submission. Carries `outcome`. A `dispatched`
+   * row with no terminal row at all is the record of a lane that never
+   * delivered — the absence IS the statement — so nothing here ever mints a
+   * terminal row nobody observed.
+   */
+  "lane_outcome",
 ] as const;
 
 export type SubmissionEventKind = (typeof SUBMISSION_EVENT_KINDS)[number];
+
+/**
+ * Which kinds mean "the TOOL ingested this submission and decided about it".
+ *
+ * Exhaustive by construction, so a new kind must be classified rather than
+ * defaulting into either answer. This exists because several readers asked the
+ * question as `kind !== "expected"` — a partition that silently absorbed every
+ * future kind. Under it, a `dispatched` row appended when a refused lane is
+ * re-materialized would have become that submission's trailing event, deleting
+ * the refusal from `lastRefusals` (so a host whose submission was received and
+ * REJECTED is told it "submitted nothing") and making the report claim the
+ * refusal "was later accepted or re-landed by hand" when nothing had been.
+ */
+const EVENT_KIND_IS_INGEST: Record<SubmissionEventKind, boolean> = {
+  // A declaration, not an ingest.
+  expected: false,
+  // Facts about dispatch and delivery; the tool consumed nothing.
+  dispatched: false,
+  lane_outcome: false,
+  accepted: true,
+  rejected: true,
+  recovered_by_hand: true,
+  accepted_via_recovery: true,
+  // A withdrawal is a decision ABOUT an ingested submission, and it ends a
+  // refusal's trailing state exactly as an acceptance does.
+  removed_by_operator: true,
+};
+
+/** The kinds {@link isIngestEvent} admits, in declaration order. */
+export const INGEST_EVENT_KINDS: readonly SubmissionEventKind[] =
+  SUBMISSION_EVENT_KINDS.filter((kind) => EVENT_KIND_IS_INGEST[kind]);
+
+/**
+ * True when this kind records the tool having ingested something. The ONE home
+ * for "which events change a submission's trailing state": every
+ * last-event-per-submission reader asks it here rather than re-spelling an
+ * exclusion list that the next new kind would fall through.
+ */
+export function isIngestEvent(kind: SubmissionEventKind): boolean {
+  return EVENT_KIND_IS_INGEST[kind];
+}
 
 /**
  * One ledger event. Generic over the DRAW's issue-code vocabulary: the base
@@ -75,6 +141,19 @@ export interface SubmissionLedgerEvent<
   readonly kind: SubmissionEventKind;
   readonly issue_code?: TIssueCode;
   readonly message?: string;
+  /**
+   * What a `lane_outcome` row observed at the bound path. Absent on every other
+   * kind — an ingest event's decision is its `kind`.
+   */
+  readonly outcome?: MeasuredOutcome;
+  /**
+   * The ROUND a `dispatched` (and its matching `lane_outcome`) row belongs to,
+   * when the emitter has one. Carried as DATA rather than parsed back out of a
+   * lane id, so a delivery rate is reported per round and a superseded round's
+   * lanes never drag the current round's rate down. Absent for lane families
+   * with no round of their own.
+   */
+  readonly round_id?: string;
   /** ISO-8601. A faithful event record is allowed to say when. */
   readonly recorded_at: string;
 }

@@ -142,6 +142,7 @@ import {
   GATE_LANES,
   charterExtractionLane,
   charterExtractionPacketFilename,
+  closeDispatchedLaneOutcomes,
   laneSubmissionPath,
   recordHostResultOutcomes,
   recordLaneOutcome,
@@ -1007,6 +1008,15 @@ async function consumeConceptualSubmission(
       perspectiveFindings,
       submission: parsed.data,
       generatedAt: new Date().toISOString(),
+    });
+    // THE observation boundary for this round's perspective lanes. The tool
+    // never ingests a perspective, so nothing else will ever close its dispatch
+    // row — and the emission cannot, because once this submission lands the
+    // lanes are never re-materialized (a fully delivered pass would report 0 of
+    // N). Observed here, once, against the round manifest the tool wrote.
+    await closeDispatchedLaneOutcomes(artifactsDir, {
+      lanes: manifest.perspectives.map((perspective) => perspective.lane_id),
+      roundId: manifest.round_id,
     });
     return {
       status: "ok",

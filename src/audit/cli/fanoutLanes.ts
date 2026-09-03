@@ -5,6 +5,7 @@ import { laneAssetsDir } from "audit-tools/shared";
 
 import {
   laneSubmissionPath,
+  recordDispatchedLanes,
   recordExpectedLanes,
   type LaneSubmissionShortfall,
 } from "./laneSubmissions.js";
@@ -152,6 +153,13 @@ export async function materializeFanoutLanes(params: {
    * have no run id of their own.
    */
   runId: string;
+  /**
+   * The ROUND these lanes belong to, when the caller has one (the deep
+   * conceptual pass's content-derived round token). Recorded on each dispatch
+   * row so a delivery rate is reported per round and a superseded round's lanes
+   * never drag the current round's rate down.
+   */
+  roundId?: string;
   lanes: FanoutLaneSpec[];
 }): Promise<MaterializedFanout> {
   const promptDir = laneAssetsDir(params.artifactsDir);
@@ -185,6 +193,20 @@ export async function materializeFanoutLanes(params: {
       resultExists,
     });
   }
+
+  // Every lane the caller declared, EXPECTED OR NOT, leaves a dispatch row —
+  // written from `params.lanes` directly, on the other side of the
+  // `expected !== false` filter below, which is untouched. The two records are
+  // structurally disjoint: a dispatch row can never reach
+  // `expected-submissions.json`, and shortfall is a diff over the expected SET
+  // that never reads ledger events, so this cannot recreate the permanent false
+  // shortfall P25 removed.
+  await recordDispatchedLanes(
+    params.artifactsDir,
+    params.runId,
+    params.lanes.map((spec) => spec.id),
+    params.roundId,
+  );
 
   const shortfall = await recordExpectedLanes(
     params.artifactsDir,

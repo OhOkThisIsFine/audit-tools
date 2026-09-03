@@ -123,9 +123,25 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
       "only the lane the tool itself ingests is owed a submission",
     ).toEqual(["design_review_conceptual"]);
 
+    const ledger = await readSubmissionLedger(dir);
     expect(
-      (await readSubmissionLedger(dir)).map((event) => event.lane),
+      ledger.filter((event) => event.kind === "expected").map((e) => e.lane),
       "a perspective must not appear on the ledger as an unsatisfiable expectation",
     ).toEqual(["design_review_conceptual"]);
+
+    // The retirement and the RECORD are different things. Expecting an artifact
+    // is a claim the tool will be owed something and will re-ask until it
+    // arrives — that is what P25 removed for perspectives, and the assertion
+    // above still pins it. Recording that a lane was dispatched is a statement
+    // about the past: it re-asks nothing, accumulates in no set, and can never
+    // become a shortfall (shortfall is a diff over the expected SET, which
+    // never reads ledger events). Without it, a perspective that exited 0
+    // having written nothing left no trace in any artifact.
+    expect(
+      new Set(
+        ledger.filter((e) => e.kind === "dispatched").map((e) => e.lane),
+      ).size,
+      "every dispatched lane, expected or not, leaves a dispatch row",
+    ).toBe(3); // 2 perspectives + the judge
   });
 });

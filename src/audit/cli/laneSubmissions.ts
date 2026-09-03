@@ -25,6 +25,8 @@
  * valid submission the first time that file was absent — so derivation is the
  * mechanism and the record is the record.
  */
+import { readFile } from "node:fs/promises";
+
 import { z } from "zod";
 
 import {
@@ -36,6 +38,8 @@ import {
   discardOnSchemaVersionMismatch,
   expectedSubmissionsPath,
   hashContent,
+  isIngestEvent,
+  isRecord,
   mergeExpectedSets,
   mintSubmissionId,
   outputDirFor,
@@ -51,6 +55,7 @@ import {
   type CharterKind,
   type ExpectedSubmission,
   type ExpectedSubmissionSet,
+  type MeasuredOutcome,
   type SubmissionIssueCode,
   type SubmissionLedgerEvent,
   type SubmissionReadOutcome,
@@ -421,6 +426,13 @@ export async function recordExpectedLanes(
  * A later acceptance or hand recovery ends the refusal, so only the trailing
  * state counts: this answers "is this lane outstanding BECAUSE it was refused",
  * never "was it ever refused".
+ *
+ * "Trailing" is over the INGEST events only. It used to be "everything except
+ * `expected`", which is a partition that absorbs every future kind: a
+ * `dispatched` row appended when a refused (and therefore still-pending) lane is
+ * re-materialized would have become the trailing event and deleted the refusal,
+ * putting the false "submitted nothing" message back — the exact message the
+ * refusal record exists to prevent.
  */
 async function lastRefusals(
   artifactsDir: string,
@@ -430,13 +442,134 @@ async function lastRefusals(
   const last = new Map<string, SubmissionLedgerEvent>();
   for (const event of await readSubmissionLedger(artifactsDir)) {
     if (!wanted.has(event.submission_id)) continue;
-    if (event.kind === "expected") continue;
+    if (!isIngestEvent(event.kind)) continue;
     last.set(event.submission_id, event);
   }
   for (const [id, event] of [...last.entries()]) {
     if (event.kind !== "rejected") last.delete(id);
   }
   return last;
+}
+
+/**
+ * Append one `dispatched` row per lane that has none yet.
+ *
+ * Called from the ONE materializing boundary, from the caller's whole lane list
+ * — on the other side of the `expected !== false` filter, which is untouched.
+ * Deduped per submission id so a re-emitted round (the K-of-N resume path
+ * rewrites a still-pending lane's prompt on every call) records the dispatch
+ * once rather than once per poll.
+ */
+export async function recordDispatchedLanes(
+  artifactsDir: string,
+  runId: string,
+  lanes: readonly string[],
+  roundId?: string,
+): Promise<void> {
+  if (lanes.length === 0) return;
+  const alreadyDispatched = new Set(
+    (await readSubmissionLedger(artifactsDir))
+      .filter((event) => event.kind === "dispatched")
+      .map((event) => event.submission_id),
+  );
+  for (const lane of lanes) {
+    const submissionId = laneSubmissionId(lane, runId);
+    if (alreadyDispatched.has(submissionId)) continue;
+    alreadyDispatched.add(submissionId);
+    await appendSubmissionEvent(artifactsDir, {
+      contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+      run_id: runId,
+      submission_id: submissionId,
+      lane,
+      kind: "dispatched",
+      ...(roundId === undefined ? {} : { round_id: roundId }),
+      recorded_at: new Date().toISOString(),
+    });
+  }
+}
+
+/** What the bytes at a lane's bound path say it delivered. */
+async function observeLaneDelivery(path: string): Promise<MeasuredOutcome> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch {
+    // Dispatched, and nothing at the bound path. The five "exit 0, wrote
+    // nothing" lanes of the measured run are exactly this.
+    return "not_run";
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    // Present and unusable — the lane that returned the single word "Let".
+    return "degraded";
+  }
+  const items = Array.isArray(value)
+    ? value
+    : isRecord(value)
+      ? Object.values(value).find((entry) => Array.isArray(entry))
+      : undefined;
+  if (items === undefined) {
+    // A JSON value that is not a submission shape at all.
+    return isRecord(value) && Object.keys(value).length === 0
+      ? "clean"
+      : "degraded";
+  }
+  return items.length > 0 ? "findings" : "clean";
+}
+
+/**
+ * Observe, ONCE, what each still-open dispatched lane delivered.
+ *
+ * WHY IT IS NOT AT THE EMISSION. `materializeFanoutLanes` can never see the
+ * LAST delivery: once the round's terminal submission lands and is ingested,
+ * the lanes are never re-materialized, so an emission-time observer would report
+ * a fully delivered pass as 0 of N. This runs at the fold that ingests the
+ * round's terminal submission, and again when a round is superseded.
+ *
+ * A lane the TOOL ingests needs nothing here — its `accepted`/`rejected` row is
+ * already its terminal record. So "still open" is: a `dispatched` row with no
+ * `lane_outcome` and no ingest event after it. Idempotent by that definition,
+ * so calling it twice appends nothing the second time: an outcome is observed
+ * once, and this never mints a terminal row nobody observed.
+ */
+export async function closeDispatchedLaneOutcomes(
+  artifactsDir: string,
+  params: {
+    readonly lanes: readonly string[];
+    readonly runId?: string;
+    readonly roundId?: string;
+  },
+): Promise<void> {
+  if (params.lanes.length === 0) return;
+  const runId = params.runId ?? AUDIT_GATE_SUBMISSION_SCOPE;
+  const events = await readSubmissionLedger(artifactsDir);
+  const dispatched = new Set<string>();
+  const terminated = new Set<string>();
+  for (const event of events) {
+    if (event.kind === "dispatched") dispatched.add(event.submission_id);
+    else if (event.kind === "lane_outcome" || isIngestEvent(event.kind)) {
+      terminated.add(event.submission_id);
+    }
+  }
+  for (const lane of params.lanes) {
+    const submissionId = laneSubmissionId(lane, runId);
+    if (!dispatched.has(submissionId) || terminated.has(submissionId)) continue;
+    terminated.add(submissionId);
+    await appendSubmissionEvent(artifactsDir, {
+      contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+      run_id: runId,
+      submission_id: submissionId,
+      lane,
+      kind: "lane_outcome",
+      outcome: await observeLaneDelivery(
+        laneSubmissionPath(artifactsDir, lane, runId),
+      ),
+      ...(params.roundId === undefined ? {} : { round_id: params.roundId }),
+      recorded_at: new Date().toISOString(),
+    });
+  }
 }
 
 /** Merge the shortfalls of a step that materializes several lane groups. */
