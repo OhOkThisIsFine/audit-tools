@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 244 entr(y/ies) indexed.
+> and at commit). 245 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -287,6 +287,7 @@
 - `durable-traps.md:933` — Two offload lanes fail SUCCESS-SHAPED, and neither reports why in its status (2026-08-28).
 - `durable-traps.md:948` — A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it before the shell ever sees it (2026-08-28).
 - `durable-traps.md:959` — A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).
+- `durable-traps.md:965` — "File missing" is classified from ENOENT alone, and a path that traverses a FILE does not report ENOENT on both platforms (2026-09-03).
 
 <!-- END GENERATED SEEK INDEX -->
 

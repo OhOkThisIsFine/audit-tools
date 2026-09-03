@@ -161,7 +161,9 @@ describe("archiveCharterPackets — a failed archive is STATED, never silent", (
     expect(rows).toHaveLength(1);
     const row: CharterPacketArchiveRow = rows[0]!;
     expect(row.archived).toBe(false);
-    expect(row.reason).toBeTruthy();
+    // SANITY: the injected failure is what produced the record. Without this the
+    // case still passes when the injection stops failing and the arm never runs.
+    expect(row.reason).toContain("archive write failed");
     // The source SURVIVES — a lost archive must never cost the only copy.
     expect(await exists(sourcePath)).toBe(true);
     // ...and the digest still identifies what was not retained.
@@ -176,5 +178,49 @@ describe("archiveCharterPackets — a failed archive is STATED, never silent", (
     ).resolves.toBeDefined();
     // The index write also fails here; that must not surface as a throw either.
     expect(await exists(charterPacketIndexPath(artifactsDir))).toBe(false);
+  });
+
+  it("never throws when the INDEX cannot be read, and keeps what it retained", async () => {
+    // PLATFORM-ROBUST INJECTION. A directory where the index file belongs reads
+    // as EISDIR on win32 and POSIX alike, so both platforms enter the same arm.
+    // The archive-dir-as-a-FILE injection above does not: a path traversing a
+    // file is ENOENT on win32 — which the reader classifies as "absent" — and
+    // ENOTDIR on POSIX, which it wraps and throws. That asymmetry is why this
+    // arm was green here and red in Linux CI, and it is measured, not assumed.
+    const sourcePath = await writePacket("stated", STATED_BYTES);
+    await mkdir(charterPacketIndexPath(artifactsDir), { recursive: true });
+
+    const rows = await archiveCharterPackets({ artifactsDir, kinds: ["stated"] });
+
+    // The PACKET is still retained — only its index summary was lost, and the
+    // archived bytes are the evidence the index is merely a convenience over.
+    expect(rows).toHaveLength(1);
+    const row: CharterPacketArchiveRow = rows[0]!;
+    expect(row.archived).toBe(true);
+    expect(
+      await readFile(
+        join(
+          charterPacketArchiveDir(artifactsDir),
+          charterPacketArchiveFilename("stated", row.sha256),
+        ),
+        "utf8",
+      ),
+    ).toBe(STATED_BYTES);
+    expect(await exists(sourcePath)).toBe(false);
+  });
+
+  it("never throws when the index on disk is MALFORMED, and does not clobber it", async () => {
+    await writePacket("stated", STATED_BYTES);
+    await mkdir(charterPacketArchiveDir(artifactsDir), { recursive: true });
+    await writeFile(charterPacketIndexPath(artifactsDir), "{ truncated", "utf8");
+
+    await expect(
+      archiveCharterPackets({ artifactsDir, kinds: ["stated"] }),
+    ).resolves.toHaveLength(1);
+    // A record that could not be READ is never overwritten: the alternative is
+    // a clobber that destroys the accumulated history this index exists to keep.
+    expect(await readFile(charterPacketIndexPath(artifactsDir), "utf8")).toBe(
+      "{ truncated",
+    );
   });
 });

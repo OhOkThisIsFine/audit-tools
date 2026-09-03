@@ -962,4 +962,17 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   a probe in seconds. **Probe every lane at run start; never carry a quota verdict forward from a
   previous run's record** — a stale one silently shrinks coverage while looking like diligence.
 
+- **"File missing" is classified from ENOENT alone, and a path that traverses a FILE does not report
+  ENOENT on both platforms (2026-09-03).** Measured on Node 26: reading `<a-file>/x.json` gives
+  **ENOENT on win32** and **ENOTDIR on POSIX**, so `isFileMissingError` (`src/shared/io/json.ts`)
+  calls the identical filesystem state "absent" here and an IO failure in Linux CI —
+  `readOptionalJsonFile` returns `undefined` on one and throws `Failed to read <path>` on the other.
+  That asymmetry alone turned a green Windows suite red in CI. **A test that injects a failure by
+  putting a file where a DIRECTORY belongs is platform-dependent and proves nothing about the other
+  platform; inject a DIRECTORY where a FILE belongs instead** — that is EISDIR on win32 and POSIX
+  alike (also measured), so both run the same arm. Same for `mkdir` over an existing file: EEXIST on
+  both, but `mkdir` THROUGH one is ENOTDIR on both. The open property is that the shared classifier
+  is still platform-asymmetric; every `readOptionalJsonFile` caller inherits it, so a never-throw
+  contract must guard the call rather than trust the classifier.
+
 ## Doc-set hygiene (enforced)

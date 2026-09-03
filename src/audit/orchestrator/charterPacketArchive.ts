@@ -90,7 +90,13 @@ export function charterPacketArchiveFilename(
   return `${kind}-${sha256.slice(0, ARCHIVE_NAME_DIGEST_CHARS)}.md`;
 }
 
-/** Read the retention index, tolerating an absent or malformed file. */
+/**
+ * Read the retention index. An ABSENT file, and a payload that is not an array,
+ * read as no rows. Anything else — a malformed body, a directory in its place,
+ * a permission failure — THROWS, deliberately: the caller that overwrites this
+ * file must be able to tell "there was nothing to accumulate" from "the record
+ * could not be read", and only the second must stop it from clobbering.
+ */
 export async function readCharterPacketIndex(
   artifactsDir: string,
 ): Promise<CharterPacketArchiveRow[]> {
@@ -179,21 +185,30 @@ export async function archiveCharterPackets(params: {
 
   if (written.length === 0) return written;
 
-  // The index ACCUMULATES — a re-extraction adds what it retained and never
-  // overwrites the record of what an earlier lane read. Identical (kind, digest,
-  // outcome) rows collapse: the same bytes are the same packet, already recorded.
-  const existing = await readCharterPacketIndex(params.artifactsDir);
-  const seen = new Set(
-    existing.map((r) => `${r.kind}|${r.sha256}|${r.archived}`),
-  );
-  const merged = [...existing];
-  for (const row of written) {
-    const key = `${row.kind}|${row.sha256}|${row.archived}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(row);
-  }
+  // The WHOLE index phase — read, merge, write — is inside one guard. The READ
+  // was outside it, and that broke the never-throw contract on one platform
+  // only: `readCharterPacketIndex` wraps its own IO failure (`Failed to read
+  // <path>`) for anything it cannot classify as absent, and "absent" is decided
+  // by an ENOENT test, while a path that traverses a FILE reports ENOENT on
+  // win32 and ENOTDIR on POSIX. So the identical filesystem state read as an
+  // empty index here and as a rejected promise in Linux CI. A directory in
+  // place of the index file (EISDIR on both) escaped everywhere, as did a
+  // malformed index, whose parse error is not an absence either.
   try {
+    // The index ACCUMULATES — a re-extraction adds what it retained and never
+    // overwrites the record of what an earlier lane read. Identical (kind,
+    // digest, outcome) rows collapse: same bytes, same packet, already recorded.
+    const existing = await readCharterPacketIndex(params.artifactsDir);
+    const seen = new Set(
+      existing.map((r) => `${r.kind}|${r.sha256}|${r.archived}`),
+    );
+    const merged = [...existing];
+    for (const row of written) {
+      const key = `${row.kind}|${row.sha256}|${row.archived}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(row);
+    }
     await mkdir(archiveDir, { recursive: true });
     await writeFile(
       charterPacketIndexPath(params.artifactsDir),
@@ -202,7 +217,10 @@ export async function archiveCharterPackets(params: {
     );
   } catch {
     // The index is a convenience over the archived files themselves; failing to
-    // write it must not abort a fold whose ingest already succeeded.
+    // write it must not abort a fold whose ingest already succeeded. Nothing is
+    // written when the existing rows could not be READ either — the write is
+    // reached only through a successful read, so a failed read can never
+    // overwrite the accumulated record this index exists to keep.
   }
   return written;
 }
