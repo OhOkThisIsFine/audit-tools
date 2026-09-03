@@ -191,6 +191,47 @@ function formatDeterministicFindings(findings: Finding[], max = 20): string {
 export interface DesignReviewOptions {
   max_units?: number;
   conceptual_depth?: "shallow" | "deep";
+  /**
+   * The operator's RESOLVED lens selection, as
+   * `resolveIntentLensSelection` produced it. Absent when the operator
+   * expressed no limit at all.
+   *
+   * It reached no semantic channel: this options object — the one every
+   * design-review, contract, conceptual, perspective and judge prompt is
+   * rendered with — had no lens field, and the only lens literal a lane ever saw
+   * was the output example's hard-coded `"architecture"`. The delivered
+   * distribution was exactly the set of literals in the deterministic producers.
+   *
+   * A prompt cannot FORCE a model to produce a finding, so this is not the
+   * guarantee (the report's `lens_coverage` is). It is what makes `clean` — the
+   * "asked, and there was nothing there" answer — reachable at all.
+   */
+  lenses?: readonly string[];
+}
+
+/**
+ * State the operator's lens scope for a lens-open lane, and give the output
+ * example a lens to echo instead of a hard-coded one.
+ */
+function renderLensScope(options: DesignReviewOptions): string[] {
+  const lenses = options.lenses ?? [];
+  if (lenses.length === 0) return [];
+  return [
+    "## Lenses in scope",
+    "",
+    `The operator selected these lenses for this audit: ${lenses.join(", ")}. ` +
+      "Set each finding's `lens` to the one it genuinely belongs to, from that list. " +
+      "Do NOT default every finding to the same lens — a lens with no findings is " +
+      "reported as un-exercised, which is a truthful outcome; a finding filed under " +
+      "the wrong lens is not. If a finding genuinely belongs to no selected lens, " +
+      "report it with the lens it does belong to rather than forcing it into one.",
+    "",
+  ];
+}
+
+/** The lens literal the findings example echoes: the first selected, else a placeholder. */
+function exampleLens(options: DesignReviewOptions): string {
+  return options.lenses?.[0] ?? "the lens this finding belongs to";
 }
 
 /**
@@ -376,7 +417,10 @@ function conceptualCritiqueInstructions(): string[] {
  * the shape round-trips. `categoryEnum` is the per-pass category field (the one
  * line that differs between the contract / conceptual / combined passes).
  */
-function findingsEnvelopeExample(categoryEnum: string): string[] {
+function findingsEnvelopeExample(
+  categoryEnum: string,
+  lensExample = "the lens this finding belongs to",
+): string[] {
   return [
     "```json",
     "{",
@@ -387,7 +431,7 @@ function findingsEnvelopeExample(categoryEnum: string): string[] {
     `      "category": "${categoryEnum}",`,
     '      "severity": "one of: critical, high, medium, low, info",',
     '      "confidence": "one of: high, medium, low",',
-    '      "lens": "architecture",',
+    `      "lens": "${lensExample}",`,
     '      "summary": "detailed explanation of the observation and the recommended change",',
     '      "affected_files": [{"path": "relevant/file.ts"}],',
     '      "systemic": true',
@@ -410,7 +454,10 @@ export const CONCEPTUAL_FINDING_CATEGORIES = [
 ] as const;
 
 /** Shared finding-output-format block for any conceptual-review prompt. */
-function conceptualOutputFormat(resultsPathNote: string): string[] {
+function conceptualOutputFormat(
+  resultsPathNote: string,
+  lensExample?: string,
+): string[] {
   return [
     "## Output format",
     "",
@@ -418,6 +465,7 @@ function conceptualOutputFormat(resultsPathNote: string): string[] {
     "",
     ...findingsEnvelopeExample(
       `one of: ${CONCEPTUAL_FINDING_CATEGORIES.join(", ")}`,
+      lensExample,
     ),
     "",
     "**Ground every finding.** Cite at least one real `affected_files` path that exists in this repository — the component your observation is actually about. A finding that cites no real component is surfaced as ungrounded (quarantined), not admitted as confirmed: point at the code, do not invent paths. A whole-system observation should anchor on the file(s) where the structure is clearest.",
@@ -584,6 +632,7 @@ export function renderContractReviewPrompt(
     "You are performing the **contract-assessment** pass on this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to infer existing contracts from the repository and attack them adversarially with concrete counterexamples.",
     "",
     renderSharedStructuralContext(bundle, maxUnits),
+    ...renderLensScope(options),
     "## Contract assessment instructions",
     "",
     "- Infer existing contracts from the repository artifacts and code you inspect: invariants, trust boundaries, preconditions, postconditions, data lifecycle obligations, and critical-flow guarantees.",
@@ -597,6 +646,7 @@ export function renderContractReviewPrompt(
     "",
     ...findingsEnvelopeExample(
       "one of: inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap",
+      exampleLens(options),
     ),
     "",
     // Where the object goes (and what to do when this lane cannot write files)
@@ -632,10 +682,12 @@ export function renderConceptualReviewPrompt(
     "You are performing the **conceptual-design-critique** pass on this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide generative observations about broader architecture ideas that static analysis cannot produce.",
     "",
     renderSharedStructuralContext(bundle, maxUnits),
+    ...renderLensScope(options),
     ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
       "Use finding IDs starting with DR-001.",
+      exampleLens(options),
     ),
   ].join("\n");
 }
@@ -671,10 +723,12 @@ export function renderConceptualPerspectivePrompt(
     "You may sharpen or extend this lens to fit this codebase's character and domain, but stay in character.",
     "",
     renderSharedStructuralContext(bundle, maxUnits),
+    ...renderLensScope(options),
     ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
       "Report findings *from your perspective only*. Use finding IDs starting with DR-001.",
+      exampleLens(options),
     ),
   ].join("\n");
 }
@@ -715,6 +769,7 @@ export function renderConceptualJudgePrompt(
     // was the omission that left the deep pass's only ingested lane without the
     // graph's provenance (and, below, without the operator's lens selection).
     renderSharedStructuralContext(bundle, maxUnits),
+    ...renderLensScope(options),
     "## Perspective result files",
     "",
     "Read each of these JSON finding submissions (each a `{ \"findings\": [ ... ] }` object):",
@@ -738,6 +793,7 @@ export function renderConceptualJudgePrompt(
     `- Set top-level \`round_id\` to exactly \`${roundId}\`. In the SAME top-level object as \`findings\`, include \`candidate_dispositions\` entries with \`candidate_id\`, \`contributor_id\`, \`source_finding_id\`, \`disposition\`, \`target_final_finding_ids\`, \`modification_percent\`, \`rationale\`, \`verification_status\`, and \`verification_note\` (only when the status is not \`asserted\`); and \`final_finding_shares\` entries with \`final_finding_id\` plus \`contributors\`, each carrying \`contributor_id\`, \`source_candidate_ids\`, \`contribution_percent\`, and \`rationale\`.`,
     ...conceptualOutputFormat(
       "Produce ONE merged, ranked object. Renumber finding IDs sequentially from DR-001.",
+      exampleLens(options),
     ),
   ].join("\n");
 }

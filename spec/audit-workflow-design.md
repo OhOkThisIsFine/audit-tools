@@ -271,6 +271,20 @@ overridden files never become audit tasks.
 **Lens selection:** `resolveIntentLensSelection` is called with `lens_selection`
 from the intent checkpoint. Mandatory lenses are always included.
 
+The same resolution reaches every **lens-open** channel, not just the planning
+draw: the design-review contract lane, the shallow conceptual reviewer, each
+deep perspective, and the judge are all rendered with `DesignReviewOptions.lenses`
+and state the operator's scope in their prompts. That is the remedy half, and it
+is not the guarantee — a prompt cannot force a model to produce a finding. The
+guarantee is `summary.lens_coverage` on `audit-findings.json`: synthesis holds
+both the checkpoint and the produced findings, so it states, for every selected
+lens, whether it produced findings (`findings`), was asked through an ingested
+lens-open channel and produced none (`clean`), or was never exercised
+(`not_run`). Absence of a finding is therefore never silently readable as
+absence of a defect. `validateAuditFindingsReport` holds no checkpoint and so
+checks internal consistency only — it abstains on the `clean`/`not_run`
+distinction it cannot establish.
+
 **No N-file task cap:** `max_task_files` is a degenerate guard only; the token
 budget (`max_task_lines`, byte-based `sizeIndex` sizing) is the real constraint.
 

@@ -28,10 +28,14 @@ import {
   renderFindingBlockLines,
   compareCodeUnits,
   countBy,
+  deriveLensCoverage,
   isIngestEvent,
+  reprojectLensCoverage,
   type AgentReflection,
+  type LensCoverageEntry,
   type MeasuredOutcome,
 } from "audit-tools/shared";
+import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import type {
   RuntimeValidationReport,
   RuntimeValidationTaskManifest,
@@ -99,6 +103,12 @@ export interface AuditReportSummary {
    * `AuditFindingsSummary` makes it optional, so this render shape must too.
    */
   verification_status_breakdown?: Record<string, number>;
+  /**
+   * What every selected lens delivered. Optional for the same reason as the
+   * breakdowns above — the shared `AuditFindingsSummary` makes it optional, so
+   * this render shape must too — and absent on a run that carried no selection.
+   */
+  lens_coverage?: LensCoverageEntry[];
 }
 
 export interface AuditReportModel {
@@ -253,6 +263,13 @@ export function buildAuditReportModel(params: {
   systemicChallenge?: SystemicChallengeRegister;
   /** Intake manifest byte sizes used to estimate remediation source context. */
   sizeIndex?: Readonly<Record<string, number>>;
+  /**
+   * The accepted intent checkpoint. Read for its `lens_selection`, which is the
+   * ONLY statement of what the operator asked to be reviewed — and which used
+   * to reach synthesis's RENDER options while the model builder, the one site
+   * that mints the summary, was never passed it at all.
+   */
+  intentCheckpoint?: IntentCheckpoint;
 }): AuditReportModel {
   const markedConceptual = markConceptualFindingIds(params.designAssessment);
   // Re-key the finalized findings with globally-unique, content-addressed ids
@@ -312,6 +329,20 @@ export function buildAuditReportModel(params: {
     sizeIndex: params.sizeIndex,
   });
   const coverage = coverageSummary(params.coverageMatrix);
+  // A lens is only `clean` — "asked, and there was nothing there" — when at
+  // least one LENS-OPEN channel came back. Per-file audit results are lens-gated
+  // by planning (`required_lenses`), and the two design-review passes carry the
+  // selection into their prompts and record their own completion. With none of
+  // them ingested, a selected lens with no findings was never exercised, and
+  // saying `clean` would be exactly the "absence of a finding reads as absence
+  // of a defect" claim this field exists to refuse.
+  const lensOpenChannelIngested =
+    params.results.length > 0 ||
+    params.designAssessment?.contract_reviewed === true ||
+    params.designAssessment?.conceptual_reviewed === true;
+  const selectedLenses = resolveIntentLensSelection(
+    params.intentCheckpoint?.lens_selection,
+  );
   // Count grounding over ALL findings (incl. quarantined-refuted) so the `refuted`
   // tally reflects findings dropped from the admitted set.
   const groundingBreakdown = groundingStatusBreakdown(allFindings);
@@ -322,6 +353,19 @@ export function buildAuditReportModel(params: {
       work_block_count: workBlocks.blocks.length,
       severity_breakdown: severityBreakdown(findings),
       lens_breakdown: lensBreakdown(findings),
+      // Presence is guaranteed HERE, at the one boundary that holds both the
+      // operator's selection and the produced findings. Absent — deliberately —
+      // when no selection resolved: "no limit" and "every lens" are different
+      // answers, and inventing a map would be a claim nobody made.
+      ...(selectedLenses === undefined
+        ? {}
+        : {
+            lens_coverage: deriveLensCoverage({
+              selectedLenses,
+              findings,
+              lensOpenChannelIngested,
+            }),
+          }),
       audited_file_count: coverage.audited_file_count,
       excluded_file_count: coverage.excluded_file_count,
       ...(Object.keys(groundingBreakdown).length > 0
@@ -474,6 +518,36 @@ export interface RenderAuditReportOptions {
    * weaker run read as a complete one.
    */
   analyzer_capability?: AnalyzerCapabilityRecord;
+}
+
+/**
+ * Name the selected lenses this run did not exercise.
+ *
+ * Rendered whenever a selected lens produced no findings, with its outcome, so
+ * `clean` ("asked, nothing found") and `not_run` ("never asked") stay legible as
+ * the different statements they are. Nothing to say — every selected lens
+ * produced findings, or no selection was made — renders nothing.
+ */
+function renderUnexercisedLensLine(
+  coverage: readonly LensCoverageEntry[] | undefined,
+): string[] {
+  const unexercised = (coverage ?? []).filter(
+    (entry) => entry.selected && entry.outcome !== "findings",
+  );
+  if (unexercised.length === 0) return [];
+  const byOutcome = new Map<MeasuredOutcome, string[]>();
+  for (const entry of unexercised) {
+    const bucket = byOutcome.get(entry.outcome);
+    if (bucket) bucket.push(entry.lens);
+    else byOutcome.set(entry.outcome, [entry.lens]);
+  }
+  const parts = [...byOutcome.entries()]
+    .sort(([left], [right]) => compareCodeUnits(left, right))
+    .map(
+      ([outcome, lenses]) =>
+        `${outcome === "not_run" ? "never exercised" : "exercised, no findings"}: ${lenses.join(", ")}`,
+    );
+  return [`- Lenses not exercised: ${parts.join("; ")}`];
 }
 
 /**
@@ -911,6 +985,11 @@ export function renderAuditReportMarkdown(
     ...(report.summary.lens_breakdown && Object.keys(report.summary.lens_breakdown).length > 0
       ? [`- Lens breakdown: ${formatCountList(report.summary.lens_breakdown)}`]
       : []),
+    // The line the breakdown structurally cannot carry: a selected lens with no
+    // findings has no key in a `countBy`, so it used to be invisible. Named
+    // here rather than in *Audit Limitations* (owner working assumption) — terse
+    // and always in front of the reader, beside the counts it qualifies.
+    ...renderUnexercisedLensLine(report.summary.lens_coverage),
     ...(report.summary.grounding_status_breakdown &&
     Object.keys(report.summary.grounding_status_breakdown).length > 0
       ? [
@@ -1153,6 +1232,20 @@ export function normalizeExistingFindingsReport(
       work_block_count: report.work_blocks.length,
       severity_breakdown: severityBreakdown(report.findings as Finding[]),
       lens_breakdown: lensBreakdown(report.findings as Finding[]),
+      // The SELECTION is carried through — this function has no checkpoint and
+      // must not invent one — while the counts and outcomes are re-derived over
+      // the same findings `lens_breakdown` is re-counted from. Copying the map
+      // untouched beside a re-derived breakdown is how the two come to
+      // contradict each other, and the contradiction is refused downstream by
+      // `projectApprovedFindings`, which throws.
+      ...(report.summary.lens_coverage === undefined
+        ? {}
+        : {
+            lens_coverage: reprojectLensCoverage(
+              report.summary.lens_coverage,
+              report.findings as Finding[],
+            ),
+          }),
       ...(Object.keys(groundingBreakdown).length > 0
         ? { grounding_status_breakdown: groundingBreakdown }
         : {}),

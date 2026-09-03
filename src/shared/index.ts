@@ -123,9 +123,11 @@ export {
   WorkBlockSeamSchema,
   FindingThemeSchema,
   SynthesisNarrativeSchema,
+  LensCoverageEntrySchema,
   AuditFindingsSummarySchema,
   AuditFindingsReportSchema,
 } from "./types/finding.js";
+export type { LensCoverageEntry } from "./types/finding.js";
 export type { IntentCheckpoint } from "./types/intentCheckpoint.js";
 export { IntentCheckpointSchema } from "./types/intentCheckpoint.js";
 // Conceptual design-review charter spine (Phase A) — data model + hard gates.
@@ -309,6 +311,11 @@ export {
   worstMeasuredOutcome,
 } from "./measurement/measuredOutcome.js";
 export type { MeasuredOutcome } from "./measurement/measuredOutcome.js";
+export {
+  deriveLensCoverage,
+  lensCoverageEntryContradictsCount,
+  reprojectLensCoverage,
+} from "./reporting/lensCoverage.js";
 
 // Contracts
 export { AUDITOR_REPORT_MARKER } from "./contracts.js";

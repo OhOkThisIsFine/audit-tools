@@ -13,6 +13,7 @@
 import { z } from "zod";
 import { AnalyzerLeadProvenanceSchema } from "../analyzers/provenance.js";
 import { ContentCoherenceTraceSchema } from "../decompose/contentCoherence.js";
+import { MeasuredOutcomeSchema } from "../measurement/measuredOutcome.js";
 
 /** Canonical finding severity vocabulary (most-severe-first). */
 export const FindingSeveritySchema = z.enum([
@@ -423,6 +424,32 @@ export function findingIdentity(finding: Finding): FindingIdentity {
   };
 }
 
+/**
+ * What ONE lens the operator selected actually delivered.
+ *
+ * `lens_breakdown` is a `countBy` over what was PRODUCED, so a selected lens
+ * that produced nothing has no key at all — and the render suppressed the whole
+ * line on an empty map. A run therefore advertised the operator's chosen scope,
+ * delivered a fraction of it, and nothing could distinguish "reviewed, nothing
+ * found" from "never reviewed". This states the difference:
+ *
+ *   • `findings` — asked, and it found something.
+ *   • `clean` — asked through a lens-open channel that was ingested, and there
+ *     was nothing there. The ONLY value that may be read as "no defect".
+ *   • `not_run` — selected, and no lens-open channel was ever ingested. Absence
+ *     of a finding is not absence of a defect.
+ */
+export const LensCoverageEntrySchema = z
+  .object({
+    lens: z.string(),
+    /** True when the operator's resolved selection includes this lens. */
+    selected: z.boolean(),
+    findings_count: z.number().int().min(0),
+    outcome: MeasuredOutcomeSchema,
+  })
+  .strict();
+export type LensCoverageEntry = z.infer<typeof LensCoverageEntrySchema>;
+
 export const AuditFindingsSummarySchema = z.object({
   finding_count: z.number(),
   work_block_count: z.number(),
@@ -454,6 +481,15 @@ export const AuditFindingsSummarySchema = z.object({
    * population and would hide the quarantine.
    */
   verification_status_breakdown: z.record(z.string(), z.number()).optional(),
+  /**
+   * What EVERY lens the operator selected delivered — the statement that makes
+   * an absent `lens_breakdown` key legible. Optional because a run that carried
+   * no lens selection has no coverage claim to make, and because the recovery
+   * deliverable mints a summary from a flat finding set with no checkpoint at
+   * all. PRESENCE is guaranteed at the synthesis boundary, which holds the
+   * checkpoint; this schema and its validator own only internal consistency.
+   */
+  lens_coverage: z.array(LensCoverageEntrySchema).optional(),
 });
 export type AuditFindingsSummary = z.infer<typeof AuditFindingsSummarySchema>;
 

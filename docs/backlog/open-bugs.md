@@ -12,64 +12,20 @@ Seven entries were found by running two full audits of `C:\Code\llm-relay` (335 
 back, differing only in lane capability. They are grouped here because they share one shape:
 **the tool reports success while delivering less than it claims**, and each was invisible from
 inside the run. Ordered by consequence. Full evidence lives in each entry. Numbering is positional
-and never reused, so a closed entry leaves its number vacant rather than shifting the rest — item 4
-(`NO-REJECTION-OUTCOME`) is closed.
+and never reused, so a closed entry leaves its number vacant rather than shifting the rest — items 1
+(`SELECTED-LENSES-IGNORED`), 4 (`NO-REJECTION-OUTCOME`), 6 (`CAPABILITY-ASSERTED`) and 7
+(`LANE-OUTCOMES-UNRECORDED`) are closed.
 
-1. **Nine lenses were selected; two produced findings.** `SELECTED-LENSES-IGNORED` below. The most
-   consequential of the set — it silently voids the operator's own scope decision.
 2. **A charter packet ships a manifest instead of evidence.** `PACKET-SHIPS-MANIFEST` — 0 of 72
    source-comment blocks delivered; a lane characterises intent from evidence it never received.
 3. **`charter_register.json` self-certifies.** `REGISTER-SELF-CERTIFIES` — printed
    `validation_issues: []` at 1-of-15 correct citations and again at 75-of-75.
 5. **Packets are consumed at ingest.** `PACKETS-CONSUMED` — lane inputs cannot be audited after
    the fact; a three-lane claim about missing coverage could not be checked.
-6. **Capability status is asserted, not measured.** `CAPABILITY-ASSERTED` — failed analyzer
-   installs record `"status": "applied"`; a gate with zero planned tasks records `satisfied`.
-7. **Lane outcomes are not recorded per lane.** `LANE-OUTCOMES-UNRECORDED` — run 1's five
-   "exit 0, wrote nothing" lanes are invisible in every artifact.
 
 Cross-repo siblings, already filed: `docs/backlog/forward-tracks.md` Track 3 (emit size, complexity
 and risk per lane) and `C:\Code\docs\backlog.md` (host must query the live ladder, and match model
 capability to stated task demand).
-
-- **SELECTED-LENSES-IGNORED — nine lenses were selected and two produced findings, with nothing
-  reporting the gap (2026-09-03, high, friction: false_green).** `intent_checkpoint.json` recorded
-  `lens_selection.include = [architecture, maintainability, performance, tests, operability,
-  config_deployment, observability, provenance_labelling, concurrency_races]`, `exclude: []`.
-  Measured across the delivered artifacts: `design_assessment.json` carries `architecture 97,
-  maintainability 511`; `charter_register.json` carries `architecture 16`; all 27 merged conceptual
-  findings and all 16 charter deltas are `architecture`. The other SEVEN produced zero findings —
-  including two custom lenses the operator added and one canonical lens the host flipped from
-  exclude to include on stated evidence. ⚠ The only enforcement is prose in the lane prompt telling
-  the model not to default to `architecture`; nothing checks the output against the selection. So a
-  run advertises the operator's chosen scope and delivers a fraction of it, and the report cannot
-  distinguish "reviewed, nothing found" from "never reviewed". Reproduced identically across both
-  runs, so it is not lane-quality. **Property:** a lens selected in intent either produces findings
-  attributed to it, or the run reports that lens as un-exercised — in the artifacts and in the
-  final report — so absence of a finding is never silently readable as absence of a defect.
-
-- **CAPABILITY-ASSERTED — a failed analyzer install records `"status": "applied"`, and a gate with
-  nothing to check records `satisfied` (2026-09-03, medium, friction: false_green).** The html and
-  css analyzers were requested `ephemeral` in both runs; `web-tree-sitter` never installed, the run
-  logged `analyzer 'html' … is ABSENT — parser-grade extraction is OFF … the weaker regex floor
-  will run instead`, and `analyzer_capability.json` nonetheless records `"status": "applied"` while
-  `audit_state.json` records the obligation `satisfied`. No lane prompt discloses the degradation,
-  yet lanes rank on `external_analyzer_signal`. Separately `runtime_validation_current: satisfied`
-  is recorded while `planning_artifacts` is still `missing` — the gate passed because zero tasks
-  existed to validate. ⚠ Both are the same shape: a status field asserts an intent rather than
-  recording a measurement. **Property:** capability and gate statuses are derived from what
-  actually ran; a degraded analyzer is surfaced to every lane that ranks on its signal, and a gate
-  with an empty input set reports `not-applicable`, never `satisfied`.
-
-- **LANE-OUTCOMES-UNRECORDED — a lane that reports success and writes nothing leaves no trace
-  (2026-09-03, medium, friction: missing_affordance).** `submission-ledger.jsonl` is round-scoped: <!-- doc-citation-exempt: runtime artifact names, not tracked files -->
-  eight design-review lanes produced two rows. The only per-lane roster is inside the judge's own
-  submission, and its self-reference to the judge result file already dangles once that submission
-  is consumed. Measured in run 1: of 8 dispatched lanes, 5 reported process exit 0 while writing no
-  artifact at all (one returned the single word "Let" after 909 s), 2 failed outright, 1 succeeded.
-  None of that is recoverable from any audit artifact — it survives only in the host's transcript.
-  **Property:** the ledger records one row per dispatched lane with its outcome (artifact written,
-  empty, failed) so a run's real delivery rate is auditable from its own artifacts.
 
 - **REGISTER-SELF-CERTIFIES — `charter_register.json` prints `validation_issues: []` whether its citations are right or wrong
   (2026-09-02, high, friction: false_green).** Measured as a controlled A/B on one repo, same

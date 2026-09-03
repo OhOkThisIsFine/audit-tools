@@ -12,6 +12,10 @@ import {
 import type { ContentCoherenceTrace } from "../decompose/contentCoherence.js";
 import { workBlockSeamRationale } from "../decompose/workBlockSeams.js";
 import { compareCodeUnits } from "../compareCodeUnits.js";
+import {
+  lensCoverageEntryContradictsCount,
+  reprojectLensCoverage,
+} from "../reporting/lensCoverage.js";
 import { severityRank } from "../types/lens.js";
 import type { ValidationIssue } from "./basic.js";
 import { isRecord, pushValidationIssue } from "./basic.js";
@@ -74,6 +78,64 @@ function validateBreakdown(
       `${label}.${key}`,
       actual[key] ?? 0,
       expected.get(key) ?? 0,
+    );
+  }
+}
+
+/**
+ * `lens_coverage`, checked for INTERNAL CONSISTENCY and nothing else.
+ *
+ * This function receives the report and nothing else — no intent checkpoint —
+ * so it cannot establish whether the run carried a selection, and a gate that
+ * cannot ESTABLISH its verdict abstains rather than approximating one. Presence
+ * is guaranteed at the synthesis boundary, which does hold the checkpoint.
+ *
+ * What it CAN establish from the report alone, and therefore refuses on:
+ *   • every `lens_breakdown` key appears in the coverage map (otherwise the map
+ *     silently omits a lens the report itself counts);
+ *   • each entry's `findings_count` equals the recount from `report.findings`;
+ *   • no entry's `outcome` contradicts its own count.
+ *
+ * It ABSTAINS on `clean` versus `not_run`. Which of the two a zero-count lens
+ * deserves depends on whether a lens-open channel was ingested, and that is not
+ * in the report — so picking one here would refuse legitimate output rather than
+ * catch a defect. That distinction is the synthesis boundary's to make, and this
+ * one refuses only what it can establish.
+ */
+function validateLensCoverage(
+  issues: ValidationIssue[],
+  path: string,
+  report: AuditFindingsReport,
+  lensBreakdown: Map<string, number>,
+): void {
+  const coverage = report.summary.lens_coverage;
+  if (coverage === undefined) return;
+  const coveragePath = childPath(path, "summary.lens_coverage");
+  const seen = new Set<string>();
+  for (const entry of coverage) {
+    seen.add(entry.lens);
+    const expected = lensBreakdown.get(entry.lens) ?? 0;
+    pushCountMismatch(
+      issues,
+      childPath(coveragePath, `${entry.lens}.findings_count`),
+      `summary.lens_coverage.${entry.lens}.findings_count`,
+      entry.findings_count,
+      expected,
+    );
+    if (lensCoverageEntryContradictsCount(entry)) {
+      pushValidationIssue(
+        issues,
+        childPath(coveragePath, `${entry.lens}.outcome`),
+        `summary.lens_coverage.${entry.lens}.outcome "${entry.outcome}" contradicts its own ${String(entry.findings_count)} finding(s): a lens with findings is "findings", and a lens with none is "clean" or "not_run".`,
+      );
+    }
+  }
+  for (const lens of [...lensBreakdown.keys()].sort()) {
+    if (seen.has(lens)) continue;
+    pushValidationIssue(
+      issues,
+      childPath(coveragePath, lens),
+      `summary.lens_coverage omits "${lens}", which summary.lens_breakdown counts — a coverage map must account for every lens the report itself reports.`,
     );
   }
 }
@@ -318,6 +380,7 @@ function buildProjection(
       lensBreakdown,
     );
   }
+  validateLensCoverage(issues, path, report, lensBreakdown);
 
   const dispositionById = new Map<string, ApprovedFindingDisposition>();
   for (const [findingId] of approvedById) {
@@ -587,6 +650,15 @@ export function projectAuditFindingsReportSubset(
               findings.map((finding) => finding.lens),
             ),
           }),
+      // RE-DERIVED over the surviving findings, never copied from the parent by
+      // the `...report.summary` spread above. The projection validates itself at
+      // the write boundary, so a carried-through map would contradict the
+      // re-derived `lens_breakdown` beside it and throw — on a subset that drops
+      // every finding of one lens, which is exactly what the remediate intake's
+      // approved-subset request produces.
+      ...(report.summary.lens_coverage === undefined
+        ? {}
+        : { lens_coverage: reprojectLensCoverage(report.summary.lens_coverage, findings) }),
       ...(report.summary.grounding_status_breakdown === undefined
         ? {}
         : {

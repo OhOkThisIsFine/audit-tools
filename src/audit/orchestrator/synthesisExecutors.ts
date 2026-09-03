@@ -36,6 +36,10 @@ function buildBaseFindingsReport(
       charterRegister: bundle.charter_register,
       systemicChallenge: bundle.systemic_challenge,
       sizeIndex: options.sizeIndex,
+      // The checkpoint reached the RENDER options only; the model builder — the
+      // one site that mints the summary — was never passed it, so nothing at
+      // synthesis could compare what was selected against what was produced.
+      intentCheckpoint: bundle.intent_checkpoint,
     }),
   );
   // Record the host-confirmed exclusions in the machine contract so omissions

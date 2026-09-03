@@ -3,6 +3,7 @@ import {
   charterReviewDisposition,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
+import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import {
   type DesignReviewOptions,
   renderConceptualReviewPrompt,
@@ -172,7 +173,17 @@ export async function prepareConceptualDispatch(opts: {
     artifactsDir,
     GATE_LANES.design_review_conceptual,
   );
-  const reviewOptions: DesignReviewOptions = { max_units: settings.max_units };
+  // The operator's lens selection reaches EVERY lens-open lane of this pass —
+  // the shallow reviewer, each perspective, and the judge. It reached none of
+  // them before: this options object had no lens field at all, so the only lens
+  // a lane ever saw was the output example's hard-coded literal.
+  const lenses = resolveIntentLensSelection(
+    bundle.intent_checkpoint?.lens_selection,
+  );
+  const reviewOptions: DesignReviewOptions = {
+    max_units: settings.max_units,
+    ...(lenses === undefined ? {} : { lenses }),
+  };
   // A round that is about to be superseded — by a re-review, or by a switch to
   // the shallow pass — will never be ingested, so this is the last moment its
   // perspectives' dispatch rows can be closed with what they actually

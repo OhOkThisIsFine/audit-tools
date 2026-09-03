@@ -36,6 +36,7 @@ import {
 import {
   renderContractReviewPrompt,
 } from "../orchestrator/designReviewPrompt.js";
+import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import {
   prepareConceptualDispatch,
   resolveConceptualReviewSettings,
@@ -211,6 +212,12 @@ async function prepareContractDispatch(opts: {
     opts.artifactsDir,
     GATE_LANES.design_review_contract,
   );
+  // The contract lane is lens-open — it reports findings carrying a `lens` — so
+  // it is told which lenses the operator selected, from the ONE resolution every
+  // draw reads.
+  const lenses = resolveIntentLensSelection(
+    opts.bundle.intent_checkpoint?.lens_selection,
+  );
   const fanout = await materializeFanoutLanes({
     artifactsDir: opts.artifactsDir,
     runId: AUDIT_GATE_SUBMISSION_SCOPE,
@@ -223,7 +230,10 @@ async function prepareContractDispatch(opts: {
         // canonical footer (bound path + the read-only-executor alternative) to
         // every lane prompt it writes.
         promptText: [
-          renderContractReviewPrompt(opts.bundle, { max_units: opts.maxUnits }),
+          renderContractReviewPrompt(opts.bundle, {
+            max_units: opts.maxUnits,
+            ...(lenses === undefined ? {} : { lenses }),
+          }),
           ...(notesSection ? ["", notesSection] : []),
         ].join("\n"),
       },
