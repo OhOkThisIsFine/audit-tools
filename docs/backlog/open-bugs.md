@@ -134,25 +134,6 @@ capability to stated task demand).
   and reproducible) for the life of the run, so a claim about lane inputs is checkable after the
   fact rather than resting on the lane's own testimony.
 
-- **The backlog seek index silently omits 4 of the 5 `## Open tracks` entries, and `--check` passes
-  anyway because it re-runs the same blind parse (2026-09-02, medium, friction: false_green).**
-  `parseTrackEntries` in `scripts/shared/generate-handoff-roadmap.mjs` matches
-  `/^\*\*Track \d+\b/`, so ONLY a lead-in beginning literally `**Track <digits>` is indexed. Four
-  entries in `docs/backlog/forward-tracks.md` do not start that way — the ceremony-review remainder,
-  the audit-draw read-only framing, the metric-pool empirical program, and Track 2.5's neighbours —
-  so `docs/backlog.md` lists `Open tracks` as a section holding one entry. The generator's own doc
-  comment asserts the grammar the file does not follow: "`## Open tracks` writes `**Track N — …**`
-  paragraphs". Nothing reconciles the two, and `generate-backlog-index.mjs --check` cannot: it
-  compares the rendered index against the SAME parse, so an entry the parse cannot see is absent
-  from both sides and the gate is green. Found while adding a new entry that landed in the file and
-  never reached the index; it was renamed `Track 3` to become findable, which is a workaround, not
-  a fix. ⚠ This is the exact failure the index preamble names — "an entry that leaves the index is
-  an entry that goes stale unseen" — reached through the writer rather than through neglect.
-  **Property:** either every `## Open tracks` paragraph entry is indexed whatever its lead-in, or a
-  check FAILS on a bold paragraph in that section that the entry grammar cannot parse. A gate that
-  validates the index against its own parser cannot detect this class; the check must compare
-  against the file's paragraphs.
-
 - **Four code and CI comments assert a shape the tree no longer has, and nothing checks a comment
   against the code it describes (2026-08-31, medium, friction: tool_should_decide).**
   The header of `src/shared/continuityScore.ts` says audit "re-exports `computeContinuityScores` …

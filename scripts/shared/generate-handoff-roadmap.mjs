@@ -252,19 +252,31 @@ export function parseBulletEntries(text, file = "<text>") {
 }
 
 /**
- * `forward-tracks.md`'s *Open tracks* section writes its entries as `**Track N —
- * …**` paragraphs rather than bullets, so it needs its own reader. The track
- * NUMBER is already an explicit order signal in the prose; document order
- * reproduces it without a new marker.
+ * `forward-tracks.md`'s *Open tracks* section writes its entries as bold
+ * paragraphs (`**Title …**`) rather than `- **…**` bullets, whatever their
+ * lead-in, so it needs its own reader. Document order reproduces entry sequence.
  */
 export function parseTrackEntries(text, file = "<text>") {
   const lines = text.split(/\r?\n/);
+  const headingIndex = lines.findIndex((l) => l.trim() === "## Open tracks");
+  const startIndex = headingIndex === -1 ? 0 : headingIndex + 1;
+  let endIndex = lines.length;
+  for (let i = startIndex; i < lines.length; i++) {
+    if (/^## /.test(lines[i])) {
+      endIndex = i;
+      break;
+    }
+  }
+
   const starts = [];
-  lines.forEach((l, i) => {
-    if (/^\*\*Track \d+\b/.test(l)) starts.push(i);
-  });
+  for (let i = startIndex; i < endIndex; i++) {
+    if (/^\*\*/.test(lines[i])) {
+      starts.push(i);
+    }
+  }
+
   return starts.map((start, k) => {
-    const end = k + 1 < starts.length ? starts[k + 1] : lines.length;
+    const end = k + 1 < starts.length ? starts[k + 1] : endIndex;
     const body = lines.slice(start, end).join("\n");
     return {
       title: boldTitle(body, { where: `${file}:${start + 1}`, opener: "" }),

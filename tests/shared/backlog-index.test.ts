@@ -105,7 +105,7 @@ describe('anchors — the whole point of the index', () => {
     for (const group of collectIndex(sources)) {
       const lines = sources.get(group.file)!.split(/\r?\n/);
       for (const item of group.items) {
-        expect(lines[item.line - 1]).toMatch(/^(- \*\*|\*\*Track \d)/);
+        expect(lines[item.line - 1]).toMatch(/^(- \*\*|\*\*)/);
       }
     }
   });
@@ -119,7 +119,7 @@ describe('anchors — the whole point of the index', () => {
     for (const group of collectIndex(sources)) {
       const lines = sources.get(group.file)!.split(/\r?\n/);
       for (const item of group.items) {
-        expect(lines[item.line - 1]).toMatch(/^(- \*\*|\*\*Track \d)/);
+        expect(lines[item.line - 1]).toMatch(/^(- \*\*|\*\*)/);
         checked += 1;
       }
     }

@@ -88,6 +88,32 @@ describe('entry parsing — the pointer is the entry\'s own title, verbatim', ()
     expect(parseTrackEntries(text).map((e) => e.title)).toEqual(['Track 1 — first.', 'Track 2 — second.']);
   });
 
+  it('reads any bold-paragraph entry under `## Open tracks` whatever its lead-in', () => {
+    const text = [
+      '## Open tracks',
+      '',
+      '**Track 9 — standard track.** body prose here',
+      '',
+      '**Some other lead-in — non-numeric lead-in.** body prose here',
+      '',
+      '## Next section',
+      '',
+      '**Not in open tracks.**',
+    ].join('\n');
+    const entries = parseTrackEntries(text, 'docs/backlog/forward-tracks.md');
+    expect(entries).toEqual([
+      { title: 'Track 9 — standard track.', line: 3 },
+      { title: 'Some other lead-in — non-numeric lead-in.', line: 5 },
+    ]);
+  });
+
+  it('an UNTERMINATED bold title in open tracks fails loudly, naming file and line', () => {
+    const text = ['## Open tracks', '', '**never closed bold title\nmore text'].join('\n');
+    expect(() => parseTrackEntries(text, 'docs/backlog/forward-tracks.md')).toThrow(
+      /docs\/backlog\/forward-tracks\.md:3[\s\S]*UNTERMINATED/,
+    );
+  });
+
   it('sectionText slices one `## ` section, and refuses a heading that moved', () => {
     const text = ['# doc', '## A', 'a1', '## B', 'b1'].join('\n');
     expect(sectionText(text, 'A')).toBe('a1');
