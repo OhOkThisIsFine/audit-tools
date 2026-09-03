@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { AnalyzerLeadProvenanceSchema } from "./provenance.js";
 import { compareCodeUnits } from "../compareCodeUnits.js";
+import {
+  outcomeLostCoverage,
+  type MeasuredOutcome,
+} from "../measurement/measuredOutcome.js";
 
 /** One normalized result imported from an external analyzer such as eslint or tsc. */
 export const ExternalAnalyzerResultItemSchema = z
@@ -89,32 +93,30 @@ export type ExternalAnalyzerToolStatusValue =
  * `npm run check`, so a new status can never default into `clean`.
  */
 /**
- * What a status says about coverage. Named as a type so the vocabulary has ONE
- * home and every consumer of the classification speaks it by name.
+ * What a status says about coverage: the shared {@link MeasuredOutcome}
+ * vocabulary minus the one member an imported tool run can never be. A tool was
+ * asked to run, so "there was nothing to measure" is not an answer available to
+ * it — `not_applicable` belongs to channels whose input set can legitimately be
+ * empty (an obligation with no planned tasks, an analyzer with no supported
+ * files), not to a candidate the acquisition engine actually invoked.
+ *
+ * An ALIAS, deliberately, not a second copy: the words, their coverage
+ * classification, and the member-level question all live in
+ * `src/shared/measurement/measuredOutcome.ts`, so the two vocabularies cannot
+ * drift.
  */
-export type ExternalAnalyzerCoverage = "clean" | "findings" | "degraded" | "not_run";
-
-/**
- * Which coverage classes may be read as "this tool produced trustworthy
- * coverage". Exhaustive by construction: a new coverage class without a row here
- * fails `npm run check` rather than defaulting into either answer.
- */
-const COVERAGE_IS_TRUSTWORTHY: Record<ExternalAnalyzerCoverage, boolean> = {
-  clean: true,
-  findings: true,
-  degraded: false,
-  not_run: false,
-};
+export type ExternalAnalyzerCoverage = Exclude<MeasuredOutcome, "not_applicable">;
 
 /**
  * True when a coverage class means NO trustworthy coverage was produced — the
  * single member-level answer. Both consumers ask it here rather than each
- * re-typing `=== "degraded" || === "not_run"`, so widening the coverage
- * vocabulary is one edit guarded by a compile error, never a silent divergence
- * between two copies of the same comparison.
+ * re-typing `=== "degraded" || === "not_run"`, and it DELEGATES to the shared
+ * vocabulary's own table, so widening the coverage vocabulary is one edit
+ * guarded by a compile error, never a silent divergence between two copies of
+ * the same comparison.
  */
 export function isNonCleanAnalyzerCoverage(coverage: ExternalAnalyzerCoverage): boolean {
-  return !COVERAGE_IS_TRUSTWORTHY[coverage];
+  return outcomeLostCoverage(coverage);
 }
 
 export const EXTERNAL_ANALYZER_STATUS_CLASSIFICATION: Record<
