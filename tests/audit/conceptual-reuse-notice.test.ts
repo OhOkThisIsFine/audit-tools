@@ -1,3 +1,4 @@
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 /**
  * Tests for renderReuseNotice helper (TST-4c8bd93a-3).
  * This test file covers the reuse notice generation for conceptual dispatch.
@@ -118,7 +119,7 @@ test("INV 11: resolveConceptualReviewSettings resolves both nested bundle paths 
       design_review: { conceptual_depth: "deep", perspectives: 2 },
     },
     charter_register: {
-      schema_version: "charter-register/v3",
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
       subsystems: [
         { name: "s", charters: [{ id: "c", confidence: "low" }] },
       ],

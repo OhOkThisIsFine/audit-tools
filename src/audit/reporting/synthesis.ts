@@ -1,6 +1,10 @@
 import type { AuditResult, CoverageMatrix, Finding, UnitManifest } from "../types.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
-import type { IntentCheckpoint, SubmissionLedgerEvent } from "audit-tools/shared";
+import type {
+  CharterPacketCoverage,
+  IntentCheckpoint,
+  SubmissionLedgerEvent,
+} from "audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { ConceptualReviewAdjudication } from "../types/conceptualAdjudication.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
@@ -9,6 +13,7 @@ import {
   degradedAnalyzerEntries,
   type AnalyzerCapabilityRecord,
 } from "../types/analyzerCapability.js";
+import type { CharterPacketArchiveRow } from "../orchestrator/charterPacketArchive.js";
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type {
@@ -518,6 +523,17 @@ export interface RenderAuditReportOptions {
    * weaker run read as a complete one.
    */
   analyzer_capability?: AnalyzerCapabilityRecord;
+  /**
+   * What each blind charter lane's evidence packet actually delivered, folded
+   * from `charter_register.evidence_coverage`. Rendered UNCONDITIONALLY — see
+   * {@link renderCharterCoverageSection}.
+   */
+  charter_evidence_coverage?: readonly CharterPacketCoverage[];
+  /**
+   * Retention rows for this run's charter packets. A row with `archived: false`
+   * is a STATED retention failure and is surfaced beside the coverage figures.
+   */
+  charter_packet_archive?: readonly CharterPacketArchiveRow[];
 }
 
 /**
@@ -574,6 +590,63 @@ function renderAnalyzerDegradationLines(
     ),
     "",
   ];
+}
+
+/**
+ * What the charter lanes were actually GIVEN, per evidence class.
+ *
+ * This renders UNCONDITIONALLY, deliberately diverging from the drift section
+ * above where clean is the expected case and presence is the statement. Here the
+ * measured case was 0 of 72 source-comment blocks delivered while the register
+ * and the report said nothing at all — so a silent section would leave
+ * "complete" indistinguishable from "not measured", which is the exact
+ * false-green this block exists to close. A run with no charter layer says so.
+ */
+function renderCharterCoverageSection(
+  coverage: readonly CharterPacketCoverage[],
+  archive: readonly CharterPacketArchiveRow[],
+): string[] {
+  // Its OWN top-level section, not a sub-head of "Process Feedback": coverage is
+  // a delivery measurement about the tool's inputs, not feedback about the host —
+  // and nesting it there would force that heading to render on every report,
+  // silently inverting the drift section's "presence is the statement" contract.
+  const lines = ["## Evidence Coverage", "", "### Charter evidence coverage", ""];
+  if (coverage.length === 0) {
+    lines.push(
+      "No charter evidence packets were measured in this run (the charter layer " +
+        "is opt-in at a `deep` ceiling). This is a stated absence, not a clean bill.",
+      "",
+    );
+  }
+  for (const packet of coverage) {
+    lines.push(`- \`${packet.kind}\` channel:`);
+    for (const entry of packet.classes) {
+      const truncated =
+        entry.truncated > 0 ? `, ${entry.truncated} truncated` : "";
+      lines.push(
+        `  - ${entry.evidence_class}: ${entry.delivered} of ${entry.named} delivered${truncated}` +
+          (entry.omitted.length > 0
+            ? ` — omitted: ${entry.omitted
+                .map((row) => `${row.path} (${row.reason})`)
+                .join(", ")}`
+            : ""),
+      );
+    }
+  }
+  const unarchived = archive.filter((row) => !row.archived);
+  if (unarchived.length > 0) {
+    lines.push(
+      "",
+      "⚠ Packet retention FAILED for " +
+        unarchived
+          .map((row) => `\`${row.kind}\` (${row.reason ?? "unstated reason"})`)
+          .join(", ") +
+        ". The lane-asset copy was left in place rather than deleted, so the " +
+        "evidence still exists — but it is not in the run's archive.",
+    );
+  }
+  lines.push("");
+  return lines;
 }
 
 /**
@@ -1169,11 +1242,15 @@ export function renderAuditReportMarkdown(
         ]
       : reflectionLimitationLines;
   const feedbackLines = renderProcessFeedbackSection(processFeedback);
+  const coverageLines = renderCharterCoverageSection(
+    options.charter_evidence_coverage ?? [],
+    options.charter_packet_archive ?? [],
+  );
   lines.push(...limitationLines, ...feedbackLines);
   if (driftLines.length > 0 && feedbackLines.length === 0) {
     lines.push("## Process Feedback", "");
   }
-  lines.push(...driftLines);
+  lines.push(...driftLines, ...coverageLines);
 
   const excludedScope = options.intent_checkpoint?.excluded_scope ?? [];
   if (excludedScope.length > 0) {

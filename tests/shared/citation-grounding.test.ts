@@ -198,10 +198,17 @@ describe("checkCitations — delivered evidence", () => {
     expect(first.detail).toContain("no delivered run");
   });
 
-  it("refuses a citation to a file no excerpt delivered", () => {
-    expect(check("docs/table.md:1", { delivered }).verdict).toBe(
+  it("refuses a RANGED citation to a file no excerpt delivered", () => {
+    expect(check("docs/table.md:1-2", { delivered }).verdict).toBe(
       "outside_delivered_evidence",
     );
+  });
+
+  it("leaves a PATH-ONLY citation alone — it makes no line claim", () => {
+    // The structural packet names every member in its file tree while a member
+    // with no top-level declarations yields no excerpt; refusing those would be
+    // a false red, not a caught defect.
+    expect(check("docs/table.md", { delivered }).verdict).toBe("ok");
   });
 
   it("SKIPS the check when no manifest is available, and says so", () => {

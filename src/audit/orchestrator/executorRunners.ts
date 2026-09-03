@@ -24,6 +24,7 @@ import {
 } from "./synthesisExecutors.js";
 import { runCriticalFlowFallbackExecutor } from "./criticalFlowFallbackExecutor.js";
 import { runCharterExtractionExecutor } from "./charterExtractionExecutor.js";
+import { readCharterPacketIndex } from "./charterPacketArchive.js";
 import { runCharterDeltaExecutor } from "./charterDeltaExecutor.js";
 import { runCharterClarificationExecutor } from "./charterClarificationExecutor.js";
 import { runSystemicChallengeExecutor } from "./systemicChallengeExecutor.js";
@@ -113,8 +114,15 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     runDocsDigestExecutor(bundle, options.root),
   structure_decomposition_executor: async (bundle, { options }) =>
     runStructureDecompositionExecutor(bundle, options.root),
+  // root and artifactsDir are passed through UNCHANGED and stay optional: the
+  // omit branch needs no disk, and a `requireRoot` here would throw before the
+  // executor's own `not_run` abstention could ever be recorded — which would
+  // make the recorded abstention unreachable and the affirmation a lie.
   charter_extraction_executor: async (bundle, { options }) =>
-    runCharterExtractionExecutor(bundle, options.charterSubmission),
+    runCharterExtractionExecutor(bundle, options.charterSubmission, {
+      ...(options.root ? { root: options.root } : {}),
+      ...(options.artifactsDir ? { artifactsDir: options.artifactsDir } : {}),
+    }),
   charter_delta_executor: async (bundle, { options }) =>
     runCharterDeltaExecutor(bundle, options.charterDeltaSubmission),
   charter_clarification_executor: async (bundle, { options }) =>
@@ -156,13 +164,21 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       bundle,
       requireRoot(options.root, "runtime_validation_executor"),
     ),
+  // The runner owns the artifacts dir, so it reads the packet-retention index
+  // here and the synthesis executors stay synchronous.
   synthesis_executor: async (bundle, { options }) =>
     runSynthesisExecutor(bundle, options.auditResults, {
       sizeIndex: options.sizeIndex,
+      packetArchive: options.artifactsDir
+        ? await readCharterPacketIndex(options.artifactsDir)
+        : [],
     }),
   synthesis_narrative_executor: async (bundle, { options }) =>
     runSynthesisNarrativeExecutor(bundle, options.narrativeResults, {
       sizeIndex: options.sizeIndex,
+      packetArchive: options.artifactsDir
+        ? await readCharterPacketIndex(options.artifactsDir)
+        : [],
     }),
   runtime_validation_update_executor: async (bundle, { options }) => {
     if (!options.runtimeValidationUpdates) {

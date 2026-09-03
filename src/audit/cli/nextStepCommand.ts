@@ -9,6 +9,7 @@ import {
   laneAssetsDir,
   renderFanoutExecutionLines,
   writeTextFile,
+  writeJsonFile,
 } from "audit-tools/shared";
 import type { AnalyzerPolicy } from "audit-tools/shared";
 // The ONE shared table-driven step-emission scaffold. Imported by relative path
@@ -20,6 +21,7 @@ import { materializeFanoutLanes } from "./fanoutLanes.js";
 import {
   AUDIT_GATE_SUBMISSION_SCOPE,
   GATE_LANES,
+  charterExtractionCoverageFilename,
   charterExtractionLane,
   charterExtractionPacketFilename,
   laneSubmissionPath,
@@ -28,7 +30,10 @@ import {
   renderLaneShortfallLines,
   type LaneSubmissionShortfall,
 } from "./laneSubmissions.js";
-import { materializeCharterPacket } from "../orchestrator/charterPackets.js";
+import {
+  buildCharterPacketManifest,
+  materializeCharterPacket,
+} from "../orchestrator/charterPackets.js";
 import {
   buildEdgeReasoningPrompt,
   edgeReasoningContentHash,
@@ -730,7 +735,13 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
     // material. Packets are (re)written on every emission — they derive from
     // the bundle + disk, so re-materializing is idempotent and keeps a resumed
     // lane's evidence current.
-    const packetPaths: string[] = [];
+    // DERIVED from `kinds` AFTER the Promise.all, never pushed as IO completes:
+    // a push inside the concurrent callback fires in completion order, and this
+    // array is persisted into the step contract's `read_paths`, so a slower disk
+    // would silently reorder a recorded artifact.
+    const packetPaths = kinds.map((kind) =>
+      join(laneAssetsDir(artifactsDir), charterExtractionPacketFilename(kind)),
+    );
     const laneSpecs = await Promise.all(
       kinds.map(async (kind) => {
         const lane = charterExtractionLane(kind);
@@ -739,11 +750,22 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
           laneAssetsDir(artifactsDir),
           charterExtractionPacketFilename(kind),
         );
-        await writeTextFile(
-          packetPath,
-          await materializeCharterPacket({ root, bundle: result.bundle, kind }),
+        const packet = await materializeCharterPacket({
+          root,
+          bundle: result.bundle,
+          kind,
+        });
+        await writeTextFile(packetPath, packet.markdown);
+        // The manifest the lane reads, persisted for the ingest pass: coverage
+        // folds into the register and the delivered line runs are what a
+        // citation is checked against.
+        await writeJsonFile(
+          join(
+            laneAssetsDir(artifactsDir),
+            charterExtractionCoverageFilename(kind),
+          ),
+          buildCharterPacketManifest(kind, packet.excerpts, packet.coverage),
         );
-        packetPaths.push(packetPath);
         return {
           id: lane,
           label: `Charter ${kind} author (blind lane)`,

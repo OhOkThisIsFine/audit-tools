@@ -92,6 +92,34 @@ describe(FAILURE_SIGNATURE, () => {
     }
   });
 
+  it("states the citation grammar as COPIED provenance, not an invented `<path/id>`", () => {
+    // The packet used to carry no line provenance at all while the prompt asked
+    // for `"ref": "<path/id>"` and forbade opening real files. A lane that OBEYED
+    // could only emit its offset into the concatenated packet — which is exactly
+    // what one run did, producing 14 citations overshooting their files by up to
+    // 52x. Obedience has to be SUFFICIENT, so the grammar must name the shape and
+    // say where it is copied from.
+    const prompt = renderCharterKindLanePrompt(bundle(), {
+      kind: "stated",
+      submissionPath: "x/submission.json",
+      packetPath: "x/packet.json",
+    });
+
+    expect(
+      prompt,
+      "the ref grammar must state the line-range shape the packet publishes",
+    ).toContain("<path>:<startLine>-<endLine>");
+    expect(
+      prompt,
+      "the prompt must say the ref is COPIED, never counted or inferred",
+    ).toContain("COPIED");
+    expect(
+      prompt,
+      "a lane must be told it never has to leave the packet to cite correctly",
+    ).toContain("SUFFICIENT");
+    expect(prompt).not.toContain('"ref": "<path/id>"');
+  });
+
   it("states the element shape of excluded_scope in the confirm-intent template", async () => {
     const source = await import("node:fs/promises").then((fs) =>
       fs.readFile("src/remediate/steps/nextStep.ts", "utf8"),

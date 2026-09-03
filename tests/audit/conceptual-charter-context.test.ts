@@ -1,3 +1,4 @@
+import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 /**
  * CP-NODE-8 — Phase C residual: charters threaded into the conceptual prompt.
  *   - renderCharterContext renders per-subsystem charters + opine/flag disposition
@@ -71,6 +72,7 @@ function populatedRegister(): CharterRegister {
     triangulated: [],
     disagreement: [],
     validation_issues: [],
+    ...REGISTER_V4_AFFIRMATION,
   };
 }
 
@@ -117,6 +119,7 @@ test("renderCharterContext: empty when register absent / omitted / no surviving 
         triangulated: [],
         disagreement: [],
         validation_issues: [],
+        ...REGISTER_V4_AFFIRMATION,
       }),
     ),
   ).toBe("");
@@ -135,6 +138,7 @@ test("renderCharterContext: empty when register absent / omitted / no surviving 
         triangulated: [],
         disagreement: [],
         validation_issues: [],
+        ...REGISTER_V4_AFFIRMATION,
       }),
     ),
   ).toBe("");
@@ -181,6 +185,7 @@ test("shallow conceptual prompt is byte-identical with an absent vs omitted vs e
       triangulated: [],
       disagreement: [],
       validation_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
     }),
     { max_units: 5 },
   );
@@ -208,6 +213,7 @@ test("deep perspective prompt is byte-identical when the register is absent vs o
       triangulated: [],
       disagreement: [],
       validation_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
     }),
     p,
     0,

@@ -1,3 +1,4 @@
+import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 // The charter dependency-slice layer: projections (contract-pinned), the
 // metadata stamping terms, and the staleness slice compare that replaces the
 // whole-hash disjunction on projected edges.
@@ -70,6 +71,7 @@ function makeCharterRegister(over: Partial<CharterRegister> = {}): CharterRegist
     triangulated: [],
     disagreement: [],
     validation_issues: [],
+    ...REGISTER_V4_AFFIRMATION,
     ...over,
   };
 }

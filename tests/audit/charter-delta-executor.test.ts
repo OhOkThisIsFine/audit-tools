@@ -1,3 +1,4 @@
+import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { test, expect, describe } from "vitest";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
@@ -60,6 +61,7 @@ function bundleWith(
       triangulated: [],
       disagreement: [],
       validation_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
       deltas_pending: true,
       ...(overrides.charter_register ?? {}),
     },
@@ -130,6 +132,7 @@ describe("runCharterDeltaExecutor — ingest path", () => {
         triangulated: [],
         disagreement: [],
         validation_issues: ["a pre-existing extraction gate drop"],
+        ...REGISTER_V4_AFFIRMATION,
         deltas_pending: true,
       },
     });
@@ -175,6 +178,7 @@ describe("runCharterDeltaExecutor — omit / no-submission path", () => {
         triangulated: [],
         disagreement: [],
         validation_issues: [],
+        ...REGISTER_V4_AFFIRMATION,
       },
     });
     const run = runCharterDeltaExecutor(bundle, undefined);
@@ -196,6 +200,7 @@ describe("runCharterDeltaExecutor — omit / no-submission path", () => {
         triangulated: [],
         disagreement: [],
         validation_issues: [],
+        ...REGISTER_V4_AFFIRMATION,
       },
     });
     const run = runCharterDeltaExecutor(bundle, { subsystems: [], no_deltas: true, triangulated: [], true_nominations: [] });

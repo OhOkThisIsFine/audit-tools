@@ -64,27 +64,48 @@ describe("stripCommentText — the extract complement (one grammar, two views)",
 });
 
 describe("topLevelDeclarationLines — the structural channel's heuristic lead", () => {
+  function numbered(texts: string[]) {
+    return texts.map((text, i) => ({ line: i + 1, text }));
+  }
+
   it("keeps indent-zero declarations, drops indented bodies and bare closers", () => {
-    const stripped = [
-      'import { z } from "zod";',
-      "export function alpha(a: number): number {",
-      "  return a + 1;",
-      "}",
-      "export const BETA = 2;",
-    ].join("\n");
-    const lines = topLevelDeclarationLines(stripped);
-    expect(lines).toContain('import { z } from "zod";');
-    expect(lines).toContain("export function alpha(a: number): number {");
-    expect(lines).toContain("export const BETA = 2;");
-    expect(lines.join("\n")).not.toContain("return a + 1;");
-    expect(lines).not.toContain("}");
+    const lines = topLevelDeclarationLines(
+      numbered([
+        'import { z } from "zod";',
+        "export function alpha(a: number): number {",
+        "  return a + 1;",
+        "}",
+        "export const BETA = 2;",
+      ]),
+    );
+    const texts = lines.map((entry) => entry.text);
+    expect(texts).toContain('import { z } from "zod";');
+    expect(texts).toContain("export function alpha(a: number): number {");
+    expect(texts).toContain("export const BETA = 2;");
+    expect(texts.join("\n")).not.toContain("return a + 1;");
+    expect(texts).not.toContain("}");
+  });
+
+  it("keeps each declaration's TRUE source line, not its index in the kept set", () => {
+    // The whole point of the shape change: a lane citing `BETA` must be able to
+    // copy line 5, not the "3rd kept declaration".
+    const lines = topLevelDeclarationLines(
+      numbered([
+        'import { z } from "zod";',
+        "export function alpha(a: number): number {",
+        "  return a + 1;",
+        "}",
+        "export const BETA = 2;",
+      ]),
+    );
+    expect(lines.find((entry) => entry.text.includes("BETA"))?.line).toBe(5);
   });
 
   it("truncates pathological single lines", () => {
     const long = `export const X = "${"y".repeat(400)}";`;
-    const [line] = topLevelDeclarationLines(long);
-    expect(line!.length).toBeLessThanOrEqual(201);
-    expect(line).toContain("…");
+    const [line] = topLevelDeclarationLines([{ line: 1, text: long }]);
+    expect(line!.text.length).toBeLessThanOrEqual(201);
+    expect(line!.text).toContain("…");
   });
 });
 
@@ -178,41 +199,41 @@ describe("charterPacketReadSet — the single-sourced read-set", () => {
 describe("materializeCharterPacket — blindness is a property of the input", () => {
   it("revealed: comment-stripped bodies — no comment text, no docs", async () => {
     const root = await makeRepoRoot();
-    const packet = await materializeCharterPacket({
+    const { markdown } = await materializeCharterPacket({
       root,
       bundle: makeBundle(),
       kind: "revealed",
     });
-    expect(packet).toContain(CODE_BODY_MARKER);
-    expect(packet).not.toContain(COMMENT_MARKER);
-    expect(packet).not.toContain(DOC_MARKER);
+    expect(markdown).toContain(CODE_BODY_MARKER);
+    expect(markdown).not.toContain(COMMENT_MARKER);
+    expect(markdown).not.toContain(DOC_MARKER);
   });
 
   it("structural: tree + edges + declarations — no bodies, no comments, no docs", async () => {
     const root = await makeRepoRoot();
-    const packet = await materializeCharterPacket({
+    const { markdown } = await materializeCharterPacket({
       root,
       bundle: makeBundle(),
       kind: "structural",
     });
-    expect(packet).toContain("src/a.ts");
-    expect(packet).toContain("src/b.ts → src/a.ts");
-    expect(packet).toContain("export function alpha(): number {");
-    expect(packet).not.toContain(CODE_BODY_MARKER);
-    expect(packet).not.toContain(COMMENT_MARKER);
-    expect(packet).not.toContain(DOC_MARKER);
+    expect(markdown).toContain("src/a.ts");
+    expect(markdown).toContain("src/b.ts → src/a.ts");
+    expect(markdown).toContain("export function alpha(): number {");
+    expect(markdown).not.toContain(CODE_BODY_MARKER);
+    expect(markdown).not.toContain(COMMENT_MARKER);
+    expect(markdown).not.toContain(DOC_MARKER);
   });
 
   it("stated: docs + extracted comments — no code bodies", async () => {
     const root = await makeRepoRoot();
-    const packet = await materializeCharterPacket({
+    const { markdown } = await materializeCharterPacket({
       root,
       bundle: makeBundle(),
       kind: "stated",
     });
-    expect(packet).toContain(DOC_MARKER);
-    expect(packet).toContain(COMMENT_MARKER);
-    expect(packet).not.toContain(CODE_BODY_MARKER);
+    expect(markdown).toContain(DOC_MARKER);
+    expect(markdown).toContain(COMMENT_MARKER);
+    expect(markdown).not.toContain(CODE_BODY_MARKER);
   });
 
   it("refuses a packet for the true kind (nominated downstream, never extracted)", async () => {
@@ -224,13 +245,182 @@ describe("materializeCharterPacket — blindness is a property of the input", ()
 
   it("names unreadable files in the omitted list instead of silently skipping", async () => {
     const root = await mkdtemp(join(tmpdir(), "charter-packets-empty-"));
-    const packet = await materializeCharterPacket({
+    const { markdown } = await materializeCharterPacket({
       root,
       bundle: makeBundle(),
       kind: "revealed",
     });
-    expect(packet).toContain("Omitted");
-    expect(packet).toContain("src/a.ts (unreadable or oversized)");
+    expect(markdown).toContain("Omitted");
+    expect(markdown).toContain("src/a.ts (unreadable or oversized)");
+  });
+});
+
+// ── The packet states what it delivered, and where every line came from ──────
+
+/** Docs whose total blows the whole packet ceiling, plus two commented members. */
+async function makeOverflowRepoRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "charter-packets-overflow-"));
+  await mkdir(join(root, "src"), { recursive: true });
+  await writeFile(
+    join(root, "README.md"),
+    // MANY lines, as a real doc corpus has — the measured case was 95 doc files
+    // costing 459,907 chars against a 150,000 budget, 3.07x over before the
+    // comment loop was even reached.
+    `# Fixture\n\n${DOC_MARKER}\n${"filler prose that exists only to blow the budget.\n".repeat(4_000)}`,
+    "utf8",
+  );
+  await writeFile(
+    join(root, "src", "a.ts"),
+    [
+      "export function alpha(): number {",
+      `  return ${CODE_BODY_MARKER};`,
+      "}",
+      `// ${COMMENT_MARKER}: alpha exists so budgets are respected`,
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    join(root, "src", "b.ts"),
+    [
+      `// ${COMMENT_MARKER}: beta exists to prove the comment class is funded`,
+      'import { alpha } from "./a.js";',
+      "export const beta = alpha();",
+    ].join("\n"),
+    "utf8",
+  );
+  return root;
+}
+
+describe("materializeCharterPacket — the comment class is funded, not starved", () => {
+  it("T1a: delivers source comments even when the doc class alone overflows the ceiling", async () => {
+    const root = await makeOverflowRepoRoot();
+    const { markdown } = await materializeCharterPacket({
+      root,
+      bundle: makeBundle(),
+      kind: "stated",
+    });
+    // One greedy budget in doc-then-comment order spent the whole ceiling on
+    // docs and reduced every comment section to its heading.
+    expect(markdown).toContain(COMMENT_MARKER);
+    expect(markdown).toContain(DOC_MARKER);
+  });
+
+  it("T1b: reports the comment class's delivery figure", async () => {
+    const root = await makeOverflowRepoRoot();
+    const { coverage } = await materializeCharterPacket({
+      root,
+      bundle: makeBundle(),
+      kind: "stated",
+    });
+    const comment = coverage.classes.find((c) => c.evidence_class === "comment");
+    expect(comment?.named).toBe(2);
+    expect(comment?.delivered).toBe(2);
+  });
+
+  it("stays inside the packet ceiling once metadata and prefixes are charged", async () => {
+    const root = await makeOverflowRepoRoot();
+    const { markdown } = await materializeCharterPacket({
+      root,
+      bundle: makeBundle(),
+      kind: "stated",
+    });
+    expect(markdown.length).toBeLessThanOrEqual(150_000);
+  });
+});
+
+describe("materializeCharterPacket — no candidate is silently absent (T2)", () => {
+  it("reconciles delivered + omitted === named for every class", async () => {
+    // src/b.ts carries NO comments in this fixture, so under the old builder it
+    // appeared in neither the delivered nor the omitted list and `named` could
+    // not be reconciled at all.
+    const root = await makeRepoRoot();
+    for (const kind of ["stated", "structural", "revealed"] as const) {
+      const { coverage } = await materializeCharterPacket({
+        root,
+        bundle: makeBundle(),
+        kind,
+      });
+      expect(coverage.classes.length).toBeGreaterThan(0);
+      for (const entry of coverage.classes) {
+        expect(
+          entry.delivered + entry.omitted.length,
+          `${kind}/${entry.evidence_class}`,
+        ).toBe(entry.named);
+      }
+    }
+  });
+
+  it("names a member with no comments, with an explicit reason", async () => {
+    const root = await makeRepoRoot();
+    const { coverage, markdown } = await materializeCharterPacket({
+      root,
+      bundle: makeBundle(),
+      kind: "stated",
+    });
+    const comment = coverage.classes.find((c) => c.evidence_class === "comment");
+    expect(comment?.omitted).toEqual([{ path: "src/b.ts", reason: "no_content" }]);
+    expect(markdown).toContain("src/b.ts (no content of this evidence class");
+  });
+});
+
+describe("materializeCharterPacket — provenance a lane copies (T3)", () => {
+  function manifestOf(markdown: string) {
+    const start = markdown.indexOf("```json");
+    const end = markdown.indexOf("```", start + 7);
+    return JSON.parse(markdown.slice(start + 7, end));
+  }
+
+  it("publishes true line runs in a machine manifest and repeats them per line", async () => {
+    const root = await makeRepoRoot();
+    const { markdown, excerpts } = await materializeCharterPacket({
+      root,
+      bundle: makeBundle(),
+      kind: "stated",
+    });
+    const manifest = manifestOf(markdown);
+    expect(manifest.schema_version).toBe("charter-packet-manifest/v1");
+
+    // The fixture's comment sits on line 1 of src/a.ts.
+    const excerpt = excerpts.find((e) => e.source_path === "src/a.ts");
+    expect(excerpt?.evidence_class).toBe("comment");
+    expect(excerpt?.line_runs).toEqual([{ start: 1, end: 1 }]);
+    const row = manifest.excerpts.find(
+      (e: { source_path: string }) => e.source_path === "src/a.ts",
+    );
+    expect(row.line_runs).toEqual([{ start: 1, end: 1 }]);
+
+    // …and the human body carries the same number on the line itself. The
+    // comment's own leading space survives verbatim — the emitted prefix is a
+    // fixed width a validator strips POSITIONALLY, so the text after it must not
+    // be trimmed or the stripped quote would no longer match the file.
+    expect(markdown).toMatch(new RegExp(`1\\|\\s+${COMMENT_MARKER}`));
+    expect(markdown).toContain("lines 1");
+  });
+
+  it("numbers a structural declaration against the UNSTRIPPED file", async () => {
+    const root = await makeRepoRoot();
+    const { excerpts } = await materializeCharterPacket({
+      root,
+      bundle: makeBundle(),
+      kind: "structural",
+    });
+    // src/a.ts is: line 1 comment, line 2 `export function alpha…`.
+    // Numbering against `stripCommentText` output would call it line 1.
+    const excerpt = excerpts.find((e) => e.source_path === "src/a.ts");
+    const decl = excerpt?.lines.find((l) => l.text.includes("export function alpha"));
+    expect(decl?.line).toBe(2);
+  });
+
+  it("records a per-excerpt prefix width that strips positionally", async () => {
+    const root = await makeRepoRoot();
+    const { excerpts } = await materializeCharterPacket({
+      root,
+      bundle: makeBundle(),
+      kind: "revealed",
+    });
+    const excerpt = excerpts.find((e) => e.source_path === "src/a.ts");
+    // Widest line number is a single digit here: `2| ` is 3 characters.
+    expect(excerpt?.prefix_width).toBe(3);
   });
 });
 

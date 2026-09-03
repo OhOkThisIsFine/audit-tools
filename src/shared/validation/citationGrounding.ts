@@ -398,16 +398,12 @@ export function checkCitations(
           continue;
         }
       }
-    } else if (deliveredChecked && excerpts.length === 0) {
-      checks.push({
-        owner_id: citation.owner_id,
-        ref: citation.ref,
-        verdict: "outside_delivered_evidence",
-        resolved_path: resolved.repoRelativePath,
-        detail: "no excerpt of this file was delivered to the author",
-      });
-      continue;
     }
+    // A PATH-ONLY citation makes no line claim, so it is not checked against the
+    // delivered runs. Some channels legitimately name a file they delivered no
+    // excerpt of — the structural packet lists every member in its file tree
+    // while a member with no top-level declarations yields no excerpt — and
+    // refusing those would be a false red, not a caught defect.
 
     const quote = citation.quote?.trim() ?? "";
     if (quote.length > 0) {

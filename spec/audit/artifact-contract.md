@@ -137,3 +137,35 @@ file presence alone is not acceptance.
 | `artifact_metadata.json` | JSON | Per-artifact staleness metadata (recorded upstream revisions/hashes). |
 | `tooling_manifest.json` | JSON | Detected tooling/analyzer versions (rebuilt fresh every `advanceAudit` call — never stale by construction). |
 <!-- END GENERATED spec-mirror artifact-contract#supervisor -->
+
+<!-- doc-citation-exempt: runtime artifact directory under .audit-tools/, not a tracked path -->
+### Retained evidence: `charter-packets/`
+
+Hand-written prose, deliberately outside every generated `spec-mirror` region:
+this directory has **no `ARTIFACT_DEFINITIONS` row**, so no registry can describe
+it and no generator owns these lines.
+
+`<artifactsDir>/charter-packets/` holds the evidence packets the charter
+extraction lanes actually read, archived at ingest and keyed by content —
+`<kind>-<first 12 of sha256>.md`, with a `index.json` of <!-- doc-citation-exempt: runtime artifact names under .audit-tools/, not tracked files -->
+`{ kind, sha256, byte_length, archived_at, source_filename, archived }` rows
+sorted by kind then digest. It follows the precedent `design-review-snapshots/` <!-- doc-citation-exempt: runtime artifact directory under .audit-tools/, not a tracked path -->
+set: loaded specially, not a dependency-map node, and never read as input by any
+production module, so it adds no DAG edge and can re-stale nothing. The prune in
+`writeCoreArtifacts` unlinks only registry filenames and never enumerates a
+directory, so it cannot reach these files.
+
+Two properties hold together. The emitter's read path
+(`<artifactsDir>/lanes/`) is EMPTY after a successful ingest — a stale packet
+left there would feed a later staleness-triggered re-extraction yesterday's
+evidence — and the bytes still exist, because they are archived and re-verified
+by hash BEFORE the source is unlinked. A packet is a function of the bundle *and
+the working tree*, so once the audited tree moves it is not regenerable: a hash
+alone would answer "did this lane get the tool's packet" but never "what exactly
+did this lane read". An archive that cannot be verified leaves the source in
+place and records `archived: false` with a reason, which the report's charter
+evidence coverage block surfaces.
+
+Growth is bounded by the same constant that bounds a packet: three kinds x the
+150,000-character ceiling per distinct content, and identical re-extractions
+collapse onto the same file.

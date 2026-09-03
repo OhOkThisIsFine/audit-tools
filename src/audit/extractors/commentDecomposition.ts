@@ -184,6 +184,118 @@ export function extractCommentText(source: string, path: string): string {
 }
 
 /**
+ * Mask every comment span with spaces, preserving newlines — so the result has
+ * EXACTLY the same number of lines as the source and every surviving character
+ * sits at its original line.
+ *
+ * This is the substrate of the line-true packet channels, and it is a
+ * REIMPLEMENTATION rather than a wrapper over {@link stripCommentText} on
+ * purpose. `stripCommentText` REMOVES span text and then collapses blank-line
+ * runs, so its output's line indices have no relation to the source's; deriving a
+ * line number from it would emit confidently wrong provenance, which is the exact
+ * failure the packet contract exists to close. `stripCommentText` keeps its
+ * signature and its collapse for its own consumers.
+ */
+function maskCommentSpans(source: string, path: string): string {
+  const spans = scanCommentSpans(source, path);
+  if (spans.length === 0) return source;
+  const chars = [...source];
+  for (const span of spans) {
+    for (let i = span.outerStart; i < span.outerEnd && i < chars.length; i += 1) {
+      if (chars[i] !== "\n") chars[i] = " ";
+    }
+  }
+  return chars.join("");
+}
+
+/** One source line with its TRUE 1-based number. */
+export interface NumberedSourceLine {
+  line: number;
+  text: string;
+}
+
+/**
+ * The comment text of a file, span by span, each line carrying its TRUE 1-based
+ * source line number. The span-preserving twin of {@link extractCommentText},
+ * which joins the inner slices and discards every position.
+ *
+ * `scanCommentSpans` already computes `innerStart`/`innerEnd`; the line numbers
+ * were always derivable from those offsets and were simply thrown away. Blank
+ * lines inside a span are dropped — they carry no testimony — so a multi-line
+ * block comment yields one run per contiguous stretch of substantive lines.
+ */
+export function extractCommentLines(
+  source: string,
+  path: string,
+): NumberedSourceLine[] {
+  const spans = scanCommentSpans(source, path);
+  if (spans.length === 0) return [];
+  const lineStarts = lineStartOffsets(source);
+  const byLine = new Map<number, string>();
+  for (const span of spans) {
+    const inner = source.slice(span.innerStart, span.innerEnd);
+    let lineNo = lineNumberAt(lineStarts, span.innerStart);
+    for (const text of inner.split("\n")) {
+      if (text.trim().length > 0) {
+        const existing = byLine.get(lineNo);
+        byLine.set(lineNo, existing === undefined ? text : `${existing} ${text}`);
+      }
+      lineNo += 1;
+    }
+  }
+  return [...byLine.keys()]
+    .sort((a, b) => a - b)
+    .map((line) => ({ line, text: byLine.get(line)! }));
+}
+
+/**
+ * The comment-stripped source of a file, each surviving line carrying its TRUE
+ * 1-based source line number. The line-true twin of {@link stripCommentText}.
+ *
+ * A line whose content was entirely comment disappears, which leaves a GAP in the
+ * numbering. That gap discloses where comment blocks are and how large they are —
+ * never what they say. It is a bounded, deliberate reversal of the 2026-08-05
+ * blank-run collapse for THIS channel only: there is no leak-free line-true
+ * option (padding the removed spans reproduces the same negative space), and
+ * without line truth the revealed channel's citations cannot be validated at all.
+ */
+export function strippedSourceLines(
+  source: string,
+  path: string,
+): NumberedSourceLine[] {
+  const masked = maskCommentSpans(source, path);
+  const out: NumberedSourceLine[] = [];
+  const lines = masked.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const text = lines[i]!.replace(/\s+$/, "");
+    if (text.trim().length === 0) continue;
+    out.push({ line: i + 1, text });
+  }
+  return out;
+}
+
+/** Offsets at which each line of `source` starts (index 0 = line 1). */
+function lineStartOffsets(source: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < source.length; i += 1) {
+    if (source[i] === "\n") starts.push(i + 1);
+  }
+  return starts;
+}
+
+/** The 1-based line number containing `offset`, by binary search. */
+function lineNumberAt(lineStarts: readonly number[], offset: number): number {
+  let lo = 0;
+  let hi = lineStarts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (lineStarts[mid]! <= offset) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo + 1;
+}
+
+/**
  * The complement of `extractCommentText`: the source with every comment span
  * removed (markers included) — the revealed channel's comment-blind feed. Shares
  * the span scanner, so the two views partition the file identically. Blank-line

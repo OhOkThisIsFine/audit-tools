@@ -1,3 +1,5 @@
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
+import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { expect, test } from "vitest";
 
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
@@ -28,7 +30,7 @@ test("systemic challenge receives charter projection, actual findings, and conce
       conceptual_findings: [finding("DR-1", "Collapse duplicate state")],
     },
     charter_register: {
-      schema_version: "charter-register/v3",
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
       generated_at: "now",
       target: "charter",
       ceiling: { rung: "deep" },
@@ -74,6 +76,7 @@ test("systemic challenge receives charter projection, actual findings, and conce
       ],
       disagreement: [],
       validation_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
     },
     conceptual_review_adjudication: {
       schema_version: 1,

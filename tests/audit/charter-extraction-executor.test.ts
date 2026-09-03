@@ -59,7 +59,7 @@ function checkpoint(rung?: Ceiling["rung"]): IntentCheckpoint {
   };
 }
 
-type CharterRun = ReturnType<typeof runCharterExtractionExecutor>;
+type CharterRun = Awaited<ReturnType<typeof runCharterExtractionExecutor>>;
 
 function requireCharterRegister(
   run: CharterRun,
@@ -137,8 +137,8 @@ describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scop
 });
 
 describe("runCharterExtractionExecutor — omit path", () => {
-  test("shallow ceiling writes an omitted register with no host turn", () => {
-    const run = runCharterExtractionExecutor(bundleWith({ intent_checkpoint: checkpoint() }), undefined);
+  test("shallow ceiling writes an omitted register with no host turn", async () => {
+    const run = await runCharterExtractionExecutor(bundleWith({ intent_checkpoint: checkpoint() }), undefined);
     requireCharterRegister(run);
     expect(run.artifacts_written).toEqual(["charter_register.json"]);
     const reg = run.updated.charter_register;
@@ -148,8 +148,8 @@ describe("runCharterExtractionExecutor — omit path", () => {
     expect(reg.ceiling).toEqual({ rung: "shallow" });
   });
 
-  test("deep ceiling but no submission records an empty register", () => {
-    const run = runCharterExtractionExecutor(
+  test("deep ceiling but no submission records an empty register", async () => {
+    const run = await runCharterExtractionExecutor(
       bundleWith({ intent_checkpoint: checkpoint("deep") }),
       undefined,
     );
@@ -160,7 +160,7 @@ describe("runCharterExtractionExecutor — omit path", () => {
 });
 
 describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
-  test("assembles + gates charters grounded against the consensus scaffold, deferring deltas", () => {
+  test("assembles + gates charters grounded against the consensus scaffold, deferring deltas", async () => {
     const submission: CharterSubmission = {
       nodes: [
         {
@@ -190,7 +190,7 @@ describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
         },
       ],
     };
-    const run = runCharterExtractionExecutor(
+    const run = await runCharterExtractionExecutor(
       bundleWith({ intent_checkpoint: checkpoint("deep") }),
       submission,
     );
@@ -207,7 +207,7 @@ describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
     expect(reg.validation_issues.join()).toContain("outside the repo universe");
   });
 
-  test("multiple charters of the same kind are merged into the teleology; best is selected for the charter", () => {
+  test("multiple charters of the same kind are merged into the teleology; best is selected for the charter", async () => {
     // Design v2: multiple nodes of the same kind in a unit are merged into
     // the teleology (all preserved by premise_height + purpose), and the
     // best-overlap node is selected for the unit's charter. No gate drop.
@@ -231,7 +231,7 @@ describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
         },
       ],
     };
-    const run = runCharterExtractionExecutor(
+    const run = await runCharterExtractionExecutor(
       bundleWith({ intent_checkpoint: checkpoint("deep") }),
       submission,
     );
@@ -249,7 +249,7 @@ describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
     expect(reg.validation_issues).toHaveLength(0);
   });
 
-  test("no consensus subsystems → deltas_pending false (delta pass self-satisfies)", () => {
+  test("no consensus subsystems → deltas_pending false (delta pass self-satisfies)", async () => {
     // ghost.ts is grounded out (not in repo), so no subsystem survives → nothing to mine.
     const submission: CharterSubmission = {
       nodes: [
@@ -263,7 +263,7 @@ describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
         },
       ],
     };
-    const run = runCharterExtractionExecutor(
+    const run = await runCharterExtractionExecutor(
       bundleWith({ intent_checkpoint: checkpoint("deep") }),
       submission,
     );
@@ -271,5 +271,144 @@ describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
     const reg = run.updated.charter_register;
     expect(reg.subsystems).toHaveLength(0);
     expect(reg.deltas_pending).toBe(false);
+  });
+});
+
+// ── The register is CHECKED, not self-certified ──────────────────────────────
+//
+// Both live runs printed `validation_issues: []` — one at 1-of-15 correct
+// citations, one at 75-of-75 — because the field's only two producers were
+// node-file membership and the True-charter gate, while the overshoots lived in
+// `provenance[].ref`, which nothing read.
+
+/** A real 3-line file on disk: the citation check counts lines, so it needs one. */
+async function fixtureRoot(): Promise<string> {
+  const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "charter-citation-"));
+  await mkdir(join(root, "src"), { recursive: true });
+  await writeFile(join(root, "src", "a.ts"), "alpha\nbeta\ngamma\n", "utf8");
+  return root;
+}
+
+function submissionCiting(ref: string): CharterSubmission {
+  return {
+    nodes: [
+      {
+        kind: "stated",
+        purpose: "exists so callers get audited output",
+        premise_height: 0,
+        files: ["src/a.ts"],
+        provenance: [{ kind: "code", ref }],
+        confidence: "high",
+      },
+    ],
+  };
+}
+
+describe("runCharterExtractionExecutor — citation validation", () => {
+  test("T6: a citation whose END line exceeds the file's length fails the register", async () => {
+    const root = await fixtureRoot();
+    const run = await runCharterExtractionExecutor(
+      bundleWith({ intent_checkpoint: checkpoint("deep") }),
+      submissionCiting("src/a.ts:900-905"),
+      { root },
+    );
+    requireCharterRegister(run);
+    const reg = run.updated.charter_register;
+    expect(reg.validation_issues.join("\n")).toContain("src/a.ts:900-905");
+    expect(reg.validation_issues.join("\n")).toContain("line_out_of_range");
+    expect(reg.citation_validation.failed_count).toBe(1);
+  });
+
+  test("T7: a clean run affirms that the check RAN, with a stated count", async () => {
+    const root = await fixtureRoot();
+    const run = await runCharterExtractionExecutor(
+      bundleWith({ intent_checkpoint: checkpoint("deep") }),
+      submissionCiting("src/a.ts:2"),
+      { root },
+    );
+    requireCharterRegister(run);
+    const reg = run.updated.charter_register;
+    // An empty issue list is unfalsifiable ALONE — it must sit beside the
+    // affirmation and the count.
+    expect(reg.validation_issues).toHaveLength(0);
+    expect(reg.citation_validation.status).toBe("checked");
+    expect(reg.citation_validation.citation_count).toBe(1);
+    expect(reg.citation_validation.checked_count).toBe(1);
+    expect(reg.citation_validation.failed_count).toBe(0);
+  });
+
+  test("T8: a bad line number is REPORTED unchanged, never repaired", async () => {
+    const root = await fixtureRoot();
+    const run = await runCharterExtractionExecutor(
+      bundleWith({ intent_checkpoint: checkpoint("deep") }),
+      submissionCiting("src/a.ts:900-905"),
+      { root },
+    );
+    requireCharterRegister(run);
+    const reg = run.updated.charter_register;
+    // The issue NAMES the ref (the red half)…
+    expect(reg.validation_issues.some((i) => i.includes("src/a.ts:900-905"))).toBe(
+      true,
+    );
+    // …and the submitted provenance survives byte-identical (the guard half):
+    // no nearest-enclosing-declaration repair, which was tried and rejected
+    // repo-wide on 2026-07-28.
+    const refs = reg.subsystems.flatMap((s) =>
+      s.charters.flatMap((c) => (c.provenance ?? []).map((p) => p.ref)),
+    );
+    expect(refs).toContain("src/a.ts:900-905");
+  });
+
+  test("with NO root, the check is a recorded abstention — never an implicit pass", async () => {
+    const run = await runCharterExtractionExecutor(
+      bundleWith({ intent_checkpoint: checkpoint("deep") }),
+      submissionCiting("src/a.ts:900-905"),
+    );
+    requireCharterRegister(run);
+    const reg = run.updated.charter_register;
+    expect(reg.citation_validation.status).toBe("not_run");
+    expect(reg.citation_validation.citation_count).toBe(1);
+    expect(reg.citation_validation.checked_count).toBe(0);
+    expect(reg.validation_issues).toHaveLength(0);
+  });
+
+  test("the omit path reports no_citations, never `checked` over work it never examined", async () => {
+    const run = await runCharterExtractionExecutor(
+      bundleWith({ intent_checkpoint: checkpoint() }),
+      undefined,
+    );
+    requireCharterRegister(run);
+    expect(run.updated.charter_register.citation_validation.status).toBe(
+      "no_citations",
+    );
+    expect(run.updated.charter_register.evidence_coverage).toEqual([]);
+  });
+
+  test("a non-path provenance kind is counted but not path-checked", async () => {
+    const root = await fixtureRoot();
+    const run = await runCharterExtractionExecutor(
+      bundleWith({ intent_checkpoint: checkpoint("deep") }),
+      {
+        nodes: [
+          {
+            kind: "stated",
+            purpose: "exists so callers get audited output",
+            premise_height: 0,
+            files: ["src/a.ts"],
+            provenance: [{ kind: "intent_checkpoint", ref: "design_review.ceiling" }],
+            confidence: "high",
+          },
+        ],
+      },
+      { root },
+    );
+    requireCharterRegister(run);
+    const reg = run.updated.charter_register;
+    expect(reg.citation_validation.citation_count).toBe(1);
+    expect(reg.citation_validation.checked_count).toBe(0);
+    expect(reg.validation_issues).toHaveLength(0);
   });
 });

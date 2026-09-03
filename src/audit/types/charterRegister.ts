@@ -1,7 +1,9 @@
 import type { Finding } from "../types.js";
 import type {
+  CharterPacketCoverage,
   CharterSubsystem,
   ChannelDisagreement,
+  CitationValidationSummary,
   GoalGraph,
   Ceiling,
   TriangulatedTelos,
@@ -10,6 +12,16 @@ import type { StampedCharterDelta } from "../../shared/types/charter.js";
 
 /**
  * The stamped register schema version.
+ *
+ * v4 = the register no longer self-certifies. `validation_issues: []` printed
+ * identically at 1-of-15 correct citations and at 75-of-75, because its only two
+ * producers were node-file membership and the True-charter gate while the
+ * overshoots lived in `provenance[].ref` — a field nothing read. v4 adds
+ * `citation_validation` (the affirmation that the check RAN, with a recorded
+ * abstention rather than an implicit pass) and `evidence_coverage` (what each
+ * blind lane's packet actually delivered, per evidence class). Both are REQUIRED:
+ * an optional affirmation is one a writer can forget, which is the same
+ * false-green in a new place.
  *
  * v3 = the deltas carry their own identity: every delta is a
  * {@link StampedCharterDelta} with an explicit `node_id` (and `goal_node_id`
@@ -31,7 +43,7 @@ import type { StampedCharterDelta } from "../../shared/types/charter.js";
  * deltas. The clarification join's own refusal of an unstamped delta stays as
  * defense-in-depth for anything that reaches it anyway.
  */
-export const CHARTER_REGISTER_SCHEMA_VERSION = "charter-register/v3";
+export const CHARTER_REGISTER_SCHEMA_VERSION = "charter-register/v4";
 
 /**
  * The `charter_register.json` artifact — the charter LAYER of the conceptual
@@ -102,6 +114,26 @@ export interface CharterRegister {
    * quantitative "which parts of the triangulation need clarification" surface.
    */
   disagreement: ChannelDisagreement[];
-  /** Gate drops (un-falsifiable True, ungrounded scopes, …) — surfaced, not hidden. */
+  /**
+   * Gate drops (un-falsifiable True, ungrounded scopes) AND failed provenance
+   * citations — surfaced, not hidden. Read it beside {@link citation_validation}:
+   * an empty array means "nothing was wrong" only when the affirmation says the
+   * check ran, and how many refs it saw.
+   */
   validation_issues: string[];
+  /**
+   * The affirmation that the citation check RAN. REQUIRED, because an empty
+   * `validation_issues` is unfalsifiable on its own — it printed identically at
+   * 1-of-15 correct citations and at 75-of-75.
+   */
+  citation_validation: CitationValidationSummary;
+  /**
+   * What each blind lane's evidence packet actually DELIVERED, per evidence
+   * class, in canonical kind order. The "stated" channel — whose whole job is
+   * source comments — once delivered 0 of 72 comment blocks and said so only in
+   * prose inside a file that was then deleted, so absent evidence was
+   * indistinguishable from thorough work. Empty when no packet manifest was
+   * available to fold (the omit path, or an ingest with no artifacts dir).
+   */
+  evidence_coverage: CharterPacketCoverage[];
 }

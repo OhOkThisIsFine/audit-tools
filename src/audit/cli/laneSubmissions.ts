@@ -149,6 +149,17 @@ export function charterExtractionPacketFilename(kind: CharterKind): string {
 }
 
 /**
+ * The packet's manifest, persisted beside it at EMIT so the INGEST pass — a
+ * different invocation — can fold per-class coverage into the register and check
+ * each citation against the line runs actually delivered. Tool-written, so it is
+ * a lane asset and not a submission; consumed and deleted at ingest, by which
+ * time its content lives in the register and inside the archived packet.
+ */
+export function charterExtractionCoverageFilename(kind: CharterKind): string {
+  return `charter-extraction-${kind}-coverage.json`;
+}
+
+/**
  * The tool-side merge of the per-kind charter lanes, handed to the extraction
  * executor by path and deleted once ingested. Tool-written, so it is a lane
  * asset and not a submission.

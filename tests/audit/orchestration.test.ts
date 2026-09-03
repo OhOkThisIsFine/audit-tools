@@ -1,3 +1,4 @@
+import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -138,6 +139,7 @@ function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
       triangulated: [],
       disagreement: [],
       validation_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
     },
     charter_clarification: {
       generated_at: "2026-01-01T00:00:00.000Z",
@@ -149,6 +151,7 @@ function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
       banked: [],
       findings: [],
       validation_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
     },
     // Phase E systemic challenge loop: an omitted (shallow-ceiling), converged register
     // so systemic_challenge_current is satisfied and the decision reaches the planning
@@ -162,6 +165,7 @@ function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
       converged: true,
       findings: [],
       validation_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
     },
     intent_checkpoint: {
       schema_version: "intent-checkpoint/v1",

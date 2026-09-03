@@ -1,3 +1,4 @@
+import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
@@ -1268,6 +1269,7 @@ function makeCharterBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
     triangulated: [],
     disagreement: [],
     validation_issues: [],
+    ...REGISTER_V4_AFFIRMATION,
   };
   return {
     repo_manifest: {

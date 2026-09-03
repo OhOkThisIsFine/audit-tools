@@ -141,6 +141,7 @@ import type { AuditHostIngestIssue } from "../validation/ingestIssueCodes.js";
 import {
   CHARTER_EXTRACTION_MERGED_FILENAME,
   GATE_LANES,
+  charterExtractionCoverageFilename,
   charterExtractionLane,
   closeDispatchedLaneOutcomes,
   laneSubmissionPath,
@@ -1919,6 +1920,17 @@ export async function handleCharterExtractionBranch(
       artifactsDir: params.artifactsDir,
       kinds,
     });
+    // The coverage manifests are consumed inputs too, and their content is now in
+    // two other places: folded into the register's `evidence_coverage`, and
+    // inside the archived packet's own machine header. P25-f satisfied.
+    for (const kind of kinds) {
+      await unlink(
+        join(
+          laneAssetsDir(params.artifactsDir),
+          charterExtractionCoverageFilename(kind),
+        ),
+      ).catch(() => {});
+    }
     return { action: "continue", bundle: applied.updated_bundle };
   }
   // Missing or quarantined lane(s): a host turn is still owed — the emitter

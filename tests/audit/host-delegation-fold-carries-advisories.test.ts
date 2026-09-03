@@ -1,3 +1,5 @@
+import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 // N1 (A2 re-review F1-1): in `runHostDelegationObligation`, when the same fold
 // ingests results for still-pending tasks, it returned `{ kind: "transition" }`
 // through the result-ingestion path BEFORE the semantic_review emission that
@@ -181,7 +183,7 @@ async function setup() {
       findings: [],
     },
     charter_register: {
-      schema_version: "charter-register/v3" as const,
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
       generated_at: "2026-01-01T00:00:00.000Z",
       target: "charter",
       ceiling: { rung: "shallow" },
@@ -193,6 +195,7 @@ async function setup() {
       triangulated: [],
       disagreement: [],
       validation_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
     },
     charter_clarification: {
       generated_at: "2026-01-01T00:00:00.000Z",

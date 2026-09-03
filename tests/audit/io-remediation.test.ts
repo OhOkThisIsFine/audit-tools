@@ -1,3 +1,4 @@
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -762,7 +763,7 @@ test("INV 11: the bundle exposes every field its named consumers read", async ()
         design_review: { mode: "conceptual" },
       },
       charter_register: {
-        schema_version: "charter-register/v3",
+        schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
         subsystems: [{ name: "s", charters: [] }],
       },
       graph_edge_cache: { schema_version: "graph-edge-cache/v1", entries: [] },

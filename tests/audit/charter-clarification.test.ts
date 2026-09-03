@@ -1,3 +1,4 @@
+import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { describe, test, expect } from "vitest";
 
 // Phase D — the charter-alignment triangulation loop. Import the pure D1/D2
@@ -331,6 +332,7 @@ function charterRegister(
     triangulated: [],
     disagreement: [],
     validation_issues: [],
+    ...REGISTER_V4_AFFIRMATION,
   };
 }
 
@@ -495,6 +497,7 @@ function priorRegister(
     banked: [],
     findings: [],
     validation_issues: [],
+    ...REGISTER_V4_AFFIRMATION,
   };
 }
 

@@ -992,11 +992,32 @@ export {
   findingNeedsVerificationBeforeFix,
 } from "./validation/findingGrounding.js";
 
+// The charter evidence PACKET contract: what a blind lane was handed, in a shape
+// it can copy a citation out of (line runs + a positional prefix width) and a
+// consumer can measure (per-class coverage, `delivered + omitted === named`).
+export type {
+  CharterPacketCoverage,
+  CharterPacketCoverageClass,
+  CharterPacketManifest,
+  CharterPacketManifestExcerpt,
+  CitationValidationSummary,
+  EvidenceClass,
+  OmissionReason,
+  PacketExcerpt,
+  PacketExcerptLine,
+  PacketLineRun,
+} from "./types/charterPacket.js";
+export {
+  CHARTER_PACKET_MANIFEST_SCHEMA_VERSION,
+  EVIDENCE_CLASSES,
+} from "./types/charterPacket.js";
+
 // Validation: citation grounding — ONE synchronous core, two draws. The
 // remediate draw asks the existential question through `evidenceCitesRealPath`;
 // the audit draw checks a charter register's provenance per citation. The
 // grammar, the path resolution and the TRUE line count live here in one copy so
 // the two draws cannot disagree. It REJECTS, never REPAIRS.
+export type { DeliveredExcerpt } from "./validation/citationGrounding.js";
 export {
   checkCitations,
   extractCitationRefs,

@@ -118,6 +118,13 @@ export function renderCharterKindLanePrompt(
     "tool to hold exactly this channel's evidence. Do NOT read repository files",
     "directly, and do NOT read another lane's prompt, packet, or output.",
     "",
+    "The packet already contains everything a correct citation needs, so obeying",
+    "that instruction is SUFFICIENT — you never have to open a file to cite one.",
+    "Its `## Provenance manifest` block names every excerpt with the exact line",
+    "runs delivered, and every content line is prefixed with its TRUE line number",
+    "in its own source file (`  12| …`). COPY a citation from there; never count",
+    "lines, never infer them, and never cite a range that spans two runs.",
+    "",
     ...lane.channel,
     "",
     "## Self-organize a leveled teleology",
@@ -174,7 +181,13 @@ export function renderCharterKindLanePrompt(
     // closedness of the RENDERED text instead of teaching a worker a smaller
     // contract (an open list here coined a member and quarantined a 34-minute
     // lane run).
-    `      "provenance": [{ "kind": "${PROVENANCE_KINDS}", "ref": "<path/id>", "quote": "<optional>" }],`,
+    `      "provenance": [{ "kind": "${PROVENANCE_KINDS}", "ref": "<path>:<startLine>-<endLine>", "quote": "<optional>" }],`,
+    "",
+    "        `ref` is COPIED verbatim from ONE line run in your packet's manifest",
+    "        — never counted, inferred, or spanned across two runs. Use",
+    "        `<path>:<N>` for a single line, or the bare `<path>` when the claim",
+    "        names no lines at all. A non-path source (an intent-checkpoint field,",
+    "        a component id) stays a bare id.",
     '      "confidence": "high|medium|low"',
     "    }",
     "  ]",

@@ -1,3 +1,4 @@
+import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
 import { decideNextStep } from "../../src/audit/orchestrator/nextStep.js";
@@ -50,6 +51,7 @@ function omittedCharterRegister(): CharterRegister {
     triangulated: [],
     disagreement: [],
     validation_issues: [],
+    ...REGISTER_V4_AFFIRMATION,
   };
 }
 

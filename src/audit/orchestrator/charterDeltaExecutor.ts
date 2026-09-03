@@ -72,6 +72,20 @@ export function runCharterDeltaExecutor(
           triangulated: [],
           disagreement: [],
           validation_issues: [],
+          // There is no register to mine, so nothing was authored and nothing is
+          // certified. `no_citations` rather than `checked`: this pass examined
+          // no work, and an affirmation over work never examined is the exact
+          // false-green the field exists to close. (The settle branch above
+          // spreads the existing register, so a real one carries its own
+          // affirmation and coverage through unchanged.)
+          citation_validation: {
+            status: "no_citations",
+            citation_count: 0,
+            checked_count: 0,
+            failed_count: 0,
+            delivered_evidence_checked: false,
+          },
+          evidence_coverage: [],
           deltas_pending: false,
         };
     return {

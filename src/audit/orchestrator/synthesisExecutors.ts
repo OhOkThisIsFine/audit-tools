@@ -11,9 +11,17 @@ import {
 } from "../reporting/synthesis.js";
 import type { SynthesisNarrative } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
+import type { CharterPacketArchiveRow } from "./charterPacketArchive.js";
 
 interface SynthesisOptions {
   sizeIndex?: Readonly<Record<string, number>>;
+  /**
+   * This run's charter-packet retention rows, read from the archive index by the
+   * runner (which owns the artifacts dir; these executors stay synchronous). An
+   * `archived: false` row is surfaced in the report's coverage block, so a lost
+   * archive is STATED rather than silently reproducing PACKETS-CONSUMED.
+   */
+  packetArchive?: readonly CharterPacketArchiveRow[];
 }
 
 function buildBaseFindingsReport(
@@ -109,6 +117,8 @@ export function runSynthesisExecutor(
         conceptual_adjudication: bundle.conceptual_review_adjudication,
         submission_ledger: bundle.submission_ledger,
         analyzer_capability: bundle.analyzer_capability,
+        charter_evidence_coverage: bundle.charter_register?.evidence_coverage,
+        charter_packet_archive: options.packetArchive,
       }),
     },
     artifacts_written: ["audit-findings.json", AUDIT_REPORT_FILENAME],
@@ -187,6 +197,8 @@ export function runSynthesisNarrativeExecutor(
         conceptual_adjudication: bundle.conceptual_review_adjudication,
         submission_ledger: bundle.submission_ledger,
         analyzer_capability: bundle.analyzer_capability,
+        charter_evidence_coverage: bundle.charter_register?.evidence_coverage,
+        charter_packet_archive: options.packetArchive,
       }),
       synthesis_narrative: record,
     },
