@@ -1,0 +1,30 @@
+RED AT HEAD — observed, not predicted.
+
+HEAD:    e836d386a1e7be94fbebd096e4a59c5324140664
+Date:    2026-09-03
+Command: cp .audit-tools/nightly/proposals/P50-conceptual-categories-single-source/conceptual-category-comment-drift.test.ts \
+           tests/audit/conceptual-category-comment-drift.test.ts
+         npx vitest run tests/audit/conceptual-category-comment-drift.test.ts
+Exit:    1
+
+The temporary copy under tests/ was removed immediately after the run; the
+working tree was verified byte-identical afterwards (git status unchanged).
+
+VERBATIM FAILURE
+----------------
+FAIL tests/audit/conceptual-category-comment-drift.test.ts > conceptual finding
+categories are single-sourced > no source comment re-enumerates the category set
+
+AssertionError: A comment hand-copies the conceptual category set, so it drifts
+silently when the set changes.
+  src/audit/orchestrator/designReviewPrompt.ts:571 names 3/8 categories (missing: fundamental_approach, core_assumption, structural_risk, integration, missing_capability)
+    * Categories: tool_opportunity, architecture_pattern, design_simplification,
+  src/audit/types/designAssessment.ts:42 names 5/8 categories (missing: fundamental_approach, core_assumption, structural_risk)
+    /** Conceptual-design pass (generative): tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability */
+  : expected [ { …(4) }, { …(4) } ] to deeply equal []
+
+FALSE-POSITIVE SURFACE, MEASURED
+--------------------------------
+The scan ran over every tracked src/**/*.ts file. It flagged exactly the two
+known-stale comments and nothing else, so the 3-token threshold produced zero
+false positives on the current tree.
