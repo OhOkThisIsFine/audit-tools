@@ -8,26 +8,26 @@
 - **v0.51.0 is live**, published from the release commit `e6329a44`; the release workflow
   passed and the registry artifact is installed globally. Both `audit-code --version` and
   `remediate-code --version` report `0.51.0`.
-- **The 2026-09-03 lap landed the nine live-run defects** as three loop-core clusters —
-  adjudication verification status, status-truth vocabulary with per-lane ledger rows, and
-  packet provenance with citation validation — together with P50, the seek-index parser
-  fix, and the design-gate record in
+- **Every owner-answered decision that is actionable here has a landed commit** recorded in
+  the decisions ledger under `.claude/`. The one still open — routing the leg-2 triage sweep
+  through llm-relay dispatch — waits on the fast dispatch path in the llm-relay repository
+  (owner decision 2026-09-04, tracked in the machine-wide backlog).
+- **The nine live-run design assumptions are decided**: the owner confirmed eight and reversed
+  one on 2026-09-04, as the design-gate record states beside each in
   [`live-run-defect-set-design-gate-2026-09-03.md`](reviews/live-run-defect-set-design-gate-2026-09-03.md).
-- **Two red-on-main landings were repaired in-lap:** an invariant-test import and a
-  platform-asymmetric file classifier.
 
 ## Immediate next
 
-The owner confirms the nine in-force design assumptions listed in that design-gate record.
-The owner decided on 2026-09-04 to improve llm-relay first (a fast dispatch path in the
-llm-relay repository), after which the sweep routes through it; tracked in the machine-wide
-backlog. The external 5-primary + 5-held-out paired benchmark run described in
+The llm-relay fast dispatch path unblocks the last answered decision; nothing in this
+repository precedes it. The external 5-primary + 5-held-out paired benchmark run described in
 [`forward-tracks.md`](backlog/forward-tracks.md) stays the pinned forward track.
 
 ## Deliberate state, not bugs
 
-- The nine design assumptions are in force pending the owner's confirmation; the design-gate
-  record states each one with the alternative it was chosen over.
+- Two working assumptions from the 2026-09-04 lap await the owner's word and are asked in that
+  lap's hand-back: the stale-dir cleanup rule refuses a complete-but-unpromoted dir without
+  `--force` rather than deleting it (the literal revert would have), and a `custom` closing
+  action carries its command on the intent checkpoint with no close-phase preview.
 - The judge-side naming refusal is unreachable on the production path by design of the parse
   order: the property it guards holds twice over, and only its claimed reach does not. Tracked
   in [`minor-bugs.md`](backlog/minor-bugs.md).

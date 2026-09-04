@@ -6,6 +6,22 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **A destroyed extracted plan routes `next-step` to the no-input prompt, which hides why the plan
+  died (2026-09-04, medium, friction: tool_should_decide).** When `handlePendingExtractedPlan`
+  returns null — grounding dropped every finding (a cited path not tracked by git, a finding with no
+  `evidence`), or normalization refused — the decide loop falls through to `handleNoState`, so the
+  host reads a "Collect Remediation Starting Point" step listing default input locations, as if no
+  intake existed. Two fixtures in one lap hit it, each diagnosed by reading the source rather than the
+  step. **Property:** a step emitted because a plan was discarded names the discard and its reason
+  (the grounding or normalization outcome), and never reads as "no input supplied".
+
+- **A constitutional or loop-core attestation accepts a mistyped nightly ledger key in its decision
+  text (2026-09-04, low, friction: tool_should_decide).** `attest-constitutional-doc-change.mjs`
+  recorded `cde41c31c1c6a7f3` (one character off the real `cde41c31f1c6a7f3`); only the later
+  `answer.mjs --done` refused it. The attestation is the durable audit record, so the typo survives
+  there. **Property:** an `--owner-decision` that cites a 16-hex nightly ledger key resolves that key
+  against `.claude/nightly-decisions.json` before the record is written.
+
 - **CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a
   DIFFERENT test each time (2026-09-04, high, friction: false_red).** Two `audit-code-test-suite` runs on
   `main` the same day failed identically and in different places: `tests/audit/next-step-narrative.test.ts`
