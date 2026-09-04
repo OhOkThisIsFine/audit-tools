@@ -22,10 +22,10 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-09-04 at `03776c20`.*
+*Last run: 2026-09-04 at `b04145b8`.*
 
 
-> **12 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+> **7 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
 
 
 ---
@@ -168,6 +168,8 @@ Full proposal: [`.audit-tools/nightly/proposals/P51-guard-form-reach/P51-guard-f
 - INSIGHTS ran (due: the stamp read 2026-08-28, 7.0 days). Report: C:\Users\ethan\.claude\usage-data\report-2026-09-04-020610.html. Twelve suggestions triaged against HEAD: TEN already shipped or already decided, TWO debatable, ZERO genuinely open. The two provider-health suggestions (a pre-launch probe of every relay provider, and the 'self-healing dispatch fabric' horizon item) are the retirement-direction catch the contract warns about: they propose exactly the roster-preflight the owner REJECTED for this repo in decision c0dc10138087d836 ('Lane readiness, availability, and best-lane selection belong to llm-relay'), so they are dropped here rather than re-raised.
 
 - The two DEBATABLE insights suggestions are not raised as items because they are MACHINE-WIDE working practice, not audit-tools facts, and a nightly item must carry a premise probe on a tracked source file in THIS repo — which neither has. Filing them here would hide them from the repos that need them. They are: (1) structure a sprint as independently landable packets so a quota interruption costs one packet rather than a sprint; (2) inline generated report content into the response instead of pointing at a tool result the owner cannot see. Their correct home is C:\Code\docs\backlog.md, and leg 3 is propose-only, so this run does not write them there.
+
+- CI IS SPLIT ON THIS RUN'S COMMITS AND THAT IS NOT CLEAN: the `ci` workflow SUCCEEDED on e197ea2c, but `audit-code-test-suite` FAILED — tests/audit/next-step-narrative.test.ts timed out at 300000ms on shard 1/4 with the spawned `audit-code.mjs next-step` child still alive at teardown. It is NOT a regression from this run: an earlier main run the same day (001d45f1, 02:39) failed the same way in a DIFFERENT test on a DIFFERENT shard (audit-code-completion-present.test.ts, shard 3/4), and the full suite is green locally on this exact tree, run three times, 496 files each. It was untracked, so it is now logged as a high-severity entry in docs/backlog/open-bugs.md. Stated here rather than left implied: the local green gate this run required did pass, and CI on the same commits did not agree. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 - sol-2 from 2026-09-03 (P50, the stale five-category conceptual comments) AUTO-CLOSED as resolved: both premise probes now find nothing, because P50 landed — CONCEPTUAL_FINDING_CATEGORIES is exported at src/audit/orchestrator/designReviewPrompt.ts:445 and both former hand copies now point at it. No action needed; recorded so the disappearance is legible rather than silent.
 
