@@ -5,31 +5,31 @@
 
 ## Live state
 
-- **v0.50.21 is live**, published from `2431e007`; the release workflow passed and the
-  registry artifact is installed globally. Both `audit-code --version` and
-  `remediate-code --version` report `0.50.21`.
-- **The P0 deep-review rewiring is implemented.** Broad/comprehensive audit intent now
-  offers deep review without selecting it autonomously; synthesis preserves detailed
-  contributor attribution and reports structural capability limitations. The pinned
-  5+5 benchmark harness, generic-claim evaluator packets, private-gold adjudication,
-  and derived scoring contracts are in
-  [`benchmarks/p0/`](../benchmarks/p0/) and the design gate is recorded in
-  [`p0-deep-review-design-gate-2026-08-31.md`](reviews/p0-deep-review-design-gate-2026-08-31.md).
-- **Acceptance is not yet claimed.** The harness and seeded controls are green, but the
-  provider-backed paired run and blinded evaluation require external execution.
+- **v0.51.0 is live**, published from the release commit `e6329a44`; the release workflow
+  passed and the registry artifact is installed globally. Both `audit-code --version` and
+  `remediate-code --version` report `0.51.0`.
+- **The 2026-09-03 lap landed the nine live-run defects** as three loop-core clusters —
+  adjudication verification status, status-truth vocabulary with per-lane ledger rows, and
+  packet provenance with citation validation — together with P50, the seek-index parser
+  fix, and the design-gate record in
+  [`live-run-defect-set-design-gate-2026-09-03.md`](reviews/live-run-defect-set-design-gate-2026-09-03.md).
+- **Two red-on-main landings were repaired in-lap:** an invariant-test import and a
+  platform-asymmetric file classifier.
 
 ## Immediate next
 
-Run the external 5-primary + 5-held-out paired benchmark and blinded evaluation described
-in [`forward-tracks.md`](backlog/forward-tracks.md). Use the checked-in pinned runner and
-evaluator protocol; do not substitute an inferred or self-scored acceptance result.
+The owner confirms the nine in-force design assumptions listed in that design-gate record,
+and decides sol-1's routing (recorded in `C:/Code/docs/backlog.md`). The external
+5-primary + 5-held-out paired benchmark run described in
+[`forward-tracks.md`](backlog/forward-tracks.md) stays the pinned forward track.
 
 ## Deliberate state, not bugs
 
-- Deep review remains a user-selected option. Detection presents the choice; it does not
-  autonomously choose the closing action.
-- Final benchmark acceptance remains open until the external run is complete. This is the
-  one explicit forward track, not an incomplete local implementation.
+- The nine design assumptions are in force pending the owner's confirmation; the design-gate
+  record states each one with the alternative it was chosen over.
+- The judge-side naming refusal is unreachable on the production path by design of the parse
+  order: the property it guards holds twice over, and only its claimed reach does not. Tracked
+  in [`minor-bugs.md`](backlog/minor-bugs.md).
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
