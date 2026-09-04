@@ -1,12 +1,12 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
+import { isWorkingDirFullyPromoted } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
 
 export type CleanupOptions = {
   force?: boolean;
   dryRun?: boolean;
-  preRun?: boolean;
 };
 
 export type CleanupResult = {
@@ -15,27 +15,39 @@ export type CleanupResult = {
   reason?: string;
 };
 
-// Remove a stale artifacts directory. Two callers: the `cleanup` CLI command
-// (cmdCleanup) and the next-step pre-run sweep (cmdNextStepBody, preRun=true).
-// A missing state file means there is nothing to clean.
+// Remove a stale working artifacts directory. Two callers, ONE rule: the
+// `cleanup` CLI command (cmdCleanup) and the next-step pre-run sweep
+// (cmdNextStepBody) call this identically — owner decision 74c89b226ab9b9cd
+// (2026-08-31), which reversed the not_started-only pre-run narrowing of
+// 7ebeccc8 while keeping its protection.
 //
-// Pre-run eligibility (preRun=true) is NOT_STARTED-ONLY: a lingering `complete`
-// dir at next-step time is a live continuation — friction triage may still be
-// pending, and report promotion itself deletes the dir once the report is
-// copied up — so sweeping it would destroy unfinished work. `complete` dirs
-// stay owned by the completion transition and the manual cleanup verb, which
-// keeps its complete+not_started eligibility unchanged.
+// A dir is stale (eligible without --force) when nothing in it is still owed to
+// the host: its run is `not_started` (nothing was produced), or `complete` with
+// nothing left for the completion transition to do — every artifact promotion
+// archives is already one level up, byte-identical, as decided by promotion's
+// own archive walk in verify-only mode (isWorkingDirFullyPromoted), never by a
+// second list. A `complete` dir with work left — an unpromoted render, an
+// unarchived contract, friction triage pending — is a live continuation for
+// BOTH callers: at next-step entry the fold's terminal step presents and
+// promotes it; the verb refuses it without --force. Sweeping it would destroy
+// the only copy of a finished audit.
+//
+// Deletion contract: only the working artifacts dir is removed. The promoted
+// final reports live one level up (promotedAuditReportPath /
+// promotedAuditFindingsPath, and the remediation pair beside them) and no
+// cleanup path touches them. A missing state file means there is nothing to
+// clean.
 //
 // With options:
-//   preRun=true — pre-run sweep mode: only `not_started` is eligible.
-//   force=true  — delete even when status is active/blocked or state file is missing.
+//   force=true  — delete even when the run is active/blocked, complete with
+//                 work left, or has no state file.
 //   dryRun=true — skip the actual rm call and return action='dry-run'.
-// All default to false.
+// Both default to false.
 export async function cleanupStaleArtifactsDir(
   artifactsDir: string,
   options: CleanupOptions = {},
 ): Promise<CleanupResult> {
-  const { force = false, dryRun = false, preRun = false } = options;
+  const { force = false, dryRun = false } = options;
 
   let status: AuditState["status"] | "unknown" = "unknown";
   try {
@@ -50,22 +62,22 @@ export async function cleanupStaleArtifactsDir(
     // State file missing — status stays "unknown".
   }
 
-  const eligibleWithoutForce = preRun
-    ? status === "not_started"
-    : status === "complete" || status === "not_started";
+  const stale =
+    status === "not_started" ||
+    (status === "complete" && (force || (await isWorkingDirFullyPromoted(artifactsDir))));
   const resumable = status === "active" || status === "blocked";
 
-  if (!eligibleWithoutForce && !force) {
+  if (!stale && !force) {
     // active/blocked — caller may want to resume; skip unless forced
     if (resumable) {
       const reason = `audit is ${status} and may be resumed — use --force to delete anyway`;
       return { action: "skipped", status, reason };
     }
-    // complete — only reachable in preRun mode (the verb treats complete as
-    // eligible above): the dir is a live continuation, never pre-run junk.
+    // complete with work left — the dir holds the only copy of the finished
+    // audit until the completion transition promotes it.
     if (status === "complete") {
       const reason =
-        "audit is complete — friction triage / report promotion own this dir; the completion transition or the cleanup command clears it";
+        "audit is complete but its final report is not fully promoted — this dir holds the only copy; run next-step to present and promote it, or use --force to delete anyway";
       return { action: "skipped", status, reason };
     }
     // unknown (missing state file) — no-op by default; caller decides how to

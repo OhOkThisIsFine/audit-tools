@@ -291,16 +291,17 @@ async function cmdNextStepBody(
   root: string,
   artifactsDir: string,
 ): Promise<void> {
-  // Pre-run sweep (docs-14): a dir whose persisted status is `not_started` is
-  // junk left by a run that never got going — clear it so the fresh run starts
-  // clean. NOT_STARTED-ONLY by design: a lingering `complete` dir is a live
-  // continuation (friction triage pending, or an unpromoted report the
-  // completion transition itself deletes), so it is preserved here and owned by
-  // that transition + the manual cleanup verb. Must run BEFORE the mkdir below
-  // and BEFORE applyGuidanceFile (fresh guidance must never be swept). Inside
-  // the backstop, a malformed audit_state.json re-throw becomes a blocked-step
-  // contract rather than a raw crash.
-  await cleanupStaleArtifactsDir(artifactsDir, { preRun: true });
+  // Pre-run sweep (docs-14; one rule, 74c89b226ab9b9cd): clear a stale working
+  // dir so the fresh run starts clean — one whose run is `not_started` (junk
+  // from a run that never got going) or `complete` with its promotion already
+  // finished (a leftover from an rm that failed). The rule is the same one the
+  // `cleanup` verb applies; a `complete` dir with work left is a live
+  // continuation the fold's terminal step presents and promotes, so it survives
+  // entry. Must run BEFORE the mkdir below and BEFORE applyGuidanceFile (fresh
+  // guidance must never be swept). Inside the backstop, a malformed
+  // audit_state.json re-throw becomes a blocked-step contract rather than a raw
+  // crash.
+  await cleanupStaleArtifactsDir(artifactsDir);
   // Inside the backstop (AGY review catch): a supervisor-dir IO failure must
   // yield a blocked step too. The backstop's own writer needs no pre-created
   // dirs — writeStepContract mkdirs recursively.

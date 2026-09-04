@@ -159,7 +159,17 @@ into partial success.
   working artifacts dir — into `.audit-tools/` for the canonical `.audit-tools/audit/` dir — and
   then deletes the now-superseded working artifacts dir — so cleanup IS part of the completion
   transition, folded into promotion rather than routed through `cleanupStaleArtifactsDir`. A
-  separate mechanism, `cleanupStaleArtifactsDir` (the `cleanup` CLI command and the pre-run sweep
-  before a fresh run), clears a *stale* artifacts dir left by a prior `complete`/`not_started` run
-  before a fresh run starts; it explicitly skips deletion while a run is `active`/`blocked`, so an
-  in-progress or blocked run's artifacts are never swept mid-flight.
+  separate mechanism, `cleanupStaleArtifactsDir`, clears a *stale* working artifacts dir under ONE
+  eligibility rule shared by its two callers, the `cleanup` CLI command and the pre-run sweep at
+  `next-step` entry: a dir is stale when its run is `not_started` (nothing was produced), or
+  `complete` with nothing left for the completion transition to do — every artifact promotion
+  archives is already one level up, byte-identical, as decided by promotion's own archive walk run
+  in verify-only mode, never by a second enumeration of the archive set. A `complete` dir with work
+  left (an unpromoted render, an unarchived contract, friction triage pending) is a live
+  continuation for BOTH callers: `next-step` finishes it through the terminal step, and the
+  `cleanup` command refuses it without `--force`. `active`/`blocked` runs are never swept
+  mid-flight.
+- Deletion contract: every cleanup path removes only the working artifacts dir. The promoted final
+  reports — `.audit-tools/audit-findings.json`, `.audit-tools/audit-report.md`, and the remediation
+  pair `.audit-tools/remediation-outcomes.json` / `.audit-tools/remediation-report.md` — live one
+  level up and are never touched by cleanup.

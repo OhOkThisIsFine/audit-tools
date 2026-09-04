@@ -2048,7 +2048,9 @@
     "answer": "Restore real Node-major CI coverage so the published engines.node >=22 support claim is exercised rather than correcting the documentation down to single-version coverage. Keep the workflow and contract test aligned with the restored matrix.",
     "subject": "release.md claims CI varies Node majors and a CONTRACT TEST pins that sentence — correct both, or is Node-major coverage what should be restored?",
     "path": "docs/audit-pkg/release.md",
-    "decided_at": "2026-08-31T16:25:28.989Z"
+    "decided_at": "2026-08-31T16:25:28.989Z",
+    "completed_at": "2026-09-04T16:23:13.960Z",
+    "completed_ref": "audit-tools d03dbbe6: suite matrixed over Node 22/24/26 in audit-code-test-suite.yml; release.md and release-contract.test.ts aligned (shape pinned against engines.node)"
   },
   "c47dc1bf930484be": {
     "disposition": "settled",

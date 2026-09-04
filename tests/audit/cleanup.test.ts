@@ -2,7 +2,17 @@ import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, writeFile, stat } from "node:fs/promises";
 import { join, dirname, parse } from "node:path";
-import { auditArtifactsDir } from "audit-tools/shared";
+import {
+  AUDIT_FINDINGS_FILENAME,
+  AUDIT_REPORT_FILENAME,
+  REMEDIATION_OUTCOMES_FILENAME,
+  REMEDIATION_REPORT_FILENAME,
+  auditArtifactsDir,
+  auditFindingsPath,
+  auditReportPath,
+  promotedAuditFindingsPath,
+  promotedAuditReportPath,
+} from "audit-tools/shared";
 import { fileURLToPath } from "node:url";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 import { withTempDir } from "./helpers/withTempDir.mjs";
@@ -35,6 +45,50 @@ async function fileExists(filePath: string): Promise<boolean> {
     return false;
   }
 }
+
+/** Bytes a completed run rendered in place; its promoted copies must equal them. */
+const RENDER = "# Audit report\n\n## Work blocks\n\n- Done\n";
+const FINDINGS = JSON.stringify({ schema_version: "audit-findings/v1alpha1", work_blocks: [] }) + "\n";
+
+async function writeState(artifactsDir: string, status: string): Promise<void> {
+  await mkdir(artifactsDir, { recursive: true });
+  await writeFile(join(artifactsDir, "audit_state.json"), JSON.stringify({ status }));
+}
+
+/** A complete run's in-place deliverables: the render and the machine contract. */
+async function plantInPlaceDeliverables(artifactsDir: string): Promise<void> {
+  await writeFile(auditReportPath(artifactsDir), RENDER);
+  await writeFile(auditFindingsPath(artifactsDir), FINDINGS);
+}
+
+/** Promoted copies one level up — byte-identical unless a variant asks otherwise. */
+async function plantPromotedCopies(
+  artifactsDir: string,
+  variant: { report?: string; findings?: boolean } = {},
+): Promise<void> {
+  await writeFile(promotedAuditReportPath(artifactsDir), variant.report ?? RENDER);
+  if (variant.findings !== false) {
+    await writeFile(promotedAuditFindingsPath(artifactsDir), FINDINGS);
+  }
+}
+
+/** A complete run whose completion transition has nothing left to do. */
+async function plantFullyPromotedCompleteRun(artifactsDir: string): Promise<void> {
+  await writeState(artifactsDir, "complete");
+  await plantInPlaceDeliverables(artifactsDir);
+  await plantPromotedCopies(artifactsDir);
+}
+
+/**
+ * The four promoted final reports, one level above the working artifacts dir.
+ * The deletion contract says no cleanup path touches them.
+ */
+const PROMOTED_FINAL_REPORTS = [
+  AUDIT_FINDINGS_FILENAME,
+  AUDIT_REPORT_FILENAME,
+  REMEDIATION_OUTCOMES_FILENAME,
+  REMEDIATION_REPORT_FILENAME,
+] as const;
 
 test("cleanupStaleArtifactsDir preserves artifacts directory when status is active", async () => {
   await withTempDir("audit-cleanup-test-", async (tempDir) => {
@@ -96,18 +150,14 @@ test("cleanupStaleArtifactsDir returns silently when audit_state.json is absent"
   });
 });
 
-test("cleanupStaleArtifactsDir removes artifacts directory when status is complete", async () => {
+test("cleanupStaleArtifactsDir removes artifacts directory when status is complete and fully promoted", async () => {
   await withTempDir("audit-cleanup-test-", async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    await writeFile(
-      join(artifactsDir, "audit_state.json"),
-      JSON.stringify({ status: "complete" }),
-    );
+    await plantFullyPromotedCompleteRun(artifactsDir);
 
     await cleanupStaleArtifactsDir(artifactsDir);
 
-    expect(!(await dirExists(artifactsDir)), "directory should be removed for complete status").toBeTruthy();
+    expect(!(await dirExists(artifactsDir)), "directory should be removed for a fully promoted complete run").toBeTruthy();
   });
 });
 
@@ -128,14 +178,10 @@ test("cleanupStaleArtifactsDir removes artifacts directory when status is not_st
 
 // ── Structured return value tests ─────────────────────────────────────────────
 
-test("cleanupStaleArtifactsDir: deletes when status is complete (no options)", async () => {
+test("cleanupStaleArtifactsDir: deletes when status is complete and fully promoted (no options)", async () => {
   await withTempDir("audit-cleanup-test-", async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    await writeFile(
-      join(artifactsDir, "audit_state.json"),
-      JSON.stringify({ status: "complete" }),
-    );
+    await plantFullyPromotedCompleteRun(artifactsDir);
 
     const result = await cleanupStaleArtifactsDir(artifactsDir);
 
@@ -205,11 +251,7 @@ test("cleanupStaleArtifactsDir: deletes when status is active and force is true"
 test("cleanupStaleArtifactsDir: dry-run skips rm but returns dry-run action", async () => {
   await withTempDir("audit-cleanup-test-", async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    await writeFile(
-      join(artifactsDir, "audit_state.json"),
-      JSON.stringify({ status: "complete" }),
-    );
+    await plantFullyPromotedCompleteRun(artifactsDir);
 
     const result = await cleanupStaleArtifactsDir(artifactsDir, { dryRun: true });
 
@@ -282,14 +324,10 @@ test("cmdCleanup: active status — exitCode=1, JSON action=skipped with reason"
   });
 });
 
-test("cmdCleanup: complete status — exitCode=0, JSON action=deleted", async () => {
+test("cmdCleanup: fully promoted complete status — exitCode=0, JSON action=deleted", async () => {
   await withTempDir("audit-cleanup-test-", async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    await writeFile(
-      join(artifactsDir, "audit_state.json"),
-      JSON.stringify({ status: "complete" }),
-    );
+    await plantFullyPromotedCompleteRun(artifactsDir);
 
     const { code, stdout } = await runCleanup(artifactsDir);
 
@@ -340,11 +378,7 @@ test("cmdCleanup: --force flag deletes active-status artifacts, exitCode=0", asy
 test("cmdCleanup: --dry-run flag returns dry-run action without deleting, exitCode=0", async () => {
   await withTempDir("audit-cleanup-test-", async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    await writeFile(
-      join(artifactsDir, "audit_state.json"),
-      JSON.stringify({ status: "complete" }),
-    );
+    await plantFullyPromotedCompleteRun(artifactsDir);
 
     const { code, stdout } = await runCleanup(artifactsDir, ["--dry-run"]);
 
@@ -456,107 +490,183 @@ test("cmdCleanup: structural refusal fires even with --force and --dry-run", asy
   });
 });
 
-// ── Pre-run sweep eligibility (docs-14) ───────────────────────────────────────
-// preRun=true is the next-step pre-run sweep mode: NOT_STARTED-ONLY. A lingering
-// `complete` dir at next-step time is a live continuation (friction triage
-// pending, or an unpromoted report the completion transition itself deletes) —
-// sweeping it would be destroy-before-verify. The manual verb keeps its
-// complete+not_started semantics unchanged.
+// ── One eligibility rule (owner decision 74c89b226ab9b9cd, 2026-08-31) ────────
+// Both callers — the `cleanup` verb and the next-step pre-run sweep — apply the
+// SAME rule, with no mode flag: a dir is stale when its run is `not_started`, or
+// `complete` with nothing left for the completion transition to do (every
+// artifact promotion archives is already one level up, byte-identical — decided
+// by promotion's own archive walk in verify-only mode, never by a second list).
+// A complete dir with work left is a live continuation for BOTH callers: the
+// fold's terminal step presents and promotes it; the verb refuses without
+// --force. This replaced the not_started-only pre-run narrowing of 7ebeccc8 and
+// keeps its protection — an unpromoted report is never destroyed — without the
+// split.
 
-test("preRun sweep: deletes when status is not_started", async () => {
+test("one rule: deletes a not_started dir", async () => {
   await withTempDir("audit-cleanup-test-", async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    await writeFile(
-      join(artifactsDir, "audit_state.json"),
-      JSON.stringify({ status: "not_started" }),
-    );
+    await writeState(artifactsDir, "not_started");
 
-    const result = await cleanupStaleArtifactsDir(artifactsDir, { preRun: true });
+    const result = await cleanupStaleArtifactsDir(artifactsDir);
 
     expect(result.action).toBe("deleted");
     expect(result.status).toBe("not_started");
-    expect(!(await dirExists(artifactsDir)), "directory should be removed for not_started status in pre-run mode").toBeTruthy();
+    expect(!(await dirExists(artifactsDir)), "a not_started dir is junk from a run that never got going").toBeTruthy();
   });
 });
 
-test("preRun sweep: preserves a complete dir (live continuation, never pre-run junk)", async () => {
+test("one rule: deletes a complete dir whose promotion has nothing left to do", async () => {
   await withTempDir("audit-cleanup-test-", async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    await writeFile(
-      join(artifactsDir, "audit_state.json"),
-      JSON.stringify({ status: "complete" }),
-    );
-
-    const result = await cleanupStaleArtifactsDir(artifactsDir, { preRun: true });
-
-    expect(result.action).toBe("skipped");
-    expect(result.status).toBe("complete");
-    if (typeof result.reason !== "string") {
-      throw new Error("Expected the pre-run complete skip to carry a reason");
-    }
-    expect(result.reason.includes("complete"), "reason should name the complete status").toBeTruthy();
-    expect(await dirExists(artifactsDir), "a complete dir must survive the pre-run sweep — promotion / friction triage own it").toBeTruthy();
-  });
-});
-
-test("preRun sweep: preserves active and blocked dirs", async () => {
-  for (const status of ["active", "blocked"] as const) {
-    await withTempDir("audit-cleanup-test-", async (tempDir) => {
-      const artifactsDir = join(tempDir, ".audit-tools/audit");
-      await mkdir(artifactsDir, { recursive: true });
-      await writeFile(
-        join(artifactsDir, "audit_state.json"),
-        JSON.stringify({ status }),
-      );
-
-      const result = await cleanupStaleArtifactsDir(artifactsDir, { preRun: true });
-
-      expect(result.action).toBe("skipped");
-      expect(result.status).toBe(status);
-      expect(await dirExists(artifactsDir), `a ${status} dir must survive the pre-run sweep`).toBeTruthy();
-    });
-  }
-});
-
-test("preRun sweep: preserves a dir with no audit_state.json", async () => {
-  await withTempDir("audit-cleanup-test-", async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    // No audit_state.json written — status unknown, never pre-run eligible.
-
-    const result = await cleanupStaleArtifactsDir(artifactsDir, { preRun: true });
-
-    expect(result.action).toBe("skipped");
-    expect(result.status).toBe("unknown");
-    expect(await dirExists(artifactsDir), "an unknown-status dir must survive the pre-run sweep").toBeTruthy();
-  });
-});
-
-test("cleanup verb semantics unchanged: complete stays eligible without preRun", async () => {
-  await withTempDir("audit-cleanup-test-", async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    await writeFile(
-      join(artifactsDir, "audit_state.json"),
-      JSON.stringify({ status: "complete" }),
-    );
+    await plantFullyPromotedCompleteRun(artifactsDir);
 
     const result = await cleanupStaleArtifactsDir(artifactsDir);
 
     expect(result.action).toBe("deleted");
     expect(result.status).toBe("complete");
-    expect(!(await dirExists(artifactsDir)), "the manual verb must still clear a complete dir").toBeTruthy();
+    expect(!(await dirExists(artifactsDir)), "a fully promoted complete dir is a leftover (an rm that failed), not a continuation").toBeTruthy();
+    expect(await fileExists(promotedAuditReportPath(artifactsDir)), "the promoted report survives").toBeTruthy();
+    expect(await fileExists(promotedAuditFindingsPath(artifactsDir)), "the promoted findings survive").toBeTruthy();
   });
 });
 
-// ── Pre-run sweep wiring (next-step entry) ────────────────────────────────────
-// The sweep runs at the top of cmdNextStepBody: a stale not_started dir left by
-// a crashed prior run is cleared before the fresh run bootstraps. The
-// complete-dir preservation half of the wiring is anchored by
+test("one rule: preserves a complete dir whose render is not promoted — the only copy of the report", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await writeState(artifactsDir, "complete");
+    await plantInPlaceDeliverables(artifactsDir);
+
+    const result = await cleanupStaleArtifactsDir(artifactsDir);
+
+    expect(result.action).toBe("skipped");
+    expect(result.status).toBe("complete");
+    expect(result.reason ?? "").toMatch(/promot/);
+    expect(result.reason ?? "").toMatch(/--force/);
+    expect(await dirExists(artifactsDir), "an unpromoted complete dir is a live continuation the terminal step finishes").toBeTruthy();
+    expect(await fileExists(auditReportPath(artifactsDir)), "the only copy of the render survives").toBeTruthy();
+  });
+});
+
+test("one rule: preserves a complete dir whose render is promoted but whose findings are not archived (INV 1 parity)", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await writeState(artifactsDir, "complete");
+    await plantInPlaceDeliverables(artifactsDir);
+    await plantPromotedCopies(artifactsDir, { findings: false });
+
+    const result = await cleanupStaleArtifactsDir(artifactsDir);
+
+    expect(result.action).toBe("skipped");
+    expect(await dirExists(artifactsDir), "promotion's delete gate would refuse this dir, so cleanup must too").toBeTruthy();
+    expect(await fileExists(auditFindingsPath(artifactsDir)), "the only copy of the machine contract survives").toBeTruthy();
+  });
+});
+
+test("one rule: a previous audit's promoted report does not make this complete dir stale", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await writeState(artifactsDir, "complete");
+    await plantInPlaceDeliverables(artifactsDir);
+    await plantPromotedCopies(artifactsDir, { report: "# An older audit's report\n" });
+
+    const result = await cleanupStaleArtifactsDir(artifactsDir);
+
+    expect(result.action).toBe("skipped");
+    expect(await dirExists(artifactsDir), "identity, not existence: an older promoted report is not this run's").toBeTruthy();
+  });
+});
+
+test("one rule: --force deletes a complete dir with work left", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await writeState(artifactsDir, "complete");
+    await plantInPlaceDeliverables(artifactsDir);
+
+    const result = await cleanupStaleArtifactsDir(artifactsDir, { force: true });
+
+    expect(result.action).toBe("deleted");
+    expect(!(await dirExists(artifactsDir)), "--force waives the run's status evidence").toBeTruthy();
+  });
+});
+
+test("one rule: preserves active and blocked dirs", async () => {
+  for (const status of ["active", "blocked"] as const) {
+    await withTempDir("audit-cleanup-test-", async (tempDir) => {
+      const artifactsDir = join(tempDir, ".audit-tools/audit");
+      await writeState(artifactsDir, status);
+
+      const result = await cleanupStaleArtifactsDir(artifactsDir);
+
+      expect(result.action).toBe("skipped");
+      expect(result.status).toBe(status);
+      expect(await dirExists(artifactsDir), `a ${status} dir must survive cleanup`).toBeTruthy();
+    });
+  }
+});
+
+test("one rule: preserves a dir with no audit_state.json", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    // No audit_state.json written — status unknown, never eligible without --force.
+
+    const result = await cleanupStaleArtifactsDir(artifactsDir);
+
+    expect(result.action).toBe("skipped");
+    expect(result.status).toBe("unknown");
+    expect(await dirExists(artifactsDir), "an unknown-status dir must survive cleanup").toBeTruthy();
+  });
+});
+
+test("deletion contract: the four promoted final reports survive every cleanup path", async () => {
+  for (const viaVerb of [false, true]) {
+    await withTempDir("audit-cleanup-test-", async (tempDir) => {
+      const artifactsDir = join(tempDir, ".audit-tools/audit");
+      await writeState(artifactsDir, "not_started");
+      const promotedDir = dirname(artifactsDir);
+      for (const name of PROMOTED_FINAL_REPORTS) {
+        await writeFile(join(promotedDir, name), `promoted ${name}\n`);
+      }
+
+      if (viaVerb) {
+        const { code } = await runCleanup(artifactsDir);
+        expect(code).toBe(0);
+      } else {
+        expect((await cleanupStaleArtifactsDir(artifactsDir)).action).toBe("deleted");
+      }
+
+      expect(!(await dirExists(artifactsDir)), "only the working artifacts dir is removed").toBeTruthy();
+      for (const name of PROMOTED_FINAL_REPORTS) {
+        expect(await fileExists(join(promotedDir, name)), `${name} lives one level up and is never touched by cleanup`).toBeTruthy();
+      }
+    });
+  }
+});
+
+test("cmdCleanup: complete with work left — exitCode=1, JSON action=skipped, reason names --force", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await writeState(artifactsDir, "complete");
+    await plantInPlaceDeliverables(artifactsDir);
+
+    const { code, stdout } = await runCleanup(artifactsDir);
+
+    expect(code, "a live continuation is refused").toBe(1);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.action).toBe("skipped");
+    expect(String(parsed.reason)).toMatch(/--force/);
+    expect(await dirExists(artifactsDir), "the only copy of the report survives the verb").toBeTruthy();
+  });
+});
+
+// ── Sweep wiring (next-step entry) ────────────────────────────────────────────
+// The sweep runs at the top of cmdNextStepBody under the same rule as the verb: a
+// stale not_started dir left by a crashed prior run, or a complete dir whose
+// promotion already finished (a leftover from an rm that failed), is cleared
+// before the fresh run bootstraps. A complete dir with work left survives entry
+// and is finished by the fold's terminal step — anchored by
 // tests/audit/next-step-core-report.test.ts (promotion + pending-friction-triage
-// steps both require the complete dir to survive next-step entry).
+// steps both require that dir to survive next-step entry).
 
 test("next-step clears a stale not_started artifacts dir before the fresh run", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
@@ -582,5 +692,28 @@ test("next-step clears a stale not_started artifacts dir before the fresh run", 
     expect(!(await fileExists(junkPath)), "the stale not_started dir (and its junk) should be swept at next-step entry").toBeTruthy();
     expect(await dirExists(artifactsDir), "the artifacts dir should be recreated for the fresh run").toBeTruthy();
     expect(typeof step.step_kind === "string" && step.step_kind.length > 0, "the fresh run should proceed to a real step").toBeTruthy();
+  });
+});
+
+test("next-step sweeps a complete dir whose promotion has nothing left to do", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-tools/audit");
+    await plantFullyPromotedCompleteRun(artifactsDir);
+    const junkPath = join(artifactsDir, "stale-junk.txt");
+    await writeFile(junkPath, "left by an rm that failed after promotion\n");
+
+    const analyzerCache = join(dirname(root), "empty-analyzer-cache");
+    await mkdir(analyzerCache, { recursive: true });
+
+    const { stdout } = await runWrapper(["next-step"], {
+      cwd: root,
+      env: { AUDIT_TOOLS_ANALYZER_CACHE: analyzerCache },
+    });
+    const step = JSON.parse(stdout);
+
+    expect(!(await fileExists(junkPath)), "a fully promoted complete dir is swept at next-step entry like a not_started one").toBeTruthy();
+    expect(await dirExists(artifactsDir), "the artifacts dir should be recreated for the fresh run").toBeTruthy();
+    expect(step.step_kind, "the fresh run starts instead of re-presenting the finished audit").not.toBe("present_report");
+    expect(await fileExists(promotedAuditReportPath(artifactsDir)), "the promoted report is untouched").toBeTruthy();
   });
 });

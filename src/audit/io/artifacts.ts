@@ -694,3 +694,48 @@ export async function promoteFinalAuditReport(params: {
     return { promoted: true, cleaned: false, warning, ...dropped };
   }
 }
+
+/**
+ * Has the completion transition NOTHING left to do for this working dir — is
+ * every artifact `promoteFinalAuditReport` archives already one level up,
+ * byte-identical? This is the stale-dir cleanup rule's question
+ * (`cleanupStaleArtifactsDir`), and it is answered by promotion's OWN archive
+ * walk rather than by a second enumeration of the archive set: the walk runs
+ * with its copy replaced by a byte comparison against what is already at each
+ * destination and its delete replaced by a no-op, so "fully promoted" means
+ * exactly "the delete gate (INV 1) would pass without copying anything". A
+ * member promotion archives is a member this walk checks; the two cannot drift.
+ *
+ * Identity, not existence: a destination that is missing, or that differs from
+ * its in-place source, is work left — so a PREVIOUS audit's promoted report
+ * never qualifies THIS run (the dogfood 2026-07-30 false-green), and a dir with
+ * no in-place render has no identity to prove and is never "already promoted".
+ * A missing in-place member of the tolerant set (findings, feedback, ledger,
+ * friction records) is what promotion itself tolerates: nothing to archive.
+ */
+export async function isWorkingDirFullyPromoted(artifactsDir: string): Promise<boolean> {
+  const verifyOnly: typeof cp = async (from, to) => {
+    // ENOENT from the SOURCE propagates as-is: promotion's own catch reads it as
+    // "absent, nothing to archive" for the tolerant members, and the report
+    // step, which tolerates nothing, reads it as a failed promotion.
+    const source = await readFile(from);
+    let destination: Buffer;
+    try {
+      destination = await readFile(to);
+    } catch (error) {
+      // Deliberately NOT the ENOENT itself: promotion's catch would otherwise
+      // mistake a missing DESTINATION for an absent source and wave it through.
+      throw new Error(
+        `not promoted: ${String(to)} is missing (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+    if (Buffer.compare(source, destination) !== 0) {
+      throw new Error(`not promoted: ${String(to)} differs from ${String(from)}`);
+    }
+  };
+  const result = await promoteFinalAuditReport(
+    { artifactsDir },
+    { copy: verifyOnly, remove: async () => {}, warn: () => {} },
+  );
+  return result.promoted && result.cleaned;
+}
