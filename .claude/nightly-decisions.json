@@ -1971,7 +1971,9 @@
     "answer": "Reject P49 in audit-tools. Lane readiness, availability, and best-lane selection belong to llm-relay, which is intended to own that machinery. Do not add a parallel roster-preflight or fallback policy here; route the remaining gap to llm-relay.",
     "subject": "P49: let the leg-2 sweep preflight DOWN the roster instead of dying on its first entry?",
     "path": "scripts/shared/triage-backlog.mjs",
-    "decided_at": "2026-08-31T15:27:21.178Z"
+    "decided_at": "2026-08-31T15:27:21.178Z",
+    "completed_at": "2026-09-04T13:29:49.200Z",
+    "completed_ref": "no audit-tools change by design: the lane-readiness gap is routed to llm-relay by the machine-wide backlog entry (C:/Code commit 0754301, owner decision 2026-09-04: improve llm-relay first, add a fast dispatch path there, then point the sweep at it); no roster preflight or fallback policy added here"
   },
   "92b0e2dd7cfdc06d": {
     "disposition": "settled",
@@ -2081,6 +2083,8 @@
     "answer": "Move lesson (4) to the machine-wide standing traps (C:/Code/docs/backlog.md, Standing traps half), then delete the whole friction-walk entry from docs/backlog/open-bugs.md in the same lap. The lesson applies to scripted edits in any repo, so its home is machine-wide, not this repo. Owner answered 2026-09-04 at lap start.",
     "subject": "Backlog: a shipped friction-walk entry carries one lesson that is homed nowhere — delete it, or move the lesson first?",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-09-04T13:21:29.458Z"
+    "decided_at": "2026-09-04T13:21:29.458Z",
+    "completed_at": "2026-09-04T13:29:57.073Z",
+    "completed_ref": "audit-tools 743ce9be deletes the friction-walk entry; C:/Code 4e97cee homes lesson 4 in the machine-wide Standing traps"
   }
 }

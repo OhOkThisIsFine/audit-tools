@@ -142,9 +142,10 @@ result ledger (which files/lenses each step covered, with recency in
 step-ordinal space) — the ingestion executor writes it in the same
 `advanceAudit` call that appends the ledger, so it records the post-append
 `audit_results.jsonl` revision (dependency-first, no cycle). No audit-side reader
-exists — the artifact is write-only, reserved to bias later host-work composition
-toward continuity (remediate's `computeBlockContinuityScores` is the intended
-shape of that consumer). The bias is deliberately **not** a DAG edge — a
+exists — the audit side writes continuity information and never consumes it;
+the artifact is reserved to bias later host-work composition toward continuity,
+and which downstream consumer reads it is outside this map. The bias is
+deliberately **not** a DAG edge — a
 `coverage_matrix → audit_results → access_memory → coverage_matrix` edge would
 be a cycle.
 
@@ -210,28 +211,26 @@ edge is added by editing the registry, never a table.
 
 ### Example 1
 
-If `repo_manifest.json` changes, every structure artifact (`graph_bundle.json`,
-`unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`,
-`risk_register.json`, `git_history.json`, `design_assessment.json`,
-`structure_decomposition.json`, `charter_register.json`, `charter_clarification.json`,
-`systemic_challenge.json`) and every
-downstream planning/execution/reporting artifact that lists it as a dependency
-is stale.
+If `repo_manifest.json` changes, every artifact whose generated dependency row
+above lists `repo_manifest.json` is stale, and so is every artifact downstream of
+those — the structure rows first, then the planning, execution and reporting rows
+that list a stale artifact. The generated tables are the sole authoritative
+enumeration; this example deliberately names none of them, so it cannot omit
+one.
 
 ### Example 2
 
-If `audit_results.jsonl` changes (new findings ingested), `coverage_matrix.json`,
-`flow_coverage.json`, `requeue_tasks.json`, `runtime_validation_tasks.json`,
-`runtime_validation_report.json`, `audit_plan_metrics.json`, and `audit-report.md`
-are all stale — but `audit-findings.json` is not directly in this table, so its
-own staleness follows from the synthesis executor's obligation logic, not this
-DAG.
+If `audit_results.jsonl` changes (new findings ingested), every artifact whose
+generated row lists `audit_results.jsonl` is stale — the generated tables above
+carry the current set — but `audit-findings.json` is not a row in this map, so
+its own staleness follows from the synthesis executor's obligation logic, not
+this DAG.
 
 ### Example 3
 
-If `runtime_validation_report.json` changes, `audit-report.md` is stale, but
-upstream planning artifacts (`coverage_matrix.json`, `audit_tasks.json`) are
-not — the dependency only runs downstream.
+If `runtime_validation_report.json` changes, the reporting rows that list it are
+stale, but upstream planning artifacts such as `coverage_matrix.json` and
+`audit_tasks.json` are not — the dependency only runs downstream.
 
 ## Implementation note
 
