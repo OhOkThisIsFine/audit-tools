@@ -6,6 +6,20 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a
+  DIFFERENT test each time (2026-09-04, high, friction: false_red).** Two `audit-code-test-suite` runs on
+  `main` the same day failed identically and in different places: `tests/audit/next-step-narrative.test.ts`
+  on shard 1/4 (`e197ea2c`) and `tests/audit/audit-code-completion-present.test.ts` on shard 3/4
+  (`001d45f1`). Both report `Test timed out in 300000ms`, and shard 1 additionally reports the global-setup
+  teardown catching a surviving child: `1 child process spawned by this run is STILL RUNNING: node
+  audit-code.mjs next-step`. The full suite is green locally on the same tree (496 files, run three times),
+  so the signal is CI-runner-specific and the varying test file says the cause is a shared resource or a
+  runner-speed floor, not any one test. The cost is the expensive kind: `ci` goes green while
+  `audit-code-test-suite` goes red on the same commit, so "is main green" has two answers and the red one
+  is the one everybody learns to skip. **Property:** an orchestration test that spawns the real CLI either
+  completes within a bound the slowest supported runner meets, or fails naming what it waited on — a bare
+  300s timeout with a live child names nothing.
+
 - **A guard's stated escape hatch does not work for any statement after a NEWLINE (2026-09-04, medium,
   friction: tool_should_decide).** `bypassEnabled` (`.claude/hooks/shell-split.mjs`) accepts the
   `NAME=1` assignment only at string start, after `;`/`&`/`|`, or after `export` — a newline is not in
