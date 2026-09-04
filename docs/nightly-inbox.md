@@ -60,7 +60,7 @@ Line 198 of scripts/shared/triage-backlog.mjs reads `return ids.includes('auto')
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
 
 ```notes
-
+Owner: "I don't understand why we need to set a triage model." Direction approved: the sweep must not name a model at all; llm-relay will expose an `auto` model name that resolves to the best free rung, and the sweep points at it once that ships (llm-relay lap of 2026-09-03).
 ```
 
 <details>
