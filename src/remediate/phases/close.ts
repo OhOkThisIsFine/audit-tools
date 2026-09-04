@@ -32,7 +32,7 @@ import type {
 import { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "audit-tools/shared";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import { verifyAnalyzerLeads } from "./closeVerifyAnalyzerLeads.js";
-import type { ClosingAction } from "../state/closingActions.js";
+import type { ClosingAction } from "audit-tools/shared";
 import type {
   CoverageLedgerEntry,
   Finding,
@@ -814,7 +814,13 @@ function generateCommitMessage(state: RemediationState): string {
   return `Fix: ${titles}${suffix}`;
 }
 
-/** Actions that require user confirmation before executing. */
+/**
+ * Actions that require user confirmation before executing. `custom` is not
+ * here: its command is host-authored (attached on the confirmed intent
+ * checkpoint as `closing_custom_command`, owner decision 92b0e2dd7cfdc06d, or
+ * by hand on `closing_plan.custom_command`), and writing the command IS the
+ * authorization.
+ */
 const PREVIEW_ACTIONS = new Set<string>(["commit", "push", "open-pr", "publish"]);
 
 /**
@@ -921,11 +927,20 @@ export async function executeClosingAction(
     await run("npm", ["publish"]);
   } else if (action === "tag") {
     await run("git", ["tag", "auto-remediation"]);
-  } else if (action === "custom" && state.closing_plan!.custom_command?.length) {
-    await run(
-      state.closing_plan!.custom_command[0],
-      state.closing_plan!.custom_command.slice(1),
-    );
+  } else if (action === "custom") {
+    const custom = state.closing_plan!.custom_command;
+    if (custom?.length) {
+      await run(custom[0], custom.slice(1));
+    } else {
+      // A chosen `custom` with no command attached must never read as a green
+      // no-op: nothing ran, and the result says so. `custom` is reachable from
+      // the checkpoint since owner decision 92b0e2dd7cfdc06d.
+      commands.push({
+        command: [],
+        exit_code: null,
+        stderr: "closing action `custom` has no custom_command attached — nothing was run",
+      });
+    }
   }
 
   return {

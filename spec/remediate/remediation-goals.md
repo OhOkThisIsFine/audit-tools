@@ -131,8 +131,11 @@ input is Markdown, free-form, or conversational.
   transitive-closure edges. Dangerous overlap is emitted as an explicit seam-preparation dependency;
   it does not force one unbounded block.
 - Compute parallel-safety per block (default true unless dependencies are found).
-- Detect project type and candidate closing actions (git remote, package
-  metadata, release scripts) for confirmation in Phase 2.
+- Detect project type and candidate closing actions deterministically (git
+  remote names, package metadata, release scripts, CI configuration —
+  `detectProjectFacts`) and record them on the plan as CANDIDATES. Detection
+  presents; it never selects: the user chooses the closing action at the intent
+  checkpoint (below), and an unchosen action is `none`.
 - Emit `remediation_plan.json` conforming to the `RemediationPlan` contract (validated by the
   hand-written TypeScript validators in `src/remediate/validation/`, per the Schemas section below).
 
@@ -154,9 +157,14 @@ gates fire at planning, each at most once per run:
   surfaced to the user at once (categories under Ambiguity criteria below).
   Remediation halts until every clarification is resolved.
 
-The LLM also confirms the project-level closing action selected by Phase 1, or
-proposes an alternative, including the `custom` escape hatch for user-supplied
-commands.
+The closing action is the USER's choice, made at the intent checkpoint
+(`confirm_intent`): the tool presents the candidates Phase 1 detected, each with
+the fact that offers it, and the host writes `closing_action` on the confirmed
+checkpoint — one of the candidates, or any other vocabulary value as an explicit
+alternative, including the `custom` escape hatch for a user-supplied command. A
+value outside the vocabulary is refused by name and re-asked; an omitted field
+is `none`. The tool never selects a closing action, and the close phase still
+asks for confirmation of the concrete preview before it executes anything.
 
 **Dependency ambiguity:** `public_contract` is one of the recognized ambiguity
 kinds; when an item is flagged with it the ambiguity rides the clarification batch

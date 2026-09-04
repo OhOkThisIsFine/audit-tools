@@ -1987,7 +1987,9 @@
     "answer": "Revert the pre-run narrowing so the explicit cleanup command and automatic pre-run cleanup use one eligibility rule. Make the deletion contract explicit: cleanup removes transient run state but preserves every promoted final canonical report, both machine-readable and human-readable: audit-findings.json, audit-report.md, remediation-outcomes.json, and remediation-report.md.",
     "subject": "normative: audit-goals states ONE cleanup-eligibility rule, but the two callers now differ — adopt the split, or is the pre-run narrowing wrong?",
     "path": "spec/audit/audit-goals.md",
-    "decided_at": "2026-08-31T15:27:25.225Z"
+    "decided_at": "2026-08-31T15:27:25.225Z",
+    "completed_at": "2026-09-04T16:43:34.027Z",
+    "completed_ref": "audit-tools 89bc84b1: one eligibility rule for cleanup verb and pre-run sweep (preRun option deleted); staleness of a complete dir decided by promotion's own archive walk in verify-only mode (isWorkingDirFullyPromoted); deletion contract stated in spec/audit/audit-goals.md and pinned by tests"
   },
   "f86315b46e7f352e": {
     "disposition": "settled",

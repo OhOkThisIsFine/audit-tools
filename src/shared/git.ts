@@ -326,6 +326,15 @@ export async function mineGitHistory(
   };
 }
 
+/**
+ * Configured remote NAMES (`git remote`), never URLs — a remote URL may carry a
+ * token, and the callers only need to know that a push target exists. Empty
+ * when `root` is not a repository or git is unavailable.
+ */
+export async function gitRemotes(root: string): Promise<string[]> {
+  return await gitLines(root, ["remote"]);
+}
+
 /** Working-tree changes vs HEAD plus untracked (non-ignored) files. */
 export async function stagedAndUntracked(root: string): Promise<string[]> {
   const files = new Set<string>();

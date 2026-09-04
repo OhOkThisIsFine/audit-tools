@@ -156,7 +156,7 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
 
 - **Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>`
   branch has no closing action that lands it on the base branch.** `CLOSING_ACTIONS`
-  (`src/remediate/state/closingActions.ts`) is commit/push/open-pr/publish/tag/none/custom; the
+  (`src/shared/types/closingActions.ts`) is commit/push/open-pr/publish/tag/none/custom; the
   retired `merge-to-base` (deleted in `467b1e8f` with the execution substrate) was the opt-in fix —
   one revertable `--no-ff` merge into the launch branch, aborting safely on conflict. A host
   dispatching on an isolated branch must land the work itself (`custom` or a manual merge). If

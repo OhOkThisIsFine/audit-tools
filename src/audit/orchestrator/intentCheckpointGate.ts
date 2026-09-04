@@ -67,7 +67,7 @@ export interface NormalizeConfig {
  * provenance).
  */
 export const DEFAULT_NORMALIZE_CONFIG: NormalizeConfig = {
-  version: 'intent-checkpoint-normalize/v2',
+  version: 'intent-checkpoint-normalize/v3',
   structuredFields: [
     'schema_version',
     'excluded_scope',
@@ -76,17 +76,26 @@ export const DEFAULT_NORMALIZE_CONFIG: NormalizeConfig = {
     'disposition_overrides',
     'lens_selection',
     'design_review',
+    // Remediate-only, a discrete choice from a closed vocabulary plus the argv
+    // a `custom` choice runs: a changed closing action or command is a
+    // deterministic delta, never a judged rephrase.
+    'closing_action',
+    'closing_custom_command',
   ],
   // `constraint_clauses` is PROSE per DD-9's explicit listing (host_answer
   // rephrases are judge-arbitrated): the clauses array rides the prose normal
   // form in full, so a clause addition/removal is visible to the judge and a
   // benign answer rephrase is judgeable rather than deterministically re-staling
-  // the cascade.
+  // the cascade. `pre_draft_questions` and `intent_interpretation` are the
+  // remediate intake worker's free text on a DRAFT checkpoint; audit never
+  // writes them, and as prose they are judge-arbitrated if they ever appear.
   proseFields: [
     'scope_summary',
     'intent_summary',
     'free_form_intent',
     'constraint_clauses',
+    'pre_draft_questions',
+    'intent_interpretation',
   ],
 };
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CLOSING_ACTIONS } from "./closingActions.js";
+import { CLOSING_ACTIONS } from "audit-tools/shared";
 import type { RemediationItemStatus } from "./itemStatus.js";
 
 // `Finding` is the canonical machine contract owned by audit-tools/shared.

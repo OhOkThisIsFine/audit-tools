@@ -656,6 +656,14 @@ export {
 export type { ProjectCommands } from "./tooling/testCommand.js";
 export { discoverProjectCommands } from "./tooling/testCommand.js";
 
+// Closing actions: the vocabulary the remediation plan, the closing plan and
+// the confirmed intent checkpoint share; and the deterministic project-fact
+// detection that offers CANDIDATES from it (the user always chooses).
+export type { ClosingAction } from "./types/closingActions.js";
+export { CLOSING_ACTIONS, isClosingAction } from "./types/closingActions.js";
+export type { ProjectFacts, ProjectSignals } from "./tooling/projectFacts.js";
+export { candidateClosingActions, detectProjectFacts } from "./tooling/projectFacts.js";
+
 // Tooling: THE declared single-invocation command shape. One rule, asked by
 // every boundary that produces, consumes, or spawns a declared command — the
 // producer's promotion normalizer, the host-handoff consumer, and the triage
@@ -701,6 +709,7 @@ export {
   changedFiles,
   fileCommits,
   headCommit,
+  gitRemotes,
   stagedAndUntracked,
   mineGitHistory,
 } from "./git.js";

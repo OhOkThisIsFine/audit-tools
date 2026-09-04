@@ -42,6 +42,7 @@ import {
   normalizeRepoPath,
   repoRelativePath,
   toPosixPath,
+  detectProjectFacts,
 } from "audit-tools/shared";
 import {
   createStepEmissionScaffold,
@@ -4565,6 +4566,9 @@ export async function promoteImplementationDagToExtractedPlan(
     };
   });
 
+  // Detected, never chosen: the candidates the host picks from at the intent
+  // checkpoint (owner decision 92b0e2dd7cfdc06d).
+  const facts = await detectProjectFacts(root);
   const extractedPlan = {
     plan_id: dag?.goal_id ?? `CP-PLAN-${Date.now()}`,
     goal_id: dag?.goal_id,
@@ -4572,8 +4576,8 @@ export async function promoteImplementationDagToExtractedPlan(
     blocks,
     // finding_id → { obligation_ids, node_ids } backward trace.
     traceability,
-    project_type: "unknown",
-    candidate_closing_actions: ["none"],
+    project_type: facts.project_type,
+    candidate_closing_actions: facts.candidate_closing_actions,
     source: "contract_pipeline",
   };
 

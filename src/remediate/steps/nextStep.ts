@@ -45,6 +45,9 @@ import {
   type StoppedFoldDescription,
   type InterpretedIntent,
   type SessionIntentLoadResult,
+  CLOSING_ACTIONS,
+  detectProjectFacts,
+  isClosingAction,
 } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -146,7 +149,7 @@ import {
   findingRiskEvidence,
   distinctAffectedFiles,
 } from "../riskSignal.js";
-import type { IntentCheckpoint } from "audit-tools/shared";
+import type { ClosingAction, IntentCheckpoint, ProjectFacts } from "audit-tools/shared";
 import {
   ambiguityReviewPrompt,
   clarificationPrompt,
@@ -585,7 +588,7 @@ async function applyCheckpointIntentOrdering(
   return { ...plan, findings: ordered.findings, blocks: ordered.blocks };
 }
 
-function normalizeExtractedPlan(value: unknown): {
+function normalizeExtractedPlan(value: unknown, facts: ProjectFacts): {
   plan: RemediationPlan;
   /** Findings as received (post-default, pre-dedup) for coverage accounting. */
   sourceFindings: Finding[];
@@ -638,13 +641,24 @@ function normalizeExtractedPlan(value: unknown): {
     ...(typeof value.source === "string" ? { source: value.source } : {}),
     findings: dedup.findings,
     blocks: dedupBlocks,
+    // Project facts (owner decision 92b0e2dd7cfdc06d): the input's own VALID
+    // values win — the contract pipeline detects them itself — and the run's
+    // detected facts fill the rest. Candidates are what the host chooses
+    // FROM at the intent checkpoint; nothing here selects one.
     project_type:
-      typeof value.project_type === "string" ? value.project_type : "unknown",
+      typeof value.project_type === "string" && value.project_type !== "unknown"
+        ? value.project_type
+        : facts.project_type,
     test_command:
       typeof value.test_command === "string" ? value.test_command : undefined,
     e2e_command:
       typeof value.e2e_command === "string" ? value.e2e_command : undefined,
-    candidate_closing_actions: ["none"],
+    candidate_closing_actions:
+      Array.isArray(value.candidate_closing_actions) &&
+      value.candidate_closing_actions.length > 0 &&
+      value.candidate_closing_actions.every(isClosingAction)
+        ? value.candidate_closing_actions
+        : facts.candidate_closing_actions,
     block_strategy:
       value.block_strategy === "test_graph" ||
       value.block_strategy === "git_cocommit" ||
@@ -664,6 +678,37 @@ function normalizeExtractedPlan(value: unknown): {
     throw new Error("Extracted plan contains zero findings.");
   }
   return { plan, sourceFindings: findings, mergeMap: dedup.mergeMap };
+}
+
+/**
+ * The closing plan the HOST chose on the confirmed checkpoint: its action, or
+ * `none` when the field is absent, plus the argv a `custom` choice carries.
+ * Never a detected candidate: detection presents, the host chooses (owner
+ * decision 92b0e2dd7cfdc06d). An invalid action, or a `custom` with no
+ * command, cannot reach here — the confirm_intent obligation refuses both —
+ * so membership is the whole check.
+ */
+async function confirmedClosingPlan(
+  artifactsDir: string,
+): Promise<{ action: ClosingAction; custom_command?: string[] }> {
+  const checkpoint = await readOptionalJsonFile<IntentCheckpoint>(
+    join(artifactsDir, "intent_checkpoint.json"),
+  );
+  if (!checkpoint || checkpoint.confirmed_by !== "host") return { action: "none" };
+  const chosen: unknown = checkpoint.closing_action;
+  if (!isClosingAction(chosen)) return { action: "none" };
+  const command = customCommandOf(checkpoint);
+  return chosen === "custom" && command ? { action: chosen, custom_command: command } : { action: chosen };
+}
+
+/** The checkpoint's `closing_custom_command` when it is a non-empty argv of non-empty strings. */
+function customCommandOf(checkpoint: unknown): string[] | null {
+  const raw = (checkpoint as { closing_custom_command?: unknown }).closing_custom_command;
+  return Array.isArray(raw) &&
+    raw.length > 0 &&
+    raw.every((part) => typeof part === "string" && part.length > 0)
+    ? (raw as string[])
+    : null;
 }
 
 async function saveStateForPlan(
@@ -687,7 +732,7 @@ async function saveStateForPlan(
     status: "planning",
     plan,
     items,
-    closing_plan: { action: "none" },
+    closing_plan: await confirmedClosingPlan(artifactsDir),
     ...(planCoverage ? { plan_coverage: planCoverage } : {}),
   };
   await new StateStore(artifactsDir).saveState(state);
@@ -1310,7 +1355,10 @@ async function handlePendingExtractedPlan(
   let mergeMap: Map<string, string>;
   let grounding: ExtractedFindingGrounding;
   try {
-    ({ plan, sourceFindings, mergeMap } = normalizeExtractedPlan(extractedPlan));
+    ({ plan, sourceFindings, mergeMap } = normalizeExtractedPlan(
+      extractedPlan,
+      await detectProjectFacts(root),
+    ));
 
     // INTENT ORDERING, applied where the plan's findings and blocks are
     // FINALIZED. `applyIntentOrdering` existed with no production caller at all:
@@ -3510,6 +3558,28 @@ async function buildConfirmResumeOrRestartStep(ctx: {
   });
 }
 
+/**
+ * The closing-action choice, rendered from DETECTED facts. Lists only the
+ * candidates the repository's shape makes appropriate, each with the fact
+ * behind it, and says outright that the tool selects nothing: an omitted
+ * `closing_action` is `none`.
+ */
+function renderClosingActionSection(facts: ProjectFacts): string {
+  const candidateLines = facts.candidate_closing_actions
+    .map((action) => `- \`${action}\` — ${facts.candidate_rationale[action] ?? ""}`)
+    .join("\n");
+  const vocabulary = CLOSING_ACTIONS.map((action) => `\`${action}\``).join(", ");
+  return [
+    "## Closing Action — you choose",
+    "",
+    `Detected project type: \`${facts.project_type}\`. The repository's shape makes these closing actions appropriate. The tool never selects one: set \`closing_action\` in the checkpoint, or omit it to choose \`none\`.`,
+    "",
+    candidateLines,
+    "",
+    `Any other value from ${vocabulary} is accepted as an explicit alternative. \`custom\` runs the argv you write beside it as \`closing_custom_command\` (for example ["npm", "run", "release"]); a \`custom\` without one is refused.`,
+  ].join("\n");
+}
+
 async function buildConfirmIntentStep(ctx: {
   root: string;
   artifactsDir: string;
@@ -3524,6 +3594,21 @@ async function buildConfirmIntentStep(ctx: {
   const draft = await readOptionalJsonFile<IntentCheckpoint>(checkpointPath);
   const isDraft = draft?.confirmed_by === "draft";
 
+  // Closing action: DETECTED candidates, presented for the host to choose
+  // from; the tool never selects one (owner decision 92b0e2dd7cfdc06d).
+  const facts = await detectProjectFacts(root);
+  const closingSection = renderClosingActionSection(facts);
+  // A confirmed checkpoint whose closing_action is not in the vocabulary
+  // re-enters this step by name — a refusal, never a silent default.
+  const rawChoice: unknown =
+    draft?.confirmed_by === "host" ? (draft as { closing_action?: unknown }).closing_action : undefined;
+  const refusal =
+    rawChoice !== undefined && !isClosingAction(rawChoice)
+      ? `> **Refused:** \`closing_action\` ${JSON.stringify(rawChoice)} is not one of ${CLOSING_ACTIONS.map((a) => `\`${a}\``).join(", ")}. Rewrite the checkpoint with a valid value, or omit the field for \`none\`.\n`
+      : rawChoice === "custom" && customCommandOf(draft) === null
+        ? "> **Refused:** `closing_action` \"custom\" needs `closing_custom_command`, a non-empty argv array such as [\"npm\", \"run\", \"release\"]. Add it, or choose another action.\n"
+        : "";
+
   let prompt: string;
   if (isDraft && draft) {
     // Build a consolidated single-stop proposal from the draft.
@@ -3536,7 +3621,6 @@ async function buildConfirmIntentStep(ctx: {
     const blockingQs = preDraftQuestions.filter((q) => q.blocking === true);
     const nonBlockingQs = preDraftQuestions.filter((q) => q.blocking !== true);
     const intentInterpretation = typeof draftRaw.intent_interpretation === "string" ? draftRaw.intent_interpretation : undefined;
-    const suggestedClosingAction = typeof draftRaw.closing_action === "string" ? draftRaw.closing_action : undefined;
 
     const questionLines = [
       ...blockingQs.map((q) => `- **[blocking] ${q.id}**: ${q.question}`),
@@ -3547,10 +3631,8 @@ async function buildConfirmIntentStep(ctx: {
       ? `\`\`\`json\n${JSON.stringify(draft.filters, null, 2)}\n\`\`\``
       : "(none — remediating all findings)";
 
-    const closingOptions = "`commit` or `none`";
-
     prompt = `
-# Confirm Remediation Scope and Intent
+${refusal}# Confirm Remediation Scope and Intent
 
 The intake worker has pre-populated the following proposal. Review each section
 and adjust where needed, then confirm by writing the final \`intent_checkpoint.json\`.
@@ -3571,9 +3653,7 @@ ${filtersBlock}
 
 ${questionLines}
 
-## Suggested Closing Action
-
-${suggestedClosingAction ?? "commit"} (valid options: ${closingOptions})
+${closingSection}
 
 ---
 
@@ -3591,7 +3671,9 @@ To confirm, write the final checkpoint to:
   "free_form_intent": "<optional: additional guidance>",
   "filters": ${JSON.stringify(draft.filters ?? {}, null, 2)},
   "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],
-  "must_not_touch": []
+  "must_not_touch": [],
+  "closing_action": "<one of the candidates above, or omit the field for none>",
+  "closing_custom_command": ["<only with custom: the argv to run>"]
 }
 \`\`\`
 
@@ -3606,7 +3688,7 @@ Once written with \`"confirmed_by": "host"\`, run:
   } else {
     // Fallback for when there is no pre-drafted checkpoint.
     prompt = `
-# Confirm Remediation Scope and Intent
+${refusal}# Confirm Remediation Scope and Intent
 
 Please review the intake summary at \`.audit-tools/remediation/intake/intake-summary.json\` (and the audit report, if this run consumes one).
 
@@ -3629,9 +3711,13 @@ Only \`scope_summary\` and \`intent_summary\` are required; add the optional fie
     "themes": ["<theme id>"]
   },
   "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],
-  "must_not_touch": ["<glob>"]
+  "must_not_touch": ["<glob>"],
+  "closing_action": "<one of the candidates below, or omit the field for none>",
+  "closing_custom_command": ["<only with custom: the argv to run>"]
 }
 \`\`\`
+
+${closingSection}
 
 - \`filters\` drop findings that don't match BEFORE planning, so only the work you want is remediated. Valid severities: ${VALID_SEVERITIES_PROSE}. Valid lenses: ${VALID_LENSES_PROSE}. Draw \`packages\`/\`themes\` from the findings in the audit report.
 - \`excluded_scope\` drops findings whose files match a path or directory prefix; \`must_not_touch\` globs are never written.
@@ -3995,6 +4081,16 @@ export function buildPreIntakeObligations(
       id: "confirm_intent",
       derive: (state) => {
         const checkpointIsDraft = existingCheckpoint?.confirmed_by === "draft";
+        // A host-confirmed checkpoint carrying a closing_action outside the
+        // vocabulary is not a confirmation: the step re-emits naming the value
+        // (owner decision 92b0e2dd7cfdc06d — never a silent default).
+        const chosenClosingAction: unknown =
+          existingCheckpoint?.confirmed_by === "host"
+            ? (existingCheckpoint as { closing_action?: unknown }).closing_action
+            : undefined;
+        const invalidClosingAction =
+          (chosenClosingAction !== undefined && !isClosingAction(chosenClosingAction)) ||
+          (chosenClosingAction === "custom" && customCommandOf(existingCheckpoint) === null);
         const activeRunState =
           state != null &&
           state.status !== "pending" &&
@@ -4002,6 +4098,7 @@ export function buildPreIntakeObligations(
           state.status !== "closing";
         const fires =
           checkpointIsDraft ||
+          invalidClosingAction ||
           (!existsSync(checkpointPath) &&
             (existsSync(ip.summary) ||
               existsSync(ip.extractedPlan) ||

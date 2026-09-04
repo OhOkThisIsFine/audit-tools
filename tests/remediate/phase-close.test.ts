@@ -498,24 +498,31 @@ describe("runClosePhase", () => {
       expect(jsonReport.closing_result.commands).toHaveLength(0);
     });
 
-    it("status is 'success' when action is 'custom' and custom_command is undefined", async () => {
+    // `custom` is the exception to the vacuous-success rule: a chosen custom
+    // action with no command attached ran NOTHING, and a green there would pass
+    // verification and delete the artifacts dir for a close that never landed
+    // (owner decision 92b0e2dd7cfdc06d makes `custom` reachable from the
+    // checkpoint, where the confirm step refuses it without a command; this is
+    // the backstop for a hand-edited closing_plan).
+    it("status is 'failed' when action is 'custom' and custom_command is undefined — nothing ran", async () => {
       const state = makeState({ closing_plan: { action: "custom" } });
       await runClosePhase(state, BASE_OPTIONS);
       const jsonReport = JSON.parse(
         await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
       );
-      expect(jsonReport.closing_result.status).toBe("success");
-      expect(jsonReport.closing_result.commands).toHaveLength(0);
+      expect(jsonReport.closing_result.status).toBe("failed");
+      expect(jsonReport.closing_result.commands).toHaveLength(1);
+      expect(jsonReport.closing_result.commands[0].stderr).toMatch(/no custom_command attached/);
     });
 
-    it("status is 'success' when action is 'custom' and custom_command is empty array", async () => {
+    it("status is 'failed' when action is 'custom' and custom_command is empty array — nothing ran", async () => {
       const state = makeState({ closing_plan: { action: "custom", custom_command: [] } });
       await runClosePhase(state, BASE_OPTIONS);
       const jsonReport = JSON.parse(
         await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
       );
-      expect(jsonReport.closing_result.status).toBe("success");
-      expect(jsonReport.closing_result.commands).toHaveLength(0);
+      expect(jsonReport.closing_result.status).toBe("failed");
+      expect(jsonReport.closing_result.commands[0].exit_code).toBeNull();
     });
   });
 

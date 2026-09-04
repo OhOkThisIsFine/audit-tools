@@ -496,8 +496,7 @@ Also write a preliminary intent checkpoint to exactly:
       "question": "<question text from open_questions above>",
       "blocking": true
     }
-  ],
-  "closing_action": "commit"
+  ]
 }
 \`\`\`
 
@@ -508,8 +507,8 @@ Rules for the preliminary checkpoint:
   findings from the audit report").
 - Copy ALL open_questions into \`pre_draft_questions\`, preserving their ids and
   blocking flags. Non-blocking questions are included as FYI context.
-- Suggest \`closing_action\` as \`"commit"\` by default (valid options:
-  \`"commit"\` or \`"none"\`).
+- Do NOT write a \`closing_action\`: the tool detects the candidates from the
+  repository's shape and the host chooses one at confirmation.
 - If a \`free_form_intent\` was interpreted (e.g. "prioritizing security
   findings"), record a brief explanation in \`intent_interpretation\`.
 - Leave \`filters\` empty (\`{}\`) unless the source clearly implies specific

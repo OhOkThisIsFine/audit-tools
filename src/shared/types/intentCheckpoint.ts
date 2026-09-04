@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { FileDispositionStatusSchema } from "./disposition.js";
 import { CeilingSchema } from "./charter.js";
+import { CLOSING_ACTIONS } from "./closingActions.js";
 
 /**
  * The accepted scope and intent for a run, confirmed by the host before
@@ -46,6 +47,38 @@ export const IntentCheckpointSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * Remediate-only: the closing action the HOST chose at confirmation, from
+     * the candidates the tool detected and presented (owner decision
+     * 92b0e2dd7cfdc06d — the tool never selects one). Absent means `none`:
+     * no closing side effect is ever inferred. audit-code ignores it.
+     */
+    closing_action: z.enum(CLOSING_ACTIONS).optional(),
+    /**
+     * Remediate-only: the argv the close phase runs when `closing_action` is
+     * `custom`. Required with `custom` (the confirm step refuses a `custom`
+     * without it) and meaningless otherwise. Host-authored: writing it is the
+     * authorization, so `custom` needs no second preview at close.
+     */
+    closing_custom_command: z.array(z.string().min(1)).min(1).optional(),
+    /**
+     * Remediate-only, draft checkpoints: the intake worker's open questions,
+     * carried into the confirmation prompt. `blocking: true` alone blocks
+     * (INV-remediate-state-06).
+     */
+    pre_draft_questions: z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            question: z.string(),
+            blocking: z.boolean().optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+    /** Remediate-only, draft checkpoints: how free-form intent was read. */
+    intent_interpretation: z.string().optional(),
     /**
      * Clauses from free_form_intent that could not be encoded as lens-weight,
      * priority, or scope signals. Each entry carries the original clause text,
