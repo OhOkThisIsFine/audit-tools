@@ -2,7 +2,7 @@
 
 **Verdict: SIGN-OFF REFUSED, 3 of 3 independent lenses, unanimous.** Target: `e500672f` on
 `wip/capability-evidence`. This is the fourth-party review `docs/HANDOFF.md` named as the next action.
-Defect statement + the author's own round-1/round-2 account: [`nim-dispatch-single-pool-2026-07-19.md`](nim-dispatch-single-pool-2026-07-19.md).
+Defect statement + the author's own round-1/round-2 account: `nim-dispatch-single-pool-2026-07-19.md` (retired — in git history).
 
 Three lenses ran independently, none seeing the others' output, each instructed to treat the author's
 review record as a lead requiring verification and to default to refusing under uncertainty:

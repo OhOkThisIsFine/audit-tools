@@ -3,7 +3,7 @@
 **Run:** `remediate-audit-2026-07-30`, consuming the 2026-07-30 self-audit (2,100 findings, 121
 high) under the operator directive *delegate every LLM step to free lanes; primary quota is low;
 take a wide view of the process itself*. Companion to
-[`meta-review-audit-run-2026-07-30.md`](meta-review-audit-run-2026-07-30.md). Per-event friction
+`meta-review-audit-run-2026-07-30.md` (retired — in git history). Per-event friction
 authority: `.audit-tools/remediation/friction/*.json`; this document is the wide-view synthesis.
 *(Status: written mid-run at the implement phase's false-abandonment recovery; finalized at close.)*
 

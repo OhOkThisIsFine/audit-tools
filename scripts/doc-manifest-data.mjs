@@ -237,8 +237,7 @@ export const DOC_MANIFEST = [
       "docs/nightly-routine.md",
     ],
     check:
-      "Standalone dev-workflow how-to and scheduler-prompt SOURCE; do the documented commands/paths " +
-      "still resolve. Changes to `docs/nightly-routine.md` must regenerate the generated scheduler prompt.",
+      "Standalone dev-workflow how-to; do the documented commands/paths still resolve.",
     autoApply: "factual-stale → yes",
   },
   {

@@ -66,11 +66,12 @@ reviewed cold, which is the honest answer rather than a defect.
 
 *Review-archive retirement (C-10).* `docs/reviews/` is excluded from the doc
 manifest by construction, so no staleness pass can ever mark a dated record
-spent — which is how 27 files came to hold zero citations from anywhere. Run
-`node scripts/nightly/review-retirement-candidates.mjs` once per pass: each
-candidate it names (a dated review older than 14 days that nothing outside the
-archive cites) becomes a retirement PROPOSAL in the inbox — an owner decision,
-never an auto-delete. Git history keeps every retired record.
+spent — which is how 27 files came to hold zero citations from anywhere. A dated
+review older than 30 days that nothing outside the archive cites retires under a
+STANDING rule (owner decision `c47dc1bf930484be`), not a per-batch question: run
+`node scripts/nightly/review-retirement-candidates.mjs --retire` once per pass and
+it applies the rule itself. Re-proposing the same batch nightly is what the rule
+replaced. Git history keeps every retired record.
 
 ### Leg 2 — backlog
 

@@ -22,11 +22,57 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-09-03 at `e836d386`.*
+*Last run: 2026-09-04 at `03776c20`.*
 
 
-> **11 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+> **12 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
 
+
+---
+
+
+# Backlog disambiguation
+
+
+<!-- nightly:item key=d4809ab86c433e58 -->
+
+## `bl-1` — Backlog: a shipped friction-walk entry carries one lesson that is homed nowhere — delete it, or move the lesson first? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The open-bugs backlog holds an entry recording a 'friction walk' from a lap on 2026-08-30. The backlog's own rule is that an entry is removed once its work ships, because git already records what happened. The one actionable defect in this entry is shipped, and the entry says so itself: the false-red test bug is fixed and now enforced by a contract test. The mechanical sweep has therefore flagged this entry for deletion on two consecutive nights. The reason it has not been deleted is that the entry also carries two lessons that are not work items. The first lesson — that a fix with two halves cannot be proved by inverting only one of them — already has a durable home in project memory, so deleting the entry would not lose it. The second lesson has no home anywhere: it says that a scripted find-and-replace over text that repeats identically in two function signatures needs an anchor, because a bare string match silently edited the wrong one and swapped two defaults. Nothing in the repository records that anywhere else, so deleting the entry deletes the lesson. The question is which of those two things matters more: keeping the backlog clean of shipped entries, or keeping a lesson that currently only survives inside a retrospective nobody will read.
+
+### The question
+
+docs/backlog/open-bugs.md carries 'Friction walk (guard-test-hermeticity lap, 2026-08-30)'. Its only actionable item (2) is shipped and says so. Lesson (3) is already homed in project memory ([[a-two-half-fix-needs-both-halves-inverted]]). Lesson (4) — 'A scripted edit over repeated signature text needs an anchor, never a bare string match' — is homed NOWHERE. Delete the entry outright, move lesson (4) to a durable home first, or keep the entry?
+
+### Your answer
+
+- [ ] **1. Move lesson (4) to durable traps, then delete** — Add 'a scripted edit over repeated signature text needs an anchor, never a bare string match' to docs/backlog/durable-traps.md, then delete the whole friction-walk entry from open-bugs.md in the same commit.
+- [ ] **2. Move lesson (4) to project memory, then delete** — Home lesson (4) as a project memory note (with its MEMORY.md index line) rather than in durable-traps, since it is an agent-behaviour lesson rather than an environment gotcha, then delete the entry.
+- [ ] **3. Delete outright, accept the loss** — Delete the entry now. Lesson (4) is a one-off editing mistake rather than a durable trap, and preserving every retrospective observation is what makes the backlog unreadable.
+- [ ] **4. Keep the entry** — Leave the entry in open-bugs.md. It is the only record of lesson (4), and an entry that still carries an unhomed lesson has not finished being useful, whatever its shipped half says.
+- [ ] **5. Decide the CLASS, not this entry** — Do not answer for this entry alone. Every friction-walk retrospective in open-bugs.md has the same shape (shipped defect plus unhomed lessons); settle a standing rule for the whole class and apply it to all of them at once.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- The entry's own text: 'FIXED and now mechanically enforced by a contract test in the same file, so no entry is kept for it; the uncovered half is stated as data in the guard-reach registry.' (docs/backlog/open-bugs.md:574-575)
+- Lesson (3) is homed: ~/.claude/projects/C--Code-audit-tools/memory/a-two-half-fix-needs-both-halves-inverted.md exists.
+- Lesson (4) is homed nowhere: no match for 'scripted edit', 'String.replace' or 'bare string match' in docs/backlog/durable-traps.md or anywhere in the project memory store.
+- Flagged for deletion by the mechanical sweep on two consecutive nights (2026-09-03 and 2026-09-04), both times as already_shipped_or_stale with premise evidence 'probes_unusable' — so it has never carried the code anchor a deletion requires, and will keep recurring until answered.
+- The doc-review rubric sanctions the middle option directly: 'If a shipped fix carries a durable trap/convention, that belongs in its durable home — move it there in the same edit, then delete the backlog entry.'
+
+</details>
 
 ---
 
@@ -34,71 +80,27 @@ records them in the tracked ledger, and does the work.
 # Recurring-problem solutions
 
 
-<!-- nightly:item key=133f4f815b608ea4 -->
+<!-- nightly:item key=baf2da68fa9cd24f -->
 
-## `sol-1` — The leg-2 sweep asks the router for ids[0], which is the one roster entry that needs a real API key — name a target instead? <!-- doc-citation-exempt: quoted item prose, not citations -->
+## `sol-1` — P51: one guard has shipped four reach defects on four dates — declare a guard's recognized FORMS as data, like its file reach? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `scripts/shared/triage-backlog.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-Every night, leg 2 of this routine classifies all ~95 backlog entries by sending each one to a language model running on the local llm-relay router. It has to pick which model to ask for. The code prefers a model called 'auto' if the router offers one, and otherwise takes whichever model happens to be listed first. Tonight the router listed five models: 'anthropic', then 'pool/high', 'pool/low', 'pool/medium' and 'pool/xhigh'. There is no 'auto', so the script took the first one, 'anthropic'. That entry is not a free local model at all — it is a pass-through to the real paid Anthropic API, and it needs an API key the routine does not have. The sweep died immediately with 'HTTP 401 authentication_error: x-api-key header is required' and classified zero of the 95 entries. The four free pool models sitting right beside it in the same list were never tried. Re-running the exact same command with TRIAGE_MODEL=pool/medium worked, and that is how leg 2 got its coverage tonight. So the machinery is fine; only the choice of which model to name is broken. This is not the same question as P49, which you rejected on 2026-08-31. P49 wanted this script to try each roster entry in turn until one answered, and you said that kind of lane-readiness and best-lane logic belongs in llm-relay, not here. This item does not propose any fallback or retry logic. It only asks what the script should name when it has no instruction, given that taking the first item in a list is an arbitrary choice that happens to select the one entry guaranteed to fail.
-
-### The question
-
-Line 198 of scripts/shared/triage-backlog.mjs reads `return ids.includes('auto') ? 'auto' : ids[0];`. The router's roster is `anthropic, pool/high, pool/low, pool/medium, pool/xhigh` and contains no `auto`, so this returns `anthropic` and the sweep dies 401 before attempting entry 0. What should the script name when TRIAGE_MODEL is unset? <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### Your answer
-
-- [ ] **1. Default to pool/medium** — Replace the ids[0] fallback with an explicit default of pool/medium, validated against the roster, and fail with a clear message naming the available ids when it is absent. No retry or ranking logic; TRIAGE_MODEL still overrides.
-- [ ] **2. Prefer any pool/* over a passthrough** — When there is no 'auto' alias, prefer the first pool/* id in the roster and never select a bare passthrough target such as 'anthropic'. Still a single choice, not a fallback chain.
-- [ ] **3. Require TRIAGE_MODEL** — Stop guessing entirely. Make TRIAGE_MODEL mandatory and exit with a message listing the roster when it is unset, so the nightly loader states the target explicitly and audit-tools holds no lane-selection opinion at all.
-- [ ] **4. Route through llm-relay dispatch** — Stop naming a model. Send each entry through the llm-relay dispatch tool so the relay owns lane choice end to end, consistent with the P49 answer that best-lane selection belongs to llm-relay.
-- [ ] **5. Leave it; set the env var** — Change nothing in audit-tools. The nightly loader sets TRIAGE_MODEL explicitly from now on, and a bare invocation is accepted as unsupported.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-Owner: "I don't understand why we need to set a triage model." Direction approved: the sweep must not name a model at all; llm-relay will expose an `auto` model name that resolves to the best free rung, and the sweep points at it once that ships (llm-relay lap of 2026-09-03).
-```
-
-<details>
-<summary>Evidence (6) — what was verified against code, and how</summary>
-
-- Ran `node scripts/shared/triage-backlog.mjs .audit-tools/nightly/triage-0903.jsonl` at HEAD e836d386. Exit 1. stderr: 'preflight failed: HTTP 401 authentication_error: x-api-key header is required' / 'The lane is DEAD, not slow — nothing was attempted.' <!-- doc-citation-exempt: quoted item prose, not citations -->
-- The coverage stamp it wrote records the chosen target: `.audit-tools/nightly/triage-0903-coverage.json` had `"model": "anthropic"`, `"attempted": 0`, `"classified": 0`, and the 401 in `aborted`. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- `curl -s http://127.0.0.1:8791/v1/models` returned ids `anthropic, pool/high, pool/low, pool/medium, pool/xhigh` — no `auto` alias, so line 198 falls through to `ids[0]`. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- Re-ran the identical command as `TRIAGE_MODEL=pool/medium node scripts/shared/triage-backlog.mjs …`. It passed preflight and swept the backlog, so the failure is target selection alone and not the router, the script, or the prompt. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- The global ~/.claude/CLAUDE.md already records this exact trap for a different caller: '`--model anthropic` is NOT a pool substitute — it authenticates against the real API and returns 401'. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- Distinct from settled subject c0dc10138087d836 (P49, rejected 2026-08-31), which proposed preflighting DOWN the roster as a fallback policy. Nothing here retries or ranks lanes.
-
-</details>
-
----
-
-
-<!-- nightly:item key=1ed1beee5024b166 -->
-
-## `sol-2` — P50: two code comments still name five conceptual categories where the prompt emits eight — single-source the list and guard it? <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Recurring-problem solutions · open 1 night · `src/audit/types/designAssessment.ts`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · open 1 night · `scripts/guard-reach-data.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
-The conceptual-design review asks a reviewing agent to label each finding with a category. This lap widened that set from five categories to eight, adding fundamental_approach, core_assumption and structural_risk. The real list lives in exactly one place: a plain text string inside the prompt builder in src/audit/orchestrator/designReviewPrompt.ts. Two comments elsewhere in the source hand-copied the old five-item list, and nobody updated them, so they now describe behaviour the code no longer has. One of them sits directly above renderConceptualReviewPrompt and claims the shallow single-agent pass uses only the five old categories; that function calls the same builder, so it really does emit all eight. The spec file was updated correctly in the same lap, which means the code comments are the wrong half, not the spec. The reason this matters beyond two wrong sentences is that nothing in this repository can detect it. Every documentation gate reads tracked markdown files. A comment inside a .ts file is invisible to all of them, so a false statement there survives until a person happens to read it. That has now happened three times on two separate dates, including a comment in continuityScore.ts that an open backlog entry says makes the spec look self-contradictory. The proposal is to stop keeping a second copy at all: turn the list into one exported constant, build the prompt string from it, replace both comments with a pointer to the constant, and add a test that fails if any comment ever re-enumerates the set again. A working test that proves the current state is broken is already written and was run against this commit.
+This repository keeps a registry that says, for each automated guard, which files that guard scans. A gate reconciles that registry against the real tree, so a guard that scans nothing, or a file no guard covers, turns the build red. That mechanism works well for coverage measured in FILES. It cannot express coverage measured in SYNTAX. The memory-citation guard is supposed to catch a documentation reference to a memory note that no longer exists, because such a reference silently re-asserts whatever the deleted note said. It has now failed to do that four separate times, on four separate dates, and each failure had the same shape: the guard scanned every file it was supposed to scan, but did not recognize one of the ways a citation can be written, so it printed a green tick while a dangling reference sat in a tracked document. Tonight's instance was the sentence-initial form 'Memory: some-note' — the pattern was case-sensitive, so a capital M made the citation invisible. It was found only because an unrelated owner decision happened to name that exact line; nothing in the repository would ever have reported it. The proposal is to let a registry row list the forms a guard must recognize, each as a small literal example, and to add a test that runs the real guard over each example and fails if it stops detecting one. The alternative of banning all but one citation syntax was considered and rejected, because enforcing that would need its own guard. Choosing to do nothing is also a real option: the cost is that the fifth instance of this defect will be found the same way as the first four, by accident.
 
 ### The question
 
-src/audit/orchestrator/designReviewPrompt.ts:571 and src/audit/types/designAssessment.ts:42 both enumerate the old five-category conceptual set, while conceptualOutputFormat emits eight. Adopt P50 — extract CONCEPTUAL_FINDING_CATEGORIES, build the prompt enum from it, delete both hand copies, and ship the drift guard?
+scripts/guard-reach-data.mjs declares each guard's file reach but has no way to declare which syntax forms a guard must recognize, and scripts/check-memory-citations.mjs has silently missed a citation form three times (the [[…]] wikilink form, the whole guard in every worktree, and tonight the case-varied `Memory:` list form). Adopt P51 — add a `forms` field carrying literal positive samples, and a contract test that drives the real guard over each declared sample? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### Your answer
 
-- [ ] **1. Adopt P50 whole** — Extract CONCEPTUAL_FINDING_CATEGORIES, build the line-408 enum from it, replace both stale comments with a pointer to the constant, and ship the drift guard as tests/audit/conceptual-category-comment-drift.test.ts with its guard-reach registry row. One commit, per atomic-replace.
-- [ ] **2. Fix only, no guard** — Single-source the constant and delete both hand copies, but do not ship the guard. The trap is removed at the source and the residual risk of someone writing a fresh prose list is accepted.
-- [ ] **3. Correct the comments only** — Just update the two comments to name all eight categories. Do not single-source and do not add a guard; treat this as an ordinary stale-comment edit.
-- [ ] **4. Widen the guard to all enums** — Adopt P50, and additionally generalize the guard so it covers every hand-copied enum comment in src/ (the contract-pass categories, the lens vocabulary, the finding severities), not just the conceptual categories.
-- [ ] **5. Reject** — Leave both comments as they are. A stale comment is not worth a mechanism, and the category list is stable enough that the cost of a guard exceeds the cost of the drift.
+- [ ] **1. Adopt P51** — Add a `forms` field to the guard-reach registry carrying literal positive samples per recognized syntax, populate it for check:memory-citations with the three known forms (lowercase inline, sentence-initial, wikilink), and land the contract test at tests/shared/ so a lost form goes red. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. Adopt, and widen to every form-recognizing guard** — Adopt P51, and additionally populate `forms` for every other guard whose job is to recognize a syntax rather than a file set, so the mechanism covers the class rather than the one guard that exposed it. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **3. Fix the forms by hand, no mechanism** — Accept that the three known citation forms are now all recognized and add no mechanism. The next missed form is accepted as a cost, on the judgement that citation syntax is stable enough not to warrant a gate.
+- [ ] **4. Remove the trap instead** — Reject the guard-side fix and instead enforce ONE canonical citation syntax across the corpus, so there are no alternative forms left to miss. Accept the migration churn and the new guard needed to enforce it.
+- [ ] **5. Reject** — Leave the registry as it is. A guard's recognized forms stay implementation detail, documented in the row's prose note, and reach defects continue to be found by inspection.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -107,43 +109,67 @@ src/audit/orchestrator/designReviewPrompt.ts:571 and src/audit/types/designAsses
 
 ```
 
-Full proposal: [`.audit-tools/nightly/proposals/P50-conceptual-categories-single-source/PROPOSAL.md`](../.audit-tools/nightly/proposals/P50-conceptual-categories-single-source/PROPOSAL.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
+Full proposal: [`.audit-tools/nightly/proposals/P51-guard-form-reach/P51-guard-form-reach.md`](../.audit-tools/nightly/proposals/P51-guard-form-reach/P51-guard-form-reach.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 <details>
 <summary>Evidence (7) — what was verified against code, and how</summary>
 
-- The live enum is one string literal: src/audit/orchestrator/designReviewPrompt.ts:408 — 'one of: fundamental_approach, core_assumption, structural_risk, architecture_pattern, design_simplification, tool_opportunity, integration, missing_capability'.
-- designReviewPrompt.ts:571-572 documents renderConceptualReviewPrompt (the shallow pass) as 'Categories: tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability'. That function calls conceptualOutputFormat at line 595, so the shallow pass does emit all eight — the comment is wrong, not merely narrower.
-- designAssessment.ts:42 carries the same stale five-item list for conceptual_findings.
-- The sibling contract-pass comment at designReviewPrompt.ts:527 matches its own enum at line 556 exactly, which bounds the defect to the conceptual pair.
-- spec/audit-workflow-design.md was updated to the correct eight categories in this lap (diff 5b634c7d..HEAD), so the spec is right and only the comments are stale.
-- Recurrence, counted across distinct dates: commit 86215384 (2026-08-31) is titled in part 'the comment class that hid behind the doc gates'; docs/backlog/open-bugs.md carries a 2026-08-31 entry on a false src/shared/continuityScore.ts header; and this pair on 2026-09-03. Three records, two dates, four stale comments.
-- The guard was run at HEAD e836d386 and failed with exactly the two offenders and no false positives across every tracked src/**/*.ts file. Verbatim failure in .audit-tools/nightly/proposals/P50-conceptual-categories-single-source/RED-AT.txt.
+- Defect 4, tonight: scripts/check-memory-citations.mjs used /memory:\s*([^)*]+)/g (case-sensitive), so the sentence-initial `Memory: disambiguation-completes-or-leaves` list in docs/project-philosophy.md was never scanned. Proved by inverting the fix: with the old prose restored and the widened regex, the gate reported '1 citation(s) resolve to no memory file → docs/project-philosophy.md:325'. With the case-sensitive regex it reported '✓ all citations resolve'. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Defect 5, also tonight, and found by the PROPOSAL DOCUMENT ITSELF tripping the gate it proposes to strengthen: the `memory:` scan never stripped inline code spans, though the wikilink scan always did, so a document that merely DESCRIBED the citation syntax was read as citing notes that do not exist. Two forms in one guard disagreed about whether inline code counts. Fixed in the same run by making the two consistent, and re-proved afterwards that a genuine dangling citation still goes red. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Defect 2: commit b91057c5 added the `[[name]]` wikilink form, which had been structurally invisible — the commit's own comment calls it 'The OTHER citation form'. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Defect 3: commit 69cbcd99 (2026-08-30) fixed the guard being inert in every linked worktree, because the store was resolved from cwd rather than the repository.
+- Defect 1: commit e7a57713 created the guard, after a dangling citation in docs/project-philosophy.md restored a refuted design as the map's stated target.
+- The gap is structural, not an oversight: the registry row for check:memory-citations (scripts/guard-reach-data.mjs:361) declares files and states its uncovered halves in a prose `note` — prose that decays independently and can never go red. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- The proposal's test was run at HEAD 03776c2076d41eaeee06692ad05fd9a0d26d2ceb and failed with 'AssertionError: expected 0 to be greater than 0' (no row declares `forms`). Verbatim record, including a first run that failed for the WRONG reason and was corrected before the record was written: .audit-tools/nightly/proposals/P51-guard-form-reach/RED-AT.txt <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 </details>
 
 ---
+
+
+<details>
+<summary>What the last run changed on its own</summary>
+
+
+- LEG 1 (deferred from 2026-09-03, unblocked by a clean tree): benchmarks/p0/README.md now states the four-of-five bound on strongest recovery. Anchor: benchmarks/p0/runner.mjs:469 rejects when primary.candidate_runs_recovering_strongest < 4, and runner.mjs:1815 counts it over the five primary pairs.
+
+- LEG 1 (owner decision 076315de56b74b0b): scripts/doc-manifest-data.mjs no longer orders regeneration of the scheduler prompt deleted at C-08 (docs/nightly-routine-prompt.md, removed in 7afb99a3); the manifest table in docs/doc-review-guidelines.md was re-rendered. The ordered bounded sweep of the manifest data for other no-longer-existing artifacts found NO further dead reference — the three other flagged tokens (remediation-report.md, meta-audit-log.md, project-philosophy.md) are prose inside the module's own header, and the registered paths they correspond to all resolve.
+
+- LEG 1 (owner decision f86315b46e7f352e): docs/project-philosophy.md B6 no longer cites the non-existent memory note disambiguation-completes-or-leaves; it now points at .claude/skills/disambiguate-backlog/SKILL.md → Hard rules ('No half-specced write-backs'), which was verified to state that conviction. The second half of the same decision also landed: scripts/check-memory-citations.mjs now matches case-insensitively, so the bare `Memory: <name>` list form is no longer invisible to the gate. Red-green proved by inverting the doc fix: the widened gate reports the dangling citation at docs/project-philosophy.md:325, the old gate reported all-clear. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+- LEG 1 (owner decision b789256441d2ccf9): docs/audit-pkg/development.md now points at .claude/skills/ship/SKILL.md for what verify:release covers and when to run it, keeping release.md referenced for the manual host-validation and troubleshooting half only.
+
+- LEG 1 (owner decision 309bbbfff0ff6b89): docs/glossary-ids.md no longer hand-enumerates counterexample ids. The old sentence claimed a contiguous CE-001..CE-011 range; CE-003 has zero citations in src/, so the claim was false. The same de-status treatment was applied to the sibling INV-<n> enumeration, as the decision directed.
+
+- LEG 1 (owner decision c47dc1bf930484be, the standing 30-day retirement rule): scripts/nightly/review-retirement-candidates.mjs now defaults to 30 days and gained --retire, which applies the rule itself instead of re-proposing the same batch nightly; docs/nightly-routine.md's C-10 paragraph was rewritten to match. The rule was then executed: 17 dated review records (2026-06-27..2026-07-30), each with zero citations outside docs/reviews/, were removed with git rm. Git history keeps every one.
+
+- LEG 1 (defect found and fixed WITHIN this run, by check:doc-links): the retirement rule as first written left two surviving reviews pointing at retired siblings, which is a red doc-links gate — so the standing rule produced a broken build every time it fired. The mechanism now de-links surviving siblings in the same pass, and the two affected files (account-metering-round2-independent-review-2026-07-19.md, meta-review-remediation-run-2026-07-30.md) were repaired.
+
+- LEG 1 (second defect found WITHIN this run, by the citation gate itself): scripts/check-memory-citations.mjs now strips inline code spans before the `memory:` scan, as it already did for the `[[…]]` wikilink scan. The two forms disagreed, so a document that merely DESCRIBED the citation syntax was read as citing notes that do not exist — which is how tonight's own leg-3 proposal tripped the gate it proposes to strengthen. Re-proved after the fix that a genuine dangling citation still goes red, so the strip did not blind the gate. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+- LEG 1 (adversary-driven hardening): the retirement matcher now tests the filename STEM rather than the full basename, so a citation that drops the .md extension still spares a record. The independent adversary lane refuted the change on the grounds that a matcher adequate for PROPOSING is not adequate for DELETING; that is correct in principle. It was verified not to change tonight's outcome: none of the 17 retired records would have been spared under the hardened matcher.
+
+
+</details>
 
 
 <details>
 <summary>What the last run could NOT cover</summary>
 
 
-- Leg 1 + leg 2 APPLY: nothing was written to the tree. The working tree was DIRTY at run start (benchmarks/p0/runner.mjs, tests/shared/p0-benchmark-harness.test.ts, docs/backlog.md, docs/backlog/forward-tracks.md, docs/backlog/open-bugs.md all modified and uncommitted). Under the clean-tree rule the run reviews and reports but applies nothing.
+- FOUR owner-answered decisions still have NOT landed, and nothing will re-raise them, because a settled subject is never re-asked. All four are code work beyond a doc pass and were deliberately not attempted tonight rather than half-done: (a) 92b0e2dd7cfdc06d — build project-type and candidate closing-action DETECTION, used only to present options to the user, never to auto-select; (b) 74c89b226ab9b9cd — revert the pre-run cleanup narrowing so the explicit cleanup command and automatic pre-run cleanup share one eligibility rule, and make the deletion contract explicit about preserving the four promoted canonical reports; (c) b175a773958b1b4d — restore real Node-major CI coverage so the published engines.node >=22 claim is exercised, keeping workflow and contract test aligned; (d) 133f4f815b608ea4 + c0dc10138087d836 — route the leg-2 sweep through llm-relay dispatch so the relay owns lane choice end to end, and add no roster-preflight or fallback policy inside audit-tools. Run `node scripts/nightly/answer.mjs --list`, and `--done <KEY> "<ref>"` as each lands. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- DEFERRED auto-apply (leg 1, blocked only by the dirty tree): benchmarks/p0/README.md states 'Strongest recovery requires every privately marked strongest case to carry outcome weight 1 in a candidate run.' The acceptance rule also requires this in at least FOUR of the five primary candidate runs (runner.mjs computes candidate_runs_recovering_strongest and rejects below 4). The README states every other threshold explicitly, so the omission is a narrow code-anchored fix. Re-apply on the next clean-tree run.
+- TWO owner-answered decisions touch CONSTITUTIONAL specs and were not attempted tonight for the same reason: b4faa22d74fb56e3 (spec/audit/dependency-map.md — drop the consumer symbol computeBlockContinuityScores, keep only the durable invariant that the audit side writes continuity information and does not consume it) and cde41c31f1c6a7f3 (the same file — replace two hand-maintained artifact enumerations with the invariant, leaving the generated tables as the sole authoritative enumeration). Both need a constitutional-doc override attestation; both premises were re-verified present at HEAD tonight.
 
-- ELEVEN answered decisions have NOT landed and nothing will re-raise them, because a settled subject is never re-asked. Verified individually against HEAD e836d386 tonight — every premise is still present verbatim: docs/audit-pkg/development.md still points at release.md; docs/glossary-ids.md still enumerates the CE range; docs/project-philosophy.md still carries the bare 'Memory:' citation; scripts/doc-manifest-data.mjs still orders the retired scheduler-prompt regeneration; spec/audit/dependency-map.md still names computeBlockContinuityScores and still hand-lists artifacts; spec/audit/audit-goals.md and spec/remediate/remediation-goals.md are unchanged; docs/audit-pkg/release.md still claims a Node-major matrix that .github/workflows/ci.yml does not have; and the 30-day review-retirement rule is unimplemented. Run `node scripts/nightly/answer.mjs --list` to see them, and `--done <KEY> "<ref>"` as each lands. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- LEG 2 APPLIED NOTHING, and that is the correct outcome rather than a gap. The sweep named three deletion leads: open-bugs#82e36029 (already_shipped_or_stale, premise probes_unusable), forward-tracks#bf9e6dc3 (accepted_residual_no_work, probes_unusable) and forward-tracks#ecc091c1 (accepted_residual_no_work, partial). None carries the code anchor a deletion requires. The first was hand-verified this run instead of being left to recur a third night, and it turned out NOT to be a clean delete — it carries an unhomed lesson — so it is raised as item bl-1 rather than deleted or dropped.
 
-- REVIEW RETIREMENT: scripts/nightly/review-retirement-candidates.mjs names 17 dated reviews that nothing outside docs/reviews/ cites, all dated 2026-06-27..2026-07-30 and so all older than 30 days. Under settled subject c47dc1bf930484be these should now retire AUTOMATICALLY rather than being proposed. That rule is not implemented — the script still uses a 14-day bar and still prints 'owner decision' — and the tree is dirty, so nothing was deleted. No item is raised: the subject is settled and the work is unambiguous.
+- SECOND INDEPENDENT LANE (Codex) IS QUOTA-DEAD until 2026-09-07 02:04: `codex exec` returned 'You have hit your usage limit'. It is deliberately not a llm-relay ladder rung (the first-party Codex plugin owns Codex dispatch, so the relay does not meter it), which means there is no exhaustion bucket to record the death in — it is stated here instead. Adversary coverage was preserved by the llm-relay claude-free-pool lane (pool/medium, 1593s), which returned a full per-hunk verdict: AGREE on five hunks, REFUTE on two. Both refutations were verified against source rather than taken on trust; one was substantive and led to the stem-matching hardening recorded in applied, the other dissolved once that mechanism was fixed. Its claimed extra defect (that docs/nightly-inbox.md:136 describes a citation that does not exist) is WRONG and was rejected — the dangling citation was reproduced directly. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- LEG 2 LANE: the first sweep attempt died at preflight with HTTP 401 and classified ZERO entries (see item sol-1). Coverage was preserved by re-running with TRIAGE_MODEL=pool/medium. Final leg-2 coverage, read from .audit-tools/nightly/triage-0903-coverage.json and not from prose: model pool/medium, 95 of 95 entries attempted, 92 classified, 3 errored, not aborted. Verdicts: 67 actionable_now, 13 owner_decision_needed, 8 live_run_blocked, 1 already_shipped_or_stale, 1 accepted_residual_no_work. Premise evidence: 37 holds, 28 probes_unusable, 19 unprobed, 3 partial, 3 premise_unconfirmed.
+- INSIGHTS ran (due: the stamp read 2026-08-28, 7.0 days). Report: C:\Users\ethan\.claude\usage-data\report-2026-09-04-020610.html. Twelve suggestions triaged against HEAD: TEN already shipped or already decided, TWO debatable, ZERO genuinely open. The two provider-health suggestions (a pre-launch probe of every relay provider, and the 'self-healing dispatch fabric' horizon item) are the retirement-direction catch the contract warns about: they propose exactly the roster-preflight the owner REJECTED for this repo in decision c0dc10138087d836 ('Lane readiness, availability, and best-lane selection belong to llm-relay'), so they are dropped here rather than re-raised.
 
-- LEG 2 APPLIED NOTHING, and would have applied nothing on a clean tree either. The sweep named exactly two deletion leads — open-bugs#82e36029 ('Friction walk (guard-test-hermeticity lap, 2026-08-30)', already_shipped_or_stale) and forward-tracks#55883634 ('CI wall-clock: shard balance and the single-file floor', accepted_residual_no_work). Their premise evidence is probes_unusable and unprobed respectively, so neither carries the code anchor a deletion requires. Both are LEADS for the next lap, not verified shipped entries. Both also live in files the owner is currently editing.
+- The two DEBATABLE insights suggestions are not raised as items because they are MACHINE-WIDE working practice, not audit-tools facts, and a nightly item must carry a premise probe on a tracked source file in THIS repo — which neither has. Filing them here would hide them from the repos that need them. They are: (1) structure a sprint as independently landable packets so a quota interruption costs one packet rather than a sprint; (2) inline generated report content into the response instead of pointing at a tool result the owner cannot see. Their correct home is C:\Code\docs\backlog.md, and leg 3 is propose-only, so this run does not write them there.
 
-- SECOND INDEPENDENT LANE: the llm-relay dispatch lane (claude-free-pool, pool/medium) completed in 326s but returned the single word 'generic' — a degenerate answer, not a review. Its assigned scope (docs/audit-pkg/*.md, README.md, examples/README.md, src/audit/README.md) was therefore covered by direct mechanical verification in this session instead: every npm-run reference, every backticked function symbol, and every path citation across all 54 tracked docs were checked and all resolve.
-
-- INSIGHTS: not due. The stamp at .audit-tools/nightly/insights-last-run.json reads 2026-08-28T09:07:31Z, which is 6.00 days old against the 7-day bar. Not-due is not a skipped leg; recorded here only so the absence is legible.
+- sol-2 from 2026-09-03 (P50, the stale five-category conceptual comments) AUTO-CLOSED as resolved: both premise probes now find nothing, because P50 landed — CONCEPTUAL_FINDING_CATEGORIES is exported at src/audit/orchestrator/designReviewPrompt.ts:445 and both former hand copies now point at it. No action needed; recorded so the disappearance is legible rather than silent.
 
 
 </details>

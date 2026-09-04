@@ -52,16 +52,16 @@ is deleted too.
 | INV-SSP-DEFERRED-SET-REPORTED | `computeStaleArtifacts` returns the stale set together with an explicit deferred set naming every downstream held behind a slice projection, and the emitted consolidated staleness record names them — an omission is red. | `src/audit/orchestrator/staleness.ts` |
 | INV-WTS | Landed-node ancestry probe: a landed node's commit must be an ancestor of the ref it claims to have landed on. | `src/remediate/steps/dispatch/hostHandoff.ts` |
 
-The source also contains local numeric invariants such as INV-1, INV-2, INV-3, INV-09, and INV-10.
-Those numbers are file-local; resolve them at the citing module rather than treating them as a global
-namespace.
+The source also contains local numeric invariants (`INV-<n>`). Those numbers are file-local and their
+set is sparse; resolve them at the citing module rather than treating them as a global namespace.
 
 ## Live counterexample ids
 
-The source currently cites CE-001 (plus the variant CE-001b) through CE-011, plus CE-013, CE-206 and
-CE-P3-001.
-Their meanings are local to the validator, ledger, intent, analyzer, worktree, or scoring code that
-cites them. Reuse of a number in another subsystem does not imply shared identity.
+The counterexample ID set is **sparse** — it is not a contiguous range, and a number inside its span
+is not guaranteed to exist. Resolve each ID at the module that cites it rather than reading the set
+as a namespace. Their meanings are local to the validator, ledger, intent, analyzer, worktree, or
+scoring code that cites them, and reuse of a number in another subsystem does not imply shared
+identity.
 
 ## Live plan-node ids
 

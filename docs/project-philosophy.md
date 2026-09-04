@@ -319,9 +319,10 @@ bindings and the renderer)*
 - **Log friction the moment you hit it** — full friction walk each loop lap; log all three categories
   (ambiguous-direction / tool-should-decide / inefficient-feeding) durably to backlog, unprompted; don't
   trust the empty mechanical set. *(Only "log friction" is homed in `CLAUDE.md` → Known friction &
-  deferred fixes; "disambiguation completes
-  or leaves" and "front-load broad search" are memory-only. Memory: disambiguation-completes-or-leaves,
-  front-load-broad-search-before-contract-authoring, log-all-friction-categories-every-lap)*
+  deferred fixes; "disambiguation completes or leaves" is homed in
+  [`.claude/skills/disambiguate-backlog/SKILL.md`](../.claude/skills/disambiguate-backlog/SKILL.md) →
+  Hard rules ("No half-specced write-backs"); "front-load broad search" is memory-only.
+  Memory: front-load-broad-search-before-contract-authoring, log-all-friction-categories-every-lap)*
 
 ---
 

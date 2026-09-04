@@ -104,8 +104,9 @@ ecosystem-specific parser.
 Before treating a build as production-ready, verify the full review loop in one
 real host (`next-step` emits the complete workload → the host writes each bound
 result → `next-step` ingests them → `validate`), then run the release gate from a clean
-checkout (see [`release.md`](release.md) for what `npm run verify:release`
-covers and when to run it). Keep runtime command execution covered when
+checkout (see [`.claude/skills/ship/SKILL.md`](../../.claude/skills/ship/SKILL.md) for what
+`npm run verify:release` covers and when to run it; [`release.md`](release.md) covers the
+manual host-validation and troubleshooting half). Keep runtime command execution covered when
 changing it — including the Windows package-manager-shim path (see the Windows
 notes in [`operator-guide.md`](operator-guide.md)). If the
 final `audit-report.md` cannot be promoted from `.audit-tools/audit/` to

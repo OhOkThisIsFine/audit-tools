@@ -93,7 +93,12 @@ const tracked = execFileSync("git", ["ls-files", "*.md"], {
 
 // `memory: a, b, c` — runs to the end of the parenthetical or the line group.
 // Names are kebab-case slugs; prose after an em-dash is an annotation, not a name.
-const CITATION = /memory:\s*([^)*]+)/g;
+//
+// CASE-INSENSITIVE, because the bare sentence-initial `Memory: a, b, c` list form
+// is the same citation and was structurally invisible to this gate: a dangling
+// `Memory:` name sat unread in `docs/project-philosophy.md` while the check ran
+// green, which is the inert-guard shape this module already exists to prevent.
+const CITATION = /memory:\s*([^)*]+)/gi;
 
 const dangling = [];
 let scanned = 0;
@@ -109,7 +114,12 @@ for (const file of tracked) {
   }
   scanned += 1;
   const lines = text.split(/\r?\n/);
-  for (const match of text.matchAll(CITATION)) {
+  // Code spans are stripped for THIS form too, not just the wikilink form below.
+  // Inline code and fences quote the SYNTAX — a doc explaining that a citation
+  // looks like `memory: a, b, c` is documenting the form, not naming notes `a`
+  // and `b`. The two forms disagreeing on this was a live false positive the
+  // moment a doc first described the syntax.
+  for (const match of stripCodeSpans(text).matchAll(CITATION)) {
     const names = match[1]
       .split(",")
       .map((raw) => raw.split("—")[0].trim())

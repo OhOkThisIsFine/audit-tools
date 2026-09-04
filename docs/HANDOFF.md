@@ -35,6 +35,11 @@ backlog. The external 5-primary + 5-held-out paired benchmark run described in
   unreadable or empty omissions.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **2 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `sol-1` — P51: one guard has shipped four reach defects on four dates — declare a guard's recognized FORMS as data, like its file reach?
+  - `bl-1` — Backlog: a shipped friction-walk entry carries one lesson that is homed nowhere — delete it, or move the lesson first?
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

@@ -1,0 +1,52 @@
+RED-AT record for P51 — guard form reach
+========================================
+
+HEAD sha : 03776c2076d41eaeee06692ad05fd9a0d26d2ceb
+Observed : 2026-09-04 (nightly maintenance run)
+
+The test is not runnable from the proposals directory (vitest excludes it and the
+relative import would not resolve), so it was copied to its LANDING location and
+run there:
+
+  cp .audit-tools/nightly/proposals/P51-guard-form-reach/guard-form-reach.test.ts \
+     tests/shared/p51-guard-form-reach.test.ts
+  npx vitest run tests/shared/p51-guard-form-reach.test.ts
+
+Exit code: 1
+
+Verbatim failure
+----------------
+
+   × guard form reach > at least one guard declares the forms it must recognize 3ms
+     → expected 0 to be greater than 0
+
+  AssertionError: expected 0 to be greater than 0
+
+  Test Files  1 failed (1)
+       Tests  1 failed (1)
+
+Why this is the RIGHT red
+-------------------------
+
+No row in scripts/guard-reach-data.mjs carries a `forms` field at HEAD, so the
+filter yields zero form-declaring guards and the declaration assertion fails.
+That is the mechanism being absent, which is precisely what the proposal adds.
+
+Once the `forms` field lands on the check:memory-citations row, this assertion
+goes green and the three per-form assertions become live — those are the ones
+that stay red if the guard ever stops recognizing a declared syntax.
+
+NOTE ON AN EARLIER FALSE RED
+----------------------------
+
+The first run of this test failed with:
+
+  Failed to load url ../../../../scripts/guard-reach-data.mjs
+
+That was a broken relative import written for the proposals directory, NOT the
+defect under test. It was corrected to ../../scripts/guard-reach-data.mjs and
+re-run before this record was written. A red for the wrong reason is exactly the
+false evidence this record exists to prevent, so it is stated rather than hidden.
+
+The temporary copy at tests/shared/p51-guard-form-reach.test.ts was removed after
+this run; the proposal does not land the test.
