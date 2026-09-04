@@ -24,6 +24,10 @@ const { runFirstAvailableCommand } = await import(
   "../../src/audit/orchestrator/localCommands.js"
 );
 
+const { typeCoverageCandidate } = await import(
+  "../../src/shared/analyzers/candidates.js"
+);
+
 // F5 inv-8 imports the SAME pre-shipped merge-helper seam pair F6 consumes. The
 // top-level await below means a half-shipped state (F5 producers present, seam
 // absent) is UNSCHEDULABLE: this import throws before any F5 consumer test runs.
@@ -783,4 +787,72 @@ test("F5 fail-7 [CP-NODE-72]: an owned signal (git-history) registered as an acq
   };
   await runAcquisitionEngine([...ownedCandidates], "/root", { run: spy, analyzers: {} });
   expect(spawned.length, "no owned candidate is ever spawned through the engine").toBe(0);
+});
+
+// --- npx runner prefix: the exact spawned argv, with and without peers --------
+
+/** The argv the engine actually hands the runner for one candidate (not the probe). */
+async function spawnedArgvFor(
+  c: ExternalAnalyzerCandidate,
+  root = "/root",
+): Promise<string[]> {
+  let spawned: string[] = [];
+  const run = async (argv: string[], cwd?: string) => {
+    if (!argv.includes("--version")) spawned = argv;
+    return fakeRunner({ toolStdout: "[]" })(argv, cwd);
+  };
+  await runExternalAnalyzer(c, root, { run, consentToken: grantFor(c.id) });
+  return spawned;
+}
+
+test("npx runner: a candidate with no peers spawns the byte-identical `npx -y <spec> …` argv", async () => {
+  const argv = await spawnedArgvFor(candidate({ spec: "eslint@9.39.5" }));
+  expect(argv, "the peers-free npx prefix must not change shape").toEqual([
+    "npx",
+    "-y",
+    "eslint@9.39.5",
+    "--format",
+    "json",
+    "/root",
+  ]);
+});
+
+test("npx runner: peers are installed ALONGSIDE the tool via `-p`, and the bin is named explicitly", async () => {
+  // `npx -y <spec>` lets npm resolve the tool's own peer range however it likes —
+  // which is how the default-admitted type-coverage came to be paired with a
+  // typescript major that removed the API it calls. Naming both packages with
+  // `-p` makes the pair exactly the one that was measured to work; naming the
+  // bin is then mandatory, because `-p` supplies packages, not a command.
+  // A real Node marker: type-coverage's own `detect` gates the spawn on one.
+  const root = await mkdtemp(join(tmpdir(), "type-coverage-argv-"));
+  await writeFile(join(root, "package.json"), "{}", "utf8");
+  const argv = await spawnedArgvFor(typeCoverageCandidate, root);
+  await rm(root, { recursive: true, force: true });
+  expect(argv).toEqual([
+    "npx",
+    "-y",
+    "-p",
+    "type-coverage@2.29.7",
+    "-p",
+    "typescript@5.9.3",
+    "type-coverage",
+    "--json",
+    "--detail",
+  ]);
+});
+
+test("npx runner: the bin name derives from the package name, scope included, unless declared", async () => {
+  const scoped = await spawnedArgvFor(
+    candidate({ id: "scoped", spec: "@acme/lint@1.2.3", peers: ["typescript@5.9.3"] }),
+  );
+  expect(scoped.slice(0, 7)).toEqual([
+    "npx", "-y", "-p", "@acme/lint@1.2.3", "-p", "typescript@5.9.3", "@acme/lint",
+  ]);
+
+  const declared = await spawnedArgvFor(
+    candidate({ id: "declared", spec: "tool-pkg@1.2.3", bin: "tool", peers: ["typescript@5.9.3"] }),
+  );
+  expect(declared.slice(0, 7)).toEqual([
+    "npx", "-y", "-p", "tool-pkg@1.2.3", "-p", "typescript@5.9.3", "tool",
+  ]);
 });

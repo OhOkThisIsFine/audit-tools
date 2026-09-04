@@ -650,7 +650,10 @@ function parseActionlintSample() {
 // type-coverage — npx runner, --json, per-any items.
 test("type-coverage: npx runner, --json argv, detects Node", () => {
   expect(typeCoverageCandidate.runner).toBe("npx");
-  const argv = typeCoverageCandidate.buildArgv(["npx", "-y", "type-coverage@2"], "/repo");
+  const argv = typeCoverageCandidate.buildArgv(
+    ["npx", "-y", "-p", "type-coverage@2.29.7", "-p", "typescript@5.9.3", "type-coverage"],
+    "/repo",
+  );
   expect(argv.includes("--json")).toBeTruthy();
   expect(typeCoverageCandidate.detect("/repo")).toBe(false);
 });

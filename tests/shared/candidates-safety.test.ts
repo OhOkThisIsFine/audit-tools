@@ -59,4 +59,65 @@ describe("AnalyzerSafetyProfile contract", () => {
       }
     }
   });
+
+  // `version_pinning: "pinned"` is a claim the registry makes about REPRODUCIBILITY,
+  // and the test above only proved a version-ish character followed the separator —
+  // so a major RANGE ("type-coverage@2") satisfied it while resolving to a different
+  // release, and a different transitive peer, on every fresh cache. That is not a
+  // pin; it is a promise the registry cannot keep. Measured 2026-09-04: the range
+  // `type-coverage@2` began resolving type-coverage 2.30.1 against typescript 7,
+  // which no longer exposes `ts.SyntaxKind`, and the default-admitted analyzer
+  // crashed at load on EVERY spawn — after paying a two-minute install first.
+  //
+  // The check is on the VERSION component, so each runner's spec shape is read
+  // where it differs and the exactness rule is stated once.
+  const EXACT_SEMVER = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
+  /**
+   * The version component of a spec, by runner shape: npm `name@version` (the
+   * name may itself be `@scope/pkg`, so the separator is the LAST `@` past
+   * index 0), PyPI `name==version`, and a `binary` spec that IS the bare version.
+   * `null` = no version component at all, which is never an exact pin.
+   */
+  function versionOf(runner: string, spec: string): string | null {
+    if (runner === "npx") {
+      const at = spec.lastIndexOf("@");
+      return at > 0 ? spec.slice(at + 1) : null;
+    }
+    if (runner === "pipx") {
+      const eq = spec.indexOf("==");
+      return eq > 0 ? spec.slice(eq + 2) : null;
+    }
+    if (runner === "binary") return spec;
+    return null;
+  }
+
+  it("a candidate claiming version_pinning:'pinned' names an EXACT version, never a range", () => {
+    for (const candidate of EXTERNAL_ANALYZER_CANDIDATES) {
+      if (candidate.safetyProfile.version_pinning !== "pinned") continue;
+      const version = versionOf(candidate.runner, candidate.spec);
+      expect(
+        version,
+        `${candidate.id}: spec '${candidate.spec}' carries no version component, ` +
+        `so version_pinning:'pinned' is false`,
+      ).not.toBeNull();
+      expect(
+        version,
+        `${candidate.id}: spec '${candidate.spec}' pins a RANGE, not a version — ` +
+        `version_pinning:'pinned' requires an exact x.y.z (a range re-resolves to a ` +
+        `different release, and different transitive peers, on every fresh cache)`,
+      ).toMatch(EXACT_SEMVER);
+
+      // A peer exists precisely because the tool's own resolution of it is too
+      // loose to be trusted, so a ranged peer reintroduces the whole defect.
+      for (const peer of candidate.peers ?? []) {
+        expect(
+          versionOf(candidate.runner, peer),
+          `${candidate.id}: peer '${peer}' must name an exact version — a peer is ` +
+          `declared to REPLACE the tool's own loose resolution, so a range there ` +
+          `restores exactly what it was added to prevent`,
+        ).toMatch(EXACT_SEMVER);
+      }
+    }
+  });
 });

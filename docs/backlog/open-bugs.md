@@ -967,7 +967,7 @@
   actually waiting on it, and an orphaned npm lock makes every later spawn re-pay the same wait
   (2026-09-04, medium, friction: tool_should_decide).** The audit CLI's `next-step` admits and runs
   the default-admitted analyzer `type-coverage` (`typeCoverageCandidate`,
-  `src/shared/analyzers/candidates.ts`) as `npx -y type-coverage@2 --json --detail` through the one
+  `src/shared/analyzers/candidates.ts`) as an ephemeral `npx` install-and-run through the one
   spawn-admission chokepoint, `runExternalAnalyzer` (`src/shared/analyzers/acquisitionEngine.ts`),
   which DOES pass a deadline — `ANALYZER_CHILD_DEADLINE_MS`, 10 minutes — into `runTrackedAsync`, so
   the mechanism is not literally timeout-free. It is simply longer than any real caller's budget:

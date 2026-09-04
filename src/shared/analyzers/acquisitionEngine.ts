@@ -99,8 +99,27 @@ export interface ExternalAnalyzerCandidate {
   id: string;
   /** Runner that acquires + executes the tool ephemerally. */
   runner: EcosystemRunner;
-  /** Pinned tool spec, e.g. "eslint@9" / "ruff==0.5.0" (pinned for reproducibility). */
+  /**
+   * Pinned tool spec, e.g. "eslint@9.39.5" / "ruff==0.5.0". A candidate whose
+   * `safetyProfile.version_pinning` is `"pinned"` must name an EXACT version, never a
+   * range — pinned to a range is a promise the registry cannot keep, and the
+   * candidates safety contract test refuses it.
+   */
   spec: string;
+  /**
+   * Exact specs installed ALONGSIDE {@link spec} for one ephemeral run — for a tool
+   * whose own peer range is looser than the versions it actually works against. The
+   * npx runner then names the tool's executable explicitly, because supplying
+   * packages (`-p`) supplies no command. Omit when the tool's own resolution is
+   * sound: the peers-free argv is deliberately unchanged.
+   */
+  peers?: readonly string[];
+  /**
+   * The tool's executable name, when it differs from its package name (npx runner
+   * only, and only meaningful alongside {@link peers}). Defaults to the package
+   * name parsed off {@link spec}.
+   */
+  bin?: string;
   /** Safety profile indicating whether this tool is safe to run by default. */
   safetyProfile: AnalyzerSafetyProfile;
   /**
@@ -192,10 +211,25 @@ function runnerProbeArgv(runner: EcosystemRunner): string[] {
   }
 }
 
-function runnerPrefix(runner: EcosystemRunner, spec: string): string[] {
+/**
+ * The npm package name of a spec, i.e. everything before the version separator.
+ * The separator is the LAST `@` past index 0, so a scoped name ("@acme/lint@1.2.3")
+ * keeps its scope; a spec with no version is its own package name.
+ */
+function npmPackageName(spec: string): string {
+  const at = spec.lastIndexOf("@");
+  return at > 0 ? spec.slice(0, at) : spec;
+}
+
+function runnerPrefix(candidate: ExternalAnalyzerCandidate): string[] {
+  const { runner, spec, peers } = candidate;
   switch (runner) {
     // `-y` so the ephemeral fetch never blocks on a prompt; pinned spec.
-    case "npx": return ["npx", "-y", spec];
+    // With peers, the tool and its pinned peers are supplied as PACKAGES (`-p`)
+    // and the executable is named separately — `-p` installs, it does not run.
+    case "npx": return peers && peers.length > 0
+      ? ["npx", "-y", "-p", spec, ...peers.flatMap((p) => ["-p", p]), candidate.bin ?? npmPackageName(spec)]
+      : ["npx", "-y", spec];
     case "pipx": return ["pipx", "run", "--spec", spec];
     case "cargo": return ["cargo", spec];
     case "bundle": return ["bundle", "exec", spec];
@@ -537,7 +571,7 @@ export async function runExternalAnalyzer(
         status: { tool: candidate.id, resolved: false, status: "not_resolved", error: gate.reason },
       };
     }
-    prefix = runnerPrefix(candidate.runner, candidate.spec);
+    prefix = runnerPrefix(candidate);
   }
 
   const argv = candidate.buildArgv(prefix, root);

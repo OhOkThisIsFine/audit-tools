@@ -261,7 +261,7 @@ function parseEslint(stdout: string): ExternalAnalyzerParseReport {
 const eslintCandidate: ExternalAnalyzerCandidate = {
   id: "eslint",
   runner: "npx",
-  spec: "eslint@9",
+  spec: "eslint@9.39.5",
   purpose: "JS/TS lint findings using the repo's own eslint config",
   safetyProfile: {
     config_execution: "executable",
@@ -369,7 +369,7 @@ function parseKnip(stdout: string): ExternalAnalyzerParseReport {
 const knipCandidate: ExternalAnalyzerCandidate = {
   id: "knip",
   runner: "npx",
-  spec: "knip@6",
+  spec: "knip@6.34.0",
   purpose: "unused files, dependencies, and exports (leads, not verdicts)",
   safetyProfile: {
     config_execution: "executable",
@@ -535,7 +535,7 @@ function parseJscpd(report: string): ExternalAnalyzerParseReport {
 const jscpdCandidate: ExternalAnalyzerCandidate = {
   id: "jscpd",
   runner: "npx",
-  spec: "jscpd@4",
+  spec: "jscpd@4.3.0",
   purpose: "copy-pasted/duplicated code blocks across the repo",
   safetyProfile: {
     config_execution: "executable",
@@ -964,7 +964,16 @@ function parseTypeCoverage(stdout: string): ExternalAnalyzerParseReport {
 const typeCoverageCandidate: ExternalAnalyzerCandidate = {
   id: "type-coverage",
   runner: "npx",
-  spec: "type-coverage@2",
+  spec: "type-coverage@2.29.7",
+  // type-coverage reads the project through whatever typescript npm resolves for
+  // it, and its peer range is open at the top. Measured 2026-09-04: a fresh
+  // resolution of the former range `type-coverage@2` paired type-coverage 2.30.1
+  // with typescript 7.0.2, whose compiler API no longer exposes `ts.SyntaxKind` —
+  // so `type-coverage-core/dist/checker.js` threw at LOAD ("Cannot read properties
+  // of undefined (reading 'Unknown')") on every spawn, after paying the two-minute
+  // install first. Naming the typescript peer exactly makes the pair the measured
+  // working one instead of whatever the registry serves that day.
+  peers: ["typescript@5.9.3"],
   purpose: "per-file TypeScript any-coverage gaps",
   safetyProfile: {
     config_execution: "inert-data",
