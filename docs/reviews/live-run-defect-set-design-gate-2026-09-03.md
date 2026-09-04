@@ -340,21 +340,28 @@ Each is in force for the implementation and awaits confirmation.
    on a finding carrying an executable anchor, making the bit the tool's own run.
    **Assumption: (A).** (B) would start the measured rate at zero — zero of 27 conceptual findings
    carried an anchor.
+   Confirmed by the owner 2026-09-04: as shipped.
 2. **C-Q2 — two count populations.** (A) label them (candidate-scoped on the adjudication artifact,
    finding-scoped on the summary); (B) reconcile them into one number. **Assumption: (A).** They
    legitimately differ — a merged candidate's final finding can still be quarantined downstream.
+   Confirmed by the owner 2026-09-04: as shipped.
 3. **C-Q3 — the P0 exception.** The two new persisted fields and the summary breakdown extend the
    owner-approved narrow exception to the no-new-persistent-schema rule. Both refuter lanes raised
    it. **Assumption: proceed** — the entry's Property requires them and the lap approval covered the
    entry. Confirm.
+   Confirmed by the owner 2026-09-04: as shipped.
 4. **A-Q1 — revealed-channel line fidelity.** (A) line-true excerpts, disclosing comment-block
    positions and sizes but never content, undoing part of the deliberate 2026-08-05 collapse;
    (B) path-only provenance for that channel, leaving the Property met for two of three channels and
    the report saying so. **Assumption: (A).** (B) is the smaller rework if the owner picks it.
+   Confirmed by the owner 2026-09-04: line-true stays.
 5. **A-Q2 — stated-channel quota.** (A) an even doc/comment split with spill; (B) weighted toward
    comments, the class the channel is named for, since docs are reachable through another artifact
    and comments are not. **Assumption: (A)** — neither class is a priori more valuable, and the
    measured zero-comment outcome was never chosen.
+   Reversed by the owner 2026-09-04: the packet carries no character limit; the
+   150,000-character ceiling, the per-file clamp and the budget allocator are removed in a
+   follow-up commit, because sizing for a model window is the host's concern, never the tool's.
 6. **A-Q3 — retention footprint.** (A) retain all three packets; (B) retain the stated packet only
    and hash the rest. **Assumption: (A).** (B) would not have answered the coverage dispute that
    motivated the entry, which was about the revealed channel. ⚠ **The footprint is not constant.**
@@ -363,13 +370,17 @@ Each is in force for the implementation and awaits confirmation.
    differing by one character are two files. Each packet stays individually bounded by the existing
    ceiling, but the directory grows with the number of extractions, not with the number of channels;
    only an identical re-extraction is free.
+   Confirmed by the owner 2026-09-04: as shipped.
 7. **B-Q1 — delivery-rate policy.** (A) print it and proceed; (B) hold the affected obligation below
    a threshold. **Assumption: (A).** (B) re-creates the re-ask loop P25 removed.
+   Confirmed by the owner 2026-09-04: as shipped.
 8. **B-Q2 — where un-exercised lenses are reported.** (A) a Summary line; (B) an Audit Limitations
    entry. **Assumption: (A);** moving it is one line.
+   Confirmed by the owner 2026-09-04: as shipped.
 9. **B-Q3 — custom lenses.** Report non-canonical operator-added lenses in the coverage map like
    canonical ones? **Assumption: yes** — the incident used two custom lenses and the Property says
    *any selected lens*.
+   Confirmed by the owner 2026-09-04: as shipped.
 
 **Deferred, outside the three clusters.** sol-1: route the triage sweep through the relay's MCP stdio
 dispatch at 60-180 s per entry with no schema channel, or first change llm-relay (a separate

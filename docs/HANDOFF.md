@@ -18,9 +18,10 @@
 
 ## Immediate next
 
-The owner confirms the nine in-force design assumptions listed in that design-gate record,
-and decides sol-1's routing (recorded in `C:/Code/docs/backlog.md`). The external
-5-primary + 5-held-out paired benchmark run described in
+The owner confirms the nine in-force design assumptions listed in that design-gate record.
+The owner decided on 2026-09-04 to improve llm-relay first (a fast dispatch path in the
+llm-relay repository), after which the sweep routes through it; tracked in the machine-wide
+backlog. The external 5-primary + 5-held-out paired benchmark run described in
 [`forward-tracks.md`](backlog/forward-tracks.md) stays the pinned forward track.
 
 ## Deliberate state, not bugs
@@ -30,6 +31,8 @@ and decides sol-1's routing (recorded in `C:/Code/docs/backlog.md`). The externa
 - The judge-side naming refusal is unreachable on the production path by design of the parse
   order: the property it guards holds twice over, and only its claimed reach does not. Tracked
   in [`minor-bugs.md`](backlog/minor-bugs.md).
+- The charter packet builder no longer caps packet size; its coverage manifest records only
+  unreadable or empty omissions.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
