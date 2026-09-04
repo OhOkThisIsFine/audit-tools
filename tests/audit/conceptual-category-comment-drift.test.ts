@@ -4,25 +4,15 @@ import { resolve } from "node:path";
 // INV-WH: a raw `node:child_process` entry point flashes a console window when
 // the parent is windowless on win32. The hidden wrapper is the only door.
 import { execSyncHidden } from "../helpers/spawn.mjs";
+// The recognizer lives in the shared helper so the guard-form-reach test can
+// drive the REAL matcher over each declared sample (P51).
+import {
+  CONCEPTUAL_CATEGORY_TOKENS as CANONICAL,
+  enumeratingCommentLines,
+} from "../helpers/recognizers.js";
 import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
-
-/**
- * The eight conceptual-design finding categories the review prompt actually
- * emits. Canonical occurrence at HEAD is the `one of: …` enum string inside
- * `conceptualOutputFormat` (src/audit/orchestrator/designReviewPrompt.ts).
- */
-const CANONICAL = [
-  "fundamental_approach",
-  "core_assumption",
-  "structural_risk",
-  "architecture_pattern",
-  "design_simplification",
-  "tool_opportunity",
-  "integration",
-  "missing_capability",
-] as const;
 
 function trackedTsSources(): string[] {
   return execSyncHidden('git ls-files "src/**/*.ts"', {
@@ -34,29 +24,14 @@ function trackedTsSources(): string[] {
     .filter(Boolean);
 }
 
-/** A comment line that names 3+ canonical tokens is a hand copy of the set. */
-function enumeratingCommentLines(
-  file: string,
-): { line: number; text: string; named: string[] }[] {
-  const hits: { line: number; text: string; named: string[] }[] = [];
-  const lines = readFileSync(resolve(REPO_ROOT, file), "utf8").split(/\r?\n/);
-  lines.forEach((text, index) => {
-    const trimmed = text.trim();
-    const isComment =
-      trimmed.startsWith("*") ||
-      trimmed.startsWith("//") ||
-      trimmed.startsWith("/*");
-    if (!isComment) return;
-    const named = CANONICAL.filter((token) => text.includes(token));
-    if (named.length >= 3) hits.push({ line: index + 1, text: trimmed, named });
-  });
-  return hits;
-}
 
 describe("conceptual finding categories are single-sourced", () => {
   it("no source comment re-enumerates the category set", () => {
     const offenders = trackedTsSources().flatMap((file) =>
-      enumeratingCommentLines(file).map((hit) => ({ file, ...hit })),
+      enumeratingCommentLines(readFileSync(resolve(REPO_ROOT, file), "utf8")).map((hit) => ({
+        file,
+        ...hit,
+      })),
     );
     const detail = offenders
       .map(

@@ -86,12 +86,9 @@ function slashed(candidate: string): string {
  * Only whole-line `//` comments are stripped, so a `https://` inside a string
  * literal is never mistaken for one.
  */
-function stripComments(source: string): string {
-  return source
-    // Blank a block comment to its own newlines so reported line numbers stay true.
-    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ""))
-    .replace(/^[ \t]*\/\/.*$/gm, "");
-}
+// The recognizer lives in the shared helper so the guard-form-reach test can
+// drive the REAL matcher over each declared sample (P51).
+import { incomingLiteralLines } from "../helpers/recognizers.js";
 
 async function collectTypeScriptSources(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { recursive: true, withFileTypes: true });
@@ -192,17 +189,12 @@ describe("the submission path is tool-owned", () => {
 
     const violations: string[] = [];
     for (const file of sources) {
-      const code = stripComments(await readFile(file, "utf8"));
-      code.split(/\r?\n/).forEach((line, index) => {
-        // Two forms, both host-facing: the directory constructed as a path
-        // segment (`join(artifactsDir, "incoming", …)`) and the literal
-        // rendered into a prompt/packet body (`incoming/<name>.json`).
-        if (/["'`]incoming["'`]/.test(line) || /incoming\//.test(line)) {
-          violations.push(
-            `${slashed(file.slice(repoRoot.length))}:${index + 1}: ${line.trim()}`,
-          );
-        }
-      });
+      // Two forms, both host-facing: the directory constructed as a path
+      // segment (`join(artifactsDir, "incoming", …)`) and the literal
+      // rendered into a prompt/packet body (`incoming/<name>.json`).
+      for (const hit of incomingLiteralLines(await readFile(file, "utf8"))) {
+        violations.push(`${slashed(file.slice(repoRoot.length))}:${hit.line}: ${hit.text}`);
+      }
     }
     expect(
       violations,

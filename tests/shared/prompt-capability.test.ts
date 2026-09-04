@@ -66,33 +66,15 @@ const ALL_PATHS = Object.fromEntries(
   ]),
 ) as Record<ContractPipelineArtifactName, string>;
 
-/** The `- \`<path>\` (<key>)` entries a rendered "## Required Inputs" block lists. */
-function requiredInputEntries(prompt: string): Array<{ path: string; key: string }> {
-  const section = prompt.split(/^## Required Inputs$/m)[1];
-  if (section === undefined) return [];
-  const body = section.split(/^## /m)[0]!;
-  return [...body.matchAll(/^- `([^`]+)` \(([a-z_]+)\)$/gm)].map((match) => ({
-    path: match[1]!,
-    key: match[2]!,
-  }));
-}
+// The recognizers live in the shared helper so the guard-form-reach test can
+// drive the REAL matchers over each declared sample (P51).
+import { requiredInputEntries, resultsPathDriftLines } from "../helpers/recognizers.js";
 
 /** OS-agnostic reporting for src-scan violations. */
 function slashed(candidate: string): string {
   return String(candidate).replace(/\\/g, "/");
 }
 
-/**
- * Drop comments before scanning source, so the guard is about CODE (precedent:
- * `tests/shared/submission-path-is-tool-owned.test.ts`). Only whole-line `//`
- * comments are stripped, so a `https://` inside a string literal is never
- * mistaken for one.
- */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ""))
-    .replace(/^[ \t]*\/\/.*$/gm, "");
-}
 
 async function collectTypeScriptSources(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { recursive: true, withFileTypes: true });
@@ -273,20 +255,13 @@ describe("every fan-out lane prompt states a bound path AND a read-only alternat
     const violations: string[] = [];
     for (const file of sources) {
       if (file === chokepoint) continue;
-      const code = stripComments(await readFile(file, "utf8"));
-      code.split(/\r?\n/).forEach((line, index) => {
-        const where = `${slashed(file.slice(repoRoot.length))}:${index + 1}: ${line.trim()}`;
-        // A second "## Results path" section is a second place the bound path
-        // and its alternative can drift out of agreement.
-        if (line.includes(LANE_RESULTS_HEADING)) {
-          violations.push(where);
-        }
-        // "…provided below" promises a section this renderer does not emit —
-        // the dangling reference that left every conceptual lane pathless.
-        if (/results path provided below/i.test(line)) {
-          violations.push(where);
-        }
-      });
+      // A second "## Results path" section is a second place the bound path
+      // and its alternative can drift out of agreement; "…provided below"
+      // promises a section this renderer does not emit — the dangling
+      // reference that left every conceptual lane pathless.
+      for (const hit of resultsPathDriftLines(await readFile(file, "utf8"))) {
+        violations.push(`${slashed(file.slice(repoRoot.length))}:${hit.line}: ${hit.text}`);
+      }
     }
     expect(
       violations,

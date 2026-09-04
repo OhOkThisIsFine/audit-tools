@@ -19,6 +19,9 @@
 import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+// The recognizer lives in the shared helper so the guard-form-reach test can
+// drive the REAL matcher over each declared sample (P51).
+import { syncSpawnHits } from "../helpers/recognizers.js";
 
 const repoRoot = join(__dirname, "..", "..");
 
@@ -34,32 +37,12 @@ const FOLD_REACHABLE_MODULES = [
   "src/shared/validation/findingGrounding.ts", //  phase lock (grounding corpus)
 ];
 
-// Sync spawn entry points. `runTrackedAsync(` also contains `runTracked` as a
-// substring, so the sync-twin token is matched with a negative lookahead.
-const FORBIDDEN_TOKENS: { label: string; pattern: RegExp }[] = [
-  { label: "spawnSync", pattern: /\bspawnSync\b/u },
-  { label: "spawnSyncHidden", pattern: /\bspawnSyncHidden\b/u },
-  { label: "runTracked (sync twin)", pattern: /\brunTracked(?!Async)\b/u },
-  { label: "execSync", pattern: /\bexecSync\b/u },
-];
-
 for (const module of FOLD_REACHABLE_MODULES) {
   test(`INV-SSF: ${module} spawns children through the async exec twin only`, () => {
     const source = readFileSync(join(repoRoot, module), "utf8");
-    const hits: string[] = [];
-    for (const [index, line] of source.split(/\r?\n/).entries()) {
-      // Comments may NAME the sync twin (e.g. "never runTracked"); only code
-      // lines count. A leading `*` or `//` marks the documentation lines.
-      const trimmed = line.trim();
-      if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
-        continue;
-      }
-      for (const token of FORBIDDEN_TOKENS) {
-        if (token.pattern.test(line)) {
-          hits.push(`${module}:${index + 1} uses ${token.label}: ${trimmed}`);
-        }
-      }
-    }
+    const hits = syncSpawnHits(source).map(
+      (hit) => `${module}:${hit.line} uses ${hit.label}: ${hit.text}`,
+    );
     expect(hits, hits.join("\n")).toEqual([]);
   });
 }

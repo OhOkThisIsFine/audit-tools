@@ -54,34 +54,14 @@ const drawSrcFiles = [
   join(repoRoot, "src", "audit", "cli", "laneValidators.ts"),
 ];
 
-/** Sizing / execution / transport identity — none of it is this package's business. */
-const BANNED_KEY =
-  /packet_id|wave_id|shard|provider|model|endpoint|token_budget|budget|cost|rate_limit|concurrency|lease|admission|window|transport/iu;
-
-/** The same ban as source identifiers, whole-word so `submission_path` is untouched. */
-const BANNED_IDENTIFIER =
-  /\b(packet_id|wave_id|shard_index|shard|provider|model|endpoint|token_budget|max_tokens|context_window|rate_limit|concurrency|lease|admission|transport)\b/iu;
-
-/** Recursive key walk (same idiom as tests/audit/host-handoff.test.ts). */
-function objectKeys(value: unknown, seen: string[] = []): string[] {
-  if (Array.isArray(value)) {
-    for (const item of value) objectKeys(item, seen);
-    return seen;
-  }
-  if (value && typeof value === "object") {
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      seen.push(key);
-      objectKeys(child, seen);
-    }
-  }
-  return seen;
-}
-
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ""))
-    .replace(/^[ \t]*\/\/.*$/gm, "");
-}
+// The recognizers live in the shared helper so the guard-form-reach test can
+// drive the REAL matchers over each declared sample (P51).
+import {
+  BANNED_SIZING_KEY as BANNED_KEY,
+  bannedSizingIdentifierLines,
+  bannedSizingKeys,
+  objectKeys,
+} from "../helpers/recognizers.js";
 
 describe("the submission contract has no sizing identity", () => {
   it("nothing the producers emit carries a packet/shard/provider/model/budget field", async () => {
@@ -116,7 +96,7 @@ describe("the submission contract has no sizing identity", () => {
 
       const keys = [...objectKeys(set), ...objectKeys(diff)];
       expect(keys.length, "the walk must actually reach fields").toBeGreaterThan(5);
-      const offenders = keys.filter((key) => BANNED_KEY.test(key));
+      const offenders = bannedSizingKeys([set, diff]);
       expect(
         offenders,
         "the submission/expected-set contract carries no sizing, routing, or execution identity",
@@ -166,15 +146,9 @@ describe("the submission contract has no sizing identity", () => {
 
     const violations: string[] = [];
     for (const file of sources) {
-      stripComments(await readFile(file, "utf8"))
-        .split(/\r?\n/)
-        .forEach((line, index) => {
-          if (BANNED_IDENTIFIER.test(line)) {
-            violations.push(
-              `${file.slice(repoRoot.length).replace(/\\/g, "/")}:${index + 1}: ${line.trim()}`,
-            );
-          }
-        });
+      for (const hit of bannedSizingIdentifierLines(await readFile(file, "utf8"))) {
+        violations.push(`${file.slice(repoRoot.length).replace(/\\/g, "/")}:${hit.line}: ${hit.text}`);
+      }
     }
     expect(
       violations,

@@ -33,7 +33,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { execFileSyncHidden } from "../helpers/spawn.mjs";
-import { maskCode } from "../../scripts/check-doc-links.mjs";
+// The text recognizers live in the shared helper so the guard-form-reach test
+// can drive the REAL matchers over each declared sample (P51).
+import {
+  absoluteGitHubSlugs,
+  headingAnchors,
+  relativeLinkTargets,
+} from "../helpers/recognizers.js";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -97,46 +103,6 @@ function isShipped(path: string): boolean {
 
 const shippedMarkdown = trackedFiles().filter((file) => file.endsWith(".md") && isShipped(file));
 
-/** Inline links and reference definitions, code masked so examples are not links. */
-function relativeLinkTargets(markdown: string): string[] {
-  const masked = maskCode(markdown.replace(/\r\n/g, "\n"));
-  const targets: string[] = [];
-  for (const pattern of [
-    /\[[^\]]*\]\(\s*<?([^)<>\s]+)>?(?:\s+"[^"]*")?\s*\)/g,
-    /^[ \t]{0,3}\[[^\]]+\]:[ \t]+<?([^\s<>]+)>?/gm,
-  ]) {
-    for (const match of masked.matchAll(pattern)) targets.push(match[1]);
-  }
-  return targets.filter(
-    (target) => !/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith("#") && !target.startsWith("//"),
-  );
-}
-
-/**
- * GitHub's heading slugs: lowercased, punctuation dropped, spaces hyphenated.
- * Code spans and inline links in a heading contribute their text only.
- */
-function headingAnchors(markdown: string): Set<string> {
-  const anchors = new Set<string>();
-  // Fences masked (a `#` line inside one is not a heading), but NOT inline code
-  // spans: maskCode blanks their bytes, and GitHub keeps the text inside them.
-  const body = markdown
-    .replace(/\r\n/g, "\n")
-    .replace(/^[ \t]{0,3}(`{3,}|~{3,})[\s\S]*?^[ \t]{0,3}\1[ \t]*$/gm, (m) => m.replace(/[^\n]/g, " "));
-  for (const match of body.matchAll(/^#{1,6}[ \t]+(.+?)[ \t]*#*$/gm)) {
-    const text = match[1]
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/[`*_~]/g, "")
-      .trim()
-      .toLowerCase();
-    anchors.add(
-      text
-        .replace(/[^\p{L}\p{N}\s-]/gu, "")
-        .replace(/\s/g, "-"),
-    );
-  }
-  return anchors;
-}
 
 describe("the published tarball carries a coherent, self-contained doc set", () => {
   it("ships the consumer-facing package pages and no repo-internal ones", () => {
@@ -174,9 +140,7 @@ describe("the published tarball carries a coherent, self-contained doc set", () 
   it("spells every absolute repository URL with the declared repository slug", () => {
     const wrong: string[] = [];
     for (const file of shippedMarkdown) {
-      const text = maskCode(readFileSync(join(REPO_ROOT, file), "utf8").replace(/\r\n/g, "\n"));
-      for (const match of text.matchAll(/https:\/\/github\.com\/([^/\s)#]+)\/([^/\s)#]+)/g)) {
-        const slug = `${match[1]}/${match[2]}`;
+      for (const slug of absoluteGitHubSlugs(readFileSync(join(REPO_ROOT, file), "utf8"))) {
         if (slug !== repositorySlug) wrong.push(`${file} → ${slug}`);
       }
     }

@@ -736,7 +736,9 @@ export const GUARDS = [
     id: 'shared-primitives-gate-test',
     kind: 'contract-test',
     impl: 'tests/shared/check-shared-primitives.test.ts',
-    note: 'pins the rule matching semantics of check:shared-primitives on synthetic content',
+    note:
+      'pins the rule matching semantics of check:shared-primitives on synthetic content; its forms are ' +
+      'the gate\'s own (declared on the check:shared-primitives row), driven through the same scanFile export',
   },
   {
     id: 'suite-green-stamp-test',
@@ -805,6 +807,16 @@ export const GUARDS = [
     id: 'shipped-doc-surface-test',
     kind: 'contract-test',
     impl: 'tests/shared/shipped-doc-surface.test.ts',
+    forms: [
+      { name: 'inline link target', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'relativeLinkTargets', call: 'text',
+        sample: 'read [the guide](docs/audit-pkg/operator-guide.md#supported-surfaces)' },
+      { name: 'reference-definition target', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'relativeLinkTargets', call: 'text',
+        sample: '[guide]: ./docs/audit-pkg/product.md' },
+      { name: 'heading anchor', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'headingAnchors', call: 'text',
+        sample: '## Supported surfaces' },
+      { name: 'absolute GitHub URL', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'absoluteGitHubSlugs', call: 'text',
+        sample: 'see https://github.com/owner/repo/blob/main/docs/x.md' },
+    ],
     note:
       'the npm tarball as a doc surface: which docs/ pages ship, README naming exactly them, no ' +
       'relative link or fragment leaving the set, every absolute github.com slug bound to ' +
@@ -816,6 +828,14 @@ export const GUARDS = [
     id: 'sync-spawn-fold-safety-test',
     kind: 'contract-test',
     impl: 'tests/shared/sync-spawn-fold-safety.test.ts',
+    forms: [
+      { name: 'spawnSync call', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'syncSpawnHits', call: 'text',
+        sample: 'const r = spawnSync("git", ["status"]);' },
+      { name: 'sync runTracked twin', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'syncSpawnHits', call: 'text',
+        sample: 'const r = runTracked(["git", "status"], { cwd });' },
+      { name: 'execSync call', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'syncSpawnHits', call: 'text',
+        sample: 'const out = execSync("git status");' },
+    ],
     note:
       'INV-SSF: the fold-reachable modules (shared git helpers, the disposition extractor, the ' +
       'analyzer-dep installer) spawn children only through the async exec twin — a synchronous child ' +
@@ -830,6 +850,12 @@ export const GUARDS = [
     id: 'submission-no-sizing-identity-test',
     kind: 'contract-test',
     impl: 'tests/shared/submission-contract-has-no-sizing-identity.test.ts',
+    forms: [
+      { name: 'banned key on an emitted object', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'bannedSizingKeys', call: 'text',
+        sample: '{"submission_id": "s1", "shard": 2}' },
+      { name: 'banned identifier in source', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'bannedSizingIdentifierLines', call: 'text',
+        sample: 'const shard_index = 2;' },
+    ],
     note:
       'mechanical replacement for a backlog note: the submission core must not re-grow a packet/shard/' +
       'provider/model/budget field, in the emitted objects OR as a source identifier',
@@ -838,6 +864,12 @@ export const GUARDS = [
     id: 'submission-path-tool-owned-test',
     kind: 'contract-test',
     impl: 'tests/shared/submission-path-is-tool-owned.test.ts',
+    forms: [
+      { name: 'incoming as a path segment', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'incomingLiteralLines', call: 'text',
+        sample: 'const dir = join(artifactsDir, "incoming", name);' },
+      { name: 'incoming as a rendered path', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'incomingLiteralLines', call: 'text',
+        sample: 'const line = `write the result to incoming/${id}.json`;' },
+    ],
     note:
       'scans all of src/ for a reintroduced host-typed drop directory — the guard that keeps the ' +
       'tool-owned submission path from being undone one call site at a time',
@@ -972,6 +1004,14 @@ export const GUARDS = [
     id: 'prompt-capability-test',
     kind: 'contract-test',
     impl: 'tests/shared/prompt-capability.test.ts',
+    forms: [
+      { name: 'required-inputs entry', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'requiredInputEntries', call: 'text',
+        sample: '## Required Inputs\n- `/project/.audit-tools/remediation/intake/goal-spec.json` (goal_spec)\n' },
+      { name: 'second results-path heading', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'resultsPathDriftLines', call: 'text',
+        sample: 'const footer = "## Results path";' },
+      { name: 'results path promised below', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'resultsPathDriftLines', call: 'text',
+        sample: 'const note = "write to the results path provided below";' },
+    ],
     note:
       'C2 (sol-10/P35): a rendered imperative must be satisfiable by the worker it is handed to — ' +
       'contract-pipeline Required Inputs are DERIVED from DEPENDENCY_MAP (no hand-kept per-role list), ' +
@@ -1004,6 +1044,10 @@ export const GUARDS = [
     id: 'conceptual-category-comment-drift-test',
     kind: 'contract-test',
     impl: 'tests/audit/conceptual-category-comment-drift.test.ts',
+    forms: [
+      { name: 'comment re-enumerating the category set', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'enumeratingCommentLines', call: 'text',
+        sample: '// one of: fundamental_approach, core_assumption, structural_risk' },
+    ],
     note:
       'P50: conceptual finding categories are single-sourced; scans tracked src/**/*.ts comment ' +
       'lines for 3+ canonical token enumerations. Uncovered: comments naming 1-2 tokens (accepted ' +
