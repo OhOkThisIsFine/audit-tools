@@ -52,6 +52,53 @@ import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror
  *   tests/shared/generator-gates-run-at-commit.test.ts filters on this string,
  *   so a fixless gate row is invisible to it; the F2 hole, 2026-08-29).
  * @property {string} [note]
+ * @property {FormFixture[]} [forms] the SYNTAX FORMS this guard recognizes (P51,
+ *   owner decision baf2da68fa9cd24f): each a literal positive sample the guard
+ *   MUST flag, plus how tests/shared/guard-form-reach.test.ts drives the REAL
+ *   recognizer over it. Declared by form-recognizing guards only — a file-set
+ *   or structural guard has none. A form the guard stops recognizing goes RED,
+ *   and so does a form declared without teaching the guard: the declaration is
+ *   the source of truth. Positive fixtures only; a suppression form (a marker
+ *   that makes the guard NOT flag) is stated in the row's `note`.
+ */
+
+/**
+ * @typedef {object} FormFixture
+ * @property {string} name
+ * @property {string} sample the literal text the guard must flag
+ * @property {'script'|'export'|'hook'|'test'} drive
+ *   script — spawn `script` in a throwaway git repo holding `sample` as the
+ *            tracked file `path` (default docs/fixture.md), with `extraFiles`
+ *            and `fixtureDirs` beside it and `env` set ($FIXTURE_ROOT expands);
+ *            expect a non-zero exit whose output contains `expect`.
+ *   export — import `module`, call `exportName` per `call` — `text`: fn(sample);
+ *            `file-content`: fn(fixturePath, sample); `sources-map`:
+ *            fn(new Map([[fixturePath, sample]])) — expect a non-empty result.
+ *            The only drive for a script that resolves its tree from its own
+ *            file location, and the natural one for a pure recognizer.
+ *   hook   — spawn `hook` with `payload` on stdin ($SAMPLE, $SAMPLE_FILE and
+ *            $SESSION expand; `sampleFile` writes the sample into a file of that
+ *            format; `rootFixture` files are copied into the throwaway project
+ *            root); expect exit 2 with `expect` on stderr.
+ *   test   — the form is pinned by the dedicated harness test `test`; the
+ *            declared sample must still appear in it.
+ * @property {string} [expect]
+ * @property {string} [script]
+ * @property {string} [path]
+ * @property {Record<string,string>} [env]
+ * @property {string[]} [fixtureDirs]
+ * @property {Record<string,string>} [extraFiles]
+ * @property {string} [module]
+ * @property {string} [exportName]
+ * @property {'text'|'file-content'|'sources-map'} [call]
+ * @property {string} [fixturePath]
+ * @property {string} [hook]
+ * @property {unknown} [payload]
+ * @property {'transcript-jsonl'} [sampleFile]
+ * @property {string[]} [rootFixture]
+ * @property {{files: Record<string,string>, unstaged?: Record<string,string>}} [rootGit] hook: a git
+ *   repo at the project root — `files` committed, then `unstaged` written over them
+ * @property {string} [test]
  */
 
 /**
@@ -99,6 +146,22 @@ export const GUARDS = [
   {
     id: 'check:shared-primitives',
     kind: 'gate',
+    forms: [
+      { name: 'comparator body', drive: 'export', module: 'scripts/check-shared-primitives.mjs',
+        exportName: 'scanFile', call: 'file-content', sample: 'const cmp = (a, b) => a < b ? -1 : a > b ? 1 : 0;' },
+      { name: 'containment predicate', drive: 'export', module: 'scripts/check-shared-primitives.mjs',
+        exportName: 'scanFile', call: 'file-content', sample: 'const outside = relative(root, target).startsWith("..");' },
+      { name: 'sha256 chain', drive: 'export', module: 'scripts/check-shared-primitives.mjs',
+        exportName: 'scanFile', call: 'file-content', sample: 'const digest = createHash("sha256").update(body).digest("hex");' },
+      { name: 'truncated hash chain', drive: 'export', module: 'scripts/check-shared-primitives.mjs',
+        exportName: 'scanFile', call: 'file-content', sample: 'const short = createHash("sha1").update(body).digest("hex").slice(0, 8);' },
+      { name: 'Intl.Collator', drive: 'export', module: 'scripts/check-shared-primitives.mjs',
+        exportName: 'scanFile', call: 'file-content', sample: 'const collator = new Intl.Collator("en");' },
+      { name: 'localeCompare', drive: 'export', module: 'scripts/check-shared-primitives.mjs',
+        exportName: 'scanFile', call: 'file-content', sample: 'names.sort((a, b) => a.localeCompare(b));' },
+      { name: 'single-definition re-roll', drive: 'export', module: 'scripts/check-shared-primitives.mjs',
+        exportName: 'scanFile', call: 'file-content', sample: 'function isPlainObject(value) { return typeof value === "object"; }' },
+    ],
     impl: 'check:shared-primitives',
     preCommit: 'reach',
     fix:
@@ -148,6 +211,14 @@ export const GUARDS = [
   {
     id: 'check:doc-links',
     kind: 'gate',
+    forms: [
+      { name: 'inline link', drive: 'script', script: 'scripts/check-doc-links.mjs',
+        sample: 'read [the plan](missing-target.md) first', expect: 'missing-target.md' },
+      { name: 'reference definition', drive: 'script', script: 'scripts/check-doc-links.mjs',
+        sample: '[plan]: ./missing-target.md', expect: 'missing-target.md' },
+      { name: 'line-suffixed target', drive: 'script', script: 'scripts/check-doc-links.mjs',
+        sample: 'see [the anchor](./fixture.md:9999)', expect: 'line-suffixed' },
+    ],
     impl: 'check:doc-links',
     preCommit: 'final',
     fix:
@@ -161,6 +232,12 @@ export const GUARDS = [
   {
     id: 'check:doc-code-citations',
     kind: 'gate',
+    forms: [
+      // A tracked src/ file keeps `src/…` a repo path rather than a third-party token.
+      { name: 'backticked path citation', drive: 'script', script: 'scripts/check-doc-code-citations.mjs',
+        sample: 'the reader lives in `src/does-not-exist.ts`', extraFiles: { 'src/present.ts': 'export {};\n' },
+        expect: 'does-not-exist.ts' },
+    ],
     impl: 'check:doc-code-citations',
     preCommit: 'reach',
     fix:
@@ -302,6 +379,18 @@ export const GUARDS = [
   {
     id: 'check:handoff-roadmap',
     kind: 'gate',
+    forms: [
+      { name: 'dated bullet', drive: 'export', module: 'scripts/shared/generate-handoff-roadmap.mjs',
+        exportName: 'findHandwrittenCreep', call: 'text', sample: '- 2026-08-12: the queue was answered in full' },
+      { name: 'landed narrative', drive: 'export', module: 'scripts/shared/generate-handoff-roadmap.mjs',
+        exportName: 'findHandwrittenCreep', call: 'text', sample: 'The cleanup rule is LANDED on main.' },
+      { name: 'shipped narrative', drive: 'export', module: 'scripts/shared/generate-handoff-roadmap.mjs',
+        exportName: 'findHandwrittenCreep', call: 'text', sample: 'That fix shipped in v0.34.' },
+      { name: 'built-first narrative', drive: 'export', module: 'scripts/shared/generate-handoff-roadmap.mjs',
+        exportName: 'findHandwrittenCreep', call: 'text', sample: 'Built red-tests-first (7 contract tests).' },
+      { name: 'verification-state heading', drive: 'export', module: 'scripts/shared/generate-handoff-roadmap.mjs',
+        exportName: 'findHandwrittenCreep', call: 'text', sample: '## Verification state' },
+    ],
     impl: 'check:handoff-roadmap',
     preCommit: 'reach',
     fix:
@@ -340,6 +429,14 @@ export const GUARDS = [
   {
     id: 'check:backlog-status',
     kind: 'gate',
+    forms: [
+      { name: 'status glyph', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
+        exportName: 'findStatusMarkers', call: 'text', sample: '- ✅ the fix landed' },
+      { name: 'emphasised status label', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
+        exportName: 'findStatusMarkers', call: 'text', sample: '- **SHIPPED 2026-07-19.** the entry' },
+      { name: 'leading status label', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
+        exportName: 'findStatusMarkers', call: 'text', sample: '- DONE: the entry' },
+    ],
     impl: 'check:backlog-status',
     preCommit: 'reach',
     fix:
@@ -350,6 +447,12 @@ export const GUARDS = [
   {
     id: 'check:backlog-line-numbers',
     kind: 'gate',
+    forms: [
+      { name: 'backticked path with line suffix', drive: 'export', module: 'scripts/check-backlog-line-numbers.mjs',
+        exportName: 'findLineNumberCitations', call: 'text', sample: 'see `src/x.ts:123` for the write' },
+      { name: 'backticked bare line suffix', drive: 'export', module: 'scripts/check-backlog-line-numbers.mjs',
+        exportName: 'findLineNumberCitations', call: 'text', sample: 'the anchor at `:21` moved' },
+    ],
     impl: 'check:backlog-line-numbers',
     preCommit: 'reach',
     fix:
@@ -360,6 +463,19 @@ export const GUARDS = [
   {
     id: 'check:memory-citations',
     kind: 'gate',
+    forms: [
+      // The store is pointed at an EMPTY fixture dir, so every cited name is dangling by construction.
+      { name: 'lowercase inline list', drive: 'script', script: 'scripts/check-memory-citations.mjs',
+        sample: '(see memory: this-note-does-not-exist)', fixtureDirs: ['memory'],
+        env: { AUDIT_TOOLS_MEMORY_DIR: '$FIXTURE_ROOT/memory' }, expect: 'this-note-does-not-exist' },
+      { name: 'sentence-initial list', drive: 'script', script: 'scripts/check-memory-citations.mjs',
+        sample: 'Memory: this-note-does-not-exist', fixtureDirs: ['memory'],
+        env: { AUDIT_TOOLS_MEMORY_DIR: '$FIXTURE_ROOT/memory' }, expect: 'this-note-does-not-exist' },
+      // Memories cite each other as [[name]]; the scan runs over the STORE, so the sample is a note.
+      { name: 'wikilink between memories', drive: 'script', script: 'scripts/check-memory-citations.mjs',
+        sample: 'related: [[this-note-does-not-exist]]', path: 'memory/fixture-note.md',
+        env: { AUDIT_TOOLS_MEMORY_DIR: '$FIXTURE_ROOT/memory' }, expect: 'this-note-does-not-exist' },
+    ],
     impl: 'check:memory-citations',
     preCommit: 'reach',
     fix: 'a staged doc cites a memory file that does not exist — fix the citation or restore the memory file',
@@ -375,6 +491,20 @@ export const GUARDS = [
   {
     id: 'check:version-gates',
     kind: 'gate',
+    forms: [
+      // A version constant, a payload type stamped with it, and a read-back that never compares it.
+      { name: 'stamped version read back unchecked', drive: 'export', module: 'scripts/check-version-gates.mjs',
+        exportName: 'scanVersionGates', call: 'sources-map', fixturePath: 'src/fixture.ts',
+        sample: [
+          'export const FIXTURE_SCHEMA_VERSION = "fixture/v1";',
+          'export interface FixturePayload {',
+          '  schema_version: typeof FIXTURE_SCHEMA_VERSION;',
+          '}',
+          'export async function loadFixture(path: string) {',
+          '  return await readJsonFile<FixturePayload>(path);',
+          '}',
+        ].join('\n') },
+    ],
     impl: 'check:version-gates',
     preCommit: false,
     fix:
@@ -529,15 +659,79 @@ export const GUARDS = [
   { id: 'session-start', kind: 'hook', impl: '.claude/hooks/session-start.sh' },
   { id: 'nightly-surface', kind: 'hook', impl: '.claude/hooks/nightly-surface.mjs' },
   { id: 'session-start-guards', kind: 'hook', impl: '.claude/hooks/session-start-guards.mjs' },
-  { id: 'shell-trap-guard', kind: 'hook', impl: '.claude/hooks/shell-trap-guard.mjs' },
-  { id: 'pre-commit-gate', kind: 'hook', impl: '.claude/hooks/pre-commit-gate.mjs' },
-  { id: 'tool-input-guard', kind: 'hook', impl: '.claude/hooks/tool-input-guard.mjs' },
-  { id: 'question-philosophy-gate', kind: 'hook', impl: '.claude/hooks/question-philosophy-gate.mjs' },
+  {
+    id: 'shell-trap-guard',
+    kind: 'hook',
+    impl: '.claude/hooks/shell-trap-guard.mjs',
+    forms: [
+      { name: 'codex exec with stdin left open', drive: 'hook', hook: '.claude/hooks/shell-trap-guard.mjs',
+        payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
+        sample: 'codex exec "reply ok"', expect: 'stdin closed' },
+      { name: 'destructive worktree restore', drive: 'hook', hook: '.claude/hooks/shell-trap-guard.mjs',
+        payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
+        sample: 'git checkout -- src/x.ts', expect: 'destructive restore',
+        rootGit: { files: { 'src/x.ts': 'export const x = 1;\n' }, unstaged: { 'src/x.ts': 'export const x = 2;\n' } } },
+      { name: 'suite exit code masked by a pipe', drive: 'hook', hook: '.claude/hooks/shell-trap-guard.mjs',
+        payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
+        sample: 'npm test | tail -50', expect: 'masked suite exit code' },
+      { name: 'state-changing exit code masked by a pipe', drive: 'hook', hook: '.claude/hooks/shell-trap-guard.mjs',
+        payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
+        sample: 'git push origin main | tail -3', expect: 'masked state-changing exit code' },
+    ],
+  },
+  {
+    id: 'pre-commit-gate',
+    kind: 'hook',
+    impl: '.claude/hooks/pre-commit-gate.mjs',
+    note: 'its one content FORM — the `[vitest-gate] ATTRIBUTION:` line a doc-contract leg emits — is pinned by the harness test below rather than driven here: reproducing it needs a staged repo, a stub doc-contract suite and the gate\'s own round-trip, which that test already owns',
+    forms: [
+      { name: 'doc-contract attribution line', drive: 'test',
+        test: 'tests/shared/pre-commit-gate-doc-contract-attribution.test.ts', sample: '[vitest-gate] ATTRIBUTION:' },
+    ],
+  },
+  {
+    id: 'tool-input-guard',
+    kind: 'hook',
+    impl: '.claude/hooks/tool-input-guard.mjs',
+    note: 'the control-byte form (rule 1) is deliberately NOT declared: its positive sample is the very byte the guard bans, and a raw control byte cannot live in this tracked file (check:control-bytes); the hook-trap-guards test pins it with a runtime-built string',
+    forms: [
+      { name: 'CLI name in a dispatch prompt', drive: 'hook', hook: '.claude/hooks/tool-input-guard.mjs',
+        payload: { tool_name: 'Agent', tool_input: { prompt: '$SAMPLE', isolation: 'worktree' } },
+        sample: 'Run remediate-code for this node in the bound worktree', expect: 'isolation' },
+      { name: 'implement-node phrase', drive: 'hook', hook: '.claude/hooks/tool-input-guard.mjs',
+        payload: { tool_name: 'Agent', tool_input: { prompt: '$SAMPLE', isolation: 'worktree' } },
+        sample: 'Please implement node 2 from the plan', expect: 'isolation' },
+      { name: 'node-id token', drive: 'hook', hook: '.claude/hooks/tool-input-guard.mjs',
+        payload: { tool_name: 'Agent', tool_input: { prompt: '$SAMPLE', isolation: 'worktree' } },
+        sample: 'Work in the node_id n3 tree', expect: 'isolation' },
+    ],
+  },
+  {
+    id: 'question-philosophy-gate',
+    kind: 'hook',
+    impl: '.claude/hooks/question-philosophy-gate.mjs',
+    note: 'the Stop leg reads the transcript FILE the payload names and needs docs/project-philosophy.md under the project root, so the fixture root carries a copy of the brief',
+    forms: [
+      { name: 'trailing question in the final message', drive: 'hook', hook: '.claude/hooks/question-philosophy-gate.mjs',
+        payload: { hook_event_name: 'Stop', session_id: '$SESSION', transcript_path: '$SAMPLE_FILE', stop_hook_active: false },
+        sampleFile: 'transcript-jsonl', rootFixture: ['docs/project-philosophy.md'],
+        sample: 'Landed the fix.\n\nWant me to also split the backlog?', expect: 'ends in a question to the owner' },
+    ],
+  },
   { id: 'async-typecheck', kind: 'hook', impl: '.claude/hooks/async-typecheck.mjs' },
   { id: 'friction-stop-gate', kind: 'hook', impl: '.claude/hooks/friction-stop-gate.mjs' },
   { id: 'closeout-challenge-gate', kind: 'hook', impl: '.claude/hooks/closeout-challenge-gate.mjs' },
 
   // ── contract tests (the guards' own guards) ────────────────────────────────
+  {
+    id: 'guard-form-reach-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/guard-form-reach.test.ts',
+    note:
+      'P51: drives the REAL recognizer of every guard row that declares `forms` over each declared ' +
+      'sample (script in a fixture repo, exported pure function, or hook payload), so a syntax form a ' +
+      'guard stops recognizing goes red instead of being found by accident',
+  },
   {
     id: 'shared-primitives-gate-test',
     kind: 'contract-test',
@@ -1031,6 +1225,7 @@ export const REACH = [
     files: ['.claude/hooks/**'],
     guardedBy: [
       'hook-trap-guards-test',
+      'guard-form-reach-test',
       'hook-session-gates-test',
       'hook-async-typecheck-test',
       'hook-friction-stop-test',
@@ -1094,6 +1289,7 @@ export const REACH = [
       'check:guard-reach',
       'doc-manifest-gate-test',
       'guard-reach-gate-test',
+      'guard-form-reach-test',
       'check:lint',
       'check:dup',
       // Area-granular citations (existing precedent in this row): each gate

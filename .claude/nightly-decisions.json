@@ -1980,7 +1980,9 @@
     "answer": "Build project-type and candidate closing-action detection, but never use it to autonomously select the closing action. Use the detected facts only to present appropriate closing-action options to the user; the user always chooses.",
     "subject": "normative: remediation-goals requires project-type and closing-action DETECTION that does not exist — build it, or retire the requirement?",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-08-31T15:27:23.349Z"
+    "decided_at": "2026-08-31T15:27:23.349Z",
+    "completed_at": "2026-09-04T20:23:31.022Z",
+    "completed_ref": "audit-tools 23719896: detectProjectFacts + candidate closing actions presented at confirm_intent; host choice (closing_action / closing_custom_command) reaches closing_plan; tool never selects; spec restated"
   },
   "74c89b226ab9b9cd": {
     "disposition": "settled",
