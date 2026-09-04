@@ -1992,28 +1992,36 @@
     "answer": "Repoint the B6 reference to .claude/skills/disambiguate-backlog/SKILL.md Hard rules, and widen check:memory-citations to recognize the bare Memory: <name> list form so this class of dangling reference becomes mechanically red.",
     "subject": "instruction-file edit: project-philosophy.md cites a memory file that does not exist — repoint it at the skill that holds the conviction?",
     "path": "docs/project-philosophy.md",
-    "decided_at": "2026-08-31T15:27:27.373Z"
+    "decided_at": "2026-08-31T15:27:27.373Z",
+    "completed_at": "2026-09-04T09:59:59.109Z",
+    "completed_ref": "ce982379"
   },
   "b789256441d2ccf9": {
     "disposition": "settled",
     "answer": "Repoint development.md to .claude/skills/ship/SKILL.md for what verify:release covers and when to run it. Keep release.md referenced only for the manual host-validation and troubleshooting half; do not duplicate the ship workflow.",
     "subject": "development.md points at release.md for what verify:release covers — repoint it at the ship skill, or leave the pointer?",
     "path": "docs/audit-pkg/development.md",
-    "decided_at": "2026-08-31T15:33:33.423Z"
+    "decided_at": "2026-08-31T15:33:33.423Z",
+    "completed_at": "2026-09-04T09:59:59.240Z",
+    "completed_ref": "ce982379"
   },
   "309bbbfff0ff6b89": {
     "disposition": "settled",
     "answer": "Stop hand-enumerating live counterexample IDs. State that the ID set is sparse and each ID is resolved through its citing module, and apply the same de-status treatment to comparable hand-maintained ID enumerations in the glossary.",
     "subject": "glossary-ids.md states a contiguous CE-001..CE-011 range that asserts a CE-003 the source never cites — de-status the sentence, or keep an exact list?",
     "path": "docs/glossary-ids.md",
-    "decided_at": "2026-08-31T15:33:35.360Z"
+    "decided_at": "2026-08-31T15:33:35.360Z",
+    "completed_at": "2026-09-04T09:59:59.357Z",
+    "completed_ref": "ce982379"
   },
   "076315de56b74b0b": {
     "disposition": "settled",
     "answer": "Remove the retired scheduler-prompt regeneration clauses, re-render the manifest, and perform a bounded sweep of the manifest data for any other row that names an artifact which no longer exists.",
     "subject": "The doc manifest still orders a regeneration of the scheduler prompt deleted at C-08 — drop that instruction?",
     "path": "scripts/doc-manifest-data.mjs",
-    "decided_at": "2026-08-31T15:33:37.371Z"
+    "decided_at": "2026-08-31T15:33:37.371Z",
+    "completed_at": "2026-09-04T09:59:59.003Z",
+    "completed_ref": "ce982379"
   },
   "b4faa22d74fb56e3": {
     "disposition": "settled",
@@ -2041,7 +2049,9 @@
     "answer": "Adopt a standing retirement rule: retire a dated review after 30 days when no tracked canonical document, backlog item, or current handoff cites it. Git remains the historical archive. Apply the rule automatically rather than returning each batch for another owner decision.",
     "subject": "Retire 18 dated review records that nothing outside the archive cites, or keep the archive growing?",
     "path": "docs/reviews/dogfood-run-2026-07-30.md",
-    "decided_at": "2026-08-31T16:27:09.511Z"
+    "decided_at": "2026-08-31T16:27:09.511Z",
+    "completed_at": "2026-09-04T09:59:59.484Z",
+    "completed_ref": "ce982379"
   },
   "133f4f815b608ea4": {
     "disposition": "settled",
