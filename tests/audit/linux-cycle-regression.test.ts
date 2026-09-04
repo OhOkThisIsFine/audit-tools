@@ -31,6 +31,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
+import { declineDefaultAcquiredAnalyzers } from "../helpers/analyzerConsentFixture.js";
 const { GATE_LANES, laneSubmissionPath } = await import(
   "../../src/audit/cli/laneSubmissions.js"
 );
@@ -63,6 +64,7 @@ async function withFloorOnlyRepo(
         "",
       ].join("\n"),
     );
+    await declineDefaultAcquiredAnalyzers(root);
     return await fn(root, { AUDIT_TOOLS_ANALYZER_CACHE: analyzerCache });
   } finally {
     await rm(tempDir, { recursive: true, force: true });

@@ -114,8 +114,12 @@ async function submit(step: any, key: string, body: string): Promise<void> {
 /**
  * Answer one scripted host pause. Returns false when the kind is not a pause
  * this driver knows how to answer, leaving the decision to the caller.
+ *
+ * Exported for the walks whose terminal condition is an ARTIFACT rather than a
+ * step kind (the acquisition-marker hermeticity pin), so they answer pauses
+ * through this one answerer instead of teaching themselves a second copy.
  */
-async function answerHostPause(step: any): Promise<boolean> {
+export async function answerHostPause(step: any): Promise<boolean> {
   switch (step.step_kind) {
     case "analyzer_consent":
       await submit(step, "analyzer_consent_decisions", pretty(DECLINED_ANALYZERS));

@@ -973,15 +973,12 @@
   the mechanism is not literally timeout-free. It is simply longer than any real caller's budget:
   vitest's own 300-second per-file timeout, and this project's "one bounded step" fold invariant,
   both expect an answer well inside 10 minutes. Measured on a Windows checkout with a cold `_npx`
-  cache: sixteen parallel vitest workers each spawned the fetch; npx serialized them on its
-  per-package `concurrency.lock`; each spawn took 180-310s; seven CLI-spawning test files
-  (`audit-code-completion-*`, `next-step-core-*`, `next-step-narrative`, `linux-cycle-regression`)
-  hit vitest's 300s timeout before the analyzer's own 600s deadline could resolve anything, and a
-  lock orphaned by a killed npx then made every later spawn re-arm the same 600s wait against a lock
-  that never clears on its own. CI hit the same 300s timeout once, on one shard (the v0.51.0 publish
-  run's first attempt; rerun green). **Property:** (a) the deadline on an acquired-analyzer spawn is
-  short enough for its tightest real caller — well under any test-file or fold-step budget, not
-  merely finite — and a killed spawn still records the analyzer degraded/`spawn_error` rather than
-  leaving the caller to discover the stall only via its OWN timeout; (b) the test suite never
-  depends on network or npx-cache state: the heavy CLI-spawning tests run with acquisition disabled
-  through the existing consent mechanism, or the analyzer is pre-warmed/vendored once per run.
+  cache: parallel vitest workers each spawned the fetch, npx serialized them on its per-package
+  `concurrency.lock`, each spawn took 180-310s, and a lock orphaned by a killed npx then made every
+  later spawn re-arm the same 600s wait against a lock that never clears on its own. (The suite's
+  own exposure is closed — every shared CLI fixture now records an operator decline for the default
+  acquired set, so no test reaches npx; a production caller still has no bounded wait.)
+  **Property:** the deadline on an acquired-analyzer spawn is short enough for its tightest real
+  caller — well under any fold-step budget, not merely finite — and a killed spawn still records the
+  analyzer degraded/`spawn_error` rather than leaving the caller to discover the stall only via its
+  OWN timeout.

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { countLines } from "./countLines.mjs";
 import { walkStepsUntilTerminal } from "./step-driver.js";
+import { declineDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
 import type { AuditTask } from "../../../src/audit/types.js";
 
 const { GATE_LANES, laneSubmissionPath } = await import(
@@ -145,6 +146,7 @@ export async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise
       ].join("\n"),
     );
 
+    await declineDefaultAcquiredAnalyzers(root);
     return await fn(root);
   } finally {
     await rm(tempDir, { recursive: true, force: true });

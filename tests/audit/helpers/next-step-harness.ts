@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWrapper } from "./run-wrapper.mjs";
 import { walkStepsUntilTerminal } from "./step-driver.js";
+import { declineDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
 
 export async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise<T> {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-next-step-"));
@@ -29,6 +30,7 @@ export async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise
     );
     const seededArtifactsDir = join(root, ".audit-tools/audit");
     await mkdir(seededArtifactsDir, { recursive: true });
+    await declineDefaultAcquiredAnalyzers(root);
     return await fn(root);
   } finally {
     await rm(tempDir, { recursive: true, force: true });

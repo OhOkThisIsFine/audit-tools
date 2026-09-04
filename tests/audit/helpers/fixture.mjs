@@ -3,6 +3,9 @@ import { join } from "node:path";
 
 const { advanceAudit } = await import("../../../src/audit/orchestrator/advance.ts");
 const { buildAdvancedBundle } = await import("./advancedBundle.mjs");
+const { declineDefaultAcquiredAnalyzers } = await import(
+  "../../helpers/analyzerConsentFixture.ts"
+);
 
 /**
  * The canonical line-index for the shared fixture repository.
@@ -72,6 +75,11 @@ export async function writeFixtureRepo(root) {
       "",
     ].join("\n"),
   );
+
+  // Hermeticity: state the operator's decline of the DEFAULT acquired-analyzer
+  // set before any CLI call, so `admitSpawn` refuses outright and no fixture
+  // reaches npx or a release download. See tests/helpers/analyzerConsentFixture.ts.
+  await declineDefaultAcquiredAnalyzers(root);
 }
 
 /**

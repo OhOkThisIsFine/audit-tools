@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnHidden as spawn } from "../../helpers/spawn.mjs";
+import { declineDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
 
 // Loose shapes for the JSON the wrapper prints / writes. Only the fields the
 // assertions read through a callback are named — everything else stays open via
@@ -280,6 +281,7 @@ export async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise
         2,
       ) + "\n",
     );
+    await declineDefaultAcquiredAnalyzers(root);
     return await fn(root);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
