@@ -361,7 +361,8 @@ Each is in force for the implementation and awaits confirmation.
    measured zero-comment outcome was never chosen.
    Reversed by the owner 2026-09-04: the packet carries no character limit; the
    150,000-character ceiling, the per-file clamp and the budget allocator are removed in a
-   follow-up commit, because sizing for a model window is the host's concern, never the tool's.
+   follow-up commit (`a682922d`), because sizing for a model window is the host's concern, never
+   the tool's.
 6. **A-Q3 — retention footprint.** (A) retain all three packets; (B) retain the stated packet only
    and hash the rest. **Assumption: (A).** (B) would not have answered the coverage dispute that
    motivated the entry, which was about the revealed channel. ⚠ **The footprint is not constant.**
