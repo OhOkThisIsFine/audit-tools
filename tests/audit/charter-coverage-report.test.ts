@@ -23,20 +23,17 @@ const BASE: RenderableAuditReport = {
   work_block_seams: [],
 };
 
-const STARVED: CharterPacketCoverage = {
+const SHORT_DELIVERY: CharterPacketCoverage = {
   kind: "stated",
   classes: [
     {
       evidence_class: "comment",
       named: 72,
-      delivered: 0,
-      truncated: 0,
-      omitted: [{ path: "src/a.ts", reason: "total_budget" }],
+      delivered: 71,
+      omitted: [{ path: "src/a.ts", reason: "unreadable_or_oversized" }],
     },
-    { evidence_class: "doc", named: 95, delivered: 39, truncated: 12, omitted: [] },
+    { evidence_class: "doc", named: 95, delivered: 95, omitted: [] },
   ],
-  budget_chars: 147_860,
-  spent_chars: 147_800,
 };
 
 test("the coverage block renders UNCONDITIONALLY, so 'complete' cannot read as 'not measured'", () => {
@@ -48,18 +45,18 @@ test("the coverage block renders UNCONDITIONALLY, so 'complete' cannot read as '
   expect(rendered).not.toMatch(/## Process Feedback/);
 });
 
-test("a starved channel is stated as a figure, not left to prose inside a deleted file", () => {
+test("a short-delivering channel is stated as a figure, not left to prose inside a deleted file", () => {
   const rendered = renderAuditReportMarkdown(BASE, {
-    charter_evidence_coverage: [STARVED],
+    charter_evidence_coverage: [SHORT_DELIVERY],
   });
-  expect(rendered).toContain("comment: 0 of 72 delivered");
-  expect(rendered).toContain("doc: 39 of 95 delivered, 12 truncated");
-  expect(rendered).toContain("src/a.ts (total_budget)");
+  expect(rendered).toContain("comment: 71 of 72 delivered");
+  expect(rendered).toContain("doc: 95 of 95 delivered");
+  expect(rendered).toContain("src/a.ts (unreadable_or_oversized)");
 });
 
 test("a FAILED packet archive is surfaced beside the coverage figures", () => {
   const rendered = renderAuditReportMarkdown(BASE, {
-    charter_evidence_coverage: [STARVED],
+    charter_evidence_coverage: [SHORT_DELIVERY],
     charter_packet_archive: [
       {
         kind: "revealed",

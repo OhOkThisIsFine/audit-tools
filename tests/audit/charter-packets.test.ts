@@ -69,9 +69,11 @@ describe("stripCommentText — the extract complement (one grammar, two views)",
 describe("every OmissionReason has a producer", () => {
   it("names no reason the builder can never emit", async () => {
     // A vocabulary value with no producer is a claim the data can never make.
-    // `per_file_cap` was exactly that: PER_FILE_CHARS is a delivery clamp, so a
-    // candidate it truncates is DELIVERED with `truncated: true`, and one left
-    // below MIN_EXCERPT_CHARS is omitted as `total_budget`.
+    // `per_file_cap` was one; `total_budget` became another the moment the
+    // ceiling, the per-file clamp and the allocator were deleted — the packet
+    // carries no character limit, so no candidate is ever omitted for want of
+    // room, and the value was deleted with its producer rather than left to
+    // mislead a reader of the coverage record.
     const { readFile } = await import("node:fs/promises");
     const typeSource = await readFile(
       "src/shared/types/charterPacket.ts",
@@ -351,33 +353,54 @@ describe("materializeCharterPacket — blindness is a property of the input", ()
 });
 
 // ── The packet states what it delivered, and where every line came from ──────
+//
+// The packet carries NO character limit (owner, 2026-09-04): sizing evidence for
+// a model window is the host's concern and never the tool's. So the starvation
+// pair (T1a/T1b) and the ceiling assertion that once bounded these fixtures are
+// gone with the allocator that gave them a subject — what replaces them is the
+// stronger property that everything named is delivered whole.
 
-/** Docs whose total blows the whole packet ceiling, plus two commented members. */
-async function makeOverflowRepoRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "charter-packets-overflow-"));
+const DOC_TAIL_MARKER = "readmeTailPurposeMarker";
+const LONG_COMMENT_TAIL_MARKER = "alphaLongCommentTailMarker";
+const BETA_COMMENT_MARKER = "betaIntentCommentMarker";
+
+/**
+ * A doc corpus far past the retired 150,000-character ceiling, plus a member
+ * whose SINGLE comment block is past the retired 6,000-character per-file clamp.
+ * Sizing a packet for a model window is the host's concern and never the tool's,
+ * so both must be delivered whole.
+ */
+async function makeOversizeRepoRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "charter-packets-oversize-"));
   await mkdir(join(root, "src"), { recursive: true });
   await writeFile(
     join(root, "README.md"),
-    // MANY lines, as a real doc corpus has — the measured case was 95 doc files
-    // costing 459,907 chars against a 150,000 budget, 3.07x over before the
-    // comment loop was even reached.
-    `# Fixture\n\n${DOC_MARKER}\n${"filler prose that exists only to blow the budget.\n".repeat(4_000)}`,
+    `# Fixture\n\n${DOC_MARKER}\n` +
+      "filler prose that used to be spent against a ceiling.\n".repeat(4_000) +
+      `${DOC_TAIL_MARKER}\n`,
     "utf8",
   );
   await writeFile(
     join(root, "src", "a.ts"),
     [
+      "/*",
+      ` * ${COMMENT_MARKER}: alpha's intent, stated at length`,
+      ...Array.from(
+        { length: 200 },
+        (_, i) => ` * intent paragraph ${i} — testimony past the old per-file clamp`,
+      ),
+      ` * ${LONG_COMMENT_TAIL_MARKER}`,
+      " */",
       "export function alpha(): number {",
       `  return ${CODE_BODY_MARKER};`,
       "}",
-      `// ${COMMENT_MARKER}: alpha exists so budgets are respected`,
     ].join("\n"),
     "utf8",
   );
   await writeFile(
     join(root, "src", "b.ts"),
     [
-      `// ${COMMENT_MARKER}: beta exists to prove the comment class is funded`,
+      `// ${BETA_COMMENT_MARKER}: beta exists to prove every block is delivered`,
       'import { alpha } from "./a.js";',
       "export const beta = alpha();",
     ].join("\n"),
@@ -386,40 +409,38 @@ async function makeOverflowRepoRoot(): Promise<string> {
   return root;
 }
 
-describe("materializeCharterPacket — the comment class is funded, not starved", () => {
-  it("T1a: delivers source comments even when the doc class alone overflows the ceiling", async () => {
-    const root = await makeOverflowRepoRoot();
-    const { markdown } = await materializeCharterPacket({
+describe("materializeCharterPacket — no character limit", () => {
+  it("delivers every named doc and comment block IN FULL, past the retired ceiling", async () => {
+    const root = await makeOversizeRepoRoot();
+    const { markdown, coverage } = await materializeCharterPacket({
       root,
       bundle: makeBundle(),
       kind: "stated",
     });
-    // One greedy budget in doc-then-comment order spent the whole ceiling on
-    // docs and reduced every comment section to its heading.
-    expect(markdown).toContain(COMMENT_MARKER);
-    expect(markdown).toContain(DOC_MARKER);
-  });
 
-  it("T1b: reports the comment class's delivery figure", async () => {
-    const root = await makeOverflowRepoRoot();
-    const { coverage } = await materializeCharterPacket({
-      root,
-      bundle: makeBundle(),
-      kind: "stated",
-    });
+    // Every named candidate reaches the packet WHOLE — its head and its tail.
+    expect(markdown).toContain(DOC_MARKER);
+    expect(markdown).toContain(DOC_TAIL_MARKER);
+    expect(markdown).toContain(COMMENT_MARKER);
+    expect(markdown).toContain(LONG_COMMENT_TAIL_MARKER);
+    expect(markdown).toContain(BETA_COMMENT_MARKER);
+
+    // Nothing is reported as cut short, in the manifest or anywhere else.
+    expect(markdown).not.toContain('"truncated": true');
+
+    // Coverage reconciles at FULL delivery: nothing omitted for want of room.
+    for (const entry of coverage.classes) {
+      expect(entry.delivered, entry.evidence_class).toBe(entry.named);
+      expect(entry.omitted, entry.evidence_class).toEqual([]);
+    }
+    // …including the class the channel is named for, which a doc corpus this
+    // size used to starve to 0 delivered.
     const comment = coverage.classes.find((c) => c.evidence_class === "comment");
     expect(comment?.named).toBe(2);
     expect(comment?.delivered).toBe(2);
-  });
 
-  it("stays inside the packet ceiling once metadata and prefixes are charged", async () => {
-    const root = await makeOverflowRepoRoot();
-    const { markdown } = await materializeCharterPacket({
-      root,
-      bundle: makeBundle(),
-      kind: "stated",
-    });
-    expect(markdown.length).toBeLessThanOrEqual(150_000);
+    // …and the packet is free to exceed the ceiling that used to bound it.
+    expect(markdown.length).toBeGreaterThan(150_000);
   });
 });
 

@@ -45,17 +45,18 @@ export const EVIDENCE_CLASSES: readonly EvidenceClass[] = [
  * top-level declarations used to appear in neither the delivered nor the omitted
  * list, so `delivered + omitted === named` could not be reconciled at all.
  *
- * EVERY value here has a producer, and a contract test pins that. There is no
- * `per_file_cap`: `PER_FILE_CHARS` is a delivery CLAMP, not an omission cause —
- * a candidate it truncates is DELIVERED with `truncated: true`, and one the
- * clamp leaves below `MIN_EXCERPT_CHARS` is omitted as `total_budget`. A
- * vocabulary value with no producer is a claim the data can never make, so it
- * would only ever mislead a reader of the coverage record.
+ * There are exactly TWO reasons, because the packet carries no character limit
+ * (owner, 2026-09-04): a file is either read and delivered WHOLE, or it is named
+ * here. `unreadable_or_oversized` is the read-safety guard — a file too large to
+ * read at all, recorded with its byte count — and never a budget verdict; the
+ * `total_budget` reason died with the ceiling, the per-file clamp and the
+ * allocator that produced it.
+ *
+ * EVERY value here has a producer, and a contract test pins that: a vocabulary
+ * value with no producer is a claim the data can never make, so it would only
+ * ever mislead a reader of the coverage record.
  */
-export type OmissionReason =
-  | "total_budget"
-  | "unreadable_or_oversized"
-  | "no_content";
+export type OmissionReason = "unreadable_or_oversized" | "no_content";
 
 /** One delivered source line, carrying its TRUE 1-based number in its own file. */
 export interface PacketExcerptLine {
@@ -87,8 +88,6 @@ export interface PacketExcerpt {
   source_path: string;
   line_runs: PacketLineRun[];
   lines: PacketExcerptLine[];
-  /** True when content existed beyond what is delivered. */
-  truncated: boolean;
   prefix_width: number;
 }
 
@@ -97,12 +96,14 @@ export interface CharterPacketCoverageClass {
   evidence_class: EvidenceClass;
   /** Every candidate file considered for this class. */
   named: number;
-  /** Excerpts delivered with at least one line. */
+  /** Excerpts delivered — in full, which is the only way they are delivered. */
   delivered: number;
-  /** Delivered but incomplete. */
-  truncated: number;
-  /** Path-sorted; every named candidate that did not make it, with its reason. */
-  omitted: { path: string; reason: OmissionReason }[];
+  /**
+   * Path-sorted; every named candidate that did not make it, with its reason.
+   * `bytes` is the file's size, stated on the read-safety omission so the record
+   * says WHY rather than leaving a reader to guess between missing and huge.
+   */
+  omitted: { path: string; reason: OmissionReason; bytes?: number }[];
 }
 
 /**
@@ -116,9 +117,6 @@ export interface CharterPacketCoverage {
   kind: CharterKind;
   /** One entry per class this kind emits, sorted by canonical class order. */
   classes: CharterPacketCoverageClass[];
-  /** The content budget after packet metadata was charged against the ceiling. */
-  budget_chars: number;
-  spent_chars: number;
 }
 
 export const CHARTER_PACKET_MANIFEST_SCHEMA_VERSION =
@@ -131,7 +129,6 @@ export interface CharterPacketManifestExcerpt {
   evidence_class: EvidenceClass;
   line_runs: PacketLineRun[];
   line_count: number;
-  truncated: boolean;
   prefix_width: number;
 }
 

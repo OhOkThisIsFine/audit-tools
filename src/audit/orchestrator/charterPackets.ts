@@ -119,67 +119,36 @@ export function topLevelDeclarationLines(
   return kept;
 }
 
-// ── Packet budget ────────────────────────────────────────────────────────────
+// ── What the packet delivers ─────────────────────────────────────────────────
 //
-// PACKET_TOTAL_CHARS is the hard ceiling and stays exactly what it was: bounded,
-// never whole-repo. What changed is that it is no longer spent by whoever is
-// rendered FIRST.
+// THE PACKET CARRIES NO CHARACTER LIMIT (owner, 2026-09-04). The rule this
+// module used to state as "budget context: bounded, never whole-repo" is
+// actually: THE TOOL DELIVERS WHAT IT NAMES, AND SIZING IS THE HOST'S. A
+// backend's context or output window is transport config and never enters this
+// package — the same boundary that retired the routing substrate. So every
+// named doc, comment block, declaration set and stripped body reaches its
+// packet IN FULL, and the coverage manifest states what was named against what
+// was delivered rather than what a ceiling could afford.
 //
-// The old builder walked one greedy budget over sections in doc-then-comment
-// order and, on overflow, kept the heading only. On a 335-file repo the 95
-// doc-intent files cost 459,907 chars against a 150,000 budget — 3.07x over
-// before the comment loop was even reached — so 0 of 72 comment sections
-// survived. That is an ordering artifact, not a size problem: reversing the order
-// would starve docs instead. So the budget is now split by CLASS QUOTA and filled
-// by a two-pass water-fill, which is what makes a coverage figure mean anything.
-
-const PER_FILE_CHARS = 6_000;
-const PACKET_TOTAL_CHARS = 150_000;
-/**
- * An excerpt below this is a stub, not evidence — too small to characterize a
- * file's purpose. A candidate TRUNCATED below it is omitted by name instead, and
- * its allocation returns to the pool. A file whose whole content is smaller than
- * this is COMPLETE, not a stub, and is delivered.
- */
-const MIN_EXCERPT_CHARS = 400;
-const MAX_READ_BYTES = 512 * 1024;
+// The one remaining bound is a READ-SAFETY guard, never a size budget: a file
+// larger than READ_SAFETY_MAX_BYTES is not read at all, because a binary blob
+// or a pathological generated file is noise rather than evidence. Such a file
+// is recorded BY NAME in the coverage manifest as `unreadable_or_oversized`
+// with its byte count. Nothing that IS read is ever cut short.
 
 /**
- * Metadata is charged against the ceiling BEFORE the content quotas are derived,
- * so the manifest and the per-line prefixes are paid for rather than silently
- * pushing the packet over its own bound.
- *
- * The real overhead, measured rather than guessed: one pretty-printed manifest
- * excerpt row runs ~150-200 chars (id, path, class, runs, counts, prefix width),
- * so 176 candidates — the motivating repo's 95 docs + 81 members — cost ~30 KB,
- * about 20% of the ceiling. The per-line `NNN| ` prefix is 5-8 chars against a
- * mean source line of 38.7 chars measured over this repo's own `src/**\/*.ts`
- * (101,830 lines / 3,944,266 chars), i.e. 13-21%, not the 12% a 7-char estimate
- * suggested. Prefix cost is not estimated here at all — it is charged exactly,
- * because allocation measures the RENDERED body, prefixes included.
+ * The read-safety bound: the bytes a single file may occupy before this builder
+ * declines to read it at all. NOT a delivery budget — a file under it is
+ * delivered WHOLE, and a file over it is omitted BY NAME with its byte count,
+ * never trimmed to fit.
  */
-const MANIFEST_ROW_CHARS = 180;
-/** Preamble, manifest envelope, headings and the omitted-list chrome. */
-const PACKET_CHROME_CHARS = 1_600;
+const READ_SAFETY_MAX_BYTES = 512 * 1024;
 
 interface ExcerptCandidate {
   evidence_class: EvidenceClass;
   source_path: string;
   /** Every line available for this candidate, in ascending line order. */
   lines: NumberedSourceLine[];
-}
-
-interface AllocatedExcerpt {
-  candidate: ExcerptCandidate;
-  lines: NumberedSourceLine[];
-  truncated: boolean;
-  cost: number;
-}
-
-interface ClassAllocation {
-  delivered: AllocatedExcerpt[];
-  omitted: { path: string; reason: OmissionReason }[];
-  spent: number;
 }
 
 /** The uniform prefix width for an excerpt: widest line number, plus `"| "`. */
@@ -225,132 +194,28 @@ function lineRunsOf(lines: readonly NumberedSourceLine[]): PacketLineRun[] {
   return runs;
 }
 
-/** The rendered cost of delivering these lines (prefixes included) plus a heading. */
-function costOf(lines: readonly NumberedSourceLine[]): number {
-  if (lines.length === 0) return 0;
-  return renderExcerptBody(lines).length + HEADING_OVERHEAD_CHARS;
-}
-
-const HEADING_OVERHEAD_CHARS = 90;
-
-/** Take as many leading lines as fit in `cap`, measured on the RENDERED body. */
-function fitLines(
-  lines: readonly NumberedSourceLine[],
-  cap: number,
-): { lines: NumberedSourceLine[]; truncated: boolean; cost: number } {
-  const whole = costOf(lines);
-  if (whole <= cap) return { lines: [...lines], truncated: false, cost: whole };
-  const kept: NumberedSourceLine[] = [];
-  for (const entry of lines) {
-    const next = [...kept, entry];
-    if (costOf(next) > cap) break;
-    kept.push(entry);
-  }
-  return { lines: kept, truncated: true, cost: costOf(kept) };
-}
-
 /**
- * Fill one evidence class's quota by a two-pass water-fill, in PATH order.
- *
- * Pass 1 gives every candidate `min(need, floor(B/N))`, so no candidate can
- * consume the class before another is considered — the property the greedy loop
- * lacked. Pass 2 spills the class's unspent remainder to candidates that still
- * have need, in path order, up to `PER_FILE_CHARS`. A candidate left TRUNCATED
- * below `MIN_EXCERPT_CHARS` is a stub: it is omitted by name (`total_budget`),
- * its allocation returns to the pool, and the fill is recomputed — iterating to a
- * fixpoint, which terminates because the active set strictly shrinks.
- *
- * Deterministic in (candidates, budget): no filesystem order, no completion
- * order, no randomness.
+ * The outcome of reading one candidate file. `oversized` carries the byte count
+ * so the omission can state WHY, rather than leaving a reader to guess whether
+ * the file was missing, binary, or simply large.
  */
-function allocateClass(
-  candidates: readonly ExcerptCandidate[],
-  budget: number,
-): ClassAllocation {
-  const omitted: { path: string; reason: OmissionReason }[] = [];
-  let active = [...candidates];
-
-  for (;;) {
-    if (active.length === 0 || budget <= 0) break;
-    const share = Math.floor(budget / active.length);
-    const fills = active.map((candidate) => fitLines(candidate.lines, share));
-    let remainder = budget - fills.reduce((sum, fill) => sum + fill.cost, 0);
-
-    // Pass 2 — spill the unspent remainder in path order, clamped per file.
-    for (let i = 0; i < active.length && remainder > 0; i += 1) {
-      if (!fills[i]!.truncated) continue;
-      const cap = Math.min(PER_FILE_CHARS, fills[i]!.cost + remainder);
-      if (cap <= fills[i]!.cost) continue;
-      const refill = fitLines(active[i]!.lines, cap);
-      remainder -= refill.cost - fills[i]!.cost;
-      fills[i] = refill;
-    }
-
-    // A truncated stub is worse than a named omission; a small COMPLETE file is
-    // not a stub, so completeness is checked before size.
-    const stubs = new Set<number>();
-    for (let i = 0; i < fills.length; i += 1) {
-      if (fills[i]!.truncated && fills[i]!.cost < MIN_EXCERPT_CHARS) stubs.add(i);
-    }
-    if (stubs.size === 0) {
-      return {
-        delivered: active.map((candidate, i) => ({
-          candidate,
-          lines: fills[i]!.lines,
-          truncated: fills[i]!.truncated,
-          cost: fills[i]!.cost,
-        })),
-        omitted,
-        spent: fills.reduce((sum, fill) => sum + fill.cost, 0),
-      };
-    }
-    for (const i of [...stubs].sort((a, b) => a - b)) {
-      omitted.push({ path: active[i]!.source_path, reason: "total_budget" });
-    }
-    active = active.filter((_, i) => !stubs.has(i));
-  }
-
-  for (const candidate of active) {
-    omitted.push({ path: candidate.source_path, reason: "total_budget" });
-  }
-  return { delivered: [], omitted, spent: 0 };
-}
-
-/**
- * Split a content budget across the classes a kind emits, then SPILL what a class
- * cannot use to the class that can. The `stated` channel splits 50/50 between
- * docs and comments: neither class is a priori more valuable, and the 100/0
- * outcome that starved every source comment was never chosen — it fell out of
- * render order. Spill keeps the split from becoming a new cap: a repo with three
- * docs still yields a full comment channel.
- */
-function allocateStated(
-  docs: readonly ExcerptCandidate[],
-  comments: readonly ExcerptCandidate[],
-  budget: number,
-): { doc: ClassAllocation; comment: ClassAllocation } {
-  // Spill tracks the REMAINING TOTAL, never a sum of halves: giving each class
-  // "its half plus the other's leftover" double-counts the shared pool, and a
-  // single oversized doc then swallowed 200k against a 148k budget.
-  const half = Math.floor(budget / 2);
-  const firstDoc = allocateClass(docs, half);
-  const comment = allocateClass(comments, budget - firstDoc.spent);
-  const remaining = budget - firstDoc.spent - comment.spent;
-  const doc =
-    remaining > 0 ? allocateClass(docs, firstDoc.spent + remaining) : firstDoc;
-  return { doc, comment };
-}
+type RepoFileRead =
+  | { kind: "text"; text: string }
+  | { kind: "oversized"; bytes: number }
+  | { kind: "unreadable" };
 
 async function readRepoFile(
   root: string,
   path: string,
-): Promise<string | undefined> {
+): Promise<RepoFileRead> {
   try {
     const buf = await readFile(join(root, path));
-    if (buf.byteLength > MAX_READ_BYTES) return undefined;
-    return buf.toString("utf8");
+    if (buf.byteLength > READ_SAFETY_MAX_BYTES) {
+      return { kind: "oversized", bytes: buf.byteLength };
+    }
+    return { kind: "text", text: buf.toString("utf8") };
   } catch {
-    return undefined;
+    return { kind: "unreadable" };
   }
 }
 
@@ -385,7 +250,6 @@ export function buildCharterPacketManifest(
       evidence_class: excerpt.evidence_class,
       line_runs: excerpt.line_runs,
       line_count: excerpt.lines.length,
-      truncated: excerpt.truncated,
       prefix_width: excerpt.prefix_width,
     })),
     coverage,
@@ -395,10 +259,13 @@ export function buildCharterPacketManifest(
 interface PacketPlan {
   /** Synthesized, non-file sections (the structural tree and edge list). */
   fixedSections: { heading: string; body: string }[];
-  /** Per class, every candidate considered — `named`, before any budget. */
+  /** Per class, every candidate considered — `named`, and every one delivered. */
   candidatesByClass: Map<EvidenceClass, ExcerptCandidate[]>;
-  /** Omissions decided before allocation (unreadable, empty). */
-  preOmitted: Map<EvidenceClass, { path: string; reason: OmissionReason }[]>;
+  /** The only omissions there are: unreadable/oversized, and empty. */
+  omitted: Map<
+    EvidenceClass,
+    { path: string; reason: OmissionReason; bytes?: number }[]
+  >;
   /** Candidates named but carrying no content — counted in `named`. */
   namedByClass: Map<EvidenceClass, number>;
 }
@@ -407,7 +274,7 @@ function emptyPlan(): PacketPlan {
   return {
     fixedSections: [],
     candidatesByClass: new Map(),
-    preOmitted: new Map(),
+    omitted: new Map(),
     namedByClass: new Map(),
   };
 }
@@ -417,10 +284,35 @@ function note(
   evidenceClass: EvidenceClass,
   path: string,
   reason: OmissionReason,
+  bytes?: number,
 ): void {
-  const list = plan.preOmitted.get(evidenceClass) ?? [];
-  list.push({ path, reason });
-  plan.preOmitted.set(evidenceClass, list);
+  const list = plan.omitted.get(evidenceClass) ?? [];
+  list.push({ path, reason, ...(bytes === undefined ? {} : { bytes }) });
+  plan.omitted.set(evidenceClass, list);
+}
+
+/**
+ * Read one named candidate, or record the read-safety omission and yield
+ * nothing. The bound is on READING, not on delivering: a file this returns is
+ * delivered whole, and a file it declines is named in the coverage manifest
+ * with its byte count.
+ */
+async function readCandidate(
+  plan: PacketPlan,
+  root: string,
+  evidenceClass: EvidenceClass,
+  path: string,
+): Promise<string | undefined> {
+  const read = await readRepoFile(root, path);
+  if (read.kind === "text") return read.text;
+  note(
+    plan,
+    evidenceClass,
+    path,
+    "unreadable_or_oversized",
+    read.kind === "oversized" ? read.bytes : undefined,
+  );
+  return undefined;
 }
 
 function nameCandidate(plan: PacketPlan, evidenceClass: EvidenceClass): void {
@@ -438,8 +330,8 @@ function addCandidate(plan: PacketPlan, candidate: ExcerptCandidate): void {
 
 /**
  * Materialize ONE kind's evidence packet. Deterministic given the bundle + file
- * contents: stable path order, class quotas, an order-independent allocator, and
- * an explicit per-class coverage record in which
+ * contents: stable path order, every named candidate delivered in full, and an
+ * explicit per-class coverage record in which
  * `delivered + omitted.length === named` for every class — so a file that
  * contributed nothing is NAMED rather than silently absent.
  */
@@ -452,11 +344,8 @@ export async function materializeCharterPacket(
   if (params.kind === "stated") {
     for (const path of docPaths) {
       nameCandidate(plan, "doc");
-      const text = await readRepoFile(params.root, path);
-      if (text === undefined) {
-        note(plan, "doc", path, "unreadable_or_oversized");
-        continue;
-      }
+      const text = await readCandidate(plan, params.root, "doc", path);
+      if (text === undefined) continue;
       const lines = numberedLinesOf(text);
       if (lines.length === 0) {
         note(plan, "doc", path, "no_content");
@@ -466,11 +355,8 @@ export async function materializeCharterPacket(
     }
     for (const path of memberPaths) {
       nameCandidate(plan, "comment");
-      const text = await readRepoFile(params.root, path);
-      if (text === undefined) {
-        note(plan, "comment", path, "unreadable_or_oversized");
-        continue;
-      }
+      const text = await readCandidate(plan, params.root, "comment", path);
+      if (text === undefined) continue;
       const lines = extractCommentLines(text, path);
       if (lines.length === 0) {
         // Previously a bare `continue`: a member with no comments appeared in
@@ -503,11 +389,8 @@ export async function materializeCharterPacket(
     }
     for (const path of memberPaths) {
       nameCandidate(plan, "declaration");
-      const text = await readRepoFile(params.root, path);
-      if (text === undefined) {
-        note(plan, "declaration", path, "unreadable_or_oversized");
-        continue;
-      }
+      const text = await readCandidate(plan, params.root, "declaration", path);
+      if (text === undefined) continue;
       const lines = topLevelDeclarationLines(strippedSourceLines(text, path));
       if (lines.length === 0) {
         note(plan, "declaration", path, "no_content");
@@ -522,11 +405,13 @@ export async function materializeCharterPacket(
   } else if (params.kind === "revealed") {
     for (const path of memberPaths) {
       nameCandidate(plan, "stripped_source");
-      const text = await readRepoFile(params.root, path);
-      if (text === undefined) {
-        note(plan, "stripped_source", path, "unreadable_or_oversized");
-        continue;
-      }
+      const text = await readCandidate(
+        plan,
+        params.root,
+        "stripped_source",
+        path,
+      );
+      if (text === undefined) continue;
       const lines = strippedSourceLines(text, path);
       if (lines.length === 0) {
         note(plan, "stripped_source", path, "no_content");
@@ -546,90 +431,41 @@ export async function materializeCharterPacket(
     );
   }
 
-  // Charge the metadata BEFORE deriving the content quotas, so the manifest and
-  // the fixed sections are paid for rather than pushing the packet over its bound.
-  const candidateCount = [...plan.candidatesByClass.values()].reduce(
-    (sum, list) => sum + list.length,
-    0,
-  );
-  const fixedCost = plan.fixedSections.reduce(
-    (sum, section) => sum + section.heading.length + section.body.length + 8,
-    0,
-  );
-  const estimatedOverhead =
-    PACKET_CHROME_CHARS + candidateCount * MANIFEST_ROW_CHARS + fixedCost;
-
-  // MANIFEST_ROW_CHARS is an ESTIMATE, and an estimate is not a bound: an excerpt
-  // with many scattered runs (comment blocks through a long file) costs more than
-  // a typical row. So the first layout is measured, and if the real metadata
-  // pushed the packet over its ceiling the layout is recomputed ONCE against the
-  // measured overhead. It converges: a smaller content budget delivers no more
-  // lines, so no more runs, so no larger manifest.
-  let layout = layoutPacket(params.kind, plan, PACKET_TOTAL_CHARS - estimatedOverhead);
-  let markdown = renderPacket(
+  const layout = layoutPacket(params.kind, plan);
+  const markdown = renderPacket(
     params.kind,
     plan.fixedSections,
     layout.excerpts,
     layout.coverage,
   );
-  if (markdown.length > PACKET_TOTAL_CHARS) {
-    const measuredOverhead = markdown.length - layout.coverage.spent_chars;
-    layout = layoutPacket(
-      params.kind,
-      plan,
-      PACKET_TOTAL_CHARS - measuredOverhead,
-    );
-    markdown = renderPacket(
-      params.kind,
-      plan.fixedSections,
-      layout.excerpts,
-      layout.coverage,
-    );
-  }
-
   return { markdown, coverage: layout.coverage, excerpts: layout.excerpts };
 }
 
-/** Allocate, number, and measure one packet against a content budget. */
+/**
+ * Number every named excerpt and state what the packet delivered.
+ *
+ * Emission order is the order candidates were named — class by class in the
+ * order the kind's branch reads them (docs before comments for `stated`), path
+ * order within a class — so it is DERIVED, never a second hand-kept list that
+ * could drift from the branch above.
+ */
 function layoutPacket(
   kind: CharterKind,
   plan: PacketPlan,
-  contentBudget: number,
 ): { excerpts: PacketExcerpt[]; coverage: CharterPacketCoverage } {
-  const budget = Math.max(0, contentBudget);
-  const allocations = new Map<EvidenceClass, ClassAllocation>();
-  if (kind === "stated") {
-    const { doc, comment } = allocateStated(
-      plan.candidatesByClass.get("doc") ?? [],
-      plan.candidatesByClass.get("comment") ?? [],
-      budget,
-    );
-    allocations.set("doc", doc);
-    allocations.set("comment", comment);
-  } else {
-    for (const [evidenceClass, candidates] of plan.candidatesByClass) {
-      allocations.set(evidenceClass, allocateClass(candidates, budget));
-    }
-  }
-
-  // Emission order = class order within the packet, path order within a class.
-  const emissionOrder: EvidenceClass[] =
-    kind === "stated" ? ["doc", "comment"] : [...plan.candidatesByClass.keys()];
   const excerpts: PacketExcerpt[] = [];
-  for (const evidenceClass of emissionOrder) {
-    for (const allocated of allocations.get(evidenceClass)?.delivered ?? []) {
-      if (allocated.lines.length === 0) continue;
+  for (const [evidenceClass, candidates] of plan.candidatesByClass) {
+    for (const candidate of candidates) {
       excerpts.push({
         excerpt_id: `E${String(excerpts.length + 1).padStart(2, "0")}`,
         evidence_class: evidenceClass,
-        source_path: allocated.candidate.source_path,
-        line_runs: lineRunsOf(allocated.lines),
-        lines: allocated.lines.map((entry) => ({
+        source_path: candidate.source_path,
+        line_runs: lineRunsOf(candidate.lines),
+        lines: candidate.lines.map((entry) => ({
           line: entry.line,
           text: entry.text,
         })),
-        truncated: allocated.truncated,
-        prefix_width: prefixWidthFor(allocated.lines),
+        prefix_width: prefixWidthFor(candidate.lines),
       });
     }
   }
@@ -638,35 +474,17 @@ function layoutPacket(
   for (const evidenceClass of EVIDENCE_CLASSES) {
     const named = plan.namedByClass.get(evidenceClass);
     if (named === undefined) continue;
-    const allocation = allocations.get(evidenceClass);
-    const delivered = (allocation?.delivered ?? []).filter(
-      (entry) => entry.lines.length > 0,
-    );
-    const omitted = [
-      ...(plan.preOmitted.get(evidenceClass) ?? []),
-      ...(allocation?.omitted ?? []),
-    ].sort((a, b) => compareCodeUnits(a.path, b.path));
     classes.push({
       evidence_class: evidenceClass,
       named,
-      delivered: delivered.length,
-      truncated: delivered.filter((entry) => entry.truncated).length,
-      omitted,
+      delivered: (plan.candidatesByClass.get(evidenceClass) ?? []).length,
+      omitted: [...(plan.omitted.get(evidenceClass) ?? [])].sort((a, b) =>
+        compareCodeUnits(a.path, b.path),
+      ),
     });
   }
 
-  return {
-    excerpts,
-    coverage: {
-      kind,
-      classes,
-      budget_chars: budget,
-      spent_chars: [...allocations.values()].reduce(
-        (sum, allocation) => sum + allocation.spent,
-        0,
-      ),
-    },
-  };
+  return { excerpts, coverage: { kind, classes } };
 }
 
 /** Every non-empty line of a file, with its TRUE 1-based number. */
@@ -701,6 +519,11 @@ function renderPacket(
     "This packet is your ONLY input. It was materialized by the tool to contain",
     "exactly this channel's evidence; do not read repository files directly.",
     "",
+    "Every file this channel names is delivered IN FULL — nothing here was cut",
+    "short to fit a size budget, because this packet carries no character limit.",
+    "Any file that could not be delivered at all is named at the end with its",
+    "reason, so an absence is stated rather than silent.",
+    "",
     "Every content line below is prefixed with its TRUE line number in its own",
     "source file, and the manifest names the exact line runs delivered. A correct",
     "citation is COPIED from here — never counted, inferred, or reconstructed.",
@@ -724,7 +547,11 @@ function renderPacket(
     );
   }
   const omitted = coverage.classes.flatMap((entry) =>
-    entry.omitted.map((row) => `${row.path} (${OMISSION_PROSE[row.reason]})`),
+    entry.omitted.map(
+      (row) =>
+        `${row.path} (${OMISSION_PROSE[row.reason]}` +
+        `${row.bytes === undefined ? "" : `, ${row.bytes} bytes`})`,
+    ),
   );
   if (omitted.length > 0) {
     lines.push(
@@ -738,7 +565,6 @@ function renderPacket(
 }
 
 const OMISSION_PROSE: Record<OmissionReason, string> = {
-  total_budget: "no room left in this channel's budget",
   unreadable_or_oversized: "unreadable or oversized",
   no_content: "no content of this evidence class in the file",
 };

@@ -621,10 +621,8 @@ function renderCharterCoverageSection(
   for (const packet of coverage) {
     lines.push(`- \`${packet.kind}\` channel:`);
     for (const entry of packet.classes) {
-      const truncated =
-        entry.truncated > 0 ? `, ${entry.truncated} truncated` : "";
       lines.push(
-        `  - ${entry.evidence_class}: ${entry.delivered} of ${entry.named} delivered${truncated}` +
+        `  - ${entry.evidence_class}: ${entry.delivered} of ${entry.named} delivered` +
           (entry.omitted.length > 0
             ? ` — omitted: ${entry.omitted
                 .map((row) => `${row.path} (${row.reason})`)
