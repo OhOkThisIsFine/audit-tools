@@ -182,3 +182,29 @@ export async function detectProjectFacts(root: string): Promise<ProjectFacts> {
     commands: discoverProjectCommands(root),
   };
 }
+
+/**
+ * The facts a run has when nothing was detected — an unknown type and only
+ * the two actions appropriate for every repository. Planning falls back to
+ * this when no persisted facts exist; it never detects on its own, because
+ * detection spawns git and planning is backend-independent by contract.
+ */
+export function neutralProjectFacts(): ProjectFacts {
+  const signals: ProjectSignals = {
+    git_repo: false,
+    remotes: [],
+    manifests: [],
+    package_private: null,
+    package_publishable: false,
+    release_scripts: [],
+    ci_config: [],
+  };
+  const { candidates, rationale } = candidateClosingActions(signals);
+  return {
+    project_type: "unknown",
+    candidate_closing_actions: candidates,
+    candidate_rationale: rationale,
+    signals,
+    commands: {},
+  };
+}

@@ -2,7 +2,8 @@
  * MNT-remediate-pipeline: maintainability regression assertions.
  *
  * MNT-d86014de: Magic string "`commit`or`none`" missing space between options.
- *   Fix: render "`commit` or `none`" in the intent-checkpoint prompt.
+ *   Fix: rendered with spaces; the string itself is gone since 2026-09-04 (detected candidates
+ *   are rendered instead — see the note at the end of this file).
  *
  * MNT-ce15022c: `inferRepairTarget` returned deprecated "design_spec" as fallback.
  *   Fix: fallback now returns "finalized_module_contracts" directly.
@@ -34,11 +35,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { inferRepairTarget } from "../../src/remediate/steps/contractPipeline.js";
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── MNT-ce15022c: inferRepairTarget fallback is finalized_module_contracts ────
 
@@ -75,17 +72,7 @@ describe("MNT-ce15022c: inferRepairTarget no longer returns deprecated design_sp
   });
 });
 
-// ── MNT-d86014de: closing-options string has correct spacing ──────────────────
-
-describe("MNT-d86014de: closingOptions string has correct spacing in nextStep.ts source", () => {
-  it("source text contains `commit` or `none` (with spaces) not `commit`or`none`", () => {
-    const nextStepSrc = readFileSync(
-      join(__dirname, "../../src/remediate/steps/nextStep.ts"),
-      "utf8",
-    );
-    // The bug: no spaces around "or" in the closing-options inline string.
-    expect(nextStepSrc).not.toContain('or `none`"'.replace(/ /g, ""));
-    // The fix: spaces present around the trailing "or `none`".
-    expect(nextStepSrc).toContain('or `none`');
-  });
-});
+// MNT-d86014de (the closing-options inline string's spacing) has no subject any
+// more: the confirm step renders the DETECTED candidates through
+// renderClosingActionSection (owner decision 92b0e2dd7cfdc06d), pinned by
+// tests/remediate/closing-action-choice.test.ts.

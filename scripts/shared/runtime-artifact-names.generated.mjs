@@ -61,6 +61,7 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "intent_checkpoint.json",
   "pending-audit-tasks.json",
   "phase.lock",
+  "project-facts.json",
   "remediation-brief.md",
   "remediation-closing-result.json",
   "remediation-outcomes.json",

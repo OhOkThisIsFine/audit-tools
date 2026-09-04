@@ -48,6 +48,7 @@ import {
   CLOSING_ACTIONS,
   detectProjectFacts,
   isClosingAction,
+  neutralProjectFacts,
 } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -138,6 +139,8 @@ import {
   isIntakeReady,
   manifestIsInputBound,
   readIntakeArtifacts,
+  readProjectFacts,
+  writeProjectFacts,
   resolveManifestSources,
   type IntakeSourceManifest,
 } from "../intake.js";
@@ -1357,7 +1360,9 @@ async function handlePendingExtractedPlan(
   try {
     ({ plan, sourceFindings, mergeMap } = normalizeExtractedPlan(
       extractedPlan,
-      await detectProjectFacts(root),
+      // Persisted by the confirm step; planning spawns nothing (the
+      // backend-independent planning contract), so it never detects here.
+      (await readProjectFacts(artifactsDir)) ?? neutralProjectFacts(),
     ));
 
     // INTENT ORDERING, applied where the plan's findings and blocks are
@@ -3597,6 +3602,9 @@ async function buildConfirmIntentStep(ctx: {
   // Closing action: DETECTED candidates, presented for the host to choose
   // from; the tool never selects one (owner decision 92b0e2dd7cfdc06d).
   const facts = await detectProjectFacts(root);
+  // Persisted for planning, which spawns nothing by contract and reads this
+  // artifact instead of detecting again.
+  await writeProjectFacts(artifactsDir, facts);
   const closingSection = renderClosingActionSection(facts);
   // A confirmed checkpoint whose closing_action is not in the vocabulary
   // re-enters this step by name — a refusal, never a silent default.

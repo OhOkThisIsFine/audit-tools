@@ -6,13 +6,15 @@
 // candidates), and the contract pipeline's extracted plan carrying detected
 // values instead of a hard-coded ["none"].
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { promoteImplementationDagToExtractedPlan } from "../../src/remediate/steps/contractPipeline.js";
 import { StateStore } from "../../src/remediate/state/store.js";
-import { intakePaths } from "../../src/remediate/intake.js";
+import { intakePaths, writeProjectFacts } from "../../src/remediate/intake.js";
+import { detectProjectFacts } from "audit-tools/shared";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 
 const harness = createNextStepHarness(".test-closing-action-choice");
@@ -137,6 +139,10 @@ describe("closing action: detected candidates, user choice", () => {
     expect(prompt).toContain("the root is a git working tree");
     expect(prompt).toContain('"closing_action"');
     expect(prompt).not.toContain("Suggested Closing Action");
+    expect(
+      existsSync(intakePaths(ARTIFACTS_DIR).projectFacts),
+      "the confirm step persists the detected facts for planning, which spawns nothing",
+    ).toBe(true);
   });
 
   it("a confirmed checkpoint whose closing_action is outside the vocabulary is refused by name", async () => {
@@ -153,6 +159,8 @@ describe("closing action: detected candidates, user choice", () => {
   it("the host's choice reaches closing_plan, and detection fills the plan's candidates", async () => {
     await writeReadyDocumentIntake();
     await writeExtractedPlanWithoutFacts();
+    // The confirm step runs first, as in the real flow: it detects and persists the facts.
+    await decideNextStep({ root: REPO_DIR });
     await writeHostCheckpoint({ closing_action: "commit" });
 
     const step = await decideNextStep({ root: REPO_DIR });
@@ -167,6 +175,7 @@ describe("closing action: detected candidates, user choice", () => {
   it("an omitted closing_action is none — nothing is inferred from the candidates", async () => {
     await writeReadyDocumentIntake();
     await writeExtractedPlanWithoutFacts();
+    await decideNextStep({ root: REPO_DIR });
     await writeHostCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
@@ -176,9 +185,12 @@ describe("closing action: detected candidates, user choice", () => {
     expect(state?.closing_plan?.action, `after step ${step.step_kind}`).toBe("none");
   });
 
-  it("the contract pipeline's extracted plan carries detected candidates, not a hard-coded none", async () => {
+  it("the contract pipeline's extracted plan carries the persisted detected candidates, not a hard-coded none", async () => {
     await writeCompleteContractPipelineDag();
     git("remote", "add", "origin", "https://example.invalid/fixture.git");
+    // The confirm step's persisted facts are what planning consumes; promotion
+    // itself spawns nothing (the backend-independent planning contract).
+    await writeProjectFacts(ARTIFACTS_DIR, await detectProjectFacts(REPO_DIR));
 
     await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR, REPO_DIR);
 

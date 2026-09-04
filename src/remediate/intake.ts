@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
+import { writeJsonFile, type ProjectFacts } from "audit-tools/shared";
 import {
   readOptionalJsonFile,
   readOptionalTextFile,
@@ -109,6 +110,7 @@ export function intakePaths(artifactsDir: string): {
   findingsDigest: string;
   findingEnumeration: string;
   riskSignal: string;
+  projectFacts: string;
 } {
   const dir = join(artifactsDir, "intake");
   return {
@@ -123,7 +125,35 @@ export function intakePaths(artifactsDir: string): {
     findingsDigest: join(dir, "findings-digest.json"),
     findingEnumeration: join(dir, "finding-enumeration.json"),
     riskSignal: join(dir, "risk-signal.json"),
+    projectFacts: join(dir, "project-facts.json"),
   };
+}
+
+/**
+ * The project facts the confirm step detected — project type, candidate
+ * closing actions and the signals behind them (owner decision
+ * 92b0e2dd7cfdc06d). Detection spawns git, and planning is
+ * backend-independent by contract (it spawns nothing), so the confirm step
+ * persists what it detected and planning READS it; a run whose facts were
+ * never persisted plans on `neutralProjectFacts()`.
+ */
+export const PROJECT_FACTS_SCHEMA_VERSION = "remediate-code-project-facts/v1alpha1";
+
+export interface PersistedProjectFacts extends ProjectFacts {
+  schema_version: typeof PROJECT_FACTS_SCHEMA_VERSION;
+}
+
+export async function writeProjectFacts(artifactsDir: string, facts: ProjectFacts): Promise<void> {
+  const persisted: PersistedProjectFacts = { schema_version: PROJECT_FACTS_SCHEMA_VERSION, ...facts };
+  await writeJsonFile(intakePaths(artifactsDir).projectFacts, persisted);
+}
+
+/** The persisted facts, or null when absent or written under another schema version. */
+export async function readProjectFacts(artifactsDir: string): Promise<ProjectFacts | null> {
+  const raw = await readOptionalJsonFile<PersistedProjectFacts>(intakePaths(artifactsDir).projectFacts);
+  if (!raw || raw.schema_version !== PROJECT_FACTS_SCHEMA_VERSION) return null;
+  const { schema_version: _version, ...facts } = raw;
+  return facts;
 }
 
 /**

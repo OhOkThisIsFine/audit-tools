@@ -42,7 +42,7 @@ import {
   normalizeRepoPath,
   repoRelativePath,
   toPosixPath,
-  detectProjectFacts,
+  neutralProjectFacts,
 } from "audit-tools/shared";
 import {
   createStepEmissionScaffold,
@@ -161,7 +161,7 @@ import { writeCurrentStep } from "./stepWriter.js";
 import { loaderCommand } from "./prompts.js";
 import type { RemediationStep } from "./types.js";
 import type { RemediationStepKind } from "./types.js";
-import { intakePaths } from "../intake.js";
+import { intakePaths, readProjectFacts } from "../intake.js";
 
 // ── Phase → artifact name mapping ─────────────────────────────────────────────
 // PHASE_TO_ARTIFACT is single-sourced in contractPipelinePrompts.ts (it also
@@ -4566,9 +4566,10 @@ export async function promoteImplementationDagToExtractedPlan(
     };
   });
 
-  // Detected, never chosen: the candidates the host picks from at the intent
-  // checkpoint (owner decision 92b0e2dd7cfdc06d).
-  const facts = await detectProjectFacts(root);
+  // Detected at the confirm step and persisted, never chosen: the candidates
+  // the host picks from (owner decision 92b0e2dd7cfdc06d). Planning reads the
+  // artifact and spawns nothing (the backend-independent planning contract).
+  const facts = (await readProjectFacts(artifactsDir)) ?? neutralProjectFacts();
   const extractedPlan = {
     plan_id: dag?.goal_id ?? `CP-PLAN-${Date.now()}`,
     goal_id: dag?.goal_id,

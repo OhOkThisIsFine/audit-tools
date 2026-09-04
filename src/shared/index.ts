@@ -662,7 +662,11 @@ export { discoverProjectCommands } from "./tooling/testCommand.js";
 export type { ClosingAction } from "./types/closingActions.js";
 export { CLOSING_ACTIONS, isClosingAction } from "./types/closingActions.js";
 export type { ProjectFacts, ProjectSignals } from "./tooling/projectFacts.js";
-export { candidateClosingActions, detectProjectFacts } from "./tooling/projectFacts.js";
+export {
+  candidateClosingActions,
+  detectProjectFacts,
+  neutralProjectFacts,
+} from "./tooling/projectFacts.js";
 
 // Tooling: THE declared single-invocation command shape. One rule, asked by
 // every boundary that produces, consumes, or spawns a declared command — the
