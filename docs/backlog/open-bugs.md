@@ -604,24 +604,6 @@
   `worktreeTree` to learn whether the baseline was green. Its home is `C:\Code\docs\backlog.md`,
   because the declaration schema and its reader are machine-wide.
 
-- **Friction walk (guard-test-hermeticity lap, 2026-08-30):** (1) **ambiguous-direction:** none —
-  the lap's goal came from its own baseline red and was approved before any edit. (2) **false_red
-  (high):** the lap's subject — `npm test` red once on any lap opening behind main, then green on a
-  rerun, because tool-input-guard rule 3 refused where rule 1 was under test and CONSUMED the live
-  <!-- doc-citation-exempt: gitignored runtime state written by session-start-guards.mjs, never tracked -->
-  `stale-main.json`. FIXED and now mechanically enforced by a contract test in the same file, so no
-  entry is kept for it; the uncovered half is stated as data in the guard-reach registry.
-  (3) **tool-should-decide (medium): a two-half fix cannot be red-green proved by inverting ONE
-  half.** The fix couples a temp ROOT (what actually keeps rule 3 off live state) to the payload
-  PATHS (which must agree with that root). Inverting only the paths left a planted marker
-  SURVIVING — which reads as "the defect was never real". Only inverting BOTH reproduced
-  `CONSUMED`. A half-inversion fails in the reassuring direction, which is the dangerous one.
-  (4) **environment (low):** `runHook` and `runInputGuard` carry byte-identical option lines
-  (`{ root = X, env = {} }: RunHookOptions = {},`), so a scripted `String.replace` hit the wrong one
-  and silently SWAPPED both defaults — leaving `runHook` on the temp root, which is exactly the
-  shape measured as dangerous. Caught by reading the file back, by no gate. A scripted edit over
-  repeated signature text needs an anchor, never a bare string match.
-
 - **Friction walk (two-identities lap, 2026-08-30):** (1) **ambiguous-direction:** none — both
   approved goals stated a testable property, and the one live owner decision (which goals) was
   asked before work started. (2) **tool-should-decide (medium):** nothing validates that a backlog

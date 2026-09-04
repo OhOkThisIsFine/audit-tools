@@ -2068,5 +2068,19 @@
     "decided_at": "2026-09-03T15:39:24.464Z",
     "completed_at": "2026-09-03T15:49:18.338Z",
     "completed_ref": "507bcc98 — P50 landed: constant + pointers + drift guard"
+  },
+  "baf2da68fa9cd24f": {
+    "disposition": "settled",
+    "answer": "Adopt P51 and widen to every form-recognizing guard: add a forms field to the guard-reach registry carrying literal positive samples per recognized syntax, populate it for check:memory-citations with the three known forms (lowercase inline, sentence-initial, wikilink) and for every other guard whose job is to recognize a syntax rather than a file set, and land the contract test at tests/shared/ so a lost form goes red. Owner answered 2026-09-04 at lap start.",
+    "subject": "P51: one guard has shipped four reach defects on four dates — declare a guard's recognized FORMS as data, like its file reach?",
+    "path": "scripts/guard-reach-data.mjs",
+    "decided_at": "2026-09-04T13:21:29.406Z"
+  },
+  "d4809ab86c433e58": {
+    "disposition": "settled",
+    "answer": "Move lesson (4) to the machine-wide standing traps (C:/Code/docs/backlog.md, Standing traps half), then delete the whole friction-walk entry from docs/backlog/open-bugs.md in the same lap. The lesson applies to scripted edits in any repo, so its home is machine-wide, not this repo. Owner answered 2026-09-04 at lap start.",
+    "subject": "Backlog: a shipped friction-walk entry carries one lesson that is homed nowhere — delete it, or move the lesson first?",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-09-04T13:21:29.458Z"
   }
 }
