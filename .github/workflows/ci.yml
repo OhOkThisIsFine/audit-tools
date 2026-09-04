@@ -258,11 +258,12 @@ env:
   NPM_CONFIG_LOGLEVEL: notice
 
 jobs:
-  # ci.yml runs only the cheap deterministic chain (`checks` → verify:checks).
-  # The vitest suite is owned by audit-code-test-suite.yml, which runs it once per
-  # Node line (20 + 22), each sharded 4 ways — so the suite is not re-run here on
-  # Node 22 (that was a pure duplicate of audit-code-test-suite.yml's Node-22 line).
-  # The release-time authoritative gate still lives in publish-package.yml.
+  # ci.yml runs only the cheap deterministic chain (`checks` → verify:checks) on
+  # the one pinned line above. The vitest suite is owned by
+  # audit-code-test-suite.yml, which runs it once per supported Node major (its
+  # `matrix.node` axis is the list), each sharded 4 ways — so the suite is not
+  # re-run here. The release-time authoritative gate still lives in
+  # publish-package.yml.
   # This `checks` job carries a release-bump skip guard: the `release: vX.Y.Z`
   # commit's authoritative gate runs on Linux in publish-package.yml, so re-running
   # it here is a pure duplicate. The predicate is version-digit-anchored (GitHub

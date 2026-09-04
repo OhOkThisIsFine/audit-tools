@@ -72,11 +72,11 @@ env:
 
 jobs:
   orchestration-tests:
-    name: Orchestration tests (shard ${{ matrix.shard }}/4)
+    name: Orchestration tests (Node ${{ matrix.node }}, shard ${{ matrix.shard }}/4)
     # Skip the suite on the `release: vX.Y.Z` bump push: that commit only bumps the
     # version (the code was already exercised by this suite on the pre-bump commit),
     # and publish-package.yml runs the authoritative sharded suite for the actual
-    # release. Re-running the 8-job matrix here would be a pure duplicate. Mirrors
+    # release. Re-running the Node × shard matrix here would be a pure duplicate. Mirrors
     # the same guard on ci.yml's `checks` job. The predicate is version-digit-anchored
     # (GitHub expressions have no regex): it matches only `release: v<digit>...` — the
     # exact bump-commit format emitted by scripts/release-and-publish.mjs
@@ -99,12 +99,19 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      # Sole suite runner: the vitest suite runs once on Node 22.14.0, sharded
-      # 4 ways (not the full suite whole). ci.yml carries only verify:checks now,
-      # so this workflow owns type-stripping coverage ci.yml (Node 22 only) lacks.
-      # Keep the denominator in the `vitest run --shard` command below in sync
-      # with the length of this shard list.
+      # Sole suite runner: the vitest suite runs sharded 4 ways (never whole) on
+      # EVERY Node major the engines range admits and the Node project still
+      # ships — the floor (package.json engines.node >=22), the active LTS line
+      # and the current line. Floating majors, so each job runs its line's
+      # latest release: that is the support claim under test. ci.yml carries
+      # only verify:checks on the pinned floor line, so this workflow owns the
+      # runtime coverage of every supported major (owner decision b175a773,
+      # 2026-08-31, superseding T5's single line). Keep the denominator in the
+      # `vitest run --shard` command below in sync with the length of the shard
+      # list; tests/audit/release-contract.test.ts pins the matrix shape against
+      # package.json.
       matrix:
+        node: ["22", "24", "26"]
         shard: [1, 2, 3, 4]
     steps:
       - name: Checkout
@@ -114,7 +121,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: "22.14.0"
+          node-version: ${{ matrix.node }}
           cache: npm
       - name: Validate package-lock.json
         timeout-minutes: 2
@@ -159,7 +166,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: audit-code-test-suite-npm-logs-shard-${{ matrix.shard }}
+          name: audit-code-test-suite-npm-logs-node${{ matrix.node }}-shard-${{ matrix.shard }}
           path: |
             ~/.npm/_logs
             npm-debug.log*
@@ -169,7 +176,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: audit-code-test-suite-vitest-ledger-shard-${{ matrix.shard }}
+          name: audit-code-test-suite-vitest-ledger-node${{ matrix.node }}-shard-${{ matrix.shard }}
           path: |
             .audit-tools-profile/vitest-shard${{ matrix.shard }}of4-latest.json
           if-no-files-found: ignore

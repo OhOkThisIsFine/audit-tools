@@ -2030,14 +2030,18 @@
     "answer": "Remove the consumer symbol from the dependency-map sentence. Preserve only the durable invariant that the audit side writes continuity information and does not consume it; do not name the current downstream function or consumer.",
     "subject": "normative: dependency-map names computeBlockContinuityScores, a symbol that no longer exists — repoint it at the shared scorer?",
     "path": "spec/audit/dependency-map.md",
-    "decided_at": "2026-08-31T15:33:39.029Z"
+    "decided_at": "2026-08-31T15:33:39.029Z",
+    "completed_at": "2026-09-04T13:32:00.137Z",
+    "completed_ref": "audit-tools 8bd754fa: dependency-map access_memory paragraph keeps only the write-not-consume invariant; the consumer symbol is gone"
   },
   "cde41c31f1c6a7f3": {
     "disposition": "settled",
     "answer": "Replace the two hand-maintained artifact enumerations with the durable invariant: every artifact whose generated dependency row lists the changed upstream artifact. Keep the examples explanatory while making the generated tables the sole authoritative enumeration.",
     "subject": "normative: two dependency-map examples hand-list artifacts and omit rows their own generated tables carry — state the invariant instead of re-listing?",
     "path": "spec/audit/dependency-map.md",
-    "decided_at": "2026-08-31T16:25:27.238Z"
+    "decided_at": "2026-08-31T16:25:27.238Z",
+    "completed_at": "2026-09-04T13:33:33.303Z",
+    "completed_ref": "audit-tools 8bd754fa: the three staleness examples state the generated-row invariant; no hand-listed artifacts remain"
   },
   "b175a773958b1b4d": {
     "disposition": "settled",

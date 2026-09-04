@@ -44,20 +44,16 @@
   boundary git itself owns. **Property:** the gate resolves the target repository from the command's
   own working directory and abstains when that is not this repository.
 
-- **Four code and CI comments assert a shape the tree no longer has, and nothing checks a comment
+- **Three code comments assert a shape the tree no longer has, and nothing checks a comment
   against the code it describes (2026-08-31, medium, friction: tool_should_decide).**
   The header of `src/shared/continuityScore.ts` says audit "re-exports `computeContinuityScores` …
   and biases review-packet ORDERING with it"; `grep` over `src/audit` finds no consumer at all, only
   `access_memory.json` writers — and `spec/audit/dependency-map.md` separately calls that artifact
-  write-only, so the comment is what makes the spec look self-contradictory. The `jobs:` preamble in
-  `.github/workflows/ci.yml` says the suite runs "once per Node line (20 + 22), each sharded 4
-  ways", and `orchestration-tests` in `.github/workflows/audit-code-test-suite.yml` calls it an
-  "8-job matrix"; that workflow has ONE job, a `shard: [1,2,3,4]` matrix and `node-version:
-  "22.14.0"`, so it claims Node-20 coverage that does not exist. The doc comments on
+  write-only, so the comment is what makes the spec look self-contradictory. The doc comments on
   `renderConceptualReviewPrompt` (`src/audit/orchestrator/designReviewPrompt.ts`) and on
   `conceptual_findings` (`src/audit/types/designAssessment.ts`) both list five conceptual-review
   categories where `conceptualOutputFormat` has emitted eight since `e9b0ae77`, and
-  `findingsEnvelopeExample` names a "combined" pass that exists nowhere else in the tree. All four
+  `findingsEnvelopeExample` names a "combined" pass that exists nowhere else in the tree. All three
   were found by a doc-review lane
   reading code to check a DOC, which is the point: the docs are gated by
   `check:doc-code-citations`, and comments are gated by nothing. **Property:** a comment that names a

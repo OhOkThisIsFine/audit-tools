@@ -4,9 +4,10 @@ The maintainer land-and-publish flow — release gate, publication, version bump
 is owned by the ship skill (`.claude/skills/ship/SKILL.md`), including the
 generated gate-step list. `npm run release:patch` bumps + tags;
 `npm run release:patch:publish` runs the full flow (`release:minor` /
-`release:major` variants likewise). Routine CI exercises the
-Node majors matrixed in `.github/workflows/*.yml` (the matrix there is
-self-describing).
+`release:major` variants likewise). Routine CI runs the full suite on every Node major
+that `engines.node` admits and the Node project still ships; the matrix in
+`.github/workflows/audit-code-test-suite.yml` is self-describing, and the release pipeline
+builds and publishes on its single pinned line (`RELEASE_NODE_VERSION`).
 
 This page keeps what the skill does not carry: manual host validation, manual
 workflow dispatch, trusted-publisher configuration, and troubleshooting.

@@ -2,6 +2,7 @@ import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -67,10 +68,11 @@ test("release docs point at trusted publishing instead of token-based npm auth",
   expect(releasing).toMatch(/Trusted Publishing/i);
   expect(releasing).toMatch(/publish-package\.yml/);
   expect(releasing).toMatch(/workflow_dispatch/);
-  // The Node matrix is documented as self-describing from the workflow files
+  // The Node matrix is documented as self-describing from the workflow file
   // (DD-8: no pinned version status strings in the concept doc) — assert the
-  // durable pointer, not specific major versions.
-  expect(releasing).toMatch(/Node majors matrixed in .*\.github\/workflows/i);
+  // durable pointer, not specific major versions. The matrix SHAPE is pinned
+  // against package.json in the CI-workflow test below.
+  expect(releasing).toMatch(/every Node major[\s\S]*audit-code-test-suite\.yml/i);
   expect(releasing).toMatch(/dry_run=true/);
   expect(releasing).toMatch(/\*-npm-logs/);
   expect(releasing).toMatch(/npm run release:patch/);
@@ -223,16 +225,42 @@ test("primary CI workflows validate the lockfile, preserve diagnostics, and make
     expect(workflow).toMatch(/npm-debug\.log\*/);
   }
 
-  expect(ci).toMatch(/CI_NODE_VERSION: "22\.14\.0"/);
-
-  // T5 (owner-settled 2026-08-07): ONE Node line across the whole pipeline —
-  // 22.14.0 pinned, no matrix axis, engines >=22. "No workflow references Node
-  // 20" is T5's acceptance clause, pinned here as the negative assertion.
-  expect(testSuite).toMatch(/name: Orchestration tests \(shard \$\{\{ matrix\.shard \}\}\/4\)/);
+  // Owner decision b175a773 (2026-08-31), superseding T5's single Node line:
+  // routine CI runs the suite on EVERY Node major the engines range admits. The
+  // matrix is data in the workflow; this pins its SHAPE against package.json so
+  // a narrowed matrix, or a raised floor with no matching job, goes red.
+  const packageJson = JSON.parse(await readText("package.json"));
+  const engineFloor = Number(/(\d+)/.exec(String(packageJson.engines?.node ?? ""))?.[1]);
+  expect(Number.isInteger(engineFloor), "package.json engines.node must state a numeric floor").toBeTruthy();
+  type MatrixJob = { name?: unknown; strategy?: { matrix?: { node?: unknown } } };
+  const suite = parseYaml(testSuite) as { jobs?: Record<string, MatrixJob> };
+  const job = suite.jobs?.["orchestration-tests"];
+  const nodeAxis = job?.strategy?.matrix?.node;
+  expect(Array.isArray(nodeAxis), "orchestration-tests must carry a strategy.matrix.node axis").toBeTruthy();
+  const majors = (nodeAxis as unknown[]).map((value) => Number.parseInt(String(value), 10));
+  expect(majors.length, "the suite must run on more than one Node major").toBeGreaterThanOrEqual(2);
+  expect(new Set(majors).size, "matrix majors must be distinct").toBe(majors.length);
+  for (const major of majors) {
+    expect(
+      Number.isInteger(major) && major >= engineFloor,
+      `matrix major ${major} must be an integer >= the engines floor ${engineFloor}`,
+    ).toBeTruthy();
+  }
+  expect(majors, "the engines floor itself must be exercised").toContain(engineFloor);
+  expect(String(job?.name)).toMatch(/\$\{\{ matrix\.node \}\}/);
+  expect(testSuite).toMatch(/node-version: \$\{\{ matrix\.node \}\}/);
   expect(testSuite).toMatch(/fail-fast: false/);
-  expect(testSuite).toMatch(/node-version: "22\.14\.0"/);
-  expect(testSuite.includes("20.19.2"), "T5: no workflow may reference Node 20").toBeFalsy();
-  expect(testSuite).toMatch(/audit-code-test-suite-npm-logs-shard-\$\{\{ matrix\.shard \}\}/);
+  // Artifact names carry both axes — upload-artifact v4 refuses a duplicate name.
+  expect(testSuite).toMatch(/audit-code-test-suite-npm-logs-node\$\{\{ matrix\.node \}\}-shard-\$\{\{ matrix\.shard \}\}/);
+  expect(testSuite).toMatch(/audit-code-test-suite-vitest-ledger-node\$\{\{ matrix\.node \}\}-shard-\$\{\{ matrix\.shard \}\}/);
+  // The deterministic check chain stays on ONE pinned line, itself a supported major.
+  const ciPin = /CI_NODE_VERSION: "(\d+)\.\d+\.\d+"/.exec(ci);
+  expect(ciPin, "ci.yml pins CI_NODE_VERSION to an exact version").not.toBeNull();
+  expect(Number(ciPin?.[1])).toBeGreaterThanOrEqual(engineFloor);
+  // T5's acceptance clause survives the matrix: no workflow references Node 20.
+  for (const workflow of [ci, testSuite]) {
+    expect(workflow.includes("20.19.2"), "no workflow may reference Node 20").toBeFalsy();
+  }
 });
 
 test("test-suite workflow pins external GitHub Actions to commit SHAs", async () => {
