@@ -38,6 +38,15 @@ trusting its leg-2 report.
   unreadable or empty omissions.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **6 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `l1-1` — Instruction-file edit: four factual corrections in CLAUDE.md — apply them, or drop the two hand-copied lists instead?
+  - `l1-2` — Normative spec: remediation-goals.md still puts project-fact detection in Phase 1, but c899265a moved it to the confirm step — correct the spec, or is the spec the target the code should meet?
+  - `l1-3` — Normative spec: remediation-goals.md promises e2e_command DETECTION that is not wired anywhere — say so, or build it?
+  - `l1-4` — Doc-set condensation: the ingestion check set lives in three docs and each names a different check — pick one home, and which?
+  - `bl-1` — Backlog: three friction walks each list guards that behaved CORRECTLY — delete those sub-items, or is that list load-bearing?
+  - `sol-1` — P53: the commit gate guesses at a boundary git owns, and a memory note calls that defect closed while it is live — move the gate to core.hooksPath?
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
