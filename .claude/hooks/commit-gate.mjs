@@ -134,7 +134,6 @@ if (toplevel.status !== 0 || !toplevel.stdout.trim()) {
 const root = resolve(toplevel.stdout.trim());
 const {
   git,
-  gitWithIndex,
   captureWorktreeTree,
   listTreePaths,
   checkoutTreeExact,
