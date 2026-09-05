@@ -189,8 +189,11 @@ the conflicts between them. The design phase is:
    A's declared output ≠ module B's declared input), then LLM resolution per
    mismatch (which side adjusts, what the agreed interface becomes). Resolutions
    may be adversarially checked (propose → attack → accept) before adoption.
-4. **Contract finalization** — parallel: each module agent receives the
-   reconciliation report and finalizes its contract.
+4. **Contract finalization** — deterministic: the tool merges each drafted
+   module contract with the seam report it belongs to
+   (`deriveFinalizedModuleContracts`), and re-emits an LLM finalization step only
+   when the declared token graph is cyclic or a downstream gate finds the merge
+   inadequate. The judgment already happened at seam reconciliation.
 5. **Critique** — conceptual design critique of the finalized contracts (the
    philosophy/alternatives/better-directions lens, distinct from the mechanical
    contract-assessment phase below).
@@ -220,7 +223,7 @@ the conflicts between them. The design phase is:
     inferred from the failing classifications rather than defaulting to a fixed
     artifact.
 
-Parallel-friendly phases (2, 4; plus critique alongside assessment where inputs
+Parallel-friendly phases (2; plus critique alongside assessment where inputs
 allow) dispatch as parallel agents in one step, not sequential next-step
 roundtrips. Prompt-caching principle applies: shared prefix (GoalSpec +
 ContextBundle) first, module-specific payload last.
