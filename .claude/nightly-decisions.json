@@ -2151,6 +2151,8 @@
     "answer": "Adopt P53. Move the commit-gating legs to a tracked pre-commit script run through core.hooksPath, re-scope the hook-bypass rule so an override pointing at the tracked hook directory is the intended state, re-derive the loop-core and constitutional-doc attestation bindings there, and leave the non-commit shell traps at the tool boundary. Correct the memory note in the same pass.",
     "subject": "the commit gate is wired at the tool boundary and parses shell text to decide which repository a commit targets, so a throwaway repo is judged by this repository's rules",
     "path": "scripts/guard-reach-data.mjs",
-    "decided_at": "2026-09-05T16:07:17.125Z"
+    "decided_at": "2026-09-05T16:07:17.125Z",
+    "completed_at": "2026-09-05T17:43:39.120Z",
+    "completed_ref": "765af9a7 — P53 landed: commit legs run from .githooks via commit-gate.mjs; the tool-boundary hook keeps the bypass refusal, push child refusal and incoming-content routing; memory note corrected"
   }
 }
