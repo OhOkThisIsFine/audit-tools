@@ -1,0 +1,9 @@
+#!/bin/sh
+# Git's own boundary for the commit legs (P53, owner decision 2026-09-05).
+# git runs THIS repository's hook for THIS repository's commits and never for
+# anyone else's, so jurisdiction is by construction — no shell-text parsing.
+# The gate is resolved from THIS FILE's location, not the worktree's, so a
+# linked worktree checked out on an older branch still runs the current gate
+# against its own root (the gate reads `git rev-parse --show-toplevel` in cwd).
+# core.hooksPath is pointed here by .claude/hooks/session-start-guards.mjs.
+exec node "$(dirname "$0")/../.claude/hooks/commit-gate.mjs" pre-commit "$@"

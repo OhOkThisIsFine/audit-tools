@@ -1,0 +1,10 @@
+#!/bin/sh
+# core.hooksPath points at this directory, which SILENCES `.git/hooks/` — and
+# the maintainer keeps a local-only, never-committed identity guard at
+# `.git/hooks/pre-push`. Delegate to it when present (exec keeps stdin, which
+# carries the ref lines pre-push reads); otherwise there is nothing to run.
+local="$(git rev-parse --git-common-dir)/hooks/pre-push"
+if [ -x "$local" ]; then
+  exec "$local" "$@"
+fi
+exit 0

@@ -63,6 +63,33 @@ export function runGate(
   });
 }
 
+export const COMMIT_GATE = resolve(HERE, "../../.claude/hooks/commit-gate.mjs");
+
+// Run the GIT-BOUNDARY commit gate the way git runs it: cwd = the repo (git
+// runs hooks at the worktree top level), the hook name as argv[2], no stdin.
+// `sessionId` rides as CLAUDE_CODE_SESSION_ID — the child-session refusal keys
+// on it from the environment there — and is DELETED when omitted, so a test
+// that says nothing about sessions is not accidentally this dev shell's
+// session; CLAUDE_PID is deleted for the same reason (it marks "inside a
+// Claude process" for the session-less announcement). The two dispatch vars are
+// scrubbed as in runGate.
+export function runCommitGate(
+  repo: string,
+  { sessionId, env = {}, hook = "pre-commit" }: { sessionId?: string; env?: NodeJS.ProcessEnv; hook?: string } = {},
+) {
+  const inherited = { ...process.env };
+  delete inherited.AUDIT_TOOLS_AGENT_GIT;
+  delete inherited.AUDIT_TOOLS_CHILD_SESSION;
+  delete inherited.GIT_INDEX_FILE;
+  delete inherited.CLAUDE_CODE_SESSION_ID;
+  delete inherited.CLAUDE_PID;
+  return spawnSync(process.execPath, [COMMIT_GATE, hook], {
+    cwd: repo,
+    encoding: "utf8",
+    env: { ...inherited, ...(sessionId === undefined ? {} : { CLAUDE_CODE_SESSION_ID: sessionId }), ...env },
+  });
+}
+
 export function runAttest(repo: string, args: string[]) {
   return spawnSync(process.execPath, [ATTEST, ...args], {
     cwd: repo,
@@ -86,6 +113,11 @@ export function initGateRepo(): string {
   g(repo, "config", "user.email", "t@t");
   g(repo, "config", "user.name", "t");
   g(repo, "config", "commit.gpgsign", "false");
+  // Hermetic line endings: the gate's round-trip restores the worktree through
+  // `git checkout-index`, which honours core.autocrlf — a global `true` on a
+  // Windows dev box would hand LF fixtures back as CRLF and fail byte-equality
+  // assertions for a reason that has nothing to do with the gate.
+  g(repo, "config", "core.autocrlf", "false");
   writeFileSync(
     join(repo, "package.json"),
     JSON.stringify(

@@ -503,20 +503,23 @@ test("INV-shared-core-15b: ci.yml runs a single-package build + verify gate (no 
 //
 // These tests lock the gate's existence and contract so it cannot be silently deleted.
 
-test("INV-shared-core-16: pre-commit-gate.mjs exists and blocks git commit on check failure", () => {
-  const gatePath = resolve(REPO_ROOT, ".claude/hooks/pre-commit-gate.mjs");
-  expect(existsSync(gatePath), `.claude/hooks/pre-commit-gate.mjs must exist — CRIT-tests-with-source`).toBeTruthy();
-
+test("INV-shared-core-16: commit-gate.mjs exists, is wired as git's pre-commit hook, and blocks a commit on check failure", () => {
+  // P53: the gate runs at git's own boundary — .githooks/pre-commit runs
+  // commit-gate.mjs — so the tool-boundary hook no longer has to detect commits
+  // to enforce green-at-every-commit.
+  const gatePath = resolve(REPO_ROOT, ".claude/hooks/commit-gate.mjs");
+  expect(existsSync(gatePath), `.claude/hooks/commit-gate.mjs must exist — CRIT-tests-with-source`).toBeTruthy();
   const source = readFileSync(gatePath, "utf8");
 
-  // Gate must intercept git commit invocations.
-  expect(source.includes("git") && source.includes("commit"), "pre-commit-gate.mjs must detect git commit invocations").toBeTruthy();
-
   // Gate must run npm run check (the full workspace typecheck).
-  expect(source.includes("npm run check"), "pre-commit-gate.mjs must invoke 'npm run check' — CRIT-tests-with-source").toBeTruthy();
+  expect(source.includes("npm run check"), "commit-gate.mjs must invoke 'npm run check' — CRIT-tests-with-source").toBeTruthy();
 
   // Gate must exit non-zero to block the commit when check fails.
-  expect(source.includes("process.exit(2)"), "pre-commit-gate.mjs must call process.exit(2) to block a failing commit — CRIT-tests-with-source").toBeTruthy();
+  expect(source.includes("process.exit(2)"), "commit-gate.mjs must call process.exit(2) to block a failing commit — CRIT-tests-with-source").toBeTruthy();
+
+  // And git must reach it: the tracked pre-commit hook names it.
+  const hook = readFileSync(resolve(REPO_ROOT, ".githooks/pre-commit"), "utf8");
+  expect(hook.includes("commit-gate.mjs"), ".githooks/pre-commit must run commit-gate.mjs").toBeTruthy();
 });
 
 test("INV-shared-core-16: pre-commit-gate.mjs rejects hook-bypass commits (--no-verify / core.hooksPath)", () => {

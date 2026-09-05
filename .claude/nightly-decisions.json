@@ -2133,7 +2133,9 @@
     "answer": "Do not pick a prose home. Generate the check list from the ingestion validator itself into a marked block, the way the doc-manifest table and the executor tables already work, so no copy can drift from the code.",
     "subject": "the ingestion-verification check set is enumerated in three separate documents and the three lists have already drifted apart",
     "path": "spec/multi-ide-concurrent-runs-design.md",
-    "decided_at": "2026-09-05T16:07:17.121Z"
+    "decided_at": "2026-09-05T16:07:17.121Z",
+    "completed_at": "2026-09-05T17:03:02.642Z",
+    "completed_ref": "041f7b6d — l1-4 landed: INGESTION_CHECKS registry cited by both ingests; contracts.md block generated; two docs reduced to pointers"
   },
   "8f7450e8810dba44": {
     "disposition": "settled",

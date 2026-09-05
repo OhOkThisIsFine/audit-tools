@@ -1,0 +1,4 @@
+#!/bin/sh
+# `git am` applies each patch to the index and runs this hook before it commits;
+# the applied index is the staged snapshot the gate judges. See .githooks/pre-commit.
+exec node "$(dirname "$0")/../.claude/hooks/commit-gate.mjs" pre-applypatch "$@"

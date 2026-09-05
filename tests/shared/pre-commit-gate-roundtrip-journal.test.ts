@@ -19,12 +19,16 @@ import { join } from "node:path";
 import {
   g as gIn,
   initGateRepo,
+  runCommitGate,
   runGate as runGateIn,
 } from "./pre-commit-gate-harness.js";
 
 let repo: string;
 const g = (...args: string[]) => gIn(repo, ...args);
+// Recovery runs in BOTH hooks (the tool-boundary hook heals on every shell
+// call); the round-trip itself belongs to the git-boundary commit gate (P53).
 const runGate = (command?: string) => runGateIn(repo, command);
+const runCommit = () => runCommitGate(repo);
 const stateDir = () => join(repo, ".claude", "hooks", ".state");
 const journalPath = () => join(stateDir(), "gate-roundtrip-journal.json");
 const revParse = (ref: string) => g("rev-parse", ref).stdout.trim();
@@ -89,31 +93,17 @@ describe("pre-commit gate: round-trip journal HEAD binding (open-bugs.md:291)", 
     expect(quarantined.length, "expected exactly one quarantined journal").toBe(1);
   });
 
-  test("a history-moving command with a divergent tree takes the DIRECT check, never the round-trip", () => {
-    // Staged snapshot GOOD, worktree BAD → the trees diverge. The round-trip
-    // would materialize the staged GOOD and allow; the direct worktree check
-    // sees BAD and blocks. Blocking here is the pinned behavior: the gate must
-    // not rewrite the tree around a command whose own execution rewrites it.
+  test("the commit gate keeps the staged-snapshot round-trip on a divergent tree", () => {
+    // Staged GOOD, worktree BAD: the staged GOOD is what lands, so the
+    // round-trip checks it and allows, and the worktree comes back byte-exact.
+    // (The old tool-boundary "history-moving verbs take the direct check"
+    // carve-out is gone with P53: under a git hook the index is final and the
+    // hook runs INSIDE the git command, so there is no command left to race.)
     writeFileSync(join(repo, "sentinel.txt"), "GOOD\n");
     g("add", "sentinel.txt");
     writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
 
-    const r = runGate("git rebase --continue");
-    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
-    // No journal exists afterwards — nothing was staged for crash recovery.
-    expect(existsSync(journalPath())).toBe(false);
-    // The worktree was never touched.
-    expect(readFileSync(join(repo, "sentinel.txt"), "utf8").trim()).toBe("BAD");
-  });
-
-  test("`git commit` keeps the staged-snapshot round-trip on a divergent tree", () => {
-    // Same divergence as above, but the plain commit verb: the staged GOOD is
-    // what lands, so the round-trip checks it and allows.
-    writeFileSync(join(repo, "sentinel.txt"), "GOOD\n");
-    g("add", "sentinel.txt");
-    writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
-
-    const r = runGate("git commit -m x");
+    const r = runCommit();
     expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
     expect(readFileSync(join(repo, "sentinel.txt"), "utf8").trim()).toBe("BAD");
   });

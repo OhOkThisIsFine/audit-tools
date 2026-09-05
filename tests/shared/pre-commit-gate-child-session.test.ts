@@ -13,12 +13,16 @@ import { test, describe, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeSessionRecord } from "../../scripts/shared/sessionRegistry.mjs";
-import { g as gIn, initGateRepo, runGate as runGateIn } from "./pre-commit-gate-harness.js";
+import { g as gIn, initGateRepo, runCommitGate, runGate as runGateIn } from "./pre-commit-gate-harness.js";
 
 let repo: string;
 const g = (...args: string[]) => gIn(repo, ...args);
+// P53: the COMMIT half of the refusal runs at git's boundary (commit-gate.mjs),
+// keyed on CLAUDE_CODE_SESSION_ID in the hook's environment; the PUSH half,
+// which has no git hook of ours, stays in the tool-boundary hook.
 const runGate = (command?: string, opts?: { sessionId?: string; env?: NodeJS.ProcessEnv }) =>
   runGateIn(repo, command, opts);
+const runCommit = (opts?: { sessionId?: string; env?: NodeJS.ProcessEnv }) => runCommitGate(repo, opts);
 
 beforeEach(() => {
   repo = initGateRepo();
@@ -52,7 +56,7 @@ function stageBadSentinel(): void {
 describe("pre-commit gate: child-session refusal (Build 1 / P23)", () => {
   test("C-1: refuses an unregistered session's commit, naming the mechanism but NO bypass route (P27)", () => {
     armRegistry();
-    const r = runGate("git commit -m x", { sessionId: "child-1" });
+    const r = runCommit({ sessionId: "child-1" });
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toMatch(/child session/i);
     expect(r.stderr).toContain(".claude/hooks/.state/sessions/");
@@ -71,41 +75,41 @@ describe("pre-commit gate: child-session refusal (Build 1 / P23)", () => {
     expect(r.stderr).toMatch(/child session/i);
   });
 
-  test("C-3: the inline token admits the commit — the gate then runs and passes on GOOD", () => {
+  test("C-3: the inline token admits the commit past the tool-boundary hook", () => {
+    // The inline prefix is parsed here; by the time git runs the hook it is a
+    // real environment variable (C-5 is that half).
     armRegistry();
     const r = runGate("AUDIT_TOOLS_AGENT_GIT=1 git commit -m x", { sessionId: "child-1" });
     expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toMatch(/child session/i);
   });
 
   test("C-4: the token admits the commit into the NORMAL gate, not around it — BAD still blocks", () => {
     armRegistry();
     stageBadSentinel();
-    const r = runGate("AUDIT_TOOLS_AGENT_GIT=1 git commit -m x", { sessionId: "child-1" });
+    const r = runCommit({ sessionId: "child-1", env: { AUDIT_TOOLS_AGENT_GIT: "1" } });
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toContain("`npm run check` FAILED");
     expect(r.stderr).not.toMatch(/child session/i);
   });
 
-  test("C-5: the hook-env form of the token is honored too", () => {
+  test("C-5: the environment form of the token is what git's hook honors", () => {
     armRegistry();
-    const r = runGate("git commit -m x", {
-      sessionId: "child-1",
-      env: { AUDIT_TOOLS_AGENT_GIT: "1" },
-    });
+    const r = runCommit({ sessionId: "child-1", env: { AUDIT_TOOLS_AGENT_GIT: "1" } });
     expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
   });
 
   test("C-6: a REGISTERED session gets the full normal gate — BAD blocks with the check text", () => {
     armRegistry("owner-sid");
     stageBadSentinel();
-    const r = runGate("git commit -m x", { sessionId: "owner-sid" });
+    const r = runCommit({ sessionId: "owner-sid" });
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toContain("`npm run check` FAILED");
     expect(r.stderr).not.toMatch(/child session/i);
   });
 
   test("C-7: an UNARMED registry is legacy — unregistered sid commits normally", () => {
-    const r = runGate("git commit -m x", { sessionId: "child-1" });
+    const r = runCommit({ sessionId: "child-1" });
     expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
   });
 
@@ -128,16 +132,23 @@ describe("pre-commit gate: child-session refusal (Build 1 / P23)", () => {
     expect(commit.stderr).toContain("hook-bypass");
   });
 
-  test("C-10: no session_id fails open on the commit — ANNOUNCED when the registry is armed (B4)", () => {
+  test("C-10: an id-less CLAUDE process fails open on the commit — ANNOUNCED when the registry is armed (B4)", () => {
     armRegistry();
-    const r = runGate("git commit -m x");
+    const r = runCommit({ env: { CLAUDE_PID: "1" } });
     expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
     expect(r.stderr).toContain("child-session refusal skipped");
   });
 
+  test("C-10b: a plain terminal (no Claude markers at all) commits with no session announcement", () => {
+    armRegistry();
+    const r = runCommit();
+    expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toContain("child-session refusal skipped");
+  });
+
   test("C-11: a path-shaped session_id is sanitized, classified unregistered, and refused — no crash", () => {
     armRegistry();
-    const r = runGate("git commit -m x", { sessionId: "..\\..\\evil" });
+    const r = runCommit({ sessionId: "..\\..\\evil" });
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toMatch(/child session/i);
   });

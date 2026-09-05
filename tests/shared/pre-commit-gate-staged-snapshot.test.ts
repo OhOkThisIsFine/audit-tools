@@ -9,11 +9,15 @@ import { join } from "node:path";
 import {
   g as gIn,
   initGateRepo,
+  runCommitGate,
   runGate as runGateIn,
 } from "./pre-commit-gate-harness.js";
 
 let repo: string;
 const g = (...args: string[]) => gIn(repo, ...args);
+// The snapshot legs run at GIT's boundary (commit-gate.mjs, P53); the bypass
+// refusal is the tool-boundary hook's.
+const runCommit = () => runCommitGate(repo);
 const runGate = (command?: string) => runGateIn(repo, command);
 
 beforeEach(() => {
@@ -33,7 +37,7 @@ describe("pre-commit gate: staged-snapshot validation (CP-NODE-1)", () => {
     g("add", "sentinel.txt");
     writeFileSync(join(repo, "sentinel.txt"), "GOOD\n"); // unstaged working-tree fix
 
-    const r = runGate();
+    const r = runCommit();
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toContain("npm run check");
 
@@ -51,7 +55,7 @@ describe("pre-commit gate: staged-snapshot validation (CP-NODE-1)", () => {
     g("add", "sentinel.txt");
     writeFileSync(join(repo, "sentinel.txt"), "BAD\n"); // unstaged working-tree break
 
-    const r = runGate();
+    const r = runCommit();
     expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
 
     // The unstaged working-tree change must be restored intact.
@@ -62,7 +66,7 @@ describe("pre-commit gate: staged-snapshot validation (CP-NODE-1)", () => {
     // Everything staged (working tree == index), sentinel GOOD → allow, no churn.
     writeFileSync(join(repo, "new.txt"), "x");
     g("add", "-A");
-    const r = runGate();
+    const r = runCommit();
     expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
   });
 
@@ -73,7 +77,7 @@ describe("pre-commit gate: staged-snapshot validation (CP-NODE-1)", () => {
     g("add", "sentinel.txt");
     writeFileSync(join(repo, "untracked.txt"), "keepme");
 
-    const r = runGate();
+    const r = runCommit();
     expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
     expect(existsSync(join(repo, "untracked.txt")), "untracked file must be restored").toBe(true);
     expect(readFileSync(join(repo, "untracked.txt"), "utf8")).toBe("keepme");
@@ -90,7 +94,7 @@ describe("pre-commit gate: staged-snapshot validation (CP-NODE-1)", () => {
     g("rm", "-q", "extra.txt"); // stages the deletion immediately
     writeFileSync(join(repo, "sentinel.txt"), "BAD\n"); // unstaged worktree churn
 
-    const r = runGate();
+    const r = runCommit();
     expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
     // Unstaged worktree change restored; staged deletion still staged.
     expect(readFileSync(join(repo, "sentinel.txt"), "utf8").trim()).toBe("BAD");

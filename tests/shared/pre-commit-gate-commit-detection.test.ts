@@ -8,12 +8,17 @@ import { join } from "node:path";
 import {
   g as gIn,
   initGateRepo,
+  runCommitGate,
   runGate as runGateIn,
 } from "./pre-commit-gate-harness.js";
 
 let repo: string;
 const g = (...args: string[]) => gIn(repo, ...args);
+// Detection, the bypass refusal and prompt crash recovery are the tool-boundary
+// hook's; the round-trip, its live lock and the hook-tracking invariant run at
+// GIT's boundary (commit-gate.mjs, P53).
 const runGate = (command?: string) => runGateIn(repo, command);
+const runCommit = () => runCommitGate(repo);
 
 beforeEach(() => {
   repo = initGateRepo();
@@ -43,10 +48,11 @@ describe("pre-commit gate: commit detection is subcommand-positional", () => {
   });
 
   test("`git -C <path> commit` is still detected through global options", () => {
-    writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
-    g("add", "sentinel.txt");
-    const r = runGate(`git -C ${JSON.stringify(repo)} commit -m x`);
+    // A bypass token is the tool-boundary hook's one commit refusal, so it is
+    // the probe for "was the commit detected at all".
+    const r = runGate(`git -C ${JSON.stringify(repo)} commit --no-verify -m x`);
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("hook-bypass");
   });
 
   test("crash recovery: a journal left by a killed round-trip heals tree + index on the next call", () => {
@@ -106,32 +112,23 @@ describe("pre-commit gate: commit detection is subcommand-positional", () => {
     writeFileSync(join(repo, "sentinel.txt"), "GOOD\n"); // divergent → round-trip path
     mkdirSync(join(repo, ".claude", "hooks", ".state", "gate-roundtrip.lock"), { recursive: true });
 
-    const r = runGate(); // BAD staged would block — but the live lock must fail open
+    const r = runCommit(); // BAD staged would block — but the live lock must fail open
     expect(r.status, `expected fail-open allow (0); stderr:\n${r.stderr}`).toBe(0);
     expect(r.stderr).toContain("another staged-snapshot round-trip is in flight");
     // Worktree untouched by the skipped round-trip.
     expect(readFileSync(join(repo, "sentinel.txt"), "utf8").trim()).toBe("GOOD");
   });
 
-  test("chained `git add -A && git commit` gates the WORKTREE (what actually lands)", () => {
-    // Staged GOOD, worktree BAD: the chained add will stage the BAD content, so
-    // that is what the commit carries — the gate must check the worktree and
-    // block. (The old behavior materialized the PRE-add staged snapshot: GOOD →
-    // false allow → unchecked content landed.)
-    writeFileSync(join(repo, "sentinel.txt"), "GOOD\n");
-    g("add", "sentinel.txt");
-    writeFileSync(join(repo, "sentinel.txt"), "BAD\n"); // will be swept in by add -A
-
-    const r = runGate("git add -A && git commit -m x");
-    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
-  });
-
-  test("`git commit -am x` is a stage command too (cluster flag, not just `-a`)", () => {
+  test("a chained `git add -A && git commit` is judged on what the add staged — the index is final under git's hook", () => {
+    // Staged GOOD, worktree BAD, then the chained add sweeps BAD in: git's hook
+    // fires AFTER the add, so the staged snapshot it reads is the BAD content.
+    // (The tool-boundary approximation of "what the add WILL stage" is gone.)
     writeFileSync(join(repo, "sentinel.txt"), "GOOD\n");
     g("add", "sentinel.txt");
     writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
+    g("add", "-A");
 
-    const r = runGate("git commit -am x");
+    const r = runCommit();
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
   });
 
@@ -147,12 +144,9 @@ describe("pre-commit gate: commit detection is subcommand-positional", () => {
   });
 
   test("a line-continuation commit (`git \\<newline>commit`) is still detected", () => {
-    writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
-    g("add", "sentinel.txt");
-    writeFileSync(join(repo, "sentinel.txt"), "BAD\n"); // worktree == index, both BAD
-
-    const r = runGate("git \\\ncommit -m x");
+    const r = runGate("git \\\ncommit --no-verify -m x");
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("hook-bypass");
   });
 
   test("2c blocks a settings-referenced hook that is PRESENT on disk but gitignored", () => {
@@ -168,7 +162,7 @@ describe("pre-commit gate: commit detection is subcommand-positional", () => {
     writeFileSync(join(repo, ".claude", "hooks", "ghost.mjs"), "// present but ignored\n");
     g("add", "-A"); // stages settings.json + .gitignore; ghost.mjs stays ignored
 
-    const r = runGate();
+    const r = runCommit();
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toContain("ghost.mjs");
   });

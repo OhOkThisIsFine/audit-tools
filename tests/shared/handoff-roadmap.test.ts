@@ -47,7 +47,7 @@ import {
 } from '../../scripts/shared/generate-handoff-roadmap.mjs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
-const GATE = join(REPO_ROOT, '.claude', 'hooks', 'pre-commit-gate.mjs');
+const GATE = join(REPO_ROOT, '.claude', 'hooks', 'commit-gate.mjs');
 const GENERATOR = join(REPO_ROOT, 'scripts', 'shared', 'generate-handoff-roadmap.mjs');
 
 describe('entry parsing — the pointer is the entry\'s own title, verbatim', () => {
@@ -684,14 +684,17 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     writeFileSync(abs, body, 'utf8');
   };
 
+  // P53: the derived HANDOFF-roadmap leg runs at GIT's boundary — commit-gate.mjs,
+  // spawned the way git runs a hook (cwd = repo, no payload).
   const runGate = () => {
-    const r = spawnSyncHidden(process.execPath, [GATE], {
-      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git commit -m "wip"' } }),
+    const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_PROJECT_DIR: repo };
+    delete env.GIT_INDEX_FILE;
+    const r = spawnSyncHidden(process.execPath, [GATE, 'pre-commit'], {
       encoding: 'utf8',
       timeout: 120_000,
       windowsHide: true,
       cwd: repo,
-      env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+      env,
     });
     return { code: r.status, stderr: r.stderr ?? '' };
   };

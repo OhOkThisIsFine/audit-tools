@@ -85,10 +85,13 @@ function reachableScripts(packageScripts, root = 'verify:release') {
  * list, the package.json scripts object and the settings.json hook command
  * strings; returns error strings (empty = clean).
  */
-export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookCommands }) {
+export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookCommands, gitHookTexts = {} }) {
   const errors = [];
   const files = onDisk.map(norm);
   const hookCommands = settingsHookCommands.map(norm);
+  // `.githooks/<name>` → its text, for the git-hook wiring check (P53): git
+  // runs these files, so a git-hook guard is wired iff one of them names it.
+  const gitHooks = Object.fromEntries(Object.entries(gitHookTexts).map(([p, t]) => [norm(p), t]));
 
   // ── registry integrity ─────────────────────────────────────────────────────
   const ids = new Map();
@@ -149,7 +152,7 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
             `leg would print no remedy. State the one-line remedy. (${DATA_FILE})`,
         );
       }
-    } else if ((g.kind === 'hook' || g.kind === 'contract-test') && 'preCommit' in g) {
+    } else if ((g.kind === 'hook' || g.kind === 'git-hook' || g.kind === 'contract-test') && 'preCommit' in g) {
       errors.push(
         `Guard "${g.id}" (kind "${g.kind}") carries a preCommit flag — only gates run as derived ` +
           `pre-commit legs.`,
@@ -205,6 +208,34 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
       if (!files.includes(impl)) {
         errors.push(`Hook guard "${g.id}" impl is not a tracked file: ${g.impl}`);
       }
+    } else if (g.kind === 'git-hook') {
+      // Wired by GIT, not by settings.json (P53): each declared `.githooks/<name>`
+      // must be tracked and must name the module, or git runs nothing of ours.
+      if (!files.includes(impl)) {
+        errors.push(`Git-hook guard "${g.id}" impl is not a tracked file: ${g.impl}`);
+      }
+      const hooks = Array.isArray(g.hooks) ? g.hooks.map(norm) : [];
+      if (hooks.length === 0) {
+        errors.push(
+          `Git-hook guard "${g.id}" declares no \`hooks\` — a git-boundary gate is wired only by the ` +
+            `tracked .githooks/<name> files that exec it; name them. (${DATA_FILE})`,
+        );
+      }
+      const implBase = impl.slice(impl.lastIndexOf('/') + 1);
+      for (const hook of hooks) {
+        if (!hook.startsWith('.githooks/')) {
+          errors.push(`Git-hook guard "${g.id}" names a hook outside .githooks/: ${hook}`);
+        } else if (!files.includes(hook)) {
+          errors.push(`Git-hook guard "${g.id}" names an untracked hook file: ${hook} — git in a fresh clone runs nothing.`);
+        } else if (!(hook in gitHooks)) {
+          errors.push(`Git-hook guard "${g.id}": the text of ${hook} was not supplied to the reconciler.`);
+        } else if (!gitHooks[hook].includes(implBase)) {
+          errors.push(
+            `Git-hook guard "${g.id}" is not wired: ${hook} does not run ${implBase} — a hook file that ` +
+              `execs something else leaves this gate silently absent.`,
+          );
+        }
+      }
     } else if (g.kind === 'contract-test') {
       if (!files.includes(impl)) {
         errors.push(`Contract-test guard "${g.id}" impl is not a tracked file: ${g.impl}`);
@@ -215,7 +246,23 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
         );
       }
     } else {
-      errors.push(`Guard "${g.id}" has unknown kind "${g.kind}" — expected gate|hook|contract-test.`);
+      errors.push(`Guard "${g.id}" has unknown kind "${g.kind}" — expected gate|hook|git-hook|contract-test.`);
+    }
+  }
+
+  // ── bidirectional: a tracked git hook that runs one of our modules has a row ─
+  // Mirrors the settings.json check below: a `.githooks/<name>` that execs a
+  // `.claude/hooks/*.mjs` module nobody registered is undeclared reach.
+  const declaredGitHooks = new Set(
+    guards.filter((g) => g.kind === 'git-hook').flatMap((g) => (Array.isArray(g.hooks) ? g.hooks.map(norm) : [])),
+  );
+  for (const [hook, text] of Object.entries(gitHooks)) {
+    if (!files.includes(hook)) continue;
+    if (/\.claude\/hooks\/[A-Za-z0-9._-]+\.mjs/.test(text) && !declaredGitHooks.has(hook)) {
+      errors.push(
+        `${hook} runs a .claude/hooks module but no git-hook GUARDS row names it\n  → add the row to ` +
+          `${DATA_FILE} (kind "git-hook", with its \`hooks\` and its reach or uncovered half stated).`,
+      );
     }
   }
 
@@ -284,6 +331,12 @@ function main() {
 
   const packageScripts = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')).scripts;
   const settings = JSON.parse(readFileSync(join(repoRoot, '.claude', 'settings.json'), 'utf8'));
+  // The tracked git hooks, by text — what git actually runs (P53).
+  const gitHookTexts = Object.fromEntries(
+    onDisk
+      .filter((f) => norm(f).startsWith('.githooks/'))
+      .map((f) => [norm(f), readFileSync(join(repoRoot, f), 'utf8')]),
+  );
 
   const errors = reconcile({
     guards: GUARDS,
@@ -291,6 +344,7 @@ function main() {
     onDisk,
     packageScripts,
     settingsHookCommands: collectHookCommands(settings),
+    gitHookTexts,
   });
 
   if (errors.length) {

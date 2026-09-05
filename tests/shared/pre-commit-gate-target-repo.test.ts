@@ -45,11 +45,17 @@ function stageRed(): void {
 }
 
 describe("pre-commit gate: target-repo scoping", () => {
-  test("T1 sanity: a commit in THIS repo still blocks on a red snapshot", () => {
+  test("T1 a plain commit in THIS repo passes through — the snapshot is judged by git's own hook, not here", () => {
     stageRed();
     const r = runGate("git commit -m x");
+    expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toMatch(/FAILED|blocked/);
+  });
+
+  test("T1b a bypass token on a commit in THIS repo is refused here — git would never see that commit", () => {
+    const r = runGate("git commit --no-verify -m x");
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
-    expect(r.stderr).toContain("`npm run check` FAILED");
+    expect(r.stderr).toContain("hook-bypass");
   });
 
   test("T2 the observed false RED: `cd <other> && git commit` is exempt while THIS repo is red", () => {
@@ -81,18 +87,33 @@ describe("pre-commit gate: target-repo scoping", () => {
     expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
   });
 
-  test("T6 a LINKED WORKTREE of this repo stays gated — identity is the common dir, not the toplevel", () => {
-    stageRed();
+  test("T6 a LINKED WORKTREE of this repo is in jurisdiction — identity is the common dir, not the toplevel", () => {
     worktree = `${repo}-wt`;
     g("worktree", "add", worktree, "-b", "wt-scope");
-    const r = runGate(`cd ${JSON.stringify(worktree)} && git commit -m x`);
+    const r = runGate(`cd ${JSON.stringify(worktree)} && git commit --no-verify -m x`);
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("hook-bypass");
   });
 
-  test("T7 an unresolvable target fails CLOSED — a variable cd still gates", () => {
+  // P53 (owner decision 2026-09-05): the commit legs run at GIT's boundary
+  // (.githooks/pre-commit → commit-gate.mjs), where jurisdiction is by
+  // construction. This tool-boundary hook therefore no longer claims an
+  // UNRESOLVABLE target as this repo — the fail-closed residue that refused a
+  // `git commit -m init` inside a fresh `mktemp -d` repo on 2026-09-04. What it
+  // still refuses, fail-closed even when the target is unresolvable, is the one
+  // thing git cannot see once `--no-verify` is on the line: a hook bypass.
+  test("T7 an unresolvable target with NO bypass token is out of jurisdiction (the mktemp false RED)", () => {
     stageRed();
-    const r = runGate('cd "$SOMEWHERE_ELSE" && git commit -m x');
+    const r = runGate("cd $(mktemp -d) && git init -q && git commit --allow-empty -m init");
+    expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toMatch(/FAILED|blocked|attest/i);
+  });
+
+  test("T7b the same unresolvable chain WITH `--no-verify` stays refused — fail-closed on the bypass alone", () => {
+    stageRed();
+    const r = runGate("cd $(mktemp -d) && git init -q && git commit --no-verify --allow-empty -m init");
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("hook-bypass");
   });
 
   test("T8 a foreign-repo `--no-verify` commit is not our hook-bypass to refuse", () => {
@@ -102,10 +123,22 @@ describe("pre-commit gate: target-repo scoping", () => {
     expect(r.stderr).not.toContain("hook-bypass");
   });
 
-  test("T9 a MIXED command still gates the half that targets this repo", () => {
-    stageRed();
-    const r = runGate(`git -C ${JSON.stringify(otherRepo)} commit -m x && git commit -m x`);
+  test("T9 a MIXED command still refuses a bypass on the half that targets this repo", () => {
+    const r = runGate(`git -C ${JSON.stringify(otherRepo)} commit -m x && git commit --no-verify -m x`);
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("hook-bypass");
+  });
+
+  test("T9b a bypass token anywhere in a MIXED command is still refused — the whole-command scan is deliberate", () => {
+    // The long-form vectors are matched against the WHOLE command on purpose: a
+    // sibling statement can arm a bypass for a later commit (fd7ccab2), so the
+    // scan cannot be scoped per statement. A mixed command with the token on the
+    // foreign half is the accepted false block (durable-traps: `git commit -F`
+    // and separate tool calls avoid it). Only a command with NO commit of ours
+    // at all (T8) is exempt.
+    const r = runGate(`git -C ${JSON.stringify(otherRepo)} commit --no-verify -m x && git commit -m x`);
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("hook-bypass");
   });
 
   test("T10 the child-session refusal has no jurisdiction over a foreign-repo commit either", () => {

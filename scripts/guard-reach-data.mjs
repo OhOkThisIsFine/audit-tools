@@ -26,12 +26,17 @@ import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror
 /**
  * @typedef {object} GuardRow
  * @property {string} id
- * @property {'gate'|'hook'|'contract-test'} kind
+ * @property {'gate'|'hook'|'git-hook'|'contract-test'} kind
  * @property {string} impl gate: npm script name, or a repo path referenced
  *   verbatim by a script reachable from verify:release; hook: the hook file's
- *   repo path (must be registered in .claude/settings.json); contract-test:
- *   the test file's repo path (must live under tests/ — vitest excludes
- *   .claude/**).
+ *   repo path (must be registered in .claude/settings.json); git-hook: the
+ *   module's repo path, run by git through the tracked `.githooks/<name>`
+ *   files named in `hooks` (each must be tracked and must name the module —
+ *   P53: a gate at git's own boundary is wired by git, not by settings.json);
+ *   contract-test: the test file's repo path (must live under tests/ — vitest
+ *   excludes .claude/**).
+ * @property {string[]} [hooks] git-hook only, REQUIRED there: the tracked
+ *   `.githooks/<name>` files that exec this module.
  * @property {false|'reach'|'always'|'final'} [preCommit] gates only, REQUIRED
  *   there (reconciled — a gate row without it is a red build): whether and how
  *   the pre-commit hook runs this gate as a derived leg
@@ -690,14 +695,35 @@ export const GUARDS = [
     ],
   },
   {
-    id: 'pre-commit-gate',
-    kind: 'hook',
-    impl: '.claude/hooks/pre-commit-gate.mjs',
-    note: 'its one content FORM — the `[vitest-gate] ATTRIBUTION:` line a doc-contract leg emits — is pinned by the harness test below rather than driven here: reproducing it needs a staged repo, a stub doc-contract suite and the gate\'s own round-trip, which that test already owns',
+    id: 'commit-gate',
+    kind: 'git-hook',
+    impl: '.claude/hooks/commit-gate.mjs',
+    hooks: ['.githooks/pre-commit', '.githooks/pre-merge-commit', '.githooks/pre-applypatch'],
+    note:
+      'the commit legs at GIT\'s own boundary (P53, owner decision 2026-09-05): `npm run check` on the ' +
+      'staged snapshot, the derived verify:checks legs, the doc-contract subset, the constitutional-doc ' +
+      'refusal, the loop-core attestation, the branch-strand and child-session refusals. Jurisdiction is ' +
+      'by construction — git runs this repository\'s hook for this repository\'s commits only. Its one ' +
+      'content FORM — the `[vitest-gate] ATTRIBUTION:` line the doc-contract leg emits — is pinned by ' +
+      'the harness test rather than driven here: reproducing it needs a staged repo, a stub doc-contract ' +
+      'suite and the gate\'s own round-trip, which that test already owns. core.hooksPath is pointed at ' +
+      '.githooks by session-start-guards.mjs; a clone that never opened a session runs no hook until then',
     forms: [
       { name: 'doc-contract attribution line', drive: 'test',
         test: 'tests/shared/pre-commit-gate-doc-contract-attribution.test.ts', sample: '[vitest-gate] ATTRIBUTION:' },
     ],
+  },
+  {
+    id: 'pre-commit-gate',
+    kind: 'hook',
+    impl: '.claude/hooks/pre-commit-gate.mjs',
+    note:
+      'the THIN tool-boundary half (P53): refuses what git cannot see — a `--no-verify`/`-n`/`core.hooksPath` ' +
+      'bypass on a commit-creating command (fail-closed even on an unresolvable target), the child-session ' +
+      'PUSH refusal, and ROUTING of gated incoming content for the verbs git does not hook (a merge that ' +
+      'could fast-forward → `--no-ff`; a cherry-pick or revert → `-n` then `git commit`). It also heals a ' +
+      'crashed staged-snapshot round-trip on every shell call. An unresolvable target with none of those ' +
+      'is out of jurisdiction (the mktemp false RED of 2026-09-04 is closed by construction)',
   },
   {
     id: 'tool-input-guard',
@@ -982,6 +1008,18 @@ export const GUARDS = [
       'textual extraction against the runtime-layout sources and cross-checks ARTIFACT_DEFINITIONS directly',
   },
   {
+    id: 'commit-gate-git-boundary-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/commit-gate-git-boundary.test.ts',
+    note:
+      'drives a REAL `git commit` in a fixture whose core.hooksPath runs commit-gate.mjs: a GOOD snapshot ' +
+      'lands, a BAD one is refused with the gate\'s own text and HEAD does not move, the staged snapshot ' +
+      '(not the worktree) is judged and the worktree restored, `commit -a` is judged on the temporary index ' +
+      'git hands the hook, a routed cherry-pick (-n, then commit) is judged on the applied tree; and pins ' +
+      'the tracked .githooks/* files — executable in the index, LF, running the gate relative to themselves, ' +
+      'pre-push delegating to the local .git/hooks/pre-push identity guard',
+  },
+  {
     id: 'ingestion-checks-drift-test',
     kind: 'contract-test',
     impl: 'tests/shared/ingestion-checks-drift.test.ts',
@@ -1207,6 +1245,20 @@ export const REACH = [
       'order and is unchecked. The one declared non-registry row is checked only for being ABSENT ' +
       'from ARTIFACT_DEFINITIONS; nothing verifies the runtime submission it describes still behaves ' +
       'as stated',
+  },
+  {
+    area: 'git hooks — the commit gate\'s boundary (P53)',
+    files: ['.githooks/pre-commit', '.githooks/pre-merge-commit', '.githooks/pre-applypatch', '.githooks/pre-push'],
+    guardedBy: ['commit-gate-git-boundary-test'],
+    note:
+      'the tracked hook files git runs through core.hooksPath: three exec commit-gate.mjs relative to ' +
+      'themselves (so a linked worktree on an older branch still runs the current gate), pre-push delegates ' +
+      'to the local, never-committed .git/hooks/pre-push identity guard that pointing core.hooksPath here ' +
+      'would otherwise silence. check:guard-reach verifies each git-hook row\'s files exist and name the module',
+    uncovered:
+      'core.hooksPath itself is a per-clone git setting: a clone in which no Claude Code session has started ' +
+      '(session-start-guards.mjs sets it) runs no commit gate, and nothing in the tree can observe that. ' +
+      'CI does not commit, so it is unaffected; a human clone is the exposed case',
   },
   {
     area: 'result-ingestion check registry and its render',

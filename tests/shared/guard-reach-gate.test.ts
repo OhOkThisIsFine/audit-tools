@@ -28,11 +28,14 @@ import { reconcile as reconcileImpl } from '../../scripts/check-guard-reach.mjs'
 /** Mirrors the JSDoc typedefs in scripts/guard-reach-data.mjs. */
 interface GuardRow {
   id: string;
-  kind: 'gate' | 'hook' | 'contract-test';
+  kind: 'gate' | 'hook' | 'git-hook' | 'contract-test';
   /** gate: an npm script name OR a repo path referenced verbatim by a reachable
-   *  script; hook: the hook file's repo path; contract-test: the test file's
-   *  repo path (must live under tests/ — vitest excludes .claude/**). */
+   *  script; hook: the hook file's repo path; git-hook: the module's repo path,
+   *  run by the tracked .githooks/<name> files in `hooks`; contract-test: the
+   *  test file's repo path (must live under tests/ — vitest excludes .claude/**). */
   impl: string;
+  /** git-hook only: the tracked .githooks/<name> files that exec the module. */
+  hooks?: string[];
   /** REQUIRED on gates (P34): the derived pre-commit leg behavior, as data.
    *  Typed loosely here so the invalid-enum case can be expressed. */
   preCommit?: false | 'reach' | 'always' | 'final' | string | boolean;
@@ -56,6 +59,8 @@ type ReconcileArgs = {
   onDisk: string[];
   packageScripts: Record<string, string>;
   settingsHookCommands: string[];
+  /** `.githooks/<name>` → text, for the git-hook wiring check (P53). */
+  gitHookTexts?: Record<string, string>;
 };
 const reconcile = reconcileImpl as (args: ReconcileArgs) => string[];
 
@@ -79,13 +84,18 @@ const GUARDS: GuardRow[] = [
   { id: 'build', kind: 'gate', impl: 'build', preCommit: false, fix: 'fix the build' },
   { id: 'vitest-gate', kind: 'gate', impl: 'scripts/shared/run-vitest-gate.mjs', preCommit: false, fix: 'fix the suite' },
   { id: 'beta-guard', kind: 'hook', impl: '.claude/hooks/beta-guard.mjs' },
+  { id: 'delta-gate', kind: 'git-hook', impl: '.claude/hooks/delta-gate.mjs', hooks: ['.githooks/pre-commit'] },
   { id: 'gamma-contract', kind: 'contract-test', impl: 'tests/shared/gamma.test.ts' },
 ];
+const GIT_HOOK_TEXTS: Record<string, string> = {
+  '.githooks/pre-commit': '#!/bin/sh\nexec node "$(dirname "$0")/../.claude/hooks/delta-gate.mjs" pre-commit "$@"\n',
+};
 const REACH: ReachRow[] = [
   { area: 'source', files: ['src/**'], guardedBy: ['build', 'vitest-gate'] },
   { area: 'tests', files: ['tests/**'], guardedBy: ['vitest-gate'] },
   { area: 'gates', files: ['scripts/**'], guardedBy: ['check:alpha'] },
   { area: 'hooks', files: ['.claude/hooks/**'], guardedBy: ['gamma-contract'] },
+  { area: 'git hooks', files: ['.githooks/**'], guardedBy: ['gamma-contract'] },
   {
     area: 'meta',
     files: ['package.json'],
@@ -99,6 +109,8 @@ const ON_DISK = [
   'scripts/check-alpha.mjs',
   'scripts/shared/run-vitest-gate.mjs',
   '.claude/hooks/beta-guard.mjs',
+  '.claude/hooks/delta-gate.mjs',
+  '.githooks/pre-commit',
   'package.json',
 ];
 
@@ -109,12 +121,49 @@ const run = (over: Partial<ReconcileArgs> = {}) =>
     onDisk: ON_DISK,
     packageScripts: SCRIPTS,
     settingsHookCommands: HOOK_COMMANDS,
+    gitHookTexts: GIT_HOOK_TEXTS,
     ...over,
   });
 
 describe('healthy registry', () => {
   it('a fully claimed, fully wired tree reconciles clean', () => {
     expect(run()).toEqual([]);
+  });
+});
+
+describe('git-hook guards are wired by git, not settings.json (P53)', () => {
+  it('a git-hook row whose .githooks file does not run its module is an error', () => {
+    const errors = run({
+      gitHookTexts: { '.githooks/pre-commit': '#!/bin/sh\nexec node other.mjs\n' },
+    });
+    expect(errors.some((e) => e.includes('delta-gate') && e.includes('not wired'))).toBe(true);
+  });
+
+  it('a git-hook row naming an untracked hook file is an error', () => {
+    const errors = run({ onDisk: ON_DISK.filter((f) => f !== '.githooks/pre-commit') });
+    expect(errors.some((e) => e.includes('delta-gate') && /untracked hook file/.test(e))).toBe(true);
+  });
+
+  it('a git-hook row with no hooks declared is an error', () => {
+    const errors = run({
+      guards: GUARDS.map((g) => (g.id === 'delta-gate' ? { ...g, hooks: [] } : g)),
+    });
+    expect(errors.some((e) => e.includes('delta-gate') && /declares no `hooks`/.test(e))).toBe(true);
+  });
+
+  it('a tracked .githooks file running a .claude/hooks module with no git-hook row is an error', () => {
+    const errors = run({
+      guards: GUARDS.filter((g) => g.id !== 'delta-gate'),
+      reach: REACH.map((r) => (r.area === 'hooks' ? { ...r, files: ['.claude/hooks/**'] } : r)),
+    });
+    expect(errors.some((e) => e.includes('.githooks/pre-commit') && /no git-hook GUARDS row/.test(e))).toBe(true);
+  });
+
+  it('a preCommit flag on a git-hook row is an error', () => {
+    const errors = run({
+      guards: GUARDS.map((g) => (g.id === 'delta-gate' ? { ...g, preCommit: 'reach' } : g)),
+    });
+    expect(errors.some((e) => e.includes('delta-gate') && /preCommit flag/.test(e))).toBe(true);
   });
 });
 

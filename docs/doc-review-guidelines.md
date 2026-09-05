@@ -140,8 +140,9 @@ rewrote `spec/remediate/remediation-goals.md` along with eight other files. A la
 refusal. The normative set is therefore enumerated in **`src/shared/constitutionalDocPaths.ts`**
 (generated for the hooks into `scripts/shared/constitutional-doc-paths.generated.mjs`,
 parity-checked by `npm run check:constitutional-doc-paths`), and
-`.claude/hooks/pre-commit-gate.mjs` **blocks any commit whose staged set touches one of those
-paths** unless a fresh, staged-tree-bound override record exists:
+`.claude/hooks/commit-gate.mjs` (git's own `pre-commit` hook, via the tracked `.githooks/`) **blocks
+any commit whose staged set touches one of those paths** unless a fresh, staged-tree-bound override
+record exists:
 
 ```
 node scripts/attest-constitutional-doc-change.mjs --reviewed-by <id> \

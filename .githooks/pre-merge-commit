@@ -1,0 +1,6 @@
+#!/bin/sh
+# A non-fast-forward `git merge` writes its commit through this hook, not
+# pre-commit; the merged index is the staged snapshot the gate judges. (A
+# fast-forward merge writes no commit and runs no hook — the tool-boundary
+# hook routes a merge carrying gated content to `--no-ff`.) See .githooks/pre-commit.
+exec node "$(dirname "$0")/../.claude/hooks/commit-gate.mjs" pre-merge-commit "$@"

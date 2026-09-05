@@ -37,7 +37,8 @@ import {
 import { buildPreCommitLegs } from '../../scripts/shared/derived-file-preflight.mjs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
-const GATE = join(REPO_ROOT, '.claude', 'hooks', 'pre-commit-gate.mjs');
+// P53: the derived legs run at GIT's boundary, in commit-gate.mjs.
+const GATE = join(REPO_ROOT, '.claude', 'hooks', 'commit-gate.mjs');
 
 /** A synthetic backlog whose section-scoped file has a deliberately long preamble. */
 function fixtureSources() {

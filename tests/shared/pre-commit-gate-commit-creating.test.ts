@@ -22,11 +22,13 @@ afterEach(() => {
   if (repo && existsSync(repo)) rmSync(repo, { recursive: true, force: true });
 });
 
-describe("pre-commit gate: every commit-creating subcommand is gated (P9)", () => {
-  // git merge / rebase / cherry-pick / revert / am all WRITE HISTORY and used
-  // to skip every leg of the gate — observed live as stray-doc failures on all
-  // three merge commits of the v0.34.7 queue. With a BAD sentinel staged, a
-  // gated command must block exactly like `git commit` does.
+describe("pre-commit gate: every commit-creating subcommand is DETECTED (P9)", () => {
+  // git merge / rebase / cherry-pick / revert / am all WRITE HISTORY. Under P53
+  // the legs that judge the snapshot run in git's own hooks (pre-commit for a
+  // commit, pre-merge-commit for a merge commit, pre-applypatch for am —
+  // measured 2026-09-05; the sequencer runs NO pre-commit for cherry-pick,
+  // revert or a rebase replay), so this hook has to SEE each verb for the
+  // bypass refusal git cannot make, and ROUTE the unhooked verbs' gated content.
   const commitCreating = [
     "git merge feature",
     "git rebase --continue",
@@ -35,13 +37,19 @@ describe("pre-commit gate: every commit-creating subcommand is gated (P9)", () =
     "git am patch.mbox",
   ];
   for (const cmd of commitCreating) {
-    test(`gates \`${cmd}\`, which creates a commit`, () => {
-      writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
-      g("add", "sentinel.txt");
-      const r = runGate(cmd);
-      expect(r.status, `expected block (2) for "${cmd}"; stderr:\n${r.stderr}`).toBe(2);
+    test(`detects \`${cmd}\` — a bypass token on it is refused`, () => {
+      const r = runGate(`${cmd} --no-verify`);
+      expect(r.status, `expected bypass refusal (2) for "${cmd}"; stderr:\n${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/bypass/i);
     });
   }
+
+  test("a red snapshot alone no longer blocks here — git's hook is the judge", () => {
+    writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
+    g("add", "sentinel.txt");
+    const r = runGate("git cherry-pick abc123");
+    expect(r.status, `expected pass-through (0); stderr:\n${r.stderr}`).toBe(0);
+  });
 
   test("still allows a git subcommand that cannot create a commit", () => {
     writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
@@ -110,34 +118,48 @@ describe("pre-commit gate: a history-moving verb is judged on its INCOMING paths
     return sha;
   }
 
-  test("a cherry-pick of a loop-core commit demands an attestation", () => {
+  // P53: git runs NO pre-commit for a cherry-pick or revert (the sequencer
+  // commits directly) and none for a fast-forward merge, so the tool-boundary
+  // hook ROUTES gated incoming content to a hooked commit instead of judging it
+  // with a second copy of the attestation legs: `--no-ff` for a merge,
+  // `-n`/`--no-commit` (then `git commit`) for cherry-pick and revert.
+  test("a cherry-pick of a loop-core commit is refused unless it lands through `git commit` (-n)", () => {
     const sha = sideBranchWithLoopCore();
     expect(g("status", "--porcelain").stdout.trim(), "index must be clean").toBe("");
-    const r = runGate(`git cherry-pick ${sha}`);
-    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
-    expect(r.stderr).toMatch(/loop-core/i);
+    const direct = runGate(`git cherry-pick ${sha}`);
+    expect(direct.status, `expected block (2); stderr:\n${direct.stderr}`).toBe(2);
+    expect(direct.stderr).toMatch(/loop-core/i);
+    expect(direct.stderr).toContain("--no-commit");
+    const routed = runGate(`git cherry-pick -n ${sha}`);
+    expect(routed.status, `expected pass-through (0); stderr:\n${routed.stderr}`).toBe(0);
   });
 
-  test("a merge that introduces a loop-core path demands an attestation", () => {
+  test("a merge that introduces a loop-core path and could fast-forward is refused, naming --no-ff", () => {
     sideBranchWithLoopCore();
     const r = runGate("git merge side");
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toMatch(/loop-core/i);
+    expect(r.stderr).toContain("--no-ff");
   });
 
-  test("a cherry-pick introducing NO loop-core path is left alone (not a false red)", () => {
+  test("the same merge with --no-ff passes through — pre-merge-commit will judge the merged index", () => {
+    sideBranchWithLoopCore();
+    const r = runGate("git merge --no-ff side");
+    expect(r.status, `expected pass-through (0); stderr:\n${r.stderr}`).toBe(0);
+  });
+
+  test("a merge introducing NO loop-core or constitutional path is left alone (not a false red)", () => {
     g("checkout", "-q", "-b", "plain");
     writeFileSync(join(repo, "notes.md"), "hello\n");
     g("add", "-A");
     g("commit", "-qm", "docs only");
-    const sha = g("rev-parse", "HEAD").stdout.trim();
     g("checkout", "-q", "-");
-    const r = runGate(`git cherry-pick ${sha}`);
+    const r = runGate("git merge plain");
     expect(r.status, `expected pass (0); stderr:\n${r.stderr}`).toBe(0);
   });
 
-  test("an unresolvable ref FAILS OPEN and NAMES the check it skipped", () => {
-    const r = runGate("git cherry-pick deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+  test("an unresolvable merge ref FAILS OPEN and NAMES the check it skipped", () => {
+    const r = runGate("git merge deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
     expect(r.status, `expected pass (0); stderr:\n${r.stderr}`).toBe(0);
     expect(r.stderr).toMatch(/FAIL-OPEN/);
     expect(r.stderr).toMatch(/incoming ref/i);

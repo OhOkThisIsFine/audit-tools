@@ -49,17 +49,6 @@
   `bypassEnabled` accepts is the same set `splitShellStatements` splits on, pinned by a test that feeds
   one bypass through both.
 
-- **`pre-commit-gate.mjs` evaluates the audit-tools tree for a `git commit` run in ANY directory
-  (2026-09-04, medium, friction: tool_should_decide).** The gate keys off `CLAUDE_PROJECT_DIR`, not the
-  repository the command actually targets, so a `git commit` inside an unrelated repo — a throwaway
-  probe repo under the temp dir, a sibling checkout — is blocked by audit-tools' constitutional-doc
-  rule and told to attest a staged tree that belongs to a different repository. Measured 2026-09-04: a
-  `git commit -m init` inside a fresh `mktemp -d` repo was refused, naming `docs/doc-review-guidelines.md`
-  and `docs/project-philosophy.md`. This is the *gate states the boundary it OWNS* rule
-  (`CLAUDE.md`): the gate's authority is this repository's commits, and it is currently guessing at a
-  boundary git itself owns. **Property:** the gate resolves the target repository from the command's
-  own working directory and abstains when that is not this repository.
-
 - **Three code comments assert a shape the tree no longer has, and nothing checks a comment
   against the code it describes (2026-08-31, medium, friction: tool_should_decide).**
   The header of `src/shared/continuityScore.ts` says audit "re-exports `computeContinuityScores` …

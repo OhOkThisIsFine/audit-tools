@@ -262,7 +262,7 @@ describe("the leg set is the gate's, derived from the registry — single-source
 
   it("the gate and BOTH attest scripts import the shared module — no second copy", () => {
     for (const f of [
-      ".claude/hooks/pre-commit-gate.mjs",
+      ".claude/hooks/commit-gate.mjs",
       ".claude/hooks/attest-loop-core-review.mjs",
       "scripts/attest-constitutional-doc-change.mjs",
     ]) {
@@ -278,7 +278,7 @@ describe("the leg set is the gate's, derived from the registry — single-source
     // copy of the leg set, the exact divergence P19/P34 removed. The two
     // hand-coded legs (`npm run check`, `npm run test:doc-contract`) are not
     // check:* gates.
-    const hook = readFileSync(join(REPO_ROOT, ".claude", "hooks", "pre-commit-gate.mjs"), "utf8");
+    const hook = readFileSync(join(REPO_ROOT, ".claude", "hooks", "commit-gate.mjs"), "utf8");
     const code = hook
       .split(/\r?\n/)
       .filter((line) => !line.trimStart().startsWith("//"))

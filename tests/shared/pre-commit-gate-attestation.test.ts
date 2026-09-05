@@ -10,13 +10,17 @@ import {
   g as gIn,
   initGateRepo,
   runAttest as runAttestIn,
+  runCommitGate,
   runGate as runGateIn,
   stageLoopCoreFile as stageLoopCoreFileIn,
 } from "./pre-commit-gate-harness.js";
 
 let repo: string;
 const g = (...args: string[]) => gIn(repo, ...args);
+// The bypass refusal is the tool-boundary hook's; the attestation legs run at
+// GIT's boundary (commit-gate.mjs, P53).
 const runGate = (command?: string) => runGateIn(repo, command);
+const runCommit = () => runCommitGate(repo);
 const runAttest = (args: string[]) => runAttestIn(repo, args);
 const stageLoopCoreFile = () => {
   stageLoopCoreFileIn(repo);
@@ -75,74 +79,34 @@ describe("pre-commit gate: bypass scoping, attester class, destination-keyed con
     ]);
     expect(at.status, `attest failed:\n${at.stderr}`).toBe(0);
 
-    const onMain = runGate();
+    const onMain = runCommit();
     expect(onMain.status, `expected block (2) on main; stderr:\n${onMain.stderr}`).toBe(2);
     expect(onMain.stderr).toContain('verdict "concerns"');
 
     g("checkout", "-qb", "wip/preserve");
-    const onBranch = runGate();
+    const onBranch = runCommit();
     expect(onBranch.status, `expected allow (0) off main; stderr:\n${onBranch.stderr}`).toBe(0);
   });
-});
 
-describe("pre-commit gate: a chained attest+commit names its own impossibility", () => {
-  // PreToolUse fires ONCE, on the whole Bash call, so `attest … && git commit …`
-  // is checked before the attest half has run. It must stay blocked (accepting
-  // the chain would trust a verdict the gate never read) — but the generic "no
-  // attestation" text sent the agent to write one it had just written.
-  test("blocks and explains when the attest step is chained into the commit", () => {
+  test("a missing attestation for a staged loop-core path blocks, naming the record to write", () => {
+    stageLoopCoreFile();
+    const r = runCommit();
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("no adversarial-review attestation");
+  });
+
+  // Under a git hook the attestation is read when GIT runs the commit — after
+  // every earlier statement of the Bash call has executed — so `attest … &&
+  // git commit …` in ONE tool call now simply works. The tool-boundary hook's
+  // "chained attest can never pass" refusal, and its explanatory note, are gone
+  // with the legs it guarded.
+  test("an attest step chained before the commit in one command is accepted by the tool-boundary hook", () => {
     stageLoopCoreFile();
     const r = runGate(
       'node .claude/hooks/attest-loop-core-review.mjs --reviewed-by t --attester-class agent ' +
         '--checked "fixture" && git commit -m x',
     );
-    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
-    expect(r.stderr).toContain("CHAINS the attestation");
-    expect(r.stderr).toContain("as its OWN tool call");
-  });
-
-  test("the chained-note is absent from an ordinary missing-attestation block", () => {
-    stageLoopCoreFile();
-    const r = runGate();
-    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
-    expect(r.stderr).toContain("no adversarial-review attestation");
+    expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
     expect(r.stderr).not.toContain("CHAINS the attestation");
-  });
-
-  // The script path is QUOTED in every shape an agent naturally writes it —
-  // a path with a `$CLAUDE_PROJECT_DIR` prefix is quoted by reflex, and the
-  // repo's own settings.json spells hook invocations that way. Detecting the
-  // chain on quote-STRIPPED text blanks the span content, so the script name
-  // vanishes and the explanatory note is dropped exactly when it is needed.
-  test.each([
-    ['double-quoted', '"$CLAUDE_PROJECT_DIR/.claude/hooks/attest-loop-core-review.mjs"'],
-    ['double-quoted relative', '".claude/hooks/attest-loop-core-review.mjs"'],
-    ['single-quoted', "'.claude/hooks/attest-loop-core-review.mjs'"],
-  ])("blocks and explains when the chained attest path is %s", (_shape, scriptArg) => {
-    stageLoopCoreFile();
-    const r = runGate(
-      `node ${scriptArg} --reviewed-by t --attester-class agent --checked "fixture" && git commit -m x`,
-    );
-    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
-    expect(r.stderr).toContain("CHAINS the attestation");
-    expect(r.stderr).toContain("as its OWN tool call");
-  });
-
-  test("re-attesting after the staged tree MOVES is the same trap (attestation is sha-keyed)", () => {
-    // The attestation file is named for the staged tree, so moving the tree
-    // makes it MISSING, not stale — the chained form is the natural reflex
-    // there ("just re-attest and commit"), and it must be named as impossible.
-    stageLoopCoreFile();
-    const at = runAttest([
-      "--reviewed-by", "t",
-      "--attester-class", "agent",
-      "--checked", "checked the fixture loop-core edit for accounting drift and off-by-one",
-    ]);
-    expect(at.status, `attest failed:\n${at.stderr}`).toBe(0);
-    writeFileSync(join(repo, "src", "shared", "engine", "x.ts"), "export const x = 2;\n");
-    g("add", "-A");
-    const r = runGate("node .claude/hooks/attest-loop-core-review.mjs --reviewed-by t ; git commit -m x");
-    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
-    expect(r.stderr).toContain("CHAINS the attestation");
   });
 });

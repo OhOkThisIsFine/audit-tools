@@ -117,6 +117,49 @@ if (existsSync(join(ROOT, 'package.json')) && !existsSync(join(ROOT, 'node_modul
   );
 }
 
+// ── Git-boundary commit gate wiring (P53) ────────────────────────────────────
+// The commit legs run from the tracked `.githooks/` through `core.hooksPath`, a
+// per-clone git setting no checkout carries by itself. Point it at the MAIN
+// checkout's `.githooks` (the config is shared by every linked worktree, and the
+// hook files resolve the gate relative to themselves, so a worktree on an older
+// branch still runs the current gate against its own tree). A config write is
+// instant and local — unlike an `npm ci` — so the leg SETS it and says so;
+// left unset, every commit from this clone would run no gate at all, silently.
+try {
+  const commonDir = git(['rev-parse', '--git-common-dir']);
+  if (commonDir.ok && commonDir.stdout) {
+    const mainCheckout = resolve(ROOT, commonDir.stdout, '..');
+    const wanted = join(mainCheckout, '.githooks').replace(/\\/g, '/');
+    if (existsSync(wanted)) {
+      // The EFFECTIVE value is what git will use. With `extensions.worktreeConfig`
+      // a `.git/config.worktree` entry outranks the shared `.git/config`, so a
+      // shared-scope write can leave the effective value unchanged (this repo's
+      // main worktree carried exactly that: an absolute `.git/hooks` pinned at
+      // worktree scope). Write the shared scope, re-read, and if a worktree-scope
+      // value still wins, write that scope too.
+      const effective = () => git(['config', '--get', 'core.hooksPath']);
+      const before = effective();
+      if (!before.ok || !samePath(before.stdout, wanted)) {
+        let set = git(['config', 'core.hooksPath', wanted]);
+        let after = effective();
+        if (set.ok && (!after.ok || !samePath(after.stdout, wanted))) {
+          set = git(['config', '--worktree', 'core.hooksPath', wanted]);
+          after = effective();
+        }
+        const wired = set.ok && after.ok && samePath(after.stdout, wanted);
+        notes.push(
+          wired
+            ? `core.hooksPath set to ${wanted} — the commit gate now runs from git's own boundary ` +
+              `(was: ${before.ok && before.stdout ? before.stdout : 'unset'}).`
+            : `core.hooksPath could NOT be pointed at ${wanted} (effective: ${after.ok ? after.stdout : 'unset'}); ` +
+              `commits from this clone run NO commit gate until it is.`,
+        );
+      }
+    }
+  }
+} catch {
+  /* a probe must never block a session; an unwired gate is announced above when detectable */
+}
 // ── Stale main ───────────────────────────────────────────────────────────────
 // A lap branched from stale local main once re-implemented a commit that had
 // already landed. Measure the gap, don't assume it.

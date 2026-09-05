@@ -35,7 +35,11 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(HERE, "..", "..");
 
-const HOOKS = [".claude/hooks/pre-commit-gate.mjs", ".claude/hooks/attest-loop-core-review.mjs"];
+const HOOKS = [
+  ".claude/hooks/commit-gate.mjs",
+  ".claude/hooks/pre-commit-gate.mjs",
+  ".claude/hooks/attest-loop-core-review.mjs",
+];
 
 test("the generated hook module equals the single-sourced LOOP_CORE_PATTERNS, in order", () => {
   expect(GENERATED).toEqual([...LOOP_CORE_PATTERNS]);

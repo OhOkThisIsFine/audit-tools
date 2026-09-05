@@ -96,17 +96,17 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   again before calling the lap green, and never read “the latest completed run succeeded” as 
   “the tip is green” — match the head SHA first.
 
-- **A session rooted ABOVE the repo loads NONE of its hooks, so every commit gate is silently
-  absent (measured 2026-08-26).** Claude Code loads `.claude/settings.json` from the SESSION's
-  project directory. A session started in `C:/Code` that edits `C:/Code/audit-tools` therefore runs
-  zero audit-tools hooks: a commit staging `CLAUDE.md` landed with no constitutional-doc refusal, no
-  green-at-every-commit check, and no guard-reach leg — while `pre-commit-gate.mjs`, fed the same
-  staged tree by hand, refuses it. There is no in-repo fix: hooks cannot register themselves for a
-  session that never named this project, so this is the one class of trap the enforce-in-tooling rule
-  cannot reach. Start the session AT the repo root whenever you intend to commit, and read "the gates
-  passed" as a claim that needs the session's project dir behind it. Running the gate by hand from
-  such a session does not substitute: with no registry record it refuses as a dispatched CHILD first,
-  before it ever reaches the constitutional check.
+- **A session rooted ABOVE the repo loads NONE of its Claude Code hooks (measured 2026-08-26) — the
+  COMMIT gate no longer depends on that, the shell traps still do.** Claude Code loads
+  `.claude/settings.json` from the SESSION's project directory, so a session started in `C:/Code`
+  that edits `C:/Code/audit-tools` runs zero audit-tools PreToolUse/Stop hooks. Since P53 (2026-09-05)
+  the commit legs run from GIT's own boundary (`.githooks/pre-commit` → `commit-gate.mjs`, wired by
+  `core.hooksPath`), which fires for every commit into this repository regardless of where the
+  session was rooted — PROVIDED a session has run here once, because the SessionStart guard is what
+  sets `core.hooksPath` on a clone. What such a session still lacks is the tool-boundary half: the
+  hook-bypass refusal, the incoming-content routing, and every other shell trap. Start the session AT
+  the repo root when you intend to commit, and read "the gates passed" as a claim about the commit
+  gate only.
 
 - **Each `dispatch_review` `next-step` re-mints EVERY outstanding binding (measured 2026-08-21).** One partial ingest published a new run directory and changed `prompt_sha256` for 494/494 carried-over items and `result_path` for 494/494; only `work_item_id` stayed stable. A host holding bindings from before that call has 100% stale identity, so results written against them are refused. Two consequences: do not call `next-step` while work is in flight, and prefer a dispatch shape where workers return FINDINGS ONLY while the host binds identity and `file_coverage` mechanically from the CURRENT `host-task-bindings.json` — that shape is immune by construction and is what made a 498-item fan-out survivable. Evidence for the "Wave-friendly host dispatch" forward track.
 

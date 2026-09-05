@@ -14,11 +14,12 @@
 import { test, describe, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { g as gIn, initGateRepo, runGate as runGateIn } from "./pre-commit-gate-harness.js";
+import { g as gIn, initGateRepo, runCommitGate } from "./pre-commit-gate-harness.js";
 
 let repo: string;
 const g = (...args: string[]) => gIn(repo, ...args);
-const runGate = () => runGateIn(repo, "git commit -m x");
+// The derived legs run at GIT's boundary (commit-gate.mjs, P53).
+const runGate = () => runCommitGate(repo);
 
 beforeEach(() => {
   repo = initGateRepo();

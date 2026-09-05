@@ -7,15 +7,17 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  COMMIT_GATE,
   GATE,
   g as gIn,
   initGateRepo,
-  runGate as runGateIn,
+  runCommitGate,
 } from "./pre-commit-gate-harness.js";
 
 let repo: string;
 const g = (...args: string[]) => gIn(repo, ...args);
-const runGate = (command?: string) => runGateIn(repo, command);
+// The branch-strand refusal runs at GIT's boundary (commit-gate.mjs, P53).
+const runGate = () => runCommitGate(repo);
 
 beforeEach(() => {
   repo = initGateRepo();
@@ -84,15 +86,16 @@ describe("pre-commit gate: branch-strand refusal (docs-only commit on a remediat
     expect(r.stderr).not.toContain("STRAND");
   });
 
-  test("a chained `git add -A && git commit` of docs on remediation/* is blocked too", () => {
-    // The strand-prone shape in practice: nothing is staged yet when the gate
-    // runs, so the refusal must read the set the chained add WILL stage.
+  test("the strand-prone `git add -A && git commit` shape is blocked too — the add has run when git's hook fires", () => {
+    // At the tool boundary this needed a worktree approximation; under a git
+    // hook the chained add has already staged the docs, so the index IS the set.
     g("branch", "-M", "main");
     g("checkout", "-qb", "remediation/PLAN-4");
     mkdirSync(join(repo, "docs"), { recursive: true });
-    writeFileSync(join(repo, "docs", "HANDOFF.md"), "# doc\n"); // left UNSTAGED
+    writeFileSync(join(repo, "docs", "HANDOFF.md"), "# doc\n");
+    g("add", "-A");
 
-    const r = runGate("git add -A && git commit -m x");
+    const r = runGate();
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toContain("STRAND");
   });
@@ -110,23 +113,23 @@ describe("pre-commit gate: branch-strand refusal (docs-only commit on a remediat
 describe("pre-commit gate: a fail-open ANNOUNCES which check it skipped", () => {
   // A silent fail-open is indistinguishable from a clean pass, so the commit it
   // waved through looks verified when nothing checked it.
-  test("outside a git repo, the gate allows but says the whole gate was skipped", () => {
+  test("outside a git repo, the commit gate allows but says no check ran", () => {
     const notARepo = mkdtempSync(join(tmpdir(), "gate-nonrepo-"));
     try {
-      const r = spawnSync(process.execPath, [GATE], {
-        input: JSON.stringify({ tool_name: "Bash", tool_input: { command: "git commit -m x" } }),
+      const r = spawnSync(process.execPath, [COMMIT_GATE, "pre-commit"], {
+        cwd: notARepo,
         encoding: "utf8",
-        env: { ...process.env, CLAUDE_PROJECT_DIR: notARepo },
+        env: { ...process.env, GIT_CEILING_DIRECTORIES: notARepo },
       });
       expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
       expect(r.stderr).toContain("FAIL-OPEN");
-      expect(r.stderr).toContain("SKIPPED");
+      expect(r.stderr).toContain("no check ran");
     } finally {
       rmSync(notARepo, { recursive: true, force: true });
     }
   });
 
-  test("an unparseable payload allows but says no check ran", () => {
+  test("an unparseable payload allows the tool-boundary hook but says no check ran", () => {
     const r = spawnSync(process.execPath, [GATE], {
       input: "not json",
       encoding: "utf8",

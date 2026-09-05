@@ -22,7 +22,7 @@
 import { rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, expect, beforeEach, afterEach } from "vitest";
-import { initGateRepo, runGate, g } from "./pre-commit-gate-harness.js";
+import { initGateRepo, runCommitGate as runGate, g } from "./pre-commit-gate-harness.js";
 
 let repo: string;
 

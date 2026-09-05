@@ -8,6 +8,7 @@
 
 # Shell scripts must stay LF even on a Windows checkout (CRLF breaks them).
 *.sh text eol=lf
+.githooks/* text eol=lf
 
 # Windows batch scripts genuinely require CRLF.
 *.bat text eol=crlf
