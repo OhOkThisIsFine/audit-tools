@@ -2100,5 +2100,47 @@
     "decided_at": "2026-09-04T13:21:29.458Z",
     "completed_at": "2026-09-04T13:29:57.073Z",
     "completed_ref": "audit-tools 743ce9be deletes the friction-walk entry; C:/Code 4e97cee homes lesson 4 in the machine-wide Standing traps"
+  },
+  "397cbb619e0e0bef": {
+    "disposition": "settled",
+    "answer": "Correct the two wrong identifiers (the knip array and verifyAnalyzerLeads), and delete the hand-copied guard enumeration and the registry-contents description outright, keeping only the sentence that points at scripts/guard-reach-data.mjs as authoritative. A second copy of a list that already has an authoritative home is what went stale.",
+    "subject": "CLAUDE.md carries four factual slips: a mis-quoted knip include array, a snake_case symbol name that exists nowhere, and a guard enumeration missing two registered hooks",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-09-05T16:07:17.114Z"
+  },
+  "ea9e7e909bc96742": {
+    "disposition": "settled",
+    "answer": "The shipped order is intended. Rewrite the Phase 1 bullet to say planning READS the project facts the confirm-intent step detected and persisted (falling back to neutralProjectFacts when absent), and change the ':161' sentence to say the tool detects the candidates at that step and presents them.",
+    "subject": "remediation-goals.md places project-fact detection in Phase 1 and says the intent checkpoint presents the candidates Phase 1 detected, but detection now runs AT the checkpoint and Phase 1 only reads what it persisted",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-09-05T16:07:17.117Z"
+  },
+  "b3a57ee10e05013f": {
+    "disposition": "settled",
+    "answer": "Rewrite both lines to say end-to-end tests run if the PLAN carries an e2e_command, and state in one clause that detection is not wired. The spec then describes what exists.",
+    "subject": "remediation-goals.md says end-to-end tests run if an e2e_command was detected in Phase 1, but nothing in the tree detects one — the field is only ever copied from an incoming plan",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-09-05T16:07:17.119Z"
+  },
+  "166028792143befe": {
+    "disposition": "settled",
+    "answer": "Do not pick a prose home. Generate the check list from the ingestion validator itself into a marked block, the way the doc-manifest table and the executor tables already work, so no copy can drift from the code.",
+    "subject": "the ingestion-verification check set is enumerated in three separate documents and the three lists have already drifted apart",
+    "path": "spec/multi-ide-concurrent-runs-design.md",
+    "decided_at": "2026-09-05T16:07:17.121Z"
+  },
+  "8f7450e8810dba44": {
+    "disposition": "settled",
+    "answer": "Delete the three enumerations, and add one standing line to docs/backlog/durable-traps.md saying that a guard firing as designed is not friction and must not be re-filed as a defect — so the immunity is stated once and permanently instead of rewritten each lap.",
+    "subject": "three friction-walk entries each carry a guards-that-fired-correctly enumeration and five bare ambiguous-direction-none sub-items, none of which states an open property",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-09-05T16:07:17.123Z"
+  },
+  "c6b7d601ba708f45": {
+    "disposition": "settled",
+    "answer": "Adopt P53. Move the commit-gating legs to a tracked pre-commit script run through core.hooksPath, re-scope the hook-bypass rule so an override pointing at the tracked hook directory is the intended state, re-derive the loop-core and constitutional-doc attestation bindings there, and leave the non-commit shell traps at the tool boundary. Correct the memory note in the same pass.",
+    "subject": "the commit gate is wired at the tool boundary and parses shell text to decide which repository a commit targets, so a throwaway repo is judged by this repository's rules",
+    "path": "scripts/guard-reach-data.mjs",
+    "decided_at": "2026-09-05T16:07:17.125Z"
   }
 }
