@@ -24,7 +24,6 @@ import {
   coverageStampPath,
   dispatchBoundedItems,
   LanePreflightError,
-  writeAbortStamp,
 } from "../../scripts/shared/lane-dispatch.mjs";
 
 const dirs: string[] = [];
@@ -294,52 +293,5 @@ describe("dispatchBoundedItems", () => {
     expect(stamp.classified).toBe(2);
     const warns = writes.filter((w) => w.includes("coverage stamp not writable"));
     expect(warns).toHaveLength(1);
-  });
-});
-
-describe("writeAbortStamp", () => {
-  it("writes the abort-shaped stamp in the read-verbatim field order, zero counters", () => {
-    const stampPath = coverageStampPath(join(tmp(), "t.jsonl"));
-    const stamp = writeAbortStamp(stampPath, { aborted: "no model resolvable", totalEntries: 7 });
-    const onDisk = JSON.parse(readFileSync(stampPath, "utf8"));
-    expect(onDisk).toEqual(stamp);
-    expect(onDisk.model).toBeNull();
-    expect(onDisk.aborted).toBe("no model resolvable");
-    expect(onDisk.total_entries).toBe(7);
-    expect(onDisk.finished_at).toBeNull();
-    expect(onDisk.classified_total).toBe(0);
-    // The nightly routine reads this sidecar verbatim: the names AND their
-    // order are the contract.
-    expect(Object.keys(onDisk)).toEqual([
-      "model",
-      "started_at",
-      "finished_at",
-      "aborted",
-      "total_entries",
-      "prior_classified",
-      "attempted",
-      "classified",
-      "classified_total",
-      "errored",
-    ]);
-  });
-
-  it("lets a seed override the leading fields without disturbing the shape", () => {
-    const stampPath = coverageStampPath(join(tmp(), "t.jsonl"));
-    writeAbortStamp(stampPath, { aborted: "x", totalEntries: 1, seed: { model: "m9" } });
-    expect(JSON.parse(readFileSync(stampPath, "utf8")).model).toBe("m9");
-  });
-
-  it("is best-effort: an unwritable path warns instead of masking the abort", () => {
-    const stampPath = coverageStampPath(join(tmp(), "t.jsonl"));
-    mkdirSync(stampPath);
-    const writes: string[] = [];
-    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: any) => {
-      writes.push(String(chunk));
-      return true;
-    }) as any);
-    const stamp = writeAbortStamp(stampPath, { aborted: "x", totalEntries: 1 });
-    expect(stamp.aborted).toBe("x");
-    expect(writes.filter((w) => w.includes("coverage stamp not writable"))).toHaveLength(1);
   });
 });

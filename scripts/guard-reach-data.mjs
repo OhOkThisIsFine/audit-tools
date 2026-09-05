@@ -1385,9 +1385,11 @@ export const REACH = [
     uncovered:
       'release-and-publish, update-languages, triage-backlog, rebaseline-flakes and ' +
       'poll-log-throttle run only at release/maintenance time — no build gate executes them ' +
-      "(triage-backlog's sweep driver is now shared lane-dispatch.mjs, gate-executed via " +
-      "tests/shared/lane-dispatch.test.ts — the uncovered half is triage-backlog's HTTP lane + CLI " +
-      'shell only). derived-file-preflight refuses only when the worktree tree equals the staged ' +
+      "(triage-backlog's sweep driver is shared lane-dispatch.mjs, gate-executed via " +
+      "tests/shared/lane-dispatch.test.ts, and its llm-relay dispatch lane is mcp-dispatch-lane.mjs, " +
+      'gate-executed against a fake MCP server via tests/shared/triage-lane-health.test.ts — the ' +
+      "uncovered half is triage-backlog's task/record binding + CLI shell only). " +
+      'derived-file-preflight refuses only when the worktree tree equals the staged ' +
       'tree before AND after its legs; three halves stay open, all stated in the open-bugs entry: ' +
       'the DIVERGENT case gets no verdict at all (the preflight abstains, so a genuine staged-tree ' +
       'failure reaches the gate at commit and costs one P19 double-attestation); even an ' +

@@ -45,49 +45,49 @@
 // strongest verdict belongs only to probe evaluation in the nightly writer,
 // whose probes are authored to be checkable against the tree.
 //
-//   TRIAGE_MODEL=<spec>        explicit model id served by the router. DEFAULT
-//                              IS DISCOVERED LIVE from the router's own
-//                              /v1/models, preferring the `auto` alias — a
-//                              hardcoded model name is a hand-held copy of the
-//                              router's roster and went stale twice before.
-//   TRIAGE_ENDPOINT=<url>      router origin, default http://127.0.0.1:8791
-//   TRIAGE_API_KEY=<key>       router bearer key. OPTIONAL: llm-relay serves
-//                              loopback with no key, so leave it unset.
-//   TRIAGE_CONCURRENCY=<n>     default 3
+//   TRIAGE_CONCURRENCY=<n>     default 3 — one `llm-relay mcp` child each
+//
+// THE SWEEP NAMES NO MODEL (ledger 133f4f815b608ea4, owner decision
+// 2026-09-03). Each entry goes to llm-relay's own `dispatch` tool through the
+// stdio MCP lane (scripts/shared/mcp-dispatch-lane.mjs); the relay owns lane
+// choice end to end, and every record carries the lane that answered it. This
+// script never reads a roster, never picks an alias, and has no model env var:
+// a hand-held copy of the relay's roster went stale twice, and the fallback
+// that replaced it chose the one passthrough needing a real API key and killed
+// leg 2 at preflight with zero entries attempted.
 //
 // HEALTH CONTRACT (P11, owner decision sol-4 2026-08-06). Three consecutive
 // nights degraded silently to a partial sweep, each for a different transport
-// fault. Now: (1) the model target is resolved live (above) and an unresolvable
-// lane ABORTS at startup naming the escape; (2) one PREFLIGHT call runs before
-// the sweep — a dead lane fails loudly at entry 0, not silently at entry 154
-// (single attempt, matching the per-entry policy: failover is the router's job);
-// (3) a COVERAGE STAMP (<out>-coverage.json) records model/attempted/
-// classified/errored/aborted, rewritten as the sweep progresses, so "did leg 2
-// actually cover the backlog" is a number the routine reads, never a wc -l.
+// fault. Now: (1) one PREFLIGHT dispatch runs before the sweep — a dead lane
+// (no relay, no `llm-relay` on PATH, no servable rung) fails loudly at entry 0
+// with the relay's own message, not silently at entry 154 (single attempt,
+// matching the per-entry policy: failover is the relay's job); (2) a COVERAGE
+// STAMP (<out>-coverage.json) records model/attempted/classified/errored/
+// aborted plus a per-lane count, rewritten as the sweep progresses, so "did
+// leg 2 actually cover the backlog" is a number the routine reads, never a
+// wc -l.
 //
-// ⚠ ALIAS CHOICE IS THE WHOLE COST. `glm-5.2` (rank 1) spent ~4 min per entry on
-// this — ~7h for the file — because it is a heavy reasoning model doing a
-// mechanical classification. The flash tier answers in seconds. Conversely
-// `deepseek-v4-flash` prepends prose before the JSON despite `response_format`,
-// which is why the extractor below salvages the object rather than trusting the
-// body to be bare JSON. [[offload-lane-failures-are-usually-the-caller]]
+// ⚠ Some lanes prepend prose before the JSON despite the schema, which is why
+// the extractor below salvages the object rather than trusting the body to be
+// bare JSON. [[offload-lane-failures-are-usually-the-caller]]
 //
 // ⚠ The schema is shaped to THIS task (a verdict enum plus an action), not the
 // lane's generic {summary, findings[], open_questions[]} container. A misfitting
 // schema does not error; it returns valid JSON full of placeholders that reads as
-// model incapacity.
+// model incapacity. It is passed twice on purpose: as the dispatch `schema`,
+// which a relay lane answers through a forced tool call, and inline in the task
+// text, which is all a CLI agent lane ever sees.
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import http from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   coverageStampPath,
   dispatchBoundedItems,
   LanePreflightError,
-  writeAbortStamp,
 } from './lane-dispatch.mjs';
+import { openDispatchLane } from './mcp-dispatch-lane.mjs';
 import { evaluateProbes } from '../nightly/items.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -106,10 +106,8 @@ const USAGE = 'Usage: node scripts/shared/triage-backlog.mjs [outPath]';
 if (IS_CLI && (OUT_ARG === '-h' || OUT_ARG === '--help')) {
   console.log(USAGE);
   console.log('  outPath                  default .audit-tools/backlog-triage.jsonl');
-  console.log('  TRIAGE_MODEL=<spec>      model id; the default is discovered live');
-  console.log('  TRIAGE_ENDPOINT=<url>    router origin, default http://127.0.0.1:8791');
-  console.log('  TRIAGE_API_KEY=<key>     router bearer key; optional on loopback');
-  console.log('  TRIAGE_CONCURRENCY=<n>   default 3');
+  console.log('  TRIAGE_CONCURRENCY=<n>   default 3; one llm-relay mcp child each');
+  console.log('  Lane choice belongs to llm-relay dispatch; there is no model setting.');
   process.exit(0);
 }
 if (IS_CLI && OUT_ARG?.startsWith('-')) {
@@ -124,79 +122,9 @@ const OUT = OUT_ARG && !OUT_ARG.startsWith('-')
   : join(ROOT, '.audit-tools', 'backlog-triage.jsonl');
 const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
 
-// The router is a local OpenAI-compatible gateway (llm-relay on :8791 by
-// default). This lane has now outlived THREE transports — LiteLLM on :4000,
-// an earlier local router, and FreeLLMAPI on :3001 — so nothing about it is
-// hardcoded beyond the origin, which TRIAGE_ENDPOINT overrides.
-//
-// ⚠ FreeLLMAPI was RETIRED 2026-08-29 and :3001 is dead, so the old default
-// gave every unconfigured run an ECONNREFUSED. TRIAGE_ENDPOINT is set nowhere
-// on this machine, so the default is what actually runs — it is the live
-// value, not a fallback.
-//
-// The key is optional: llm-relay serves loopback with no bearer token
-// (/v1/models answers 200 unauthenticated), so an unset TRIAGE_API_KEY is the
-// normal case rather than a misconfiguration.
-const ENDPOINT = new URL(process.env.TRIAGE_ENDPOINT || 'http://127.0.0.1:8791');
-const API_KEY = process.env.TRIAGE_API_KEY || '';
-
-function defaultRosterSource() {
-  const r = spawnSync(
-    process.execPath,
-    [
-      '-e',
-      `fetch(${JSON.stringify(new URL('/v1/models', ENDPOINT).href)},{headers:${JSON.stringify({ authorization: `Bearer ${API_KEY}` })}})` +
-        `.then(r=>r.text()).then(t=>process.stdout.write(t)).catch(e=>{console.error(e.message);process.exit(1)})`,
-    ],
-    { encoding: 'utf8', windowsHide: true, timeout: 15_000 },
-  );
-  if (r.error || r.status !== 0) {
-    throw new Error(r.error?.message || (r.stderr || '').trim() || `roster probe exited ${r.status}`);
-  }
-  return r.stdout;
-}
-
-/**
- * Resolve the model spec: an explicit TRIAGE_MODEL wins verbatim; otherwise the
- * router's live roster is asked for. Never a hardcoded model id — the router
- * owns its roster and changes it without telling this script.
- */
-export function resolveTriageModel(env = process.env, rosterSource = defaultRosterSource) {
-  const explicit = env.TRIAGE_MODEL;
-  if (typeof explicit === 'string' && explicit.trim() !== '') return explicit.trim();
-  let raw;
-  try {
-    raw = rosterSource();
-  } catch (err) {
-    throw new Error(
-      `triage lane cannot resolve a model target: router roster discovery failed ` +
-        `(${/** @type {any} */ (err)?.message ?? err}). The lane is DEAD, not slow — start the router or set ` +
-        `TRIAGE_MODEL=<spec> to bypass discovery.`,
-    );
-  }
-  let roster;
-  try {
-    roster = JSON.parse(raw);
-  } catch {
-    throw new Error(
-      `triage lane cannot resolve a model target: router returned an unparseable roster ` +
-        `(${String(raw).slice(0, 120)}). Set TRIAGE_MODEL=<spec> to bypass discovery.`,
-    );
-  }
-  const ids = (Array.isArray(roster?.data) ? roster.data : [])
-    .map((m) => (typeof m?.id === 'string' ? m.id : null))
-    .filter(Boolean);
-  if (ids.length === 0) {
-    throw new Error(
-      'triage lane cannot resolve a model target: router reports no available models. ' +
-        'Set TRIAGE_MODEL=<spec> to bypass discovery.',
-    );
-  }
-  // Mechanical classification wants a fast target (the header notes measure a
-  // heavy reasoner at ~4min/entry vs seconds). `auto` delegates that choice to
-  // the router, which is the only thing that knows live health and quota.
-  return ids.includes('auto') ? 'auto' : ids[0];
-}
+// Ceiling on one entry's dispatch. The lane the relay picks may be a heavy
+// reasoner; the previous HTTP transport allowed the same twenty minutes.
+const ENTRY_TIMEOUT_MS = 20 * 60 * 1000;
 
 /** Tracked files matching a git query, or null when git cannot answer. */
 function trackedMatches(root, args, okStatuses = [0]) {
@@ -316,53 +244,49 @@ function chunk(file) {
 const entries = [...chunk('open-bugs.md'), ...chunk('forward-tracks.md'), ...chunk('deferred.md')];
 
 const SCHEMA = {
-  name: 'backlog_triage',
-  strict: false,
-  schema: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['title', 'verdict', 'why', 'action', 'effort', 'code_paths', 'premise_probes'],
-    properties: {
-      title: { type: 'string', description: 'the entry title, condensed to <=90 chars' },
-      verdict: {
-        type: 'string',
-        enum: [
-          'actionable_now',
-          'owner_decision_needed',
-          'live_run_blocked',
-          'accepted_residual_no_work',
-          'already_shipped_or_stale',
-        ],
-      },
-      why: { type: 'string', description: 'one sentence justifying the verdict, quoting the entry' },
-      action: { type: 'string', description: 'the single concrete change to make, or the exact question to ask the owner' },
-      effort: { type: 'string', enum: ['trivial', 'small', 'medium', 'large'] },
-      code_paths: { type: 'array', items: { type: 'string' }, description: 'source paths the entry names' },
-      premise_probes: {
-        type: 'array',
-        description:
-          'literal strings the ENTRY quotes as existing in the tree, each tied to the repo-relative path the entry names for it; empty only when the entry quotes nothing checkable',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          // `file` is no longer required: the author cannot see the repo, and
-          // forcing a path made it emit bare basenames and guesses. Naming a
-          // `symbol` instead is honest, and the sweep resolves it against the
-          // tracked tree when exactly one file matches.
-          required: ['contains'],
-          properties: {
-            file: {
-              type: 'string',
-              description:
-                'repo-relative path the entry names; a bare filename is accepted and resolved when unambiguous',
-            },
-            symbol: {
-              type: 'string',
-              description:
-                'an identifier to locate the file by, when the entry names no path — use INSTEAD of file, never a guess',
-            },
-            contains: { type: 'string', description: 'a literal fragment the entry quotes from that file' },
+  type: 'object',
+  additionalProperties: false,
+  required: ['title', 'verdict', 'why', 'action', 'effort', 'code_paths', 'premise_probes'],
+  properties: {
+    title: { type: 'string', description: 'the entry title, condensed to <=90 chars' },
+    verdict: {
+      type: 'string',
+      enum: [
+        'actionable_now',
+        'owner_decision_needed',
+        'live_run_blocked',
+        'accepted_residual_no_work',
+        'already_shipped_or_stale',
+      ],
+    },
+    why: { type: 'string', description: 'one sentence justifying the verdict, quoting the entry' },
+    action: { type: 'string', description: 'the single concrete change to make, or the exact question to ask the owner' },
+    effort: { type: 'string', enum: ['trivial', 'small', 'medium', 'large'] },
+    code_paths: { type: 'array', items: { type: 'string' }, description: 'source paths the entry names' },
+    premise_probes: {
+      type: 'array',
+      description:
+        'literal strings the ENTRY quotes as existing in the tree, each tied to the repo-relative path the entry names for it; empty only when the entry quotes nothing checkable',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        // `file` is no longer required: the author cannot see the repo, and
+        // forcing a path made it emit bare basenames and guesses. Naming a
+        // `symbol` instead is honest, and the sweep resolves it against the
+        // tracked tree when exactly one file matches.
+        required: ['contains'],
+        properties: {
+          file: {
+            type: 'string',
+            description:
+              'repo-relative path the entry names; a bare filename is accepted and resolved when unambiguous',
           },
+          symbol: {
+            type: 'string',
+            description:
+              'an identifier to locate the file by, when the entry names no path — use INSTEAD of file, never a guess',
+          },
+          contains: { type: 'string', description: 'a literal fragment the entry quotes from that file' },
         },
       },
     },
@@ -371,7 +295,7 @@ const SCHEMA = {
 
 // Single-sourced from the schema so the validation below can never disagree
 // with what the lane was asked to produce.
-export const TRIAGE_VERDICTS = new Set(SCHEMA.schema.properties.verdict.enum);
+export const TRIAGE_VERDICTS = new Set(SCHEMA.properties.verdict.enum);
 
 // P20 (owner decision sol-2, 2026-08-12): parsing is not classifying. A
 // response that parses as JSON but is not a triage record — the schema
@@ -426,59 +350,26 @@ Three rules about the TARGET, each of which made a third of the previous run's p
   resolvable against the tree; a guessed path is not, and a wrong one is worse than none.
 - A bare filename is fine when that is all the entry gives — do not invent directories for it.`;
 
-function post(body) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body);
-    const req = http.request(
-      { host: ENDPOINT.hostname, port: ENDPOINT.port || 80, path: '/v1/chat/completions', method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(data),
-          ...(API_KEY ? { authorization: `Bearer ${API_KEY}` } : {}),
-        } },
-      (res) => {
-        let buf = '';
-        res.on('data', (d) => (buf += d));
-        res.on('end', () => {
-          try { resolve({ status: res.statusCode, body: JSON.parse(buf) }); }
-          catch { reject(new Error(`HTTP ${res.statusCode}: ${buf.slice(0, 400)}`)); }
-        });
-      },
-    );
-    req.setTimeout(20 * 60 * 1000, () => req.destroy(new Error('timeout')));
-    req.on('error', reject);
-    req.write(data);
-    req.end();
-  });
-}
-
-// A provider/router error body has no choices array. Surface ITS message — it
-// names the real cause (and often its own retry-after) — never the
-// information-free `finish_reason=undefined` it used to be reported as.
-// Deliberately NO retry/backoff anywhere in this lane: failover is the
-// router's job, and duplicating it in the caller would hide a router defect.
-function chatFailure(status, r) {
-  const msg = r?.error?.message ?? JSON.stringify(r).slice(0, 400);
-  return new Error(`HTTP ${status} ${r?.error?.code ?? r?.error?.type ?? ''}: ${msg}`.trim());
+// The whole brief travels in the task text, schema included: a relay lane
+// answers through the forced `schema` tool call, but a CLI agent rung sees
+// nothing but the task, so the task must stand alone.
+function triageTask(e) {
+  return (
+    `${SYS}\n\n` +
+    `Reply with ONLY one JSON object matching this schema:\n${JSON.stringify(SCHEMA)}\n\n` +
+    `Backlog entry (from docs/backlog/${e.file}):\n\n${e.text}`
+  );
 }
 
 // The sweep itself — resume, worker pool, coverage stamp — is the shared
 // one-item-per-call driver (scripts/shared/lane-dispatch.mjs). This file owns
 // only the triage DOMAIN: backlog chunking, the schema, premise probing, and
-// the HTTP router lane.
+// the binding of one entry to one dispatch. Deliberately NO retry/backoff
+// anywhere in this lane: failover is the relay's job, and duplicating it in
+// the caller would hide a relay defect.
 async function main() {
-  let MODEL;
   const stampPath = coverageStampPath(OUT);
-  try {
-    MODEL = resolveTriageModel();
-  } catch (err) {
-    writeAbortStamp(stampPath, {
-      aborted: String(/** @type {any} */ (err).message || err),
-      totalEntries: entries.length,
-    });
-    process.stderr.write(`${/** @type {any} */ (err).message}\n`);
-    process.exit(1);
-  }
+  const lane = openDispatchLane({ size: CONCURRENCY, cwd: ROOT });
 
   let stamp;
   try {
@@ -486,13 +377,16 @@ async function main() {
       items: entries,
       outPath: OUT,
       concurrency: CONCURRENCY,
-      stampSeed: { model: MODEL },
+      stampSeed: { model: 'llm-relay dispatch' },
       // Counted so "the sweep covered 121 entries" cannot hide how many of
       // those carried probes that could not be evaluated at all. 30 of 121 did
       // on 2026-08-09, indistinguishable from an honest `unprobed` until now.
-      stampInit: { probes_unusable: 0 },
+      // `lanes` counts which rung answered each row — the relay chose it, so
+      // the stamp says what it chose.
+      stampInit: { probes_unusable: 0, lanes: {} },
       stampExtra: (s, rec) => {
         if (rec.premise === 'probes_unusable') s.probes_unusable += 1;
+        if (typeof rec.lane === 'string') s.lanes[rec.lane] = (s.lanes[rec.lane] ?? 0) + 1;
       },
       // Re-evaluate the premise of every stored record on load: running this
       // script IS the presentation event for triage verdicts, so a record
@@ -507,64 +401,71 @@ async function main() {
         };
       },
       preflight: async () => {
-        const { status, body: r } = await post({
-          model: MODEL,
-          max_tokens: 16,
-          messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
+        const r = await lane.dispatch('Reply with the single word: ok', {
+          maxTokens: 16,
+          timeoutMs: 2 * 60 * 1000,
         });
-        if (r?.error || !Array.isArray(r?.choices)) throw chatFailure(status, r);
+        if (r.status !== 'completed') {
+          throw new Error(`dispatch ${r.status} on lane ${r.lane}: ${r.error ?? r.raw.slice(0, 300)}`);
+        }
       },
       callLane: async (e) => {
-        const { status, body: r } = await post({
-          model: MODEL,
-          max_tokens: 4000,
-          messages: [
-            { role: 'system', content: SYS },
-            { role: 'user', content: `Backlog entry (from docs/backlog/${e.file}):\n\n${e.text}` },
-          ],
-          response_format: { type: 'json_schema', json_schema: SCHEMA },
+        const r = await lane.dispatch(triageTask(e), {
+          schema: SCHEMA,
+          maxTokens: 4000,
+          timeoutMs: ENTRY_TIMEOUT_MS,
         });
-        if (r?.error || !Array.isArray(r?.choices)) throw chatFailure(status, r);
-        const c = r.choices?.[0];
-        // The content is returned even on a non-stop finish: the driver
-        // records its byte size, which is the truncation diagnostic (P28 —
+        // A terminal failure is returned, not thrown, so the driver records
+        // the output size beside it — the truncation diagnostic (P28:
         // near-zero = dialect death, large-but-truncated = a cap to raise).
-        return { raw: c?.message?.content ?? '', finishReason: c?.finish_reason };
+        return { raw: r.raw, finishReason: r.status, lane: r.lane, servedBy: r.servedBy, error: r.error };
       },
-      buildRecord: (e, { raw, finishReason }) => {
-        // `finish_reason !== 'stop'` is OpenAI-chat policy, so it lives HERE,
-        // never in the lane-agnostic driver — but AFTER the lane returned, so
-        // the error row still carries finish_reason/output_bytes.
-        if (finishReason !== 'stop') throw new Error(`finish_reason=${finishReason}`);
+      buildRecord: (e, { raw, finishReason, lane: laneId, servedBy, error }) => {
+        // A job that did not complete is the lane's verdict on itself, so it
+        // is judged HERE, never in the lane-agnostic driver — but AFTER the
+        // lane returned, so the error row still carries finish_reason and
+        // output_bytes.
+        if (finishReason !== 'completed') {
+          throw new Error(`dispatch ${finishReason} on lane ${laneId}: ${error ?? raw.slice(0, 200)}`);
+        }
         // Some lanes prepend prose before the JSON despite the schema. Salvage +
         // parse + shape-validate live in buildTriageRecord — only a response that
         // finished cleanly (checked above) reaches it, so a truncated body can
         // never be laundered into a valid-looking record.
         const rec = buildTriageRecord(e, raw);
+        // Provenance: the relay chose the lane, so the record names it.
+        rec.lane = laneId;
+        if (servedBy) rec.served_by = servedBy;
         const { stamp: premise, recovered } = premiseVerdict(rec);
         rec.premise = premise;
         if (recovered.length > 0) rec.premise_probes_recovered = recovered;
         return rec;
       },
       onProgress: (e, rec) => {
-        process.stderr.write(`${e.id} -> ${rec.verdict ? `${rec.verdict} [premise: ${rec.premise}]` : 'ERR:' + rec.error}\n`);
+        process.stderr.write(
+          `${e.id} -> ${rec.verdict ? `${rec.verdict} [premise: ${rec.premise}] via ${rec.lane}` : 'ERR:' + rec.error}\n`,
+        );
       },
     }));
   } catch (err) {
     if (err instanceof LanePreflightError) {
       process.stderr.write(
         `${err.message}\nThe lane is DEAD, not slow — nothing was attempted. ` +
-          `Fix the router, or set TRIAGE_MODEL=<spec> to try a different target.\n`,
+          `Start the relay (llm-relay autostarts at logon; liveness is GET /telemetry) and re-run.\n`,
       );
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     throw err;
+  } finally {
+    await lane.close();
   }
 
   process.stderr.write(
     `leg-2 coverage: ${stamp.classified_total} classified total (${stamp.classified} this pass) / ` +
       `${stamp.errored} errored / ${stamp.probes_unusable} probes-unusable of ` +
-      `${stamp.attempted} attempted (${stamp.prior_classified} prior, ${stamp.total_entries} total) — ${stampPath}\n`,
+      `${stamp.attempted} attempted (${stamp.prior_classified} prior, ${stamp.total_entries} total) — ` +
+      `lanes ${JSON.stringify(stamp.lanes)} — ${stampPath}\n`,
   );
 }
 

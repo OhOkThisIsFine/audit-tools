@@ -86,10 +86,12 @@ a 2026-07-19 pass found ~21% of entries stale or already closed, in both
 directions. Deletion requires the same code anchor a doc auto-apply requires.
 
 *Coverage is read from the stamp, never eyeballed.* The mechanical sweep
-(`scripts/shared/triage-backlog.mjs`) resolves its model target live from the
-router's roster, preflights once (a dead lane aborts at entry 0 with the
-router's own error), and writes `<out>-coverage.json` — model, attempted, classified,
-errored, aborted — beside the JSONL as it runs. Report leg-2 coverage from that
+(`scripts/shared/triage-backlog.mjs`) names no model: it hands each entry to
+llm-relay's `dispatch` tool over MCP stdio, so the relay owns lane choice and
+each record names the lane that answered it. It preflights once (a dead lane
+aborts at entry 0 with the relay's own error) and writes `<out>-coverage.json`
+— model, attempted, classified, errored, aborted, and a per-lane count — beside
+the JSONL as it runs. Report leg-2 coverage from that
 stamp; a missing or aborted stamp means the sweep did NOT cover the backlog,
 and saying so is the honest sentence three partial runs had to reconstruct by
 hand (P11, sol-4 decision 2026-08-06).

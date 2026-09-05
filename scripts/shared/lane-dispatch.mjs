@@ -37,35 +37,6 @@ export function writeCoverageStamp(path, stamp) {
   fs.writeFileSync(path, JSON.stringify(stamp, null, 2) + '\n');
 }
 
-/**
- * A dispatch that never started: the caller could not even resolve its lane
- * target (a dead router, an unresolvable model). Single-sourced here so the
- * abort-stamp shape cannot drift from the sweep stamp's field names, and
- * best-effort like every stamp write — a failed write must never mask the
- * real abort message.
- */
-export function writeAbortStamp(stampPath, { aborted, totalEntries, seed = {} }) {
-  const stamp = {
-    model: null,
-    ...seed,
-    started_at: new Date().toISOString(),
-    finished_at: null,
-    aborted,
-    total_entries: totalEntries,
-    prior_classified: 0,
-    attempted: 0,
-    classified: 0,
-    classified_total: 0,
-    errored: 0,
-  };
-  try {
-    writeCoverageStamp(stampPath, stamp);
-  } catch (err) {
-    process.stderr.write(`coverage stamp not writable (${/** @type {any} */ (err)?.message ?? err}) — continuing without it\n`);
-  }
-  return stamp;
-}
-
 /** Preflight failed: the lane is DEAD, not slow — nothing was attempted. */
 export class LanePreflightError extends Error {
   constructor(message, options) {
