@@ -2106,7 +2106,9 @@
     "answer": "Correct the two wrong identifiers (the knip array and verifyAnalyzerLeads), and delete the hand-copied guard enumeration and the registry-contents description outright, keeping only the sentence that points at scripts/guard-reach-data.mjs as authoritative. A second copy of a list that already has an authoritative home is what went stale.",
     "subject": "CLAUDE.md carries four factual slips: a mis-quoted knip include array, a snake_case symbol name that exists nowhere, and a guard enumeration missing two registered hooks",
     "path": "CLAUDE.md",
-    "decided_at": "2026-09-05T16:07:17.114Z"
+    "decided_at": "2026-09-05T16:07:17.114Z",
+    "completed_at": "2026-09-05T16:12:15.890Z",
+    "completed_ref": "57cdcd79 — l1-1 landed: two identifiers corrected, the two hand-copied lists deleted, AGENTS.md regenerated"
   },
   "ea9e7e909bc96742": {
     "disposition": "settled",

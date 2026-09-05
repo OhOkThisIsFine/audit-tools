@@ -131,11 +131,14 @@ input is Markdown, free-form, or conversational.
   transitive-closure edges. Dangerous overlap is emitted as an explicit seam-preparation dependency;
   it does not force one unbounded block.
 - Compute parallel-safety per block (default true unless dependencies are found).
-- Detect project type and candidate closing actions deterministically (git
-  remote names, package metadata, release scripts, CI configuration —
-  `detectProjectFacts`) and record them on the plan as CANDIDATES. Detection
-  presents; it never selects: the user chooses the closing action at the intent
-  checkpoint (below), and an unchosen action is `none`.
+- Read the project facts — project type and candidate closing actions (git
+  remote names, package metadata, release scripts, CI configuration) — that the
+  intent checkpoint detected deterministically (`detectProjectFacts`) and
+  persisted (`project-facts.json`), falling back to `neutralProjectFacts` when
+  none were persisted, and record them on the plan as CANDIDATES. Planning
+  detects nothing itself. Detection presents; it never selects: the user
+  chooses the closing action at the intent checkpoint (below), and an unchosen
+  action is `none`.
 - Emit `remediation_plan.json` conforming to the `RemediationPlan` contract (validated by the
   hand-written TypeScript validators in `src/remediate/validation/`, per the Schemas section below).
 
@@ -158,8 +161,8 @@ gates fire at planning, each at most once per run:
   Remediation halts until every clarification is resolved.
 
 The closing action is the USER's choice, made at the intent checkpoint
-(`confirm_intent`): the tool presents the candidates Phase 1 detected, each with
-the fact that offers it, and the host writes `closing_action` on the confirmed
+(`confirm_intent`): the tool detects the candidates at that step and presents
+them, each with the fact that offers it, and the host writes `closing_action` on the confirmed
 checkpoint — one of the candidates, or any other vocabulary value as an explicit
 alternative, including the `custom` escape hatch for a user-supplied command. A
 value outside the vocabulary is refused by name and re-asked; an omitted field
@@ -252,7 +255,8 @@ Phase 2. If Phase 3 produces no blocked items, Phase 3b is skipped.
 - Run the full unit/integration test suite on the combined post-remediation
   state. If it fails, the run is not complete; offending items move to
   `blocked` and Phase 3b is re-entered.
-- Run end-to-end tests if an `e2e_command` was detected in Phase 1. Because
+- Run end-to-end tests if the plan carries an `e2e_command` (only a plan
+  supplied from outside the pipeline carries one; detection is not wired). Because
   individual per-finding refactors may be interdependent, e2e tests run once
   after all findings are resolved rather than per-block. A failure here
   transitions the run back to triage — it does not throw. The code changes are
@@ -354,7 +358,7 @@ Remediation is complete only when:
 - every item is in a terminal state (`resolved`, `resolved_no_change`,
   `deemed_inappropriate`, user-confirmed `ignored`, or `abandoned`),
 - the full unit/integration test suite passes on the combined post-remediation state,
-- end-to-end tests pass (if an `e2e_command` was detected),
+- end-to-end tests pass (if the plan carries an `e2e_command`),
 - the configured closing action has either executed or been explicitly
   recorded as skipped,
 - `remediation-outcomes.json` and its render `remediation-report.md` have been
