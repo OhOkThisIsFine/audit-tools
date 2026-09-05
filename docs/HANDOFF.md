@@ -24,10 +24,11 @@
 ## Immediate next
 
 The external 5-primary + 5-held-out paired benchmark run described in
-[`forward-tracks.md`](backlog/forward-tracks.md) is the pinned forward track. The next scheduled
-maintenance run is the first to exercise the dispatch-routed leg-2 sweep unattended; read its
-coverage stamp (`.audit-tools/backlog-triage-coverage.json`, now with a per-lane count) before
-trusting its leg-2 report.
+[`forward-tracks.md`](backlog/forward-tracks.md) is the pinned forward track.
+
+The dispatch-routed leg-2 sweep has now run unattended and is proven: 98 of 98 entries
+classified, all on `free-pool`, zero errored after one retry of a single empty-output lane.
+Read a run's own `<out>-coverage.json` stamp before trusting its leg-2 report.
 
 ## Deliberate state, not bugs
 
