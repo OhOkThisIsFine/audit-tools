@@ -2115,14 +2115,18 @@
     "answer": "The shipped order is intended. Rewrite the Phase 1 bullet to say planning READS the project facts the confirm-intent step detected and persisted (falling back to neutralProjectFacts when absent), and change the ':161' sentence to say the tool detects the candidates at that step and presents them.",
     "subject": "remediation-goals.md places project-fact detection in Phase 1 and says the intent checkpoint presents the candidates Phase 1 detected, but detection now runs AT the checkpoint and Phase 1 only reads what it persisted",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-09-05T16:07:17.117Z"
+    "decided_at": "2026-09-05T16:07:17.117Z",
+    "completed_at": "2026-09-05T16:16:32.233Z",
+    "completed_ref": "b626663a — l1-2 landed: Phase 1 reads the persisted project facts; the intent checkpoint detects and presents"
   },
   "b3a57ee10e05013f": {
     "disposition": "settled",
     "answer": "Rewrite both lines to say end-to-end tests run if the PLAN carries an e2e_command, and state in one clause that detection is not wired. The spec then describes what exists.",
     "subject": "remediation-goals.md says end-to-end tests run if an e2e_command was detected in Phase 1, but nothing in the tree detects one — the field is only ever copied from an incoming plan",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-09-05T16:07:17.119Z"
+    "decided_at": "2026-09-05T16:07:17.119Z",
+    "completed_at": "2026-09-05T16:16:32.296Z",
+    "completed_ref": "b626663a — l1-3 landed: e2e tests run if the plan carries an e2e_command; detection stated as not wired"
   },
   "166028792143befe": {
     "disposition": "settled",

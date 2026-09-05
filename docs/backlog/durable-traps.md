@@ -13,6 +13,16 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **A guard that fires AS DESIGNED is not friction and is never re-filed as a defect (owner
+  decision 2026-09-05, nightly item bl-1).** A refusal from `shell-trap-guard`,
+  `shell-conventions-guard`, `question-philosophy-gate`, `worktree-deps-guard`, a budget or
+  line-number check, or any other registered guard doing exactly what its registry row says is the
+  mechanism working. A friction walk records only open properties and unfiled defects; it does not
+  enumerate correct refusals to immunize them, because the immunity that list provided lasted one
+  lap while the guards are permanent, and rewriting it every lap was a mechanism made of
+  repetition. This line is that immunity, stated once. A guard whose refusal is WRONG (a false
+  positive, a fix hint that does not work as stated) is a defect and goes to `open-bugs.md`.
+
 - **A delegated `codex exec` lane runs the sprint ceremony and CONSUMES the session's lap record
   (2026-08-29, ENFORCED IN PART).** The lane reads the generated `AGENTS.md` (the shared global
   CLAUDE.md region, end-of-sprint cleanup included), so mid-run it rewrote `.claude/lap-start.json`

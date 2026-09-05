@@ -581,16 +581,10 @@
   "wait for CI (or the in-flight run) to complete, then retry" — so it knows an in-flight run may
   exist and declines to wait on it. The retry then re-ran the full pre-tag gate from scratch.
   **Property:** the pre-tag gate waits out a run already in flight for that SHA, and refuses only
-  when none exists or one has concluded red. (4) **guards that fired CORRECTLY, recorded so they are
-  not mistaken for friction:** `shell-conventions-guard` refused a heredoc file write;
-  `shell-trap-guard` refused a piped `npx vitest` and a piped `git commit`, each stating its fix;
-  `check:backlog-line-numbers` caught a bare line-number citation in a new entry, then caught the
-  first attempt to DESCRIBE that catch, because the description repeated the offending form;
-  `unasked-decision-gate` refused an owner decision posed in prose instead of through
-  `AskUserQuestion`. (5) **already tracked, hit again, deliberately NOT restated:** the closeout Stop
-  gate challenged a mid-lap pause, and `verify-green.mjs check` deferred without naming a runnable
-  check — both are open entries in the machine-wide `C:\Code\docs\backlog.md`. (6) **filed
-  machine-wide this lap:** three merged, clean `start-lap-*` worktrees survived their laps and cost
+  when none exists or one has concluded red. (4) **already tracked, hit again, deliberately NOT
+  restated:** the closeout Stop gate challenged a mid-lap pause, and `verify-green.mjs check`
+  deferred without naming a runnable check — both are open entries in the machine-wide
+  `C:\Code\docs\backlog.md`. (5) **filed machine-wide this lap:** three merged, clean `start-lap-*` worktrees survived their laps and cost
   this lap-start an inspection each; the owner ruled worktree cleanup machine-wide.
 
 - **Friction walk (commitFold unlink lap, 2026-08-30):** (1) **ambiguous-direction:** none — the
@@ -606,12 +600,8 @@
   (3) **inefficient-feeding (low):** the `claude-free-pool` (pool/medium) refutation lane ran 14 min
   with no answer and was cancelled; an `agy` lane given the identical prompt returned a fully-cited
   verdict in ~4 min, and its two novel claims both held against source. For a repo-reading
-  refutation, prefer agy and hand it the recon map. (4) **guards that fired CORRECTLY, recorded so
-  they are not mistaken for friction:** `shell-trap-guard` refused a piped `npx vitest` and a piped
-  `git push`, both of which mask the real exit code, and each refusal stated its fix;
-  `question-philosophy-gate` challenged the `/start-lap` approval question the skill MANDATES —
-  already tracked in [`minor-bugs.md`](minor-bugs.md), confirmed live again.
-  (5) **machine-wide, filed OUTSIDE this repo:** `verify-green.mjs check` defers to this repo's
+  refutation, prefer agy and hand it the recon map.
+  (4) **machine-wide, filed OUTSIDE this repo:** `verify-green.mjs check` defers to this repo's
   mechanism and names no runnable substitute, so step 3 of the lap had to hand-compute
   `worktreeTree` to learn whether the baseline was green. Its home is `C:\Code\docs\backlog.md`,
   because the declaration schema and its reader are machine-wide.
@@ -625,13 +615,7 @@
   instead of a line count. **Property:** an entry that lost its opener, or a stray continuation line
   belonging to no entry, is a RED. (3) **inefficient-feeding:** the full suite ran three times
   (~3.2 min each) because the green stamp binds the tree and two doc commits changed it after the
-  first two runs; batching the doc commits before the final run would have cost one. (4) **guards
-  that fired CORRECTLY, recorded so they are not mistaken for friction:** `worktree-deps-guard`
-  caught an empty `node_modules` before any check ran; `shell-trap-guard` refused a piped `npm test`
-  and a piped `git commit` (both mask the real exit code); `shell-conventions-guard` refused two
-  heredoc writes; `question-philosophy-gate` fired once and the question survived it, as its own
-  text says it should. `check:backlog-budget` refused a 2709/2600-byte entry without naming what to
-  cut — already tracked, confirmed live.
+  first two runs; batching the doc commits before the final run would have cost one.
 
 - **Friction walk (determinations-execution lap, 2026-07-29):** (1) **ambiguous-direction:** none —
   the 16 nightly-ledger answers were executable as written; the two left unexecuted (premise probe
