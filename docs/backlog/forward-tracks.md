@@ -154,6 +154,17 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   re-mints, or an accepted ledger keyed by work item rather than by run — which is a change to the
   host-handoff contract itself, so it takes a `/design-check` before any build.
 
+- **Fill the plan's `test_command` / `e2e_command` from the persisted project facts, not from the
+  LLM extraction (2026-09-04, owner-directed follow-up).** `detectProjectFacts` already discovers
+  test, e2e, build and lint argv (`discoverProjectCommands`), and the confirm step persists them in
+  the intake `project-facts.json`, but `normalizeExtractedPlan` still passes the extracted plan's
+  `test_command` / `e2e_command` through and fills nothing when they are absent, so the close
+  phase's combined run depends on what a worker happened to write. The owner chose this as a
+  follow-up at the 2026-09-04 closeout rather than widening the closing-action item. **Property:**
+  a plan's test and e2e commands come from the repository's own manifests when the extraction
+  names none, and every such command still passes the project-test admission gate before it runs.
+  Needs `/design-check` first: it touches the close-phase combined run and the test-admission gate.
+
 - **Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>`
   branch has no closing action that lands it on the base branch.** `CLOSING_ACTIONS`
   (`src/shared/types/closingActions.ts`) is commit/push/open-pr/publish/tag/none/custom; the

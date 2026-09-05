@@ -9,25 +9,26 @@
   passed and the registry artifact is installed globally. Both `audit-code --version` and
   `remediate-code --version` report `0.51.0`.
 - **Every owner-answered decision that is actionable here has a landed commit** recorded in
-  the decisions ledger under `.claude/`. The one still open — routing the leg-2 triage sweep
-  through llm-relay dispatch — waits on the fast dispatch path in the llm-relay repository
-  (owner decision 2026-09-04, tracked in the machine-wide backlog).
+  the decisions ledger under `.claude/`, except one: routing the leg-2 triage sweep through
+  `llm-relay dispatch` so the relay owns lane choice. The owner lifted its wait on the llm-relay
+  repository on 2026-09-04 (llm-relay is faster now); it is this repository's next lap.
+- **The four closeout decisions of 2026-09-04 are answered**: the one cleanup rule stays as
+  landed; a `custom` closing action keeps its command on the checkpoint with no close-phase
+  preview; the Node matrix stays on floating majors; test-command detection is a filed
+  forward track, not wired.
 - **The nine live-run design assumptions are decided**: the owner confirmed eight and reversed
   one on 2026-09-04, as the design-gate record states beside each in
   [`live-run-defect-set-design-gate-2026-09-03.md`](reviews/live-run-defect-set-design-gate-2026-09-03.md).
 
 ## Immediate next
 
-The llm-relay fast dispatch path unblocks the last answered decision; nothing in this
-repository precedes it. The external 5-primary + 5-held-out paired benchmark run described in
-[`forward-tracks.md`](backlog/forward-tracks.md) stays the pinned forward track.
+Route the leg-2 triage sweep (`scripts/shared/triage-backlog.mjs`) through `llm-relay dispatch`
+instead of naming a model through the router (ledger item 133f4f815b608ea4, owner answer
+2026-09-03, wait lifted 2026-09-04). The external 5-primary + 5-held-out paired benchmark run
+described in [`forward-tracks.md`](backlog/forward-tracks.md) stays the pinned forward track.
 
 ## Deliberate state, not bugs
 
-- Two working assumptions from the 2026-09-04 lap await the owner's word and are asked in that
-  lap's hand-back: the stale-dir cleanup rule refuses a complete-but-unpromoted dir without
-  `--force` rather than deleting it (the literal revert would have), and a `custom` closing
-  action carries its command on the intent checkpoint with no close-phase preview.
 - The judge-side naming refusal is unreachable on the production path by design of the parse
   order: the property it guards holds twice over, and only its claimed reach does not. Tracked
   in [`minor-bugs.md`](backlog/minor-bugs.md).

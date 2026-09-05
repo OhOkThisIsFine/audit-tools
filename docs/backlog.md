@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 250 entr(y/ies) indexed.
+> and at commit). 251 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -193,10 +193,11 @@
 - `forward-tracks.md:124` — CI wall-clock: shard balance and the single-file floor.
 - `forward-tracks.md:131` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
 - `forward-tracks.md:143` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:157` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
-- `forward-tracks.md:166` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
-- `forward-tracks.md:191` — ▶ Audit-tools deep-review acceptance benchmark still needs its external run.
-- `forward-tracks.md:213` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:157` — Fill the plan's `test_command` / `e2e_command` from the persisted project facts, not from the LLM extraction (2026-09-04, owner-directed follow-up).
+- `forward-tracks.md:168` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:177` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
+- `forward-tracks.md:202` — ▶ Audit-tools deep-review acceptance benchmark still needs its external run.
+- `forward-tracks.md:224` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 
