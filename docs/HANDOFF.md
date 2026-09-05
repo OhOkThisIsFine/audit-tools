@@ -9,9 +9,10 @@
   passed and the registry artifact is installed globally. Both `audit-code --version` and
   `remediate-code --version` report `0.51.0`.
 - **Every owner-answered decision that is actionable here has a landed commit** recorded in
-  the decisions ledger under `.claude/`, except one: routing the leg-2 triage sweep through
-  `llm-relay dispatch` so the relay owns lane choice. The owner lifted its wait on the llm-relay
-  repository on 2026-09-04 (llm-relay is faster now); it is this repository's next lap.
+  the decisions ledger under `.claude/`. The last one, routing the leg-2 triage sweep through
+  llm-relay dispatch, landed 2026-09-04: the sweep speaks MCP stdio to `llm-relay mcp` through
+  `scripts/shared/mcp-dispatch-lane.mjs`, names no model, and records the lane that answered
+  each entry (owner choice: the dispatch tool per entry, not the `auto` alias over HTTP).
 - **The four closeout decisions of 2026-09-04 are answered**: the one cleanup rule stays as
   landed; a `custom` closing action keeps its command on the checkpoint with no close-phase
   preview; the Node matrix stays on floating majors; test-command detection is a filed
@@ -22,10 +23,11 @@
 
 ## Immediate next
 
-Route the leg-2 triage sweep (`scripts/shared/triage-backlog.mjs`) through `llm-relay dispatch`
-instead of naming a model through the router (ledger item 133f4f815b608ea4, owner answer
-2026-09-03, wait lifted 2026-09-04). The external 5-primary + 5-held-out paired benchmark run
-described in [`forward-tracks.md`](backlog/forward-tracks.md) stays the pinned forward track.
+The external 5-primary + 5-held-out paired benchmark run described in
+[`forward-tracks.md`](backlog/forward-tracks.md) is the pinned forward track. The next scheduled
+maintenance run is the first to exercise the dispatch-routed leg-2 sweep unattended; read its
+coverage stamp (`.audit-tools/backlog-triage-coverage.json`, now with a per-lane count) before
+trusting its leg-2 report.
 
 ## Deliberate state, not bugs
 
