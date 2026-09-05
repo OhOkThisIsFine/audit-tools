@@ -42,6 +42,7 @@ export const STEP_GLOSS = {
   "check:executor-producers": "executor→artifact producer-table parity",
   "check:spec-mirrors": "spec/audit registry-mirror table parity",
   "check:cli-surface": "installer-verb surface parity in the shipped product page",
+  "check:ingestion-checks": "result-ingestion check-set parity between the registry and contracts.md",
   "check:deadcode": "dead-code export gate",
   "check:orphan-modules": "production-reachability gate over src modules",
   "check:lint": "curated lint gate (eslint, zero-tolerance)",

@@ -36,6 +36,7 @@ import {
   stableStringify,
   TRACKED_CHILD_DEADLINE_MS,
   writeJsonFile,
+  type IngestionCheckId,
   type SubmissionIssue,
   type SubmissionLedgerEvent,
   type SubmissionScanMessages,
@@ -791,7 +792,7 @@ export async function remediationSubmissionBinding(params: {
       );
       return parsed.ok
         ? null
-        : { code: "submission_contract_invalid", message: parsed.reason };
+        : { code: "submission_contract_invalid", check: parsed.check, message: parsed.reason };
     },
   };
 }
@@ -1227,10 +1228,11 @@ type ParsedHostResult =
       readonly kind: "decision";
       readonly result: RemediationHostDecision;
     }
-  | { readonly ok: false; readonly reason: string };
+  | { readonly ok: false; readonly check: IngestionCheckId; readonly reason: string };
 
-function invalidResult(reason: string): ParsedHostResult {
-  return { ok: false, reason };
+/** `check` names the registered ingestion check that failed; `reason` is its prose. */
+function invalidResult(check: IngestionCheckId, reason: string): ParsedHostResult {
+  return { ok: false, check, reason };
 }
 
 /** A submission this draw's contract gate accepted — landed edit or decision. */
@@ -1257,6 +1259,8 @@ function parseResult(
   root: string,
 ): ParsedHostResult {
   if (isRecord(value) && value.contract_version === DECISION_CONTRACT_VERSION) {
+    // Envelope first, identity second: one message (the host repairs the same
+    // file either way), two registered checks, so the issue names which failed.
     if (
       !hasExactKeys(value, [
         "contract_version",
@@ -1266,15 +1270,23 @@ function parseResult(
         "prompt_sha256",
         "outcome",
       ]) ||
-      !resultIdentityIsBound(value, {
-        runId,
-        workItemId: workItem.id,
-        promptSha256: workItem.prompt.sha256,
-      }) ||
       !isRecord(value.outcome) ||
       typeof value.outcome.status !== "string"
     ) {
       return invalidResult(
+        "result_envelope",
+        "decision must match the exact current run, work-item, and prompt binding",
+      );
+    }
+    if (
+      !resultIdentityIsBound(value, {
+        runId,
+        workItemId: workItem.id,
+        promptSha256: workItem.prompt.sha256,
+      })
+    ) {
+      return invalidResult(
+        "identity_binding",
         "decision must match the exact current run, work-item, and prompt binding",
       );
     }
@@ -1288,6 +1300,7 @@ function parseResult(
         evidence.some((entry) => entry.trim().length === 0)
       ) {
         return invalidResult(
+          "outcome_shape",
           "resolved_no_change requires a non-empty evidence string array",
         );
       }
@@ -1297,7 +1310,7 @@ function parseResult(
         typeof outcome.failure_reason !== "string" ||
         outcome.failure_reason.trim().length === 0
       ) {
-        return invalidResult("blocked requires a non-empty failure_reason");
+        return invalidResult("outcome_shape", "blocked requires a non-empty failure_reason");
       }
     } else if (outcome.status === "needs_clarification") {
       if (
@@ -1311,11 +1324,13 @@ function parseResult(
           !isClarificationCategory(outcome.category))
       ) {
         return invalidResult(
+          "outcome_shape",
           "needs_clarification requires a non-empty question and optional canonical category",
         );
       }
     } else {
       return invalidResult(
+        "outcome_shape",
         "decision outcome.status must be resolved_no_change, blocked, or needs_clarification",
       );
     }
@@ -1342,7 +1357,14 @@ function parseResult(
       "work_item_id",
       "worktree_evidence",
     ]) ||
-    value.contract_version !== RESULT_CONTRACT_VERSION ||
+    value.contract_version !== RESULT_CONTRACT_VERSION
+  ) {
+    return invalidResult(
+      "result_envelope",
+      "result must match the exact current contract, run, work-item, and prompt binding",
+    );
+  }
+  if (
     !resultIdentityIsBound(value, {
       runId,
       workItemId: workItem.id,
@@ -1350,6 +1372,7 @@ function parseResult(
     })
   ) {
     return invalidResult(
+      "identity_binding",
       "result must match the exact current contract, run, work-item, and prompt binding",
     );
   }
@@ -1365,6 +1388,7 @@ function parseResult(
     )
   ) {
     return invalidResult(
+      "write_scope",
       "changed_files must be non-empty, sorted, unique, normalized paths within allowed_files",
     );
   }
@@ -1377,6 +1401,7 @@ function parseResult(
     value.commit_evidence.after === value.commit_evidence.before
   ) {
     return invalidResult(
+      "commit_evidence",
       "commit_evidence must bind the workload baseline to a distinct full commit id",
     );
   }
@@ -1386,6 +1411,7 @@ function parseResult(
     value.test_evidence.length !== workItem.required_tests.length
   ) {
     return invalidResult(
+      "test_evidence",
       "test_evidence must contain exactly one entry for every required test",
     );
   }
@@ -1397,6 +1423,7 @@ function parseResult(
       evidence.status !== "passed"
     ) {
       return invalidResult(
+        "test_evidence",
         `test_evidence[${index}] must echo the bound command with status passed`,
       );
     }
@@ -1408,6 +1435,7 @@ function parseResult(
   const obligationEvidence = value.obligation_evidence;
   if (!Array.isArray(obligationEvidence)) {
     return invalidResult(
+      "obligation_evidence",
       "obligation_evidence must be an array with one entry per bound obligation",
     );
   }
@@ -1428,6 +1456,7 @@ function parseResult(
           ? ` (obligation_id: ${entry.obligation_id})`
           : "";
       return invalidResult(
+        "obligation_evidence",
         `obligation_evidence[${index}] must cite at least one non-empty evidence string for a named obligation${named}`,
       );
     }
@@ -1439,12 +1468,14 @@ function parseResult(
       ...new Set(citedIds.filter((id, i) => citedIds.indexOf(id) !== i)),
     ];
     return invalidResult(
+      "obligation_evidence",
       `obligation_evidence cites an obligation more than once: ${duplicates.join(", ")}`,
     );
   }
   const uncovered = workItem.obligation_ids.filter((id) => !cited.has(id));
   if (uncovered.length > 0) {
     return invalidResult(
+      "obligation_evidence",
       `obligation_evidence must cover every prompt-bound obligation; uncovered: ${uncovered.join(", ")}`,
     );
   }
@@ -1453,6 +1484,7 @@ function parseResult(
   );
   if (unknown.length > 0) {
     return invalidResult(
+      "obligation_evidence",
       `obligation_evidence cites obligations the work item does not bind: ${unknown.join(", ")}`,
     );
   }
@@ -1463,12 +1495,14 @@ function parseResult(
     value.worktree_evidence.baseline_commit !== workItem.baseline_commit
   ) {
     return invalidResult(
+      "worktree_evidence",
       "worktree_evidence must bind the workload baseline and changed-file list",
     );
   }
   const worktreeFiles = stringArray(value.worktree_evidence.changed_files);
   if (!worktreeFiles || !sameStrings(worktreeFiles, changedFiles)) {
     return invalidResult(
+      "worktree_evidence",
       "worktree_evidence.changed_files must exactly equal changed_files",
     );
   }
@@ -1482,6 +1516,7 @@ function parseResult(
     value.merge.status !== "merged"
   ) {
     return invalidResult(
+      "landing_attestation",
       "acceptance and merge must both attest a completed landing",
     );
   }
@@ -1507,6 +1542,7 @@ type CorroboratedHostResult =
   | {
       readonly ok: false;
       readonly code: RemediationHostIngestIssue["code"];
+      readonly check: IngestionCheckId;
       readonly message: string;
     };
 
@@ -1696,6 +1732,7 @@ async function corroborateNoChangeClaim(params: {
   | {
       readonly ok: false;
       readonly code: RemediationHostIngestIssue["code"];
+      readonly check: IngestionCheckId;
       readonly message: string;
     }
 > {
@@ -1706,6 +1743,7 @@ async function corroborateNoChangeClaim(params: {
     return {
       ok: false,
       code: "commit_missing",
+      check: "no_change_corroboration",
       message:
         "resolved_no_change cannot be corroborated: baseline_commit does not resolve to a real commit",
     };
@@ -1715,6 +1753,7 @@ async function corroborateNoChangeClaim(params: {
     return {
       ok: false,
       code: "commit_missing",
+      check: "no_change_corroboration",
       message:
         "resolved_no_change cannot be corroborated: git could not enumerate the changes since the workload baseline",
     };
@@ -1732,6 +1771,7 @@ async function corroborateNoChangeClaim(params: {
     return {
       ok: false,
       code: "changed_files_mismatch",
+      check: "no_change_corroboration",
       message:
         "resolved_no_change is contradicted by the tree — these files changed since the " +
         `workload baseline: ${violating.join(", ")}` +
@@ -2018,6 +2058,7 @@ function requiredTestIssue(
       : failures.some((failure) => failure.outcome === "output_overflow")
         ? "required_test_output_overflow"
         : "required_test_failed",
+    check: "test_evidence",
     work_item_id: workItem.id,
     result_path: workItem.result_path,
     message: `mechanical required-test rerun failed: ${failures
@@ -2099,6 +2140,7 @@ async function corroborateHostResult(params: {
     return {
       ok: false,
       code: "commit_missing",
+      check: "commit_evidence",
       message: "baseline_commit and commit_evidence.after must both resolve to real commits",
     };
   }
@@ -2107,6 +2149,7 @@ async function corroborateHostResult(params: {
       return {
         ok: false,
         code: "baseline_not_ancestor",
+        check: "commit_evidence",
         message: "the trusted workload baseline is not an ancestor of the claimed landed commit",
       };
     }
@@ -2123,6 +2166,7 @@ async function corroborateHostResult(params: {
       return {
         ok: false,
         code: "baseline_not_ancestor",
+        check: "commit_evidence",
         message:
           "the trusted workload baseline is not an ancestor of the claimed landed commit, " +
           "and the baseline is NOT orphaned (a ref still contains it, or it is reachable " +
@@ -2135,6 +2179,7 @@ async function corroborateHostResult(params: {
     return {
       ok: false,
       code: "commit_not_landed",
+      check: "commit_evidence",
       message: "commit_evidence.after is not reachable from the repository HEAD",
     };
   }
@@ -2143,6 +2188,7 @@ async function corroborateHostResult(params: {
     return {
       ok: false,
       code: "changed_files_mismatch",
+      check: "write_scope",
       message:
         "the landed commit's mechanically derived changed files do not exactly match changed_files",
     };
@@ -2155,6 +2201,7 @@ async function corroborateHostResult(params: {
     return {
       ok: false,
       code: "changed_files_mismatch",
+      check: "write_scope",
       message: "the landed commit changed a file outside the prompt-bound allowed_files",
     };
   }
@@ -2168,6 +2215,7 @@ async function corroborateHostResult(params: {
     return {
       ok: false,
       code: "run_start_dirty_overlap",
+      check: "worktree_evidence",
       message: `landed files overlap pre-existing run-start dirt: ${dirtyOverlap.join(", ")}`,
     };
   }
@@ -2178,7 +2226,7 @@ async function corroborateHostResult(params: {
   );
   if (failedTests.length > 0) {
     const issue = requiredTestIssue(workItem, failedTests);
-    return { ok: false, code: issue.code, message: issue.message };
+    return { ok: false, code: issue.code, check: "test_evidence", message: issue.message };
   }
   return { ok: true, changedFiles: actualFiles, usedRecovery };
 }
@@ -2347,6 +2395,7 @@ export async function ingestRemediationHostResults(params: {
           workloadRead.kind === "missing"
             ? "workload_missing"
             : "workload_invalid",
+        check: "workload_binding",
         message:
           workloadRead.kind === "missing"
             ? "the persisted trusted handoff has no workload file"
@@ -2381,6 +2430,7 @@ export async function ingestRemediationHostResults(params: {
   if ((await isGitRepo(paths.root)) && !state.host_handoff) {
     issues.push({
       code: "trusted_binding_missing",
+      check: "workload_binding",
       message:
         "a git-backed remediation workload requires the tool-owned host_handoff state binding",
     });
@@ -2406,6 +2456,7 @@ export async function ingestRemediationHostResults(params: {
     // thing that names the cause.
     issues.push({
       code: "workload_invalid",
+      check: "workload_binding",
       message:
         "the workload does not match its canonical state shape and persisted digest binding",
     });
@@ -2467,7 +2518,7 @@ export async function ingestRemediationHostResults(params: {
         const result = parseResult(value, params.runId, workItem, paths.root);
         return result.ok
           ? { ok: true, parsed: result }
-          : { ok: false, detail: result.reason };
+          : { ok: false, check: result.check, detail: result.reason };
       },
       resultId: (result) => result.result.result_id,
       seen: (resultId) => resultIds.has(resultId),
@@ -2488,6 +2539,7 @@ export async function ingestRemediationHostResults(params: {
         if (!canCorroborate) {
           issues.push({
             code: "trusted_binding_missing",
+            check: "no_change_corroboration",
             work_item_id: workItem.id,
             result_path: workItem.result_path,
             message:
@@ -2509,6 +2561,7 @@ export async function ingestRemediationHostResults(params: {
         if (!noChange.ok) {
           issues.push({
             code: noChange.code,
+            check: noChange.check,
             work_item_id: workItem.id,
             result_path: workItem.result_path,
             message: noChange.message,
@@ -2563,6 +2616,7 @@ export async function ingestRemediationHostResults(params: {
     if (!canCorroborate) {
       issues.push({
         code: "trusted_binding_missing",
+        check: "workload_binding",
         work_item_id: workItem.id,
         result_path: workItem.result_path,
         message:
@@ -2581,6 +2635,7 @@ export async function ingestRemediationHostResults(params: {
     if (!corroborated.ok) {
       issues.push({
         code: corroborated.code,
+        check: corroborated.check,
         work_item_id: workItem.id,
         result_path: workItem.result_path,
         message: corroborated.message,

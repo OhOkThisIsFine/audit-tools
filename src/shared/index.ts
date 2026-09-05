@@ -495,6 +495,14 @@ export {
   classifyRead,
   readSubmissionDocument,
 } from "./submission/submissionClassifier.js";
+export type { IngestionCheck, IngestionCheckId, IngestionDraw } from "./submission/ingestionChecks.js";
+export {
+  INGESTION_CHECKS,
+  INGESTION_DRAWS,
+  INGESTION_SHARED_SOURCE,
+  ingestionCheckIdsCitedBy,
+  ingestionCheckIdsFor,
+} from "./submission/ingestionChecks.js";
 export type {
   ExpectedSetDiff,
   ExpectedSubmission,

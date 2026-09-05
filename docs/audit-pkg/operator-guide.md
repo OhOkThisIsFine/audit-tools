@@ -42,10 +42,10 @@ Each `next-step` invocation writes:
 ```
 
 Follow only the returned prompt. A review handoff also writes a versioned host
-workload and result-map path under `.audit-tools/audit/`. Result ingestion checks
-the run id, work-item id, prompt digest, expected file coverage, and strict
-result schema before state advances. Replaying an already accepted result is a
-no-op.
+workload and result-map path under `.audit-tools/audit/`. Result ingestion binds
+every result to its run, work item and prompt and verifies it before state
+advances; the full check set is the generated block in
+[`contracts.md`](contracts.md). Replaying an already accepted result is a no-op.
 
 There are no provider, model, routing, quota, context-window, worker-command, or
 headless-launch settings in audit-tools. Parallelism and concrete execution

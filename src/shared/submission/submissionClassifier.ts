@@ -14,6 +14,7 @@
  * than pulling its vocabulary in here — see `RemediationIssueCode`.
  */
 import { readFile } from "node:fs/promises";
+import type { IngestionCheckId } from "./ingestionChecks.js";
 
 export const SUBMISSION_ISSUE_CODES = [
   /** Nothing exists at the bound path. */
@@ -45,6 +46,13 @@ export type SubmissionIssueCode = (typeof SUBMISSION_ISSUE_CODES)[number];
 export interface SubmissionIssue<TCode extends string = SubmissionIssueCode> {
   readonly code: TCode;
   readonly message: string;
+  /**
+   * The registered ingestion check this issue failed
+   * (`INGESTION_CHECKS`, ./ingestionChecks.ts) — the structured twin of the
+   * category the message opens with, so a host repairing the result does not
+   * have to parse prose to learn which check to fix.
+   */
+  readonly check?: IngestionCheckId;
   readonly submission_id?: string;
   readonly submission_path?: string;
   readonly work_item_id?: string;

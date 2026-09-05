@@ -15,8 +15,10 @@ Cooperation rests on four rules:
 1. **Emit complete work.** Every host workload contains stable work-item ids, the full prompt, a
    prompt digest, declared scope, deterministic metadata, and an exact result path. A host does not
    need hidden routing state to execute it.
-2. **Bind every result.** Ingestion checks the workload version, run id, work-item id, prompt digest,
-   and declared task or finding coverage before accepting a result.
+2. **Bind every result.** Ingestion verifies every result against the tool-owned bindings before
+   accepting it; the check set is the generated block in
+   [`docs/audit-pkg/contracts.md`](../docs/audit-pkg/contracts.md), rendered from the registry
+   both ingests cite.
 3. **Serialize shared mutation.** Result and state stores use the shared locked JSON/file-lock
    substrate for read-modify-write transitions. Hosts may execute concurrently; accepted mutations
    still land atomically.

@@ -346,6 +346,16 @@ export const GUARDS = [
       'then re-stage it. The producer relation is declared on EXECUTOR_REGISTRY[].produces; never hand-edit the render',
   },
   {
+    id: 'check:ingestion-checks',
+    kind: 'gate',
+    impl: 'check:ingestion-checks',
+    preCommit: 'reach',
+    fix:
+      'the ingestion-check block in docs/audit-pkg/contracts.md is stale — run ' +
+      '`node scripts/shared/generate-ingestion-checks.mjs`, then re-stage it. The check set is declared ' +
+      'in INGESTION_CHECKS (src/shared/submission/ingestionChecks.ts); never hand-edit the render',
+  },
+  {
     id: 'check:spec-mirrors',
     kind: 'gate',
     impl: 'check:spec-mirrors',
@@ -972,6 +982,16 @@ export const GUARDS = [
       'textual extraction against the runtime-layout sources and cross-checks ARTIFACT_DEFINITIONS directly',
   },
   {
+    id: 'ingestion-checks-drift-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/ingestion-checks-drift.test.ts',
+    note:
+      'pins the contracts.md ingestion-check block against INGESTION_CHECKS (render from declaration, ' +
+      'tracked page byte-equal, the two former copies reduced to pointers), and pins the registry as ' +
+      'load-bearing by structural extraction: the shared scan and each host-handoff twin cite exactly ' +
+      'the checks the registry declares for them, in both directions',
+  },
+  {
     id: 'executor-producer-declaration-test',
     kind: 'contract-test',
     impl: 'tests/audit/executor-artifact-production-declaration.test.ts',
@@ -1187,6 +1207,20 @@ export const REACH = [
       'order and is unchecked. The one declared non-registry row is checked only for being ABSENT ' +
       'from ARTIFACT_DEFINITIONS; nothing verifies the runtime submission it describes still behaves ' +
       'as stated',
+  },
+  {
+    area: 'result-ingestion check registry and its render',
+    files: ['src/shared/submission/ingestionChecks.ts', 'scripts/shared/generate-ingestion-checks.mjs'],
+    guardedBy: ['check:ingestion-checks', 'vitest-gate', 'ingestion-checks-drift-test'],
+    note:
+      'the declared check set both host-handoff twins cite on every refusal, plus its doc render; the ' +
+      'render target docs/audit-pkg/contracts.md is claimed by the shipped-doc-surface row. The ' +
+      'citation extractor recognises literal first arguments of refuse/invalidResult/bindingFailure and ' +
+      'literal `check:` properties; a passthrough (`check: parsed.check`) is deliberately not a citation',
+    uncovered:
+      'a refusal whose check id is computed rather than literal is invisible to the extractor, so a draw ' +
+      'could satisfy the type and still be uncited — the test then reads as a MISSING citation for that ' +
+      'id, which is the loud direction, not a silent pass',
   },
   {
     area: 'installer-verb surface render',

@@ -31,6 +31,7 @@ import {
   withFileLock,
   writeBlockedStepContract,
   writeJsonFile,
+  type IngestionCheckId,
   type RunLogger,
   type SubmissionScanMessages,
 } from "audit-tools/shared";
@@ -761,10 +762,10 @@ function validateHandoffBinding(
   const items = new Map<string, AuditHostWorkItem>();
   for (const item of workload.work_items) {
     if (items.has(item.id)) {
-      throw new Error(`Duplicate audit host work item: ${item.id}`);
+      throw bindingFailure("workload_binding", `Duplicate audit host work item: ${item.id}`);
     }
     if (item.result_path !== resultPathFor(paths, item.id)) {
-      throw new Error(`Unbound audit host result path: ${item.id}`);
+      throw bindingFailure("workload_binding", `Unbound audit host result path: ${item.id}`);
     }
     const binding = taskBindings.get(item.id);
     if (
@@ -779,7 +780,7 @@ function validateHandoffBinding(
         [...item.scope.files].sort(compareCodeUnits),
       )
     ) {
-      throw new Error(`Invalid audit host task binding: ${item.id}`);
+      throw bindingFailure("workload_binding", `Invalid audit host task binding: ${item.id}`);
     }
     items.set(item.id, item);
   }
@@ -789,13 +790,24 @@ function validateHandoffBinding(
   // draw's original refusals survive — they are not collapsed into one.
   const identity = resultMapIdentity([...items.values()], resultMap.entries);
   if (!identity.ok) {
-    throw new Error(
+    throw bindingFailure(
+      "workload_binding",
       identity.reason === "coverage"
         ? "Audit host result map does not cover the workload exactly"
         : `Invalid audit host result binding: ${identity.workItemId ?? "unknown"}`,
     );
   }
   return items;
+}
+
+/**
+ * A persisted-binding failure is a THROW, not an issue: nothing about a host
+ * result can be judged until the tool's own workload, result map and task
+ * bindings re-derive. The check id is what the throw cites, so the failure is
+ * still attributable to a registered ingestion check.
+ */
+function bindingFailure(check: IngestionCheckId, message: string): Error {
+  return new Error(`${message} [${check}]`);
 }
 
 /**
@@ -810,10 +822,11 @@ function validateHandoffBinding(
  */
 type HostResultParse =
   | { readonly ok: true; readonly result: AuditHostResult }
-  | { readonly ok: false; readonly detail: string };
+  | { readonly ok: false; readonly check: IngestionCheckId; readonly detail: string };
 
-function refuse(detail: string): HostResultParse {
-  return { ok: false, detail };
+/** `check` names the registered ingestion check that failed; `detail` is its prose. */
+function refuse(check: IngestionCheckId, detail: string): HostResultParse {
+  return { ok: false, check, detail };
 }
 
 /** `findings[2].affected_files.0.path` — a zod issue path, host-readable. */
@@ -897,31 +910,36 @@ function parseHostResult(
     value.result_id.length === 0
   ) {
     return refuse(
+      "result_envelope",
       `result envelope is not ${RESULT_CONTRACT_VERSION} with exactly contract_version, ` +
         `result_id, run_id, work_item_id, prompt_sha256, file_coverage and findings`,
     );
   }
   if (value.run_id !== runId) {
-    return refuse(`identity binding: run_id is not this run's '${runId}'`);
+    return refuse("identity_binding", `identity binding: run_id is not this run's '${runId}'`);
   }
   if (value.work_item_id !== item.id) {
-    return refuse(`identity binding: work_item_id is not '${item.id}'`);
+    return refuse("identity_binding", `identity binding: work_item_id is not '${item.id}'`);
   }
   if (value.prompt_sha256 !== item.prompt.sha256) {
     return refuse(
+      "identity_binding",
       "prompt binding: prompt_sha256 is not the sha256 of this work item's prompt",
     );
   }
   if (!Array.isArray(value.file_coverage)) {
-    return refuse("file coverage: file_coverage must be an array");
+    return refuse("file_coverage", "file coverage: file_coverage must be an array");
   }
   if (!Array.isArray(value.findings)) {
-    return refuse("findings failed the audit finding contract: findings must be an array");
+    return refuse(
+      "findings_contract",
+      "findings failed the audit finding contract: findings must be an array",
+    );
   }
   // The parsed findings ride ON the result, so `toAuditResult` never has to
   // re-parse them (one parse, one door).
   const findingsParse = parseFindings(value.findings);
-  if (!findingsParse.ok) return refuse(findingsParse.detail);
+  if (!findingsParse.ok) return refuse("findings_contract", findingsParse.detail);
   const { findings } = findingsParse;
   const coveragePaths = new Set<string>();
   for (const coverage of value.file_coverage) {
@@ -931,11 +949,12 @@ function parseHostResult(
       typeof coverage.path !== "string"
     ) {
       return refuse(
+        "file_coverage",
         "file coverage: every entry must contain exactly path, reviewed_lines and total_lines",
       );
     }
     if (coveragePaths.has(coverage.path)) {
-      return refuse(`file coverage: '${coverage.path}' is covered twice`);
+      return refuse("file_coverage", `file coverage: '${coverage.path}' is covered twice`);
     }
     if (
       !Number.isInteger(coverage.reviewed_lines) ||
@@ -944,12 +963,14 @@ function parseHostResult(
       coverage.reviewed_lines !== coverage.total_lines
     ) {
       return refuse(
+        "file_coverage",
         `file coverage: '${coverage.path}' must report reviewed_lines equal to total_lines`,
       );
     }
     const boundLines: number | undefined = binding.file_line_counts[coverage.path];
     if (coverage.total_lines !== boundLines) {
       return refuse(
+        "file_coverage",
         boundLines === undefined
           ? `file coverage: '${coverage.path}' is not one of this work item's bound files`
           : `file coverage: '${coverage.path}' reports ${String(coverage.total_lines)} ` +
@@ -961,6 +982,7 @@ function parseHostResult(
   const uncovered = item.scope.files.filter((path) => !coveragePaths.has(path));
   if (uncovered.length > 0 || coveragePaths.size !== item.scope.files.length) {
     return refuse(
+      "file_coverage",
       uncovered.length > 0
         ? `file coverage: the assigned scope is not fully covered (missing ${uncovered.join(", ")})`
         : "file coverage: entries do not match the assigned scope exactly",
@@ -1125,6 +1147,7 @@ export async function ingestAuditHostResults(params: {
     if (!converted.ok) {
       issues.push({
         code: "submission_contract_invalid",
+        check: "result_schema",
         message:
           `work item '${entry.work_item_id}' submitted a result that does not convert to ` +
           `an AuditResult: ${converted.detail}`,
@@ -1161,6 +1184,7 @@ export async function ingestAuditHostResults(params: {
       if (errors.length > 0) {
         issues.push({
           code: "result_validation_failed",
+          check: "result_validation",
           message:
             `work item '${entry.work_item_id}' failed audit-results validation ` +
             `(${errors.length} error(s)); fix the result file at its bound path and call next-step again: ` +

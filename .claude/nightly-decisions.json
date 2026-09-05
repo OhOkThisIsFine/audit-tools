@@ -2140,7 +2140,9 @@
     "answer": "Delete the three enumerations, and add one standing line to docs/backlog/durable-traps.md saying that a guard firing as designed is not friction and must not be re-filed as a defect — so the immunity is stated once and permanently instead of rewritten each lap.",
     "subject": "three friction-walk entries each carry a guards-that-fired-correctly enumeration and five bare ambiguous-direction-none sub-items, none of which states an open property",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-09-05T16:07:17.123Z"
+    "decided_at": "2026-09-05T16:07:17.123Z",
+    "completed_at": "2026-09-05T16:19:22.657Z",
+    "completed_ref": "99c9b9fc — bl-1 landed: three correct-firing enumerations deleted; the immunity is one durable-traps entry"
   },
   "c6b7d601ba708f45": {
     "disposition": "settled",

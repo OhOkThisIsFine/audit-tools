@@ -33,6 +33,7 @@ import {
   type SubmissionIssue,
 } from "./submissionClassifier.js";
 import { resolveContainedPath } from "./submissionIdentity.js";
+import type { IngestionCheckId } from "./ingestionChecks.js";
 
 /**
  * The domain parser's answer, normalized. `detail` is handed straight to the
@@ -41,7 +42,7 @@ import { resolveContainedPath } from "./submissionIdentity.js";
  */
 export type SubmissionParse<TParsed> =
   | { readonly ok: true; readonly parsed: TParsed }
-  | { readonly ok: false; readonly detail: string };
+  | { readonly ok: false; readonly check: IngestionCheckId; readonly detail: string };
 
 /**
  * The per-draw refusal vocabulary. Text is a DRAW concern: the audit ingest
@@ -106,6 +107,7 @@ export async function scanBoundSubmission<TParsed>(params: {
       ok: false,
       issue: {
         code: "submission_missing",
+        check: "result_path",
         message: params.messages.missing(),
         ...locators,
       },
@@ -116,6 +118,7 @@ export async function scanBoundSubmission<TParsed>(params: {
       ok: false,
       issue: {
         code: "submission_malformed",
+        check: "result_json",
         message: params.messages.malformed(read.detail),
         ...locators,
       },
@@ -127,6 +130,7 @@ export async function scanBoundSubmission<TParsed>(params: {
       ok: false,
       issue: {
         code: "submission_contract_invalid",
+        check: parsed.check,
         message: params.messages.contractInvalid(parsed.detail),
         ...locators,
       },
@@ -138,6 +142,7 @@ export async function scanBoundSubmission<TParsed>(params: {
       ok: false,
       issue: {
         code: "duplicate_submission_id",
+        check: "duplicate_result",
         message: params.messages.duplicate(resultId),
         ...locators,
       },
