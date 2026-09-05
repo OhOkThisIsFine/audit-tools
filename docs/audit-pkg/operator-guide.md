@@ -86,9 +86,12 @@ pair it cannot validate, records each removal so a repaired run stays
 distinguishable from a clean one, invalidates the persisted step contract, and
 the next `next-step` re-reads the bound result files for the dropped items.
 
-`audit-code cleanup` removes `.audit-tools/audit/` only when the persisted run
-is complete or not started. Active or blocked runs are refused unless the
-operator explicitly supplies `--force`. A directory with no `audit_state.json`
+`audit-code cleanup` removes `.audit-tools/audit/` only when nothing in the
+directory is still owed to the host: the persisted run is `not_started`, or it
+is `complete` and every artifact promotion archives is already one level up.
+Active or blocked runs are refused, and so is a complete run whose report is not
+fully promoted — that directory holds the only copy. All three refusals are
+waived by `--force`. A directory with no `audit_state.json`
 marker is refused whether or not `--force` is supplied: `--force` waives the
 evidence about a run's STATUS, never the evidence about its IDENTITY, and the
 verb will not delete a directory it cannot prove is an audit run. `--dry-run`

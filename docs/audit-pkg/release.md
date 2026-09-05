@@ -15,9 +15,12 @@ workflow dispatch, trusted-publisher configuration, and troubleshooting.
 ## Host validation — the manual half of the release gate
 
 The automated half of multi-host validation lives in `npm run verify:hosts`
-(wired into `verify:release`): it deploys every host surface into an isolated
-temp `$HOME` and re-runs each host's own `verify()` handler from the same
-`INSTALL_HOST_DEFINITIONS` table the postinstall deploy uses. That gate catches
+(wired into `verify:release`): it deploys the four hosts in
+`INSTALL_HOST_DEFINITIONS` (codex, opencode, vscode, antigravity) into an
+isolated temp `$HOME` and re-runs each host's own `verify()` handler from that
+table. The postinstall also writes surfaces outside the table — the
+`~/.claude/commands/` entry and the Claude Desktop external-plugin manifest,
+command and skill — and the gate does not cover those. That gate catches
 *our* drift — a missing, unparseable, or canonical-body-diverged asset — before
 publish.
 
@@ -67,9 +70,10 @@ Notes / failures (file each as a backlog item):
 
 `remediate-code` has its own automated half — `npm run verify:remediate-hosts`
 (`scripts/remediate/verify-hosts.mjs`, wired into `verify:release`), the mirror of
-the audit gate: it deploys every remediate host surface into an isolated temp
-`$HOME` and re-runs each host's `verify()` handler from the same
-`INSTALL_HOST_DEFINITIONS` table. As with audit, that gate catches *our* drift but
+the audit gate: it deploys the four hosts in `INSTALL_HOST_DEFINITIONS` into an
+isolated temp `$HOME` and re-runs each host's `verify()` handler from that
+table, and likewise does not cover the `~/.claude/commands/` surface the
+postinstall writes outside it. As with audit, that gate catches *our* drift but
 cannot invoke `/remediate-code` inside a live GUI host — a human runs the rows
 below at release, using the same GUI-host set.
 

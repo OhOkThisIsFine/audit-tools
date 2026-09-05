@@ -191,7 +191,7 @@ steps (e.g. deterministic subsystem clustering runs before the intent checkpoint
 1. **Intake** — reads the findings and/or free-form intent, validates the input, and drafts a
    summary with any open questions.
 2. **Confirm intent** — you confirm scope, answer open questions, and set the closing action
-   (commit, push, open PR, publish, or halt).
+   (commit, push, open PR, publish, tag, none, or a custom command).
 3. **Design the change** — decomposes the work into modules, drafts a contract per module in
    parallel, detects and reconciles seams (where one module's output must match another's
    input), then derives obligations and a test plan. Riskier changes get an independent
