@@ -1573,6 +1573,51 @@ function reviewDecisionPath(artifactsDir: string): string {
   return join(artifactsDir, "review_decision.json");
 }
 
+/**
+ * Stamp and persist one review decision. Three sites built this literal — the
+ * autonomous and interactive arms of the approval gate, and the planning gate —
+ * and a schema stamp that lives in three places is one edit away from meaning
+ * two different things on disk.
+ *
+ * Persistence only. WHICH ids are approved, where the plan id comes from, and
+ * what the caller does next are all decided by the caller and stay there: the
+ * autonomous arm mints a run id and declines nothing, the two resolution arms
+ * carry the live plan's id and the operator's declines.
+ */
+async function writeReviewDecisionRecord(
+  decisionPath: string,
+  fields: {
+    planId: string;
+    approvedIds: string[];
+    declined: Array<{ finding_id: string; reason: string }>;
+  },
+): Promise<void> {
+  const record: ReviewDecisionRecord = {
+    schema_version: REVIEW_DECISION_SCHEMA_VERSION,
+    plan_id: fields.planId,
+    approved_ids: fields.approvedIds,
+    declined: fields.declined,
+    created_at: new Date().toISOString(),
+  };
+  await writeJsonFile(decisionPath, record);
+}
+
+/**
+ * Archive the inputs a gate has just consumed, so it cannot re-halt on them.
+ *
+ * Renaming rather than deleting keeps the operator's own answer recoverable;
+ * the timestamp suffix keeps a second consumption from colliding with the
+ * first. An absent path is not an error — a gate reached through the autonomous
+ * arm never wrote one.
+ */
+async function archiveConsumedInputs(paths: readonly string[]): Promise<void> {
+  for (const p of paths) {
+    if (existsSync(p)) {
+      await withFsRetry(() => rename(p, `${p}.consumed-${Date.now()}`));
+    }
+  }
+}
+
 // Up-front ambiguity gate (note 3, part A) — its own request/resolution/decision
 // files, mirroring the review gate so it fires (and halts) at most once per run.
 function ambiguityRequestPath(artifactsDir: string): string {
@@ -1706,14 +1751,11 @@ async function runReviewApprovalGate(
     // Leftovers stay LIVE: declined is EMPTY (no durable rejection). The
     // decision REPLAY keys on approved_ids (COR-227a02ae), so on later calls
     // exactly the approved subset — never the live leftovers — re-enters.
-    const record: ReviewDecisionRecord = {
-      schema_version: REVIEW_DECISION_SCHEMA_VERSION,
-      plan_id: randomRunId("path-a-review"),
-      approved_ids: auto.approved_ids,
+    await writeReviewDecisionRecord(decisionPath, {
+      planId: randomRunId("path-a-review"),
+      approvedIds: auto.approved_ids,
       declined: [],
-      created_at: new Date().toISOString(),
-    };
-    await writeJsonFile(decisionPath, record);
+    });
     // Re-emit the leftovers as a standard, re-consumable audit deliverable pair
     // so the next nightly run picks them up via defaultInputCandidates. Always
     // on disk regardless of whether a git remote / PR is available.
@@ -1765,20 +1807,12 @@ async function runReviewApprovalGate(
     );
     if (refusalStep) return { kind: "halt", step: refusalStep };
     const decision = applyReviewResolution(request, resolution);
-    const record: ReviewDecisionRecord = {
-      schema_version: REVIEW_DECISION_SCHEMA_VERSION,
-      plan_id: request.plan_id,
-      approved_ids: decision.approved_ids,
+    await writeReviewDecisionRecord(decisionPath, {
+      planId: request.plan_id,
+      approvedIds: decision.approved_ids,
       declined: decision.declined,
-      created_at: new Date().toISOString(),
-    };
-    await writeJsonFile(decisionPath, record);
-    // Archive the consumed inputs so the gate cannot re-halt.
-    for (const p of [resolutionPath, requestPath]) {
-      if (existsSync(p)) {
-        await withFsRetry(() => rename(p, `${p}.consumed-${Date.now()}`));
-      }
-    }
+    });
+    await archiveConsumedInputs([resolutionPath, requestPath]);
   }
 
   // Decision recorded (now or on a prior call): split the survivors. The
@@ -2609,20 +2643,12 @@ async function runPlanningReviewGate(
   );
   if (refusalStep) return refusalStep;
   const decision = applyReviewResolution(request, resolution);
-  const record: ReviewDecisionRecord = {
-    schema_version: REVIEW_DECISION_SCHEMA_VERSION,
-    plan_id: request.plan_id,
-    approved_ids: decision.approved_ids,
+  await writeReviewDecisionRecord(decisionPath, {
+    planId: request.plan_id,
+    approvedIds: decision.approved_ids,
     declined: decision.declined,
-    created_at: new Date().toISOString(),
-  };
-  await writeJsonFile(decisionPath, record);
-  // Archive the consumed inputs so the gate cannot re-halt.
-  for (const p of [resolutionPath, requestPath]) {
-    if (existsSync(p)) {
-      await withFsRetry(() => rename(p, `${p}.consumed-${Date.now()}`));
-    }
-  }
+  });
+  await archiveConsumedInputs([resolutionPath, requestPath]);
 
   // Declined nodes → recorded terminal disposition (never a silent close).
   let changed = false;
