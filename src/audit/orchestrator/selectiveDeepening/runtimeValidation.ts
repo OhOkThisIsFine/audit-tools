@@ -1,3 +1,4 @@
+import { lineCountFromSources } from "../lineCounts.js";
 import type { AuditResult, AuditTask, Lens } from "../../types.js";
 import type {
   RuntimeValidationStatus,
@@ -8,7 +9,7 @@ import {
   type FindingContext,
   SEVERITY_RANK,
   intersects,
-  lineCountFromSources,
+
   sanitizeSegment,
   taskIdFor,
   uniqueSorted,

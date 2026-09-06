@@ -1,8 +1,9 @@
+import { lineCountForPath } from "../lineCounts.js";
 import type { AuditResult, AuditTask } from "../../types.js";
 import {
   DEEPENING_TAG,
   isDeepeningTask,
-  lineCountForPath,
+
   sanitizeSegment,
   taskIdFor,
   uniqueSorted,
@@ -62,7 +63,7 @@ export function buildHighRiskCleanFollowupTask(params: {
     file_line_counts: Object.fromEntries(
       paths.map((path) => [
         path,
-        lineCountForPath(path, params.task, params.result, params.lineIndex),
+        lineCountForPath(path, { task: params.task, result: params.result, lineIndex: params.lineIndex }),
       ]),
     ),
     rationale:

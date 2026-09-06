@@ -1,3 +1,4 @@
+import { lineCountForPath, lineCountFromSources } from "../lineCounts.js";
 import type { AuditResult, AuditTask, Lens } from "../../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { compareCodeUnits } from "audit-tools/shared";
@@ -13,8 +14,8 @@ import {
   getExternalAnalyzerPaths,
   isDeepeningTask,
   isLensVerificationTask,
-  lineCountForPath,
-  lineCountFromSources,
+
+
   priorityLabel,
   priorityRank,
   taskIdFor,
@@ -84,7 +85,7 @@ function lensVerificationTriggers(params: {
   }
   const totalLines = filePaths.reduce((sum, path) => {
     const owner = pathOwnerMap.get(path);
-    return sum + (owner ? lineCountForPath(path, owner.task, owner.result) : 0);
+    return sum + (owner ? lineCountForPath(path, { task: owner.task, result: owner.result }) : 0);
   }, 0);
 
   const triggers: string[] = [];
@@ -225,7 +226,7 @@ function selectLensVerificationFiles(
     const priorityScore = priorityRank(source.task?.priority);
     const highRiskClean = isHighRiskCleanResult(source.result, source.task);
     for (const path of resultFiles(source)) {
-      add(path, priorityScore, lineCountForPath(path, source.task, source.result));
+      add(path, priorityScore, lineCountForPath(path, { task: source.task, result: source.result }));
       if (source.task?.tags?.includes("critical_flow")) add(path, SCORE_CRITICAL_FLOW, 0);
       if (source.task?.tags?.includes("external_analyzer_signal")) add(path, SCORE_EXTERNAL_ANALYZER_SIGNAL, 0);
       if (source.task?.tags?.includes("large_file")) add(path, SCORE_LARGE_FILE, 0);

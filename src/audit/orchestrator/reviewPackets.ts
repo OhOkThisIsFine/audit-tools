@@ -30,7 +30,8 @@ import {
 } from "./taskAffinityGraph.js";
 import { computeAuditPlanMetrics } from "./reviewPacketMetrics.js";
 import type { ReviewPacketPlanningData } from "./reviewPacketShared.js";
-import { normalizePriority, lineCountForPath } from "./reviewPacketShared.js";
+import { normalizePriority } from "./reviewPacketShared.js";
+import { lineCountForPath } from "./lineCounts.js";
 
 export { normalizeGraphPath };
 export {
@@ -100,7 +101,7 @@ export function buildPacket(
   const fileLineCounts = Object.fromEntries(
     filePaths.map((path) => {
       const owner = tasks.find((task) => task.file_paths.includes(path));
-      return [path, owner ? lineCountForPath(owner, path, lineIndex) : 0];
+      return [path, owner ? lineCountForPath(path, { task: owner, lineIndex }) : 0];
     }),
   );
   const totalLines = Object.values(fileLineCounts).reduce(

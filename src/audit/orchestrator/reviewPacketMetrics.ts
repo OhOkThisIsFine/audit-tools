@@ -16,7 +16,8 @@ import {
 } from "./reviewPacketGraphEdges.js";
 import { roundQuality } from "./reviewPacketGraphContext.js";
 import type { ReviewPacketPlanningData } from "./reviewPacketShared.js";
-import { normalizePriority, lineCountForPath } from "./reviewPacketShared.js";
+import { normalizePriority } from "./reviewPacketShared.js";
+import { lineCountForPath } from "./lineCounts.js";
 
 // Audit-plan quality metrics: packet cohesion, weakly-explained packet
 // analysis, edge-kind breakdowns. buildAuditPlanMetrics is the single entry
@@ -37,7 +38,7 @@ function taskLineCount(
   lineIndex?: Record<string, number>,
 ): number {
   return task.file_paths.reduce(
-    (sum, path) => sum + lineCountForPath(task, path, lineIndex),
+    (sum, path) => sum + lineCountForPath(path, { task, lineIndex }),
     0,
   );
 }

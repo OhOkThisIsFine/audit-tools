@@ -84,28 +84,7 @@ export function sanitizeSegment(value: string): string {
   return sanitized.length > 0 ? sanitized : "followup";
 }
 
-function resultLineIndex(result: AuditResult): Record<string, number> {
-  return Object.fromEntries(
-    result.file_coverage.map((coverage) => [
-      coverage.path,
-      coverage.total_lines,
-    ]),
-  );
-}
 
-export function lineCountForPath(
-  path: string,
-  task: AuditTask | undefined,
-  result: AuditResult,
-  lineIndex?: Record<string, number>,
-): number {
-  return (
-    task?.file_line_counts?.[path] ??
-    resultLineIndex(result)[path] ??
-    lineIndex?.[path] ??
-    0
-  );
-}
 
 export function uniqueSorted(values: Iterable<string>): string[] {
   return [...new Set(values)].sort((a, b) => compareCodeUnits(a, b));
@@ -142,28 +121,6 @@ export function taskIdFor(prefix: string, values: string[]): string {
   return `deepening:${prefix}:${hashContent(values.join("\0"), { length: 10 })}`;
 }
 
-export function lineCountFromSources(
-  path: string,
-  tasks: AuditTask[],
-  results: AuditResult[],
-  lineIndex?: Record<string, number>,
-): number {
-  for (const task of tasks) {
-    const count = task.file_line_counts?.[path];
-    if (count !== undefined) {
-      return count;
-    }
-  }
-
-  for (const result of results) {
-    const coverage = result.file_coverage.find((item) => item.path === path);
-    if (coverage) {
-      return coverage.total_lines;
-    }
-  }
-
-  return lineIndex?.[path] ?? 0;
-}
 
 export function formatList(values: string[], maxItems: number): string {
   const visible = values.slice(0, maxItems);

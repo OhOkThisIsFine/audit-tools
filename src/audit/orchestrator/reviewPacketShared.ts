@@ -23,11 +23,3 @@ export function normalizePriority(
   return priority ?? "low";
 }
 
-/** Line count for one path: the task's own counts first, then the shared index. */
-export function lineCountForPath(
-  task: AuditTask,
-  path: string,
-  lineIndex?: Record<string, number>,
-): number {
-  return task.file_line_counts?.[path] ?? lineIndex?.[path] ?? 0;
-}

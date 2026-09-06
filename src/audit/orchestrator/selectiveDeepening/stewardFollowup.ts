@@ -1,3 +1,4 @@
+import { lineCountForPath } from "../lineCounts.js";
 import type { AuditResult, AuditTask } from "../../types.js";
 import { isRecord } from "audit-tools/shared";
 import {
@@ -82,10 +83,18 @@ export function buildVerificationFollowupTasks(params: {
       pass_id: `deepening:${params.result.pass_id}`,
       lens: params.result.lens,
       file_paths: paths,
+      // NO `task` source, deliberately. This follow-up is built FROM a result,
+      // so the result's measured coverage is the fresher number and the parent
+      // task's assigned count may already be stale. Precedence here is stated by
+      // what is passed: result, then the index. `coverageByPath` above stays as
+      // the membership FILTER, which is a different question from the count.
       file_line_counts: Object.fromEntries(
         paths.map((path) => [
           path,
-          coverageByPath.get(path) ?? params.lineIndex?.[path] ?? 0,
+          lineCountForPath(path, {
+            result: params.result,
+            lineIndex: params.lineIndex,
+          }),
         ]),
       ),
       rationale:

@@ -1,10 +1,11 @@
+import { lineCountForPath } from "../lineCounts.js";
 import type { AuditResult, AuditTask, Finding } from "../../types.js";
 import {
   DEEPENING_TAG,
   type FindingContext,
   SEVERITY_RANK,
   isDeepeningTask,
-  lineCountForPath,
+
   pathsForFinding,
   sanitizeSegment,
   taskIdFor,
@@ -38,7 +39,7 @@ export function buildFindingFollowupTask(params: {
     file_line_counts: Object.fromEntries(
       paths.map((path) => [
         path,
-        lineCountForPath(path, params.task, params.result, params.lineIndex),
+        lineCountForPath(path, { task: params.task, result: params.result, lineIndex: params.lineIndex }),
       ]),
     ),
     rationale:

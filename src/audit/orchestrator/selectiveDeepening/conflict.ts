@@ -1,10 +1,11 @@
+import { lineCountForPath } from "../lineCounts.js";
 import type { AuditResult, AuditTask, Lens } from "../../types.js";
 import {
   CONFIDENCE_RANK,
   DEEPENING_TAG,
   type FindingContext,
   SEVERITY_RANK,
-  lineCountForPath,
+
   sanitizeSegment,
   taskIdFor,
   uniqueSorted,
@@ -51,7 +52,7 @@ export function buildConflictFollowupTask(params: {
         return [
           path,
           source
-            ? lineCountForPath(path, source.task, source.result, params.lineIndex)
+            ? lineCountForPath(path, { task: source.task, result: source.result, lineIndex: params.lineIndex })
             : (params.lineIndex?.[path] ?? 0),
         ];
       }),
