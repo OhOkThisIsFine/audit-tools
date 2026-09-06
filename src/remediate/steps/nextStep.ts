@@ -1115,6 +1115,32 @@ async function buildImplementDispatchStep(ctx: {
       "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.",
     );
   }
+  // DURABLY RECORD EVERY CLASSIFIED ISSUE BEFORE ANY EXIT PATH.
+  //
+  // This loop used to sit below the `state_changed` early return, next to the
+  // prompt that renders the same issues — so it only ran when NOTHING was
+  // accepted. On a partial batch (some results accepted, some rejected)
+  // `state_changed` is true, the call transitions here, and every rejection was
+  // lost: not logged, not rendered, not carried. The one path where a host most
+  // needs to know that some of its work was refused was the path that said
+  // nothing at all.
+  //
+  // The rendering half is separate and still only reached on the re-emit path;
+  // this is the DURABLE half, and it must not depend on which exit is taken. The
+  // ledger already records the rejection, but the run log is what a person reads
+  // when reconstructing a run.
+  for (const issue of ingested.issues) {
+    runLogger.event({
+      phase: "next-step",
+      kind: "outcome",
+      obligation: "host_ingest",
+      note:
+        `host_ingest_issue code=${issue.code}` +
+        (issue.work_item_id ? ` work_item=${issue.work_item_id}` : "") +
+        (issue.result_path ? ` result=${issue.result_path}` : "") +
+        ` message=${issue.message}`,
+    });
+  }
   if (ingested.state_changed) {
     const { contract_version: _contractVersion, ...persistableState } =
       ingested.state;
@@ -1159,23 +1185,9 @@ async function buildImplementDispatchStep(ctx: {
     "remediate-code",
   );
 
-  // Ingest issues reached the PROMPT and nothing else — a channel that survives
-  // exactly as long as the host reads that one step. They are also the durable
-  // record of which submitted results were rejected and why, so they are logged
-  // as well as rendered.
-  for (const issue of ingested.issues) {
-    runLogger.event({
-      phase: "next-step",
-      kind: "outcome",
-      obligation: "host_ingest",
-      note:
-        `host_ingest_issue code=${issue.code}` +
-        (issue.work_item_id ? ` work_item=${issue.work_item_id}` : "") +
-        (issue.result_path ? ` result=${issue.result_path}` : "") +
-        ` message=${issue.message}`,
-    });
-  }
-
+  // The issues were logged above, before any exit path. What follows is the
+  // RENDER — a channel that survives exactly as long as the host reads this one
+  // step, and that is reached only when nothing was accepted.
   const resultDiagnostics =
     ingested.issues.length === 0
       ? ""

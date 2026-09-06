@@ -310,25 +310,29 @@
   silently mandates event-BEFORE-write ordering — a legitimate write-then-log pairing would
   false-red with a misleading message; state the mandate in the comment and failure text.
 
-- **next-step discards a rejected submission's classified issues (2026-08-20, medium,
-  friction: tool_should_decide).** `buildImplementDispatchStep` consumes
-  `ingestRemediationHostResults` and, when `accepted_count` is 0, falls through to
-  prepare + re-emit without surfacing `issues` anywhere — stdout carries only the
-  re-emitted step. Hit live: a result rejected `submission_contract_invalid`
-  ("commit_evidence must bind the workload baseline to a distinct full commit id" —
-  a stale baseline in the host's result file) was invisible, and diagnosing it took
-  a direct probe of the ingest function. The ingest half reports-and-continues
-  (CP-NODE-6's fix), but its only production caller drops the report on exactly the
-  path where nothing advanced. **Property:** every classified ingest issue reaches
-  the operator through the surface that triggered the ingest — the step contract,
-  stdout, or the step prompt — never only a discarded return value. **The audit draw has
-  the same class, observed live 2026-08-29** (CX-02 measurement run,
-  `docs/reviews/cx02-hold-time-measurement-2026-08-29.md`): a host result rejected on the
-  exact-key envelope check (an extra `reviewed_clean` key) produced zero diagnostic on any
-  surface; the next fold re-minted the run id with new bound paths, the step prompt then
-  reported the item as `submission_missing`, and the intact file at the OLD run's bound
-  path was never read again. Rejected-with-reason surfaced as missing-without-reason,
-  and the re-mint made the repair path non-obvious.
+- **A classified ingest issue still does not reach the host across a CALL boundary — the durable
+  half is closed, the reporting half is not (2026-08-20, medium, friction: tool_should_decide).**
+  ⚠ Partly enforced, so this entry states the uncovered half outright rather than reading as a
+  close. **Closed 2026-09-06:** the per-issue run-log write in `buildImplementDispatchStep` now runs
+  BEFORE every exit path, pinned by `tests/remediate/ingest-issues-recorded-before-exit.test.ts`
+  (position AND reachability, since a branch-wrapped log reproduces the defect while satisfying an
+  ordering check). Before that it sat below the `state_changed` early return, so a PARTIAL batch —
+  some results accepted, some rejected — transitioned and lost every rejection: not logged, not
+  rendered, not carried. **Still open:** the issues reach a host only on the re-emit path, where
+  nothing was accepted. A transition that ends the call still reports nothing to the host, on either
+  draw. The audit draw carries advisories across folds WITHIN one call
+  (`FoldAdvisories`/`takeFoldAdvisories`) and deliberately does not persist them — its own comment
+  states that the submission ledger is the durable record — and the remediate draw has no carry at
+  all. Observed live 2026-08-29 on the audit side (`docs/reviews/cx02-hold-time-measurement-2026-08-29.md`):
+  a result rejected on the exact-key envelope check produced no diagnostic, the next fold re-minted
+  the run id with new bound paths, the step then reported the item as `submission_missing`, and the
+  intact file at the OLD bound path was never read again. Rejected-with-reason surfaced as
+  missing-without-reason. **Property:** a step that reports an item as missing first consults the
+  durable submission ledger, and states a recorded rejection-with-reason instead. ⚠ The fix is a
+  READER, not a second writer — do not persist the advisories: that duplicates a fact the ledger
+  already holds, and the audit draw's non-persistence is a decision, not an oversight. Its twin is
+  the entry noting the remediate-side submission ledger has no reader; one reader in
+  `audit-tools/shared`, drawn by both, is the shape.
 
 - **Host-handoff residuals from the CP-NODE-6 landing (low, one entry).** (a) A malformed
   FRONTIER block at prepare raises a classified aggregate naming the thrower, but still a
