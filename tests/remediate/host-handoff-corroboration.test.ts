@@ -402,13 +402,14 @@ function resultFor(
 function decisionFor(
   value: Fixture,
   outcome: Record<string, unknown>,
+  item: RemediationHostWorkItem = value.item,
 ): Record<string, unknown> {
   return {
     contract_version: "remediation-host-decision/v1alpha1",
-    result_id: `decision-${value.item.id}`,
+    result_id: `decision-${item.id}`,
     run_id: value.runId,
-    work_item_id: value.item.id,
-    prompt_sha256: value.item.prompt.sha256,
+    work_item_id: item.id,
+    prompt_sha256: item.prompt.sha256,
     outcome,
   };
 }
@@ -1000,6 +1001,63 @@ describe("remediation host handoff repository corroboration", () => {
     ]);
   });
 
+  it("names a MISSING workload file and keeps the bound items pending", async () => {
+    // The first of the three whole-ingest early exits, and the only issue code
+    // in this boundary that no test asserted. Each exit returns a DIFFERENT
+    // pending list — this one and the parse failure return the binding's own
+    // item ids, while the trusted-binding refusal returns the empty list — so
+    // the pending list is asserted here, not just the code. Confusing the three
+    // is a silent behaviour change, which is what makes this a characterization
+    // test rather than a coverage nicety.
+    const value = await fixture();
+    await rm(value.handoff.workload_path, { force: true });
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+    });
+    expect(ingested).not.toBe("unsupported_retired_state");
+    if (ingested === "unsupported_retired_state") return;
+    expect(ingested.issues.map((issue) => issue.code)).toEqual([
+      "workload_missing",
+    ]);
+    expect(ingested.issues[0]!.check).toBe("workload_binding");
+    expect(ingested.pending_work_item_ids).toEqual(
+      value.handoff.handoff_record.work_item_ids,
+    );
+    expect(ingested.accepted_count).toBe(0);
+    expect(ingested.state_changed).toBe(false);
+    expect(ingested.state.items.F1!.status).toBe("pending");
+  });
+
+  it("names an UNPARSEABLE workload file distinctly from a digest mismatch", async () => {
+    // The second early exit. It shares the `workload_invalid` code with the
+    // canonical re-derivation failure above, so only the MESSAGE tells the two
+    // apart — and an extract that folded one arm into the other would keep
+    // every code assertion green. The message is therefore the assertion.
+    const value = await fixture();
+    await writeFile(value.handoff.workload_path, "{ this is not json", "utf8");
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+    });
+    expect(ingested).not.toBe("unsupported_retired_state");
+    if (ingested === "unsupported_retired_state") return;
+    expect(ingested.issues.map((issue) => issue.code)).toEqual([
+      "workload_invalid",
+    ]);
+    expect(ingested.issues[0]!.message).toContain("not valid JSON");
+    expect(ingested.issues[0]!.message).not.toContain("canonical state shape");
+    expect(ingested.pending_work_item_ids).toEqual(
+      value.handoff.handoff_record.work_item_ids,
+    );
+    expect(ingested.accepted_count).toBe(0);
+    expect(ingested.state_changed).toBe(false);
+  });
+
   it("rejects reported files that differ from the landed commit and files dirty at run start", async () => {
     const mismatch = await fixture({ allowedFiles: ["src/a.ts", "src/b.ts"] });
     const after = await landA(mismatch);
@@ -1252,6 +1310,67 @@ describe("remediation host handoff repository corroboration", () => {
       refused.issues.map((issue) => issue.message).join("\n"),
     ).toContain("src/b.ts");
     expect(refused.state.items.F1!.status).toBe("pending");
+  });
+
+  it("excuses a SIBLING's landing accepted earlier in the SAME ingest from a no-change claim", async () => {
+    // The intra-ingest half of the excuse, and the one the code comment at the
+    // `excusedPaths` site promises: `landedFiles` starts from
+    // `applied_edit_surface` and GROWS as this same ingest accepts. Without the
+    // growth half, an honest no-change item is falsified by a sibling item's
+    // legitimately landed commit — the tree really has moved since the
+    // baseline, and the mover was this same run.
+    //
+    // This is a CHARACTERIZATION test for the hostHandoff decomposition: the
+    // set of accepted files is created before the per-item loop, READ by the
+    // no-change branch, and WRITTEN by the landed branch, so it is an
+    // accumulator with intra-loop feedback. Any split that defers the accepted
+    // set to a post-loop phase flips this case from accepted to refused, and
+    // every other test in this file stays green while it does.
+    const shared = await fixture({ twoBlocks: true });
+    // Iteration order is the guarantee under test: the landing must be accepted
+    // BEFORE the no-change claim is corroborated, or there is nothing to excuse.
+    expect(shared.workItems.map((entry) => entry.id)).toEqual(["B1", "B2"]);
+    const [landing, noChange] = shared.workItems as [
+      RemediationHostWorkItem,
+      RemediationHostWorkItem,
+    ];
+    // The two write scopes are disjoint, so the landed file is OUT of the
+    // no-change item's scope — the strictest half of the falsification rule.
+    expect(landing.allowed_files).toEqual(["src/a.ts"]);
+    expect(noChange.allowed_files).toEqual(["src/b.ts"]);
+
+    const after = await landA(shared);
+    await writeResult(shared, resultFor(shared, after, ["src/a.ts"], landing), landing);
+    await writeResult(
+      shared,
+      decisionFor(
+        shared,
+        {
+          status: "resolved_no_change",
+          evidence: ["src/b.ts already exports the requested value."],
+        },
+        noChange,
+      ),
+      noChange,
+    );
+
+    const ingested = await ingestRemediationHostResults({
+      root: shared.root,
+      artifactsDir: shared.artifactsDir,
+      runId: shared.runId,
+      state: boundState(shared),
+    });
+    expect(ingested).not.toBe("unsupported_retired_state");
+    if (ingested === "unsupported_retired_state") return;
+    // BOTH are accepted. The sibling's landed `src/a.ts` is ground truth this
+    // run already corroborated, so it does not falsify the other item's claim.
+    expect(ingested.issues).toEqual([]);
+    expect(ingested.accepted_count).toBe(2);
+    expect(ingested.state.items.F1!.status).toBe("resolved");
+    expect(ingested.state.items.F2!.status).toBe("resolved_no_change");
+    // The accepted surface carries the landed file, which is what the excuse
+    // was drawn from.
+    expect(ingested.state.applied_edit_surface).toEqual(["src/a.ts"]);
   });
 
   it("converges explicit no-change, blocked, and clarification outcomes without fabricated merge evidence", async () => {
