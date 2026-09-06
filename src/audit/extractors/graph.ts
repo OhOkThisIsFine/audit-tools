@@ -9,7 +9,7 @@ import type {
   NodeMetrics,
   RouteEdge,
 } from "audit-tools/shared";
-import { hashContent, isRecord, stableStringify, resolveWithinRoot, compareCodeUnits } from "audit-tools/shared";
+import { hashContent, isRecord, stableStringify, resolveWithinRoot, compareCodeUnits, edgeConfidence } from "audit-tools/shared";
 import { computeNodeMetricsForFile } from "./analyzers/complexityDuplication.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
@@ -200,11 +200,6 @@ function clampConfidence(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.min(1, Math.max(0, value))
     : fallback;
-}
-
-/** A stated confidence, or 0 for an edge that never stated one. */
-function edgeConfidence(edge: GraphEdge): number {
-  return typeof edge.confidence === "number" ? edge.confidence : 0;
 }
 
 /**
@@ -781,7 +776,7 @@ function extractPerFileContribution(
  * never equal a key minted now, so a stale cache degrades to a full re-extraction
  * (fail-safe) instead of replaying contributions built under different rules.
  */
-export const GRAPH_EDGE_CACHE_KEY_VERSION = "v5";
+export const GRAPH_EDGE_CACHE_KEY_VERSION = "v6";
 
 /**
  * The ONE definition of "this file's content was available to the extractors".
