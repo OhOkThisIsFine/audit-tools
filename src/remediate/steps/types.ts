@@ -73,7 +73,28 @@ export type RemediationStepKind =
   //
   // Persisted contract: an ADDITIVE value, read the same way as `final_gate_red`
   // by a host that does not know it.
-  | "fold_did_not_converge";
+  | "fold_did_not_converge"
+  // A FIFTH thing, and the same attribution argument again. The extracted plan
+  // was UNUSABLE and has been archived and removed: normalization refused, or
+  // grounding dropped every finding. The run is recoverable — re-extract with the
+  // problem corrected — but it is not a run that never had an input.
+  //
+  // Until this existed, that recovery returned a bare `null` and the decide loop
+  // fell through to `collect_starting_point`, whose prompt is headed "Collect
+  // Remediation Starting Point" and lists the default input locations. A host
+  // whose plan had just been destroyed was told, in effect, that no intake
+  // existed — and the reason, which the tool had computed and written to its own
+  // run log, appeared nowhere the host would read. Two fixtures in one lap hit
+  // it, each diagnosed by reading the source rather than the step.
+  //
+  // Conflating the two is the attribution defect this union has now recorded
+  // five times: a discarded plan and a never-supplied input have different
+  // repairs, and reporting the first as the second sends the operator to find an
+  // input they already had.
+  //
+  // Persisted contract: an ADDITIVE value, read the same way as `final_gate_red`
+  // by a host that does not know it.
+  | "extracted_plan_discarded";
 
 import type { StepStatus, AccessDeclaration } from "audit-tools/shared";
 

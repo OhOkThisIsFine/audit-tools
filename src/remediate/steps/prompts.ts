@@ -335,6 +335,61 @@ export function formatIntakeSources(sources: IntakeSource[]): string {
   return sources.map((source) => `- ${source.type}: \`${source.path}\``).join("\n");
 }
 
+/**
+ * The step emitted when an extracted plan was UNUSABLE and has been removed.
+ *
+ * This exists because the alternative was `collectStartingPointPrompt`, which is
+ * headed "Collect Remediation Starting Point" and lists the default input
+ * locations. Telling a host whose plan was just destroyed to go and find an input
+ * is a wrong instruction, not merely a vague one: the input was supplied, it was
+ * read, and it failed for a stated reason the tool already knew. The reason went
+ * to the run log and to stderr, neither of which the host reads.
+ *
+ * @param reason the failure that made the plan unusable, verbatim
+ * @param archivePath where the original bytes were preserved, when they were
+ */
+export function extractedPlanDiscardedPrompt(
+  reason: string,
+  archivePath: string | undefined,
+  paths: ReturnType<typeof intakePaths>,
+): string {
+  const archiveNote = archivePath
+    ? `The plan that failed was archived first, unchanged, at:\n\n\`${archivePath}\`\n\nRead it to see exactly what was rejected.`
+    : "There was no plan file on disk to archive, so nothing was preserved.";
+
+  return `
+# Extracted Plan Discarded
+
+The extracted plan was read and could not be used, so it was removed. **This is
+not a missing input** — an input was supplied and parsed. Do not go looking for
+one.
+
+## Why it was rejected
+
+${reason}
+
+## The original
+
+${archiveNote}
+
+## What to do
+
+Correct the cause named above, then write a corrected plan to exactly:
+
+\`${paths.extractedPlan}\`
+
+and run next-step again. Re-extracting without changing anything reproduces this
+exact rejection: the failure is in the plan's content, not in the reading of it.
+
+Two causes account for most rejections, and they need different corrections:
+
+- **Every finding cited only paths that do not exist.** Cite real repository
+  paths, relative to the repository root.
+- **A finding carried no evidence.** Give each finding at least one concrete
+  citation — name a symbol and the file that holds it, not a line number.
+`;
+}
+
 export function collectStartingPointPrompt(
   root: string,
   checkedPaths: string[],

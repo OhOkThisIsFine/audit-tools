@@ -162,6 +162,7 @@ import {
   clarificationPrompt,
   collectIntakeClarificationsPrompt,
   collectStartingPointPrompt,
+  extractedPlanDiscardedPrompt,
   loaderCommand,
   reviewApprovalPrompt,
   synthesizeIntakePrompt,
@@ -865,7 +866,7 @@ async function forceReplanFromExistingIntake(
   previous: RemediationState,
   store: StateStore,
   runLogger: RunLogger,
-): Promise<RemediationState | null> {
+): Promise<RemediationState | { kind: "discarded"; reason: string; archivePath?: string } | null> {
   const pendingState: RemediationState = {
     status: "pending",
     started_at: previous.started_at,
@@ -889,13 +890,19 @@ async function forceReplanFromExistingIntake(
     return null;
   }
 
-  const replanned = await handlePendingExtractedPlan(
+  const outcome = await handlePendingExtractedPlan(
     root,
     artifactsDir,
     pendingState,
     extractedPlan,
     runLogger,
   );
+  if (outcome.kind === "discarded") {
+    // Carried up rather than collapsed to null: the decide loop emits the step
+    // that names the discard.
+    return outcome;
+  }
+  const replanned = outcome.state;
   if (!replanned) {
     return null;
   }
@@ -1332,6 +1339,37 @@ async function archiveExtractedPlan(extractedPlanPath: string): Promise<string> 
   return archivePath;
 }
 
+/**
+ * What became of an extracted plan. A DISCARD is a first-class outcome, not an
+ * absence: the plan was supplied, read, and rejected for a reason the tool
+ * computed. Modelling it as `null` threw that reason away at the one boundary
+ * where the host could have acted on it.
+ */
+type ExtractedPlanOutcome =
+  | { kind: "planned"; state: RemediationState }
+  | { kind: "discarded"; reason: string; archivePath?: string };
+
+/** Render the step that STATES a discard, rather than asking for an input again. */
+async function emitExtractedPlanDiscardedStep(
+  root: string,
+  artifactsDir: string,
+  discard: { reason: string; archivePath?: string },
+): Promise<RemediationStep> {
+  const paths = intakePaths(artifactsDir);
+  return writeCurrentStep({
+    stepKind: "extracted_plan_discarded",
+    status: "blocked",
+    runId: randomRunId("PLAN-DISCARD"),
+    repoRoot: root,
+    artifactsDir,
+    prompt: extractedPlanDiscardedPrompt(discard.reason, discard.archivePath, paths),
+    allowedCommands: [loaderCommand("next-step")],
+    stopCondition:
+      "Stop after writing a corrected extracted plan and rerunning next-step.",
+    artifactPaths: { extracted_plan: paths.extractedPlan },
+  });
+}
+
 async function handlePendingExtractedPlan(
   root: string,
   artifactsDir: string,
@@ -1343,7 +1381,7 @@ async function handlePendingExtractedPlan(
   // captured into the artifact dir; before this, the durable tree held no trace
   // that a plan had been destroyed or that findings had been dropped.
   runLogger: RunLogger,
-): Promise<RemediationState | null> {
+): Promise<ExtractedPlanOutcome> {
   // The discard-and-re-extract recovery below covers EXACTLY the region whose
   // failures mean the extracted PLAN is unusable: normalization and grounding.
   // It deliberately stops there. Everything after it — sizing, the dirty
@@ -1463,9 +1501,19 @@ async function handlePendingExtractedPlan(
         `archive=${archivePath ?? "(nothing on disk to archive)"}`,
     });
     process.stderr.write(
-      `[remediate-code] Unusable extracted-plan.json removed (${reason}); archived at ${archivePath ?? "(nothing on disk to archive)"}. Re-emitting extraction step.\n`,
+      `[remediate-code] Unusable extracted-plan.json removed (${reason}); archived at ${archivePath ?? "(nothing on disk to archive)"}. Emitting the plan-discarded step.\n`,
     );
-    return null;
+    // The reason travels with the outcome, so the EMITTED STEP can state it.
+    // Returning a bare `null` here is what made a destroyed plan indistinguishable
+    // from a run that never had an input: the decide loop fell through to
+    // `collect_starting_point` and the host was told to go and find an input it
+    // had already supplied. Everything needed to say so was already computed —
+    // it just had nowhere to go.
+    return {
+      kind: "discarded",
+      reason,
+      ...(archivePath ? { archivePath } : {}),
+    };
   }
 
   // Past the recovery boundary: a failure below is a real failure and propagates.
@@ -1534,7 +1582,10 @@ async function handlePendingExtractedPlan(
           ]),
         ),
       });
-  return await saveStateForPlan(artifactsDir, existing, pipelined, coverage);
+  return {
+    kind: "planned",
+    state: await saveStateForPlan(artifactsDir, existing, pipelined, coverage),
+  };
 }
 
 // ── Review-approval gate (go-forward program item 1) ───────────────────────────
@@ -1956,13 +2007,16 @@ async function handleReadyIntakeContractPipeline(
   // ground+plan" and the grounding tests that write extracted-plan.json directly.
   const earlyExtractedPlan = await readExtractedPlanIfPresent(artifactsDir);
   if (earlyExtractedPlan) {
-    return handlePendingExtractedPlan(
+    const outcome = await handlePendingExtractedPlan(
       root,
       artifactsDir,
       { status: "pending" },
       earlyExtractedPlan,
       runLogger,
     );
+    return outcome.kind === "discarded"
+      ? emitExtractedPlanDiscardedStep(root, artifactsDir, outcome)
+      : outcome.state;
   }
 
   const intake = await readIntakeArtifacts(artifactsDir);
@@ -2135,13 +2189,16 @@ async function handleReadyIntakeContractPipeline(
   if (!extractedPlan) {
     return null;
   }
-  return handlePendingExtractedPlan(
+  const outcome = await handlePendingExtractedPlan(
     root,
     artifactsDir,
     { status: "pending" },
     extractedPlan,
     runLogger,
   );
+  return outcome.kind === "discarded"
+    ? emitExtractedPlanDiscardedStep(root, artifactsDir, outcome)
+    : outcome.state;
 }
 
 async function handlePendingIntake(
@@ -4631,13 +4688,20 @@ async function advanceUnderPhaseLock(deps: {
   // transitions, never a recursive decideNextStepLoop), so this fires at most once.
   if (options.forceReplan && state != null) {
     await countStep(state);
-    state = await forceReplanFromExistingIntake(
+    const replanOutcome = await forceReplanFromExistingIntake(
       root,
       artifactsDir,
       state,
       store,
       runLogger,
     );
+    // A discarded plan is REPORTED here, not collapsed into `state = null`. Once
+    // it is null the loop can no longer tell "the plan was destroyed, and here is
+    // why" from "there was never an input", and it emits the second.
+    if (replanOutcome !== null && "kind" in replanOutcome) {
+      return emitExtractedPlanDiscardedStep(root, artifactsDir, replanOutcome);
+    }
+    state = replanOutcome;
   }
 
   // Pre-read the once-async signals the pre-intake derive()s consume

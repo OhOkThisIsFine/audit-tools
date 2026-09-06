@@ -51,15 +51,6 @@
   the failure it was built to prevent. **Property:** the cold count reported for a run is derived
   from the ledger as it stood BEFORE that run stamped anything, so stamping cannot alter it.
 
-- **A destroyed extracted plan routes `next-step` to the no-input prompt, which hides why the plan
-  died (2026-09-04, medium, friction: tool_should_decide).** When `handlePendingExtractedPlan`
-  returns null — grounding dropped every finding (a cited path not tracked by git, a finding with no
-  `evidence`), or normalization refused — the decide loop falls through to `handleNoState`, so the
-  host reads a "Collect Remediation Starting Point" step listing default input locations, as if no
-  intake existed. Two fixtures in one lap hit it, each diagnosed by reading the source rather than the
-  step. **Property:** a step emitted because a plan was discarded names the discard and its reason
-  (the grounding or normalization outcome), and never reads as "no input supplied".
-
 - **A constitutional or loop-core attestation accepts a mistyped nightly ledger key in its decision
   text (2026-09-04, low, friction: tool_should_decide).** `attest-constitutional-doc-change.mjs`
   recorded `cde41c31c1c6a7f3` (one character off the real `cde41c31f1c6a7f3`); only the later

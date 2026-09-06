@@ -277,6 +277,51 @@ describe("decideNextStep — extracted-plan.json grounding (WS1+WS2)", () => {
     expect(bad.phantom_paths_removed).toEqual(["phantom/two.ts"]);
   });
 
+  // The defect: when grounding dropped EVERY finding, the recovery archived the
+  // plan, deleted it, wrote the reason to the run log and to stderr — and then
+  // returned a bare `null`. The decide loop fell through to `handleNoState`, so
+  // the host was handed a step headed "Collect Remediation Starting Point"
+  // listing default input locations, exactly as if no intake had ever existed.
+  // The reason the tool had already computed appeared nowhere the host reads.
+  // Two fixtures in one lap hit this, each diagnosed by reading the source.
+  it("a plan discarded by grounding emits a step that NAMES the discard, not the no-input step", async () => {
+    await writeFile(
+      join(ARTIFACTS_DIR, "extracted-plan.json"),
+      JSON.stringify({
+        plan_id: "PLAN-ALL-PHANTOM",
+        findings: [
+          mkFinding("F-GHOST-1", {
+            files: ["phantom/one.ts"],
+            evidence: ["phantom/one.ts:1 — invented"],
+          }),
+          mkFinding("F-GHOST-2", {
+            files: ["phantom/two.ts"],
+            evidence: ["phantom/two.ts:2 — invented"],
+          }),
+        ],
+        blocks: [
+          { block_id: "B-GHOST", items: ["F-GHOST-1", "F-GHOST-2"], parallel_safe: true },
+        ],
+      }),
+      "utf8",
+    );
+    await writeIntentCheckpoint();
+
+    const step = await decideNextStep({ root: TEST_DIR });
+
+    expect(step.step_kind).toBe("extracted_plan_discarded");
+
+    // Assert on the RENDERED prompt, which is what the host actually reads.
+    const prompt = await readFile(
+      join(ARTIFACTS_DIR, "steps", "current-prompt.md"),
+      "utf8",
+    );
+    expect(prompt).toMatch(/phantom/i);
+    // And it must not read as "you never gave me an input".
+    expect(prompt).not.toMatch(/Collect Remediation Starting Point/);
+    expect(prompt).toMatch(/not a missing input/i);
+  });
+
   it("contract-pipeline-promoted plans keep their confidence (grounded by construction)", async () => {
     // Promoted findings carry obligation-reference evidence, not path:line
     // citations; the traceability gate already grounded them. They must not be
