@@ -430,6 +430,59 @@ function semanticReviewPlan(
 }
 
 /**
+ * The prompt envelope every single-lane fan-out row emits: title, shortfall,
+ * an optional lead-in, the execution lines, where to write the result, an
+ * optional note about that result, and the continue-command closer.
+ *
+ * Four rows emitted this shape and each spelled it out inline, so the closer —
+ * which carries no per-row information at all — could drift between them and
+ * nothing would notice: the closer text is asserted by no test.
+ *
+ * BOTH optional slots exist because the rows genuinely differ, not to be
+ * general. `leadIn` sits between the shortfall and the execution lines, where
+ * the charter-delta and systemic-challenge rows each state who the lane's
+ * executor must be. `resultNote` sits after the result path, where the
+ * systemic-challenge row explains that an empty findings array is the
+ * deliberate loop terminator. An envelope without those slots cannot express
+ * those rows, and adopting it there would DELETE those lines from a
+ * host-visible prompt.
+ *
+ * Not exported, and its name deliberately avoids "Prompt": an exported symbol
+ * whose name contains that substring must be registered in
+ * `tests/shared/promptContractRegistry.ts` or `check`s red.
+ */
+function singleLaneDispatchEnvelope(opts: {
+  title: string;
+  shortfallLines: string[];
+  leadIn?: string;
+  executionLines: string[];
+  writeSentence: string;
+  resultPath: string;
+  resultNote?: string;
+  continueCommand: string;
+}): string[] {
+  return [
+    opts.title,
+    "",
+    ...opts.shortfallLines,
+    ...(opts.leadIn === undefined ? [] : [opts.leadIn, ""]),
+    ...opts.executionLines,
+    "",
+    opts.writeSentence,
+    "",
+    `  ${opts.resultPath}`,
+    "",
+    ...(opts.resultNote === undefined ? [] : [opts.resultNote, ""]),
+    "When the result file exists, run:",
+    "",
+    `  ${opts.continueCommand}`,
+    "",
+    "Read and follow only the new step prompt returned by that command.",
+    "",
+  ];
+}
+
+/**
  * The blocked-step shape both blocked paths share — the pre-dispatch config
  * failure and the `blocked` result kind. Single-sourced so the two cannot drift
  * into two different operator-handoff contracts.
@@ -869,28 +922,21 @@ const emitCharterDelta = emissionRow<"charter_delta">(
       repoRoot: root,
       artifactPaths: fanout.artifactPaths,
       prompt: [
-        "# audit-code charter delta-mining",
-        "",
-        ...renderLaneShortfallLines(fanout.shortfall),
-        "The assembled charters are ready for the INDEPENDENT delta-miner (it did not author them).",
-        "",
-        ...renderFanoutExecutionLines({
-          lanes: fanout.pendingLanes.map((lane) => ({
-            label: lane.label,
-            promptPath: lane.promptPath,
-          })),
+        ...singleLaneDispatchEnvelope({
+          title: "# audit-code charter delta-mining",
+          shortfallLines: renderLaneShortfallLines(fanout.shortfall),
+          leadIn:
+            "The assembled charters are ready for the INDEPENDENT delta-miner (it did not author them).",
+          executionLines: renderFanoutExecutionLines({
+            lanes: fanout.pendingLanes.map((lane) => ({
+              label: lane.label,
+              promptPath: lane.promptPath,
+            })),
+          }),
+          writeSentence: "The executor must write its CharterDeltaSubmission JSON to:",
+          resultPath: submissionPath,
+          continueCommand,
         }),
-        "",
-        "The executor must write its CharterDeltaSubmission JSON to:",
-        "",
-        `  ${submissionPath}`,
-        "",
-        "When the result file exists, run:",
-        "",
-        `  ${continueCommand}`,
-        "",
-        "Read and follow only the new step prompt returned by that command.",
-        "",
       ].join("\n"),
       access: {
         read_paths: [
@@ -1014,30 +1060,23 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
       ),
     },
       prompt: [
-        "# audit-code systemic challenge (second-order adversary)",
-        "",
-        ...renderLaneShortfallLines(fanout.shortfall),
-        "This round's adversary lane challenges the audit process itself (optimization/better-way mandate). The adversary must NOT be the agent that drove this audit.",
-        "",
-        ...renderFanoutExecutionLines({
-          lanes: fanout.pendingLanes.map((lane) => ({
-            label: lane.label,
-            promptPath: lane.promptPath,
-          })),
+        ...singleLaneDispatchEnvelope({
+          title: "# audit-code systemic challenge (second-order adversary)",
+          shortfallLines: renderLaneShortfallLines(fanout.shortfall),
+          leadIn:
+            "This round's adversary lane challenges the audit process itself (optimization/better-way mandate). The adversary must NOT be the agent that drove this audit.",
+          executionLines: renderFanoutExecutionLines({
+            lanes: fanout.pendingLanes.map((lane) => ({
+              label: lane.label,
+              promptPath: lane.promptPath,
+            })),
+          }),
+          writeSentence: "The executor must write its findings JSON to:",
+          resultPath: submissionPath,
+          resultNote:
+            "An EMPTY findings array is the deliberate loop terminator (this round found nothing new).",
+          continueCommand,
         }),
-        "",
-        "The executor must write its findings JSON to:",
-        "",
-        `  ${submissionPath}`,
-        "",
-        "An EMPTY findings array is the deliberate loop terminator (this round found nothing new).",
-        "",
-        "When the result file exists, run:",
-        "",
-        `  ${continueCommand}`,
-        "",
-        "Read and follow only the new step prompt returned by that command.",
-        "",
       ].join("\n"),
       access: {
       read_paths: [
@@ -1385,26 +1424,20 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
       repoRoot: root,
       artifactPaths: fanout.artifactPaths,
       prompt: [
-        "# audit-code critical-flow fallback",
-        "",
-        ...renderLaneShortfallLines(fanout.shortfall),
-        ...renderFanoutExecutionLines({
-          lanes: fanout.pendingLanes.map((lane) => ({
-            label: lane.label,
-            promptPath: lane.promptPath,
-          })),
+        ...singleLaneDispatchEnvelope({
+          title: "# audit-code critical-flow fallback",
+          shortfallLines: renderLaneShortfallLines(fanout.shortfall),
+          executionLines: renderFanoutExecutionLines({
+            lanes: fanout.pendingLanes.map((lane) => ({
+              label: lane.label,
+              promptPath: lane.promptPath,
+            })),
+          }),
+          writeSentence:
+            "The executor must write the CriticalFlowFallbackResult JSON object to:",
+          resultPath: fallbackResultsPath,
+          continueCommand,
         }),
-        "",
-        "The executor must write the CriticalFlowFallbackResult JSON object to:",
-        "",
-        `  ${fallbackResultsPath}`,
-        "",
-        "When the result file exists, run:",
-        "",
-        `  ${continueCommand}`,
-        "",
-        "Read and follow only the new step prompt returned by that command.",
-        "",
       ].join("\n"),
       access: {
         read_paths: fanout.readPaths,
@@ -1453,26 +1486,19 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
       repoRoot: root,
       artifactPaths: fanout.artifactPaths,
       prompt: [
-        "# audit-code synthesis narrative",
-        "",
-        ...renderLaneShortfallLines(fanout.shortfall),
-        ...renderFanoutExecutionLines({
-          lanes: fanout.pendingLanes.map((lane) => ({
-            label: lane.label,
-            promptPath: lane.promptPath,
-          })),
+        ...singleLaneDispatchEnvelope({
+          title: "# audit-code synthesis narrative",
+          shortfallLines: renderLaneShortfallLines(fanout.shortfall),
+          executionLines: renderFanoutExecutionLines({
+            lanes: fanout.pendingLanes.map((lane) => ({
+              label: lane.label,
+              promptPath: lane.promptPath,
+            })),
+          }),
+          writeSentence: "The executor must write the SynthesisNarrative JSON object to:",
+          resultPath: narrativeResultsPath,
+          continueCommand,
         }),
-        "",
-        "The executor must write the SynthesisNarrative JSON object to:",
-        "",
-        `  ${narrativeResultsPath}`,
-        "",
-        "When the result file exists, run:",
-        "",
-        `  ${continueCommand}`,
-        "",
-        "Read and follow only the new step prompt returned by that command.",
-        "",
       ].join("\n"),
       access: {
         read_paths: fanout.readPaths,
