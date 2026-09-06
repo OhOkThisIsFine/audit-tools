@@ -6,6 +6,14 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **A nightly script that writes the tracked ledger ignores unrecognized argv, so a query-shaped flag
+  performs the write (2026-09-06, medium, friction: tool_should_decide).** `node
+  scripts/nightly/ingest-answers.mjs --help` did not print usage — it ingested ten answers and wrote
+  `.claude/nightly-decisions.json`. The flag is ignored rather than refused, and the default action is
+  a durable write. 9 of the 95 `.mjs` files under `scripts/` mention `--help` at all, so the gap is the
+  norm, not this one script. **Property:** a script whose default action writes durable state refuses an
+  argument it does not recognize, and never treats an unrecognized flag as consent to write.
+
 - **Leg 1's coverage stamp reports `items_reviewed_cold: 0` whenever the run stamps before it
   measures (2026-09-06, medium, friction: false_green).** `stampExamined` marks an examined doc at
   HEAD, and `writeCoverage` derives the cold count from whether an item carries a stamp — so the

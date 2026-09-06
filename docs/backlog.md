@@ -24,94 +24,95 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 254 entr(y/ies) indexed.
+> and at commit). 255 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
-- `open-bugs.md:9` — Leg 1's coverage stamp reports `items_reviewed_cold: 0` whenever the run stamps before it measures (2026-09-06, medium, friction: false_green).
-- `open-bugs.md:18` — A destroyed extracted plan routes `next-step` to the no-input prompt, which hides why the plan died (2026-09-04, medium, friction: tool_should_decide).
-- `open-bugs.md:27` — A constitutional or loop-core attestation accepts a mistyped nightly ledger key in its decision text (2026-09-04, low, friction: tool_should_decide).
-- `open-bugs.md:34` — CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a DIFFERENT test each time (2026-09-04, high, friction: false_red).
-- `open-bugs.md:48` — A guard's stated escape hatch does not work for any statement after a NEWLINE (2026-09-04, medium, friction: tool_should_decide).
-- `open-bugs.md:61` — Three code comments assert a shape the tree no longer has, and nothing checks a comment against the code it describes (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:77` — `durable-traps.md` documents RETIRED infrastructure as though it were live (2026-08-30, medium, friction: false_green).
-- `open-bugs.md:89` — The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the dispatching tool call (2026-08-29, high, friction: tool_should_decide).
-- `open-bugs.md:118` — The closeout gate calls pushed commits "UNPUSHED" — it tests against `main` and says something different from what it means (2026-08-29, low, friction: false_red).
-- `open-bugs.md:129` — The gate fixture helper `stageLoopCoreFile` arms NOTHING, and its own comment says it arms the loop-core gate (2026-08-29, medium, friction: false_green).
-- `open-bugs.md:143` — A literal pinned in a test outside the change's neighborhood reds only in CI — the general discovery arm stays open (2026-08-29, medium, friction: tool_should_decide).
-- `open-bugs.md:153` — Registering ONE new gate takes edits in five separate homes, and you find them one red at a time (2026-08-30, medium, friction: missing_affordance).
-- `open-bugs.md:166` — The loop-core closure rule claims a module only when EVERY importer is core, and today's 25 declared modules are grandfathered by MEASUREMENT (2026-08-30, low, friction: false_green).
-- `open-bugs.md:178` — A history-moving commit lands its INCOMING content unreviewed — the gate can only read the STAGED snapshot (2026-08-28, mechanism corrected 2026-08-29, medium).
-- `open-bugs.md:196` — The attest preflight's REFUSAL is now sound, but the divergent case gets no verdict at all (2026-08-28, narrowed 2026-08-30, medium, friction: false_red).
-- `open-bugs.md:214` — `shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then fired on a third near-identical one (2026-08-27, medium).
-- `open-bugs.md:226` — The rendered decision queue and its tracked snapshot can outlive the ledger that settles them, and nothing gates the disagreement (2026-08-27, medium, friction: tool_should_decide).
-- `open-bugs.md:245` — The critique-driven contract repair step renders the judge-repair template (2026-08-22, medium).
-- `open-bugs.md:247` — Remediation intake drops a finding with no `evidence` array, and the audit systemic-challenge lane emits findings without one (2026-08-22, medium).
-- `open-bugs.md:249` — The Implementation DAG prompt does not state the one-invocation rule for `targeted_commands` (2026-08-23, medium, friction: tool_should_decide).
-- `open-bugs.md:256` — The per-item required tests and the host landing gate do not include the tree-wide guard suites or the cheap release gates, and every landing's evidence is Windows-local (2026-08-23, medium).
-- `open-bugs.md:266` — The systemic-challenge lane prompt withholds the banked findings it asks the adversary to beat (2026-08-21, medium).
-- `open-bugs.md:268` — Conceptual-review DEPTH is still modelled as durable when it must be per-run (2026-08-21, owner directive, medium).
-- `open-bugs.md:270` — Promotion and close residuals from the CP-NODE-3/15 reviews (low, one entry).
-- `open-bugs.md:290` — next-step discards a rejected submission's classified issues (2026-08-20, medium, friction: tool_should_decide).
-- `open-bugs.md:310` — Host-handoff residuals from the CP-NODE-6 landing (low, one entry).
-- `open-bugs.md:334` — Analyzer-boundary residuals from the CP-NODE-1 review (low).
-- `open-bugs.md:351` — Staleness third-state residuals from the CP-NODE-10 review (low).
-- `open-bugs.md:359` — Emission-scaffold and gate residuals from the CP-NODE-12/13 reviews (low).
-- `open-bugs.md:370` — Charter and route residuals from the CP-NODE-18/19 reviews (low).
-- `open-bugs.md:383` — Drift-guard residuals from the CP-NODE-25 review (low).
-- `open-bugs.md:393` — `fixture-generator-drift-guard` is not hermetic (low, friction).
-- `open-bugs.md:399` — A scoped wave item that coins an invariant id in `src/` is structurally unable to satisfy the id-glossary gate (2026-08-20, medium, friction: tool_should_decide).
-- `open-bugs.md:410` — The remediate-side submission ledger has no reader — `accepted_via_recovery` marks are write-only (2026-08-19, low-medium).
-- `open-bugs.md:418` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:425` — `runCommand` buffers child output unboundedly (2026-08-13, medium).
-- `open-bugs.md:432` — `shell-trap-guard` misses `git stash push <pathspec>` eating uncommitted work (2026-08-12, medium).
-- `open-bugs.md:438` — Contract-pipeline fan-out names a mechanism the host may not have (2026-08-08, medium).
-- `open-bugs.md:446` — Sweep the test tree for tests that re-implement their subject (2026-08-08, medium).
-- `open-bugs.md:455` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
-- `open-bugs.md:479` — Remediation pause/recovery is not durable (2026-08-03, medium).
-- `open-bugs.md:487` — Graph heuristics are promoted to findings without a semantic lead boundary (2026-08-03, medium).
-- `open-bugs.md:494` — Tool-owned gate reds are unattributed — foreign live-tree dirt pauses the run (2026-07-30, shrunk 2026-08-20; was "Phase-boundary gate false abandonment", HIGH).
-- `open-bugs.md:508` — Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction).
-- `open-bugs.md:518` — ⬇ Live-run watch (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim.
-- `open-bugs.md:526` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
-- `open-bugs.md:547` — A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.
-- `open-bugs.md:567` — Friction walk (copy-fallback lap, 2026-08-30):
-- `open-bugs.md:588` — Friction walk (commitFold unlink lap, 2026-08-30):
-- `open-bugs.md:607` — Friction walk (two-identities lap, 2026-08-30):
-- `open-bugs.md:618` — Friction walk (determinations-execution lap, 2026-07-29):
-- `open-bugs.md:632` — Friction walk (duplicated-guard lap, 2026-07-25):
-- `open-bugs.md:644` — The per-result LLM conformance review — the opt-in depth dial half of the owner decision — is unbuilt, so semantic conformance to the carried module contracts is still judged by nothing (2026-08-09, narrowed 2026-08-29, medium).
-- `open-bugs.md:655` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
-- `open-bugs.md:671` — Friction walk (niggle-fix lap, 2026-08-07):
-- `open-bugs.md:689` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
-- `open-bugs.md:701` — Friction walk (nightly-determinations lap, 2026-07-26):
-- `open-bugs.md:713` — Friction walk (touched_files load-gate lap, 2026-07-25):
-- `open-bugs.md:719` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:732` — Friction walk (second backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:741` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
-- `open-bugs.md:763` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:775` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:781` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:789` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
-- `open-bugs.md:798` — `StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.
-- `open-bugs.md:804` — systemic_challenge findings ids are adversary-invented and round-colliding.
-- `open-bugs.md:811` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
-- `open-bugs.md:818` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:823` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
-- `open-bugs.md:833` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
-- `open-bugs.md:840` — A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run, medium).
-- `open-bugs.md:849` — A provenance plane with no producer is still exported, advertised and documented (2026-08-27, from the philosophy audit, medium).
-- `open-bugs.md:851` — Three persisted contracts are read back without the schema that defines them (2026-08-27, from the philosophy audit, medium).
-- `open-bugs.md:853` — The pre-split design-review lane is still polled beside the two current judgment types (2026-08-27, from the philosophy audit, medium).
-- `open-bugs.md:855` — The N-R13 status invariant asserts its own literal, and the status vocabulary exists in three unlinked copies (2026-08-27, low-medium).
-- `open-bugs.md:871` — The dispatch boundary strips every per-node field the contract pipeline writes onto a promoted finding but `FindingSchema` does not declare (2026-08-27, medium).
-- `open-bugs.md:891` — The two evidence-bearing terminal dispositions have no producer — `verified_already_fixed` and `refuted` are unreachable in any real run (2026-08-27, medium, from [`reviews/wave2-dispositions-2026-08-20.md`](./reviews/wave2-dispositions-2026-08-20.md)).
-- `open-bugs.md:916` — The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](./reviews/closeout-generation-failure-2026-08-26.md)).
-- `open-bugs.md:918` — An analysis record can identify work and reach no work queue, and every gate stays green while it happens (2026-08-27, medium, from the orphan-routing lap).
-- `open-bugs.md:939` — The masked-exit guard keyed on TEST RUNNERS, not on whether the exit status is load-bearing — NARROWED to its curated-list half (2026-08-27, narrowed 2026-08-29, medium, friction: tool_should_decide).
-- `open-bugs.md:956` — An agent push to `main` is not gated on a full-suite stamp, and the "touched area's suite" rule cannot see a cross-area invariant (2026-09-03, medium, friction: tool_should_decide).
-- `open-bugs.md:968` — The backlog's own gates run only at commit, so a writer sees the refusal long after the text is cold (2026-09-03, medium, friction: tool_should_decide).
-- `open-bugs.md:980` — `type-coverage`'s acquired-analyzer spawn carries a deadline ten times longer than the callers actually waiting on it, and an orphaned npm lock makes every later spawn re-pay the same wait (2026-09-04, medium, friction: tool_should_decide).
+- `open-bugs.md:9` — A nightly script that writes the tracked ledger ignores unrecognized argv, so a query-shaped flag performs the write (2026-09-06, medium, friction: tool_should_decide).
+- `open-bugs.md:17` — Leg 1's coverage stamp reports `items_reviewed_cold: 0` whenever the run stamps before it measures (2026-09-06, medium, friction: false_green).
+- `open-bugs.md:26` — A destroyed extracted plan routes `next-step` to the no-input prompt, which hides why the plan died (2026-09-04, medium, friction: tool_should_decide).
+- `open-bugs.md:35` — A constitutional or loop-core attestation accepts a mistyped nightly ledger key in its decision text (2026-09-04, low, friction: tool_should_decide).
+- `open-bugs.md:42` — CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a DIFFERENT test each time (2026-09-04, high, friction: false_red).
+- `open-bugs.md:56` — A guard's stated escape hatch does not work for any statement after a NEWLINE (2026-09-04, medium, friction: tool_should_decide).
+- `open-bugs.md:69` — Three code comments assert a shape the tree no longer has, and nothing checks a comment against the code it describes (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:85` — `durable-traps.md` documents RETIRED infrastructure as though it were live (2026-08-30, medium, friction: false_green).
+- `open-bugs.md:97` — The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the dispatching tool call (2026-08-29, high, friction: tool_should_decide).
+- `open-bugs.md:126` — The closeout gate calls pushed commits "UNPUSHED" — it tests against `main` and says something different from what it means (2026-08-29, low, friction: false_red).
+- `open-bugs.md:137` — The gate fixture helper `stageLoopCoreFile` arms NOTHING, and its own comment says it arms the loop-core gate (2026-08-29, medium, friction: false_green).
+- `open-bugs.md:151` — A literal pinned in a test outside the change's neighborhood reds only in CI — the general discovery arm stays open (2026-08-29, medium, friction: tool_should_decide).
+- `open-bugs.md:161` — Registering ONE new gate takes edits in five separate homes, and you find them one red at a time (2026-08-30, medium, friction: missing_affordance).
+- `open-bugs.md:174` — The loop-core closure rule claims a module only when EVERY importer is core, and today's 25 declared modules are grandfathered by MEASUREMENT (2026-08-30, low, friction: false_green).
+- `open-bugs.md:186` — A history-moving commit lands its INCOMING content unreviewed — the gate can only read the STAGED snapshot (2026-08-28, mechanism corrected 2026-08-29, medium).
+- `open-bugs.md:204` — The attest preflight's REFUSAL is now sound, but the divergent case gets no verdict at all (2026-08-28, narrowed 2026-08-30, medium, friction: false_red).
+- `open-bugs.md:222` — `shell-trap-guard`'s PowerShell here-string rule did not fire on two Bash-tool commits and then fired on a third near-identical one (2026-08-27, medium).
+- `open-bugs.md:234` — The rendered decision queue and its tracked snapshot can outlive the ledger that settles them, and nothing gates the disagreement (2026-08-27, medium, friction: tool_should_decide).
+- `open-bugs.md:253` — The critique-driven contract repair step renders the judge-repair template (2026-08-22, medium).
+- `open-bugs.md:255` — Remediation intake drops a finding with no `evidence` array, and the audit systemic-challenge lane emits findings without one (2026-08-22, medium).
+- `open-bugs.md:257` — The Implementation DAG prompt does not state the one-invocation rule for `targeted_commands` (2026-08-23, medium, friction: tool_should_decide).
+- `open-bugs.md:264` — The per-item required tests and the host landing gate do not include the tree-wide guard suites or the cheap release gates, and every landing's evidence is Windows-local (2026-08-23, medium).
+- `open-bugs.md:274` — The systemic-challenge lane prompt withholds the banked findings it asks the adversary to beat (2026-08-21, medium).
+- `open-bugs.md:276` — Conceptual-review DEPTH is still modelled as durable when it must be per-run (2026-08-21, owner directive, medium).
+- `open-bugs.md:278` — Promotion and close residuals from the CP-NODE-3/15 reviews (low, one entry).
+- `open-bugs.md:298` — next-step discards a rejected submission's classified issues (2026-08-20, medium, friction: tool_should_decide).
+- `open-bugs.md:318` — Host-handoff residuals from the CP-NODE-6 landing (low, one entry).
+- `open-bugs.md:342` — Analyzer-boundary residuals from the CP-NODE-1 review (low).
+- `open-bugs.md:359` — Staleness third-state residuals from the CP-NODE-10 review (low).
+- `open-bugs.md:367` — Emission-scaffold and gate residuals from the CP-NODE-12/13 reviews (low).
+- `open-bugs.md:378` — Charter and route residuals from the CP-NODE-18/19 reviews (low).
+- `open-bugs.md:391` — Drift-guard residuals from the CP-NODE-25 review (low).
+- `open-bugs.md:401` — `fixture-generator-drift-guard` is not hermetic (low, friction).
+- `open-bugs.md:407` — A scoped wave item that coins an invariant id in `src/` is structurally unable to satisfy the id-glossary gate (2026-08-20, medium, friction: tool_should_decide).
+- `open-bugs.md:418` — The remediate-side submission ledger has no reader — `accepted_via_recovery` marks are write-only (2026-08-19, low-medium).
+- `open-bugs.md:426` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:433` — `runCommand` buffers child output unboundedly (2026-08-13, medium).
+- `open-bugs.md:440` — `shell-trap-guard` misses `git stash push <pathspec>` eating uncommitted work (2026-08-12, medium).
+- `open-bugs.md:446` — Contract-pipeline fan-out names a mechanism the host may not have (2026-08-08, medium).
+- `open-bugs.md:454` — Sweep the test tree for tests that re-implement their subject (2026-08-08, medium).
+- `open-bugs.md:463` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
+- `open-bugs.md:487` — Remediation pause/recovery is not durable (2026-08-03, medium).
+- `open-bugs.md:495` — Graph heuristics are promoted to findings without a semantic lead boundary (2026-08-03, medium).
+- `open-bugs.md:502` — Tool-owned gate reds are unattributed — foreign live-tree dirt pauses the run (2026-07-30, shrunk 2026-08-20; was "Phase-boundary gate false abandonment", HIGH).
+- `open-bugs.md:516` — Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction).
+- `open-bugs.md:526` — ⬇ Live-run watch (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim.
+- `open-bugs.md:534` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
+- `open-bugs.md:555` — A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.
+- `open-bugs.md:575` — Friction walk (copy-fallback lap, 2026-08-30):
+- `open-bugs.md:596` — Friction walk (commitFold unlink lap, 2026-08-30):
+- `open-bugs.md:615` — Friction walk (two-identities lap, 2026-08-30):
+- `open-bugs.md:626` — Friction walk (determinations-execution lap, 2026-07-29):
+- `open-bugs.md:640` — Friction walk (duplicated-guard lap, 2026-07-25):
+- `open-bugs.md:652` — The per-result LLM conformance review — the opt-in depth dial half of the owner decision — is unbuilt, so semantic conformance to the carried module contracts is still judged by nothing (2026-08-09, narrowed 2026-08-29, medium).
+- `open-bugs.md:663` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
+- `open-bugs.md:679` — Friction walk (niggle-fix lap, 2026-08-07):
+- `open-bugs.md:697` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
+- `open-bugs.md:709` — Friction walk (nightly-determinations lap, 2026-07-26):
+- `open-bugs.md:721` — Friction walk (touched_files load-gate lap, 2026-07-25):
+- `open-bugs.md:727` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:740` — Friction walk (second backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:749` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
+- `open-bugs.md:771` — External shared-logic audit V1–V7 residuals
+- `open-bugs.md:783` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:789` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:797` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:806` — `StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.
+- `open-bugs.md:812` — systemic_challenge findings ids are adversary-invented and round-colliding.
+- `open-bugs.md:819` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
+- `open-bugs.md:826` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:831` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
+- `open-bugs.md:841` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
+- `open-bugs.md:848` — A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run, medium).
+- `open-bugs.md:857` — A provenance plane with no producer is still exported, advertised and documented (2026-08-27, from the philosophy audit, medium).
+- `open-bugs.md:859` — Three persisted contracts are read back without the schema that defines them (2026-08-27, from the philosophy audit, medium).
+- `open-bugs.md:861` — The pre-split design-review lane is still polled beside the two current judgment types (2026-08-27, from the philosophy audit, medium).
+- `open-bugs.md:863` — The N-R13 status invariant asserts its own literal, and the status vocabulary exists in three unlinked copies (2026-08-27, low-medium).
+- `open-bugs.md:879` — The dispatch boundary strips every per-node field the contract pipeline writes onto a promoted finding but `FindingSchema` does not declare (2026-08-27, medium).
+- `open-bugs.md:899` — The two evidence-bearing terminal dispositions have no producer — `verified_already_fixed` and `refuted` are unreachable in any real run (2026-08-27, medium, from [`reviews/wave2-dispositions-2026-08-20.md`](./reviews/wave2-dispositions-2026-08-20.md)).
+- `open-bugs.md:924` — The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](./reviews/closeout-generation-failure-2026-08-26.md)).
+- `open-bugs.md:926` — An analysis record can identify work and reach no work queue, and every gate stays green while it happens (2026-08-27, medium, from the orphan-routing lap).
+- `open-bugs.md:947` — The masked-exit guard keyed on TEST RUNNERS, not on whether the exit status is load-bearing — NARROWED to its curated-list half (2026-08-27, narrowed 2026-08-29, medium, friction: tool_should_decide).
+- `open-bugs.md:964` — An agent push to `main` is not gated on a full-suite stamp, and the "touched area's suite" rule cannot see a cross-area invariant (2026-09-03, medium, friction: tool_should_decide).
+- `open-bugs.md:976` — The backlog's own gates run only at commit, so a writer sees the refusal long after the text is cold (2026-09-03, medium, friction: tool_should_decide).
+- `open-bugs.md:988` — `type-coverage`'s acquired-analyzer spawn carries a deadline ten times longer than the callers actually waiting on it, and an orphaned npm lock makes every later spawn re-pay the same wait (2026-09-04, medium, friction: tool_should_decide).
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 

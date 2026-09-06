@@ -52,19 +52,6 @@ rewrite with no owner override. Both refusals were correct and both named their 
   unreadable or empty omissions.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
-
-- **10 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `l1-1` — Nightly lane: the routine tells itself to run `llm-relay dispatch -t` and use the first ready lane's printed command, but that command never prints one — which lane form should the doc name?
-  - `l1-2` — Instruction-file edit: four CLAUDE.md claims went stale when the commit gate moved to git’s boundary (P53) — apply the four corrections?
-  - `l1-3` — Loader prompt asks the host for a reflection the parser silently DROPS — add the missing required field, or change the parser?
-  - `l1-4` — Two invariant namespaces used in src/ (INV-COVERAGE, INV-SSF) have no glossary row, and no gate checks completeness — add rows, or narrow the claim?
-  - `l1-5` — HANDOFF narrates three already-settled decision batches — trim them as changelog, or is the narration load-bearing?
-  - `bl-1` — Backlog: the "paraphrase inverted the mechanism" entry describes an incident whose offending text is GONE — keep it, or reduce it to its durable rule?
-  - `sol-1` — P54: guards print hand-written remedies that the guard itself would refuse — make the refusal text declared data and round-trip it, and in which scope?
-  - `sol-2` — P55: file-scoped gate legs fire only at commit, often in another session — run them advisory at WRITE time, or not at all?
-  - `sol-3` — P56: five generated artifacts have gone stale unnoticed — reconcile every generator against a declared freshness authority (patch and red-green test attached)?
-  - `sol-4` — P57: a test that fails only under full-suite load reports as a bare red — classify it at the gate, or decline as under-evidenced?
-
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
