@@ -49,6 +49,10 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/audit/cli/laneValidators.ts",
   "src/audit/cli/nextStepHelpers.ts",
   "src/audit/orchestrator/",
+  // Imported ONLY by nextStep.ts, so the closure rule claims it: a module every
+  // one of whose importers is core is core. It renders the record of what the
+  // intake filter removed, which is a statement about the loop's own decisions.
+  "src/remediate/droppedFindingsRecord.ts",
   "src/remediate/riskSignal.ts",
   "src/remediate/steps/contractPipeline.ts",
   "src/remediate/steps/dispatch/",

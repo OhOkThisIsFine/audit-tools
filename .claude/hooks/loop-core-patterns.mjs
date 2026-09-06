@@ -13,6 +13,7 @@ export const LOOP_CORE_PATTERNS = [
   "src/audit/cli/laneValidators.ts",
   "src/audit/cli/nextStepHelpers.ts",
   "src/audit/orchestrator/",
+  "src/remediate/droppedFindingsRecord.ts",
   "src/remediate/riskSignal.ts",
   "src/remediate/steps/contractPipeline.ts",
   "src/remediate/steps/dispatch/",

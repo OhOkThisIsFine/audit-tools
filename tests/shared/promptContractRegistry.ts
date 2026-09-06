@@ -198,6 +198,7 @@ const reconciliationGapRows: PromptContractRegistryRow[] = [
   ["clarificationPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
   ["collectIntakeClarificationsPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
   ["collectStartingPointPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
+  ["extractedPlanDiscardedPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
   ["reviewApprovalPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
   ["triagePrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
   ["renderBlockedStepPrompt", "src/shared/io/stepContractWriter.ts", DRIVER_GAP],
