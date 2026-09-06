@@ -6,6 +6,15 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Leg 1's coverage stamp reports `items_reviewed_cold: 0` whenever the run stamps before it
+  measures (2026-09-06, medium, friction: false_green).** `stampExamined` marks an examined doc at
+  HEAD, and `writeCoverage` derives the cold count from whether an item carries a stamp — so the
+  natural order (review, stamp, then write coverage) makes every examined item look windowed. The
+  2026-09-06 run wrote 0 and had to recompute 22 across 8 docs from a snapshot taken at run start.
+  The field exists precisely so a cold review is declared rather than eyeballed, so a silent 0 is
+  the failure it was built to prevent. **Property:** the cold count reported for a run is derived
+  from the ledger as it stood BEFORE that run stamped anything, so stamping cannot alter it.
+
 - **A destroyed extracted plan routes `next-step` to the no-input prompt, which hides why the plan
   died (2026-09-04, medium, friction: tool_should_decide).** When `handlePendingExtractedPlan`
   returns null — grounding dropped every finding (a cited path not tracked by git, a finding with no
