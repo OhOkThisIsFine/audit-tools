@@ -44,6 +44,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
 import { spliceGeneratedBlock } from "./generatedArtifacts.mjs";
+import { unwrapExpression } from "./tsAstHelpers.mjs";
 
 import {
   ARTIFACT_REGISTRY_FILE,
@@ -88,22 +89,6 @@ const ARTIFACT_HELPER_FORMATS = {
 
 const parseSource = (file, text) =>
   ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-
-/** Strip `as const` / `satisfies T` / parentheses down to the underlying literal. */
-function unwrapExpression(node) {
-  let current = node;
-  for (;;) {
-    if (
-      ts.isAsExpression(current) ||
-      ts.isSatisfiesExpression(current) ||
-      ts.isParenthesizedExpression(current)
-    ) {
-      current = current.expression;
-      continue;
-    }
-    return current;
-  }
-}
 
 /** The initializer of a top-level `export const <name> = …`, unwrapped. */
 function exportedInitializer(sourceFile, name, file) {

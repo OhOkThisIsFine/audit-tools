@@ -33,6 +33,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
 import { runGeneratedArtifactCli, spliceGeneratedBlock } from "./generatedArtifacts.mjs";
+import { unwrapExpression } from "./tsAstHelpers.mjs";
 
 const repoRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 
@@ -46,22 +47,6 @@ export const END_MARKER = "<!-- END GENERATED INGESTION CHECKS -->";
 
 /** The calls whose FIRST argument is a check id. */
 const CITING_CALLS = new Set(["refuse", "invalidResult", "bindingFailure"]);
-
-/** Strip `as const` / `satisfies T` / parentheses down to the underlying literal. */
-function unwrapExpression(node) {
-  let current = node;
-  for (;;) {
-    if (
-      ts.isAsExpression(current) ||
-      ts.isSatisfiesExpression(current) ||
-      ts.isParenthesizedExpression(current)
-    ) {
-      current = current.expression;
-      continue;
-    }
-    return current;
-  }
-}
 
 /** @typedef {{id: string, verifies: string, draws: string[], cited_by: string}} IngestionCheckRow */
 
