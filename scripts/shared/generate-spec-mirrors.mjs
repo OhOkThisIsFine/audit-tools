@@ -236,7 +236,7 @@ export function parseExecutorRegistry(sourceText) {
     for (const property of element.properties) {
       if (!ts.isPropertyAssignment(property)) continue;
       const name = property.name.getText().replace(/^["']|["']$/g, "");
-      const value = property.initializer;
+      const value = unwrapExpression(property.initializer);
       if (name === "id" || name === "kind") {
         if (!ts.isStringLiteral(value)) {
           throw new Error(`EXECUTOR_REGISTRY entry declares a non-literal \`${name}\``);
@@ -300,7 +300,7 @@ export function parseDependencyMap(sourceText, constants) {
           `computed filename constant — refusing to guess which artifact it keys.`,
       );
     }
-    const value = property.initializer;
+    const value = unwrapExpression(property.initializer);
     if (!ts.isArrayLiteralExpression(value)) {
       throw new Error(`ARTIFACT_DEPENDS_ON_MAP["${artifact}"] is not an array literal`);
     }
