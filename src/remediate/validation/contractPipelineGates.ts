@@ -338,22 +338,10 @@ export function validateImplementationDAGIntegrity(
     }
   }
 
-  const acceptedCounterexampleIds = new Set<string>();
-  if (isRecord(judgeReportPayload) && Array.isArray(judgeReportPayload.classifications)) {
-    for (const cls of judgeReportPayload.classifications as unknown[]) {
-      if (
-        isRecord(cls) &&
-        cls.classification === "accepted" &&
-        typeof cls.counterexample_id === "string" &&
-        cls.counterexample_id.length > 0 &&
-        // A waived counterexample is resolved by a recorded owner decision —
-        // coverage must not be demanded for it (open-bugs.md:108).
-        !waivedCounterexampleIds?.has(cls.counterexample_id)
-      ) {
-        acceptedCounterexampleIds.add(cls.counterexample_id);
-      }
-    }
-  }
+  const acceptedCounterexampleIds = collectUnwaivedAcceptedCounterexampleIds(
+    judgeReportPayload,
+    waivedCounterexampleIds,
+  );
 
   // Track which obligations and accepted counterexamples are covered.
   const coveredObligationIds = new Set<string>();
@@ -678,23 +666,11 @@ export function validateEvidenceThreaded(
     }
   }
 
-  // 2. accepted counterexamples must be threaded into the DAG. A waived
-  // counterexample is resolved by a recorded owner decision and is not
-  // demanded here (open-bugs.md:108).
-  const acceptedCounterexampleIds = new Set<string>();
-  if (isRecord(judgeReportPayload) && Array.isArray(judgeReportPayload.classifications)) {
-    for (const cls of judgeReportPayload.classifications as unknown[]) {
-      if (
-        isRecord(cls) &&
-        cls.classification === "accepted" &&
-        typeof cls.counterexample_id === "string" &&
-        cls.counterexample_id.length > 0 &&
-        !waivedCounterexampleIds?.has(cls.counterexample_id)
-      ) {
-        acceptedCounterexampleIds.add(cls.counterexample_id);
-      }
-    }
-  }
+  // 2. accepted counterexamples must be threaded into the DAG.
+  const acceptedCounterexampleIds = collectUnwaivedAcceptedCounterexampleIds(
+    judgeReportPayload,
+    waivedCounterexampleIds,
+  );
 
   if (acceptedCounterexampleIds.size > 0) {
     const threaded = new Set<string>();
@@ -961,6 +937,46 @@ export function validateWorkBlockSeamPreparation(
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * The judge-accepted counterexample ids this pipeline still DEMANDS coverage
+ * for: accepted, non-empty, and not resolved by a recorded owner waiver.
+ *
+ * Two gates in this file need that set and each built it inline, character for
+ * character. Every conjunct is load-bearing, which is why they must not drift
+ * apart: the `length > 0` test keeps an empty id out of a demand nothing can
+ * satisfy, and the optional chaining on the waiver set is required because most
+ * callers omit the argument entirely.
+ *
+ * Deliberately NOT `acceptedCounterexampleIds` from `contractPipeline/derive.ts`,
+ * despite the name. That one returns a possibly-duplicated array, filters no
+ * waiver and admits the empty string — and importing its value here would close
+ * a module cycle, since `derive.ts` already imports `isTestablePhaseObligation`
+ * from this file.
+ *
+ * A waived counterexample is resolved by a recorded owner decision, so coverage
+ * is not demanded for it — see the waiver entry in `docs/backlog/open-bugs.md`.
+ */
+function collectUnwaivedAcceptedCounterexampleIds(
+  judgeReportPayload: unknown,
+  waivedCounterexampleIds?: ReadonlySet<string>,
+): Set<string> {
+  const accepted = new Set<string>();
+  if (isRecord(judgeReportPayload) && Array.isArray(judgeReportPayload.classifications)) {
+    for (const cls of judgeReportPayload.classifications as unknown[]) {
+      if (
+        isRecord(cls) &&
+        cls.classification === "accepted" &&
+        typeof cls.counterexample_id === "string" &&
+        cls.counterexample_id.length > 0 &&
+        !waivedCounterexampleIds?.has(cls.counterexample_id)
+      ) {
+        accepted.add(cls.counterexample_id);
+      }
+    }
+  }
+  return accepted;
 }
 
 /**

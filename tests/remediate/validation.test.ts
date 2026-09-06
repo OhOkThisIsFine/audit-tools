@@ -1044,6 +1044,71 @@ describe("validateImplementationDAGIntegrity", () => {
     ],
   };
 
+  // The accepted-counterexample set has two conjuncts that decide whether the
+  // gate DEMANDS coverage, and neither was reachable by any test: dropping the
+  // waiver filter, or dropping the non-empty check, left the whole suite green.
+  // The waiver one is an owner-decision mechanism, so an unpinned copy of it is
+  // the thing most worth pinning.
+  it("does not demand coverage for a WAIVED accepted counterexample", () => {
+    const dagWithoutCe = {
+      nodes: [
+        {
+          id: "N-1",
+          satisfies_obligations: ["O-1"],
+          verification_obligation_ids: ["O-2"],
+          addresses_counterexamples: [],
+        },
+      ],
+    };
+    const unwaived = validateImplementationDAGIntegrity(
+      dagWithoutCe,
+      obligation_ledger,
+      counterexample,
+      judge_report,
+    );
+    expect(unwaived.filter((i) => i.severity === "error").some((e) => e.message.includes("CE-1"))).toBe(true);
+
+    const waived = validateImplementationDAGIntegrity(
+      dagWithoutCe,
+      obligation_ledger,
+      counterexample,
+      judge_report,
+      new Set(["CE-1"]),
+    );
+    expect(waived.filter((i) => i.severity === "error").some((e) => e.message.includes("CE-1"))).toBe(false);
+  });
+
+  it("never demands coverage for an empty-string counterexample id", () => {
+    // An empty id names nothing, so a demand for it could not be satisfied by
+    // any node — it would be an error no DAG can clear.
+    const emptyIdJudgeReport = {
+      classifications: [
+        { counterexample_id: "", classification: "accepted", rationale: "Malformed." },
+      ],
+    };
+    const dagCoveringNothing = {
+      nodes: [
+        {
+          id: "N-1",
+          satisfies_obligations: ["O-1"],
+          verification_obligation_ids: ["O-2"],
+          addresses_counterexamples: [],
+        },
+      ],
+    };
+    const issues = validateImplementationDAGIntegrity(
+      dagCoveringNothing,
+      obligation_ledger,
+      { counterexamples: [] },
+      emptyIdJudgeReport,
+    );
+    expect(
+      issues
+        .filter((i) => i.severity === "error")
+        .some((e) => e.message.includes("Judge-accepted counterexample")),
+    ).toBe(false);
+  });
+
   it("returns no errors for a fully valid DAG", () => {
     const issues = validateImplementationDAGIntegrity(validDag, obligation_ledger, counterexample, judge_report);
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
