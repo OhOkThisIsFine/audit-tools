@@ -10,12 +10,29 @@
   The owner answered all ten open propositions in conversation; the answers are recorded in
   `.claude/nightly-decisions.json`, which is their one home — read each answer there rather than a
   copy. `l1-5` is the only one applied (it trimmed HANDOFF's three narrated decision batches).
-  Eight remain, and one of the ten is not implementable as offered: `sol-4` was answered "none of
-  these solutions are correct — there should be a solution enforced by tooling", so proposal 57's
-  three forms are dead while its requirement stands and needs a new form proposed.
+  `sol-4`'s three offered forms were refused outright and a successor form was settled the same
+  day; its spec is the next entry, so `sol-4` is no longer blocked on a proposal.
   ⚠ `sol-1` is the only one that writes OUTSIDE this repository: its machine-wide half files to
-  `C:\Code\docs\backlog.md`, not here. **Property:** each settled answer has a landed commit, or a
-  successor proposition recorded for the one whose form was refused.
+  `C:\Code\docs\backlog.md`, not here. **Property:** each settled answer has a landed commit.
+
+- **A test that fails only under full-suite load reports as a bare red, and the gate cannot say so
+  (2026-09-06, medium, friction: false_red).** Observed twice on unchanged trees, 2026-08-09 and
+  2026-09-03: a file failed during the whole suite and passed immediately when run alone, so the
+  diagnosis fell to a person remembering a written routine. The owner refused all three originally
+  offered forms — a hand-declared list, a list derived from run timings, and declining — because
+  each leaves the CLASSIFYING to something other than tooling, and settled this shape instead:
+  1. On a failure, the gate RE-RUNS that file alone. Nothing is declared up front, so no file can
+     be forgotten and no list can go stale.
+  2. The gate RECORDS every file that fails under load and then passes alone. The record is built
+     by the tool from what it observed, never typed by hand — that is the difference from the
+     refused form.
+  3. Once a file's record REPEATS, two tracks run in parallel: spin off a worker to find a way to
+     improve the TEST ITSELF, and advise the test runner that this file has failed under load
+     before and passed alone.
+  ⚠ Track 1 is the half that makes this more than labelling: a repeat is evidence of a hermeticity
+  defect to fix, not a condition to live with. **Property:** a load-only failure is named as one by
+  the gate rather than by a person; the naming rests on the tool's own recorded observations; and a
+  repeat opens both a fix attempt and a warning, never only a warning.
 
 - **A nightly script that writes the tracked ledger ignores unrecognized argv, so a query-shaped flag
   performs the write (2026-09-06, medium, friction: tool_should_decide).** `node
