@@ -309,89 +309,101 @@ export function validateGoalIdConsistency(
  * referential checks are skipped when the target artifact is absent (the caller
  * is responsible for ensuring the artifacts exist before calling this gate).
  */
-export function validateImplementationDAGIntegrity(
-  dagPayload: unknown,
-  obligationLedgerPayload: unknown,
-  counterexamplePayload: unknown,
-  judgeReportPayload: unknown,
-  waivedCounterexampleIds?: ReadonlySet<string>,
-): ValidationIssue[] {
+/**
+ * The non-empty string ids a sibling artifact declares, read defensively from an
+ * `unknown` payload shaped `{ [arrayKey]: [{ id }] }`.
+ *
+ * The obligation ledger and the counterexample artifact were each read by their
+ * own copy of this loop, identical but for the key they look under.
+ */
+function collectDeclaredIds(payload: unknown, arrayKey: string): Set<string> {
+  const ids = new Set<string>();
+  if (isRecord(payload) && Array.isArray(payload[arrayKey])) {
+    for (const entry of payload[arrayKey] as unknown[]) {
+      if (isRecord(entry) && typeof entry.id === "string" && entry.id.length > 0) {
+        ids.add(entry.id);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * One node's obligation references, for one of the two fields that carry them.
+ * Both fields were checked by the same fifteen lines, differing only in the field
+ * name — which appears in the issue path AND in its message, so a copy that
+ * drifted would have misreported which field was wrong.
+ *
+ * ⚠ An EMPTY `obligationIds` means the ledger declared nothing, which is not the
+ * same as "this reference is unknown". In that case every referenced id counts as
+ * covered and NOTHING is reported — the gate refuses to invent a referential
+ * error against an artifact that stated no ids at all.
+ */
+function checkNodeObligationRefs(
+  issues: ValidationIssue[],
+  node: Record<string, unknown>,
+  nodeIndex: number,
+  field: "satisfies_obligations" | "verification_obligation_ids",
+  obligationIds: ReadonlySet<string>,
+  coveredObligationIds: Set<string>,
+): void {
+  const refs = node[field];
+  if (!Array.isArray(refs)) return;
+  for (const oblId of refs as unknown[]) {
+    if (typeof oblId !== "string") continue;
+    if (obligationIds.size > 0 && !obligationIds.has(oblId)) {
+      pushValidationIssue(
+        issues,
+        `implementation_dag.nodes[${nodeIndex}].${field}`,
+        `Node "${node.id}" references obligation "${oblId}" in ${field}, but no such obligation exists in the obligation_ledger.`,
+      );
+    } else {
+      coveredObligationIds.add(oblId);
+    }
+  }
+}
+
+/** Report every declared id no node covered. An empty set reports nothing. */
+function reportUncovered(
+  issues: ValidationIssue[],
+  declared: ReadonlySet<string>,
+  covered: ReadonlySet<string>,
+  message: (id: string) => string,
+): void {
+  for (const id of declared) {
+    if (!covered.has(id)) {
+      pushValidationIssue(issues, "implementation_dag.coverage", message(id));
+    }
+  }
+}
+
+/**
+ * Phase 1 — referential integrity, node by node: every obligation and
+ * counterexample a node references must exist in the artifact that declares it.
+ *
+ * Returns the covered sets alongside the issues, because phase 2 asks the
+ * opposite question of the same walk and must not walk the nodes again.
+ */
+function validateDAGReferentialIntegrity(
+  nodes: readonly unknown[],
+  obligationIds: ReadonlySet<string>,
+  counterexampleIds: ReadonlySet<string>,
+  acceptedCounterexampleIds: ReadonlySet<string>,
+): {
+  issues: ValidationIssue[];
+  coveredObligationIds: Set<string>;
+  coveredCounterexampleIds: Set<string>;
+} {
   const issues: ValidationIssue[] = [];
-  if (!canEvaluateImplementationDagIntegrity(dagPayload)) return issues;
-
-  // Build reference sets from sibling artifacts.
-  const obligationIds = new Set<string>();
-  if (isRecord(obligationLedgerPayload) && Array.isArray(obligationLedgerPayload.obligations)) {
-    for (const obl of obligationLedgerPayload.obligations as unknown[]) {
-      if (isRecord(obl) && typeof obl.id === "string" && obl.id.length > 0) {
-        obligationIds.add(obl.id);
-      }
-    }
-  }
-
-  const counterexampleIds = new Set<string>();
-  if (isRecord(counterexamplePayload) && Array.isArray(counterexamplePayload.counterexamples)) {
-    for (const ce of counterexamplePayload.counterexamples as unknown[]) {
-      if (isRecord(ce) && typeof ce.id === "string" && ce.id.length > 0) {
-        counterexampleIds.add(ce.id);
-      }
-    }
-  }
-
-  const acceptedCounterexampleIds = collectUnwaivedAcceptedCounterexampleIds(
-    judgeReportPayload,
-    waivedCounterexampleIds,
-  );
-
-  // Track which obligations and accepted counterexamples are covered.
   const coveredObligationIds = new Set<string>();
   const coveredCounterexampleIds = new Set<string>();
 
-  const nodes = dagPayload.nodes as unknown[];
   for (const [i, node] of nodes.entries()) {
     if (!isRecord(node)) continue;
 
-    // 1a. Referential integrity: satisfies_obligations → obligation_ledger.
-    if (obligationIds.size > 0 && Array.isArray(node.satisfies_obligations)) {
-      for (const oblId of node.satisfies_obligations as unknown[]) {
-        if (typeof oblId !== "string") continue;
-        if (!obligationIds.has(oblId)) {
-          pushValidationIssue(
-            issues,
-            `implementation_dag.nodes[${i}].satisfies_obligations`,
-            `Node "${node.id}" references obligation "${oblId}" in satisfies_obligations, but no such obligation exists in the obligation_ledger.`,
-          );
-        } else {
-          coveredObligationIds.add(oblId);
-        }
-      }
-    } else if (Array.isArray(node.satisfies_obligations)) {
-      for (const oblId of node.satisfies_obligations as unknown[]) {
-        if (typeof oblId === "string") coveredObligationIds.add(oblId);
-      }
-    }
+    checkNodeObligationRefs(issues, node, i, "satisfies_obligations", obligationIds, coveredObligationIds);
+    checkNodeObligationRefs(issues, node, i, "verification_obligation_ids", obligationIds, coveredObligationIds);
 
-    // 1b. Referential integrity: verification_obligation_ids → obligation_ledger.
-    if (obligationIds.size > 0 && Array.isArray(node.verification_obligation_ids)) {
-      for (const oblId of node.verification_obligation_ids as unknown[]) {
-        if (typeof oblId !== "string") continue;
-        if (!obligationIds.has(oblId)) {
-          pushValidationIssue(
-            issues,
-            `implementation_dag.nodes[${i}].verification_obligation_ids`,
-            `Node "${node.id}" references obligation "${oblId}" in verification_obligation_ids, but no such obligation exists in the obligation_ledger.`,
-          );
-        } else {
-          coveredObligationIds.add(oblId);
-        }
-      }
-    } else if (Array.isArray(node.verification_obligation_ids)) {
-      for (const oblId of node.verification_obligation_ids as unknown[]) {
-        if (typeof oblId === "string") coveredObligationIds.add(oblId);
-      }
-    }
-
-    // 1c. Referential integrity: addresses_counterexamples → counterexample artifact.
     if (Array.isArray(node.addresses_counterexamples)) {
       for (const ceId of node.addresses_counterexamples as unknown[]) {
         if (typeof ceId !== "string") continue;
@@ -409,33 +421,70 @@ export function validateImplementationDAGIntegrity(
     }
   }
 
-  // 2. Bidirectional coverage: every obligation must be covered.
-  if (obligationIds.size > 0) {
-    for (const oblId of obligationIds) {
-      if (!coveredObligationIds.has(oblId)) {
-        pushValidationIssue(
-          issues,
-          "implementation_dag.coverage",
-          `Obligation "${oblId}" from the obligation_ledger is not addressed by any implementation_dag node (neither in satisfies_obligations nor verification_obligation_ids).`,
-        );
-      }
-    }
-  }
+  return { issues, coveredObligationIds, coveredCounterexampleIds };
+}
 
-  // 2b. Bidirectional coverage: every accepted counterexample must be covered.
-  if (acceptedCounterexampleIds.size > 0) {
-    for (const ceId of acceptedCounterexampleIds) {
-      if (!coveredCounterexampleIds.has(ceId)) {
-        pushValidationIssue(
-          issues,
-          "implementation_dag.coverage",
-          `Judge-accepted counterexample "${ceId}" is not addressed by any implementation_dag node in addresses_counterexamples.`,
-        );
-      }
-    }
-  }
-
+/**
+ * Phase 2 — the other direction: every declared obligation and every accepted
+ * counterexample must be addressed by SOME node. Phase 1 asks whether each
+ * reference resolves; this asks whether each declaration was reached.
+ */
+function validateDAGCoverageGaps(
+  obligationIds: ReadonlySet<string>,
+  acceptedCounterexampleIds: ReadonlySet<string>,
+  coveredObligationIds: ReadonlySet<string>,
+  coveredCounterexampleIds: ReadonlySet<string>,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  reportUncovered(
+    issues,
+    obligationIds,
+    coveredObligationIds,
+    (oblId) =>
+      `Obligation "${oblId}" from the obligation_ledger is not addressed by any implementation_dag node (neither in satisfies_obligations nor verification_obligation_ids).`,
+  );
+  reportUncovered(
+    issues,
+    acceptedCounterexampleIds,
+    coveredCounterexampleIds,
+    (ceId) =>
+      `Judge-accepted counterexample "${ceId}" is not addressed by any implementation_dag node in addresses_counterexamples.`,
+  );
   return issues;
+}
+
+export function validateImplementationDAGIntegrity(
+  dagPayload: unknown,
+  obligationLedgerPayload: unknown,
+  counterexamplePayload: unknown,
+  judgeReportPayload: unknown,
+  waivedCounterexampleIds?: ReadonlySet<string>,
+): ValidationIssue[] {
+  if (!canEvaluateImplementationDagIntegrity(dagPayload)) return [];
+
+  const obligationIds = collectDeclaredIds(obligationLedgerPayload, "obligations");
+  const counterexampleIds = collectDeclaredIds(counterexamplePayload, "counterexamples");
+  const acceptedCounterexampleIds = collectUnwaivedAcceptedCounterexampleIds(
+    judgeReportPayload,
+    waivedCounterexampleIds,
+  );
+
+  const referential = validateDAGReferentialIntegrity(
+    dagPayload.nodes as unknown[],
+    obligationIds,
+    counterexampleIds,
+    acceptedCounterexampleIds,
+  );
+
+  return [
+    ...referential.issues,
+    ...validateDAGCoverageGaps(
+      obligationIds,
+      acceptedCounterexampleIds,
+      referential.coveredObligationIds,
+      referential.coveredCounterexampleIds,
+    ),
+  ];
 }
 
 // ── Contract-obligations gates (CP-BLOCK-N-contract-obligations) ───────────────
@@ -638,85 +687,111 @@ export type { PairingVerdict };
  * skipped, except the counterexample-threading check, which is fail-closed when
  * accepted counterexamples exist but the DAG is missing.
  */
+/** The DAG's node array, or `[]` when the payload declares none. */
+function dagNodes(dagPayload: unknown): unknown[] {
+  return isRecord(dagPayload) && Array.isArray(dagPayload.nodes)
+    ? (dagPayload.nodes as unknown[])
+    : [];
+}
+
+/** Check 1: a finding that reports a violation must carry concrete evidence. */
+function validateViolatedFindingsEvidence(
+  assessmentReportPayload: unknown,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(assessmentReportPayload) || !Array.isArray(assessmentReportPayload.findings)) {
+    return issues;
+  }
+  for (const [i, finding] of (assessmentReportPayload.findings as unknown[]).entries()) {
+    if (!isRecord(finding)) continue;
+    if (finding.status !== "violated") continue;
+    const evidence = Array.isArray(finding.evidence)
+      ? (finding.evidence as unknown[]).filter((e) => typeof e === "string" && e.length > 0)
+      : [];
+    if (evidence.length === 0) {
+      pushValidationIssue(
+        issues,
+        `contract_assessment_report.findings[${i}].evidence`,
+        `Assessment finding for obligation "${
+          typeof finding.obligation_id === "string" ? finding.obligation_id : "?"
+        }" is "violated" but carries no evidence — a violation must thread concrete evidence forward.`,
+      );
+    }
+  }
+  return issues;
+}
+
+/**
+ * Check 2: every judge-accepted counterexample must reach implementation.
+ *
+ * ⚠ FAIL-CLOSED, and the shape of the code is what makes it so. An ABSENT dag
+ * yields no nodes, so nothing is threaded, so every accepted id is reported.
+ * Accepted adversarial evidence with no DAG to reach is the failure this gate
+ * exists to catch — not a case to skip for want of a payload.
+ */
+function validateCounterexampleThreading(
+  acceptedCounterexampleIds: ReadonlySet<string>,
+  dagPayload: unknown,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (acceptedCounterexampleIds.size === 0) return issues;
+
+  const threaded = new Set<string>();
+  for (const node of dagNodes(dagPayload)) {
+    if (!isRecord(node) || !Array.isArray(node.addresses_counterexamples)) continue;
+    for (const ceId of node.addresses_counterexamples as unknown[]) {
+      if (typeof ceId === "string") threaded.add(ceId);
+    }
+  }
+  for (const ceId of acceptedCounterexampleIds) {
+    if (!threaded.has(ceId)) {
+      pushValidationIssue(
+        issues,
+        "implementation_dag.evidence_threading",
+        `Judge-accepted counterexample "${ceId}" is not threaded into any implementation_dag node (addresses_counterexamples) — accepted adversarial evidence must reach implementation.`,
+      );
+    }
+  }
+  return issues;
+}
+
+/** Check 3: a node that claims to satisfy obligations must say what it does. */
+function validateSatisfyingNodeDescriptions(dagPayload: unknown): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const [i, node] of dagNodes(dagPayload).entries()) {
+    if (!isRecord(node)) continue;
+    const satisfies = Array.isArray(node.satisfies_obligations)
+      ? (node.satisfies_obligations as unknown[]).filter((o) => typeof o === "string")
+      : [];
+    if (satisfies.length === 0) continue;
+    const description = typeof node.description === "string" ? node.description.trim() : "";
+    if (description.length === 0) {
+      pushValidationIssue(
+        issues,
+        `implementation_dag.nodes[${i}].description`,
+        `Node "${
+          typeof node.id === "string" ? node.id : "?"
+        }" satisfies obligations but has an empty description — the evidence of what work satisfies the obligation must not be blank.`,
+      );
+    }
+  }
+  return issues;
+}
+
 export function validateEvidenceThreaded(
   assessmentReportPayload: unknown,
   judgeReportPayload: unknown,
   dagPayload: unknown,
   waivedCounterexampleIds?: ReadonlySet<string>,
 ): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-
-  // 1. violated assessment findings must carry evidence.
-  if (isRecord(assessmentReportPayload) && Array.isArray(assessmentReportPayload.findings)) {
-    for (const [i, finding] of (assessmentReportPayload.findings as unknown[]).entries()) {
-      if (!isRecord(finding)) continue;
-      if (finding.status !== "violated") continue;
-      const evidence = Array.isArray(finding.evidence)
-        ? (finding.evidence as unknown[]).filter((e) => typeof e === "string" && e.length > 0)
-        : [];
-      if (evidence.length === 0) {
-        pushValidationIssue(
-          issues,
-          `contract_assessment_report.findings[${i}].evidence`,
-          `Assessment finding for obligation "${
-            typeof finding.obligation_id === "string" ? finding.obligation_id : "?"
-          }" is "violated" but carries no evidence — a violation must thread concrete evidence forward.`,
-        );
-      }
-    }
-  }
-
-  // 2. accepted counterexamples must be threaded into the DAG.
-  const acceptedCounterexampleIds = collectUnwaivedAcceptedCounterexampleIds(
-    judgeReportPayload,
-    waivedCounterexampleIds,
-  );
-
-  if (acceptedCounterexampleIds.size > 0) {
-    const threaded = new Set<string>();
-    const nodes =
-      isRecord(dagPayload) && Array.isArray(dagPayload.nodes)
-        ? (dagPayload.nodes as unknown[])
-        : [];
-    for (const node of nodes) {
-      if (!isRecord(node) || !Array.isArray(node.addresses_counterexamples)) continue;
-      for (const ceId of node.addresses_counterexamples as unknown[]) {
-        if (typeof ceId === "string") threaded.add(ceId);
-      }
-    }
-    for (const ceId of acceptedCounterexampleIds) {
-      if (!threaded.has(ceId)) {
-        pushValidationIssue(
-          issues,
-          "implementation_dag.evidence_threading",
-          `Judge-accepted counterexample "${ceId}" is not threaded into any implementation_dag node (addresses_counterexamples) — accepted adversarial evidence must reach implementation.`,
-        );
-      }
-    }
-  }
-
-  // 3. obligation-satisfying nodes must not be empty placeholders.
-  if (isRecord(dagPayload) && Array.isArray(dagPayload.nodes)) {
-    for (const [i, node] of (dagPayload.nodes as unknown[]).entries()) {
-      if (!isRecord(node)) continue;
-      const satisfies = Array.isArray(node.satisfies_obligations)
-        ? (node.satisfies_obligations as unknown[]).filter((o) => typeof o === "string")
-        : [];
-      if (satisfies.length === 0) continue;
-      const description = typeof node.description === "string" ? node.description.trim() : "";
-      if (description.length === 0) {
-        pushValidationIssue(
-          issues,
-          `implementation_dag.nodes[${i}].description`,
-          `Node "${
-            typeof node.id === "string" ? node.id : "?"
-          }" satisfies obligations but has an empty description — the evidence of what work satisfies the obligation must not be blank.`,
-        );
-      }
-    }
-  }
-
-  return issues;
+  return [
+    ...validateViolatedFindingsEvidence(assessmentReportPayload),
+    ...validateCounterexampleThreading(
+      collectUnwaivedAcceptedCounterexampleIds(judgeReportPayload, waivedCounterexampleIds),
+      dagPayload,
+    ),
+    ...validateSatisfyingNodeDescriptions(dagPayload),
+  ];
 }
 
 /**
