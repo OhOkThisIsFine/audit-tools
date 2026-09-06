@@ -128,6 +128,17 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   this repo's agent loop by the owner 2026-08-07. [[vitest-shard-is-hash-based-and-file-atomic]]
 
 
+- **`preferredExecutor` is a MODE, and the step-command scaffold serves only one of the two (2026-09-05).**
+  `runStepCommand` (`src/audit/cli/stepScaffold.ts`) requires it, so the three single-action verbs
+  adopt and `cmdPlan` cannot. Not a missing field: a forced executor runs exactly ONE step and
+  bypasses the shared engine, while its absence runs the PRIORITY scan and drains the frontier
+  (`advanceAudit`'s own doc comment). Defaulting one for `cmdPlan` would convert the plan draw into a
+  single forced dispatch, and nothing would red — the CLI suites pin only that each module exports a
+  function of that name. **Property:** the scaffold states which MODE it serves, and a command whose
+  mode differs gets that mode expressed in the contract or stays bespoke, never a defaulted executor
+  id. Non-adopters: `cmdPlan`; `cmdIngestResults` and `cmdImportExternalAnalyzer` are deferred, not
+  examined for mode. Evidence: [`refactor-plan-verification-2026-09-05.md`](../reviews/refactor-plan-verification-2026-09-05.md).
+
 - **Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.**
   A DAG node that declares no files inherits its write scope from the module its obligations belong
   to, matched as `OBL-<moduleSlug>-…`. Nothing forces the two sides to agree, so a rename on either

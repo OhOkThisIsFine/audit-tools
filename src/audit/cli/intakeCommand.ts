@@ -1,24 +1,8 @@
-import { runAuditStep } from "./auditStep.js";
-import { getArtifactsDir, getRootDir, warnIfNotGitRepo } from "./args.js";
+import { runStepCommand } from "./stepScaffold.js";
 
 export async function cmdIntake(argv: string[]): Promise<void> {
-  const root = getRootDir(argv);
-  warnIfNotGitRepo(root);
-  const artifactsDir = getArtifactsDir(argv);
-  const result = await runAuditStep({
-    root,
-    artifactsDir,
+  await runStepCommand(argv, {
     preferredExecutor: "intake_executor",
+    warnIfNotGit: true,
   });
-  console.log(
-    JSON.stringify(
-      {
-        artifacts_dir: artifactsDir,
-        selected_executor: result.selected_executor,
-        progress_summary: result.progress_summary,
-      },
-      null,
-      2,
-    ),
-  );
 }
