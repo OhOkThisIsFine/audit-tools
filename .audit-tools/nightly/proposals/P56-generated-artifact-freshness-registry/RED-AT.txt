@@ -1,0 +1,113 @@
+RED-AT record for P56 — generated-artifact freshness registry
+=============================================================
+
+HEAD sha : 97f3033a
+Observed : 2026-09-06 (nightly maintenance, leg 3)
+
+The test is NOT runnable from the proposals directory. Vitest's own resolved
+config prints the reason verbatim — `.audit-tools/**` is in `exclude`, and
+`include` is `tests/{audit,remediate,shared}/**` only. A first attempt to run
+the candidate in place produced:
+
+  No test files found, exiting with code 1
+  include: tests/audit/**/*.test.mjs, tests/audit/**/*.test.ts,
+           tests/remediate/**/*.test.ts, tests/shared/**/*.test.mjs,
+           tests/shared/**/*.test.ts
+  exclude: … .audit-tools/** , .claude/** …
+
+The relative imports (`../helpers/spawn.mjs`, `../../scripts/guard-reach-data.mjs`)
+are written for the LANDING location and do not resolve from the proposals tree
+either. So it was copied to its landing location, run there, and the copy was
+removed immediately after — the proposal lands nothing.
+
+Command actually run
+--------------------
+
+  cp .audit-tools/nightly/proposals/P56-generated-artifact-freshness-registry/\
+generated-artifact-registry.test.ts \
+     tests/shared/p56-generated-artifact-registry.test.ts
+  npx vitest run tests/shared/p56-generated-artifact-registry.test.ts
+  rm -f tests/shared/p56-generated-artifact-registry.test.ts
+
+Exit code: 1   (`git status --porcelain` afterwards showed only the untracked
+proposal directory — the temporary copy is gone.)
+
+Verbatim failure (ANSI stripped, unabridged for the three failing cases)
+------------------------------------------------------------------------
+
+ ❯ tests/shared/p56-generated-artifact-registry.test.ts (4 tests | 3 failed) 56ms
+   × generated-artifact freshness registry > the guard-reach registry declares a GENERATED section 4ms
+     → expected [ 'GUARDS', 'REACH' ] to include 'GENERATED'
+   × generated-artifact freshness registry > every tracked generator is claimed by exactly one row 27ms
+     → generators claimed by no GENERATED row: scripts/audit/generate-schemas.mjs,
+       scripts/nightly/render-inbox.mjs,
+       scripts/remediate/generate-auditor-contract-fixture.mjs,
+       scripts/shared/generate-backlog-index.mjs,
+       scripts/shared/generate-ci-trigger-paths.mjs,
+       scripts/shared/generate-cli-surface.mjs,
+       scripts/shared/generate-constitutional-doc-paths.mjs,
+       scripts/shared/generate-executor-producers.mjs,
+       scripts/shared/generate-filelock-export-surface.mjs,
+       scripts/shared/generate-friction-categories.mjs,
+       scripts/shared/generate-handoff-roadmap.mjs,
+       scripts/shared/generate-ingestion-checks.mjs,
+       scripts/shared/generate-loop-core-patterns.mjs,
+       scripts/shared/generate-runtime-artifact-names.mjs,
+       scripts/shared/generate-spec-mirrors.mjs,
+       scripts/shared/generate-vitest-shard-baseline.mjs:
+       expected [ …(16) ] to deeply equal []
+   × generated-artifact freshness registry > every row names a freshness authority that actually exists 0ms
+     → an empty section would pass vacuously: expected 0 to be greater than 0
+   ✓ generated-artifact freshness registry > every declared artifact is a tracked file 24ms
+
+ AssertionError: expected [ 'GUARDS', 'REACH' ] to include 'GENERATED'
+  ❯ tests/shared/p56-generated-artifact-registry.test.ts:64:35
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 1 passed (4)
+
+The gate's own flake reporter classified all three:
+
+   parallel-flake baseline (win32-cpu16-w16, load=solo):
+     3 UNRECOGNIZED — these stay RED
+
+Why this is the RIGHT red
+-------------------------
+
+`scripts/guard-reach-data.mjs` exports exactly `GUARDS` and `REACH` at HEAD —
+the failure message prints that list, so the absence is measured, not asserted.
+The second case is the survey itself, produced by the test rather than by a hand
+count: 16 tracked generators, zero claimed.
+
+The fourth case PASSES at HEAD, and that is deliberate rather than an oversight:
+with no rows there are no declared artifacts, so it is vacuous. It is stated
+here so a reader does not mistake "3 of 4 red" for a partial mechanism.
+
+GREEN AFTER THE PATCH — the other half, also measured
+-----------------------------------------------------
+
+A red nobody can turn green is not a proposal. The candidate check script was
+run against the real tree at HEAD, reading the candidate registry:
+
+  node .audit-tools/nightly/proposals/P56-generated-artifact-freshness-registry/
+  check-generated-artifacts.candidate.mjs
+
+Exit code: 0
+
+  OK check:generated-artifacts: 16 generator(s), each with an existing freshness
+  authority
+
+So the registry as drafted is self-consistent against the tracked tree: every
+tracked generator is claimed exactly once, every named npm script exists, passes
+--check and sits inside verify:checks, and every named contract test is a
+tracked file under tests/. The script reads only; it writes nothing and runs no
+generator.
+
+Note on the run itself
+----------------------
+
+The first attempt at this run was refused by `.claude/hooks/shell-trap-guard.mjs`
+(`masked suite exit code`) because it piped vitest into `tail`. The refusal was
+correct and its remedy worked verbatim: the run above writes the full log to a
+file and reads it in a separate call. Recorded because a leg-3 record that
+hides a gate it tripped is the same dishonesty as an unobserved red.

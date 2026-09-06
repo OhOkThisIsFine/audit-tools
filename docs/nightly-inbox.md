@@ -22,31 +22,454 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-09-05 at `ad94e487d9dfd55e5eadf791a13d2d848ebd3dce`.*
+*Last run: 2026-09-06 at `a53bb7e1eb2af25cf9173c499b155ab0297d315c`.*
 
 
 ---
 
-## Nothing to answer
 
-No open propositions. The next run will refill this file if it finds any.
+# Documentation
+
+
+<!-- nightly:item key=b80cc7e6b0f62d7d -->
+
+## `l1-1` — Nightly lane: the routine tells itself to run `llm-relay dispatch -t` and use the first ready lane's printed command, but that command never prints one — which lane form should the doc name? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `docs/nightly-routine.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The nightly routine's own instructions tell it how to reach a second, independent AI lane for cross-checking. They say: run `llm-relay dispatch -t "<prompt>"`, look at the list of lanes it prints, and run the command shown for the first available one. Three separate checks tonight showed that command does not work that way. Your machine-wide instruction file (~/.claude/CLAUDE.md) explicitly retracts that claim — it says the ladder form 'never did' hand back a runnable command, and adds 'do not parse the ladder'. A live run confirmed it: it printed eleven lanes and a summary line naming one, not a command to run. Worse, one lane in that live list was a relay TARGET with no command at all, so the documented procedure has nothing to run whenever that lane comes up first. The routine's own leg-2 backlog sweep already stopped using this form months ago — it goes through the relay's MCP dispatch tool instead. So this paragraph is the last place still describing the retired method. The reason this is a question rather than a silent fix: choosing the replacement changes how the nightly routine actually reaches its second lane, and there are three reasonable replacements. That is a procedure decision, not a typo. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+docs/nightly-routine.md says: `llm-relay dispatch -t "<prompt>"` renders the ladder with the prompt substituted — run the first ready lane's printed command. The machine-wide CLAUDE.md says bare `-t` never hands back one command and instructs 'do not parse the ladder'. Which lane mechanism should the nightly's second independent lane document instead? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### Your answer
+
+- [ ] **1. MCP dispatch tool** — Rewrite the bullet to say the second independent lane goes through the llm-relay MCP `dispatch` tool (one call returns an answer, with `dispatch_status`/`dispatch_result` for a lane that outlives waitMs). This matches the machine-wide CLAUDE.md's stated preference ('PREFER THE MCP TOOL... use it in place of --next-command whenever the tools are present') and matches what leg 2's own sweep already does. Cost: the routine then depends on the MCP server being registered on whatever host runs it. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. --next-command** — Rewrite the bullet to `llm-relay dispatch --next-command -t "<prompt>"` and document its two-outcome contract verbatim: exit 0 means one command line on stdout, run it verbatim; exit 2 means stderr names a relay target spec, address that spec as an ordinary subagent. Shell-only, so it works on a host with no MCP registration, and it removes the ladder-parsing entirely. Cost: two code paths for the routine to handle instead of one call. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **3. Point at the repo’s own lane module** — Stop restating any llm-relay invocation in this doc and point the bullet at the repo's own `scripts/shared/mcp-dispatch-lane.mjs`, the lane leg 2 already uses. This is the strongest fit for the bullet's own stated principle — 'the relay owns the routing mechanics... so this doc never restates them and cannot drift from them' — since the doc drifted precisely because it restated a mechanic. Cost: the doc becomes less self-contained for a reader outside the repo. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **4. Leave as is** — Keep the current text. Defensible only if you consider parsing the ladder acceptable in this routine despite the machine-wide instruction, since the ladder does mark the ready lane and print its command on this host. Cost: the documented procedure silently fails whenever the first ready lane is a relay target rung with no printed command, and it contradicts a live machine-wide instruction.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- Reviewer, adversary and judge all confirmed the fact independently. ~/.claude/CLAUDE.md carries the retraction verbatim: 'This line used to claim bare `-t` "hands you the first ready lane's command" — it never did; it prints the whole ladder and ends with a `use:` line naming a lane', plus 'do not parse the ladder'. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- `llm-relay dispatch --help` lists `--next-command -t <task>  Print only the runnable command for the next lane` as a DISTINCT flag, which is only meaningful if bare `-t` does not print one. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- The judge RAN `llm-relay dispatch -t "test prompt"` live: it printed all 11 ladder rungs and ended with `use: free-pool — first ready lane (2 ahead of it unavailable)` — a ladder, not a command. Rung 9 printed `target: anthropic` with no `run:` line at all, so 'run the first ready lane's printed command' is unexecutable whenever the ready lane is a relay target. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- The repo already migrated: scripts/shared/triage-backlog.mjs imports openDispatchLane from scripts/shared/mcp-dispatch-lane.mjs, and leg 2 of this same doc already describes that MCP path.
+- Judge decision: ESCALATE, not auto-apply. The manifest's meta-tooling row admits this doc for 'do the documented commands/paths still resolve', and `llm-relay dispatch -t` does still resolve; what is wrong is a described BEHAVIOUR, and the replacement swaps the routine's own operating mechanism among three defensible forms. The rubric bars the routine from rewriting a doc's substance on its own, and the sole code anchor is a machine-wide instruction file, which is escalate-only. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+</details>
+
+---
+
+
+<!-- nightly:item key=812b48629fe2be01 -->
+
+## `l1-2` — Instruction-file edit: four CLAUDE.md claims went stale when the commit gate moved to git’s boundary (P53) — apply the four corrections? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `CLAUDE.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+CLAUDE.md is the repository's instruction file, and the routine is never allowed to edit it on its own — a wrong edit there deletes a guardrail that governs every agent. So these are proposed to you rather than applied. Last night's P53 decision moved the commit-gating checks from the tool boundary (a hook that watched Claude Code's own tool calls) to git's own boundary (real `.githooks/` files that git runs). That landed in commit 765af9a7, and it left four sentences in CLAUDE.md describing the world before the move. (1) It lists the kinds of guard the registry holds as 'gate / hook / contract-test', but the registry gained a fourth kind, `git-hook`, in that very commit. (2) It says a new hook is added by registering it in `.claude/settings.json` — true for ordinary hooks, but a gate at git's boundary is wired by a tracked `.githooks/` file instead, which is exactly how the new commit gate works. (3) It names `pre-commit-gate.mjs` parsing shell text as the live example of a gate guessing at a boundary somebody else owns — that guessing was removed by P53, so the example is now the resolved case, not an open one. (4) It attributes the function `buildPreCommitLegs` to `scripts/guard-reach-data.mjs`; the DATA lives there, but the function itself lives in `scripts/shared/derived-file-preflight.mjs`. None of these are policy changes — each is a name or a list that no longer matches the tree. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+CLAUDE.md carries four factual claims that P53 (commit 765af9a7) made stale. Apply all four corrections, or handle them differently?
+
+### Your answer
+
+- [ ] **1. Apply all four** — Apply the four corrections to CLAUDE.md: (1) 'authoritative registry of every guard (gate / hook / contract-test)' becomes '(gate / hook / git-hook / contract-test)'; (2) 'Adding a hook: register it in `.claude/settings.json` AND add the' becomes 'Adding a hook: register it in `.claude/settings.json` (or, for a gate at git's own boundary, in a tracked `.githooks/<name>` that execs it) AND add the'; (3) the PH-05 example sentence gains ' — since resolved by P53, which moved the commit legs to `.githooks/` and left this hook only what git cannot see'; (4) 'via `buildPreCommitLegs`' becomes 'via `buildPreCommitLegs` in `scripts/shared/derived-file-preflight.mjs`'. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. Apply the two enumeration fixes only** — Apply corrections (1) the missing `git-hook` guard kind and (2) the adding-a-hook instruction, because those two actively mislead an agent registering a new guard. Leave (3) the PH-05 example and (4) the `buildPreCommitLegs` attribution alone — the example still teaches the principle correctly even as a past instance, and the attribution names the right registry. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **3. Delete rather than correct** — Do not correct the enumerations — delete them. The guard-kind list and the adding-a-hook recipe are hand-copied restatements of what `scripts/guard-reach-data.mjs` already declares as data, and this is the second time a hand copy in CLAUDE.md has gone stale under a registry change. Replace both with a pointer to the registry, and apply corrections (3) and (4) as written. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **4. Leave all four** — Change nothing. Defensible if you read these as close enough not to mislead, or if you would rather batch instruction-file edits than take them one night at a time. Cost: an agent registering a git-boundary gate follows the settings.json recipe and produces a guard git never runs.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- scripts/guard-reach-data.mjs GuardRow typedef now declares kind as 'gate'|'hook'|'git-hook'|'contract-test', and a live row exists: { id: 'commit-gate', kind: 'git-hook', impl: '.claude/hooks/commit-gate.mjs', hooks: ['.githooks/pre-commit','.githooks/pre-merge-commit','.githooks/pre-applypatch'] }.
+- .claude/settings.json does NOT reference .claude/hooks/commit-gate.mjs; the three tracked .githooks/ files each exec it. The .gitignore half of the instruction still holds.
+- The current .claude/hooks/pre-commit-gate.mjs header states: 'This hook used to parse the shell text to GUESS the target repository' — the guessing PH-05 names is gone.
+- buildPreCommitLegs is defined and exported at scripts/shared/derived-file-preflight.mjs, imported by .claude/hooks/commit-gate.mjs and two tests; scripts/guard-reach-data.mjs only mentions it in a comment pointing at that module.
+- Escalated rather than applied because CLAUDE.md is an instruction file: the manifest row is escalate-only, and the rubric forbids auto-editing it under any disposition.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=6aebffe0c4e32e11 -->
+
+## `l1-3` — Loader prompt asks the host for a reflection the parser silently DROPS — add the missing required field, or change the parser? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `skills/audit-code/audit-code.prompt.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+When audit-code starts, it asks the host agent to send back a short 'capability preflight' reflection — how clear the instructions were, what tools got in the way, what it would suggest. The prompt that asks for this lists three things to include: `tool_friction`, `ambiguities`, and `suggestions`. But the code that reads those reflections back requires three DIFFERENT fields before it will accept one: `task_id`, `severity`, and `instruction_clarity`. Two of the three are named elsewhere in the prompt; `instruction_clarity` is named nowhere. And the parser does not complain when a reflection is missing a required field — it skips it silently. So a host that follows this prompt literally can produce a well-formed reflection that is thrown away without a word, and the synthesis step that would have consumed it never sees it. This matters because the prompt file is the hand-authored source every IDE's copy is rendered from, so the gap reaches every host. It is a question rather than an auto-fix because there are two honest ways to close it: teach the prompt to ask for the field, or stop the parser from discarding input in silence — and the second is the repo's own 'enforce it in tooling' instinct. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+skills/audit-code/audit-code.prompt.md asks for a reflection `with concrete `tool_friction`, `ambiguities`, and `suggestions`` but never names `instruction_clarity`, which the schema requires and the parser silently drops a reflection for missing. Fix the prompt, the parser, or both? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### Your answer
+
+- [ ] **1. Fix the prompt** — Name the missing field in the prompt: change 'with concrete `tool_friction`, `ambiguities`, and `suggestions`' to 'with `instruction_clarity` (`clear`/`mostly_clear`/`ambiguous`/`unclear`) stated and concrete `tool_friction`, `ambiguities`, and `suggestions`'. Smallest change; the rendered host assets follow automatically. Cost: it still relies on the host reading the prompt carefully, and a future required field can drift the same way. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. Make the drop loud** — Leave the prompt and fix the mechanism: make parseReflectionsNdjson RECORD every reflection it rejects and why, instead of skipping silently, so a dropped reflection surfaces rather than vanishing. This is the repo's own 'auditor-agnostic robustness' rule — the workflow must not depend on the host remembering a field name. Cost: more work than a prompt edit, and it does not by itself make the host emit the field.
+- [ ] **3. Both** — Name the field in the prompt AND make the parser report what it drops. The prompt edit fixes today’s gap; the parser change makes the next one visible instead of silent. Cost: the largest change of the three, touching a loader body and shared parsing code in one pass.
+- [ ] **4. Leave as is** — Change nothing. Defensible if capability-preflight reflections are low-value enough that losing some is acceptable. Cost: the loss stays invisible, so you cannot tell how often it happens.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- src/shared/agentReflections.ts: AgentReflectionSchema is .strict() and REQUIRES task_id, instruction_clarity (enum clear|mostly_clear|ambiguous|unclear) and severity; ambiguities, tool_friction and suggestions are all .optional().
+- parseReflectionsNdjson skips silently any object missing task_id / instruction_clarity / severity — there is no diagnostic.
+- The prompt names task_id and severity but never instruction_clarity: grep for 'instruction_clarity' in skills/audit-code/audit-code.prompt.md returns zero matches.
+- src/audit/reporting/synthesis.ts is the only consumer of task_id === 'audit-capability-preflight', so a dropped reflection never reaches synthesis.
+- This file is a hand-authored canonical loader body; every .agent/** and .github/** copy is rendered from it, so the gap reaches every host.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=26328a5e858c3f69 -->
+
+## `l1-4` — Two invariant namespaces used in src/ (INV-COVERAGE, INV-SSF) have no glossary row, and no gate checks completeness — add rows, or narrow the claim? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `docs/glossary-ids.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+docs/glossary-ids.md opens by saying it is the lookup table for opaque identifiers that still occur in src/**/*.ts, and it notes one deliberate exception: local numeric invariants written as INV-<number>. A sweep of the source found two more invariant families that are neither numeric nor listed: INV-COVERAGE (used in four files, including the '26 INV-COVERAGE joins') and INV-SSF (used in five places across four unrelated subsystems). Every one of the 33 namespaces the table DOES list was checked and found present in its declared owner files, so the table is accurate about what it covers — it just does not cover everything it claims to. Nothing catches this: no script reads the glossary, and the guard registry names no glossary row, so the gap is silent and would stay silent. Adding the two rows is not mechanical, which is why this is a question: each row must state what the invariant actually guarantees and who owns it, and INV-SSF in particular is cited across lock staleness, timer arming, single-enumeration and argv-splitting, so deciding whether it is one invariant or a file-local family is a judgment about the code, not about the doc.
+
+### The question
+
+docs/glossary-ids.md says it is the lookup for opaque identifiers still occurring in src/**/*.ts, but INV-COVERAGE and INV-SSF appear in src/ with no row and no gate to notice. Add the rows, narrow the claim, or gate it?
+
+### Your answer
+
+- [ ] **1. Add the two rows** — Write a glossary row for INV-COVERAGE and one for INV-SSF, each stating the contract the invariant guarantees and naming its owning module, deciding as part of that work whether INV-SSF is one invariant or a file-local family. Restores the doc to the claim it already makes. Cost: the INV-SSF judgment needs a read of four unrelated subsystems.
+- [ ] **2. Add the rows AND gate completeness** — Add both rows, then make the claim mechanical: a check that every non-numeric INV-* namespace appearing in src/**/*.ts has a glossary row, registered in scripts/guard-reach-data.mjs and wired into verify:checks. This is the repo's 'whatever can be enforced in tooling must be' rule applied to a doc that currently states an unenforced completeness claim. Cost: one more gate to maintain, and it will fire on the next invariant coined mid-wave.
+- [ ] **3. Narrow the claim** — Leave the table and edit the opening sentence so it claims only what it delivers — a lookup for the listed namespaces, not for every opaque identifier in src/. Cheapest, and it stops the doc from over-promising. Cost: the two live namespaces stay undocumented, so a reader meeting INV-SSF in the source still has nowhere to look.
+- [ ] **4. Leave as is** — Change nothing. Defensible if these two namespaces are self-explanatory at their use sites. Cost: the doc keeps a completeness claim that is false, and nothing will catch the third one.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- grep -rhoE '\bINV-[A-Z0-9][A-Z0-9-]*' src --include=*.ts yields two non-numeric namespaces with no glossary row: INV-COVERAGE (src/remediate/phases/close.ts, src/remediate/state/types.ts x2, src/shared/types/remediationOutcome.ts) and INV-SSF (src/audit/extractors/disposition.ts, src/remediate/phases/close.ts, src/remediate/phases/grounding.ts x2, src/remediate/phases/triage.ts).
+- Every one of the 33 namespaces the table DOES list was verified present in each of its declared owner files — zero misses. The table is accurate about its coverage; only its completeness claim overreaches.
+- No gate covers glossary completeness: scripts/guard-reach-data.mjs names no glossary row, and no script under scripts/ reads docs/glossary-ids.md.
+- Escalated rather than applied because writing a row requires deciding each invariant’s contract statement and live owner — a judgment, not a factual correction.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=462665972a678f7d -->
+
+## `l1-5` — HANDOFF narrates three already-settled decision batches — trim them as changelog, or is the narration load-bearing? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `docs/HANDOFF.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+docs/HANDOFF.md is the one doc in this repo allowed to describe current state rather than timeless concepts, and the documentation philosophy defines its job narrowly: current published state plus the immediate next step, explicitly NOT 'a changelog — what already shipped, narrated'. Three bullets in it have drifted into exactly that. One says the four closeout decisions of 2026-09-04 are answered and recounts what each answer was. One says the nine live-run design assumptions are decided, with the count of confirmed and reversed. One, sitting under the *Immediate next* heading, describes P53's acceptance evidence — something that already happened, while the same document's live-state section already states P53's outcome. None of these is factually wrong. The question is whether they are still doing a job: the decisions are all recorded in the tracked ledger, and the design-gate record has its own file. If they are history, they belong to `git log` and the ledger, and the handoff gets shorter and easier to trust. That is a condensation judgment about your own working notes, so the routine will not make it for you. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+docs/HANDOFF.md's live state carries three narrations of settled decision batches (the 2026-09-04 closeout answers, the nine live-run design assumptions, and P53's acceptance evidence under *Immediate next*). The philosophy says HANDOFF holds current state plus immediate next only, never a narrated changelog. Trim them?
+
+### Your answer
+
+- [ ] **1. Trim all three** — Delete the three narration bullets. The decisions live in .claude/nightly-decisions.json, the design-gate outcomes in docs/reviews/live-run-defect-set-design-gate-2026-09-03.md, and P53’s outcome is already stated once in the live-state section. HANDOFF returns to current state plus immediate next.
+- [ ] **2. Move P53 only** — Delete only the P53 acceptance paragraph from *Immediate next* — it is the clearest defect, because it describes completed work under a heading reserved for what comes next, and duplicates a statement made earlier in the same file. Keep the two decision-batch bullets as orientation for the next session.
+- [ ] **3. Keep them, with pointers** — Keep all three but reduce each to one line pointing at its authoritative home (the ledger, the design-gate record, the commit). Preserves the orientation a returning session gets from knowing what was recently settled, without re-narrating it.
+- [ ] **4. Leave as is** — Change nothing. Defensible if you read HANDOFF as your working memory between sessions rather than a published doc, and these bullets are what you actually want to see on return. Cost: the section grows every lap, which is the pressure that produced this finding.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- docs/documentation-philosophy.md's one-home table declares HANDOFF holds 'current published state + the immediate next step only' and explicitly NOT 'A changelog (what already shipped, narrated)'.
+- All three bullets narrate completed, already-recorded work: the closeout answers and the nine live-run assumptions are in .claude/nightly-decisions.json and docs/reviews/live-run-defect-set-design-gate-2026-09-03.md (file confirmed present).
+- The P53 paragraph sits under *Immediate next* while describing something that already happened; the same doc already states the P53 outcome as live state earlier in the file.
+- The two GENERATED blocks (live status, roadmap) were checked and are current and correct — this item concerns only hand-written prose. Escalated because retiring text from a hand-written HANDOFF section is a condensation judgment.
+
+</details>
+
+---
+
+
+# Backlog disambiguation
+
+
+<!-- nightly:item key=5249ea2a9d5ad6d6 -->
+
+## `bl-1` — Backlog: the "paraphrase inverted the mechanism" entry describes an incident whose offending text is GONE — keep it, or reduce it to its durable rule? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+One open-bugs entry records a real and useful lesson from 2026-07-24: a backlog entry had paraphrased an incident in a way that reversed its mechanism — it said some tasks were 'dispatched-but-in-flight' when the primary record said they were undispatched, never granted — and an agent that read the backlog first built the wrong fix and had to replace it after tests refuted it. The entry ends with a durable rule: an entry that reinterprets an incident must quote or link the primary record's own words, not restate them. Tonight's sweep flagged it as needing your call, because the entry points at 'the partial-wave entry' without naming it. A search settles that part: the offending text appears nowhere in the backlog any more except inside this entry, quoting it. So the incident is closed and only the rule is still live. The question is where that rule should live. A backlog entry is a work item, and there is no work left here; a standing rule about how to write entries is what docs/backlog/durable-traps.md is for. Moving it would shorten open-bugs and put the rule where a writer would actually look for it.
+
+### The question
+
+docs/backlog/open-bugs.md carries the entry beginning 'Backlog prose paraphrased an incident in a way that INVERTED its mechanism'. The offending paraphrase no longer exists anywhere in the tree, so no work remains — only the durable rule at its end. Where should that rule live?
+
+### Your answer
+
+- [ ] **1. Move the rule to durable-traps** — Move the entry's closing rule — an entry that reinterprets an incident must quote or link the primary record's own words for the mechanism, not restate them — into docs/backlog/durable-traps.md as a standing line, then delete the open-bugs entry. This is the repo's stated pattern for a shipped entry that carries a durable convention: move the rule to its home in the same edit, never keep the entry just to host it.
+- [ ] **2. Trim in place** — Keep the entry in open-bugs but strip the incident narrative down to the rule plus a pointer at the primary record. Shorter, and it stays where a backlog reader meets it. Cost: open-bugs is for fixable defects, and this one has nothing left to fix.
+- [ ] **3. Keep it whole** — Leave the entry exactly as it is. Defensible if the story is what makes the rule stick — the concrete detail (a wrong claim-liveness discriminator, refuted by existing tests) is what a bare rule loses. Cost: an entry with no open work sits in the open-bugs file and is re-triaged every sweep.
+- [ ] **4. Delete outright** — Delete the entry and do not preserve the rule anywhere. Defensible if you consider the rule already covered by the existing verify-against-HEAD guidance. Cost: this entry says something sharper than that one — the decay was not staleness but a paraphrase that changed the mechanism.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- grep confirms the offending text 'M dispatched-but-in-flight' appears in the tree exactly once, inside this entry quoting it; no live backlog entry still makes that claim.
+- The entry's own closing sentence states the durable rule: 'an entry that reinterprets an incident must quote or link the primary record's own words for the mechanism, not restate them.'
+- The primary record it cites, docs/reviews/re-dogfood-2026-07-21.md, exists and is linked from the entry.
+- Leg 2 may only delete an entry whose fix verifiably shipped; this one has no fix to ship, so the destination of its rule is a genuine disambiguation and is the owner’s call.
+- The leg-2 mechanical sweep classified this entry owner_decision_needed, noting it names no exact target entry to fix.
+
+</details>
+
+---
+
+
+# Recurring-problem solutions
+
+
+<!-- nightly:item key=02ddbce6105770fa -->
+
+## `sol-1` — P54: guards print hand-written remedies that the guard itself would refuse — make the refusal text declared data and round-trip it, and in which scope? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `.claude/hooks/shell-trap-guard.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+When a guard blocks a command, it prints a remedy: 'do it this way instead'. Those remedy strings are typed by hand, one per rule, and nothing ever checks that the suggested command would actually be allowed. Five times across five days that failed in a way that cost real time. The sharpest case is open at HEAD right now: a guard refused a command and told the agent to re-run it with a specific environment-variable prefix; the agent did exactly that, and the guard refused again — because the code that detects the bypass prefix and the code that splits the command into statements disagree about whether a plain newline separates statements. Another case had a guard print a remedy that was itself the mistake the rule exists to prevent. Another printed one rule's remedy for a different rule's refusal. The fix is small because the scaffolding already exists: last week's P51 put a table of every guard rule and the exact command shapes it recognizes into `scripts/guard-reach-data.mjs`, with a test that drives each shape through the real recognizer. Add the remedy to that same table, build the refusal message from it instead of from hand-typed strings, and add one test leg that feeds each remedy back through the same recognizer and asserts it is ALLOWED. Then a remedy the guard would refuse cannot be committed. The question is scope: this repo's guards only, or also the machine-wide guard that produced the most recent case. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+Make a guard’s refusal text declared data per rule — the rule that fires names itself, and its printed remedy is driven back through the recognizer and must be ADMITTED. Which scope?
+
+### Your answer
+
+- [ ] **1. A — audit-tools only** — Add a `remedy` field to the existing forms rows in scripts/guard-reach-data.mjs and a round-trip leg to the existing tests/shared/guard-form-reach.test.ts, and build the 15 hand-written denials.push strings in .claude/hooks/shell-trap-guard.mjs from the registry. Cheapest by far — the registry, the driver and the fixtures all exist. Does NOT cover ~/.claude/hooks/shell-conventions-guard.mjs, which produced the most recent record. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. B — audit-tools plus a machine-wide mirror** — Do A, then build the minimum equivalent for ~/.claude/hooks/shell-conventions-guard.mjs: a form/remedy table beside its block sites plus a standalone test that re-drives each remedy. Covers every counted record. Cost: ~/.claude has no version history and no test harness, so the machine-wide half is new infrastructure, files to C:\Code\docs\backlog.md rather than this repo, and cannot be red-green validated against a prior tree.
+- [ ] **3. C — fix only the live instance** — Align bypassEnabled’s separator set with splitShellStatements’ in .claude/hooks/shell-split.mjs and pin it with one test. Closes in a few lines the one defect verified live at HEAD, and nothing else; the class recurs on the next rule whose remedy is hand-typed. This is the do-the-named-instance option the repo’s own “fix the defect CLASS” rule argues against.
+- [ ] **4. Decline** — Do nothing. Defensible if you read a wrong remedy as cheap — the agent reads the code and works around it. Cost: the live bypass defect stays, and the next hand-typed remedy is unverified in the same way.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (7) — what was verified against code, and how</summary>
+
+- Recurrence: 5 records across 5 distinct dates — 2026-07-26, 2026-08-13, 2026-08-27, 2026-09-04, 2026-09-05.
+- The live defect was reproduced this run by driving the real module: bypassEnabled and splitShellStatements return opposite verdicts on identical statement lists, decided only by the separator. Only the BARE-newline separator fails; a newline after a semicolon is swallowed correctly.
+- The 2026-09-05 machine-wide record was re-verified rather than accepted: a prior lane called it unverifiable because the rule is gated behind isGitCommit, but isGitCommit tests the ENTIRE command text including the heredoc BODY, so a heredoc whose prose contains the words "git commit" satisfies the gate. Reproduced first-hand during this run.
+- The mechanism is one field on an existing structure: P51 (2026-09-04) already put 18 rows and 49 forms with literal samples in scripts/guard-reach-data.mjs, driven through the real recognizer by tests/shared/guard-form-reach.test.ts.
+- Honest non-catches are recorded in the proposal: P27’s masked-exit remedy is ADMITTED by the guard and so passes the round-trip leg, and the here-string reach case is a P51 forms problem, not a remedy problem.
+- False-positive surface: a remedy that is not a runnable command must be declared kind: prose and asserted for presence only; marking a runnable remedy as prose is the one way to defeat the check, so kind should default to command.
+- Full record with the patch decision: .audit-tools/nightly/proposals/P54-guard-remedy-is-declared-data/P54-guard-remedy-is-declared-data.md. No patch is attached deliberately — the three forms share no code, so a patch written before the form decision is discarded.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=ef4555cf23e838a5 -->
+
+## `sol-2` — P55: file-scoped gate legs fire only at commit, often in another session — run them advisory at WRITE time, or not at all? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `scripts/shared/derived-file-preflight.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+Several of this repo's checks judge one file at a time: do the backticked paths in this doc resolve, do its `path:line` citations point at real lines. Today they run only when you commit. That means the refusal often lands in a different session from the one that wrote the text — and fixing someone else's half-remembered prose against a gate is slow, while fixing it at the keystroke is nearly free. It happened concretely: nine backlog entries written in one session failed a citation check at landing, were fixed, then failed a line-number check on the next attempt, all in a later session. The proposed fix reuses machinery that already exists — the pre-commit leg set is already derived from the guard registry — by marking which legs can judge a single file quickly, and running just those on each edit through the hook that already watches edits. The critical constraint, and the reason this is a question: a blocking write-time hook has already been measured hurting on this machine. The typecheck hook that blocks on edit refused a legitimate two-step change (add an import, then use it) seven times in one day, and the workarounds it forced were worse than what it prevented. So the honest default is advisory — print, never block — which reduces the commit-time loop rather than closing it. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+Run the guard registry’s file-scoped legs at write time (PostToolUse Edit|Write) for the file just edited, so the author sees the finding while the text is still theirs. Advisory, blocking, or not at all?
+
+### Your answer
+
+- [ ] **1. A — advisory only** — The hook prints findings and always exits 0. Cannot block a legitimate mid-edit intermediate state, so it cannot reproduce the measured typecheck-hook friction; the commit gate stays the only authority. Cost: an author can ignore it, so the serialized commit loop is reduced rather than closed.
+- [ ] **2. B — blocking at write time** — The hook refuses the edit. Closes the loop outright, and for the two named checks (path citations, line numbers) there is no legitimate incomplete intermediate — a half-written citation is not a build step. Cost: it re-creates the exact friction class measured seven times in one day, and any future path-scoped leg inherits blocking behaviour by default.
+- [ ] **3. C — advisory, escalating to blocking** — Advisory on first notice; refuses only when the same file is edited again with the same finding still present, which distinguishes mid-change from ignoring it. Cost: strictly more machinery — the hook needs per-file state under .claude/hooks/.state/, which a `git clean -xdf` silently disarms. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **4. Decline** — Leave every check at the commit boundary. Defensible: the commit gate is the authority, and a second place where a check can fire is a second place it can be wrong. Cost: the write-then-discover-at-commit loop stays, and it is worst exactly when the writing session and the committing session are different.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- Recurrence: 4 records across 2026-08-09, 2026-08-20, 2026-08-30, 2026-09-03.
+- The mechanism reuses what exists: scripts/shared/derived-file-preflight.mjs already derives the pre-commit leg set from scripts/guard-reach-data.mjs (P34), and .claude/hooks/ already has the sole PostToolUse Edit|Write hook. The addition is a writeTime classification plus a buildWriteTimeLegs(path) sibling.
+- The false-positive surface is already MEASURED on this machine, not hypothesised: ~/.claude/hooks/posttooluse-typecheck.mjs blocked a two-step edit at its midpoint (import added in one edit, first used in the next) three times in one lap and four more the same day, 2026-09-05 — seven blocks in one day. That is the direct argument for advisory-only.
+- One counted record is deliberately out of scope and is the test of an honest classification: the doc-links case is a staged-tree property by construction and cannot be judged from a single file.
+- One counted record is flagged as ADJACENT rather than identical — its stated property is about the CONTENT of a refusal, not its timing — so the cluster is not inflated.
+- Full record: .audit-tools/nightly/proposals/P55-write-time-legs-from-the-guard-registry/P55-write-time-legs-from-the-guard-registry.md. No patch attached until the form is chosen.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=991c31e5d1f673d5 -->
+
+## `sol-3` — P56: five generated artifacts have gone stale unnoticed — reconcile every generator against a declared freshness authority (patch and red-green test attached)? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `scripts/guard-reach-data.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+This repo generates a lot of tracked files: spec tables, CI trigger lists, the backlog index, the nightly inbox. Each generator is supposed to have something that notices when its output goes stale — usually a `--check` mode wired into the build. A survey tonight found sixteen generators and no list of which ones actually have that. Eleven are properly wired; three are covered by a test instead, which you can only discover by grepping; and two have no freshness check at all. One of those two is the nightly inbox, and its staleness has already caused real damage: on 2026-08-27 the inbox and its data file showed six propositions as open while the ledger said zero, a later session read the stale copy and put four settled questions back to you, and one answer you could have given would have reverted a completed decision. The fix copies a shape this repo already trusts: the guard registry declares every guard and a check reconciles it against the tree, both directions. Do the same for generated artifacts — one row per artifact naming its generator and its freshness authority (a check script, a contract test, or an explicit on-demand exemption with a stated reason) — and fail the build when a generator has no authority, or a declared check runs nowhere. Unlike the other proposals tonight, the form here is settled, so a working patch and a red-green test are attached and the test's failure at HEAD was observed, not predicted. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+Add a generated-artifact section to scripts/guard-reach-data.mjs and a check:generated-artifacts leg to verify:checks, reconciling every tracked generator against a declared freshness authority. Adopt the attached patch?
+
+### Your answer
+
+- [ ] **1. Adopt as written** — Adopt the attached patch: a `generated` section in scripts/guard-reach-data.mjs with one row per tracked generator naming its freshness authority (check | contractTest | onDemand with a stated reason), plus check:generated-artifacts in verify:checks and the derived pre-commit legs. Includes giving scripts/nightly/render-inbox.mjs the --check it currently lacks — it is the artifact whose staleness caused the one confirmed damage. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. Adopt, but leave the inbox on-demand** — Adopt the registry and the reconciliation, but record docs/nightly-inbox.md as an onDemand row rather than adding a --check to render-inbox.mjs. Smaller change. Cost: it exempts precisely the artifact whose staleness already put four settled questions back to you.
+- [ ] **3. Registry only, no gate** — Add the declared rows so the coverage picture stops being tribal knowledge, but do not wire a check that can fail the build. Documents the two on-demand exemptions and the three test-covered generators. Cost: a declared list nothing enforces is the exact shape this repo calls "a script in no gate is not a gate".
+- [ ] **4. Decline** — Do nothing. Defensible if you read eleven-of-sixteen wired as good enough and would rather not add a sixteenth check to verify:checks. Cost: the two unchecked generators stay unchecked, and the next one added inherits no requirement to declare an authority.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (7) — what was verified against code, and how</summary>
+
+- Recurrence: 5 records across 2026-07-25, 2026-08-26, 2026-08-27, 2026-08-30 — including one with CONFIRMED same-day damage (four settled propositions re-put to the owner; one answer would have reverted a completed decision).
+- Survey re-verified at HEAD, correcting the first pass: 16 tracked generators, not 14. Eleven have --check wired to a check:* script inside verify:checks; three are covered by contract tests only (generate-filelock-export-surface, generate-schemas, generate-auditor-contract-fixture); two have no freshness authority at all (generate-vitest-shard-baseline, render-inbox).
+- A prior lane reported generate-filelock-export-surface.mjs as having an unwired --check. That was WRONG and the record says so: it has NO --check arm, deliberately — its header states an unwired one existed and was deleted, enforcement is the drift test alone. The difference matters, because "an unwired --check exists" would argue for wiring something the tree deliberately refused.
+- RED-AT observed, not predicted: the candidate test was copied to tests/shared/, run with npx vitest, and failed at HEAD with three real assertions — the registry declares no GENERATED section; 16 generators are claimed by no row; an empty section would pass vacuously. The temp copy was removed; the candidate gate then ran GREEN against the real tree.
+- The two deliberate on-demand exemptions become declared rows with stated reasons rather than tribal knowledge: the flake baseline (writing it every run records in-progress regressions as known flakes) and the vitest shard baseline.
+- scripts/shared/generatedArtifacts.mjs already exists as a shared IMPLEMENTATION substrate imported by 10 generators — the record states this explicitly so the proposal is not read as reinventing it. It is not a registry and is not reconciled against the tree.
+- Patch, candidate registry, candidate check script, the test and RED-AT.txt: .audit-tools/nightly/proposals/P56-generated-artifact-freshness-registry/.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=5d8dadf4cbdd8e9a -->
+
+## `sol-4` — P57: a test that fails only under full-suite load reports as a bare red — classify it at the gate, or decline as under-evidenced? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `scripts/shared/run-vitest-gate.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+Twice, a test file failed during a full suite run and passed immediately when run on its own, on the same unchanged tree. That pattern means the failure came from running under load, not from a defect in the code — but the gate cannot say so, so it prints a plain red and a human has to remember the diagnosis protocol and run it by hand. The proposal is modest: declare which files are known to behave this way, and when one of them reds, have the gate re-run that file alone and print a named verdict — a real regression, or 'passed alone, failed in parallel', or red both ways. It never turns a red into a green; it only names what it saw. Two honest caveats belong with this. First, the evidence is thin: both observations live inside a single backlog entry, the second added as an addendum to the first, so this sits exactly at the recurrence bar and no higher — declining it is a legitimate answer. Second, one solo re-run is weaker evidence than the protocol the entry itself prescribes, which asks for two greens plus a mechanism argument, so a printed 'load-flake' verdict would slightly overstate its own confidence.
+
+### The question
+
+When the vitest gate reds on a file declared load-sensitive, re-run that file alone and report a three-way verdict instead of a bare red. Which form, if any?
+
+### Your answer
+
+- [ ] **1. A — declared list** — An explicit loadSensitive array with a stated reason per row, reconciled against the tracked tree so a renamed file reds. Precise and self-describing. Cost: maintained by hand when files split — and the names have moved before.
+- [ ] **2. B — derived from the timing ledger** — Treat any file in the top N of the profiled wall-clock history as load-sensitive. Self-maintaining, no list. Cost: it silently widens the auto-rerun set as the suite grows, gives no place to record WHY a file is on it, and would not have contained three of the five files — the 2026-08-09 symptom was a call-count limit, not a timeout.
+- [ ] **3. C — decline as under-evidenced** — Do nothing mechanical. The recurrence is exactly two observations inside one backlog entry, which is the bar and no more, and the prose protocol did work both times. Cost: the next occurrence is diagnosed by a human reading a long traps file.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- Recurrence: 2 observations, 2026-08-09 and 2026-09-03 — and both live inside ONE docs/backlog/durable-traps.md entry, the second as an addendum to the first. The record states this in its opening rather than burying it.
+- Verified at HEAD: scripts/shared/test-flake-baseline.json holds four entries, none of them the five files named in the incidents — so nothing currently tells you these files behave this way.
+- The mechanism is read-side only: scripts/shared/run-vitest-gate.mjs already reads the structured outcome from the timing ledger and already owns the false-RED downgrade predicate. The verdict stays non-zero and merely NAMES the classification; it never downgrades to green and never writes the flake baseline.
+- A cost the first pass did not name: one solo pass is WEAKER than the protocol the trap entry prescribes (two greens plus a mechanism argument), so a printed load-flake verdict would overstate its own evidence.
+- Full record: .audit-tools/nightly/proposals/P57-load-flake-classified-at-the-gate/P57-load-flake-classified-at-the-gate.md. No patch attached.
+
+</details>
+
+---
 
 
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- 63790e46 — three code-anchored doc fixes: docs/audit-pkg/operator-guide.md cleanup eligibility (a complete run whose report is not fully promoted is refused without --force); README.md closing actions (halt is a triage action, not a closing action; the vocabulary is commit/push/open-pr/publish/tag/none/custom); docs/audit-pkg/release.md verify:hosts reach (four hosts in INSTALL_HOST_DEFINITIONS, not every host surface — the postinstall also writes ~/.claude/commands/ and the Claude Desktop external-plugin surfaces outside the table).
+- a53bb7e1 — five code-anchored doc fixes, each reviewer+adversary+judge verified: src/audit/README.md and docs/audit-pkg/contracts.md drop the "one bounded transition / one bounded unit" claim for the fold-aware drain the engine actually runs (MAX_DRAIN_STEPS); docs/audit-pkg/development.md stops calling examples/ validated (3 of 18 are schema-validated by a contract test); spec/remediation-workflow-design.md names module_decomposition’s file_scope as the deriveNodeFiles fallback instead of the module contract (the contract half is a different, correctly-described set); .claude/skills/ship/SKILL.md pushes to the runtime-resolved remote instead of a remote named audit-tools, which does not exist.
 
-- ad94e487 — spec/remediation-workflow-design.md: contract finalization is deterministic (deriveFinalizedModuleContracts), not a parallel per-module LLM wave; PARALLEL_MODULE_PHASES holds only module_contract_drafting.
+- Leg-2 triage sweep: 99 of 99 backlog entries classified through llm-relay dispatch (all free-pool), 0 errored after one retry of the single empty-output failure. Coverage stamp: .audit-tools/nightly/triage-2026-09-06-coverage.json.
 
-- C:/Code 50c0d61 — machine-wide backlog: filed the shared-checkout commit-absorption item (leg 3, P52), 11 records across 9 distinct dates spanning audit-tools, llm-relay and C:/Code. Proposal only; the choice of form is the owner's.
+- Leg-3: four proposal records written to .audit-tools/nightly/proposals/ (P54, P55, P56, P57) with an index. P56 carries a full candidate patch, a red-green test and an OBSERVED RED-AT at HEAD.
 
-- C:/Code a22fac3 — machine-wide backlog: filed the shell-conventions-guard refusal-text friction item hit during this run (heredoc file content refused with the commit-message remedy).
-
-- Leg-1 scope ledger: 36 of 54 in-scope docs stamped as examined at HEAD.
-
-- Leg-2 triage sweep: 98 of 98 backlog entries classified through llm-relay dispatch (all free-pool), 0 errored after one retry of the single empty-output failure.
+- Standing review-retirement rule applied (review-retirement-candidates.mjs --retire): no candidate older than 30 days with zero outside citations.
 
 
 </details>
@@ -56,17 +479,17 @@ No open propositions. The next run will refill this file if it finds any.
 <summary>What the last run could NOT cover</summary>
 
 
-- Leg-1 item-level review did NOT cover 8 of 54 in-scope docs: the seven generated host assets (.agent/skills/**, .github/**) and docs/nightly-inbox.md. These are renderer- and generator-owned by manifest rule, so a hand edit is drift rather than a fix; their drift is gated by the host-asset renderer tests, which passed in the full suite this run. This is a deliberate exclusion, not a coverage failure.
+- Leg-1 item-level review did NOT cover 8 of 54 in-scope docs: the seven generated host assets (.agent/skills/**, .github/**) and docs/nightly-inbox.md. These are renderer- and generator-owned by manifest rule, so a hand edit is drift rather than a fix; their drift is gated by the host-asset renderer tests, which passed in the full suite this run. Deliberate exclusion, not a coverage failure.
 
-- Leg-1 examined 1215 of 1681 in-scope items. 46 items across 27 docs had no ledger entry and were reviewed cold (no evidence window), which is the honest state rather than a defect.
+- Five condensation findings were FOUND and RECORDED rather than raised, to keep tonight’s queue answerable: a dated owner attribution inside spec/audit/artifact-contract.md (generated cell — the source is scripts/shared/spec-mirror-data.mjs), a doc-history clause in spec/audit-workflow-design.md, a retired convention-scan paragraph in spec/remediation-workflow-design.md, a run-cost measurement in spec/self-scaling-pipeline-design.md, and a dated post-mortem in spec/conceptual-design-review-design.md. All five are condensation judgments (escalate-only), none is factually wrong, and none is closed or refuted.
 
-- The spec/ remainder lane verified CONCRETE claims only (named files, symbols, artifact names, contract versions, enumerated sets, counts). Normative and policy assertions in spec/audit/orchestration-policy.md, spec/conceptual-design-review-design.md and spec/self-scaling-pipeline-design.md were read but deliberately not adjudicated against code absence, per the rubric's rule that a policy is not stale because no code uses it.
+- The Codex lane was not used this run. Coverage did not shrink: five independent Claude reviewer lanes plus an adversary, a judge, a leg-3 recurrence lane and the llm-relay dispatch sweep covered every leg, and each auto-applied fix was verified from source by three agents before it was applied.
 
-- The Codex lane was not used this run. Coverage did not shrink: four independent Claude lanes plus the llm-relay dispatch sweep covered every leg, and each auto-applied fix was verified from source a second time before it was applied.
+- Leg 3 attached no patch to P54, P55 or P57. In each the owner is being asked WHICH FORM, and the candidate forms share no code, so a patch written before that answer would be discarded. P56, whose form is settled, does carry its patch and an observed RED-AT.
 
-- Leg 3 attached no ready-to-apply patch to either proposal (P52, P53). In both the owner is being asked WHICH FORM, and the candidate forms share no code, so a patch written before that answer would be discarded. The patch follows the form decision.
+- The weekly /insights pass was NOT due and did not run: .audit-tools/nightly/insights-last-run.json records ran_at 2026-09-04, two days old against a seven-day cadence. Not-due is not a skipped leg; it is recorded here only so the absence is not read as a failure.
 
-- Three condensation findings (A1 the language-analyzer policy duplicated across product.md and development.md; B2 a post-mortem tail on the nightly-queue entry; B3 a dissolved-premise entry in minor-bugs.md) were found and RECORDED rather than raised, to keep tonight's queue answerable. They are written in full at .audit-tools/nightly/proposals/C-condensation-2026-09-05/ and are neither closed nor refuted.
+- Leg 2 deleted nothing. The sweep surfaced exactly one already_shipped_or_stale candidate (a deferred entry whose gate shipped), and reading it refuted the lead: the entry itself states the cascade-cost measurement stays deferred, so it is a partial entry with an open remainder, not a shipped one. Deleting it would have destroyed live work.
 
 
 </details>
