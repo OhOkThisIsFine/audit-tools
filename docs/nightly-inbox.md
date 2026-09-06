@@ -25,9 +25,6 @@ records them in the tracked ledger, and does the work.
 *Last run: 2026-09-05 at `ad94e487d9dfd55e5eadf791a13d2d848ebd3dce`.*
 
 
-> **6 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
-
-
 ---
 
 ## Nothing to answer
