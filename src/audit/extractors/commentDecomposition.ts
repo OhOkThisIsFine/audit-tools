@@ -376,6 +376,52 @@ function referenceTokens(posixPath: string): string[] {
   return [...tokens].filter((t) => t.includes("/") || t === base);
 }
 
+/**
+ * Index a file universe into the reference vocabulary that comment and doc text
+ * is scanned against: every unambiguous {@link referenceTokens} token mapped to
+ * the one file that owns it, plus those tokens in longest-first order.
+ *
+ * The input is the ALREADY-normalized universe each caller holds (posix,
+ * deduped, `compareCodeUnits`-sorted). This builds no universe and normalizes
+ * nothing, because `deriveDocGroups` normalizes two lists and indexes only one
+ * of them — folding normalization in here would couple the index to list
+ * selection for no gain.
+ *
+ * A token claimed by two files is DROPPED rather than assigned arbitrarily: the
+ * sentinel marks the collision during the build and the purge deletes it, so a
+ * bare basename shared by two directories couples nothing.
+ *
+ * The longest-first order is INERT today (finding MNT-e3dd9a7f). Both consumers
+ * test every token and accumulate owners into a set, so no ordering can change a
+ * result, and the sort's own comment states a first-match-wins reason that does
+ * not hold. The sort and that comment move here verbatim rather than change —
+ * fixing either is a behavior-justifying change, not part of this relocation.
+ */
+function buildTokenIndex(files: readonly string[]): {
+  tokenOwner: Map<string, string>;
+  tokens: string[];
+} {
+  // token → owning file (longest/most-specific token wins on collision is
+  // unnecessary; a token maps to exactly one file by construction of paths).
+  const tokenOwner = new Map<string, string>();
+  for (const file of files) {
+    for (const token of referenceTokens(file)) {
+      // A token shared by two files (possible for a bare basename) is ambiguous —
+      // drop it rather than couple arbitrarily.
+      if (tokenOwner.has(token)) tokenOwner.set(token, "\0ambiguous");
+      else tokenOwner.set(token, file);
+    }
+  }
+  for (const [token, owner] of [...tokenOwner]) {
+    if (owner === "\0ambiguous") tokenOwner.delete(token);
+  }
+  // Sort tokens longest-first so a specific path matches before a substring.
+  const tokens = [...tokenOwner.keys()].sort(
+    (a, b) => b.length - a.length || compareCodeUnits(a, b),
+  );
+  return { tokenOwner, tokens };
+}
+
 export interface CommentDecompositionResult {
   /** Intent-declared coupling edges from comment cross-references (undirected). */
   edges: CouplingEdge[];
@@ -413,24 +459,7 @@ export async function deriveCommentDecomposition(
     compareCodeUnits(a, b),
   );
 
-  // token → owning file (longest/most-specific token wins on collision is
-  // unnecessary; a token maps to exactly one file by construction of paths).
-  const tokenOwner = new Map<string, string>();
-  for (const file of files) {
-    for (const token of referenceTokens(file)) {
-      // A token shared by two files (possible for a bare basename) is ambiguous —
-      // drop it rather than couple arbitrarily.
-      if (tokenOwner.has(token)) tokenOwner.set(token, "\0ambiguous");
-      else tokenOwner.set(token, file);
-    }
-  }
-  for (const [token, owner] of [...tokenOwner]) {
-    if (owner === "\0ambiguous") tokenOwner.delete(token);
-  }
-  // Sort tokens longest-first so a specific path matches before a substring.
-  const tokens = [...tokenOwner.keys()].sort(
-    (a, b) => b.length - a.length || compareCodeUnits(a, b),
-  );
+  const { tokenOwner, tokens } = buildTokenIndex(files);
 
   const weightByPair = new Map<string, number>();
   let scannedFiles = 0;
@@ -494,19 +523,7 @@ export async function deriveDocGroups(
     compareCodeUnits(a, b),
   );
 
-  const tokenOwner = new Map<string, string>();
-  for (const file of codeFiles) {
-    for (const token of referenceTokens(file)) {
-      if (tokenOwner.has(token)) tokenOwner.set(token, "\0ambiguous");
-      else tokenOwner.set(token, file);
-    }
-  }
-  for (const [token, owner] of [...tokenOwner]) {
-    if (owner === "\0ambiguous") tokenOwner.delete(token);
-  }
-  const tokens = [...tokenOwner.keys()].sort(
-    (a, b) => b.length - a.length || compareCodeUnits(a, b),
-  );
+  const { tokenOwner, tokens } = buildTokenIndex(codeFiles);
 
   const groups: string[][] = [];
   for (const doc of docFiles) {
