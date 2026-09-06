@@ -118,6 +118,26 @@ describe("deriveCommentDecomposition — comment cross-references", () => {
     });
     expect(result.edges).toEqual([]);
   });
+
+  it("drops a bare basename two files both claim rather than coupling arbitrarily", async () => {
+    // `parser.ts` is a distinctive basename (stem >= 5 chars, not a generic
+    // stem), so referenceTokens emits it for BOTH files that carry it. The
+    // token is therefore ambiguous, and the index drops it: a comment naming
+    // the bare basename must couple to neither file, because picking one would
+    // be arbitrary. Without the drop, the collision sentinel itself becomes the
+    // resolved "owner" and edges a file that does not exist.
+    const result = await deriveCommentDecomposition({
+      root: "/repo",
+      files: ["src/a/parser.ts", "src/b/parser.ts", "src/c/main.ts"],
+      readFileText: readerFrom({
+        "src/a/parser.ts": "code",
+        "src/b/parser.ts": "code",
+        "src/c/main.ts": "// delegates to parser.ts\ncode",
+      }),
+    });
+    expect(result.scannedFiles).toBe(3);
+    expect(result.edges).toEqual([]);
+  });
 });
 
 describe("deriveDocGroups — docs naming files together", () => {
