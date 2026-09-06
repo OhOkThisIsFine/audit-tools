@@ -8,40 +8,30 @@
 - **v0.51.0 is live**, published from the release commit `e6329a44`; the release workflow
   passed and the registry artifact is installed globally. Both `audit-code --version` and
   `remediate-code --version` report `0.51.0`.
-- **Every owner-answered decision that is actionable here has a landed commit** recorded in
-  the decisions ledger under `.claude/`. The six owner decisions of 2026-09-05 all landed the same
-  day; the largest, P53, moved the commit gate to git's own boundary: the tracked `.githooks/`
-  run `.claude/hooks/commit-gate.mjs` for every commit into this repository, and the PreToolUse
+- **The commit gate runs at git's own boundary.** The tracked `.githooks/` run
+  `.claude/hooks/commit-gate.mjs` for every commit into this repository; the PreToolUse
   `pre-commit-gate.mjs` keeps only what git cannot see (the hook-bypass refusal, the push
   child-session refusal, and routing of gated incoming content for merge, cherry-pick and revert).
 - **The commit gate is wired per clone.** `core.hooksPath` is a git setting the SessionStart guard
   points at `.githooks` (writing the worktree scope too where `extensions.worktreeConfig` makes a
   `.git/config.worktree` entry win). A clone that has never opened a session runs no commit gate
   until it does; the registry row states this as the uncovered half.
-- **The four closeout decisions of 2026-09-04 are answered**: the one cleanup rule stays as
-  landed; a `custom` closing action keeps its command on the checkpoint with no close-phase
-  preview; the Node matrix stays on floating majors; test-command detection is a filed
-  forward track, not wired.
-- **The nine live-run design assumptions are decided**: the owner confirmed eight and reversed
-  one on 2026-09-04, as the design-gate record states beside each in
-  [`live-run-defect-set-design-gate-2026-09-03.md`](reviews/live-run-defect-set-design-gate-2026-09-03.md).
+- **The 2026-09-05 duplication-and-complexity sweep is complete.** Hotspot #7 landed on
+  2026-09-06, so `ingestRemediationHostResults` is now a ~40-line orchestrator over
+  `validateHostResultBundle`, `executeHostVerificationReruns` and
+  `commitRemediationStateUpdates`, all three file-local. The owner chose the deepest of the three
+  offered seams — split fully, preserve behaviour — so the couplings that made the plan's own
+  seam wrong are neutralised rather than accepted: the per-item pending set and timestamp ride on
+  the verdict, and a settled-finding set restores what the pending filter used to observe. The
+  accepted-file set stays a verification-phase accumulator, which is where the plan had it wrong.
+  `tests/remediate/host-ingest-phase-boundary.test.ts` pins the boundary so it cannot erode back.
 
 ## Immediate next
 
-**Hotspot #7** is the one unlanded item of the 2026-09-05 duplication-and-complexity sweep;
-the other twelve shipped on 2026-09-05. Its spec and its blockers are in
-[`forward-tracks.md`](backlog/forward-tracks.md), pinned. Do the characterization lock
-before the split: it is a fail-closed ingestion boundary whose own plan names fail-open
-regression as the highest risk.
-
-Every plan in that sweep was re-checked against HEAD before implementation, and the record of
-what did not hold is [`refactor-plan-verification-2026-09-05.md`](reviews/refactor-plan-verification-2026-09-05.md).
-Read the brief for an item before implementing it — three plans would have caused a regression
-if followed as written, and the Hotspot #7 brief is one of the nine.
-
-**P53 has its acceptance evidence.** The commit gate fired at git's own boundary during ordinary
-work and REFUSED two commits: a stray doc absent from the manifest, and a constitutional-doc
-rewrite with no owner override. Both refusals were correct and both named their fix.
+**Implement the settled owner decisions of 2026-09-06.** They are pinned in
+[`open-bugs.md`](backlog/open-bugs.md) and appear in the generated list below. The answers
+themselves live in the decisions ledger under `.claude/`, which is their one home — read them
+there. One of the ten has no implementable form yet and says so in the entry.
 
 ## Deliberate state, not bugs
 
@@ -69,7 +59,7 @@ rewrite with no owner override. Both refusals were correct and both named their 
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ Hotspot #7 — `ingestRemediationHostResults` still interleaves validation, verification and mutation (2026-09-05). · [`forward-tracks.md`](backlog/forward-tracks.md)
+- ▶ Nine owner decisions of 2026-09-06 are settled and unimplemented (2026-09-06, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - ▶ Audit-tools deep-review acceptance benchmark still needs its external run. · [`forward-tracks.md`](backlog/forward-tracks.md)
 
 <!-- END GENERATED ROADMAP -->

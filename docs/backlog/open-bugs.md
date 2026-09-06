@@ -6,6 +6,17 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **▶ Nine owner decisions of 2026-09-06 are settled and unimplemented (2026-09-06, medium).**
+  The owner answered all ten open propositions in conversation; the answers are recorded in
+  `.claude/nightly-decisions.json`, which is their one home — read each answer there rather than a
+  copy. `l1-5` is the only one applied (it trimmed HANDOFF's three narrated decision batches).
+  Eight remain, and one of the ten is not implementable as offered: `sol-4` was answered "none of
+  these solutions are correct — there should be a solution enforced by tooling", so proposal 57's
+  three forms are dead while its requirement stands and needs a new form proposed.
+  ⚠ `sol-1` is the only one that writes OUTSIDE this repository: its machine-wide half files to
+  `C:\Code\docs\backlog.md`, not here. **Property:** each settled answer has a landed commit, or a
+  successor proposition recorded for the one whose form was refused.
+
 - **A nightly script that writes the tracked ledger ignores unrecognized argv, so a query-shaped flag
   performs the write (2026-09-06, medium, friction: tool_should_decide).** `node
   scripts/nightly/ingest-answers.mjs --help` did not print usage — it ingested ten answers and wrote

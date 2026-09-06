@@ -128,19 +128,6 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   this repo's agent loop by the owner 2026-08-07. [[vitest-shard-is-hash-based-and-file-atomic]]
 
 
-- **▶ Hotspot #7 — `ingestRemediationHostResults` still interleaves validation, verification and mutation (2026-09-05).**
-  The last unlanded item of the 2026-09-05 duplication sweep; the other twelve shipped. ~375 lines at
-  cognitive 80 in `src/remediate/steps/dispatch/hostHandoff.ts`, mixing whole-bundle gates, per-item
-  verification reruns and ledger mutation in one body. **Property:** the three phases are separable
-  functions over a shared read-mostly context, the verification phase writes nothing to state, and
-  every fail-closed gate keeps its exact issue code. ⚠ This is a security-relevant boundary and its
-  plan names FAIL-OPEN REGRESSION as the highest risk, so the characterization lock comes first: one
-  test per fail-closed gate asserting its exact code, passing before and after with no message change.
-  Loop-core, so the commit needs an attestation. Spec:
-  [`refactor-plan-hotspot-host-handoff-2026-09-05.md`](../reviews/refactor-plan-hotspot-host-handoff-2026-09-05.md);
-  checked against HEAD in
-  [`refactor-plan-verification-2026-09-05.md`](../reviews/refactor-plan-verification-2026-09-05.md).
-
 - **`preferredExecutor` is a MODE, and the step-command scaffold serves only one of the two (2026-09-05).**
   `runStepCommand` (`src/audit/cli/stepScaffold.ts`) requires it, so the three single-action verbs
   adopt and `cmdPlan` cannot. Not a missing field: a forced executor runs exactly ONE step and

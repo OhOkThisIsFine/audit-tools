@@ -2386,6 +2386,138 @@ export async function ingestRemediationHostResults(params: {
 
   const paths = resolveBoundaryPaths(params);
   const nextState = structuredClone(state);
+  const validated = await validateHostResultBundle({
+    state,
+    nextState,
+    paths,
+    runId: params.runId,
+    recovery: params.recovery,
+  });
+  if (validated.kind === "summary") return validated.summary;
+
+  const acc: HostIngestAccumulators = {
+    issues: validated.issues,
+    completed: [],
+    resultIds: new Set<string>(),
+    landedFiles: new Set(nextState.applied_edit_surface ?? []),
+    settledFindingIds: new Set<string>(),
+    recordedRecoveryMarks: null,
+  };
+  const verdicts = await executeHostVerificationReruns(validated.ctx, acc);
+  return commitRemediationStateUpdates(validated.ctx, acc, verdicts);
+}
+
+/**
+ * The read-mostly inputs the three ingest phases share.
+ *
+ * `nextState` is the sole mutable member, and only
+ * {@link commitRemediationStateUpdates} writes to it — the verification phase
+ * READS it (the pending filter) and writes nothing. `paths` is carried whole
+ * rather than re-flattened to `root`/`artifactsDir`, because
+ * {@link resolveBoundaryPaths} RESOLVES those values and they need not equal
+ * the caller's arguments; the validate phase also needs `workloadPath`.
+ */
+interface HostIngestContext {
+  readonly paths: BoundaryPaths;
+  readonly runId: string;
+  /** `params.recovery !== undefined` — the bare boolean corroboration takes. */
+  readonly recovery: boolean;
+  /** Parsed, never mutated. Corroboration is checked against THIS, not the clone. */
+  readonly state: CurrentRemediationHostState;
+  readonly nextState: CurrentRemediationHostState;
+  readonly effectiveWorkload: RemediationHostWorkload;
+  readonly eligibleIds: ReadonlySet<string>;
+  readonly canCorroborate: boolean;
+  readonly requiredTestVerdicts: RemediationRequiredTestVerdicts | null;
+}
+
+/**
+ * One accepted item, carrying everything the state commit needs.
+ *
+ * `pendingItems` and `at` ride on the verdict rather than being recomputed in
+ * the commit phase, and that is load-bearing rather than convenience. Both are
+ * observations of a moment INSIDE the loop: `pendingItems` is the finding set
+ * that was still pending when this item was verified, and `at` is the instant
+ * this item finished — which the loop interleaves with git probes and test
+ * reruns that take real wall-clock time. Recomputing either during the commit
+ * would change what the ingest writes for the same input.
+ *
+ * A refusal produces NO verdict; it pushes a classified issue and continues, so
+ * the fail-closed shape stays structural rather than encoded in a verdict kind.
+ */
+type HostItemVerdict =
+  | {
+      readonly kind: "decision";
+      readonly workItem: RemediationHostWorkItem;
+      readonly pendingItems: readonly string[];
+      readonly at: string;
+      readonly outcome: RemediationHostDecision["outcome"];
+    }
+  | {
+      readonly kind: "landed";
+      readonly workItem: RemediationHostWorkItem;
+      readonly pendingItems: readonly string[];
+      readonly at: string;
+    };
+
+/**
+ * What the verification phase accumulates across items. None of it is
+ * persisted state: the ingest returns a summary and a clone, and the caller
+ * decides what to save.
+ *
+ * `landedFiles` is a VERIFICATION-phase accumulator with intra-loop feedback,
+ * not a commit-phase one: it is seeded from `applied_edit_surface`, READ by a
+ * no-change claim's excuse set, and WRITTEN by an accepted landing — so a
+ * sibling item's legitimately landed files do not falsify a later item's claim.
+ * Deferring it to the commit phase silently starts refusing honest no-change
+ * items (pinned by "excuses a SIBLING's landing accepted earlier in the SAME
+ * INGEST" in tests/remediate/host-handoff-corroboration.test.ts).
+ */
+interface HostIngestAccumulators {
+  readonly issues: RemediationHostIngestIssue[];
+  readonly completed: string[];
+  readonly resultIds: Set<string>;
+  readonly landedFiles: Set<string>;
+  /**
+   * Findings an accepted verdict has already settled THIS ingest.
+   *
+   * The pending filter used to read the settlement off `nextState` directly,
+   * because the loop mutated as it went. With mutation deferred to the commit
+   * phase it would instead read the pre-loop clone, so two work items sharing a
+   * finding id would both claim it. This set restores exactly what the filter
+   * used to observe.
+   */
+  readonly settledFindingIds: Set<string>;
+  recordedRecoveryMarks: SubmissionLedgerEvent[] | null;
+}
+
+/**
+ * Phase 1 — the whole-bundle gates, up to the schedulable frontier.
+ *
+ * Returns either a populated context or ONE OF THREE finished summaries. The
+ * three do not agree on `pending_work_item_ids` — the read failure and the
+ * canonical parse failure return the binding's own item ids, the trusted-binding
+ * refusal returns the empty list — so folding any two together is a silent
+ * behavior change. Each is pinned by a test that asserts the pending list, not
+ * just the code.
+ */
+async function validateHostResultBundle(input: {
+  readonly state: CurrentRemediationHostState;
+  readonly nextState: CurrentRemediationHostState;
+  readonly paths: BoundaryPaths;
+  readonly runId: string;
+  readonly recovery?: {
+    readonly requiredTestVerdicts: RemediationRequiredTestVerdicts;
+  };
+}): Promise<
+  | { readonly kind: "summary"; readonly summary: RemediationHostIngestSummary }
+  | {
+      readonly kind: "context";
+      readonly ctx: HostIngestContext;
+      readonly issues: RemediationHostIngestIssue[];
+    }
+> {
+  const { state, nextState, paths } = input;
   const issues: RemediationHostIngestIssue[] = [];
   const workloadRead = await readSubmissionDocument(paths.workloadPath);
   if (workloadRead.kind !== "value") {
@@ -2403,12 +2535,15 @@ export async function ingestRemediationHostResults(params: {
       });
     }
     return {
-      accepted_count: 0,
-      completed_work_item_ids: [],
-      pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
-      issues,
-      state_changed: false,
-      state: nextState,
+      kind: "summary",
+      summary: {
+        accepted_count: 0,
+        completed_work_item_ids: [],
+        pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
+        issues,
+        state_changed: false,
+        state: nextState,
+      },
     };
   }
 
@@ -2435,21 +2570,19 @@ export async function ingestRemediationHostResults(params: {
         "a git-backed remediation workload requires the tool-owned host_handoff state binding",
     });
     return {
-      accepted_count: 0,
-      completed_work_item_ids: [],
-      pending_work_item_ids: [],
-      issues,
-      state_changed: false,
-      state: nextState,
+      kind: "summary",
+      summary: {
+        accepted_count: 0,
+        completed_work_item_ids: [],
+        pending_work_item_ids: [],
+        issues,
+        state_changed: false,
+        state: nextState,
+      },
     };
   }
 
-  const workload = parseWorkload(
-    workloadRead.value,
-    paths,
-    params.runId,
-    state,
-  );
+  const workload = parseWorkload(workloadRead.value, paths, input.runId, state);
   if (!workload) {
     // Accumulated, not replaced: when a block-contract defect is WHY the
     // canonical re-derivation failed, the block-attributed issue is the only
@@ -2461,46 +2594,69 @@ export async function ingestRemediationHostResults(params: {
         "the workload does not match its canonical state shape and persisted digest binding",
     });
     return {
-      accepted_count: 0,
-      completed_work_item_ids: [],
-      pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
-      issues,
-      state_changed: false,
-      state: nextState,
+      kind: "summary",
+      summary: {
+        accepted_count: 0,
+        completed_work_item_ids: [],
+        pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
+        issues,
+        state_changed: false,
+        state: nextState,
+      },
     };
   }
-  const effectiveWorkload = effectiveBoundWorkload(state, workload);
 
-  const eligibleIds = new Set(
-    (hostDependencyLevels(state)[0] ?? []).map((block) => block.block_id),
-  );
-  const resultIds = new Set<string>();
-  const completed: string[] = [];
-  // Recovery-only answer table; the normal lane gets null and spawns exactly as
-  // it always has. See RemediationRequiredTestVerdicts.
-  const requiredTestVerdicts = params.recovery?.requiredTestVerdicts ?? null;
-  // Lazily loaded on the first recovery-marked acceptance: the recovery marks
-  // the ledger ALREADY carries. A crash between the append and the state write
-  // leaves a mark whose item is still pending, and the natural response is to
-  // re-run the verb — which must converge, not accumulate a second record of
-  // the same acceptance.
-  let recordedRecoveryMarks: SubmissionLedgerEvent[] | null = null;
-  const landedFiles = new Set(nextState.applied_edit_surface ?? []);
-  // Can this ingest be corroborated against ground truth AT ALL? A git root
-  // supplies the tree; a persisted `host_handoff` supplies the trusted binding.
-  // With NEITHER there is nothing to check a host's claim against, and the
-  // remaining evidence is the host's own attestation — which is exactly the
-  // claim under test. That branch is REFUSED for both result and decision
-  // documents rather than admitted on the attestation alone.
-  const canCorroborate =
-    state.host_handoff !== undefined || (await isGitRepo(paths.root));
-  for (const workItem of effectiveWorkload.work_items) {
+  return {
+    kind: "context",
+    issues,
+    ctx: {
+      paths,
+      runId: input.runId,
+      recovery: input.recovery !== undefined,
+      state,
+      nextState,
+      effectiveWorkload: effectiveBoundWorkload(state, workload),
+      eligibleIds: new Set(
+        (hostDependencyLevels(state)[0] ?? []).map((block) => block.block_id),
+      ),
+      // Can this ingest be corroborated against ground truth AT ALL? A git root
+      // supplies the tree; a persisted `host_handoff` supplies the trusted
+      // binding. With NEITHER there is nothing to check a host's claim against,
+      // and the remaining evidence is the host's own attestation — which is
+      // exactly the claim under test. That branch is REFUSED for both result
+      // and decision documents rather than admitted on the attestation alone.
+      canCorroborate:
+        state.host_handoff !== undefined || (await isGitRepo(paths.root)),
+      // Recovery-only answer table; the normal lane gets null and spawns
+      // exactly as it always has. See RemediationRequiredTestVerdicts.
+      requiredTestVerdicts: input.recovery?.requiredTestVerdicts ?? null,
+    },
+  };
+}
+
+/**
+ * Phase 2 — per-item verification. Writes NOTHING to `ctx.nextState`.
+ *
+ * Iterates the effective workload in order and emits one verdict per ACCEPTED
+ * item; a refusal pushes its classified issue and continues. The ledger mark
+ * for a recovery acceptance still goes down before that item's verdict is
+ * emitted, so no acceptance can outrun its record.
+ */
+async function executeHostVerificationReruns(
+  ctx: HostIngestContext,
+  acc: HostIngestAccumulators,
+): Promise<readonly HostItemVerdict[]> {
+  const { paths, nextState, state } = ctx;
+  const verdicts: HostItemVerdict[] = [];
+  for (const workItem of ctx.effectiveWorkload.work_items) {
     const pendingItems = workItem.finding_ids.filter(
-      (findingId) => nextState.items[findingId]?.status === "pending",
+      (findingId) =>
+        nextState.items[findingId]?.status === "pending" &&
+        !acc.settledFindingIds.has(findingId),
     );
     if (pendingItems.length === 0) continue;
-    if (!eligibleIds.has(workItem.id)) {
-      issues.push({
+    if (!ctx.eligibleIds.has(workItem.id)) {
+      acc.issues.push({
         code: "submission_contract_invalid",
         work_item_id: workItem.id,
         result_path: workItem.result_path,
@@ -2515,29 +2671,29 @@ export async function ingestRemediationHostResults(params: {
       workItemId: workItem.id,
       resultPath: workItem.result_path,
       parse: (value) => {
-        const result = parseResult(value, params.runId, workItem, paths.root);
+        const result = parseResult(value, ctx.runId, workItem, paths.root);
         return result.ok
           ? { ok: true, parsed: result }
           : { ok: false, check: result.check, detail: result.reason };
       },
       resultId: (result) => result.result.result_id,
-      seen: (resultId) => resultIds.has(resultId),
+      seen: (resultId) => acc.resultIds.has(resultId),
       messages: remediationScanMessages,
     });
     if (!scan.ok) {
-      issues.push(scan.issue);
+      acc.issues.push(scan.issue);
       continue;
     }
     const parsed = scan.parsed;
     const resultId = parsed.result.result_id;
 
-    resultIds.add(resultId);
+    acc.resultIds.add(resultId);
     if (parsed.kind === "decision") {
       const result = parsed.result;
       const outcome = result.outcome;
       if (outcome.status === "resolved_no_change") {
-        if (!canCorroborate) {
-          issues.push({
+        if (!ctx.canCorroborate) {
+          acc.issues.push({
             code: "trusted_binding_missing",
             check: "no_change_corroboration",
             work_item_id: workItem.id,
@@ -2555,11 +2711,11 @@ export async function ingestRemediationHostResults(params: {
           // `applied_edit_surface` and grows as this same ingest accepts).
           excusedPaths: new Set([
             ...(state.run_start_dirty ?? []).map(normalizeRepoPath),
-            ...[...landedFiles].map(normalizeRepoPath),
+            ...[...acc.landedFiles].map(normalizeRepoPath),
           ]),
         });
         if (!noChange.ok) {
-          issues.push({
+          acc.issues.push({
             code: noChange.code,
             check: noChange.check,
             work_item_id: workItem.id,
@@ -2571,25 +2727,153 @@ export async function ingestRemediationHostResults(params: {
         const failedTests = await rerunRequiredTests(
           paths.root,
           workItem.required_tests,
-          requiredTestVerdicts,
+          ctx.requiredTestVerdicts,
         );
         if (failedTests.length > 0) {
-          issues.push(requiredTestIssue(workItem, failedTests));
+          acc.issues.push(requiredTestIssue(workItem, failedTests));
           continue;
         }
       }
-      const now = new Date().toISOString();
-      for (const findingId of pendingItems) {
+      for (const findingId of pendingItems) acc.settledFindingIds.add(findingId);
+      verdicts.push({
+        kind: "decision",
+        workItem,
+        pendingItems,
+        at: new Date().toISOString(),
+        outcome,
+      });
+      acc.completed.push(workItem.id);
+      continue;
+    }
+
+    const result = parsed.result;
+    if (!ctx.canCorroborate) {
+      acc.issues.push({
+        code: "trusted_binding_missing",
+        check: "workload_binding",
+        work_item_id: workItem.id,
+        result_path: workItem.result_path,
+        message:
+          "a landed result needs a git root or a persisted host_handoff binding to corroborate the write scope against; attestation-only acceptance is refused",
+      });
+      continue;
+    }
+    const corroborated = await corroborateHostResult({
+      root: paths.root,
+      state,
+      workItem,
+      result,
+      verdicts: ctx.requiredTestVerdicts,
+      recovery: ctx.recovery,
+    });
+    if (!corroborated.ok) {
+      acc.issues.push({
+        code: corroborated.code,
+        check: corroborated.check,
+        work_item_id: workItem.id,
+        result_path: workItem.result_path,
+        message: corroborated.message,
+      });
+      continue;
+    }
+    if (corroborated.usedRecovery) {
+      // No acceptance without a record. The mark goes down BEFORE the item is
+      // marked resolved, and an append that throws refuses this item rather
+      // than landing an acceptance the ledger cannot account for — the run
+      // must never read as one that never drifted. The refusal is per item:
+      // an unwritable ledger is not a reason to discard the whole ingest.
+      try {
+        acc.recordedRecoveryMarks ??= (
+          await readSubmissionLedger(paths.artifactsDir)
+        ).filter((event) => event.kind === "accepted_via_recovery");
+        // The mark's identity is (run, item, LANDED COMMIT), not just
+        // (run, item): an item re-opened and later re-accepted from a
+        // DIFFERENT landing is a different relaxed acceptance and earns its
+        // own record. Only a retry of the SAME landing is a duplicate. The
+        // landed sha is matched inside the message because the shared event
+        // contract carries no commit field, and a 40-hex sha this writer
+        // itself emitted is an unambiguous token to match on.
+        const landedCommit = result.commit_evidence.after;
+        const alreadyMarked = acc.recordedRecoveryMarks.some(
+          (event) =>
+            event.run_id === ctx.runId &&
+            event.submission_id === workItem.id &&
+            (event.message ?? "").includes(landedCommit),
+        );
+        if (!alreadyMarked) {
+          const event: SubmissionLedgerEvent = {
+            contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+            run_id: ctx.runId,
+            submission_id: workItem.id,
+            lane: workItem.id,
+            kind: "accepted_via_recovery",
+            // Derived from what was actually probed, never asserted: the
+            // baseline was found in no ref and unreachable from HEAD.
+            message:
+              `accepted under recovery: the trusted baseline ${workItem.baseline_commit} is ` +
+              "contained by no ref and unreachable from HEAD, so landed commit " +
+              `${landedCommit} was corroborated against HEAD and this ` +
+              "item's bound scope instead of against baseline ancestry",
+            recorded_at: new Date().toISOString(),
+          };
+          await appendSubmissionEvent(paths.artifactsDir, event);
+          acc.recordedRecoveryMarks.push(event);
+        }
+      } catch (error) {
+        acc.issues.push({
+          code: "recovery_unrecorded",
+          work_item_id: workItem.id,
+          result_path: workItem.result_path,
+          message:
+            "the recovery acceptance could not be recorded on the submission ledger, so it " +
+            `was refused: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        continue;
+      }
+    }
+    for (const findingId of pendingItems) acc.settledFindingIds.add(findingId);
+    verdicts.push({
+      kind: "landed",
+      workItem,
+      pendingItems,
+      at: new Date().toISOString(),
+    });
+    for (const changedFile of corroborated.changedFiles) {
+      acc.landedFiles.add(changedFile);
+    }
+    acc.completed.push(workItem.id);
+  }
+  return verdicts;
+}
+
+/**
+ * Phase 3 — apply the accepted verdicts to the clone and assemble the summary.
+ *
+ * Infallible given the verdicts: every refusal was already classified in
+ * phase 2, so nothing here can reject. Verdicts apply in workload order, which
+ * is the order they were emitted, so a finding two items share is written the
+ * same way it was before the phases were separated.
+ */
+function commitRemediationStateUpdates(
+  ctx: HostIngestContext,
+  acc: HostIngestAccumulators,
+  verdicts: readonly HostItemVerdict[],
+): RemediationHostIngestSummary {
+  const { nextState } = ctx;
+  for (const verdict of verdicts) {
+    if (verdict.kind === "decision") {
+      const outcome = verdict.outcome;
+      for (const findingId of verdict.pendingItems) {
         const item = nextState.items[findingId]!;
-        item.started_at ??= now;
+        item.started_at ??= verdict.at;
         if (outcome.status === "resolved_no_change") {
           item.status = "resolved_no_change";
-          item.completed_at = now;
+          item.completed_at = verdict.at;
           item.host_result_evidence = [...outcome.evidence];
           delete item.failure_reason;
         } else if (outcome.status === "blocked") {
           item.status = "blocked";
-          item.completed_at = now;
+          item.completed_at = verdict.at;
           item.failure_reason = outcome.failure_reason;
         } else {
           item.status = "needs_clarification";
@@ -2608,121 +2892,30 @@ export async function ingestRemediationHostResults(params: {
           nextState.clarifications = clarifications;
         }
       }
-      completed.push(workItem.id);
       continue;
     }
-
-    const result = parsed.result;
-    if (!canCorroborate) {
-      issues.push({
-        code: "trusted_binding_missing",
-        check: "workload_binding",
-        work_item_id: workItem.id,
-        result_path: workItem.result_path,
-        message:
-          "a landed result needs a git root or a persisted host_handoff binding to corroborate the write scope against; attestation-only acceptance is refused",
-      });
-      continue;
-    }
-    const corroborated = await corroborateHostResult({
-      root: paths.root,
-      state,
-      workItem,
-      result,
-      verdicts: requiredTestVerdicts,
-      recovery: params.recovery !== undefined,
-    });
-    if (!corroborated.ok) {
-      issues.push({
-        code: corroborated.code,
-        check: corroborated.check,
-        work_item_id: workItem.id,
-        result_path: workItem.result_path,
-        message: corroborated.message,
-      });
-      continue;
-    }
-    if (corroborated.usedRecovery) {
-      // No acceptance without a record. The mark goes down BEFORE the item is
-      // marked resolved, and an append that throws refuses this item rather
-      // than landing an acceptance the ledger cannot account for — the run
-      // must never read as one that never drifted. The refusal is per item:
-      // an unwritable ledger is not a reason to discard the whole ingest.
-      try {
-        recordedRecoveryMarks ??= (
-          await readSubmissionLedger(paths.artifactsDir)
-        ).filter((event) => event.kind === "accepted_via_recovery");
-        // The mark's identity is (run, item, LANDED COMMIT), not just
-        // (run, item): an item re-opened and later re-accepted from a
-        // DIFFERENT landing is a different relaxed acceptance and earns its
-        // own record. Only a retry of the SAME landing is a duplicate. The
-        // landed sha is matched inside the message because the shared event
-        // contract carries no commit field, and a 40-hex sha this writer
-        // itself emitted is an unambiguous token to match on.
-        const landedCommit = result.commit_evidence.after;
-        const alreadyMarked = recordedRecoveryMarks.some(
-          (event) =>
-            event.run_id === params.runId &&
-            event.submission_id === workItem.id &&
-            (event.message ?? "").includes(landedCommit),
-        );
-        if (!alreadyMarked) {
-          const event: SubmissionLedgerEvent = {
-            contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
-            run_id: params.runId,
-            submission_id: workItem.id,
-            lane: workItem.id,
-            kind: "accepted_via_recovery",
-            // Derived from what was actually probed, never asserted: the
-            // baseline was found in no ref and unreachable from HEAD.
-            message:
-              `accepted under recovery: the trusted baseline ${workItem.baseline_commit} is ` +
-              "contained by no ref and unreachable from HEAD, so landed commit " +
-              `${landedCommit} was corroborated against HEAD and this ` +
-              "item's bound scope instead of against baseline ancestry",
-            recorded_at: new Date().toISOString(),
-          };
-          await appendSubmissionEvent(paths.artifactsDir, event);
-          recordedRecoveryMarks.push(event);
-        }
-      } catch (error) {
-        issues.push({
-          code: "recovery_unrecorded",
-          work_item_id: workItem.id,
-          result_path: workItem.result_path,
-          message:
-            "the recovery acceptance could not be recorded on the submission ledger, so it " +
-            `was refused: ${error instanceof Error ? error.message : String(error)}`,
-        });
-        continue;
-      }
-    }
-    const acceptedFiles = corroborated.changedFiles;
-    const completedAt = new Date().toISOString();
-    for (const findingId of pendingItems) {
+    for (const findingId of verdict.pendingItems) {
       const item = nextState.items[findingId]!;
       item.status = "resolved";
-      item.started_at ??= completedAt;
-      item.completed_at = completedAt;
+      item.started_at ??= verdict.at;
+      item.completed_at = verdict.at;
       delete item.failure_reason;
       delete item.host_result_evidence;
     }
-    for (const changedFile of acceptedFiles) landedFiles.add(changedFile);
-    completed.push(workItem.id);
   }
 
-  if (completed.length > 0) {
-    nextState.applied_edit_surface = [...landedFiles].sort(compareCodeUnits);
+  if (acc.completed.length > 0) {
+    nextState.applied_edit_surface = [...acc.landedFiles].sort(compareCodeUnits);
   }
 
-  const pendingWorkItemIds = effectiveWorkload.work_items
+  const pendingWorkItemIds = ctx.effectiveWorkload.work_items
     .filter((workItem) =>
       workItem.finding_ids.some(
         (findingId) => nextState.items[findingId]?.status === "pending",
       ),
     )
     .map((workItem) => workItem.id);
-  let stateChanged = completed.length > 0;
+  let stateChanged = acc.completed.length > 0;
   if (nextState.host_handoff && pendingWorkItemIds.length === 0) {
     migrateLegacyDirectoryScopesAfterFinalDrain(nextState);
     delete nextState.host_handoff;
@@ -2730,10 +2923,10 @@ export async function ingestRemediationHostResults(params: {
   }
 
   return {
-    accepted_count: completed.length,
-    completed_work_item_ids: completed,
+    accepted_count: acc.completed.length,
+    completed_work_item_ids: acc.completed,
     pending_work_item_ids: pendingWorkItemIds,
-    issues,
+    issues: acc.issues,
     state_changed: stateChanged,
     state: nextState,
   };
