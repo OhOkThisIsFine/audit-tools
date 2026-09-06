@@ -1,5 +1,5 @@
 import type { GraphEdge } from "audit-tools/shared";
-import { compareCodeUnits } from "audit-tools/shared";
+import { compareCodeUnits, edgeConfidence } from "audit-tools/shared";
 
 // Analyzer edge confidences are set above their regex-floor counterparts so the
 // group-aware merge below prefers the compiler-derived edge for the same
@@ -46,12 +46,6 @@ function edgeGroupOf(edge: GraphEdge): string | undefined {
   return edge.kind ? EDGE_GROUP[edge.kind] : undefined;
 }
 
-function confidenceOf(edge: GraphEdge): number {
-  return typeof edge.confidence === "number" && Number.isFinite(edge.confidence)
-    ? edge.confidence
-    : 0;
-}
-
 function groupedKey(edge: GraphEdge, group: string): string {
   return `${edge.from}\0${edge.to}\0${group}`;
 }
@@ -89,7 +83,7 @@ export function mergeAnalyzerEdges(
     if (group) {
       const key = groupedKey(edge, group);
       const existing = grouped.get(key);
-      if (!existing || confidenceOf(edge) >= confidenceOf(existing)) {
+      if (!existing || edgeConfidence(edge) >= edgeConfidence(existing)) {
         grouped.set(key, edge);
       }
     } else {

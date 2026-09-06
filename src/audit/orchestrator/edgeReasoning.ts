@@ -1,5 +1,5 @@
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import { hashContent, compareCodeUnits } from "audit-tools/shared";
+import { hashContent, compareCodeUnits, edgeConfidence } from "audit-tools/shared";
 
 /**
  * Phase 4B — optional, bounded edge-reasoning pass.
@@ -48,12 +48,6 @@ export interface EdgeReasoningSummary {
   candidates: number;
 }
 
-function confidenceOf(edge: GraphEdge): number {
-  return typeof edge.confidence === "number" && Number.isFinite(edge.confidence)
-    ? edge.confidence
-    : 0;
-}
-
 function edgeSignature(edge: GraphEdge): string {
   return `${edge.from}\0${edge.to}\0${edge.kind ?? ""}`;
 }
@@ -74,7 +68,7 @@ export function collectLowConfidenceEdges(
     bundle.graphs.references,
   ]) {
     for (const edge of bucket ?? []) {
-      if (confidenceOf(edge) < floor) {
+      if (edgeConfidence(edge) < floor) {
         candidates.push(edge);
       }
     }
@@ -92,7 +86,7 @@ export function edgeReasoningContentHash(candidates: GraphEdge[]): string {
       from: edge.from,
       to: edge.to,
       kind: edge.kind ?? "",
-      confidence: confidenceOf(edge),
+      confidence: edgeConfidence(edge),
       reason: edge.reason ?? "",
     })),
   });
@@ -103,7 +97,7 @@ export function edgeReasoningContentHash(candidates: GraphEdge[]): string {
 export function buildEdgeReasoningPrompt(candidates: GraphEdge[]): string {
   const lines = candidates.map(
     (edge) =>
-      `- from: ${edge.from} | to: ${edge.to} | kind: ${edge.kind ?? "?"} | confidence: ${confidenceOf(edge).toFixed(2)} | current: ${edge.reason ?? "(none)"}`,
+      `- from: ${edge.from} | to: ${edge.to} | kind: ${edge.kind ?? "?"} | confidence: ${edgeConfidence(edge).toFixed(2)} | current: ${edge.reason ?? "(none)"}`,
   );
   return [
     "You are improving the human-readable 'reason' for low-confidence edges in a code dependency graph.",
