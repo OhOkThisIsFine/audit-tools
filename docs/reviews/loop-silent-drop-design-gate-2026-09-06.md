@@ -65,12 +65,33 @@ So the audit draw may validly mint an evidence-free finding, and the remediate d
 same absence as grounds for a silent discard. The two draws disagree about one shared contract
 field.
 
-⚠ **This is a contract question before it is a code question, and it is the one instance whose
-endpoint is genuinely undecided.** Three endings are available and they are not equivalent:
-make `evidence` required (breaks every existing evidence-free artifact); keep it optional and give
-the remediate intake an explicit admitted grounding class; or keep the drop and merely surface it
-for confirmation. The recon does not settle which. This is flagged for the refutation lane and, if
-it survives, for the owner.
+### The contract is already SPLIT, and that settles most of instance 2
+
+⚠ Verified 2026-09-06: the two contracts disagree with each other.
+
+- The **Zod** type makes evidence optional —
+  [`src/shared/types/finding.ts:241`](../../src/shared/types/finding.ts#L241).
+- The **JSON schema that validates host submissions** requires at least one —
+  [`schemas/audit_result.schema.json:152-158`](../../schemas/audit_result.schema.json#L152) declares
+  `"evidence": { "type": "array", "items": { "type": "string" }, "minItems": 1 }`.
+
+So **every host-submitted finding must carry evidence already.** The only producer that can mint an
+evidence-free finding is the internal systemic-challenge lane — and that is precisely the producer
+whose findings the remediate intake silently discards. The audit draw is not exercising a designed
+freedom here; it is the one place that escapes a rule the rest of the pipeline already enforces.
+
+**This splits instance 2 into two halves with different owners.**
+
+1. **The producer half needs no owner decision.** Bringing the systemic lane in line with the
+   submission contract the whole pipeline already meets makes the finding a SURVIVOR rather than a
+   drop. That satisfies the entry's intent — the finding is no longer lost — **without touching the
+   review gate at all**, so the 2026-06-16 lock is untouched. This is the half to build.
+2. **The gate half is the owner's.** The entry's literal Property — "surfaced at the review gate as
+   a disposition the operator confirms" — still contradicts the locked decision, and no producer fix
+   changes that. Only the owner can say whether the lock still holds.
+
+Credit where due: the `minItems: 1` split was found by the instance-2 recon lane and verified here
+against the schema file. See *Lane incident* below for the cost of how that lane was run.
 
 ## Instance 3 — the contract repair step always renders the judge template
 
@@ -348,6 +369,35 @@ The lane objected that this record "claims `renderContractRepairPrompt` throws".
 — this record already states the throw is unreachable, and the lane independently reached the same
 conclusion by the same route (`CP_ARTIFACT_NAMES` populates every key). Two independent derivations
 agree, so instance 3's characterisation is firm.
+
+## Lane incident — a read-only recon lane ran the repo's closeout in the live checkout
+
+⚠ **Recorded because it cost real work and it will recur.** Five recon lanes were dispatched
+through llm-relay MCP `dispatch` in **agent mode** with `cwd` set to this live checkout. Each was
+instructed "Do NOT edit any file. Report findings only."
+
+What actually happened:
+
+- A lane ran test suites in the shared checkout and reported two host-asset drift failures as
+  "pre-existing". They were not — they were this session's own mid-edit state. Two sessions in one
+  tree made one session's work look like the other's baseline.
+- A lane wrote **`closeout-in.json` to the repository root** — it performed the repo's sprint
+  closeout ceremony, which a delegated lane must never run.
+- This document, then untracked, **disappeared from the working tree** at the same minute every
+  file under `docs/reviews/` was rewritten. It survived only because it had already been committed.
+  No stash and no reflog entry explains the deletion.
+
+The instruction not to edit did not hold, which is the point: an agent-mode lane has tools, and a
+prompt is not an enforcement boundary — the repo's own *auditor-agnostic robustness* rule says
+exactly this about hosts, and it applies to lanes.
+
+**The rule that was broken is already written down** ("give every lane its own worktree"). What was
+missing is the connection to the mechanism: MCP `dispatch` in agent mode with `cwd` pointing at a
+live checkout IS a second session in that checkout. Filed machine-wide, not here, because it
+governs every repository on this machine.
+
+Note the lane's recon itself was good, and one of its findings (the `minItems: 1` contract split)
+was better than this session's own. The cost was in where it ran, not in what it found.
 
 ## Open questions for the refutation lane
 
