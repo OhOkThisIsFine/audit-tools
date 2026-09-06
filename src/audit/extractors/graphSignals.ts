@@ -110,6 +110,23 @@ export interface GraphSignals {
 }
 
 /**
+ * Narrow an unknown graph-bucket entry to a usable edge. Buckets arrive as
+ * `unknown` (the bundle schema is open-ended via `catchall(z.unknown())` and
+ * bundles are merged/re-read across analyzer passes), so every selector drops
+ * malformed entries — missing string endpoints — instead of throwing. Single
+ * home for the predicate shared by {@link allGraphEdges} and
+ * {@link structuralImportEdges}; the bucket-SELECTION logic stays per-function
+ * (merged set vs. load-order projection) and must not be unified here.
+ */
+function isValidGraphEdge(edge: unknown): edge is GraphEdge {
+  return (
+    !!edge &&
+    typeof (edge as GraphEdge).from === "string" &&
+    typeof (edge as GraphEdge).to === "string"
+  );
+}
+
+/**
  * Flatten every edge bucket of a graph bundle into one edge list. `routes` is
  * excluded (it is a `{path,handler,method}` shape, not a `from`/`to` edge); the
  * `co_change` bucket is excluded too — it is temporal coupling (git-history
@@ -124,7 +141,7 @@ export function allGraphEdges(graphBundle: GraphBundle): GraphEdge[] {
       continue;
     }
     for (const edge of value) {
-      if (edge && typeof edge.from === "string" && typeof edge.to === "string") {
+      if (isValidGraphEdge(edge)) {
         edges.push(edge);
       }
     }
@@ -159,7 +176,7 @@ export function structuralImportEdges(graphBundle: GraphBundle): GraphEdge[] {
     const value = graphBundle.graphs[bucket];
     if (!Array.isArray(value)) continue;
     for (const edge of value) {
-      if (edge && typeof edge.from === "string" && typeof edge.to === "string") {
+      if (isValidGraphEdge(edge)) {
         edges.push(edge);
       }
     }
