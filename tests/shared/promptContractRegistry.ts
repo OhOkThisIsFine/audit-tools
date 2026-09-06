@@ -42,10 +42,15 @@ const artifactPaths = Object.fromEntries(
 const renderPipeline = (role: string): (() => string) => () =>
   renderContractPipelinePrompt({ role, artifactPaths }).prompt;
 
+// The two repair TRIGGERS render different prompts (different framing, different
+// Required Inputs) against the same output schema, so each is its own registry
+// row: a rendered prompt nobody registers is a projection nobody checks.
 const renderRepair = (
   target: "finalized_module_contracts" | "obligation_ledger" | "contract_assessment_report",
+  trigger: "judge" | "critique" = "judge",
 ): (() => string) => () =>
   renderContractRepairPrompt({
+    trigger,
     target,
     instruction: "Repair the registered contract.",
     artifactPaths,
@@ -167,6 +172,12 @@ const pipelineProjectionRows: PromptContractRegistryRow[] = [
     schema: { name: "validateContractAssessmentReport", file: "src/remediate/validation/contractPipeline.ts" },
     projectionFields: ["contract_version", "goal_id", "findings", "verdict"],
     render: renderRepair("contract_assessment_report"),
+  },
+  {
+    builder: "renderContractRepairPrompt[finalized_module_contracts:critique]",
+    schema: { name: "validateFinalizedModuleContracts", file: "src/remediate/validation/contractPipeline.ts" },
+    projectionFields: ["contract_version", "goal_id", "module_contracts"],
+    render: renderRepair("finalized_module_contracts", "critique"),
   },
 ].map((row) => ({
   ...row,

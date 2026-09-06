@@ -539,16 +539,92 @@ export const CONTRACT_PIPELINE_PHASE_ORDER: string[] = Object.keys(PHASE_TO_ARTI
 
 // ── Repair prompt ─────────────────────────────────────────────────────────────
 
+/**
+ * Which gate ordered this repair. The two are NOT interchangeable: they run at
+ * different points, they are handed different artifacts, and a worker told the
+ * wrong one goes looking for inputs that were never produced.
+ */
+export type ContractRepairTrigger = "judge" | "critique";
+
 export interface ContractRepairRenderInput {
-  /** The contract artifact the judge ordered regenerated. */
+  /** Which gate ordered the repair — selects the framing and the input set. */
+  trigger: ContractRepairTrigger;
+  /** The contract artifact the gate ordered regenerated. */
   target: "finalized_module_contracts" | "obligation_ledger" | "contract_assessment_report";
-  /** The judge's bounded regeneration instruction. */
+  /** The gate's bounded regeneration instruction. */
   instruction: string;
   /** Resolved file paths for all contract-pipeline artifacts. */
   artifactPaths: Partial<Record<ContractPipelineArtifactName, string>>;
   /** Repository root path — passed to workers for cwd anchoring. */
   repoRoot?: string;
 }
+
+/**
+ * Per-trigger prompt contract, as DECLARED DATA rather than a branch in the
+ * renderer, so a third trigger cannot be added without stating its framing and
+ * its inputs.
+ *
+ * The defect this closes (observed live 2026-08-22 on the first-draw remediation
+ * run, `Contract Repair: finalized_module_contracts`): the renderer had ONE
+ * hard-coded framing and ONE hard-coded six-artifact input list, so a repair
+ * ordered by the CONCEPTUAL-CRITIQUE gate told the worker "the adversarial judge
+ * rejected the current contract" and listed `obligation_ledger`,
+ * `contract_assessment_report`, `counterexample` and `judge_report` as Required
+ * Inputs. On that trigger those four do not exist on disk. The worker burned
+ * turns hunting inputs the tool never bound.
+ *
+ * ⚠ The old existence check could not catch it and was never going to: it tested
+ * whether a PATH STRING was present in `artifactPaths`, and that record is
+ * populated for every `CP_ARTIFACT_NAMES` entry unconditionally
+ * (`contractPipeline.ts`), with no disk check. So it never threw in production —
+ * it silently rendered paths to files that were not there, which is worse than a
+ * refusal. Checking only the trigger's own set is what makes the guard mean
+ * something.
+ */
+const REPAIR_TRIGGER_CONTRACT: Record<
+  ContractRepairTrigger,
+  {
+    /** Opening sentence, which must name the gate that actually fired. */
+    lead: (target: ContractRepairRenderInput["target"]) => string;
+    /** Heading above the gate's own instruction. */
+    instructionHeading: string;
+    /** The artifacts this trigger genuinely binds — nothing else is listed. */
+    requiredInputs: readonly ContractPipelineArtifactName[];
+    /** What to attend to while reading the inputs above. */
+    readingNote: string;
+  }
+> = {
+  judge: {
+    lead: (target) =>
+      `The adversarial judge rejected the current contract. Regenerate \`${target}\` IN FULL so that every judge-accepted counterexample is addressed.`,
+    instructionHeading: "Judge Instruction",
+    requiredInputs: [
+      "goal_spec",
+      "finalized_module_contracts",
+      "obligation_ledger",
+      "contract_assessment_report",
+      "counterexample",
+      "judge_report",
+    ],
+    readingNote:
+      "pay particular attention to the accepted counterexamples in the judge report's classifications",
+  },
+  critique: {
+    lead: (target) =>
+      `The conceptual design critique raised BLOCKING concerns about the current design. Regenerate \`${target}\` IN FULL so that none of those concerns still applies.`,
+    instructionHeading: "Blocking Concerns",
+    // The critique gate runs BEFORE any downstream artifact is derived, so the
+    // judge-side artifacts do not exist yet. Listing them is what sent workers
+    // hunting. These three are the whole of what this trigger binds.
+    requiredInputs: [
+      "goal_spec",
+      "finalized_module_contracts",
+      "conceptual_design_critique",
+    ],
+    readingNote:
+      "read each blocking concern's own description in the conceptual design critique before rewriting",
+  },
+};
 
 /** Schema shape per repair target, sourced from the producing role. */
 const REPAIR_TARGET_SCHEMA: Record<ContractRepairRenderInput["target"], () => string> = {
@@ -572,18 +648,12 @@ export function renderContractRepairPrompt(
       `Contract repair requires an artifact path for "${input.target}" but it was not provided.`,
     );
   }
-  const requiredInputs = [
-    "goal_spec",
-    "finalized_module_contracts",
-    "obligation_ledger",
-    "contract_assessment_report",
-    "counterexample",
-    "judge_report",
-  ] as ContractPipelineArtifactName[];
+  const contract = REPAIR_TRIGGER_CONTRACT[input.trigger];
+  const requiredInputs = contract.requiredInputs;
   for (const key of requiredInputs) {
     if (!input.artifactPaths[key]) {
       throw new Error(
-        `Contract repair requires artifact path for "${key}" but it was not provided.`,
+        `Contract repair (${input.trigger}) requires artifact path for "${key}" but it was not provided.`,
       );
     }
   }
@@ -594,9 +664,9 @@ export function renderContractRepairPrompt(
 
   const prompt = `# Contract Repair: ${input.target}
 
-The adversarial judge rejected the current contract. Regenerate \`${input.target}\` IN FULL so that every judge-accepted counterexample is addressed.
+${contract.lead(input.target)}
 ${cwdNote}
-## Judge Instruction
+## ${contract.instructionHeading}
 
 ${input.instruction}
 
@@ -606,7 +676,7 @@ ${requiredInputs.map((key) => `- \`${input.artifactPaths[key]}\` (${key})`).join
 
 ## Your Task
 
-Read the inputs above — pay particular attention to the accepted counterexamples in the judge report's classifications. Rewrite the complete, corrected artifact (not a diff) to exactly:
+Read the inputs above — ${contract.readingNote}. Rewrite the complete, corrected artifact (not a diff) to exactly:
 
 \`${outputPath}\`
 

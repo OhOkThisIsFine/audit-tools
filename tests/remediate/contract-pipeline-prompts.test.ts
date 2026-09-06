@@ -330,6 +330,7 @@ describe("contract repair prompt", () => {
       "contract_assessment_report",
     ] as const) {
       const result = renderContractRepairPrompt({
+        trigger: "judge",
         target,
         instruction: "Address the accepted counterexamples.",
         artifactPaths: ALL_PATHS,
@@ -347,6 +348,7 @@ describe("contract repair prompt", () => {
   it("throws when the target artifact path is missing", () => {
     expect(() =>
       renderContractRepairPrompt({
+        trigger: "judge",
         target: "finalized_module_contracts",
         instruction: "Fix.",
         artifactPaths: { ...ALL_PATHS, finalized_module_contracts: undefined },
@@ -354,16 +356,85 @@ describe("contract repair prompt", () => {
     ).toThrow(/finalized_module_contracts/);
   });
 
-  it("throws when contract_assessment_report path is absent (TST-5ddb69b9)", () => {
-    // renderContractRepairPrompt validates all requiredInputs before emitting the prompt.
-    // contract_assessment_report is one of those required inputs regardless of target.
+  it("throws when contract_assessment_report path is absent on the judge trigger (TST-5ddb69b9)", () => {
+    // renderContractRepairPrompt validates the TRIGGER's requiredInputs before
+    // emitting. contract_assessment_report is one of the judge trigger's inputs.
     expect(() =>
       renderContractRepairPrompt({
+        trigger: "judge",
         target: "finalized_module_contracts",
         instruction: "Fix contract.",
         artifactPaths: { ...ALL_PATHS, contract_assessment_report: undefined },
       }),
     ).toThrow(/contract_assessment_report/);
+  });
+
+  // The defect, observed live 2026-08-22 on the first-draw remediation run: the
+  // renderer had ONE framing and ONE input list, so a repair ordered by the
+  // conceptual-critique gate told the worker the adversarial judge had rejected
+  // the contract and listed four artifacts that do not exist on that path. The
+  // worker burned turns hunting inputs the tool never bound.
+  it("the critique trigger names the critique, never the judge", () => {
+    const result = renderContractRepairPrompt({
+      trigger: "critique",
+      target: "finalized_module_contracts",
+      instruction: "Resolve blocking concerns C1, C2.",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+
+    expect(result.prompt).toContain("conceptual design critique");
+    expect(result.prompt).not.toContain("adversarial judge");
+    expect(result.prompt).toContain("Resolve blocking concerns C1, C2.");
+    expect(result.prompt).toContain(ALL_PATHS.conceptual_design_critique);
+  });
+
+  it("the critique trigger lists no artifact that trigger does not bind", () => {
+    const result = renderContractRepairPrompt({
+      trigger: "critique",
+      target: "finalized_module_contracts",
+      instruction: "Resolve blocking concerns.",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+
+    // These four are produced only on the judge path. Naming them as Required
+    // Inputs sends the worker to files that are not on disk.
+    for (const absent of [
+      "obligation_ledger",
+      "contract_assessment_report",
+      "counterexample",
+      "judge_report",
+    ] as const) {
+      expect(
+        result.prompt.includes(`(${absent})`),
+        `the critique repair prompt must not list '${absent}' as a Required Input`,
+      ).toBe(false);
+    }
+  });
+
+  it("the critique trigger refuses when its OWN input is missing", () => {
+    expect(() =>
+      renderContractRepairPrompt({
+        trigger: "critique",
+        target: "finalized_module_contracts",
+        instruction: "Fix.",
+        artifactPaths: { ...ALL_PATHS, conceptual_design_critique: undefined },
+      }),
+    ).toThrow(/conceptual_design_critique/);
+  });
+
+  it("the critique trigger does NOT refuse for a judge-only artifact", () => {
+    // The judge-side artifacts genuinely do not exist when the critique gate
+    // fires, so requiring them would block the repair the gate just ordered.
+    expect(() =>
+      renderContractRepairPrompt({
+        trigger: "critique",
+        target: "finalized_module_contracts",
+        instruction: "Fix.",
+        artifactPaths: { ...ALL_PATHS, judge_report: undefined, counterexample: undefined },
+      }),
+    ).not.toThrow();
   });
 });
 

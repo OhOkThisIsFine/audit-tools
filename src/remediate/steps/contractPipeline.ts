@@ -2618,6 +2618,7 @@ const conceptualCritiqueGate: ContractGate = async (ctx) => {
       await writeRepairState(ctx.artifactsDir, repairState);
     }
     const rendered = renderContractRepairPrompt({
+      trigger: "critique",
       target: "finalized_module_contracts",
       instruction:
         "Revise the design to resolve every BLOCKING concern in the conceptual design critique " +
@@ -2800,6 +2801,7 @@ const judgeRepairGate: ContractGate = async (ctx) => {
       await writeRepairState(ctx.artifactsDir, repairState);
     }
     const rendered = renderContractRepairPrompt({
+      trigger: "judge",
       target: repairTarget,
       instruction: gate.directive.instruction,
       artifactPaths: ctx.artifactPaths,
