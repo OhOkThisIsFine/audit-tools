@@ -6,6 +6,21 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Tracked docs cite line numbers, against a new standing preference for symbols, and no gate
+  says so (2026-09-06, low, friction: tool_should_decide).** Owner, 2026-09-06: *"in general we
+  should make citations refer to symbols and not line numbers"* — a line number is wrong after the
+  next edit above it, and a stale citation sends a reader confidently to the wrong place. The
+  preference is recorded machine-wide in `~/.claude/CLAUDE.md` and is already applied in the
+  systemic adversary prompt, but the existing corpus predates it:
+  [`loop-silent-drop-design-gate-2026-09-06.md`](../reviews/loop-silent-drop-design-gate-2026-09-06.md)
+  is written almost entirely in `file.ts:NNN` form. `check:doc-code-citations` today resolves a
+  cited PATH and says nothing about the line-number suffix, so nothing detects a drifted anchor.
+  Two questions, and the second is the owner's: whether to convert the existing docs, and whether
+  the gate should refuse a new `:NNN` citation where a symbol could be named. **Property:** a
+  citation in a tracked doc names a symbol, or states why no symbol exists at that point; the
+  choice between converting and grandfathering the existing corpus is recorded rather than left to
+  each future edit.
+
 - **▶ Nine owner decisions of 2026-09-06 are settled and unimplemented (2026-09-06, medium).**
   The owner answered all ten open propositions in conversation; the answers are recorded in
   `.claude/nightly-decisions.json`, which is their one home — read each answer there rather than a
