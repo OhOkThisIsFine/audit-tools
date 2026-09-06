@@ -18,7 +18,7 @@ The JSON contract is authoritative; Markdown is its render.
 
 ## Step artifacts
 
-`audit-code next-step` advances one bounded transition and writes:
+`audit-code next-step` advances one bounded, fold-aware drain of the deterministic frontier and writes:
 
 ```text
 <artifacts_dir>/steps/current-step.json

@@ -40,7 +40,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 ## 2. Commit + push
 
 - Review `git status`. Exclude stray run artifacts (`tmp*.json`, `*result.json`, worker payloads). Unexplained foreign working-tree edits → partial-stage around them and ask — may be a concurrent session in this checkout.
-- Conventional commit message. Push `main` to the `audit-tools` remote.
+- Conventional commit message. Push `main` to the runtime-resolved remote (`"$remote"`, per the rule above).
 - **Lap-worktree ship (one command, no primary-worktree dance).** Laps run on a `claude/<lap>` linked
   worktree, not the primary `main` checkout. You do NOT need to FF the primary worktree or rebuild its stale
   `dist/`. Push the lap branch's landed work onto `main` (`git push "$remote" HEAD:main`, a fast-forward),

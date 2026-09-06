@@ -1,7 +1,9 @@
 # `src/audit` — audit-code orchestrator
 
 Obligation-driven audit engine. `next-step` derives state from the artifact bundle,
-picks the highest-priority unsatisfied obligation, runs one bounded unit, persists, returns.
+picks the highest-priority unsatisfied obligation, drains the deterministic frontier
+fold-aware (halting at the first host-input pause, non-drainable step, or the
+`MAX_DRAIN_STEPS` charged-execution budget), persists, returns.
 
 ## Module index
 
