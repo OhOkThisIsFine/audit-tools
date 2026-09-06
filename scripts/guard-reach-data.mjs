@@ -142,11 +142,20 @@ export const GUARDS = [
     id: 'check:control-bytes',
     kind: 'gate',
     impl: 'check:control-bytes',
-    preCommit: false,
+    preCommit: 'always',
     fix:
       'a tracked file carries raw control bytes — strip them at the named offsets; this gate covers ' +
       'the merge/import paths the tool-input-guard write-time hook never sees',
-    note: 'preCommit false is deliberate (CI-only; the tool-input-guard hook already refuses control bytes at write time) — cheap, flip to reach if wanted',
+    note:
+      "'always' rather than 'reach': a control byte can enter ANY tracked file, so there is no " +
+      'narrower honest trigger — the same argument check:guard-reach makes. This row read ' +
+      'preCommit false until 2026-09-05, on the premise that the tool-input-guard hook already ' +
+      'refuses control bytes AT WRITE TIME. That premise only covers writes made through THIS ' +
+      "agent's tools. A delegated lane writes in its own process, so the hook never sees it: an " +
+      'offloaded lane authoring a doc emitted nine raw 0x1A bytes where arrows belonged, every ' +
+      'local gate passed, and the gate that caught it was release CI — 22s in, on main. The row ' +
+      "already knew about paths the hook cannot see (its own fix text says so); what it got wrong " +
+      'was treating those paths as rare. The gate scans 1405 files in 0.2s.',
   },
   {
     id: 'check:shared-primitives',

@@ -150,7 +150,7 @@ describe('every retired hand-coded trigger is reproduced', () => {
     expect(triggeredIds(['src/shared/types/lens.ts'])).toContain('check:tests');
   });
 
-  it('a src-only staged set triggers exactly the src-reach legs: test-tree typecheck, the primitive gate, the orphan-module gate, and the unconditional guard-reach leg', () => {
+  it('a src-only staged set triggers exactly the src-reach legs: test-tree typecheck, the primitive gate, the orphan-module gate, and the two unconditional legs (control-bytes, guard-reach)', () => {
     expect(triggeredIds(['src/audit/orchestrator/advance.ts'])).toEqual([...EXPECTED_SRC_REACH_LEG_IDS]);
   });
 
