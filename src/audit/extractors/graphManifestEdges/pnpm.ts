@@ -1,5 +1,5 @@
-import { WorkspacePattern, addWorkspacePattern } from "./workspace.js";
-import { yamlRootObject, yamlStringArray } from "./yaml.js";
+import { WorkspacePattern, addWorkspacePattern, manifestStringArray } from "./workspace.js";
+import { yamlRootObject } from "./yaml.js";
 
 /**
  * pnpm workspace globs from `pnpm-workspace.yaml`'s top-level `packages:` list.
@@ -11,7 +11,7 @@ import { yamlRootObject, yamlStringArray } from "./yaml.js";
 export function pnpmWorkspacePatterns(content: string): WorkspacePattern[] {
   const root = yamlRootObject(content);
   const patterns: WorkspacePattern[] = [];
-  for (const pattern of yamlStringArray(root?.packages)) {
+  for (const pattern of manifestStringArray(root?.packages)) {
     addWorkspacePattern(patterns, pattern);
   }
   return patterns;

@@ -1,7 +1,8 @@
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
 import { graphEdge, normalizeGraphPath, isPyprojectPath } from "../graphPathUtils.js";
-import { parseTomlSafe, asTomlTable, tomlStringArray } from "./toml.js";
+import { parseTomlSafe, asTomlTable } from "./toml.js";
+import { manifestStringArray } from "./workspace.js";
 
 export const PYPROJECT_TESTPATHS_LINK_CONFIDENCE = 0.85;
 
@@ -17,7 +18,7 @@ function pyprojectTestpaths(content: string): string[] {
   const tool = asTomlTable(parseTomlSafe(content).tool);
   const pytest = asTomlTable(tool?.pytest);
   const iniOptions = asTomlTable(pytest?.ini_options);
-  return tomlStringArray(iniOptions?.testpaths);
+  return manifestStringArray(iniOptions?.testpaths);
 }
 
 export function extractPyprojectTestpathLinks(

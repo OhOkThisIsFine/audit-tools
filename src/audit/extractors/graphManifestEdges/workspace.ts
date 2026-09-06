@@ -38,6 +38,24 @@ export function collectWorkspacePatternValues(
   }
 }
 
+/**
+ * Coerce a post-parse manifest value to a string[]: a string scalar → `[s]`
+ * (both TOML and YAML allow a bare scalar where a list is expected), a string
+ * array → its string elements, anything else → `[]`. Trims and drops empties
+ * to match the prior line-scanner extractors' behavior. Operates on plain JS
+ * values, so it is parser-agnostic — shared by the TOML (`smol-toml`) and YAML
+ * (`yaml`) sides without coupling the parsers.
+ */
+export function manifestStringArray(value: unknown): string[] {
+  const raw =
+    typeof value === "string"
+      ? [value]
+      : Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === "string")
+        : [];
+  return raw.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
 export function normalizeWorkspacePattern(
   workspacePath: string,
   pattern: string,

@@ -2,10 +2,12 @@ import { test, expect } from "vitest";
 
 const { stripJsonComments, removeTrailingJsonCommas, parseJsoncObject } =
   await import("../../src/audit/extractors/graphManifestEdges/jsonc.js");
-const { parseYamlSafe: parseYamlSafeRaw, yamlStringArray, collectYamlStringScalars } =
+const { parseYamlSafe: parseYamlSafeRaw, collectYamlStringScalars } =
   await import("../../src/audit/extractors/graphManifestEdges/yaml.js");
-const { parseTomlSafe, tomlStringArray } =
+const { parseTomlSafe } =
   await import("../../src/audit/extractors/graphManifestEdges/toml.js");
+const { manifestStringArray } =
+  await import("../../src/audit/extractors/graphManifestEdges/workspace.js");
 const { stripGoLineComment, splitGoWorkspaceSpecifiers } =
   await import("../../src/audit/extractors/graphManifestEdges/go.js");
 const {
@@ -61,10 +63,10 @@ test("parseTomlSafe parses a table and degrades to {} on malformed input", () =>
   expect(parseTomlSafe("this is = = not toml [")).toEqual({});
 });
 
-test("tomlStringArray coerces a scalar, an array, and rejects non-strings", () => {
-  expect(tomlStringArray("tests")).toEqual(["tests"]); // bare scalar → [s]
-  expect(tomlStringArray([" a ", "b", 3, null])).toEqual(["a", "b"]); // trims, drops non-strings
-  expect(tomlStringArray(undefined)).toEqual([]);
+test("manifestStringArray coerces a scalar, an array, and rejects non-strings (TOML cases)", () => {
+  expect(manifestStringArray("tests")).toEqual(["tests"]); // bare scalar → [s]
+  expect(manifestStringArray([" a ", "b", 3, null])).toEqual(["a", "b"]); // trims, drops non-strings
+  expect(manifestStringArray(undefined)).toEqual([]);
 });
 
 // ── YAML utilities (vetted: yaml) ────────────────────────────────────────────
@@ -75,10 +77,27 @@ test("parseYamlSafe parses a document and degrades to undefined on malformed inp
   expect(parseYamlSafe("packages:\n\t- bad-tab-indent")).toBe(undefined);
 });
 
-test("yamlStringArray coerces a scalar, a sequence, and rejects non-strings", () => {
-  expect(yamlStringArray("packages/*")).toEqual(["packages/*"]);
-  expect(yamlStringArray([" a ", "b", 3])).toEqual(["a", "b"]);
-  expect(yamlStringArray(undefined)).toEqual([]);
+test("manifestStringArray coerces a scalar, a sequence, and rejects non-strings (YAML cases)", () => {
+  expect(manifestStringArray("packages/*")).toEqual(["packages/*"]);
+  expect(manifestStringArray([" a ", "b", 3])).toEqual(["a", "b"]);
+  expect(manifestStringArray(undefined)).toEqual([]);
+});
+
+test("manifestStringArray parity battery pins the unified coercion semantics", () => {
+  const cases: Array<[unknown, string[]]> = [
+    ["tests", ["tests"]],
+    [" a ", ["a"]],
+    ["   ", []],
+    [[" a ", "b", 3, null, undefined], ["a", "b"]],
+    [undefined, []],
+    [null, []],
+    [42, []],
+    [true, []],
+    [{ members: ["a"] }, []],
+  ];
+  for (const [input, expected] of cases) {
+    expect(manifestStringArray(input)).toEqual(expected);
+  }
 });
 
 test("collectYamlStringScalars walks maps and sequences depth-first (values only)", () => {

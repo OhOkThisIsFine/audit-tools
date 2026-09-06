@@ -28,17 +28,6 @@ export function yamlRootObject(content: string): Record<string, unknown> | undef
     : undefined;
 }
 
-/** Coerce a YAML value to a string[]: a scalar → `[s]`, a sequence → its strings. */
-export function yamlStringArray(value: unknown): string[] {
-  const raw =
-    typeof value === "string"
-      ? [value]
-      : Array.isArray(value)
-        ? value.filter((v): v is string => typeof v === "string")
-        : [];
-  return raw.map((s) => s.trim()).filter((s) => s.length > 0);
-}
-
 /**
  * Every string SCALAR VALUE reachable in a parsed YAML value, walked depth-first
  * through maps and sequences (map keys are not collected — only values, matching

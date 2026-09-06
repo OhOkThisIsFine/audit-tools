@@ -1,7 +1,7 @@
 import type { GraphEdge } from "audit-tools/shared";
 import { isCargoManifestPath } from "../graphPathUtils.js";
-import { WorkspacePattern, addWorkspacePattern, workspaceMemberEdges } from "./workspace.js";
-import { tomlTable, tomlStringArray } from "./toml.js";
+import { WorkspacePattern, addWorkspacePattern, workspaceMemberEdges, manifestStringArray } from "./workspace.js";
+import { tomlTable } from "./toml.js";
 
 const CARGO_WORKSPACE_MEMBER_EDGE_CONFIDENCE = 0.87;
 
@@ -21,10 +21,10 @@ export function cargoWorkspacePatterns(content: string): WorkspacePattern[] {
     return [];
   }
   const patterns: WorkspacePattern[] = [];
-  for (const member of tomlStringArray(workspace.members)) {
+  for (const member of manifestStringArray(workspace.members)) {
     addWorkspacePattern(patterns, member);
   }
-  for (const excluded of tomlStringArray(workspace.exclude)) {
+  for (const excluded of manifestStringArray(workspace.exclude)) {
     addWorkspacePattern(patterns, `!${excluded}`);
   }
   return patterns;

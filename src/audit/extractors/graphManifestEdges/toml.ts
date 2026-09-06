@@ -39,18 +39,3 @@ export function tomlTable(
 ): Record<string, unknown> | undefined {
   return asTomlTable(parseTomlSafe(content)[key]);
 }
-
-/**
- * Coerce a TOML value to a string[]: a string scalar → `[s]` (TOML allows a
- * bare `testpaths = "tests"`), a string array → its string elements, anything
- * else → `[]`. Trims and drops empties to match the prior extractor's behavior.
- */
-export function tomlStringArray(value: unknown): string[] {
-  const raw =
-    typeof value === "string"
-      ? [value]
-      : Array.isArray(value)
-        ? value.filter((v): v is string => typeof v === "string")
-        : [];
-  return raw.map((s) => s.trim()).filter((s) => s.length > 0);
-}
