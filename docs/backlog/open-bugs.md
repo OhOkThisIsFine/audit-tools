@@ -278,8 +278,6 @@
   ledger was already right. `start-lap` has been repointed at `answer.mjs --list` as the authority,
   closing the path actually walked; the snapshot's own freshness gate is still the fix.
 
-- **Remediation intake drops a finding with no `evidence` array, and the audit systemic-challenge lane emits findings without one (2026-08-22, medium).** Intake's no-evidence branch records only a `droppedNoEvidence` disposition in review_filter_dispositions.json and never surfaces the finding; the review gate therefore never showed MNT-c2dc7f9c (high severity, high confidence: the wrapper pair duplicates ~2,400 lines), so an operator could neither confirm nor decline the drop. The audit side's systemic-challenge lane mints findings with no evidence array, so every such finding is unremediatable by construction. **Property:** a finding the intake drops is surfaced at the review gate as a disposition the operator confirms, and a systemic-lane finding carries evidence (or an explicit grounding class the intake admits) so the pipeline can remediate it.
-
 - **The Implementation DAG prompt does not state the one-invocation rule for `targeted_commands`
   (2026-08-23, medium, friction: tool_should_decide).** The worker emitted `npm run build && npm run
   check` on 23 nodes; the promotion gate rejected the whole DAG twice (`MAX_DAG_REGENERATION_ATTEMPTS`

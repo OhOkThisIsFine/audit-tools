@@ -135,6 +135,10 @@ import {
 import { buildAutonomousReviewDecision } from "../review/autonomousGate.js";
 import { runFindingFilterPass, type FindingFilterResult } from "../findingFilter.js";
 import {
+  droppedFindingsRecordPath,
+  renderDroppedFindingsRecord,
+} from "../droppedFindingsRecord.js";
+import {
   intakePaths,
   isIntakeReady,
   manifestIsInputBound,
@@ -1929,6 +1933,15 @@ async function persistReviewFilterDispositions(
     droppedByCheckpoint: filter.droppedByCheckpoint,
   };
   await writeJsonFile(reviewFilterDispositionsPath(artifactsDir), payload);
+  // The human half of the same fact. The JSON above keeps only IDS, which told a
+  // reader an id and nothing else; this states what each removed finding WAS and
+  // why it went. Written beside it, on every pass, so its absence means the pass
+  // did not run rather than "nothing was dropped".
+  await writeFile(
+    droppedFindingsRecordPath(artifactsDir),
+    renderDroppedFindingsRecord(originals, filter),
+    "utf8",
+  );
 }
 
 async function handleReadyIntakeContractPipeline(

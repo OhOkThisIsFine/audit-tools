@@ -90,6 +90,33 @@ freedom here; it is the one place that escapes a rule the rest of the pipeline a
    a disposition the operator confirms" — still contradicts the locked decision, and no producer fix
    changes that. Only the owner can say whether the lock still holds.
 
+### OWNER DECISION, 2026-09-06
+
+**Do the producer fix, and record the drop in a document that is not surfaced in chat but can be
+reviewed later. The review gate does not change — the 2026-06-16 survivors-only lock stands.**
+
+So the backlog entry's literal Property is **superseded**, not deferred. What shipped:
+
+- `SystemicChallengeSubmissionSchema` requires at least one evidence entry, and
+  `renderSecondOrderAdversaryPrompt` asks for the field. The refusal is the point: a refusal is
+  reported back through the lane validator and the adversary can resubmit, whereas the silent
+  downstream drop lost the round's work with no signal anywhere.
+- `renderDroppedFindingsRecord` writes `dropped-findings.md` beside the machine dispositions on
+  every filter pass. It names each removed finding — title, severity, lens — and states the reason
+  per drop class, where the machine record kept only ids. It is written even when nothing was
+  dropped, so its ABSENCE means the pass did not run rather than "nothing happened".
+
+⚠ The drop record is deliberately NOT part of any emitted step prompt. That was the owner's
+distinction: reviewable afterwards, not read aloud in the operator's conversation.
+
+### A note on citations, from the same exchange
+
+The owner's standing preference, given 2026-09-06: **"in general we should make citations refer to
+symbols and not line numbers"**. A line number is wrong after the next edit; a symbol name is not.
+This document predates the preference and is full of line numbers — converting it, and deciding
+whether `check:doc-code-citations` should enforce the rule, is raised at closeout rather than
+settled here. The systemic adversary prompt already carries the instruction to the host.
+
 Credit where due: the `minItems: 1` split was found by the instance-2 recon lane and verified here
 against the schema file. See *Lane incident* below for the cost of how that lane was run.
 

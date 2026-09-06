@@ -5,6 +5,10 @@ import { describe, test, expect } from "vitest";
 import { aggregateMetricsDigest } from "../../src/audit/systemic/aggregateMetricsDigest.js";
 import { foldChallengeRound } from "../../src/audit/systemic/systemicChallengeLoop.js";
 import { renderSecondOrderAdversaryPrompt } from "../../src/audit/systemic/secondOrderAdversaryPrompt.js";
+// Through the published subpath, not the source path: importing the source
+// module gives this file a SECOND `Finding` identity and the two are unrelated
+// to the typechecker.
+import { SystemicChallengeSubmissionSchema } from "audit-tools/shared";
 import { runSystemicChallengeExecutor } from "../../src/audit/orchestrator/systemicChallengeExecutor.js";
 import { mergeFindings } from "../../src/audit/reporting/mergeFindings.js";
 import { PRIORITY } from "../../src/audit/orchestrator/nextStep.js";
@@ -116,6 +120,11 @@ const mkFinding = (
   confidence: "medium",
   lens,
   summary: `improve ${id}`,
+  // Evidence is REQUIRED of this lane (SystemicChallengeSubmissionSchema), so a
+  // fixture without it is not a submission the pipeline could ever receive. A
+  // fixture must meet the contract it stands in for, or it tests a shape that
+  // cannot occur.
+  evidence: [`\`${id}Handler\` in ${files[0] ?? "src/a.ts"} does the work serially`],
   affected_files: files.map((path) => ({ path })),
 });
 
@@ -389,6 +398,13 @@ describe("renderSecondOrderAdversaryPrompt", () => {
     expect(prompt).toMatch(/redundant/i);
     expect(prompt).toMatch(/serial that could be parallel/i);
     expect(prompt).toMatch(/loop-until-dry|nothing new/i);
+    // The lane's findings are unremediatable without evidence — the remediate
+    // intake filter drops a finding that carries none, recording only its id.
+    // The prompt must therefore ASK for the field its own submission requires.
+    expect(prompt).toMatch(/"evidence"/);
+    expect(prompt).toMatch(/at least one `evidence` entry/i);
+    // Symbols, not line numbers: a line number is wrong after the next edit.
+    expect(prompt).toMatch(/SYMBOLS, not line numbers/);
     expect(prompt).toMatch(/true lens/i);
     // The metrics are flagged as supporting-but-not-sufficient evidence.
     expect(prompt).toMatch(/necessary, NOT sufficient/i);
@@ -413,5 +429,57 @@ describe("PRIORITY insertion", () => {
     const planning = PRIORITY.indexOf("planning_artifacts");
     expect(systemic).toBe(clar + 1);
     expect(planning).toBe(systemic + 1);
+  });
+});
+
+// ── Evidence is required, and the refusal is the point ───────────────────────
+
+// Before this, `SystemicChallengeSubmissionSchema` used the bare `FindingSchema`,
+// whose `evidence` is optional. Every OTHER producer already meets a stricter
+// rule — `schemas/audit_result.schema.json` declares `minItems: 1` on evidence
+// for host submissions — so this lane was the single escape, and the remediate
+// intake's filter pass silently discards a finding with no evidence. The lane
+// could converge, bank improvements, and have all of them dropped downstream
+// with no signal on any surface.
+describe("SystemicChallengeSubmissionSchema evidence requirement", () => {
+  const wellFormed = {
+    id: "SYS-1",
+    title: "Parallelize the serial verification legs",
+    category: "systemic_improvement",
+    severity: "medium",
+    confidence: "high",
+    lens: "performance",
+    summary: "The legs are independent and run serially.",
+    affected_files: [{ path: "scripts/verify.mjs" }],
+  };
+
+  test("refuses a systemic finding that carries no evidence", () => {
+    const parsed = SystemicChallengeSubmissionSchema.safeParse({
+      findings: [wellFormed],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  test("refuses a systemic finding whose evidence array is empty", () => {
+    const parsed = SystemicChallengeSubmissionSchema.safeParse({
+      findings: [{ ...wellFormed, evidence: [] }],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  test("accepts a systemic finding with at least one evidence entry", () => {
+    const parsed = SystemicChallengeSubmissionSchema.safeParse({
+      findings: [
+        { ...wellFormed, evidence: ["`runVerifyLegs` in scripts/verify.mjs awaits each leg in turn"] },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("an empty findings array still converges the loop", () => {
+    // The loop-until-dry terminator must not become collateral damage of a
+    // stricter per-finding rule.
+    const parsed = SystemicChallengeSubmissionSchema.safeParse({ findings: [] });
+    expect(parsed.success).toBe(true);
   });
 });
