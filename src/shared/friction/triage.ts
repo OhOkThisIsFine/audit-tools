@@ -395,7 +395,11 @@ async function readReflections(artifactsDir: string): Promise<AgentReflection[]>
   const text = await readOptionalTextFile(
     `${artifactsDir}/${AGENT_FEEDBACK_FILENAME}`,
   );
-  return text ? parseReflectionsNdjson(text) : [];
+  // Discards are NOT reported here and never become triage subjects: this feed
+  // is the mandatory closeout walk, so one malformed line would become an
+  // obligation an operator cannot clear. The readers that render a report state
+  // them instead.
+  return text ? parseReflectionsNdjson(text).reflections : [];
 }
 
 async function readRecord(

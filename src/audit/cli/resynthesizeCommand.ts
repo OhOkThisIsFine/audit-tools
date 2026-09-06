@@ -15,6 +15,7 @@ import {
   promotedAuditFindingsPath,
   promotedAuditReportPath,
   readOptionalTextFile,
+  reportDiscardedReflections,
 } from "audit-tools/shared";
 import type { AuditFindingsReport } from "audit-tools/shared";
 import { readOptionalJsonFile } from "audit-tools/shared";
@@ -58,8 +59,10 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
   const feedbackText = await readOptionalTextFile(
     join(artifactsDir, AGENT_FEEDBACK_FILENAME),
   );
+  const feedback = feedbackText ? parseReflectionsNdjson(feedbackText) : undefined;
+  if (feedback) reportDiscardedReflections(feedback.discarded, "audit-code resynthesize");
   const markdown = renderAuditReportMarkdown(normalized, {
-    reflections: feedbackText ? parseReflectionsNdjson(feedbackText) : undefined,
+    reflections: feedback?.reflections,
     conceptual_adjudication:
       await readOptionalJsonFile<ConceptualReviewAdjudication>(
         join(artifactsDir, "conceptual_review_adjudication.json"),

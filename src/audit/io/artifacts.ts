@@ -67,6 +67,7 @@ import {
   readOptionalJsonFile,
   readOptionalNdjsonFile,
   readOptionalTextFile,
+  reportDiscardedReflections,
   throwOnSchemaVersionMismatch,
   writeJsonFile,
   writeNdjsonFile,
@@ -413,7 +414,9 @@ export async function loadArtifactBundle(
     join(root, AGENT_FEEDBACK_FILENAME),
   );
   if (feedbackText !== undefined) {
-    bundle.agent_reflections = parseReflectionsNdjson(feedbackText);
+    const feedback = parseReflectionsNdjson(feedbackText);
+    bundle.agent_reflections = feedback.reflections;
+    reportDiscardedReflections(feedback.discarded, "audit-code");
   }
   // The submission ledger rides the same read-only NDJSON seam: absent (a run
   // where nothing was ever submitted through a gate) reads as nothing to say.

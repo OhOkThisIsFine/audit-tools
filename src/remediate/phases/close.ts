@@ -9,6 +9,7 @@ import {
   readOptionalJsonFile,
   readOptionalTextFile,
   renderProcessFeedbackSection,
+  reportDiscardedReflections,
   stagedAndUntracked,
   writeJsonFile,
   writeTextFile,
@@ -1976,6 +1977,10 @@ export async function runClosePhase(
   const feedbackText = await readOptionalTextFile(
     join(options.artifactsDir, AGENT_FEEDBACK_FILENAME),
   );
+  const closeFeedback = feedbackText
+    ? parseReflectionsNdjson(feedbackText)
+    : { reflections: [], discarded: [] };
+  reportDiscardedReflections(closeFeedback.discarded, "remediate-code");
   const reportContent = buildRemediationReportMarkdown(
     state,
     entries,
@@ -1983,7 +1988,7 @@ export async function runClosePhase(
     e2eResult.ran ? e2eResult.passed : undefined,
     outcomesReport,
     combinedTest,
-    feedbackText ? parseReflectionsNdjson(feedbackText) : [],
+    closeFeedback.reflections,
   );
 
   // Enrich the coverage ledger with never-planned payloads NOW, from the live

@@ -365,6 +365,7 @@ export {
 export {
   AGENT_FEEDBACK_FILENAME,
   parseReflectionsNdjson,
+  reportDiscardedReflections,
   aggregateReflections,
   renderProcessFeedbackSection,
   ReflectionClaritySchema,
