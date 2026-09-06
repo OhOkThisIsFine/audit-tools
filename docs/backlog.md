@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 252 entr(y/ies) indexed.
+> and at commit). 253 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -190,14 +190,15 @@
 - `forward-tracks.md:101` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
 - `forward-tracks.md:109` — Deterministic analyzers: own-vs-acquire engine.
 - `forward-tracks.md:124` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:131` — `preferredExecutor` is a MODE, and the step-command scaffold serves only one of the two (2026-09-05).
-- `forward-tracks.md:142` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:154` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:168` — Fill the plan's `test_command` / `e2e_command` from the persisted project facts, not from the LLM extraction (2026-09-04, owner-directed follow-up).
-- `forward-tracks.md:179` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
-- `forward-tracks.md:188` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
-- `forward-tracks.md:213` — ▶ Audit-tools deep-review acceptance benchmark still needs its external run.
-- `forward-tracks.md:235` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:131` — ▶ Hotspot #7 — `ingestRemediationHostResults` still interleaves validation, verification and mutation (2026-09-05).
+- `forward-tracks.md:144` — `preferredExecutor` is a MODE, and the step-command scaffold serves only one of the two (2026-09-05).
+- `forward-tracks.md:155` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:167` — Wave-friendly host dispatch: run identity survives partial ingest.
+- `forward-tracks.md:181` — Fill the plan's `test_command` / `e2e_command` from the persisted project facts, not from the LLM extraction (2026-09-04, owner-directed follow-up).
+- `forward-tracks.md:192` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:201` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
+- `forward-tracks.md:226` — ▶ Audit-tools deep-review acceptance benchmark still needs its external run.
+- `forward-tracks.md:248` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 

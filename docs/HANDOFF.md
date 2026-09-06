@@ -28,15 +28,20 @@
 
 ## Immediate next
 
-The external 5-primary + 5-held-out paired benchmark run described in
-[`forward-tracks.md`](backlog/forward-tracks.md) is the pinned forward track.
+**Hotspot #7** is the one unlanded item of the 2026-09-05 duplication-and-complexity sweep;
+the other twelve shipped on 2026-09-05. Its spec and its blockers are in
+[`forward-tracks.md`](backlog/forward-tracks.md), pinned. Do the characterization lock
+before the split: it is a fail-closed ingestion boundary whose own plan names fail-open
+regression as the highest risk.
 
-The dispatch-routed leg-2 sweep has now run unattended and is proven: 98 of 98 entries
-classified, all on `free-pool`, zero errored after one retry of a single empty-output lane.
+Every plan in that sweep was re-checked against HEAD before implementation, and the record of
+what did not hold is [`refactor-plan-verification-2026-09-05.md`](reviews/refactor-plan-verification-2026-09-05.md).
+Read the brief for an item before implementing it — three plans would have caused a regression
+if followed as written, and the Hotspot #7 brief is one of the nine.
 
-The next lap that commits from this checkout is the first to do so through git's own hook
-in ordinary work; read the gate's stderr on that commit as the acceptance evidence for P53.
-Read a run's own `<out>-coverage.json` stamp before trusting its leg-2 report.
+**P53 has its acceptance evidence.** The commit gate fired at git's own boundary during ordinary
+work and REFUSED two commits: a stray doc absent from the manifest, and a constitutional-doc
+rewrite with no owner override. Both refusals were correct and both named their fix.
 
 ## Deliberate state, not bugs
 
@@ -60,10 +65,11 @@ Read a run's own `<out>-coverage.json` stamp before trusting its leg-2 report.
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 1 pinned item(s).
+> `verify:checks` and at commit). 2 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
+- ▶ Hotspot #7 — `ingestRemediationHostResults` still interleaves validation, verification and mutation (2026-09-05). · [`forward-tracks.md`](backlog/forward-tracks.md)
 - ▶ Audit-tools deep-review acceptance benchmark still needs its external run. · [`forward-tracks.md`](backlog/forward-tracks.md)
 
 <!-- END GENERATED ROADMAP -->
