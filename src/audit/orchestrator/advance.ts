@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
 import { decideNextStep, findObligation, PRIORITY } from "./nextStep.js";
+import { deriveObligationState } from "./obligationDerive.js";
 import { deriveAuditState } from "./state.js";
 import { computeArtifactMetadata } from "./artifactMetadata.js";
 import { EXECUTOR_RUNNERS } from "./executorRunners.js";
@@ -577,51 +578,6 @@ interface DrainCtx {
 
 type DrainObligation = ObligationDef<ArtifactBundle, DrainCtx, AdvanceAuditResult>;
 type DrainOutcome = ObligationOutcome<ArtifactBundle, AdvanceAuditResult>;
-
-/**
- * `derive` for one PRIORITY id: the same holistic `deriveAuditState` scan
- * `decideNextStep` runs, narrowed to this id's own missing/stale/satisfied
- * state. A pruned/absent obligation (e.g. `friction_capture_current`, which
- * `deriveAuditState` never emits — see `executorRunners.ts`) is satisfied, so
- * the scan can never select it — preserving today's "unreachable" behavior.
- *
- * MEMOIZED per bundle object identity: `findNextObligation` calls every def's
- * `derive` on the SAME bundle each scan (one scan per fold iteration), and
- * `deriveAuditState` runs the full `computeStaleArtifacts` content-hash pass —
- * without the cache each scan would recompute it |PRIORITY| times (~8-9x the
- * hand loop's per-iteration derivation count). The cache is a per-`advanceAudit`
- * -call `WeakMap` created in `advanceAudit` (never module-level, so a caller
- * that mutates a bundle in place between calls can never observe a stale
- * entry); bundle identity changes exactly at each `transition`
- * (`runSingleAdvanceStep` builds a fresh `finalizedBundle`), so the memo
- * yields exactly one derivation per scanned bundle. Pure memoization — WHAT is
- * derived is unchanged, and `deriveAuditState` itself is deterministic in the
- * bundle (no time/randomness inputs).
- */
-export function deriveObligationState(
-  id: string,
-  cache: WeakMap<ArtifactBundle, AuditState>,
-): (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied" {
-  return (bundle) => {
-    if (bundle.audit_state?.status === "complete") return "satisfied";
-    let state = cache.get(bundle);
-    if (!state) {
-      // The memo is keyed on bundle IDENTITY, which changes at every transition
-      // (`runSingleAdvanceStep` builds a fresh `finalizedBundle`) — and the gate can
-      // only change via a promotion, which is itself a transition. So a cache entry
-      // can never outlive the delta it was derived under.
-      state = deriveAuditState(bundle, {
-        emitStaleness: false,
-      });
-      cache.set(bundle, state);
-    }
-    const found = state.obligations.find((o) => o.id === id);
-    if (!found) return "satisfied";
-    return found.state === "missing" || found.state === "stale"
-      ? found.state
-      : "satisfied";
-  };
-}
 
 /**
  * Merge one step's outputs into the running drain accumulators — artifacts

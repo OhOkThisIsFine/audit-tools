@@ -112,6 +112,7 @@ import {
 } from "../orchestrator/nextStep.js";
 import { isHostDelegationExecutor } from "../orchestrator/executors.js";
 import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
+import { deriveObligationState } from "../orchestrator/obligationDerive.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 import type { EdgeReasonRewrite } from "../orchestrator/edgeReasoning.js";
@@ -2569,49 +2570,6 @@ async function runDeterministicExecutor(
   // construction. A disk reload here would read the fold's pre-state and
   // silently roll back everything the fold has done (persist-once).
   return { kind: "transition", state: result.updated_bundle };
-}
-
-/**
- * `derive` for an audit obligation: look up its precomputed satisfaction state
- * from `deriveAuditState` — the holistic content-hash staleness pass that
- * computes EVERY obligation's state in one scan (`state.ts`). A pruned/absent
- * obligation is satisfied. `decideNextStep`'s persisted-`complete` short-circuit
- * yields an all-satisfied scan (no actionable obligation), which `advance`
- * surfaces as `step === null` → the post-fold terminal.
- */
-function deriveObligationState(
-  id: string,
-  cache: WeakMap<ArtifactBundle, AuditState>,
-): (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied" {
-  return (bundle) => {
-    if (bundle.audit_state?.status === "complete") return "satisfied";
-    let state = cache.get(bundle);
-    if (!state) {
-      // MEMOIZED per bundle IDENTITY, exactly as the plan draw's namesake in
-      // `orchestrator/advance.ts` is — and for the same reason. `advance` scans
-      // by calling EVERY registered def's `derive`, so without this the fold
-      // ran the holistic `deriveAuditState` once PER OBLIGATION per scan: 25
-      // full staleness passes to answer one question (the regression
-      // `6145a1a3` measured and memoized away).
-      //
-      // The key is safe for the same reason it is safe there: identity changes
-      // at every transition (each one carries a fresh bundle), and the
-      // `complete` gate above can only flip via a transition. So an entry can
-      // never outlive the state it was derived under.
-      //
-      // EMIT-OFF, like every in-fold derivation (CX-02): the fold's DRIVER
-      // emits the ONE consolidated staleness record at its boundary — the
-      // preserve-list contract — so a derive that emitted per scan miss would
-      // turn one call's cascade back into a record per carried bundle.
-      state = deriveAuditState(bundle, { emitStaleness: false });
-      cache.set(bundle, state);
-    }
-    const found = state.obligations.find((o) => o.id === id);
-    if (!found) return "satisfied";
-    return found.state === "missing" || found.state === "stale"
-      ? found.state
-      : "satisfied";
-  };
 }
 
 /**

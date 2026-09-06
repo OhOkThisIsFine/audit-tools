@@ -10,13 +10,15 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const {
   advanceAudit,
-  deriveObligationState,
   engineMaxTransitions,
   ExecutorFailure,
   findExecutorFailure,
   findPriorityOrderingViolations,
   MAX_DRAIN_STEPS,
 } = await import("../../src/audit/orchestrator/advance.js");
+const { deriveObligationState } = await import(
+  "../../src/audit/orchestrator/obligationDerive.js"
+);
 const { decideNextStep, PRIORITY } = await import("../../src/audit/orchestrator/nextStep.js");
 const { EXECUTOR_RUNNERS } = await import(
   "../../src/audit/orchestrator/executorRunners.js"
