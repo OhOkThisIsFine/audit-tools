@@ -858,7 +858,7 @@ const REPO_LANE_REMEDIES = defineRemedies({
       forms: [
         {
           tool_name: 'Bash',
-          command: 'cd C:/tmp && claude -p "review" --allowedTools Bash,Read',
+          command: 'cd /tmp && claude -p "review" --allowedTools Bash,Read',
         },
       ],
     },
