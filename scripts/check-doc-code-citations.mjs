@@ -145,6 +145,38 @@ function stripLineSuffix(token) {
   return token.replace(/:[~\d][\d,~–-]*$/, "");
 }
 
+/** Does this token carry a line-anchor suffix at all? */
+function hasLineSuffix(token) {
+  return stripLineSuffix(token) !== token;
+}
+
+/**
+ * A line anchor into SOURCE is refused; into anything else it is allowed.
+ *
+ * Owner preference, 2026-09-06: *"in general we should make citations refer to
+ * symbols and not line numbers"*. The reason is decay, not style — a line number
+ * is wrong the moment anything is inserted above it, and this gate proves the
+ * point: it resolves the PATH and has always thrown the line suffix away, so a
+ * citation could rot to a completely unrelated statement and every check stayed
+ * green. A symbol name survives every edit that does not rename it, and a rename
+ * is exactly when the citation SHOULD break.
+ */
+const CODE_EXTENSIONS = new Set(["ts", "tsx", "mjs", "cjs", "js", "jsx"]);
+
+/**
+ * ⚠ The rule needs NO exclusion list of its own, and adding one would be a second
+ * home for a decision the doc manifest already owns. This gate scans only the
+ * docs the manifest does not exclude — 54 of 209 tracked markdown files — and the
+ * two classes that carry essentially every line anchor are already outside it:
+ * generated tool output under the runtime state dirs, and dated review records.
+ *
+ * Measured 2026-09-06, which is why that matters: 2,781 code line anchors live
+ * under the runtime state dirs and 935 in dated review records, against ZERO in
+ * the living authored docs this gate reads. So the rule starts green, and it
+ * binds exactly the documents a person maintains by hand. To widen it to either
+ * class, change the manifest's excluded row — not this file.
+ */
+
 const PATTERN_CHARS = /[*{<>…]/;
 const HAS_EXTENSION = /\.([A-Za-z0-9]+)$/;
 
@@ -214,6 +246,8 @@ function main() {
   // Pass 1 — collect classified citation records, so gitignore scoping can run
   // as ONE batched git call over every candidate instead of a spawn per token.
   const records = [];
+  /** Line anchors into source, collected by the same scan. */
+  const lineAnchors = [];
   for (const relPath of markdown) {
     const lines = readFileSync(join(root, relPath), "utf8").split("\n");
     lines.forEach((line, i) => {
@@ -227,6 +261,16 @@ function main() {
         const exempt =
           EXEMPT_MARKER.test(line) || (i > 0 && EXEMPT_MARKER.test(lines[i - 1]));
         const base = { relPath, line: i + 1, token, exempt };
+
+        // The line-anchor rule rides the same scan: this loop already has the
+        // token, the line and the exemption, so a second pass over the corpus
+        // would only be a second place to keep in step with this one.
+        if (!exempt && hasLineSuffix(token)) {
+          const ext = HAS_EXTENSION.exec(path);
+          if (ext && CODE_EXTENSIONS.has(ext[1].toLowerCase())) {
+            lineAnchors.push({ relPath, line: i + 1, token, path });
+          }
+        }
 
         if (path.endsWith("/")) {
           const dir = path.replace(/\/+$/, "");
@@ -317,10 +361,28 @@ function main() {
     process.exit(1);
   }
 
+  if (lineAnchors.length > 0) {
+    console.error(
+      `check-doc-code-citations: ${lineAnchors.length} citation(s) anchor to a LINE NUMBER in source:`,
+    );
+    for (const a of lineAnchors) {
+      console.error(`  ${a.relPath}:${a.line}  \`${a.token}\``);
+    }
+    console.error(
+      "\nCite the SYMBOL instead — the function, type, constant or export, and the file that holds " +
+        "it. A line number is wrong as soon as anything is inserted above it, and this gate resolves " +
+        "only the PATH, so a rotted anchor stays green forever. Write `renderContractRepairPrompt` in " +
+        "`src/remediate/steps/contractPipelinePrompts.ts`, not `contractPipelinePrompts.ts:566`.\n" +
+        "When there is genuinely no symbol to name — a data row, a config line — keep the anchor and " +
+        "put `<!-- doc-citation-exempt: <reason> -->` on the line above it, saying what is at that line.",
+    );
+    process.exit(1);
+  }
+
   console.log(
     `check-doc-code-citations: ${counts.path} path + ${counts.dir} directory + ` +
       `${counts.bare} bare-filename citation(s) across ${markdown.length} tracked docs — ` +
-      `every one resolves.`,
+      `every one resolves, and none anchors to a source line.`,
   );
 }
 

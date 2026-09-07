@@ -63,19 +63,67 @@ describe("check-doc-code-citations — backticked repo paths must name tracked f
     rmSync(repo.dir, { recursive: true, force: true });
   });
 
-  it("PASSES when every citation resolves — including a stripped :line suffix", () => {
+  it("PASSES when every citation resolves and none anchors to a source line", () => {
     write(repo.dir, "src/thing.ts", "export const x = 1;\n");
-    write(
-      repo.dir,
-      "docs/a.md",
-      "See `src/thing.ts` and the anchor form `src/thing.ts:42` and range `src/thing.ts:10-20`.\n",
-    );
+    write(repo.dir, "docs/a.md", "See `src/thing.ts` for the shape.\n");
     repo.git("add", "-A");
     const { code, out } = runChecker(repo.dir);
     expect(code, `expected green, got:\n${out}`).toBe(0);
     expect(out).toMatch(/every one resolves/);
     // The tally reports all three citation classes, not just slashed file paths.
     expect(out).toMatch(/\d+ path \+ \d+ directory \+ \d+ bare-filename citation\(s\)/);
+  });
+
+  // Owner preference, 2026-09-06: cite symbols, not line numbers. The reason is
+  // decay — this gate resolves the PATH and strips the line suffix, so before
+  // this rule a citation could rot to a completely unrelated statement and every
+  // check stayed green. The suffix is STILL stripped for path resolution; what
+  // changed is that a source anchor is now refused rather than ignored.
+  // ⚠ The fixture repo is shared by every case in this describe (beforeAll), so a
+  // RED case must delete its own document or it reddens every case after it.
+  it("is RED on a citation that anchors to a line number in source", () => {
+    write(repo.dir, "src/thing.ts", "export const x = 1;\n");
+    write(repo.dir, "docs/anchor-red.md", "See the anchor form `src/thing.ts:42`.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected red, got:\n${out}`).toBe(1);
+    expect(out).toMatch(/anchor to a LINE NUMBER in source/);
+    expect(out).toMatch(/src\/thing\.ts:42/);
+    // The refusal must teach the replacement, not merely forbid the form.
+    expect(out).toMatch(/Cite the SYMBOL instead/);
+    rmSync(join(repo.dir, "docs", "anchor-red.md"));
+  });
+
+  it("is RED on a line RANGE just as on a single line", () => {
+    write(repo.dir, "src/thing.ts", "export const x = 1;\n");
+    write(repo.dir, "docs/anchor-range-red.md", "See range `src/thing.ts:10-20`.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected red, got:\n${out}`).toBe(1);
+    expect(out).toMatch(/anchor to a LINE NUMBER in source/);
+    rmSync(join(repo.dir, "docs", "anchor-range-red.md"));
+  });
+
+  it("allows a line anchor into a NON-source file, where there is no symbol to name", () => {
+    // A data row or a config line has no enclosing symbol, so the rule would be
+    // demanding something that does not exist.
+    write(repo.dir, "data/rows.json", "{}\n");
+    write(repo.dir, "docs/anchor-nonsource.md", "The row at `data/rows.json:12` is the odd one.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+  });
+
+  it("an exempt marker suppresses a source line anchor, for the genuinely symbol-less case", () => {
+    write(repo.dir, "src/thing.ts", "export const x = 1;\n");
+    write(
+      repo.dir,
+      "docs/anchor-exempt.md",
+      "<!-- doc-citation-exempt: a bare data line, no enclosing symbol -->\nSee `src/thing.ts:42`.\n",
+    );
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
   });
 
   it("is RED on a citation of a non-tracked path under a tracked top-level dir", () => {
@@ -220,7 +268,10 @@ describe("check-doc-code-citations — backticked repo paths must name tracked f
     write(
       repo.dir,
       "docs/bare-green.md",
-      "Entries live in `package.json`; the helper is `thing.ts`, anchored as `thing.ts:1`.\n",
+      // The anchored form uses a NON-source file: suffix stripping is what this
+      // case pins, and a source anchor is separately refused by the line-anchor
+      // rule, which would make this fixture fail for an unrelated reason.
+      "Entries live in `package.json`; the helper is `thing.ts`, anchored as `package.json:1`.\n",
     );
     repo.git("add", "-A");
     const { code, out } = runChecker(repo.dir);
