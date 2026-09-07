@@ -349,7 +349,7 @@ await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDA
   expect(prompt).toMatch(new RegExp(`Mandatory lenses \\(${MANDATORY_LENSES.join(", ")}\\)`));
 });
 
-await test("renderConfirmIntentPrompt asks for conceptual design-review depth (default shallow) and offers it in the JSON shape", async () => {
+await test("renderConfirmIntentPrompt proposes deep for a bare full audit and offers it in the JSON shape", async () => {
   const prompt = renderConfirmIntentPrompt(
     {
       mode: "full",
@@ -368,11 +368,39 @@ await test("renderConfirmIntentPrompt asks for conceptual design-review depth (d
     },
   );
   expect(prompt).toMatch(/Conceptual design-review depth/);
-  expect(prompt).toMatch(/shallow.*\(default\)/);
+  expect(prompt).toMatch(/proposed.*\*\*deep\*\*/);
+  expect(prompt).toMatch(/- \*\*shallow\*\* — a single conceptual reviewer/);
   expect(prompt).toMatch(/\bdeep\b/);
   // The depth choice is part of the single confirmation round, and offered in the JSON shape.
   expect(prompt).toMatch(/Ask the conceptual design-review depth/);
-  expect(prompt).toMatch(/"design_review":\s*\{\s*"conceptual_depth":\s*"shallow",\s*"perspectives":\s*5\s*\}/);
+  expect(prompt).toMatch(/"design_review":\s*\{\s*"conceptual_depth":\s*"deep",\s*"perspectives":\s*5\s*\}/);
+});
+
+await test("depth proposal keeps targeted full audits and bare delta audits shallow", async () => {
+  const base = {
+    since: null,
+    files_in_scope: 1,
+    scope_dirs: [{ dir: "src", files: 1 }],
+    excluded_summary: [],
+    disposition_override_proposals: [],
+    lens_propositions: [],
+    docs_digest: [],
+    mis_scope_smells: [],
+  };
+  const opts = {
+    intentCheckpointPath: "/repo/intent.json",
+    continueCommand: "next",
+  };
+  const targeted = renderConfirmIntentPrompt(
+    { ...base, mode: "full" },
+    { ...opts, intentSummary: "targeted review of src/a.ts" },
+  );
+  expect(targeted).toMatch(/proposed.*\*\*shallow\*\*/);
+  expect(targeted).toMatch(/"conceptual_depth":\s*"shallow"/);
+
+  const delta = renderConfirmIntentPrompt({ ...base, mode: "delta" }, opts);
+  expect(delta).toMatch(/proposed.*\*\*shallow\*\*/);
+  expect(delta).toMatch(/"conceptual_depth":\s*"shallow"/);
 });
 
 // ── Validation ──────────────────────────────────────────────────────────────

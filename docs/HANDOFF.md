@@ -31,10 +31,11 @@
 
 ## Immediate next
 
-**Complete the deep-review quality comparison with an executor that meets the pinned
-budget contract.** The corrected local executor reached review dispatch, but the bounded
-diagnostic produced six of seven results before timeout; context/output/turn caps remain
-unenforced. Evidence and limits are in
+**Finish the active pipeline-quality lap.** The shared JSON byte-marker fix is committed
+on `codex/pipeline-quality` but is not released. Regression fixes for bare full-audit
+depth and benchmark objective forwarding are being verified. The AGY calibration ended
+shallow and over budget; a lean external host is being calibrated before the complete
+paired comparison. Evidence and limits are in
 [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
 No quality score exists; successful preflight and contract tests are not acceptance.
 

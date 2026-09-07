@@ -24,13 +24,15 @@ const RENDERED_EXCERPT_CHARS = 500;
 export function proposeConceptualDepth(
   intentSummary?: string,
   freeFormIntent?: string,
+  scopeMode: ScopePreDigest["mode"] = "full",
 ): "shallow" | "deep" {
   const text = `${intentSummary ?? ""} ${freeFormIntent ?? ""}`.toLowerCase();
   if (/\b(?:src|lib|test|tests|app|packages?)\/[\w./-]+\b|\bnamed files?\b|\btightly scoped\b|\b(?:the )?(?:api layer|authentication module|subsystem|module)\b/.test(text)) return "shallow";
   if (/\b(quick|brief|low[- ]?cost|cheap|named[- ]file|specific file|tightly scoped|single file|targeted)\b/.test(text)) {
     return "shallow";
   }
-  return /\b(?:full[- ]audit|complete[- ]audit|full audit|complete audit|comprehensive|(?:repository|codebase)[- ]wide audit|full[- ]repository|whole[- ]repository|whole[- ]codebase|entire (?:repository|codebase|project)|whole repo|whole codebase)\b/.test(text)
+  if (scopeMode === "full" && text.trim().length === 0) return "deep";
+  return /\b(?:full|complete)[- ](?:audit|review|repository|codebase|repo|project)\b|\bcomprehensive\b|\b(?:repository|codebase)[- ]wide audit\b|\bwhole[- ](?:repository|codebase|repo)\b|\bentire (?:repository|codebase|project)\b/.test(text)
     ? "deep"
     : "shallow";
 }
@@ -131,7 +133,7 @@ export function renderConfirmIntentPrompt(
   const mandatoryLensList = MANDATORY_LENSES.join(", ");
   const unresolvedClauses = opts.unresolvedConstraintClauses ?? [];
   const hasBlockingClauses = unresolvedClauses.length > 0;
-  const proposedDepth = proposeConceptualDepth(opts.intentSummary, opts.freeFormIntent);
+  const proposedDepth = proposeConceptualDepth(opts.intentSummary, opts.freeFormIntent, preDigest.mode);
 
   return [
     `# Confirm Audit Scope and Intent\n\nConceptual review depth proposed for this intent: **${proposedDepth}**. Confirm or change it; this choice is fresh for each run.`,
@@ -254,7 +256,7 @@ export function renderConfirmIntentPrompt(
     "The audit runs a conceptual design-review pass (philosophy / alternatives /",
     "better directions, distinct from the contract pass). Choose its depth:",
     "",
-    "- **shallow** *(default)* — a single conceptual reviewer. Faster, cheaper.",
+    "- **shallow** — a single conceptual reviewer. Faster, cheaper.",
     `- **deep** — fan out ${DEFAULT_CONCEPTUAL_PERSPECTIVES} independent reviewers, each with a maximally`,
     "  dissimilar value system, then compile via an independent judge. Surfaces more,",
     "  costs more. The default perspectives are:",
@@ -278,7 +280,7 @@ export function renderConfirmIntentPrompt(
     "   recommend-include / recommend-exclude). Do NOT re-confirm or even mention the",
     "   mandatory lenses — they are always on. The user may add **any number** of",
     "   additional custom lenses (freeform names).",
-    "3. Ask the conceptual design-review depth (default **shallow**).",
+    `3. Ask the conceptual design-review depth (proposed **${proposedDepth}** for this intent). The choice is fresh each run and remains the user's confirmation.`,
     "4. Wait for the user to confirm before proceeding.",
     "",
     "Record the result in `lens_selection`: optional + custom lenses the user wants",
@@ -325,16 +327,13 @@ export function renderConfirmIntentPrompt(
     "- `lens_selection.include` and `lens_selection.exclude` accept both canonical",
     "  and custom lens names. Custom lenses generate tasks using the unit's files",
     "  with context derived from the lens name and `free_form_intent`.",
-    "- `design_review.conceptual_depth` is `shallow` (default) or `deep`; on `deep`,",
+    "- `design_review.conceptual_depth` is `shallow` (schema default) or `deep`; on `deep`,",
     "  `perspectives` bounds the parallel-reviewer fan-out. Omit for shallow.",
     "- Leave the optional fields out to audit the full discovered scope.",
     "",
     `Then run: ${opts.continueCommand}`,
     "",
   ].join("\n").replace(
-    "3. Ask conceptual design-review depth (default **shallow**).",
-    `3. Ask conceptual design-review depth (default **shallow**; proposed **${proposedDepth}** for this intent). The choice is fresh each run and remains the user's confirmation.`,
-  ).replace(
     '"design_review": { "conceptual_depth": "shallow", "perspectives": 5 }',
     `"design_review": { "conceptual_depth": "${proposedDepth}", "perspectives": 5 }`,
   );

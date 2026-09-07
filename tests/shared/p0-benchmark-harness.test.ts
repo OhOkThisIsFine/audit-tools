@@ -9,7 +9,8 @@ import {
   evaluateBenchmarkScores,
   validateBenchmarkManifest,
 } from "../../benchmarks/p0/runner.mjs";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
@@ -322,9 +323,11 @@ describe("P0 benchmark harness manifest", () => {
       { step_id: "s2", prompt_path: "p2.md", prompt: "second" },
       { step_id: "s3", step_kind: "present_report", complete: true },
     ];
+    const candidateRequest = { protocol: "p0-request-v1", request_id: "pair-A", pair_id: "pair", arm: "A", prompt: "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior.", pinned_profile: shared, snapshot: "held-out" };
     let i = 0;
     const result = await runCandidateArm({
       auditCode: "audit-code.mjs", snapshotRoot: "C:/snapshots/held-out", pinnedProfile: shared, maxSteps: 3,
+      candidateRequest,
       invokeCommand: async (argv: string[]) => { argvCalls.push(argv); },
       readCurrentStep: async () => steps[i++],
       readPrompt: async (path: string) => { promptPaths.push(path); return path === "p1.md" ? "first" : "second"; },
@@ -341,6 +344,11 @@ describe("P0 benchmark harness manifest", () => {
     }
     expect(promptPaths).toEqual(["p1.md", "p2.md"]);
     expect(requests).toHaveLength(2);
+    expect(requests[0]).toEqual(expect.objectContaining({
+      prompt: "first",
+      candidate_prompt: "Run the ordinary comprehensive /audit-code workflow with P0 benchmark behavior.",
+      candidate_request_digest: createHash("sha256").update(JSON.stringify(candidateRequest)).digest("hex"),
+    }));
 
     const help = spawnSyncHidden(process.execPath, ["benchmarks/p0/runner.mjs", "--help"], { encoding: "utf8" });
     expect(help.status).toBe(0);
@@ -352,6 +360,156 @@ describe("P0 benchmark harness manifest", () => {
     expect(help.stdout).toMatch(/score/);
     const unknown = spawnSyncHidden(process.execPath, ["benchmarks/p0/runner.mjs", "unknown-command"], { encoding: "utf8" });
     expect(unknown.status).not.toBe(0);
+  });
+
+  test("production run preserves the prepared candidate objective beside each backend step prompt", () => {
+    const root = mkdtempSync(resolve(tmpdir(), "p0-run-integration-"));
+    try {
+      const repoRoot = resolve(root, "repo");
+      mkdirSync(repoRoot, { recursive: true });
+      const auditCode = resolve(repoRoot, "audit-code.mjs");
+      writeFileSync(
+        auditCode,
+        [
+          'import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";',
+          'import { join } from "node:path";',
+          'const root = process.argv[process.argv.indexOf("--root") + 1];',
+          'const state = join(root, ".p0-step-count");',
+          'const count = existsSync(state) ? Number(readFileSync(state, "utf8")) + 1 : 1;',
+          'writeFileSync(state, String(count));',
+          'const steps = join(root, ".audit-tools", "audit", "steps");',
+          'mkdirSync(steps, { recursive: true });',
+          'const current = join(steps, "current-step.json");',
+          'if (count === 1) {',
+          '  writeFileSync(join(root, "candidate-step.md"), "backend-generated prompt");',
+          '  writeFileSync(current, JSON.stringify({ step_kind: "review", prompt_path: "candidate-step.md" }));',
+          '} else {',
+          '  const report = join(root, ".audit-tools", "audit", "audit-report.md");',
+          '  mkdirSync(join(root, ".audit-tools", "audit"), { recursive: true });',
+          '  writeFileSync(report, "# Candidate report\\n");',
+          '  writeFileSync(current, JSON.stringify({ step_kind: "present_report", status: "complete", complete: true, artifact_paths: { final_report: report } }));',
+          '}',
+          'console.log(JSON.stringify({ artifact_paths: { current_step: current } }));',
+        ].join("\n"),
+      );
+      const fixture = resolve(repoRoot, "fixture.js");
+      writeFileSync(fixture, "export const fixture = true;\\n");
+      spawnSyncHidden("git", ["init"], { cwd: repoRoot, encoding: "utf8" });
+      for (const args of [
+        ["config", "user.email", "p0@example.invalid"],
+        ["config", "user.name", "P0 Test"],
+        ["add", "."],
+        ["commit", "-m", "fixture"],
+      ]) {
+        const result = spawnSyncHidden("git", args, { cwd: repoRoot, encoding: "utf8" });
+        expect(result.status).toBe(0);
+      }
+      const revision = spawnSyncHidden("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" });
+      expect(revision.status).toBe(0);
+      const profile = { ...shared, repo_commit: revision.stdout.trim() };
+      const corpus = resolve(root, "held-out-corpus");
+      mkdirSync(corpus, { recursive: true });
+      writeFileSync(resolve(corpus, "fixture.js"), "export const heldOut = true;\\n");
+      const corpusDigest = createHash("sha256")
+        .update("fixture.js")
+        .update("\0")
+        .update(readFileSync(resolve(corpus, "fixture.js")))
+        .update("\0")
+        .digest("hex");
+      const manifest = {
+        ...validManifest,
+        shared: profile,
+        primary: { pairs: validManifest.primary.pairs.map((pair) => ({ ...pair, pinned: profile })) },
+        held_out: {
+          pairs: validManifest.held_out.pairs.map((pair) => ({ ...pair, pinned: profile })),
+          corpus: { path: corpus, deterministic_tree_digest: true, sha256: corpusDigest },
+        },
+      };
+      const manifestPath = resolve(root, "manifest.json");
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      const runner = resolve("benchmarks/p0/runner.mjs");
+      const preparedRoot = resolve(root, "prepared");
+      const prepared = spawnSyncHidden(
+        process.execPath,
+        [runner, "prepare", "--manifest", manifestPath, "--output", preparedRoot],
+        { cwd: repoRoot, encoding: "utf8" },
+      );
+      expect(prepared.status, `${prepared.stderr}\n${prepared.stdout}`).toBe(0);
+      const requestsPath = resolve(preparedRoot, "requests.public.json");
+      const identityPath = resolve(preparedRoot, "identity.private.json");
+      const executor = resolve(root, "executor.mjs");
+      const executorLog = resolve(root, "executor-requests.jsonl");
+      writeFileSync(
+        executor,
+        [
+          'import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";',
+          'import { createHash } from "node:crypto";',
+          'import { dirname, join } from "node:path";',
+          'const value = (flag) => process.argv[process.argv.indexOf(flag) + 1];',
+          'const requestPath = value("--request");',
+          'const responsePath = value("--response");',
+          'const request = JSON.parse(readFileSync(requestPath, "utf8"));',
+          `appendFileSync(${JSON.stringify(executorLog)}, JSON.stringify(request) + "\\n");`,
+          'const suffix = String(request.step_id ?? "control").replaceAll(/[^a-z0-9_.-]/gi, "_");',
+          'const artifactPath = join(dirname(responsePath), `${request.request_id ?? "candidate"}-${suffix}.md`);',
+          'const bytes = Buffer.from("# Executor artifact\\n");',
+          'writeFileSync(artifactPath, bytes);',
+          'mkdirSync(dirname(responsePath), { recursive: true });',
+          'writeFileSync(responsePath, JSON.stringify({ protocol: "p0-executor-response-v1", request_digest: createHash("sha256").update(JSON.stringify(request)).digest("hex"), pinned_profile: request.pinned_profile, artifact_path: artifactPath, artifact_sha256: createHash("sha256").update(bytes).digest("hex") }));',
+        ].join("\n"),
+      );
+      const run = spawnSyncHidden(
+        process.execPath,
+        [
+          runner,
+          "run",
+          "--manifest",
+          manifestPath,
+          "--requests",
+          requestsPath,
+          "--identity",
+          identityPath,
+          "--executor",
+          process.execPath,
+          "--executor-arg",
+          executor,
+        ],
+        { cwd: repoRoot, encoding: "utf8" },
+      );
+      expect(run.status, `${run.stderr}\n${run.stdout}`).toBe(0);
+      const output = JSON.parse(run.stdout);
+      const requests = JSON.parse(readFileSync(requestsPath, "utf8")).requests;
+      const identity = JSON.parse(readFileSync(identityPath, "utf8"));
+      const executorRequests = readFileSync(executorLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(output.records).toHaveLength(20);
+      expect(executorRequests).toHaveLength(20);
+      for (const request of requests) {
+        const kind = identity.arms[request.pair_id][request.arm];
+        const seen = executorRequests.filter((entry: any) =>
+          kind === "candidate"
+            ? entry.candidate_request_digest ===
+              createHash("sha256").update(JSON.stringify(request)).digest("hex")
+            : entry.request_id === request.request_id,
+        );
+        expect(seen).toHaveLength(1);
+        if (kind === "candidate") {
+          expect(seen[0]).toEqual(expect.objectContaining({
+            prompt: "backend-generated prompt",
+            candidate_prompt: request.prompt,
+            candidate_request_digest: createHash("sha256").update(JSON.stringify(request)).digest("hex"),
+          }));
+          expect(seen[0]).not.toHaveProperty("private_gold");
+        } else {
+          expect(seen[0]).toEqual(expect.objectContaining({ prompt: request.prompt, execution: "standalone" }));
+          expect(seen[0]).not.toHaveProperty("candidate_prompt");
+        }
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("requires every pair to match the manifest shared pinned profile", () => {

@@ -211,10 +211,10 @@ export function bindCandidateTerminalStep(step) {
     complete: step?.complete === true || step?.status === "complete",
   };
 }
-function stepRequest(step, prompt, snapshot_root, pinned_profile) {
+function stepRequest(step, prompt, snapshot_root, pinned_profile, candidateRequest) {
   const step_id = stepIdentity(step);
   if (!isStr(prompt)) throw Error(`missing prompt for step ${step_id}`);
-  return {
+  const request = {
     step_id,
     step_kind: step.step_kind,
     prompt,
@@ -226,6 +226,20 @@ function stepRequest(step, prompt, snapshot_root, pinned_profile) {
     stop_condition: step.stop_condition,
     snapshot_root,
     pinned_profile,
+  };
+  if (candidateRequest === undefined) return request;
+  if (
+    !isObj(candidateRequest) ||
+    candidateRequest.protocol !== "p0-request-v1" ||
+    !isStr(candidateRequest.prompt)
+  )
+    throw Error(`missing prepared candidate request for step ${step_id}`);
+  return {
+    ...request,
+    // The prepared pair prompt is the candidate's original user objective;
+    // `prompt` above is the backend-emitted instruction for this step.
+    candidate_prompt: candidateRequest.prompt,
+    candidate_request_digest: digest(candidateRequest),
   };
 }
 
@@ -259,6 +273,7 @@ export async function runCandidateArm({
   auditCode,
   snapshotRoot,
   pinnedProfile,
+  candidateRequest,
   maxSteps = 20,
   invokeCommand,
   readCurrentStep,
@@ -273,6 +288,12 @@ export async function runCandidateArm({
     throw Error("candidate runner seams required");
   if (!isObj(pinnedProfile) || !isStr(pinnedProfile.repo_commit))
     throw Error("concrete pinned profile required");
+  if (
+    !isObj(candidateRequest) ||
+    candidateRequest.protocol !== "p0-request-v1" ||
+    !isStr(candidateRequest.prompt)
+  )
+    throw Error("concrete prepared candidate request required");
   const seen = new Set();
   let last;
   for (let count = 1; count <= maxSteps; count += 1) {
@@ -301,6 +322,7 @@ export async function runCandidateArm({
         await readPrompt(step.prompt_path),
         snapshotRoot,
         pinnedProfile,
+        candidateRequest,
       ),
     );
   }
@@ -690,12 +712,13 @@ function external(executor, executorArgs, request, dir) {
     throw Error("executor artifact digest failure");
   return response;
 }
-async function candidate({ root, profile, executor, executorArgs, results }) {
+async function candidate({ root, profile, candidateRequest, executor, executorArgs, results }) {
   let currentStepPath;
   return runCandidateArm({
     auditCode: resolve("audit-code.mjs"),
     snapshotRoot: root,
     pinnedProfile: profile,
+    candidateRequest,
     invokeCommand: (argv) => {
       const child = spawnSync(process.execPath, argv.slice(1), {
         encoding: "utf8",
@@ -738,6 +761,7 @@ async function run(path, requestsPath, identityPath, executor, executorArgs) {
   const records = [],
     artifactDir = join(dirname(requestsPath), "raw-artifacts");
   for (const request of requests.requests) {
+    const requestDigest = digest(request);
     const kind = identity.arms?.[request.pair_id]?.[request.arm];
     if (
       !["control", "candidate"].includes(kind) ||
@@ -747,7 +771,7 @@ async function run(path, requestsPath, identityPath, executor, executorArgs) {
     if (kind === "control")
       records.push({
         request_id: request.request_id,
-        request_digest: digest(request),
+        request_digest: requestDigest,
         response: external(
           executor,
           executorArgs,
@@ -775,10 +799,18 @@ async function run(path, requestsPath, identityPath, executor, executorArgs) {
           final_step = await candidate({
             root,
             profile: manifest.shared,
+            candidateRequest: request,
             executor,
             executorArgs,
             results: step_responses,
           });
+        if (
+          step_responses.some(
+            (step) =>
+              step?.request?.candidate_request_digest !== requestDigest,
+          )
+        )
+          throw Error("candidate objective provenance failure");
         const boundFinalStep = bindCandidateTerminalStep(final_step);
         if (
           boundFinalStep.complete !== true ||
@@ -811,7 +843,7 @@ async function run(path, requestsPath, identityPath, executor, executorArgs) {
         copyFileSync(sourceReport, artifact_path);
         records.push({
           request_id: request.request_id,
-          request_digest: digest(request),
+          request_digest: requestDigest,
           final_step: boundFinalStep,
           step_responses,
           snapshot_commit: primary ? manifest.shared.repo_commit : null,
@@ -965,6 +997,8 @@ function validateRawRunRecords(manifest, identity, raw) {
         !isStr(stepRequest.step_id) ||
         stepIds.has(stepRequest.step_id) ||
         !isStr(stepRequest.prompt) ||
+        stepRequest.candidate_prompt !== request.prompt ||
+        stepRequest.candidate_request_digest !== digest(request) ||
         !isStr(stepRequest.snapshot_root) ||
         !equal(stepRequest.pinned_profile, manifest.shared) ||
         !validExecutorResponse(step.response, stepRequest)

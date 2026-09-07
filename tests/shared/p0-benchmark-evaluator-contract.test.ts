@@ -109,6 +109,8 @@ function fixture() {
       protocol: "p0-step-request-v1",
       step_id: `semantic-${index + 1}`,
       prompt: "Review the blinded snapshot and return bound evidence.",
+      candidate_prompt: request.prompt,
+      candidate_request_digest: digest(request),
       artifact_path: `.audit-tools/audit/evidence-${index + 1}.json`,
       snapshot_root: join(root, `snapshot-${index + 1}`),
       pinned_profile: request.pinned_profile,

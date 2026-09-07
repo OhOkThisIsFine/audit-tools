@@ -149,11 +149,35 @@ Two additional setup failures were verified during continuation:
   primary trials require a frozen source fixture that excludes those answer-bearing
   records while preserving the product code and governing documents.
 
-The executor continuation records complete host usage and applies the same
-aggregate acceptance limits to both arms. A missing receipt or a limit overrun
-invalidates an arm. These checks must not be described as token-level interruption
-controls; only the shared wall deadline is enforced during execution. No new
-quality score is claimed from this setup work.
+The AGY continuation ended without a valid audit. Four semantic-review calls in
+its final ledger alone reported 10,211,442 cache-inclusive input tokens and
+29,090 output tokens including thinking, exceeding the 10,000,000 input limit.
+Earlier stages used another ledger, so these are not whole-arm totals. The CLI's
+four reported turns are user turns, not model/tool iterations. The run also used
+shallow review and cannot support a comprehensive quality claim.
+
+Source verification identified two independent depth defects:
+`proposeConceptualDepth` in `src/audit/cli/confirmIntentStep.ts` ignores the
+resolved full-repository scope when the optional intent text is empty; and the
+`run` → `candidate` → `runCandidateArm` chain in `benchmarks/p0/runner.mjs`
+drops the prepared candidate objective before it reaches the external host.
+Both are corrected. Parent verification added the regression tests to the unfixed
+tree and observed two failures, then integrated the implementation and passed all
+69 focused tests. The subprocess test exercises the production runner across all
+twenty requests, verifies the exact candidate objective and its request digest at
+the external boundary, and keeps the control prompt unchanged. The depth proposal,
+confirmation text, and example JSON agree; explicit bounded requests remain shallow.
+The replacement external benchmark host is being calibrated with a pinned free deployment and explicit model calls,
+usage receipts, and bounded tools. It has not yet completed a valid trial.
+
+The primary fixture has been sanitized into a new, history-free repository at
+commit `90b377c349191b736eb9309d54b31977f8db6788`. Parent verification confirmed
+identical `src`, `tests`, `spec`, `scripts`, `.claude/hooks`, and `.claude/skills`
+trees relative to the original primary pin, with reference reports absent. The
+fixture retains 1,188 entries and excludes 173; its provenance records twelve
+documentation references to intentionally omitted records. Those omissions must
+be disclosed to evaluators rather than scored as product defects. No new quality
+score is claimed from this setup work.
 
 - Codex crashes required resuming the existing approved lap and its running agents.
   An earlier helper also overwrote the owner's checkpoint; the missing ownership
