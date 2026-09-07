@@ -243,12 +243,35 @@ function main() {
     (p) => p.endsWith(".md") && !excluded.some((re) => re.test(p)),
   );
 
+  // TWO RULES, TWO SCOPES, and the difference is deliberate.
+  //
+  // Path RESOLUTION runs over `markdown` — the manifest's narrower set — because
+  // a dated review record legitimately cites paths that were deleted after it was
+  // written, and reddening it for that would make the record unmaintainable.
+  //
+  // The LINE-ANCHOR rule runs wider, over every tracked doc outside the runtime
+  // state dirs, because a dead anchor is not a historical fact the way a deleted
+  // path is: it points at whatever now occupies that line number, which is a
+  // statement the record never made. Owner decision 2026-09-06, on measurement —
+  // of 935 anchors in dated review records, 640 named a path that no longer
+  // resolved and every resolvable one sampled pointed at unrelated content:
+  // "If the line number citations are meaningless, we should remove them." They
+  // were removed; this scope is what stops them coming back.
+  //
+  // The runtime state dirs stay out because they are generated: the next run
+  // rewrites them, so a refusal there would be unfixable by editing.
+  const anchorScope = tracked.filter(
+    (p) => p.endsWith(".md") && !RUNTIME_STATE_PREFIXES.some((s) => p.startsWith(s)),
+  );
+  const resolutionScope = new Set(markdown);
+
   // Pass 1 — collect classified citation records, so gitignore scoping can run
   // as ONE batched git call over every candidate instead of a spawn per token.
   const records = [];
   /** Line anchors into source, collected by the same scan. */
   const lineAnchors = [];
-  for (const relPath of markdown) {
+  for (const relPath of anchorScope) {
+    const resolves = resolutionScope.has(relPath);
     const lines = readFileSync(join(root, relPath), "utf8").split("\n");
     lines.forEach((line, i) => {
       for (const match of line.matchAll(/`([^`\n]+)`/g)) {
@@ -271,6 +294,10 @@ function main() {
             lineAnchors.push({ relPath, line: i + 1, token, path });
           }
         }
+
+        // Past here is PATH RESOLUTION, which keeps the manifest's narrower
+        // scope. A doc outside it was read only for the anchor rule above.
+        if (!resolves) continue;
 
         if (path.endsWith("/")) {
           const dir = path.replace(/\/+$/, "");

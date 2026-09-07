@@ -114,6 +114,30 @@ describe("check-doc-code-citations — backticked repo paths must name tracked f
     expect(code, `expected green, got:\n${out}`).toBe(0);
   });
 
+  // TWO RULES, TWO SCOPES. Path resolution keeps the manifest's narrower set,
+  // because a dated review record legitimately cites paths deleted after it was
+  // written. The line-anchor rule runs wider, because a dead anchor is not a
+  // historical fact the way a deleted path is — it points at whatever now
+  // occupies that line, a statement the record never made. Losing this
+  // distinction is how 935 anchors accumulated unnoticed in the first place.
+  it("the line-anchor rule reaches an excluded doc that path resolution does not", () => {
+    write(repo.dir, "src/thing.ts", "export const x = 1;\n");
+    write(
+      repo.dir,
+      // Same shape the manifest excludes from path resolution.
+      "docs/reviews/some-review-2026-01-01.md",
+      "It cited `src/thing.ts:42`, and also the long-deleted `src/gone-forever.ts`.\n",
+    );
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected red, got:\n${out}`).toBe(1);
+    // RED for the anchor...
+    expect(out).toMatch(/anchor to a LINE NUMBER in source/);
+    // ...and NOT for the deleted path, which a review record may legitimately name.
+    expect(out).not.toMatch(/gone-forever/);
+    rmSync(join(repo.dir, "docs", "reviews", "some-review-2026-01-01.md"));
+  });
+
   it("an exempt marker suppresses a source line anchor, for the genuinely symbol-less case", () => {
     write(repo.dir, "src/thing.ts", "export const x = 1;\n");
     write(

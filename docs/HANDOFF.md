@@ -52,6 +52,12 @@ is a READER of the submission ledger drawn by both draws, never a second writer 
 
 ## Deliberate state, not bugs
 
+- **Line anchors under the runtime state dirs are left alone on purpose.** 2,781 of them sit in
+  generated tool output, which the next run rewrites, so a refusal there would be unfixable by
+  editing. The line-anchor rule therefore covers every tracked doc EXCEPT those dirs — including
+  dated review records, which were cleaned of all 935 of theirs. `check-doc-code-citations.mjs`
+  states this beside the scope itself.
+
 - The judge-side naming refusal is unreachable on the production path by design of the parse
   order: the property it guards holds twice over, and only its claimed reach does not. Tracked
   in [`minor-bugs.md`](backlog/minor-bugs.md).

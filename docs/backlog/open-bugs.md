@@ -6,23 +6,6 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **Line anchors survive in generated artifacts and dated review records, outside the gate's reach
-  (2026-09-06, low).** ⚠ Partly enforced, so the uncovered half is stated rather than left to read
-  as a close. Owner, 2026-09-06: *"in general we should make citations refer to symbols and not
-  line numbers"*, then *"convert everything and enforce"*. **Closed:** `check:doc-code-citations`
-  now refuses a citation anchoring to a line in a source file, teaches the symbol form in its
-  refusal, and still accepts an anchor into a non-source file (a data row has no enclosing symbol)
-  or one carrying the existing `doc-citation-exempt` marker. **Nothing needed converting**, which
-  was the surprise: measured across all 209 tracked markdown files, 2,781 code line anchors live
-  under the runtime state dirs and 935 in dated review records, against **zero** in the 54 living
-  authored docs the gate reads. The single hit in `README.md` is inside the illustrative sample
-  report, where a finding legitimately cites the lines it found. **Still open, and it is an owner
-  call:** both large classes sit outside the gate because the doc manifest excludes them —
-  generated output would be rewritten by the next run, and a dated review record is a snapshot
-  whose rewriting edits history rather than correcting a live document. **Property:** whether the
-  rule extends to dated review records is decided and recorded, rather than left as a silent
-  consequence of the manifest's exclusion list.
-
 - **▶ Nine owner decisions of 2026-09-06 are settled and unimplemented (2026-09-06, medium).**
   The owner answered all ten open propositions in conversation; the answers are recorded in
   `.claude/nightly-decisions.json`, which is their one home — read each answer there rather than a
