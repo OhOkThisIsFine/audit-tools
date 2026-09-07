@@ -71,12 +71,12 @@ release to stay true. Its 8 inbound `[[live-status]]` links were retargeted to `
 Two Codex read-only verification passes (33 claims, file:line evidence) against HEAD:
 
 - **`a3-a4-engine-unification`** stated the cycle-detection key as `artifact-sig|obligation|executor`.
-  Actual order is `artifact-sig|executor|obligation` (`src/audit/cli/nextStepHelpers.ts:1195`), and
+  Actual order is `artifact-sig|executor|obligation` (`src/audit/cli/nextStepHelpers.ts`), and
   audit does not pass `stateSignature` into shared `advance` at all (`:1153`). Corrected.
 - **`conversation-first-subagent-dispatch-first-class`** listed 4 open items; 3 are done —
   audit's symmetric wiring exists and uses the SHARED engine
   (`src/audit/cli/rollingAuditDispatch.ts`), INV-QD-14 spill is implemented
-  (`src/shared/dispatch/rollingDispatch.ts:23`), `rate_limited` is handled
+  (`src/shared/dispatch/rollingDispatch.ts`), `rate_limited` is handled
   (`src/shared/dispatch/providerLaunchFinalize.ts`). Rewritten as "since closed".
 - **`account-metering-step2-multiconstraint-ledger`** warned the N× over-admission was "STILL LIVE".
   The budget axis closed in v0.33.10; the **cooldown axis** is the live remainder. Corrected so it
@@ -87,7 +87,7 @@ Two Codex read-only verification passes (33 claims, file:line evidence) against 
 CLAUDE.md's *Own-vs-acquire analyzer engine* says every acquired-tool spawn "routes through the single
 `admitSpawn` chokepoint and requires the per-run `ExternalAcquisitionConfig.consent_token`."
 Verification found `defaultRun` **bypasses** the token requirement — only non-default tools require it
-(`src/audit/extractors/analyzers/acquisitionEngine.ts:216-224`). Logged to backlog; not fixed here.
+(`src/audit/extractors/analyzers/acquisitionEngine.ts`). Logged to backlog; not fixed here.
 
 ## Compression pass — 29 drafted, 20 applied, 7 rejected as lossy
 

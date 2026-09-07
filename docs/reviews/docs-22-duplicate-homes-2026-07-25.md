@@ -36,7 +36,7 @@ worked examples an operator needs — audience-appropriate usage, not a second d
 ## 22d — partial completion · **audit-goals survives; orchestration-policy gets the valve**
 
 `spec/audit/audit-goals.md:131-139` documents a sanctioned partial-completion valve, and
-`recordPartialCompletionTerminal` is live at `src/audit/cli/dispatch/pausePersist.ts:65`.
+`recordPartialCompletionTerminal` is live at `src/audit/cli/dispatch/pausePersist.ts`.
 `spec/audit/orchestration-policy.md:77-84,:110-111` describes completion as all-or-nothing and never
 mentions it. This is the one pair where the gap is a **missing fact**, not a duplicate: a reader of
 orchestration-policy concludes a run either completes or does not.

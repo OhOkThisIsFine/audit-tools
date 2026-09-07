@@ -14,18 +14,18 @@ contradicted design — it is a **spec label that is factually false for this fi
 
 | | `critical-flow-fallback.json` | `intent-equivalence-verdict.json` |
 |---|---|---|
-| In `ARTIFACT_DEFINITIONS` | **yes** — `src/audit/io/artifacts.ts:245` | **no** |
-| In the staleness DAG | **yes** — a declared leaf, `dependencyMap.ts:56,68` | **no** |
+| In `ARTIFACT_DEFINITIONS` | **yes** — `src/audit/io/artifacts.ts` | **no** |
+| In the staleness DAG | **yes** — a declared leaf, `dependencyMap.ts` | **no** |
 | Executor reports it written | **yes** — `artifacts_written: ["critical-flow-fallback.json"]` | **no** — `artifacts_written: []` at all five exits |
 | Persists after consumption | **yes** — merged into `critical_flows.json`, file remains | **no** — `unlink`ed |
 | Where the value ends up | the artifact itself is the durable input | `artifact_metadata.intent_baseline` |
 
 `critical-flow-fallback.json` genuinely is a durable host input: a registered, DAG-participating
 leaf. `intent-equivalence-verdict.json` is a **transient host submission**: written to
-`incoming/` (`nextStepCommand.ts:1341`), validated and consumed
-(`nextStepHelpers.ts:1198-1210`), then `unlink`ed. The executor materializes the accepted judgment
+`incoming/` (`nextStepCommand.ts`), validated and consumed
+(`nextStepHelpers.ts`), then `unlink`ed. The executor materializes the accepted judgment
 into `artifact_metadata.intent_baseline` and writes no artifact at any of its five exits
-(`intentEquivalenceExecutor.ts:132,150,184,220,240`).
+(`intentEquivalenceExecutor.ts`).
 
 That is exactly the behavior DD-9 specified: *"No verdict-pair cache is persisted: a verdict is
 materialized into the entry/baseline at commit, so a seen pair never re-fires"*

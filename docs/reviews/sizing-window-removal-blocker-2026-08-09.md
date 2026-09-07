@@ -13,13 +13,13 @@ the very budget being deleted, in five places:
 
 | # | Site | Behaviour when the window is absent | Class |
 |---|---|---|---|
-| 1 | `src/audit/orchestrator/partitionTaskGraph.ts:126` | merge loop skipped → **every task becomes its own packet** | **SILENT** |
-| 2 | `src/audit/reporting/workBlocks.ts:167-176` | `throw` — "Cannot partition audit findings because the usable context budget is unknown" | runtime throw |
-| 3 | `src/shared/decompose/workPartition.ts:103-107` | `throw` — "capacityTokens must be a finite non-negative number" | runtime throw |
-| 4 | `src/audit/cli/dispatch/quotaPool.ts:179-186` | `throw` — "Cannot size audit packets for pool …" | runtime throw |
-| 5 | `src/remediate/phases/plan.ts:815-823` | `throw` — "Cannot size remediation blocks …" | runtime throw |
+| 1 | `src/audit/orchestrator/partitionTaskGraph.ts` | merge loop skipped → **every task becomes its own packet** | **SILENT** |
+| 2 | `src/audit/reporting/workBlocks.ts` | `throw` — "Cannot partition audit findings because the usable context budget is unknown" | runtime throw |
+| 3 | `src/shared/decompose/workPartition.ts` | `throw` — "capacityTokens must be a finite non-negative number" | runtime throw |
+| 4 | `src/audit/cli/dispatch/quotaPool.ts` | `throw` — "Cannot size audit packets for pool …" | runtime throw |
+| 5 | `src/remediate/phases/plan.ts` | `throw` — "Cannot size remediation blocks …" | runtime throw |
 
-Site 1 states the inverted conviction in a comment (`partitionTaskGraph.ts:124-125`):
+Site 1 states the inverted conviction in a comment (`partitionTaskGraph.ts`):
 
 > `// Unknown window (mergeTokenBudget null): no merges at all — every task`
 > `// stays its own packet, because any merge would be an unfounded fit claim.`
@@ -39,18 +39,18 @@ because the tool stops deciding grouping. It emits **tasks + an affinity metric*
 
 **This is already built.** `task_affinity_graph.json` is a first-class persisted artifact today:
 
-- registered in `ARTIFACT_DEFINITIONS` — `src/audit/io/artifacts.ts:284`, payload type at `:120`
-- in the dependency DAG, upstream `audit_tasks.json` — `src/audit/orchestrator/dependencyMap.ts:194-198`
-- zod-schema'd and versioned `task-affinity-graph/v1` — `src/audit/orchestrator/taskAffinityGraph.ts:59-66`
-- built and written at planning — `src/audit/orchestrator/planningExecutors.ts:307-309, 336, 352`
-- described in-source as **provider-neutral** — `taskAffinityGraph.ts:6`, `partitionTaskGraph.ts:9`,
-  `planningExecutors.ts:304-305`
+- registered in `ARTIFACT_DEFINITIONS` — `src/audit/io/artifacts.ts`, payload type at `:120`
+- in the dependency DAG, upstream `audit_tasks.json` — `src/audit/orchestrator/dependencyMap.ts`
+- zod-schema'd and versioned `task-affinity-graph/v1` — `src/audit/orchestrator/taskAffinityGraph.ts`
+- built and written at planning — `src/audit/orchestrator/planningExecutors.ts`
+- described in-source as **provider-neutral** — `taskAffinityGraph.ts`, `partitionTaskGraph.ts`,
+  `planningExecutors.ts`
 
 Its edge kinds are pure content signals, with zero transport properties
-(`taskAffinityGraph.ts:190-208`): `shared_file`, `cross_lens_same_file`, `same_flow` (shared
+(`taskAffinityGraph.ts`): `shared_file`, `cross_lens_same_file`, `same_flow` (shared
 `critical_flow:` tag), `same_unit`, `call_adjacent` (import/call adjacency from `graph_bundle`),
 `same_dir`. Every node already carries `token_estimate` and `risk_estimate`
-(`taskAffinityGraph.ts:36-40, 160-167`).
+(`taskAffinityGraph.ts`).
 
 So the directive's stated end state — *partitions on content coherence and reports a token estimate*
 — is **already satisfied by an artifact that ships today**. What has to go is the internal consumer
@@ -60,9 +60,9 @@ that folds that graph under a backend window, not anything that needs authoring.
 
 Not "delete three resolvers". The shape is:
 
-- **Delete** `resolvePlanContextBudget` (`plan.ts:772`), `resolveCurrentWorkPartitionRuntime`
-  (`workPartitionRuntime.ts:13`), `resolveSizingWindowTokens` (`sizingWindow.ts:48` — note
-  `quotaPool.ts:173` is a call site, not the definition; the whole `sizingWindow.ts` module goes,
+- **Delete** `resolvePlanContextBudget` (`plan.ts`), `resolveCurrentWorkPartitionRuntime`
+  (`workPartitionRuntime.ts`), `resolveSizingWindowTokens` (`sizingWindow.ts` — note
+  `quotaPool.ts` is a call site, not the definition; the whole `sizingWindow.ts` module goes,
   its only other export `SizingWindowInput` has no outside consumer).
 - **Delete** the window-fold from `partitionTaskGraph` — `mergeTokenBudget` and its gate at `:126`.
   Whether any merging remains there at all follows from §2: if the host groups, this partitioner is
@@ -83,16 +83,16 @@ explicit `contextTokenBudget`; all need re-basing.
 Both are consequences of promoting an internal structure to a public one.
 
 **Edge-array order is inherited, not content-derived.** Edge *endpoints* are canonically ordered by
-`task_id` (`taskAffinityGraph.ts:226-229`), but the `edges` array is emitted in nested-loop order over
+`task_id` (`taskAffinityGraph.ts`), but the `edges` array is emitted in nested-loop order over
 the task list (`:186-187`) with no sort before return (`:240`). It is stable today only because
-`buildChunkedAuditTasks` sorts tasks by priority then `task_id` upstream (`taskBuilder.ts:330-420`).
+`buildChunkedAuditTasks` sorts tasks by priority then `task_id` upstream (`taskBuilder.ts`).
 The repo's invariant requires order derived from content *in the artifact*, not inherited from an
 upstream sort — otherwise any upstream reordering churns the content hash and cascades phantom
 staleness. Minimal fix: canonical sort of `edges` (and `nodes`) in the builder before return.
 
 **Weight saturates.** `weight = Math.min(1, weight + SAME_LENS_BONUS)` then rounded to 3 decimals
-(`taskAffinityGraph.ts:222, 234`). Distinct strong affinities collapse to exactly `1.0`, and the
-authors describe the scale as soft and not cross-run comparable (`taskAffinityGraph.ts:8-13, 49-53`).
+(`taskAffinityGraph.ts`). Distinct strong affinities collapse to exactly `1.0`, and the
+authors describe the scale as soft and not cross-run comparable (`taskAffinityGraph.ts`).
 That was harmless when one known algorithm consumed it; it is a real ambiguity for a host reasoning
 over it. Mitigation already present: the `reason` field carries the full contributing kind set, not
 just the dominant `kind` (`:220, 235`), so a host can discriminate saturated edges — provided the
@@ -105,22 +105,22 @@ task affinity, right?"* Directionally yes, mechanically no.
 
 | Signal | Task affinity (`taskAffinityGraph.ts`) | Findings grouping (`workBlocks.ts` + `workPartition.ts`) |
 |---|---|---|
-| shared file | `:171, :190-194` | `:188`, jaccard `workPartition.ts:400-403` |
+| shared file | `:171, :190-194` | `:188`, jaccard `workPartition.ts` |
 | shared unit | `:200` | `normalizeOwnedUnits :29-39`, jaccard `:403` |
 | same lens | weight bonus `:221-224` | `lens:` semantic tag `:141` |
 | directory | `same_dir :96, :208` | — |
 | call/import adjacency | `call_adjacent :120-127, :201-207` | present, but feeds **block dependency ordering** (`:64-84`), not cohesion |
 | critical-flow tag | `same_flow :102-107, :197-199` | present, but feeds **dependency ordering** (`:87-100`), not cohesion |
 | semantic tags (category, title tokens) | — | `semanticTagsForFinding :133-144` |
-| `finding.systemic` role | — | `:193`, `workPartition.ts:740-754` |
+| `finding.systemic` role | — | `:193`, `workPartition.ts` |
 
 The algorithms differ too: task affinity is weighted-edge agglomerative merging under a ceiling
-(`partitionTaskGraph.ts:118-142`); findings grouping is seeded multi-objective constrained assignment
-with explicit seam surfacing (`workPartition.ts:531-577, :579-605`). `workPartition.ts:4` says so
+(`partitionTaskGraph.ts`); findings grouping is seeded multi-objective constrained assignment
+with explicit seam surfacing (`workPartition.ts, :579-605`). `workPartition.ts` says so
 outright — *"Shared units and files are affinity signals, not union-find edges."*
 
 **The blocker on unifying them is a missing key, not a missing algorithm.** `Finding` has no
-`task_id` (`src/shared/types/finding.ts:103-118`) and `WorkBlock` carries only `finding_ids`
+`task_id` (`src/shared/types/finding.ts`) and `WorkBlock` carries only `finding_ids`
 (`:173-175`), so findings grouping *cannot* be re-expressed as a draw over task affinity today — the
 join does not exist. Add that key and the granularity mismatch is still real: one task produces many
 findings, one finding spans many files and units.

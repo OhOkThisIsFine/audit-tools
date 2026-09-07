@@ -20,10 +20,10 @@ out explicitly rather than quietly dropped.
 | CP-NODE-4 | `blocked` | "A dependency node did not reach a verified-complete disposition … (INV-RS-01)" |
 
 The scope-less refusal added in `40f632b4` lives in `validateImplementationDagTraceability`, called
-from `src/remediate/steps/contractPipeline.ts:2364` — inside the contract-pipeline step flow. A
-completed run never reaches it: `PRE_INTAKE_PRIORITY` in `src/remediate/steps/nextStep.ts:5130`
+from `src/remediate/steps/contractPipeline.ts` — inside the contract-pipeline step flow. A
+completed run never reaches it: `PRE_INTAKE_PRIORITY` in `src/remediate/steps/nextStep.ts`
 orders `complete` ahead of `pending_intake`, and the `complete` obligation
-(`nextStep.ts:5302`, `derive: state => state?.status === "complete" ? "missing" : "satisfied"`)
+(`nextStep.ts`, `derive: state => state?.status === "complete" ? "missing" : "satisfied"`)
 fires first and emits `handleComplete`.
 
 **Correction to the agent recon.** It concluded "Resume will refuse and regenerate." That is right
@@ -33,10 +33,10 @@ run that is not already complete, not resuming this one.
 
 ## 2. The refusal only catches the LOUD failure. Two quiet ones are uncaught — and both fired
 
-`buildNodeWriteScopeResolver` (`contractPipeline.ts:1434`): a node with no declared
+`buildNodeWriteScopeResolver` (`contractPipeline.ts`): a node with no declared
 `output_files`/`files_likely_touched` inherits `file_scope` from whichever decomposed module its
 obligation ids prefix-match as `OBL-<moduleSlug>-`. The validator
-(`contractPipeline.ts:1093`) refuses **only** `resolveWriteScope(node).length === 0`.
+(`contractPipeline.ts`) refuses **only** `resolveWriteScope(node).length === 0`.
 
 The 7 decomposed module names, against the 4 nodes' obligation slugs:
 
@@ -89,7 +89,7 @@ write-scope resolver then joins those obligations against `module_decomposition`
 finds nothing. **The DAG was faithful to its input; its input had already lost three modules.**
 
 **Why nothing caught it.** Finalization is deliberately deterministic —
-`contractPipeline.ts:2210` states it is "a mechanical merge, not fresh authoring: carry each drafted
+`contractPipeline.ts` states it is "a mechanical merge, not fresh authoring: carry each drafted
 module contract verbatim," and `deriveFinalizedModuleContracts` does exactly that, preserving all 7.
 But the same comment names an escape hatch: a downstream gate that finds the merge inadequate
 "re-emits contract_finalization as an **LLM step** via buildPhaseStep — the only path that still needs
@@ -98,7 +98,7 @@ CE-001…CE-012 and CE-101…CE-104, 2 `critique_repairs`). The LLM rewrote the 
 collapsed the module set, and **no post-condition checks that a rewrite preserves it**.
 
 The completeness machinery that would have caught this exists but does not reach here: `scanModuleShards`
-enforces one shard per decomposed module, and `contractPipeline.ts:539` exempts finalization on the
+enforces one shard per decomposed module, and `contractPipeline.ts` exempts finalization on the
 grounds that it "is deterministically derived, never sharded" — true of the derivation, false of the
 repair path that overwrites it.
 
@@ -116,7 +116,7 @@ though their evidence stands.
 ## 4. Contributing cause: nothing ever asks for a node's write scope
 
 `output_files` and `files_likely_touched` are both optional on the node type
-(`src/shared/types/contractPipeline/implementation.ts:44,52`), and
+(`src/shared/types/contractPipeline/implementation.ts`), and
 `src/remediate/steps/contractPipelinePrompts.ts` **never mentions either field** — grep returns
 nothing. The DAG author is not asked for write scope, so every node falls through to the join, and
 the join is a prefix match between two independently authored name spaces
@@ -140,14 +140,14 @@ DAG that passes the gate, not one that is correctly scoped.
 ## 6. Other verified mechanics
 
 - **Resume gate.** A non-complete run re-invoked bare emits `confirm_resume_or_restart` and requires
-  `confirm_resume_ack.json` carrying `{"choice":"resume"}` (`nextStep.ts:5192`).
+  `confirm_resume_ack.json` carrying `{"choice":"resume"}` (`nextStep.ts`).
 - **Hand-editing the DAG is detectable.** `detectStaleArtifacts`
-  (`src/remediate/contractPipeline/artifactStore.ts:327`) recomputes `envelopeSemanticHash` from the
+  (`src/remediate/contractPipeline/artifactStore.ts`) recomputes `envelopeSemanticHash` from the
   *current* payload and compares it against each downstream's recorded `dependency_hashes`, so an
   edited `implementation_dag.json` surfaces as staleness in its dependents rather than being
   silently accepted.
 - **Ingest reads only `.input.json`.** With no fresh input file the persisted envelope is left
-  alone (`contractPipeline.ts:506`), which is why the defective DAG survived the run.
+  alone (`contractPipeline.ts`), which is why the defective DAG survived the run.
 
 ## 7. RETIREMENT COLLISION — the obvious fix is the thing that was deliberately removed
 

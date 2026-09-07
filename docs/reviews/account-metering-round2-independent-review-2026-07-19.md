@@ -14,13 +14,13 @@ from source alone.
 
 **The lease key moved to account scope; the budget it is compared against did not.** `critical`
 
-- `src/shared/dispatch/admissionLoop.ts:239-241` — `resourceKey: pool.account_key` (account-scoped)
+- `src/shared/dispatch/admissionLoop.ts` — `resourceKey: pool.account_key` (account-scoped)
   paired with `budget: pool.remaining_token_budget` (pool-scoped).
-- `src/shared/dispatch/rollingDispatch.ts:1005-1011` — same split.
-- `src/shared/dispatch/unifiedRolling.ts:99,108` — `budgetByPool` keyed on `alloc.pool_id`, never
+- `src/shared/dispatch/rollingDispatch.ts` — same split.
+- `src/shared/dispatch/unifiedRolling.ts` — `budgetByPool` keyed on `alloc.pool_id`, never
   touched by this commit.
 
-The contract is violated in-tree: `src/shared/quota/reservationLedger.ts:78` documents `budget` as
+The contract is violated in-tree: `src/shared/quota/reservationLedger.ts` documents `budget` as
 "Caller-computed live remaining tokens for `resourceKey`", and `admit` computes
 `budget − Σ outstanding(resourceKey)`. The two operands are now on different partitions.
 
@@ -30,25 +30,25 @@ The contract is violated in-tree: `src/shared/quota/reservationLedger.ts:78` doc
 
 1. The effective account ceiling becomes the **MAX** sibling budget, not any real limit — because
    `tokens_per_pct` is learned per *pool* and is explicitly excluded from the account fold
-   (`accountId.ts:104-107`), so siblings derive different budgets.
-2. An uncalibrated sibling has a null budget → `+Infinity` (`admissionLoop.ts:241`,
-   `unifiedRolling.ts:108`) → the shared ceiling is **not enforced at all** while any one sibling is
+   (`accountId.ts`), so siblings derive different budgets.
+2. An uncalibrated sibling has a null budget → `+Infinity` (`admissionLoop.ts`,
+   `unifiedRolling.ts`) → the shared ceiling is **not enforced at all** while any one sibling is
    new, which is the common case when adding a model to an existing credential.
 
 **Why this is the sharpest possible finding against this change:** it is the author's own rejection
-argument, verbatim. `admissionLoop.ts:624-628` states that keying the cap per-account would "make the
+argument, verbatim. `admissionLoop.ts` states that keying the cap per-account would "make the
 effective ceiling the MAX cap across an account's pools rather than any real limit, permanently
 starving its lowest-cap pool" — and that reasoning is exactly why round 2 reverted the concurrency-cap
 change. The identical flaw was then shipped on the budget axis the change *did* alter. Diagnosed for
 one axis, unapplied to the other.
 
 Invisible to the suite because every author fixture uses equal sibling budgets
-(`tests/shared/account-scoped-metering.test.mjs:182` — `250/250/250`).
+(`tests/shared/account-scoped-metering.test.mjs` — `250/250/250`).
 
 ## The motivating case is STILL not fixed — third consecutive round
 
-`accountId.ts:37` requires `api_key_env`. But `api_key` (inline) is a documented, supported credential
-field that `openAiCompatibleSource` explicitly copies (`apiPool.ts:450-453`). So:
+`accountId.ts` requires `api_key_env`. But `api_key` (inline) is a documented, supported credential
+field that `openAiCompatibleSource` explicitly copies (`apiPool.ts`). So:
 
 ```
 {id:"nim-nano",  provider:"openai-compatible", endpoint:"…/v1", api_key:"sk-…", model:"nano"}
@@ -76,12 +76,12 @@ verification lens independently confirmed all 7 declared sites are genuinely pin
   "All 7 changed sites individually pinned" is literally true and materially misleading — 7 is the
   author's own denominator.
 - **The two hunks that ARE the fix's core claim are outside the subset and invisible to everything:**
-  `schedulePool`'s stamp (`capacity.ts:725`) and `buildHostModelPool`'s stamp (`apiPool.ts:276`). Revert
+  `schedulePool`'s stamp (`capacity.ts`) and `buildHostModelPool`'s stamp (`apiPool.ts`). Revert
   either to the pre-fix value and `tsc` is clean and the full suite is byte-identical to baseline.
   Reverting `buildHostModelPool` makes host pools meter per-model — *the exact defect this change
   exists to fix* — with zero signal.
 - **Reversions were authored to fit the tool, not derived from pre-fix code.** Three dead imports
-  (`admissionLoop.ts:26`, `rollingDispatch.ts:66`, `apiPool.ts:12`) exist only to make the gate's
+  (`admissionLoop.ts`, `rollingDispatch.ts`, `apiPool.ts`) exist only to make the gate's
   `replace` text compile. Sites 5–6 revert to feature-OFF rather than to the old derivation, so they
   pin "a fold happens", not "it groups on `accountKey`" — and the actual delta stays untested.
 
@@ -89,31 +89,31 @@ verification lens independently confirmed all 7 declared sites are genuinely pin
 
 - **The `concurrency_cap` revert reasoning is a non-sequitur, and its residual hole is undisclosed.**
   `high` The contract claim was verified TRUE (`sessionConfig.ts` — `max_concurrent` is per-ENDPOINT).
-  But enforcement keys on `poolId` (`admissionLoop.ts:631-640`), and N models on one endpoint are N
+  But enforcement keys on `poolId` (`admissionLoop.ts`), and N models on one endpoint are N
   pools. Two models declaring `max_concurrent: 2` on one endpoint **admitted 4**. "It's per-endpoint,
   therefore keep it per-pool" does not follow — neither `poolId` nor `accountKey` is the endpoint. The
   commit presents the revert as contract-faithful without naming the surviving N× over-admission.
-- **Rung 1 discards the credential — mirror-image over-merge.** `medium-high` `accountId.ts:91` ignores
+- **Rung 1 discards the credential — mirror-image over-merge.** `medium-high` `accountId.ts` ignores
   `api_key_env` when `backend_provider` is set. Two different NVIDIA accounts behind one
   `backend_provider` → one budget, one cooldown. The docstring offers explicit `account` as the
   safeguard, which requires the operator to remember — barred by *auditor-agnostic robustness*.
 - **The degraded `"proxy"` bucket newly merges budgets across unrelated backends.** `medium-high`
-  `proxyCatalog.ts:546` assigns `provider = "proxy"` when an advert carries no provider. Two such lanes
+  `proxyCatalog.ts` assigns `provider = "proxy"` when an advert carries no provider. Two such lanes
   share one budget and cooldown. Pre-commit the budget axis was per-pool, so this is a **new**
   over-merge — round 1's "a free lane's 429 stalls an unrelated paid lane" surviving in the degradation
   rung.
 - **The `provider !== "openai-compatible"` guard was deleted; the docstring still asserts it.** `medium`
-  `accountId.ts:26-27` states "Returns null when: the source isn't `openai-compatible`" — describing
+  `accountId.ts` states "Returns null when: the source isn't `openai-compatible`" — describing
   removed behavior. Rung 2 now applies to provider classes never analyzed (two `worker-command` sources
   sharing endpoint+key now merge). Unpinned: restoring the guard leaves the suite green.
   *Enumeration note:* the sweep lens grepped every caller of `deriveLocalAccountId` — exactly one
   (`resolvePoolAccountKey`). So there is **no** over-merge re-entry through a second caller. That
   hypothesis is dead.
-- **Cooldown fold silently widened to every pool.** `medium` `apiPool.ts:784` deleted
+- **Cooldown fold silently widened to every pool.** `medium` `apiPool.ts` deleted
   `if (!accountId) return pool`. Two `codex`/`agy` pools for different models now share a 429 cooldown —
   correct for a subscription, wrong for per-model TPM/RPM. Not in the commit's scope statement.
 - **Budget and cooldown split partitions on the host-pool class.** `medium`
-  `foldAccountCooldownAcrossPools` is called only at `apiPool.ts:670`, on the source-pool path.
+  `foldAccountCooldownAcrossPools` is called only at `apiPool.ts`, on the source-pool path.
   `buildHostModelPools` pools never fold, yet now share a budget meter. For source pools the two axes
   genuinely do share the partition; for host pools they do not.
 - **Untypechecked test tree hides a fixture-wide over-merge.** `medium` ~46 test files build
@@ -141,7 +141,7 @@ different rates with different models."** (owner)
 
 This does not rescue the change — the starvation the reviewers executed is real — but it **falsifies the
 repair they implied**, and the option this review originally recommended. Verified from source:
-`scheduler.ts:418-421` derives `remaining_token_budget` as `tokens_per_pct[label] × remaining_pct × 100`.
+`scheduler.ts` derives `remaining_token_budget` as `tokens_per_pct[label] × remaining_pct × 100`.
 So:
 
 - The **shared account resource is `remaining_pct`** — a percentage of the account's quota window.
@@ -152,7 +152,7 @@ So:
 
 **Consequence: an account-level `tokens_per_pct` cannot exist.** There is no common token unit across
 models on one account, because they burn at different rates. `tokens_per_pct` being learned per-pool and
-excluded from the account fold (`accountId.ts:104-107`) is **correct by design** — this review treated it
+excluded from the account fold (`accountId.ts`) is **correct by design** — this review treated it
 as the obstacle to an account-scoped budget when it is in fact the conversion that makes one possible.
 
 Two pools on one account reading 1000 and 200 are not necessarily two budgets. They may be **the same

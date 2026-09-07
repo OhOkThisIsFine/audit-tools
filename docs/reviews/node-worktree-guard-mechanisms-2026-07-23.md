@@ -8,10 +8,10 @@ mechanisms and the refuted alternatives so they are not re-derived.
 ## The clobber mechanism (verified against source)
 
 A dispatched worker's CWD is its isolated worktree, `<repo>/.audit-tools/worktrees/<name>`
-(`worktreePath()`, `src/remediate/steps/dispatch/worktreeLifecycle.ts:390`; audit review
-snapshots `review-<runId>` share the parent, `src/shared/providers/reviewSnapshot.ts:47`).
+(`worktreePath()`, `src/remediate/steps/dispatch/worktreeLifecycle.ts`; audit review
+snapshots `review-<runId>` share the parent, `src/shared/providers/reviewSnapshot.ts`).
 A stray driver CLI run from there with defaults hits `resolveRepoRoot` →
-`climbOutOfAuditTools` (`src/shared/io/repoRoot.ts:33`), which truncates at the outermost
+`climbOutOfAuditTools` (`src/shared/io/repoRoot.ts`), which truncates at the outermost
 `.audit-tools` segment — the anti-drift anchoring designed for operator cwd-drift is exactly
 what redirects a worker's invocation onto the REAL shared run state. That is how
 `rolling-session.json` was rewritten mid-run (2026-07-22 dogfood).
@@ -75,7 +75,7 @@ Two complications found in recon, both load-bearing for the fix shape:
 Audit-side writers rely on the CLI-level guard alone (add writer asserts only on evidence);
 a worker that both `cd`s out and passes explicit targets can still reach state (containment,
 not authority — the standing-rules prompt section is the remaining layer); a degraded review
-snapshot runs workers at the real root with no cwd signal (`rollingAuditDispatch.ts:253`);
+snapshot runs workers at the real root with no cwd signal (`rollingAuditDispatch.ts`);
 deferred dist-dependent commands are subsumed by the close gate's full-suite run, not
 individually re-run.
 

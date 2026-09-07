@@ -98,37 +98,37 @@ no local transcript predates 2026-08-01, so this cannot be settled from this mac
 
 Nothing replaces it as a producing step.
 
-- 8 statuses, no `document`/`documenting` — `src/remediate/state/store.ts:20-29`, mirrored at `:89-98`.
+- 8 statuses, no `document`/`documenting` — `src/remediate/state/store.ts`, mirrored at `:89-98`.
 - `src/remediate/phases/` holds 6 files. No `document.ts`.
-- `handlePlanning` runs `runPlanningReviewGate` (`nextStep.ts:2616`) and `runPlanAmbiguityGate`
+- `handlePlanning` runs `runPlanningReviewGate` (`nextStep.ts`) and `runPlanAmbiguityGate`
   (`:2750`), then transitions straight to implementing (`:2874-2912`). Neither gate mints an `ItemSpec`.
-- Items are minted with three fields — `finding_id`, `status`, `block_id` (`nextStep.ts:665-670`).
+- Items are minted with three fields — `finding_id`, `status`, `block_id` (`nextStep.ts`).
 
-`ItemSpec` survives as a contract (`types.ts:143-173`, optional at `:376`) that **zero production
+`ItemSpec` survives as a contract (`types.ts`, optional at `:376`) that **zero production
 code writes**. An exhaustive grep finds two src hits, both readers projecting outward
-(`close.ts:321`, `hostHandoff.ts:736`); the other 28 are test fixtures. `ItemSpecSchema` is never
+(`close.ts`, `hostHandoff.ts`); the other 28 are test fixtures. `ItemSpecSchema` is never
 `.parse()`d.
 
 Consumers therefore always take the fallback:
 
-- Enforced write scope = `block.touched_files` (`hostHandoff.ts:753-755`), not the spec.
-- Access memory falls back to block surface (`accessMemory.ts:59-62`).
-- Close attribution sees `[]` (`close.ts:1096`), so per-item test-failure attribution always misses
+- Enforced write scope = `block.touched_files` (`hostHandoff.ts`), not the spec.
+- Access memory falls back to block surface (`accessMemory.ts`).
+- Close attribution sees `[]` (`close.ts`), so per-item test-failure attribution always misses
   and the fallback at `:1104` blocks **all** resolved items rather than the implicated ones.
-- The autonomous gate synthesizes a stub spec (`autonomousGate.ts:207-216`); `:114` says outright
+- The autonomous gate synthesizes a stub spec (`autonomousGate.ts`); `:114` says outright
   "At the review gate there is no ItemSpec yet".
 
 Lost with no successor: `tests_to_write`, `not_applicable_steps`, `no_change` — validated, never populated.
 
 Two loose ends:
 
-- The comment at `nextStep.ts:2875` claims the workload "reads item_spec from the plan DAG node when
+- The comment at `nextStep.ts` claims the workload "reads item_spec from the plan DAG node when
   present". **Unbacked.** No DAG node carries one. The nearest candidate,
-  `contractPipeline.ts:4254` (`concrete_change`), is stripped: `FindingSchema`
-  (`src/shared/types/finding.ts:194`) is a bare `z.object` with no `.strict()`/`.passthrough()`, so
-  `FindingSchema.parse` at `hostHandoff.ts:735` drops `concrete_change`, `preconditions`, and
+  `contractPipeline.ts` (`concrete_change`), is stripped: `FindingSchema`
+  (`src/shared/types/finding.ts`) is a bare `z.object` with no `.strict()`/`.passthrough()`, so
+  `FindingSchema.parse` at `hostHandoff.ts` drops `concrete_change`, `preconditions`, and
   `expected_changes`. A refutation lane **executed** this parse and confirmed the strip.
-- `nextStep.ts:760-768` carries forward a spec that no code can create.
+- `nextStep.ts` carries forward a spec that no code can create.
 - The invariant test is partly vacuous — audit finding `TST-cf496f2a`: the first describe block
   asserts a locally-declared literal array, not the real `RemediationState` type, so a reintroduced
   `documenting` status passes silently. The other three blocks test real code.
@@ -176,34 +176,34 @@ of introduction — at introduction there was nothing to be second to.
 
 Two producers:
 
-- `buildLeanExtractedPlan` — `contractPipeline.ts:4543-4554`. Eleven lines, returns a literal,
+- `buildLeanExtractedPlan` — `contractPipeline.ts`. Eleven lines, returns a literal,
   calls no phase, no gate, no LLM step.
-- `promoteImplementationDagToExtractedPlan` — `contractPipeline.ts:4071`, terminus of the full sequence.
+- `promoteImplementationDagToExtractedPlan` — `contractPipeline.ts`, terminus of the full sequence.
 
-The lean branch is a **bypass, not a shallow traversal**. It returns at `nextStep.ts:2161-2170`
+The lean branch is a **bypass, not a shallow traversal**. It returns at `nextStep.ts`
 before `writePathASeedFromFindings` (~`:2203`), the pipeline's entry seed. Every reader of
 `pathASeedFilePath` lives inside `contractPipeline.ts` / `contractPipeline/phaseCutArtifact.ts`.
-The test asserts it too: `tests/remediate/lean-fast-path.test.ts:191-193` —
+The test asserts it too: `tests/remediate/lean-fast-path.test.ts` —
 `expect(step.step_kind).not.toBe("contract_pipeline")`.
 
 One of everything else:
 
-- One classifier — `riskSignal.tier === "low"` (`nextStep.ts:2109`).
-- One artifact — both writers hit `extracted-plan.json` (`nextStep.ts:2146-2149`,
-  `contractPipeline.ts:4404`, path at `intake.ts:121`).
-- One consumer — `handlePendingExtractedPlan` (`nextStep.ts:1265`) → `normalizeExtractedPlan`
-  (`:575`) → `applyPlanPipeline` (`plan.ts:373`).
+- One classifier — `riskSignal.tier === "low"` (`nextStep.ts`).
+- One artifact — both writers hit `extracted-plan.json` (`nextStep.ts`,
+  `contractPipeline.ts`, path at `intake.ts`).
+- One consumer — `handlePendingExtractedPlan` (`nextStep.ts`) → `normalizeExtractedPlan`
+  (`:575`) → `applyPlanPipeline` (`plan.ts`).
 - One output contract.
 
-Genuine dials also exist and are real: `adversarialDepthForTier` (`riskSignal.ts:63-65`) and
+Genuine dials also exist and are real: `adversarialDepthForTier` (`riskSignal.ts`) and
 `roundTripGranularityForTier` (`:83-87`) are consumed **inside** the pipeline
-(`contractPipeline.ts:1802`, `:3487`). That is literally "one pipeline, two depths" — and it is a
+(`contractPipeline.ts`, `:3487`). That is literally "one pipeline, two depths" — and it is a
 different mechanism from the lean bypass.
 
 Correction to `CLAUDE.md`: its `touched_files` claim is true but mis-keyed. `normalizeExtractedPlan`
-branches on `rawBlocks.length > 0` (`nextStep.ts:597`) — artifact **content**, not the source tag.
-Lean plans carry no `blocks` (pinned by `lean-fast-path.test.ts:129`), so they fall to `:610-615`.
-The only branch on `plan.source` anywhere in `src/` is `nextStep.ts:1316`, and it makes the lean
+branches on `rawBlocks.length > 0` (`nextStep.ts`) — artifact **content**, not the source tag.
+Lean plans carry no `blocks` (pinned by `lean-fast-path.test.ts`), so they fall to `:610-615`.
+The only branch on `plan.source` anywhere in `src/` is `nextStep.ts`, and it makes the lean
 path **stricter** (`evidenceGrounding: plan.source !== "contract_pipeline"`), not laxer.
 
 ### Whether it collides with the one-pipeline conviction
@@ -225,7 +225,7 @@ Again on 2026-08-25, key `a04a8cfcef8b908e`:
 **Refutation correction:** one trace reported "no evidence of owner approval, question still open"
 for this. That was wrong — it searched `docs/`, `spec/`, and `.audit-tools/`, but never `.claude/`,
 where the decision ledger lives. Same trace claimed `D-68` and `DD-21` resolve to nothing; `D-68`
-had a backlog entry inside the diff of the very commit it cited, sits at `nextStep.ts:2077`, and
+had a backlog entry inside the diff of the very commit it cited, sits at `nextStep.ts`, and
 `DD-21` is recorded in `.claude/hooks/doc-review-resolved.json`.
 
 The 2026-07-26 ruling **post-dates** the fold that shipped 2026-07-09 (`1280d04b`). It confirmed a
@@ -254,7 +254,7 @@ Both are the same failure shape, four weeks apart.
    structured-audit input one still exists at HEAD.
 4. **N-R13's premise is the fast path's exception.** The dissolution rests on "contracts, obligations,
    file scope, and test specs established upstream." The lean branch never enters the pipeline
-   (`nextStep.ts:2168-2170`), so on that path nothing is established upstream —
+   (`nextStep.ts`), so on that path nothing is established upstream —
    `normalizeExtractedPlan:610-615` copies `finding.affected_files` instead. The premise holds for
    the contract-pipeline path and does not hold for the lean one.
 
@@ -276,12 +276,12 @@ self-attestation alone.
 
 **2. What happens to the `ItemSpec` corpse?** Zero writers, five readers, a `.strict()` schema, a
 hand-rolled validator, a carry-forward branch, 28 fixtures. Delete it outright, or give it a
-producer? Note the real bug riding on it: `close.ts:1096` always reads `[]`, so a close-gate test
+producer? Note the real bug riding on it: `close.ts` always reads `[]`, so a close-gate test
 failure blocks every resolved item instead of the implicated ones.
 
 **3. Is the last lean fork closed, or deliberately kept?** You ruled "it is the defect" on
 2026-07-26. Selection, artifact, consumer, and depth dials are unified. `buildLeanExtractedPlan`
-(`contractPipeline.ts:4543`) and the bypass at `nextStep.ts:2161-2170` are not. Finish the fold, or
+(`contractPipeline.ts`) and the bypass at `nextStep.ts` are not. Finish the fold, or
 sanction this remainder as the low tier's realization?
 
 **4. Apply the 2026-08-25 reword?** Ledger key `a04a8cfcef8b908e` is answered but carries **no

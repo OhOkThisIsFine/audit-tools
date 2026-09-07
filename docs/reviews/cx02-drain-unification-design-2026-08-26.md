@@ -221,17 +221,17 @@ HEAD with the deciding lines quoted back. The judgments are this record's; the f
 
 The mechanism the earlier answer missed: `checkFinalizationCycle` is a SLACK measure, not a counter.
 Its condition is `index + 1 - seenStateSignatures.size < tolerance` → continue
-(`nextStepHelpers.ts:1978`), and each counted event adds exactly one signature to the set. The left
+(`nextStepHelpers.ts`), and each counted event adds exactly one signature to the set. The left
 side is therefore the number of counted events that landed on an ALREADY-SEEN artifact state. So 16
 is *permitted revisits*, not permitted iterations, and it fires on the 16th. Both terms are in ONE
 unit today — outer-fold transitions, advanced once per `transition` in `countTransitions`
-(`nextStepHelpers.ts:2685-2694`) and signed once per guard call.
+(`nextStepHelpers.ts`) and signed once per guard call.
 
 1. **Observation point: the dispatch site.** Emission points cannot work (refuted above: `advance`
    returns on the first emit). The obligation SCAN cannot work either — `findNextObligation` selects
    without dispatching, so a scan produces no new state to sign. The dispatch is the only point where
    a new artifact state exists. Identity is available there: the unified obligation's `execute` calls
-   `decideNextStep` once, as `runDeterministicExecutor` does today (`nextStepHelpers.ts:2165`), so the
+   `decideNextStep` once, as `runDeterministicExecutor` does today (`nextStepHelpers.ts`), so the
    obligation id and executor id are both in scope without re-deriving.
 2. **Unit: dispatch slots** — the unit of `MAX_DRAIN_STEPS`, which is the operative graceful cap. The
    two terms of the subtraction must never be in different units.
@@ -252,7 +252,7 @@ unit today — outer-fold transitions, advanced once per `transition` in `countT
    is the better DIAGNOSTIC — it names the cycling obligations, which the cap cannot.
 6. **Checked and clear: the bootstrap window does not false-trip.** `computeArtifactStateSignature`
    returns the literal `"no-metadata"` before any metadata exists
-   (`orchestrator/artifactMetadata.ts:66`), and unlike `checkNoProgressBeforeDispatch` the
+   (`orchestrator/artifactMetadata.ts`), and unlike `checkNoProgressBeforeDispatch` the
    finalization guard has no skip for it — so at finer granularity a long pre-metadata run would
    accumulate slack fast. It cannot: the fold recomputes `artifact_metadata` on every step, so at most
    the first dispatch signs `"no-metadata"`. `checkNoProgressBeforeDispatch` itself needs no
@@ -264,13 +264,13 @@ The open question was whether the fold holds one lock across work the outer laye
 releases and reacquires. It holds ONE. Three facts force it, and none was in the record:
 
 - **The inner drain is already this shape.** `runAuditStep` holds one tree lock across load → the
-  whole drain of up to 64 dispatches → ONE `writeCoreArtifacts` (`cli/auditStep.ts:86-107`).
+  whole drain of up to 64 dispatches → ONE `writeCoreArtifacts` (`cli/auditStep.ts`).
   Persist-once-under-one-hold is not new machinery; it is the existing inner contract, widened.
 - **The self-steal risk the constraint cites does not apply to a live holder.** The heartbeat
-  re-stamps the held lock at `STALE_LOCK_MS / 3` = 10s, token-checked (`shared/io/fileLock.ts:189`),
+  re-stamps the held lock at `STALE_LOCK_MS / 3` = 10s, token-checked (`shared/io/fileLock.ts`),
   and a steal requires an mtime older than 30s. Hold length is irrelevant while the heartbeat beats.
 - **Release-and-reacquire is not available anyway.** `withFileLock` is non-reentrant: `acquireLock`
-  does an exclusive `wx` create (`fileLock.ts:261`), so a second acquisition from inside the hold
+  does an exclusive `wx` create (`fileLock.ts`), so a second acquisition from inside the hold
   gets `EEXIST` — and the heartbeat keeping the outer hold fresh is exactly what stops the stale-steal
   path from rescuing it. It retries to the 10s default and throws `FileLockTimeoutError`. A
   deterministic timeout, never a success.
@@ -282,11 +282,11 @@ Three consequences follow, and each is part of the same atomic replace:
    2402, 2422, 2456, 2475, 2508, 2524). Under persist-once each reads the fold's own unwritten state,
    which silently rolls back everything the fold has done — a larger break than the metadata-carry
    loss the constraint names. The pattern needs no invention: `runDrainStep` already carries in memory
-   (`orchestrator/advance.ts:699`), and one outer transition already does too — the result-ingest arm
-   returns `ingested.updated_bundle` (`nextStepHelpers.ts:2616`).
+   (`orchestrator/advance.ts`), and one outer transition already does too — the result-ingest arm
+   returns `ingested.updated_bundle` (`nextStepHelpers.ts`).
 2. **The catch's second acquisition is deleted, not moved.** `executeAndRecord`'s failure path takes
    the tree lock a second time to write `last_executor` / `last_obligation`
-   (`nextStepHelpers.ts:1845-1851`); inside one hold that is the guaranteed timeout above. It becomes
+   (`nextStepHelpers.ts`); inside one hold that is the guaranteed timeout above. It becomes
    a plain in-memory mutation of the fold's bundle.
 3. **The halt-time persist must therefore cover the THROW path.** Today that catch persists before it
    rethrows. A persist placed only on the success path drops the failure attribution the recovery
@@ -294,10 +294,10 @@ Three consequences follow, and each is part of the same atomic replace:
 
 **The cost to measure, stated so it is not discovered later.** The hold now spans work the outer layer
 ran unlocked — result ingest, workload materialization, analyzer spawns. The heartbeat protects the
-HOLDER, not WAITERS: `withFileLock`'s default timeout is 10s (`fileLock.ts:27`) and
-`LOCKED_JSON_STORE_TIMEOUT_MS` is `STALE_LOCK_MS - 10s` = 20s (`shared/io/lockedJsonStore.ts:19`). A
+HOLDER, not WAITERS: `withFileLock`'s default timeout is 10s (`fileLock.ts`) and
+`LOCKED_JSON_STORE_TIMEOUT_MS` is `STALE_LOCK_MS - 10s` = 20s (`shared/io/lockedJsonStore.ts`). A
 fold holding longer than those windows converts a concurrent second process — another `next-step`,
-`review-run` (`cli/reviewRun.ts:176,195`), an analyzer-policy write — from *waiting* into *failing*.
+`review-run` (`cli/reviewRun.ts`), an analyzer-policy write — from *waiting* into *failing*.
 So the live fresh-audit measurement this entry already requires before the cap is sized must measure
 HOLD TIME, not only dispatch count. The residual risk is event-loop starvation rather than staleness:
 a synchronous stretch over 30s inside the hold stops the heartbeat and the lock does go stale. Every
@@ -313,23 +313,23 @@ fatal rather than untidy: `withFileLock` is non-reentrant, so none of them can r
 reacquire its way out. Each is a deterministic `FileLockTimeoutError`. Verified at HEAD by direct
 enumeration:
 
-1. `nextStepHelpers.ts:1845` — the catch. The one the answer found.
-2. `reviewRun.ts:176` — `persistReviewPause`, reached from `ensureSemanticReviewRun`, which
-   `runHostDelegationObligation` calls at `nextStepHelpers.ts:2620`. That is the audit loop's most
+1. `nextStepHelpers.ts` — the catch. The one the answer found.
+2. `reviewRun.ts` — `persistReviewPause`, reached from `ensureSemanticReviewRun`, which
+   `runHostDelegationObligation` calls at `nextStepHelpers.ts`. That is the audit loop's most
    common exit path, so the plan as written breaks the ordinary case, not an edge case. It is also
    the only one of the eleven on an EMIT path rather than a transition.
-3–11. Nine `runAuditStep` calls inside the fold, each locking via `auditStep.ts:82` —
+3–11. Nine `runAuditStep` calls inside the fold, each locking via `auditStep.ts` —
    `nextStepHelpers.ts` 1419, 1464, 1511, 1611, 1663, 1705, 1760 (the submission-apply forced
    dispatches inside the `handle*Branch` descriptors' `apply` callbacks), 1812 (`executeAndRecord`'s
    normal path) and 2601 (the result-ingest arm).
 
 **Count the SITES, not the paths — an independent sweep sharpened this and it changes the work.**
 The whole source tree holds exactly FOUR `withFileLock(artifactTreeLockPath(...))` acquisition
-sites: `auditStep.ts:86`, `nextStepHelpers.ts:1845`, `reviewRun.ts:176` and `reviewRun.ts:195`.
-Three of the four are reachable from the fold; `reviewRun.ts:195`
-(`persistConfigErrorHandoff`) is not — its only caller is `nextStepCommand.ts:311`, the CLI error
+sites: `auditStep.ts`, `nextStepHelpers.ts`, `reviewRun.ts` and `reviewRun.ts`.
+Three of the four are reachable from the fold; `reviewRun.ts`
+(`persistConfigErrorHandoff`) is not — its only caller is `nextStepCommand.ts`, the CLI error
 handler outside the fold, so it keeps its wrapper untouched. The eleven above are the eleven PATHS
-by which the fold reaches those three, and nine of them funnel through the single `auditStep.ts:86`.
+by which the fold reaches those three, and nine of them funnel through the single `auditStep.ts`.
 So the edit is three splits, not eleven; the eleven is what makes it unavoidable, not what sizes it.
 
 **The resolving shape is already in the tree, so this is scope rather than a new judgment.**
@@ -347,8 +347,7 @@ later reader will raise them again.
 
 - **The hold does not newly span analyzer child processes.**
   `external_analyzer_acquisition_executor`, `graph_enrichment_executor`, `auto_fix_executor` and
-  `syntax_resolution_executor` are all `EXECUTOR_RUNNERS` entries (`executorRunners.ts:93, 103, 189,
-  197`), dispatched from inside `runAuditStep`'s existing hold. Child processes already run under the
+  `syntax_resolution_executor` are all `EXECUTOR_RUNNERS` entries (`executorRunners.ts`), dispatched from inside `runAuditStep`'s existing hold. Child processes already run under the
   tree lock. The honest delta is hold LENGTH, not a new class of work under the lock.
 - **A crash mid-fold does not newly lose much.** `runAuditStepLocked` is load → `executeAdvance` →
   ONE `writeCoreArtifacts`, and `executeAdvance` drains up to `MAX_DRAIN_STEPS` in memory with no
@@ -366,16 +365,16 @@ That paragraph closes by saying every folded-in operation is async IO or an awai
 so a NEW synchronous hot loop inside the fold is the one thing that would break the heartbeat.
 Synchronous work is already in there, and it is child-process work:
 
-- `findingGrounding.ts:120` — `spawnSync("git", ["ls-files", "-z"])` with a 64 MB `maxBuffer`,
-  enumerating every tracked path. Reached inside the hold from `auditStep.ts:285`
+- `findingGrounding.ts` — `spawnSync("git", ["ls-files", "-z"])` with a 64 MB `maxBuffer`,
+  enumerating every tracked path. Reached inside the hold from `auditStep.ts`
   (`verifyFindingGrounding`). On a very large repository this is the most plausible multi-second
   synchronous stretch in the fold.
-- `disposition.ts:517` and `:522` — `spawnSync` for the VCS-ignore and untracked rules, in the
+- `disposition.ts` and `:522` — `spawnSync` for the VCS-ignore and untracked rules, in the
   `file_disposition` obligation. Injectable (`options.spawn ?? spawnSync`), so the default is the
   synchronous one.
-- `candidates.ts:452` — a synchronous `readdirSync` breadth-first walk in analyzer candidate
+- `candidates.ts` — a synchronous `readdirSync` breadth-first walk in analyzer candidate
   discovery. This one is SAFE by construction and should stay that way: `LIZARD_WALK_MAX_ENTRIES`
-  bounds it at 5,000 entries (`candidates.ts:433`).
+  bounds it at 5,000 entries (`candidates.ts`).
 
 None of this blocks the change — all three already run inside `runAuditStep`'s hold, so the
 heartbeat is already exposed to them and persist-once does not add the exposure. What it changes is
@@ -402,7 +401,7 @@ what holds the other 29 still.
 
 One layering assumption should not be made: there is no rule forcing the one registry into either
 area. `src/audit/orchestrator/` already imports `../cli/lineIndex.js` in three modules
-(`requeueFold.ts:19`, `taskBuilder.ts:16`, `trivialAudit.ts:3`), so "orchestrator must not import
+(`requeueFold.ts`, `taskBuilder.ts`, `trivialAudit.ts`), so "orchestrator must not import
 cli" is not an available argument for where the registry lands. Decide it on the host-boundary
 policy the registry carries, which is CLI-shaped, not on a layering rule that does not exist.
 
@@ -479,7 +478,7 @@ Constraint 2 calls the plan draw "a FILTERED registry view". Read literally as r
 host-boundary entries, it is wrong, and the engine says why:
 `findFirstActionableObligation` walks `priority` and does
 `obligations.find((o) => o.id === id)` per id, **continuing to the next id when no def matches**
-(`obligationEngine.ts:63-68`). An excluded obligation therefore does not stop the scan — the scan
+(`obligationEngine.ts`). An excluded obligation therefore does not stop the scan — the scan
 steps over it and selects a LATER obligation. A `plan` built that way would run PAST the first host
 boundary rather than halting at it, which inverts the one semantic constraint 2 gives it
 ("deterministic-only advance, halts at the first host boundary").
@@ -494,7 +493,7 @@ and consume edge / review / charter / narrative submissions.
 ### Persist-once is NOT achieved by converting the eleven reloads — there are direct core writes too
 
 The design-review consumption path writes a CORE artifact by hand, outside `writeCoreArtifacts`:
-`writeJsonFile(join(artifactsDir, "design_assessment.json"), existing)` at `nextStepHelpers.ts:1040`
+`writeJsonFile(join(artifactsDir, "design_assessment.json"), existing)` at `nextStepHelpers.ts`
 and again at `:1208`, plus the pass snapshots that follow it. So converting the reloads to carries
 leaves those writes landing mid-fold, and the "one persist boundary" claim is simply false — a later
 throw leaves a partly persisted fold. Removing them instead loses the state, because the handlers
@@ -505,9 +504,9 @@ converted into an in-memory transaction result that the single outer commit cons
 
 This is the subtlest of the set and the proposed `tolerance < MAX_DRAIN_STEPS` test does not cover
 it. The shared engine increments its transition counter on EVERY `transition`
-(`obligationEngine.ts:320-325`). Under the unified heterogeneous registry, bespoke policy bodies can
+(`obligationEngine.ts`). Under the unified heterogeneous registry, bespoke policy bodies can
 transition WITHOUT dispatching an executor — a consumed analyzer consent returns a transition at
-`nextStepHelpers.ts:2293-2297`, a consumed design review at `:2519-2524`. If `MAX_DRAIN_STEPS`
+`nextStepHelpers.ts`, a consumed design review at `:2519-2524`. If `MAX_DRAIN_STEPS`
 counts only executor dispatches, as constraint 4 says it must, those policy transitions spend engine
 budget and no slot. Four of them plus 63 dispatches crosses the 66-transition engine bound before
 the 64th dispatch can reach the graceful slot cap — so the derived bound is no longer guaranteed to
@@ -526,7 +525,7 @@ needs a mixed policy-transition test, which nothing in the blast radius currentl
   immutable bundles, nested objects included.
 - **The forced-executor bypass is load-bearing and must stay explicit.** `advanceAuditInner` branches
   on `preferredExecutor` and runs exactly one step INSTEAD of entering the drain
-  (`advance.ts:763-768`). Route a forced call through the unified drain and it can execute subsequent
+  (`advance.ts`). Route a forced call through the unified drain and it can execute subsequent
   obligations, breaking the single-action contract every submission-ingest caller depends on. Keep an
   explicit one-dispatch path and pin it with a contract test.
 - **`tests/audit/host-delegation-fold-carries-advisories.test.ts` must migrate, and the record's
@@ -537,8 +536,8 @@ needs a mixed policy-transition test, which nothing in the blast radius currentl
 ### Two smaller corrections to this record's own claims
 
 - **`findExecutorFailure` may retire; the structured error contract may NOT.** Its only production
-  consumer is `nextStepHelpers.ts:1839`, so the chain-walking helper goes once attribution is
-  dispatch-local. But dispatch still wraps failures as `ExecutorFailure` (`advance.ts:264-275, 462`),
+  consumer is `nextStepHelpers.ts`, so the chain-walking helper goes once attribution is
+  dispatch-local. But dispatch still wraps failures as `ExecutorFailure` (`advance.ts`),
   and deleting that with the helper leaves a nested forced dispatch — result ingestion, say —
   attributable only to the outer `semantic_review_executor`.
 - **`one-holistic-derivation-per-scan.test.ts`'s own header comment is now STALE.** Lines 20-22 say
@@ -550,7 +549,7 @@ needs a mixed policy-transition test, which nothing in the blast radius currentl
 ### And the lock-path count above is one short — an ALIAS hides a call site from grep
 
 `handleGraphEnrichmentBranch` binds `const runStep = deps.runStep ?? runAuditStep`
-(`nextStepHelpers.ts:496`) for its injected-runner seam, then applies the edge-reasoning submission
+(`nextStepHelpers.ts`) for its injected-runner seam, then applies the edge-reasoning submission
 through `runStep(...)` at `:601`. A search for `runAuditStep(` does not find it — mine did not — so
 the in-fold path list above is one short, and any future sweep for lock re-entry must search the
 ALIAS as well as the name. That site is also where the crash-safety ordering is stated in the code
@@ -570,12 +569,12 @@ the work.** The direction — one registry, one drain — is untouched.
 1. **Lock re-entry — STANDS, with the site list and the test replaced.** Wrapper plus lock-free
    core at each fold-reachable site, the idiom `auditStep.ts` already uses.
    - The site list is one longer than stated: the explicit `withFileLock` in the error-recovery
-     block at `nextStepHelpers.ts:1845` is fold-reachable and must split too.
+     block at `nextStepHelpers.ts` is fold-reachable and must split too.
    - The blast radius is TEN in-fold call sites in `nextStepHelpers.ts` (601 through the `runStep`
      alias, 1419, 1464, 1511, 1611, 1663, 1705, 1760, 1812, 2601), not three. The eight external
      top-level callers need NO change: each calls the public `runAuditStep`, which keeps its lock.
    - `persistReviewPause` is safe outside its own hold. It reads only in-memory parameters and
-     writes through `writeCoreArtifacts` / `writeHandoffOnly` (`reviewRun.ts:151-188`); under a
+     writes through `writeCoreArtifacts` / `writeHandoffOnly` (`reviewRun.ts`); under a
      continuous outer hold there is no time-of-check race to reintroduce.
    - **The proposed contract test is refuted.** "Nothing reachable from a fold `execute`" is a
      static reachability claim over dynamic dispatch and injected callbacks — the engine calls
@@ -590,33 +589,33 @@ the work.** The direction — one registry, one drain — is untouched.
    - The core writer list is `:1040`, `:1146`, `:1208` and the `writeCoreArtifacts` at `:1850`.
      `:1146` is a third raw `design_assessment.json` write this record previously missed.
    - **A partial bundle DELETES.** `ArtifactBundle` is `Partial<ArtifactPayloadMap>`
-     (`artifacts.ts:154`) and pruning treats a missing value as an intent to unlink (`:447-458`).
+     (`artifacts.ts`) and pruning treats a missing value as an intent to unlink (`:447-458`).
      The return must be a FULL authoritative bundle, or a tri-state patch separating untouched
      from set from delete.
    - **Design-review snapshots are state-critical and are not core artifacts.** They live under
-     `design-review-snapshots/`, are loaded specially (`artifacts.ts:157-162`), and
-     `writeCoreArtifacts` never writes them — while `state.ts:44-47` treats a COMPLETED pass with
+     `design-review-snapshots/`, are loaded specially (`artifacts.ts`), and
+     `writeCoreArtifacts` never writes them — while `state.ts` treats a COMPLETED pass with
      no snapshot as `satisfied`. A snapshot lost between fold and commit silently marks the pass
      done rather than re-firing it. Commit them with the core, not after it.
    - The failure path throws without returning a bundle (`:1842`), so pending state must survive
      exceptions. The submission ledger and `agent_reflections` are append-only and must never
-     round-trip through a write-back (`artifacts.ts:145-152, :173-180`).
+     round-trip through a write-back (`artifacts.ts, :173-180`).
    - **The marker protocol is EXEMPT and must stay mid-fold.** The five
      `steps/deterministic-progress.json` writes (`:1805, :1820, :1852, :1929, :1984`) exist so a
      host watching the filesystem can see which executor is active DURING a long step, which the
      preserve list protects. Their value is being visible mid-fold. So the property this landing
      delivers is ONE CORE WRITE BOUNDARY, not "one persist boundary" — state it that way, or a
      later lap folds the markers in and breaks the observability contract.
-   - Define "one commit". `writeCoreArtifacts` writes sequentially (`artifacts.ts:437-446`); only
-     each individual file is atomic temp-then-rename (`json.ts:99`). The result is one logical
+   - Define "one commit". `writeCoreArtifacts` writes sequentially (`artifacts.ts`); only
+     each individual file is atomic temp-then-rename (`json.ts`). The result is one logical
      locked flush, not crash-atomic all-or-nothing.
 
 3. **Unlink ordering — REFUTED. Deferral introduces a silent, permanent failure.**
    A deferred deletion creates a re-consumption path, and one apply is not idempotent under it.
    **Systemic challenge falsely converges, for good.** `foldChallengeRound` counts a finding as new
-   only when it is absent from `prior` (`systemicChallengeLoop.ts:107-113`) and sets
+   only when it is absent from `prior` (`systemicChallengeLoop.ts`) and sets
    `dry = new_finding_ids.length === 0` (`:122`); the executor sets `converged: folded.dry`
-   (`systemicChallengeExecutor.ts:109`). Re-consuming an already-folded submission therefore
+   (`systemicChallengeExecutor.ts`). Re-consuming an already-folded submission therefore
    reports a dry round and terminates the adversary loop permanently. (This instance depends on
    convergence being ONE dry round — open decision `backlog-1`. Answering that two-or-more blunts
    the instance without fixing the class.)
@@ -624,7 +623,7 @@ the work.** The direction — one registry, one drain — is untouched.
    transitions may already have written outside `artifactsDir`; throw and guard paths
    (`:1831-1869`, and the no-progress / blocked / cycle / stopped-fold guards) discard a staged
    list; and `recordLaneOutcome` appends an immutable ledger event
-   (`laneSubmissions.ts:481-518`) that double-records on re-consumption.
+   (`laneSubmissions.ts`) that double-records on re-consumption.
    **Replacement landing:** durable STAGING, not an in-memory list — atomically rename a
    submission into a staging directory before applying, so recovery can tell whether it was
    already folded. Commit lane outcomes and deletions in the same phase as the artifact commit,
@@ -633,22 +632,22 @@ the work.** The direction — one registry, one drain — is untouched.
 
 4. **Plan draw — REFUTED. A blanket replacement halt is wrong; the policy must be
    branch-sensitive.** The premise holds: `findFirstActionableObligation` skips a missing def and
-   continues (`obligationEngine.ts:63-68`), so an exclusion filter steps OVER a host boundary. But
+   continues (`obligationEngine.ts`), so an exclusion filter steps OVER a host boundary. But
    of 25 definitions, 13 have bespoke policy bodies and EIGHT are HYBRID — host on one branch,
    deterministic on another: `external_analyzers_current`, `graph_enrichment_current`,
    `intent_equivalence_current`, `charter_extraction_current`, `charter_delta_current`,
    `charter_clarification_current`, `systemic_challenge_current`, `synthesis_narrative_current`.
-   Counterexample: `planCommand.ts:4-10` passes no acquisition option, so
-   `pendingAnalyzerConsent` returns `[]` (`hostInputPause.ts:96`) and the obligation takes its
+   Counterexample: `planCommand.ts` passes no acquisition option, so
+   `pendingAnalyzerConsent` returns `[]` (`hostInputPause.ts`) and the obligation takes its
    DETERMINISTIC arm. A blanket halt stops `plan` at a boundary that does not exist on that run.
    Also: this record's exclusion list MISSES `critical_flow_fallback_current`,
    `intent_checkpoint_current`, `intent_equivalence_current` and `systemic_challenge_current`, and
    it OVERSTATES consent persistence — only declines are durable; grants modify the run-scoped
    token (`:428-450`).
    **There is no halt outcome.** `ObligationOutcome` is exactly `transition | emit`
-   (`obligationEngine.ts:109-111`), so a halt is an `emit` with a stated step. And `plan` has TWO
+   (`obligationEngine.ts`), so a halt is an `emit` with a stated step. And `plan` has TWO
    output shapes at HEAD — the accumulated last deterministic result after progress
-   (`advance.ts:644-699`), and, entered at a no-runner boundary, the host executor with the exact
+   (`advance.ts`), and, entered at a no-runner boundary, the host executor with the exact
    summary `Executor <id> is selected and requires its bound host step.` (`:406-443`). A generic
    halt changes the first.
    **Replacement landing:** preserve every id, `derive` closure, membership and priority position;
@@ -660,14 +659,14 @@ the work.** The direction — one registry, one drain — is untouched.
    first, and both cannot be claimed at once.
    One hazard is CLOSED: a satisfied obligation does not become actionable under a replacement
    view, because selection derives state before `execute` and admits only `missing`/`stale`
-   (`obligationEngine.ts:313-320`).
+   (`obligationEngine.ts`).
    Residual: the classifier cannot "peek" by calling today's handlers — several poll, quarantine,
    apply, unlink, persist and ledger-record before returning a branch decision (`:1363-1393`). So
    either the classifier is pure, or the policy bodies split into classify and apply halves.
 
 5. **Cap unit — STANDS, with its stated invariant corrected.** Charge every obligation execution
    to the slot. But **"slots and engine transitions return to 1:1" is FALSE**: an `emit` returns
-   before the counter (`obligationEngine.ts:321-323`), so an emitting execution spends a slot and
+   before the counter (`obligationEngine.ts`), so an emitting execution spends a slot and
    no transition budget. The true and sufficient invariant is
    **`engine transitions <= charged executions`** — if every execution takes a slot, every
    transition took one first, so the engine cannot reach `cap + 2` before the execution cap.
@@ -679,38 +678,38 @@ the work.** The direction — one registry, one drain — is untouched.
    Must add: ONE wrapper owning both charging and cap enforcement over every definition; a
    structured, resumable cap halt for policy bodies, which return only transition state
    (`:2293-2297, :2519-2524`) and have no cap field in `AdvanceAuditResult`
-   (`advanceTypes.ts:91-100`); and an explicit supersession of the "64 dispatches" contract,
-   reframing `tests/audit/advance-drain-loop.test.ts:179-254` — its fixture has no policy
+   (`advanceTypes.ts`); and an explicit supersession of the "64 dispatches" contract,
+   reframing `tests/audit/advance-drain-loop.test.ts` — its fixture has no policy
    transitions, so it stays green either way and its MEANING changes while its number does not.
    The mixed acceptance test: four policy-only transitions plus a perpetually-actionable
    state-changing executor; assert exactly 64 executions, resumable, no engine-bound stop.
 
 6. **Synchronous children in the hold — DECIDED (owner, 2026-08-28): migrate the audit path off
    the synchronous runner. Do NOT move the lock constants.**
-   The mechanism is confirmed: the heartbeat is a `setInterval` (`fileLock.ts:204-211`) and
-   `spawnSync` (`exec.ts:359`) blocks the event loop, so a synchronous child outliving
+   The mechanism is confirmed: the heartbeat is a `setInterval` (`fileLock.ts`) and
+   `spawnSync` (`exec.ts`) blocks the event loop, so a synchronous child outliving
    `STALE_LOCK_MS` (30 s) lets another process steal a lock the holder still believes it holds.
    Reachable into today's hold via `autoFixExecutor.ts` and `syntaxResolutionExecutor.ts`.
-   **The exposure is not hypothetical and the remedy already exists.** `exec.ts:384-392` records
+   **The exposure is not hypothetical and the remedy already exists.** `exec.ts` records
    that this already fired — "one stalled `npx --version` probe classified a LIVE lock stale and
    stole it mid-flight" — and states that acquisition runs on the ASYNC twin for exactly that
    reason. `runTrackedAsync` does not block the loop, classifies a deadline as `ETIMEDOUT` and an
    overflow as `ENOBUFS` instead of a bare signal, and escalates SIGTERM to SIGKILL so a deadline
-   is actually terminal. **Remediate already migrated** (`close.ts:562, :977`); audit did not —
+   is actually terminal. **Remediate already migrated** (`close.ts, :977`); audit did not —
    a one-core-two-draws divergence, the same defect fixed on one side only.
-   **Landing:** move `runFirstAvailableCommand` (`localCommands.ts:133`, currently sync, both
+   **Landing:** move `runFirstAvailableCommand` (`localCommands.ts`, currently sync, both
    callers already async) onto `runTrackedAsync` with a 120 s deadline. Once nothing blocks the
    loop the heartbeat fires and the lock cannot be stolen, so no stale-window change is needed:
    `STALE_LOCK_MS` stays 30 s, its `/3` heartbeat ratio stays, the derived
    `LOCKED_JSON_STORE_TIMEOUT_MS` is untouched, and the test pinning 30 s
    (`fileLock-clock-seam.test.ts`) does not move. Independent of CX-02 and landable before it.
    Contention cost of the single outer hold, now measured: a concurrent CLI blocks up to
-   `DEFAULT_TIMEOUT_MS` = 10,000 ms (`fileLock.ts:27`) before `FileLockTimeoutError`.
+   `DEFAULT_TIMEOUT_MS` = 10,000 ms (`fileLock.ts`) before `FileLockTimeoutError`.
 
 **One correction to this record's own preservation constraints.** The in-place mutation hazard is
 real — `handleDesignReviewBranch` aliases and mutates `bundle.design_assessment`
 (`:1083, :1141-1143, :1176-1197`) while both derive caches key on bundle identity
-(`:2266`, `advance.ts:787`). But this record attributes "nested objects included" to the
+(`:2266`, `advance.ts`). But this record attributes "nested objects included" to the
 memoization, and the memoization does not require it: a shallow `{...bundle}` mints a fresh key and
 re-derives correctly. Keep the requirement; its real reason is ALIASING, so an earlier carry cannot
 observe a later mutation. Stated wrongly, the next lap satisfies it with a shallow copy and

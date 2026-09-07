@@ -10,7 +10,7 @@ Blocker mechanism found:
 2. Of the 18: 11 have ZERO results in the ledger; 7 are status=complete/result_ingested but re-enter
    pending via `computeStaleResultTaskIds` (baseline contentKey drift — task content signature moved
    after ingest, legit O3 re-dispatch demand).
-3. **Cycle**: every ~20 min (= AUDIT_TASK_CLAIM_LEASE_MS, dispatch.ts:135) one next-step run claims all
+3. **Cycle**: every ~20 min (= AUDIT_TASK_CLAIM_LEASE_MS, dispatch.ts) one next-step run claims all
    18 via ClaimRegistry.claimMany (task-claims.json), plans 8 packets, dispatches to NIM workers via
    LiteLLM → **every worker fails with 429 RateLimitError (deepseek-v4-pro + glm-5.2, no fallbacks)**
    → no inline-result.json ever written → claims sit live for 20 min.
@@ -50,7 +50,7 @@ stale at ~16:36:45Z).
   (DPN-COR-001, finding sustained high/high with live artifact evidence) → merged: accepted 1.
 - runtime_validation phase ran npm test: exit 1 → 39 runtime units ALL not_confirmed → spawned
   deepening:runtime reconcile tasks in batches (14, then 15). ROOT CAUSE identified: single test
-  failure tests/audit/quota-command.test.mjs:143 — bare existsSync assertion on
+  failure tests/audit/quota-command.test.mjs — bare existsSync assertion on
   <repoRoot>/.audit-tools/audit/session-config.json, which the LIVE self-audit session created →
   hermeticity defect, not a source regression. Recorded as finding RTV-TST-001 (medium/high) on task
   deepening:runtime:052a52513e.
@@ -72,10 +72,10 @@ stale at ~16:36:45Z).
 
 ## Product defects discovered live (for backlog)
 1. Drain livelock on zero-grant dispatch rounds + merge-only claim release
-   (src/audit/cli/mergeAndIngestCommand.ts:833 claim clear; src/audit/cli/dispatch.ts:135 20-min lease;
+   (src/audit/cli/mergeAndIngestCommand.ts claim clear; src/audit/cli/dispatch.ts 20-min lease;
    advance drain maxTransitions(100) exit-1 loop). Captured as findings FLW-COR-003 / COR-6ba55c63.
-2. Runtime-validation hermeticity: tests/audit/quota-command.test.mjs:143 bare existsSync assertion on
+2. Runtime-validation hermeticity: tests/audit/quota-command.test.mjs bare existsSync assertion on
    <repoRoot>/.audit-tools/audit/session-config.json fails in any live-audited working copy ->
    39 not_confirmed units -> 29 reconcile tasks. Captured as RTV-TST-001.
-3. Idempotent-replay exit-code flip (mergeAndIngestCommand.ts:602 has_failures:false on replay) —
+3. Idempotent-replay exit-code flip (mergeAndIngestCommand.ts has_failures:false on replay) —
    finding FLW-COR-002.

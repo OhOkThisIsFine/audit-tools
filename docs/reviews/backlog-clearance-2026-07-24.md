@@ -86,22 +86,22 @@ expectations — those encode real list prices and are what caught it.
   and the release. Adversarial review corrected TWO of this lap's own premises: the lease is 30s
   (`STALE_LOCK_MS`), not the audit side's 20 minutes; and the claimed blocker — that releasing would break
   the `reverify-node` retry via the ownership heartbeat — is FALSE, because `reverifyQuarantinedNode`
-  passes no `ownership` at all (`rollingSession.ts:790-792`, "a quarantine re-drive takes NO claim
+  passes no `ownership` at all (`rollingSession.ts`, "a quarantine re-drive takes NO claim
   anywhere"). The real consequence is worse than a stall: `writeSessionFile` never runs on that throw, so
   `terminal` never counts the node and `inFlight` stays ≥1 — a permanent hang.
   ⚠ The obvious fix is ALSO wrong: routing a stray into `accept_failed` makes the host directive
-  (`nextStep.ts:2264-2269`) assert a falsehood — it promises the work is "preserved under a quarantine
+  (`nextStep.ts`) assert a falsehood — it promises the work is "preserved under a quarantine
   ref" and names `reverify-node`, but a stray never committed, so no ref exists and the command returns
   `no_quarantine`. That converts a hard stop into a confidently-wrong instruction. The stray needs its own
   terminal class carrying its diagnostic.
   ⚠ **And the intra-block ORDER is load-bearing, in a way that is easy to get backwards.**
   `recordNodeAcceptOutcome` must stay FIRST, exactly where it is at `:579` — one draft enumerated it last
-  (after persist and release), which trades the hang for something worse: `marshal.ts:947-951` computes
+  (after persist and release), which trades the hang for something worse: `marshal.ts` computes
   `acceptHardFailed` from the sidecar, so a NULL sidecar makes it `false` and, per its own comment at
   `:939-946`, "the gates below stay inert". A sidecar write that throws after the session is already
   persisted terminal would leave a node whose work is quarantined and never landed, with the worker's
   self-reported `resolved` trusted through marshal and the hard-fail gate disarmed. `acceptReconcile`
-  cannot save it either — it only repairs blocks WITH landed git evidence (`acceptReconcile.ts:143-146`),
+  cannot save it either — it only repairs blocks WITH landed git evidence (`acceptReconcile.ts`),
   which a never-landed node lacks by construction. Correct order: **record sidecar → mark terminal →
   drop token → persist session → release claim → throw last.** Persist-then-release is the right way
   round: a persist failure leaves claim and session both intact (today's behaviour, 30s window still
@@ -113,7 +113,7 @@ expectations — those encode real list prices and are what caught it.
   `Promise<{outcome: "success" | "error"; …}>`, which is what makes every return from the host-subagent
   path terminal by construction.
   **Red-green recipe** (the whole design is unverified without it): extend the stray fixture at
-  `tests/remediate/host-rolling-dispatch.test.ts:534` and assert three things after the rejection — (i)
+  `tests/remediate/host-rolling-dispatch.test.ts` and assert three things after the rejection — (i)
   `node-claims.json` has no entry for the stray block, (ii) the persisted rolling-session lists it terminal
   with its token dropped from `claims`, and (iii) the directive a SIBLING node's accept returns does not
   tell the host to reverify a node that has no quarantine ref. Invert by moving the throw back above the

@@ -59,7 +59,7 @@ against the current source with targeted reads/searches.
 
 The negative-claim scope check returned no recorded issue under `src/audit` and
 one known gap under `src/shared`: the unrelated parse-partial range
-`src/shared/analyzers/candidates.ts:450`. That range is not evidence for any
+`src/shared/analyzers/candidates.ts`. That range is not evidence for any
 claim in this report.
 
 `index_status` reported seven parse-partial files and no skipped files. None of

@@ -111,7 +111,7 @@ jscpd counts these; they are deliberate architecture, not drift:
 Filed in the backlog (owning file noted per entry there); evidence summarized here:
 
 1. **scoreAudit/scoreTokens drifted mirror** — `ratio`/`pct`/regression-predicate/markdown-render
-   duplicated; `scoreTokens.ts:222` even documents itself as an exact mirror. They have already
+   duplicated; `scoreTokens.ts` even documents itself as an exact mirror. They have already
    drifted (direction-flipped predicates). Extract the shared pure helpers.
 2. **claimRegistry/reservationLedger copied store scaffolding** — mint-token/read/write/type-guard
    substrate byte-copied ("the ClaimRegistry pattern generalized"); collapse the I/O scaffolding,

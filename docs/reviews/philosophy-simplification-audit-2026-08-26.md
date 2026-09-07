@@ -77,7 +77,7 @@ safety semantics:
 - audit uses a priority obligation walk (`src/audit/orchestrator/nextStep.ts`);
 - remediation owns mutation, phase locks, clarification, triage, merge, quarantine, and
   recovery semantics (`src/remediate/steps/nextStep.ts`;
-  `src/remediate/index.ts:186-303`);
+  `src/remediate/index.ts`);
 - the exact-source slim-down review establishes that partial audit coverage may be abandoned
   while half-applied remediation may not, and that the two `decideNextStep` machines are genuine
   category differences (`docs/reviews/slimdown-review-2026-07-28.md:659-671`);
@@ -130,7 +130,7 @@ calls it one step; `CLAUDE.md:89` and `CLAUDE.md:178` redefine it as a fold-awar
 deterministic obligations; the audit CLI then adds branch and emission drains around the shared
 engine. The terminology makes nested loops look like separate contract requirements.
 
-The missing primitive is not new. `src/shared/engine/obligationEngine.ts:170-293` already provides
+The missing primitive is not new. `src/shared/engine/obligationEngine.ts` already provides
 bounded `advance()`: it repeatedly selects and executes transition obligations, stops at an emit
 or completion, and reports structured `cycle` or `bound` non-convergence.
 
@@ -193,11 +193,11 @@ the host-result bindings at the product boundary.
 plane over executable source:
 
 - `package.json:54` owns the executable gate sequence. `STEP_GLOSS` in
-  `scripts/gate-enumeration-data.mjs:17-35` keeps a parallel membership-keyed description set,
-  while `scripts/check-gate-enumeration.mjs:27-45` correctly derives order from the executable
+  `scripts/gate-enumeration-data.mjs` keeps a parallel membership-keyed description set,
+  while `scripts/check-gate-enumeration.mjs` correctly derives order from the executable
   source. The shipping workflow still renders the duplicate enumeration.
 - Guard reach mixes derivable identity and wiring with declarations that source inspection cannot
-  infer. `scripts/check-guard-reach.mjs:14-33` and `:175-205` distinguish repository-discovered
+  infer. `scripts/check-guard-reach.mjs` and `:175-205` distinguish repository-discovered
   existence/reachability from explicit semantic reach, uncovered halves, and nonstandard
   contract-test claims.
 
@@ -242,7 +242,7 @@ also defines any pause or window switch as a sprint end requiring the full rende
 - the `▶`-pinned backlog pointers.
 
 Do not make a tracked projection depend on a live registry query:
-`scripts/release-and-publish.mjs:27-30` and `:448-456` show that registry observation is
+`scripts/release-and-publish.mjs` and `:448-456` show that registry observation is
 network-, latency-, and error-prone. Published availability can be rendered best-effort at display
 time rather than committed as canonical state.
 
@@ -345,7 +345,7 @@ advertise it, but no tracked production writer exists.
 
 `run.log.jsonl` is real telemetry, not an authoritative replacement. `RunLogger` can be disabled,
 becomes a no-op when no path is configured, and intentionally swallows append failures
-(`src/shared/observability/runLog.ts:4-6`; `:38-39`; `:65-79`). It also does not supply every old
+(`src/shared/observability/runLog.ts`; `:38-39`; `:65-79`). It also does not supply every old
 ledger field.
 
 Retire the unused execution-record and run-ledger plane at an explicit contract boundary. Then
@@ -362,11 +362,11 @@ consumers together, then remove or version the contract atomically.
 
 ### DC-02 — Use one strict, versioned remediation-state schema at read and write
 
-The remediation state shape currently has several partial authorities. `src/remediate/state/store.ts:113-212`
+The remediation state shape currently has several partial authorities. `src/remediate/state/store.ts`
 contains a hand-written partial load validator; `:245-260` parses bytes but does not establish the
 full contract; `:286-311` mutates and replaces state. Host handoff separately narrows state and
 `RemediationStateKeySet` duplicates keys. The shared store already supports an optional
-`validate` hook and invokes it on writes (`src/shared/io/lockedJsonStore.ts:46-50`;
+`validate` hook and invokes it on writes (`src/shared/io/lockedJsonStore.ts`;
 `:120-123`), but this state store does not use one full schema symmetrically.
 
 Define one Zod discriminated-union `RemediationStateSchema` with an explicit
@@ -377,10 +377,10 @@ or invalidation release. This closes the “write now, fail on the next invocati
 
 ### DC-03 — Make the shared step schema describe and validate emitted bytes
 
-`src/shared/io/stepContractWriter.ts:193-207` defines the shared contract only as a TypeScript
+`src/shared/io/stepContractWriter.ts` defines the shared contract only as a TypeScript
 interface, and the writer injects `agent_id` at `:303-320`. Audit's strict `StepArtifactSchema`
 omits `agent_id`, so its own emitted artifact cannot parse; a test explicitly works around the
-mismatch (`tests/shared/submission-path-is-tool-owned.test.ts:23-25`). Remediation hand-validates
+mismatch (`tests/shared/submission-path-is-tool-owned.test.ts`). Remediation hand-validates
 the same base independently. This exact defect is already program-of-record
 (`docs/backlog/open-bugs.md:785-789`).
 
@@ -388,10 +388,10 @@ Create one shared Zod `BaseStepSchema` that includes `agent_id`; each draw exten
 `step_kind` and real policy fields. Pass the concrete schema into the writer and parse the fully
 constructed value before persistence. Without runtime parsing, the current
 `as unknown as TStep` cast and `extraFields` can recreate schema/byte drift
-(`src/shared/io/stepContractWriter.ts:303-322`).
+(`src/shared/io/stepContractWriter.ts`).
 
 `allowed_mcp_tools` is declared in audit's `StepArtifactSchema` and covered by producer tests
-(`src/audit/cli/steps.ts:70-101`; `tests/audit/steps-write-current-step.test.ts:167-201`), but a
+(`src/audit/cli/steps.ts`; `tests/audit/steps-write-current-step.test.ts`), but a
 bounded tracked production search finds no reader after artifact emission. That absence does not
 rule out an installed host capability. Inspect installed host assets before deleting it. If no host
 consumer exists, remove it at the same versioned contract bump; otherwise represent the external
@@ -400,7 +400,7 @@ capability explicitly and test that boundary.
 ### DC-04 — Delete the pre-split design-review compatibility lane
 
 The live audit still polls `design_review_legacy` alongside contract and conceptual review
-(`src/audit/cli/laneSubmissions.ts:77`; `src/audit/cli/nextStepHelpers.ts:1129-1156`). Old
+(`src/audit/cli/laneSubmissions.ts`; `src/audit/cli/nextStepHelpers.ts`). Old
 `reviewed` state is interpreted as both modern passes and preserved across structure refresh.
 
 Legacy artifacts do not currently fail a strict schema, so deletion needs an explicit resume
@@ -419,39 +419,39 @@ behavior, and operator-facing rerun messaging must move with the lane.
 
 `SubmissionLedgerRead` is an array intersection with hidden non-enumerable `.events` and
 `.dropped` properties so old callers still observe `[]`
-(`src/shared/submission/submissionLedger.ts:123-176`). Recovery acceptance then deduplicates by
+(`src/shared/submission/submissionLedger.ts`). Recovery acceptance then deduplicates by
 asking whether a free-text event message contains a landed commit
-(`src/remediate/steps/dispatch/hostHandoff.ts:2212-2253`).
+(`src/remediate/steps/dispatch/hostHandoff.ts`).
 
 Return `{ events, dropped }` directly and decode events with a Zod discriminated union. An
 `accepted_via_recovery` event should carry structured `baseline_commit` and `landed_commit` fields.
 The current reader accepts any object with the matching version without validating `kind` or
-required fields (`src/shared/submission/submissionLedger.ts:213-238`); invalid-shape lines should
+required fields (`src/shared/submission/submissionLedger.ts`); invalid-shape lines should
 be classified in `dropped`.
 
 Because the ledger is persisted NDJSON, add an event version and an explicit decoder/migration for
 older lines. The consumer set is small only inside the tracked repository:
 `readSubmissionLedger` is exported through published `audit-tools/shared`
-(`src/shared/index.ts:489-498`; `package.json:12-20`). Treat the return-shape change as an external
+(`src/shared/index.ts`; `package.json:12-20`). Treat the return-shape change as an external
 API contract and migrate it deliberately. Identity should never be parsed back out of a message.
 
 ### DC-06 — Make the contract envelope strict, then test whether host views can be derived
 
 The remediation contract pipeline can create up to 30 payload-bearing files for fifteen artifacts:
 a plain `<name>.input.json` host staging/read view and an accepted `<name>.json` envelope
-(`src/remediate/contractPipeline/artifactStore.ts:1-24`; `:150-166`). Tool-derived artifacts can
+(`src/remediate/contractPipeline/artifactStore.ts`; `:150-166`). Tool-derived artifacts can
 place the same payload in both, yielding up to fifteen duplicated payloads (`:244-263`).
 
 Those paths do not currently claim equal authority. The plain file is an untrusted host staging/read
 view; the envelope is the accepted canonical form. The proven defect is narrower: envelope
 authority is split among a TypeScript interface, a permissive `isEnvelope`, and generic
 unvalidated reads (`:79-105`; `:286-303`), while the CLI accepts bare or wrapped forms
-(`src/remediate/index.ts:385-391`).
+(`src/remediate/index.ts`).
 
 Retain the envelope and validate it with one strict Zod schema at every canonical read and write.
 Shape validation is insufficient: bind `artifact_name` to the requested name/filename and
 recompute `content_hash` over `payload` before selecting a semantic projection
-(`src/remediate/contractPipeline/artifactStore.ts:98-106`; `:195-199`; `:279-288`). Preserve and
+(`src/remediate/contractPipeline/artifactStore.ts`; `:195-199`; `:279-288`). Preserve and
 validate dependency metadata as part of the same contract.
 
 Making the host view ephemeral or deriving it from the envelope is a design hypothesis, not an
@@ -466,9 +466,9 @@ The conceptual-design spec describes convergence after an unspecified `N` consec
 it defines neither a value nor configuration (`spec/conceptual-design-review-design.md:79-80`;
 `:175-179`). Runtime instead converges on the first round with zero novel findings, including a
 non-empty submission whose findings were all seen before
-(`src/audit/orchestrator/systemicChallengeExecutor.ts:28-43`; `:97-121`). Novelty already uses the
+(`src/audit/orchestrator/systemicChallengeExecutor.ts`; `:97-121`). Novelty already uses the
 content-derived `findingReEmissionKey`
-(`src/audit/systemic/systemicChallengeLoop.ts:68-70`; `:89-112`), superseding the earlier
+(`src/audit/systemic/systemicChallengeLoop.ts`; `:89-112`), superseding the earlier
 worker-ID concern. Bounded source search found no total-round ceiling; that open defect is already
 recorded at `docs/backlog/open-bugs.md:791-803`.
 
@@ -486,7 +486,7 @@ These do not need a new architecture program:
   tests with a semantic document-phase name; replace runtime-visible `N-R21` with a named
   diagnostic and explicit resolution action, updating producer, prompt, and tests atomically
   (`docs/glossary-ids.md:13-19`; `:66-72`;
-  `src/remediate/validation/contractPipelineGates.ts:223`);
+  `src/remediate/validation/contractPipelineGates.ts`);
 - delete the release-gate restatement and make `/ship` invoke the executable list directly;
 - share project-memory path/index resolution between the citation check and closeout hook;
 - single-source friction IDs and labels for product, hook, and closeout consumers; and

@@ -16,9 +16,9 @@ subsystem decomposition; **C6** run evidence of agent confusion.
 
 ### 1. Critical-flow fallback — "EXACT id" echo (confirmed, and it is a class)
 
-[`criticalFlowFallbackPrompt.ts:59`](../../src/audit/reporting/criticalFlowFallbackPrompt.ts)
+[`criticalFlowFallbackPrompt.ts`](../../src/audit/reporting/criticalFlowFallbackPrompt.ts)
 asks the host to re-author a flow with its exact id; the return schema is `id: z.string()`
-(`src/shared/types/flows.ts:10`) — no enum, no format, no collision check; the executor merges
+(`src/shared/types/flows.ts`) — no enum, no format, no collision check; the executor merges
 whatever comes back. Same unguarded-echo shape recurs across **both** orchestrators (census below).
 
 **Mechanical alternative (recommended):** stop asking for ids at all. Render the deterministic
@@ -40,8 +40,8 @@ affirmation (the loader-truncation lesson from the run: never one unbounded list
 ### 2. Scope confirmation starved of telos (confirmed; reorder is blocked, digest is not)
 
 `buildLensPropositions` receives only unit manifest + paths + disposition — pure path heuristics
-(`intentCheckpointExecutor.ts:209-321`, called at `:358`). `design_assessment` is *already in the
-bundle* at that point (PRIORITY slot 8 vs. checkpoint slot 10, `nextStep.ts:34-36`) and is never
+(`intentCheckpointExecutor.ts`, called at `:358`). `design_assessment` is *already in the
+bundle* at that point (PRIORITY slot 8 vs. checkpoint slot 10, `nextStep.ts`) and is never
 referenced (grep: 0 matches in the executor). That is exactly how the run got the factually wrong
 "no logging/metrics surface" observability rationale beside a JSONL ledger.
 
@@ -58,19 +58,19 @@ scope the owner may prune. **But two DAG-clean fixes exist:**
 ### 3. Orchestrator fed subagent-only content (confirmed; the design exists but only one step honors it)
 
 The capability-conditional pattern is implemented correctly in exactly **one** place:
-[`semanticReviewStep.ts:61-93`](../../src/audit/cli/semanticReviewStep.ts) branches on
+[`semanticReviewStep.ts`](../../src/audit/cli/semanticReviewStep.ts) branches on
 `hostCanDispatch` — thin step + per-packet prompt files on disk when capable, inline when not. It
 is documented **nowhere** (`spec/unified-dispatch-worker-model.md` covers worker kinds, not
 orchestrator step rendering). Every other fan-out step ignores it:
 
 | Step | Render site | Violation |
 |---|---|---|
-| charter extraction | `nextStepCommand.ts:709` | full 3-subagent instruction set inlined, no branch; **no per-kind prompt files are ever written** — the host improvises subagent prompts (the prompt-quality variance the owner observed is downstream of this) |
-| charter delta | `nextStepCommand.ts:744` | same, no branch |
-| design review (contract + conceptual) | `nextStepCommand.ts:608-685` | `prepareConceptualDispatch` never sees capability; output path prose-referenced, not materialized — the run's 5-of-8 artifact drift |
-| critical-flow fallback | `nextStepCommand.ts:1095-1107` | ~340 lines of flow stubs inlined; digest + file pointer would carry it |
-| synthesis narrative | `nextStepCommand.ts:1139-1151` | up to 120 findings inlined, silent-drop id join on return |
-| remediate review-approval gate | `prompts.ts:158-227` | every finding body inlined; `prepareImplementDispatch` (`marshal.ts:401-414`) proves the file-writing pattern exists one layer down |
+| charter extraction | `nextStepCommand.ts` | full 3-subagent instruction set inlined, no branch; **no per-kind prompt files are ever written** — the host improvises subagent prompts (the prompt-quality variance the owner observed is downstream of this) |
+| charter delta | `nextStepCommand.ts` | same, no branch |
+| design review (contract + conceptual) | `nextStepCommand.ts` | `prepareConceptualDispatch` never sees capability; output path prose-referenced, not materialized — the run's 5-of-8 artifact drift |
+| critical-flow fallback | `nextStepCommand.ts` | ~340 lines of flow stubs inlined; digest + file pointer would carry it |
+| synthesis narrative | `nextStepCommand.ts` | up to 120 findings inlined, silent-drop id join on return |
+| remediate review-approval gate | `prompts.ts` | every finding body inlined; `prepareImplementDispatch` (`marshal.ts`) proves the file-writing pattern exists one layer down |
 
 **Fix shape:** one shared "fan-out step" renderer that (a) branches on host capability, (b) writes
 per-subagent prompt files (which also *materializes* output paths and access scopes instead of
@@ -80,13 +80,13 @@ design-review drift and the improvised-charter-prompt variance in one move.
 ### 4. Charter access scopes + forced decomposition (confirmed with corrections)
 
 - The canonical prompt itself seeds the doc-bleed: inferred = "subsystem's shape **+ docs**"
-  ([`charterExtractionPrompt.ts:83`](../../src/audit/cli/charterExtractionPrompt.ts)). The
+  ([`charterExtractionPrompt.ts`](../../src/audit/cli/charterExtractionPrompt.ts)). The
   verifier's correction is worth keeping: the JSDoc's independence claim is blindness to each
   other's *output*, not source isolation — but source isolation is what makes stated↔revealed
   deltas meaningful, and the run showed the collapse (comment-dense repos: headers ARE the stated
   intent).
 - **Nothing enforces any scope.** `assembleCharters` validates node_id membership and
-  one-charter-per-kind only (`charterExtraction.ts:224-286`); a revealed charter citing a README
+  one-charter-per-kind only (`charterExtraction.ts`); a revealed charter citing a README
   passes silently. Delta-miner independence is prompt text; `CharterRegister` records no
   authoring/mining identity, so the host merging all three sets and then "independently" mining
   them (as the run did) is undetectable.
@@ -96,7 +96,7 @@ design-review drift and the improvised-charter-prompt variance in one move.
   capability stops mattering, and the comment-dense collapse is fixed as a side effect (comments
   move INTO stated's evidence and OUT of revealed's).
 - **Node naming:** `node_id = members[0]` — lexicographically first file
-  (`consensus.ts:371`; deliberate, size-robust, union-order-stable). "Confident" = ≥2 behavior
+  (`consensus.ts`; deliberate, size-robust, union-order-stable). "Confident" = ≥2 behavior
   sources, majority F1 ≥ 0.5 across scales. The ids are sound as join keys and bad as *names*;
   agents were forced to infer subsystem meaning from member lists.
 - **Owner's L0/L1/L2 self-organized teleology — sizing:** four consumers key on charter node_id
@@ -113,25 +113,25 @@ design-review drift and the improvised-charter-prompt variance in one move.
 
 Enforcement classes: (a) validating chokepoint, (b) fuzzy remap, (c) nothing/silent drop.
 
-**audit-code, class (c):** flow id (`criticalFlowFallbackPrompt.ts:59`); systemic-challenge ids —
+**audit-code, class (c):** flow id (`criticalFlowFallbackPrompt.ts`); systemic-challenge ids —
 free-form, dedup keys on lens|category|title so cross-round id collisions pass
-(`secondOrderAdversaryPrompt.ts:78`, `systemicChallengeLoop.ts:108-110`; the run's SC-001
-collision); design-review finding ids + prose output paths (`designReviewPrompt.ts:349,558`);
+(`secondOrderAdversaryPrompt.ts`, `systemicChallengeLoop.ts`; the run's SC-001
+collision); design-review finding ids + prose output paths (`designReviewPrompt.ts`);
 synthesis narrative finding refs — *documented* silent drop ("unknown ids are dropped",
-`synthesisNarrativePrompt.ts:41,75`); deepening tasks — "task_id MUST be exactly … copy it
-verbatim" and file_coverage "copy exactly" (`packetPrompt.ts:271-276`; completeness-critic find).
-**Class (a), healthy:** charter node_id membership, packet submit (`submitPacketCommand.ts:125-153`
+`synthesisNarrativePrompt.ts`); deepening tasks — "task_id MUST be exactly … copy it
+verbatim" and file_coverage "copy exactly" (`packetPrompt.ts`; completeness-critic find).
+**Class (a), healthy:** charter node_id membership, packet submit (`submitPacketCommand.ts`
 — duplicate/unassigned/missing-task all throw; verified by hand), semantic-review dispatch
 admission.
 
 **remediate-code, class (c):** review-approval gate — declined ids looked up with silent
-`continue` (`prompts.ts:176` → `nextStep.ts:4014-4023`); ambiguity gate (`nextStep.ts:4132-4133`);
+`continue` (`prompts.ts` → `nextStep.ts`); ambiguity gate (`nextStep.ts`);
 triage — `validateTriageResolution` checks string-ness only, unknown ids no-op
-(`remediationState.ts:317-330`, `triage.ts:271-272`); intake clarifications — validator only
+(`remediationState.ts`, `triage.ts`); intake clarifications — validator only
 requires ≥1 blocking question answered, typo'd `question_id` silently ignored
-(`intake.ts:399-414`); implement-worker results — ids *are* enumerated in the prompt (refutation,
-below) but `validateImplementWorkerResult` never checks membership (`validation/artifacts.ts:226`)
-and the alias remap silently skips unmapped ids (`marshal.ts:181`).
+(`intake.ts`); implement-worker results — ids *are* enumerated in the prompt (refutation,
+below) but `validateImplementWorkerResult` never checks membership (`validation/artifacts.ts`)
+and the alias remap silently skips unmapped ids (`marshal.ts`).
 
 The pattern fix is uniform: render the valid set as a **structured closed enum in the return
 schema** (retry on mismatch) for pre-existing ids; **tool-minted ids via ordinal reference** for
@@ -142,7 +142,7 @@ new items; **hard-fail, never silent-skip**, on unknown ids at every gate.
 - Remediate inherits audit-side starvation: `applyPlanPipeline` treats audit scope/lenses as
   authoritative with no supplemental-audit path (root fix belongs audit-side).
 - Review-approval gate hides the planner's block clustering — the host approves findings without
-  seeing the union-find coupling (`plan.ts:107-156` never surfaced in `ReviewRequest`).
+  seeing the union-find coupling (`plan.ts` never surfaced in `ReviewRequest`).
 - Ambiguity gate omits the Finding's grounding verdict/evidence from the candidates it renders.
 - Workers have no channel to push back on block decomposition (no feedback field; capture as
   friction, don't act inline).
@@ -150,10 +150,10 @@ new items; **hard-fail, never silent-skip**, on unknown ids at every gate.
 ## Refutations & corrections (kept honest)
 
 - **submit-packet coverage**: HEAD *does* refuse missing/unassigned/duplicate task results
-  (`submitPacketCommand.ts:145-153`; non-array payloads hard-error). The run's "false valid" was
+  (`submitPacketCommand.ts`; non-array payloads hard-error). The run's "false valid" was
   workers writing inline-result files directly on disk — a chokepoint *bypass*, not a chokepoint
   gap. Already filed in open-bugs; the uncovered half is merge-side per-task rejection persistence.
-- **Implement-dispatch prompt** does enumerate assigned finding ids (`prompts.ts:689-707`); the
+- **Implement-dispatch prompt** does enumerate assigned finding ids (`prompts.ts`); the
   live gap is validation-side membership + silent alias skip, not enumeration.
 - **Intake clarification validation** is incomplete (unknown ids ignored), not absent.
 
@@ -248,8 +248,8 @@ mechanism, one owner question, eight binding constraints.**
   inline-vs-write contradiction named as the bug, 2026-06-15).
 - **Owner question — mandate wording:** "only a concurrency hint is capability-sensitive"
   collides with **CP-BLOCK-IMPL-mandatory-independent-critic** (`34bab094`;
-  `renderIndependentReviewerDirective`, `designReviewPrompt.ts:202-222` + remediate twin
-  `contractPipelinePrompts.ts:371-386`): review-class lanes carry a capability-sensitive MANDATE
+  `renderIndependentReviewerDirective`, `designReviewPrompt.ts` + remediate twin
+  `contractPipelinePrompts.ts`): review-class lanes carry a capability-sensitive MANDATE
   (independent subagent; inline self-review only as the explicitly-degraded fallback). Strictly
   neutral phrasing deletes that distinction and licenses author-self-review at full strength.
   Proposed reconciliation: keep the prompt capability-neutral but carry the mandate in the neutral
@@ -272,7 +272,7 @@ mechanism, one owner question, eight binding constraints.**
      with "unknown cap refuses rather than fits") or degenerate single-task-sized lanes. Silently
      inheriting the refusal regresses the weakest hosts with no recorded decision.
   3. **Routing consumers of capability survive:** `hostCanDispatch` stays for engine routing
-     (`nextStepHelpers.ts:2152-2188` hybrid/headless; `waveScheduling.ts:302` headless pools).
+     (`nextStepHelpers.ts` hybrid/headless; `waveScheduling.ts` headless pools).
      Change 2 deletes capability branching from step RENDERING only.
   4. **Per-lane ingest rides the existing engines:** `runOmittableGate` (the 6 schema-validated,
      quarantining host-gate ingests) + the change-1 refusal pattern (refuse whole, archive +
@@ -291,7 +291,7 @@ mechanism, one owner question, eight binding constraints.**
   7. **Sequencing vs resolution 4:** charter lanes materialize with CURRENT content rules under
      change 2 (per-kind prompt files, mechanism only); channel-pure packet feeding + the kind
      rename ride change 4 — never entangled in one commit.
-  8. **Census corrections:** `edge_reasoning` (`nextStepCommand.ts:915-985`) is a SECOND
+  8. **Census corrections:** `edge_reasoning` (`nextStepCommand.ts`) is a SECOND
      capability branch of the same class, unnamed in the settled text — in scope, replaced in the
      same change. `systemic_challenge` is quota-gated but renders inline (single lane). The
      remediate review-approval gate is operator-interactive, not a fan-out — its context items
@@ -336,25 +336,25 @@ Verdict: **implementable — retirement-clean, eight binding constraints, zero r
      pre-digest already reads bundle artifacts (unit_manifest et al.) without checkpoint edges —
      same pattern for both new inputs.
   2. **One doc predicate:** the digest's doc universe REUSES `isDocIntentFile`
-     (`src/audit/decompose/buildStructureDecomposition.ts:31` — "the pipeline's single doc
-     predicate", `dependencySlices.ts:60`); a second "what is a doc" rule is the fork the
+     (`src/audit/decompose/buildStructureDecomposition.ts` — "the pipeline's single doc
+     predicate", `dependencySlices.ts`); a second "what is a doc" rule is the fork the
      charter-slice residual (open-bugs DD-9 entry (b)) exists to prevent.
   3. **A new PRIORITY obligation lands whole, one commit:** `docs_digest_current` (between
      `structure_decomposition_current` and `intent_checkpoint_current`) + exactly-one executor
-     registry entry (load-time assert `nextStep.ts:69-87`) + a hand-pushed derivation in
+     registry entry (load-time assert `nextStep.ts`) + a hand-pushed derivation in
      `buildAuditObligations` (`state.ts` — obligations are pushed per artifact, a PRIORITY id
      with no derivation is silently never selected) + `ARTIFACT_DEFINITIONS` +
      `ARTIFACT_DEPENDS_ON_MAP` row (`docs_digest.json` ← repo_manifest, file_disposition,
      structure_decomposition) + the `spec/audit/dependency-map.md` row (doc-contract commit gate
      fires on it).
   4. **Empty is no-signal:** absent design_assessment, empty findings, or auto-completed stamps
-     (`contract_auto_completed` = UNREVIEWED, never clean — `designAssessment.ts:39-46`) keep the
+     (`contract_auto_completed` = UNREVIEWED, never clean — `designAssessment.ts`) keep the
      heuristic dispositions; evidence only ever flips exclude→include or confirms, never
      absence→exclude.
   5. **Weak-path degradation:** `computeScopePreDigest` and `runIntentCheckpointAutoComplete`
-     (`intentCheckpointExecutor.ts:386-442`, which ignores `lens_propositions`) must run cleanly
+     (`intentCheckpointExecutor.ts`, which ignores `lens_propositions`) must run cleanly
      on older bundles missing the new artifact — blast radius of half (a) is render-only
-     (`lens_propositions` consumer census: `confirmIntentStep.ts:85` alone).
+     (`lens_propositions` consumer census: `confirmIntentStep.ts` alone).
   6. **Extractor determinism:** stable path-sorted doc order, bounded per-doc extraction
      (budget-context rule); no volatile fields beyond the registry norm. No downstream edge
      exists, so digest churn cascades nowhere — keep it that way unless a consumer earns it.
@@ -403,7 +403,7 @@ override), eleven binding constraints.**
   machinery, orthogonal to the charter model.
 - **The one knowing refinement — "never reconciled into one truth"**
   (`spec/conceptual-design-review-design.md:252` "the deltas are the product; a merge destroys
-  them"; echoed `charter.ts:13-14`). The refutation lane called this a hard collision; verification
+  them"; echoed `charter.ts`). The refutation lane called this a hard collision; verification
   downgrades it: the rejection's own rationale is *delta destruction*, and change 4 preserves the
   deltas as primary (disagreement density per channel-pair IS the quantitative surface) while the
   spec already endorses triangulating toward True (`:126-127`) under leads-not-verdicts
@@ -414,7 +414,7 @@ override), eleven binding constraints.**
   may override before implementation; absent that, this is the contract.
 - **Binding constraints:**
   1. **The persisted-rename hazard is live and silent:** `charter_register.json` carries NO
-     `schema_version`, NO zod parse, NO validation-pass reference on read (`artifacts.ts:252` is a
+     `schema_version`, NO zod parse, NO validation-pass reference on read (`artifacts.ts` is a
      plain `jsonArtifact`; `validation/artifacts.ts` never names it). An old register
      (`kind:"inferred"`) read by post-rename code flows silently through `keptByKind`/`DELTA_ROUTES`
      misses, and the staleness DAG cannot catch a code-taxonomy change (content-keyed — an old
@@ -426,9 +426,9 @@ override), eleven binding constraints.**
      `charterExtractionKindsForCeiling` + `KIND_LANE_TEXT` + lane filenames
      (`charter-extraction-<kind>.json`) + kind-purity superRefine + `charter_id`/`delta_id`
      derivations + fixtures, one commit. The word-collision `CharterProvenanceSchema.kind`
-     `"inferred"` (provenance-SOURCE sense, `charter.ts:47-54`; prompt example
-     `charterExtractionPrompt.ts:144`) is NOT co-renamed.
-  3. **Blast/VOI tiers ride the taxonomy:** `blastRadius.ts:59-62` keys intrinsic tiers on the OLD
+     `"inferred"` (provenance-SOURCE sense, `charter.ts`; prompt example
+     `charterExtractionPrompt.ts`) is NOT co-renamed.
+  3. **Blast/VOI tiers ride the taxonomy:** `blastRadius.ts` keys intrinsic tiers on the OLD
      delta kinds (`wrong_goal` 3 / `spec_drift` 2 / else 1); partition + VOI consume it. The new
      channel-pair kinds get a declared tier table in the same commit; `wrong_goal`'s home moves
      downstream with "true".
@@ -438,15 +438,15 @@ override), eleven binding constraints.**
      downstream of triangulation), where `applyTrueCharterGate` (falsifiable-or-drop) also applies.
      A `deep` run never emits a true nomination.
   5. **Vestigial checkpoint fields are deleted, not migrated:**
-     `IntentCheckpoint.design_review.charters`/`.goal_graph` (`intentCheckpoint.ts:141-142`) have
+     `IntentCheckpoint.design_review.charters`/`.goal_graph` (`intentCheckpoint.ts`) have
      NO writer anywhere in src (grep-verified) and one validation reader
-     (`validation/artifacts.ts:333-344`); the register's own doc records the deliberate
-     keep-charters-off-the-checkpoint decision (`charterRegister.ts:17-19`). Delete the pair + the
+     (`validation/artifacts.ts`); the register's own doc records the deliberate
+     keep-charters-off-the-checkpoint decision (`charterRegister.ts`). Delete the pair + the
      reader in the same replace; `ceiling`/`attention`/`conceptual_depth`/`perspectives` stay
      live; the checkpoint stays `intent-checkpoint/v1` (no real payload ever carried the deleted
      fields); DD-9 leaf-ness untouched — feeding packets add NO checkpoint DAG edges.
   6. **The staleness slice is re-derived from the new reads:** `charterReadFileSlice`
-     (`dependencySlices.ts:75-92`) models the instruction-scope read set. Feeding changes what
+     (`dependencySlices.ts`) models the instruction-scope read set. Feeding changes what
      extraction reads — re-derive the slice from the packet materializer's actual input set, keep
      the single doc predicate `isDocIntentFile` (change-3 constraint 2 carries), and make the
      materializer the ONE place the read-set is defined so slice and packets cannot drift.
@@ -454,9 +454,9 @@ override), eleven binding constraints.**
      whose scopes cite files outside the repo universe must be refused/flagged at the lane
      chokepoint — no silent-drop reintroduction (change-1 discipline; audit's packet-local
      idDiscipline untouched). The K-of-N lane resume + kind-purity chokepoint
-     (`nextStepHelpers.ts:1291-1364`) is the substrate the per-kind packets ride (change-2
+     (`nextStepHelpers.ts`) is the substrate the per-kind packets ride (change-2
      constraints 4/6 carry). The current invented-node drop-with-issue contract
-     (`charterExtraction.ts:247-254`) is REPLACED by file-universe grounding — "cannot conjure
+     (`charterExtraction.ts`) is REPLACED by file-universe grounding — "cannot conjure
      boundaries" survives in file-set form (scopes ⊆ universe), decided explicitly, never
      inherited silently.
   8. **Miner authority under the open author/critic gap:** open-bugs:487 — `charter_delta`
@@ -465,7 +465,7 @@ override), eleven binding constraints.**
      `charter_delta` step (C3a boundary), and the open bug stays open and named unless the change
      mechanically enforces a distinct lane.
   9. **Leveled teleology stays emergent:** `premise_height` integer, self-organized levels, NO
-     fixed L0/L1/L2 enum in any schema or prompt mandate (`charter.ts:93-97`; spec `:69-70`).
+     fixed L0/L1/L2 enum in any schema or prompt mandate (`charter.ts`; spec `:69-70`).
      File scopes are content-derived join keys; stable path-sorted ordering everywhere
      (extractor-determinism invariant).
   10. **Sequencing + doc gate:** the always-materialized lane mechanism is already in (change 2,
@@ -485,7 +485,7 @@ override), eleven binding constraints.**
   (compile-bound, join with the implementation): packet channel-purity — the revealed packet
   contains no comment text, the structural packet contains no bodies/docs/comments, the stated
   packet contains docs + extracted comments only. Note: `extractCommentText` exists
-  (`commentDecomposition.ts:83`); NO language-neutral comment-STRIPPING or signature-surface
+  (`commentDecomposition.ts`); NO language-neutral comment-STRIPPING or signature-surface
   utility exists yet — both are new build, on the two-tier dependency policy (vetted lib vs tiny
   owned bit) at implementation.
 - Independent refutation lane: agy-gemini (gemini-3.6-flash-medium), 8 typed verdicts over the

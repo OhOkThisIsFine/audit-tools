@@ -14,11 +14,11 @@ compare intent-free.
    `confirmed_by` participate in the canonical hash; a byte-identical-prose re-confirm re-stales
    the cascade purely on the timestamp (CONFIRMED).
 3. Dependency staleness keys on the **whole upstream artifact hash + revision**
-   (`staleness.ts:131-139`); no per-edge slice exists (CONFIRMED). The charter path consumes:
+   (`staleness.ts`); no per-edge slice exists (CONFIRMED). The charter path consumes:
    `intent_checkpoint` → only `design_review.ceiling` (fallback `conceptual_depth`);
    `structure_decomposition` → only `consensus[*].{node_id, members}`; `repo_manifest` → only
-   `files[].hash` of consensus **member** paths (`charterExtractionExecutor.ts:18,38`,
-   `charterExtractionPrompt.ts:21`).
+   `files[].hash` of consensus **member** paths (`charterExtractionExecutor.ts`,
+   `charterExtractionPrompt.ts`).
 4. `intent_checkpoint.json` fans out to charters, coverage_matrix, audit_tasks,
    audit_plan_metrics, requeue_tasks → dispatch planning → reporting. Results/redispatch are
    protected downstream by task-content signatures — the re-stale cost is the planning/charter/

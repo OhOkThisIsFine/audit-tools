@@ -76,31 +76,31 @@ CONFIRMED items only, ranked by value-to-risk. Every one is behavior-neutral unl
 
 - Delete: `src/shared/repair/emitValidateRepair.ts` (358), `src/shared/repair/brokeredDispatch.ts`
   (332), `src/shared/repair/index.ts` (34), `src/audit/contracts/schemaEnforcedEmit.ts` (210) = **934
-  production lines**; the re-export block at `src/shared/index.ts:715-742`; and ~1,300 test lines:
+  production lines**; the re-export block at `src/shared/index.ts`; and ~1,300 test lines:
   `tests/audit/f3-schema-enforced-generation.test.mjs` (760),
   `tests/remediate/cross-node-seam-signature-guard.test.ts` (241),
   `tests/shared/emit-validate-repair.test.mjs` (276),
   `tests/shared/brokered-dispatch-no-disk-io.test.mjs` (73), plus ~25 broker-construction sites in
-  `tests/remediate/wave-scheduler.test.ts:537-1490` (surgical edit — that file also covers `scheduleWave`,
+  `tests/remediate/wave-scheduler.test.ts` (surgical edit — that file also covers `scheduleWave`,
   `classifyProvider` and the cold-start floor, which are live).
-- **Mechanism:** `enforceSchemaAtEmit` (`schemaEnforcedEmit.ts:156`) is the only consumer of
+- **Mechanism:** `enforceSchemaAtEmit` (`schemaEnforcedEmit.ts`) is the only consumer of
   `runEmitValidateRepair` / `createBrokeredRepairDispatch`, and it has zero production callers.
   `estimateSlotTokens` and `classifyCapableHost` likewise. The live audit worker-result path uses
-  `src/audit/contracts/workerSchemas.ts` directly (`src/audit/cli/rollingAuditDispatch.ts:69` →
+  `src/audit/contracts/workerSchemas.ts` directly (`src/audit/cli/rollingAuditDispatch.ts` →
   `renderWorkerJsonSchema`). Remediate has its own **live** repair loop that never touches this seam
-  (`src/remediate/steps/contractPipeline.ts:1935`, `:2071`), so deleting removes no running capability.
+  (`src/remediate/steps/contractPipeline.ts`, `:2071`), so deleting removes no running capability.
 - **Risk:** `docs/backlog/forward-tracks.md:213` names `enforceSchemaAtEmit` as the CE-004 "repair
   floor" for backends with no API-level constraint hook. That claim is **false against HEAD** and must
   be corrected either way. If the forward track is still wanted, the fix is the opposite of deletion —
   wire it into the rolling-dispatch emit path. The one state that should not persist is the current
   one: tested, documented, unreachable. Also correct the stale pointer at
-  `src/shared/quota/scheduler.ts:179`.
+  `src/shared/quota/scheduler.ts`.
 
 ### 2.2 — Collapse the two `providers/` directories onto one per-mode policy record (270 src + ~490 test) — **CONFIRMED**
 
 - Delete: all 12 files under `src/audit/providers/` and `src/remediate/providers/` (verified 303 lines
   exactly: audit 32+38+25+5+45+6=151, remediate 33+39+26+1+47+6=152), plus
-  `FreshSessionProviderDeps` (`src/shared/providers/providerFactory.ts:387-421`) and its four
+  `FreshSessionProviderDeps` (`src/shared/providers/providerFactory.ts`) and its four
   `deps.createX` branches (`:496,507,516,518`). Add back ~30 lines: one frozen `OrchestratorPolicy`
   record per mode.
 - **Mechanism:** the entire information content of the injection is **four scalars** —
@@ -112,7 +112,7 @@ CONFIRMED items only, ranked by value-to-risk. Every one is behavior-neutral unl
   subject entirely — clauses 2/3/4/8/9/10), `tests/remediate/f4-brokered-core-parity.test.ts` (108),
   plus `tests/shared/shared-core-invariants.test.mjs` INV-shared-core-03 (:158) and -14 (:646).
   Retarget `tests/audit/providers-remediation.test.ts` / `tests/remediate/providers.test.ts` and the
-  4 allowlist entries at `tests/shared/audit-tools-path-guard.test.mjs:82-97` (they collapse to 1).
+  4 allowlist entries at `tests/shared/audit-tools-path-guard.test.mjs` (they collapse to 1).
 - **Risk:** medium-mechanical, low-semantic. `skipPermissionsDefault`'s polarity is the one delta with
   runtime teeth and must be carried as data. No production module imports the per-orchestrator
   provider *class* re-exports, so no dangling imports. Two side-findings surfaced and must be
@@ -143,12 +143,12 @@ CONFIRMED items only, ranked by value-to-risk. Every one is behavior-neutral unl
 ### 2.4 — Delete `tests/audit/file-lock-doc-sync.test.mjs` and the millisecond values in CLAUDE.md (68) — **CONFIRMED**
 
 - **Mechanism:** the backoff window and stale threshold exist in **three** places: the source constants
-  (`src/shared/quota/fileLock.ts:5,21-22`), a prose restatement in `CLAUDE.md:131` ("exponential
+  (`src/shared/quota/fileLock.ts`), a prose restatement in `CLAUDE.md:131` ("exponential
   50ms→500ms backoff, token-checked 30s stale-lock cleanup"), and this test — which does not compare
   the first two but **independently pins the literals** at lines 44-46 (`toBe(50)`, `toBe(500)`,
   `toBe(30_000)`), making it the third copy. It regex-scrapes two module-private constants out of the
   source *text* and greps CLAUDE.md by content. `STALE_LOCK_MS` is already pinned better at
-  `tests/shared/fileLock-clock-seam.test.mjs:19-20`, so it is really a fourth copy.
+  `tests/shared/fileLock-clock-seam.test.mjs`, so it is really a fourth copy.
 - **Endpoint:** strip the numbers from `CLAUDE.md:131`, keep the durable claim (single-sourced in
   `audit-tools/shared` `quota/fileLock`; `store.ts` adds none of its own). Delete the test file.
 - **Risk:** this removes a passing guard, so it is a coverage change — state it as one. Land the
@@ -161,18 +161,18 @@ CONFIRMED items only, ranked by value-to-risk. Every one is behavior-neutral unl
 
 - `src/shared/providers/providerKeyedFactory.ts` (18 lines) is a generic factory whose body is one
   expression: `(providerName) => record[providerName] ?? fallback`. Exactly one production
-  instantiation: `getErrorParserForProvider` at `src/shared/quota/errorParsers/index.ts:21`.
+  instantiation: `getErrorParserForProvider` at `src/shared/quota/errorParsers/index.ts`.
 - Its docstring justifies the extraction by naming a second consumer — "the audit header-extractor
   factory (drift-plan E5)" — which **no longer exists anywhere in the repo**. The abstraction outlived
   its second consumer without anyone revisiting it.
 - **Endpoint:** `export const getErrorParserForProvider = (name: string): ErrorParser => PARSERS[name] ?? GENERIC;`
-  Delete the file, `src/shared/index.ts:885-886`, and `tests/shared/provider-keyed-factory.test.mjs`
+  Delete the file, `src/shared/index.ts`, and `tests/shared/provider-keyed-factory.test.mjs`
   (collapse its unknown-key→fallback contract into one assertion in the errorParsers test).
 - **Risk:** very low. Single call site, single bound type, no dispatch or re-export-alias wiring.
 
 ### 2.6 — One channel-error classifier registry (~75) — **CONFIRMED**
 
-- `src/shared/quota/errorParsing.ts:154-296,384-393` + `src/shared/dispatch/providerLaunchFinalize.ts:56-146`.
+- `src/shared/quota/errorParsing.ts` + `src/shared/dispatch/providerLaunchFinalize.ts`.
 - **Mechanism:** three duplications. (a) `detectModelUnavailableError` (216-227) and
   `detectRequestTooLargeError` (269-280) are byte-identical pattern loops modulo the array and the
   boolean key; credit-exhaustion and rate-limit are the same loop with a prologue. (b) All four
@@ -189,19 +189,19 @@ CONFIRMED items only, ranked by value-to-risk. Every one is behavior-neutral unl
   vestigial too** — `Omit<RollingDispatchResult<TPacket>, "packet">` is TPacket-free, so drop both.
 - **Risk:** loop-core (`src/shared/dispatch/`) → needs a fresh staged-tree review attestation. Keep the
   four `detectX` / `detectXFromChannel` named exports as thin delegations —
-  `tests/shared/errorParsing.test.mjs:220-267` asserts them by name and by `is*` key. Per-class detail
+  `tests/shared/errorParsing.test.mjs` asserts them by name and by `is*` key. Per-class detail
   builders are **mandatory**: the `rate_limited` branches (93, 129) emit `{channel, text}` with no
   `rawMatch`, so a uniform builder would silently change the contract.
 
 ### 2.7 — Table-drive `validateConfiguredProviderEnvironment` (~45) — **CONFIRMED**
 
-- `src/audit/validation/sessionConfig.ts:65-86` (claude-code), `88-109` (opencode), `111-132` (codex)
+- `src/audit/validation/sessionConfig.ts` (claude-code), `88-109` (opencode), `111-132` (codex)
   are three structurally byte-identical 22-line blocks; only the tuple (provider, config key, default
   command) and one interpolated word vary.
 - **Endpoint:** `PATH_CHECKED_CLI_PROVIDERS` table + one loop. Function drops 141 → ~95.
 - **This duplication has already produced a live coverage gap:**
-  `src/shared/validation/sessionConfig.ts:787-790` validates **four** agent-CLI sections
-  (`claude_code`, `codex`, `opencode`, `agy`) and `src/shared/providers/providerFactory.ts:118-119,156-159`
+  `src/shared/validation/sessionConfig.ts` validates **four** agent-CLI sections
+  (`claude_code`, `codex`, `opencode`, `agy`) and `src/shared/providers/providerFactory.ts`
   PATH-probes `agy` exactly like the others — but this file has **no `agy` branch**, because someone
   would have had to paste a fourth copy. An operator with a bogus `agy.command` passes environment
   validation silently.
@@ -226,12 +226,12 @@ CONFIRMED items only, ranked by value-to-risk. Every one is behavior-neutral unl
 
 ### 2.9 — Strip `RollingDispatchEngineContract`'s four dead fields (~25) — **CONFIRMED**
 
-- `src/shared/types/rollingDispatch.ts:107-118`. `dispatchItems` appears **three times in the entire
+- `src/shared/types/rollingDispatch.ts`. `dispatchItems` appears **three times in the entire
   repo**: its own declaration and two doc comments — never read, written, or passed. `livelockGuard`,
   `consumerTerminal` and `onResult` are read only inside `runRollingDispatch`
-  (`src/audit/orchestrator/rollingDispatch.ts:80,89,142,182,193`) and supplied only by
+  (`src/audit/orchestrator/rollingDispatch.ts`) and supplied only by
   `tests/audit/shared-api-integration.test.mjs`. The single production call site
-  (`src/audit/cli/rollingAuditDispatch.ts:555-616`) passes only the eight friction hooks.
+  (`src/audit/cli/rollingAuditDispatch.ts`) passes only the eight friction hooks.
 - **Endpoint:** delete all four fields and their guarded call sites; `detectLivelock` takes the literal
   `3` that is already the effective value (bit-identical — the call already passes
   `consecutiveNoProgressWaves === noProgressLimit === livelockLimit`). Drop the `Partial<>` and the
@@ -251,13 +251,13 @@ Grouped by theme. Corrected estimates. Every item names its files.
 
 | Item | Lines | Tag | Files |
 |---|---|---|---|
-| Six dead audit adapters — the live analyzer path re-implements their parsers inline | ~870 (416 src / 454 test) | UNVERIFIED | `src/audit/adapters/{semgrep,codeql,astGrep,eslint,npmAudit,coverageSummary}.ts` whole files; `clippy.ts:120-128`, `rubocop.ts:117-125` (`normalize*Json` only); `adapters/README.md:8-15`; `tests/audit/adapters-remediation.test.mjs` (most), `tests/audit/graph-external-analyzers.test.mjs:14-21` |
-| Contract-pipeline incremental-reconvergence cluster (INV-IR-1/IR-2) | ~627 | UNVERIFIED | `src/remediate/contractPipeline/artifactStore.ts:245-296`; `derive.ts:575-728`; `tests/remediate/contract-pipeline-cp-node-2.test.ts` (421) |
+| Six dead audit adapters — the live analyzer path re-implements their parsers inline | ~870 (416 src / 454 test) | UNVERIFIED | `src/audit/adapters/{semgrep,codeql,astGrep,eslint,npmAudit,coverageSummary}.ts` whole files; `clippy.ts`, `rubocop.ts` (`normalize*Json` only); `adapters/README.md:8-15`; `tests/audit/adapters-remediation.test.mjs` (most), `tests/audit/graph-external-analyzers.test.mjs` |
+| Contract-pipeline incremental-reconvergence cluster (INV-IR-1/IR-2) | ~627 | UNVERIFIED | `src/remediate/contractPipeline/artifactStore.ts`; `derive.ts`; `tests/remediate/contract-pipeline-cp-node-2.test.ts` (421) |
 | `waveManifest.ts` — `wave-manifest.json` is never written or read | 272 | UNVERIFIED | `src/audit/cli/waveManifest.ts` (88, whole file); `tests/audit/wave-manifest.test.mjs` (184) |
 | Three superseded whole-file facades | ~555 | UNVERIFIED | `src/audit/orchestrator.ts` (105, superseded by `orchestrator/taskBuilder.ts`); `src/audit/orchestrator/chunking.ts` (25, superseded by `src/shared/chunkByBudget.ts`); `src/remediate/intent/intentOrdering.ts` (175); `tests/audit/orchestrator.test.mjs`, `tests/audit/chunking.test.mjs`, the intentOrdering cases in `tests/audit/dc1.test.mjs` |
-| Intake findings-digest / enumeration builders — emit a shape the live reader rejects | ~312 | UNVERIFIED | `src/remediate/intake.ts:150-283` and the dead `findingsDigest` path at `:65,:79`; digest sections of `tests/remediate/intake-sources-and-digest.test.ts` |
-| Five thin wrappers + superseded predicates kept alive by re-export chains | ~250 | UNVERIFIED | `src/remediate/steps/dispatch/waveScheduling.ts:113-124` (`resolveHostConcurrencyLimit`); `src/remediate/steps/stepUtils.ts:27-44` (`dependenciesSatisfied` — explicitly superseded per `nextStep.ts:526`); `src/audit/cli/nextStepHelpers.ts:1464-1518` (`HOST_GATE_DESCRIPTORS`, read only by a test asserting the registry covers what it lists); `src/audit/systemic/systemicChallengeLoop.ts:136-137` (`SYSTEMIC_HIGH_BLAST_THRESHOLD` = an alias of `DEFAULT_RISK_GATE_THRESHOLDS.highBlastThreshold`) |
-| `src/shared/index.ts` — 270 of 1041 barrel re-exports have no consumer outside `src/shared` | ~280 | UNVERIFIED | `src/shared/index.ts:1-1532`; 44 export blocks become entirely empty |
+| Intake findings-digest / enumeration builders — emit a shape the live reader rejects | ~312 | UNVERIFIED | `src/remediate/intake.ts` and the dead `findingsDigest` path at `:65,:79`; digest sections of `tests/remediate/intake-sources-and-digest.test.ts` |
+| Five thin wrappers + superseded predicates kept alive by re-export chains | ~250 | UNVERIFIED | `src/remediate/steps/dispatch/waveScheduling.ts` (`resolveHostConcurrencyLimit`); `src/remediate/steps/stepUtils.ts` (`dependenciesSatisfied` — explicitly superseded per `nextStep.ts`); `src/audit/cli/nextStepHelpers.ts` (`HOST_GATE_DESCRIPTORS`, read only by a test asserting the registry covers what it lists); `src/audit/systemic/systemicChallengeLoop.ts` (`SYSTEMIC_HIGH_BLAST_THRESHOLD` = an alias of `DEFAULT_RISK_GATE_THRESHOLDS.highBlastThreshold`) |
+| `src/shared/index.ts` — 270 of 1041 barrel re-exports have no consumer outside `src/shared` | ~280 | UNVERIFIED | `src/shared/index.ts`; 44 export blocks become entirely empty |
 
 Notes on the barrel: nothing inside `src/shared` imports from it (modules reach each other by relative
 path), so these 270 lines serve no importer at all. `check:deadcode` (`knip --no-config-hints`) exits 0
@@ -267,10 +267,10 @@ consumers" makes that the intended direction, but it is the one judgment call. D
 independently** — it touches no logic. Textual scan → a computed/namespace access would be missed; the
 typecheck catches that.
 
-**Escalate, do not delete:** `src/audit/quota/discoveredLimits.ts:77-110`
+**Escalate, do not delete:** `src/audit/quota/discoveredLimits.ts`
 (`writeDiscoveredLimitsCache` / `updateDiscoveredLimits`, ~190 lines with tests) is a **wiring bug, not
-dead code**. The read half is live (`src/audit/cli/dispatch/quotaPool.ts:149,159`;
-`src/audit/cli/quotaCommand.ts:36`) but the write half has no production caller, so
+dead code**. The read half is live (`src/audit/cli/dispatch/quotaPool.ts`;
+`src/audit/cli/quotaCommand.ts`) but the write half has no production caller, so
 `discovered-limits.json` can never be produced and the learned-limits cache CLAUDE.md's quota policy
 calls authoritative is **permanently empty**. Deleting is behavior-neutral today and forecloses the
 feature; wiring it into the 429-parse / capability-handshake path is the likely correct fix.
@@ -283,14 +283,14 @@ in the repo.** See §4.1 for the combined endpoint.
 | Item | Lines | Tag | Files |
 |---|---|---|---|
 | Quota layer: two pure re-export barrels + two shims differing in one string | ~200 | PARTIAL | `src/audit/quota/index.ts`, `src/remediate/quota/index.ts`, `src/audit/quota/hostLimits.ts`, `src/remediate/quota/hostLimits.ts` |
-| Two `WorkerTask` interfaces are one contract; remediate's carries 4 provably dead fields | ~40 | UNVERIFIED | `src/audit/types/workerSession.ts:14-31`, `src/remediate/types/workerSession.ts:5-33` (dead: `audit_results_path`, `pending_audit_tasks_path`, `runtime_updates_path`, `external_analyzer_results_path` at `:13-16` — never set by the only builder `phases/workerTasks.ts:28-39`, never read) |
-| `src/remediate/providers/constants.ts` has zero importers repo-wide | 7 | UNVERIFIED | plus `src/audit/providers/constants.ts:3-4` (`CODEX_PROVIDER_NAME`, `ANTIGRAVITY_PROVIDER_NAME` re-exports with no importers) |
-| Worktree safety primitives duplicated, and the two `canonicalPathKey` copies already disagree | ~55 | UNVERIFIED — **behavior change** | `src/shared/providers/reviewSnapshot.ts:59-72,87-112,125-160`; `src/remediate/steps/dispatch/common.ts:55-61,89-98`; `src/remediate/steps/dispatch/worktreeLifecycle.ts:33-65,119-135` |
+| Two `WorkerTask` interfaces are one contract; remediate's carries 4 provably dead fields | ~40 | UNVERIFIED | `src/audit/types/workerSession.ts`, `src/remediate/types/workerSession.ts` (dead: `audit_results_path`, `pending_audit_tasks_path`, `runtime_updates_path`, `external_analyzer_results_path` at `:13-16` — never set by the only builder `phases/workerTasks.ts`, never read) |
+| `src/remediate/providers/constants.ts` has zero importers repo-wide | 7 | UNVERIFIED | plus `src/audit/providers/constants.ts` (`CODEX_PROVIDER_NAME`, `ANTIGRAVITY_PROVIDER_NAME` re-exports with no importers) |
+| Worktree safety primitives duplicated, and the two `canonicalPathKey` copies already disagree | ~55 | UNVERIFIED — **behavior change** | `src/shared/providers/reviewSnapshot.ts`; `src/remediate/steps/dispatch/common.ts`; `src/remediate/steps/dispatch/worktreeLifecycle.ts` |
 
 **The quota item's endpoint needs reshaping** — the verifier refuted three of its four premises
 (see §5). Corrected: `src/audit/quota/hostLimits.ts` **does** have a production consumer via the barrel
-(`src/audit/cli/quotaCommand.ts:7,29`); `src/remediate/quota/index.ts:66-69` exports **local**
-prefix-bound functions, not the shared ones; and `src/audit/quota/index.ts:72-79` barrels the genuinely
+(`src/audit/cli/quotaCommand.ts`); `src/remediate/quota/index.ts` exports **local**
+prefix-bound functions, not the shared ones; and `src/audit/quota/index.ts` barrels the genuinely
 audit-owned `discoveredLimits.ts`, whose consumers must repoint to `../quota/discoveredLimits.js`, not
 to shared. If the `AUDIT_CODE` prefix is not re-bound at `quotaCommand.ts`,
 `AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS` silently stops being honoured — and the only test that would
@@ -298,8 +298,8 @@ catch it is the parity suite the same commit deletes. **Correct endpoint: `envPr
 on the per-mode policy record**, not an inline literal at three call sites.
 
 **The worktree item changes behavior** and is the only one in this section that does. `canonicalPathKey`
-exists twice and is **not** equivalent: shared's (`reviewSnapshot.ts:59-72`) case-folds only on win32,
-remediate's (`common.ts:55-61`) routes through `normalizeRepoPath`, which `.toLowerCase()`s on every
+exists twice and is **not** equivalent: shared's (`reviewSnapshot.ts`) case-folds only on win32,
+remediate's (`common.ts`) routes through `normalizeRepoPath`, which `.toLowerCase()`s on every
 platform. Unifying picks one policy → remediate's guard becomes stricter on Linux. The win32-only fold
 is correct. The guard is load-bearing (it prevents a `git worktree add` walking up into an ancestor
 repo — see HEAD~ commit `0ebaa20f`), so **land a red-green test before the merge**. The detached-HEAD
@@ -317,7 +317,7 @@ This is the one item that **adds** an abstraction in a review about over-abstrac
 (`resolveWindowsShimSpawnCommand` vs `resolveOpenCodeSpawnCommand` vs none) and claude-worker's
 config-dir lifecycle all stay per-provider. **Prefer a `launchStdinCliProvider(spec, input)` helper over
 a `SpawnCliProvider` inheritance base** — same merge, no new hierarchy.
-`claudeWorkerProvider.ts:112-117`'s `requireNonEmpty` triple is a documented **constructor invariant**
+`claudeWorkerProvider.ts`'s `requireNonEmpty` triple is a documented **constructor invariant**
 (`:88-96`) and must not become an optional base hook. Verifier corrections: the two nested-session
 message builders differ on **two** axes, not one; the three constructors are **not** line-for-line
 identical (ClaudeWorker's runs three validations and stores endpoint/model); `opencodeProvider.ts` is 86
@@ -327,11 +327,11 @@ lines, not 96.
 
 | Item | Lines | Tag | Files |
 |---|---|---|---|
-| Three session-config knobs with zero readers — two of them advertised to operators | ~50 | UNVERIFIED | `src/shared/types/sessionConfig.ts:135-136,778` (`ui_mode`, `SESSION_UI_MODES`), `:816` (`agent_task_batch_size`), `:683-684` (`GraphConfig.model`); `src/shared/validation/sessionConfig.ts:22,32,42,736-745`; `src/shared/index.ts:250,279`; `tests/shared/runtimeConstants.test.mjs:61-77` (tautological); `docs/audit-pkg/operator-guide.md:175-181` |
-| `openai_compatible` back-compat fold is unreachable — the block has exactly one writer | ~55 | UNVERIFIED | `src/shared/quota/apiPool.ts:625-631` (the fold), `:180-196` (`sourceProviderConfig`, the only writer), docblocks at `:596-604` and `src/shared/types/sessionConfig.ts:807-814` |
-| The validator's `required` mechanism is never operatively true | ~40 | UNVERIFIED | `src/shared/validation/sessionConfig.ts:395-437`, `:507-551`, and the four call sites at `:769-796` |
-| Four base64 CLI escape-hatch flags the tool never emits, plus `--preferred-executor` | ~35 | UNVERIFIED — **behavior change** | `src/audit/cli/validateResultCommand.ts:18-30`; `src/audit/cli/submitPacketCommand.ts:18-22`; `src/audit/cli/dispatch/paths.ts:37-44` (`resolveRunScopedArg`); `src/audit/cli/advanceAuditCommand.ts:77-79` |
-| Three byte-identical template provider config interfaces | 12 | UNVERIFIED | `src/shared/types/sessionConfig.ts:138-141,291-294,296-304` |
+| Three session-config knobs with zero readers — two of them advertised to operators | ~50 | UNVERIFIED | `src/shared/types/sessionConfig.ts` (`ui_mode`, `SESSION_UI_MODES`), `:816` (`agent_task_batch_size`), `:683-684` (`GraphConfig.model`); `src/shared/validation/sessionConfig.ts`; `src/shared/index.ts`; `tests/shared/runtimeConstants.test.mjs` (tautological); `docs/audit-pkg/operator-guide.md:175-181` |
+| `openai_compatible` back-compat fold is unreachable — the block has exactly one writer | ~55 | UNVERIFIED | `src/shared/quota/apiPool.ts` (the fold), `:180-196` (`sourceProviderConfig`, the only writer), docblocks at `:596-604` and `src/shared/types/sessionConfig.ts` |
+| The validator's `required` mechanism is never operatively true | ~40 | UNVERIFIED | `src/shared/validation/sessionConfig.ts`, `:507-551`, and the four call sites at `:769-796` |
+| Four base64 CLI escape-hatch flags the tool never emits, plus `--preferred-executor` | ~35 | UNVERIFIED — **behavior change** | `src/audit/cli/validateResultCommand.ts`; `src/audit/cli/submitPacketCommand.ts`; `src/audit/cli/dispatch/paths.ts` (`resolveRunScopedArg`); `src/audit/cli/advanceAuditCommand.ts` |
+| Three byte-identical template provider config interfaces | 12 | UNVERIFIED | `src/shared/types/sessionConfig.ts` |
 | `test:single` npm script is byte-identical to `test` and referenced nowhere | 1 | UNVERIFIED | `package.json:48` |
 
 Notes:
@@ -339,35 +339,35 @@ Notes:
   (no caller supplies `uiMode` to the resolver; the config field is validate-only), but the correct
   endpoint may be to **wire** it, not delete it. Decide that before touching either.
 - Because the validator ignores unknown keys, follow the repo's own
-  `[[deleting-a-field-is-not-retiring-it]]` pattern (`validation/sessionConfig.ts:141-155`,
+  `[[deleting-a-field-is-not-retiring-it]]` pattern (`validation/sessionConfig.ts`,
   `refuseInlineApiKey`): add a **refusal** for `ui_mode` / `agent_task_batch_size`, which are the two an
   operator may plausibly have on disk today. `graph.model` needs none (undocumented). Bare deletion
   would stop `ui_mode: "bogus"` from erroring.
 - `--preferred-executor` is the sole route by which a user-supplied executor name bypasses the
   obligation engine — the host-discretion pattern CLAUDE.md's *auditor-agnostic robustness* rule bans.
   Its single occurrence in the entire repo is its own parse. Keep `--results-b64` (it **is** exercised
-  at `tests/audit/submit-packet-command.test.mjs:183,552,578`); check `wrapper/audit-code-wrapper-lib.mjs`
+  at `tests/audit/submit-packet-command.test.mjs`); check `wrapper/audit-code-wrapper-lib.mjs`
   before dropping the others.
 
 ### 3.5 Redundant guards
 
 | Item | Lines | Tag | Files |
 |---|---|---|---|
-| `validateTopLevelShapes` is a second hand-maintained copy of the artifact registry | ~30 | PARTIAL | `src/audit/validation/artifacts.ts:27-73` (15 blocks, not 16); `src/audit/io/artifacts.ts:235+` (`ARTIFACT_DEFINITIONS`) |
-| Path-normalization predicate ×3 + no-op `pushIssue` wrapper ×3 | ~27 | PARTIAL | `src/audit/validation/auditResults.ts:45-47`, `src/remediate/riskSignal.ts:174-176`, `src/audit/orchestrator/fileAnchors.ts:130-132`, `src/shared/validation/findingGrounding.ts:46-48`; wrappers at `src/audit/validation/artifacts.ts:11-17`, `src/audit/validation/sessionConfig.ts:15-21`, `src/shared/validation/sessionConfig.ts:339-345` |
-| `host-asset-renderer-drift` E1 tests assert a tautology of an already single-sourced renderer | ~26 | PARTIAL | `tests/audit/host-asset-renderer-drift.test.mjs:47-96` |
-| Repo-tree readability gate copy-pasted between the two grounding gates | ~8 | PARTIAL | `src/remediate/validation/contractPipelineGates.ts:1157-1180`, `:1346-1366` |
+| `validateTopLevelShapes` is a second hand-maintained copy of the artifact registry | ~30 | PARTIAL | `src/audit/validation/artifacts.ts` (15 blocks, not 16); `src/audit/io/artifacts.ts+` (`ARTIFACT_DEFINITIONS`) |
+| Path-normalization predicate ×3 + no-op `pushIssue` wrapper ×3 | ~27 | PARTIAL | `src/audit/validation/auditResults.ts`, `src/remediate/riskSignal.ts`, `src/audit/orchestrator/fileAnchors.ts`, `src/shared/validation/findingGrounding.ts`; wrappers at `src/audit/validation/artifacts.ts`, `src/audit/validation/sessionConfig.ts`, `src/shared/validation/sessionConfig.ts` |
+| `host-asset-renderer-drift` E1 tests assert a tautology of an already single-sourced renderer | ~26 | PARTIAL | `tests/audit/host-asset-renderer-drift.test.mjs` |
+| Repo-tree readability gate copy-pasted between the two grounding gates | ~8 | PARTIAL | `src/remediate/validation/contractPipelineGates.ts`, `:1346-1366` |
 
 Corrections that matter before acting:
 - **`validateTopLevelShapes` is mostly a relocation, not a deletion** — the required-key arrays are
   irreducible data; moving them into `jsonArtifact(...)` keeps them. An **optional** `requiredKeys?`
   field does **not** deliver the forcing function ("a new artifact must declare its shape"); only a
   required field with an explicit `null`/`[]` opt-out would. A real pre-existing defect sits underneath:
-  `ArtifactPayloadMap` types `external_analyzer_results` as an **array** (`io/artifacts.ts:113`) while
+  `ArtifactPayloadMap` types `external_analyzer_results` as an **array** (`io/artifacts.ts`) while
   `requireKeys` → `isRecord` rejects arrays, so line 65 already emits a spurious "Expected an object,
   got array". Fix that deliberately; do not launder it through the refactor.
-- **Only 3 of the 5 path copies collapse safely.** `src/audit/extractors/disposition.ts:192-194` and
-  `src/audit/extractors/fsIntake.ts:29-31` are **slash-only** and do not strip `./` — folding them into
+- **Only 3 of the 5 path copies collapse safely.** `src/audit/extractors/disposition.ts` and
+  `src/audit/extractors/fsIntake.ts` are **slash-only** and do not strip `./` — folding them into
   a `./`-stripping helper is a behavior change. Export two primitives or leave those two alone. Do
   **not** swap the three case-preserving copies for the lowercasing `normalizeRepoPath` or path matching
   turns case-insensitive on Linux. The `pushIssue` rename touches **~90** call sites (29 + 10 + 56), not
@@ -389,8 +389,8 @@ Corrections that matter before acting:
 |---|---|---|---|
 | 17 test files re-declare `withTempDir` inline while 19 import the shared helper | ~130 | UNVERIFIED | helper: `tests/audit/helpers/withTempDir.mjs` → move to `tests/helpers/`; copies in `tests/audit/{audit-cli-correctness,audit-dispatch-observability,dispatch-scripts,finalization-cycle-guard,next-step-helpers,observability-signals,provider-assisted-bridge,review-packets,seam-host-only-next-step,status-command,synthesis-narrative-convergence}.test.mjs`, `tests/shared/{analyzerDeps-injectable-log,analyzerDeps,repoConventions,runLog,schema-version-read-policy,testCommand}.test.mjs` |
 | ~20 hand-rolled temp-git-repo scaffolds with no shared helper at all | ~200 | UNVERIFIED | 11 `initRepo()` in `tests/remediate/`, 9 `withTempRepo()` in `tests/audit/`, 14 inline `git(cwd,...)` wrappers — full list in the candidate set; endpoint `tests/helpers/tempRepo.mjs` |
-| Four generator/gate scripts re-implement the same marker-splice + `--check`/`--write` protocol; two are the same program twice | ~150 | UNVERIFIED | `scripts/shared/generate-loop-core-patterns.mjs` (95) and `generate-constitutional-doc-paths.mjs` (101) are the same program; splice copies at `generate-backlog-index.mjs:152-163`, `generate-handoff-roadmap.mjs:244-255`, `scripts/check-philosophy-brief.mjs:76-88`, `scripts/check-doc-manifest.mjs:242-256` |
-| `pinsLoopCore` copied into two hooks; nine files each declare their own `git()` spawn wrapper | ~75 | UNVERIFIED | `.claude/hooks/pre-commit-gate.mjs:69-79,286-302`, `.claude/hooks/attest-loop-core-review.mjs:64-74,43-51`; git wrappers in `closeout-challenge-gate.mjs:58`, `session-start-guards.mjs:18-29`, `shell-trap-guard.mjs:95`, `scripts/attest-constitutional-doc-change.mjs:47`, `scripts/check-control-bytes.mjs:17`, `scripts/check-doc-manifest.mjs:50` |
+| Four generator/gate scripts re-implement the same marker-splice + `--check`/`--write` protocol; two are the same program twice | ~150 | UNVERIFIED | `scripts/shared/generate-loop-core-patterns.mjs` (95) and `generate-constitutional-doc-paths.mjs` (101) are the same program; splice copies at `generate-backlog-index.mjs`, `generate-handoff-roadmap.mjs`, `scripts/check-philosophy-brief.mjs`, `scripts/check-doc-manifest.mjs` |
+| `pinsLoopCore` copied into two hooks; nine files each declare their own `git()` spawn wrapper | ~75 | UNVERIFIED | `.claude/hooks/pre-commit-gate.mjs`, `.claude/hooks/attest-loop-core-review.mjs`; git wrappers in `closeout-challenge-gate.mjs`, `session-start-guards.mjs`, `shell-trap-guard.mjs`, `scripts/attest-constitutional-doc-change.mjs`, `scripts/check-control-bytes.mjs`, `scripts/check-doc-manifest.mjs` |
 | `scripts/audit/verify-hosts.mjs` and `scripts/remediate/verify-hosts.mjs` — same 46-line script, three substitutions | ~45 | UNVERIFIED | both whole files; `package.json` `verify:hosts` / `verify:remediate-hosts` |
 | Remediate's two smoke scripts fork substrate audit already single-sourced | ~130 | UNVERIFIED — **partly behavior change** | `scripts/remediate/smoke-linked-remediate-code.mjs` (148), `scripts/remediate/smoke-packaged-remediate-code.mjs` (182) vs `scripts/shared/smoke-process.mjs` |
 | Audit/remediate postinstall pair forks the installs table and has drifted into two incompatible OpenCode-permission APIs | ~130 | UNVERIFIED — **behavior change** | `scripts/audit/postinstall.mjs` (328), `scripts/remediate/postinstall.mjs` (275), `scripts/shared/install-host-assets.mjs` (188) |
@@ -406,41 +406,41 @@ Notes:
   **Making `smoke-linked-remediate-code.mjs` actually use the linked shape is a capability fix, not a
   simplification** — despite its name it spawns `node <repoRoot>/remediate-code.mjs` directly and never
   runs `npm link`. Decide that on its own merits. Extend
-  `tests/audit/release-contract.test.mjs:249-257` to cover the remediate pair so the fork cannot regrow.
+  `tests/audit/release-contract.test.mjs` to cover the remediate pair so the fork cannot regrow.
 - **Postinstall is the highest-risk item in the whole review.** The two OpenCode merge functions are
   **not currently equivalent** (audit: `mergeOpenCodeAgentPermissionConfig(existing, generated)`;
   remediate: `renderOpenCodeAgentPermissionConfig(existing)` building from constants), so collapsing
   means *choosing* one merge semantics — which changes what an existing user's
   `~/.config/opencode/opencode.json` converges to on the next `npm install`. Establish equivalence
   first. One real per-tool behavior to preserve as a parameter: remediate strips frontmatter from the
-  Claude command, audit does not. Leave `scripts/postinstall.mjs:70-76`'s local
+  Claude command, audit does not. Leave `scripts/postinstall.mjs`'s local
   `resolveVisibilityOverride` alone — it is a deliberate fresh-`npm ci` fallback.
 
 ### 3.7 Legacy paths
 
 | Item | Lines | Tag | Files |
 |---|---|---|---|
-| `maybeArchiveLegacyPendingResults` guards a filename with zero writers repo-wide | ~40 | UNVERIFIED | `src/audit/cli/auditStep.ts:49-69` and the two call sites at `:266-275`, `:291-300` |
-| Two competing repair-target unions bridged by a cast | ~35 | UNVERIFIED — **behavior change** | `src/shared/types/contractPipeline/obligations.ts:209-213` (`JudgeRepairTarget`, still naming the retired `design_spec`); `src/remediate/steps/contractPipeline.ts:698-700,719,733,748,790-795`; `src/remediate/validation/contractPipeline.ts:500-506` |
-| `agy` `gemini` binary fallback is past its own stated sunset (2026-07-18) | ~60 | UNVERIFIED — **behavior change** | `src/shared/providers/agyProvider.ts:66-93,101`; `auditorSources.ts:85-86,531-535`; `providerConfirmation.ts:118-124`; `providerFactory.ts:155-159,260`; `providerPathGuard.ts:96-102`; `src/shared/types/sessionConfig.ts:311-317` |
-| `rejectionRewriteInstruction`'s `string \| undefined` back-compat overload only tests exercise | 8 | UNVERIFIED | `src/remediate/steps/contractPipeline.ts:457-460`; convert `tests/remediate/contract-pipeline-adversarial.test.ts:1373` and `contract-pipeline-cp-node-3.test.ts:129` |
+| `maybeArchiveLegacyPendingResults` guards a filename with zero writers repo-wide | ~40 | UNVERIFIED | `src/audit/cli/auditStep.ts` and the two call sites at `:266-275`, `:291-300` |
+| Two competing repair-target unions bridged by a cast | ~35 | UNVERIFIED — **behavior change** | `src/shared/types/contractPipeline/obligations.ts` (`JudgeRepairTarget`, still naming the retired `design_spec`); `src/remediate/steps/contractPipeline.ts`; `src/remediate/validation/contractPipeline.ts` |
+| `agy` `gemini` binary fallback is past its own stated sunset (2026-07-18) | ~60 | UNVERIFIED — **behavior change** | `src/shared/providers/agyProvider.ts`; `auditorSources.ts`; `providerConfirmation.ts`; `providerFactory.ts`; `providerPathGuard.ts`; `src/shared/types/sessionConfig.ts` |
+| `rejectionRewriteInstruction`'s `string \| undefined` back-compat overload only tests exercise | 8 | UNVERIFIED | `src/remediate/steps/contractPipeline.ts`; convert `tests/remediate/contract-pipeline-adversarial.test.ts` and `contract-pipeline-cp-node-3.test.ts` |
 
 Notes:
 - `worker_results_pending.json` has **exactly one** hit in the tracked repo — the guard's own comparison
-  at `auditStep.ts:52`. The condition is unsatisfiable.
+  at `auditStep.ts`. The condition is unsatisfiable.
 - The `JudgeRepairTarget` merge changes behavior: `validateJudgeReport` would reject a report whose
   `repair_directive.target` is `design_spec` instead of silently remapping it. Exposure is a stale
   in-flight report on disk (no live prompt offers that value —
-  `tests/remediate/n-r07-seam-negotiation.test.ts:257-259,636` pins it out). Delete
-  `tests/remediate/validation.test.ts:584` in the same commit. Distinct from
-  `ObligationEntry.source?: "design_spec"` (`obligations.ts:80`), which `derive.ts:108/119/132` actively
+  `tests/remediate/n-r07-seam-negotiation.test.ts` pins it out). Delete
+  `tests/remediate/validation.test.ts` in the same commit. Distinct from
+  `ObligationEntry.source?: "design_spec"` (`obligations.ts`), which `derive.ts/119/132` actively
   writes — **that one is live**.
 - The `agy` sunset **does** change behavior: a machine with only `gemini` on PATH stops auto-resolving
   to the agy provider, and an operator with `agy.command: "gemini"` would get modern flags on a legacy
   binary. That is the deliberate intent of the gate and the date has passed — but get a one-line
   confirmation that `agy` is installed before landing. Update
-  `tests/shared/auditor-sources.test.mjs:210-212` and
-  `tests/shared/codex-antigravity-providers.test.mjs:685-710`.
+  `tests/shared/auditor-sources.test.mjs` and
+  `tests/shared/codex-antigravity-providers.test.mjs`.
 
 ---
 
@@ -467,13 +467,13 @@ and rolling uses `AUDIT_CODE_ROLLING_ENGINE` vs `REMEDIATE_ROLLING_ENGINE`.
 - **Deletes:** both `providers/` directories (303), both `quota/hostLimits.ts` (54), both `quota/index.ts`
   barrels (~158, keeping audit's `discoveredLimits` re-export block as a direct import),
   `FreshSessionProviderDeps` (~28), and four env-var-currying wrappers
-  (`src/audit/cli/args.ts:62-75`, `src/remediate/steps/nextStep.ts:181-197,210-221`,
-  `src/audit/cli/rollingAuditDispatch.ts:108-119`). Inline `envPrefix` literals at
-  `src/audit/cli/dispatch/quotaPool.ts:140` and `src/remediate/steps/dispatch/waveScheduling.ts:165`
+  (`src/audit/cli/args.ts`, `src/remediate/steps/nextStep.ts`,
+  `src/audit/cli/rollingAuditDispatch.ts`). Inline `envPrefix` literals at
+  `src/audit/cli/dispatch/quotaPool.ts` and `src/remediate/steps/dispatch/waveScheduling.ts`
   read from the descriptor.
 - **Deletes as a consequence:** `tests/audit/seam-provider-quota-instantiation-parity.test.mjs` (382)
   and `tests/remediate/f4-brokered-core-parity.test.ts` (108) — both exist *only* to police these
-  forks. `f4-brokered-core-parity.test.ts:83-85` literally regex-strips the `AUDIT_CODE`/`REMEDIATE_CODE`
+  forks. `f4-brokered-core-parity.test.ts` literally regex-strips the `AUDIT_CODE`/`REMEDIATE_CODE`
   literal from both files and asserts the remainder is byte-identical. Preserve the one genuine
   behavior assertion (`getErrorParserForProvider` unknown-key → generic fallback, seam file `:372-381`)
   as a ~10-line test in `tests/shared`.
@@ -487,8 +487,7 @@ One concept — the six omittable host gates (`synthesis_narrative`, `charter_ex
 `charter_delta`, `charter_clarification`, `systemic_challenge`, `critical_flow_fallback`) — is
 hand-restated in **four** places:
 
-1. a descriptor inside a `handleXBranch` wrapper (`src/audit/cli/nextStepHelpers.ts:1155-1180,
-   1238-1264, 1277-1302, 1315-1341, 1357-1396, 1412-1452`);
+1. a descriptor inside a `handleXBranch` wrapper (`src/audit/cli/nextStepHelpers.ts`);
 2. a per-gate result type alias (`:1067-1073`);
 3. an obligation `execute` body that is **character-for-character identical across seven gates**
    (`:2016-2031, 2079-2091, 2097-2109, 2117-2129, 2151-2163, 2170-2182, 2199-2215`);
@@ -513,23 +512,23 @@ kept honest by remembering" pattern CLAUDE.md bans.
 
 The design review was split into independent `contract` and `conceptual` passes. The pre-split combined
 path survived intact and is unreachable **three independent ways**: `EXECUTOR_REGISTRY`
-(`src/audit/orchestrator/executors.ts:17-192`) has no `design_review` entry; `kind: "design_review"` is
-declared in the result union (`nextStepHelpers.ts:315,568`) but **constructed nowhere**; and the legacy
+(`src/audit/orchestrator/executors.ts`) has no `design_review` entry; `kind: "design_review"` is
+declared in the result union (`nextStepHelpers.ts`) but **constructed nowhere**; and the legacy
 incoming file `design-review-findings.json` is named to the host only inside the dead arm.
 
 Cascade: with no writer for `design_assessment.reviewed` / `.review_findings`, every reader is dead —
-the `legacyReviewed` disjuncts (`src/audit/orchestrator/state.ts:388-400,408,419`), the carry-forward
-and cleanup (`structureExecutors.ts:225-229,302-304`), the fallback merge
-(`reporting/mergeFindings.ts:63-67`), the `@deprecated` fields
-(`src/audit/types/designAssessment.ts:14,26-30`), `renderDesignReviewPrompt`
-(`orchestrator/designReviewPrompt.ts:643-696`, 54 lines, one caller — inside the dead arm), the runner
-entry (`executorRunners.ts:149-150`), and `"design_review"` in `StepKindSchema` (`cli/steps.ts:15`).
+the `legacyReviewed` disjuncts (`src/audit/orchestrator/state.ts`), the carry-forward
+and cleanup (`structureExecutors.ts`), the fallback merge
+(`reporting/mergeFindings.ts`), the `@deprecated` fields
+(`src/audit/types/designAssessment.ts`), `renderDesignReviewPrompt`
+(`orchestrator/designReviewPrompt.ts`, 54 lines, one caller — inside the dead arm), the runner
+entry (`executorRunners.ts`), and `"design_review"` in `StepKindSchema` (`cli/steps.ts`).
 
-- **Keep:** `HostFanoutFamily = "design_review"` (`hostFanoutGate.ts:57`) is a **different** thing,
+- **Keep:** `HostFanoutFamily = "design_review"` (`hostFanoutGate.ts`) is a **different** thing,
   shared by the live contract/conceptual dispatches.
-- **Decide separately:** the legacy *consume* leg at `nextStepHelpers.ts:906-933` is still exercised by
-  `tests/audit/next-step-helpers.test.mjs:308,657-675`, `next-step.test.mjs:156`,
-  `linux-cycle-regression.test.mjs:111`. Deleting it stops consuming a stray legacy submission file and
+- **Decide separately:** the legacy *consume* leg at `nextStepHelpers.ts` is still exercised by
+  `tests/audit/next-step-helpers.test.mjs`, `next-step.test.mjs`,
+  `linux-cycle-regression.test.mjs`. Deleting it stops consuming a stray legacy submission file and
   requires deleting those tests.
 - **Risk:** a `design_assessment.json` written by a pre-split build would stop satisfying the two review
   obligations and both passes would re-run. Transient per-run artifacts; the split shipped long ago.
@@ -539,15 +538,15 @@ entry (`executorRunners.ts:149-150`), and `"design_review"` in `StepKindSchema` 
 
 ### 4.4 — Collapse remediate's `--host-*` scalar flags onto audit's `--auditor` descriptor (~320) — UNVERIFIED, **behavior change**
 
-`src/shared/types/auditorDescriptor.ts:19-66` documents a 1:1 mapping for every one of these
+`src/shared/types/auditorDescriptor.ts` documents a 1:1 mapping for every one of these
 (`model_id` "was `--host-model-id`", `roster` "was `--host-models`", …). Audit registers **none** of the
-scalar flags; remediate registers five (`src/remediate/index.ts:162-181`, parsed at `:219-232`). The
-fork is self-acknowledged at `tests/remediate/cli-host-capability-flags.test.ts:385-391`: "audit and
+scalar flags; remediate registers five (`src/remediate/index.ts`, parsed at `:219-232`). The
+fork is self-acknowledged at `tests/remediate/cli-host-capability-flags.test.ts`: "audit and
 remediate deliberately DIVERGE on the handshake transport until the remediate `--auditor` round-trip
 (G6)". The cost is not the flag block — it is the **431-line parity test** keeping 6 loader assets in
 sync with a flag list audit no longer has (audit's equivalent is one 130-line descriptor round-trip).
 
-- **Endpoint:** lift `getAuditorDescriptor` (`src/audit/cli/args.ts:245-354`) into `src/shared` — it
+- **Endpoint:** lift `getAuditorDescriptor` (`src/audit/cli/args.ts`) into `src/shared` — it
   already depends only on shared symbols — and have remediate's `next-step` take `--auditor <json>`,
   mapping `descriptor.self` onto the `hostMaxConcurrent`/`hostContextTokens`/… params it already
   threads. Internal remediate plumbing (~98 `hostX` references) is unchanged; only the entry seam
@@ -594,21 +593,21 @@ attestations.
 ### 4.6 — Ask first: the legacy host-fanned wave dispatch (~250) — UNVERIFIED, **behavior change**
 
 Both orchestrators default `rolling_engine` to **true**, and the knob is already half-retired at the
-persistence layer: it is stripped from `RepoDispatchConfig` (`src/shared/types/sessionConfig.ts:872`)
+persistence layer: it is stripped from `RepoDispatchConfig` (`src/shared/types/sessionConfig.ts`)
 and `validateRepoSessionIntent` **rejects it as an error**
-(`src/shared/validation/sessionConfig.ts:876`), so it is unrepresentable in `session-config.json`. The
+(`src/shared/validation/sessionConfig.ts`), so it is unrepresentable in `session-config.json`. The
 only surviving reachable route to the legacy wave is `REMEDIATE_ROLLING_ENGINE=false` /
 `AUDIT_CODE_ROLLING_ENGINE=false`. Deleting collapses the `if (rollingEngineEnabled)` fork
-(`src/remediate/steps/nextStep.ts:1952`) to its taken arm and removes the `dispatch_implement` wave emit
+(`src/remediate/steps/nextStep.ts`) to its taken arm and removes the `dispatch_implement` wave emit
 (~2377-2560) plus that `StepKind`.
 
 **This removes a real escape hatch, not dead code** — if the rolling engine hits a bad case in a live
 run, this is the fallback. It is also entangled: `prepareImplementDispatch` / `mergeImplementResults`
-are called by `src/remediate/index.ts:257,279` and `scheduleWave` by
-`src/remediate/steps/contractPipeline.ts:1664`, so those helpers survive and the true count is lower
+are called by `src/remediate/index.ts` and `scheduleWave` by
+`src/remediate/steps/contractPipeline.ts`, so those helpers survive and the true count is lower
 than the branch's raw size. Loop-core → attestation.
 
-**If the hatch is kept, take the free win anyway:** `src/remediate/steps/nextStep.ts:160` still claims
+**If the hatch is kept, take the free win anyway:** `src/remediate/steps/nextStep.ts` still claims
 "Defaults off (proven host-fanned wave path)" — the exact opposite of the actual default. That comment
 will mislead the next reader regardless of the decision.
 
@@ -634,20 +633,20 @@ single-sourced, or a false positive of a specific detection method.
 - `src/shared/dispatch/rollingDispatch.ts` — 46% comment; its only real duplication is §4.5.
 
 **Abstractions that earn themselves**
-- `BaseHttpQuotaSource` (`src/shared/quota/httpQuotaSource.ts:70-185`) — 5 real subclasses, each with a
+- `BaseHttpQuotaSource` (`src/shared/quota/httpQuotaSource.ts`) — 5 real subclasses, each with a
   genuinely different credential read + endpoint mapping.
 - `SubprocessTemplateProvider` — one class serving three provider names. The correct direction.
 - `isInProcessWorkerProvider` / `isHeadlessPrimaryProvider` (`src/shared/providers/inProcessWorkers.ts`)
   — two deliberately distinct predicates over one base set, replacing three drifted allowlists.
 - `planHybridDispatch` (`src/shared/dispatch/hybridDispatch.ts`) — live in **both** orchestrators
-  (`nextStepHelpers.ts:2426`, `remediate/steps/nextStep.ts:2075`).
+  (`nextStepHelpers.ts`, `remediate/steps/nextStep.ts`).
 - The `contractPipeline` barrel and `src/shared/index.ts` **as barrels** — navigability, not speculative
   generality. Only the 270 orphan *names* go (§3.1).
 
 **Already correctly single-sourced — do not re-audit**
-- Step-contract writing (`src/audit/cli/steps.ts:105-139`, `src/remediate/steps/stepWriter.ts:34-58`
+- Step-contract writing (`src/audit/cli/steps.ts`, `src/remediate/steps/stepWriter.ts`
   both delegate to shared `writeStepContract`; only the zod enums differ, which is real per-mode data).
-- File integrity (`src/shared/fileIntegrity.ts:54-88` owns the classify-and-bucket loop).
+- File integrity (`src/shared/fileIntegrity.ts` owns the classify-and-bucket loop).
 - Access memory (`src/shared/accessMemory.ts`; the two adapters map genuinely different inputs).
 - Prompt assembly (`src/audit/cli/prompts.ts` and `src/remediate/steps/prompts.ts` share no function).
 - Dispatch quota emit — the fork memory flags as open was largely closed by the H5 lift into shared
@@ -664,7 +663,7 @@ single-sourced, or a false positive of a specific detection method.
   audit's read-only detached snapshot. Only the three safety primitives are shared logic (§3.2).
 - `decideNextStep` — genuinely different state machines.
 - `driveRollingDispatch` vs `driveRollingImplementDispatch` are **not** duplicates despite the naming —
-  the latter *calls* the former at `nextStep.ts:1433`.
+  the latter *calls* the former at `nextStep.ts`.
 - `src/audit/validation/auditResults.ts` (1,141 lines) sitting beside a zod `AuditResultSchema` is
   **not** redundant: the hand-rolled pass produces per-worker, per-field remediation prose fed back to
   workers, and enforces cross-record semantics zod cannot express (coverage-vs-task identity, line-count
@@ -673,16 +672,16 @@ single-sourced, or a false positive of a specific detection method.
 
 **Verifier refutations of specific claims** (these premises are false — do not act on them)
 - "`src/audit/quota/hostLimits.ts` has zero production consumers" — **false**.
-  `src/audit/cli/quotaCommand.ts:7,29` reaches it through the barrel at `src/audit/quota/index.ts:66-70`.
+  `src/audit/cli/quotaCommand.ts` reaches it through the barrel at `src/audit/quota/index.ts`.
   The original grep matched the file path and missed the re-export.
 - "`src/remediate/quota/index.ts` contains zero non-re-export lines" — **false**. `:66-69` export the
   **local** prefix-bound functions, which have a different signature from the shared ones.
-- "Delete all four quota files; the symbols are identical" — **false**. `src/audit/quota/index.ts:72-79`
+- "Delete all four quota files; the symbols are identical" — **false**. `src/audit/quota/index.ts`
   barrels the genuinely audit-owned `discoveredLimits.ts`, which has no shared equivalent.
 - "The three constructors of ClaudeCode/Agy/ClaudeWorker providers are line-for-line identical" —
   **false**. ClaudeWorker's runs three `requireNonEmpty` validations and stores endpoint/model.
 - "`normalizeCoveragePath` is dead" — **false**. It has six live in-file callers
-  (`auditResults.ts:783,882,961,1021,1059,1068`). Only the `export` keyword is surplus.
+  (`auditResults.ts`). Only the `export` keyword is surplus.
 - "`resolveFreshSessionProviderName` is dead" — the **audit** copy is live in 7-8 call sites; only the
   **remediate** twin is dead. Confirm which file before touching.
 - "The last two tests in `host-asset-renderer-drift.test.mjs`" — the file has **nine** tests; five live
@@ -690,11 +689,11 @@ single-sourced, or a false positive of a specific detection method.
 
 **Detection false positives (dispatch / dynamic / spawned wiring)**
 - `tests/audit/helpers/provider-assisted-bridge.mjs` looks dead to a symbol grep but is **executed as a
-  spawned child** by `tests/audit/provider-assisted-bridge.test.mjs:9`. Same for
+  spawned child** by `tests/audit/provider-assisted-bridge.test.mjs`. Same for
   `tests/audit/helpers/{validate,synthetic-results}.mjs`.
 - `parseClippy` / `parseRubocop` are live via the `candidates.ts` dispatch table (`:561`, `:577`) — only
   the `normalize*Json` halves of those two files are dead.
-- `src/audit/adapters/normalizeExternal.ts` **must stay** — `acquisitionEngine.ts:11,414` imports it.
+- `src/audit/adapters/normalizeExternal.ts` **must stay** — `acquisitionEngine.ts` imports it.
   §3.1's adapter delete is a partial-directory delete.
 - Every npm-script path in `package.json` resolves to a real file; `test:single` is the only orphan. The
   low-reference scripts are all live via non-obvious wiring: `triage-backlog.mjs`,
@@ -703,53 +702,53 @@ single-sourced, or a false positive of a specific detection method.
 
 **"Legacy"-labelled but live**
 - The `openai_compatible` config block is called "legacy" in ~15 comments but is
-  `OpenAiCompatibleProvider`'s **primary** config (`openAiCompatibleProvider.ts:185-197`). Comment
+  `OpenAiCompatibleProvider`'s **primary** config (`openAiCompatibleProvider.ts`). Comment
   accuracy issue only.
-- `ESTIMATED_TOKENS_PER_LINE` (`tokens.ts:29`) — live via `reviewPacketSizing.ts:23,56` and
-  `reviewPackets.ts:14,41`.
-- The `"agent"` executor registry entry (`executors.ts:175-181`) — live across `reviewRun.ts:149,206,232`,
-  `workerRunCommand.ts:48-109`, `runArtifacts.ts:178`, `renderWorkerPrompt.ts:28`, `envelope.ts:89`.
-- `conceptual_depth` — live via `conceptualDispatch.ts:70,90,183`.
-- The `steps/current-step.json` "latest" slot — read by `remediate/validation/artifacts.ts:383`.
+- `ESTIMATED_TOKENS_PER_LINE` (`tokens.ts`) — live via `reviewPacketSizing.ts` and
+  `reviewPackets.ts`.
+- The `"agent"` executor registry entry (`executors.ts`) — live across `reviewRun.ts`,
+  `workerRunCommand.ts`, `runArtifacts.ts`, `renderWorkerPrompt.ts`, `envelope.ts`.
+- `conceptual_depth` — live via `conceptualDispatch.ts`.
+- The `steps/current-step.json` "latest" slot — read by `remediate/validation/artifacts.ts`.
 - `contentKey.ts`'s "legacy lone-base" references describe a byte-identity property of the *current*
-  derivation. `METADATA_SCHEMA_VERSION` handling (`artifactMetadata.ts:82-113`) is a forward-safe `>=`
+  derivation. `METADATA_SCHEMA_VERSION` handling (`artifactMetadata.ts`) is a forward-safe `>=`
   guard, not a migration.
 
 **Wire, don't delete**
-- The `uiMode` / `AutoProviderContext.headless` axis (`providerFactory.ts:70-121,188,238,302-329`) is
+- The `uiMode` / `AutoProviderContext.headless` axis (`providerFactory.ts`) is
   dead at **both** ends — no caller supplies `uiMode` (`createFreshSessionProvider` itself doesn't
-  forward it, `:439-442`), and `SessionConfig.ui_mode` (`sessionConfig.ts:778`) is validated
-  (`validation/sessionConfig.ts:736-742`) and **never read**. But deleting retires **INV-SCC-01**
+  forward it, `:439-442`), and `SessionConfig.ui_mode` (`sessionConfig.ts`) is validated
+  (`validation/sessionConfig.ts`) and **never read**. But deleting retires **INV-SCC-01**
   ("a provider whose launch deterministically rejects headless input must never be auto-selected for a
   headless run"), leaving only `OpenCodeProvider`'s launch-time throw — degrading the failure from
   "never selected" to "selected, then hard-fails after the packet is built". That contradicts
   *enforce-in-tooling*. Wiring is ~6 lines once §4.1 removes the wrappers' options narrowing; the two
-  headless dispatch paths (`rollingAuditDispatch.ts:336`, `workerTasks.ts:61`) already know their mode.
+  headless dispatch paths (`rollingAuditDispatch.ts`, `workerTasks.ts`) already know their mode.
   **This conflicts with the `ui_mode` deletion in §3.4 — resolve before acting on either.**
 - `src/audit/quota/discoveredLimits.ts` write path — §3.1.
-- `getTreeSitterDegradationCount` (`treeSitter.ts:58`) is write-only telemetry (`_degradationCount`
+- `getTreeSitterDegradationCount` (`treeSitter.ts`) is write-only telemetry (`_degradationCount`
   incremented at `:99,126,176,203`, read only by this getter, called only by tests). Deleting is honest
   dead-code removal but costs the observable
   `tests/audit/tree-sitter-language-cache.test.mjs` uses. Plumb the count into the extraction artifact
   instead.
-- `FreshSessionProviderDeps.runLogger` (`providerFactory.ts:420`) is never supplied, so the structured
+- `FreshSessionProviderDeps.runLogger` (`providerFactory.ts`) is never supplied, so the structured
   `provider_launch` event at `:460` never fires. Removing it in §2.2 is behavior-neutral but it is a
   **real observability gap** — report it, don't bury it.
 
 **Test seams — deleting is a reshuffle or a coverage loss**
-- `cliTestUtils` (`src/audit/cli.ts:52`), `__resetTreeSitterForTests` (a real hermeticity seam),
-  `__resolveFromPathForTests`, `runInProcessAuditDispatch` (`nextStepCommand.ts:1548`, drives the
+- `cliTestUtils` (`src/audit/cli.ts`), `__resetTreeSitterForTests` (a real hermeticity seam),
+  `__resolveFromPathForTests`, `runInProcessAuditDispatch` (`nextStepCommand.ts`, drives the
   provider-matrix e2e), `projectDesignReviewInputs`.
 - `tests/audit/quota-*.test.mjs` (9 files) test `src/shared/quota/` and arguably belong under
   `tests/shared/` — but `tests/shared/errorParsing.test.mjs` covers tier-1 mutual-exclusivity and
   channel-isolation that the audit copies do not. Moving is a reshuffle; deleting either side drops real
   invariants.
 - The control-byte predicate in both `scripts/check-control-bytes.mjs` and
-  `.claude/hooks/tool-input-guard.mjs:87` is **deliberate** and documented in the hook ("the same rule
+  `.claude/hooks/tool-input-guard.mjs` is **deliberate** and documented in the hook ("the same rule
   moved to the keystroke that causes it").
 
 **Clean already:** zero `TODO`/`FIXME`/`XXX`/`HACK` markers exist in `src/`. Only two "for now" comments
-survive (`providerConfirmationStep.ts:347`, `derive.ts:263`).
+survive (`providerConfirmationStep.ts`, `derive.ts`).
 
 ---
 

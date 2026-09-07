@@ -28,7 +28,7 @@ missing render only 3 times. The enforcement did not see 16 of the 19 misses.
 
 The renderer's **input** requires the literal `"none"` for every silent section. The Stop
 challenge's stderr is the loudest and latest instruction an agent reads at closeout time, and
-it says (`closeout-challenge-gate.mjs:328`):
+it says (`closeout-challenge-gate.mjs`):
 
 > Then RE-RENDER the whole closeout report **to the scheme in
 > docs/end-of-sprint-report-template.md** … a line or section with nothing to report is
@@ -68,14 +68,14 @@ Following that instruction produces a second refusal:
 render-closeout: section "verification" is required and may not be "none"
 ```
 
-The `emptied` branch (`render-closeout.mjs:180`) does not check `section.required` before it
+The `emptied` branch (`render-closeout.mjs`) does not check `section.required` before it
 recommends `"none"`. The documented entry point is therefore a two-step contradiction. Verified
 by direct execution on 2026-08-26.
 
 ## Root cause 3 — the enforcement record is repo-global and HEAD-keyed
 
 `.claude/hooks/.state/closeout-render/latest.json` is a single file for the whole repo. The gate
-(`closeout-challenge-gate.mjs:210-222`) compares only `rec.head` against the current HEAD. It
+(`closeout-challenge-gate.mjs`) compares only `rec.head` against the current HEAD. It
 never compares `rec.session_id`, and `session_id` is `null` in the live record because
 `CLAUDE_SESSION_ID` is not present in the renderer's environment.
 

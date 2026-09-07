@@ -12,12 +12,12 @@ node-worker subagents; 3 of 4 died mid-run with `You've hit your session limit �
 - **Not missing modeling.** The 5-hr window does not need separate modeling: `mapUsageToSnapshot`
   already picks the *binding* (highest-utilization) window across `limits[]` + top-level windows, so
   `remaining_pct` is the most-constraining window's remaining fraction.
-- **Not missing wiring.** `buildHostPoolPreamble` (`src/remediate/steps/dispatch.ts:296`) builds a
+- **Not missing wiring.** `buildHostPoolPreamble` (`src/remediate/steps/dispatch.ts`) builds a
   `quotaSource` with the proactive Claude OAuth source by default; `buildConfirmedPools` feeds it to
   the rolling driver's pool sizing.
 
 ## Root cause
-`applyQuotaSourceAdjustment` (`src/shared/quota/scheduler.ts:345`) consumes `remaining_pct` only as
+`applyQuotaSourceAdjustment` (`src/shared/quota/scheduler.ts`) consumes `remaining_pct` only as
 two cliff bands:
 
 - `remaining_pct < 0.1` (CRITICAL) → wave size 1 + cooldown to reset
@@ -64,8 +64,8 @@ stripped:
    tokens of in-flight + next task must fit within remaining budget (remaining_pct × learned
    tokens_per_pct), reserving headroom to `reset_at`.
 
-**Strip (the "nonsense" caps):** the `first_contact` floor (~3/8, `scheduler.ts:500`), the `fallback`
-`unknown_*_concurrency` caps (`scheduler.ts:486`), and the `applyQuotaSourceAdjustment` 0.1/0.3 cliffs.
+**Strip (the "nonsense" caps):** the `first_contact` floor (~3/8, `scheduler.ts`), the `fallback`
+`unknown_*_concurrency` caps (`scheduler.ts`), and the `applyQuotaSourceAdjustment` 0.1/0.3 cliffs.
 Atomic-replace each with the budget gate.
 
 **Cold start (no learned tokens_per_pct yet):** calibrate, don't invent a cap — dispatch a small first
@@ -79,4 +79,4 @@ A detected session-limit worker death pauses until `reset_at`, preserves the wor
 ## Verification anchor
 - Live probe: `new ClaudeOAuthQuotaSource().probeUsage("claude-code/*")` → `{status:"ok",
   remaining_pct:0.6, reset_at:"2026-07-01T01:59:59Z"}`.
-- Band logic: `src/shared/quota/scheduler.ts:325-371`.
+- Band logic: `src/shared/quota/scheduler.ts`.

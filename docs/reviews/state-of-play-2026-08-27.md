@@ -69,8 +69,8 @@ work queue. Every gate is green precisely because none of them looks here.
 **CX-03 is not fully landed as the document describes.** Four of its five symbols are gone
 tree-wide: `writeCanonicalAuditDeliverables`, `readContractPipelinePlanningOutputs`, `isBlockId`,
 `fromBlockId` and `obligationKindVocabularyDivergence` all return zero hits. The fifth,
-`projectDesignReviewInputs`, still exists at `src/audit/orchestrator/designReviewProjection.ts:275`
-and was **wired into production** at `src/audit/orchestrator/designReviewSnapshot.ts:120` — the
+`projectDesignReviewInputs`, still exists at `src/audit/orchestrator/designReviewProjection.ts`
+and was **wired into production** at `src/audit/orchestrator/designReviewSnapshot.ts` — the
 opposite of the proposed deletion. That is a legitimate alternative resolution, but `HANDOFF`
 records CX-03 as landed without saying so.
 
@@ -90,7 +90,7 @@ not the enabling contract change.
 1. Marker-protocol sub-claim (c) is **refuted**. `spec/audit/executor-producers.generated.md` is
    generated structurally from `EXECUTOR_REGISTRY[].produces` and `LIFECYCLE_PRODUCTIONS`; the
    render names no obligation registry.
-2. The lock-held read-modify-write is cited at `nextStepHelpers.ts:1822-1823`. Those lines are the
+2. The lock-held read-modify-write is cited at `nextStepHelpers.ts`. Those lines are the
    success-path marker fields. The real site is `:1845-1851`.
 3. The claim that `executor-registry-sync` retires with the second registry is **overstated**. Only
    2 of that file's 4 tests consume `buildAuditObligations`; the other two must survive.

@@ -118,8 +118,8 @@ adoption baseline, has never tightened, and currently constrains nothing.
 `docs/reviews/` holds 94 dated documents, 16,419 lines — 65% of all documentation. Fifteen
 appeared in the last 14 days.
 
-`scripts/doc-manifest-data.mjs:148-155` excludes them **by construction**, and that
-exclusion is load-bearing: `check-doc-code-citations.mjs:209-211` filters its scope through
+`scripts/doc-manifest-data.mjs` excludes them **by construction**, and that
+exclusion is load-bearing: `check-doc-code-citations.mjs` filters its scope through
 `excludedMatchers()`, and `scripts/nightly/scope-ledger.mjs` drops them from
 `inScopeDocs()`. So no staleness review, drift check, or doc-to-code citation check ever
 inspects their content — and nothing can ever mark one spent.
@@ -151,9 +151,9 @@ to the repository totals):
 | D | **Cited by nothing, anywhere** | **27** | **3,526** |
 
 Class A must stay. `closeout-generation-failure-2026-08-26.md` is cited from
-`.claude/hooks/closeout-challenge-gate.mjs:281`, `cx02-hold-time-measurement-2026-08-29.md`
-from `src/audit/cli/auditStep.ts:96`, and `low-tier-phase-cost-2026-08-25.md` from
-`src/remediate/steps/contractPipeline.ts:183`. Deleting those breaks live code comments.
+`.claude/hooks/closeout-challenge-gate.mjs`, `cx02-hold-time-measurement-2026-08-29.md`
+from `src/audit/cli/auditStep.ts`, and `low-tier-phase-cost-2026-08-25.md` from
+`src/remediate/steps/contractPipeline.ts`. Deleting those breaks live code comments.
 
 Class D is a safe immediate delete. Class C is deletable as a connected cluster, since its
 only referents are each other.
@@ -204,18 +204,18 @@ no orphans. `GUARDS` holds 91 rows (41 gates, 10 hooks, 40 contract tests).
 
 ### F2 — A meta-test returns green on exactly the rows it was written to catch (LIVE HOLE)
 
-`tests/shared/generator-gates-run-at-commit.test.ts:14-17` filters on
+`tests/shared/generator-gates-run-at-commit.test.ts` filters on
 `typeof g.fix === "string"`. The two live regenerate-shaped gates registered
 `preCommit: false` carry no `fix` field:
 
-- `scripts/guard-reach-data.mjs:176` — `check:loop-core-patterns`
-- `scripts/guard-reach-data.mjs:177` — `check:constitutional-doc-paths`
+- `scripts/guard-reach-data.mjs` — `check:loop-core-patterns`
+- `scripts/guard-reach-data.mjs` — `check:constitutional-doc-paths`
 
 Both are regenerate-shaped by implementation
-(`generate-loop-core-patterns.mjs:93-98`, `generate-constitutional-doc-paths.mjs:91-96`
+(`generate-loop-core-patterns.mjs`, `generate-constitutional-doc-paths.mjs`
 both print a "stale or missing … Fix: node scripts/shared/generate-…" message). Running
 the test's own predicate against the live registry yields an empty offender list. Eighteen
-gate rows carry no `fix` string and are invisible to it. `check-guard-reach.mjs:118-145`
+gate rows carry no `fix` string and are invisible to it. `check-guard-reach.mjs`
 validates `preCommit` but never requires `fix`, so nothing else closes the hole.
 
 **Consequence at HEAD:** an edit to `src/shared/loopCorePaths.ts` without regeneration
@@ -224,7 +224,7 @@ test's own header names.
 
 **Fix:** make `fix` mandatory on gate rows in `check-guard-reach.mjs`, then flip both
 rows. `check:loop-core-patterns` is already cited by a REACH row
-(`guard-reach-data.mjs:841`), so it is a one-token change; `check:constitutional-doc-paths`
+(`guard-reach-data.mjs`), so it is a one-token change; `check:constitutional-doc-paths`
 needs a REACH row added. Net **+6 lines. Risk: zero. Do this first.**
 
 ### F1 — The "generated artifact + parity check" pattern is implemented 15 times
@@ -234,23 +234,23 @@ report stale → exit 1*. Eight independently implement *find BEGIN/END markers,
 missing or duplicated, splice*.
 
 - Ten `--check` generators share a byte-near-identical `main()` and footer: 256 lines
-  across `generate-cli-surface.mjs:78-106`, `generate-loop-core-patterns.mjs:81-117`,
-  `generate-constitutional-doc-paths.mjs:79-115`,
-  `generate-runtime-artifact-names.mjs:111-144`, `generate-executor-producers.mjs:218-251`,
-  `generate-filelock-export-surface.mjs:229-262`, `generate-backlog-index.mjs:174-203`,
-  `generate-ci-trigger-paths.mjs:102-148`, `generate-spec-mirrors.mjs:650-655`,
-  `generate-handoff-roadmap.mjs:650-655`.
+  across `generate-cli-surface.mjs`, `generate-loop-core-patterns.mjs`,
+  `generate-constitutional-doc-paths.mjs`,
+  `generate-runtime-artifact-names.mjs`, `generate-executor-producers.mjs`,
+  `generate-filelock-export-surface.mjs`, `generate-backlog-index.mjs`,
+  `generate-ci-trigger-paths.mjs`, `generate-spec-mirrors.mjs`,
+  `generate-handoff-roadmap.mjs`.
 - The `invokedDirectly` incantation appears 20 times verbatim across `scripts/`.
 - Eight separate splice implementations exist.
 - **The generic version already exists and is private:**
-  `generate-handoff-roadmap.mjs:385` `spliceGeneratedBlock(...)` is a `function`, not an
-  `export function`. `spliceRegion` at `generate-spec-mirrors.mjs:550` is the same
+  `generate-handoff-roadmap.mjs` `spliceGeneratedBlock(...)` is a `function`, not an
+  `export function`. `spliceRegion` at `generate-spec-mirrors.mjs` is the same
   function with different error prose.
 - Two opposite CLI conventions for one operation: `generate-*.mjs` treats bare as *write*
   and `--check` as verify; five `check-*.mjs` scripts treat bare as *verify* and `--write`
   as write.
 - **`check:shared-primitives` — the repo's own one-definition-per-primitive gate — scans
-  `git ls-files 'src/**/*.ts'` only (`check-shared-primitives.mjs:262`). The enforcement
+  `git ls-files 'src/**/*.ts'` only (`check-shared-primitives.mjs`). The enforcement
   layer is the one tree exempt from the repo's own single-source rule.** A targeted
   `jscpd --min-lines 5 scripts/shared` reports 15 clones / 141 duplicated lines / 1.73%,
   every clone a generator tail paired with another generator tail. The repo-wide 5.5%
@@ -273,12 +273,12 @@ after renaming the record directory, the predicate and the free-text field. The 
 argument parsing, `--attester-class` validation, the field-length check, the
 `git write-tree` bind, `runDerivedFilePreflight`, the record write — is identical.
 
-`scripts/attest-constitutional-doc-change.mjs:14-16` says outright: *"It is deliberately
+`scripts/attest-constitutional-doc-change.mjs` says outright: *"It is deliberately
 the SAME mechanism as attest-loop-core-review.mjs, not a second unrelated one."* It is
 nonetheless a second implementation.
 
-The consumer is duplicated too: `pre-commit-gate.mjs:934-998` (60 code lines) and
-`pre-commit-gate.mjs:1008-1075` (62 code lines) run the identical seven-step sequence, and
+The consumer is duplicated too: `pre-commit-gate.mjs` (60 code lines) and
+`pre-commit-gate.mjs` (62 code lines) run the identical seven-step sequence, and
 line 952 carries the same "SAME mechanism" comment.
 
 **Fix:** one `stagedTreeAttestation({ recordDir, predicate, requiredField, extraFields,
@@ -296,10 +296,10 @@ Measured, in order: 535 / 559 / 504 / 738 / 1128 / 1995 / 2586 / 1240 / 493 / 53
 **Total ≈ 35.6s.**
 
 Three of the backlog gates enumerate the directory off disk rather than off the git index
-— `check-backlog-budget.mjs:268`, `check-backlog-status-tokens.mjs:130`,
-`check-backlog-line-numbers.mjs:111` all call `readdirSync(backlogDir)`. Every other gate
-uses `git ls-files` and says why (`check-doc-links.mjs:10-12`,
-`check-proposal-red-at.mjs:11`). An untracked scratch file in `docs/backlog/` reds the
+— `check-backlog-budget.mjs`, `check-backlog-status-tokens.mjs`,
+`check-backlog-line-numbers.mjs` all call `readdirSync(backlogDir)`. Every other gate
+uses `git ls-files` and says why (`check-doc-links.mjs`,
+`check-proposal-red-at.mjs`). An untracked scratch file in `docs/backlog/` reds the
 build, and a fresh CI clone can disagree with a local run.
 
 **Fix:** one `check:backlog` process that enumerates `git ls-files docs/backlog/*.md`
@@ -312,13 +312,13 @@ The four properties themselves are genuinely distinct and all four stay.
 
 ### F4 — `test:doc-contract` is a 21-second commit leg outside every registry
 
-Its trigger is hand-coded at `pre-commit-gate.mjs:792-793`, while every other leg's
-trigger is derived registry data. It carries no `GUARDS` row: `check-guard-reach.mjs:245-252`
+Its trigger is hand-coded at `pre-commit-gate.mjs`, while every other leg's
+trigger is derived registry data. It carries no `GUARDS` row: `check-guard-reach.mjs`
 requires a row only for scripts named `check:*`, and this one starts with `test:`, so it
 slips the bidirectional reconciliation entirely.
 
 It is also excluded from the attest preflight by design
-(`derived-file-preflight.mjs:29-31`). So an attestation can bind a tree the gate then
+(`derived-file-preflight.mjs`). So an attestation can bind a tree the gate then
 rejects on doc-contract — the double-attestation trap the preflight exists to close, left
 open for the costliest leg.
 
@@ -339,7 +339,7 @@ check → `stop_hook_active` → `sanitizeSessionId` → `readSessionRegistry().
 directory.
 
 The duplication hides a real divergence: two of the three exit on `stop_hook_active`;
-`closeout-challenge-gate.mjs:19-21` deliberately does not. You can only learn that by
+`closeout-challenge-gate.mjs` deliberately does not. You can only learn that by
 reading all three.
 
 **Fix:** `scripts/shared/stopGate.mjs` exporting
@@ -348,17 +348,17 @@ lines. **~50 lines removed. Risk: low.**
 
 ### F8 — Six drift tests re-assert byte-for-byte what their gate already asserts
 
-`tests/shared/runtime-artifact-names-drift.test.ts:29-36`,
-`tests/shared/cli-surface-drift.test.ts:37-39`,
-`tests/shared/loop-core-gate-parity.test.ts:76-80`,
-`tests/audit/executor-artifact-production-declaration.test.ts:275-281`, and
-`tests/shared/ci-trigger-paths.test.ts:89-95` each assert that a tracked file equals a
+`tests/shared/runtime-artifact-names-drift.test.ts`,
+`tests/shared/cli-surface-drift.test.ts`,
+`tests/shared/loop-core-gate-parity.test.ts`,
+`tests/audit/executor-artifact-production-declaration.test.ts`, and
+`tests/shared/ci-trigger-paths.test.ts` each assert that a tracked file equals a
 fresh render — which the matching `check:*` gate already asserts in the same
-`verify:release` chain. `cli-surface-drift.test.ts:3-4` acknowledges this in its own
+`verify:release` chain. `cli-surface-drift.test.ts` acknowledges this in its own
 header. `loop-core-gate-parity.test.ts` is titled *"the generator's `--check` mode fails
 when the generated file is stale"* and never invokes `--check`.
 
-`tests/shared/filelock-export-surface.test.ts:28-30` is the one case where the test is the
+`tests/shared/filelock-export-surface.test.ts` is the one case where the test is the
 sole enforcement. **Keep that one.**
 
 Four separate test files each independently assert "refuses a missing marker pair" and
@@ -370,10 +370,10 @@ splice. F1 collapses those to one shared test.
 
 ### F7 — A `--check` arm wired to nothing
 
-`scripts/shared/generate-filelock-export-surface.mjs:232-250` implements a complete
+`scripts/shared/generate-filelock-export-surface.mjs` implements a complete
 `--check` branch. Grepping `package.json`, `.github/` and `scripts/guard-reach-data.mjs`
 for `filelock-export-surface` returns nothing. Enforcement is
-`tests/shared/filelock-export-surface.test.ts:28-30` only.
+`tests/shared/filelock-export-surface.test.ts` only.
 
 `knip` cannot see it: `knip.json` lists `scripts/**/*.mjs!` as an entry, so the module is
 an entry point and the dead intra-file branch is invisible.
@@ -384,12 +384,12 @@ an entry point and the dead intra-file branch is invisible.
 ### F11 — "Cite a symbol, never a bare line number" is enforced in one shape, in one directory
 
 Three gates touch this rule and none covers the common case.
-`check-doc-links.mjs:113-124` flags `path/file.ts:1946` only inside a markdown link
-target. `check-backlog-line-numbers.mjs:72-110` flags a backticked `file.ts:123`, but its
-`main()` enumerates `docs/backlog` only. `check-doc-code-citations.mjs:52-53` explicitly
+`check-doc-links.mjs` flags `path/file.ts` only inside a markdown link
+target. `check-backlog-line-numbers.mjs` flags a backticked `file.ts`, but its
+`main()` enumerates `docs/backlog` only. `check-doc-code-citations.mjs` explicitly
 **strips** the `:123` suffix before resolving.
 
-Net effect at HEAD: a backticked `` `src/foo.ts:123` `` anywhere in `docs/` outside
+Net effect at HEAD: a backticked `` `src/foo.ts` `` anywhere in `docs/` outside
 `docs/backlog/` is refused by nothing. `findLineNumberCitations` is already fully generic
 and pure.
 
@@ -400,7 +400,7 @@ citations.
 
 ### F9 — 158 code lines of shell-text inference at a boundary git owns
 
-`pre-commit-gate.mjs:241-525` is 285 lines / 158 code of reconstruction: `gitSubcommandRe`
+`pre-commit-gate.mjs` is 285 lines / 158 code of reconstruction: `gitSubcommandRe`
 (a regex modelling git's global-option grammar, with a documented accepted false negative
 at :238-240), `tokenizeStatement` (a hand-rolled quote-aware shell tokenizer, :328-357),
 `cdEffect` (models `cd`/`chdir`/`pushd`/`sl`/`Set-Location`/`Push-Location` including
@@ -419,7 +419,7 @@ This is `PH-05`'s named instance, and the *accepted* half of PH-05 is "move a ga
 guesses at a boundary it does not own". The honest framing is a split, not a deletion: a
 real `.git/hooks/pre-commit` gets the staged index and the target repository for free and
 needs none of the inference — but `--no-verify` skips it, and refusing `--no-verify` is
-exactly what `pre-commit-gate.mjs:508-525` exists to do. So move the six property checks
+exactly what `pre-commit-gate.mjs` exists to do. So move the six property checks
 into a native `pre-commit` hook and keep a ~40-line PreToolUse hook whose only job is the
 bypass refusal. The round-trip machinery (`:108-235`, 88 code lines) is **not**
 attributable to the boundary choice and stays either way.
@@ -477,12 +477,12 @@ proposed for cutting.** The actionable concentration is F9 and F10.
 - No stale hook registration. All 11 `.claude/settings.json` entries match live tool
   events; all 10 hook `GUARDS` rows reconcile.
 - `check:control-bytes` versus `tool-input-guard.mjs` Rule 1 is duplicate enforcement, and
-  `tool-input-guard.mjs:122` says so — but the hook covers write-time and the gate covers
+  `tool-input-guard.mjs` says so — but the hook covers write-time and the gate covers
   merge and import paths the hook never sees. Defensible defence in depth. Not removable.
 - The four backlog gates enforce four genuinely distinct properties. F5 is about process
   count and enumeration source, not about merging the properties.
 - The 20 REACH rows whose files are multiply claimed are not redundant;
-  `guard-reach-data.mjs:1045-1048` declares the overlap as intended.
+  `guard-reach-data.mjs` declares the overlap as intended.
 
 ---
 
@@ -519,22 +519,22 @@ below has zero importers outside itself and its own test:
 Three sub-cases each have a live replacement:
 
 - **`src/audit/adapters/` (6 files, 416 lines) is a superseded parallel normalizer set.**
-  `normalizeSemgrepJson` (`semgrep.ts:62`) performs the same mapping the live
-  `parseSemgrep` performs at `src/shared/analyzers/candidates.ts:177-204`. The one CLI
-  that could reach the adapters — `src/audit/cli/importExternalAnalyzerCommand.ts:6-25` —
+  `normalizeSemgrepJson` (`semgrep.ts`) performs the same mapping the live
+  `parseSemgrep` performs at `src/shared/analyzers/candidates.ts`. The one CLI
+  that could reach the adapters — `src/audit/cli/importExternalAnalyzerCommand.ts` —
   reads the JSON and hands it straight to `runAuditStep`, never calling a normalizer.
-- **`src/audit/orchestrator.ts:67` `buildAuditTasks`** carries its own hand-written
+- **`src/audit/orchestrator.ts` `buildAuditTasks`** carries its own hand-written
   validators. Nothing calls it. The file records an in-place dead-code removal at `:4-6` —
   somebody cleaned *inside* a module that is itself unreachable.
-- **`src/audit/cli/paths.ts:10`** documents its consumers at `:8` as
+- **`src/audit/cli/paths.ts`** documents its consumers at `:8` as
   "renderSemanticReviewStep and cmdRunToCompletion". `cmdRunToCompletion` no longer exists
   anywhere; `semanticReviewStep.ts` does not import it; and
-  `src/audit/io/toolingManifest.ts:10-15` recomputes the identical expression locally.
+  `src/audit/io/toolingManifest.ts` recomputes the identical expression locally.
 - **`src/remediate/state/accessMemory.ts`** documents itself at `:14-17` as the
   "remediate-side parity of the audit access-memory harvest … so continuity works in both
   orchestrators". It does not: `rg 'access_memory|accessMemory' src/remediate/` returns
   nothing outside that file. The audit half is wired
-  (`src/audit/orchestrator/ingestionExecutors.ts:20,252`); the remediate half was built and
+  (`src/audit/orchestrator/ingestionExecutors.ts`); the remediate half was built and
   never called.
 
 **This is a re-accumulation, and that is the important part.** Project memory already
@@ -546,8 +546,8 @@ class once before and were deleted. No mechanism was added, so the class refille
 the mechanism leaves the trap armed, which the repo's own rule forbids.
 
 **~1,515 lines removed. Risk: low-medium.** `src/audit/adapters/README.md` is cited by
-`scripts/doc-manifest-data.mjs:253`, so that row drops in the same commit;
-`anchorGrounding.ts` is named in prose at `src/shared/tooling/allowlistedExec.ts:27,356`,
+`scripts/doc-manifest-data.mjs`, so that row drops in the same commit;
+`anchorGrounding.ts` is named in prose at `src/shared/tooling/allowlistedExec.ts`,
 which needs rewording, not code.
 
 ### CY-02, CY-05, CY-06 — Three hand copies of deliberately single-sourced vocabularies
@@ -557,8 +557,8 @@ against exactly that copy.
 
 **CY-02 — the lens vocabulary, copied three times.** `CLAUDE.md` states the eleven-lens
 vocabulary is single-sourced in `LensSchema` and must never be read from a copy.
-`src/shared/types/lens.ts:1-8` records the incident: a copy omitting `observability` once
-caused a lens to be wrongly rejected. Yet `src/audit/types.ts:5-16` holds an 11-member
+`src/shared/types/lens.ts` records the incident: a copy omitting `observability` once
+caused a lens to be wrongly rejected. Yet `src/audit/types.ts` holds an 11-member
 string union with the same members in the same order; `:31-43` restates all eleven ids in
 `LENS_REGISTRY`, typed `readonly LensDefinition[]`, **so omitting a lens compiles clean**;
 and `:51-55` is a second `isLens`. The warning against this is five lines above the
@@ -568,16 +568,16 @@ Fix: re-export `Lens` and `isLens` from shared, and retype `LENS_REGISTRY` as
 `Record<Lens, {...}>` so a missing lens is a **compile error**. That is the mechanical
 enforcement the invariant demands. ~17 lines, plus one live drift surface.
 
-**CY-05 — severities and confidences.** `src/shared/types/lens.ts:46,52` derive
+**CY-05 — severities and confidences.** `src/shared/types/lens.ts` derive
 `VALID_SEVERITIES` / `VALID_CONFIDENCES` from the zod schema options. Audit imports them
-(`src/audit/validation/auditResults.ts:9-11`). Remediate re-declares both by hand at
-`src/remediate/validation/remediationState.ts:9-10`. Fix: import from shared, delete the
+(`src/audit/validation/auditResults.ts`). Remediate re-declares both by hand at
+`src/remediate/validation/remediationState.ts`. Fix: import from shared, delete the
 two declarations. Very low risk.
 
 **CY-06 — `AnalyzerConsentDecision` declared twice inside `src/shared`.**
-`src/shared/analyzerPolicy.ts:36-39` derives it from a one-member zod enum, and `:25-35`
+`src/shared/analyzerPolicy.ts` derives it from a one-member zod enum, and `:25-35`
 explains that the rule is enforced by the type rather than remembered.
-`src/shared/analyzers/acquisitionEngine.ts:223` then writes
+`src/shared/analyzers/acquisitionEngine.ts` then writes
 `export type AnalyzerConsentDecision = "declined";` by hand. The barrel exports only the
 derived one, so the second is a local shadow.
 `tests/shared/consent-token-not-persisted.test.ts` pins the *schema* and cannot pin the
@@ -609,13 +609,13 @@ bypasses the barrel. `src/remediate/steps/nextStep.ts` imports through the barre
 *and* around it at `:69`, in the same import block.
 
 **91 production lines removed**, plus one of two addressing schemes for about 20 symbols.
-Risk: low. `tests/remediate/backend-independent-planning.test.ts:83` does `vi.mock` on a
+Risk: low. `tests/remediate/backend-independent-planning.test.ts` does `vi.mock` on a
 barrel path, so that mock must move to the real module in the same commit or it silently
 stops intercepting.
 
 ### CY-04 — Eight `canEvaluate*` predicates that restate the guard each validator owns
 
-`src/remediate/validation/contractPipelineGates.ts:1629-1707` holds eight predicates plus
+`src/remediate/validation/contractPipelineGates.ts` holds eight predicates plus
 a helper, 79 lines. `canEvaluateDesignSpec` (`:1675-1677`) is `return isRecord(x);` — a
 one-line wrapper with a single caller. The runner at `:1824-1893` is eight structurally
 identical `gateOutcome(name, canEvaluateX(...), validateX(...), "prose reason")` calls.
@@ -635,14 +635,14 @@ byte-identical.
 
 ### CY-08 — The whole-repo line walk runs 2–3 times per fold
 
-`src/audit/cli/lineIndex.ts:47-70` `buildLineIndex` walks every file in the repo manifest.
+`src/audit/cli/lineIndex.ts` `buildLineIndex` walks every file in the repo manifest.
 A memo exists specifically to stop the fold recomputing it —
-`nextStepHelpers.ts:2002-2023`, whose own comment says recomputing per dispatch "would
+`nextStepHelpers.ts`, whose own comment says recomputing per dispatch "would
 regress the drain's cost profile".
 
 **The memo has exactly one call site** (`:1948`). The host-delegation path — the product's
 most common path — bypasses it twice: directly at `:2736-2738`, and again through
-`runAuditStepUnlocked` at `:2776` → `src/audit/cli/auditStep.ts:187-189`.
+`runAuditStepUnlocked` at `:2776` → `src/audit/cli/auditStep.ts`.
 
 The comment at `:2731-2733` shows the coupling was deliberate — both gates must see the
 same disk truth — but it achieves sameness by recomputing rather than by sharing.
@@ -653,9 +653,9 @@ fold. Risk: low** — the memo already keys on manifest object identity.
 
 ### CY-09 — Every accepted audit result is put through the identical rule walk twice
 
-Pass 1 at accept: `src/audit/cli/dispatch/hostHandoff.ts:1145-1149`. Pass 2 at the batch
-gate: `src/audit/cli/auditStep.ts:229-231`. Both entry points call the same
-`validateSingleAuditResult` (`src/audit/validation/auditResults.ts:1053`);
+Pass 1 at accept: `src/audit/cli/dispatch/hostHandoff.ts`. Pass 2 at the batch
+gate: `src/audit/cli/auditStep.ts`. Both entry points call the same
+`validateSingleAuditResult` (`src/audit/validation/auditResults.ts`);
 `validateAuditResults` adds only an `Array.isArray` check and a stderr count line. **No
 cross-result rule exists.** The inputs are made identical by construction, and orphans are
 already filtered out of `pendingAccepted`.
@@ -691,8 +691,8 @@ configuration shell the prior audit rejected for host handoff. **~140 lines. Ris
 
 ### CY-11 — The transitive-staleness fixpoint is hand-rolled twice, in opposite directions
 
-`src/audit/orchestrator/staleness.ts:348-388` and
-`src/remediate/contractPipeline/artifactStore.ts:344-357` each hand-write the same
+`src/audit/orchestrator/staleness.ts` and
+`src/remediate/contractPipeline/artifactStore.ts` each hand-write the same
 `while (changed)` closure loop over a declared dependency map. The per-edge compare above
 each is the same shape too. `src/shared/graph/directedCycles.ts` exists — CX-01
 consolidated cycle detection into it — but exposes no reachability helper, which is why
@@ -708,8 +708,8 @@ predicate. Otherwise leave both.** ~35-45 lines.
 ### CY-12 — The bound-prompt identity chain is duplicated verbatim
 
 Seven conditions appear verbatim in both `parseWorkItem` implementations, differing only
-in the ordering of two lines: `src/audit/cli/dispatch/hostHandoff.ts:636,639,645-649` and
-`src/remediate/steps/dispatch/hostHandoff.ts:1088,1094,1096-1101`.
+in the ordering of two lines: `src/audit/cli/dispatch/hostHandoff.ts` and
+`src/remediate/steps/dispatch/hostHandoff.ts`.
 
 Fix: one shared `parseBoundPromptIdentity` in
 `src/shared/submission/hostHandoffCore.ts`, plus its `buildBoundPrompt` inverse. **~16
@@ -722,8 +722,8 @@ which model is right.
 
 ### CY-15 — `collectFiles` implemented twice, and the copies disagree on determinism
 
-`src/audit/io/toolingManifest.ts:35-50` sorts entries with `compareCodeUnits` before
-descending. `src/remediate/validation/artifacts.ts:102-115` **does not sort**: its output
+`src/audit/io/toolingManifest.ts` sorts entries with `compareCodeUnits` before
+descending. `src/remediate/validation/artifacts.ts` **does not sort**: its output
 order is `readdir` order.
 
 This is more than duplication. The project invariant is *"Extractors emit stable,
@@ -736,7 +736,7 @@ treat that diff as the bug being fixed.
 
 ### CY-10, CY-13, CY-14 — Smaller items
 
-**CY-10.** `src/remediate/steps/dispatch/hostHandoff.ts:279` schema-parses the plan, then
+**CY-10.** `src/remediate/steps/dispatch/hostHandoff.ts` schema-parses the plan, then
 `:331` returns the **raw** value; `:988` re-parses the same findings with
 `FindingSchema.parse` — a throwing call on a path that can no longer legitimately fail.
 Fix: carry `parsedPlan.data`. ~3 lines. **Caveat:** `FindingSchema.parse` also normalizes
@@ -744,20 +744,20 @@ before the finding reaches `promptSha256`, so use `parsedPlan.data` (which prese
 normalization), not the raw value, and verify prompt bytes against a digest fixture.
 
 **CY-13.** Five one-field or alias types with one construction site each:
-`EvidenceGrounding` (`src/remediate/phases/grounding.ts:164-167`),
-`LaneValidationContext` (`src/audit/cli/laneValidators.ts:155-158` — while `:89` takes the
+`EvidenceGrounding` (`src/remediate/phases/grounding.ts`),
+`LaneValidationContext` (`src/audit/cli/laneValidators.ts` — while `:89` takes the
 identical value bare in the same file), `DetectedCycle`
-(`src/remediate/contractPipeline/cyclicSeamResolution.ts:32-35`, wrapping a `string[][]`
+(`src/remediate/contractPipeline/cyclicSeamResolution.ts`, wrapping a `string[][]`
 the helper already returned, with all six reads unwrapping `.members`),
-`UnresolvedConstraintClause` (`src/audit/orchestrator/intentInterpreter.ts:95`, where 8 of
+`UnresolvedConstraintClause` (`src/audit/orchestrator/intentInterpreter.ts`, where 8 of
 9 lines are a comment explaining the alias), and `CrossLensDedupResult`
-(`src/remediate/dedup/crossLensDedup.ts:9` — two names one character apart for one shape).
+(`src/remediate/dedup/crossLensDedup.ts` — two names one character apart for one shape).
 Plus `AnchorRunner`, `RemediationStepStatus`, and `FindingsContainer`. **~35 lines, very
 low risk.**
 
 **CY-14.** The `InterpretedClause[] → ConstraintClauseRecord[]` projection is byte-identical
-at `src/audit/orchestrator/intentInterpreter.ts:126-134` and
-`src/remediate/steps/nextStep.ts:3586-3594`. `src/shared/intent/constraintClauses.ts`
+at `src/audit/orchestrator/intentInterpreter.ts` and
+`src/remediate/steps/nextStep.ts`. `src/shared/intent/constraintClauses.ts`
 already owns its downstream half and its header states the one-core-two-draws principle;
 this projection is the missing member of that module. **~9 lines, very low risk.**
 
@@ -796,8 +796,8 @@ on a score.
 ### Verified and explicitly NOT reported
 
 - **`schemas/*.json` are generated, not hand-duplicated.** All six are registered in
-  `WORKER_SCHEMA_SOURCES` (`src/audit/contracts/workerSchemas.ts:94-114`) and pinned by
-  `tests/audit/worker-schema-generation.test.ts:27-36`. Fields cannot drift. The ~540
+  `WORKER_SCHEMA_SOURCES` (`src/audit/contracts/workerSchemas.ts`) and pinned by
+  `tests/audit/worker-schema-generation.test.ts`. Fields cannot drift. The ~540
   redundant JSON lines from `$refStrategy: "none"` are a deliberate trade: a schema handed
   to an external worker that will not resolve `$ref` should be self-contained.
 - **`accessMemory` as an algorithm** is a textbook one-core-two-draws pair. It appears in
@@ -812,7 +812,7 @@ on a score.
 - **Single-field persisted envelopes** are correctly objects; `CriticalFlowManifest`
   already gained a sibling field, proving the shape earns itself.
 
-Adjacent, outside the brief: `src/remediate/utils/fileIntegrity.ts:82-125` and `:233-328`
+Adjacent, outside the brief: `src/remediate/utils/fileIntegrity.ts` and `:233-328`
 are the same directory-digest walk written twice — intra-tree, not cross-mode. The repo
 root also holds five zero-byte shell-redirect artifacts (the known
 `repo-root-empty-files-are-shell-redirect-artifacts` trap), not a source finding.
@@ -837,7 +837,7 @@ Both were checked and both failed. Recording them so the next pass does not repe
 2. **The backlog machinery is smaller than the backlog, at 0.72 : 1.** Content is 2,360
    lines across 5 files and 224 entries. Enforcement is 875 lines of scripts plus 820 lines
    of contract tests = 1,695. Each gate has a documented incident behind it and is
-   well-calibrated. `check-backlog-budget.mjs:17-32` even records that it corrected *itself*
+   well-calibrated. `check-backlog-budget.mjs` even records that it corrected *itself*
    after refusing a factually correct edit that cost 14 bytes: *"A gate that makes
    correcting a fact cost more than leaving it wrong is worse than no gate."* **None of
    these should be removed.**
@@ -856,7 +856,7 @@ Both were checked and both failed. Recording them so the next pass does not repe
 differing lines: `docs/nightly-routine-prompt.md:435-861` is byte-identical to
 `docs/doc-review-guidelines.md:1-427`, and `:12-431` is byte-identical to
 `docs/nightly-routine.md:1-420`. The generator
-(`scripts/check-nightly-routine-prompt.mjs:32-56`) is pure concatenation and says so: *"The
+(`scripts/check-nightly-routine-prompt.mjs`) is pure concatenation and says so: *"The
 two canonical contracts follow verbatim."*
 
 The only consumer is `nightly-prompt.txt:7` — *"read `docs/nightly-routine-prompt.md`"*.
@@ -970,7 +970,7 @@ machine-wide configuration, so it needs the owner's scope decision (see below).
 `docs/doc-review-guidelines.md:228`, `spec/audit/audit-goals.md:31`. Three further copies
 are legitimately generated and are not violations: `README.md:31`,
 `docs/nightly-routine-prompt.md:662`, and the runtime extraction in
-`question-philosophy-gate.mjs:136`.
+`question-philosophy-gate.mjs`.
 
 *"One home per concept"* has **5 in-repo homes**: `docs/documentation-philosophy.md:19`
 (canonical), `docs/project-philosophy.md:83`, `:307`, `docs/doc-review-guidelines.md:40`,
@@ -1030,16 +1030,16 @@ say so in one line and go."* The loop-core attestation fires only inside 12 decl
 patterns.
 
 **Correction on the Stop chain.** Only `closeout-challenge-gate` reliably fires.
-`friction-stop-gate.mjs:70-98` exits 0 unless a recent audit or remediate run is on disk —
-for an ordinary bug fix it never fires. `question-philosophy-gate.mjs:98` exits 0 unless
+`friction-stop-gate.mjs` exits 0 unless a recent audit or remediate run is on disk —
+for an ordinary bug fix it never fires. `question-philosophy-gate.mjs` exits 0 unless
 the final message's last line ends in `?`. An earlier draft of this review overstated the
 ordinary path.
 
 ### C-07 — A backlog file reached the generated machinery and none of the prose
 
 `minor-bugs.md` (448 lines, 54 entries) was added 2026-08-28. It is present in the
-generated half: `scripts/shared/generate-backlog-index.mjs:68`, 54 indexed rows in
-`docs/backlog.md`, and `scripts/doc-manifest-data.mjs:105`.
+generated half: `scripts/shared/generate-backlog-index.mjs`, 54 indexed rows in
+`docs/backlog.md`, and `scripts/doc-manifest-data.mjs`.
 
 It is absent from every hand-maintained routing table:
 
@@ -1085,14 +1085,14 @@ bulk delete.** Estimated 8-11 entries, ~120-160 lines.
 
 `docs/backlog/minor-bugs.md:412` says three consumers hold independent copies of the
 friction taxonomy. Verified at HEAD, two of the three are covered:
-`.claude/hooks/friction-stop-gate.mjs:70` is a hand copy but is **pinned** by
-`tests/shared/friction-derived-observations.test.ts:253-260`, and
-`scripts/closeout-sections-data.mjs:20` **imports** `FRICTION_CATEGORIES` and throws at load
+`.claude/hooks/friction-stop-gate.mjs` is a hand copy but is **pinned** by
+`tests/shared/friction-derived-observations.test.ts`, and
+`scripts/closeout-sections-data.mjs` **imports** `FRICTION_CATEGORIES` and throws at load
 on a missing label.
 
 The genuine duplicate is a different thing: two exports named
-`FRICTION_CATEGORY_LABELS` — `src/shared/friction/triage.ts:115-122` and a private copy at
-`scripts/closeout-sections-data.mjs:27-34`, same keys, different prose, no gate between
+`FRICTION_CATEGORY_LABELS` — `src/shared/friction/triage.ts` and a private copy at
+`scripts/closeout-sections-data.mjs`, same keys, different prose, no gate between
 them. **Assessment: these are two legitimately different renderings for two audiences, so
 this is not a dedup target.** The finding is only that the backlog entry is stale. ~4 lines.
 
@@ -1109,7 +1109,7 @@ Three facts, each verified independently, make the same point:
 
 1. **32 gates added, zero removed, ever.** There is no retirement path, by construction.
 2. **`check:shared-primitives` — the repository's own one-definition-per-primitive gate —
-   scans `git ls-files 'src/**/*.ts'` only** (`check-shared-primitives.mjs:262`). The
+   scans `git ls-files 'src/**/*.ts'` only** (`check-shared-primitives.mjs`). The
    enforcement layer is the single tree exempt from the rule it enforces. That is why F1
    found the same pattern written 15 times and C-03 found the anti-duplication rule stated
    7 times.

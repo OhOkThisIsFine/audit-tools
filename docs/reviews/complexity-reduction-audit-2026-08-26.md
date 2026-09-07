@@ -58,10 +58,10 @@ Four implementations currently answer overlapping cycle questions:
 
 | Implementation | Location | Current behavior |
 |---|---|---|
-| Shared DFS witness | `src/shared/types/obligationLedger.ts:26-63` | Returns the first exact cycle witness. |
-| Cyclic-seam Kahn + union-find | `src/remediate/contractPipeline/cyclicSeamResolution.ts:78-161` | Returns components among every node left after Kahn's drain. |
-| Design-gate Kahn clone | `src/remediate/validation/contractPipelineGates.ts:172-226` | Emits a warning from every node left after Kahn's drain. |
-| Contract validator DFS | `src/remediate/validation/contractPipeline.ts:641-704` | Privately repeats directed-cycle traversal. |
+| Shared DFS witness | `src/shared/types/obligationLedger.ts` | Returns the first exact cycle witness. |
+| Cyclic-seam Kahn + union-find | `src/remediate/contractPipeline/cyclicSeamResolution.ts` | Returns components among every node left after Kahn's drain. |
+| Design-gate Kahn clone | `src/remediate/validation/contractPipelineGates.ts` | Emits a warning from every node left after Kahn's drain. |
+| Contract validator DFS | `src/remediate/validation/contractPipeline.ts` | Privately repeats directed-cycle traversal. |
 
 The Kahn remainder is not the set of cycle members. A node downstream of a
 cycle never reaches indegree zero, so it remains even though it is not in a
@@ -116,13 +116,13 @@ runDeterministicForNextStep
 Evidence:
 
 - outer registry: `buildAuditObligations` in
-  `src/audit/cli/nextStepHelpers.ts:2238-2485`, invoked at `:2748`;
+  `src/audit/cli/nextStepHelpers.ts`, invoked at `:2748`;
 - outer execution and repair plumbing:
-  `src/audit/cli/nextStepHelpers.ts:1794-1841,2161-2203,2690-2827`;
-- bridge into the inner drain: `src/audit/cli/auditStep.ts:229`;
+  `src/audit/cli/nextStepHelpers.ts`;
+- bridge into the inner drain: `src/audit/cli/auditStep.ts`;
 - inner state adapter and registry:
-  `src/audit/orchestrator/advance.ts:612-635,706-713`, invoked at `:787`;
-- shared engine: `src/shared/engine/obligationEngine.ts:236-293`.
+  `src/audit/orchestrator/advance.ts`, invoked at `:787`;
+- shared engine: `src/shared/engine/obligationEngine.ts`.
 
 The nesting forces two obligation-definition adapters, two transition/cap
 layers, repeated holistic state derivation, failure-attribution repair after an
@@ -144,7 +144,7 @@ Preserve:
 
 Remediation already demonstrates the intended shape by using shared `advance`
 directly with its policy definitions in
-`src/remediate/steps/nextStep.ts:3733-3989,4019-4233,4363-4397`.
+`src/remediate/steps/nextStep.ts`.
 
 ### CX-03 — Delete tested-only production APIs
 
@@ -153,11 +153,11 @@ exercise paths the product never takes.
 
 | Production symbol | Live consumer evidence | Action |
 |---|---|---|
-| `writeCanonicalAuditDeliverables` (`src/audit/io/artifacts.ts:541-589`) | Only called by `tests/audit/io-remediation.test.ts`; live promotion is `promoteFinalAuditReport`. | Delete the dead writer and its dedicated test. Keep promotion's archive-before-cleanup/loss-reporting tests. |
-| `readContractPipelinePlanningOutputs` and its result interface (`src/remediate/steps/contractPipeline.ts:4493-4557`) | Only called by three assertions in `tests/remediate/contract-pipeline.test.ts`. | Delete the reconstruction API; assert promoted plan contents through the live path. |
-| `isBlockId` / `fromBlockId` (`src/remediate/contractPipeline/idRegistry.ts:52-64`) | Only the inverse test calls them. Production uses `ensureNodeId` and `toBlockId`, never the inverse. | Delete the inverse pair and its orphaned tests/spec promise. |
-| `projectDesignReviewInputs` (`src/audit/orchestrator/designReviewProjection.ts:275-283`) | No graph caller; tests call it directly. Production snapshots loop over singular `projectDesignReviewInput`. | Delete the bulk wrapper; migrate tests to the production snapshot path or singular projector loop. |
-| `obligationKindVocabularyDivergence` (`src/remediate/steps/contractPipeline.ts:3779-3783`) | Three test-only calls. | Single-source the vocabulary, then delete the production test seam. Moving the set difference into a test alone would preserve the duplication and is not sufficient. |
+| `writeCanonicalAuditDeliverables` (`src/audit/io/artifacts.ts`) | Only called by `tests/audit/io-remediation.test.ts`; live promotion is `promoteFinalAuditReport`. | Delete the dead writer and its dedicated test. Keep promotion's archive-before-cleanup/loss-reporting tests. |
+| `readContractPipelinePlanningOutputs` and its result interface (`src/remediate/steps/contractPipeline.ts`) | Only called by three assertions in `tests/remediate/contract-pipeline.test.ts`. | Delete the reconstruction API; assert promoted plan contents through the live path. |
+| `isBlockId` / `fromBlockId` (`src/remediate/contractPipeline/idRegistry.ts`) | Only the inverse test calls them. Production uses `ensureNodeId` and `toBlockId`, never the inverse. | Delete the inverse pair and its orphaned tests/spec promise. |
+| `projectDesignReviewInputs` (`src/audit/orchestrator/designReviewProjection.ts`) | No graph caller; tests call it directly. Production snapshots loop over singular `projectDesignReviewInput`. | Delete the bulk wrapper; migrate tests to the production snapshot path or singular projector loop. |
+| `obligationKindVocabularyDivergence` (`src/remediate/steps/contractPipeline.ts`) | Three test-only calls. | Single-source the vocabulary, then delete the production test seam. Moving the set difference into a test alone would preserve the duplication and is not sufficient. |
 
 All are internal deep imports rather than `audit-tools/shared` package exports.
 The graph's only inbound edges are tests (or none), and exact production text
@@ -168,12 +168,12 @@ search found no registry, alias, script, or dynamic consumer.
 **Confidence:** high. **Reduction:** one parallel eight-gate path and its parity
 test.
 
-`src/remediate/validation/contractPipelineGates.ts:1789-1820` and
+`src/remediate/validation/contractPipelineGates.ts` and
 `:1832-1903` independently extract the same payloads and invoke the same eight
 validators in the same order. The richer outcomes path is already used by
-`src/remediate/validation/artifacts.ts:554-561`; the only live plain caller is
-`src/remediate/index.ts:411-415`. The source comment at
-`src/remediate/validation/artifacts.ts:538-545` and the backlog already name the
+`src/remediate/validation/artifacts.ts`; the only live plain caller is
+`src/remediate/index.ts`. The source comment at
+`src/remediate/validation/artifacts.ts` and the backlog already name the
 duplication.
 
 **Elegant endpoint:** keep `evaluateContractPipelineCrossGateOutcomes` as the
@@ -185,7 +185,7 @@ test. Preserve the gate count, order, absent-artifact tolerance, and issue text.
 
 **Confidence:** medium-high.
 
-`src/shared/findings/dedupe.ts:285-345` and `:545-578` repeat the group/pair
+`src/shared/findings/dedupe.ts` and `:545-578` repeat the group/pair
 scan, removed-survivor guard, severity/confidence winner selection, absorption,
 and removal. Cross-lens and same-lens matching thresholds are real policy
 differences; the survivor lifecycle is not.
@@ -213,10 +213,10 @@ persistence engine would hide real audit/remediation differences, but one
 bounded seam remains duplicated:
 
 - audit wrapper and ingestion use:
-  `src/audit/cli/dispatch/hostHandoff.ts:1021-1068,1129-1155`;
+  `src/audit/cli/dispatch/hostHandoff.ts`;
 - remediation repeats path resolution, JSON read/classification, domain parse,
   and duplicate-result handling inline at
-  `src/remediate/steps/dispatch/hostHandoff.ts:2059-2103`.
+  `src/remediate/steps/dispatch/hostHandoff.ts`.
 
 Both expose missing, malformed, contract-invalid, and duplicate-submission
 outcomes. A shared scan should resolve the contained bound path, read/classify
@@ -234,7 +234,7 @@ state mutation.
 validator DSL.
 
 `validateDesignSpecGates` repeats six checks with the same shape at
-`src/remediate/validation/contractPipelineGates.ts:63-98,136-168`: collection,
+`src/remediate/validation/contractPipelineGates.ts`: collection,
 required field, non-empty kind, path, and reason. A typed six-row descriptor and
 one small validator loop can own those checks.
 

@@ -30,8 +30,8 @@ gated turns before implementation:
 Six of the fifteen phases already cost **nothing**. `seam_reconciliation` (single module),
 `contract_finalization` (always), `obligation_ledger` (always) and `cyclic_seam_resolution`
 (no cycles) each return `{via: "rederive"}`, which re-enters the walk in-process at
-`contractPipeline.ts:2111-2114`. `context_collection` and `decomposition` ride the framing
-collapse. `closing` is filtered out of the frontier at `contractPipeline.ts:167-169`.
+`contractPipeline.ts`. `context_collection` and `decomposition` ride the framing
+collapse. `closing` is filtered out of the frontier at `contractPipeline.ts`.
 
 ## Only one further collapse is safe
 

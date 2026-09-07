@@ -124,7 +124,7 @@ reached R1, R2 and R4; R3, R5, R6 and R7 are mine; R8 is an `agy` claim I checke
 
 ### R1 — P25 targets a surface that already implements P25 *(fatal to the build as specified)*
 
-`src/audit/cli/dispatch/hostHandoff.ts:237-243`:
+`src/audit/cli/dispatch/hostHandoff.ts`:
 
 ```ts
 function resultPathFor(paths: ResolvedBoundaryPaths, workItemId: string): string {
@@ -136,7 +136,7 @@ function resultPathFor(paths: ResolvedBoundaryPaths, workItemId: string): string
 At ingest, `validateHandoffBinding` cross-checks `host-workload.json` ↔ `host-task-bindings.json` ↔
 `host-result-map.json` and hard-errors when `resultMap.entries.length !== items.size` — the expected
 set must cover the workload exactly. Ingestion then iterates `resultMap.entries` (the expected set),
-never a directory listing. `tests/audit/host-handoff.test.ts:339-348` already asserts that a valid
+never a directory listing. `tests/audit/host-handoff.test.ts` already asserts that a valid
 result at an *unbound* path is refused ("No directory scan/fallback may steal a valid result from an
 unbound path").
 
@@ -149,15 +149,15 @@ already tool-computed.** Implementing P25 there would be a no-op at best.
 
 ### R2 — the measured drift is on `incoming/`, and P25 does not touch it
 
-`src/audit/cli/nextStepHelpers.ts:119-134`:
+`src/audit/cli/nextStepHelpers.ts`:
 
 ```ts
 const filePath = join(artifactsDir, "incoming", filename);
 ```
 
-Flat, unhashed, and the tool *tells the host the string to type* — `nextStepCommand.ts:183` builds
+Flat, unhashed, and the tool *tells the host the string to type* — `nextStepCommand.ts` builds
 `incoming/design-review-contract-findings.json` and renders it into the prompt; `:519-522` does the
-same per charter kind; `charterExtractionPrompt.ts:155` renders "Write your submission as JSON to
+same per charter kind; `charterExtractionPrompt.ts` renders "Write your submission as JSON to
 `<path>`".
 
 Evidence attribution (verified against the records):
@@ -208,7 +208,7 @@ it" should simply be *"write a file"*, with the tool owning the filename.
 
 This is the most important correction to the problem statement. I traced every absent-file path:
 
-- `runOmittableGate` (`nextStepHelpers.ts:1064-1100`): absent → `shouldOmit(bundle)` → **`run_omit`
+- `runOmittableGate` (`nextStepHelpers.ts`): absent → `shouldOmit(bundle)` → **`run_omit`
   only when the gate's own predicate says no host turn is owed** (e.g. narrative disabled, shallow
   charter ceiling). Otherwise it **re-emits the step**.
 - `handleCharterExtractionBranch` (`:1272-1290`): an absent lane `continue`s; K-of-N is unsatisfied,
@@ -230,7 +230,7 @@ single biggest gap between what P25 proposes and what the evidence demands.
 
 ### R6 — the two orchestrators have already drifted on failure classification ("one core, two draws")
 
-`src/audit/cli/dispatch/hostHandoff.ts:803-820`:
+`src/audit/cli/dispatch/hostHandoff.ts`:
 
 ```ts
 } catch (error) {
@@ -270,7 +270,7 @@ between host submissions and state transitions", and would trigger an "involunta
 via `computeArtifactMetadata`. I could not reproduce either. Submissions are consumed *inside*
 `next-step` under the existing lock discipline, not concurrently with it; and a submit that writes a
 tool-owned path before the same process ingests it is the current design, which does not cascade.
-`agy`'s suggested test (`design-review-contract-independence.test.ts:138-143`) is also **not a valid
+`agy`'s suggested test (`design-review-contract-independence.test.ts`) is also **not a valid
 red test** — it asserts today's correct behaviour and would merely *need changing*, which the skill
 explicitly rules out ("a test that would pass against the unfixed tree proves nothing"; the inverse —
 a test that must be edited to accommodate the fix — is a contract change, not a red test). Treated as
@@ -343,7 +343,7 @@ needs an explicit owner call — see §6.
 
 | module | owns |
 |---|---|
-| `submissionIdentity.ts` | mint `submission_id`; `submissionPathFor(paths, id)` — the single sha256 path rule. **Single-source with `resultPathFor`**: the audit and remediate handoffs must call this, not keep their own copies (they are already near-identical at `hostHandoff.ts:237` / `:343`) |
+| `submissionIdentity.ts` | mint `submission_id`; `submissionPathFor(paths, id)` — the single sha256 path rule. **Single-source with `resultPathFor`**: the audit and remediate handoffs must call this, not keep their own copies (they are already near-identical at `hostHandoff.ts` / `:343`) |
 | `expectedSubmissions.ts` | the expected-set contract: persist at emit, load at ingest, diff → per-member classification |
 | `submissionClassifier.ts` | the **one** absent/malformed/rejected/accepted vocabulary (promoted from `RemediationHostIngestIssue`) |
 | `submissionLedger.ts` | append-only drift/repair event record (P25-c), stable content-derived ordering |
@@ -382,7 +382,7 @@ existing-coverage check — none of these duplicates a current test.
 1. **`tests/shared/submission-path-is-tool-owned.test.ts`** — *the headline test.*
    For every descriptor in `HOST_GATE_DESCRIPTORS`, assert the emitted step's declared write path is
    the tool-computed `submissionPathFor(...)` and that **no host-facing prompt string contains a
-   literal `incoming/` filename**. Red at HEAD: `nextStepCommand.ts:183` renders
+   literal `incoming/` filename**. Red at HEAD: `nextStepCommand.ts` renders
    `incoming/design-review-contract-findings.json` into the prompt. *(P25-a)*
 
 2. **`tests/shared/expected-submission-set.test.ts`** — emit a 3-lane charter fan-out, satisfy 2,
@@ -393,7 +393,7 @@ existing-coverage check — none of these duplicates a current test.
 3. **`tests/audit/host-ingest-issue-codes.test.ts`** — write a malformed result at the bound path,
    ingest, assert `summary.issues.map(i => i.code)` contains `result_malformed`; delete it and assert
    `result_missing`. Red at HEAD: `readSubmittedResult` returns `null` for both and the audit summary
-   has no `issues` field. **Verified net-new**: `tests/audit/host-handoff.test.ts:319-348` asserts only
+   has no `issues` field. **Verified net-new**: `tests/audit/host-handoff.test.ts` asserts only
    the coalesced `completed_work_item_ids: []`, and `result_missing` is asserted by name nowhere in the
    repo. *(P25-d, R6)*
 
@@ -459,7 +459,7 @@ existing-coverage check — none of these duplicates a current test.
   **outside** `loopCorePaths.ts`, so this build must add it to the attestation set in the same commit;
   it also harbours a live consume-then-drop data loss (R7).
 - **Failing test pinned:** `tests/shared/submission-path-is-tool-owned.test.ts` — red at HEAD because
-  `nextStepCommand.ts:183` renders a host-typed `incoming/` filename into the prompt.
+  `nextStepCommand.ts` renders a host-typed `incoming/` filename into the prompt.
 
 **Gate outcome: proceed-with-changes, pending owner answers to §6.1 and §6.2** — those two change what
 gets built, so implementation should not start ahead of them.

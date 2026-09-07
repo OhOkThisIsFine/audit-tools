@@ -17,12 +17,12 @@ left to reason its way to something the tool already knew.
 
 **Open. Confirmed at HEAD.**
 
-- `handlePendingExtractedPlan` — [`src/remediate/steps/nextStep.ts:1331`](../../src/remediate/steps/nextStep.ts#L1331).
+- `handlePendingExtractedPlan` — [`src/remediate/steps/nextStep.ts`](../../src/remediate/steps/nextStep.ts).
 - Its `catch` begins at line 1420. It computes `const reason = error instanceof Error ? error.message : String(error)`
   and an `archivePath`, writes both to the run log (`extracted_plan_removed reason=…`) and to
   stderr, then `return null` at line 1464.
-- The caller returns null at [`nextStep.ts:895`](../../src/remediate/steps/nextStep.ts#L895).
-- The decide loop reaches `handleNoState` — [`nextStep.ts:2178`](../../src/remediate/steps/nextStep.ts#L2178)
+- The caller returns null at [`nextStep.ts`](../../src/remediate/steps/nextStep.ts).
+- The decide loop reaches `handleNoState` — [`nextStep.ts`](../../src/remediate/steps/nextStep.ts)
   — which emits `stepKind: "collect_starting_point"`.
 
 So the reason is known and durable. Only the **emitted step** omits it.
@@ -30,7 +30,7 @@ So the reason is known and durable. Only the **emitted step** omits it.
 ⚠ The stderr line asserts `Re-emitting extraction step.` That is **false**: the no-input step is
 emitted, not an extraction step. The message misdescribes its own control flow.
 
-⚠ `collectStartingPointPrompt` — [`src/remediate/steps/prompts.ts:338`](../../src/remediate/steps/prompts.ts#L338)
+⚠ `collectStartingPointPrompt` — [`src/remediate/steps/prompts.ts`](../../src/remediate/steps/prompts.ts)
 — has **no** spare reason slot. Its third parameter is `missingPaths`, which renders as
 "The supplied input path did not exist". Do not overload it; a discarded plan is not a missing path.
 
@@ -39,25 +39,25 @@ emitted, not an extraction step. The message misdescribes its own control flow.
 **Open, both halves. Confirmed at HEAD.**
 
 Half A, the remediate drop:
-- `runFindingFilterPass` step 1 — [`src/remediate/findingFilter.ts:73`](../../src/remediate/findingFilter.ts#L73)
+- `runFindingFilterPass` step 1 — [`src/remediate/findingFilter.ts`](../../src/remediate/findingFilter.ts)
   — filters findings whose `evidence` is absent or empty and keeps **only their ids** in
   `droppedNoEvidence`.
-- The dispositions persist through [`nextStep.ts:1903-1926`](../../src/remediate/steps/nextStep.ts#L1903).
+- The dispositions persist through [`nextStep.ts`](../../src/remediate/steps/nextStep.ts).
 - The review gate `runPlanningReviewGate` reads `state.plan?.findings`
-  ([`nextStep.ts:2606`](../../src/remediate/steps/nextStep.ts#L2606)) — the **survivors**. A dropped
+  ([`nextStep.ts`](../../src/remediate/steps/nextStep.ts)) — the **survivors**. A dropped
   finding is by construction absent from that set, so the gate cannot show it and the operator can
   neither confirm nor decline the drop.
 
 Half B, the audit mint:
 - `evidence` is **optional** in the shared contract:
-  [`src/shared/types/finding.ts:241`](../../src/shared/types/finding.ts#L241) declares
+  [`src/shared/types/finding.ts`](../../src/shared/types/finding.ts) declares
   `evidence: z.array(z.string()).optional()`.
 - Systemic-challenge findings join the merge at
-  [`src/audit/reporting/mergeFindings.ts:77`](../../src/audit/reporting/mergeFindings.ts#L77)
+  [`src/audit/reporting/mergeFindings.ts`](../../src/audit/reporting/mergeFindings.ts)
   (`...(systemicChallenge?.findings ?? [])`).
 
 - The systemic register declares its findings as the shared type:
-  [`src/audit/types/systemicChallenge.ts:93`](../../src/audit/types/systemicChallenge.ts#L93)
+  [`src/audit/types/systemicChallenge.ts`](../../src/audit/types/systemicChallenge.ts)
   reads `findings: Finding[]`. Since `Finding.evidence` is optional, an evidence-free systemic
   finding is **contract-valid by construction**.
 
@@ -70,7 +70,7 @@ field.
 ⚠ Verified 2026-09-06: the two contracts disagree with each other.
 
 - The **Zod** type makes evidence optional —
-  [`src/shared/types/finding.ts:241`](../../src/shared/types/finding.ts#L241).
+  [`src/shared/types/finding.ts`](../../src/shared/types/finding.ts).
 - The **JSON schema that validates host submissions** requires at least one —
   [`schemas/audit_result.schema.json:152-158`](../../schemas/audit_result.schema.json#L152) declares
   `"evidence": { "type": "array", "items": { "type": "string" }, "minItems": 1 }`.
@@ -126,15 +126,15 @@ against the schema file. See *Lane incident* below for the cost of how that lane
 
 ⚠ The site is in `src/remediate/`, **not** `src/audit/` as the backlog entry's wording suggests.
 
-- `renderContractRepairPrompt` — [`src/remediate/steps/contractPipelinePrompts.ts:566`](../../src/remediate/steps/contractPipelinePrompts.ts#L566).
+- `renderContractRepairPrompt` — [`src/remediate/steps/contractPipelinePrompts.ts`](../../src/remediate/steps/contractPipelinePrompts.ts).
 - It hard-codes one `requiredInputs` array of six names (`goal_spec`, `finalized_module_contracts`,
   `obligation_ledger`, `contract_assessment_report`, `counterexample`, `judge_report`) and
   **throws** when any of the six paths is absent.
 - It hard-codes the sentence `The adversarial judge rejected the current contract.` and renders the
   same six names under `## Required Inputs`.
 - Two callers, which are the two triggers to separate:
-  [`contractPipeline.ts:2620`](../../src/remediate/steps/contractPipeline.ts#L2620) and
-  [`contractPipeline.ts:2802`](../../src/remediate/steps/contractPipeline.ts#L2802).
+  [`contractPipeline.ts`](../../src/remediate/steps/contractPipeline.ts) and
+  [`contractPipeline.ts`](../../src/remediate/steps/contractPipeline.ts).
 
 There is no trigger parameter and no second template. Selection is unconditional.
 
@@ -147,7 +147,7 @@ There is no trigger parameter and no second template. Selection is unconditional
 
 **The throw is dead code on the production path, and that makes the defect worse, not better.**
 Both callers pass the same `ctx.artifactPaths`, and that map is populated **unconditionally for
-every artifact name** — [`contractPipeline.ts:3744-3747`](../../src/remediate/steps/contractPipeline.ts#L3744)
+every artifact name** — [`contractPipeline.ts`](../../src/remediate/steps/contractPipeline.ts)
 loops `for (const name of CP_ARTIFACT_NAMES)` and assigns a path to each, with **no existence
 check**. So:
 
@@ -167,7 +167,7 @@ recorded there: the diagnostics block is reached only when nothing was accepted,
 loses every rejection. What follows describes the machinery that does exist; it is not a claim that
 the machinery is reached on every path.
 
-- `buildImplementDispatchStep` — [`src/remediate/steps/nextStep.ts:1085`](../../src/remediate/steps/nextStep.ts#L1085).
+- `buildImplementDispatchStep` — [`src/remediate/steps/nextStep.ts`](../../src/remediate/steps/nextStep.ts).
 - It logs **every** ingest issue to the run log (a `runLogger.event` per issue, around line 1147)
   **and** renders them into the emitted prompt as `## Result status requiring attention`
   (around line 1170). Its own comment states the design.
@@ -177,8 +177,8 @@ a result rejected on the exact-key envelope check produced no diagnostic on any 
 fold re-minted the run id, and the step then reported the item as `submission_missing`.
 
 - The audit ingest does return issues:
-  [`src/audit/cli/dispatch/hostHandoff.ts:1301`](../../src/audit/cli/dispatch/hostHandoff.ts#L1301).
-- They are carried at [`nextStepHelpers.ts:2855-2961`](../../src/audit/cli/nextStepHelpers.ts#L2855).
+  [`src/audit/cli/dispatch/hostHandoff.ts`](../../src/audit/cli/dispatch/hostHandoff.ts).
+- They are carried at [`nextStepHelpers.ts`](../../src/audit/cli/nextStepHelpers.ts).
 
 The residual is therefore a **cross-call carry**, and it is the same defect as the entry recorded in
 [`minor-bugs.md`](../backlog/minor-bugs.md) ("A transition that ends the call drops the fold's
@@ -191,8 +191,8 @@ not.** The project's own rule says a fix in one usually belongs in both.
 ### ⚠ The plan's step 4 is REFUTED by the source itself
 
 The audit draw already has a cross-fold carry, `FoldAdvisories`
-([`nextStepHelpers.ts:2360`](../../src/audit/cli/nextStepHelpers.ts#L2360)), consumed once per
-emission by `takeFoldAdvisories` ([`nextStepHelpers.ts:2946`](../../src/audit/cli/nextStepHelpers.ts#L2946)).
+([`nextStepHelpers.ts`](../../src/audit/cli/nextStepHelpers.ts)), consumed once per
+emission by `takeFoldAdvisories` ([`nextStepHelpers.ts`](../../src/audit/cli/nextStepHelpers.ts)).
 Its own header states the boundary as a **decision**, not an oversight:
 
 > The carry is fold-local (a `{ value }` ref on `AuditNextStepCtx`), **never persisted** — the
@@ -222,7 +222,7 @@ in `src/shared`, drawn by both.
   `audit-capability-preflight`; use severity `high` or `critical` … with concrete `tool_friction`,
   `ambiguities`, and `suggestions` details."
 - The parser `parseReflectionsNdjson` —
-  [`src/shared/agentReflections.ts:76-88`](../../src/shared/agentReflections.ts#L76) — requires
+  [`src/shared/agentReflections.ts`](../../src/shared/agentReflections.ts) — requires
   **three** fields: `task_id`, `instruction_clarity`, and `severity`. On a missing or out-of-enum
   `instruction_clarity` it executes `continue`, discarding the whole line.
 - The prompt **never names `instruction_clarity`.**
@@ -252,22 +252,22 @@ called comprehensive — cannot carry a single message from a host that obeys th
 
 ⚠ `parseReflectionsNdjson` has **four production callers** plus a public export, so changing its
 return type is a real blast radius, not a local edit:
-[`src/audit/cli/resynthesizeCommand.ts:62`](../../src/audit/cli/resynthesizeCommand.ts#L62),
-[`src/audit/io/artifacts.ts:416`](../../src/audit/io/artifacts.ts#L416),
-[`src/remediate/phases/close.ts:1986`](../../src/remediate/phases/close.ts#L1986),
-[`src/shared/friction/triage.ts:398`](../../src/shared/friction/triage.ts#L398), and the export at
-[`src/shared/index.ts:367`](../../src/shared/index.ts#L367). The repo bans a compatibility sibling,
+[`src/audit/cli/resynthesizeCommand.ts`](../../src/audit/cli/resynthesizeCommand.ts),
+[`src/audit/io/artifacts.ts`](../../src/audit/io/artifacts.ts),
+[`src/remediate/phases/close.ts`](../../src/remediate/phases/close.ts),
+[`src/shared/friction/triage.ts`](../../src/shared/friction/triage.ts), and the export at
+[`src/shared/index.ts`](../../src/shared/index.ts). The repo bans a compatibility sibling,
 and an additive export with no adopter reds `check:deadcode`, so the endpoint is one changed
 signature and four updated callers.
 
 ⚠ `AgentReflectionSchema` is declared `.strict()`
-([`agentReflections.ts:31-41`](../../src/shared/agentReflections.ts#L31)) but
+([`agentReflections.ts`](../../src/shared/agentReflections.ts)) but
 `parseReflectionsNdjson` never calls it — the parser hand-checks fields and ignores unknown keys. The
 strictness does not guard the path that reads the data.
 
 ## Precedent for a distinct step kind (instance 1)
 
-`RemediationStepKind` — [`src/remediate/steps/types.ts:25`](../../src/remediate/steps/types.ts#L25)
+`RemediationStepKind` — [`src/remediate/steps/types.ts`](../../src/remediate/steps/types.ts)
 — is a 19-member union. The most recently added member carries its own argument, in a comment on
 the union itself, and it applies directly here:
 
@@ -282,7 +282,7 @@ Reporting the first as the second is the same attribution defect. So the repo's 
 argues for a distinct kind rather than a reason argument bolted onto `collect_starting_point`.
 
 ⚠ Counter-consideration to weigh: `MNT-e6c289ae`
-([`src/remediate/steps/intakeResolver.ts:89`](../../src/remediate/steps/intakeResolver.ts#L89))
+([`src/remediate/steps/intakeResolver.ts`](../../src/remediate/steps/intakeResolver.ts))
 deliberately funnelled every `collect_starting_point` branch through ONE builder "so the step shape
 stays consistent". A new kind must not fragment that consolidation — it is a sibling of it, not a
 reopening.
@@ -307,7 +307,7 @@ lane's word.
 ### ADOPTED — the remediate half of instance 4 is NOT closed (this document was wrong)
 
 An earlier revision of this record claimed the remediate half was fixed. **It is not.**
-[`nextStep.ts:1107-1112`](../../src/remediate/steps/nextStep.ts#L1107) returns
+[`nextStep.ts`](../../src/remediate/steps/nextStep.ts) returns
 `{ kind: "transition" }` **before** both the per-issue `runLogger.event` loop and the
 `resultDiagnostics` render:
 
@@ -344,7 +344,7 @@ locked on 2026-06-16:
 - `161d60aa` — *"feat(remediate): Path-A single filter pass + review over the deduped survivor
   set"*: "the gate previews the SURVIVORS tiered by review-necessity — not the raw pre-dedup set."
 - The current code states the same rule at
-  [`nextStep.ts:2017-2020`](../../src/remediate/steps/nextStep.ts#L2017).
+  [`nextStep.ts`](../../src/remediate/steps/nextStep.ts).
 
 So the backlog entry asks for exactly what the owner removed. **Do not argue it back in.** The
 owner decides whether the 2026-06-16 lock still holds.
@@ -352,8 +352,8 @@ owner decides whether the 2026-06-16 lock still holds.
 ### ADOPTED — the audit draw already renders its diagnostics block
 
 The lane cites `renderIngestIssueLines` at
-[`src/audit/cli/semanticReviewStep.ts:49-60`](../../src/audit/cli/semanticReviewStep.ts#L49), used
-in the prompt at [`semanticReviewStep.ts:170-174`](../../src/audit/cli/semanticReviewStep.ts#L170).
+[`src/audit/cli/semanticReviewStep.ts`](../../src/audit/cli/semanticReviewStep.ts), used
+in the prompt at [`semanticReviewStep.ts`](../../src/audit/cli/semanticReviewStep.ts).
 The plan step "give the audit draw the same rendered diagnostics block" was therefore wrong: the
 audit draw has one. Only the cross-call carry is missing.
 

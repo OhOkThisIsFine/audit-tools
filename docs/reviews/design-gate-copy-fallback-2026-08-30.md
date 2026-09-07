@@ -54,7 +54,7 @@ Three call sites, all in `foldTransaction.ts`:
 ### `quarantineSubmissionFile` — throw is WRONG; it must record
 
 Verified at the call sites, not assumed. Every quarantine caller awaits the quarantine and *then*
-records a `rejected` ledger event (`nextStepHelpers.ts:792` → 797, `:841` → 842, and the sibling
+records a `rejected` ledger event (`nextStepHelpers.ts` → 797, `:841` → 842, and the sibling
 sites). A throw from the quarantine therefore:
 
 1. suppresses the `rejected` event that explains the refusal,
@@ -93,7 +93,7 @@ Found while sizing this change, and it is not about this change alone.
 ([`src/shared/loopCorePaths.ts`](../../src/shared/loopCorePaths.ts)) and has never been in it
 (`git log -S'foldTransaction'` over that file returns nothing). The file was created by `b4a3eb4a`
 (CX-02), and `quarantineSubmissionFile` moved into it from
-`src/audit/cli/nextStepHelpers.ts:693` — which **is** loop-core, then and now.
+`src/audit/cli/nextStepHelpers.ts` — which **is** loop-core, then and now.
 
 So a refactor moved the fold's staging and commit core out of attestation coverage, silently. The
 file whose own header calls `commitFold` "THE commit — the fold's one core write boundary, run on

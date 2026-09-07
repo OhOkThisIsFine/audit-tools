@@ -26,7 +26,7 @@ dropped.
 actually coupled to routing.**
 
 The synthesized plan opened by claiming the post-cut path is already the conversation-first default:
-`src/audit/cli/dispatch.ts:706` branches on `hostOwnedDispatch`, the `true` arm grants every packet,
+`src/audit/cli/dispatch.ts` branches on `hostOwnedDispatch`, the `true` arm grants every packet,
 creates no lease and sets `declaredCap = null`, so "separation is mostly naming the branch that
 already exists." That is true of **admission, leases, caps and the wall**, and false of everything
 that decides **how big a unit of work is**. Four sizing values on the kept side are computed *from*
@@ -34,10 +34,10 @@ pools, a roster, or a `ResolvedProviderName`:
 
 | Kept value | Where it is produced | The routing input |
 |---|---|---|
-| Audit packet partition | `dispatch.ts:460` ← `contextBudgetTokens` | `probeBudget` runs `computeDispatchCapacity` over a `CapacityPool` (`dispatch/quotaPool.ts:166-176`) |
-| Remediate block partition | `phases/plan.ts:749` ← `resolvePlanContextBudget` | roster-capability max (`plan.ts:800`), then provider-scoped statics (`plan.ts:802`) |
-| `model_hint.tier` per packet | `dispatch.ts:661-665` | cut points from `computeDynamicRoutingTiers(risks, rankCount)` (`dispatch.ts:538-560`) |
-| `oversized_packet` warning | `dispatch.ts:791-793` | `waveSchedule.confidence` + `tierBudgets` (`dispatch/packetFilter.ts:227-242`) |
+| Audit packet partition | `dispatch.ts` ← `contextBudgetTokens` | `probeBudget` runs `computeDispatchCapacity` over a `CapacityPool` (`dispatch/quotaPool.ts`) |
+| Remediate block partition | `phases/plan.ts` ← `resolvePlanContextBudget` | roster-capability max (`plan.ts`), then provider-scoped statics (`plan.ts`) |
+| `model_hint.tier` per packet | `dispatch.ts` | cut points from `computeDynamicRoutingTiers(risks, rankCount)` (`dispatch.ts`) |
+| `oversized_packet` warning | `dispatch.ts` | `waveSchedule.confidence` + `tierBudgets` (`dispatch/packetFilter.ts`) |
 
 So the separation the directive asks for is **not file motion**. It is: give sizing a single declared
 window that owes nothing to a pool, a roster or a provider name. Everything else in the sequence is
@@ -51,12 +51,12 @@ Each was re-read at `48de5485` after the refuter raised it.
 
 ### 1. Packet sizing is a pool round-trip
 
-`dispatch/quotaPool.ts:166-176` — `probeBudget(pool)` calls `computeDispatchCapacity({pools:[pool]})`
+`dispatch/quotaPool.ts` — `probeBudget(pool)` calls `computeDispatchCapacity({pools:[pool]})`
 and reads `probe.primary.schedule.resolved_limits`. Its output is `contextBudgetTokens`, which is the
-*sole* sizing input at `dispatch.ts:460`. On the roster path (`quotaPool.ts:200`) the number is
+*sole* sizing input at `dispatch.ts`. On the roster path (`quotaPool.ts`) the number is
 `Math.max(...tierBudgets)` — the most capable declared rank's window, i.e. a capability-rank max.
 
-**But the underlying resolver is clean.** `resolveLimits` (`src/shared/quota/limits.ts:141-225`)
+**But the underlying resolver is clean.** `resolveLimits` (`src/shared/quota/limits.ts`)
 consults `providerName` at exactly one place — `hostClassFor(providerName)` at `:221` — and only to
 choose between the `provider_default` and `default` *labels*; the returned window pair is `defaults`
 either way. The window pair is genuinely provider-independent. That is what makes the first commit
@@ -64,39 +64,39 @@ possible.
 
 ### 2. Remediate sizes blocks off a capability rank and a provider name
 
-`phases/plan.ts:787-800` maps `caps.models` (the declared host model roster) to per-model budgets and
+`phases/plan.ts` maps `caps.models` (the declared host model roster) to per-model budgets and
 returns `Math.max(...rosterBudgets)`. Only when the roster is empty does `:802` run
 `resolveModelStatics(caps?.model_id, sessionConfig?.host_provider)` — and the provider argument is
 load-bearing, not decorative (`quota/modelStatics.ts` resolves cheapest-on-collision without one,
 pins that provider's statics with one). `host_provider` is typed from `PROVIDER_NAMES`
-(`types/sessionConfig.ts:4`), the constant cut (c) deletes.
+(`types/sessionConfig.ts`), the constant cut (c) deletes.
 
 **One-core-two-draws violation, incidentally:** the audit draw already resolves statics
-provider-free (`limits.ts:169` calls `resolveModelStatics(hostModel)` with no provider). Only
+provider-free (`limits.ts` calls `resolveModelStatics(hostModel)` with no provider). Only
 remediate passes one. The draws disagree about the same question today.
 
-After C8/C10 remove provider selection and the roster, `plan.ts:800` and `:802` both degrade to the
+After C8/C10 remove provider selection and the roster, `plan.ts` and `:802` both degrade to the
 `:809-815` throw — planning would refuse resumably for every host that reported a roster or a model
 id rather than an explicit scalar pair, which is the common conversation-first case.
 
 ### 3. `src/audit/cli/dispatch.ts` is loop-core — the first commit is not free
 
-`src/shared/loopCorePaths.ts:32` — the first entry in `LOOP_CORE_PATTERNS` is the exact string
-`"src/audit/cli/dispatch.ts"`, matched by equality (`loopCorePaths.ts:59-69`), and
+`src/shared/loopCorePaths.ts` — the first entry in `LOOP_CORE_PATTERNS` is the exact string
+`"src/audit/cli/dispatch.ts"`, matched by equality (`loopCorePaths.ts`), and
 `.claude/hooks/pre-commit-gate.mjs` fails closed without a staged-tree-bound attestation. Every
 commit in this sequence carries one, including the first.
 
 ### 4. The reporting arm is NOT the audit main path
 
-`prepareDispatchArtifacts` has three callers. Only `semanticReviewStep.ts:102` passes
-`hostOwnedDispatch: true`. `prepareDispatchCommand.ts:81` — the `audit-code prepare-dispatch` verb,
-the conversation-first packet entry point — passes nothing, and `dispatch.ts:692` reads
+`prepareDispatchArtifacts` has three callers. Only `semanticReviewStep.ts` passes
+`hostOwnedDispatch: true`. `prepareDispatchCommand.ts` — the `audit-code prepare-dispatch` verb,
+the conversation-first packet entry point — passes nothing, and `dispatch.ts` reads
 `params.hostOwnedDispatch === true`, so `undefined` takes the **admitted** arm.
-`rollingAuditDispatch.ts:421` passes `grantLeases:false` and `recordAttemptedGrant:false` but never
+`rollingAuditDispatch.ts` passes `grantLeases:false` and `recordAttemptedGrant:false` but never
 `hostOwnedDispatch`, so it takes the admitted arm too.
 
 Two of three callers take the arm the plan called dead-by-default, and one of them is the primary
-path. The remediate draw genuinely is as described (`nextStep.ts:2073` threads the flag) — **the
+path. The remediate draw genuinely is as described (`nextStep.ts` threads the flag) — **the
 asymmetry between the draws is the finding.**
 
 Consequence: "delete the admitted arm and what only it imports" does not reduce to deleting unused
@@ -104,14 +104,14 @@ code. It deletes the path `prepare-dispatch` uses today.
 
 ### 5. The reporting arm imports the routing half anyway
 
-`dispatch.ts:710` — the `true` arm's first statement is `computeDispatchCapacity(...)`, from
+`dispatch.ts` — the `true` arm's first statement is `computeDispatchCapacity(...)`, from
 `src/shared/quota/capacity.ts`, inside the range slated for deletion. Its `waveSchedule` output feeds
 the KEPT `collectOversizedWarnings` at `:791-793`. So the "reporting arm needs zero imports from
 `quota/capacity`" success criterion is falsifiable at HEAD, before any commit is written.
 
 ### 6. `attributionContract.ts` is a first-class blocker — and it is HANDOFF item 2's declared input
 
-`src/shared/types/attributionContract.ts:9-11` imports `PROVIDER_NAMES`; `:26-34` builds
+`src/shared/types/attributionContract.ts` imports `PROVIDER_NAMES`; `:26-34` builds
 `RESOLVED_PROVIDER_NAMES` and `ResolvedProviderNameSchema` from it; `AttributionTripleSchema` is
 `{provider, model, rank}` with `provider` validated against that set. `HANDOFF.md:177-181` declares
 this file already on main (`14677902`) and states *"The contract is INPUT, not output… The run is the
@@ -128,10 +128,10 @@ provider axis is DROPPED and the run re-scopes to model × lens.**
 
 `spec/backend-identity-axes.md:10-11,46-56,82` states self-spawn safety as an invariant that
 explicitly SURVIVES dispatch inversion. Its mechanism is `buildSelfSpawnExclusion`
-(`providers/dispatchExclusion.ts:23-43`), whose four production consumers are all in the routing
-wiring being deleted (`pausePersist.ts:338`, `nextStepHelpers.ts:2425`, `nextStep.ts:1370,2115`).
+(`providers/dispatchExclusion.ts`), whose four production consumers are all in the routing
+wiring being deleted (`pausePersist.ts`, `nextStepHelpers.ts`, `nextStep.ts`).
 
-`workerCommandProvider.launch` (`providers/workerCommandProvider.ts:23-33`) spawns
+`workerCommandProvider.launch` (`providers/workerCommandProvider.ts`) spawns
 `task.worker_command[0]` through `spawnLoggedCommand` with **no** `isSelfSpawnBlocked` check. Since
 `worker_command` is operator-declared argv that can name the active host CLI, collapsing to that
 adapter replaces a mechanical recursion refusal with nothing — the exact *enforce in tooling, never
@@ -141,35 +141,35 @@ host discretion* class `CLAUDE.md` forbids.
 
 ## Refuted claims — recorded so they are not re-proposed
 
-- **"Only `prepareDispatchCommand.ts:81` reaches the admitted arm."** Two callers do (finding 4).
+- **"Only `prepareDispatchCommand.ts` reaches the admitted arm."** Two callers do (finding 4).
 - **"The reporting arm's import set is zero from `quota/capacity`."** It is not (finding 5).
-- **"`estimated_wave_tokens` is an independently reporting field."** `quota/scheduler.ts:874` computes
+- **"`estimated_wave_tokens` is an independently reporting field."** `quota/scheduler.ts` computes
   it as `sumTopN(slotsSorted, waveSize)` over the wave the scheduler *chose*. It dies with wave
   sizing and must be re-sourced from the plan's own per-item estimates.
-- **"Force `canDispatchImpl` false at `nextStep.ts:2073` to make the routing branches unreachable."**
-  Inverted — `false` routes into `driveRollingImplementDispatch` (`nextStep.ts:2132`), the most
-  routing-dense path in the file; `true` is host-owned (`:2172`). And `nextStep.ts:2085-2131` builds
+- **"Force `canDispatchImpl` false at `nextStep.ts` to make the routing branches unreachable."**
+  Inverted — `false` routes into `driveRollingImplementDispatch` (`nextStep.ts`), the most
+  routing-dense path in the file; `true` is host-owned (`:2172`). And `nextStep.ts` builds
   pools unconditionally and *consumes* `canDispatchImpl` at `:2113/:2116`. There is no one-line kill
   switch here.
 - **"`detectRequestTooLargeError` is load-bearing for packet sizing."** No packet-sizing module
-  references it; its only consumers are `providerLaunchFinalize.ts:137,173` inside the deleted
+  references it; its only consumers are `providerLaunchFinalize.ts` inside the deleted
   cascade. It goes with the cascade.
 - **"`sumWaveTokenUsage` can be lifted out and routed to the scorecard."** It has exactly one
   consumer, inside the deleted fold; `scoreTokens.ts` aggregates ledger rows itself. Lifting it
   leaves a zero-consumer export that `check:deadcode` fails on. Delete it, or name a new consumer as
   an explicit deliverable.
-- **"The tier→pool capability gate enforces nothing on either draw."** `quota/apiPool.ts:447-448`
-  prefers the declared `source.capability_rank` (`types/sessionConfig.ts:567`) and uses the passed
+- **"The tier→pool capability gate enforces nothing on either draw."** `quota/apiPool.ts`
+  prefers the declared `source.capability_rank` (`types/sessionConfig.ts`) and uses the passed
   map only as a fallback. Passing `capabilityRanks: null` removes the fallback only. The floor is
   unfed *in this checkout* because `~/.audit-code/sources-declared.json` is empty — an environment
   fact, not a code property. Do not record it as an invariant.
-- **"The claim substrate guards state mutation, not dispatch."** `dispatch.ts:346` constructs a
+- **"The claim substrate guards state mutation, not dispatch."** `dispatch.ts` constructs a
   `ClaimRegistry` at dispatch time and `:375-377` merges the owner-token sidecar that feeds the
   shipped merge-time ownership gate. `forward-tracks.md:237-240` is a settled owner decision — *the
-  claim STAYS at dispatch time… Do not re-raise it.* `dispatch.ts:267-405` must be classified as
+  claim STAYS at dispatch time… Do not re-raise it.* `dispatch.ts` must be classified as
   coordination that survives in **both** arms.
-- **Two citations in the synthesized plan do not resolve:** `auditStep.ts:193,224` (the registry is
-  at `:168`) and `nextStepHelpers.ts:2434` (that is `buildAuditSourcePools`, not `buildDispatchPool`).
+- **Two citations in the synthesized plan do not resolve:** `auditStep.ts` (the registry is
+  at `:168`) and `nextStepHelpers.ts` (that is `buildAuditSourcePools`, not `buildDispatchPool`).
   Re-resolve every citation before any of this is frozen into a gated registry — a wrong row in a
   gate is worse than no row, because the gate makes it look verified.
 
@@ -181,14 +181,14 @@ Separation only. Nothing below deletes a live mechanism; the collapse (NO adapte
 plus `PROVIDER_NAMES`, quota in full and the driver tree) is a second pass.
 
 **S1 — Give sizing one declared window.** Replace `probeBudget`'s `computeDispatchCapacity` round-trip
-(`dispatch/quotaPool.ts:166-176`) with a direct `resolveLimits` call against the handshake /
+(`dispatch/quotaPool.ts`) with a direct `resolveLimits` call against the handshake /
 models.dev rungs, which finding 1 establishes is provider-independent. `contextBudgetTokens` stops
 being pool-derived; pools keep being built for the admitted arm, so nothing is deleted.
 Behaviour-preserving on the single-pool path. On the roster path `Math.max(...tierBudgets)` becomes
 the single declared window — a deliberate, stated change, and the first place a red-green test must
 pin the new number.
 
-**S2 — Mirror it on the remediate draw.** `resolvePlanContextBudget` (`phases/plan.ts:772-817`) drops
+**S2 — Mirror it on the remediate draw.** `resolvePlanContextBudget` (`phases/plan.ts`) drops
 the roster-capability max at `:800` and the provider argument at `:802`, resolving the same single
 declared window as S1. This is the draw-parity half of S1 and closes the statics-provider asymmetry
 noted in finding 2. The resumable refusal at `:809-815` stays — it is the correct behaviour when no
@@ -202,14 +202,14 @@ emission gate dropped; `estimated_wave_tokens` summed from the plan's own per-it
 
 **S4 — Extract the three branch bodies in `dispatch.ts`.** NOT a top-level selector — that cannot
 typecheck, because the required fields of `PrepareDispatchResult`
-(`cli/dispatch/types.ts:62-104`) are produced by unconditional work outside both arms, and making it
+(`cli/dispatch/types.ts`) are produced by unconditional work outside both arms, and making it
 work means duplicating ~519 lines (which would also consume ~54% of the tree's jscpd headroom).
 `prepareDispatchArtifacts` stays the sequencer owning `:268-690` and `:759-854` in place; extract only
 `:706-717`, `:718-757` and `:856-928` into three functions taking an explicit context object. Watch:
 `admission`/`admissionPackets` declared at `:698-704` become unread in the reporting body →
 `check:lint` (`no-unused-vars`, error); and `:826-854` must not move across `:872-928`, because
 `replaceActiveDispatchForRun` before `advanceHostDispatchPause` is load-bearing ordering pinned by
-`tests/audit/rolling-audit-dispatch.test.ts:509` (CP-NODE-6).
+`tests/audit/rolling-audit-dispatch.test.ts` (CP-NODE-6).
 
 **S5 — Flip `cmdPrepareDispatch` to `hostOwnedDispatch: true`** and prove a full audit run still
 completes. Until this lands, the reporting arm is one narrow step's path (finding 4) and no later

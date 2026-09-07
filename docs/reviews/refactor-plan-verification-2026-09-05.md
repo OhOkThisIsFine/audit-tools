@@ -31,7 +31,7 @@ a proposed change that would have caused a regression if implemented as written.
 **Premise holds:** yes  
 **Loop-core:** yes — commit needs a review attestation
 
-The duplication is real at HEAD, but NOT in the "byte-identical" form the plan's Overview claims. Two definitions exist: `src/audit/cli/nextStepHelpers.ts:2582` (module-private `function deriveObligationState`) and `src/audit/orchestrator/advance.ts:601` (`export function deriveObligationState`). Both have the identical signature `(id: string, cache: WeakMap<ArtifactBundle, AuditState>) => (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied"` and, after stripping comments and indentation, identical bodies EXCEPT for two textual differences I diffed: (a) the `export` keyword on advance.ts's declaration, and (b) the call formatting — nextStepHelpers.ts:2607 is `state = deriveAuditState(bundle, { emitStaleness: false });` on one line, advance.ts:613-615 is `state = deriveAuditState(bundle, {` / `emitStaleness: false,` / `});` across three. Token-for-token the executable code is the same (complete-gate short-circuit -> WeakMap memo on bundle identity -> deriveAuditState(bundle,{emitStaleness:false}) on miss -> find-by-id -> `if (!found) return "satisfied"` -> missing/stale passthrough, else satisfied). The interior COMMENTS differ substantively, not merely the jsdoc as the plan says: nextStepHelpers carries the "namesake"/6145a1a3/emit-off-preserve-list block (2590-2606), advance.ts carries a shorter identity-safety block (609-612) plus a much longer jsdoc (581-600). So the plan's "byte-identical" and "Only the doc comments differ" are both overstated; "logically identical" holds. The rest of the premise verified true: advance.ts's `buildPlanDrawObligations` (735-754) and nextStepHelpers' `buildAuditObligations` (2626+) each call `derive: deriveObligationState(id, cache)` inside a `PRIORITY.map`; advance's memo is `new WeakMap<ArtifactBundle, AuditState>()` at advance.ts:824, inside `advanceAuditInner` (declared 794) as the plan states; the fold's memo is created at nextStepHelpers.ts:2631 inside `buildAuditObligations`. `deriveAuditState` and both types are already in scope in `src/audit/orchestrator/state.ts` (deriveAuditState declared at state.ts:72; `import type { ArtifactBundle }` line 2; `AuditState` in the type import block lines 3-8), so the plan's "no new imports needed" is correct.
+The duplication is real at HEAD, but NOT in the "byte-identical" form the plan's Overview claims. Two definitions exist: `src/audit/cli/nextStepHelpers.ts` (module-private `function deriveObligationState`) and `src/audit/orchestrator/advance.ts` (`export function deriveObligationState`). Both have the identical signature `(id: string, cache: WeakMap<ArtifactBundle, AuditState>) => (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied"` and, after stripping comments and indentation, identical bodies EXCEPT for two textual differences I diffed: (a) the `export` keyword on advance.ts's declaration, and (b) the call formatting — nextStepHelpers.ts is `state = deriveAuditState(bundle, { emitStaleness: false });` on one line, advance.ts is `state = deriveAuditState(bundle, {` / `emitStaleness: false,` / `});` across three. Token-for-token the executable code is the same (complete-gate short-circuit -> WeakMap memo on bundle identity -> deriveAuditState(bundle,{emitStaleness:false}) on miss -> find-by-id -> `if (!found) return "satisfied"` -> missing/stale passthrough, else satisfied). The interior COMMENTS differ substantively, not merely the jsdoc as the plan says: nextStepHelpers carries the "namesake"/6145a1a3/emit-off-preserve-list block (2590-2606), advance.ts carries a shorter identity-safety block (609-612) plus a much longer jsdoc (581-600). So the plan's "byte-identical" and "Only the doc comments differ" are both overstated; "logically identical" holds. The rest of the premise verified true: advance.ts's `buildPlanDrawObligations` (735-754) and nextStepHelpers' `buildAuditObligations` (2626+) each call `derive: deriveObligationState(id, cache)` inside a `PRIORITY.map`; advance's memo is `new WeakMap<ArtifactBundle, AuditState>()` at advance.ts, inside `advanceAuditInner` (declared 794) as the plan states; the fold's memo is created at nextStepHelpers.ts inside `buildAuditObligations`. `deriveAuditState` and both types are already in scope in `src/audit/orchestrator/state.ts` (deriveAuditState declared at state.ts; `import type { ArtifactBundle }` line 2; `AuditState` in the type import block lines 3-8), so the plan's "no new imports needed" is correct.
 
 ### Files to change
 
@@ -61,9 +61,9 @@ The duplication is real at HEAD, but NOT in the "byte-identical" form the plan's
 
 ### Plan errors (8)
 
-- Overview claims the two bodies are 'byte-identical'. They are not. advance.ts:601 carries `export`, and its deriveAuditState call is formatted across three lines (613-615) where nextStepHelpers.ts:2607 is one line. The plan's own §1 later says 'logically identical', which is the accurate claim; the Overview contradicts it.
+- Overview claims the two bodies are 'byte-identical'. They are not. advance.ts carries `export`, and its deriveAuditState call is formatted across three lines (613-615) where nextStepHelpers.ts is one line. The plan's own §1 later says 'logically identical', which is the accurate claim; the Overview contradicts it.
 
-- 'Only the doc comments differ (each names the other as its namesake)' is wrong: the INTERIOR comments differ substantively too — nextStepHelpers.ts:2590-2606 is a six-paragraph block (namesake, 6145a1a3, identity safety, emit-off preserve-list) while advance.ts:609-612 is a four-line identity-safety note. The 'merge both jsdocs' instruction must extend to the interior comments or content is silently lost.
+- 'Only the doc comments differ (each names the other as its namesake)' is wrong: the INTERIOR comments differ substantively too — nextStepHelpers.ts is a six-paragraph block (namesake, 6145a1a3, identity safety, emit-off preserve-list) while advance.ts is a four-line identity-safety note. The 'merge both jsdocs' instruction must extend to the interior comments or content is silently lost.
 
 - MATERIAL: §2 asserts 'No other importers. Verified by repo-wide grep for deriveObligationState' and concludes 'the existing suite is the regression net'. The grep was symbol-name-based and therefore missed `tests/audit/one-holistic-derivation-per-scan.test.ts`, which reaches the function through `buildAuditObligations()` and pins its memo via a `vi.mock` of `src/audit/orchestrator/state.js`. That test makes the plan's RECOMMENDED home (§1.3, state.ts) break a green test: an intra-module call from state.ts to its own deriveAuditState is not intercepted by the mock, so the spy sees 0 derivations against an assertion of 1. The plan's risk list ('all low', three named risks) does not contain this one.
 
@@ -71,7 +71,7 @@ The duplication is real at HEAD, but NOT in the "byte-identical" form the plan's
 
 - §1.3 and §5 claim relocating into state.ts 'introduces no new import edge and no cycle risk' and that the import block should be 'diff-identical'. True for imports, but incomplete as a safety argument — the hazard is the mock boundary, not the import graph.
 
-- Minor: the plan repeats advance.ts's own jsdoc inaccuracy in reverse. advance.ts:591-592 says the cache is 'created in advanceAudit'; it is actually created in advanceAuditInner (line 824). The plan states advanceAuditInner correctly, so the merged jsdoc must not copy advance.ts's wording verbatim.
+- Minor: the plan repeats advance.ts's own jsdoc inaccuracy in reverse. advance.ts says the cache is 'created in advanceAudit'; it is actually created in advanceAuditInner (line 824). The plan states advanceAuditInner correctly, so the merged jsdoc must not copy advance.ts's wording verbatim.
 
 - Minor: §1.1 says '~25 passes' and advance.ts's jsdoc says '~8-9x the hand loop's'; the one-holistic test asserts only 'exactly 1'. Neither number is pinned by anything, so do not restate a count in the merged jsdoc without measuring it.
 
@@ -128,7 +128,7 @@ Suite to run: `npx vitest run tests/audit/one-holistic-derivation-per-scan.test.
 
 - THE HOME. The plan recommends src/audit/orchestrator/state.ts and offers src/audit/orchestrator/obligationDerive.ts as an 'acceptable fallback if review prefers it'. The source forces a decision the plan did not know it was asking: state.ts requires rewriting the vi.mock in tests/audit/one-holistic-derivation-per-scan.test.ts (making the change no longer a pure relocation and weakening a CX-02 invariant test); obligationDerive.ts keeps every test byte-unchanged at the cost of one more file. Recommend obligationDerive.ts; a human must confirm they accept the extra module.
 
-- Whether to adopt the optional `createObligationDeriveCache()` factory. Pro: single-sources the 'fresh per registry, never module-level' discipline currently spelled as a bare `new WeakMap` at nextStepHelpers.ts:2631 and advance.ts:824. Con: an additive export on a pure-relocation commit; the plan says skip it for a minimal diff.
+- Whether to adopt the optional `createObligationDeriveCache()` factory. Pro: single-sources the 'fresh per registry, never module-level' discipline currently spelled as a bare `new WeakMap` at nextStepHelpers.ts and advance.ts. Con: an additive export on a pure-relocation commit; the plan says skip it for a minimal diff.
 
 - Whether to add the plan's suggested follow-up hardening test (both registry builders resolve the same deriveObligationState reference). The plan calls it 'recommended as a follow-up, not a gate'. This is the only thing that would mechanically prevent re-twinning, and it closes the coverage gap named above.
 
@@ -166,7 +166,7 @@ C:\Code\audit-tools\src\audit\cli\synthesizeCommand.ts (cmdSynthesize):
 
 So: same emitted payload (same three keys, same order, both paths end in JSON.stringify(data, null, 2) — outputJson at C:\Code\audit-tools\src\audit\cli\cliHelpers.ts is exactly that one line), but different resolution ORDER in cmdSynthesize and a hand-rolled console.log in the other two. The duplication is real and the plan's stated ~29→~10 line reduction for cmdForceSynthesis is roughly right (29 lines today).
 
-The plan's supporting claims also check out at HEAD: cliHelpers.ts has zero imports (pure console); outputJson is adopted by only 6 other modules (requeueCommand, resynthesizeCommand, sampleRunCommand, statusCommand, synthesizeCommand, updateRuntimeValidationCommand) while 13 modules still hand-roll console.log; getArtifactsDir does re-resolve getRootDir when --artifacts-dir is absent (src\audit\cli\args.ts:103-108), so the double-parse the plan notes is real; resynthesizeCommand.ts really does bypass getArtifactsDir for auditArtifactsDir(root) (lines 12-13, 26-27); nextStepCommand.ts:264 really does call warnIfNotGitRepo.
+The plan's supporting claims also check out at HEAD: cliHelpers.ts has zero imports (pure console); outputJson is adopted by only 6 other modules (requeueCommand, resynthesizeCommand, sampleRunCommand, statusCommand, synthesizeCommand, updateRuntimeValidationCommand) while 13 modules still hand-roll console.log; getArtifactsDir does re-resolve getRootDir when --artifacts-dir is absent (src\audit\cli\args.ts), so the double-parse the plan notes is real; resynthesizeCommand.ts really does bypass getArtifactsDir for auditArtifactsDir(root) (lines 12-13, 26-27); nextStepCommand.ts really does call warnIfNotGitRepo.
 
 ### Files to change
 
@@ -186,7 +186,7 @@ The plan's supporting claims also check out at HEAD: cliHelpers.ts has zero impo
 | `RunAuditStepOptions` | `src/audit/cli/auditStep.ts` | yes | Line 42, exported interface. preferredExecutor is `preferredExecutor?: string` — so the plan's NonNullable<RunAuditStepOptions["preferredExecutor"]> resolves to plain `string`, which typechecks but gives NO compile-time check that the executor id is real. |
 | `getRootDir` | `src/audit/cli/args.ts` | yes | Line 96. Explicit --root -> resolveRepoRoot; absent -> discoverRepoRoot(callerWorkingDirectory()) — filesystem-touching, not pure. |
 | `getArtifactsDir` | `src/audit/cli/args.ts` | yes | Line 103. Falls back to auditArtifactsDir(getRootDir(argv)) — confirms the double-resolution the plan notes. |
-| `warnIfNotGitRepo` | `src/audit/cli/args.ts` | yes | Line 110. console.warn only, never throws. Callers at HEAD: intakeCommand.ts:6 and nextStepCommand.ts:264 only. |
+| `warnIfNotGitRepo` | `src/audit/cli/args.ts` | yes | Line 110. console.warn only, never throws. Callers at HEAD: intakeCommand.ts and nextStepCommand.ts only. |
 | `outputJson` | `src/audit/cli/cliHelpers.ts` | yes | Exists, one line: console.log(JSON.stringify(data, null, 2)). Docstring does say it centralizes the repeated pattern, as the plan claims. |
 | `runAuditStepUnlocked` | `src/audit/cli/auditStep.ts` | yes | Line 149. Lock-free core used by the fold. Unchanged by this item. |
 | `withArtifactTreeHold` | `src/audit/cli/auditStep.ts` | yes | Line 120; ARTIFACT_TREE_LOCK_TIMEOUT_MS at line 104. Both unchanged by this item. |
@@ -207,7 +207,7 @@ The plan's supporting claims also check out at HEAD: cliHelpers.ts has zero impo
 
 ### Plan errors (8)
 
-- §3.1 / §5.3: 'getRootDir(argv) is resolved once into root ... the scaffold resolves once and passes both'. FALSE against src/audit/cli/args.ts:103-108 — getArtifactsDir(argv) unconditionally re-derives the root via auditArtifactsDir(getRootDir(argv)) whenever --artifacts-dir is absent. The scaffold as written still resolves twice on the default path. The §5.3 verification step 'confirm getRootDir is called once per scaffold invocation' would therefore FAIL as stated.
+- §3.1 / §5.3: 'getRootDir(argv) is resolved once into root ... the scaffold resolves once and passes both'. FALSE against src/audit/cli/args.ts — getArtifactsDir(argv) unconditionally re-derives the root via auditArtifactsDir(getRootDir(argv)) whenever --artifacts-dir is absent. The scaffold as written still resolves twice on the default path. The §5.3 verification step 'confirm getRootDir is called once per scaffold invocation' would therefore FAIL as stated.
 
 - §3.5 (wave 2, cmdPlan): the plan says adopt cmdPlan with `extraOptions: (argv) => ({ since: getFlag(argv, "--since") })`. src/audit/cli/planCommand.ts passes NO preferredExecutor, but StepCommandSpec.preferredExecutor is required. The plan names no executor id for cmdPlan and gives no way to omit it. Wave 2 for cmdPlan is unimplementable as specified.
 
@@ -288,7 +288,7 @@ COVERAGE GAP — state it plainly: NO existing test reaches the behavior this re
 
 What exists and what it actually pins:
 - tests/audit/cli-dispatcher.test.ts (rows 56/64/65) and tests/audit/cli-remediation.test.ts (rows 325/333/334) only dynamically import the module and assert `typeof mod[exportName] === "function"`. They never call cmdIntake/cmdSynthesize/cmdForceSynthesis, never inspect stdout, never inspect the payload keys.
-- tests/audit/cli-remediation.test.ts:238-275 tests warnIfNotGitRepo, but by calling cliTestUtils.warnIfNotGitRepo(tempDir) DIRECTLY. It does not go through cmdIntake, so it cannot notice cmdIntake losing the warn call.
+- tests/audit/cli-remediation.test.ts tests warnIfNotGitRepo, but by calling cliTestUtils.warnIfNotGitRepo(tempDir) DIRECTLY. It does not go through cmdIntake, so it cannot notice cmdIntake losing the warn call.
 - I grepped tests/ for any invocation of the three commands or their payload: nothing. The plan's §5.2 claim that these tests are a "regression net" for this refactor is WRONG — they are a net for the export names only.
 
 Consequence: the plan's own primary guard (§5.1 before/after stdout snapshot diff) is a MANUAL procedure with no committed artifact. Under the repo's "enforce in tooling, never host discretion" rule that is the wrong shape for the one property this refactor can break.
@@ -368,11 +368,11 @@ Copy B — inside validateEvidenceThreaded (function starts line 653; block at l
 
 `diff` of the two blocks with comment lines removed is empty. The ONLY difference between the two copies is where the waiver comment sits (inline among the conjuncts in A; above the block in B). Downstream uses are as the plan states: A feeds `acceptedCounterexampleIds.has(ceId)` (line 417) and the coverage sweep `if (acceptedCounterexampleIds.size > 0)` (line 438); B feeds the threading check at line 699.
 
-The contract-difference table in §1.2 also verified true against src/remediate/contractPipeline/derive.ts:431-447 (`acceptedCounterexampleIds`): returns string[], no `length > 0` guard, no waiver parameter, non-record → []. Its consumer is src/remediate/steps/contractPipeline.ts:352.
+The contract-difference table in §1.2 also verified true against src/remediate/contractPipeline/derive.ts (`acceptedCounterexampleIds`): returns string[], no `length > 0` guard, no waiver parameter, non-record → []. Its consumer is src/remediate/steps/contractPipeline.ts.
 
-The cycle claim is real: src/remediate/contractPipeline/derive.ts:39 value-imports `isTestablePhaseObligation` from "../validation/contractPipelineGates.js", so a value import back would close a cycle.
+The cycle claim is real: src/remediate/contractPipeline/derive.ts value-imports `isTestablePhaseObligation` from "../validation/contractPipelineGates.js", so a value import back would close a cycle.
 
-The third copy the plan puts out of scope also exists, at src/remediate/steps/contractPipeline.ts:1153-1157 inside the DAG traceability validator: `new Set((judge?.classifications ?? []).filter((entry) => entry.classification === "accepted").map((entry) => entry.counterexample_id))` — no isRecord guard, no length guard, no waiver filter, as claimed.
+The third copy the plan puts out of scope also exists, at src/remediate/steps/contractPipeline.ts inside the DAG traceability validator: `new Set((judge?.classifications ?? []).filter((entry) => entry.classification === "accepted").map((entry) => entry.counterexample_id))` — no isRecord guard, no length guard, no waiver filter, as claimed.
 
 ### Files to change
 
@@ -393,7 +393,7 @@ The third copy the plan puts out of scope also exists, at src/remediate/steps/co
 | `acceptedCounterexampleIds (derive.ts export)` | `src/remediate/contractPipeline/derive.ts` | yes | Line 431. Contract differs from the gate blocks exactly as the plan's §1.2 table states. |
 | `isTestablePhaseObligation` | `src/remediate/validation/contractPipelineGates.ts` | yes | Imported by derive.ts line 39 — the direction that makes a reverse value import a cycle. Confirmed. |
 | `evaluateContractPipelineCrossGateOutcomes` | `src/remediate/validation/contractPipelineGates.ts` | yes | The single direct caller of both gates in src/ (call sites at lines 1870 and 1894). See plan-error note: it is 1 direct caller, not 9. |
-| `waivedJudgeAcceptedIds` | `src/remediate/contractPipeline/repairState.ts` | yes | Line 195; consumed by src/remediate/index.ts:435, src/remediate/validation/artifacts.ts:558, src/remediate/steps/contractPipeline.ts:2182 to populate inputs.waivedCounterexampleIds. Unaffected by this refactor. |
+| `waivedJudgeAcceptedIds` | `src/remediate/contractPipeline/repairState.ts` | yes | Line 195; consumed by src/remediate/index.ts, src/remediate/validation/artifacts.ts, src/remediate/steps/contractPipeline.ts to populate inputs.waivedCounterexampleIds. Unaffected by this refactor. |
 | `TESTABLE_OBLIGATION_KINDS` | `src/remediate/validation/contractPipelineGates.ts` | yes | Imported from ../contractPipeline/obligationKinds.js (line 42), as the plan says — but this is NOT the file's only value import from contractPipeline/ (see plan_errors). |
 | `third inline copy in the DAG traceability validator` | `src/remediate/steps/contractPipeline.ts` | yes | Lines 1153-1157. Out of scope per plan §2.4; note this file IS loop-core, so touching it would trigger the attestation gate. |
 
@@ -489,7 +489,7 @@ MUTATIONS THAT STAY GREEN TODAY (the gap the plan's §5.2 tests must close): del
 
 - Whether to also close the SAME gap at the cross-gate entry point by adding a waiver case to tests/remediate/validate-artifact-cross-gates.test.ts — the plan does not mention that file, and it is the only place inputs.waivedCounterexampleIds is exercised end-to-end (today it is not).
 
-- Whether to file the two out-of-scope follow-ups the plan names as backlog entries now: unifying with derive.ts's acceptedCounterexampleIds via a cycle-safe leaf module, and the third copy at src/remediate/steps/contractPipeline.ts:1153 (which lacks the waiver filter entirely — a live semantic divergence, not just duplication, and that file IS loop-core so it would need a review attestation).
+- Whether to file the two out-of-scope follow-ups the plan names as backlog entries now: unifying with derive.ts's acceptedCounterexampleIds via a cycle-safe leaf module, and the third copy at src/remediate/steps/contractPipeline.ts (which lacks the waiver filter entirely — a live semantic divergence, not just duplication, and that file IS loop-core so it would need a review attestation).
 
 ### Against what already landed
 
@@ -512,13 +512,13 @@ Everything else — the "" after the title, `...renderLaneShortfallLines(fanout.
 
 DISAGREEMENT WITH SOURCE (plan §3.4): the plan says `emitCharterDelta` "fits the helper as-is" and `emitSystemicChallenge` "fits via `midNote`". NEITHER DOES. Both carry a lead-in paragraph BETWEEN the shortfall lines and the execution lines, for which the plan's proposed helper (§3.1) has no slot:
 
-  emitCharterDelta (src/audit/cli/nextStepCommand.ts:874-883):
+  emitCharterDelta (src/audit/cli/nextStepCommand.ts):
       ...renderLaneShortfallLines(fanout.shortfall),
       "The assembled charters are ready for the INDEPENDENT delta-miner (it did not author them).",
       "",
       ...renderFanoutExecutionLines({...}),
 
-  emitSystemicChallenge (src/audit/cli/nextStepCommand.ts:1019-1028):
+  emitSystemicChallenge (src/audit/cli/nextStepCommand.ts):
       ...renderLaneShortfallLines(fanout.shortfall),
       "This round's adversary lane challenges the audit process itself (optimization/better-way mandate). The adversary must NOT be the agent that drove this audit.",
       "",
@@ -548,15 +548,15 @@ Closer census at HEAD: the literal "When the result file exists, run:" appears a
 | `emitSynthesisNarrative` | `src/audit/cli/nextStepCommand.ts` | yes | Line 1418. Module-local const, emissionRow<"synthesis_narrative">. Shape matches the plan exactly and mirrors emitCriticalFlowFallback. |
 | `emissionRow` | `src/audit/cli/nextStepCommand.ts` | yes | Line 479. `function emissionRow<K extends NextStepEmissionKind>(handle) : NextStepEmissionRow`. Matches the plan's description (binds the row to its result variant once). Untouched by the plan. |
 | `currentStepPlan` | `src/audit/cli/nextStepCommand.ts` | yes | Line 414. Returns `{ via: "current", params }`. Signature unchanged by the plan. |
-| `materializeFanoutLanes` | `src/audit/cli/fanoutLanes.ts` | yes | Imported at nextStepCommand.ts:20; called at 226, 782, 849, 987, 1197, 1365, 1433. Untouched by the plan (non-goal 1). |
+| `materializeFanoutLanes` | `src/audit/cli/fanoutLanes.ts` | yes | Imported at nextStepCommand.ts; called at 226, 782, 849, 987, 1197, 1365, 1433. Untouched by the plan (non-goal 1). |
 | `operatorHandoffBlock` | `src/audit/cli/nextStepCommand.ts` | yes | Line 437, immediately before writeAuditStep (456). The plan's stated insertion point ("directly after it, before writeAuditStep") is a real, currently-empty seam at HEAD. |
-| `renderLaneShortfallLines` | `src/audit/cli/laneSubmissions.ts` | yes | Exported at laneSubmissions.ts:602; imported at nextStepCommand.ts:30. Returns string[]. Matches the plan. |
-| `renderFanoutExecutionLines` | `src/shared/prompts.ts` | yes | Exported at prompts.ts:87; imported at nextStepCommand.ts:10. Returns string[]. Matches the plan. |
-| `laneSubmissionPath` | `src/audit/cli/laneSubmissions.ts` | yes | Exported at laneSubmissions.ts:209. Called separately by charter_delta (847), charter_clarification (916), systemic_challenge (964), analyzer rows (1107, 1144), edge_reasoning (1179), intent_equivalence (1311), critical_flow_fallback (1353), synthesis_narrative (1420) — the twin-derivation the plan defers to §6 is real. |
-| `renderLaneResultsFooter` | `src/audit/cli/fanoutLanes.ts` | yes | Line 126, applied inside fanoutLanes.ts:141. Confirms the plan's non-goal 1 (two audiences: lane file vs step prompt). |
+| `renderLaneShortfallLines` | `src/audit/cli/laneSubmissions.ts` | yes | Exported at laneSubmissions.ts; imported at nextStepCommand.ts. Returns string[]. Matches the plan. |
+| `renderFanoutExecutionLines` | `src/shared/prompts.ts` | yes | Exported at prompts.ts; imported at nextStepCommand.ts. Returns string[]. Matches the plan. |
+| `laneSubmissionPath` | `src/audit/cli/laneSubmissions.ts` | yes | Exported at laneSubmissions.ts. Called separately by charter_delta (847), charter_clarification (916), systemic_challenge (964), analyzer rows (1107, 1144), edge_reasoning (1179), intent_equivalence (1311), critical_flow_fallback (1353), synthesis_narrative (1420) — the twin-derivation the plan defers to §6 is real. |
+| `renderLaneResultsFooter` | `src/audit/cli/fanoutLanes.ts` | yes | Line 126, applied inside fanoutLanes.ts. Confirms the plan's non-goal 1 (two audiences: lane file vs step prompt). |
 | `NEXT_STEP_EMISSION_TABLE` | `src/audit/cli/nextStepCommand.ts` | yes | Line 1495, exported, typed `Readonly<Record<NextStepEmissionKind, NextStepEmissionRow>>` — total record as the plan describes. Untouched. |
 | `NEXT_STEP_EMISSION_KINDS` | `src/audit/cli/nextStepCommand.ts` | yes | Line 1553, derived from the table's own keys. Untouched. |
-| `createStepEmissionScaffold` | `src/shared/steps/stepEmissionScaffold.ts` | yes | Imported at nextStepCommand.ts:17, used at 1520 to build NEXT_STEP_EMISSION. Untouched. |
+| `createStepEmissionScaffold` | `src/shared/steps/stepEmissionScaffold.ts` | yes | Imported at nextStepCommand.ts, used at 1520 to build NEXT_STEP_EMISSION. Untouched. |
 | `writeAuditStep` | `src/audit/cli/nextStepCommand.ts` | yes | Line 456, the single writer dispatch, wired at 1541. Untouched. |
 | `blockedStepPlan` | `src/audit/cli/nextStepCommand.ts` | yes | Line 420. Untouched. |
 | `semanticReviewPlan` | `src/audit/cli/nextStepCommand.ts` | yes | Line 426, used only in the scaffold's semantic_review fallback at 1531. Untouched. |
@@ -565,20 +565,20 @@ Closer census at HEAD: the literal "When the result file exists, run:" appears a
 | `emitSystemicChallenge` | `src/audit/cli/nextStepCommand.ts` | yes | Line 956. EXISTS. The midNote slot does fit its "An EMPTY findings array..." paragraph (1033), but it ALSO has a pre-execution lead-in paragraph (1021-1022) the helper cannot express. |
 | `emitEdgeReasoning` | `src/audit/cli/nextStepCommand.ts` | yes | Line 1177. EXISTS but carries NO inline envelope — it delegates to renderEdgeReasoningDispatchPrompt (1224) and only prepends shortfallLines. Relevant to the §6 path follow-up only, not to envelope duplication. |
 | `emitDesignReviewParallel / emitDesignReviewContract / emitDesignReviewConceptual` | `src/audit/cli/nextStepCommand.ts` | yes | Lines 567, 629, 675. Confirmed out of scope: distinct closer lead-ins at 600 and 649, and no "Read and follow only" line at all. |
-| `prepareContractDispatch` | `src/audit/cli/nextStepCommand.ts` | yes | Line 202, cited by the plan for the twin-path-derivation note; also referenced in the src/audit/cli/fanoutLanes.ts:22 module comment. Both citations check out. |
+| `prepareContractDispatch` | `src/audit/cli/nextStepCommand.ts` | yes | Line 202, cited by the plan for the twin-path-derivation note; also referenced in the src/audit/cli/fanoutLanes.ts module comment. Both citations check out. |
 | `renderSingleLaneDispatchEnvelope` | `src/audit/cli/nextStepCommand.ts` | **NO** | The symbol the plan PROPOSES to add. Does not exist at HEAD — expected, not a plan error. |
 
 ### Plan errors (8)
 
-- §3.4: "`emitCharterDelta`: ... fits the helper as-is" is FALSE. The row has a lead-in paragraph between `renderLaneShortfallLines` and `renderFanoutExecutionLines` (src/audit/cli/nextStepCommand.ts:875-876) that the proposed helper cannot express.
+- §3.4: "`emitCharterDelta`: ... fits the helper as-is" is FALSE. The row has a lead-in paragraph between `renderLaneShortfallLines` and `renderFanoutExecutionLines` (src/audit/cli/nextStepCommand.ts) that the proposed helper cannot express.
 
-- §3.4: "`emitSystemicChallenge`: ... fits via `midNote`" is FALSE for the same reason — its pre-execution lead-in (src/audit/cli/nextStepCommand.ts:1021-1022) has no slot. The `midNote` slot does correctly fit its post-path "An EMPTY findings array..." line (1033), but that is only half the row.
+- §3.4: "`emitSystemicChallenge`: ... fits via `midNote`" is FALSE for the same reason — its pre-execution lead-in (src/audit/cli/nextStepCommand.ts) has no slot. The `midNote` slot does correctly fit its post-path "An EMPTY findings array..." line (1033), but that is only half the row.
 
-- §3.4: `emitCharterExtraction` is excluded for the wrong reason — the plan cites an "extra `Read and follow only...` after the continue command". There is exactly one such line (src/audit/cli/nextStepCommand.ts:824), same as every other row. Its real disqualifiers are the different closer lead-in at line 820 ("When every pending lane's result file exists, run:"), the lead-in paragraph at 802, the conditional completed-lanes block at 812-819, and the `resultPath` field passed to `renderFanoutExecutionLines` at 808.
+- §3.4: `emitCharterExtraction` is excluded for the wrong reason — the plan cites an "extra `Read and follow only...` after the continue command". There is exactly one such line (src/audit/cli/nextStepCommand.ts), same as every other row. Its real disqualifiers are the different closer lead-in at line 820 ("When every pending lane's result file exists, run:"), the lead-in paragraph at 802, the conditional completed-lanes block at 812-819, and the `resultPath` field passed to `renderFanoutExecutionLines` at 808.
 
 - §1.2: lists `emitCharterExtraction` among "Rows exhibiting this envelope", which §3.4 then contradicts. On the source, §3.4's exclusion is right and §1.2's inclusion is wrong.
 
-- §6.1 / §1.4 non-goal 3: implies `emitEdgeReasoning` is an envelope site. It is not — it delegates the whole body to `renderEdgeReasoningDispatchPrompt` (src/audit/cli/nextStepCommand.ts:1224) and prepends only `shortfallLines`. It IS a valid member of the submission-path-derivation follow-up (its `laneSubmissionPath` call is at 1179), so the §6 listing is defensible; the §1.4 framing is loose.
+- §6.1 / §1.4 non-goal 3: implies `emitEdgeReasoning` is an envelope site. It is not — it delegates the whole body to `renderEdgeReasoningDispatchPrompt` (src/audit/cli/nextStepCommand.ts) and prepends only `shortfallLines`. It IS a valid member of the submission-path-derivation follow-up (its `laneSubmissionPath` call is at 1179), so the §6 listing is defensible; the §1.4 framing is loose.
 
 - §4 step 2: "typecheck (`tsc`) to confirm the helper compiles unused" — an unused module-local function is an eslint error under the repo's PostToolUse tsc+eslint hook. Add the helper and its call sites in one edit.
 
@@ -588,9 +588,9 @@ Closer census at HEAD: the literal "When the result file exists, run:" appears a
 
 ### Behavior changes (3)
 
-- NONE, if the plan is implemented as scoped to `emitCriticalFlowFallback` and `emitSynthesisNarrative` only. Verified by reading both prompt arrays at src/audit/cli/nextStepCommand.ts:1388-1409 and 1456-1477: the proposed helper's element sequence reproduces both arrays element-for-element with no reordering, no rewording, and no added or removed blank line. It is a pure intra-function extraction — no signature change, no control-flow change, no IO, no path derivation moved.
+- NONE, if the plan is implemented as scoped to `emitCriticalFlowFallback` and `emitSynthesisNarrative` only. Verified by reading both prompt arrays at src/audit/cli/nextStepCommand.ts and 1456-1477: the proposed helper's element sequence reproduces both arrays element-for-element with no reordering, no rewording, and no added or removed blank line. It is a pure intra-function extraction — no signature change, no control-flow change, no IO, no path derivation moved.
 
-- BEHAVIOR CHANGE IF §3.4 IS FOLLOWED AS WRITTEN (host-visible prompt regression): adopting the helper in `emitCharterDelta` would DELETE the line "The assembled charters are ready for the INDEPENDENT delta-miner (it did not author them)." plus its trailing blank from the emitted step prompt (nextStepCommand.ts:875-876), because the helper has no slot between shortfallLines and executionLines. Same for `emitSystemicChallenge`: it would delete "This round's adversary lane challenges the audit process itself (optimization/better-way mandate). The adversary must NOT be the agent that drove this audit." plus its blank (1021-1022). Both violate the plan's own non-goal 5 (byte-identical host-visible prompts). The §3.4 byte-identity precondition prevents this if actually run; the prose assertion that these rows "fit" does not.
+- BEHAVIOR CHANGE IF §3.4 IS FOLLOWED AS WRITTEN (host-visible prompt regression): adopting the helper in `emitCharterDelta` would DELETE the line "The assembled charters are ready for the INDEPENDENT delta-miner (it did not author them)." plus its trailing blank from the emitted step prompt (nextStepCommand.ts), because the helper has no slot between shortfallLines and executionLines. Same for `emitSystemicChallenge`: it would delete "This round's adversary lane challenges the audit process itself (optimization/better-way mandate). The adversary must NOT be the agent that drove this audit." plus its blank (1021-1022). Both violate the plan's own non-goal 5 (byte-identical host-visible prompts). The §3.4 byte-identity precondition prevents this if actually run; the prose assertion that these rows "fit" does not.
 
 - MINOR SCOPE CHANGE I RECOMMEND (not in the plan): dropping the `midNote?: string` parameter from §3.1. That is a change to the plan, not to runtime behavior — no caller in the minimal change passes it.
 
@@ -662,8 +662,8 @@ Expected diff: roughly +20 / −30 lines, one file.
 COVERAGE GAP — state it plainly: NO existing test reaches the behavior this refactor is supposed to preserve.
 
 What I checked and found:
-- `tests/audit/next-step-critical-flow-fallback.test.ts:116-120` reads `paused.prompt_path` and asserts only `toMatch(/critical-flow fallback/i)`, `toContain(resultsPath)`, and `toMatch(/sequentially yourself|else read and follow/)` (the last is satisfied by `renderFanoutExecutionLines`, not by the closer).
-- `tests/audit/next-step-narrative.test.ts:134-135` reads `paused.prompt_path` and asserts only `toMatch(/synthesis narrative/i)`. It does not even assert the results path appears in the step prompt.
+- `tests/audit/next-step-critical-flow-fallback.test.ts` reads `paused.prompt_path` and asserts only `toMatch(/critical-flow fallback/i)`, `toContain(resultsPath)`, and `toMatch(/sequentially yourself|else read and follow/)` (the last is satisfied by `renderFanoutExecutionLines`, not by the closer).
+- `tests/audit/next-step-narrative.test.ts` reads `paused.prompt_path` and asserts only `toMatch(/synthesis narrative/i)`. It does not even assert the results path appears in the step prompt.
 - `grep -rn "When the result file exists|Read and follow only" tests/` returns NOTHING. `grep -rn "The executor must write" tests/` returns NOTHING. The closer and the write sentence are asserted nowhere in the suite.
 - `tests/audit/systemic-challenge.test.ts` and `tests/audit/charter-delta-executor.test.ts` contain no `stepPrompt` / `prompt_path` reads at all.
 - `tests/audit/next-step-helpers.test.ts` and `tests/audit/seam-host-only-next-step.test.ts` guard the TABLE key set and the host-only seam; they are structurally blind to prompt bytes. The plan (§1.2, §2.2) says this correctly.
@@ -682,7 +682,7 @@ Red-green plan that actually works:
 
 ### Open choices (6)
 
-- The helper's NAME. The plan says "names negotiable, semantics not". Constraint discovered at HEAD and not in the plan: if the name contains the substring "Prompt" AND the symbol is exported, `tests/shared/prompt-renders-its-contract.test.ts:306` (`scanExportedPromptBuilders`) reds until a row is added to `tests/shared/promptContractRegistry.ts`. Keeping it module-local and "Prompt"-free avoids this entirely.
+- The helper's NAME. The plan says "names negotiable, semantics not". Constraint discovered at HEAD and not in the plan: if the name contains the substring "Prompt" AND the symbol is exported, `tests/shared/prompt-renders-its-contract.test.ts` (`scanExportedPromptBuilders`) reds until a row is added to `tests/shared/promptContractRegistry.ts`. Keeping it module-local and "Prompt"-free avoids this entirely.
 
 - Whether to keep the `midNote?: string` parameter. I recommend dropping it (no caller in the minimal change uses it, and its intended adopter cannot adopt). An owner may prefer keeping it as the plan wrote it.
 
@@ -690,7 +690,7 @@ Red-green plan that actually works:
 
 - Whether to add the closer-drift assertion to the two row tests. The plan calls it optional (§5.3, §6.2); I recommend required given the measured zero coverage. Owner may still decline.
 
-- Whether to fold in §6.1 (unify submission-path derivation so rows consume `fanout.lanes[i].resultPath` instead of re-calling `laneSubmissionPath`). The plan defers it; the twin derivation is confirmed present at HEAD across eight call sites (nextStepCommand.ts:847, 916, 964, 1107, 1144, 1179, 1311, 1353, 1420).
+- Whether to fold in §6.1 (unify submission-path derivation so rows consume `fanout.lanes[i].resultPath` instead of re-calling `laneSubmissionPath`). The plan defers it; the twin derivation is confirmed present at HEAD across eight call sites (nextStepCommand.ts).
 
 - Whether to record the §3.4 decline ("leave these rows on their inline arrays, they do not fit") as a one-line source comment at each declined row, as §4 step 5 directs, or only in the closeout.
 
@@ -698,9 +698,9 @@ Red-green plan that actually works:
 
 NO CONFLICT, and NO OVERLAP. None of the six landed commits touches src/audit/cli/nextStepCommand.ts, src/shared/prompts.ts, src/audit/cli/fanoutLanes.ts, or src/audit/cli/laneSubmissions.ts. `git log --oneline -- src/audit/cli/nextStepCommand.ts` shows its most recent commit is 89bc84b1, well before the item-3.x/2.5 wave. The landed items live in src/audit/extractors/* and scripts/shared/*; the GRAPH_EDGE_CACHE_KEY_VERSION v4->v5 bump and the check:control-bytes preCommit flip are irrelevant to prompt assembly.
 
-Nothing already partly does this: no shared prompt-envelope helper exists anywhere. The closest existing single-sourcing is `renderFanoutExecutionLines` (src/shared/prompts.ts:87) and `renderLaneShortfallLines` (src/audit/cli/laneSubmissions.ts:602) — exactly the two pieces the plan says are already factored.
+Nothing already partly does this: no shared prompt-envelope helper exists anywhere. The closest existing single-sourcing is `renderFanoutExecutionLines` (src/shared/prompts.ts) and `renderLaneShortfallLines` (src/audit/cli/laneSubmissions.ts) — exactly the two pieces the plan says are already factored.
 
-One landed-adjacent guard the plan does not mention and the implementer must respect: `tests/shared/prompt-renders-its-contract.test.ts:306` (`scanExportedPromptBuilders`) scans all of `src/**/*.ts` for `export function|const <name containing "Prompt">` and REDS unless `tests/shared/promptContractRegistry.ts` claims each such export exactly once. The plan's proposed name `renderSingleLaneDispatchEnvelope` contains no "Prompt" and is module-local, so it is clear — but naming it `...Prompt` AND exporting it would fail that gate.
+One landed-adjacent guard the plan does not mention and the implementer must respect: `tests/shared/prompt-renders-its-contract.test.ts` (`scanExportedPromptBuilders`) scans all of `src/**/*.ts` for `export function|const <name containing "Prompt">` and REDS unless `tests/shared/promptContractRegistry.ts` claims each such export exactly once. The plan's proposed name `renderSingleLaneDispatchEnvelope` contains no "Prompt" and is module-local, so it is clear — but naming it `...Prompt` AND exporting it would fail that gate.
 
 ---
 
@@ -709,7 +709,7 @@ One landed-adjacent guard the plan does not mention and the implementer must res
 **Premise holds:** yes  
 **Loop-core:** yes — commit needs a review attestation
 
-The duplication is real and EXACT at HEAD. src/audit/extractors/analyzers/merge.ts:49-53 and src/audit/orchestrator/edgeReasoning.ts:51-55 both contain, byte-identically:
+The duplication is real and EXACT at HEAD. src/audit/extractors/analyzers/merge.ts and src/audit/orchestrator/edgeReasoning.ts both contain, byte-identically:
 
 function confidenceOf(edge: GraphEdge): number {
   return typeof edge.confidence === "number" && Number.isFinite(edge.confidence)
@@ -726,7 +726,7 @@ The plan's two corrections of the catalog are BOTH verified correct against sour
 Plan-vs-source disagreements found (all minor, all source-wins):
 - Plan §2.1/§3.4 says edgeReasoning.ts has FOUR reads and instructs "replace 4 call sites (… and any 4th read)". There are exactly THREE: lines 77, 95, 106. No fourth exists.
 - Plan §1.5 cites the hidden-coupling floor as "0.5 in designAssessment.ts". The real path is src/audit/extractors/designAssessment.ts (not orchestrator/), symbol HIDDEN_COUPLING_CONFIDENCE_FLOOR = 0.5 at line 293. Value and intent correct, path under-specified.
-- Plan §3.3 says merge.ts's shared imports are "import type { GraphEdge } / compareCodeUnits lines"; at HEAD merge.ts:1-2 are exactly `import type { GraphEdge } from "audit-tools/shared";` and `import { compareCodeUnits } from "audit-tools/shared";` — so the value import already exists and edgeConfidence extends line 2. Matches.
+- Plan §3.3 says merge.ts's shared imports are "import type { GraphEdge } / compareCodeUnits lines"; at HEAD merge.ts are exactly `import type { GraphEdge } from "audit-tools/shared";` and `import { compareCodeUnits } from "audit-tools/shared";` — so the value import already exists and edgeConfidence extends line 2. Matches.
 - Plan §3.5 lists typescript.ts TS_* consumer lines "~187, ~213-215, ~241, ~266, ~297, ~329" — all six confirmed present at those lines.
 
 ### Files to change
@@ -748,7 +748,7 @@ Plan-vs-source disagreements found (all minor, all source-wins):
 | `GraphEdge` | `src/shared/types/graph.ts` | yes | z.infer type off GraphEdgeSchema (line 3). Both consumers import it as a type from "audit-tools/shared", not by relative path. |
 | `DEFAULT_EDGE_CONFIDENCE_FLOOR` | `src/audit/orchestrator/edgeReasoning.ts` | yes | Line 25, exported, = 0.65. Plan leaves it in place; correct — it is used as the default parameter of collectLowConfidenceEdges. |
 | `MAX_REASONED_EDGES` | `src/audit/orchestrator/edgeReasoning.ts` | yes | Line 27, exported, = 200. Untouched by the plan. |
-| `TS_IMPORT_EDGE_CONFIDENCE / TS_REEXPORT_ / TS_EXTENDS_ / TS_IMPLEMENTS_ / TS_CALL_EDGE_CONFIDENCE` | `src/audit/extractors/analyzers/merge.ts` | yes | All five exported at lines 7-11 (0.99, 0.99, 0.97, 0.97, 0.9) under the tuning comment at lines 4-6 — exactly as the plan states. Grep across src/, tests/, scripts/ confirms the plan's step-1 expectation: the ONLY importer is src/audit/extractors/analyzers/typescript.ts:9-15. No test or deep-import consumer. So the plan's backward-compat option (a) clean break is the correct branch; option (b) shim is dead. |
+| `TS_IMPORT_EDGE_CONFIDENCE / TS_REEXPORT_ / TS_EXTENDS_ / TS_IMPLEMENTS_ / TS_CALL_EDGE_CONFIDENCE` | `src/audit/extractors/analyzers/merge.ts` | yes | All five exported at lines 7-11 (0.99, 0.99, 0.97, 0.97, 0.9) under the tuning comment at lines 4-6 — exactly as the plan states. Grep across src/, tests/, scripts/ confirms the plan's step-1 expectation: the ONLY importer is src/audit/extractors/analyzers/typescript.ts. No test or deep-import consumer. So the plan's backward-compat option (a) clean break is the correct branch; option (b) shim is dead. |
 | `edgeConfidence (existing private twin)` | `src/audit/extractors/graph.ts` | yes | Line 206-208. Confirmed WEAKER as the plan claims: `return typeof edge.confidence === "number" ? edge.confidence : 0;` — no Number.isFinite guard, so NaN/Infinity propagate. This is a real name collision with the plan's proposed shared export name. |
 | `clampConfidence` | `src/audit/extractors/graph.ts` | yes | Lines 199-203; clamps to [0,1] with an explicit fallback. Different contract, correctly excluded. |
 | `normalizeGraphPath / collectGraphEdges re-export` | `src/shared/index.ts` | yes | Line 84. findCyclicComponents/findFirstCycleWitness at line 85. The plan's insertion point is accurate. |
@@ -773,7 +773,7 @@ Plan-vs-source disagreements found (all minor, all source-wins):
 
 - The plan never mentions the loop-core attestation requirement, even though src/audit/orchestrator/edgeReasoning.ts is loop-core by src/shared/loopCorePaths.ts. The commit will be blocked without an attestation, and the plan's §4/§5 sequences give no step for it.
 
-- Neither §5 nor §4 notices that the merge.ts call site is effectively untested (see red_green_plan) — the plan asserts the existing suites constitute a 'behavior-invariance proof', which for merge.ts:92 they do not.
+- Neither §5 nor §4 notices that the merge.ts call site is effectively untested (see red_green_plan) — the plan asserts the existing suites constitute a 'behavior-invariance proof', which for merge.ts they do not.
 
 ### Behavior changes (5)
 
@@ -798,7 +798,7 @@ The duplication being removed is three lines in two files. The minimal correct c
        ? edge.confidence
        : 0;
    }
-   with a doc comment saying why non-finite reads as 0 (the value feeds >= / < comparisons where NaN poisons every comparison). Relative type import matches graphPaths.ts:3.
+   with a doc comment saying why non-finite reads as 0 (the value feeds >= / < comparisons where NaN poisons every comparison). Relative type import matches graphPaths.ts.
 
 2. src/shared/index.ts — insert after line 84:
    export { edgeConfidence } from "./graph/edgeConfidence.js";
@@ -809,7 +809,7 @@ The duplication being removed is three lines in two files. The minimal correct c
 
 5. NEW tests/shared/edge-confidence.test.ts — table-driven: missing field→0, undefined→0, NaN→0, Infinity→0, -Infinity→0, 0→0, 0.72→0.72, 1→1, -0.5→-0.5 (readers do not clamp; pin it).
 
-Naming caveat the implementer must handle deliberately: src/audit/extractors/graph.ts already has a PRIVATE function named edgeConfidence with different (weaker) semantics. After this lands, two functions with the same name and different behavior coexist in the tree. Either (a) accept it and add a one-line comment on graph.ts:206 pointing at the shared helper and the deferred adoption, or (b) rename the shared export (e.g. statedEdgeConfidence / readEdgeConfidence). Do not leave the collision silent.
+Naming caveat the implementer must handle deliberately: src/audit/extractors/graph.ts already has a PRIVATE function named edgeConfidence with different (weaker) semantics. After this lands, two functions with the same name and different behavior coexist in the tree. Either (a) accept it and add a one-line comment on graph.ts pointing at the shared helper and the deferred adoption, or (b) rename the shared export (e.g. statedEdgeConfidence / readEdgeConfidence). Do not leave the collision silent.
 
 Gate notes: src/shared/graph/edgeConfidence.ts gains two importers in the same commit, so check:deadcode and check:orphan-modules are satisfied; one of its importers (merge.ts) is outside loop-core, so check:loop-core-closure will not demand it join the set. The commit stages a loop-core file, so it needs the attestation.
 
@@ -817,13 +817,13 @@ Gate notes: src/shared/graph/edgeConfidence.ts gains two importers in the same c
 
 Existing coverage is ASYMMETRIC — one call site is genuinely covered, the other is not, and NEITHER covers the guard that is the whole point of the helper.
 
-COVERED (edgeReasoning): tests/audit/edge-reasoning.test.ts:45 "collectLowConfidenceEdges returns only edges below the 0.65 floor" asserts exactly 2 candidates from a 3-edge fixture (0.95 / 0.25 / 0.55). Mutation that reds the fixed code: make edgeConfidence return a constant 0 — the 0.95 edge then falls below the floor and the count becomes 3, failing the `toBe(2)`. Returning a constant 1 also reds it (count 0). This is a real red-green on the shared helper via a consumer.
+COVERED (edgeReasoning): tests/audit/edge-reasoning.test.ts "collectLowConfidenceEdges returns only edges below the 0.65 floor" asserts exactly 2 candidates from a 3-edge fixture (0.95 / 0.25 / 0.55). Mutation that reds the fixed code: make edgeConfidence return a constant 0 — the 0.95 edge then falls below the floor and the count becomes 3, failing the `toBe(2)`. Returning a constant 1 also reds it (count 0). This is a real red-green on the shared helper via a consumer.
 
-NOT COVERED (merge): tests/audit/analyzer-seam.test.ts:48 "analyzer import edge supersedes the regex floor" passes a floor edge at 0.95 and an analyzer edge at 0.99, and mergeAnalyzerEdges iterates `[...floor, ...analyzer]` with a `>=` tie-break, so the analyzer edge wins on ORDER alone. A mutant edgeConfidence that returns a constant still passes that test, and passes the ungrouped-kinds test and tests/audit/tree-sitter-analyzers.test.ts too. No test anywhere puts a HIGHER-confidence floor edge against a lower-confidence analyzer edge in the same group — the one input shape where merge.ts's comparison actually decides. COVERAGE GAP, and it is a finding, not an obstacle: the refactor cannot break what no test observes, so a mechanical mistake at merge.ts:92 would land green.
+NOT COVERED (merge): tests/audit/analyzer-seam.test.ts "analyzer import edge supersedes the regex floor" passes a floor edge at 0.95 and an analyzer edge at 0.99, and mergeAnalyzerEdges iterates `[...floor, ...analyzer]` with a `>=` tie-break, so the analyzer edge wins on ORDER alone. A mutant edgeConfidence that returns a constant still passes that test, and passes the ungrouped-kinds test and tests/audit/tree-sitter-analyzers.test.ts too. No test anywhere puts a HIGHER-confidence floor edge against a lower-confidence analyzer edge in the same group — the one input shape where merge.ts's comparison actually decides. COVERAGE GAP, and it is a finding, not an obstacle: the refactor cannot break what no test observes, so a mechanical mistake at merge.ts would land green.
 
 NOT COVERED ANYWHERE: the Number.isFinite branch. No test in the repo feeds an edge with a missing, undefined, NaN or Infinity confidence to either helper. The guard that distinguishes these two helpers from the weak twin in extractors/graph.ts is currently unpinned. The plan's new tests/shared/edge-confidence.test.ts closes this, and it is the highest-value part of the item.
 
-Recommended additions beyond the plan: one merge case with floor 0.99 / analyzer 0.90 in the same group asserting the FLOOR edge survives — that is the assertion which makes merge.ts:92 red-green-able.
+Recommended additions beyond the plan: one merge case with floor 0.99 / analyzer 0.90 in the same group asserting the FLOOR edge survives — that is the assertion which makes merge.ts red-green-able.
 
 ### Open choices (6)
 
@@ -831,7 +831,7 @@ Recommended additions beyond the plan: one merge case with floor 0.99 / analyzer
 
 - If §3.5 is taken: src/audit/extractors/analyzers/types.ts versus a new src/audit/extractors/analyzers/edgeConfidences.ts. The plan states no preference beyond 'preferred'. Note types.ts already carries runtime code (AnalyzerResolutionSchema), so hosting constants there does not change its character.
 
-- The shared export's NAME: edgeConfidence (colliding deliberately with the private, weaker function at src/audit/extractors/graph.ts:206) versus a distinct name such as statedEdgeConfidence. The plan argues the collision is a feature; a reviewer may call it a trap.
+- The shared export's NAME: edgeConfidence (colliding deliberately with the private, weaker function at src/audit/extractors/graph.ts) versus a distinct name such as statedEdgeConfidence. The plan argues the collision is a feature; a reviewer may call it a trap.
 
 - Whether to file the deferred follow-up (graph.ts adopts the guarded helper, NaN→0, requiring a GRAPH_EDGE_CACHE_KEY_VERSION bump) as a backlog entry now, and to which file — docs/backlog/open-bugs.md as a real latent defect, or docs/backlog/minor-bugs.md if judged low severity. The plan says 'file a follow-up backlog entry' without naming a destination.
 
@@ -886,7 +886,7 @@ A2 vs B are BYTE-IDENTICAL modulo two spaces of indentation. Verified mechanical
 so the plan's §1.1 archive-loop quote is exact, and its "identical shape" claim is literally true.
 
 Where source disagrees with the plan (three points, all minor, source wins):
-1. §3.5 / §1.3.7 calls the "mid-run clarification resolver" a `.consumed-` LOOP. At HEAD (`src/remediate/steps/nextStep.ts:2467-2469`) it is a SINGLE-file guarded rename of `resolutionPath` only — no array, no `requestPath`. It is not a loop and would need a one-element call, not a drop-in. The genuine second loop is the ambiguity gate at 2822-2826, which IS byte-identical to the A2/B loop.
+1. §3.5 / §1.3.7 calls the "mid-run clarification resolver" a `.consumed-` LOOP. At HEAD (`src/remediate/steps/nextStep.ts`) it is a SINGLE-file guarded rename of `resolutionPath` only — no array, no `requestPath`. It is not a loop and would need a one-element call, not a drop-in. The genuine second loop is the ambiguity gate at 2822-2826, which IS byte-identical to the A2/B loop.
 2. §2.2 says `writeJsonFile` has "53 callers repo-wide". At HEAD `grep -rn "writeJsonFile(" src/` returns 71 occurrences. Immaterial to the change; the plan does not modify it.
 3. §1.3.4 quotes Path B's id as `state.plan?.plan_id ?? randomRunId("path-b-review")` — correct (line 2582, bound to local `reviewPlanId`) — but note the record itself uses `request.plan_id`, not `reviewPlanId`; `reviewPlanId` only seeds `buildReviewRequest`. The helper receiving `request.plan_id` (as §3.4 says) is right; the §1.1 table's "live plan's own id" is a simplification.
 
@@ -902,20 +902,20 @@ Where source disagrees with the plan (three points, all minor, source wins):
 | `runPlanningReviewGate` | `src/remediate/steps/nextStep.ts` | yes | Line 2566. Signature `(root, artifactsDir, state: RemediationState, store: StateStore): Promise<RemediationStep \| null>`. Module-private. Single caller `handlePlanning` at line 2845, gated on `state.plan && !existsSync(reviewDecisionPath(artifactsDir))` (2844) exactly as the plan claims. |
 | `ReviewDecisionRecord` | `src/remediate/steps/nextStep.ts` | yes | Interface at line 1558, module-private (not exported). Fields exactly `schema_version: typeof REVIEW_DECISION_SCHEMA_VERSION`, `plan_id: string`, `approved_ids: string[]`, `declined: Array<{ finding_id: string; reason: string }>`, `created_at: string`. Matches the plan's helper return type. |
 | `REVIEW_DECISION_SCHEMA_VERSION` | `src/remediate/steps/nextStep.ts` | yes | Line 1550, `"remediate-code-review-decision/v1" as const`. Also read at 1485 and 1793 by `discardOnSchemaVersionMismatch` (replay guards) — those are NOT construction sites and must not be swept by the plan's step-5 residue grep. |
-| `writeJsonFile` | `src/shared/io/json.ts` | yes | Defined at src/shared/io/json.ts:173, imported into nextStep.ts via the `audit-tools/shared` barrel (import line 18). Unchanged by this refactor, as the plan states. |
-| `withFsRetry` | `src/shared/io/json.ts` | yes | Defined at src/shared/io/json.ts:66, already imported in nextStep.ts (import line 23). `existsSync` (node:fs, line 2) and `rename` (node:fs/promises, line 3) also already imported — the plan's 'no import changes needed' holds. |
+| `writeJsonFile` | `src/shared/io/json.ts` | yes | Defined at src/shared/io/json.ts, imported into nextStep.ts via the `audit-tools/shared` barrel (import line 18). Unchanged by this refactor, as the plan states. |
+| `withFsRetry` | `src/shared/io/json.ts` | yes | Defined at src/shared/io/json.ts, already imported in nextStep.ts (import line 23). `existsSync` (node:fs, line 2) and `rename` (node:fs/promises, line 3) also already imported — the plan's 'no import changes needed' holds. |
 | `archiveConsumedInputs` | `src/remediate/steps/nextStep.ts` | **NO** | PLAN-DECLARED-NEW, not a plan error. The plan lists it as a key symbol but states in §1.2 that it 'does not exist yet'. Confirmed: zero hits repo-wide. The loop it names is inlined at four places in nextStep.ts (1777-1781, 2622-2626, 2822-2826, and the single-file 2467-2469). |
 | `buildReviewDecisionRecord` | `src/remediate/steps/nextStep.ts` | **NO** | PLAN-DECLARED-NEW. Zero hits repo-wide. To be created module-private. |
 | `writeReviewDecisionRecord` | `src/remediate/steps/nextStep.ts` | **NO** | PLAN-DECLARED-NEW. Zero hits repo-wide. Optional per the plan's own §3.1 alternative. |
 | `reviewDecisionPath / reviewRequestPath / reviewResolutionPath / ambiguityDecisionPath` | `src/remediate/steps/nextStep.ts` | yes | Lines 1572, 1566, 1569, 1584. The plan's placement anchor ('after the path helpers, before `extractAuditFindings`') is valid: `extractAuditFindings` is at 1589. |
-| `buildAutonomousReviewDecision` | `src/remediate/review/autonomousGate.js (imported at nextStep.ts:135)` | yes | Used at line 1704; supplies `auto.approved_ids` for site A1 as the plan's table says. |
+| `buildAutonomousReviewDecision` | `src/remediate/review/autonomousGate.js (imported at nextStep.ts)` | yes | Used at line 1704; supplies `auto.approved_ids` for site A1 as the plan's table says. |
 | `applyReviewResolution / isResolutionForRequest / buildReviewRequest / refuseUnknownIdResolution` | `src/remediate/review/reviewGate.ts (refuseUnknownIdResolution is local to nextStep.ts)` | yes | All present and used at both consume arms; explicitly untouched by the plan. |
 
 ### Plan errors (7)
 
 - Plan file path in the task is wrong: `docs/reviews/refactor-plans/refactor-plan-item-3.3-...md` does not exist. The file is at `docs/reviews/refactor-plan-item-3.3-gate-runner-construction-twins-2026-09-05.md` (untracked, alongside 12 sibling refactor plans and the two catalog/runbook docs).
 
-- §3.5 and §1.3.7 describe the mid-run clarification resolver as having a `.consumed-` LOOP. At HEAD it is a single-file guarded rename of `resolutionPath` only (src/remediate/steps/nextStep.ts:2467-2469) — no array, no `requestPath`. The plan's §5.5 follow-up ('expands call sites from 2 to 4 with zero helper changes') is therefore wrong about that site: only the ambiguity gate (2822-2826) is a drop-in; the clarification resolver would need a one-element call, and passing both paths there would change behavior.
+- §3.5 and §1.3.7 describe the mid-run clarification resolver as having a `.consumed-` LOOP. At HEAD it is a single-file guarded rename of `resolutionPath` only (src/remediate/steps/nextStep.ts) — no array, no `requestPath`. The plan's §5.5 follow-up ('expands call sites from 2 to 4 with zero helper changes') is therefore wrong about that site: only the ambiguity gate (2822-2826) is a drop-in; the clarification resolver would need a one-element call, and passing both paths there would change behavior.
 
 - §2.2 states `writeJsonFile` has '53 callers repo-wide'. At HEAD `grep -rn "writeJsonFile(" src/` returns 71 occurrences. Not load-bearing (the function is not modified), but the number is stale.
 
@@ -1022,7 +1022,7 @@ COVERAGE GAP — a finding, state it in the commit note. **No test asserts the C
 
 - Wrapper or no wrapper. The plan itself (§3.1) offers the alternative of dropping `writeReviewDecisionRecord` and calling `writeJsonFile(decisionPath, buildReviewDecisionRecord(...))` inline at the three sites — one line shorter per site. The plan prefers the wrapper; the repo's dead-code posture (`npm run check:deadcode`, default-mode knip) tolerates a module-private one-line wrapper, so this is a taste call for the owner. Note the wrapper's stated value ('a future schema bump or ledger hook has one call site') is already delivered by `buildReviewDecisionRecord` for the schema half.
 
-- Whether to migrate the ambiguity gate's identical loop (src/remediate/steps/nextStep.ts:2822-2826) in the SAME commit. The plan says no ('one item, one gate pair') and defers it to §5.5. Against that: the repo's atomic-replace ordering invariant and 'fix the defect CLASS' preference argue for taking the one byte-identical sibling now rather than leaving a second copy of the loop the helper exists to kill. This is genuinely the owner's call.
+- Whether to migrate the ambiguity gate's identical loop (src/remediate/steps/nextStep.ts) in the SAME commit. The plan says no ('one item, one gate pair') and defers it to §5.5. Against that: the repo's atomic-replace ordering invariant and 'fix the defect CLASS' preference argue for taking the one byte-identical sibling now rather than leaving a second copy of the loop the helper exists to kill. This is genuinely the owner's call.
 
 - Whether the single-file clarification-resolver rename (2467-2469) should also route through `archiveConsumedInputs([resolutionPath])`. Uniform naming vs. an extra call for one path; the plan does not address the single-path form at all.
 
@@ -1109,7 +1109,7 @@ Incidental correctness detail the plan does not mention: `resultLineIndex(result
 | `lineCountForPath (4-arg)` | `src/audit/orchestrator/selectiveDeepening/shared.ts` | yes | EXISTS, line 96. Shape matches: (path, task: AuditTask\|undefined, result: AuditResult, lineIndex?) with the four-level chain. Note `result` is REQUIRED (not optional) at HEAD. |
 | `resultLineIndex` | `src/audit/orchestrator/selectiveDeepening/shared.ts` | yes | EXISTS, line 87, module-private (not exported). Returns Record<string,number> via Object.fromEntries, rebuilt per call. Matches the plan's defect description. |
 | `lineCountFromSources` | `src/audit/orchestrator/selectiveDeepening/shared.ts` | yes | EXISTS, line 145. Signature (path, tasks: AuditTask[], results: AuditResult[], lineIndex?). tasks/results are REQUIRED non-optional arrays of non-undefined elements — the plan's proposed LineCountMultiSources widens both to optional arrays of possibly-undefined, an accepted-input change. |
-| `ReviewTask` | `src/ (repo-wide)` | **NO** | CONFIRMED ABSENT, exactly as the plan's own §1.5 correction says. Only `allReviewTasks` locals in ingestionExecutors.ts:229 and planningExecutors.ts:241. The plan header's 'ReviewTask' means AuditTask; the plan already self-corrects, so this is a header wart, not an actionable plan error. |
+| `ReviewTask` | `src/ (repo-wide)` | **NO** | CONFIRMED ABSENT, exactly as the plan's own §1.5 correction says. Only `allReviewTasks` locals in ingestionExecutors.ts and planningExecutors.ts. The plan header's 'ReviewTask' means AuditTask; the plan already self-corrects, so this is a header wart, not an actionable plan error. |
 | `AuditTask.file_line_counts` | `src/audit/types.ts` | yes | EXISTS, line 147: `file_line_counts: z.record(z.string(), z.number()).optional()`. Matches. |
 | `FileCoverageRecord` | `src/audit/types.ts` | yes | EXISTS, line 95: { path, total_lines, pass_id, lens?, agent_role? }. AuditResultSchema.file_coverage (line 203) is the separate inline { path, total_lines } array. Both match the plan's §1.5 description; the plan's minimal structural view type accepts both. |
 | `buildPacket / fileLineCounts materialization` | `src/audit/orchestrator/reviewPackets.ts` | yes | EXISTS, call at line 103: `owner ? lineCountForPath(owner, path, lineIndex) : 0`. Matches plan row #1. |
@@ -1130,7 +1130,7 @@ Incidental correctness detail the plan does not mention: `resultLineIndex(result
 
 ### Plan errors (10)
 
-- §3.3 FACTUAL ERROR: 'Type AuditResult import in shared.ts becomes unused — remove it from the type import (keep AuditTask, Finding, Lens)'. FALSE at HEAD. After deleting the three functions, `AuditResult` is still referenced at src/audit/orchestrator/selectiveDeepening/shared.ts:58 (BuildSelectiveDeepeningTaskOptions.results), :66 (FindingContext.result) and :121 (pathsForFinding). Following the plan here is an immediate compile error.
+- §3.3 FACTUAL ERROR: 'Type AuditResult import in shared.ts becomes unused — remove it from the type import (keep AuditTask, Finding, Lens)'. FALSE at HEAD. After deleting the three functions, `AuditResult` is still referenced at src/audit/orchestrator/selectiveDeepening/shared.ts (BuildSelectiveDeepeningTaskOptions.results), :66 (FindingContext.result) and :121 (pathsForFinding). Following the plan here is an immediate compile error.
 
 - §3.1 GATE ERROR: the module exports `buildResultLineIndex` and `resultLineIndexFor`, neither of which any production call site uses (the plan itself says 'Canonical call sites need not use it' and only the throwaway probes call them). `check:deadcode` runs `knip --no-config-hints` with `exports` in knip.json's include list — an exported symbol with no importing consumer is a red build. Make both module-private (as minimal_change does) or give them a real adopter. This is the exact class recorded in project memory as 'an additive export with no adopter reds check:deadcode'.
 
@@ -1138,9 +1138,9 @@ Incidental correctness detail the plan does not mention: `resultLineIndex(result
 
 - §2.2 row 6a / §3.4 MISCLASSIFICATION: threading lineIndex into lensVerificationTriggers is called 'behavior-neutral'. It is not (see behavior_changes #2). §5.3's 'ranking output is unchanged' rests on the same error (behavior_changes #3). Both claims are refuted by resultFiles() preferring task.file_paths over file_coverage.
 
-- §3.4 SHAPE MISMATCH: 'selectLensVerificationFiles: add lineIndex? param'. At HEAD that function is three POSITIONAL params `(sources, externalAnalyzerPaths, lens)` at lensVerification.ts:211, not an options object — the plan reads as if it were one. minimal_change drops this step entirely, so it is moot there, but any implementer following the plan verbatim would be adding a fourth positional argument to a function whose neighbours all use options objects.
+- §3.4 SHAPE MISMATCH: 'selectLensVerificationFiles: add lineIndex? param'. At HEAD that function is three POSITIONAL params `(sources, externalAnalyzerPaths, lens)` at lensVerification.ts, not an options object — the plan reads as if it were one. minimal_change drops this step entirely, so it is moot there, but any implementer following the plan verbatim would be adding a fourth positional argument to a function whose neighbours all use options objects.
 
-- MISSING STEP — LOOP-CORE ATTESTATION. Every file the plan touches, and the new file, sits under `src/audit/orchestrator/`, a directory-prefix pattern in src/shared/loopCorePaths.ts:51. The commit gate blocks a loop-core commit lacking a fresh staged-tree-bound attestation. The plan's §4 sequence and §5.5 closeout checklist never mention it; an implementer following the plan hits the block at commit time with no idea why.
+- MISSING STEP — LOOP-CORE ATTESTATION. Every file the plan touches, and the new file, sits under `src/audit/orchestrator/`, a directory-prefix pattern in src/shared/loopCorePaths.ts. The commit gate blocks a loop-core commit lacking a fresh staged-tree-bound attestation. The plan's §4 sequence and §5.5 closeout checklist never mention it; an implementer following the plan hits the block at commit time with no idea why.
 
 - §5.2 METHOD ERROR (repo-policy, not factual): 'Parity is proven with throwaway probes'. This repo's standing rule is that a property worth stating is enforced mechanically — a throwaway probe leaves the precedence chain exactly as untested after the change as before it, and the coverage gap in red_green_plan shows that is a real hole, not a theoretical one. Probes A, B and D should land as real tests.
 
@@ -1154,19 +1154,19 @@ Incidental correctness detail the plan does not mention: `resultLineIndex(result
 
 - #1 (plan §2.3, ACKNOWLEDGED by the plan) stewardFollowup.ts precedence inversion. HEAD: `coverageByPath.get(path) ?? params.lineIndex?.[path] ?? 0` — task counts are never consulted. Plan: task counts win. Output changes for any path where the lens-verification task's file_line_counts disagrees with the verification result's coverage. The plan calls this a 'deliberate precedence fix'; it is a semantic change bundled into a move and should be its own commit. Note the plan's own mitigation reasoning ('paths are pre-filtered to coverageByPath.has(path), so the old code always hit coverage') is right about the filter but does not bound the disagreement — the filter guarantees coverage HAS the path, not that it agrees with the task.
 
-- #2 (plan MISLABELS this as behavior-neutral) lensVerification.ts:87, `lensVerificationTriggers` totalLines. Plan row 6a threads `lineIndex` in and says '(behavior-neutral: adds a fallback level that previously returned 0)'. IT IS NOT NEUTRAL. `resultFiles(source)` returns `source.task.file_paths` whenever that array is non-empty — those paths need not appear in `file_coverage`, and `file_line_counts` is optional — so paths that resolve to 0 today can resolve to a real lineIndex value. totalLines directly gates the `large_lens_surface` trigger (threshold 2000), which gates whether a lens-steward task is built at all. A previously-absent steward task can now be created.
+- #2 (plan MISLABELS this as behavior-neutral) lensVerification.ts, `lensVerificationTriggers` totalLines. Plan row 6a threads `lineIndex` in and says '(behavior-neutral: adds a fallback level that previously returned 0)'. IT IS NOT NEUTRAL. `resultFiles(source)` returns `source.task.file_paths` whenever that array is non-empty — those paths need not appear in `file_coverage`, and `file_line_counts` is optional — so paths that resolve to 0 today can resolve to a real lineIndex value. totalLines directly gates the `large_lens_surface` trigger (threshold 2000), which gates whether a lens-steward task is built at all. A previously-absent steward task can now be created.
 
-- #3 (plan MISLABELS, and §5.3 asserts the opposite) lensVerification.ts:228, `selectLensVerificationFiles`. Threading `lineIndex` changes the `lines` value fed to `add(path, priorityScore, lines)`, which is combined with `Math.max` and used as the ranking tiebreak. §5.3 claims 'ranking output is unchanged' — that claim depends on the very threading it also proposes. Different `lines` can reorder `selectedPaths`, which changes the steward task's `file_paths`, which changes `taskIdFor('steward', …)` inputs indirectly via omittedPathCount/rationale text. Do not thread lineIndex here as part of a move.
+- #3 (plan MISLABELS, and §5.3 asserts the opposite) lensVerification.ts, `selectLensVerificationFiles`. Threading `lineIndex` changes the `lines` value fed to `add(path, priorityScore, lines)`, which is combined with `Math.max` and used as the ranking tiebreak. §5.3 claims 'ranking output is unchanged' — that claim depends on the very threading it also proposes. Different `lines` can reorder `selectedPaths`, which changes the steward task's `file_paths`, which changes `taskIdFor('steward', …)` inputs indirectly via omittedPathCount/rationale text. Do not thread lineIndex here as part of a move.
 
 - #4 lineCountFromSources widens its accepted input: HEAD takes `tasks: AuditTask[]` and `results: AuditResult[]` (required, non-undefined elements); the plan takes optional readonly arrays whose elements may be undefined. Strictly wider — no existing caller changes answer — but it does change what the function accepts, and it lets `lensVerification.ts` delete its `.filter((task): task is AuditTask => task !== undefined)` type guard (same answers, since a filtered-out and a skipped undefined both fall through).
 
-- #5 lineCountForPath's `result` becomes OPTIONAL where HEAD requires it (shared.ts:99 `result: AuditResult`). Callers can now omit it, so a caller that means to pass a result and forgets gets a silent fallback to lineIndex/0 instead of a compile error. This is the price of unifying with the 3-arg planning form and is unavoidable, but it is a real loss of static enforcement — flag it in review.
+- #5 lineCountForPath's `result` becomes OPTIONAL where HEAD requires it (shared.ts `result: AuditResult`). Callers can now omit it, so a caller that means to pass a result and forgets gets a silent fallback to lineIndex/0 instead of a compile error. This is the price of unifying with the 3-arg planning form and is unavoidable, but it is a real loss of static enforcement — flag it in review.
 
 - #6 WeakMap memoization introduces a staleness window that does not exist today. HEAD rebuilds the index on every call, so a mutation of `result.file_coverage` is observed immediately. After the change, the first lookup pins the index for the lifetime of that result object. The plan's soundness argument ('file_coverage is append-only at ingestion time') is an assertion about a code path outside the touched files and is NOT verified by anything in this plan or by any test. If a result object is ever reused across an ingestion that appends coverage, counts go stale silently.
 
 - #7 (incidental, plan does not mention) prototype-pollution-shaped fix: HEAD's `resultLineIndex(result)[path]` returns an inherited Object.prototype member for a coverage path named `constructor`/`toString`/`valueOf`, which short-circuits the `??` chain with a non-number. The Map-based rewrite returns undefined and falls through correctly. A behavior change for pathological path names — an improvement, but a change.
 
-- #8 conflict.ts:54 loses its explicit `source ? … : (params.lineIndex?.[path] ?? 0)` branch. Verified equivalent (helper with no task and no result returns lineIndex ?? 0), so this is a pure simplification — listed only so the reviewer knows it was checked rather than assumed.
+- #8 conflict.ts loses its explicit `source ? … : (params.lineIndex?.[path] ?? 0)` branch. Verified equivalent (helper with no task and no result returns lineIndex ?? 0), so this is a pure simplification — listed only so the reviewer knows it was checked rather than assumed.
 
 ### Minimal change
 
@@ -1231,23 +1231,23 @@ export function lineCountFromSources(path: string, sources?: LineCountMultiSourc
 Keep `??` throughout — a recorded `0` must beat the fallback; `||` is the regression this invites.
 
 2. Repoint the planning pair (imports switch to `"./lineCounts.js"`):
-   - `reviewPackets.ts:103` -> `owner ? lineCountForPath(path, { task: owner, lineIndex }) : 0` (keep the ternary; the `owner` guard also drives nothing else).
-   - `reviewPacketMetrics.ts:40` -> `lineCountForPath(path, { task, lineIndex })`.
+   - `reviewPackets.ts` -> `owner ? lineCountForPath(path, { task: owner, lineIndex }) : 0` (keep the ternary; the `owner` guard also drives nothing else).
+   - `reviewPacketMetrics.ts` -> `lineCountForPath(path, { task, lineIndex })`.
 
 3. Repoint the deepening strategies (imports switch to `"../lineCounts.js"`; drop the twin names from the `./shared.js` import lists):
-   - `conflict.ts:54` -> collapse the ternary to `lineCountForPath(path, { task: source?.task, result: source?.result, lineIndex: params.lineIndex })` (the `?? 0` arm is subsumed).
-   - `highRiskClean.ts:65`, `findingFollowup.ts:41` -> `lineCountForPath(path, { task: params.task, result: params.result, lineIndex: params.lineIndex })`.
-   - `lensVerification.ts:87` and `:228` -> `lineCountForPath(path, { task: …, result: … })` — PASS NO lineIndex (keep HEAD behavior; see behavior_changes #2/#3). This deletes the plan's whole lineIndex-threading step for `lensVerificationTriggers` and `selectLensVerificationFiles`.
-   - `lensVerification.ts:336` -> `lineCountFromSources(path, { tasks: params.sources.map((s) => s.task), results: params.sources.map((s) => s.result), lineIndex: params.lineIndex })` — the widened `tasks` element type lets the existing `.filter((task): task is AuditTask => …)` be deleted (pure simplification, same answers: a filtered-out undefined task and a skipped-undefined task both fall through).
-   - `runtimeValidation.ts:75` -> `lineCountFromSources(path, { tasks: params.relatedTasks, results: params.results, lineIndex: params.lineIndex })`.
+   - `conflict.ts` -> collapse the ternary to `lineCountForPath(path, { task: source?.task, result: source?.result, lineIndex: params.lineIndex })` (the `?? 0` arm is subsumed).
+   - `highRiskClean.ts`, `findingFollowup.ts` -> `lineCountForPath(path, { task: params.task, result: params.result, lineIndex: params.lineIndex })`.
+   - `lensVerification.ts` and `:228` -> `lineCountForPath(path, { task: …, result: … })` — PASS NO lineIndex (keep HEAD behavior; see behavior_changes #2/#3). This deletes the plan's whole lineIndex-threading step for `lensVerificationTriggers` and `selectLensVerificationFiles`.
+   - `lensVerification.ts` -> `lineCountFromSources(path, { tasks: params.sources.map((s) => s.task), results: params.sources.map((s) => s.result), lineIndex: params.lineIndex })` — the widened `tasks` element type lets the existing `.filter((task): task is AuditTask => …)` be deleted (pure simplification, same answers: a filtered-out undefined task and a skipped-undefined task both fall through).
+   - `runtimeValidation.ts` -> `lineCountFromSources(path, { tasks: params.relatedTasks, results: params.results, lineIndex: params.lineIndex })`.
 
-4. `stewardFollowup.ts:88` — TWO options, and this is the one real judgment call (see open_choices #1). Minimal-and-behavior-preserving: leave it alone entirely (it is a third variant, not a twin, and the plan's §2.3 change is a semantic change smuggled into a move). If the precedence fix IS wanted, it lands as its OWN commit after the move, with its own test.
+4. `stewardFollowup.ts` — TWO options, and this is the one real judgment call (see open_choices #1). Minimal-and-behavior-preserving: leave it alone entirely (it is a third variant, not a twin, and the plan's §2.3 change is a semantic change smuggled into a move). If the precedence fix IS wanted, it lands as its OWN commit after the move, with its own test.
 
 5. DELETE `lineCountForPath` from `reviewPacketShared.ts`; DELETE `resultLineIndex`, `lineCountForPath`, `lineCountFromSources` from `selectiveDeepening/shared.ts`. KEEP the `AuditResult` type import in shared.ts (plan error). No re-export shims.
 
 6. Loop-core attestation is REQUIRED before commit (the plan never mentions it): every touched path is under `src/audit/orchestrator/`, which is a directory-prefix pattern in `src/shared/loopCorePaths.ts`. Run `node .claude/hooks/attest-loop-core-review.mjs --reviewed-by <id> --attester-class <agent|human> --checked "<...>"` against the final staged tree.
 
-7. Gates: `npm run check`, `npm run check:tests`, then `check:lint check:depgraph check:deadcode check:orphan-modules check:dup check:shared-primitives check:loop-core-closure check:control-bytes`, then `npm test`. `check:doc-code-citations` strips `:NNN` suffixes and resolves paths only, so the catalog's `reviewPacketShared.ts:27` / `shared.ts:96` citations will NOT red — but they become factually stale; fix them in `docs/reviews/duplication-and-complexity-catalog-2026-09-05.md` lines 161-162 and 241 (line 241 additionally proposes `src/shared/paths.ts` as the destination, which the plan correctly rejects).
+7. Gates: `npm run check`, `npm run check:tests`, then `check:lint check:depgraph check:deadcode check:orphan-modules check:dup check:shared-primitives check:loop-core-closure check:control-bytes`, then `npm test`. `check:doc-code-citations` strips `:NNN` suffixes and resolves paths only, so the catalog's `reviewPacketShared.ts` / `shared.ts` citations will NOT red — but they become factually stale; fix them in `docs/reviews/duplication-and-complexity-catalog-2026-09-05.md` lines 161-162 and 241 (line 241 additionally proposes `src/shared/paths.ts` as the destination, which the plan correctly rejects).
 
 ### Red-green plan
 
@@ -1256,9 +1256,9 @@ COVERAGE GAP — state this plainly, it is the main finding of the verification.
 Tests that REACH the code (all via `buildSelectiveDeepeningTasks` in `tests/audit/orchestrator-remediation.test.ts`; no test imports either twin directly, and `tests/audit/observability-signals.test.ts` imports only constants from `selectiveDeepening/shared.js`):
 - line 369 `expect(tasks[0].file_line_counts!["src/api/auth.ts"]).toBe(40)` — reaches findingFollowup's lineCountForPath.
 - line 602 same assertion — reaches stewardFollowup's counting path.
-- the two `lensVerificationTriggers totalLines` tests (fixtures at lines ~1544 and ~1633) — reach lensVerification.ts:87 and gate the `trigger:large_lens_surface` tag.
+- the two `lensVerificationTriggers totalLines` tests (fixtures at lines ~1544 and ~1633) — reach lensVerification.ts and gate the `trigger:large_lens_surface` tag.
 - the lens-steward and runtime-validation tests (fixtures at ~1278, ~1697) — reach lineCountFromSources.
-- `tests/audit/review-packets.test.ts:20` and `review-packet-sizing.test.ts:37,52` — reach reviewPackets/reviewPacketMetrics.
+- `tests/audit/review-packets.test.ts` and `review-packet-sizing.test.ts` — reach reviewPackets/reviewPacketMetrics.
 
 BUT NO EXISTING TEST DISCRIMINATES THE PRECEDENCE CHAIN. Every fixture builds `file_coverage` as `task.file_paths.map((path) => ({ path, total_lines: task.file_line_counts![path] }))` (lines 508, 1238, 1302, 1365, 1428, 1509, 1588, 1658) or hand-writes coverage equal to the task counts (lines 344, 568-571). And NO test that reaches these call sites passes a non-empty `lineIndex`. Consequences:
 - Swapping the first two precedence levels (result before task) in the fixed `lineCountForPath` reds NOTHING.
@@ -1286,9 +1286,9 @@ RED-GREEN PLAN (do this, do not use the plan's "throwaway probes" — this repo'
 
 - #5 Module name and placement: `src/audit/orchestrator/lineCounts.ts`. The plan's rejection of src/shared/paths.ts and of both twin modules is sound, but the sibling-leaf choice is still a naming call, and the file lands inside loop-core by placement alone. An alternative — `src/audit/orchestrator/lineCounts.ts` vs a `src/audit/orchestrator/planning/` subdir — was not considered.
 
-- #6 Whether the stale catalog citations in docs/reviews/duplication-and-complexity-catalog-2026-09-05.md (lines 161-162 pointing at reviewPacketShared.ts:27 and shared.ts:96, and line 241 proposing src/shared/paths.ts as the destination) get corrected in this commit. That file is UNTRACKED at HEAD, so check:doc-code-citations does not see it and no gate forces the issue — it is a judgment call, and line 241 in particular now contradicts the plan's own accepted decision.
+- #6 Whether the stale catalog citations in docs/reviews/duplication-and-complexity-catalog-2026-09-05.md (lines 161-162 pointing at reviewPacketShared.ts and shared.ts, and line 241 proposing src/shared/paths.ts as the destination) get corrected in this commit. That file is UNTRACKED at HEAD, so check:doc-code-citations does not see it and no gate forces the issue — it is a judgment call, and line 241 in particular now contradicts the plan's own accepted decision.
 
-- #7 Whether reviewPackets.ts:103 keeps its `owner ? … : 0` ternary or collapses to `lineCountForPath(path, { task: owner, lineIndex })`. Collapsing is equivalent ONLY because a missing owner falls through to lineIndex — which is a BEHAVIOR CHANGE (HEAD returns a hard 0 for an unowned path even when lineIndex has it). minimal_change keeps the ternary; the plan's §2.2 row 1 collapses it without flagging the difference. Someone must decide which is wanted.
+- #7 Whether reviewPackets.ts keeps its `owner ? … : 0` ternary or collapses to `lineCountForPath(path, { task: owner, lineIndex })`. Collapsing is equivalent ONLY because a missing owner falls through to lineIndex — which is a BEHAVIOR CHANGE (HEAD returns a hard 0 for an unowned path even when lineIndex has it). minimal_change keeps the ternary; the plan's §2.2 row 1 collapses it without flagging the difference. Someone must decide which is wanted.
 
 ### Against what already landed
 
@@ -1302,7 +1302,7 @@ NO CONFLICT with any of the six landed commits. Verified by reading each touched
 
 Nothing in the landed set already does any part of item 4.1: both twins are fully intact at HEAD and lineCounts.ts does not exist.
 
-LINE NUMBERS in the plan are still accurate at HEAD for every file it names (spot-checked reviewPacketShared.ts:27, shared.ts:87/96/145, reviewPackets.ts:103, reviewPacketMetrics.ts:40, conflict.ts:54, highRiskClean.ts:65, findingFollowup.ts:41, lensVerification.ts:87/228/336, runtimeValidation.ts:75, stewardFollowup.ts:88) — the landed commits did not move this code. Still locate by name.
+LINE NUMBERS in the plan are still accurate at HEAD for every file it names (spot-checked reviewPacketShared.ts, shared.ts/96/145, reviewPackets.ts, reviewPacketMetrics.ts, conflict.ts, highRiskClean.ts, findingFollowup.ts, lensVerification.ts/228/336, runtimeValidation.ts, stewardFollowup.ts) — the landed commits did not move this code. Still locate by name.
 
 ---
 
@@ -1500,7 +1500,7 @@ COVERAGE GAPS — findings, not obstacles:
 
 - Whether the catalog correction (docs/reviews/duplication-and-complexity-catalog-2026-09-05.md, Hotspot #2 Phase 2 bullet) rides in this commit or is filed separately. Note that file is currently UNTRACKED per git status.
 
-- Whether to also file the third/fourth accepted-set copies (`acceptedCeIdsOf` at src/remediate/steps/contractPipeline.ts:890 and the inline Set at :1153, plus `acceptedCounterexampleIds` at src/remediate/contractPipeline/derive.ts:431) as a follow-up cross-module item, as plan §2.4 defers. NOTE: src/remediate/steps/contractPipeline.ts IS loop-core, so that follow-up would require a review attestation; this diff does not.
+- Whether to also file the third/fourth accepted-set copies (`acceptedCeIdsOf` at src/remediate/steps/contractPipeline.ts and the inline Set at :1153, plus `acceptedCounterexampleIds` at src/remediate/contractPipeline/derive.ts) as a follow-up cross-module item, as plan §2.4 defers. NOTE: src/remediate/steps/contractPipeline.ts IS loop-core, so that follow-up would require a review attestation; this diff does not.
 
 ### Against what already landed
 
@@ -1594,7 +1594,7 @@ WHERE PLAN AND SOURCE DISAGREE (source wins, all reported below in plan_errors):
 
 - §2.2 lists a caller 'src/remediate/steps/nextStep.ts -> execute (dispatch routing)'. No such caller. `execute` is an obligation-registry property name in nextStep.ts (lines 4045+). The graph's '4 callers' is inflated — there are exactly 2 real call sites, both in nextStep.ts (1064, 1096).
 
-- §2.1's 'No export-list change except the three new functions if tests need them' understates the cost. tests/helpers/dispatchBarrelBaseline.ts pins hostHandoff.ts's value exports to exactly 9 names and tests/remediate/host-handoff.test.ts:1569 asserts set equality. Any new export reds that test, and check:deadcode (knip default mode) flags an export with no consumer. The plan does not name dispatchBarrelBaseline.ts anywhere.
+- §2.1's 'No export-list change except the three new functions if tests need them' understates the cost. tests/helpers/dispatchBarrelBaseline.ts pins hostHandoff.ts's value exports to exactly 9 names and tests/remediate/host-handoff.test.ts asserts set equality. Any new export reds that test, and check:deadcode (knip default mode) flags an export with no consumer. The plan does not name dispatchBarrelBaseline.ts anywhere.
 
 - §1.2's HostIngestContext flattens `root` and `artifactsDir` and omits `workloadPath` and the BoundaryPaths object. resolveBoundaryPaths (line 679) RESOLVES those values through resolveHostHandoffPaths — they are not params.root/params.artifactsDir — and Phase 1 needs workloadPath. Carry `paths: BoundaryPaths`.
 
@@ -1649,13 +1649,13 @@ E. Do NOT touch src/remediate/steps/nextStep.ts, src/remediate/index.ts, or src/
 COVERAGE IS GOOD for the fail-closed gates and WEAK for the intra-loop couplings the split actually risks. Two suites reach the behavior: tests/remediate/host-handoff.test.ts (contract/prepare-ingest round trips, the export-surface pin at line 1569) and tests/remediate/host-handoff-corroboration.test.ts (~35 `it` blocks, all driving ingestRemediationHostResults end to end against real git fixtures).
 
 COVERED — single mutations that red today:
-- Delete the `if (!eligibleIds.has(workItem.id))` refusal block (line ~2506) -> reds "keeps dependency eligibility enforced under recovery" (host-handoff-corroboration.test.ts:1729).
+- Delete the `if (!eligibleIds.has(workItem.id))` refusal block (line ~2506) -> reds "keeps dependency eligibility enforced under recovery" (host-handoff-corroboration.test.ts).
 - Flip `canCorroborate` to a constant `true` -> reds "refuses attestation-only acceptance when neither a trusted binding nor a git repo exists" (:1756).
 - Drop the lazy `recordedRecoveryMarks` identity check (accept `alreadyMarked = false` always) -> reds "does not append a second ledger mark when a recovery acceptance is retried" (:1539) and the ledger assertion in :1481.
 - Change the mark identity from (run, item, landedCommit) to (run, item) -> reds "marks a re-accepted item again when the landed commit differs" (:1690).
 - Remove the try/catch around the ledger append -> reds "refuses a recovery acceptance whose ledger mark cannot be recorded" (:1411).
 - Move `migrateLegacyDirectoryScopesAfterFinalDrain` before the loop -> reds "defers legacy plan migration until the bound workload's final drain" (:632).
-- Export any of the three new functions -> reds the export-surface pin (host-handoff.test.ts:1569) and check:deadcode.
+- Export any of the three new functions -> reds the export-surface pin (host-handoff.test.ts) and check:deadcode.
 - Break any `check: "<literal>"` citation -> reds tests/shared/ingestion-checks-drift.test.ts.
 
 COVERAGE GAP — a finding, state it in the closeout:

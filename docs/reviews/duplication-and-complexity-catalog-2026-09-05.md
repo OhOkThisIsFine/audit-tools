@@ -28,8 +28,8 @@ Type 2 clones share identical AST grammar and statement sequencing, differing on
 
 ### Item 2.1: `deriveObligationState` Function Twin
 * **Files:**
-  * [`src/audit/cli/nextStepHelpers.ts:2582-2615`](file:///c:/Code/audit-tools/src/audit/cli/nextStepHelpers.ts#L2582-L2615)
-  * [`src/audit/orchestrator/advance.ts:601-624`](file:///c:/Code/audit-tools/src/audit/orchestrator/advance.ts#L601-L624)
+  * [`src/audit/cli/nextStepHelpers.ts`](file:///c:/Code/audit-tools/src/audit/cli/nextStepHelpers.ts)
+  * [`src/audit/orchestrator/advance.ts`](file:///c:/Code/audit-tools/src/audit/orchestrator/advance.ts)
 * **Similarity:** **1.00 (Exact AST Match)** — 24 lines, 25 tokens.
 * **Code Structure:**
   ```typescript
@@ -52,8 +52,8 @@ Type 2 clones share identical AST grammar and statement sequencing, differing on
 
 ### Item 2.2: CLI Step Execution Scaffolding
 * **Files:**
-  * [`src/audit/cli/forceSynthesisCommand.ts:9-29`](file:///c:/Code/audit-tools/src/audit/cli/forceSynthesisCommand.ts#L9-L29) (`cmdForceSynthesis`)
-  * [`src/audit/cli/intakeCommand.ts:4-24`](file:///c:/Code/audit-tools/src/audit/cli/intakeCommand.ts#L4-L24) (`cmdIntake`)
+  * [`src/audit/cli/forceSynthesisCommand.ts`](file:///c:/Code/audit-tools/src/audit/cli/forceSynthesisCommand.ts) (`cmdForceSynthesis`)
+  * [`src/audit/cli/intakeCommand.ts`](file:///c:/Code/audit-tools/src/audit/cli/intakeCommand.ts) (`cmdIntake`)
 * **Similarity:** **0.93** — 21 lines.
 * **Code Structure:**
   Both functions extract `--artifacts-dir` and `--root` from `argv`, construct an identical step execution options bundle, call `runAuditStep({ ... })`, and print the JSON result envelope to `stdout`.
@@ -65,8 +65,8 @@ Type 2 clones share identical AST grammar and statement sequencing, differing on
 
 ### Item 2.3: Intra-File Gate Validation Iteration
 * **Files:**
-  * [`src/remediate/validation/contractPipelineGates.ts:336-361`](file:///c:/Code/audit-tools/src/remediate/validation/contractPipelineGates.ts#L336-L361)
-  * [`src/remediate/validation/contractPipelineGates.ts:676-701`](file:///c:/Code/audit-tools/src/remediate/validation/contractPipelineGates.ts#L676-L701)
+  * [`src/remediate/validation/contractPipelineGates.ts`](file:///c:/Code/audit-tools/src/remediate/validation/contractPipelineGates.ts)
+  * [`src/remediate/validation/contractPipelineGates.ts`](file:///c:/Code/audit-tools/src/remediate/validation/contractPipelineGates.ts)
 * **Similarity:** **0.89** — 21 lines.
 * **Code Structure:**
   Both blocks iterate over `repairState.acceptedIds`, lookup the artifact in `artifactStore`, verify checksum grounding, and append to an issue accumulator.
@@ -78,8 +78,8 @@ Type 2 clones share identical AST grammar and statement sequencing, differing on
 
 ### Item 2.4: Dispatch Execution Envelopes
 * **Files:**
-  * [`src/audit/cli/nextStepCommand.ts:1400-1417`](file:///c:/Code/audit-tools/src/audit/cli/nextStepCommand.ts#L1400-L1417)
-  * [`src/audit/cli/nextStepCommand.ts:1468-1485`](file:///c:/Code/audit-tools/src/audit/cli/nextStepCommand.ts#L1468-L1485)
+  * [`src/audit/cli/nextStepCommand.ts`](file:///c:/Code/audit-tools/src/audit/cli/nextStepCommand.ts)
+  * [`src/audit/cli/nextStepCommand.ts`](file:///c:/Code/audit-tools/src/audit/cli/nextStepCommand.ts)
 * **Similarity:** **0.86** — 17 lines.
 * **Why Identified:**
   Twin dispatch payload builders constructing identical execution envelopes for lane workers.
@@ -88,8 +88,8 @@ Type 2 clones share identical AST grammar and statement sequencing, differing on
 
 ### Item 2.5: Code Generator File Headers & Status Scaffolding
 * **Files:**
-  * [`scripts/shared/generate-ingestion-checks.mjs:48`](file:///c:/Code/audit-tools/scripts/shared/generate-ingestion-checks.mjs#L48)
-  * [`scripts/shared/generate-spec-mirrors.mjs:90`](file:///c:/Code/audit-tools/scripts/shared/generate-spec-mirrors.mjs#L90)
+  * [`scripts/shared/generate-ingestion-checks.mjs`](file:///c:/Code/audit-tools/scripts/shared/generate-ingestion-checks.mjs)
+  * [`scripts/shared/generate-spec-mirrors.mjs`](file:///c:/Code/audit-tools/scripts/shared/generate-spec-mirrors.mjs)
 * **Similarity:** **0.88** — 25 lines.
 * **Why Identified:**
   Both generator scripts re-roll the same 25 lines of banner formatting, dry-run checking, and git status comparison.
@@ -102,8 +102,8 @@ Type 3 clones perform identical tasks where statements have been inserted, delet
 
 ### Item 3.1: Manifest String Array Extractors
 * **Files:**
-  * [`src/audit/extractors/graphManifestEdges/toml.ts:49-54`](file:///c:/Code/audit-tools/src/audit/extractors/graphManifestEdges/toml.ts#L49-L54) (`tomlStringArray`)
-  * [`src/audit/extractors/graphManifestEdges/yaml.ts:33-38`](file:///c:/Code/audit-tools/src/audit/extractors/graphManifestEdges/yaml.ts#L33-L38) (`yamlStringArray`)
+  * [`src/audit/extractors/graphManifestEdges/toml.ts`](file:///c:/Code/audit-tools/src/audit/extractors/graphManifestEdges/toml.ts) (`tomlStringArray`)
+  * [`src/audit/extractors/graphManifestEdges/yaml.ts`](file:///c:/Code/audit-tools/src/audit/extractors/graphManifestEdges/yaml.ts) (`yamlStringArray`)
 * **AST Nodes:** 27 nodes matching.
 * **Why Identified:**
   Both functions extract a string array from parsed AST structures (one from `smol-toml` AST, one from `yaml` AST). The traversal, error filtering, and empty-array fallback logic are structurally identical.
@@ -113,8 +113,8 @@ Type 3 clones perform identical tasks where statements have been inserted, delet
 
 ### Item 3.2: Confidence Scoring Mapping
 * **Files:**
-  * [`src/audit/extractors/analyzers/merge.ts:49-53`](file:///c:/Code/audit-tools/src/audit/extractors/analyzers/merge.ts#L49-L53) (`confidenceOf`)
-  * [`src/audit/orchestrator/edgeReasoning.ts:51-55`](file:///c:/Code/audit-tools/src/audit/orchestrator/edgeReasoning.ts#L51-L55) (`confidenceOf`)
+  * [`src/audit/extractors/analyzers/merge.ts`](file:///c:/Code/audit-tools/src/audit/extractors/analyzers/merge.ts) (`confidenceOf`)
+  * [`src/audit/orchestrator/edgeReasoning.ts`](file:///c:/Code/audit-tools/src/audit/orchestrator/edgeReasoning.ts) (`confidenceOf`)
 * **AST Nodes:** 24 nodes matching.
 * **Why Identified:**
   Both define private helper functions mapping analyzer confidence literals (`"high" | "medium" | "low"`) to numerical probabilities.
@@ -124,8 +124,8 @@ Type 3 clones perform identical tasks where statements have been inserted, delet
 
 ### Item 3.3: Gate Runner Construction Twins
 * **Files:**
-  * [`src/remediate/steps/nextStep.ts:1768-1774`](file:///c:/Code/audit-tools/src/remediate/steps/nextStep.ts#L1768-L1774) (`runReviewApprovalGate`)
-  * [`src/remediate/steps/nextStep.ts:2612-2618`](file:///c:/Code/audit-tools/src/remediate/steps/nextStep.ts#L2612-L2618) (`runPlanningReviewGate`)
+  * [`src/remediate/steps/nextStep.ts`](file:///c:/Code/audit-tools/src/remediate/steps/nextStep.ts) (`runReviewApprovalGate`)
+  * [`src/remediate/steps/nextStep.ts`](file:///c:/Code/audit-tools/src/remediate/steps/nextStep.ts) (`runPlanningReviewGate`)
 * **AST Nodes:** 28 nodes matching.
 * **Why Identified:**
   Both construct gate arguments, verify prerequisites, invoke the gate runner harness, and map the exit status into a next-step instruction.
@@ -134,8 +134,8 @@ Type 3 clones perform identical tasks where statements have been inserted, delet
 
 ### Item 3.4: Comment Decomposition Tokenizers
 * **Files:**
-  * [`src/audit/extractors/commentDecomposition.ts:420-425`](file:///c:/Code/audit-tools/src/audit/extractors/commentDecomposition.ts#L420-L425) (`deriveCommentDecomposition`)
-  * [`src/audit/extractors/commentDecomposition.ts:498-503`](file:///c:/Code/audit-tools/src/audit/extractors/commentDecomposition.ts#L498-L503) (`deriveDocGroups`)
+  * [`src/audit/extractors/commentDecomposition.ts`](file:///c:/Code/audit-tools/src/audit/extractors/commentDecomposition.ts) (`deriveCommentDecomposition`)
+  * [`src/audit/extractors/commentDecomposition.ts`](file:///c:/Code/audit-tools/src/audit/extractors/commentDecomposition.ts) (`deriveDocGroups`)
 * **AST Nodes:** 28 nodes matching.
 * **Why Identified:**
   Identical token grouping loops scanning AST comment blocks.
@@ -144,8 +144,8 @@ Type 3 clones perform identical tasks where statements have been inserted, delet
 
 ### Item 3.5: Graph Signal Edge Extractors
 * **Files:**
-  * [`src/audit/extractors/graphSignals.ts:126-130`](file:///c:/Code/audit-tools/src/audit/extractors/graphSignals.ts#L126-L130) (`allGraphEdges`)
-  * [`src/audit/extractors/graphSignals.ts:161-165`](file:///c:/Code/audit-tools/src/audit/extractors/graphSignals.ts#L161-L165) (`structuralImportEdges`)
+  * [`src/audit/extractors/graphSignals.ts`](file:///c:/Code/audit-tools/src/audit/extractors/graphSignals.ts) (`allGraphEdges`)
+  * [`src/audit/extractors/graphSignals.ts`](file:///c:/Code/audit-tools/src/audit/extractors/graphSignals.ts) (`structuralImportEdges`)
 * **AST Nodes:** 24 nodes matching.
 * **Why Identified:**
   Near-identical edge iteration and filtering over extracted graph structures.
@@ -158,8 +158,8 @@ Type 4 clones share identical business logic and algorithmic intent while being 
 
 ### Item 4.1: Source Line Counting Twins
 * **Files:**
-  * [`src/audit/orchestrator/reviewPacketShared.ts:27`](file:///c:/Code/audit-tools/src/audit/orchestrator/reviewPacketShared.ts#L27) (`lineCountForPath`)
-  * [`src/audit/orchestrator/selectiveDeepening/shared.ts:96`](file:///c:/Code/audit-tools/src/audit/orchestrator/selectiveDeepening/shared.ts#L96) (`lineCountForPath`)
+  * [`src/audit/orchestrator/reviewPacketShared.ts`](file:///c:/Code/audit-tools/src/audit/orchestrator/reviewPacketShared.ts) (`lineCountForPath`)
+  * [`src/audit/orchestrator/selectiveDeepening/shared.ts`](file:///c:/Code/audit-tools/src/audit/orchestrator/selectiveDeepening/shared.ts) (`lineCountForPath`)
 * **Why Identified:**
   Both read file text and compute line counts by splitting on newline boundaries (`/\r?\n/`). Located in separate packages because one was authored for review packets and the other for selective deepening.
 * **Remediation:** Single-source in [`src/shared/paths.ts`](file:///c:/Code/audit-tools/src/shared/paths.ts).
@@ -237,7 +237,7 @@ These items were detected during analysis sweeps but were verified as **intentio
 ## 7. Actionable Refactoring Roadmap
 
 ### Phase 1: High-Confidence Deduplication (Immediate Wins)
-* [ ] **Extract `deriveObligationState`:** Single-source between [`nextStepHelpers.ts`](file:///c:/Code/audit-tools/src/audit/cli/nextStepHelpers.ts#L2582) and [`advance.ts`](file:///c:/Code/audit-tools/src/audit/orchestrator/advance.ts#L601) into `src/shared/engine/obligationEngine.ts`.
+* [ ] **Extract `deriveObligationState`:** Single-source between [`nextStepHelpers.ts`](file:///c:/Code/audit-tools/src/audit/cli/nextStepHelpers.ts) and [`advance.ts`](file:///c:/Code/audit-tools/src/audit/orchestrator/advance.ts) into `src/shared/engine/obligationEngine.ts`.
 * [ ] **Unify `confidenceOf` and `lineCountForPath`:** Single-source into `src/shared/paths.ts` and `src/shared/types/graph.ts`.
 * [ ] **Unify Manifest Array Parsing:** Extract `tomlStringArray` and `yamlStringArray` into a shared helper.
 
