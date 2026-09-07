@@ -5,9 +5,11 @@
 
 ## Live state
 
-- **v0.51.0 is live**, published from the release commit `e6329a44`; the release workflow
-  passed and the registry artifact is installed globally. Both `audit-code --version` and
-  `remediate-code --version` report `0.51.0`.
+- **Pipeline verification defaults and rejection history are implemented** in `4b977383`.
+  Omitted test/e2e commands come from persisted project facts and pass current-manifest
+  admission at close. Both ingestion flows retain rejection explanations across calls;
+  recovery acceptance stays distinct from clean acceptance. The combined implementation
+  passed 6,460 local tests and every non-test release gate.
 - **The commit gate runs at git's own boundary.** The tracked `.githooks/` run
   `.claude/hooks/commit-gate.mjs` for every commit into this repository; the PreToolUse
   `pre-commit-gate.mjs` keeps only what git cannot see (the hook-bypass refusal, the push
@@ -28,11 +30,12 @@
 
 ## Immediate next
 
-**Complete the deep-review quality comparison.** The pipeline now fills omitted
-repository test commands through admission and retains rejection explanations across
-both ingestion flows. Verification and the benchmark executor's measured limitations
-are in [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
-No quality score exists yet; successful preflight and contract tests are not acceptance.
+**Complete the deep-review quality comparison with an executor that meets the pinned
+budget contract.** The corrected local executor reached review dispatch, but the bounded
+diagnostic produced six of seven results before timeout; context/output/turn caps remain
+unenforced. Evidence and limits are in
+[pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
+No quality score exists; successful preflight and contract tests are not acceptance.
 
 **The remaining settled owner decisions of 2026-09-06 stay queued.** They are pinned in
 [`open-bugs.md`](backlog/open-bugs.md) and appear in the generated list below. The answers

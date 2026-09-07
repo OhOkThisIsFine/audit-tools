@@ -71,6 +71,11 @@ The local executor was repinned before fresh trials to AGY 1.1.22 and Gemini
 3.8 Flash high effort because the original model was unavailable. Private gold
 was frozen outside the repository before trial outputs were evaluated. Its SHA-256
 is `821de8b96ae2c840ca8b6311e1ad2067e84392627db58637da558d62e2878c74`.
+The primary source snapshot was pinned to
+`09b0f4e4d0794507e88d45c781f7c02f08a944e1`; the held-out corpus digest was
+`5601be44f427ac06228911ac79349f125b200401b0fa1900cdf8c1a89dda802f`.
+Later isolated diagnostics used clean tooling commit `1c72023c` (package `0.51.0`),
+so they exercise the existing P0 workflow, not this lap's new diagnostic reader.
 
 Preflight accepted the pinned corpus. The first attempt timed out at analyzer
 consent. A fixture-only policy subsequently declined acquired analyzers, matching
@@ -85,22 +90,38 @@ acceptance. Harness tests and successful preflight cannot substitute for the
 missing blinded evaluation. No speculative audit phase or finding contract was
 added on the basis of these incomplete runs.
 
-## Remaining verification
+## Bounded executor diagnosis and verification
 
 The low-effort Gemini profile materialized the exact bound critical-flow artifact
 in 98 seconds in a separate calibration. Normal ingestion accepted it and advanced
 to five `dispatch_review` work items. A fresh low-profile attempt completed one
 control and the flow step, then stopped because its generic external executor
-returned a receipt without writing the five bound result files. The runner's
-non-advancement refusal was correct. The executor correction and fresh paired
-trials are in progress; these diagnostics are not quality scores. Release evidence
-will be recorded after publishing.
+returned a receipt without writing the five bound result files. A later isolated
+attempt also stopped on repeated step identity, but its temporary artifact was
+cleaned before inspection; the exact cause of that attempt remains unproved.
+
+A preserved reproduction advanced through flow and design review to ordinary
+review dispatch. Its external executor interpolated an object-valued prompt as
+`[object Object]`. The corrected local executor uses the prompt's text, supplies
+the run/item/digest binding, and checks all expected result paths. A separate
+300-second diagnostic, with up to three concurrent items, materialized six of
+seven bound results; the remaining lane timed out after 191 seconds. Workload and
+result-map hashes remained unchanged. One subsequent deterministic `next-step`
+found five accepted results in the prior run ledger and reminted four pending
+tasks; the missing item remained `src-bounded-context-js:correctness`. No more
+model calls were made. File existence was therefore not treated as acceptance.
+This is incomplete execution evidence, not a valid paired trial or quality score.
+
+The external quality comparison remains open in
+[`forward-tracks.md`](../backlog/forward-tracks.md). It needs a pinned executor
+that reliably completes the ordinary host workflow and can enforce the declared
+budgets, followed by the complete randomized comparisons and blinded adjudication.
+No audit-quality production change was justified by these executor failures.
 
 The combined implementation passed all 40 `verify:checks` legs, including packaged
 audit and remediation smokes. Its full local suite passed 6,460 tests across 513
 files, with six skipped and none failed. The isolated corroboration suite passed
-all 55 tests after the recovery-ledger correction. Publication and final installed
-version verification remain pending.
+all 55 tests after the recovery-ledger correction.
 
 ## Execution friction
 
