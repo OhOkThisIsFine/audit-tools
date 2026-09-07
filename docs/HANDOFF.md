@@ -5,6 +5,10 @@
 
 ## Live state
 
+- **v0.51.2 is published and installed globally.** Release commit `8d60c2a9`
+  passed the six-job publish workflow, including all four test shards; npm resolves 0.51.2 and
+  both installed command surfaces report 0.51.2. The release workflow is
+  [run 34155063393](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34155063393).
 - **Pipeline verification defaults and rejection history are implemented** in `4b977383`.
   Omitted test/e2e commands come from persisted project facts and pass current-manifest
   admission at close. Both ingestion flows retain rejection explanations across calls;
