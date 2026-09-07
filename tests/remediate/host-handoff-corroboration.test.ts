@@ -536,6 +536,66 @@ function reopenGate(value: Fixture): CurrentRemediationHostState {
 }
 
 describe("remediation host handoff repository corroboration", () => {
+  it("accepts one leading byte-order mark only after reading the bound result, while keeping invalid results refused", async () => {
+    const accepted = await fixture();
+    const acceptedAfter = await landA(accepted);
+    const acceptedPath = resolve(accepted.root, accepted.item.result_path);
+    await mkdir(dirname(acceptedPath), { recursive: true });
+    await writeFile(
+      acceptedPath,
+      `\uFEFF${JSON.stringify(resultFor(accepted, acceptedAfter))}`,
+      "utf8",
+    );
+    const acceptedIngest = await ingestRemediationHostResults({
+      root: accepted.root,
+      artifactsDir: accepted.artifactsDir,
+      runId: accepted.runId,
+      state: boundState(accepted),
+    });
+    expect(acceptedIngest).not.toBe("unsupported_retired_state");
+    if (acceptedIngest === "unsupported_retired_state") return;
+    expect(acceptedIngest.accepted_count).toBe(1);
+    expect(acceptedIngest.issues).toEqual([]);
+
+    const invalid = await fixture();
+    const invalidAfter = await landA(invalid);
+    const invalidPath = resolve(invalid.root, invalid.item.result_path);
+    await mkdir(dirname(invalidPath), { recursive: true });
+    await writeFile(invalidPath, `\uFEFF${JSON.stringify({
+      ...resultFor(invalid, invalidAfter),
+      prompt_sha256: "0".repeat(64),
+    })}`, "utf8");
+    const invalidIngest = await ingestRemediationHostResults({
+      root: invalid.root,
+      artifactsDir: invalid.artifactsDir,
+      runId: invalid.runId,
+      state: boundState(invalid),
+    });
+    expect(invalidIngest).not.toBe("unsupported_retired_state");
+    if (invalidIngest === "unsupported_retired_state") return;
+    expect(invalidIngest.accepted_count).toBe(0);
+    expect(invalidIngest.issues.map((issue) => issue.code)).toContain(
+      "submission_contract_invalid",
+    );
+
+    const malformed = await fixture();
+    const malformedPath = resolve(malformed.root, malformed.item.result_path);
+    await mkdir(dirname(malformedPath), { recursive: true });
+    await writeFile(malformedPath, "\uFEFF{not-json", "utf8");
+    const malformedIngest = await ingestRemediationHostResults({
+      root: malformed.root,
+      artifactsDir: malformed.artifactsDir,
+      runId: malformed.runId,
+      state: boundState(malformed),
+    });
+    expect(malformedIngest).not.toBe("unsupported_retired_state");
+    if (malformedIngest === "unsupported_retired_state") return;
+    expect(malformedIngest.accepted_count).toBe(0);
+    expect(malformedIngest.issues.map((issue) => issue.code)).toContain(
+      "submission_malformed",
+    );
+  });
+
   it("binds complete finding, clarification, and retry instructions into the prompt", async () => {
     const value = await fixture();
     expect(value.item.prompt.text).toContain("Correct the returned value");

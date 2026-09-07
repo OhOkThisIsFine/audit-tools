@@ -219,6 +219,85 @@ function boundResult(
 }
 
 describe(FAILURE_SIGNATURE, () => {
+  it("accepts one leading byte-order mark only after reading the bound result, while keeping invalid results refused", async () => {
+    const boundary = await loadBoundary();
+    const acceptedRoot = await mkdtemp(
+      join(tmpdir(), "audit-host-bom-accepted-"),
+    );
+    const invalidRoot = await mkdtemp(
+      join(tmpdir(), "audit-host-bom-invalid-"),
+    );
+    const malformedRoot = await mkdtemp(
+      join(tmpdir(), "audit-host-bom-malformed-"),
+    );
+    cleanupRoots.push(acceptedRoot, invalidRoot, malformedRoot);
+    const tasks = [
+      task("audit-bom", "security", "src/a.ts", {
+        complexity: "standard",
+        risk: "high",
+        token_estimate: 1200,
+      }),
+    ];
+
+    const cases = [
+      {
+        root: acceptedRoot,
+        runId: "audit-bom-accepted",
+        body: (item: HostWorkItem) =>
+          `\uFEFF${JSON.stringify(boundResult("audit-bom-accepted", item))}`,
+      },
+      {
+        root: invalidRoot,
+        runId: "audit-bom-invalid",
+        body: (item: HostWorkItem) =>
+          `\uFEFF${JSON.stringify(
+            boundResult("audit-bom-invalid", item, { run_id: "wrong-run" }),
+          )}`,
+      },
+      {
+        root: malformedRoot,
+        runId: "audit-bom-malformed",
+        body: () => "\uFEFF{not-json",
+      },
+    ] as const;
+
+    const summaries = [];
+    for (const current of cases) {
+      const artifactsDir = join(current.root, ".audit-tools", "audit");
+      await mkdir(join(current.root, "src"), { recursive: true });
+      await writeFile(join(current.root, "src", "a.ts"), "one\ntwo\n", "utf8");
+      const prepared = await boundary.prepareAuditHostHandoff({
+        root: current.root,
+        artifactsDir,
+        runId: current.runId,
+        tasks,
+      });
+      const item = prepared.workload.work_items[0]!;
+      await writeFile(
+        expectContained(current.root, item.result_path, "bound result"),
+        current.body(item),
+        "utf8",
+      );
+      summaries.push(await boundary.ingestAuditHostResults({
+        root: current.root,
+        artifactsDir,
+        runId: current.runId,
+        auditTasks: tasks,
+      }));
+    }
+
+    expect(summaries[0]!.accepted_count).toBe(1);
+    expect(summaries[0]!.issues).toEqual([]);
+    expect(summaries[1]!.accepted_count).toBe(0);
+    expect(summaries[1]!.issues.map((issue) => issue.code)).toContain(
+      "submission_contract_invalid",
+    );
+    expect(summaries[2]!.accepted_count).toBe(0);
+    expect(summaries[2]!.issues.map((issue) => issue.code)).toContain(
+      "submission_malformed",
+    );
+  });
+
   it("carries a prior rejection reason across a rebound workload and clears it after acceptance", async () => {
     const boundary = await loadBoundary();
     const root = await mkdtemp(join(tmpdir(), "audit-host-diagnostics-"));

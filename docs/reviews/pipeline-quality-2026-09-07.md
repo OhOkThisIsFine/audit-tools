@@ -125,6 +125,36 @@ all 55 tests after the recovery-ledger correction.
 
 ## Execution friction
 
+The initial hand-back closed the lap before the quality comparison was complete.
+The owner requested continuation under the existing approval. The resumed baseline
+includes the independently released `0.51.2`; its full suite reports 6,488 passed
+and zero failed, with two reporter-transport timeouts classified by the repository
+gate. This verifies the baseline, not audit quality.
+
+Two additional setup failures were verified during continuation:
+
+- The saved semantic-review result for `src-duplicate-js:correctness` contains a
+  leading UTF-8 byte-order mark. `readSubmissionDocument` in
+  `src/shared/submission/submissionClassifier.ts` rejected that encoding marker
+  before contract validation. Replaying the original saved file reproduced the
+  refusal. The shared reader now accepts one leading marker for parsing only and
+  preserves the file bytes. Parent verification removed the fix and reproduced
+  three failures through the shared reader and both ingestion draws; restoring
+  it passed all 63 related tests. Wrong bindings, malformed JSON, and misplaced
+  markers remain rejected, while marker characters within JSON data are preserved.
+- The primary source pin includes the two reference audit reports and this
+  experiment's workflow-gap review. `materializePinnedPrimary` in
+  `benchmarks/p0/runner.mjs` exposes the full checkout, so private evaluator data
+  separation alone does not keep reference answers away from auditors. Scored
+  primary trials require a frozen source fixture that excludes those answer-bearing
+  records while preserving the product code and governing documents.
+
+The executor continuation records complete host usage and applies the same
+aggregate acceptance limits to both arms. A missing receipt or a limit overrun
+invalidates an arm. These checks must not be described as token-level interruption
+controls; only the shared wall deadline is enforced during execution. No new
+quality score is claimed from this setup work.
+
 - Codex crashes required resuming the existing approved lap and its running agents.
   An earlier helper also overwrote the owner's checkpoint; the missing ownership
   enforcement is tracked in the machine-wide backlog at `C:/Code/docs/backlog.md`.

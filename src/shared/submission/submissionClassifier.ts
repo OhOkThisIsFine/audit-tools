@@ -87,7 +87,12 @@ export async function readSubmissionDocument(
     };
   }
   try {
-    return { kind: "value", value: JSON.parse(source) as unknown };
+    // Some editors write one UTF-8 byte-order mark before an otherwise valid
+    // JSON document. Accept that encoding marker at the parser boundary only;
+    // never strip more than one or normalize the source used by callers for
+    // any byte-sensitive binding/digest work.
+    const parseSource = source.startsWith("\uFEFF") ? source.slice(1) : source;
+    return { kind: "value", value: JSON.parse(parseSource) as unknown };
   } catch (error) {
     return {
       kind: "malformed",
