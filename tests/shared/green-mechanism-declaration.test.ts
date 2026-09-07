@@ -1,8 +1,8 @@
 // The declaration that makes the machine-wide verify-green ledger DEFER here.
 //
 // `~/.agent-config/verify-green.mjs` reads `.claude/green-mechanism.json`. When
-// it parses and carries a non-empty `ownedBy`, `check` defers and `record`
-// refuses, so no second ledger can exist beside this repo's own
+// it parses and carries a non-empty `ownedBy`, `check` runs the declared
+// command and `record` refuses, so no second ledger can exist beside this repo's own
 // `suiteGreenStamp`. When it does NOT parse, that reader treats the repo as
 // unowned — deliberately, so a broken declaration cannot silently disable the
 // ledger for a repo that still depends on it.
@@ -36,6 +36,13 @@ describe("green-mechanism declaration", () => {
     // The deferral message prints `ownedBy` verbatim. A reader who is told to
     // "ask that mechanism" must be able to find it, so it names the real file.
     expect(raw.ownedBy).toContain("scripts/shared/suiteGreenStamp.mjs");
+  });
+
+  it("declares the runnable status command the machine-wide checker executes", () => {
+    const raw = JSON.parse(readFileSync(DECLARATION, "utf8"));
+    expect(raw.command).toBe("node scripts/shared/suite-green-status.mjs");
+    expect(readFileSync(join(ROOT, "scripts", "shared", "suite-green-status.mjs"), "utf8"))
+      .toContain("suiteGreenVerdict");
   });
 
   it("states a reason — the deferral must explain itself, not just assert", () => {

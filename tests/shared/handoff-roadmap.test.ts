@@ -676,7 +676,19 @@ describe('runGenerator — the creep leg refuses at --check and at write time', 
 describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () => {
   let repo: string;
 
-  const git = (args: string[]) => execFileSyncHidden('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
+  const withoutGitLocals = () => {
+    const env = { ...process.env };
+    for (const name of Object.keys(env)) {
+      if (/^GIT_/i.test(name)) delete env[name];
+    }
+    return env;
+  };
+  const git = (args: string[]) => execFileSyncHidden('git', args, {
+    cwd: repo,
+    encoding: 'utf8',
+    stdio: 'pipe',
+    env: withoutGitLocals(),
+  });
 
   const writeFile = (rel: string, body: string) => {
     const abs = join(repo, rel);
@@ -687,8 +699,7 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
   // P53: the derived HANDOFF-roadmap leg runs at GIT's boundary — commit-gate.mjs,
   // spawned the way git runs a hook (cwd = repo, no payload).
   const runGate = () => {
-    const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_PROJECT_DIR: repo };
-    delete env.GIT_INDEX_FILE;
+    const env: NodeJS.ProcessEnv = { ...withoutGitLocals(), CLAUDE_PROJECT_DIR: repo };
     const r = spawnSyncHidden(process.execPath, [GATE, 'pre-commit'], {
       encoding: 'utf8',
       timeout: 120_000,
@@ -701,7 +712,11 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
 
   beforeAll(() => {
     repo = mkdtempSync(join(tmpdir(), 'audit-tools-roadmap-gate-'));
-    execFileSyncHidden('git', ['init', '--initial-branch=main'], { cwd: repo, stdio: 'pipe' });
+    execFileSyncHidden('git', ['init', '--initial-branch=main'], {
+      cwd: repo,
+      stdio: 'pipe',
+      env: withoutGitLocals(),
+    });
     git(['config', 'user.email', 'test@test']);
     git(['config', 'user.name', 'test']);
     git(['config', 'commit.gpgsign', 'false']);

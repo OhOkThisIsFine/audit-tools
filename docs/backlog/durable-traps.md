@@ -13,6 +13,10 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **An entry that reinterprets an incident must quote or link the primary record's own words for
+  the mechanism, not restate them.** A paraphrase can change the mechanism while looking like a
+  faithful summary, then send implementation toward a defect the primary record never described.
+
 - **A guard that fires AS DESIGNED is not friction and is never re-filed as a defect (owner
   decision 2026-09-05, nightly item bl-1).** A refusal from `shell-trap-guard`,
   `shell-conventions-guard`, `question-philosophy-gate`, `worktree-deps-guard`, a budget or
@@ -665,23 +669,14 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `node scripts/shared/sessionRegistry.mjs --register <session-id>` from the repo root — explicit
   id from a hook payload; deliberately no discovery mode.
 
-- **The `audit-code-completion-*` files can flake together under full-suite load, and the symptom
-  reads exactly like a regression (2026-08-09).** Seen: `-present`, `-promote`, and `-ingest-dir`
-  failed in one full run with `next-step did not reach present_report within
-  10 calls` and `expected only blocked/present_report while finalizing, got design_review_parallel`.
-  All passed **alone**, and a second full run on the **identical tree** was green — 597 files,
-  0 failed. They are not in `scripts/shared/test-flake-baseline.json`, so nothing tells you this.
-  The symptom is a *call-count* limit, not a timeout, which is why it does not look load-related:
-  under contention a step can come back `blocked` (or re-enter an obligation after a staleness
-  cascade) and burn one of the 10 allowed calls. Before treating this cluster as a regression: run
-  the current completion files alone, then re-run the FULL suite on the same tree. Two greens plus a mechanism argument
-  is the bar — a single alone-pass is not, because these are the slowest files in the suite
-  and spin real audit runs through real subprocesses.
-  ⚠ **A second pair flakes the same way but with the TIMEOUT symptom (2026-09-03).**
-  `tests/audit/io-remediation.test.ts` and `tests/audit/finalization-convergence.test.ts` each hit the
-  120s per-file vitest timeout in one full-suite run on this machine and passed alone immediately
-  after. Same protocol, different tell: a bare timeout on one of these two under full-suite load is a
-  load flake first and a regression second.
+- **A full-suite-only failure is classified by `runIsolatedDiagnostics` in
+  `scripts/shared/run-vitest-gate.mjs`, never from a remembered file list.** The gate reruns every
+  attributable failing file alone while preserving the original red verdict. A full-suite fail plus
+  solo pass is recorded by `addLoadOnlyObservation` in `scripts/shared/load-flake-record.mjs`, bound
+  to the current worktree tree so rerunning unchanged content cannot manufacture recurrence. On a
+  second distinct-tree occurrence, the gate both prints the prior evidence and starts a read-only
+  test-repair investigation whose report lands under `.audit-tools-profile/load-flake-investigations/`.
+  A solo failure remains a regression candidate; no history can turn it green.
 
 - **An offload recon lane reading a file you are concurrently editing reports the POST-edit tree
   (2026-08-07).** An offload lane dispatched to analyze a duplication and left running while the

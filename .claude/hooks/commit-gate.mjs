@@ -143,6 +143,34 @@ const {
   releaseRoundTripLock,
   recoverInterruptedRoundTrip,
 } = treeSnapshotTools(root, { label: `commit gate · ${hookName}` });
+
+// Git exports repository-local variables while running a hook. They correctly
+// bind THIS gate's own git calls to the committing index, but they must not
+// leak into npm children: several contract tests create nested fixture repos,
+// and an inherited GIT_DIR/GIT_WORK_TREE makes those fixtures operate on the
+// outer repository (or fail as "not a work tree"). Ask git for the complete
+// local-variable vocabulary instead of hand-maintaining a partial list.
+function childEnvironmentWithoutGitLocals() {
+  const env = { ...process.env };
+  const localVars = git(['rev-parse', '--local-env-vars']);
+  if (!localVars.ok) {
+    noteFailOpen('cannot enumerate git local environment variables; using the built-in compatibility set for child checks');
+  }
+  const names = localVars.ok
+    ? localVars.stdout.split(/\r?\n/).filter(Boolean)
+    : ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_COMMON_DIR'];
+  for (const name of names) delete env[name];
+  // Windows environment keys are case-insensitive while JavaScript object
+  // deletion is not. Remove every Git-prefixed spelling as a final boundary:
+  // npm checks need no repository binding inherited from the hook, and a
+  // mixed-case alias can otherwise survive the canonical-name deletion above.
+  for (const name of Object.keys(env)) {
+    if (/^GIT_/i.test(name)) delete env[name];
+  }
+  return env;
+}
+
+const gateChildEnv = childEnvironmentWithoutGitLocals();
 // The session that is committing, when a Claude Code session is: the Bash
 // tool's environment reaches the hook intact. A plain terminal has no id.
 const payloadSessionId = sanitizeSessionId(process.env.CLAUDE_CODE_SESSION_ID);
@@ -247,6 +275,7 @@ function runGate(committedPaths) {
   try {
     execSync('npm run check', /** @type {any} */ ({
       cwd: root,
+      env: gateChildEnv,
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 240_000,
@@ -297,6 +326,7 @@ function runGate(committedPaths) {
     try {
       execSync('npm run test:doc-contract', /** @type {any} */ ({
         cwd: root,
+        env: gateChildEnv,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 240_000,
@@ -373,6 +403,7 @@ function runGate(committedPaths) {
     try {
       execSync(`npm run ${leg.script}`, /** @type {any} */ ({
         cwd: root,
+        env: gateChildEnv,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 60_000,

@@ -51,6 +51,9 @@ import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror
  *   `'final'` = reach-triggered but runs AFTER every structural refusal
  *               (check:doc-links only — the broadest trigger in the gate must
  *               never mask a more specific refusal behind it).
+ * @property {{scope:'file', maxMs:number}} [writeTime] gates only. Declares a
+ *   reach-triggered gate safe to run after one edited file. `maxMs` must be at
+ *   most 1000: write-time feedback is advisory, but it must also stay cheap.
  * @property {string} [fix] one-line remediation hint printed by the pre-commit
  *   gate leg and the attest preflight when this gate fails. Gates: REQUIRED
  *   (reconciled — the regenerate-shaped meta-test
@@ -254,6 +257,7 @@ export const GUARDS = [
     ],
     impl: 'check:doc-code-citations',
     preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
     fix:
       'a backticked citation in a staged doc does not resolve — a slashed path must name a tracked file, ' +
       'a trailing-slash directory must exist (root- or doc-relative), and a bare filename must match ' +
@@ -445,6 +449,7 @@ export const GUARDS = [
     kind: 'gate',
     impl: 'check:backlog-budget',
     preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
     fix:
       'a staged backlog entry or file is over its size ceiling, and an over-budget file may only ' +
       'shrink — condense at write time: keep the MECHANISM and the open PROPERTY, link the primary ' +
@@ -479,6 +484,7 @@ export const GUARDS = [
     ],
     impl: 'check:backlog-line-numbers',
     preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
     fix:
       'a staged backlog entry cites a bare line number (a backticked `path:123` or a bare `:21` span) — ' +
       'cite the SYMBOL instead, or the file alone when no good symbol exists; never auto-resolve a ' +
@@ -502,6 +508,7 @@ export const GUARDS = [
     ],
     impl: 'check:memory-citations',
     preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
     fix: 'a staged doc cites a memory file that does not exist — fix the citation or restore the memory file',
     note:
       'the store is resolved from the REPOSITORY (its common git dir), so every linked worktree ' +
@@ -546,6 +553,32 @@ export const GUARDS = [
       "register the file or guard in scripts/guard-reach-data.mjs (guardedBy a real guard id, or " +
       "'declared-gap' with the reason in note)",
     note: 'this registry, reconciled; always: tree membership changes on ANY staged add/delete/rename',
+  },
+  {
+    id: 'check:generated-artifacts',
+    kind: 'gate',
+    impl: 'check:generated-artifacts',
+    preCommit: 'always',
+    fix:
+      'add or correct the generator row in the GENERATED section of scripts/guard-reach-data.mjs; ' +
+      'each tracked generator needs exactly one check, contractTest, or explained onDemand authority',
+    note: 'always: adding, deleting, or renaming any tracked generator changes the reconciled set',
+  },
+  {
+    id: 'check:invariant-glossary',
+    kind: 'gate',
+    impl: 'check:invariant-glossary',
+    preCommit: 'reach',
+    fix:
+      'add the missing uppercase nonnumeric INV-* namespace to docs/glossary-ids.md with its ' +
+      'contract and owning symbol/file, or retire the last source occurrence',
+  },
+  {
+    id: 'check:nightly-inbox',
+    kind: 'gate',
+    impl: 'check:nightly-inbox',
+    preCommit: 'reach',
+    fix: 'run `node scripts/nightly/render-inbox.mjs`, then re-stage docs/nightly-inbox.md',
   },
   {
     id: 'check:ci-trigger-paths',
@@ -1333,6 +1366,7 @@ export const REACH = [
       'prompt-capability-test',
       'prompt-renders-its-contract-test',
       'conceptual-category-comment-drift-test',
+      'check:invariant-glossary',
     ],
     uncovered:
       'the loop-core attestation half of pre-commit-gate covers only LOOP_CORE_PATTERNS prefixes ' +
@@ -1514,6 +1548,20 @@ export const REACH = [
       'gate rather than by a test.',
   },
   {
+    area: 'nightly inbox projection',
+    files: [
+      'docs/nightly-inbox.md',
+      '.audit-tools/nightly/open-items.json',
+      '.claude/nightly-decisions.json',
+      'scripts/nightly/items.mjs',
+      'scripts/nightly/render-inbox.mjs',
+    ],
+    guardedBy: ['check:nightly-inbox'],
+    note:
+      'render-inbox --check projects the tracked queue through the decisions ledger and compares ' +
+      'the tracked markdown inbox; settled items therefore cannot survive in the rendered surface',
+  },
+  {
     area: 'rendered host assets',
     files: ['skills/**', '.github/prompts/**', '.github/agents/**', '.gemini/**', '.agent/**', 'opencode.json'],
     guardedBy: ['verify:hosts', 'verify:remediate-hosts'],
@@ -1682,16 +1730,23 @@ export const REACH = [
     note: 'the per-file ratchet data the budget gate compares against',
   },
   {
+    area: 'invariant namespace glossary',
+    files: ['docs/glossary-ids.md', 'scripts/check-invariant-glossary.mjs'],
+    guardedBy: ['check:invariant-glossary'],
+    note:
+      'the gate scans tracked src/**/*.ts and reconciles every uppercase nonnumeric INV-* namespace ' +
+      'against the glossary table; numeric and lowercase file-local families stay out of scope',
+  },
+  {
     area: 'green-mechanism declaration',
-    files: ['.claude/green-mechanism.json'],
+    files: ['.claude/green-mechanism.json', 'scripts/shared/suite-green-status.mjs'],
     guardedBy: ['green-mechanism-declaration-test'],
     note:
-      'read by the MACHINE-WIDE ~/.agent-config/verify-green.mjs, which defers its `check` and ' +
-      'refuses its `record` while this file declares a non-empty ownedBy — so no second green ' +
-      'ledger can exist beside scripts/shared/suiteGreenStamp.mjs. UNCOVERED HALF: the consumer ' +
-      'lives outside this repo and cannot be gated from here, so the test pins the SHAPE only. ' +
-      'That a deferral actually happens is verified by running `verify-green.mjs check` in this ' +
-      'checkout, never by this tree.',
+      'the declaration names the repository-owned status command and the machine-wide ' +
+      '~/.agent-config/verify-green.mjs executes that command for check while still refusing its ' +
+      'own record path, so no second green ledger can exist beside suiteGreenStamp.mjs. The ' +
+      'contract test pins both declaration shape and declared-command execution; the external ' +
+      'consumer itself remains outside this repository.',
   },
   {
     area: 'nightly determinations ledger',
@@ -1766,5 +1821,100 @@ export const REACH = [
     files: ['benchmarks/p0/results/.gitignore'],
     guardedBy: 'declared-gap',
     note: 'empty result directory marker; no runtime guard reads it',
+  },
+];
+
+/**
+ * One row per tracked generator, naming exactly one freshness authority.
+ * `onDemand` is a deliberate, reviewable exception — never an omitted gate.
+ * @typedef {object} GeneratedRow
+ * @property {string} generator
+ * @property {'check'|'contractTest'} [authority]
+ * @property {string} [npmScript]
+ * @property {'flag'|'default'} [checkMode] check authority only; omitted means
+ *   the npm command must pass --check, while default means its no-flag mode is
+ *   the read-only freshness check and --write is the explicit mutation arm.
+ * @property {string} [contractTest]
+ * @property {boolean} [onDemand]
+ * @property {string} [reason]
+ * @property {string[]} [artifacts]
+ * @property {string} [note]
+ */
+
+/** @type {GeneratedRow[]} */
+export const GENERATED = [
+  {
+    generator: 'scripts/check-doc-manifest.mjs',
+    authority: 'check',
+    npmScript: 'check:doc-manifest',
+    checkMode: 'default',
+  },
+  {
+    generator: 'scripts/check-gate-enumeration.mjs',
+    authority: 'check',
+    npmScript: 'check:gate-enumeration',
+    checkMode: 'default',
+  },
+  {
+    generator: 'scripts/check-philosophy-brief.mjs',
+    authority: 'check',
+    npmScript: 'check:philosophy-brief',
+    checkMode: 'default',
+  },
+  {
+    generator: 'scripts/check-readme-sample-report.mjs',
+    authority: 'check',
+    npmScript: 'check:readme-sample-report',
+    checkMode: 'default',
+  },
+  {
+    generator: 'scripts/render-closeout.mjs',
+    authority: 'contractTest',
+    contractTest: 'tests/shared/closeout-render.test.ts',
+    note:
+      'This renderer writes tree-bound runtime state rather than a tracked artifact, so freshness ' +
+      'is not meaningful; its rendering and refusal contract is pinned by the named test.',
+  },
+  { generator: 'scripts/shared/generate-backlog-index.mjs', authority: 'check', npmScript: 'check:backlog-index' },
+  { generator: 'scripts/shared/generate-ci-trigger-paths.mjs', authority: 'check', npmScript: 'check:ci-trigger-paths' },
+  { generator: 'scripts/shared/generate-cli-surface.mjs', authority: 'check', npmScript: 'check:cli-surface' },
+  { generator: 'scripts/shared/generate-constitutional-doc-paths.mjs', authority: 'check', npmScript: 'check:constitutional-doc-paths' },
+  { generator: 'scripts/shared/generate-executor-producers.mjs', authority: 'check', npmScript: 'check:executor-producers' },
+  { generator: 'scripts/shared/generate-friction-categories.mjs', authority: 'check', npmScript: 'check:friction-categories' },
+  { generator: 'scripts/shared/generate-handoff-roadmap.mjs', authority: 'check', npmScript: 'check:handoff-roadmap' },
+  { generator: 'scripts/shared/generate-ingestion-checks.mjs', authority: 'check', npmScript: 'check:ingestion-checks' },
+  { generator: 'scripts/shared/generate-loop-core-patterns.mjs', authority: 'check', npmScript: 'check:loop-core-patterns' },
+  { generator: 'scripts/shared/generate-runtime-artifact-names.mjs', authority: 'check', npmScript: 'check:runtime-artifact-names' },
+  { generator: 'scripts/shared/generate-spec-mirrors.mjs', authority: 'check', npmScript: 'check:spec-mirrors' },
+  {
+    generator: 'scripts/nightly/render-inbox.mjs',
+    authority: 'check',
+    npmScript: 'check:nightly-inbox',
+    artifacts: ['docs/nightly-inbox.md', '.audit-tools/nightly/open-items.json'],
+  },
+  {
+    generator: 'scripts/shared/generate-filelock-export-surface.mjs',
+    authority: 'contractTest',
+    contractTest: 'tests/shared/filelock-export-surface.test.ts',
+    artifacts: ['scripts/shared/filelock-export-surface.generated.json'],
+    note: 'No --check arm by design; the contract test re-renders and byte-compares the surface.',
+  },
+  {
+    generator: 'scripts/audit/generate-schemas.mjs',
+    authority: 'contractTest',
+    contractTest: 'tests/audit/worker-schema-generation.test.ts',
+  },
+  {
+    generator: 'scripts/remediate/generate-auditor-contract-fixture.mjs',
+    authority: 'contractTest',
+    contractTest: 'tests/remediate/fixture-generator-drift-guard.test.ts',
+  },
+  {
+    generator: 'scripts/shared/generate-vitest-shard-baseline.mjs',
+    onDemand: true,
+    reason:
+      'The shard baseline is a measurement of this machine under current load, not a deterministic ' +
+      'render of tracked source. A parity check would manufacture cross-machine timing failures; ' +
+      'rewrite it deliberately with `npm run generate:shard-baseline` when suite shape changes.',
   },
 ];

@@ -28,6 +28,7 @@ import { ingestAnswers } from '../../scripts/nightly/ingest-answers.mjs';
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const SURFACE_HOOK = join(REPO_ROOT, '.claude', 'hooks', 'nightly-surface.mjs');
 const ANSWER_CLI = join(REPO_ROOT, 'scripts', 'nightly', 'answer.mjs');
+const RENDER_INBOX_CLI = join(REPO_ROOT, 'scripts', 'nightly', 'render-inbox.mjs');
 
 // Every fixture item carries a probe against this file, because writeOpenItems
 // refuses an item whose premise is not verifiably true at creation. The file
@@ -412,6 +413,7 @@ describe('inbox ingest — a ticked box becomes a ledger entry', () => {
     tick('1. Keep it');
     ingestAnswers(root);
     expect(readFileSync(join(root, 'docs', 'nightly-inbox.md'), 'utf8')).toMatch(/Nothing to answer/);
+    expect(readOpenItems(root).items).toEqual([]);
   });
 
   it('REFUSES two ticked boxes rather than guessing which one was meant', () => {
@@ -526,6 +528,35 @@ describe('inbox ingest — a ticked box becomes a ledger entry', () => {
     expect(res.recorded).toHaveLength(0);
     expect(res.errors).toHaveLength(0);
     expect(res.unanswered).toBe(1);
+  });
+});
+
+describe('render-inbox --check', () => {
+  const runCheck = () =>
+    spawnSyncHidden(process.execPath, [RENDER_INBOX_CLI, '--root', root, '--check'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+
+  it('passes on the current tracked projection and writes nothing', () => {
+    writeOpenItems(root, { items: [item()] });
+    writeInbox(root);
+    const before = readFileSync(join(root, 'docs', 'nightly-inbox.md'), 'utf8');
+    const result = runCheck();
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(readFileSync(join(root, 'docs', 'nightly-inbox.md'), 'utf8')).toBe(before);
+  });
+
+  it('fails read-only when the tracked render is stale', () => {
+    writeOpenItems(root, { items: [item()] });
+    writeInbox(root);
+    const path = join(root, 'docs', 'nightly-inbox.md');
+    writeFileSync(path, readFileSync(path, 'utf8') + '\nstale\n');
+    const result = runCheck();
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toMatch(/stale or missing/);
+    expect(readFileSync(path, 'utf8')).toMatch(/stale/);
   });
 });
 

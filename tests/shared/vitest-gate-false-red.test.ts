@@ -17,6 +17,8 @@
  */
 import { test, expect } from "vitest";
 import { isReporterTransportFault, HARNESS_FAULT } from "../../scripts/shared/vitestGateVerdict.mjs";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const TOKEN = "run-token-abc";
 const RPC_TIMEOUT_STDERR = `
@@ -108,4 +110,15 @@ test("the harness signature matches the observed form and not arbitrary prose", 
   // Test NAMES are author-chosen prose and must never trip it — the same
   // shortcut that produced two false hits when the gate grepped stdout.
   expect(HARNESS_FAULT.test('✓ handles a Timeout calling "onTaskUpdate" gracefully')).toBe(false);
+});
+
+test("the full-suite gate owns isolated reruns, observation recording, and repeated-failure repair dispatch", () => {
+  const source = readFileSync(resolve("scripts/shared/run-vitest-gate.mjs"), "utf8");
+  expect(source).toContain("runIsolatedDiagnostics({ record: transportRecord, attribution })");
+  expect(source).toContain("runIsolatedDiagnostics({ record, attribution })");
+  expect(source).toContain("AUDIT_TOOLS_ISOLATED_LOAD_DIAGNOSTIC");
+  expect(source).toContain("observeAndClaimLoadFlake");
+  expect(source).toContain('resolve(profileDir, "load-flake-record.json")');
+  expect(source).toContain("dispatch-load-flake-investigation.mjs");
+  expect(source).toContain("original gate remains RED");
 });

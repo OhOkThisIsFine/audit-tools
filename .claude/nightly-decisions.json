@@ -2160,69 +2160,89 @@
     "answer": "Stop restating any llm-relay invocation in this doc and point the bullet at the repo's own `scripts/shared/mcp-dispatch-lane.mjs`, the lane leg 2 already uses. This is the strongest fit for the bullet's own stated principle — 'the relay owns the routing mechanics... so this doc never restates them and cannot drift from them' — since the doc drifted precisely because it restated a mechanic. Cost: the doc becomes less self-contained for a reader outside the repo.",
     "subject": "",
     "path": "docs/nightly-routine.md",
-    "decided_at": "2026-09-06T17:49:25.099Z"
+    "decided_at": "2026-09-06T17:49:25.099Z",
+    "completed_at": "2026-09-07T17:57:11.423Z",
+    "completed_ref": "this housekeeping commit — nightly routine points to the repository MCP dispatch lane"
   },
   "812b48629fe2be01": {
     "disposition": "settled",
     "answer": "Apply the four corrections to CLAUDE.md: (1) 'authoritative registry of every guard (gate / hook / contract-test)' becomes '(gate / hook / git-hook / contract-test)'; (2) 'Adding a hook: register it in `.claude/settings.json` AND add the' becomes 'Adding a hook: register it in `.claude/settings.json` (or, for a gate at git's own boundary, in a tracked `.githooks/<name>` that execs it) AND add the'; (3) the PH-05 example sentence gains ' — since resolved by P53, which moved the commit legs to `.githooks/` and left this hook only what git cannot see'; (4) 'via `buildPreCommitLegs`' becomes 'via `buildPreCommitLegs` in `scripts/shared/derived-file-preflight.mjs`'.",
     "subject": "",
     "path": "CLAUDE.md",
-    "decided_at": "2026-09-06T17:49:25.102Z"
+    "decided_at": "2026-09-06T17:49:25.102Z",
+    "completed_at": "2026-09-07T17:57:11.863Z",
+    "completed_ref": "this housekeeping commit — four git-boundary and registry corrections applied to CLAUDE.md"
   },
   "6aebffe0c4e32e11": {
     "disposition": "settled",
     "answer": "Name the field in the prompt AND make the parser report what it drops. The prompt edit fixes today’s gap; the parser change makes the next one visible instead of silent. Cost: the largest change of the three, touching a loader body and shared parsing code in one pass.",
     "subject": "",
     "path": "skills/audit-code/audit-code.prompt.md",
-    "decided_at": "2026-09-06T17:49:25.106Z"
+    "decided_at": "2026-09-06T17:49:25.106Z",
+    "completed_at": "2026-09-07T17:57:12.297Z",
+    "completed_ref": "1961d1e0 — loader prompt names required reflection fields and parser reports discarded fields"
   },
   "26328a5e858c3f69": {
     "disposition": "settled",
     "answer": "Add both rows, then make the claim mechanical: a check that every non-numeric INV-* namespace appearing in src/**/*.ts has a glossary row, registered in scripts/guard-reach-data.mjs and wired into verify:checks. This is the repo's 'whatever can be enforced in tooling must be' rule applied to a doc that currently states an unenforced completeness claim. Cost: one more gate to maintain, and it will fire on the next invariant coined mid-wave.",
     "subject": "",
     "path": "docs/glossary-ids.md",
-    "decided_at": "2026-09-06T17:49:25.108Z"
+    "decided_at": "2026-09-06T17:49:25.108Z",
+    "completed_at": "2026-09-07T17:57:12.734Z",
+    "completed_ref": "this housekeeping commit — INV-COVERAGE and INV-SSF documented and completeness gated"
   },
   "462665972a678f7d": {
     "disposition": "settled",
     "answer": "Delete the three narration bullets. The decisions live in .claude/nightly-decisions.json, the design-gate outcomes in docs/reviews/live-run-defect-set-design-gate-2026-09-03.md, and P53’s outcome is already stated once in the live-state section. HANDOFF returns to current state plus immediate next.",
     "subject": "",
     "path": "docs/HANDOFF.md",
-    "decided_at": "2026-09-06T17:49:25.111Z"
+    "decided_at": "2026-09-06T17:49:25.111Z",
+    "completed_at": "2026-09-07T17:57:13.172Z",
+    "completed_ref": "3eff6823 — generated HANDOFF decision narration removed"
   },
   "5249ea2a9d5ad6d6": {
     "disposition": "settled",
     "answer": "Move the entry's closing rule — an entry that reinterprets an incident must quote or link the primary record's own words for the mechanism, not restate them — into docs/backlog/durable-traps.md as a standing line, then delete the open-bugs entry. This is the repo's stated pattern for a shipped entry that carries a durable convention: move the rule to its home in the same edit, never keep the entry just to host it.",
     "subject": "",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-09-06T17:49:25.114Z"
+    "decided_at": "2026-09-06T17:49:25.114Z",
+    "completed_at": "2026-09-07T17:57:13.606Z",
+    "completed_ref": "this housekeeping commit — primary-record rule moved to durable traps and open item removed"
   },
   "02ddbce6105770fa": {
     "disposition": "settled",
     "answer": "Do A, then build the minimum equivalent for ~/.claude/hooks/shell-conventions-guard.mjs: a form/remedy table beside its block sites plus a standalone test that re-drives each remedy. Covers every counted record. Cost: ~/.claude has no version history and no test harness, so the machine-wide half is new infrastructure, files to C:\\Code\\docs\\backlog.md rather than this repo, and cannot be red-green validated against a prior tree.",
     "subject": "",
     "path": ".claude/hooks/shell-trap-guard.mjs",
-    "decided_at": "2026-09-06T17:49:25.116Z"
+    "decided_at": "2026-09-06T17:49:25.116Z",
+    "completed_at": "2026-09-07T17:57:14.046Z",
+    "completed_ref": "this housekeeping commit — repository and global shell remedies are declared data with round-trip tests"
   },
   "ef4555cf23e838a5": {
     "disposition": "settled",
     "answer": "The hook prints findings and always exits 0. Cannot block a legitimate mid-edit intermediate state, so it cannot reproduce the measured typecheck-hook friction; the commit gate stays the only authority. Cost: an author can ignore it, so the serialized commit loop is reduced rather than closed.",
     "subject": "",
     "path": "scripts/shared/derived-file-preflight.mjs",
-    "decided_at": "2026-09-06T17:49:25.119Z"
+    "decided_at": "2026-09-06T17:49:25.119Z",
+    "completed_at": "2026-09-07T17:57:14.493Z",
+    "completed_ref": "this housekeeping commit — file-scoped write-time gates report advisory findings and always accept edits"
   },
   "991c31e5d1f673d5": {
     "disposition": "settled",
     "answer": "Adopt the attached patch: a `generated` section in scripts/guard-reach-data.mjs with one row per tracked generator naming its freshness authority (check | contractTest | onDemand with a stated reason), plus check:generated-artifacts in verify:checks and the derived pre-commit legs. Includes giving scripts/nightly/render-inbox.mjs the --check it currently lacks — it is the artifact whose staleness caused the one confirmed damage.",
     "subject": "",
     "path": "scripts/guard-reach-data.mjs",
-    "decided_at": "2026-09-06T17:49:25.122Z"
+    "decided_at": "2026-09-06T17:49:25.122Z",
+    "completed_at": "2026-09-07T17:57:14.926Z",
+    "completed_ref": "this housekeeping commit — tracked generators have reconciled freshness authorities and inbox check mode"
   },
   "5d8dadf4cbdd8e9a": {
     "disposition": "settled",
     "answer": "None of these solutions are correct. There should be a solution enforced by tooling.",
     "subject": "",
     "path": "scripts/shared/run-vitest-gate.mjs",
-    "decided_at": "2026-09-06T17:49:25.125Z"
+    "decided_at": "2026-09-06T17:49:25.125Z",
+    "completed_at": "2026-09-07T17:57:15.375Z",
+    "completed_ref": "this housekeeping commit — full-suite failures rerun alone, record load-only evidence, and dispatch repair investigation on recurrence"
   }
 }

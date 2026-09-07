@@ -24,6 +24,7 @@ is deleted too.
 | INV-CDI-EXPLICIT-NODE-FIELDS | A charter delta carries its subsystem identity as explicit `node_id`/`goal_node_id` fields rather than encoded inside `delta_id`, so `delta_id` stays an opaque identity no consumer needs to parse. | `src/shared/decompose/charterExtraction.ts` |
 | INV-CK | Deterministic identity, idempotency, and content keys. | `src/shared/contentKey.ts`; `src/shared/stableStringify.ts` |
 | INV-CO | Contract-pipeline obligation and reconciliation derivation. | `src/remediate/validation/contractPipelineGates.ts` |
+| INV-COVERAGE | Per-module remediation coverage joins preserve every owned finding's terminal outcome, verification evidence, and producing-module attribution; run close also reports planned findings missing from state. | `runClosePhase` in `src/remediate/phases/close.ts`; `RemediationItemState.recorded_by_module` in `src/remediate/state/types.ts`; `RemediationOutcomeRecord.recorded_by_module` in `src/shared/types/remediationOutcome.ts` |
 | INV-CPGV-OUTCOME-RECORD-OWNER | The cross-artifact gate-outcome record (`evaluated`/`reason`) is owned by `src/remediate/validation/contractPipelineGates.ts`. | `src/remediate/validation/contractPipelineGates.ts` |
 | INV-CVG | Fail-closed contract validation and scoped positive/negative coverage. | `src/remediate/validation/contractPipelineGates.ts` |
 | INV-DA | Analyzer deletion signals remain advisory and never authorize unattended deletion. | `src/remediate/review/autonomousGate.ts` |
@@ -49,6 +50,7 @@ is deleted too.
 | INV-S04 | Verbatim free-form intent is never copied into a host workload or output; only interpreted signals cross the boundary. | `src/shared/intent/freeFormIntentInterpreter.ts`; `src/shared/intent/pathScope.ts` |
 | INV-SCC | Portable run-id path encoding and live-holder file-lock freshness. | `src/shared/io/frictionCapture.ts`; `src/shared/io/fileLock.ts`; `src/shared/friction/triage.ts` |
 | INV-SOO | Canonical physical-file identity for ownership and overlap checks. | `src/shared/io/pathIdentity.ts` |
+| INV-SSF | Sync-spawn fold safety: child processes reachable while a lock or fold is held use the asynchronous tracked runner with a positive deadline, so event-loop heartbeats continue and hung children are bounded. | `runTrackedAsync` in `src/shared/tooling/exec.ts`; `git` in `src/shared/git.ts`; `enumerateTrackedFilePaths` in `src/remediate/phases/grounding.ts` |
 | INV-SSP-DEFERRED-SET-REPORTED | `computeStaleArtifacts` returns the stale set together with an explicit deferred set naming every downstream held behind a slice projection, and the emitted consolidated staleness record names them — an omission is red. | `src/audit/orchestrator/staleness.ts` |
 | INV-WTS | Landed-node ancestry probe: a landed node's commit must be an ancestor of the ref it claims to have landed on. | `src/remediate/steps/dispatch/hostHandoff.ts` |
 

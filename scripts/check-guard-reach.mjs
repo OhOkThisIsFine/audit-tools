@@ -152,11 +152,27 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
             `leg would print no remedy. State the one-line remedy. (${DATA_FILE})`,
         );
       }
+      if ('writeTime' in g) {
+        if (
+          g.preCommit !== 'reach' ||
+          g.writeTime?.scope !== 'file' ||
+          !Number.isInteger(g.writeTime?.maxMs) ||
+          g.writeTime.maxMs <= 0 ||
+          g.writeTime.maxMs > 1000
+        ) {
+          errors.push(
+            `Gate guard "${g.id}" has invalid writeTime metadata — expected ` +
+              `{ scope: 'file', maxMs: <integer 1..1000> } on a preCommit:'reach' gate.`,
+          );
+        }
+      }
     } else if ((g.kind === 'hook' || g.kind === 'git-hook' || g.kind === 'contract-test') && 'preCommit' in g) {
       errors.push(
         `Guard "${g.id}" (kind "${g.kind}") carries a preCommit flag — only gates run as derived ` +
           `pre-commit legs.`,
       );
+    } else if ('writeTime' in g) {
+      errors.push(`Guard "${g.id}" (kind "${g.kind}") carries writeTime metadata — only gates may run after edits.`);
     }
   }
 

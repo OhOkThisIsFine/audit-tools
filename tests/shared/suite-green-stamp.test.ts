@@ -30,6 +30,27 @@ describe('full-suite green is recorded as tree-bound evidence', () => {
     expect(mod.writeSuiteGreenStamp(ROOT, null)).toBe(false);
   });
 
+  it('answers the owned green check from the stamp and current tree without rerunning the suite', async () => {
+    const mod = await import(/* @vite-ignore */ MODULE);
+    expect(mod.suiteGreenVerdict(null, 'a'.repeat(40))).toEqual({
+      ok: false,
+      reason: 'no full-suite green stamp exists for this checkout',
+    });
+    expect(mod.suiteGreenVerdict({ tree: 'a'.repeat(40) }, 'b'.repeat(40))).toMatchObject({
+      ok: false,
+    });
+    expect(
+      mod.suiteGreenVerdict(
+        { tree: 'a'.repeat(40), ran_at: '2026-09-07T00:00:00.000Z' },
+        'a'.repeat(40),
+      ),
+    ).toEqual({
+      ok: true,
+      tree: 'a'.repeat(40),
+      ranAt: '2026-09-07T00:00:00.000Z',
+    });
+  });
+
   it('is written by the one vitest gate every suite run goes through', () => {
     const gate = readFileSync(resolve(ROOT, 'scripts/shared/run-vitest-gate.mjs'), 'utf8');
     expect(gate).toContain('suiteGreenStamp.mjs');

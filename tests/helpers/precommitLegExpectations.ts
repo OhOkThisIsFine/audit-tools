@@ -17,4 +17,9 @@ export const EXPECTED_SRC_REACH_LEG_IDS = [
   "check:shared-primitives",
   "check:orphan-modules",
   "check:guard-reach",
+  // The generator census is also unconditional: any tracked add/delete/rename
+  // can change whether a generator has a declared freshness authority.
+  "check:generated-artifacts",
+  // Production source is one side of the glossary reconciliation.
+  "check:invariant-glossary",
 ] as const;

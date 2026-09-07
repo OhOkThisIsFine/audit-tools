@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @generated-artifact tracked-output
 //
 // Render the nightly routine's open items as a TRACKED markdown inbox the owner
 // answers by ticking a checkbox.
@@ -18,9 +19,18 @@
 //
 // Usage:
 //   node scripts/nightly/render-inbox.mjs [--root <repo>]
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { readOpenItems, readDecisions, partitionBySettled, answeredNotDone, LEGS, LEG_TITLES, INBOX_RELPATH } from './items.mjs';
+import {
+  readOpenItems,
+  readDecisions,
+  partitionBySettled,
+  answeredNotDone,
+  LEGS,
+  LEG_TITLES,
+  INBOX_RELPATH,
+  OPEN_ITEMS_RELPATH,
+} from './items.mjs';
 
 const MARKER = 'nightly:item';
 
@@ -221,7 +231,7 @@ export function renderInbox({ items, decisions = {}, run = null, applied = [], s
   return out.join('\n').replace(/\n{4,}/g, '\n\n\n').trimEnd() + '\n';
 }
 
-export function writeInbox(root) {
+export function projectInbox(root) {
   const state = readOpenItems(root);
   const decisions = readDecisions(root);
   const { open } = partitionBySettled(state.items, decisions, root);
@@ -232,16 +242,62 @@ export function writeInbox(root) {
     applied: state.applied ?? [],
     skipped: state.skipped ?? [],
   });
+  const snapshot = JSON.stringify({ ...state, items: open }, null, 2) + '\n';
+  return { body, snapshot, open: open.length };
+}
+
+export function writeInbox(root) {
+  const { body, snapshot, open } = projectInbox(root);
+  const snapshotPath = join(root, OPEN_ITEMS_RELPATH);
   const out = join(root, INBOX_RELPATH);
+  mkdirSync(dirname(snapshotPath), { recursive: true });
   mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(snapshotPath, snapshot, 'utf8');
   writeFileSync(out, body, 'utf8');
-  return { path: out, open: open.length };
+  return { path: out, open };
+}
+
+/** Read-only parity arm for the tracked inbox projection. */
+export function checkInbox(root) {
+  const { body, snapshot, open } = projectInbox(root);
+  const out = join(root, INBOX_RELPATH);
+  const snapshotPath = join(root, OPEN_ITEMS_RELPATH);
+  let current = null;
+  let currentSnapshot = null;
+  try {
+    current = readFileSync(out, 'utf8');
+  } catch {
+    // Missing is stale; the write arm owns creation.
+  }
+  try {
+    currentSnapshot = readFileSync(snapshotPath, 'utf8');
+  } catch {
+    // Missing is stale; the write arm owns creation.
+  }
+  return {
+    path: out,
+    snapshotPath,
+    open,
+    fresh: current === body && currentSnapshot === snapshot,
+  };
 }
 
 if (process.argv[1] && process.argv[1].endsWith('render-inbox.mjs')) {
   const args = process.argv.slice(2);
   const rootIdx = args.indexOf('--root');
   const root = rootIdx >= 0 ? args[rootIdx + 1] : process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  if (args.includes('--check')) {
+    const result = checkInbox(root);
+    if (!result.fresh) {
+      console.error(
+        `${INBOX_RELPATH} or ${OPEN_ITEMS_RELPATH} is stale or missing.\n` +
+          `Fix: node scripts/nightly/render-inbox.mjs${rootIdx >= 0 ? ` --root ${root}` : ''}`,
+      );
+      process.exit(1);
+    }
+    console.log(`✓ nightly inbox: ${result.open} open item(s), tracked render is current`);
+    process.exit(0);
+  }
   const { open } = writeInbox(root);
   console.log(`nightly inbox: ${open} open item(s) → ${INBOX_RELPATH}`);
 }

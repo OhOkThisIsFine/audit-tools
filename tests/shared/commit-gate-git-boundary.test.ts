@@ -75,6 +75,35 @@ describe("commit-gate at git's boundary: a real `git commit` is judged by git ru
     expect(r.landed).toBe(true);
   });
 
+  test("npm checks do not inherit git's hook-local repository bindings", () => {
+    writeFileSync(
+      join(repo, "check.mjs"),
+      `const leaked = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", "GIT_COMMON_DIR"]\n` +
+        `  .filter((name) => process.env[name]);\n` +
+        `if (leaked.length) console.error("leaked git locals: " + leaked.join(", "));\n` +
+        `process.exit(leaked.length === 0 ? 0 : 1);\n`,
+      "utf8",
+    );
+    const packagePath = join(repo, "package.json");
+    const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
+    packageJson.scripts["test:doc-contract"] = "node check.mjs";
+    writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+    writeFileSync(join(repo, "note.md"), "# doc-triggered child check\n", "utf8");
+    g("add", "check.mjs", "package.json", "note.md");
+    const r = spawnSync(process.execPath, [COMMIT_GATE, "pre-commit"], {
+      cwd: repo,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_DIR: join(repo, ".git"),
+        GIT_WORK_TREE: repo,
+        GIT_INDEX_FILE: join(repo, ".git", "index"),
+        GIT_PREFIX: "nested/",
+      },
+    });
+    expect(r.status, `expected hook-local variables to be scrubbed; stderr:\n${r.stderr}`).toBe(0);
+  });
+
   test("a BAD staged snapshot is refused by the gate's own check, and HEAD does not move", () => {
     writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
     g("add", "sentinel.txt");

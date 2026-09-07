@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @generated-artifact runtime-state
 //
 // Renderer + refusal for the end-of-sprint hand-back.
 //

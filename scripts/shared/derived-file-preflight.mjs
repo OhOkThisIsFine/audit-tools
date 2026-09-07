@@ -29,7 +29,7 @@
 // to 240s) — including it would make attest cost as much as the gate. That
 // bound is stated in docs/backlog/durable-traps.md.
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
 import { isGlob, globToRegExp } from '../check-doc-manifest.mjs';
 import { GUARDS, REACH } from '../guard-reach-data.mjs';
@@ -200,6 +200,64 @@ export function buildPreCommitLegs({ guards = GUARDS, reach = REACH, packageScri
     });
   }
   return [...legs.filter((l) => l.phase === 'main'), ...legs.filter((l) => l.phase === 'final')];
+}
+
+/**
+ * Draw the cheap file-scoped legs for one edited path from the same registry
+ * and reach data as the commit gate. These are hints only; the commit gate
+ * remains the authority over the complete staged tree.
+ */
+export function buildWriteTimeLegs(
+  filePath,
+  { root = process.cwd(), guards = GUARDS, reach = REACH, packageScripts = {} } = {},
+) {
+  const normalized = norm(isAbsolute(filePath) ? relative(root, filePath) : filePath);
+  const writeTime = new Map(
+    guards
+      .filter((guard) => guard.kind === 'gate' && guard.writeTime?.scope === 'file')
+      .map((guard) => [guard.id, guard.writeTime]),
+  );
+  return buildPreCommitLegs({ guards, reach, packageScripts })
+    .filter((leg) => writeTime.has(leg.id) && leg.triggered({ root, staged: [normalized] }))
+    .map((leg) => ({ ...leg, maxMs: writeTime.get(leg.id)?.maxMs ?? 1000 }));
+}
+
+/**
+ * Run write-time legs as advisory observations. A failed check is returned as
+ * data; this function never throws for a leg result and never owns an exit
+ * code, so a caller cannot accidentally turn an intermediate edit into a gate.
+ */
+export function runWriteTimeAdvisories({
+  root,
+  filePath,
+  packageScripts = readPackageScripts(root),
+  execute = execSync,
+}) {
+  const findings = [];
+  const skipped = [];
+  for (const leg of buildWriteTimeLegs(filePath, { root, packageScripts })) {
+    if (!scriptWired(root, leg.script)) {
+      skipped.push(`${leg.script} is not wired in this repo`);
+      continue;
+    }
+    try {
+      execute(`npm run ${leg.script}`, /** @type {any} */ ({
+        cwd: root,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: leg.maxMs,
+        windowsHide: true,
+      }));
+    } catch (error) {
+      const tail = `${/** @type {any} */ (error).stdout ?? ''}\n${/** @type {any} */ (error).stderr ?? ''}`
+        .trim()
+        .split('\n')
+        .slice(-20)
+        .join('\n');
+      findings.push({ id: leg.id, script: leg.script, fix: leg.fix, tail });
+    }
+  }
+  return { findings, skipped };
 }
 
 function readPackageScripts(root) {

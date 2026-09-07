@@ -8,9 +8,20 @@
 // corrupts the other's, and surface a non-zero exit if EITHER reports a failure
 // (INV-remediate-infra-08: a partial deploy must not report success).
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 let failed = false;
+
+// A published tarball already carries dist/. A source checkout does not, and
+// npm's postinstall runs only after dependencies are present, so this is the
+// first reliable point at which it can build the shared export. Without this
+// bootstrap a fresh checkout partially deployed host assets and skipped both
+// OpenCode config and artifact .gitignore management until a human happened to
+// rerun postinstall after the first build.
+if (!ensureSourceCheckoutBuilt()) failed = true;
+
 for (const script of ["./audit/postinstall.mjs", "./remediate/postinstall.mjs"]) {
   const scriptPath = fileURLToPath(new URL(script, import.meta.url));
   const result = spawnSync(process.execPath, [scriptPath], { stdio: "inherit", windowsHide: true });
@@ -31,6 +42,37 @@ for (const script of ["./audit/postinstall.mjs", "./remediate/postinstall.mjs"])
 await manageArtifactGitignore();
 
 process.exit(failed ? 1 : 0);
+
+function ensureSourceCheckoutBuilt() {
+  const sharedEntry = fileURLToPath(new URL("../dist/shared/index.js", import.meta.url));
+  if (existsSync(sharedEntry)) return true;
+
+  const sourceTree = fileURLToPath(new URL("../src", import.meta.url));
+  const tsconfig = fileURLToPath(new URL("../tsconfig.json", import.meta.url));
+  if (!existsSync(sourceTree) || !existsSync(tsconfig)) return true;
+
+  const npmCli = process.env.npm_execpath;
+  if (!npmCli) {
+    console.warn(
+      "[audit-tools] postinstall: source checkout needs a shared build, but npm_execpath is unavailable.",
+    );
+    return false;
+  }
+
+  console.log("[audit-tools] postinstall: building shared output for this source checkout...");
+  const result = spawnSync(process.execPath, [npmCli, "run", "build"], {
+    cwd: packageRoot,
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  if (result.error || (result.status ?? 0) !== 0 || result.signal) {
+    console.warn(
+      `[audit-tools] postinstall: source-checkout build failed (${result.error?.message ?? result.signal ?? `exit ${result.status}`}).`,
+    );
+    return false;
+  }
+  return existsSync(sharedEntry);
+}
 
 async function manageArtifactGitignore() {
   try {

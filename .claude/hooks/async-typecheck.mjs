@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// PostToolUse (async) typecheck: after an Edit/Write to a source .ts file,
-// typecheck the (single) package.
+// PostToolUse advisory: run registry-declared file-scoped checks immediately,
+// then debounce the package typecheck after a source TypeScript edit.
 //
 // ADVISORY ONLY — this hook surfaces early type-error hints to the agent;
 // it is NOT an authoritative correctness verdict. The PreToolUse commit gate
@@ -15,9 +15,10 @@
 // overlapping invocations for the same package coalesce to one post-quiescence
 // run. The last writer wins; earlier writers detect they were superseded and exit.
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { runWriteTimeAdvisories } from '../../scripts/shared/derived-file-preflight.mjs';
 
 // ── 1. Parse payload — fail-open on any parse error ─────────────────────────
 let raw = '';
@@ -33,6 +34,22 @@ try {
 } catch {
   // Unparseable payload — advisory hint impossible; exit silently.
   process.exit(0);
+}
+
+const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+
+// File-scoped derived gates are WRITE-TIME ADVISORIES only. They can report an
+// intermediate edit, but they always exit 0; the commit gate is the sole
+// authority over the completed staged tree.
+const writeTime = runWriteTimeAdvisories({ root, filePath });
+if (writeTime.findings.length > 0) {
+  console.error(
+    `[ADVISORY] ${writeTime.findings.length} write-time check(s) found an issue after this edit.\n` +
+      `The edit is accepted; the commit gate remains authoritative.\n` +
+      writeTime.findings
+        .map((finding) => `\n${finding.id}:\n${finding.tail}\nFix: ${finding.fix}`)
+        .join('\n'),
+  );
 }
 
 // ── 2. Guard: only .ts files in a source subsystem ───────────────────────────
@@ -52,7 +69,6 @@ const pkg = m[1];
 // If the token changed a later invocation superseded us → yield.
 // This coalesces any burst of overlapping edits to one post-quiescence run.
 const DEBOUNCE_MS = 45_000;
-const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const stampDir = join(root, '.claude', 'hooks', '.state');
 try {
   mkdirSync(stampDir, { recursive: true });

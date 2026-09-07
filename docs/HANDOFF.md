@@ -18,15 +18,12 @@
   points at `.githooks` (writing the worktree scope too where `extensions.worktreeConfig` makes a
   `.git/config.worktree` entry win). A clone that has never opened a session runs no commit gate
   until it does; the registry row states this as the uncovered half.
-- **The 2026-09-05 duplication-and-complexity sweep is complete.** Hotspot #7 landed on
-  2026-09-06, so `ingestRemediationHostResults` is now a ~40-line orchestrator over
-  `validateHostResultBundle`, `executeHostVerificationReruns` and
-  `commitRemediationStateUpdates`, all three file-local. The owner chose the deepest of the three
-  offered seams — split fully, preserve behaviour — so the couplings that made the plan's own
-  seam wrong are neutralised rather than accepted: the per-item pending set and timestamp ride on
-  the verdict, and a settled-finding set restores what the pending filter used to observe. The
-  accepted-file set stays a verification-phase accumulator, which is where the plan had it wrong.
-  `tests/remediate/host-ingest-phase-boundary.test.ts` pins the boundary so it cannot erode back.
+- **The 2026-09-06 maintenance decision queue is closed.** The tracked inbox is empty and every
+  answer carries completion evidence in the decision ledger. Generator freshness and
+  invariant-glossary completeness are reconciled gates; eligible document gates report at write
+  time without blocking; shell-guard remedies round-trip through their guards; source installs
+  build shared output before host deployment; and a full-suite failure now owns its isolated
+  diagnostic, load-only record, recurrence warning and repair-investigation dispatch.
 
 ## Immediate next
 
@@ -36,12 +33,6 @@ diagnostic produced six of seven results before timeout; context/output/turn cap
 unenforced. Evidence and limits are in
 [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
 No quality score exists; successful preflight and contract tests are not acceptance.
-
-**The remaining settled owner decisions of 2026-09-06 stay queued.** They are pinned in
-[`open-bugs.md`](backlog/open-bugs.md) and appear in the generated list below. The answers
-themselves live in the decisions ledger under `.claude/`, which is their one home — read them
-there. Two of the ten are now landed: `l1-5` (the HANDOFF trim) and `6aebffe0` (the loader prompt
-and the reflection parser, in the lap below).
 
 ## Deliberate state, not bugs
 
@@ -71,11 +62,10 @@ and the reflection parser, in the lap below).
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 2 pinned item(s).
+> `verify:checks` and at commit). 1 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ Nine owner decisions of 2026-09-06 are settled and unimplemented (2026-09-06, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - ▶ Audit-tools deep-review acceptance benchmark still needs its external run. · [`forward-tracks.md`](backlog/forward-tracks.md)
 
 <!-- END GENERATED ROADMAP -->

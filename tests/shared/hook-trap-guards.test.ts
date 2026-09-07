@@ -89,7 +89,7 @@ function runHook(
   hook: string,
   payload: HookPayload,
   { root = REPO_ROOT, env = {} }: RunHookOptions = {},
-): { code: number | null; stderr: string } {
+): { code: number | null; stdout: string; stderr: string } {
   const scrubbed: NodeJS.ProcessEnv = { ...process.env };
   for (const name of BYPASS_VARS) delete scrubbed[name];
   const r = spawnSyncHidden(process.execPath, [hook], {
@@ -99,7 +99,7 @@ function runHook(
     windowsHide: true,
     env: { ...scrubbed, CLAUDE_PROJECT_DIR: root, ...env },
   });
-  return { code: r.status, stderr: r.stderr ?? '' };
+  return { code: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
 const bash = (command: string): HookPayload => ({ tool_name: 'Bash', tool_input: { command } });
@@ -114,6 +114,84 @@ const ps = (command: string): HookPayload => ({
 const psBg = (command: string): HookPayload => ({
   tool_name: 'PowerShell',
   tool_input: { command, run_in_background: true },
+});
+
+interface RemedyForm {
+  tool_name: 'Bash' | 'PowerShell';
+  command: string;
+  run_in_background?: boolean;
+  semantic_probe?: {
+    shell: 'bash';
+    stdout: string;
+  };
+}
+
+interface RemedyContract {
+  id: string;
+  remedies: Array<{
+    kind: 'command' | 'prose';
+    text: string;
+    forms?: RemedyForm[];
+  }>;
+}
+
+describe('shell-trap-guard: declared remedy contracts', () => {
+  it('builds every refusal from declared data and admits every advertised command form', () => {
+    const dump = runHook(SHELL_GUARD, {
+      tool_name: 'Bash',
+      tool_input: { command: 'true', remedy_contract: true },
+    });
+    expect(dump.code, dump.stderr).toBe(0);
+    const contracts = JSON.parse(dump.stdout) as RemedyContract[];
+    expect(contracts).toHaveLength(15);
+    expect(new Set(contracts.map((contract) => contract.id)).size).toBe(contracts.length);
+
+    for (const contract of contracts) {
+      expect(contract.remedies.length, contract.id).toBeGreaterThan(0);
+      for (const remedy of contract.remedies) {
+        expect(remedy.text.trim(), `${contract.id} has an empty remedy`).not.toBe('');
+        if (remedy.kind === 'prose') {
+          expect(remedy.forms, `${contract.id}: prose is advice, not a fake executable proof`).toBeUndefined();
+          continue;
+        }
+        expect(remedy.forms?.length, `${contract.id}: command remedy has no driven form`).toBeGreaterThan(0);
+        for (const form of remedy.forms ?? []) {
+          const result = runHook(SHELL_GUARD, {
+            tool_name: form.tool_name,
+            tool_input: {
+              command: form.command,
+              ...(form.run_in_background === undefined
+                ? {}
+                : { run_in_background: form.run_in_background }),
+            },
+          });
+          expect(result.code, `${contract.id}: ${form.command}\n${result.stderr}`).toBe(0);
+          if (form.semantic_probe?.shell === 'bash') {
+            const bashPath =
+              process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+            const probeEnv: NodeJS.ProcessEnv = { ...process.env };
+            delete probeEnv.TMPDIR;
+            const probe = spawnSyncHidden(bashPath, ['-lc', form.command], {
+              encoding: 'utf8',
+              env: probeEnv,
+              windowsHide: true,
+            });
+            expect(
+              probe.status,
+              `${contract.id}: semantic probe failed\n${probe.stderr ?? ''}`,
+            ).toBe(0);
+            expect(probe.stdout, `${contract.id}: remedy produced the wrong value`).toBe(
+              form.semantic_probe.stdout,
+            );
+          }
+        }
+      }
+    }
+
+    const source = readFileSync(SHELL_GUARD, 'utf8');
+    expect([...source.matchAll(/denials\.push\(/gu)]).toHaveLength(1);
+    expect(source).toContain('denials.push(`${details}\\n${renderRemedies(contract, values)}`)');
+  });
 });
 
 describe('shell-trap-guard: codex stdin (backlog: logged 3x, hangs at exit 0 + empty output)', () => {

@@ -25,12 +25,9 @@ Use independent lanes wherever they preserve coverage:
 - **Codex** has repo access and performs its own source inspection:
   `codex exec --skip-git-repo-check "<prompt>" < /dev/null`. Closing stdin is
   load-bearing; an open stdin makes the process wait indefinitely.
-- **The second independent lane** is a separate free-provider session through
-  the llm-relay dispatch ladder (freellmapi and its `claude.ps1` launcher were
-  retired 2026-08-29; running them resurrects the retired router):
-  `llm-relay dispatch -t "<prompt>"` renders the ladder with the prompt
-  substituted — run the first ready lane's printed command (rendered for pwsh;
-  `--shell` changes that). The relay owns the routing mechanics (lane order,
+- **The second independent lane** is a separate free-provider session dispatched
+  through [`scripts/shared/mcp-dispatch-lane.mjs`](../scripts/shared/mcp-dispatch-lane.mjs),
+  the same helper leg 2 uses. The relay owns the routing mechanics (lane order,
   endpoint, model, env), so this doc never restates them and cannot drift from
   them. Treat every reply as an advisory lead and verify it against source;
   quoted evidence is especially fallible.

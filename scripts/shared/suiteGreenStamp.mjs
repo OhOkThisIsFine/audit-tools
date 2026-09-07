@@ -92,3 +92,28 @@ export function readSuiteGreenStamp(root) {
     return null;
   }
 }
+
+/**
+ * Decide whether a recorded full-suite run certifies the current worktree.
+ * This pure seam is shared by the closeout readiness check and the small CLI
+ * named in .claude/green-mechanism.json; neither caller re-derives what a
+ * missing or mismatched stamp means.
+ * @param {{tree?: string, ran_at?: string} | null} stamp
+ * @param {string | null} currentTree
+ * @returns {{ok: true, tree: string, ranAt: string | null} | {ok: false, reason: string}}
+ */
+export function suiteGreenVerdict(stamp, currentTree) {
+  if (!currentTree) {
+    return { ok: false, reason: 'could not compute the current worktree tree' };
+  }
+  if (!stamp?.tree) {
+    return { ok: false, reason: 'no full-suite green stamp exists for this checkout' };
+  }
+  if (stamp.tree !== currentTree) {
+    return {
+      ok: false,
+      reason: `the last full-suite green covered different content (${stamp.tree.slice(0, 12)} != ${currentTree.slice(0, 12)})`,
+    };
+  }
+  return { ok: true, tree: currentTree, ranAt: stamp.ran_at ?? null };
+}

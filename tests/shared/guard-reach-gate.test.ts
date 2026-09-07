@@ -39,6 +39,7 @@ interface GuardRow {
   /** REQUIRED on gates (P34): the derived pre-commit leg behavior, as data.
    *  Typed loosely here so the invalid-enum case can be expressed. */
   preCommit?: false | 'reach' | 'always' | 'final' | string | boolean;
+  writeTime?: { scope: string; maxMs: number };
   /** Per-leg remediation hint the derived gate leg prints. */
   fix?: string;
   note?: string;
@@ -363,5 +364,25 @@ describe('preCommit flag discipline (P34) — the derived leg set is stated, nev
       }),
     });
     expect(errors.some((e) => e.includes('check:alpha') && e.includes('declares no fix'))).toBe(true);
+  });
+
+  it('writeTime is reconciled as a file-scoped sub-second reach gate', () => {
+    const valid = run({
+      guards: GUARDS.map((g) =>
+        g.id === 'check:alpha' ? { ...g, writeTime: { scope: 'file', maxMs: 1000 } } : g,
+      ),
+    });
+    expect(valid).toEqual([]);
+
+    for (const writeTime of [
+      { scope: 'tree', maxMs: 1000 },
+      { scope: 'file', maxMs: 1001 },
+      { scope: 'file', maxMs: 0 },
+    ]) {
+      const errors = run({
+        guards: GUARDS.map((g) => (g.id === 'check:alpha' ? { ...g, writeTime } : g)),
+      });
+      expect(errors.some((e) => e.includes('check:alpha') && e.includes('invalid writeTime'))).toBe(true);
+    }
   });
 });

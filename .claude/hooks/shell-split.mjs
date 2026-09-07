@@ -211,7 +211,10 @@ export function findLiveExpansions(s, names) {
 export function bypassEnabled(name, cmd) {
   if (process.env[name] === '1') return true;
   const assign = String.raw`${name}=(?:'1'|"1"|1)(?=\s|$|;|&)`;
-  return new RegExp(String.raw`(?:^|[;&|]\s*|\bexport\s+)${assign}`).test(cmd);
+  // A bare newline is a statement boundary too. Keep this separator set in
+  // lockstep with splitShellStatements: the guard's advertised inline bypass
+  // must work on a checked statement regardless of which separator precedes it.
+  return new RegExp(String.raw`(?:^|[;&|\n]\s*|\bexport\s+)${assign}`).test(cmd);
 }
 
 // Split a command into shell statements on `&&`, `||`, `;`, and newlines that

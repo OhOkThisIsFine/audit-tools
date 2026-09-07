@@ -29,9 +29,9 @@
 // doesn't match (missing ledger, stale ledger, reporter never ran), the gate
 // fails closed rather than trusting a ledger it cannot prove belongs to this run.
 
-import { randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,10 +43,17 @@ import {
 } from "./vitestGateVerdict.mjs";
 import { worktreeTree } from "./worktree-tree.mjs";
 import { isFullSuiteRun, writeSuiteGreenStamp } from "./suiteGreenStamp.mjs";
+import {
+  observeAndClaimLoadFlake,
+} from "./load-flake-record.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
 const profileDir = resolve(repoRoot, ".audit-tools-profile");
+// Mutable observations are checkout-local runtime state. Keeping them under the
+// ignored profiler directory is load-bearing: a write to this record must not
+// change the source-tree identity used to decide whether an observation repeats.
+const loadFlakeRecordPath = resolve(profileDir, "load-flake-record.json");
 const require = createRequire(import.meta.url);
 
 const vitestArgs = process.argv.slice(2);
@@ -94,7 +101,9 @@ if (vitestExit !== 0) {
     // pre-commit doc-contract leg — filled that silence by asserting a cause it
     // had not observed. Attribution belongs here, where the run token proves
     // the ledger describes THIS run.
-    console.error(formatAttributionLine(attributeFailure({ record: transportRecord, token })));
+    const attribution = attributeFailure({ record: transportRecord, token });
+    console.error(formatAttributionLine(attribution));
+    await runIsolatedDiagnostics({ record: transportRecord, attribution });
     process.exit(vitestExit);
   }
   console.error(
@@ -158,7 +167,9 @@ if (outcome.failed > 0) {
       `across ${outcome.failedFiles.length} file(s) — this is the false-green defect; failing the gate:`,
   );
   for (const file of outcome.failedFiles) console.error(`  - ${file}`);
-  console.error(formatAttributionLine(attributeFailure({ record, token })));
+  const attribution = attributeFailure({ record, token });
+  console.error(formatAttributionLine(attribution));
+  await runIsolatedDiagnostics({ record, attribution });
   process.exit(1);
 }
 
@@ -168,3 +179,114 @@ if (outcome.failed > 0) {
 if (isFullSuiteRun(vitestArgs)) writeSuiteGreenStamp(repoRoot, worktreeTree(repoRoot));
 
 process.exit(0);
+
+/**
+ * A full-suite failure is still RED, but it no longer leaves diagnosis to a
+ * remembered file list. Every attributable failing file is rerun alone. A
+ * full-suite fail followed by a solo pass is recorded from the tool's own
+ * observations; the second distinct-tree occurrence starts a read-only repair
+ * investigation and tells the runner where its report will land.
+ */
+async function runIsolatedDiagnostics({ record, attribution }) {
+  if (!isFullSuiteRun(vitestArgs)) return;
+  if (process.env.AUDIT_TOOLS_ISOLATED_LOAD_DIAGNOSTIC === "1") return;
+  if (!attribution.attributable) return;
+
+  const environment = record?.flakeBaseline?.environment ?? `${process.platform}-unknown-load`;
+  const tree = worktreeTree(repoRoot);
+  for (const file of [...new Set(attribution.failedFiles)]) {
+    console.error(`[vitest-gate] isolated diagnostic: rerunning ${file} alone; the original gate remains RED.`);
+    const solo = spawnSync(process.execPath, [fileURLToPath(import.meta.url), file], {
+      cwd: repoRoot,
+      stdio: "inherit",
+      windowsHide: true,
+      env: { ...process.env, AUDIT_TOOLS_ISOLATED_LOAD_DIAGNOSTIC: "1" },
+    });
+    const soloExit = solo.status ?? (solo.error || solo.signal ? 1 : 0);
+    if (soloExit !== 0) {
+      console.error(
+        `[vitest-gate] ISOLATED-FAIL: ${file} also failed alone (regression candidate); original gate remains RED.`,
+      );
+      continue;
+    }
+
+    console.error(
+      `[vitest-gate] LOAD-ONLY OBSERVED: ${file} failed in the full suite and passed alone; ` +
+        `original gate remains RED.`,
+    );
+    if (!tree) {
+      console.error("[vitest-gate] observation was not recorded because the worktree tree id was unavailable.");
+      continue;
+    }
+
+    try {
+      const result = await observeAndClaimLoadFlake({
+        path: loadFlakeRecordPath,
+        environment,
+        file,
+        tree,
+        observedAt: new Date().toISOString(),
+        startInvestigation: async (observation) => {
+          const slug = createHash("sha256").update(`${environment}\0${file}`).digest("hex").slice(0, 16);
+          const investigationDir = resolve(profileDir, "load-flake-investigations");
+          const requestPath = resolve(investigationDir, `${slug}.request.json`);
+          const reportPath = resolve(investigationDir, `${slug}.md`);
+          mkdirSync(investigationDir, { recursive: true });
+          writeFileSync(
+            requestPath,
+            `${JSON.stringify({ repoRoot, environment, file, tree, count: observation.count }, null, 2)}\n`,
+            "utf8",
+          );
+          const child = spawn(
+            process.execPath,
+            [resolve(here, "dispatch-load-flake-investigation.mjs"), requestPath, reportPath],
+            { cwd: repoRoot, detached: true, stdio: "ignore", windowsHide: true },
+          );
+          const started = await waitForSpawn(child);
+          if (!started.ok) return { started: false, error: started.error };
+          child.on("error", () => {});
+          child.unref();
+          return { started: true, requestedAt: new Date().toISOString(), reportPath };
+        },
+      });
+      if (result.prior?.count > 0) {
+        console.error(
+          `[vitest-gate] ADVISORY: ${file} has failed under full-suite load and passed alone ` +
+            `${result.prior.count} time(s) on distinct source-tree content in ${environment}.`,
+        );
+      }
+      if (result.investigation.started) {
+        console.error(
+          `[vitest-gate] REPEATED LOAD-ONLY FAILURE: started an isolated test-repair investigation; report: ${result.investigation.reportPath}`,
+        );
+      } else if (result.investigation.error) {
+        const typedSpawnError = /** @type {any} */ (result.investigation.error);
+        console.error(
+          `[vitest-gate] repeated-load investigation could not start (${typedSpawnError?.message ?? typedSpawnError}); ` +
+            `the claim remains retryable and the original gate remains RED.`,
+        );
+      }
+    } catch (error) {
+      const typedError = /** @type {any} */ (error);
+      console.error(
+        `[vitest-gate] load-only observation could not be recorded (${typedError?.message ?? error}); original gate remains RED.`,
+      );
+    }
+  }
+}
+
+/** Resolve only after Node confirms process creation; an `error` leaves the record unclaimed. */
+function waitForSpawn(child) {
+  return new Promise((resolve) => {
+    const onSpawn = () => {
+      child.off("error", onError);
+      resolve({ ok: true });
+    };
+    const onError = (error) => {
+      child.off("spawn", onSpawn);
+      resolve({ ok: false, error });
+    };
+    child.once("spawn", onSpawn);
+    child.once("error", onError);
+  });
+}

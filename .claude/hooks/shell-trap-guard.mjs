@@ -78,6 +78,38 @@ const subCmds = splitShellStatements(cmd);
 
 const denials = [];
 const advisories = [];
+const remedyContracts = [];
+
+/**
+ * Declare the refusal remedies beside the rule that owns them. The denial is
+ * rendered from this data, and the contract test drives every command form
+ * back through this hook. This makes "the guard accepts its own advice" a
+ * checked property rather than wording maintained by memory.
+ * @param {{ id: string, remedies: Array<{ kind: 'command' | 'prose', text: string, forms?: Array<{ tool_name: 'Bash' | 'PowerShell', command: string, run_in_background?: boolean, semantic_probe?: { shell: 'bash', stdout: string } }> }> }} contract
+ */
+function defineRemedies(contract) {
+  if (!contract.id || !Array.isArray(contract.remedies) || contract.remedies.length === 0) {
+    throw new Error('invalid shell-guard remedy contract');
+  }
+  remedyContracts.push(contract);
+  return contract;
+}
+
+function renderRemedies(contract, values = {}) {
+  return contract.remedies
+    .map((remedy) => {
+      let text = remedy.text;
+      for (const [name, value] of Object.entries(values)) {
+        text = text.replaceAll(`{${name}}`, String(value));
+      }
+      return `  ${text}`;
+    })
+    .join('\n');
+}
+
+function deny(contract, details, values) {
+  denials.push(`${details}\n${renderRemedies(contract, values)}`);
+}
 
 // ── git helper — never throws; callers branch on `.ok`. ──────────────────────
 function git(args) {
@@ -97,6 +129,21 @@ function git(args) {
 // killed with EXIT 0 AND EMPTY OUTPUT — indistinguishable from a model that
 // returned nothing. Logged three times (2026-07-19 / -21 / -23), each costing a
 // wasted background run.
+const CODEX_STDIN_REMEDIES = defineRemedies({
+  id: 'codex-stdin',
+  remedies: [
+    {
+      kind: 'command',
+      text: 'fix: append `< /dev/null` to the codex invocation.',
+      forms: [{ tool_name: 'Bash', command: 'codex exec "review" < /dev/null' }],
+    },
+    {
+      kind: 'command',
+      text: 'alternative: pass the prompt on stdin instead of as an argument.',
+      forms: [{ tool_name: 'Bash', command: 'echo review | codex exec' }],
+    },
+  ],
+});
 for (const sub of subCmds) {
   const stripped = stripQuoted(sub);
   // Matched on the STRIPPED statement: `rg "codex exec" docs` is a textual
@@ -108,10 +155,10 @@ for (const sub of subCmds) {
   // Something piped INTO codex also satisfies stdin (the prompt-on-stdin form).
   const pipedInto = /\|[^|]*\bcodex\b/.test(stripped);
   if (!redirectsStdin && !pipedInto) {
-    denials.push(
+    deny(
+      CODEX_STDIN_REMEDIES,
       'codex exec without stdin closed — it will HANG FOREVER on "Reading additional input from stdin..." ' +
         'and be killed with exit 0 + empty output (looks exactly like a model that returned nothing).\n' +
-        `  fix: append \`< /dev/null\` to the codex invocation, or pass the prompt ON stdin instead of as an argument.\n` +
         `  offending statement: ${sub.slice(0, 200)}`,
     );
   }
@@ -128,6 +175,25 @@ for (const sub of subCmds) {
 // `git checkout <ref> -- <paths>`, `git checkout .`, and `git restore` (unless
 // it is the index-only `--staged` form, which does not touch the worktree).
 // Plain `git checkout <branch>` is branch switching and is never flagged.
+const DESTRUCTIVE_RESTORE_REMEDIES = defineRemedies({
+  id: 'destructive-restore',
+  remedies: [
+    {
+      kind: 'prose',
+      text: 'fix: undo a temporary edit by INVERTING it with a second targeted edit, copy it to the scratchpad and back, or preserve it with `git stash push -- <path>`.',
+    },
+    {
+      kind: 'command',
+      text: 'deliberate discard: prefix the command with `AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1`.',
+      forms: [
+        {
+          tool_name: 'Bash',
+          command: 'AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1 git checkout -- README.md',
+        },
+      ],
+    },
+  ],
+});
 function restoreTargets(sub) {
   const stripped = stripQuoted(sub);
   if (!/\bgit\b/.test(stripped)) return null;
@@ -165,13 +231,11 @@ for (const sub of subCmds) {
     .filter((l) => l.length > 2 && l[1] !== ' ' && !l.startsWith('??'))
     .map((l) => l.slice(3).trim());
   if (atRisk.length > 0) {
-    denials.push(
+    deny(
+      DESTRUCTIVE_RESTORE_REMEDIES,
       'destructive restore — this would silently discard UNSTAGED work (git restores from the INDEX, ' +
         'and the resulting tree looks clean):\n' +
-        atRisk.map((p) => `  - ${p}`).join('\n') +
-        '\n  fix: undo a temporary (e.g. red-green mutation) edit by INVERTING it with a second targeted edit, ' +
-        'or copy the file to the scratchpad first and copy it back. `git stash push -- <path>` also preserves it.\n' +
-        '  deliberate discard: re-run with AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1.',
+        atRisk.map((p) => `  - ${p}`).join('\n'),
     );
   }
 }
@@ -184,23 +248,47 @@ for (const sub of subCmds) {
 // `--dangerously-skip-permissions` makes agy answer ABOUT THAT FLAG instead of
 // the prompt, and in the derailed run it began executing `audit-code next-step`
 // against the live repo unprompted.
+const AGY_PERMISSIONS_REMEDIES = defineRemedies({
+  id: 'agy-permissions-flag',
+  remedies: [
+    {
+      kind: 'command',
+      text: 'fix: use a different analysis lane whose permission model fits the task.',
+      forms: [{ tool_name: 'Bash', command: 'codex exec "review" < /dev/null' }],
+    },
+    {
+      kind: 'prose',
+      text: 'alternative: add the required allow-rules to agy settings instead of passing `--dangerously-skip-permissions`.',
+    },
+  ],
+});
+const AGY_STDIN_REMEDIES = defineRemedies({
+  id: 'agy-stdin',
+  remedies: [
+    {
+      kind: 'command',
+      text: 'fix: put the content in the prompt argument itself.',
+      forms: [{ tool_name: 'Bash', command: 'agy -p "review C:/tmp/input.txt"' }],
+    },
+  ],
+});
 for (const sub of subCmds) {
   if (!/(^|\s|\/|\\)agy(\.\w+)?(\s|$)/.test(sub)) continue;
   if (!/\s(-p|--print)(\s|$)/.test(sub)) continue;
   const stripped = stripQuoted(sub);
   if (/--dangerously-skip-permissions\b/.test(stripped)) {
-    denials.push(
+    deny(
+      AGY_PERMISSIONS_REMEDIES,
       'agy -p with --dangerously-skip-permissions — agy latches onto its OWN flag and answers about ' +
         '`--dangerously-skip-permissions` instead of your prompt (moving the task into a file does not help; ' +
-        'the flag is still in argv). One derailed run started executing `audit-code next-step` against the live repo.\n' +
-        '  fix: use codex or the NIM/LiteLLM lane for repo analysis; if agy is required, add read-only ' +
-        'allow-rules to its settings.json instead of passing that flag with a substantive prompt.',
+        'the flag is still in argv). One derailed run started executing `audit-code next-step` against the live repo.',
     );
   }
   if (/\|[^|]*\bagy\b/.test(stripped)) {
-    denials.push(
+    deny(
+      AGY_STDIN_REMEDIES,
       'piping into `agy -p` — agy does NOT read stdin; the piped document is silently ignored ' +
-        '("No document provided"). Put the content in the prompt argument itself.',
+        '("No document provided").',
     );
   }
   if (denials.length === 0) {
@@ -214,24 +302,51 @@ for (const sub of subCmds) {
 // ── Rule: Bash-tool syntax traps (Git Bash on Windows) ───────────────────────
 if (isBash) {
   const stripped = stripQuoted(cmd);
+  const WINDOWS_PATH_REMEDIES = defineRemedies({
+    id: 'bash-windows-path',
+    remedies: [
+      {
+        kind: 'command',
+        text: 'fix: use forward slashes (`C:/Code/x`).',
+        forms: [{ tool_name: 'Bash', command: 'node C:/Code/x/script.mjs' }],
+      },
+      {
+        kind: 'prose',
+        text: 'alternative: run the backslash-path command through the PowerShell tool.',
+      },
+    ],
+  });
   // Unquoted Windows backslash path — bash eats the backslashes (`C:\a\b` ->
   // `C:ab`). Drive-letter (`C:\x`), relative (`.\x` / `..\x`), and UNC
   // (`\\server\share`) forms all mangle the same way.
   if (/[A-Za-z]:\\|(?:^|\s)\.{1,2}\\\S|(?:^|\s)\\\\[A-Za-z0-9]/.test(stripped)) {
-    denials.push(
+    deny(
+      WINDOWS_PATH_REMEDIES,
       'unquoted Windows backslash path in a Bash-tool command — bash strips the backslashes ' +
-        '(`C:\\Code\\x` becomes `C:Codex`; same for `.\\x` and `\\\\server\\share`).\n' +
-        '  fix: use forward slashes (`C:/Code/x`), or run the command through the PowerShell tool.',
+        '(`C:\\Code\\x` becomes `C:Codex`; same for `.\\x` and `\\\\server\\share`).',
     );
   }
   // PowerShell here-string in a POSIX shell: parsed as literal `@` plus a syntax
   // error, and a commit lands with a mangled/truncated message.
+  const BASH_HERE_STRING_REMEDIES = defineRemedies({
+    id: 'bash-powershell-here-string',
+    remedies: [
+      {
+        kind: 'command',
+        text: 'fix: write the body to the scratchpad and use `git commit -F <file>`.',
+        forms: [{ tool_name: 'Bash', command: 'git commit -F C:/tmp/commit-message.txt' }],
+      },
+      {
+        kind: 'prose',
+        text: 'alternative: run a PowerShell here-string through the PowerShell tool.',
+      },
+    ],
+  });
   if (/@['"]\s*\r?\n/.test(cmd)) {
-    denials.push(
+    deny(
+      BASH_HERE_STRING_REMEDIES,
       'PowerShell here-string (@\'...\'@) in a Bash-tool command — POSIX sh parses it as literal `@` ' +
-        'characters plus a syntax error, and a commit message lands mangled or truncated.\n' +
-        '  fix: write the body to the scratchpad and use `git commit -F <file>` (single-line messages via -m are fine), ' +
-        'or run it through the PowerShell tool.',
+        'characters plus a syntax error, and a commit message lands mangled or truncated.',
     );
   }
   // `mktemp -d` yields an msys `/tmp/...` path that native tools (node, the
@@ -239,11 +354,21 @@ if (isBash) {
   // Command-position only: `rg mktemp docs` SEARCHES for the word, it doesn't
   // run it — fire on statement start, after a pipe, or inside `$(`/backtick
   // substitution.
+  const MKTEMP_REMEDIES = defineRemedies({
+    id: 'bash-mktemp',
+    remedies: [
+      {
+        kind: 'command',
+        text: 'fix: use the session scratchpad directory by its absolute `C:/...` path.',
+        forms: [{ tool_name: 'Bash', command: 'echo result > C:/tmp/result.txt' }],
+      },
+    ],
+  });
   if (subCmds.some((s) => /(?:^|\||\$\(|`)\s*mktemp\b/.test(stripQuoted(s)))) {
-    denials.push(
+    deny(
+      MKTEMP_REMEDIES,
       '`mktemp` in the Bash tool returns an msys path (`/tmp/tmp.XXXX`) that node / the packaged CLI ' +
-        'cannot resolve — it is re-rooted at the Windows CWD.\n' +
-        '  fix: use the session scratchpad directory (an absolute `C:/...` path) for temp files.',
+        'cannot resolve — it is re-rooted at the Windows CWD.',
     );
   }
 
@@ -267,6 +392,42 @@ if (isBash) {
   // DOUBLE-quoted (`"$TMPDIR/x"`), which stripQuoted blanks. Single-quoted
   // occurrences are inert and must not fire — `rg '$TMPDIR' docs/` is a search.
   const UNSET_IN_BASH_TOOL = ['TMPDIR', 'CLAUDE_PROJECT_DIR'];
+  const UNSET_ENV_REMEDIES = defineRemedies({
+    id: 'bash-unset-env',
+    remedies: [
+      {
+        kind: 'command',
+        text: 'fix: write the session scratchpad path by its absolute `C:/...` value.',
+        forms: [{ tool_name: 'Bash', command: 'echo result > C:/tmp/result.txt' }],
+      },
+      {
+        kind: 'command',
+        text: 'for the repo root, use a relative path or `$(git rev-parse --show-toplevel)`.',
+        forms: [{ tool_name: 'Bash', command: 'echo $(git rev-parse --show-toplevel)' }],
+      },
+      {
+        kind: 'command',
+        text: 'deliberate: assign the variable in a preceding statement (`TMPDIR=/c/tmp; ...`).',
+        forms: [
+          {
+            tool_name: 'Bash',
+            command: 'TMPDIR=/c/tmp; printf \'%s\\n\' "$TMPDIR/x.log"',
+            semantic_probe: { shell: 'bash', stdout: '/c/tmp/x.log\n' },
+          },
+        ],
+      },
+      {
+        kind: 'command',
+        text: 'deliberate: prefix the checked statement with `AUDIT_TOOLS_ALLOW_UNSET_ENV=1`.',
+        forms: [
+          {
+            tool_name: 'Bash',
+            command: 'echo ready\nAUDIT_TOOLS_ALLOW_UNSET_ENV=1 echo "$TMPDIR/x.log"',
+          },
+        ],
+      },
+    ],
+  });
   const expansions = findLiveExpansions(cmd, UNSET_IN_BASH_TOOL);
   // A command that SETS the variable first is correct usage. Same statement-
   // anchored form bypassEnabled() uses, so a mere mention in a string cannot
@@ -280,17 +441,14 @@ if (isBash) {
     (n) => !selfAssigned.has(n),
   );
   if (liveUnset.length > 0 && !bypassEnabled('AUDIT_TOOLS_ALLOW_UNSET_ENV', cmd)) {
-    denials.push(
+    deny(
+      UNSET_ENV_REMEDIES,
       `${liveUnset.map((n) => `$${n}`).join(' and ')} — UNSET in the Bash tool, so the expansion is the ` +
         'EMPTY STRING and the failure names the wrong cause. `> "$TMPDIR/x.log"` becomes `> /x.log` ' +
         '("Permission denied", which reads as a temp-dir problem), and a path read back later resolves ' +
         'against the Windows CWD as `C:\\Program Files\\Git\\x.log` (which reads as a missing file).\n' +
-        '  fix: write the SESSION SCRATCHPAD path by its absolute value (the `C:/Users/.../scratchpad` ' +
-        'path in the system prompt); for the repo root use a relative path or $(git rev-parse --show-toplevel).\n' +
         '  note: CLAUDE_PROJECT_DIR is a hook-invocation variable — it is substituted into the command ' +
-        'lines in .claude/settings.json and never exported to a tool shell.\n' +
-        '  deliberate: set it in the command itself (`TMPDIR=/c/tmp …`), or re-run with ' +
-        'AUDIT_TOOLS_ALLOW_UNSET_ENV=1.',
+        'lines in .claude/settings.json and never exported to a tool shell.',
     );
   }
 
@@ -305,20 +463,36 @@ if (isBash) {
   // DENY rather than advise: both uses have a strictly better form ($() for a
   // real substitution, -F <file> for prose), so there is nothing this refuses
   // that has no correct rewrite ([[an-advisory-that-fires-and-is-read-past]]).
+  const BACKTICK_REMEDIES = defineRemedies({
+    id: 'bash-backtick',
+    remedies: [
+      {
+        kind: 'prose',
+        text: 'fix (prose/markdown): write the body to the scratchpad, or single-quote the string so the backtick is literal.',
+      },
+      {
+        kind: 'command',
+        text: 'fix (real substitution): use `$(...)` instead.',
+        forms: [{ tool_name: 'Bash', command: 'echo $(date)' }],
+      },
+      {
+        kind: 'command',
+        text: 'deliberate: prefix the statement with `AUDIT_TOOLS_ALLOW_BACKTICKS=1`.',
+        forms: [
+          { tool_name: 'Bash', command: 'AUDIT_TOOLS_ALLOW_BACKTICKS=1 echo `date`' },
+        ],
+      },
+    ],
+  });
   const liveTicks = findLiveBackticks(cmd);
   if (liveTicks.length > 0 && !bypassEnabled('AUDIT_TOOLS_ALLOW_BACKTICKS', cmd)) {
     const inProse = liveTicks.some((t) => t.context === 'double');
-    denials.push(
+    deny(
+      BACKTICK_REMEDIES,
       'live backtick in a Bash-tool command — a backtick COMMAND-SUBSTITUTES everywhere except inside ' +
         "single quotes, so it substitutes inside double quotes too. Markdown backticks in a quoted " +
         'message are executed, not written; that is how a backlog file landed with command output ' +
-        'spliced into its prose.\n' +
-        (inProse
-          ? '  fix (prose/markdown): write the body to the scratchpad and use `git commit -F <file>`, or ' +
-            'single-quote the string — inside single quotes a backtick is literal.\n'
-          : '') +
-        '  fix (real substitution): use $(...) instead — same semantics, nests, and does not collide with markdown.\n' +
-        '  deliberate: re-run with AUDIT_TOOLS_ALLOW_BACKTICKS=1.',
+        `spliced into its prose.${inProse ? ' The occurrence is in prose/markdown.' : ''}`,
     );
   }
 
@@ -338,6 +512,26 @@ if (isBash) {
   // half of the class has its own guard.
   const INLINE_INTERPRETER =
     /\b(?:node\s+(?:-e|--eval)|python3?\s+-c|perl\s+-e|ruby\s+-e|(?:bash|sh)\s+-c)\b/;
+  const INLINE_SCRIPT_REMEDIES = defineRemedies({
+    id: 'bash-inline-script',
+    remedies: [
+      {
+        kind: 'command',
+        text: 'fix: write the script to the session scratchpad and run it by path.',
+        forms: [{ tool_name: 'Bash', command: 'node C:/tmp/script.mjs' }],
+      },
+      {
+        kind: 'command',
+        text: 'deliberate: prefix the statement with `AUDIT_TOOLS_ALLOW_INLINE_SCRIPT=1`.',
+        forms: [
+          {
+            tool_name: 'Bash',
+            command: 'AUDIT_TOOLS_ALLOW_INLINE_SCRIPT=1 node -e "const s = \\`a\\`; console.log(s)"',
+          },
+        ],
+      },
+    ],
+  });
   for (const sub of subCmds) {
     // Matched on the STRIPPED statement — `rg "node -e" docs/` is a quoted
     // textual mention, not an invocation, and must not fire.
@@ -351,14 +545,12 @@ if (isBash) {
     if (!payloadSpan || payloadSpan.quote !== '"') continue;
     const activeEscapes = payloadSpan.content.match(/\\[`"$\\]/g) ?? [];
     if (activeEscapes.length < 2) continue;
-    denials.push(
+    deny(
+      INLINE_SCRIPT_REMEDIES,
       `inline interpreter payload with ${activeEscapes.length} shell-active escapes ` +
         '(`\\` before one of `` ` `` `"` `$` `\\`) — the exact shape that got mangled: the shell ' +
         'eats one level of escaping, so the interpreter runs a DIFFERENT program from the one ' +
         'written (2026-08-14: an escaped backtick went inert and the regex around it became invalid).\n' +
-        '  fix: write the script to the session scratchpad and run it by path — re-runnable, ' +
-        'diffable, no double-escaping.\n' +
-        '  deliberate: re-run with AUDIT_TOOLS_ALLOW_INLINE_SCRIPT=1.\n' +
         `  offending statement: ${sub.slice(0, 200)}`,
     );
   }
@@ -428,26 +620,44 @@ const FILTER_PIPE = /\|\s*(?:grep|rg|tail|head|wc|sed|awk|Select-String|Select-O
 // its own statement and applies to every pipeline after it, and `${PIPESTATUS[0]}`
 // is read in the statement AFTER the pipe. A per-statement check sees neither.
 const PIPE_STATUS_PRESERVED = /\bpipefail\b|\bPIPESTATUS\b/.test(stripQuoted(cmd));
+const MASKED_EXIT_REMEDIES = defineRemedies({
+  id: 'masked-exit',
+  remedies: [
+    {
+      kind: 'command',
+      text: "fix (Bash): `{example} > run.log 2>&1`; let the {exitNoun} exit BE the command's exit, then inspect `run.log` in a separate call.",
+      forms: [{ tool_name: 'Bash', command: 'npm test > run.log 2>&1' }],
+    },
+    {
+      kind: 'command',
+      text: 'alternative (Bash): enable `set -o pipefail` when a pipe is required.',
+      forms: [{ tool_name: 'Bash', command: 'set -o pipefail; npm test | tail -5' }],
+    },
+    {
+      kind: 'command',
+      text: 'fix (PowerShell): `{example} *> run.log; exit $LASTEXITCODE`.',
+      forms: [
+        {
+          tool_name: 'PowerShell',
+          command: 'npm test *> run.log; exit $LASTEXITCODE',
+        },
+      ],
+    },
+  ],
+});
 for (const sub of subCmds) {
   const stripped = stripQuoted(sub);
   const family = MASK_FAMILIES.find((f) => f.match.test(stripped));
   if (!family || !FILTER_PIPE.test(stripped)) continue;
   if (PIPE_STATUS_PRESERVED) continue;
   if (bypassEnabled('AUDIT_TOOLS_ALLOW_MASKED_EXIT', cmd)) continue;
-  denials.push(
+  deny(
+    MASKED_EXIT_REMEDIES,
     `masked ${family.name} exit code — ${family.subject} piped into a filter reports the FILTER's ` +
       `status, ${family.consequence}\n` +
-      // Background-safe remedies ONLY: the old `; echo "EXIT=$?"` suggestion
-      // IS the laundering trap when the command is backgrounded (the rule
-      // below), so the guard must never prescribe it.
-      (isBash
-        ? `  fix: \`${family.example} > run.log 2>&1\` — let the ${family.exitNoun} exit BE the ` +
-          "command's exit (no trailing `; echo`: backgrounded, a trailing statement becomes the " +
-          "compound's exit and fakes green), then read/grep `run.log` in a separate call " +
-          '(`set -o pipefail` also propagates the real status if you must pipe).\n'
-        : `  fix: \`${family.example} *> run.log; exit $LASTEXITCODE\` then read/grep \`run.log\` in a ` +
-          'separate call.\n') +
+      `The remedy preserves the ${family.exitNoun} status; do not append a status-printing statement.\n` +
       `  offending statement: ${sub.slice(0, 200)}`,
+    { example: family.example, exitNoun: family.exitNoun },
   );
   break;
 }
@@ -471,21 +681,46 @@ for (const sub of subCmds) {
 // identical mechanism get read past once ([[false-red-is-as-corrosive-as-false-green]]
 // — same mechanism, different command family).
 const CLI_DISPATCH_CMD = /\bcodex\s+exec\b|\bagy\b[^|;&]*\s(?:-p|--print)\b/;
+const BUFFERED_DISPATCH_REMEDIES = defineRemedies({
+  id: 'buffered-dispatch',
+  remedies: [
+    {
+      kind: 'command',
+      text: 'fix (Bash): redirect to a file, then inspect the file separately.',
+      forms: [
+        {
+          tool_name: 'Bash',
+          command: 'codex exec "review" < /dev/null > run.log 2>&1 &',
+        },
+      ],
+    },
+    {
+      kind: 'command',
+      text: 'fix (PowerShell): pipe the prompt into the dispatch and redirect all output to a file.',
+      forms: [
+        {
+          tool_name: 'PowerShell',
+          command: 'Get-Content prompt.txt | codex exec *> run.log',
+        },
+      ],
+    },
+    {
+      kind: 'prose',
+      text: 'on a wedge, salvage a partial transcript from the file in a separate call.',
+    },
+  ],
+});
 for (const sub of subCmds) {
   const stripped = stripQuoted(sub);
   if (!CLI_DISPATCH_CMD.test(stripped) || !FILTER_PIPE.test(stripped)) continue;
   if (bypassEnabled('AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH', cmd)) continue;
-  denials.push(
+  deny(
+    BUFFERED_DISPATCH_REMEDIES,
     'peer-CLI dispatch piped into a buffering filter — `codex exec` / `agy -p` output piped into ' +
       '`tail`/`head`/`grep`/etc. shows ZERO bytes until the process exits, so a live run and a hung ' +
       'one look identical. One run sat at 0 bytes for ~30 minutes before returning a complete verdict; ' +
       "a wedged run the following night had already emitted 24 findings into its transcript, recoverable " +
       "only because that call was redirected to a FILE, not piped — a pipe would have discarded them.\n" +
-      (isBash
-        ? '  fix: redirect to a file instead — `codex exec "…" < /dev/null > run.log 2>&1 &` (or ' +
-          '`*> run.log` in PowerShell), then read/tail/grep `run.log` separately. On a wedge, salvage a ' +
-          "partial transcript with e.g. `awk '/^FINDING:/,0' run.log`.\n"
-        : '  fix: redirect to a file instead — `*> run.log`, then read/tail/grep `run.log` separately.\n') +
       `  offending statement: ${sub.slice(0, 200)}`,
   );
   break;
@@ -506,19 +741,37 @@ for (const sub of subCmds) {
 const MAX_DISPATCH_PROMPT_CHARS = 4000;
 const CLI_DISPATCH_PROMPT_CMD =
   /\bcodex\s+exec\b|\bagy\b[^|;&]*\s(?:-p|--print)\b|\bclaude\.ps1\b[^|;&]*\s(?:-p|--print)\b/;
+const LONG_DISPATCH_REMEDIES = defineRemedies({
+  id: 'long-dispatch',
+  remedies: [
+    {
+      kind: 'command',
+      text: 'fix: dispatch one bounded item through `node scripts/shared/lane-dispatch.mjs`.',
+      forms: [{ tool_name: 'Bash', command: 'node scripts/shared/lane-dispatch.mjs' }],
+    },
+    {
+      kind: 'command',
+      text: 'deliberate: prefix the statement with `AUDIT_TOOLS_ALLOW_LONG_DISPATCH=1`.',
+      forms: [
+        {
+          tool_name: 'Bash',
+          command: `AUDIT_TOOLS_ALLOW_LONG_DISPATCH=1 codex exec "${'x'.repeat(4001)}" < /dev/null > run.log 2>&1`,
+        },
+      ],
+    },
+  ],
+});
 for (const sub of subCmds) {
   if (!CLI_DISPATCH_PROMPT_CMD.test(stripQuoted(sub))) continue;
   if (bypassEnabled('AUDIT_TOOLS_ALLOW_LONG_DISPATCH', cmd)) continue;
   const longest = Math.max(0, ...findQuotedSpans(sub).map((sp) => sp.content.length));
   if (longest <= MAX_DISPATCH_PROMPT_CHARS) continue;
-  denials.push(
+  deny(
+    LONG_DISPATCH_REMEDIES,
     `over-long inline dispatch prompt (${longest} chars > ${MAX_DISPATCH_PROMPT_CHARS}) — an ` +
       'over-scoped peer-CLI dispatch loses the WHOLE answer silently: nothing back, truncation, ' +
       'or max_tokens spent reasoning out loud (six dated incidents; a broad multi-file scope ' +
-      'killed both lanes four times).\n' +
-      '  fix: dispatch one bounded item per call via `node scripts/shared/lane-dispatch.mjs` — ' +
-      'per-item logs, finish_reason + output size recorded, coverage stamp.\n' +
-      '  deliberate: re-run with AUDIT_TOOLS_ALLOW_LONG_DISPATCH=1.',
+      'killed both lanes four times).',
   );
   break;
 }
@@ -566,6 +819,61 @@ const CHILD_MARKER =
   /(?:^|[\s;&|(])AUDIT_TOOLS_CHILD_SESSION\s*=|\$env:AUDIT_TOOLS_CHILD_SESSION\s*=/;
 const CD_STATEMENT = /^\s*(?:cd|pushd|Set-Location|sl)\b/i;
 const strippedCmd = stripQuoted(cmd);
+const REPO_LANE_REMEDIES = defineRemedies({
+  id: 'repo-lane',
+  remedies: [
+    {
+      kind: 'command',
+      text: 'fix (Bash): mark the lane as a child with `AUDIT_TOOLS_CHILD_SESSION=1`.',
+      forms: [
+        {
+          tool_name: 'Bash',
+          command: 'AUDIT_TOOLS_CHILD_SESSION=1 claude -p "review" --allowedTools Bash,Read',
+        },
+      ],
+    },
+    {
+      kind: 'command',
+      text: 'fix (PowerShell): set `$env:AUDIT_TOOLS_CHILD_SESSION = \'1\';` before the lane.',
+      forms: [
+        {
+          tool_name: 'PowerShell',
+          command: "$env:AUDIT_TOOLS_CHILD_SESSION = '1'; claude -p \"review\" --allowedTools Bash,Read",
+        },
+      ],
+    },
+    {
+      kind: 'command',
+      text: 'alternative: give the lane read-only tools.',
+      forms: [
+        {
+          tool_name: 'Bash',
+          command: 'claude -p "review" --allowedTools Read,Grep,Glob',
+        },
+      ],
+    },
+    {
+      kind: 'command',
+      text: 'alternative: point the lane at a directory outside this repository.',
+      forms: [
+        {
+          tool_name: 'Bash',
+          command: 'cd C:/tmp && claude -p "review" --allowedTools Bash,Read',
+        },
+      ],
+    },
+    {
+      kind: 'command',
+      text: 'deliberate: prefix the statement with `AUDIT_TOOLS_ALLOW_REPO_LANE=1`.',
+      forms: [
+        {
+          tool_name: 'Bash',
+          command: 'AUDIT_TOOLS_ALLOW_REPO_LANE=1 claude -p "review" --allowedTools Bash,Read',
+        },
+      ],
+    },
+  ],
+});
 if (
   LANE_CMD.test(strippedCmd) &&
   LANE_WRITE_CAPABLE.test(strippedCmd) &&
@@ -598,17 +906,13 @@ if (
     };
     // No cd at all: the lane inherits THIS session's cwd, which is this repo.
     if (targets.length === 0 || targets.some(inFamily)) {
-      denials.push(
+      deny(
+        REPO_LANE_REMEDIES,
         'a write-capable lane dispatched INTO this repo — it will not stay a lane. It fires ' +
           'SessionStart, self-registers as an OWNER, and then runs this repo\'s sprint ceremony. ' +
           'Measured 2026-08-29: such a lane never answered its prompt; it ran the full suite three ' +
           "times, overwrote the DISPATCHING session's suite-green stamp with its own tree, and " +
-          'pushed the branch to origin.\n' +
-          '  fix: pick ONE — mark it a child (`AUDIT_TOOLS_CHILD_SESSION=1` inline, or ' +
-          "`$env:AUDIT_TOOLS_CHILD_SESSION = '1';` in PowerShell); or give it READ-ONLY tools " +
-          '(`--allowedTools Read,Grep,Glob`), which cannot commit, push, or rewrite the stamp; or ' +
-          'point it at a directory outside this repository.\n' +
-          '  deliberate: re-run with AUDIT_TOOLS_ALLOW_REPO_LANE=1.',
+          'pushed the branch to origin.',
       );
     }
   }
@@ -633,6 +937,55 @@ if (
 // negative, accepted: in-statement `&` backgrounding (`npm test … & echo`) is
 // not a split separator and stays uncovered. Bypass reuses
 // AUDIT_TOOLS_ALLOW_MASKED_EXIT — same trap class as the pipe rule above.
+const BACKGROUND_STATUS_REMEDIES = defineRemedies({
+  id: 'background-status-laundering',
+  remedies: [
+    {
+      kind: 'command',
+      text: 'fix (Bash): keep the status-bearing command terminal and inspect its log separately.',
+      forms: [
+        {
+          tool_name: 'Bash',
+          command: 'npm test > run.log 2>&1',
+          run_in_background: true,
+        },
+      ],
+    },
+    {
+      kind: 'command',
+      text: 'alternative (Bash): use a terminal `exit $?` status pass-through.',
+      forms: [
+        {
+          tool_name: 'Bash',
+          command: 'npm test > run.log 2>&1; exit $?',
+          run_in_background: true,
+        },
+      ],
+    },
+    {
+      kind: 'command',
+      text: 'fix (PowerShell): use a terminal `exit $LASTEXITCODE` status pass-through.',
+      forms: [
+        {
+          tool_name: 'PowerShell',
+          command: 'npm test *> run.log; exit $LASTEXITCODE',
+          run_in_background: true,
+        },
+      ],
+    },
+    {
+      kind: 'command',
+      text: 'deliberate: prefix the command with `AUDIT_TOOLS_ALLOW_MASKED_EXIT=1`.',
+      forms: [
+        {
+          tool_name: 'Bash',
+          command: 'AUDIT_TOOLS_ALLOW_MASKED_EXIT=1 npm test > run.log 2>&1; echo done',
+          run_in_background: true,
+        },
+      ],
+    },
+  ],
+});
 if (runInBackground && !bypassEnabled('AUDIT_TOOLS_ALLOW_MASKED_EXIT', cmd)) {
   const seq = splitShellStatementsWithSeparators(cmd);
   const PASSES_STATUS_THROUGH = /^exit\s+(?:\$\?|\$LASTEXITCODE\b|\$\{?PIPESTATUS)/;
@@ -645,22 +998,20 @@ if (runInBackground && !bypassEnabled('AUDIT_TOOLS_ALLOW_MASKED_EXIT', cmd)) {
         seq.slice(i + 1).some((later) => later.sepBefore !== '&&'),
     );
   if (laundered) {
-    denials.push(
+    deny(
+      BACKGROUND_STATUS_REMEDIES,
       'backgrounded exit status LAUNDERED by a trailing statement — under run_in_background the ' +
         "harness completion notice reads the LAST statement's exit, so a RED suite reports 0 " +
-        '(2026-08-12: two TS2345 errors sat in an unread log while the notice said exit 0).\n' +
-        (isBash
-          ? "  fix: `npm test > run.log 2>&1` — let the suite's exit BE the command's exit (no " +
-            'trailing `; echo`), then read/grep `run.log` in a separate call; `&&`-chaining and a ' +
-            'terminal `exit $?` also preserve the status.\n'
-          : '  fix: `npm test *> run.log; exit $LASTEXITCODE` then read/grep `run.log` in a ' +
-            'separate call.\n') +
-        '  deliberate: re-run with AUDIT_TOOLS_ALLOW_MASKED_EXIT=1.',
+        '(2026-08-12: two TS2345 errors sat in an unread log while the notice said exit 0).',
     );
   }
 }
 
 // ── Emit ─────────────────────────────────────────────────────────────────────
+if (payload?.tool_input?.remedy_contract === true) {
+  process.stdout.write(JSON.stringify(remedyContracts));
+  process.exit(0);
+}
 if (denials.length > 0) {
   console.error(
     `shell-trap guard: command blocked (${denials.length} rule${denials.length > 1 ? 's' : ''}).\n\n` +
