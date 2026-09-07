@@ -5,10 +5,10 @@
 
 ## Live state
 
-- **v0.51.2 is published and installed globally.** Release commit `8d60c2a9`
-  passed the six-job publish workflow, including all four test shards; npm resolves 0.51.2 and
-  both installed command surfaces report 0.51.2. The release workflow is
-  [run 34155063393](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34155063393).
+- **v0.51.3 is published and installed globally.** Release commit `f8f97c77`
+  passed the six-job publish workflow, including all four test shards; npm resolves 0.51.3 and
+  both installed command surfaces report 0.51.3. The release workflow is
+  [run 34164153253](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34164153253).
 - **Pipeline verification defaults and rejection history are implemented** in `4b977383`.
   Omitted test/e2e commands come from persisted project facts and pass current-manifest
   admission at close. Both ingestion flows retain rejection explanations across calls;
@@ -31,9 +31,9 @@
 
 ## Immediate next
 
-**Finish the active pipeline-quality lap.** The shared JSON byte-marker fix is committed
-on `codex/pipeline-quality` but is not released. Regression fixes for bare full-audit
-depth and benchmark objective forwarding are being verified. The AGY calibration ended
+**Finish the active pipeline-quality lap.** The shared JSON byte-marker fix and bare
+full-audit depth correction are released; benchmark objective forwarding is fixed on main.
+The integrated changes passed 6,496 local tests and all release checks. The AGY calibration ended
 shallow and over budget; a lean external host is being calibrated before the complete
 paired comparison. Evidence and limits are in
 [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
