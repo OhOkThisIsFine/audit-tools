@@ -136,6 +136,9 @@ all 55 tests after the recovery-ledger correction.
   The admission checks were rerun with the actual camelCase filenames.
 - The delegate diff gate flagged fixture registration through `cleanupRoots.push`;
   source inspection confirmed `afterEach` drains and removes those roots.
+- The final worktree inventory found a shared ledger regression test left in the
+  worker checkout. It was included before release, with explicit assertions that
+  recovery remains distinct and acceptance after withdrawal is recorded.
 - PowerShell mangled unquoted `@{u}` and did not expand a wildcard inside an `rg`
   path. Explicit remote refs and directory searches avoided both ambiguities.
 - A benchmark wrapper rebuilt the root `dist` while a packaged smoke imported it.
