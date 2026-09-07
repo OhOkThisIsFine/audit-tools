@@ -115,6 +115,8 @@ export const RemediationPlanSchema = z
     project_type: z.string(),
     test_command: z.string().optional(),
     e2e_command: z.string().optional(),
+    test_command_source: z.enum(["project_facts", "explicit"]).optional(),
+    e2e_command_source: z.enum(["project_facts", "explicit"]).optional(),
     candidate_closing_actions: z.array(z.enum(CLOSING_ACTIONS)),
     block_strategy: z
       .enum(["test_graph", "git_cocommit", "file_overlap", "manual"])

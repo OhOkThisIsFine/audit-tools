@@ -23,10 +23,10 @@ const {
   AUDIT_GATE_SUBMISSION_SCOPE,
   laneSubmissionPath,
   recordExpectedLanes,
-  recordHostResultOutcomes,
   recordLaneOutcome,
   renderLaneShortfallLines,
 } = await import("../../src/audit/cli/laneSubmissions.js");
+const { recordHostResultOutcomes } = await import("../../src/shared/index.js");
 const { readSubmissionLedger } = await import(
   "../../src/shared/submission/submissionLedger.js"
 );
@@ -155,7 +155,7 @@ describe("a classified ingest failure reaches the ledger", () => {
     result_path: ".audit-tools/audit/runs/r1/host-results/aa.json",
   } as const;
 
-  it("records the failure once and re-records it only when the classification changes", async () => {
+  it("records the failure once and preserves it when a later poll only goes missing", async () => {
     const dir = await artifactsDir();
 
     await recordHostResultOutcomes(dir, "run-1", { issues: [issue], acceptedIds: [] });
@@ -175,10 +175,7 @@ describe("a classified ingest failure reaches the ledger", () => {
       acceptedIds: [],
     });
     const events = await readSubmissionLedger(dir);
-    expect(events.map((event) => event.issue_code)).toEqual([
-      "submission_malformed",
-      "submission_missing",
-    ]);
+    expect(events.map((event) => event.issue_code)).toEqual(["submission_malformed"]);
     expect(events[0]!.submission_id).toBe("audit-task-a");
     expect(events.every((event) => event.kind === "rejected")).toBe(true);
   });

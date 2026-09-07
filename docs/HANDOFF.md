@@ -28,27 +28,17 @@
 
 ## Immediate next
 
-**Implement the remaining settled owner decisions of 2026-09-06.** They are pinned in
+**Complete the deep-review quality comparison.** The pipeline now fills omitted
+repository test commands through admission and retains rejection explanations across
+both ingestion flows. Verification and the benchmark executor's measured limitations
+are in [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
+No quality score exists yet; successful preflight and contract tests are not acceptance.
+
+**The remaining settled owner decisions of 2026-09-06 stay queued.** They are pinned in
 [`open-bugs.md`](backlog/open-bugs.md) and appear in the generated list below. The answers
 themselves live in the decisions ledger under `.claude/`, which is their one home — read them
 there. Two of the ten are now landed: `l1-5` (the HANDOFF trim) and `6aebffe0` (the loader prompt
 and the reflection parser, in the lap below).
-
-**Then close instance 4's reporting half.** Its entry states the uncovered half outright. The fix
-is a READER of the submission ledger drawn by both draws, never a second writer — see the entry.
-
-- **The loop's silent-drop class is closed, four instances outright and one in half.** Where the
-  orchestrator computed something the host needed and then emitted a step that did not carry it, it
-  now carries it: a discarded extracted plan emits `extracted_plan_discarded` naming the reason
-  rather than the no-input step; the contract-repair prompt names the gate that actually fired
-  instead of always claiming the judge; the audit loader prompt names every reflection field its
-  own parser requires; systemic findings must carry evidence, and every finding the intake removes
-  is written to a record a run produces at
-  <!-- doc-citation-exempt: a runtime artifact written into the run's artifacts dir, never a tracked file -->
-  `dropped-findings.md`. The fifth, host-ingest reporting across a CALL boundary,
-  has its durable half closed and its uncovered half stated in the entry. Evidence, the independent
-  refutation and what it overturned:
-  [`loop-silent-drop-design-gate-2026-09-06.md`](reviews/loop-silent-drop-design-gate-2026-09-06.md).
 
 ## Deliberate state, not bugs
 

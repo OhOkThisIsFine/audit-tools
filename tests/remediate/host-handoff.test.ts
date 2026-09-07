@@ -18,6 +18,10 @@ import { execFileHidden } from "../helpers/spawn.mjs";
 
 import { DISPATCH_BARREL_EXPORTS } from "../helpers/dispatchBarrelBaseline.js";
 import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
+import {
+  readSubmissionLedger,
+  submissionLedgerPath,
+} from "../../src/shared/submission/submissionLedger.js";
 
 const FAILURE_SIGNATURE =
   "contract:remediation-zero-adapter-boundary:not-yet-satisfied";
@@ -471,6 +475,73 @@ async function prepareFixture(): Promise<{
 }
 
 describe(FAILURE_SIGNATURE, () => {
+  it("persists rejection diagnostics and carries them across a rebound workload", async () => {
+    const { boundary, root, artifactsDir, runId, state, handoff } = await prepareFixture();
+    const first = handoff.workload.work_items.find((item) => item.id === "block-a")!;
+    const second = handoff.workload.work_items.find((item) => item.id === "block-b")!;
+    await writeFile(expectContained(root, first.result_path, "first result"), "{broken", "utf8");
+    await writeFile(
+      expectContained(root, second.result_path, "second result"),
+      JSON.stringify(await validResult(root, runId, second)),
+      "utf8",
+    );
+
+    const firstSummary = requireIngested(
+      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
+    );
+    expect(firstSummary.accepted_count).toBe(1);
+    const firstIssue = firstSummary.issues.find((issue) => issue.work_item_id === first.id)!;
+    expect(firstIssue.code).toBe("submission_malformed");
+    const firstEvents = await readSubmissionLedger(artifactsDir);
+    expect(firstEvents.filter((event) => event.submission_id === first.id).map((event) => event.kind)).toEqual([
+      "rejected",
+    ]);
+
+    const nextHandoff = requirePrepared(
+      await boundary.prepareRemediationHostHandoff({
+        root,
+        artifactsDir,
+        runId,
+        baselineCommit: await headOf(root),
+        state: firstSummary.state,
+      }),
+    );
+    const nextState: CurrentState = {
+      ...firstSummary.state,
+      host_handoff: nextHandoff.handoff_record,
+    };
+    await rm(expectContained(root, nextHandoff.workload.work_items[0]!.result_path, "rebound result"), { force: true });
+    const secondSummary = requireIngested(
+      await boundary.ingestRemediationHostResults({
+        root,
+        artifactsDir,
+        runId,
+        state: nextState,
+      }),
+    );
+    const carried = secondSummary.issues.find((issue) => issue.work_item_id === first.id)!;
+    expect(carried.code).toBe("submission_rejected");
+    expect(carried.message).toContain("submission_malformed");
+    expect(carried.result_path).toBe(nextHandoff.workload.work_items[0]!.result_path);
+
+    const beforePoll = await readFile(submissionLedgerPath(artifactsDir), "utf8");
+    await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state: nextState });
+    expect(await readFile(submissionLedgerPath(artifactsDir), "utf8")).toBe(beforePoll);
+
+    await writeFile(
+      expectContained(root, nextHandoff.workload.work_items[0]!.result_path, "repaired result"),
+      JSON.stringify(await validResult(root, runId, nextHandoff.workload.work_items[0]!)),
+      "utf8",
+    );
+    const repaired = requireIngested(
+      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state: nextState }),
+    );
+    expect(repaired.completed_work_item_ids).toContain(first.id);
+    expect((await readSubmissionLedger(artifactsDir))
+      .filter((event) => event.submission_id === first.id)
+      .map((event) => event.kind)).toEqual(["rejected", "accepted"]);
+  });
+
   it("emits exactly hostDependencyLevels(state)[0] as a provider-neutral, bound handoff", async () => {
     const scheduler = await loadScheduler();
     const { root, artifactsDir, runId, state, handoff, baselineCommit } =

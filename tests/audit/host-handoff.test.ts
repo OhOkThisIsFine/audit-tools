@@ -13,6 +13,13 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  readSubmissionLedger,
+  submissionLedgerPath,
+} from "../../src/shared/submission/submissionLedger.js";
+import { recordHostResultOutcomes } from "../../src/shared/index.js";
+import { existsSync } from "node:fs";
+
 const FAILURE_SIGNATURE =
   "contract:audit-zero-adapter-boundary:not-yet-satisfied";
 
@@ -72,6 +79,18 @@ interface PreparedHandoff {
 interface IngestSummary {
   readonly accepted_count: number;
   readonly completed_work_item_ids: readonly string[];
+  readonly issues: readonly {
+    readonly code: string;
+    readonly message: string;
+    readonly work_item_id?: string;
+    readonly result_path?: string;
+  }[];
+  readonly raw_issues: readonly {
+    readonly code: string;
+    readonly message: string;
+    readonly work_item_id?: string;
+    readonly result_path?: string;
+  }[];
 }
 
 interface HostBoundary {
@@ -200,6 +219,89 @@ function boundResult(
 }
 
 describe(FAILURE_SIGNATURE, () => {
+  it("carries a prior rejection reason across a rebound workload and clears it after acceptance", async () => {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "audit-host-diagnostics-"));
+    cleanupRoots.push(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const runId = "host-diagnostics-001";
+    const tasks = [
+      task("audit-a", "security", "src/a.ts", {
+        complexity: "standard",
+        risk: "high",
+        token_estimate: 1200,
+      }),
+      task("audit-b", "correctness", "src/b.ts", {
+        complexity: "standard",
+        risk: "medium",
+        token_estimate: 1200,
+      }),
+    ];
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+    await writeFile(join(root, "src", "b.ts"), "one\ntwo\n", "utf8");
+
+    const first = await boundary.prepareAuditHostHandoff({ root, artifactsDir, runId, tasks });
+    const firstA = first.workload.work_items.find((item) => item.id === "audit-a")!;
+    const firstB = first.workload.work_items.find((item) => item.id === "audit-b")!;
+    await writeFile(expectContained(root, firstA.result_path, "first A result"), "{broken", "utf8");
+    await writeFile(
+      expectContained(root, firstB.result_path, "first B result"),
+      JSON.stringify(boundResult(runId, firstB)),
+      "utf8",
+    );
+    const firstSummary = await boundary.ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: tasks });
+    expect(firstSummary.accepted_count).toBe(1);
+    expect(firstSummary.issues.find((issue) => issue.work_item_id === "audit-a")?.code).toBe(
+      "submission_malformed",
+    );
+    await recordHostResultOutcomes(artifactsDir, runId, {
+      issues: firstSummary.issues,
+      acceptedIds: firstSummary.completed_work_item_ids,
+    });
+
+    const secondRunId = "host-diagnostics-002";
+    const rebound = await boundary.prepareAuditHostHandoff({
+      root,
+      artifactsDir,
+      runId: secondRunId,
+      tasks,
+    });
+    const secondA = rebound.workload.work_items.find((item) => item.id === "audit-a")!;
+    const secondB = rebound.workload.work_items.find((item) => item.id === "audit-b")!;
+    const secondPath = expectContained(root, secondA.result_path, "rebound A result");
+    expect(secondA.result_path).not.toBe(firstA.result_path);
+    await rm(secondPath, { force: true });
+    await writeFile(
+      expectContained(root, secondB.result_path, "rebound B result"),
+      JSON.stringify(boundResult(secondRunId, secondB)),
+      "utf8",
+    );
+    const secondSummary = await boundary.ingestAuditHostResults({ root, artifactsDir, runId: secondRunId, auditTasks: tasks });
+    const secondIssue = secondSummary.issues.find((issue) => issue.work_item_id === "audit-a")!;
+    expect(secondIssue.code).toBe("submission_rejected");
+    expect(secondIssue.message).toContain("submission_malformed");
+    expect(secondIssue.result_path).toBe(secondA.result_path);
+    await recordHostResultOutcomes(artifactsDir, secondRunId, {
+      issues: secondSummary.raw_issues,
+      acceptedIds: secondSummary.completed_work_item_ids,
+    });
+
+    await writeFile(secondPath, JSON.stringify(boundResult(secondRunId, secondA)), "utf8");
+    const accepted = await boundary.ingestAuditHostResults({ root, artifactsDir, runId: secondRunId, auditTasks: tasks });
+    expect(accepted.completed_work_item_ids).toContain("audit-a");
+    await recordHostResultOutcomes(artifactsDir, secondRunId, {
+      issues: accepted.raw_issues,
+      acceptedIds: accepted.completed_work_item_ids,
+    });
+    const events = await readSubmissionLedger(artifactsDir);
+    expect(events.filter((event) => event.submission_id === "audit-a").map((event) => event.kind)).toEqual([
+      "rejected",
+      "accepted",
+    ]);
+    expect(existsSync(submissionLedgerPath(artifactsDir))).toBe(true);
+  });
+
   it("publishes every pending task once and ingests only exact bound host results", async () => {
     const boundary = await loadBoundary();
     const root = await mkdtemp(join(tmpdir(), "audit-host-handoff-"));

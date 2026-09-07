@@ -25,8 +25,7 @@ import {
   prepareAuditHostHandoff,
 } from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { runAuditStep } from "../../src/audit/cli/auditStep.js";
-import { recordHostResultOutcomes } from "../../src/audit/cli/laneSubmissions.js";
-import { readSubmissionLedger } from "audit-tools/shared";
+import { recordHostResultOutcomes, readSubmissionLedger } from "audit-tools/shared";
 import type { AuditTask } from "../../src/audit/types.js";
 
 const cleanupRoots: string[] = [];

@@ -19,6 +19,8 @@ import {
   parseCommandString,
   runTrackedAsync,
   compareCodeUnits,
+  runAdmittedProjectTestCommand,
+  runAdmittedProjectE2eCommand,
 } from "audit-tools/shared";
 import type {
   AgentReflection,
@@ -1030,6 +1032,27 @@ export async function runCombinedTestSuite(
   }
 
   const startedAt = Date.now();
+  if (state.plan.test_command_source === "project_facts") {
+    const admitted = await runAdmittedProjectTestCommand(parseCommandString(suiteName), options.root, {
+      timeoutMs: CLOSING_CHILD_DEADLINE_MS,
+    });
+    if (!admitted.admitted) {
+      return { ran: false, passed: false, suite_name: suiteName, duration_ms: 0, output: admitted.refusal_reason ?? "refused" };
+    }
+    const passed = admitted.exit_code === 0 && !admitted.timed_out && !admitted.spawn_error;
+    return {
+      ran: true,
+      passed,
+      suite_name: suiteName,
+      duration_ms: Date.now() - startedAt,
+      output: passed
+        ? ""
+        : (admitted.spawn_error ?? admitted.output).trim().slice(-FAILURE_OUTPUT_TAIL_CHARS) ||
+          (admitted.timed_out
+            ? `default test command timed out after ${CLOSING_CHILD_DEADLINE_MS}ms`
+            : "default test command failed without output"),
+    };
+  }
   // argv, never a shell string: the shape gate admits only single invocations,
   // and `resolveExecArgv` inside the shared runner is what makes an `npm`/`npx`
   // shim resolve on win32 without one.
@@ -1206,6 +1229,23 @@ async function runE2eTests(
   }
 
   console.log("Running end-to-end tests on combined post-remediation state...");
+  if (state.plan.e2e_command_source === "project_facts") {
+    const admitted = await runAdmittedProjectE2eCommand(parseCommandString(state.plan.e2e_command), options.root, {
+      timeoutMs: CLOSING_CHILD_DEADLINE_MS,
+    });
+    if (!admitted.admitted) return { ran: false, passed: false, output: admitted.refusal_reason ?? "refused" };
+    const passed = admitted.exit_code === 0 && !admitted.timed_out && !admitted.spawn_error;
+    return {
+      ran: true,
+      passed,
+      output: passed
+        ? ""
+        : (admitted.spawn_error ?? admitted.output).trim().slice(-FAILURE_OUTPUT_TAIL_CHARS) ||
+          (admitted.timed_out
+            ? `default e2e command timed out after ${CLOSING_CHILD_DEADLINE_MS}ms`
+            : "default e2e command failed without output"),
+    };
+  }
   const e2eResult = await runTrackedAsync(
     parseCommandString(state.plan.e2e_command),
     {
@@ -1683,7 +1723,7 @@ export function buildVerificationReport(
       kind: "task",
       label: suiteLabel,
       evidence: !combinedTest.ran
-        ? ["no combined test suite configured for this run"]
+        ? [combinedTest.output || "no combined test suite configured for this run"]
         : combinedTest.passed
           ? [`${suiteLabel} passed`]
           : [`${suiteLabel} failed`, ...(combinedTest.output ? [combinedTest.output.slice(-500)] : [])],

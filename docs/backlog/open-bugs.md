@@ -6,6 +6,14 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Packaged smoke reads can race a wrapper rebuild of the same checkout (2026-09-07,
+  medium, friction: false_red).** During pipeline verification, a benchmark's development
+  wrapper rebuilt `dist` while the packaged audit smoke imported it; the import failed and
+  the smoke passed alone. Separate benchmark tooling prevented recurrence in this lap.
+  **Property:** build replacement and smoke reads coordinate at the checkout boundary,
+  including wrapper-triggered builds, so missing intermediate output cannot look like a
+  package defect. Evidence: [pipeline quality verification](../reviews/pipeline-quality-2026-09-07.md).
+
 - **▶ Nine owner decisions of 2026-09-06 are settled and unimplemented (2026-09-06, medium).**
   The owner answered all ten open propositions in conversation; the answers are recorded in
   `.claude/nightly-decisions.json`, which is their one home — read each answer there rather than a
@@ -309,30 +317,6 @@
   vacuity guard — widen the family or key on the `[remediate-code]` prefix), and the pin
   silently mandates event-BEFORE-write ordering — a legitimate write-then-log pairing would
   false-red with a misleading message; state the mandate in the comment and failure text.
-
-- **A classified ingest issue still does not reach the host across a CALL boundary — the durable
-  half is closed, the reporting half is not (2026-08-20, medium, friction: tool_should_decide).**
-  ⚠ Partly enforced, so this entry states the uncovered half outright rather than reading as a
-  close. **Closed 2026-09-06:** the per-issue run-log write in `buildImplementDispatchStep` now runs
-  BEFORE every exit path, pinned by `tests/remediate/ingest-issues-recorded-before-exit.test.ts`
-  (position AND reachability, since a branch-wrapped log reproduces the defect while satisfying an
-  ordering check). Before that it sat below the `state_changed` early return, so a PARTIAL batch —
-  some results accepted, some rejected — transitioned and lost every rejection: not logged, not
-  rendered, not carried. **Still open:** the issues reach a host only on the re-emit path, where
-  nothing was accepted. A transition that ends the call still reports nothing to the host, on either
-  draw. The audit draw carries advisories across folds WITHIN one call
-  (`FoldAdvisories`/`takeFoldAdvisories`) and deliberately does not persist them — its own comment
-  states that the submission ledger is the durable record — and the remediate draw has no carry at
-  all. Observed live 2026-08-29 on the audit side (`docs/reviews/cx02-hold-time-measurement-2026-08-29.md`):
-  a result rejected on the exact-key envelope check produced no diagnostic, the next fold re-minted
-  the run id with new bound paths, the step then reported the item as `submission_missing`, and the
-  intact file at the OLD bound path was never read again. Rejected-with-reason surfaced as
-  missing-without-reason. **Property:** a step that reports an item as missing first consults the
-  durable submission ledger, and states a recorded rejection-with-reason instead. ⚠ The fix is a
-  READER, not a second writer — do not persist the advisories: that duplicates a fact the ledger
-  already holds, and the audit draw's non-persistence is a decision, not an oversight. Its twin is
-  the entry noting the remediate-side submission ledger has no reader; one reader in
-  `audit-tools/shared`, drawn by both, is the shape.
 
 - **Host-handoff residuals from the CP-NODE-6 landing (low, one entry).** (a) A malformed
   FRONTIER block at prepare raises a classified aggregate naming the thrower, but still a

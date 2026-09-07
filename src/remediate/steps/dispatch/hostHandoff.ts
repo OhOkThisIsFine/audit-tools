@@ -9,6 +9,7 @@ import {
   SUBMISSION_ISSUE_CODES,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   appendSubmissionEvent,
+  enrichMissingSubmissionIssues,
   compareCodeUnits,
   contentSha256,
   hasExactKeys,
@@ -25,6 +26,8 @@ import {
   promptSha256,
   readSubmissionDocument,
   readSubmissionLedger,
+  readTrailingSubmissionRefusals,
+  recordHostResultOutcomes,
   repoRelativePath,
   resolveContainedPath,
   resolveHostHandoffPaths,
@@ -2393,7 +2396,15 @@ export async function ingestRemediationHostResults(params: {
     runId: params.runId,
     recovery: params.recovery,
   });
-  if (validated.kind === "summary") return validated.summary;
+  if (validated.kind === "summary") {
+    const issues = await recordAndEnrichHostIssues(
+      params.artifactsDir,
+      params.runId,
+      validated.summary.issues,
+      validated.summary.completed_work_item_ids,
+    );
+    return { ...validated.summary, issues };
+  }
 
   const acc: HostIngestAccumulators = {
     issues: validated.issues,
@@ -2404,7 +2415,46 @@ export async function ingestRemediationHostResults(params: {
     recordedRecoveryMarks: null,
   };
   const verdicts = await executeHostVerificationReruns(validated.ctx, acc);
-  return commitRemediationStateUpdates(validated.ctx, acc, verdicts);
+  const issues = await recordAndEnrichHostIssues(
+    params.artifactsDir,
+    params.runId,
+    acc.issues,
+    acc.completed,
+  );
+  return commitRemediationStateUpdates(validated.ctx, acc, verdicts, issues);
+}
+
+/** Record raw observations first, then decorate only the returned diagnostics. */
+async function recordAndEnrichHostIssues(
+  artifactsDir: string,
+  runId: string,
+  issues: readonly RemediationHostIngestIssue[],
+  acceptedIds: readonly string[],
+): Promise<RemediationHostIngestIssue[]> {
+  const refusals = await readTrailingSubmissionRefusals(
+    artifactsDir,
+    issues
+      .map((issue) => issue.work_item_id ?? issue.submission_id)
+      .filter((id): id is string => id !== undefined),
+    { runId },
+  );
+  await recordHostResultOutcomes(
+    artifactsDir,
+    runId,
+    {
+      // This refusal already reports that the ledger write failed. Retrying
+      // that same item would replace its diagnostic with an ingest exception;
+      // other items retain normal recording and error propagation.
+      issues: issues.filter((issue) => issue.code !== "recovery_unrecorded"),
+      acceptedIds,
+    },
+    { scopeToRunId: runId },
+  );
+  return enrichMissingSubmissionIssues(
+    issues,
+    refusals,
+    "submission_rejected",
+  );
 }
 
 /**
@@ -2858,6 +2908,7 @@ function commitRemediationStateUpdates(
   ctx: HostIngestContext,
   acc: HostIngestAccumulators,
   verdicts: readonly HostItemVerdict[],
+  issues: readonly RemediationHostIngestIssue[],
 ): RemediationHostIngestSummary {
   const { nextState } = ctx;
   for (const verdict of verdicts) {
@@ -2926,7 +2977,7 @@ function commitRemediationStateUpdates(
     accepted_count: acc.completed.length,
     completed_work_item_ids: acc.completed,
     pending_work_item_ids: pendingWorkItemIds,
-    issues: acc.issues,
+    issues,
     state_changed: stateChanged,
     state: nextState,
   };

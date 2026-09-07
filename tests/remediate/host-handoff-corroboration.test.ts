@@ -1479,14 +1479,17 @@ describe("remediation host handoff repository corroboration", () => {
     // No acceptance without a record: the relaxation is marked on the ledger,
     // so a run repaired this way stays distinguishable from a clean one.
     const events = await readSubmissionLedger(value.artifactsDir);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
+    expect(events.map((event) => event.kind)).toEqual([
+      "rejected",
+      "accepted_via_recovery",
+    ]);
+    expect(events[1]).toMatchObject({
       run_id: value.runId,
       submission_id: value.item.id,
       kind: "accepted_via_recovery",
     });
-    expect(events[0]!.message).toContain(value.baseline);
-    expect(events[0]!.message).toContain(landed);
+    expect(events[1]!.message).toContain(value.baseline);
+    expect(events[1]!.message).toContain(landed);
   });
 
   it("refuses recovery when the trusted baseline is still reachable from HEAD", async () => {
@@ -1524,7 +1527,15 @@ describe("remediation host handoff repository corroboration", () => {
       "baseline_not_ancestor",
     ]);
     expect(refused.issues[0]!.message).toContain("NOT orphaned");
-    expect(await readSubmissionLedger(value.artifactsDir)).toEqual([]);
+    const events = await readSubmissionLedger(value.artifactsDir);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      run_id: value.runId,
+      submission_id: value.item.id,
+      lane: value.item.id,
+      kind: "rejected",
+      issue_code: "baseline_not_ancestor",
+    });
   });
 
   it("refuses a recovery acceptance whose ledger mark cannot be recorded", async () => {
@@ -1594,7 +1605,15 @@ describe("remediation host handoff repository corroboration", () => {
       "baseline_not_ancestor",
     ]);
     expect(refused.issues[0]!.message).toContain("NOT orphaned");
-    expect(await readSubmissionLedger(value.artifactsDir)).toEqual([]);
+    const events = await readSubmissionLedger(value.artifactsDir);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      run_id: value.runId,
+      submission_id: value.item.id,
+      lane: value.item.id,
+      kind: "rejected",
+      issue_code: "baseline_not_ancestor",
+    });
   });
 
   it("reruns a shared required test per work item on the normal lane, and once per call under recovery", async () => {
@@ -1740,7 +1759,15 @@ describe("remediation host handoff repository corroboration", () => {
     ]);
     expect(refused.issues[0]!.message).toContain("refusing to spawn");
     expect(await counterRuns(value.root)).toBe(0);
-    expect(await readSubmissionLedger(value.artifactsDir)).toEqual([]);
+    const events = await readSubmissionLedger(value.artifactsDir);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      run_id: value.runId,
+      submission_id: value.item.id,
+      lane: value.item.id,
+      kind: "rejected",
+      issue_code: "required_test_failed",
+    });
   });
 
   it("runs every required test before the lock and none inside it", async () => {
@@ -1867,7 +1894,15 @@ describe("remediation host handoff repository corroboration", () => {
     expect(refused.issues[0]!.message).toContain(
       "no longer dependency/phase eligible",
     );
-    expect(await readSubmissionLedger(value.artifactsDir)).toEqual([]);
+    const events = await readSubmissionLedger(value.artifactsDir);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      run_id: value.runId,
+      submission_id: value.item.id,
+      lane: value.item.id,
+      kind: "rejected",
+      issue_code: "submission_contract_invalid",
+    });
   });
 
   // ── CORROBORATION FAILS CLOSED — both branches, so the skip cannot widen ──

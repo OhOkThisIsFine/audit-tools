@@ -146,9 +146,9 @@ import {
   charterExtractionLane,
   closeDispatchedLaneOutcomes,
   laneSubmissionPath,
-  recordHostResultOutcomes,
   recordLaneOutcome,
 } from "./laneSubmissions.js";
+import { recordHostResultOutcomes } from "audit-tools/shared";
 
 // ── Gate submission helper ────────────────────────────────────────────────────
 
@@ -2853,6 +2853,7 @@ async function runHostDelegationObligation(
   // already reflected in coverage are not replayed.
   const currentRun = await loadCurrentActiveReviewRun(ctx.params.artifactsDir);
   let ingestIssues: readonly AuditHostIngestIssue[] = [];
+  let rawIngestIssues: readonly AuditHostIngestIssue[] = [];
   let validationWarnings: readonly AuditHostValidationWarning[] = [];
   if (currentRun) {
     let acceptedResults: Awaited<
@@ -2875,6 +2876,7 @@ async function runHostDelegationObligation(
       });
       acceptedResults = ingested.accepted_results;
       ingestIssues = ingested.issues;
+      rawIngestIssues = ingested.raw_issues;
       validationWarnings = ingested.validation_warnings;
       completedIds = ingested.completed_work_item_ids;
     } catch (error) {
@@ -2890,7 +2892,7 @@ async function runHostDelegationObligation(
     // in the re-emitted step the host actually reads. The completed set rides
     // along so a repaired item closes its own record.
     await recordHostResultOutcomes(ctx.params.artifactsDir, currentRun.run_id, {
-      issues: ingestIssues,
+      issues: rawIngestIssues,
       acceptedIds: completedIds,
     });
 

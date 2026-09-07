@@ -17,6 +17,8 @@ import {
   parseAllWorkloadItems,
   parseWorkloadEnvelope,
   promptSha256,
+  enrichMissingSubmissionIssues,
+  readTrailingSubmissionRefusals,
   readJsonFile,
   repoRelativePath,
   requireNonEmptyString,
@@ -138,6 +140,8 @@ export interface AuditHostIngestSummary {
    * measured drift P25 exists to make visible.
    */
   readonly issues: readonly AuditHostIngestIssue[];
+  /** Raw issue observations for the sole recorder; excluded from host rendering. */
+  readonly raw_issues: readonly AuditHostIngestIssue[];
   /**
    * Advisory validation findings on results that WERE accepted — a small
    * coverage-stat divergence, verification metadata on a non-verification
@@ -1290,6 +1294,19 @@ export async function ingestAuditHostResults(params: {
   // so every rejection below already lands there in arrival order. A second
   // writer inside the boundary would double-record the same fact.
 
+  const raw_issues = [...issues];
+  const refusals = await readTrailingSubmissionRefusals(
+    paths.artifactsDir,
+    raw_issues
+      .map((issue) => issue.work_item_id ?? issue.submission_id)
+      .filter((id): id is string => id !== undefined),
+  );
+  const reportedIssues = enrichMissingSubmissionIssues(
+    raw_issues,
+    refusals,
+    "submission_rejected",
+  );
+
   return {
     accepted_count: landed.length,
     accepted_results: ledger.entries.map((entry) => entry.audit_result),
@@ -1298,7 +1315,8 @@ export async function ingestAuditHostResults(params: {
     completed_work_item_ids: [
       ...new Set(ledger.entries.map((entry) => entry.work_item_id)),
     ].sort(compareCodeUnits),
-    issues,
+    issues: reportedIssues,
+    raw_issues,
   };
 }
 

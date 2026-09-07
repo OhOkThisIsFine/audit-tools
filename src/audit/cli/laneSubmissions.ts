@@ -45,6 +45,7 @@ import {
   outputDirFor,
   readSubmissionDocument,
   readSubmissionLedger,
+  readTrailingSubmissionRefusals,
   siblingLockPath,
   SKIP_WRITE,
   submissionsDir,
@@ -61,11 +62,6 @@ import {
   type SubmissionReadOutcome,
   type SubmissionRoots,
 } from "audit-tools/shared";
-import type {
-  AuditHostIngestIssue,
-  AuditIngestIssueCode,
-} from "../validation/ingestIssueCodes.js";
-
 /**
  * Gate lane ids — the single join key between an emitter and its gate reader.
  *
@@ -402,7 +398,7 @@ export async function recordExpectedLanes(
   // which is false and points it at the wrong repair.
   const refusals =
     outstanding.length > 0
-      ? await lastRefusals(
+      ? await readTrailingSubmissionRefusals(
           artifactsDir,
           outstanding.map((member) => member.submission_id),
         )
@@ -430,36 +426,6 @@ export async function recordExpectedLanes(
       };
     }),
   };
-}
-
-/**
- * The last ledger event per submission id, kept only where it is a REFUSAL.
- * A later acceptance or hand recovery ends the refusal, so only the trailing
- * state counts: this answers "is this lane outstanding BECAUSE it was refused",
- * never "was it ever refused".
- *
- * "Trailing" is over the INGEST events only. It used to be "everything except
- * `expected`", which is a partition that absorbs every future kind: a
- * `dispatched` row appended when a refused (and therefore still-pending) lane is
- * re-materialized would have become the trailing event and deleted the refusal,
- * putting the false "submitted nothing" message back — the exact message the
- * refusal record exists to prevent.
- */
-async function lastRefusals(
-  artifactsDir: string,
-  submissionIds: readonly string[],
-): Promise<ReadonlyMap<string, SubmissionLedgerEvent>> {
-  const wanted = new Set(submissionIds);
-  const last = new Map<string, SubmissionLedgerEvent>();
-  for (const event of await readSubmissionLedger(artifactsDir)) {
-    if (!wanted.has(event.submission_id)) continue;
-    if (!isIngestEvent(event.kind)) continue;
-    last.set(event.submission_id, event);
-  }
-  for (const [id, event] of [...last.entries()]) {
-    if (event.kind !== "rejected") last.delete(id);
-  }
-  return last;
 }
 
 /**
@@ -659,88 +625,4 @@ export async function recordLaneOutcome(
       ? SKIP_WRITE
       : withoutExpectedSubmissions(current, [submissionId]),
   );
-}
-
-/** How an event reads for dedupe: kind, code, and message, in one string. */
-function eventSignature(
-  kind: string,
-  issueCode: string | undefined,
-  message: string | undefined,
-): string {
-  return [kind, issueCode ?? "", message ?? ""].join("|");
-}
-
-/**
- * Record what the host-handoff ingest just decided about each work item, on the
- * same ledger the gate lanes use — so a submission that never arrived (or
- * arrived unreadable) is a durable fact rather than a value that died inside
- * the call that computed it.
- *
- * Two rules keep the record drift-focused and arithmetically honest:
- *
- *   • Deduped against the LAST recorded event for each submission. Ingest runs
- *     on every `next-step`, so a host still working through its workload would
- *     otherwise append the same "missing" line every poll, burying the state
- *     CHANGES the ledger exists to preserve. A changed classification still
- *     appends, in arrival order.
- *   • An acceptance is recorded ONLY where a refusal precedes it. A work item
- *     the host got right first try says nothing (the ledger is not an inventory
- *     of work), but one that was refused and later accepted must close its own
- *     story — otherwise a run where every failure was repaired reports its
- *     refusals with no matching repairs, and the report reads as a run that
- *     never recovered.
- */
-export async function recordHostResultOutcomes(
-  artifactsDir: string,
-  runId: string,
-  outcomes: {
-    readonly issues: readonly AuditHostIngestIssue[];
-    /** Work items whose results this run has accepted (ingest's completed set). */
-    readonly acceptedIds: readonly string[];
-  },
-): Promise<void> {
-  if (outcomes.issues.length === 0 && outcomes.acceptedIds.length === 0) return;
-  const last = new Map<string, string>();
-  for (const event of await readSubmissionLedger(artifactsDir)) {
-    last.set(
-      event.submission_id,
-      eventSignature(event.kind, event.issue_code, event.message),
-    );
-  }
-  const append = async (
-    submissionId: string,
-    event: Omit<
-      SubmissionLedgerEvent<AuditIngestIssueCode>,
-      "contract_version" | "run_id" | "submission_id" | "lane" | "recorded_at"
-    >,
-  ): Promise<void> => {
-    const signature = eventSignature(event.kind, event.issue_code, event.message);
-    if (last.get(submissionId) === signature) return;
-    last.set(submissionId, signature);
-    await appendSubmissionEvent(artifactsDir, {
-      contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
-      run_id: runId,
-      submission_id: submissionId,
-      // A host work item's id IS its submission identity: the bound path is
-      // derived from it through the same rule the gate lanes use.
-      lane: submissionId,
-      ...event,
-      recorded_at: new Date().toISOString(),
-    });
-  };
-
-  for (const submissionId of outcomes.acceptedIds) {
-    // Nothing on the record for this item means it was clean on the first try.
-    if (!last.has(submissionId)) continue;
-    await append(submissionId, { kind: "accepted" });
-  }
-  for (const issue of outcomes.issues) {
-    const submissionId = issue.work_item_id ?? issue.submission_id;
-    if (submissionId === undefined) continue;
-    await append(submissionId, {
-      kind: "rejected",
-      issue_code: issue.code,
-      message: issue.message,
-    });
-  }
 }

@@ -546,6 +546,15 @@ export type {
   SubmissionScanOutcome,
 } from "./submission/submissionScan.js";
 export { scanBoundSubmission } from "./submission/submissionScan.js";
+export type {
+  HostResultOutcomes,
+  TrailingSubmissionRefusal,
+} from "./submission/hostResultOutcomes.js";
+export {
+  enrichMissingSubmissionIssues,
+  readTrailingSubmissionRefusals,
+  recordHostResultOutcomes,
+} from "./submission/hostResultOutcomes.js";
 
 // The ONE code-unit comparator every persisted/hashed sort orders by.
 export { compareCodeUnits } from "./compareCodeUnits.js";
@@ -699,6 +708,7 @@ export {
   PROJECT_TEST_MAX_CAPTURED_OUTPUT,
   isAdmittedProjectTestCommand,
   runAdmittedProjectTestCommand,
+  runAdmittedProjectE2eCommand,
 } from "./tooling/projectTestAdmission.js";
 
 // Tooling: optional analyzer dependency resolution

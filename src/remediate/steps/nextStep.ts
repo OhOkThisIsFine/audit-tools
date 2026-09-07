@@ -23,6 +23,7 @@ import {
   withFsRetry,
   RunLogger,
   coerceJsonObjectArg,
+  renderPromptCommand,
   headCommit,
   projectAuditFindingsReportSubset,
   // obligation engine + intent
@@ -657,10 +658,16 @@ function normalizeExtractedPlan(value: unknown, facts: ProjectFacts): {
       typeof value.project_type === "string" && value.project_type !== "unknown"
         ? value.project_type
         : facts.project_type,
-    test_command:
-      typeof value.test_command === "string" ? value.test_command : undefined,
-    e2e_command:
-      typeof value.e2e_command === "string" ? value.e2e_command : undefined,
+    ...(typeof value.test_command === "string" && value.test_command.trim().length > 0
+      ? { test_command: value.test_command, test_command_source: "explicit" as const }
+      : facts.commands.test
+        ? { test_command: renderPromptCommand(facts.commands.test), test_command_source: "project_facts" as const }
+        : {}),
+    ...(typeof value.e2e_command === "string" && value.e2e_command.trim().length > 0
+      ? { e2e_command: value.e2e_command, e2e_command_source: "explicit" as const }
+      : facts.commands.e2e
+        ? { e2e_command: renderPromptCommand(facts.commands.e2e), e2e_command_source: "project_facts" as const }
+        : {}),
     candidate_closing_actions:
       Array.isArray(value.candidate_closing_actions) &&
       value.candidate_closing_actions.length > 0 &&

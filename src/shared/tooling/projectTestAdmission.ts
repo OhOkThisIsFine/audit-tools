@@ -77,11 +77,19 @@ export interface ProjectTestAdmissionOutcome {
  * project files are the sole source of truth for what is admitted. Pure and
  * total: no spawn, no throw.
  */
-export function isAdmittedProjectTestCommand(command: string[], root: string): boolean {
-  const discovered = discoverProjectCommands(root).test;
+function isAdmittedProjectCommand(
+  command: string[],
+  root: string,
+  role: "test" | "e2e",
+): boolean {
+  const discovered = discoverProjectCommands(root)[role];
   if (!discovered || discovered.length === 0) return false;
   if (command.length !== discovered.length) return false;
   return command.every((token, index) => token === discovered[index]);
+}
+
+export function isAdmittedProjectTestCommand(command: string[], root: string): boolean {
+  return isAdmittedProjectCommand(command, root, "test");
 }
 
 /**
@@ -93,7 +101,7 @@ export function isAdmittedProjectTestCommand(command: string[], root: string): b
  * killing a hung suite (SIGTERM→SIGKILL) and truncating — never silently
  * dropping — output beyond the capture cap.
  */
-export function runAdmittedProjectTestCommand(
+function runAdmittedProjectCommand(
   command: string[],
   root: string,
   options: {
@@ -101,11 +109,12 @@ export function runAdmittedProjectTestCommand(
     maxCapturedOutput?: number;
     sigkillGraceMs?: number;
   } = {},
+  role: "test" | "e2e" = "test",
 ): Promise<ProjectTestAdmissionOutcome> {
-  if (!isAdmittedProjectTestCommand(command, root)) {
+  if (!isAdmittedProjectCommand(command, root, role)) {
     return Promise.resolve({
       admitted: false,
-      refusal_reason: `\`${command.join(" ")}\` is not the test command discoverProjectCommands() emits for this repository; refused.`,
+      refusal_reason: `\`${command.join(" ")}\` is not the ${role} command discoverProjectCommands() emits for this repository; refused.`,
       exit_code: null,
       timed_out: false,
       truncated: false,
@@ -167,4 +176,28 @@ export function runAdmittedProjectTestCommand(
       resolvePromise({ admitted: true, exit_code: code, timed_out: timedOut, truncated, output });
     });
   });
+}
+
+export function runAdmittedProjectTestCommand(
+  command: string[],
+  root: string,
+  options: {
+    timeoutMs?: number;
+    maxCapturedOutput?: number;
+    sigkillGraceMs?: number;
+  } = {},
+): Promise<ProjectTestAdmissionOutcome> {
+  return runAdmittedProjectCommand(command, root, options, "test");
+}
+
+export function runAdmittedProjectE2eCommand(
+  command: string[],
+  root: string,
+  options: {
+    timeoutMs?: number;
+    maxCapturedOutput?: number;
+    sigkillGraceMs?: number;
+  } = {},
+): Promise<ProjectTestAdmissionOutcome> {
+  return runAdmittedProjectCommand(command, root, options, "e2e");
 }
