@@ -5,10 +5,10 @@
 
 ## Live state
 
-- **v0.51.3 is published and installed globally.** Release commit `f8f97c77`
-  passed the six-job publish workflow, including all four test shards; npm resolves 0.51.3 and
-  both installed command surfaces report 0.51.3. The release workflow is
-  [run 34164153253](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34164153253).
+- **v0.51.4 is published and installed globally.** Release commit `3288bfec`
+  passed the six-job publish workflow, including all four test shards; npm resolves 0.51.4 and
+  both installed command surfaces report 0.51.4. The release workflow is
+  [run 34180227015](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34180227015).
 - **Pipeline verification defaults and rejection history are implemented** in `4b977383`.
   Omitted test/e2e commands come from persisted project facts and pass current-manifest
   admission at close. Both ingestion flows retain rejection explanations across calls;
@@ -42,7 +42,8 @@ unscored continuation. Benchmark crash recovery is integrated in `86f512d1`, wit
 39 focused tests passing, original-source verification, and SQLite run ownership.
 The isolated graph-disabled trial exposed a late capability notice after semantic
 review. The early loader stop rule passed a fresh isolated live trial and is
-being released. Evidence and limits are in
+released in 0.51.4. The unscored continuation has reached the conceptual judge.
+Evidence and limits are in
 [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
 No quality score exists; successful preflight and contract tests are not acceptance.
 
