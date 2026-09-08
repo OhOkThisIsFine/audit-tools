@@ -38,7 +38,7 @@ const {
 // Post-P25 a lane's submission path is TOOL-computed from its lane id, so these
 // tests ask the tool where a submission goes instead of re-spelling a filename
 // the host used to type.
-const { GATE_LANES, charterExtractionLane, laneSubmissionPath } = await import(
+const { GATE_LANES, charterExtractionLane, laneSubmissionPath, systemicChallengeLane } = await import(
   "../../src/audit/cli/laneSubmissions.js"
 );
 const { submissionsDir } = await import("../../src/shared/io/auditToolsPaths.js");
@@ -1201,7 +1201,7 @@ const OMITTABLE_GATES: OmittableGateCase[] = [
   },
   {
     kind: "systemic_challenge",
-    lane: GATE_LANES.systemic_challenge,
+    lane: systemicChallengeLane([]),
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
       handleSystemicChallengeBranch(params, bundle, state, createFoldTransaction()),
   },

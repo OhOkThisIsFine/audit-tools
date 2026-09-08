@@ -335,6 +335,45 @@ passed afterwards, including legacy/contract baseline preservation and immutable
 carry checks. An initial test fixture's explicit empty conceptual fields masked
 the collision; matching the producer's actual output shape exposed it.
 
+The accepted-review metadata fix shipped in v0.51.6 (`66760081`), with successful
+publish workflow `34186307411` and verified npm/global command versions. The
+continuation passed its previous deterministic stop and completed the systemic
+challenge model task. Its driver then stopped on repeated step identity; backend
+acceptance was subsequently confirmed in the register and acceptance ledger. Preserved cumulative usage is 553 calls,
+23,529,315 input tokens and 274,263 output tokens. Scored comparisons remain 0/10.
+
+The repeated step was a genuine second systemic round emitted with the first
+round's submission identity. A second defect used raw answer bytes as replay
+identity, preventing two fresh byte-identical quiet rounds from converging.
+`systemicChallengeLane` now derives identity from persisted completed rounds;
+emission and consumption share it, and the fold hashes the issued lane with the
+answer bytes. Same-round retries remain stable. Old recovered paths remain
+available as evidence and cannot be consumed as new rounds. Both defects have
+real failing-test evidence. Independent review also identified the plan probe and
+recovery validator as users of the old lane identity; both now share the issued
+round identity and have failing-test proof. The final 58 targeted tests passed,
+along with 44 adjacent tests, build, typechecking, lint and packaged smokes. The
+benchmark repeat guard is unchanged.
+
+The continuation backend is still its original `efcee12e`/v0.51.3 checkout.
+Passing the earlier metadata stop in a new invocation did not establish that
+v0.51.6 executed there. An explicit additional unscored tooling-upgrade record
+will bind the published replacement before continuation; original failure,
+configuration, runtime pins, completed outputs and usage remain preserved.
+
+- The benchmark's published-tooling acquisition helper assumed npm `view --json`
+  returned an object and `pack --json` returned an array. This installation returned
+  a singleton array and a package-keyed object respectively. The helper now admits
+  those observed shapes while requiring exactly one matching package and verifying
+  tarball integrity before extraction. Both original failure logs are retained.
+- The saved release process handle expired across recovery. Actual CI completion,
+  registry version and installed bins established state without replaying publication.
+- The delegate diff gate flagged the test cleanup registry's push/splice operations.
+  Inspection confirmed per-test temporary roots are drained by `afterEach`;
+  these findings describe deliberate fixture bookkeeping, not shared production state.
+- Concurrent capture calls allocated the same millisecond-based log name and
+  interleaved their output. The atomic-unique-log requirement is recorded in the
+  machine-wide backlog at `C:/Code/docs/backlog.md`.
 - Codex crashes required resuming the existing approved lap and its running agents.
   An earlier helper also overwrote the owner's checkpoint; the missing ownership
   enforcement is tracked in the machine-wide backlog at `C:/Code/docs/backlog.md`.

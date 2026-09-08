@@ -28,6 +28,7 @@
 import { readFile } from "node:fs/promises";
 
 import { z } from "zod";
+import type { SystemicChallengeRound } from "../types/systemicChallenge.js";
 
 import {
   CharterKindSchema,
@@ -110,9 +111,8 @@ export const CONCEPTUAL_PERSPECTIVE_LANE_PREFIX = "design_review_conceptual_p";
  * enumerated.
  *
  * The id carries the ROUND — a digest of the upstream content the round asks
- * about — because a perspective is the one lane class whose reuse is WRONG.
- * Every other lane's identity is deliberately stable so a re-emitted step
- * re-declares the same bound path (K-of-N resume); a perspective, though, is a
+ * about. Like the iterative systemic challenge, a perspective must preserve
+ * identity within a round and change it after progress. A perspective is a
  * fresh independent reading of the artifacts as they now stand. Keyed on the
  * index alone, a re-review after staleness would find the PREVIOUS round's
  * submission at the bound path, skip the lane, leave its prompt unrewritten,
@@ -134,6 +134,19 @@ export function conceptualPerspectiveLane(
  */
 export function conceptualRoundToken(inputs: readonly string[]): string {
   return hashContent(inputs.join("\n"), { length: 12 });
+}
+
+export const SYSTEMIC_CHALLENGE_LANE_PREFIX = `${GATE_LANES.systemic_challenge}_`;
+
+/**
+ * Completed rounds identify the next systemic challenge. Re-emission, rejection
+ * and timestamp changes cannot mint fresh work; only an accepted round can.
+ * Both the emitter and staged consumer derive this same lane. A crashed fold's
+ * already-applied submission restores to its old lane, never the next round.
+ */
+export function systemicChallengeLane(rounds: readonly SystemicChallengeRound[]): string {
+  const progress = rounds.map(({ round, new_finding_ids, dry }) => [round, new_finding_ids, dry]);
+  return `${SYSTEMIC_CHALLENGE_LANE_PREFIX}${hashContent(JSON.stringify(progress), { length: 12 })}`;
 }
 
 /**

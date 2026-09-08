@@ -30,6 +30,7 @@ import { IntentEquivalenceVerdictSchema } from "../orchestrator/intentEquivalenc
 import { ConceptualJudgeSubmissionSchema } from "../types/conceptualAdjudication.js";
 import {
   CONCEPTUAL_PERSPECTIVE_LANE_PREFIX,
+  SYSTEMIC_CHALLENGE_LANE_PREFIX,
   GATE_LANES,
   charterKindForLane,
 } from "./laneSubmissions.js";
@@ -173,7 +174,9 @@ export function laneSubmissionValidator(
   lane: string,
   context: LaneValidationContext,
 ): ((value: unknown) => SubmissionIssue | null) | null {
-  const schema = LANE_SUBMISSION_SCHEMAS[lane];
+  const systemicRound = lane.startsWith(SYSTEMIC_CHALLENGE_LANE_PREFIX)
+    && /^[0-9a-f]{12}$/.test(lane.slice(SYSTEMIC_CHALLENGE_LANE_PREFIX.length));
+  const schema = LANE_SUBMISSION_SCHEMAS[systemicRound ? GATE_LANES.systemic_challenge : lane];
   if (schema) return (value) => schemaIssue(schema, value);
 
   const charterKind = charterKindForLane(lane);

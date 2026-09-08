@@ -68,12 +68,14 @@ export interface SystemicChallengeRegister {
   /** The loop-until-dry challenge rounds, in order. */
   rounds: SystemicChallengeRound[];
   /**
-   * Content hashes of every submission already folded into this register — the
+   * Round-bound content hashes of submissions already folded into this register — the
    * iterative-fold duplicate guard (CX-02 landing 3). A crash between the
    * fold's core commit and its staged-submission cleanup can restore an
    * already-folded submission for re-consumption; without this register a
    * re-fold of the identical round reports a QUIET round and can converge the
-   * adversary loop falsely. A duplicate hash is ignored, never counted.
+   * adversary loop falsely. A duplicate hash is ignored, never counted. The gate
+   * binds each new digest to its lane so identical fresh quiet answers count as
+   * distinct rounds; older recorded digests remain unchanged as provenance.
    */
   folded_submission_hashes?: string[];
   /**

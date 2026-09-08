@@ -56,8 +56,8 @@ export interface AdvanceAuditOptions {
   /** Host-supplied second-order-adversary challenge round (Phase E); folded by systemic_challenge_executor. */
   systemicChallenge?: SystemicChallengeSubmission;
   /**
-   * Content hash of the systemic-challenge submission, computed by the fold at
-   * staging time. The executor's iterative-fold duplicate guard: a hash the
+   * Round-bound content hash of the systemic-challenge submission, computed by
+   * the gate from its issued lane and staged bytes. The duplicate guard: a hash the
    * register already folded is ignored, never counted as a quiet round.
    */
   systemicChallengeSubmissionHash?: string;

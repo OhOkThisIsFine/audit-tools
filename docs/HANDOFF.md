@@ -5,10 +5,10 @@
 
 ## Live state
 
-- **v0.51.5 is published and installed globally.** Release commit `84339641`
-  passed the six-job publish workflow, including all four test shards; npm resolves 0.51.5 and
-  both installed command surfaces report 0.51.5. The release workflow is
-  [run 34184343142](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34184343142).
+- **v0.51.6 is published and installed globally.** Release commit `66760081`
+  passed the publish workflow; npm resolves 0.51.6 and
+  both installed command surfaces report 0.51.6. The release workflow is
+  [run 34186307411](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34186307411).
   Conceptual retries preserve the review round and valid perspective outputs, reopen
   malformed perspectives with their rejection evidence, and validate lane paths before quarantine.
 - **Pipeline verification defaults and rejection history are implemented** in `4b977383`.
@@ -45,8 +45,13 @@ unscored continuation. Benchmark crash recovery is integrated in `86f512d1`, wit
 The isolated graph-disabled trial exposed a late capability notice after semantic
 review. The early loader stop rule passed a fresh isolated live trial and is
 released in 0.51.4. The unscored continuation accepted the repaired conceptual judge,
-then stopped at the no-progress guard for `design_assessment_current`. Diagnose and
-repair that deterministic stop while preserving the completed submissions and usage ledger;
+and a fresh invocation passed the previous no-progress stop. Its backend remains
+the frozen v0.51.3 checkout; it has not yet executed the published metadata fix.
+The first systemic challenge round was accepted, then the runner rejected the next
+round's reused identity. Round identity and quiet-result replay fixes now pass
+58 targeted tests and independent review. Publish and explicitly bind the upgraded
+backend while preserving all 553 calls (23,529,315 input and 274,263 output tokens)
+and completed submissions;
 then finish the continuation and the ten paired quality comparisons.
 Evidence and limits are in
 [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).

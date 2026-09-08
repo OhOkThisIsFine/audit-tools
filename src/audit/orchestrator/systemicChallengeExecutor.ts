@@ -71,7 +71,7 @@ export function runSystemicChallengeExecutor(
   const generated_at = new Date().toISOString();
 
   // Iterative-fold duplicate guard (CX-02 landing 3): a submission whose
-  // content hash the register already folded is IGNORED — never folded again,
+  // round-bound content hash the register already folded is IGNORED — never folded again,
   // and above all never counted as a quiet round, which is what would converge
   // the adversary loop falsely and permanently. Reachable when a crash between
   // the fold's core commit and its staged-submission cleanup restores an

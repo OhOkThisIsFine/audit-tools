@@ -62,7 +62,7 @@ export interface RunAuditStepOptions {
   charterDeltaSubmissionPath?: string;
   clarificationAnswersPath?: string;
   systemicChallengePath?: string;
-  /** Fold-computed content hash of the staged systemic-challenge submission. */
+  /** Gate-computed hash binding the systemic challenge's round lane and staged bytes. */
   systemicChallengeSubmissionHash?: string;
   /**
    * Already-validated edge-reasoning rewrites. Parsed + shape-checked by the

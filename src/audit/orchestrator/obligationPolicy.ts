@@ -46,6 +46,7 @@ import { EXECUTOR_BY_OBLIGATION, isHostDelegationExecutor } from "./executors.js
 import {
   GATE_LANES,
   charterExtractionLane,
+  systemicChallengeLane,
 } from "../cli/laneSubmissions.js";
 import { charterExtractionKindsForCeiling } from "../cli/charterExtractionPrompt.js";
 
@@ -251,9 +252,10 @@ const POLICY_CLASSIFIERS: Readonly<Record<string, Classifier>> = {
   },
 
   systemic_challenge_current: async (bundle, inputs) => {
-    if (await probe(inputs, GATE_LANES.systemic_challenge)) {
+    const lane = systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []);
+    if (await probe(inputs, lane)) {
       return awaitSubmission(
-        GATE_LANES.systemic_challenge,
+        lane,
         "a systemic-challenge round submission is pending",
       );
     }

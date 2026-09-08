@@ -28,6 +28,7 @@ import {
   mergeLaneShortfalls,
   recordExpectedLanes,
   renderLaneShortfallLines,
+  systemicChallengeLane,
   type LaneSubmissionShortfall,
 } from "./laneSubmissions.js";
 import {
@@ -1005,11 +1006,12 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
     // and computed the language-neutral aggregate-metrics digest. The host dispatches
     // a SEPARATE adversary agent whose mandate is optimization/better-way; it writes
     // the round's improvement findings (true-lens) back, and the executor folds them
-    // + decides convergence. An empty submission converges the loop.
+    // + decides convergence after two consecutive quiet rounds.
     const continueCommand = nextStepCommand(root, artifactsDir);
+    const lane = systemicChallengeLane(result.bundle.systemic_challenge?.rounds ?? []);
     const submissionPath = laneSubmissionPath(
       artifactsDir,
-      GATE_LANES.systemic_challenge,
+      lane,
     );
   const metrics =
     result.bundle.systemic_challenge?.metrics ?? aggregateMetricsDigest(result.bundle);
@@ -1033,9 +1035,10 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
     const fanout = await materializeFanoutLanes({
       artifactsDir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
+      roundId: lane,
       lanes: [
         {
-          id: GATE_LANES.systemic_challenge,
+          id: lane,
           label: "Second-order adversary (improvement-seeking challenge)",
           promptFilename: "systemic-challenge-prompt.md",
           promptText: adversaryPrompt,
@@ -1049,10 +1052,11 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Execute the second-order-adversary lane prompt (a separate agent from the one that drove this audit), write its findings to the results path, then run next-step. An empty findings array converges the loop.",
+        "Execute the second-order-adversary lane prompt (a separate agent from the one that drove this audit), write its findings to the results path, then run next-step. Two consecutive rounds with no new findings converge the loop.",
       repoRoot: root,
     artifactPaths: {
-      ...fanout.artifactPaths,
+      systemic_challenge_prompt: fanout.lanes[0]!.promptPath,
+      systemic_challenge_results: submissionPath,
       systemic_charter_register: join(artifactsDir, "charter_register.json"),
       conceptual_review_adjudication: join(
         artifactsDir,
@@ -1074,7 +1078,7 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
           writeSentence: "The executor must write its findings JSON to:",
           resultPath: submissionPath,
           resultNote:
-            "An EMPTY findings array is the deliberate loop terminator (this round found nothing new).",
+            "An EMPTY findings array records a quiet round. The loop ends after two consecutive rounds find nothing new.",
           continueCommand,
         }),
       ].join("\n"),

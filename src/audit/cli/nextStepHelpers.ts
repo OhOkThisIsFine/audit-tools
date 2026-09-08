@@ -14,6 +14,7 @@ import {
   describeStoppedFold,
   RunLogger,
   compareCodeUnits,
+  hashContent,
   isFileMissingError,
   isJsonParseError,
   isRecord,
@@ -151,6 +152,7 @@ import {
   laneSubmissionPath,
   laneSubmissionId,
   recordLaneOutcome,
+  systemicChallengeLane,
 } from "./laneSubmissions.js";
 import { recordHostResultOutcomes } from "audit-tools/shared";
 
@@ -2098,10 +2100,11 @@ export async function handleSystemicChallengeBranch(
   state: AuditState,
   tx: FoldTransaction,
 ): Promise<SystemicChallengeBranchResult> {
+  const lane = systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []);
   return runOmittableGate<unknown, "systemic_challenge">(
     {
       kind: "systemic_challenge",
-      lane: GATE_LANES.systemic_challenge,
+      lane,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.systemic_challenge]!,
       apply: (_value, path, p, foldBundle, staged) =>
         runAuditStepUnlocked(
@@ -2110,11 +2113,11 @@ export async function handleSystemicChallengeBranch(
             artifactsDir: p.artifactsDir,
             preferredExecutor: "systemic_challenge_executor",
             systemicChallengePath: path,
-            // The iterative-fold duplicate guard: the executor's register
-            // records every folded submission's content hash and IGNORES a
-            // duplicate, so a crash-restored already-folded round can never
-            // read as a quiet round and converge the adversary loop falsely.
-            systemicChallengeSubmissionHash: staged.contentHash,
+            // Bind bytes to the issued round: two fresh empty answers may be
+            // byte-identical, while replaying one instance must stay a no-op.
+            systemicChallengeSubmissionHash: staged.contentHash === undefined
+              ? undefined
+              : hashContent(`${lane}\n${staged.contentHash}`),
           },
           foldBundle,
         ),
