@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   bindCandidateTerminalStep,
   buildCandidateInvocation,
+  checkpointPathForRequests,
   currentStepPathFromCliOutput,
   driveCandidateLoop,
   runCandidateArm,
@@ -12,8 +13,7 @@ import {
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
-import { spawnSyncHidden } from "../helpers/spawn.mjs";
+import { resolve } from "node:path";import { spawnSyncHidden } from "../helpers/spawn.mjs";
 
 const shared = { repo_commit: "0123456789abcdef0123456789abcdef01234567", host_build: "audit-tools@0.50.19", model: "pinned-model", reasoning_effort: "high", tool_inventory: ["codebase-memory"], budgets: { context: 100000, output: 12000, turns: 20, timeout_ms: 300000 } };
 const pairs = (prefix: string) => Array.from({ length: 5 }, (_, i) => ({ id: `${prefix}-${i + 1}`, pinned: shared, control_prompt: "user's standalone prompt verbatim codebase-memory", candidate_prompt: "ordinary comprehensive /audit-code P0 behavior" }));
@@ -374,15 +374,16 @@ describe("P0 benchmark harness manifest", () => {
           'import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";',
           'import { join } from "node:path";',
           'const root = process.argv[process.argv.indexOf("--root") + 1];',
-          'const state = join(root, ".p0-step-count");',
-          'const count = existsSync(state) ? Number(readFileSync(state, "utf8")) + 1 : 1;',
-          'writeFileSync(state, String(count));',
           'const steps = join(root, ".audit-tools", "audit", "steps");',
           'mkdirSync(steps, { recursive: true });',
+          'const state = join(steps, ".p0-step-count");',
+          'const count = existsSync(state) ? Number(readFileSync(state, "utf8")) + 1 : 1;',
+          'writeFileSync(state, String(count));',
           'const current = join(steps, "current-step.json");',
           'if (count === 1) {',
-          '  writeFileSync(join(root, "candidate-step.md"), "backend-generated prompt");',
-          '  writeFileSync(current, JSON.stringify({ step_kind: "review", prompt_path: "candidate-step.md" }));',
+          '  const prompt = join(".audit-tools", "audit", "steps", "candidate-step.md");',
+          '  writeFileSync(join(root, prompt), "backend-generated prompt");',
+          '  writeFileSync(current, JSON.stringify({ step_kind: "review", prompt_path: prompt }));',
           '} else {',
           '  const report = join(root, ".audit-tools", "audit", "audit-report.md");',
           '  mkdirSync(join(root, ".audit-tools", "audit"), { recursive: true });',
@@ -552,6 +553,281 @@ describe("P0 benchmark harness manifest", () => {
       expect(`${stale.stdout}\n${stale.stderr}`).toMatch(/digest|corpus/i);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("runCandidateArm reuses accepted step receipts without replaying completed semantic steps", async () => {
+    const requests: unknown[] = [];
+    const resumed = [
+      { request: { step_id: "s1", step_kind: "review", prompt: "first" }, response: { ok: true } },
+    ];
+    const steps = [
+      { step_id: "s2", step_kind: "synthesis", prompt_path: "p2.md", prompt: "second" },
+      { step_id: "s3", step_kind: "present_report", complete: true },
+    ];
+    let i = 0;
+    const result = await runCandidateArm({
+      auditCode: "audit-code.mjs",
+      snapshotRoot: "C:/snapshots/held-out",
+      pinnedProfile: shared,
+      maxSteps: 3,
+      candidateRequest: { protocol: "p0-request-v1", request_id: "pair-A", pair_id: "pair", arm: "A", prompt: "ordinary candidate objective", pinned_profile: shared, snapshot: "held-out" },
+      resumedStepResponses: resumed,
+      invokeCommand: async () => {},
+      readCurrentStep: async () => steps[i++],
+      readPrompt: async () => "second",
+      executeExternal: async (request: unknown) => { requests.push(request); },
+    });
+    expect(result.step_id).toBe("s3");
+    // Only the new semantic step executes; the resumed s1 receipt is never replayed.
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toEqual(expect.objectContaining({ step_id: "s2" }));
+
+    // Duplicate resumed receipts fail closed instead of silently collapsing.
+    await expect(runCandidateArm({
+      auditCode: "audit-code.mjs",
+      snapshotRoot: "C:/snapshots/held-out",
+      pinnedProfile: shared,
+      maxSteps: 3,
+      candidateRequest: { protocol: "p0-request-v1", request_id: "pair-A", pair_id: "pair", arm: "A", prompt: "ordinary candidate objective", pinned_profile: shared, snapshot: "held-out" },
+      resumedStepResponses: [
+        { request: { step_id: "dup" }, response: {} },
+        { request: { step_id: "dup" }, response: {} },
+      ],
+      invokeCommand: async () => {},
+      readCurrentStep: async () => ({ step_id: "s9" }),
+      readPrompt: async () => "x",
+      executeExternal: async () => {},
+    })).rejects.toThrow(/resumed|provenance/i);
+  });
+
+  test("crash-safe run checkpoint resumes the same prepared run without rerunning completed arms", () => {
+    const root = mkdtempSync(resolve(tmpdir(), "p0-resume-"));
+    try {
+      const repoRoot = resolve(root, "repo");
+      mkdirSync(repoRoot, { recursive: true });
+      const auditCode = resolve(repoRoot, "audit-code.mjs");
+      writeFileSync(
+        auditCode,
+        [
+          'import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";',
+          'import { join } from "node:path";',
+          'const root = process.argv[process.argv.indexOf("--root") + 1];',
+          'const steps = join(root, ".audit-tools", "audit", "steps");',
+          'mkdirSync(steps, { recursive: true });',
+          'const state = join(steps, ".p0-step-count");',
+          'const count = existsSync(state) ? Number(readFileSync(state, "utf8")) + 1 : 1;',
+          'writeFileSync(state, String(count));',
+          'const current = join(steps, "current-step.json");',
+          'if (count === 1) {',
+          '  const prompt = join(".audit-tools", "audit", "steps", "candidate-step.md");',
+          '  writeFileSync(join(root, prompt), "backend-generated prompt");',
+          '  writeFileSync(current, JSON.stringify({ step_kind: "review", prompt_path: prompt }));',
+          '} else {',
+          '  const report = join(root, ".audit-tools", "audit", "audit-report.md");',
+          '  mkdirSync(join(root, ".audit-tools", "audit"), { recursive: true });',
+          '  writeFileSync(report, "# Candidate report\\n");',
+          '  writeFileSync(current, JSON.stringify({ step_kind: "present_report", status: "complete", complete: true, artifact_paths: { final_report: report } }));',
+          '}',
+          'console.log(JSON.stringify({ artifact_paths: { current_step: current } }));',
+        ].join("\n"),
+      );
+      writeFileSync(resolve(repoRoot, "fixture.js"), "export const fixture = true;\n");
+      spawnSyncHidden("git", ["init"], { cwd: repoRoot, encoding: "utf8" });
+      for (const args of [
+        ["config", "user.email", "p0@example.invalid"],
+        ["config", "user.name", "P0 Test"],
+        ["add", "."],
+        ["commit", "-m", "fixture"],
+      ]) {
+        const result = spawnSyncHidden("git", args, { cwd: repoRoot, encoding: "utf8" });
+        expect(result.status).toBe(0);
+      }
+      const revision = spawnSyncHidden("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" });
+      const profile = { ...shared, repo_commit: revision.stdout.trim() };
+      const corpus = resolve(root, "held-out-corpus");
+      mkdirSync(corpus, { recursive: true });
+      writeFileSync(resolve(corpus, "fixture.js"), "export const heldOut = true;\n");
+      const corpusDigest = createHash("sha256")
+        .update("fixture.js")
+        .update("\0")
+        .update(readFileSync(resolve(corpus, "fixture.js")))
+        .update("\0")
+        .digest("hex");
+      const manifest = {
+        ...validManifest,
+        shared: profile,
+        primary: { pairs: validManifest.primary.pairs.map((pair) => ({ ...pair, pinned: profile })) },
+        held_out: {
+          pairs: validManifest.held_out.pairs.map((pair) => ({ ...pair, pinned: profile })),
+          corpus: { path: corpus, deterministic_tree_digest: true, sha256: corpusDigest },
+        },
+      };
+      const manifestPath = resolve(root, "manifest.json");
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      const runner = resolve("benchmarks/p0/runner.mjs");
+      const preparedRoot = resolve(root, "prepared");
+      const prepared = spawnSyncHidden(process.execPath, [runner, "prepare", "--manifest", manifestPath, "--output", preparedRoot], { cwd: repoRoot, encoding: "utf8" });
+      expect(prepared.status, `${prepared.stderr}\n${prepared.stdout}`).toBe(0);
+      const requestsPath = resolve(preparedRoot, "requests.public.json");
+      const identityPath = resolve(preparedRoot, "identity.private.json");
+      const executor = resolve(root, "executor.mjs");
+      const executorLog = resolve(root, "executor-requests.jsonl");
+      writeFileSync(
+        executor,
+        [
+          'import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";',
+          'import { createHash } from "node:crypto";',
+          'import { dirname, join } from "node:path";',
+          'const value = (flag) => process.argv[process.argv.indexOf(flag) + 1];',
+          'const request = JSON.parse(readFileSync(value("--request"), "utf8"));',
+          `appendFileSync(${JSON.stringify(executorLog)}, JSON.stringify({ request_id: request.request_id ?? null, step_id: request.step_id ?? null }) + "\\n");`,
+          'const suffix = String(request.step_id ?? "control").replaceAll(/[^a-z0-9_.-]/gi, "_");',
+          'const artifactPath = join(dirname(value("--response")), `${request.request_id ?? "candidate"}-${suffix}.md`);',
+          'const bytes = Buffer.from("# Executor artifact\\n");',
+          'writeFileSync(artifactPath, bytes);',
+          'mkdirSync(dirname(value("--response")), { recursive: true });',
+          'writeFileSync(value("--response"), JSON.stringify({ protocol: "p0-executor-response-v1", request_digest: createHash("sha256").update(JSON.stringify(request)).digest("hex"), pinned_profile: request.pinned_profile, artifact_path: artifactPath, artifact_sha256: createHash("sha256").update(bytes).digest("hex") }));',
+        ].join("\n"),
+      );
+      const runArgs = [runner, "run", "--manifest", manifestPath, "--requests", requestsPath, "--identity", identityPath, "--executor", process.execPath, "--executor-arg", executor];
+      const first = spawnSyncHidden(process.execPath, runArgs, { cwd: repoRoot, encoding: "utf8" });
+      expect(first.status, `${first.stderr}\n${first.stdout}`).toBe(0);
+      const firstOutput = JSON.parse(first.stdout);
+      expect(firstOutput.protocol).toBe("p0-raw-results-v1");
+      expect(firstOutput.records).toHaveLength(20);
+      const checkpointPath = checkpointPathForRequests(requestsPath);
+      expect(existsSync(checkpointPath)).toBe(true);
+      const checkpoint = JSON.parse(readFileSync(checkpointPath, "utf8"));
+      expect(checkpoint.protocol).toBe("p0-run-checkpoint-v1");
+      expect(checkpoint.status).toBe("complete");
+      expect(checkpoint.request_order).toEqual(firstOutput.records.map((r: any) => r.request_id));
+      expect(checkpoint.completed).toHaveLength(20);
+      expect(checkpoint.failures).toEqual([]);
+      const callsAfterFirst = readFileSync(executorLog, "utf8").trim().split("\n").length;
+      expect(callsAfterFirst).toBe(20);
+
+      // Ordinary crash recovery needs no manual flags: rerunning the same
+      // prepared run reuses completed arms without a single new execution.
+      const second = spawnSyncHidden(process.execPath, runArgs, { cwd: repoRoot, encoding: "utf8" });
+      expect(second.status, `${second.stderr}\n${second.stdout}`).toBe(0);
+      const secondOutput = JSON.parse(second.stdout);
+      expect(secondOutput).toEqual(firstOutput);
+      expect(readFileSync(executorLog, "utf8").trim().split("\n")).toHaveLength(callsAfterFirst);
+
+      // Tampered or changed bindings are rejected before any execution.
+      const tampered = { ...checkpoint, executor_args: ["tampered"] };
+      writeFileSync(checkpointPath, `${JSON.stringify(tampered, null, 2)}\n`);
+      const tamperRun = spawnSyncHidden(process.execPath, runArgs, { cwd: repoRoot, encoding: "utf8" });
+      expect(tamperRun.status).not.toBe(0);
+      expect(`${tamperRun.stdout}\n${tamperRun.stderr}`).toMatch(/binding mismatch|tamper/i);
+      expect(readFileSync(executorLog, "utf8").trim().split("\n")).toHaveLength(callsAfterFirst);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("run checkpoint preserves failed evidence and never retries recorded failures", () => {
+    const root = mkdtempSync(resolve(tmpdir(), "p0-resume-fail-"));
+    try {
+      const repoRoot = resolve(root, "repo");
+      mkdirSync(repoRoot, { recursive: true });
+      const auditCode = resolve(repoRoot, "audit-code.mjs");
+      writeFileSync(
+        auditCode,
+        [
+          'import { mkdirSync, writeFileSync } from "node:fs";',
+          'import { join } from "node:path";',
+          'const root = process.argv[process.argv.indexOf("--root") + 1];',
+          'mkdirSync(join(root, ".audit-tools", "audit", "steps"), { recursive: true });',
+          'const current = join(root, ".audit-tools", "audit", "steps", "current-step.json");',
+          'const report = join(root, ".audit-tools", "audit", "audit-report.md");',
+          'mkdirSync(join(root, ".audit-tools", "audit"), { recursive: true });',
+          'writeFileSync(report, "# Candidate report\\n");',
+          'writeFileSync(current, JSON.stringify({ step_kind: "present_report", status: "complete", complete: true, artifact_paths: { final_report: report } }));',
+          'console.log(JSON.stringify({ artifact_paths: { current_step: current } }));',
+        ].join("\n"),
+      );
+      writeFileSync(resolve(repoRoot, "fixture.js"), "export const fixture = true;\n");
+      spawnSyncHidden("git", ["init"], { cwd: repoRoot, encoding: "utf8" });
+      for (const args of [
+        ["config", "user.email", "p0@example.invalid"],
+        ["config", "user.name", "P0 Test"],
+        ["add", "."],
+        ["commit", "-m", "fixture"],
+      ]) {
+        expect(spawnSyncHidden("git", args, { cwd: repoRoot, encoding: "utf8" }).status).toBe(0);
+      }
+      const revision = spawnSyncHidden("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" });
+      const profile = { ...shared, repo_commit: revision.stdout.trim() };
+      const corpus = resolve(root, "held-out-corpus");
+      mkdirSync(corpus, { recursive: true });
+      writeFileSync(resolve(corpus, "fixture.js"), "export const heldOut = true;\n");
+      const corpusDigest = createHash("sha256")
+        .update("fixture.js")
+        .update("\0")
+        .update(readFileSync(resolve(corpus, "fixture.js")))
+        .update("\0")
+        .digest("hex");
+      const manifest = {
+        ...validManifest,
+        shared: profile,
+        primary: { pairs: validManifest.primary.pairs.map((pair) => ({ ...pair, pinned: profile })) },
+        held_out: {
+          pairs: validManifest.held_out.pairs.map((pair) => ({ ...pair, pinned: profile })),
+          corpus: { path: corpus, deterministic_tree_digest: true, sha256: corpusDigest },
+        },
+      };
+      const manifestPath = resolve(root, "manifest.json");
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      const runner = resolve("benchmarks/p0/runner.mjs");
+      const preparedRoot = resolve(root, "prepared");
+      const preparedFail = spawnSyncHidden(process.execPath, [runner, "prepare", "--manifest", manifestPath, "--output", preparedRoot], { cwd: repoRoot, encoding: "utf8" });
+      expect(preparedFail.status, `${preparedFail.stderr}\n${preparedFail.stdout}`).toBe(0);
+      const requestsPath = resolve(preparedRoot, "requests.public.json");
+      const identityPath = resolve(preparedRoot, "identity.private.json");
+      const executor = resolve(root, "executor.mjs");
+      const executorLog = resolve(root, "executor-requests.jsonl");
+      // Fail on the third executor invocation: two arms complete durably,
+      // the third records a real execution failure (not a resumable interruption).
+      writeFileSync(
+        executor,
+        [
+          'import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";',
+          'import { createHash } from "node:crypto";',
+          'import { dirname, join } from "node:path";',
+          'const value = (flag) => process.argv[process.argv.indexOf(flag) + 1];',
+          'const request = JSON.parse(readFileSync(value("--request"), "utf8"));',
+          `appendFileSync(${JSON.stringify(executorLog)}, "call\\n");`,
+          'const lines = readFileSync(' + JSON.stringify(executorLog) + ', "utf8").trim().split("\\n").length;',
+          'if (lines >= 3) { console.error("boom"); process.exit(1); }',
+          'const suffix = String(request.step_id ?? "control").replaceAll(/[^a-z0-9_.-]/gi, "_");',
+          'const artifactPath = join(dirname(value("--response")), `${request.request_id ?? "candidate"}-${suffix}.md`);',
+          'const bytes = Buffer.from("# Executor artifact\\n");',
+          'writeFileSync(artifactPath, bytes);',
+          'mkdirSync(dirname(value("--response")), { recursive: true });',
+          'writeFileSync(value("--response"), JSON.stringify({ protocol: "p0-executor-response-v1", request_digest: createHash("sha256").update(JSON.stringify(request)).digest("hex"), pinned_profile: request.pinned_profile, artifact_path: artifactPath, artifact_sha256: createHash("sha256").update(bytes).digest("hex") }));',
+        ].join("\n"),
+      );
+      const runArgs = [runner, "run", "--manifest", manifestPath, "--requests", requestsPath, "--identity", identityPath, "--executor", process.execPath, "--executor-arg", executor];
+      const failed = spawnSyncHidden(process.execPath, runArgs, { cwd: repoRoot, encoding: "utf8" });
+      expect(failed.status).not.toBe(0);
+      const checkpointPath = checkpointPathForRequests(requestsPath);
+      expect(existsSync(checkpointPath)).toBe(true);
+      const checkpoint = JSON.parse(readFileSync(checkpointPath, "utf8"));
+      expect(checkpoint.completed.length).toBeGreaterThan(0);
+      expect(checkpoint.failures).toHaveLength(1);
+      expect(checkpoint.failures[0].resumable).toBe(false);
+      const callsAfterFailure = readFileSync(executorLog, "utf8").trim().split("\n").length;
+
+      // A later invocation with the same prepared bindings must surface the
+      // recorded failure instead of selecting or retrying the failed arm.
+      const retry = spawnSyncHidden(process.execPath, runArgs, { cwd: repoRoot, encoding: "utf8" });
+      expect(retry.status).not.toBe(0);
+      expect(`${retry.stdout}\n${retry.stderr}`).toMatch(/previous run recorded execution failure/i);
+      expect(readFileSync(executorLog, "utf8").trim().split("\n")).toHaveLength(callsAfterFailure);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

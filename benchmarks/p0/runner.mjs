@@ -4,15 +4,18 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  lstatSync,
+  readlinkSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import {
   dirname,
@@ -151,7 +154,6 @@ export async function materializePinnedPrimary({
   }
   return {
     snapshot_commit: commit,
-    source_tree_clean: true,
     root: destination,
   };
 }
@@ -279,6 +281,7 @@ export async function runCandidateArm({
   readCurrentStep,
   readPrompt,
   executeExternal,
+  resumedStepResponses = /** @type {Array<{ request: object, response: object }>} */ ([]),
 }) {
   if (
     ![invokeCommand, readCurrentStep, readPrompt, executeExternal].every(
@@ -294,9 +297,25 @@ export async function runCandidateArm({
     !isStr(candidateRequest.prompt)
   )
     throw Error("concrete prepared candidate request required");
+  if (!Array.isArray(resumedStepResponses))
+    throw Error("resumed candidate step provenance failure");
   const seen = new Set();
+  for (const prior of resumedStepResponses) {
+    const priorId = prior?.request?.step_id;
+    if (!isStr(priorId) || seen.has(priorId))
+      throw Error("resumed candidate step provenance failure");
+    seen.add(priorId);
+  }
+  if (resumedStepResponses.length >= maxSteps)
+    throw Error(
+      `max-step exhaustion after ${maxSteps} steps; last=resumed`,
+    );
   let last;
-  for (let count = 1; count <= maxSteps; count += 1) {
+  for (
+    let count = resumedStepResponses.length + 1;
+    count <= maxSteps;
+    count += 1
+  ) {
     const outcome = await invokeCommand(
       buildCandidateInvocation({
         audit_code: auditCode,
@@ -680,21 +699,187 @@ function prepare(path, output) {
     count: requests.length,
   };
 }
-function external(executor, executorArgs, request, dir) {
-  const id = randomUUID(),
-    requestPath = join(dir, `${id}.request.json`),
-    responsePath = join(dir, `${id}.response.json`);
-  writeJson(requestPath, request);
+function pendingDirForRequests(requestsPath) {
+  return join(dirname(resolve(requestsPath)), "pending");
+}
+
+function pendingControlRequestPath(requestsPath, requestId) {
+  return join(pendingDirForRequests(requestsPath), `${requestId}.pending.request.json`);
+}
+
+function pendingControlResponsePath(requestsPath, requestId) {
+  return join(pendingDirForRequests(requestsPath), `${requestId}.pending.response.json`);
+}
+
+function pendingStepRequestPath(requestsPath, requestId, stepIndex) {
+  return join(
+    pendingDirForRequests(requestsPath),
+    `${requestId}.step-${stepIndex}.request.json`,
+  );
+}
+
+function pendingStepResponsePath(requestsPath, requestId, stepIndex) {
+  return join(
+    pendingDirForRequests(requestsPath),
+    `${requestId}.step-${stepIndex}.response.json`,
+  );
+}
+
+function snapshotBaseForRun(manifest, requests, identity, requestsPath) {
+  return join(
+    tmpdir(),
+    "audit-tools-p0-snapshots",
+    digest({
+      manifest,
+      requests,
+      identity,
+      prepared_requests_path: resolve(requestsPath),
+    }).slice(0, 32),
+  );
+}
+
+function snapshotRootForRun(snapshotBase, requestId) {
+  return join(resolve(snapshotBase), requestId, "repo");
+}
+
+function snapshotSourceInventory(root) {
+  const inventory = [];
+  const visit = (directory, relativePath = "") => {
+    const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+    for (const entry of entries) {
+      if (relativePath === "" && entry.name === ".git")
+        continue;
+      const childRelative = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+      const child = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(child, childRelative);
+      } else if (entry.isFile()) {
+        inventory.push({ path: childRelative, type: "file", digest: digest(readFileSync(child)) });
+      } else if (entry.isSymbolicLink()) {
+        inventory.push({ path: childRelative, type: "symlink", digest: digest(readlinkSync(child)) });
+      } else {
+        throw Error(`checkpoint source binding failure: unsupported source entry ${childRelative}`);
+      }
+    }
+  };
+  visit(resolve(root));
+  return inventory;
+}
+
+function assertSnapshotSourceBinding(root, sourceInventory, sourceDigest, requestId) {
+  if (!Array.isArray(sourceInventory) || !isStr(sourceDigest) || digest(sourceInventory) !== sourceDigest)
+    throw Error(
+      `checkpoint source binding failure for ${requestId}: source inventory is invalid`,
+    );
+  for (const entry of sourceInventory) {
+    if (!isStr(entry?.path) || !["file", "symlink"].includes(entry?.type) || !isStr(entry?.digest))
+      throw Error(`checkpoint source binding failure for ${requestId}: source inventory entry is invalid`);
+    const sourcePath = resolve(root, entry.path);
+    let stat;
+    try {
+      stat = lstatSync(sourcePath);
+    } catch {
+      throw Error(`checkpoint source binding failure for ${requestId}: original source path is missing`);
+    }
+    const actual = stat.isFile()
+      ? { type: "file", digest: digest(readFileSync(sourcePath)) }
+      : stat.isSymbolicLink()
+        ? { type: "symlink", digest: digest(readlinkSync(sourcePath)) }
+        : null;
+    if (!actual || actual.type !== entry.type || actual.digest !== entry.digest)
+      throw Error(`checkpoint source binding failure for ${requestId}: original source bytes changed`);
+  }
+}
+
+function assertSafeSnapshotRoot(root, base, requestId) {
+  const absBase = resolve(base);
+  const absRoot = resolve(root);
+  if (absRoot === absBase) throw Error("refusing snapshot cleanup outside owned root");
+  const rel = relative(absBase, absRoot);
+  const expected = join(requestId, "repo");
+  if (rel !== expected)
+    throw Error(`refusing snapshot cleanup outside owned root for ${requestId}`);
+  if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`))
+    throw Error(`refusing snapshot cleanup outside owned root for ${requestId}`);
+}
+
+function assertSafeSnapshotParent(parent, base, requestId) {
+  const absBase = resolve(base);
+  const absParent = resolve(parent);
+  if (absParent === absBase) return;
+  const rel = relative(absBase, absParent);
+  if (rel !== requestId)
+    throw Error(`refusing snapshot parent cleanup outside owned root for ${requestId}`);
+}
+
+function cleanupSnapshotTree(root, base, requestId) {
+  try {
+    assertSafeSnapshotRoot(root, base, requestId);
+  } catch (error) {
+    console.error(`p0 runner: snapshot cleanup refused: ${error.message}`);
+    return false;
+  }
+  try {
+    if (!existsSync(root)) return true;
+    rmSync(root, { recursive: true, force: true });
+  } catch (error) {
+    console.error(`p0 runner: snapshot cleanup debt for ${requestId}: ${error.message}`);
+    return false;
+  }
+  try {
+    const parent = dirname(resolve(root));
+    assertSafeSnapshotParent(parent, base, requestId);
+    if (parent !== resolve(base) && existsSync(parent) && readdirSync(parent).length === 0)
+      rmSync(parent, { recursive: true, force: true });
+  } catch {
+    // Best-effort parent pruning only.
+  }
+  return true;
+}
+
+async function cleanupPinnedSnapshotTree({ repoRoot, root, base, requestId }) {
+  try {
+    assertSafeSnapshotRoot(root, base, requestId);
+  } catch (error) {
+    console.error(`p0 runner: snapshot cleanup refused: ${error.message}`);
+    return false;
+  }
+  try {
+    if (existsSync(root)) {
+      await removePinnedPrimary({ repoRoot, destination: root });
+      if (existsSync(root)) rmSync(root, { recursive: true, force: true });
+    }
+  } catch (error) {
+    console.error(`p0 runner: snapshot cleanup debt for ${requestId}: ${error.message}`);
+    return false;
+  }
+  try {
+    const parent = dirname(resolve(root));
+    assertSafeSnapshotParent(parent, base, requestId);
+    if (parent !== resolve(base) && existsSync(parent) && readdirSync(parent).length === 0)
+      rmSync(parent, { recursive: true, force: true });
+  } catch {
+    // Best-effort parent pruning only.
+  }
+  return true;
+}
+
+function launchExternalWithPaths(executor, executorArgs, request, requestPath, responsePath) {
+  mkdirSync(dirname(resolve(requestPath)), { recursive: true });
+  mkdirSync(dirname(resolve(responsePath)), { recursive: true });
+  writeJson(resolve(requestPath), request);
   const child = spawnSync(
     executor,
-    [...executorArgs, "--request", requestPath, "--response", responsePath],
+    [...executorArgs, "--request", resolve(requestPath), "--response", resolve(responsePath)],
     { encoding: "utf8", shell: false },
   );
   if (child.error || child.status !== 0)
     throw Error(
       `external executor failed: ${child.error?.message ?? child.stderr ?? child.status}`,
     );
-  const response = readJson(responsePath);
+  const response = readJson(resolve(responsePath));
   if (
     response.protocol !== "p0-executor-response-v1" ||
     response.request_digest !== digest(request) ||
@@ -712,13 +897,341 @@ function external(executor, executorArgs, request, dir) {
     throw Error("executor artifact digest failure");
   return response;
 }
-async function candidate({ root, profile, candidateRequest, executor, executorArgs, results }) {
+
+function readPendingJson(path, label) {
+  try {
+    return readJson(resolve(path));
+  } catch {
+    throw Error(`unresolved invocation: pending ${label} at ${path} is absent or unreadable (worker may still be alive; reconnect, never relaunch)`);
+  }
+}
+
+function settleControlPending({ requestsPath, pending, expectedRequest }) {
+  const stored = pending?.request;
+  if (!isObj(stored)) throw Error("checkpoint binding mismatch: control pending request is invalid");
+  const fileRequest = readPendingJson(pending.request_path, "control request");
+  if (digest(fileRequest) !== digest(stored) || digest(stored) !== pending.request_digest)
+    throw Error("checkpoint binding mismatch: control pending request provenance is invalid");
+  const controlExpected = { ...expectedRequest, execution: "standalone" };
+  if (digest(stored) !== digest(controlExpected))
+    throw Error("checkpoint binding mismatch: control pending request does not match prepared request");
+  if (!equal(stored.pinned_profile, expectedRequest.pinned_profile))
+    throw Error("checkpoint binding mismatch: control pending profile is invalid");
+  const expectedReqPath = pendingControlRequestPath(requestsPath, expectedRequest.request_id);
+  const expectedResPath = pendingControlResponsePath(requestsPath, expectedRequest.request_id);
+  if (resolve(pending.request_path) !== resolve(expectedReqPath) || resolve(pending.response_path) !== resolve(expectedResPath))
+    throw Error("checkpoint binding mismatch: control pending paths are not deterministic");
+  if (!existsSync(resolve(pending.response_path)))
+    throw Error(
+      `unresolved invocation for ${expectedRequest.request_id}: control response absent (worker may still be alive; reconnect after it lands, never relaunch; snapshot and pending evidence preserved)`,
+    );
+  const response = readPendingJson(pending.response_path, "control response");
+  if (!validExecutorResponse(response, stored))
+    throw Error(`checkpoint binding mismatch: control pending response binding is invalid for ${expectedRequest.request_id}`);
+  return { request: stored, response };
+}
+
+function settleCandidateStepPending({ requestsPath, pending, requestId, requestDigest, manifest }) {
+  const stored = pending?.request;
+  if (!isObj(stored) || stored.protocol !== "p0-step-request-v1")
+    throw Error("checkpoint binding mismatch: candidate pending step request is invalid");
+  if (stored.candidate_request_digest !== requestDigest || !equal(stored.pinned_profile, manifest.shared))
+    throw Error("checkpoint binding mismatch: candidate pending step does not bind this request/profile");
+  const fileRequest = readPendingJson(pending.request_path, "candidate step request");
+  if (digest(fileRequest) !== digest(stored) || digest(stored) !== pending.request_digest)
+    throw Error("checkpoint binding mismatch: candidate pending step provenance is invalid");
+  const stepIndex = pending.step_index;
+  if (!Number.isInteger(stepIndex) || stepIndex < 0)
+    throw Error("checkpoint binding mismatch: candidate pending step index is invalid");
+  const expectedReqPath = pendingStepRequestPath(requestsPath, requestId, stepIndex);
+  const expectedResPath = pendingStepResponsePath(requestsPath, requestId, stepIndex);
+  if (
+    pending.request_id !== requestId ||
+    resolve(pending.request_path) !== resolve(expectedReqPath) ||
+    resolve(pending.response_path) !== resolve(expectedResPath)
+  )
+    throw Error("checkpoint binding mismatch: candidate pending paths are not deterministic");
+  if (!existsSync(resolve(pending.response_path)))
+    throw Error(
+      `unresolved invocation for ${stored.request_id ?? "candidate"} step ${stored.step_id ?? stepIndex}: step response absent (worker may still be alive; reconnect after it lands, never relaunch; snapshot and pending evidence preserved)`,
+    );
+  const response = readPendingJson(pending.response_path, "candidate step response");
+  if (!validExecutorResponse(response, stored))
+    throw Error(`checkpoint binding mismatch: candidate pending step response binding is invalid for step ${stored.step_id ?? stepIndex}`);
+  return { request: stored, response };
+}
+export const P0_CHECKPOINT_PROTOCOL = "p0-run-checkpoint-v1";
+export const P0_CHECKPOINT_FILENAME = "run.checkpoint.json";
+
+export function checkpointPathForRequests(requestsPath) {
+  return join(dirname(resolve(requestsPath)), P0_CHECKPOINT_FILENAME);
+}
+
+function writeCheckpointAtomic(checkpointPath, value) {
+  mkdirSync(dirname(checkpointPath), { recursive: true });
+  const tmpPath = `${checkpointPath}.tmp.${process.pid}`;
+  writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}\n`);
+  renameSync(tmpPath, checkpointPath);
+}
+
+function checkpointLock(checkpointPath) {
+  let database;
+  try {
+    database = new DatabaseSync(`${checkpointPath}.sqlite`);
+    database.exec("PRAGMA busy_timeout = 0");
+    database.exec("BEGIN EXCLUSIVE");
+  } catch (error) {
+    try { database?.close(); } catch {}
+    throw Error(`checkpoint is busy: ${error.message ?? error}`);
+  }
+  return () => {
+    try { database.exec("ROLLBACK"); } finally { database.close(); }
+  };
+}
+
+function checkpointArtifactValid(response) {
+  return (
+    isObj(response) &&
+    isStr(response.artifact_path) &&
+    existsSync(response.artifact_path) &&
+    response.artifact_sha256 ===
+      createHash("sha256")
+        .update(readFileSync(response.artifact_path))
+        .digest("hex")
+  );
+}
+
+function validateCheckpointRecords(manifest, requests, identity, checkpoint, requestsPath) {
+  const order = requests.requests.map((r) => r.request_id);
+  const expectedById = new Map(
+    requests.requests.map((request) => [request.request_id, request]),
+  );
+  const completed = checkpoint.completed ?? [];
+  if (!Array.isArray(completed)) throw Error("checkpoint binding mismatch: completed records are invalid");
+  const seenCompleted = new Set();
+  for (const record of completed) {
+    if (!isStr(record?.request_id) || seenCompleted.has(record.request_id))
+      throw Error("checkpoint binding mismatch: completed records must be unique");
+    seenCompleted.add(record.request_id);
+  }
+  const expectedPrefix = order.slice(0, completed.length);
+  const actualIds = completed.map((r) => r?.request_id);
+  if (!equal(actualIds, expectedPrefix))
+    throw Error("checkpoint binding mismatch: completed records must be the exact ordered contiguous prefix of the randomized request order");
+  for (const record of completed) {
+    const expected = expectedById.get(record?.request_id);
+    const kind = identity?.arms?.[expected?.pair_id]?.[expected?.arm];
+    if (!isObj(expected) || record.request_digest !== digest(expected))
+      throw Error("checkpoint binding mismatch: completed record request provenance is invalid");
+    if (!["control", "candidate"].includes(kind) || !equal(expected.pinned_profile, manifest.shared))
+      throw Error("checkpoint binding mismatch: completed record kind/provenance is invalid");
+    if (kind === "control") {
+      if (record.final_step !== undefined || record.step_responses !== undefined)
+        throw Error(`checkpoint binding mismatch: completed control arm ${record.request_id} must not carry candidate evidence`);
+      if (!validExecutorResponse(record.response, { ...expected, execution: "standalone" }))
+        throw Error(`checkpoint binding mismatch: completed control arm ${record.request_id} response failed executor binding/profile/hash validation`);
+      continue;
+    }
+    if (
+      !isObj(record.final_step) ||
+      record.final_step.complete !== true ||
+      record.final_step.step_kind !== "present_report" ||
+      !isStr(record.final_step.step_id) ||
+      !isStr(record.final_step.artifact_path) ||
+      !Array.isArray(record.step_responses) ||
+      record.source_tree_clean !== true ||
+      !Array.isArray(record.source_inventory) ||
+      !isStr(record.source_digest) ||
+      record.snapshot_commit !== (expected.snapshot === "primary" ? manifest.shared.repo_commit : null)
+    )
+      throw Error(`checkpoint binding mismatch: completed candidate arm ${record.request_id} terminal provenance is invalid`);
+    const stepIds = new Set();
+    for (const step of record.step_responses) {
+      const stepRequest = step?.request;
+      if (
+        !isObj(stepRequest) ||
+        stepRequest.protocol !== "p0-step-request-v1" ||
+        !isStr(stepRequest.step_id) ||
+        stepIds.has(stepRequest.step_id) ||
+        !isStr(stepRequest.prompt) ||
+        stepRequest.candidate_prompt !== expected.prompt ||
+        stepRequest.candidate_request_digest !== digest(expected) ||
+        !isStr(stepRequest.snapshot_root) ||
+        !equal(stepRequest.pinned_profile, manifest.shared) ||
+        !validExecutorResponse(step.response, stepRequest)
+      )
+        throw Error(`checkpoint binding mismatch: completed candidate arm ${record.request_id} step ${stepRequest?.step_id ?? "unknown"} failed executor binding/profile/hash validation`);
+      stepIds.add(stepRequest.step_id);
+    }
+    if (!checkpointArtifactValid(record.response))
+      throw Error(`checkpoint artifact mismatch for completed arm ${record.request_id} (preserved evidence failed hash validation)`);
+  }
+  const inProgress = checkpoint.in_progress;
+  if (inProgress !== null && inProgress !== undefined) {
+    const nextId = order[completed.length];
+    if (!isStr(inProgress.request_id) || inProgress.request_id !== nextId)
+      throw Error("checkpoint binding mismatch: in-progress arm must be the immediate next request after the completed prefix");
+    const expected = expectedById.get(inProgress.request_id);
+    const kind = identity?.arms?.[expected?.pair_id]?.[expected?.arm];
+    if (!isObj(expected) || inProgress.request_digest !== digest(expected))
+      throw Error("checkpoint binding mismatch: in-progress request provenance is invalid");
+    if (inProgress.kind !== kind)
+      throw Error("checkpoint binding mismatch: in-progress kind does not match private identity");
+    if (!equal(expected.pinned_profile, manifest.shared))
+      throw Error("checkpoint binding mismatch: in-progress profile is invalid");
+    if (kind === "control") {
+      const pending = inProgress.pending;
+      if (pending !== null && pending !== undefined) {
+        if (!isObj(pending.request) || pending.request_digest !== digest(pending.request))
+          throw Error("checkpoint binding mismatch: control pending provenance is invalid");
+        const controlRequest = { ...expected, execution: "standalone" };
+        if (digest(pending.request) !== digest(controlRequest))
+          throw Error("checkpoint binding mismatch: control pending request does not match prepared request");
+        if (
+          resolve(pending.request_path) !==
+            resolve(pendingControlRequestPath(requestsPath, inProgress.request_id)) ||
+          resolve(pending.response_path) !==
+            resolve(pendingControlResponsePath(requestsPath, inProgress.request_id))
+        )
+          throw Error("checkpoint binding mismatch: control pending paths are not deterministic");
+      }
+    } else {
+      if (!isStr(inProgress.snapshot_root))
+        throw Error("checkpoint binding mismatch: in-progress candidate snapshot root is invalid");
+      if (
+        ((inProgress.step_responses ?? []).length > 0 || inProgress.pending != null) &&
+        (!isStr(inProgress.source_digest) || !Array.isArray(inProgress.source_inventory))
+      )
+        throw Error("checkpoint binding mismatch: in-progress candidate source binding is invalid");
+      const snapshotBase = snapshotBaseForRun(
+        manifest,
+        requests,
+        identity,
+        requestsPath,
+      );
+      const expectedRoot = snapshotRootForRun(snapshotBase, inProgress.request_id);
+      if (resolve(inProgress.snapshot_root) !== resolve(expectedRoot))
+        throw Error("checkpoint binding mismatch: in-progress candidate snapshot must be the isolated OS-temp root for this prepared run");
+      const repoRootResolved = realpathSyncSafe(REPOSITORY_ROOT);
+      const resultsDir = dirname(resolve(requestsPath));
+      if (isInsideOrEqual(repoRootResolved, resolve(inProgress.snapshot_root)) || isInsideOrEqual(resultsDir, resolve(inProgress.snapshot_root)))
+        throw Error("checkpoint binding mismatch: in-progress candidate snapshot must live outside the development checkout and result directory");
+      const stepSeen = new Set();
+      for (const step of inProgress.step_responses ?? []) {
+        const stepRequest = step?.request;
+        if (
+          !isObj(stepRequest) ||
+          stepRequest.protocol !== "p0-step-request-v1" ||
+          !isStr(stepRequest.step_id) ||
+          stepSeen.has(stepRequest.step_id) ||
+          resolve(stepRequest.snapshot_root) !== resolve(expectedRoot) ||
+          stepRequest.candidate_request_digest !== inProgress.request_digest ||
+          !equal(stepRequest.pinned_profile, manifest.shared) ||
+          !validExecutorResponse(step.response, stepRequest)
+        )
+          throw Error(`checkpoint binding mismatch: in-progress arm ${inProgress.request_id} step ${stepRequest?.step_id ?? "unknown"} failed executor binding/profile/hash validation`);
+        stepSeen.add(stepRequest.step_id);
+      }
+      const pending = inProgress.pending;
+      if (pending !== null && pending !== undefined) {
+        if (!isObj(pending.request) || pending.request.protocol !== "p0-step-request-v1")
+          throw Error("checkpoint binding mismatch: candidate pending step is invalid");
+        if (pending.request.candidate_request_digest !== inProgress.request_digest || !equal(pending.request.pinned_profile, manifest.shared))
+          throw Error("checkpoint binding mismatch: candidate pending step does not bind this request/profile");
+        if (pending.request_digest !== digest(pending.request))
+          throw Error("checkpoint binding mismatch: candidate pending step digest is invalid");
+        if (!Number.isInteger(pending.step_index) || pending.step_index !== (inProgress.step_responses ?? []).length)
+          throw Error("checkpoint binding mismatch: candidate pending step index must equal the accepted receipt count");
+        if (!isStr(pending.request_path) || !isStr(pending.response_path))
+          throw Error("checkpoint binding mismatch: candidate pending paths are invalid");
+        if (
+          pending.request_id !== inProgress.request_id ||
+          resolve(pending.request_path) !==
+            resolve(pendingStepRequestPath(requestsPath, inProgress.request_id, pending.step_index)) ||
+          resolve(pending.response_path) !==
+            resolve(pendingStepResponsePath(requestsPath, inProgress.request_id, pending.step_index))
+        )
+          throw Error("checkpoint binding mismatch: candidate pending paths are not deterministic");
+      }
+    }
+  }
+}
+
+function realpathSyncSafe(path) {
+  try {
+    return realpathSync(resolve(path));
+  } catch {
+    return resolve(path);
+  }
+}
+
+function loadAndValidateCheckpoint({
+  checkpointPath,
+  requestsPath,
+  manifest,
+  requests,
+  identity,
+  executor,
+  executorArgs,
+}) {
+  if (!existsSync(checkpointPath)) return null;
+  let checkpoint;
+  try {
+    checkpoint = readJson(checkpointPath);
+  } catch {
+    throw Error("checkpoint binding mismatch: checkpoint file is not valid JSON (tamper suspected)");
+  }
+  const manifestDigest = digest(manifest),
+    identityDigest = digest(identity),
+    requestsDigest = digest(requests),
+    executorDigest = digest({
+      executor,
+      executor_args: [...executorArgs],
+    });
+  const snapshotBase = snapshotBaseForRun(
+    manifest,
+    requests,
+    identity,
+    requestsPath,
+  );
+  if (
+    checkpoint.protocol !== P0_CHECKPOINT_PROTOCOL ||
+    checkpoint.manifest_digest !== manifestDigest ||
+    checkpoint.identity_digest !== identityDigest ||
+    checkpoint.requests_digest !== requestsDigest ||
+    checkpoint.executor_digest !== executorDigest ||
+    checkpoint.snapshot_base !== snapshotBase ||
+    checkpoint.executor !== executor ||
+    !equal(checkpoint.executor_args ?? [], [...executorArgs]) ||
+    !equal(checkpoint.request_order ?? [], requests.requests.map((r) => r.request_id))
+  )
+    throw Error("checkpoint binding mismatch: tampered or changed manifest/identity/requests/executor bindings");
+  validateCheckpointRecords(manifest, requests, identity, checkpoint, requestsPath);
+  if (Array.isArray(checkpoint.failures) && checkpoint.failures.length > 0) {
+    const first = checkpoint.failures[0];
+    throw Error(
+      `previous run recorded execution failure for ${first.request_id}: ${first.error} (preserved; not resumable; inspect checkpoint and prepared outputs)`,
+    );
+  }
+  return checkpoint;
+}
+
+async function candidate({
+  root,
+  profile,
+  candidateRequest,
+  results,
+  resumedStepResponses = [],
+  acceptStep,
+  dispatchStep,
+}) {
   let currentStepPath;
   return runCandidateArm({
     auditCode: resolve("audit-code.mjs"),
     snapshotRoot: root,
     pinnedProfile: profile,
     candidateRequest,
+    resumedStepResponses,
     invokeCommand: (argv) => {
       const child = spawnSync(process.execPath, argv.slice(1), {
         encoding: "utf8",
@@ -732,19 +1245,25 @@ async function candidate({ root, profile, candidateRequest, executor, executorAr
     readPrompt: (promptPath) => readFileSync(resolve(root, promptPath), "utf8"),
     executeExternal: (request) => {
       const boundRequest = { protocol: "p0-step-request-v1", ...request };
-      results.push({
+      const entry = {
         request: boundRequest,
-        response: external(
-          executor,
-          executorArgs,
-          boundRequest,
-          dirname(root),
-        ),
-      });
+        response: dispatchStep(boundRequest, results.length),
+      };
+      results.push(entry);
+      acceptStep(entry);
     },
   });
 }
 async function run(path, requestsPath, identityPath, executor, executorArgs) {
+  const release = checkpointLock(checkpointPathForRequests(requestsPath));
+  try {
+    return await runUnlocked(path, requestsPath, identityPath, executor, executorArgs);
+  } finally {
+    release();
+  }
+}
+
+async function runUnlocked(path, requestsPath, identityPath, executor, executorArgs) {
   if (!isStr(executor))
     throw Error(
       "run requires --executor <executable>; operator credentials/configuration are required for a real run",
@@ -758,9 +1277,91 @@ async function run(path, requestsPath, identityPath, executor, executorArgs) {
     !validatePublicRequests(manifest, requests, identity)
   )
     throw Error("prepared files do not bind manifest");
-  const records = [],
-    artifactDir = join(dirname(requestsPath), "raw-artifacts");
+  const manifestDigest = digest(manifest),
+    identityDigest = digest(identity),
+    requestsDigest = digest(requests);
+  const executorArguments = [...(executorArgs ?? [])];
+  const executorDigest = digest({
+    executor,
+    executor_args: executorArguments,
+  });
+  const requestOrder = requests.requests.map((r) => r.request_id);
+  const checkpointPath = checkpointPathForRequests(requestsPath);
+  const snapshotBase = snapshotBaseForRun(
+    manifest,
+    requests,
+    identity,
+    requestsPath,
+  );
+  const artifactDir = join(dirname(resolve(requestsPath)), "raw-artifacts");
+  mkdirSync(snapshotBase, { recursive: true });
+
+  let checkpoint = loadAndValidateCheckpoint({
+    checkpointPath,
+    requestsPath,
+    manifest,
+    requests,
+    identity,
+    executor,
+    executorArgs: executorArguments,
+  });
+  if (!checkpoint) {
+    checkpoint = {
+      protocol: P0_CHECKPOINT_PROTOCOL,
+      manifest_digest: manifestDigest,
+      identity_digest: identityDigest,
+      requests_digest: requestsDigest,
+      executor,
+      executor_args: executorArguments,
+      executor_digest: executorDigest,
+      snapshot_base: snapshotBase,
+      request_order: [...requestOrder],
+      completed: [],
+      in_progress: null,
+      failures: [],
+      status: "in_progress",
+      updated_at: new Date().toISOString(),
+    };
+    writeCheckpointAtomic(checkpointPath, checkpoint);
+  }
+  const persist = () => {
+    checkpoint.updated_at = new Date().toISOString();
+    writeCheckpointAtomic(checkpointPath, checkpoint);
+  };
+  const isNonFailureInterruption = (message) =>
+    /unresolved invocation|interrupted candidate snapshot missing|checkpoint binding mismatch|checkpoint source binding failure|checkpoint artifact mismatch|previous run recorded execution failure/.test(
+      message ?? "",
+    );
+  const completedById = new Map(
+    checkpoint.completed.map((record) => [record.request_id, record]),
+  );
+  // Lazily clean orphan snapshots for already-completed arms (crash between
+  // persist and cleanup leaves them behind; evidence already copied).
+  // Cleanup failure is debt, never a benchmark failure.
+  for (const record of checkpoint.completed) {
+    const tempOrphan = snapshotRootForRun(snapshotBase, record.request_id);
+    if (existsSync(tempOrphan)) {
+      const primary = record.snapshot_commit != null;
+      if (primary) {
+        await cleanupPinnedSnapshotTree({
+          repoRoot: process.cwd(),
+          root: tempOrphan,
+          base: snapshotBase,
+          requestId: record.request_id,
+        });
+      } else {
+        cleanupSnapshotTree(tempOrphan, snapshotBase, record.request_id);
+      }
+    }
+  }
+
+  const buildOrderedRecords = () =>
+    requestOrder
+      .map((id) => completedById.get(id))
+      .filter((record) => record !== undefined);
+
   for (const request of requests.requests) {
+    if (completedById.has(request.request_id)) continue;
     const requestDigest = digest(request);
     const kind = identity.arms?.[request.pair_id]?.[request.arm];
     if (
@@ -768,42 +1369,230 @@ async function run(path, requestsPath, identityPath, executor, executorArgs) {
       !equal(request.pinned_profile, manifest.shared)
     )
       throw Error("identity map/profile mismatch");
-    if (kind === "control")
-      records.push({
+    if (kind === "control") {
+      const existing = checkpoint.in_progress?.request_id === request.request_id ? checkpoint.in_progress : null;
+      if (existing?.pending) {
+        // Resume: settle the exact pending invocation before any new dispatch.
+        let settled;
+        try {
+          settled = settleControlPending({ requestsPath, pending: existing.pending, expectedRequest: request });
+        } catch (error) {
+          persist();
+          throw error;
+        }
+        const record = {
+          request_id: request.request_id,
+          request_digest: requestDigest,
+          response: settled.response,
+        };
+        completedById.set(request.request_id, record);
+        checkpoint.completed = buildOrderedRecords();
+        checkpoint.in_progress = null;
+        persist();
+        continue;
+      }
+      const controlRequest = { ...request, execution: "standalone" };
+      const reqPath = pendingControlRequestPath(requestsPath, request.request_id);
+      const resPath = pendingControlResponsePath(requestsPath, request.request_id);
+      if (existsSync(resolve(resPath))) {
+        persist();
+        throw Error(
+          "unresolved invocation for " + request.request_id + ": stale control response present without journaled pending (preserved; inspect pending evidence; never relaunch blindly)",
+        );
+      }
+      checkpoint.in_progress = {
         request_id: request.request_id,
         request_digest: requestDigest,
-        response: external(
-          executor,
-          executorArgs,
-          { ...request, execution: "standalone" },
-          dirname(requestsPath),
-        ),
-      });
-    else {
-      const tempParent = mkdtempSync(join(tmpdir(), "audit-tools-p0-"));
-      const root = join(tempParent, "repo");
-      const primary = request.snapshot !== "held-out";
+        kind: "control",
+        pending: {
+          request: controlRequest,
+          request_digest: digest(controlRequest),
+          request_path: reqPath,
+          response_path: resPath,
+        },
+      };
+      writeJson(resolve(reqPath), controlRequest);
+      persist();
+      let response;
       try {
-        if (primary) {
-          await materializePinnedPrimary({
-            repoRoot: process.cwd(),
-            commit: manifest.shared.repo_commit,
-            destination: root,
-          });
-        } else {
-          cpSync(resolve(manifest.held_out.corpus.path), root, {
-            recursive: true,
-          });
+        response = launchExternalWithPaths(executor, executorArguments, controlRequest, reqPath, resPath);
+      } catch (error) {
+        const message = error?.message ?? String(error);
+        if (isNonFailureInterruption(message)) {
+          persist();
+          throw error;
         }
-        const step_responses = [],
-          final_step = await candidate({
-            root,
-            profile: manifest.shared,
-            candidateRequest: request,
-            executor,
-            executorArgs,
-            results: step_responses,
+        checkpoint.failures = [
+          ...(checkpoint.failures ?? []),
+          {
+            request_id: request.request_id,
+            request_digest: requestDigest,
+            kind: "control",
+            error: message,
+            resumable: false,
+          },
+        ];
+        checkpoint.in_progress = null;
+        persist();
+        throw error;
+      }
+      const record = {
+        request_id: request.request_id,
+        request_digest: requestDigest,
+        response,
+      };
+      completedById.set(request.request_id, record);
+      checkpoint.completed = buildOrderedRecords();
+      checkpoint.in_progress = null;
+      persist();
+    } else {
+      const primary = request.snapshot !== "held-out";
+      const root = snapshotRootForRun(snapshotBase, request.request_id);
+      let resumed =
+        checkpoint.in_progress?.request_id === request.request_id
+          ? [...(checkpoint.in_progress.step_responses ?? [])]
+          : [];
+      for (const step of resumed) {
+        if (
+          !isObj(step?.request) ||
+          step.request.candidate_request_digest !== requestDigest ||
+          !equal(step.request.pinned_profile, manifest.shared)
+        )
+          throw Error("checkpoint binding mismatch: resumed step receipts do not bind this request/profile");
+      }
+      // Settle exact pending step invocation BEFORE any next-step/semantic work.
+      const existingPending =
+        checkpoint.in_progress?.request_id === request.request_id ? checkpoint.in_progress?.pending : null;
+      if (existingPending) {
+        let settled;
+        try {
+          settled = settleCandidateStepPending({
+            requestsPath,
+            pending: { ...existingPending, request_id: request.request_id },
+            requestId: request.request_id,
+            requestDigest,
+            manifest,
           });
+        } catch (error) {
+          persist();
+          throw error;
+        }
+        resumed = [...resumed, settled];
+        checkpoint.in_progress.step_responses = [...resumed];
+        checkpoint.in_progress.pending = null;
+        persist();
+      }
+      const snapshotExists = existsSync(root);
+      if (snapshotExists) {
+        if (primary) {
+          const head = spawnSync("git", ["-C", root, "rev-parse", "HEAD"], {
+            encoding: "utf8",
+            shell: false,
+          });
+          if (head.status !== 0 || head.stdout.trim() !== manifest.shared.repo_commit)
+            throw Error(
+              "checkpoint candidate snapshot binding failure for " + request.request_id + " (preserved evidence does not match pinned commit)",
+            );
+        }
+      } else if (resumed.length > 0) {
+        persist();
+        throw Error(
+          "checkpoint interrupted candidate snapshot missing for " + request.request_id + " (preserved step receipts retained; resumable interruption, not an execution failure)",
+        );
+      }
+      if (!checkpoint.in_progress || checkpoint.in_progress.request_id !== request.request_id) {
+        checkpoint.in_progress = {
+          request_id: request.request_id,
+          request_digest: requestDigest,
+          kind: "candidate",
+          snapshot_kind: primary ? "primary" : "held-out",
+          snapshot_root: root,
+          step_responses: [...resumed],
+          pending: null,
+        };
+        persist();
+      } else {
+        checkpoint.in_progress.snapshot_root = root;
+        checkpoint.in_progress.snapshot_kind = primary ? "primary" : "held-out";
+        checkpoint.in_progress.step_responses = [...resumed];
+        if (checkpoint.in_progress.pending == null) persist();
+      }
+      let final_step;
+      let step_responses;
+      try {
+        if (!existsSync(root)) {
+          if (primary) {
+            await materializePinnedPrimary({
+              repoRoot: process.cwd(),
+              commit: manifest.shared.repo_commit,
+              destination: root,
+            });
+          } else {
+            cpSync(resolve(manifest.held_out.corpus.path), root, {
+              recursive: true,
+            });
+          }
+        }
+        if (!isStr(checkpoint.in_progress.source_digest)) {
+          checkpoint.in_progress.source_inventory = snapshotSourceInventory(root);
+          checkpoint.in_progress.source_digest = digest(
+            checkpoint.in_progress.source_inventory,
+          );
+          persist();
+        }
+        assertSnapshotSourceBinding(
+          root,
+          checkpoint.in_progress.source_inventory,
+          checkpoint.in_progress.source_digest,
+          request.request_id,
+        );
+        step_responses = [...resumed];
+        const acceptStep = (entry) => {
+          const pending = checkpoint.in_progress?.pending;
+          if (!pending || digest(pending.request) !== digest(entry.request))
+            throw Error("checkpoint binding mismatch: accepted candidate step does not match journaled pending invocation");
+          checkpoint.in_progress.step_responses = [...step_responses];
+          checkpoint.in_progress.pending = null;
+          persist();
+        };
+        const dispatchStep = (boundRequest, stepIndex) => {
+          const reqPath = pendingStepRequestPath(requestsPath, request.request_id, stepIndex);
+          const resPath = pendingStepResponsePath(requestsPath, request.request_id, stepIndex);
+          if (existsSync(resolve(resPath)))
+            throw Error(
+              "checkpoint binding mismatch: pending step response collision for " + request.request_id + " step " + stepIndex + " (preserved evidence; inspect before retry)",
+            );
+          checkpoint.in_progress.pending = {
+            request: boundRequest,
+            request_digest: digest(boundRequest),
+            request_path: reqPath,
+            response_path: resPath,
+            step_index: stepIndex,
+            request_id: request.request_id,
+          };
+          writeJson(resolve(reqPath), boundRequest);
+          persist();
+          const pending = checkpoint.in_progress?.pending;
+          if (!pending || digest(pending.request) !== digest(boundRequest) || pending.step_index !== stepIndex)
+            throw Error("checkpoint binding mismatch: journaled pending does not match dispatch");
+          const launched = launchExternalWithPaths(
+            executor,
+            executorArguments,
+            boundRequest,
+            pending.request_path,
+            pending.response_path,
+          );
+          return launched;
+        };
+        final_step = await candidate({
+          root,
+          profile: manifest.shared,
+          candidateRequest: request,
+          results: step_responses,
+          resumedStepResponses: resumed,
+          acceptStep,
+          dispatchStep,
+        });
         if (
           step_responses.some(
             (step) =>
@@ -830,7 +1619,7 @@ async function run(path, requestsPath, identityPath, executor, executorArgs) {
         for (const [index, step] of step_responses.entries()) {
           const artifact_path = join(
             artifactDir,
-            `${request.request_id}.step-${index + 1}.artifact`,
+            request.request_id + ".step-" + (index + 1) + ".artifact",
           );
           copyFileSync(step.response.artifact_path, artifact_path);
           step.response = {
@@ -839,39 +1628,77 @@ async function run(path, requestsPath, identityPath, executor, executorArgs) {
             artifact_sha256: digest(readFileSync(artifact_path)),
           };
         }
-        const artifact_path = join(artifactDir, `${request.request_id}.md`);
+        const artifact_path = join(artifactDir, request.request_id + ".md");
         copyFileSync(sourceReport, artifact_path);
-        records.push({
+        assertSnapshotSourceBinding(
+          root,
+          checkpoint.in_progress.source_inventory,
+          checkpoint.in_progress.source_digest,
+          request.request_id,
+        );
+        const record = {
           request_id: request.request_id,
           request_digest: requestDigest,
           final_step: boundFinalStep,
           step_responses,
           snapshot_commit: primary ? manifest.shared.repo_commit : null,
           source_tree_clean: true,
+          source_inventory: checkpoint.in_progress.source_inventory,
+          source_digest: checkpoint.in_progress.source_digest,
           response: {
             artifact_path,
             artifact_sha256: createHash("sha256")
               .update(readFileSync(artifact_path))
               .digest("hex"),
           },
-        });
-      } finally {
-        if (primary && existsSync(root)) {
-          await removePinnedPrimary({
-            repoRoot: process.cwd(),
-            destination: root,
-          });
-        } else {
-          rmSync(root, { recursive: true, force: true });
+        };
+        completedById.set(request.request_id, record);
+        checkpoint.completed = buildOrderedRecords();
+        checkpoint.in_progress = null;
+        persist();
+      } catch (error) {
+        const message = error?.message ?? String(error);
+        if (isNonFailureInterruption(message)) {
+          try {
+            persist();
+          } catch {}
+          throw error;
         }
-        rmSync(tempParent, { recursive: true, force: true });
+        checkpoint.failures = [
+          ...(checkpoint.failures ?? []),
+          {
+            request_id: request.request_id,
+            request_digest: requestDigest,
+            kind: "candidate",
+            error: message,
+            resumable: false,
+            snapshot_root: root,
+            step_count: checkpoint.in_progress?.step_responses?.length ?? 0,
+          },
+        ];
+        persist();
+        throw error;
+      }
+      // Snapshot cleanup only after durable persist; failure here is debt.
+      if (primary) {
+        await cleanupPinnedSnapshotTree({
+          repoRoot: process.cwd(),
+          root,
+          base: snapshotBase,
+          requestId: request.request_id,
+        });
+      } else {
+        cleanupSnapshotTree(root, snapshotBase, request.request_id);
       }
     }
   }
+  checkpoint.status = "complete";
+  persist();
+  const records = buildOrderedRecords();
   return {
     protocol: "p0-raw-results-v1",
-    manifest_digest: digest(manifest),
-    identity_digest: digest(identity),
+    manifest_digest: manifestDigest,
+    identity_digest: identityDigest,
     records,
   };
 }
@@ -984,6 +1811,8 @@ function validateRawRunRecords(manifest, identity, raw) {
       !Array.isArray(record.step_responses) ||
       record.step_responses.length === 0 ||
       record.source_tree_clean !== true ||
+      !Array.isArray(record.source_inventory) ||
+      !isStr(record.source_digest) ||
       record.snapshot_commit !==
         (request.snapshot === "primary" ? manifest.shared.repo_commit : null)
     )
