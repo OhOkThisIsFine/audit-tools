@@ -380,6 +380,16 @@ including this failed attempt, observed calls are 554. The provider supplied no
 retry-after value, so the relay's cooldown expiry is not evidence of restored
 capacity. No model substitution or quality score followed the failure.
 
+Two later scheduled retries failed the same way. Their native sessions were
+`ses_f807573a6ffeZXjt5tgtGJy0E0` and `ses_f806343cbffeLjnGCr1CTjwgkP`;
+each contains one error-only call with zero tokens. Accepted calls remain553;
+observed calls including all three failures total556. The live relay check
+at06:07UTC permits its next attempt at06:19:10.513UTC, beyond the unchanged
+continuation deadline06:15:56.434UTC. A proposed separate four-hour unscored
+recovery window would preserve all failed windows and remaining cumulative caps
+(1492calls,76470685input tokens,3725737output tokens), charge availability probes,
+and require fresh configuration validation. It is not authorized or started.
+
 - The benchmark's published-tooling acquisition helper assumed npm `view --json`
   returned an object and `pack --json` returned an array. This installation returned
   a singleton array and a package-keyed object respectively. The helper now admits

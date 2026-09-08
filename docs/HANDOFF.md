@@ -53,10 +53,13 @@ in v0.51.7 after 58 targeted tests, independent review, and complete release CI.
 The continuation now explicitly uses the isolated published backend, with immutable
 unscored upgrade lineage preserving its first 553 calls (23,529,315 input and
 274,263 output tokens). Its fresh round-2 identity passed the repeated-step guard,
-but Muse then returned a retryable HTTP 429 with no result. The failed native
-attempt adds one error-only call and zero tokens; it is retained separately from
-accepted task receipts. Resume when the pinned model has capacity, finish the
-continuation, then the ten paired quality comparisons.
+but three Muse attempts then returned retryable HTTP 429 responses with no result.
+They add three error-only calls and zero tokens, retained separately from accepted
+task receipts. The next eligible retry is after the existing continuation deadline.
+Owner decision: authorize a separate unscored recovery window of at most four
+hours after Muse capacity returns, retaining cumulative call/token caps and every
+earlier failure, or leave the benchmark paused. No existing deadline may change.
+After a genuine terminal, complete the ten paired quality comparisons.
 Evidence and limits are in
 [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
 No quality score exists; successful preflight and contract tests are not acceptance.
