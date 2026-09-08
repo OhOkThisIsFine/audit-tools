@@ -147,15 +147,13 @@ async function designReviewNotesSection(
   artifactsDir: string,
   bundle: ArtifactBundle,
   pass: DesignReviewPass,
-): Promise<string> {
+): Promise<{ reReviewSection?: string; rejectionNotice?: string }> {
   const reReview = await buildDesignReReviewSection(artifactsDir, bundle, pass);
   const rejectionNotice = renderDesignReviewRejectionNotice(bundle, [
     "legacy",
     pass,
   ]);
-  return [reReview, rejectionNotice]
-    .filter((s): s is string => Boolean(s))
-    .join("\n\n");
+  return { reReviewSection: reReview, rejectionNotice };
 }
 
 /**
@@ -182,7 +180,7 @@ async function prepareConceptualPass(
     artifactsDir,
     bundle,
     settings,
-    reReviewSection: notesSection || undefined,
+    ...notesSection,
   });
 }
 
@@ -239,7 +237,9 @@ async function prepareContractDispatch(opts: {
             max_units: opts.maxUnits,
             ...(lenses === undefined ? {} : { lenses }),
           }),
-          ...(notesSection ? ["", notesSection] : []),
+          ...[notesSection.reReviewSection, notesSection.rejectionNotice]
+            .filter((section): section is string => Boolean(section))
+            .flatMap((section) => ["", section]),
         ].join("\n"),
       },
     ],

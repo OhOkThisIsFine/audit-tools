@@ -271,6 +271,46 @@ documentation references to intentionally omitted records. Those omissions must
 be disclosed to evaluators rather than scored as product defects. No new quality
 score is claimed from this setup work.
 
+The unscored continuation exposed two conceptual-retry defects. In
+`prepareConceptualPass` (`src/audit/cli/nextStepCommand.ts`), rejection feedback
+was joined to the structural re-review section before `prepareConceptualDispatch`
+hashed the round identity. A malformed judge therefore reminted perspective
+paths despite unchanged review inputs. Separating the two retains valid work
+and keeps the rejection explanation in the judge prompt. The benchmark host's
+`planNativeStep` also scheduled every manifest perspective regardless of an
+existing bound result. Its resume check now follows the materializer's file
+existence rule. The full access grant remains stable; it is not a pending list.
+
+`loadConceptualPerspectiveFindings` (`src/audit/types/conceptualAdjudication.ts`)
+previously failed at the first malformed perspective, and
+`consumeConceptualSubmission` (`src/audit/cli/nextStepHelpers.ts`) quarantined
+only the judge. Invalid perspective files consequently stayed marked delivered.
+The repair classifies JSON/schema failures separately from IO errors, collects
+all malformed perspectives, and reopens only those files. Their lane-specific
+prompts point to the preserved rejected content; valid files and round identity
+remain intact. A repaired submission records acceptance after its refusal.
+Before reading or quarantining a perspective, the consumer verifies its path
+against the tool-computed lane binding; a copied or modified manifest cannot
+authorize quarantining an unrelated file.
+Real `cmdNextStep` regression tests cover judge rejection, mixed JSON/schema
+perspective failures, preserved valid output, and recovery acceptance.
+
+The continuation remains unscored. Its original failed calibration and all usage
+receipts are preserved. A bounded native repair supplied six missing titles in
+perspective 5, retained the other findings, and used a separate judge session.
+That judge was subsequently rejected for duplicate contributor rows. The
+canonical judge prompt and validator now explain how several candidates from
+one contributor must share one attribution row. This is an output-contract
+failure, not a measured audit-quality score. Independent design review caught
+an incorrect proposal to treat full write grants as pending work; parent checks
+also corrected a proposed combined repair/judge task and a Windows separator
+comparison in a test fixture before relying on them.
+The repaired judge subsequently passed the existing adjudication validator.
+The continuation then stopped at the auditor's no-progress guard for
+`design_assessment_current`; the benchmark host incorrectly tried to dispatch
+that blocked step as work. The original failure and 525-call cumulative ledger
+remain preserved while that separate stop is diagnosed.
+
 - Codex crashes required resuming the existing approved lap and its running agents.
   An earlier helper also overwrote the owner's checkpoint; the missing ownership
   enforcement is tracked in the machine-wide backlog at `C:/Code/docs/backlog.md`.

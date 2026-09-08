@@ -31,6 +31,22 @@ const { runSynthesisExecutor, runSynthesisNarrativeExecutor } = await import(
 );
 
 const cleanups: string[] = [];
+
+it("reports every malformed perspective together and keeps IO failures distinct", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "conceptual-malformed-batch-"));
+  cleanups.push(dir);
+  const round = {
+    ...manifest,
+    perspectives: manifest.perspectives.map((p, i) => ({ ...p, result_path: join(dir, `p${i}.json`) })),
+  };
+  await writeFile(round.perspectives[0]!.result_path, JSON.stringify({ findings: [{ id: "missing-title" }] }));
+  await writeFile(round.perspectives[1]!.result_path, "{broken JSON");
+  await expect(loadConceptualPerspectiveFindings(round)).rejects.toMatchObject({
+    failures: round.perspectives.map((p) => ({ lane: p.lane_id, path: p.result_path })),
+  });
+  await rm(round.perspectives[1]!.result_path);
+  await expect(loadConceptualPerspectiveFindings(round)).rejects.toMatchObject({ code: "ENOENT" });
+});
 afterEach(async () => {
   while (cleanups.length > 0) {
     await rm(cleanups.pop()!, { recursive: true, force: true });

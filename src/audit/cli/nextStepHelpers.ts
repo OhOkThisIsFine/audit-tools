@@ -8,7 +8,7 @@
 
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
   advance,
   describeStoppedFold,
@@ -18,6 +18,7 @@ import {
   isJsonParseError,
   isRecord,
   readJsonFile,
+  readTrailingSubmissionRefusals,
   persistAnalyzerConsent,
   persistAnalyzerSettings,
   writeJsonFile,
@@ -62,6 +63,7 @@ import {
   buildConceptualReviewAdjudication,
   deriveConceptualVerificationStatus,
   loadConceptualPerspectiveFindings,
+  MalformedConceptualPerspectivesError,
   readConceptualReviewRoundManifest,
   type ConceptualReviewAdjudication,
 } from "../types/conceptualAdjudication.js";
@@ -141,11 +143,13 @@ import {
 import type { AuditHostIngestIssue } from "../validation/ingestIssueCodes.js";
 import {
   CHARTER_EXTRACTION_MERGED_FILENAME,
+  AUDIT_GATE_SUBMISSION_SCOPE,
   GATE_LANES,
   charterExtractionCoverageFilename,
   charterExtractionLane,
   closeDispatchedLaneOutcomes,
   laneSubmissionPath,
+  laneSubmissionId,
   recordLaneOutcome,
 } from "./laneSubmissions.js";
 import { recordHostResultOutcomes } from "audit-tools/shared";
@@ -801,6 +805,7 @@ async function quarantineMisshapedSubmission(
   filePath: string,
   lane: string,
   error: ZodError | string,
+  options?: { includeRepairSource?: boolean },
 ): Promise<string | null> {
   const reason = typeof error === "string"
     ? error
@@ -817,7 +822,10 @@ async function quarantineMisshapedSubmission(
     kind: "rejected",
     issueCode:
       typeof error === "string" ? "submission_malformed" : "submission_contract_invalid",
-    message: reason + quarantineSurvivalNote(quarantine),
+    message: reason + quarantineSurvivalNote(quarantine) +
+      (options?.includeRepairSource && quarantine.quarantinePath
+        ? `\nRepair the existing findings from ${quarantine.quarantinePath}; retain their substance and correct the reported contract failures.`
+        : ""),
   });
   return quarantine.quarantinePath;
 }
@@ -981,6 +989,15 @@ async function consumeConceptualSubmission(
       : result;
   }
 
+  // A copied or modified manifest cannot authorize moving another file into
+  // quarantine. Check every path before reading or mutating any submission.
+  for (const perspective of manifest.perspectives) {
+    const boundPath = laneSubmissionPath(artifactsDir, perspective.lane_id);
+    if (relative(boundPath, perspective.result_path) !== "") {
+      throw new Error(`conceptual perspective path does not match its bound lane path: ${perspective.result_path}`);
+    }
+  }
+
   const incoming = await consumeObjectSubmission(artifactsDir, lane, tx);
   if (incoming.status === "absent") return incoming;
   if (incoming.status === "quarantined") {
@@ -1002,15 +1019,36 @@ async function consumeConceptualSubmission(
     };
   }
 
+  let perspectiveFindings: Map<string, Finding[]>;
   try {
-    const perspectiveFindings =
-      await loadConceptualPerspectiveFindings(manifest);
+    perspectiveFindings = await loadConceptualPerspectiveFindings(manifest);
+  } catch (error) {
+    // Only invalid bytes are quarantinable. IO errors propagate so valid
+    // submissions survive a transient filesystem failure.
+    if (!(error instanceof MalformedConceptualPerspectivesError)) throw error;
+    for (const failure of error.failures) {
+      await quarantineMisshapedSubmission(artifactsDir, failure.path, failure.lane, failure.reason, { includeRepairSource: true });
+    }
+    const quarantinePath = await quarantineMisshapedSubmission(artifactsDir, incoming.path, lane, error.message);
+    return { status: "quarantined", quarantinePath, lane, reason: error.message };
+  }
+  try {
     const adjudication = buildConceptualReviewAdjudication({
       manifest,
       perspectiveFindings,
       submission: parsed.data,
       generatedAt: new Date().toISOString(),
     });
+    const refusals = await readTrailingSubmissionRefusals(
+      artifactsDir,
+      manifest.perspectives.map((p) => laneSubmissionId(p.lane_id)),
+      { runId: AUDIT_GATE_SUBMISSION_SCOPE },
+    );
+    for (const perspective of manifest.perspectives) {
+      if (refusals.has(laneSubmissionId(perspective.lane_id))) {
+        await recordLaneOutcome(artifactsDir, perspective.lane_id, { kind: "accepted" });
+      }
+    }
     // THE observation boundary for this round's perspective lanes. The tool
     // never ingests a perspective, so nothing else will ever close its dispatch
     // row — and the emission cannot, because once this submission lands the

@@ -7,6 +7,7 @@ import {
   FindingSchema,
   FindingVerificationStatusSchema,
   isFileMissingError,
+  isJsonParseError,
   isRecord,
   laneAssetsDir,
   readJsonFile,
@@ -249,7 +250,7 @@ export function deriveConceptualVerificationStatus(
   }));
 }
 
-function submissionFindings(value: unknown, path: string): Finding[] {
+function submissionFindings(value: unknown): Finding[] {
   const envelope = z
     .union([
       z.array(ConceptualSubmittedFindingSchema),
@@ -257,13 +258,19 @@ function submissionFindings(value: unknown, path: string): Finding[] {
     ])
     .safeParse(value);
   if (!envelope.success) {
-    throw new Error(
-      `conceptual perspective result ${path} is not a valid findings array/envelope: ${envelope.error.message}`,
-    );
+    throw envelope.error;
   }
   return Array.isArray(envelope.data)
     ? envelope.data
     : envelope.data.findings;
+}
+
+/** Invalid content at current manifest paths; never an infrastructure read failure. */
+export class MalformedConceptualPerspectivesError extends Error {
+  constructor(readonly failures: readonly { lane: string; path: string; reason: string }[]) {
+    super(failures.map((failure) => failure.reason).join("\n\n"));
+    this.name = "MalformedConceptualPerspectivesError";
+  }
 }
 
 /**
@@ -276,16 +283,27 @@ export async function loadConceptualPerspectiveFindings(
 ): Promise<Map<string, Finding[]>> {
   const manifest = ConceptualReviewRoundManifestSchema.parse(manifestInput);
   const out = new Map<string, Finding[]>();
+  const seen = new Set<string>();
+  const failures: { lane: string; path: string; reason: string }[] = [];
   for (const contributor of manifest.perspectives) {
-    if (out.has(contributor.contributor_id)) {
+    if (seen.has(contributor.contributor_id)) {
       throw new Error(`duplicate contributor ${contributor.contributor_id}`);
     }
-    const value = await readJsonFile<unknown>(contributor.result_path);
-    out.set(
-      contributor.contributor_id,
-      submissionFindings(value, contributor.result_path),
-    );
+    seen.add(contributor.contributor_id);
+    try {
+      const value = await readJsonFile<unknown>(contributor.result_path);
+      out.set(contributor.contributor_id, submissionFindings(value));
+    } catch (error) {
+      // Do not turn an unreadable or missing file into a malformed submission.
+      if (!(error instanceof z.ZodError) && !isJsonParseError(error)) throw error;
+      failures.push({
+        lane: contributor.lane_id,
+        path: contributor.result_path,
+        reason: `conceptual perspective result ${contributor.result_path} is not a valid findings array/envelope: ${error.message}`,
+      });
+    }
   }
+  if (failures.length > 0) throw new MalformedConceptualPerspectivesError(failures);
   return out;
 }
 
@@ -455,7 +473,7 @@ export function buildConceptualReviewAdjudication(params: {
     for (const share of finalShare.contributors) {
       if (seenContributors.has(share.contributor_id)) {
         fail(
-          `duplicate contributor ${share.contributor_id} for final finding ${finalShare.final_finding_id}`,
+          `duplicate contributor ${share.contributor_id} for final finding ${finalShare.final_finding_id}; combine that contributor's source_candidate_ids into one entry with one combined contribution_percent and rationale`,
         );
       }
       seenContributors.add(share.contributor_id);

@@ -1,6 +1,7 @@
 import {
   type IntentCheckpoint,
   charterReviewDisposition,
+  readTrailingSubmissionRefusals,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
@@ -26,6 +27,7 @@ import {
   conceptualPerspectiveLane,
   conceptualRoundToken,
   laneSubmissionPath,
+  laneSubmissionId,
   type LaneSubmissionShortfall,
 } from "./laneSubmissions.js";
 
@@ -160,10 +162,13 @@ export async function prepareConceptualDispatch(opts: {
    * still reviews fresh through its own lens, never seeing the prior verdict).
    */
   reReviewSection?: string;
+  /** Repair feedback is prompt context, never part of the review round identity. */
+  rejectionNotice?: string;
 }): Promise<ConceptualDispatch> {
   const { artifactsDir, bundle, settings } = opts;
-  const reReviewSuffix = opts.reReviewSection
-    ? `\n\n${opts.reReviewSection}`
+  const notes = [opts.reReviewSection, opts.rejectionNotice].filter(Boolean).join("\n\n");
+  const reReviewSuffix = notes
+    ? `\n\n${notes}`
     : "";
   // The single conceptual submission the orchestrator ingests — written by the
   // lone reviewer when shallow, by the independent judge when deep. Either way
@@ -283,12 +288,20 @@ export async function prepareConceptualDispatch(opts: {
       reviewOptions,
     ) + reReviewSuffix;
 
+  const perspectiveRefusals = await readTrailingSubmissionRefusals(
+    artifactsDir,
+    perspectiveFiles.map((f) => laneSubmissionId(f.lane)),
+    { runId: AUDIT_GATE_SUBMISSION_SCOPE },
+  );
+
   const laneSpecs: FanoutLaneSpec[] = [
     ...perspectiveFiles.map((f) => ({
       id: f.lane,
       label: `Conceptual perspective — ${f.name}`,
       promptFilename: f.promptFilename,
-      promptText: f.promptText,
+      promptText: f.promptText + (perspectiveRefusals.has(laneSubmissionId(f.lane))
+        ? `\n\n## Previous submission rejected\n\n${perspectiveRefusals.get(laneSubmissionId(f.lane))!.message}`
+        : ""),
       // A perspective's findings are read by the JUDGE, never by this tool —
       // so the tool is owed nothing here and must not record an expectation it
       // will never satisfy. The bound path is still minted and declared below.

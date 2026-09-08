@@ -22,7 +22,7 @@
  * ingest.
  */
 import { describe, expect, it, afterEach } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -30,6 +30,11 @@ import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
 const { prepareConceptualDispatch } = await import(
   "../../src/audit/cli/conceptualDispatch.js"
+);
+const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
+const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.js");
+const { persistAnalyzerConsent } = await import(
+  "../../src/shared/analyzerPolicy.js"
 );
 const { expectedSubmissionsPath } = await import(
   "../../src/shared/io/auditToolsPaths.js"
@@ -143,5 +148,177 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
       ).size,
       "every dispatched lane, expected or not, leaves a dispatch row",
     ).toBe(3); // 2 perspectives + the judge
+  });
+
+  async function prepareRetryFixture() {
+    const dir = await artifactsDir();
+    const root = dirname(dirname(dir));
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "app.ts"), "export const app = true;\n");
+    await writeCoreArtifacts(dir, {
+      repo_manifest: {
+        repository: { name: "retry-fixture" },
+        generated_at: "2026-01-01T00:00:00.000Z",
+        files: [{ path: "src/app.ts", language: "typescript", size_bytes: 25 }],
+      },
+      file_disposition: { files: [{ path: "src/app.ts", status: "included" }] },
+      auto_fixes_applied: {},
+      syntax_resolution_status: {},
+      external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
+      external_analyzer_results: [{ tool: "eslint", results: [] }],
+      unit_manifest: { units: [] },
+      surface_manifest: { surfaces: [] },
+      graph_bundle: { graphs: {} },
+      critical_flows: { flows: [], fallback_required: false },
+      risk_register: { items: [] },
+      analyzer_capability: { coverage: "not_applicable", analyzers: [] },
+      design_assessment: {
+        generated_at: "2026-01-01T00:00:00.000Z",
+        findings: [],
+        contract_findings: [],
+        conceptual_findings: [],
+        contract_reviewed: true,
+        conceptual_reviewed: false,
+      },
+      docs_digest: { generated_at: "2026-01-01T00:00:00.000Z", docs: [] },
+      structure_decomposition: {
+        generated_at: "2026-01-01T00:00:00.000Z",
+        target: "structure",
+        node_universe_size: 1,
+        source_ids: ["fixture"],
+        consensus: [],
+        contested: [],
+        findings: [],
+      },
+      intent_checkpoint: {
+        schema_version: "intent-checkpoint/v1",
+        confirmed_at: "2026-01-01T00:00:00.000Z",
+        confirmed_by: "host",
+        scope_summary: "whole repository",
+        intent_summary: "review the repository",
+        design_review: { conceptual_depth: "deep", perspectives: 3 },
+      },
+    } as ArtifactBundle);
+    await persistAnalyzerConsent(root, {
+      semgrep: "declined",
+      eslint: "declined",
+      knip: "declined",
+      jscpd: "declined",
+      "osv-scanner": "declined",
+    });
+
+    await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
+    const firstStep = JSON.parse(
+      await readFile(join(dir, "steps", "current-step.json"), "utf8"),
+    );
+    if (firstStep.step_kind === "charter_extraction") {
+      for (const path of firstStep.access.write_paths as string[]) {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, "{\"nodes\":[]}\n", "utf8");
+      }
+      await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
+      Object.assign(
+        firstStep,
+        JSON.parse(
+          await readFile(join(dir, "steps", "current-step.json"), "utf8"),
+        ),
+      );
+    }
+    expect(firstStep.step_kind).toBe("design_review_conceptual");
+    const firstManifest = JSON.parse(await readFile(firstStep.artifact_paths.conceptual_round_manifest, "utf8"));
+    const firstPerspectivePaths = firstManifest.perspectives.map((p: { result_path: string }) => p.result_path) as string[];
+    return { dir, root, firstStep, firstPerspectivePaths };
+  }
+
+  it("keeps perspective paths stable after next-step rejects a malformed judge", async () => {
+    const { dir, root, firstStep, firstPerspectivePaths } = await prepareRetryFixture();
+    for (const path of firstPerspectivePaths) await writeFile(path, "[]\n", "utf8");
+    await writeFile(firstStep.artifact_paths.conceptual_results, "{}\n", "utf8");
+    await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
+    const retryStep = JSON.parse(await readFile(join(dir, "steps", "current-step.json"), "utf8"));
+    expect(retryStep.access.write_paths).toEqual(firstStep.access.write_paths);
+    expect(await readFile(retryStep.artifact_paths.conceptual_judge_prompt, "utf8")).toMatch(/prior submission rejected|expected shape/i);
+    expect(await readFile(retryStep.artifact_paths.current_prompt, "utf8")).toContain("All 3 perspective lanes have already delivered");
+    for (const path of firstPerspectivePaths) expect(await readFile(path, "utf8")).toBe("[]\n");
+  });
+
+  it("reopens every malformed perspective while preserving valid current-round work", async () => {
+    const { dir, root, firstStep, firstPerspectivePaths } = await prepareRetryFixture();
+    await mkdir(dirname(firstPerspectivePaths[0]!), { recursive: true });
+    await writeFile(firstPerspectivePaths[0]!, "[]\n", "utf8");
+    await mkdir(dirname(firstPerspectivePaths[1]!), { recursive: true });
+    await writeFile(firstPerspectivePaths[1]!, "{}\n", "utf8");
+    await mkdir(dirname(firstPerspectivePaths[2]!), { recursive: true });
+    await writeFile(firstPerspectivePaths[2]!, "{\n", "utf8");
+    await mkdir(dirname(firstStep.artifact_paths.conceptual_results), {
+      recursive: true,
+    });
+    const manifest = JSON.parse(
+      await readFile(firstStep.artifact_paths.conceptual_round_manifest, "utf8"),
+    );
+    await writeFile(
+      firstStep.artifact_paths.conceptual_results,
+      JSON.stringify({
+        round_id: manifest.round_id,
+        findings: [],
+        candidate_dispositions: [],
+        final_finding_shares: [],
+      }) + "\n",
+      "utf8",
+    );
+
+    await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
+    const retryStep = JSON.parse(
+      await readFile(join(dir, "steps", "current-step.json"), "utf8"),
+    );
+    expect(retryStep.step_kind).toBe("design_review_conceptual");
+    expect(retryStep.access.write_paths).toEqual(firstStep.access.write_paths);
+    expect(await readFile(firstPerspectivePaths[0]!, "utf8")).toBe("[]\n");
+    for (const path of firstPerspectivePaths.slice(1)) {
+      await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    const retryPrompt = await readFile(retryStep.artifact_paths.current_prompt, "utf8");
+    expect(retryPrompt).not.toContain("- Perspective 1 (");
+    expect(retryPrompt).toContain("- Perspective 2 (");
+    expect(retryPrompt).toContain("- Perspective 3 (");
+    for (const ordinal of [2, 3]) {
+      const lanePrompt = await readFile(retryStep.artifact_paths[`conceptual_perspective_${ordinal}_prompt`], "utf8");
+      expect(lanePrompt).toContain("Previous submission rejected");
+      expect(lanePrompt).toContain("quarantine");
+    }
+    expect(
+      await readFile(retryStep.artifact_paths.conceptual_judge_prompt, "utf8"),
+    ).toMatch(/prior submission rejected|expected shape|findings/i);
+    expect(
+      (await readSubmissionLedger(dir)).some(
+        (event) =>
+          event.kind === "rejected" &&
+          event.lane === "design_review_conceptual",
+      ),
+    ).toBe(true);
+    for (const path of firstPerspectivePaths.slice(1)) await writeFile(path, "[]\n", "utf8");
+    await writeFile(firstStep.artifact_paths.conceptual_results, JSON.stringify({
+      round_id: manifest.round_id, findings: [], candidate_dispositions: [], final_finding_shares: [],
+    }));
+    await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
+    const repairedLedger = await readSubmissionLedger(dir);
+    for (const contributor of manifest.perspectives.slice(1)) {
+      expect(repairedLedger.filter((event) => event.lane === contributor.lane_id && ["rejected", "accepted"].includes(event.kind)).map((event) => event.kind)).toEqual(["rejected", "accepted"]);
+    }
+  });
+
+  it("never quarantines a manifest path outside its tool-computed lane binding", async () => {
+    const { dir, root, firstStep, firstPerspectivePaths } = await prepareRetryFixture();
+    for (const path of firstPerspectivePaths) await writeFile(path, "[]\n", "utf8");
+    const unrelated = join(root, "unrelated.json");
+    await writeFile(unrelated, "{}\n", "utf8");
+    const manifest = JSON.parse(await readFile(firstStep.artifact_paths.conceptual_round_manifest, "utf8"));
+    manifest.perspectives[1].result_path = unrelated;
+    await writeFile(firstStep.artifact_paths.conceptual_round_manifest, JSON.stringify(manifest));
+    await writeFile(firstStep.artifact_paths.conceptual_results, JSON.stringify({
+      round_id: manifest.round_id, findings: [], candidate_dispositions: [], final_finding_shares: [],
+    }));
+    await expect(cmdNextStep(["--root", root, "--artifacts-dir", dir])).rejects.toThrow(/bound.*path|path.*bound/i);
+    expect(await readFile(unrelated, "utf8")).toBe("{}\n");
   });
 });
