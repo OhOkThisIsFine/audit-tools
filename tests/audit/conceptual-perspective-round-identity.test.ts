@@ -176,9 +176,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
         generated_at: "2026-01-01T00:00:00.000Z",
         findings: [],
         contract_findings: [],
-        conceptual_findings: [],
         contract_reviewed: true,
-        conceptual_reviewed: false,
       },
       docs_digest: { generated_at: "2026-01-01T00:00:00.000Z", docs: [] },
       structure_decomposition: {
@@ -305,6 +303,14 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     for (const contributor of manifest.perspectives.slice(1)) {
       expect(repairedLedger.filter((event) => event.lane === contributor.lane_id && ["rejected", "accepted"].includes(event.kind)).map((event) => event.kind)).toEqual(["rejected", "accepted"]);
     }
+    const repairedStep = JSON.parse(await readFile(join(dir, "steps", "current-step.json"), "utf8"));
+    expect(repairedStep.step_kind, repairedStep.prompt).not.toBe("blocked");
+    const assessment = JSON.parse(await readFile(join(dir, "design_assessment.json"), "utf8"));
+    const metadata = JSON.parse(await readFile(join(dir, "artifact_metadata.json"), "utf8"));
+    const { hashArtifactValue } = await import("../../src/shared/artifactFreshness.js");
+    expect(metadata.artifacts["design_assessment.json"].content_hash).toBe(hashArtifactValue("design_assessment.json", assessment));
+    expect(assessment.conceptual_reviewed).toBe(true);
+    expect(JSON.parse(await readFile(join(dir, "conceptual_review_adjudication.json"), "utf8")).round_id).toBe(manifest.round_id);
   });
 
   it("never quarantines a manifest path outside its tool-computed lane binding", async () => {

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
 
 const { buildDesignAssessment } = await import("../../src/audit/extractors/designAssessment.js");
+const { runDesignAssessmentExecutor } = await import("../../src/audit/orchestrator/structureExecutors.js");
+const { hashArtifactValue } = await import("../../src/shared/artifactFreshness.js");
 
 type DesignAssessmentParams = Parameters<typeof buildDesignAssessment>[0];
 
@@ -17,6 +19,36 @@ function makeParams(
     ...overrides,
   };
 }
+
+const rejection = {
+  pass: "conceptual" as const,
+  lane: "design_review_conceptual",
+  quarantine_path: "quarantine/rejected.json",
+  reason: "missing candidate disposition",
+  rejected_at: "2026-01-01T00:00:00.000Z",
+};
+
+test("rejection diagnostics do not change assessment content identity", () => {
+  const assessment = buildDesignAssessment(makeParams());
+  const hash = hashArtifactValue("design_assessment.json", assessment);
+  expect(hashArtifactValue("design_assessment.json", { ...assessment, rejected_submissions: [rejection] })).toBe(hash);
+  expect(hashArtifactValue("design_assessment.json", { ...assessment, rejected_submissions: [] })).toBe(hash);
+  expect(hashArtifactValue("design_assessment.json", { ...assessment, conceptual_reviewed: true })).not.toBe(hash);
+});
+
+test("a structural assessment rebuild retains outstanding rejection diagnostics", () => {
+  const params = makeParams();
+  const previous = { ...buildDesignAssessment(params), rejected_submissions: [rejection] };
+  const result = runDesignAssessmentExecutor({
+    unit_manifest: params.unitManifest,
+    graph_bundle: params.graphBundle,
+    critical_flows: params.criticalFlows,
+    risk_register: params.riskRegister,
+    design_assessment: previous,
+  });
+  expect(result.updated.design_assessment?.rejected_submissions).toEqual([rejection]);
+  expect(previous.rejected_submissions).toEqual([rejection]);
+});
 
 test("empty project produces no findings", () => {
   const result = buildDesignAssessment(makeParams());

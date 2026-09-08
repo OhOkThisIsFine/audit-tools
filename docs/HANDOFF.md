@@ -5,10 +5,12 @@
 
 ## Live state
 
-- **v0.51.4 is published and installed globally.** Release commit `3288bfec`
-  passed the six-job publish workflow, including all four test shards; npm resolves 0.51.4 and
-  both installed command surfaces report 0.51.4. The release workflow is
-  [run 34180227015](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34180227015).
+- **v0.51.5 is published and installed globally.** Release commit `84339641`
+  passed the six-job publish workflow, including all four test shards; npm resolves 0.51.5 and
+  both installed command surfaces report 0.51.5. The release workflow is
+  [run 34184343142](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34184343142).
+  Conceptual retries preserve the review round and valid perspective outputs, reopen
+  malformed perspectives with their rejection evidence, and validate lane paths before quarantine.
 - **Pipeline verification defaults and rejection history are implemented** in `4b977383`.
   Omitted test/e2e commands come from persisted project facts and pass current-manifest
   admission at close. Both ingestion flows retain rejection explanations across calls;
@@ -42,7 +44,10 @@ unscored continuation. Benchmark crash recovery is integrated in `86f512d1`, wit
 39 focused tests passing, original-source verification, and SQLite run ownership.
 The isolated graph-disabled trial exposed a late capability notice after semantic
 review. The early loader stop rule passed a fresh isolated live trial and is
-released in 0.51.4. The unscored continuation has reached the conceptual judge.
+released in 0.51.4. The unscored continuation accepted the repaired conceptual judge,
+then stopped at the no-progress guard for `design_assessment_current`. Diagnose and
+repair that deterministic stop while preserving the completed submissions and usage ledger;
+then finish the continuation and the ten paired quality comparisons.
 Evidence and limits are in
 [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
 No quality score exists; successful preflight and contract tests are not acceptance.

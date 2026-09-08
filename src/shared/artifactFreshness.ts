@@ -21,7 +21,9 @@ const NON_SEMANTIC_FIELDS_BY_ARTIFACT: Record<string, readonly string[]> = {
   "repo_manifest.json": ["generated_at"],
   "tooling_manifest.json": ["generated_at"],
   "audit_plan_metrics.json": ["generated_at"],
-  "design_assessment.json": ["generated_at"],
+  // Rejection diagnostics guide submission repair; they do not change findings
+  // or the structural inputs downstream artifacts consumed.
+  "design_assessment.json": ["generated_at", "rejected_submissions"],
   // The narrative-bearing machine contract. `generated_at` (when present) is
   // provenance; the array canonicalization below makes theme/top-risk ordering
   // non-load-bearing for the content hash.

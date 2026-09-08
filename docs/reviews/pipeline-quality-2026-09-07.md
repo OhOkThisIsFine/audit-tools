@@ -311,6 +311,30 @@ The continuation then stopped at the auditor's no-progress guard for
 that blocked step as work. The original failure and 525-call cumulative ledger
 remain preserved while that separate stop is diagnosed.
 
+The retry fixes shipped in `5ba96fca`, released as 0.51.5 (`84339641`). The final
+path-binding addition passed the 49-test targeted run plus fresh build, typecheck,
+test typecheck and lint; the earlier local full suite passed 6,511 tests before
+that addition. Exact-commit CI subsequently passed all twelve test jobs across
+Node 22, 24 and 26. The six-job publish workflow passed, and npm plus both global
+bins resolve 0.51.5. The host planner also now refuses a blocked step before
+looking for output paths, preserving the backend reason even if write grants are
+present. Its real red regression and eight passing tests do not change the frozen
+failed continuation runtime or constitute a quality score.
+
+The no-progress stop was reproduced in a real `cmdNextStep` regression. Rejection
+handling changed the assessment body without its metadata, triggering a rebuild.
+Accepting the repaired review then changed that body again without advancing the
+metadata signature, so the guard correctly detected a repeated dispatch signature.
+`handleDesignReviewBranch` now refreshes content metadata through the existing
+`computeArtifactMetadata` primitive while preserving structural dependency
+baselines; only a newly produced adjudication gets a new dependency baseline.
+Diagnostic rejection notes are excluded from the assessment's semantic hash and
+retained by a genuine structural rebuild. The guard itself is unchanged.
+The regression and two diagnostic tests were red before the fix; 39 targeted tests
+passed afterwards, including legacy/contract baseline preservation and immutable
+carry checks. An initial test fixture's explicit empty conceptual fields masked
+the collision; matching the producer's actual output shape exposed it.
+
 - Codex crashes required resuming the existing approved lap and its running agents.
   An earlier helper also overwrote the owner's checkpoint; the missing ownership
   enforcement is tracked in the machine-wide backlog at `C:/Code/docs/backlog.md`.

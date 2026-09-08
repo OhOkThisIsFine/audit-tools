@@ -214,6 +214,9 @@ export function runDesignAssessmentExecutor(
 
   const previous = bundle.design_assessment;
   if (previous) {
+    if (previous.rejected_submissions !== undefined) {
+      designAssessment.rejected_submissions = previous.rejected_submissions;
+    }
     // Carry forward review completion flags and findings from a prior assessment.
     if (previous.contract_reviewed) {
       designAssessment.contract_reviewed = true;

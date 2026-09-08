@@ -105,7 +105,7 @@ import {
   synthesisNarrativeOmits,
   systemicChallengeOmits,
 } from "../orchestrator/obligationPolicy.js";
-import { computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
+import { computeArtifactMetadata, computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
 import {
   decideNextStep,
   PRIORITY,
@@ -1332,6 +1332,7 @@ export async function handleDesignReviewBranch(
   let assessment = bundle.design_assessment;
   let snapshots = bundle.design_review_snapshots;
   let conceptualAdjudication = bundle.conceptual_review_adjudication;
+  let consumed = false;
   const carried = (): ArtifactBundle => {
     const next: ArtifactBundle = { ...bundle };
     if (assessment !== undefined) next.design_assessment = assessment;
@@ -1340,6 +1341,18 @@ export async function handleDesignReviewBranch(
       next.conceptual_review_adjudication = conceptualAdjudication;
     } else {
       delete next.conceptual_review_adjudication;
+    }
+    if (consumed) {
+      // A review changes the assessment's content, not its structural baseline.
+      // Only a newly produced adjudication may bind the new assessment revision;
+      // a contract/legacy update must leave an older adjudication stale.
+      next.artifact_metadata = computeArtifactMetadata(
+        next,
+        bundle.artifact_metadata,
+        conceptualAdjudication !== undefined && conceptualAdjudication !== bundle.conceptual_review_adjudication
+          ? ["conceptual_review_adjudication.json"]
+          : [],
+      );
     }
     return next;
   };
@@ -1413,6 +1426,7 @@ export async function handleDesignReviewBranch(
           (r) => r.pass !== "legacy",
         ),
       };
+      consumed = true;
       markSubmissionApplied(tx, legacyResult.path);
       return { action: "continue", bundle: carried() };
     }
@@ -1431,8 +1445,6 @@ export async function handleDesignReviewBranch(
     params.artifactsDir,
     tx,
   );
-
-  let consumed = false;
 
   if (contractResult.status === "quarantined") {
     assessment =
