@@ -371,6 +371,15 @@ unchanged repeated-step guard. Original failure, configuration, runtime pins,
 completed outputs and the first 553 calls remain preserved. This is verified
 continuation progress, not a terminal report or quality score.
 
+The first new systemic task then received a provider-side retryable HTTP 429
+(`FreeUsageLimitError`) from the pinned Muse profile. Native session
+`ses_f80910b4effejxmtyav1Q5bmFs` contains one completed error-only assistant record,
+zero input/output tokens and no pending response. The controller preserved its
+failed receipt and the driver stopped. Accepted totals remain 553 calls;
+including this failed attempt, observed calls are 554. The provider supplied no
+retry-after value, so the relay's cooldown expiry is not evidence of restored
+capacity. No model substitution or quality score followed the failure.
+
 - The benchmark's published-tooling acquisition helper assumed npm `view --json`
   returned an object and `pack --json` returned an array. This installation returned
   a singleton array and a package-keyed object respectively. The helper now admits
