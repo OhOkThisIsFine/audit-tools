@@ -242,9 +242,25 @@ The fresh calibration reached final design review but expired its 90-minute wall
 budget during a Codex quota pause. Its active native task had completed successfully;
 its response, graph receipts, and usage were recovered without rerunning it. Any
 continuation must declare its changed wall budget and remain unscored. There are
-still zero scored pairs. The separate graph-disabled trial stopped at analyzer
-consent without a comprehensive claim; it is inconclusive, because the effective
+still zero scored pairs. The first graph-disabled trial stopped at analyzer
+consent without a comprehensive claim and was inconclusive, because the effective
 host retained a graph augmentation plugin and capability isolation was unproven.
+
+A subsequent isolated trial disabled both MCP definitions, graph-plugin trigger
+tools, delegation, and arbitrary shell commands. Its native trace nevertheless
+showed semantic critical-flow, contract, and conceptual review before the final
+non-comprehensive notice. This is a measured preflight-ordering failure. The
+canonical loader in `skills/audit-code/audit-code.prompt.md` previously required
+the check only before treating a run as comprehensive, after directing the host
+to follow its workload. The loader now checks after the first backend response
+and stops before any semantic work or further `next-step` when structural
+capability is absent. A fresh isolated Muse Spark high session passed this
+ordering check: ten model calls, 259,856 input tokens, 4,529 output tokens, and
+reported cost zero. It returned an explicit degraded/non-comprehensive notice,
+issued no second backend advance, and wrote only analyzer-consent decisions.
+Native tool records confirm no semantic submissions or structural transport.
+The original adverse trace remains preserved. This is one successful live
+preflight trial, not the outstanding paired audit-quality score.
 
 The primary fixture has been sanitized into a new, history-free repository at
 commit `90b377c349191b736eb9309d54b31977f8db6788`. Parent verification confirmed

@@ -39,18 +39,28 @@ Ask for exactly one step:
 audit-code next-step
 ```
 
+Immediately after this first response, before following its workload prompt or
+calling `next-step` again, perform a host-side structural-capability preflight.
+Confirm that working tools can inspect the structural graph/relationships and
+source structure required for the audit. An installed tool name or an unavailable
+server is not evidence of capability. This check belongs to the host; do not add
+provider, routing, model, or machine-capability fields to audit-tools.
+
+If that capability is unavailable, state the concrete limitation and explicitly
+say the audit is degraded/non-comprehensive. Stop before critical-flow analysis,
+charter work, contract or conceptual review, per-file review, or writing semantic
+results. Do not defer the notice until a report is written or silently substitute
+source-only review for a comprehensive request. A user-chosen quick/shallow audit
+may proceed with the stated limitation and the reflection required below.
+
 Read the returned JSON only far enough to find `prompt_path`, then read and
 follow only that prompt. Do not inspect workload, result, schema, command
 catalog, or state files unless the current prompt directs you to them.
 
 When the prompt emits semantic review items, assign them with the host's native
 subagent facilities when available. Do not send provider, model, quota,
-context-window, routing, or launch configuration to audit-tools. Before treating
-the run as comprehensive, perform a host-side structural-capability preflight:
-confirm the host can inspect the structural graph/relationships and source
-structure required by the workload. This is a host capability check, not an
-audit-tools MCP/provider or lane-selection step. If capability is degraded but
-you proceed, record one reserved AgentReflection with task_id exactly
+context-window, routing, or launch configuration to audit-tools. If the user has
+chosen a degraded quick/shallow run, record one reserved AgentReflection with task_id exactly
 `audit-capability-preflight`. Every reflection requires all three of `task_id`,
 `instruction_clarity` (one of `clear`, `mostly_clear`, `ambiguous`, `unclear`)
 and `severity`; a line missing any of the three is discarded whole. Use severity
