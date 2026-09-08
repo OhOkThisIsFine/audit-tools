@@ -5,10 +5,10 @@
 
 ## Live state
 
-- **v0.51.6 is published and installed globally.** Release commit `66760081`
-  passed the publish workflow; npm resolves 0.51.6 and
-  both installed command surfaces report 0.51.6. The release workflow is
-  [run 34186307411](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34186307411).
+- **v0.51.7 is published and installed globally.** Release commit `a5ced6e3`
+  passed the publish workflow; npm resolves 0.51.7 and
+  both installed command surfaces report 0.51.7. The release workflow is
+  [run 34189090341](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34189090341).
   Conceptual retries preserve the review round and valid perspective outputs, reopen
   malformed perspectives with their rejection evidence, and validate lane paths before quarantine.
 - **Pipeline verification defaults and rejection history are implemented** in `4b977383`.
@@ -45,14 +45,15 @@ unscored continuation. Benchmark crash recovery is integrated in `86f512d1`, wit
 The isolated graph-disabled trial exposed a late capability notice after semantic
 review. The early loader stop rule passed a fresh isolated live trial and is
 released in 0.51.4. The unscored continuation accepted the repaired conceptual judge,
-and a fresh invocation passed the previous no-progress stop. Its backend remains
-the frozen v0.51.3 checkout; it has not yet executed the published metadata fix.
+and a fresh invocation passed the previous no-progress stop. That invocation used
+the frozen v0.51.3 checkout and did not prove the published metadata fix ran.
 The first systemic challenge round was accepted, then the runner rejected the next
-round's reused identity. Round identity and quiet-result replay fixes now pass
-58 targeted tests and independent review. Publish and explicitly bind the upgraded
-backend while preserving all 553 calls (23,529,315 input and 274,263 output tokens)
-and completed submissions;
-then finish the continuation and the ten paired quality comparisons.
+round's reused identity. Round identity and quiet-result replay fixes are published
+in v0.51.7 after 58 targeted tests, independent review, and complete release CI.
+The continuation now explicitly uses the isolated published backend, with immutable
+unscored upgrade lineage preserving its first 553 calls (23,529,315 input and
+274,263 output tokens). Its fresh round-2 identity passed the repeated-step guard.
+Finish that continuation, then the ten paired quality comparisons.
 Evidence and limits are in
 [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
 No quality score exists; successful preflight and contract tests are not acceptance.

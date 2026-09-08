@@ -355,11 +355,21 @@ round identity and have failing-test proof. The final 58 targeted tests passed,
 along with 44 adjacent tests, build, typechecking, lint and packaged smokes. The
 benchmark repeat guard is unchanged.
 
-The continuation backend is still its original `efcee12e`/v0.51.3 checkout.
-Passing the earlier metadata stop in a new invocation did not establish that
-v0.51.6 executed there. An explicit additional unscored tooling-upgrade record
-will bind the published replacement before continuation; original failure,
-configuration, runtime pins, completed outputs and usage remain preserved.
+The continuation originally used `efcee12e`/v0.51.3. Passing the earlier metadata
+stop in a new invocation did not establish that v0.51.6 executed there.
+Implementation `5a28b9c9` and release `a5ced6e3` now publish the systemic fixes
+as v0.51.7. Exact-commit CI passed all twelve shards across Node 22/24/26;
+the release's four shards, non-test gates and packaging passed in
+[publish run 34189090341](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34189090341).
+npm and both globally installed bins resolve v0.51.7, with deployment scripts enabled.
+
+The registry acquisition verified tarball integrity, eight local dependencies,
+and isolated sanitized Git history. The resume wrapper recorded immutable
+unscored backend-upgrade lineage and emitted a current step explicitly naming
+the isolated v0.51.7 command. Its fresh round-2 submission path passed the
+unchanged repeated-step guard. Original failure, configuration, runtime pins,
+completed outputs and the first 553 calls remain preserved. This is verified
+continuation progress, not a terminal report or quality score.
 
 - The benchmark's published-tooling acquisition helper assumed npm `view --json`
   returned an object and `pack --json` returned an array. This installation returned
