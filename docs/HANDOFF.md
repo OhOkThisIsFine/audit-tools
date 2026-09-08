@@ -33,9 +33,13 @@
 
 **Finish the active pipeline-quality lap.** The shared JSON byte-marker fix and bare
 full-audit depth correction are released; benchmark objective forwarding is fixed on main.
-The integrated changes passed 6,496 local tests and all release checks. The AGY calibration ended
-shallow and over budget; a lean external host is being calibrated before the complete
-paired comparison. Evidence and limits are in
+The integrated changes passed 6,496 local tests and all release checks. The free Muse host
+now has verified graph search, trace, snippet, and coverage through a fixture-bound helper.
+The held-out calibration reached final design review but exceeded its wall deadline
+during a host quota pause. Completed native outputs are preserved for an explicitly
+unscored continuation. Benchmark crash recovery is integrated in `86f512d1`, with
+39 focused tests passing, original-source verification, and SQLite run ownership.
+The separate graph-disabled preflight remains inconclusive. Evidence and limits are in
 [pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
 No quality score exists; successful preflight and contract tests are not acceptance.
 

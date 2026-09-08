@@ -170,6 +170,82 @@ confirmation text, and example JSON agree; explicit bounded requests remain shal
 The replacement external benchmark host is being calibrated with a pinned free deployment and explicit model calls,
 usage receipts, and bounded tools. It has not yet completed a valid trial.
 
+Real tool workloads have ruled out several deployment choices during unscored
+calibration. The Kilo and OpenRouter Nemotron routes returned malformed upstream
+envelopes on tool requests. Gemini Flash completed a tool sequence but returned
+HTTP 429 on the candidate workload. Groq Qwen read actual source and graph evidence,
+then returned an empty terminal response without the required submission. The host
+now checks declared output paths and can resume the recorded conversation. That
+real continuation failed HTTP 413: 7,164 requested input tokens exceeded the
+account's 7,000-token allowance. Waiting cannot make that request admissible.
+Separate NIM attempts returned HTTP 429 for MiniMax and HTTP 504 for DeepSeek.
+These are host/provider execution failures, not measured audit-quality failures.
+
+The preserved critical-flow step remains unaccepted. Its result path was already
+present in both the product's `artifact_paths.critical_flow_fallback_results` and
+the host request's `access.write_paths`; the null optional `artifact_path` did not
+mean the path was lost. No product change was made for that rejected diagnosis.
+The original requests, responses, usage, and continuation failure remain under
+`.claude/pipeline-benchmark-lean/runs/heldout-candidate-1788817513966/`.
+
+The native OpenCode free lane subsequently completed the same real critical-flow
+task. Ordinary `next-step` accepted its submission and advanced to intent
+confirmation. Its task-scoped database receipts identify Muse Spark 1.3
+contributor-free with high effort and record 230,448 input tokens including cache,
+3,376 output tokens including reasoning, and reported cost zero. A fresh held-out
+candidate now uses this lane throughout; the mixed-provider qualification is not
+a scored trial. Native usage includes descendant sessions, and the external
+bridge rejects mismatched model identities and absent usage or output artifacts.
+The complete paired run and blinded evaluation remain outstanding.
+
+Inspection of actual native task records then rejected this host configuration
+for comprehensive scoring. The standalone control produced a report and complete
+usage receipts, but its graph scout had no callable graph tools; the report
+explicitly disclosed source-only evidence. The candidate's charter-delta task
+reported the same absence. It was stopped before its judge, and both runs remain
+unscored. Direct OpenCode MCP diagnostics connect to the graph server, whereas
+model-run startup records mark it unavailable. An isolated configuration with an
+explicit 30-second timeout did not restore the model's native tools, so the
+startup-timeout explanation is only a rejected candidate fix, not an established
+cause. A fixture-scoped shell-to-MCP transport is being qualified separately.
+
+The delegated transport refusal was traced to its missing cache/runtime overrides:
+the default temporary-directory ancestry grants mutation rights to another Windows
+identity, so codebase-memory correctly refuses it. The helper now uses the active
+daemon's accepted private cache and rendezvous directories through documented
+`CBM_CACHE_DIR` and `CBM_RUNTIME_DIR` settings; permissions and validation are unchanged.
+A real free Muse run then completed search, bidirectional trace, source snippet,
+and coverage operations against the exact fixture. Its first coverage attempt
+encountered a PowerShell UTF-8 byte marker in the argument file; a no-marker rewrite
+completed, and the helper now accepts one leading marker during parsing. Raw
+receipts are retained under the local benchmark's `graph-qualification` directory.
+This establishes a functioning host, not audit quality. A fresh held-out candidate
+used the ordinary pipeline with actual graph and usage evidence required before
+each step advanced; the earlier source-only runs remain unscored.
+
+The benchmark runner previously retained completed trial records only in memory.
+Automatic checkpointing is integrated in `86f512d1` before the long paired run. Review
+of the first patch found that an unjournaled pending executor call could be replayed
+after a crash, and snapshots beside a checkout-local results directory could inherit
+unrelated instructions. The final implementation journals pending calls, validates
+accepted responses, preserves isolated snapshots, and refuses ambiguous replay.
+
+Independent parent execution passed 39 focused tests, including actual process
+interruption during control and candidate work, concurrent resume, source tampering,
+and legitimate generated root artifacts. `runUnlocked` now verifies original source
+path/type/content inventory. `checkpointLock` uses SQLite exclusive ownership, which
+the operating system releases on process death; no stale-file reclamation is needed.
+Request files precede their checkpoint pointers. The delegate gate's five warnings
+were local helpers reading actual executor logs, not copied implementations.
+
+The fresh calibration reached final design review but expired its 90-minute wall
+budget during a Codex quota pause. Its active native task had completed successfully;
+its response, graph receipts, and usage were recovered without rerunning it. Any
+continuation must declare its changed wall budget and remain unscored. There are
+still zero scored pairs. The separate graph-disabled trial stopped at analyzer
+consent without a comprehensive claim; it is inconclusive, because the effective
+host retained a graph augmentation plugin and capability isolation was unproven.
+
 The primary fixture has been sanitized into a new, history-free repository at
 commit `90b377c349191b736eb9309d54b31977f8db6788`. Parent verification confirmed
 identical `src`, `tests`, `spec`, `scripts`, `.claude/hooks`, and `.claude/skills`
