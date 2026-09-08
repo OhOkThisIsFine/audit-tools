@@ -1,10 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSyncHidden } from "../helpers/spawn.mjs";
+import { spawnHidden, spawnSyncHidden } from "../helpers/spawn.mjs";
 import { checkpointPathForRequests } from "../../benchmarks/p0/runner.mjs";
 
 const shared = { repo_commit: "0123456789abcdef0123456789abcdef01234567", host_build: "audit-tools@0.50.19", model: "pinned-model", reasoning_effort: "high", tool_inventory: ["codebase-memory"], budgets: { context: 100000, output: 12000, turns: 20, timeout_ms: 300000 } };
@@ -103,7 +102,7 @@ function targetOf(f: Fixture, kind: string) { const request = f.requests.request
 function run(f: Fixture, env: Record<string, string> = {}) { return spawnSyncHidden(process.execPath, [f.runner, "run", "--manifest", f.manifestPath, "--requests", f.requestsPath, "--identity", f.identityPath, "--executor", process.execPath, "--executor-arg", f.executor], { cwd: f.repoRoot, encoding: "utf8", env: { ...process.env, ...env } }); }
 function runAsync(f: Fixture, env: Record<string, string> = {}) {
   return new Promise<{ status: number | null; stderr: string }>((done) => {
-    const child = spawn(process.execPath, [f.runner, "run", "--manifest", f.manifestPath, "--requests", f.requestsPath, "--identity", f.identityPath, "--executor", process.execPath, "--executor-arg", f.executor], { cwd: f.repoRoot, env: { ...process.env, ...env } });
+    const child = spawnHidden(process.execPath, [f.runner, "run", "--manifest", f.manifestPath, "--requests", f.requestsPath, "--identity", f.identityPath, "--executor", process.execPath, "--executor-arg", f.executor], { cwd: f.repoRoot, env: { ...process.env, ...env } });
     let stderr = "";
     child.stderr.on("data", (chunk) => { stderr += String(chunk); });
     child.on("close", (status) => done({ status, stderr }));

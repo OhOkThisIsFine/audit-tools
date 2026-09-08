@@ -137,6 +137,8 @@ function fixture() {
       snapshot_commit:
         request.snapshot === "primary" ? manifest.shared.repo_commit : null,
       source_tree_clean: true,
+      source_inventory: [],
+      source_digest: digest([]),
       response: {
         artifact_path: artifactPath,
         artifact_sha256: fileDigest(artifactPath),
