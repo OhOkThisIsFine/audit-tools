@@ -22,27 +22,529 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-09-06 at `a53bb7e1eb2af25cf9173c499b155ab0297d315c`.*
+*Last run: 2026-09-09 at `23079f37ea25c9b899a0134205057654ac1cae33`.*
 
 
 ---
 
-## Nothing to answer
 
-No open propositions. The next run will refill this file if it finds any.
+# Documentation
+
+
+<!-- nightly:item key=4da5d39fe61a07d4 -->
+
+## `docs-dependency-map-analyzer-vocabulary` — A constitutional spec still describes the analyzer-capability marker with a vocabulary the code deliberately removed — restate it, or move the code back? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/audit/dependency-map.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+When audit-code runs its optional extra analysis pass over a repository, it writes a small record saying how that pass went. The design document spec/audit/dependency-map.md still says that record holds a status of either 'applied' or 'omitted'. The code stopped doing that. The type AnalyzerCapabilityRecordSchema in src/audit/types/analyzerCapability.ts now stores a field called coverage, and the comment written directly above it says in so many words that coverage replaces the old applied/omitted status, because that status was a yes/no guess over a partial set rather than a measurement. The newer vocabulary has five values (findings, clean, degraded, not_run, not_applicable) so the record can distinguish 'we looked and found nothing' from 'we never got to look'. A second design document, spec/audit/artifact-contract.md, already describes the same record using the new coverage vocabulary. So two normative documents now disagree with each other about one artifact. This is not being fixed automatically, because dependency-map.md is on the constitutional list in src/shared/constitutionalDocPaths.ts — those documents are the ones a doc-review sweep is forbidden to rewrite on its own, after a sweep once silently rewrote one. Answering 'restate the doc' means the document is brought into line with the code and with artifact-contract.md. Answering 'the doc is right' means the code is what should move, and the coverage field is a mistake to unwind.
+
+### The question
+
+spec/audit/dependency-map.md describes analyzer_capability.json as recording the pass outcome as "`applied` / `omitted`". The code replaced that with a five-value `coverage` measurement, and spec/audit/artifact-contract.md already says so. Should the dependency-map sentence be restated to match, or does the normative intent differ from what shipped? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### Your answer
+
+- [ ] **1. Restate the doc** — Restate the dependency-map sentence to describe the marker as recording what the pass produced — `coverage`, in the shared measured-outcome vocabulary, derived over the analyzers that were asked for — plus per-analyzer resolution and provenance, matching artifact-contract.md and the code. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. The doc is right, the code moves** — The normative intent is the applied/omitted success predicate. Treat the `coverage` field as the drift and open work to reconcile the code to the doc rather than the doc to the code. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **3. Neither — the doc should not describe the field at all** — dependency-map.md is a dependency map, not an artifact contract. Cut the field-level description entirely and point at spec/audit/artifact-contract.md, which owns the artifact's shape, so the two can never disagree again.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- spec/audit/dependency-map.md contains the literal fragment "applied` / `omitted`, plus per-analyzer resolution" (grep, HEAD 23079f37). <!-- doc-citation-exempt: quoted item prose, not citations -->
+- src/audit/types/analyzerCapability.ts declares `coverage: MeasuredOutcomeSchema`, and its JSDoc states verbatim that it replaces `status: "applied" | "omitted"`, "which was a success-predicate over a partial set". <!-- doc-citation-exempt: quoted item prose, not citations -->
+- No `applied`/`omitted` producer or reader survives for this artifact; the roll-up is `analyzerCapabilityCoverage` over `wasOwedCoverage` entries. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- spec/audit/dependency-map.md is listed in CONSTITUTIONAL_DOC_PATHS (src/shared/constitutionalDocPaths.ts), so this is escalate-only by rule, not by judgment.
+- Independently re-verified by this run's own grep, not only by the reviewer lane.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=cde86125b1d4cb83 -->
+
+## `docs-remediation-goals-output-order-omits-two-exclusion-classes` — The remediation goals document states the report's section order, and the render has two categories that order has no bullet for — widen it, or declare it a minimum? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/remediate/remediation-goals.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+spec/remediate/remediation-goals.md is the normative document for the remediation half of the pipeline. Under Final output it says the report lists five things, in order: resolved items, items deemed inappropriate, items ignored after triage, the combined-state test result, and the closing-action result. The renderer in src/remediate/phases/close.ts emits two further sections that none of those five bullets covers: findings skipped by the intent checkpoint, and findings dropped because they referred to paths that do not exist. Those are not resolved items and not ignored items — they are findings excluded from remediation altogether, so a reader working from the document alone would not expect them and would not know a report is complete when they appear. Nothing is broken at runtime; the reports render correctly. The question is what the document's list is FOR. If it is the complete contract for the render, it is now short by two categories. If it was always a floor the implementation may exceed, the document should say that plainly, so the gap stops reading as drift to every future reviewer. Worth knowing: an adversary lane refuted a third example that was originally part of this item. The verified-already-correct section is fairly read as covered by the existing resolved bullet, so it is not claimed here. It also refuted a separate claim, that the document's five terminal states had fallen behind the code — they have not, and that half was dropped. This is not being changed automatically because this file is on the constitutional list in src/shared/constitutionalDocPaths.ts, after a doc sweep once silently rewrote it.
+
+### The question
+
+spec/remediate/remediation-goals.md says remediation-report.md "lists, in order" five things, and close.ts additionally renders findings skipped by the intent checkpoint and findings dropped by grounding — neither covered by any of the five. Should the ordering be widened to name them, or should the document declare its list a minimum?
+
+### Your answer
+
+- [ ] **1. Widen the ordering** — Widen the Final output ordering to name the intent-checkpoint-skipped and grounding-dropped sections, so the normative document is the complete contract for what the render emits.
+- [ ] **2. Declare it a minimum** — The list is a floor, not an enumeration. Say so explicitly — the render may carry further coverage sections — so the gap stops reading as drift.
+- [ ] **3. Say what the extra sections ARE, without ordering them** — Keep the five-item ordering as the required spine, and add one sentence stating that findings excluded before remediation (intent checkpoint, grounding) are reported separately, without binding their position.
+- [ ] **4. Leave it** — The document specifies report content rather than an exhaustive set of headings, and the extra sections are coverage reporting rather than outcomes. Leave the ordering unchanged.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- spec/remediate/remediation-goals.md contains "items resolved (with finding id, summary, and verification evidence)" under a Final output heading introduced by "its render `remediation-report.md` lists, in order:" (grep, HEAD 23079f37). <!-- doc-citation-exempt: quoted item prose, not citations -->
+- src/remediate/phases/close.ts renders `## Skipped by Intent Checkpoint` and `## Dropped by Grounding`, both fed from plan_coverage — findings excluded before remediation, matching none of the five bullets. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- ADVERSARY REFUTATION, folded in (Codex lane, independent): the reviewer also cited `## Verified Already Correct (no changes made)` as missing. `collectReportEntries` groups `resolved_no_change` items under `verifiedNoChange`, which is fairly read as covered by the existing "items resolved" bullet, so that example is NOT claimed here. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- ADVERSARY REFUTATION, item half DROPPED: a companion claim that the document's five terminal states lag `PerFindingDisposition`'s seven was refuted and removed from this run. `TERMINAL_STATUS` in src/remediate/state/itemStatus.ts marks exactly five statuses terminal — resolved, resolved_no_change, ignored, deemed_inappropriate, abandoned — matching the document; `verified_already_fixed` and `refuted` are per-FINDING disposition overrides, a different vocabulary. Verified directly by this run, not taken on the lane's word. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- spec/remediate/remediation-goals.md is in CONSTITUTIONAL_DOC_PATHS, so this is escalate-only by rule.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=0d8be5dc91cffb42 -->
+
+## `docs-audit-prompt-reflection-destination-unnamed` — The audit loader prompt tells the host to record a reflection but never says which file to write it to — name the destination, and pin it in the contract test? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `skills/audit-code/audit-code.prompt.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+skills/audit-code/audit-code.prompt.md is the canonical instruction body every host agent reads when it runs an audit; the copies under .agent/ and .github/ are rendered from it. It instructs the host to record a reflection entry with a specific task_id, and it correctly lists the three fields every reflection needs, warning that a line missing any of them is discarded whole. What it never says is WHERE that entry goes. The destination is a file named agent-feedback.jsonl in the run's artifacts directory, held in code as the constant AGENT_FEEDBACK_FILENAME in src/shared/agentReflections.ts, and the file is append-only newline-delimited JSON. No shipped host-facing surface names it — not this prompt, not the rendered copies, not any prompt renderer. So a host that follows the instruction exactly still has to guess the filename, and a wrong guess is silently discarded: the reflection simply never appears, and the audit report's limitations section is silently thinner. There is already a contract test, tests/audit/prompt-names-required-reflection-fields.test.ts, created to stop exactly this class of silent loss by pinning the field names into the prompt. It does not pin the destination. This repository's stated conviction is that a workflow property must be guaranteed by the tool rather than by the host reasoning it out, so an instruction that requires a guess is the failure mode by its own standard.
+
+### The question
+
+Should the audit loader body name the reflection destination — append one JSON object per line to `agent-feedback.jsonl` in the run's artifacts directory — and should tests/audit/prompt-names-required-reflection-fields.test.ts be extended to pin `AGENT_FEEDBACK_FILENAME` the way it already pins the required fields? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### Your answer
+
+- [ ] **1. Name it and pin it** — Add the destination to the loader body (append-only NDJSON at `agent-feedback.jsonl` in the run's artifacts directory) and extend the existing prompt contract test to pin `AGENT_FEEDBACK_FILENAME`, so the prompt and the constant can never drift apart. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. Name it, do not pin it** — Add the destination to the loader body but leave the contract test alone. The field-name test covers the discard-on-missing-field case; a second pinned literal is more gate than the risk warrants.
+- [ ] **3. Do not name it — the tool should supply the path** — A host should never be told a filename at all. Have the emitted step carry the absolute result path for the reflection the same way it carries other result paths, so there is nothing to name and nothing to guess.
+- [ ] **4. Leave it** — Hosts in practice discover the file from the artifacts directory, and the reflection is optional enrichment. Accept the guess and leave both the prompt and the test unchanged.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- skills/audit-code/audit-code.prompt.md contains `audit-capability-preflight` and the three required reflection fields, but zero occurrences of `agent-feedback` (grep count 0, HEAD 23079f37) — independently re-verified by this run. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- src/shared/agentReflections.ts declares `export const AGENT_FEEDBACK_FILENAME = "agent-feedback.jsonl"`, parsed by `parseReflectionsNdjson`. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- The reflections feed the capability filter in `renderAuditReport` (src/audit/reporting/synthesis.ts) that produces the Audit Limitations section. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- tests/audit/prompt-names-required-reflection-fields.test.ts pins the field names for this same silent-discard class, but not the destination.
+- ADVERSARY NARROWINGS (Codex lane, independent), both folded in. (a) A MALFORMED reflection line inside a file that WAS found is reported through `reportDiscardedReflections`, naming the file and the first bad line. The silence is specific to a WRONG DESTINATION — `parseReflectionsNdjson` returns `[]` for an absent or empty set with no affirmation, so nothing reports that reflections were expected and none arrived. This item asserts only the second case. (b) The channel IS named in source and in specification documents; `loadArtifactBundle` (src/audit/io/artifacts.ts) reads only `AGENT_FEEDBACK_FILENAME` beneath the artifacts directory. The gap is HOST-FACING AUTHORING GUIDANCE — the loader body a host actually reads — not an undocumented channel. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+</details>
+
+---
+
+
+<!-- nightly:item key=d566b484062036be -->
+
+## `docs-remediate-prompt-has-no-target-directory-rule` — The remediate loader prompt carries no target-directory rule while its audit twin does — copy the rule across, or single-source it? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `skills/remediate-code/remediate-code.prompt.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The two shipped loader bodies are the canonical instructions a host agent reads: skills/audit-code/audit-code.prompt.md for auditing and skills/remediate-code/remediate-code.prompt.md for remediating. The audit one explains how the tool decides which repository it is working on: run from inside the target repository, and pass `--root <path>` only when running from outside it. It even calls itself the one full statement of that rule. The remediate one never mentions `--root` at all, though the remediate CLI declares exactly the same option in src/remediate/index.ts with the same resolution behaviour. So a host asked to remediate a repository that is not its current directory has no rule to follow and must infer one. Nothing catches this: the drift guard that keeps the rendered .agent/ and .github/ copies in step with these bodies compares each body against its own renders, so an instruction present in one body and missing from the other is invisible to it. Two answers are reasonable. Copying the rule into the remediate body is the smaller change and matches how the two bodies are written today. Single-sourcing it means both bodies render one shared statement, which is the repository's stated preference for anything that would otherwise be kept in parity by hand — but it is a change to how loader bodies are authored, not just to their text. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+skills/audit-code/audit-code.prompt.md states the target-directory rule and calls itself "the one full statement of the target-directory rule"; skills/remediate-code/remediate-code.prompt.md never mentions `--root`. Should the rule be copied into the remediate body, or should both bodies render one shared statement? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### Your answer
+
+- [ ] **1. Copy the rule across** — Add the same target-directory rule to skills/remediate-code/remediate-code.prompt.md — run from inside the target repository, `--root <path>` only from outside it — and re-render the generated host assets in the same commit. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. Single-source it** — Make the target-directory rule one shared fragment both loader bodies render, so the two can never disagree again, and drop the audit body's claim to be its one full statement in favour of the shared source.
+- [ ] **3. Add a drift test instead** — Keep the two bodies hand-authored but add a contract test asserting that both carry the target-directory rule, so the asymmetry is a red build rather than a discovery.
+- [ ] **4. Leave it** — Remediation in practice runs from inside the repository being remediated, so the rule is not load-bearing there. Leave the remediate body unchanged.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- skills/remediate-code/remediate-code.prompt.md contains zero occurrences of `--root` (grep count 0, HEAD 23079f37) — independently re-verified by this run. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- skills/audit-code/audit-code.prompt.md contains `--root` twice and the phrase "the one full statement of the target-directory rule". <!-- doc-citation-exempt: quoted item prose, not citations -->
+- src/remediate/index.ts declares `--root <path>` on `next-step` via the shared ROOT_OPTION_DESCRIPTION, with `--root X` resolving through `resolveRepoRoot` and its absence through `discoverRepoRoot` from the caller's cwd. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- The host-asset drift tests compare each body against its own renders, so a rule missing from one body is invisible to them.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=7aff25f6b983b0df -->
+
+## `docs-benchmark-readme-omits-run-contract` — The benchmark README omits `run`'s checkpoint and recovery behaviour, and one acceptance threshold — document them, or point at the runner as authoritative? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `benchmarks/p0/README.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+benchmarks/p0/README.md is the operator guide for the P0 benchmark. It has fallen behind benchmarks/p0/runner.mjs in two places, and in both the problem is OMISSION rather than a wrong statement. First, the README documents how to invoke `run` and says nothing about what happens when a run does not complete. The runner has grown a durable checkpoint: it takes an exclusive lock, so a second concurrent `run` fails with the message 'checkpoint is busy'; it writes a checkpoint file beside the prepared requests; it resumes automatically from the completed prefix after an interruption; and it REFUSES to continue past a recorded execution failure, treating that as terminal. An operator whose run is interrupted therefore has no documented recovery path, and one who meets the terminal-failure refusal has no documented explanation for it. Second, the README's final acceptance paragraph is short by one substantive condition: evaluateBenchmarkScores requires that ZERO high-confidence unsupported claims were admitted, and the README mentions unsupported counts without ever stating that the threshold is zero. So a run can fail acceptance for a reason the paragraph never names. The two gaps are the same question — how complete is this README meant to be — which is why they are asked together. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+benchmarks/p0/README.md documents `run` without its checkpoint, resume and terminal-failure behaviour, and its acceptance paragraph never states that admitted high-confidence unsupported claims must be zero. Should the README document both, or declare `evaluateBenchmarkScores` and the runner authoritative and the README illustrative? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### Your answer
+
+- [ ] **1. Document both** — Document the checkpoint behaviour that already exists — the `checkpoint is busy` refusal on a concurrent run, automatic resume after an interruption, how pending responses settle, and that a recorded execution failure is terminal — and state the zero-admitted-unsupported acceptance threshold. Describe only what the runner does; do not invent a reset procedure it does not have. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. Document the checkpoint only** — Document the checkpoint and recovery behaviour, because an operator has no other way to recover an interrupted run, and mark the acceptance paragraph as illustrative with `evaluateBenchmarkScores` named as authoritative. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **3. Declare the runner authoritative** — Keep the README short. State once that benchmarks/p0/runner.mjs is authoritative for both the run contract and the acceptance conditions, and stop enumerating either in prose where they will drift again.
+- [ ] **4. Leave it** — The benchmark has one operator who reads the runner directly. Leave the README as it is.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- benchmarks/p0/README.md contains "invokes the supplied executor without a shell" and zero occurrences of `run.checkpoint.json` or `admitted_high_confidence_unsupported` (grep, HEAD 23079f37) — independently re-verified by this run. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- benchmarks/p0/runner.mjs contains the literal `checkpoint is busy`, plus `checkpointLock`, `loadAndValidateCheckpoint`, `P0_CHECKPOINT_FILENAME` and `checkpointPathForRequests`; it refuses to resume past a recorded execution failure. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- `evaluateBenchmarkScores` additionally requires `admitted_high_confidence_unsupported` to be zero. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- `git diff a53bb7e1..HEAD -- benchmarks/p0/` shows the 999-line runner change landed with no README change. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- ADVERSARY CORRECTIONS, folded in (Codex lane, independent). (a) The README never literally says `run` is a "single unbroken pass" — that was reviewer inference, and this item now claims OMISSION rather than a contradicting statement. (b) The README already requires two independent evaluators and a separate adjudicator earlier, so the evaluator-coverage half of the acceptance gap was dropped; the substantive undocumented threshold is the zero-unsupported one. (c) The runner has no reset procedure — the fix must document interruption recovery, pending-response settlement and the failure refusal as they exist, not invent one. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+</details>
+
+---
+
+
+<!-- nightly:item key=569ce0323e227c76 -->
+
+## `docs-audit-pkg-language-convictions-two-homes` — Three language/analyzer convictions are stated twice, in different words, across two audit-pkg docs — pick one home? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `docs/audit-pkg/product.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+docs/audit-pkg/product.md and docs/audit-pkg/development.md both state the same three convictions about how audit-code handles languages and analyzers, in different wording. The three are: that semantic affinity between files stays low-authority and must never merge work packets on shared token frequency alone; that a generic analyzer-supplied ownership root is preferred over writing a bespoke parser per ecosystem; and that a command-backed analyzer must prove the project actually intends to use it from repository-local configuration. Two documents stating one fact in different words is the drift risk this repository's documentation philosophy names directly: the next edit corrects one and leaves the other quietly contradicting it, and nothing catches that because no test compares the two. What makes this worth asking rather than assuming is that both documents already practise the one-home rule elsewhere and say so out loud — product.md calls itself the one home for the installer-verb list, and development.md says of an ordering that copies of it have drifted before, which is why neither file keeps a second one. The language and analyzer convictions are the one cluster where the rule was not applied. Choosing a home means the other file keeps a pointer instead of a copy.
+
+### The question
+
+Should docs/audit-pkg/product.md be the one home for the language and analyzer convictions, with docs/audit-pkg/development.md keeping only the mechanical adapter how-to plus a pointer? Or does development.md's audience need its own statement?
+
+### Your answer
+
+- [ ] **1. product.md is the home** — Make docs/audit-pkg/product.md the one home for the three convictions (semantic affinity stays low-authority; prefer a generic analyzer-supplied ownership root; command-backed analyzers must prove intent from repo-local config), and reduce docs/audit-pkg/development.md to the mechanical adapter how-to plus a pointer.
+- [ ] **2. development.md is the home** — The convictions bind whoever is adding an analyzer, so docs/audit-pkg/development.md should own them and product.md should carry the pointer.
+- [ ] **3. Neither — CLAUDE.md owns them** — These are project convictions, not package documentation. Move all three into CLAUDE.md's standing decisions and have both audit-pkg docs point there.
+- [ ] **4. Leave both** — The two documents have different audiences and each statement is written for its reader. Accept the duplication and leave both in place.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- docs/audit-pkg/product.md contains "it must not merge packets on frequency alone"; docs/audit-pkg/development.md contains "should stay low-authority" (grep, HEAD 23079f37) — independently re-verified by this run.
+- The same pair also state the ownership-root preference and the repo-local-config precondition for command-backed analyzers in different words (product.md's ESLint sentence versus development.md's `eslint.config.*` / `.eslintrc*` / `eslintConfig` list). <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Both documents already apply the one-home rule elsewhere and say so: product.md's "This is the one home for that list", development.md's note that copies of the PRIORITY ordering have drifted before.
+- No test compares the two documents, so a divergence would not be caught.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=0bd83243c5ea487d -->
+
+## `docs-risk-tier-semantics-in-three-specs` — The risk-tier collapse rule is stated three times across three specs — reduce two of them to a pointer? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/self-scaling-pipeline-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The pipeline scales its own depth by a risk tier: at the low tier it collapses several authoring phases into shared round-trips and reduces adversarial checking to a light inline self-check, while at medium and high every phase stays its own gated step at full depth. That rule is currently written out in three separate design documents — spec/self-scaling-pipeline-design.md, spec/remediation-workflow-design.md and spec/remediate/remediation-goals.md — and the remediation-workflow copy restates it almost clause for clause. Tier names, which phases collapse, and where the adversarial floor sits are exactly the kind of detail that gets tuned later. With three near-identical copies, a tuning change is correct in one document and silently wrong in two, and nothing in the corpus would catch it, because the specs carry no drift test against one another. The repository already uses a pointer for this situation elsewhere: two of these three documents point at spec/cross-tool-alignment.md rather than restating it. There is a smaller second question in the same edit. The remediation-workflow copy introduces the target spec as "the newer design-of-record". The word newer only means something against a superseded version the reader cannot see, which is the kind of document-history clause this project's documentation philosophy asks to be removed.
+
+### The question
+
+Should the risk-tier semantics live only in spec/self-scaling-pipeline-design.md, with spec/remediation-workflow-design.md and spec/remediate/remediation-goals.md reduced to a one-line pointer? And should the "the newer design-of-record" clause go in the same edit?
+
+### Your answer
+
+- [ ] **1. One home plus pointers, and drop the clause** — Keep the risk-tier semantics only in spec/self-scaling-pipeline-design.md; reduce the other two to a one-line pointer, the same pattern both already use for cross-tool-alignment.md; and drop "(the newer design-of-record)" as a document-history clause.
+- [ ] **2. One home plus pointers, keep the clause** — Reduce the two copies to pointers, but leave the "newer design-of-record" wording alone — it is orienting, not status-noise.
+- [ ] **3. Keep three copies, add a drift test** — Each spec should be readable standalone. Keep all three statements and add a contract test asserting they agree, so a tuning change that updates only one is a red build.
+- [ ] **4. Leave it** — The tier semantics are stable enough that three copies cost nothing. Leave all three as they are.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- The literal phrase "light inline self-check" appears in all three of spec/self-scaling-pipeline-design.md, spec/remediation-workflow-design.md and spec/remediate/remediation-goals.md (grep, HEAD 23079f37) — independently re-verified by this run.
+- spec/remediation-workflow-design.md restates the rule almost clause for clause, and introduces the target spec as "(the newer design-of-record)".
+- Two of the three documents already use a one-line pointer for spec/cross-tool-alignment.md, so the pattern exists in the corpus.
+- No drift test compares the specs, so a tuning change to one would not be caught.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=bdf6ba59b50f068a -->
+
+## `docs-s8-conceptual-review-contract-split-across-specs` — The conceptual design review's contract is split across two specs — fold section S8 into the review's own design-of-record? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/contract-authoring-determinism-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+spec/contract-authoring-determinism-design.md argues one thesis: determinism owns structure and the model owns meaning. Its section S8 is announced by the document itself as the exception to everything around it — the conceptual review being the one place to lean into judgment rather than toward determinism. The durable content of S8 is really the conceptual review's contract: ask general first-principles questions, orient then roam, the judge must actually judge, ground claims at ingest, and never auto-complete on an empty result so that absence reads as no-signal rather than as approval. That last invariant appears nowhere in spec/conceptual-design-review-design.md, which is the conceptual review's own design-of-record. So the review's contract is currently split across two documents, and the half sitting in the contract-authoring spec is the half a reader looking for the review design would never open. There is a second, separable question about the same section: S8 opens and closes with the same post-mortem about a past miss, stated twice in nearly the same words. Words like restore and the miss presuppose a run the reader cannot see, which is the document-history genre this project's documentation philosophy asks to be cut, and here it appears twice in one section.
+
+### The question
+
+Should section S8 of spec/contract-authoring-determinism-design.md be folded into spec/conceptual-design-review-design.md with a pointer left behind? And should S8's duplicated post-mortem go in the same edit, keeping only the forward-facing rules?
+
+### Your answer
+
+- [ ] **1. Fold it and cut the post-mortem** — Fold S8's durable rules into spec/conceptual-design-review-design.md — including the no-auto-complete-on-empty invariant that is missing there — leave a pointer in spec/contract-authoring-determinism-design.md, and cut both statements of the post-mortem, keeping only the forward-facing rules.
+- [ ] **2. Fold it, keep one post-mortem** — Fold S8 into the review's design-of-record but carry one statement of the post-mortem across, because the three axes it names (narrow questions, no roaming, a non-judging judge) are what the rules are guarding against.
+- [ ] **3. Keep S8, move only the missing invariant** — Leave S8 where it is — it earns its place as the stated exception to that document's thesis — and copy only the no-auto-complete-on-empty invariant into spec/conceptual-design-review-design.md so the review's own spec is complete.
+- [ ] **4. Leave it** — The split is deliberate: S8 is an argument about determinism's limits and belongs beside that thesis. Leave both documents unchanged.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- spec/contract-authoring-determinism-design.md contains the heading "S8 — Fix the conceptual design review itself" (grep, HEAD 23079f37) — independently re-verified by this run.
+- S8 declares itself the exception to its own document's thesis: "the conceptual review is the one place to lean *into* judgment, not toward determinism".
+- The no-auto-complete-on-empty invariant (absence is NO-SIGNAL) appears in S8 and not in spec/conceptual-design-review-design.md.
+- S8 opens and closes with the same post-mortem about narrow questions, no roaming and a non-judging judge.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=b94dd16a08ac6a08 -->
+
+## `docs-five-recorded-condensation-findings-batch` — Five spec condensation findings recorded last run still stand, and one was routed at the wrong file — apply them as a batch, or keep recording them? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/audit/artifact-contract.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The previous nightly run found five places in the spec corpus where a durable claim is wrapped in status-noise — a dated attribution, a document-history clause, a paragraph about a retired mechanism, a run-cost measurement, and a dated post-mortem. It deliberately recorded them rather than raising them, to keep that night's queue short. All five were re-checked tonight and all five are unchanged at HEAD, so recording them again would be the third time the same five are noticed and nothing happens. One of the five was also recorded WRONG, and that part matters more than the batch. The dated owner attribution in spec/audit/artifact-contract.md was recorded as sitting inside a generated cell whose source is scripts/shared/spec-mirror-data.mjs. It is not. That generator contains no such text; the sentence is hand-written prose in a section of the spec that is deliberately not generated. Acting on the recorded form would have edited the generator, changed nothing, and left the prose in place — a fix that reports success and does nothing. Each of the five cuts is narrow and leaves the durable claim standing, which is why they can move as one batch, but every one of them is a condensation judgment and this routine never makes those on its own.
+
+### The question
+
+Five recorded condensation findings still stand at HEAD: the dated owner attribution in spec/audit/artifact-contract.md (hand-written prose, NOT a generated cell as previously recorded), the document-history clause in spec/audit-workflow-design.md, the retired convention-scan paragraph in spec/remediation-workflow-design.md, the run-cost measurement in spec/self-scaling-pipeline-design.md, and the dated post-mortem in spec/conceptual-design-review-design.md. Should they be applied as one batch?
+
+### Your answer
+
+- [ ] **1. Apply all five as a batch** — Apply all five cuts as one reviewed batch on a clean tree: strip the status-noise and keep the durable claim in each case. Edit spec/audit/artifact-contract.md directly — the sentence is hand-written prose, not a generated cell, so the generator is not involved.
+- [ ] **2. Apply four, hold the constitutional one** — Apply the four non-constitutional cuts. spec/audit/artifact-contract.md is on the constitutional list, so hold that one for a separate explicit decision rather than moving it inside a batch.
+- [ ] **3. Apply only the clearly datable ones** — Apply only the three cuts that remove a bare date or attribution, and leave the retired-mechanism paragraph and the run-cost measurement, which carry more context than they first appear to.
+- [ ] **4. Keep recording them** — None of the five is factually wrong and none is load-bearing to remove. Keep them recorded and stop re-raising them; note the corrected routing for artifact-contract.md so the wrong-file record is not acted on later.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- All five fragments re-verified present at HEAD 23079f37 by this run's own grep: "owner, 2026-09-04" in spec/audit/artifact-contract.md; "Conflating them" in spec/audit-workflow-design.md; "onvention scan" in spec/remediation-workflow-design.md; "only one further collapse was safe" in spec/self-scaling-pipeline-design.md; "owner decision 2026-08-28" in spec/conceptual-design-review-design.md.
+- PREMISE CORRECTION: scripts/shared/spec-mirror-data.mjs contains zero occurrences of "Growth is NOT bounded" (grep count 0). The previous run recorded this finding as a generated cell sourced from that generator; it is hand-written prose in the non-generated "Retained evidence: charter-packets/" section.
+- The previous run's skipped list records all five as "FOUND and RECORDED rather than raised, to keep tonight's queue answerable".
+- spec/audit/artifact-contract.md is in CONSTITUTIONAL_DOC_PATHS (src/shared/constitutionalDocPaths.ts).
+
+</details>
+
+---
+
+
+<!-- nightly:item key=e978fad576fb2473 -->
+
+## `docs-repo-start-lap-skill-is-shadowed-by-the-global-one` — The repository's own /start-lap skill never runs — the global skill of the same name shadows it. Re-home its steps, rename it, or delete it? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `.claude/skills/start-lap/SKILL.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+This repository carries its own lap-opening skill at .claude/skills/start-lap/SKILL.md. A skill with the SAME NAME also exists globally in the user's ~/.claude/skills. Inside this checkout the name resolves to the GLOBAL one: the skill listing this very session was given carries the global description word for word, not the repository's. So none of the repository's lap-open steps execute. The four it encodes are the ones that would notice a problem: a stale-worktree guard on the fetch-and-fast-forward, an npm install in a fresh worktree, a read of the current HANDOFF and backlog, and — the sharpest one — a rule to ask the nightly decision ledger with `node scripts/nightly/answer.mjs --list` rather than trusting the tracked snapshot file, because that snapshot can outlive the answers recorded against it. Every command and path the file names still resolves; the content is correct. It is simply unreachable by name, which is the worst shape a safeguard can take, because reading the file tells you it is in force. The global skill does have a documented way for a repository to add its own steps: a section headed 'Lap start' in the repository's CLAUDE.md, which it runs if present. This repository has no such section, so nothing fills the gap. This item does not close by itself — it asks what the skill file should become. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+The repository's `.claude/skills/start-lap/SKILL.md` is shadowed by the global skill of the same name, so its stale-worktree guard, fresh-worktree `npm install`, HANDOFF/backlog read, and its ask-the-ledger-not-the-snapshot rule never run. Should those steps move into a `## Lap start` section of CLAUDE.md (the extension point the global skill already looks for), should the repository skill be renamed, or should it be deleted as superseded? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### Your answer
+
+- [ ] **1. Re-home the steps into CLAUDE.md** — Move the four repository-specific lap-open steps into a `## Lap start` section of CLAUDE.md, which is the extension point the global skill already runs, and delete the shadowed skill file. Benefit: the steps run, with no name collision and no second command to remember. Cost: it grows CLAUDE.md, and it is an instruction-file edit, so only the owner can approve it. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **2. Rename the repository skill** — Rename the repository skill to an unshadowed name so it is invocable again. Benefit: it stays a skill and keeps its own file. Cost: the owner must remember a second, non-obvious command name — which is the remember-to-do-it failure mode this repository's conventions ban.
+- [ ] **3. Delete it as superseded** — Delete the repository skill. The global lap-open flow is the one that runs, and one path is better than two. Cost: the four safeguards are lost, so this is only correct if they are judged unnecessary.
+- [ ] **4. Re-home only the ledger rule** — Only the ask-the-ledger-not-the-snapshot rule is load-bearing — the rest is covered by the global flow or by ordinary practice. Put that one rule in a `## Lap start` section and delete the skill. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- Both files exist: `.claude/skills/start-lap/SKILL.md` (name `start-lap`) and `~/.claude/skills/start-lap/SKILL.md` (name `start-lap`). Verified directly by this run. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- The skill listing given to THIS session, running inside this checkout, carries the GLOBAL description verbatim ("Open a lap of work … Counterpart of /closeout."), not the repository's. That is the resolution, observed rather than inferred.
+- `grep -c "^## Lap start" CLAUDE.md` returns 0, so the global skill's documented per-repo extension point is empty here — absent section means no repository steps. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Every command and path the shadowed file names still resolves: `scripts/nightly/answer.mjs` exists and handles `--list`; `docs/HANDOFF.md` and `docs/backlog/` exist. The content is correct; only its reachability is not. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- The snapshot the ledger rule guards against, `.audit-tools/nightly/open-items.json`, is git-tracked, so it can outlive the answers recorded against it — which is why that step exists. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+</details>
+
+---
+
+
+# Backlog disambiguation
+
+
+<!-- nightly:item key=1d0c20709c1e1868 -->
+
+## `backlog-handoff-immediate-next-is-a-chronology` — docs/HANDOFF.md's Immediate next has become a run chronology — cut it to the next action, or relax the never-a-changelog rule for a benchmark lap? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Backlog disambiguation · open 1 night · `docs/HANDOFF.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+docs/HANDOFF.md is the one document this project deliberately allows to describe current state rather than durable concepts, and the allowance is narrow. Its own header says immediate state and next action only, and CLAUDE.md binds it as lean and accurate, immediate-next only, never a changelog. Its Immediate next section has grown into a sequential account of the benchmark lap: a repaired judge, then a fresh invocation, then a frozen checkout, then a systemic round accepted, then an identity rejected, then three rate-limit responses, then the next eligible retry. Nothing in it is factually wrong — the commits it names all resolve and the version it states matches what is published. The problem is form. Read in order, it is history, so the two things a reader actually opens the document for — the single next action, and the live owner decision about whether to authorise another benchmark window — sit at the end of a paragraph instead of at the top. The narrative already has a durable home that the section itself cites, the dated review record for that lap. Two answers are honest here: cut the section back and let the review record hold the story, or decide that a long benchmark lap genuinely needs its running log in HANDOFF and relax the binding for that case. This item does not close on its own — the question is what the document should become, so it leaves the queue when it is answered.
+
+### The question
+
+Should docs/HANDOFF.md's Immediate next be cut back to the single next action plus the live owner decision, with the benchmark chronology left to the dated review record it already cites — or should the never-a-changelog binding be relaxed for a long benchmark lap?
+
+### Your answer
+
+- [ ] **1. Cut it back** — Cut Immediate next to the single next action plus the live owner decision. The benchmark chronology moves to the dated review record the section already cites, and HANDOFF goes back to what its header promises.
+- [ ] **2. Relax the binding for benchmark laps** — A long benchmark lap needs its running log where the next session will see it. Relax the never-a-changelog binding for that case explicitly in CLAUDE.md, so the section is sanctioned rather than quietly non-conforming.
+- [ ] **3. Cut it back and add a length bound** — Cut the section back AND give HANDOFF a mechanical bound the way the backlog entries have one, so this recurs as a red build rather than as a nightly finding.
+- [ ] **4. Leave it** — The lap is live and the detail is being used. Leave the section alone until the benchmark work closes.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- docs/HANDOFF.md contains "The first systemic challenge round was accepted" and roughly thirty lines of past-tense sequential narration under a header that reads "Immediate state and next action only" (grep, HEAD 23079f37).
+- CLAUDE.md binds the document as "lean and accurate, correct HEAD/commits, immediate-next only, never a changelog".
+- Nothing in the section is factually wrong: the commits it names resolve and package.json, npm and both global bins all report the same published version.
+- The narrative's durable home, docs/reviews/pipeline-quality-2026-09-07.md, is already cited by the section.
+- Raised independently by two lanes this run — the document reviewer and the corpus-level condensation pass.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=bb4d63e7385554d2 -->
+
+## `backlog-open-bugs-entries-carry-narrative-before-the-open-half` — Three open-bugs entries put shipped history, an incident report, or a refuted framing ahead of the open half — condense them to mechanism plus open property? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+docs/backlog/open-bugs.md is the working queue of fixable defects. Three of its entries have accreted material ahead of the part a reader needs. The first, about the repository being unable to detect a delegated lane, opens with two paragraphs of completed work before reaching the still-open remainder — and the preamble contradicts itself, saying the shipped mechanism states its own trap so neither is restated here, and then restating it. The second states its mechanism and its open property and then appends a paragraph retelling the day the defect bit, naming the lap and the commit. The third carries both a decided answer and the deliberation it replaced: an original framing that the two goals are in tension, a first property, then a specification declaring that framing false, then a resolution and a second property. None of the proposed cuts touches a mechanism. But a reader currently has to parse shipped history, an incident report, or a refuted framing before reaching the open property, which is exactly the accretion the entry size budget was added to stop, and what makes the queue expensive to sweep. The risk here runs the other way too: condensing wrongly is worse than leaving a long entry, because an entry that has lost its mechanism looks actionable and is not. That is why this is a question and not an edit. This item does not close on its own — it asks what these entries should become.
+
+### The question
+
+Should the three named entries in docs/backlog/open-bugs.md be condensed to mechanism plus open property, with the shipped preamble, the incident retelling and the refuted framing dropped to git log — keeping the load-bearing list of already-refuted designs in the first entry?
+
+### Your answer
+
+- [ ] **1. Condense all three** — Condense all three to mechanism plus open property. Keep the first entry's list of already-refuted designs, which stops them being re-proposed, and drop the shipped preamble, the incident retelling and the superseded framing.
+- [ ] **2. Condense the two clear ones** — Condense the entries carrying the shipped preamble and the incident retelling. Leave the third alone: an entry that names the framing it replaced is what stops that framing coming back.
+- [ ] **3. Move the cut material to a review record** — Do not simply delete the narrative — move it into a dated record under docs/reviews/ and leave each entry a one-line pointer, so nothing is lost and the queue is still short.
+- [ ] **4. Leave them** — These are load-bearing entries in a live queue and the context is being used. Leave all three, and revisit only if the file approaches its size budget.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- docs/backlog/open-bugs.md contains the shipped preamble quoted in this item's subject, followed later by "What remains open is the detection itself" (grep, HEAD 23079f37).
+- The same preamble says the shipped mechanism "states its own trap and its uncovered halves, so neither is restated here" and then restates it.
+- A second entry states its mechanism and Property, then appends a paragraph naming the lap and commit on which the defect bit.
+- A third entry carries an original framing, a first Property, a SPEC declaring that framing false, a Resolution, and a second Property.
+- Condensing wrongly is the stated risk: a condensed entry that has lost its mechanism is worse than a long one, which is why this is escalated rather than applied.
+
+</details>
+
+---
 
 
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- a53bb7e1 — five code-anchored doc fixes, each reviewer+adversary+judge verified: src/audit/README.md and docs/audit-pkg/contracts.md drop the "one bounded transition / one bounded unit" claim for the fold-aware drain the engine actually runs (MAX_DRAIN_STEPS); docs/audit-pkg/development.md stops calling examples/ validated (3 of 18 are schema-validated by a contract test); spec/remediation-workflow-design.md names module_decomposition’s file_scope as the deriveNodeFiles fallback instead of the module contract (the contract half is a different, correctly-described set); .claude/skills/ship/SKILL.md pushes to the runtime-resolved remote instead of a remote named audit-tools, which does not exist.
+- NOTHING WAS APPLIED. The working tree was dirty at run start and HEAD was on branch codex/pipeline-quality, not main, so the clean-tree rule held every edit. The run reviewed and reported in full.
 
-- Leg-2 triage sweep: 99 of 99 backlog entries classified through llm-relay dispatch (all free-pool), 0 errored after one retry of the single empty-output failure. Coverage stamp: .audit-tools/nightly/triage-2026-09-06-coverage.json.
+- Leg-3: four proposal records written to .audit-tools/nightly/proposals/ (P58, P59, P60, P61) with INDEX-2026-09-09.md. P58 carries a candidate patch and an OBSERVED red-green measurement; the other three carry no patch because the owner is being asked which form, and the forms share no code.
 
-- Leg-3: four proposal records written to .audit-tools/nightly/proposals/ (P54, P55, P56, P57) with an index. P56 carries a full candidate patch, a red-green test and an OBSERVED RED-AT at HEAD.
+- Leg-2 triage sweep: 89 of 95 backlog entries classified through llm-relay dispatch (free-pool 85, opencode-muse-spark 4), 6 errored. Coverage stamp: .audit-tools/nightly/triage-2026-09-09-coverage.json.
 
-- Standing review-retirement rule applied (review-retirement-candidates.mjs --retire): no candidate older than 30 days with zero outside citations.
+- Leg-1 scope ledger stamped for the 45 docs an agent actually examined this run; leg1-2026-09-09-coverage.json written beside it.
+
+- Standing review-retirement rule applied (review-retirement-candidates.mjs): no candidate older than 30 days with zero outside citations.
 
 
 </details>
@@ -52,17 +554,23 @@ No open propositions. The next run will refill this file if it finds any.
 <summary>What the last run could NOT cover</summary>
 
 
-- Leg-1 item-level review did NOT cover 8 of 54 in-scope docs: the seven generated host assets (.agent/skills/**, .github/**) and docs/nightly-inbox.md. These are renderer- and generator-owned by manifest rule, so a hand edit is drift rather than a fix; their drift is gated by the host-asset renderer tests, which passed in the full suite this run. Deliberate exclusion, not a coverage failure.
+- APPLIED NOTHING — the tree was dirty. `git status --porcelain` reported `M AGENTS.md` at run start: a regenerated shared region from the machine-wide sync generator (a region id and a KB figure). HEAD also sat on branch codex/pipeline-quality rather than main. Under the clean-tree rule the run still reviewed and still reported, but wrote no doc edit, deleted no backlog entry, and pushed nothing. Reviewing a dirty tree is fine; writing to one is how uncommitted work is lost. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- Five condensation findings were FOUND and RECORDED rather than raised, to keep tonight’s queue answerable: a dated owner attribution inside spec/audit/artifact-contract.md (generated cell — the source is scripts/shared/spec-mirror-data.mjs), a doc-history clause in spec/audit-workflow-design.md, a retired convention-scan paragraph in spec/remediation-workflow-design.md, a run-cost measurement in spec/self-scaling-pipeline-design.md, and a dated post-mortem in spec/conceptual-design-review-design.md. All five are condensation judgments (escalate-only), none is factually wrong, and none is closed or refuted.
+- FIVE VERIFIED STALE-FACTUAL DOC FIXES ARE HELD, not applied — each was independently re-verified from source by this run, so a clean run can apply them directly without re-deriving them. (1) spec/remediation-workflow-design.md attributes the workload digest to each work item; buildWorkItem (src/remediate/steps/dispatch/hostHandoff.ts) returns no such field — workload_sha256 is a per-HANDOFF binding on RemediationHostHandoffBindingFields, assigned in prepareRemediationHostHandoff. (2) docs/HANDOFF.md says pre-commit-gate.mjs "keeps only what git cannot see" and lists three residuals; the hook's own header and its guard-registry row both name a fourth, healing a crashed staged-snapshot round-trip. (3) docs/backlog.md points the A2 oracle entry at "Deferred / waiting"; the entry lives in forward-tracks.md and deferred.md contains no match. (4) docs/backlog.md's live-run-watch matrix has two rows — Two cooperating hosts, and any live remediation on a dirty checkout — whose named items resolve nowhere in docs/backlog/ (five greps, zero hits); lane A offered deleting the rows or re-attaching watch lines, so the remedy is a judgment even though the staleness is a fact. (5) docs/glossary-ids.md declares itself the lookup for opaque identifiers in src/**/*.ts, and N-IDEMPOTENCY is live in src/shared/contentKey.ts and src/audit/orchestrator/resultBaseline.ts with no row; check-invariant-glossary.mjs reconciles only INV-* ids, so nothing catches it.
 
-- The Codex lane was not used this run. Coverage did not shrink: five independent Claude reviewer lanes plus an adversary, a judge, a leg-3 recurrence lane and the llm-relay dispatch sweep covered every leg, and each auto-applied fix was verified from source by three agents before it was applied.
+- LEG-1 COVERAGE, read from the ledger file and never eyeballed: 45 of 54 in-scope docs examined item by item by five reviewer lanes plus an independent Codex adversary. The nine not examined are renderer- or generator-owned by manifest rule — the seven generated host assets under .agent/skills and .github, docs/nightly-inbox.md, and spec/audit/executor-producers.generated.md. A hand edit to any of them is drift rather than a fix, and their drift is gated by the renderer tests. Deliberate exclusion, not a coverage failure. At run start 57 items across 17 docs carried no evidence window and were reviewed cold; that is the honest state, not a defect.
 
-- Leg 3 attached no patch to P54, P55 or P57. In each the owner is being asked WHICH FORM, and the candidate forms share no code, so a patch written before that answer would be discarded. P56, whose form is settled, does carry its patch and an observed RED-AT.
+- THE ADVERSARY REFUTED TWO FINDINGS, AND BOTH WERE DROPPED RATHER THAN RAISED. (a) A reviewer lane claimed spec/remediate/remediation-goals.md's five terminal states had fallen behind PerFindingDisposition's seven. TERMINAL_STATUS in src/remediate/state/itemStatus.ts marks exactly five statuses terminal, matching the document; verified_already_fixed and refuted are per-FINDING disposition overrides, a different vocabulary. Verified directly by this run rather than taken on the lane's word, and removed. (b) The same lane cited the report's Verified Already Correct section as missing from the document's output ordering; collectReportEntries groups resolved_no_change items there, fairly read as covered by the existing resolved bullet. That example was dropped and the item narrowed to the two exclusion classes the ordering genuinely has no bullet for. The adversary also narrowed four surviving items, and each narrowing is recorded inside the item's own evidence.
 
-- The weekly /insights pass was NOT due and did not run: .audit-tools/nightly/insights-last-run.json records ran_at 2026-09-04, two days old against a seven-day cadence. Not-due is not a skipped leg; it is recorded here only so the absence is not read as a failure.
+- LEG-2 COVERAGE, read from the stamp: 89 of 95 entries classified, 6 errored, none aborted. Lanes: free-pool 85, opencode-muse-spark 4 — the relay failed over to a second lane on its own rather than shrinking coverage. The six errors were five schema-shaped refusals (verdict null) and one malformed JSON body — five on docs/backlog/open-bugs.md entries and one on docs/backlog/deferred.md. Those six entries were NOT classified this run and no conclusion about them should be drawn from this sweep.
 
-- Leg 2 deleted nothing. The sweep surfaced exactly one already_shipped_or_stale candidate (a deferred entry whose gate shipped), and reading it refuted the lead: the entry itself states the cascade-cost measurement stays deferred, so it is a partial entry with an open remainder, not a shipped one. Deleting it would have destroyed live work.
+- LEG 2 DELETED NOTHING, and both of its shipped leads were refuted. open-bugs#1c68b4dd (packaged smoke racing a wrapper rebuild) was called shipped because the entry says separate benchmark tooling prevented recurrence in that lap — that describes a lap workaround, not a fix, and the entry's Property, that build replacement and smoke reads coordinate at the checkout boundary, is unmet. forward-tracks#55883634 (CI wall-clock) was called stale because it is a pointer-only entry whose implementation was assigned outside this repo's agent loop; being assigned elsewhere is not being done, and the entry exists precisely so the queue does not lose the pointer. Worth recording as a pattern: BOTH leads carried premise `unprobed`, meaning each reasoned from the entry's own prose and verified nothing against code — which is the exact failure mode the verify-before-deleting rule exists for. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+- CONDENSATION FINDINGS FOUND BUT NOT RAISED AS THEIR OWN ITEMS. The corpus lane surfaced an overlap between docs/audit-pkg/product.md and docs/audit-pkg/development.md, a risk-tier statement duplicated across three specs, and a fold candidate in spec/contract-authoring-determinism-design.md — all three ARE raised. Not raised: the ship skill (.claude/skills/ship/SKILL.md) documents the release pipeline without naming the pre-tag CI-green-on-exact-SHA gate or the 60-second tag-trigger watchdog that scripts/release-and-publish.mjs actually owns, so an operator reading a refusal cannot tell which gate spoke. Recorded rather than raised to keep tonight's queue answerable; it is neither closed nor refuted, and everything else that lane checked in that file verified live.
+
+- THE WEEKLY /insights PASS WAS NOT DUE and did not run: .audit-tools/nightly/insights-last-run.json records ran_at 2026-09-04, five days old against a seven-day cadence. Not-due is not a skipped leg; it is recorded here only so the absence is not read as a failure.
+
+- THE SESSION-START GUARD REPORTED THE CODEX LANE DOWN, AND IT WAS UP. The run probed it rather than planning around the notice: `codex --version` exits 0 in about 260 ms and `codex exec` answered correctly, so Codex served as this run's independent adversary lane over every leg-1 finding. The cause is a defect in the machine-wide lane registry and is filed as proposal P58 with a measured red-green: probeCommand in ~/.agent-config/offload-lane-data.mjs spawns a bare argv[0] with no shim resolution, so the npm codex.cmd shim raises ENOENT, and the error handler maps that to DOWN. A launch defect is therefore indistinguishable from a dead lane. Coverage did not shrink this run, but a false DOWN either shrinks coverage or spends effort routing around a working lane, and last night's run recorded not using Codex at all. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 
 </details>

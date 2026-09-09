@@ -1,0 +1,30 @@
+✖ the snapshot helper's tar call extracts an archive at an absolute path (2763.6231ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2822.6684
+
+✖ failing tests:
+
+test at tar-drive-letter.test.mjs:51:1
+✖ the snapshot helper's tar call extracts an archive at an absolute path (2763.6231ms)
+  AssertionError [ERR_ASSERTION]: extraction to an absolute path must succeed; a non-zero status here is the drive-letter-as-hostname parse: tar: Cannot connect to C: resolve failed
+  
+  128 !== 0
+  
+      at TestContext.<anonymous> (file:///C:/Code/audit-tools/.audit-tools/nightly/proposals/P62-tar-cannot-take-a-drive-lettered-path/tar-drive-letter.test.mjs:74:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 128,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

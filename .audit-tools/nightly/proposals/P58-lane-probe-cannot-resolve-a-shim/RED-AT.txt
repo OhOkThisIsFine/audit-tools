@@ -1,0 +1,53 @@
+RED-AT — P58, measured 2026-09-09.
+
+HEAD: 23079f37ea25c9b899a0134205057654ac1cae33
+Command (run from this proposal directory):
+    node --test lane-probe-shim.test.mjs
+
+OBSERVED FAILURE, verbatim:
+
+    ✖ a command probe resolves a bare name backed only by a .cmd shim (5.9612ms)
+    ℹ tests 1
+    ℹ pass 0
+    ℹ fail 1
+
+    ✖ failing tests:
+
+    test at lane-probe-shim.test.mjs:24:1
+    ✖ a command probe resolves a bare name backed only by a .cmd shim (5.9612ms)
+      AssertionError [ERR_ASSERTION]: a launchable CLI backed by a .cmd shim must
+      probe UP; `false` here is a false DOWN that reads as a dead lane
+
+        false !== true
+
+        actual: false
+        expected: true
+        operator: 'strictEqual'
+
+Full run: red-run.txt (exit 1).
+
+GREEN HALF, proven on the candidate copy rather than by landing the patch
+(leg 3 lands nothing):
+
+    P58_REGISTRY=<this dir>/candidate-offload-lane-data.mjs \
+      node --test lane-probe-shim.test.mjs
+    → exit 0, pass 1, fail 0.  Full run: green-run.txt
+
+REPRODUCING THE GREEN HALF. `candidate-offload-lane-data.mjs` imports
+`./capture-run.mjs`, which resolves inside `~/.agent-config/` where both files
+live in the real fix. To re-run the green proof from this directory, first copy
+that one file in:
+
+    cp ~/.agent-config/capture-run.mjs .
+
+It is deliberately NOT kept here: a tracked copy of a machine-wide module in
+this repo is a second home that would drift from the original.
+
+SUPPORTING MEASUREMENT, same machine, same session:
+  - `codex --version` → exit 0 in 262 ms / 260 ms / 320 ms over three runs.
+  - `codex exec --skip-git-repo-check "..."` → exit 0, correct answer.
+  - `spawn('codex', ['--version'])` with no shell → `ERROR event: ENOENT spawn
+    codex ENOENT`, close code -4058.
+  - `codex` exists on PATH only as the npm shim trio `codex`, `codex.cmd`,
+    `codex.ps1` in `~/AppData/Roaming/npm/`.
+The lane was UP throughout; the session-start guard reported it DOWN.

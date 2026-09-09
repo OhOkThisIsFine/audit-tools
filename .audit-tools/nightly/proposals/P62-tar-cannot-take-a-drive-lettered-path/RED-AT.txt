@@ -1,0 +1,52 @@
+RED-AT — P62, measured 2026-09-09.
+
+HEAD: 23079f37ea25c9b899a0134205057654ac1cae33
+Command (run from this proposal directory):
+    node --test tar-drive-letter.test.mjs
+
+OBSERVED FAILURE, verbatim:
+
+    ℹ pass 0
+    ℹ fail 1
+      AssertionError [ERR_ASSERTION]: extraction to an absolute path must
+      succeed; a non-zero status here is the drive-letter-as-hostname parse:
+      tar: Cannot connect to C: resolve failed
+
+Full run: red-run.txt (exit 1).
+
+GREEN HALF, proven against the candidate form without landing it:
+
+    P62_FIX=1 node --test tar-drive-letter.test.mjs
+    → exit 0, pass 1, fail 0.  Full run: green-run.txt
+
+THIS DEFECT IS ALREADY RED IN THE REPOSITORY'S OWN SUITE. It is not a
+hypothetical the test invented. The full suite was run on this tree during the
+2026-09-09 nightly and returned exit 1 with exactly one failure:
+
+    FAIL tests/shared/load-flake-record.test.ts
+      > tool-owned load-flake observations
+      > exports the observed tree to a disposable snapshot with no git metadata
+    Error: snapshot extraction failed (128): tar: Cannot connect to C: resolve failed
+      ❯ createIsolatedSnapshot scripts/shared/dispatch-load-flake-investigation.mjs:24:38
+
+    [vitest-gate] ISOLATED-FAIL: tests/shared/load-flake-record.test.ts also
+    failed alone (regression candidate); original gate remains RED.
+
+Full suite run: .audit-tools/nightly/suite-0909.log
+
+NOT CAUSED BY THIS RUN. `git diff HEAD -- scripts/shared/dispatch-load-flake-investigation.mjs
+tests/shared/load-flake-record.test.ts` is EMPTY: the nightly changed neither
+file. The helper landed in commit a1616d1d, which is inside the range
+a53bb7e1..HEAD — after the last recorded full-suite green (tree 430da423,
+2026-09-08T03:24:59Z).
+
+ENVIRONMENT MEASUREMENT, same machine, same session:
+  - `which -a tar` → /usr/bin/tar, /bin/tar, /usr/bin/tar, /c/Windows/system32/tar
+  - `tar --version` → tar (GNU tar) 1.35
+GNU tar resolves FIRST, ahead of the drive-letter-safe system tar. GNU tar
+parses a leading `host:` as a remote machine, so an archive path beginning
+`C:\` is never opened as a file.
+
+WHY CI IS GREEN AND THIS BOX IS RED: on Linux the archive path carries no drive
+letter, so GNU tar reads it as an ordinary path. The defect is reachable only on
+win32, which is why it shipped.

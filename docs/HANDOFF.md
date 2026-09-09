@@ -79,6 +79,21 @@ No quality score exists; successful preflight and contract tests are not accepta
   unreadable or empty omissions.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **12 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `docs-dependency-map-analyzer-vocabulary` — A constitutional spec still describes the analyzer-capability marker with a vocabulary the code deliberately removed — restate it, or move the code back?
+  - `docs-remediation-goals-output-order-omits-two-exclusion-classes` — The remediation goals document states the report's section order, and the render has two categories that order has no bullet for — widen it, or declare it a minimum?
+  - `docs-audit-prompt-reflection-destination-unnamed` — The audit loader prompt tells the host to record a reflection but never says which file to write it to — name the destination, and pin it in the contract test?
+  - `docs-remediate-prompt-has-no-target-directory-rule` — The remediate loader prompt carries no target-directory rule while its audit twin does — copy the rule across, or single-source it?
+  - `docs-benchmark-readme-omits-run-contract` — The benchmark README omits `run`'s checkpoint and recovery behaviour, and one acceptance threshold — document them, or point at the runner as authoritative?
+  - `docs-audit-pkg-language-convictions-two-homes` — Three language/analyzer convictions are stated twice, in different words, across two audit-pkg docs — pick one home?
+  - `docs-risk-tier-semantics-in-three-specs` — The risk-tier collapse rule is stated three times across three specs — reduce two of them to a pointer?
+  - `docs-s8-conceptual-review-contract-split-across-specs` — The conceptual design review's contract is split across two specs — fold section S8 into the review's own design-of-record?
+  - `docs-five-recorded-condensation-findings-batch` — Five spec condensation findings recorded last run still stand, and one was routed at the wrong file — apply them as a batch, or keep recording them?
+  - `docs-repo-start-lap-skill-is-shadowed-by-the-global-one` — The repository's own /start-lap skill never runs — the global skill of the same name shadows it. Re-home its steps, rename it, or delete it?
+  - `backlog-handoff-immediate-next-is-a-chronology` — docs/HANDOFF.md's Immediate next has become a run chronology — cut it to the next action, or relax the never-a-changelog rule for a benchmark lap?
+  - `backlog-open-bugs-entries-carry-narrative-before-the-open-half` — Three open-bugs entries put shipped history, an incident report, or a refuted framing ahead of the open half — condense them to mechanism plus open property?
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
