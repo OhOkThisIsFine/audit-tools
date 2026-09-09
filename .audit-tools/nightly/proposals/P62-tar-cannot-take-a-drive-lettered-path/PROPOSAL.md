@@ -4,11 +4,12 @@
 `scripts/shared/dispatch-load-flake-investigation.mjs`. The work item belongs in
 `docs/backlog/open-bugs.md`.
 
-**This is not a proposition about a hypothetical. The suite is RED right now.**
-The 2026-09-09 nightly ran `npm test` on HEAD `23079f37` and got exit 1 with
-exactly one failure, and the vitest gate re-ran that file alone and it failed
-alone — so it is a regression candidate, not a flake. Evidence and the full
-environment measurement are in `RED-AT.txt`.
+**This is not a proposition about a hypothetical. The suite went RED during this
+run.** The 2026-09-09 nightly ran `npm test` on HEAD `23079f37` and got exit 1
+with exactly one failure, and the vitest gate re-ran that file alone and it
+failed alone — deterministic within that environment, not a flake. Re-running the
+same suite with `System32` ahead on PATH turns it green. Evidence, the correction
+to an earlier wrong diagnosis, and the two-PATH measurement are in `RED-AT.txt`.
 
 ## The mechanism
 
@@ -31,13 +32,33 @@ yields Git Bash's GNU tar 1.35 first, ahead of `C:\Windows\System32\tar.exe`
 (bsdtar), which handles drive letters correctly. The call therefore reaches the
 one tar on the box that cannot do the job.
 
-## Why it shipped
+## Why it shipped, and why the suite is sometimes green
 
 On Linux the archive path has no drive letter, so GNU tar treats it as an
-ordinary path and the test passes. CI is Linux, so CI is green. The defect is
-reachable only on win32 — which is the exact class this repository's conventions
-name: *no platform-baked path, shell, or command assumptions in core logic*, and
-*package-manager shims resolve reliably through `resolveExecArgv`*.
+ordinary path and the test passes. CI is Linux, so CI is green.
+
+On Windows the outcome depends on **PATH order**, and that was measured directly
+rather than inferred (`.audit-tools/nightly/tar-probe.mjs`, one archive, two
+PATHs, same session):
+
+| PATH | tar resolved | extract |
+|---|---|---|
+| inherited (Git Bash first) | GNU tar 1.35 | status 128, `Cannot connect to C: resolve failed` |
+| System32 first | bsdtar 3.8.4 | status 0 |
+
+So this is **latent, not a regression**. The helper and its test both landed in
+`a1616d1d` at 2026-09-07 12:04 -0700, and the last recorded full-suite green is
+2026-09-08T03:24:59Z — about eight hours later, with this code already present.
+Nothing in the tree changed between that green and today's red; only the
+environment the suite was launched from. A run started from PowerShell gets
+bsdtar and passes. A run started from anything that puts Git Bash first gets GNU
+tar and fails.
+
+That is a stronger argument for fixing it than a regression would have been: as
+written, **a green suite here is a property of the launcher, not of the code**.
+It is also the exact class this repository's conventions name — *no platform-baked
+path, shell, or command assumptions in core logic*, and *package-manager shims
+resolve reliably through `resolveExecArgv`*.
 
 ## What it costs today
 
