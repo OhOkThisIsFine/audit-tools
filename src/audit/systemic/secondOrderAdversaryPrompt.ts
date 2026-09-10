@@ -8,6 +8,12 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
 import type { AggregateMetricsDigest } from "./aggregateMetricsDigest.js";
+import {
+  summarizeCoveredThemes,
+  type SystemicCoveredThemes,
+} from "./coveredThemes.js";
+import { buildReviewFileMap, renderReviewFileMap } from "./reviewFileMap.js";
+import { SYSTEMIC_FINDING_ID_PREFIX } from "./systemicChallengeLoop.js";
 
 function priorFindings(bundle: ArtifactBundle): Finding[] {
   const candidates = [
@@ -31,6 +37,37 @@ function renderPriorFindings(findings: readonly Finding[]): string[] {
     const files = finding.affected_files.map((entry) => entry.path).join(", ");
     return `- **${finding.id} — ${finding.title}** (${finding.lens}/${finding.severity}): ${finding.summary} [${files || "no files"}]`;
   });
+}
+
+/**
+ * The COVERED-THEMES digest — the variation bar's factual half.
+ *
+ * The banked set is already rendered in full below, and that alone did not stop
+ * the loop from re-treading the same ground: round 3 of the 2026-08-21 lap
+ * re-raised round 2's item under a fresh id. A flat list answers "what was
+ * said"; this answers "what ground is taken", so a round can name the axis it is
+ * departing on instead of inferring it from a wall of prose.
+ */
+function renderCoveredThemes(themes: SystemicCoveredThemes): string[] {
+  if (themes.finding_count === 0) {
+    return [
+      "Nothing is banked yet — this round SETS the coverage rather than departing from it.",
+    ];
+  }
+  const counts = (entries: SystemicCoveredThemes["by_lens"]): string =>
+    entries.map((entry) => `${entry.value} (${entry.count})`).join(", ") || "none";
+  return [
+    `${themes.finding_count} improvement(s) are banked, covering:`,
+    "",
+    `- **Lenses already used:** ${counts(themes.by_lens)}`,
+    `- **Categories already used:** ${counts(themes.by_category)}`,
+    `- **Components already implicated:** ${themes.files.join(", ") || "none"}`,
+    "",
+    "That is COVERED GROUND. Re-raising any of it — in the same words or in different ones — " +
+      "is not a new finding and will not keep this loop open. This round owes a DEPARTURE: a " +
+      "different axis, a different component, or a categorically better approach to something " +
+      "the list above does not already name.",
+  ];
 }
 
 function renderCharterProjection(bundle: ArtifactBundle): string[] {
@@ -105,6 +142,36 @@ function renderAdjudication(bundle: ArtifactBundle): string[] {
 }
 
 /**
+ * WHO the reading lane is — stated to the LANE, not only to the host dispatching it.
+ *
+ * The adversary's whole value is that it is not the agent that drove the audit:
+ * the one voice with no sunk cost in the design the audit just produced. Every
+ * other design-review lane says so in its own body (`renderConceptualReviewPrompt`
+ * and the perspective/judge prompts open by naming who the reader is and what they
+ * must NOT have authored). This lane's constraint lived only in the dispatch
+ * envelope (`nextStepCommand.ts`, "must NOT be the agent that drove this audit"),
+ * which the HOST reads — so a host that executed the lane inline in its own session
+ * satisfied the envelope's letter while breaking its point, and the round's
+ * findings were self-review with nothing on any surface recording that. A
+ * constraint the worker must obey belongs in the worker's prompt; the
+ * auditor-agnostic rule does not let it rest on the dispatcher relaying it.
+ */
+function adversaryIdentityLines(): string[] {
+  return [
+    "## Who you are (this is not optional)",
+    "",
+    "You are a SEPARATE agent from the one that drove this audit. You did not author the audit's " +
+      "findings, its charters, its adjudication, or any prior round's improvements — they are all " +
+      "inputs handed to you, and you are free to challenge every one of them.",
+    "",
+    "If you ARE the agent that drove this audit, stop and say so instead of answering: a " +
+      "self-review reports this lane compliant while delivering the opposite of what it exists " +
+      "for, and nothing downstream can tell the difference from your output alone.",
+    "",
+  ];
+}
+
+/**
  * Render one systemic challenge round. `evidencePaths` are also granted in the
  * host step's read set; the prompt names them so the adversary can inspect the
  * full perspective artifacts and persisted judge adjudication rather than
@@ -123,6 +190,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
   metricLines.push(`- Max fan-out (out-degree): ${opts.metrics.max_fan_out}`);
   const bankedFindings = priorFindings(opts.bundle);
   const evidencePaths = [...new Set(opts.evidencePaths)].sort();
+  const fileMap = buildReviewFileMap(opts.bundle);
 
   return [
     "# Design review — systemic improvement-seeking challenge (second-order adversary)",
@@ -130,6 +198,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     `You are a SEPARATE second-order adversary. This is challenge round ${opts.round}.`,
     `The audit already banked ${bankedFindings.length} distinct finding(s). Push HARDER for what those findings and their contributors missed.`,
     "",
+    ...adversaryIdentityLines(),
     "## Mandate — optimization / better-way, NOT defect-finding",
     "",
     "Do NOT hunt ordinary bugs (other lenses own that). Re-interrogate the system with human-grade pressure for SUPERIOR ALTERNATIVES to things that currently work:",
@@ -145,6 +214,9 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "Read these full artifacts before concluding the round. They include the charter register, persisted conceptual judge/adjudication record, and every current-round perspective result:",
     ...evidencePaths.map((path) => `- \`${path}\``),
     "",
+    "## Prior verified recon — read this BEFORE re-deriving anything",
+    "",
+    ...renderReviewFileMap(fileMap),
     "## Stated-purpose / goal / delta projection",
     "",
     "This projection comes from `charter_register.json`, not `docs_digest.json`. Treat triangulated telos as a lead, preserve disagreement, and inspect the full artifact when the projection raises a question:",
@@ -158,9 +230,28 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "",
     ...renderPriorFindings(bankedFindings),
     "",
+    "## Covered themes — what this round must depart from",
+    "",
+    ...renderCoveredThemes(summarizeCoveredThemes(bankedFindings)),
+    "",
+    "## Variation bar (required)",
+    "",
+    "For every finding you submit, you must be able to state — in its `summary` — which axis it " +
+      "departs on relative to the covered themes above: a component no banked finding names, a " +
+      "mechanism class none of them addresses, or a categorically different approach to something " +
+      "they only patch. A finding that cannot name its axis is a restatement, and this loop closes " +
+      "on restatements rather than counting them as progress.",
+    "",
     "## Repository/source verification (required)",
     "",
-    "Use the repository and the strongest structural tools available. For every proposed improvement, inspect exact source sites, trace relevant callers and callees in both directions, and verify the affected paths. Before any negative or exhaustive claim, check structural-index coverage/freshness and directly read every reported gap. If equivalent symbol search, bidirectional tracing, exact snippets, or coverage accounting is unavailable, state that limitation and do not present the claim as comprehensive. Aggregate counts and prior-review consensus are never proof.",
+    "Use the repository and the strongest structural tools available. The call-site map above is " +
+      "your starting recon — verify the sites it names and the claims you build on them, rather " +
+      "than rebuilding it. For every proposed improvement, inspect exact source sites, trace " +
+      "relevant callers and callees in both directions, and verify the affected paths. Before any " +
+      "negative or exhaustive claim, check structural-index coverage/freshness and directly read " +
+      "every reported gap. If equivalent symbol search, bidirectional tracing, exact snippets, or " +
+      "coverage accounting is unavailable, state that limitation and do not present the claim as " +
+      "comprehensive. Aggregate counts and prior-review consensus are never proof.",
     "",
     "## Aggregate metrics (supporting evidence — necessary, NOT sufficient)",
     "",
@@ -179,7 +270,30 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "",
     "## Loop-until-dry",
     "",
-    "The review is done only when consecutive rounds yield NOTHING NEW. If genuine source-backed pressure finds no new improvement this round, submit an empty `findings` array. Otherwise submit only new improvements, each anchored to at least one real component.",
+    "The review is done only when consecutive rounds yield NOTHING NEW. If genuine source-backed " +
+      "pressure finds no new improvement this round, submit an empty `findings` array — that is a " +
+      "QUIET round, and quiet rounds are how this loop ends. Do NOT manufacture a finding to look " +
+      "productive, and do NOT withhold a real one to end the loop sooner: either turns the dry " +
+      "signal into noise, and the dry signal is the loop's only evidence that the work is done. " +
+      "Otherwise submit only new improvements, each anchored to at least one real component.",
+    "",
+    "The tool also bounds this loop at a fixed number of rounds, so the loop ends whether or not " +
+      "it is dry. Stopping early by hand is still yours to do, and it is RECORDED as yours:",
+    "",
+    "- **If this round reaches nothing new** — submit `\"findings\": []` and stop normally.",
+    "- **If you are stopping before the loop is dry** (budget spent, no further yield available, " +
+      "the remaining ground genuinely exhausted by judgment) — say so explicitly with a top-level " +
+      "`stop` object (see Output below) and state the reason. That ending is recorded as a " +
+      "HOST-FORCED stop, distinct from convergence. Never submit an empty `findings` array to " +
+      "mean \"I am stopping\": an empty array asserts the round found nothing new, and if that is " +
+      "not true you have corrupted the loop's only convergence evidence.",
+    "",
+    "## Finding ids",
+    "",
+    "Finding ids are MINTED BY THE TOOL, not by you: whatever you write is namespaced into " +
+      `\`${SYSTEMIC_FINDING_ID_PREFIX}<round>-<your id>\`, so the same id in two different rounds ` +
+      "can never stand for two different findings. Supply a short, stable id of your own only to " +
+      "keep your own submission legible; it will be prefixed.",
     "",
     "## Output",
     "",
@@ -188,16 +302,26 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "```json",
     "{",
     '  "findings": [{',
-    '    "id": "<stable id>",',
+    '    "id": "<your short id; the tool prefixes it with the round>",',
     '    "title": "<the improvement>",',
     '    "category": "systemic_improvement",',
     '    "severity": "low|medium|high",',
     '    "confidence": "low|medium|high",',
     '    "lens": "<the TRUE lens: tests|performance|operability|...>",',
-    '    "summary": "<what to do, why it is better, and source verification>",',
+    '    "summary": "<what to do, why it is better, which axis it departs on, and source verification>",',
     '    "evidence": ["<symbol you read, the file holding it, and what you found there>"],',
     '    "affected_files": [{ "path": "<a real repo path>" }]',
     "  }]",
+    "}",
+    "```",
+    "",
+    "To stop the loop early — include this ALONGSIDE any findings you are submitting, so the work " +
+      "you did deliver is still banked:",
+    "",
+    "```json",
+    "{",
+    '  "findings": [ /* ... */ ],',
+    '  "stop": { "forced": true, "reason": "<why the loop is being stopped before it is dry>" }',
     "}",
     "```",
     "",

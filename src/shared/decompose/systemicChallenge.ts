@@ -60,11 +60,44 @@ const SystemicFindingSchema = FindingSchema.refine(
   },
 );
 
+/**
+ * A host-forced stop of the adversary loop.
+ *
+ * The loop's only honest exit is a round that surfaces nothing new, and a fresh
+ * round with no memory of what earlier rounds covered structurally CANNOT judge
+ * "nothing new" — so a host that has exhausted its budget, or that can see the
+ * loop is no longer yielding, has no sanctioned way to end it and reports a dry
+ * round it did not have (the fabricated-dry signal the ceiling entry names).
+ * This is that way: the host says so, and the register RECORDS the stop as
+ * `stop_reason: "host_forced"` rather than as convergence.
+ *
+ * `reason` is required. A forced stop is a decision the report must be able to
+ * explain, and an unexplained one is indistinguishable from a lost loop.
+ */
+const SystemicStopSchema = z
+  .object({
+    forced: z.literal(true),
+    reason: z.string().min(1),
+  })
+  .strict();
+
 export const SystemicChallengeSubmissionSchema = z
   .object({
     findings: z.array(SystemicFindingSchema).default([]),
+    /**
+     * Optional host-forced stop. Findings submitted WITH the stop are banked
+     * normally — a stop never discards delivered work — but the round they arrived
+     * in is not counted as a quiet one, so the register can never claim a dry
+     * round that did not happen.
+     */
+    stop: SystemicStopSchema.optional(),
   })
   .strict();
+/**
+ * Exported for the audit-side executor, which reads back the stop it recorded
+ * (`effectiveStop`) to state the reason in its progress summary.
+ */
+export type SystemicChallengeStop = z.infer<typeof SystemicStopSchema>;
 export type SystemicChallengeSubmission = z.infer<
   typeof SystemicChallengeSubmissionSchema
 >;

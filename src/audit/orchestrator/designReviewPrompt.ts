@@ -5,6 +5,7 @@ import { degradedAnalyzerEntries } from "../types/analyzerCapability.js";
 import {
   charterReviewDisposition,
 } from "audit-tools/shared";
+import { buildReviewFileMap, renderReviewFileMap } from "../systemic/reviewFileMap.js";
 import {
   deriveUnitScopeDisposition,
   type UnitScopeDisposition,
@@ -575,6 +576,7 @@ export function renderSharedStructuralContext(
     `Repository: ${bundle.repo_manifest?.repository?.name ?? "unknown"}`,
     "",
     ...renderGraphProvenance(bundle),
+    ...renderReviewFileMap(buildReviewFileMap(bundle)),
     "### File inventory",
     "",
     summarizeFiles(bundle),

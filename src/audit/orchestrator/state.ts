@@ -407,9 +407,10 @@ export function deriveAuditState(
   // so this never blocks the conversation-first path — mirrors charter_clarification.
   //
   // The interruptible LOOP-UNTIL-DRY: when the register exists+fresh but has NOT yet
-  // `converged` (a deep+ run whose adversary rounds have not returned nothing-new), the
-  // obligation stays unmet so the relay step re-fires for the next challenge round. A
-  // converged (or omitted) register satisfies it.
+  // ENDED, the obligation stays unmet so the relay step re-fires for the next
+  // challenge round. A register that has ended — by dry convergence, by reaching
+  // the round ceiling, or by a recorded host-forced stop — satisfies it, and
+  // `stop_reason` on the register says which ending it was.
   const systemicBase = staleOrSatisfied(
     staleArtifacts,
     ["systemic_challenge.json"],
@@ -417,12 +418,16 @@ export function deriveAuditState(
   );
   const systemicOpen =
     systemicBase === "satisfied" && bundle.systemic_challenge?.converged !== true;
+  const systemicCeiling = bundle.systemic_challenge?.convergence_rule?.round_ceiling;
   obligations.push(
     obligation(
       "systemic_challenge_current",
       systemicOpen ? "missing" : systemicBase,
       systemicOpen
-        ? "Systemic challenge loop still open (a challenge round has not yet returned nothing-new) before planning proceeds."
+        ? "Systemic challenge loop still open (a challenge round has not yet returned nothing-new) before planning proceeds." +
+          (systemicCeiling !== undefined
+            ? ` The loop also ends at ${systemicCeiling} rounds, or on a recorded host-forced stop — neither is a dry signal.`
+            : "")
         : undefined,
     ),
   );

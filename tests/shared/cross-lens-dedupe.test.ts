@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   absorbFinding,
   crossLensDedupe,
+  findingRestatesBanked,
   mergeGrounding,
   sameLensDedupe,
   upsertFindingByIdentity,
+  wordJaccard,
 } from "audit-tools/shared";
 import type { CrossLensDedupePolicy, Finding } from "audit-tools/shared";
 
@@ -444,6 +446,74 @@ describe("sameLensDedupe — an absorbed i-slot survivor never absorbs again (co
     for (const ev of ["ev-X", "ev-Y", "ev-Z"]) {
       expect(emittedEvidence.has(ev), `${ev} must reach an emitted finding`).toBe(true);
     }
+  });
+});
+
+// ── findingRestatesBanked: the re-emission bar's anchor requirement ──────────
+//
+// A title-similarity floor is a RATIO, and a ratio cannot see which token
+// carries the improvement. "Batch the graph edge writes" / "Batch the graph edge
+// reads" score 0.667 — above any floor that still admits a legitimate rewrite —
+// while the one token that differs IS the improvement. So the fuzzy layer
+// additionally requires a shared NAMED anchor whenever the titles diverge.
+
+describe("findingRestatesBanked — a shared named anchor is required when titles diverge", () => {
+  const banked = (overrides: Partial<Finding> = {}): Finding =>
+    makeFinding({
+      id: "sc-r1-writes",
+      title: "Batch the graph edge writes",
+      category: "systemic_improvement",
+      lens: "performance",
+      affected_files: [{ path: "src/graph.ts" }],
+      evidence: ["`writeGraphEdges` in src/graph.ts issues one write per edge"],
+      ...overrides,
+    });
+
+  it("does NOT absorb the same-file improvement that differs in the verb", () => {
+    const submitted = banked({
+      id: "sc-r2-reads",
+      title: "Batch the graph edge reads",
+      evidence: ["`readGraphEdges` in src/graph.ts issues one read per edge"],
+    });
+    expect(findingRestatesBanked(banked(), submitted)).toBe(false);
+  });
+
+  it("does NOT absorb it however much wording the two titles share", () => {
+    // Padded past the raised sameCategory floor (0.75) at 0.778: the anchor
+    // requirement, not the ratio, is what refuses this pair.
+    const padded = banked({ title: "Batch the graph edge writes into one call" });
+    const submitted = banked({
+      id: "sc-r2-reads",
+      title: "Batch the graph edge reads into one call",
+      evidence: ["`readGraphEdges` in src/graph.ts issues one read per edge"],
+    });
+    expect(wordJaccard(padded.title, submitted.title)).toBeGreaterThan(0.75);
+    expect(findingRestatesBanked(padded, submitted)).toBe(false);
+  });
+
+  it("DOES absorb a re-worded restatement that names the same symbol", () => {
+    const suite = banked({
+      title: "Parallelize the release suite",
+      affected_files: [{ path: "src/graph.ts", symbol: "releaseSuite" }],
+    });
+    const submitted = banked({
+      id: "sc-r2-suite-again",
+      title: "Parallelize the release suite fully",
+      affected_files: [{ path: "src/graph.ts", symbol: "releaseSuite" }],
+      evidence: ["`releaseSuite` in src/graph.ts awaits each leg in turn"],
+    });
+    expect(findingRestatesBanked(suite, submitted)).toBe(true);
+  });
+
+  it("does not need an anchor agreement when the titles are word-identical", () => {
+    // The requirement is gated on divergence: two rounds that say the same
+    // words are the same improvement, whatever they cite.
+    const submitted = banked({
+      id: "sc-r2-same-title",
+      evidence: ["`somethingElse` in src/other.ts"],
+      affected_files: [{ path: "src/graph.ts", symbol: "somethingElse" }],
+    });
+    expect(findingRestatesBanked(banked(), submitted)).toBe(true);
   });
 });
 

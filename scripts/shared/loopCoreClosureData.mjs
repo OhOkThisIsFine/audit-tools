@@ -59,7 +59,6 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   { module: "src/audit/extractors/fsIntake.ts", claim: "reads-only", reason: "filesystem intake extraction; it reads the audited tree and the executor owns the write" },
   { module: "src/audit/extractors/ignore.ts", claim: "reads-only", reason: "ignore-rule parsing; it reads ignore files and returns rules" },
   { module: "src/audit/extractors/risk.ts", claim: "pure", reason: "risk-signal extraction over already-loaded inputs; the executor owns the write" },
-  { module: "src/audit/systemic/systemicChallengeLoop.ts", claim: "pure", reason: "systemic-challenge round logic; the executor owns dispatch and persistence" },
 
   // ── Remediate: contract-pipeline stages and phase bodies ──────────────────
   // Same argument on the remediate draw: `steps/contractPipeline.ts` and

@@ -25,7 +25,13 @@
 
 import type { Finding } from "../types.js";
 import type { GoalGraph } from "audit-tools/shared";
-import { groundDesignFindings, findingReEmissionKey, compareCodeUnits } from "audit-tools/shared";
+import {
+  absorbFinding,
+  groundDesignFindings,
+  findingReEmissionKey,
+  findingRestatesBanked,
+  compareCodeUnits,
+} from "audit-tools/shared";
 import { goalBlastRadius } from "../clarification/blastRadius.js";
 
 /**
@@ -64,15 +70,86 @@ export interface SystemicRoundResult {
 }
 
 /**
+ * The tool-owned prefix every banked improvement id carries: `sc-r<round>-<slug>`.
+ *
+ * The adversary mints its own ids, and nothing made two rounds agree on a
+ * namespace — rounds 3 and 4 of the 2026-08-08 run both minted `SC-001..004` for
+ * entirely different improvements, so any consumer keyed on finding id (task
+ * dispatch, share attribution, the disposition map) saw one id standing for two
+ * findings. Namespacing is the tool's job: it is the only party that knows which
+ * round a submission belongs to, and a host-prevented collision (that run's host
+ * prefixed `r4-` by hand) is a rule held in a transcript, not in the tool.
+ *
+ * Ids are stable once banked — a restatement never re-mints the banked finding's
+ * id (see the absorb branches in {@link foldChallengeRound}) — so anything that
+ * recorded an id in an earlier round still resolves after the next fold.
+ */
+export const SYSTEMIC_FINDING_ID_PREFIX = "sc-r";
+
+/**
+ * The hard ceiling on adversary rounds.
+ *
+ * The loop had NO bound: `MAX_DRAIN_STEPS` bounds the deterministic drain, but
+ * this loop is host-driven, and its only exit was a dry round — a signal a fresh
+ * no-memory adversary structurally cannot judge, so a host that could see the
+ * loop was finished had no sanctioned way to end it (the no-ceiling entry; the
+ * 2026-08-21 lap's loop was stopped by a hand-written empty submission). Six
+ * rounds is generous against the observed yields — every recorded run has
+ * converged by round 3 — while making the bound FINITE, and the stop it produces
+ * is recorded as `stop_reason: "round_ceiling"` rather than as convergence on a
+ * dry signal the loop never reached.
+ *
+ * It lives here, in the loop's own pure module, because the prompt states the
+ * bound to the lane and the executor enforces it: one number, one home.
+ */
+export const SYSTEMIC_ROUND_CEILING = 6;
+
+/** A filesystem- and report-safe slug for an adversary-minted id fragment. */
+function idSlug(raw: string): string {
+  const slug = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug.length > 0 ? slug.slice(0, 40) : "";
+}
+
+/**
+ * Mint the round-namespaced id for one submitted finding, unique across
+ * everything banked so far AND within this round. A submission that repeats its
+ * own id (or submits none) still leaves every finding distinctly addressable —
+ * two distinct findings sharing one id is the defect this exists to prevent.
+ */
+function mintRoundFindingId(params: {
+  round: number;
+  rawId: string | undefined;
+  index: number;
+  used: ReadonlySet<string>;
+}): string {
+  const base = `${SYSTEMIC_FINDING_ID_PREFIX}${params.round}-${
+    idSlug(params.rawId ?? "") || String(params.index + 1)
+  }`;
+  if (!params.used.has(base)) return base;
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${base}-${suffix}`;
+    if (!params.used.has(candidate)) return candidate;
+  }
+}
+
+/**
  * Fold one challenge round's submitted improvement findings into the prior set. The
  * enforcement pass:
  *   1. GROUND each new finding against the repo manifest (reusing the shared design
  *      grounding — an improvement pointing at no real component is dropped).
- *   2. Mark `systemic:true` and (re)derive `blast_radius` from the goal DAG, while
+ *   2. NAMESPACE its id to this round, so two rounds can never mint one id for two
+ *      different improvements and a later round can never re-mint a banked id.
+ *   3. Mark `systemic:true` and (re)derive `blast_radius` from the goal DAG, while
  *      PRESERVING the adversary-tagged TRUE lens.
- *   3. DEDUPE against prior rounds by finding identity (lens+category+title); a
- *      re-emission of a prior finding is NOT new.
- *   4. Mark dryness: a round that adds zero new findings is `dry`; an empty
+ *   4. DEDUPE against prior rounds on CONTENT: an exact re-emission (lens+category+
+ *      title) and a re-worded RESTATEMENT of a banked improvement both collapse into
+ *      the banked finding, unioning its evidence and files. Neither is new — the
+ *      convergence signal cannot rest on a worker choosing to repeat itself verbatim
+ *      (`findingRestatesBanked` carries the measured instance).
+ *   5. Mark dryness: a round that adds zero new findings is `dry`; an empty
  *      submission is trivially dry. The EXECUTOR converges the loop only after
  *      consecutive dry rounds (the register's `convergence_rule`).
  * Deterministic: the returned `findings` are ordered by descending blast radius, ties
@@ -81,6 +158,8 @@ export interface SystemicRoundResult {
 export function foldChallengeRound(params: {
   prior: Finding[];
   submitted: Finding[];
+  /** The 1-based ordinal of the round being folded — the id namespace it mints in. */
+  round: number;
   goalGraph?: GoalGraph;
   repoManifest?: { files?: Array<{ path: string }> };
   /** Map a finding to a goal-graph node id, when the linkage is known. */
@@ -93,28 +172,76 @@ export function foldChallengeRound(params: {
   const grounded = groundDesignFindings(params.submitted, params.repoManifest);
 
   const byKey = new Map<string, Finding>();
-  for (const finding of params.prior) byKey.set(findingReEmissionKey(finding), finding);
+  const usedIds = new Set<string>();
+  for (const finding of params.prior) {
+    byKey.set(findingReEmissionKey(finding), finding);
+    usedIds.add(finding.id);
+  }
+
+  /**
+   * Fold a refinement of a BANKED finding into it — union evidence and files,
+   * KEEPING the banked id and title. A survivor is cloned first: `prior` findings
+   * are objects the carried bundle still holds, and absorbing in place would
+   * mutate the register the fold is about to re-emit.
+   */
+  const absorbIntoBanked = (banked: Finding, submitted: Finding): void => {
+    const merged: Finding = {
+      ...banked,
+      affected_files: [...banked.affected_files],
+      evidence: [...(banked.evidence ?? [])],
+    };
+    absorbFinding(merged, submitted, {
+      mergeGrounding: true,
+      sortAffectedFiles: true,
+    });
+    byKey.set(findingReEmissionKey(merged), merged);
+  };
 
   const new_finding_ids: string[] = [];
-  for (const finding of grounded) {
+  for (const [index, finding] of grounded.entries()) {
     if (finding.grounding?.status === "ungrounded") {
       validation_issues.push(
         `Dropped ungrounded improvement "${finding.title}" (${finding.grounding.reason ?? "no component"}).`,
       );
       continue;
     }
+    const id = mintRoundFindingId({
+      round: params.round,
+      rawId: finding.id,
+      index,
+      used: usedIds,
+    });
     const enriched: Finding = {
       ...finding,
+      id,
       systemic: true,
       // Preserve the adversary-tagged TRUE lens verbatim (never rewrite to architecture).
       lens: finding.lens,
       blast_radius: resolveBlastRadius(finding, params.goalGraph, goalNodeOf),
     };
     const key = findingReEmissionKey(enriched);
-    if (!byKey.has(key)) {
-      new_finding_ids.push(enriched.id);
+    const exact = byKey.get(key);
+    if (exact) {
+      // The same improvement, re-emitted: a refinement, never a new round result.
+      absorbIntoBanked(exact, enriched);
+      continue;
     }
-    // Latest wins on a same-identity re-emission (the adversary may refine a lead).
+    const restated = [...byKey.values()].find((banked) =>
+      findingRestatesBanked(banked, enriched),
+    );
+    if (restated) {
+      // A re-wording of a banked improvement is the SAME improvement. Folding it
+      // back in (rather than dropping it) keeps whatever the new round verified —
+      // evidence and files union into the banked finding — while the round stays
+      // quiet, which is what makes convergence a statement about content.
+      absorbIntoBanked(restated, enriched);
+      validation_issues.push(
+        `Folded restatement of banked improvement "${restated.title}" (submitted as "${finding.title}") — not a new finding.`,
+      );
+      continue;
+    }
+    usedIds.add(id);
+    new_finding_ids.push(id);
     byKey.set(key, enriched);
   }
 

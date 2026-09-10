@@ -16,7 +16,14 @@
 
 import type { Finding } from "./types/finding.js";
 
-function wordSet(text: string): Set<string> {
+/**
+ * The content words of a text: whitespace-tokenized, case-folded,
+ * punctuation-stripped. Exported as well as used by {@link wordJaccard} because
+ * a caller comparing two wordings needs the SET, not only the overlap ratio —
+ * `findingRestatesBanked` requires two findings whose titles differ in ANY
+ * content word to also agree on a named anchor, which no ratio can express.
+ */
+export function contentWords(text: string): Set<string> {
   return new Set(
     text
       .toLowerCase()
@@ -31,8 +38,8 @@ function wordSet(text: string): Set<string> {
  * punctuation-stripped word sets of `a` and `b`.
  */
 export function wordJaccard(a: string, b: string): number {
-  const sa = wordSet(a);
-  const sb = wordSet(b);
+  const sa = contentWords(a);
+  const sb = contentWords(b);
   let intersection = 0;
   for (const w of sa) {
     if (sb.has(w)) intersection++;

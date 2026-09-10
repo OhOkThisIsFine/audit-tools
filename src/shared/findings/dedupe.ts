@@ -1,7 +1,12 @@
 import type { Finding } from "../types/finding.js";
 import { severityRank, confidenceRank } from "../types/lens.js";
 import { findingIdentityKey } from "../findingIdentitySignature.js";
-import { wordJaccard, filePathOverlap, primaryPath } from "../findingSimilarity.js";
+import {
+  contentWords,
+  wordJaccard,
+  filePathOverlap,
+  primaryPath,
+} from "../findingSimilarity.js";
 import { compareCodeUnits } from "../compareCodeUnits.js";
 
 /**
@@ -213,6 +218,60 @@ function lineRangeOverlaps(a: Finding, b: Finding): boolean {
   return aStart <= bEnd && bStart <= aEnd;
 }
 
+/**
+ * Do two findings agree on a NAMED anchor — a path, a symbol, an evidence entry,
+ * or an evidence token?
+ *
+ * This is the tie-breaker the title-Jaccard floor cannot supply. A ratio counts
+ * shared tokens with no notion of which carry meaning, so "Batch the graph edge
+ * writes" / "Batch the graph edge reads" scores 0.667 — and a wordier variant
+ * ("… into one call") clears 0.8 — while the one token that differs IS the
+ * improvement. The file-overlap gate cannot separate them either: two distinct
+ * improvements in one module share a file by construction. What separates them
+ * is whether the two findings NAME the same thing, which is what a shared
+ * symbol (or a symbol cited in both evidence lists) states.
+ */
+function findingsAgreeOnNamedAnchor(a: Finding, b: Finding): boolean {
+  const anchorsA = namedAnchors(a);
+  for (const anchor of namedAnchors(b)) if (anchorsA.has(anchor)) return true;
+  return false;
+}
+
+/**
+ * The NAMED things a finding points at: the `symbol` on each affected file
+ * (the structural anchor), plus every backticked token in its evidence — the
+ * evidence convention this pipeline's prompts ask for ("cite SYMBOLS, not line
+ * numbers"), so an anchor the lane named without filling in `symbol` still
+ * counts. Deliberately NOT file paths or free prose: two distinct improvements
+ * in one module share a file by construction, and shared prose scaffolding is
+ * exactly the signal that cannot be trusted here.
+ */
+function namedAnchors(finding: Finding): Set<string> {
+  const anchors = new Set<string>();
+  for (const file of finding.affected_files ?? []) {
+    const symbol = file.symbol?.trim().toLowerCase();
+    if (symbol) anchors.add(symbol);
+  }
+  for (const entry of finding.evidence ?? []) {
+    for (const match of entry.matchAll(/`([^`]+)`/g)) {
+      const token = match[1]?.trim().toLowerCase();
+      if (token) anchors.add(token);
+    }
+  }
+  return anchors;
+}
+
+/**
+ * Do the two titles differ in any content word? (`Batch the graph writes` vs
+ * `…reads`: yes — `writes` is not `reads`.) A similarity floor answers "how
+ * close", which is the wrong question at exactly the pair that matters.
+ */
+function titlesDivergeInAnyContentWord(a: Finding, b: Finding): boolean {
+  const wordsA = contentWords(a.title);
+  for (const word of contentWords(b.title)) if (!wordsA.has(word)) return true;
+  return false;
+}
+
 /** Shared pairwise comparison result: should these two findings be merged? */
 interface PairwiseComparisonResult {
   /** If true, a is kept as survivor; if false, b is kept. */
@@ -255,6 +314,17 @@ interface PairMatchPolicy {
    * `line-or-file` = an overlapping line range OR file-path overlap (same-lens).
    */
   overlapGate: "file" | "line-or-file";
+  /**
+   * When true, the fuzzy layer additionally requires the two findings to agree
+   * on at least one NAMED anchor (a `symbol`, or a symbol cited in both evidence
+   * lists) whenever their titles differ in any content word — a
+   * title-similarity floor ALONE cannot tell "Batch the graph edge writes" from
+   * "Batch the graph edge reads", which differ in the one token that carries the
+   * improvement and score 0.667 on Jaccard. Opt-in, so a draw whose match only
+   * merges two same-round opinions about one place is unaffected; see
+   * {@link RE_EMISSION_MATCH_POLICY} for the draw that needs it.
+   */
+  requireAnchorAgreementOnTitleDivergence: boolean;
 }
 
 /**
@@ -295,6 +365,18 @@ function compareFindingPair(
       ? policy.titleThreshold.sameCategory
       : policy.titleThreshold.crossCategory;
     if (titleSim < threshold) {
+      return { matched: false, keepA: false };
+    }
+    // The floor is a RATIO and cannot see which token carries the improvement:
+    // "…edge writes" / "…edge reads" clears it at 0.667. Where the two titles
+    // diverge in any content word, the pair must also agree on a NAMED anchor —
+    // a path, symbol or evidence span — or it is two different improvements that
+    // happen to share a file and a phrasing scaffold.
+    if (
+      policy.requireAnchorAgreementOnTitleDivergence &&
+      titlesDivergeInAnyContentWord(a, b) &&
+      !findingsAgreeOnNamedAnchor(a, b)
+    ) {
       return { matched: false, keepA: false };
     }
     const sameProblemSite =
@@ -558,6 +640,7 @@ export function crossLensDedupe(
         ? { sameCategory: 0.4, crossCategory: 0.5 }
         : { sameCategory: 0.4, crossCategory: 0.4 },
     overlapGate: "file",
+    requireAnchorAgreementOnTitleDivergence: false,
   };
 
   const mergeMap = new Map<string, string>();
@@ -681,6 +764,73 @@ export function findingReEmissionKey(finding: Finding): string {
 }
 
 /**
+ * The RE-EMISSION policy for the second-order adversary loop's cross-round
+ * collapse — the content bar a submitted improvement must clear to count as NEW.
+ *
+ * Convergence of that loop used to rest on `findingReEmissionKey` alone: an exact
+ * `lens|category|title` equality. An adversary that re-raised a banked improvement
+ * in different words therefore registered a DIFFERENT finding, the round read
+ * `dry:false`, and the loop could not converge on content — only on a worker
+ * choosing to repeat itself verbatim (or on the host hand-writing an empty
+ * submission, which is the fabricated dry signal the loop's ceiling entry names).
+ * The measured instance: round 3 of the 2026-08-21 lap re-emitted round 2's
+ * `mapWithConcurrency` item under a fresh id and the loop kept going.
+ *
+ * The floors sit WELL ABOVE the same-lens draw's (0.35/0.45), and that gap is
+ * deliberate. There, a match merges two same-round opinions about one place and
+ * costs nothing. Here a match CLOSES a round as quiet — and the cost is stated
+ * exactly, because it is smaller than it looks and still asymmetrically bad: the
+ * survivor is the BANKED finding, so its id and title win outright and the
+ * submitted improvement survives only as unioned evidence, affected_files, and
+ * its summary if it is longer. The improvement is not deleted, but it is no
+ * longer addressable under its own title, and the round it arrived in is
+ * recorded quiet — so the loop can close on work that was real. Erring high is
+ * the only direction that does not do that.
+ *
+ * A measured false positive at 0.45: two unrelated improvements whose boilerplate
+ * wording happens to agree ("Improvement number 0" / "Improvement number 1")
+ * score exactly 0.5, because Jaccard counts only shared tokens and has no notion
+ * of which ones carry meaning. That same blindness produced a second, worse
+ * class at 0.6 — "Batch the graph edge writes" / "Batch the graph edge reads"
+ * score 0.667, same file, so the ONE token that carries the improvement was
+ * absorbed as noise. Two things answer it: the sameCategory floor is raised to
+ * 0.75, and `requireAnchorAgreementOnTitleDivergence` refuses a fuzzy match
+ * outright when the titles differ in any content word and the pair share no
+ * named anchor — which is what catches the reworded variant ("… writes into one
+ * call" / "… reads into one call", 0.8) that clears the raised floor. A true
+ * paraphrase still collapses ("Parallelize the release suite" / "…fully" scores
+ * 0.8 and cites the same symbol), and
+ * `exactIdentityShortCircuit` stays on so a verbatim re-emission collapses
+ * below the floor regardless.
+ */
+const RE_EMISSION_MATCH_POLICY: PairMatchPolicy = {
+  lensGate: "any",
+  categoryGate: "soft",
+  exactIdentityShortCircuit: true,
+  titleThreshold: { sameCategory: 0.75, crossCategory: 0.7 },
+  overlapGate: "file",
+  requireAnchorAgreementOnTitleDivergence: true,
+};
+
+/**
+ * Does `submitted` merely RESTATE `banked` — the same improvement, re-worded,
+ * under a fresh id, or with a widened file list?
+ *
+ * The adversary is asked to surface improvements nothing has surfaced yet; a
+ * restatement is not one, and counting it as new is what kept the loop open. This
+ * is the content half of that judgement, single-sourced here so the systemic fold
+ * runs the same comparison core every other dedup draw runs rather than a private
+ * notion of "same". Its answer is a lead the fold ACTS on (folding the refinement
+ * into the banked finding): nothing is deleted, but the banked finding's id and
+ * title win and the submitted one travels only as unioned evidence and files —
+ * so a false positive costs the improvement its own address, and the round its
+ * newness. Both costs are stated in {@link RE_EMISSION_MATCH_POLICY}.
+ */
+export function findingRestatesBanked(banked: Finding, submitted: Finding): boolean {
+  return compareFindingPair(banked, submitted, RE_EMISSION_MATCH_POLICY).matched;
+}
+
+/**
  * The same-lens draw's matching policy. The group key already fixes the lens, so
  * there is no lens condition; the title floors sit BELOW the cross-lens ones
  * (two findings one lens raised about one place are more often one defect), and
@@ -694,6 +844,7 @@ const SAME_LENS_MATCH_POLICY: PairMatchPolicy = {
   exactIdentityShortCircuit: false,
   titleThreshold: { sameCategory: 0.35, crossCategory: 0.45 },
   overlapGate: "line-or-file",
+  requireAnchorAgreementOnTitleDivergence: false,
 };
 
 /**
