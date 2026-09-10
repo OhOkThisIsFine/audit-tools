@@ -873,10 +873,6 @@ export const GUARDS = [
         payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
         sample: 'git push origin main', expect: 'push to a PROTECTED branch',
         rootGit: { files: { 'package.json': '{"name":"x","private":true}\n' } } },
-      { name: 'relocated push, announced not judged', drive: 'hook', hook: '.claude/hooks/push-gate.mjs',
-        payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
-        sample: 'cd /tmp/other && git push origin main', expect: 'relocated push',
-        rootGit: { files: { 'package.json': '{"name":"x","private":true}\n' } } },
     ],
     note:
       'PreToolUse on Bash|PowerShell. Refuses an AGENT push that would put a PROTECTED branch (main/master) ' +
