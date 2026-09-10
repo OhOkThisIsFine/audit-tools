@@ -13,6 +13,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   baselineFromEntries,
+  isDispatchedChildEnv,
   pruneStaleSessionRecords,
   runPorcelainStatus,
   sanitizeSessionId,
@@ -76,9 +77,15 @@ const notes = [];
 // budget. Touches only `.claude/hooks/.state/`, never the working tree.
 try {
   const sessionId = sanitizeSessionId(payload?.session_id);
-  if (process.env.AUDIT_TOOLS_CHILD_SESSION === '1') {
+  if (isDispatchedChildEnv()) {
+    // Name the marker that classified this session: the explicit hand-launched
+    // one, or the depth llm-relay `dispatch` sets in every lane child.
+    const marker =
+      process.env.AUDIT_TOOLS_CHILD_SESSION === '1'
+        ? 'AUDIT_TOOLS_CHILD_SESSION=1'
+        : `LLM_RELAY_DISPATCH_DEPTH=${process.env.LLM_RELAY_DISPATCH_DEPTH}`;
     notes.push(
-      'session registry: AUDIT_TOOLS_CHILD_SESSION=1 — this session is a dispatched child and was ' +
+      `session registry: ${marker} — this session is a dispatched child and was ` +
         'NOT registered; repo Stop gates will not recruit it.',
     );
   } else if (!sessionId) {

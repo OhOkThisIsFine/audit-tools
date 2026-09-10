@@ -174,27 +174,44 @@ describe('readSessionRegistry: the one predicate every gate imports (Build 1 con
   it('classifies a child ONLY as armed + non-empty sid + absent record', () => {
     const armedRoot = scratchRoot();
     writeSessionRecord(armedRoot, record('resident'));
-    expect(readSessionRegistry(armedRoot, 'stranger').isUnregisteredChild).toBe(true);
+    expect(readSessionRegistry(armedRoot, 'stranger', {}).isUnregisteredChild).toBe(true);
 
     // Not armed → never a child (the transitional-window guarantee).
-    expect(readSessionRegistry(scratchRoot(), 'stranger').isUnregisteredChild).toBe(false);
+    expect(readSessionRegistry(scratchRoot(), 'stranger', {}).isUnregisteredChild).toBe(false);
 
     // Empty (or unsanitizable) sid → an older payload shape, never a child.
-    expect(readSessionRegistry(armedRoot, '').isUnregisteredChild).toBe(false);
-    expect(readSessionRegistry(armedRoot, undefined).isUnregisteredChild).toBe(false);
+    expect(readSessionRegistry(armedRoot, '', {}).isUnregisteredChild).toBe(false);
+    expect(readSessionRegistry(armedRoot, undefined, {}).isUnregisteredChild).toBe(false);
 
     // Corrupt-but-present → REGISTERED with an empty baseline, never a child.
     const corruptRoot = scratchRoot();
     mkdirSync(sessionsDir(corruptRoot), { recursive: true });
     writeFileSync(join(sessionsDir(corruptRoot), 'broken.json'), '{{{');
-    const reg = readSessionRegistry(corruptRoot, 'broken');
+    const reg = readSessionRegistry(corruptRoot, 'broken', {});
     expect(reg.recordState).toBe('corrupt');
     expect(reg.isUnregisteredChild).toBe(false);
 
     // The registered resident itself.
-    const resident = readSessionRegistry(armedRoot, 'resident');
+    const resident = readSessionRegistry(armedRoot, 'resident', {});
     expect(resident.recordState).toBe('ok');
     expect(resident.isUnregisteredChild).toBe(false);
+  });
+
+  it('classifies a dispatched child by env marker alone — armed or not, registered or not', () => {
+    const root = scratchRoot(); // NOT armed: a fresh worktree holds no owner record
+    const child = (env: NodeJS.ProcessEnv) => readSessionRegistry(root, 'lane', env).isUnregisteredChild;
+    expect(child({ AUDIT_TOOLS_CHILD_SESSION: '1' })).toBe(true);
+    // llm-relay `dispatch` sets the depth in every lane child (measured 2026-09-10).
+    expect(child({ LLM_RELAY_DISPATCH_DEPTH: '1' })).toBe(true);
+    expect(child({ LLM_RELAY_DISPATCH_DEPTH: '3' })).toBe(true);
+    // Not a positive integer, or the wrong value → no marker.
+    expect(child({ LLM_RELAY_DISPATCH_DEPTH: '0' })).toBe(false);
+    expect(child({ LLM_RELAY_DISPATCH_DEPTH: 'yes' })).toBe(false);
+    expect(child({ AUDIT_TOOLS_CHILD_SESSION: '0' })).toBe(false);
+    expect(child({})).toBe(false);
+    // Even a REGISTERED resident is a child under the marker: a delegated lane is never recruited.
+    writeSessionRecord(root, record('resident'));
+    expect(readSessionRegistry(root, 'resident', { LLM_RELAY_DISPATCH_DEPTH: '1' }).isUnregisteredChild).toBe(true);
   });
 });
 
@@ -297,6 +314,7 @@ function runGuards(
   // must not flip the registration cases. Re-added only by the case testing it.
   const inherited = { ...process.env };
   delete inherited.AUDIT_TOOLS_CHILD_SESSION;
+  delete inherited.LLM_RELAY_DISPATCH_DEPTH;
   const r = spawnSyncHidden(process.execPath, [GUARDS], {
     input: payload === undefined ? '' : JSON.stringify(payload),
     encoding: 'utf8',
@@ -346,6 +364,16 @@ describe('session-start-guards: the registration leg (end-to-end)', () => {
     const pass = runGuards(root, startPayload(sid), { AUDIT_TOOLS_CHILD_SESSION: '1' });
     expect(pass.code).toBe(0);
     expect(pass.stdout).toMatch(/NOT registered/);
+    expect(existsSync(join(sessionsDir(root), `${sid}.json`))).toBe(false);
+  });
+
+  it('refuses to register a relay lane child (LLM_RELAY_DISPATCH_DEPTH=1) and names the marker', () => {
+    const root = gitRepo();
+    const sid = `lane-${process.pid}`;
+    const pass = runGuards(root, startPayload(sid), { LLM_RELAY_DISPATCH_DEPTH: '1' });
+    expect(pass.code).toBe(0);
+    expect(pass.stdout).toMatch(/NOT registered/);
+    expect(pass.stdout).toMatch(/LLM_RELAY_DISPATCH_DEPTH=1/);
     expect(existsSync(join(sessionsDir(root), `${sid}.json`))).toBe(false);
   });
 

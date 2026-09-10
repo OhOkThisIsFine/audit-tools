@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 250 entr(y/ies) indexed.
+> and at commit). 247 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -179,22 +179,19 @@
 - `forward-tracks.md:11` — Track 3 — every emitted lane should carry a size, complexity and risk ranking, so the host can match a model to the work (2026-09-02, owner-directed).
 - `forward-tracks.md:30` — Ceremony-review remainder — Tier 2/3 consolidations, plus the one unlanded Part-5 mechanism (2026-08-29).
 - `forward-tracks.md:45` — The audit draw WRITES to the audited tree, and the read-only framing does not say so (2026-08-24, raised by CP-NODE-7's refutation lane).
-- `forward-tracks.md:54` — Metric-pool empirical program — grouping/characterization metrics (owner-directed 2026-08-19).
-- `forward-tracks.md:63` — Track 2.5 — keep production-orphan detection beside knip.
+- `forward-tracks.md:54` — Track 2.5 — keep production-orphan detection beside knip.
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:77` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:101` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:109` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:124` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:131` — `preferredExecutor` is a MODE, and the step-command scaffold serves only one of the two (2026-09-05).
-- `forward-tracks.md:142` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:154` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:168` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
-- `forward-tracks.md:177` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
-- `forward-tracks.md:202` — ▶ Audit-tools deep-review acceptance benchmark still needs its external run.
-- `forward-tracks.md:226` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:68` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:76` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:91` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:98` — `preferredExecutor` is a MODE, and the step-command scaffold serves only one of the two (2026-09-05).
+- `forward-tracks.md:109` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:121` — Wave-friendly host dispatch: run identity survives partial ingest.
+- `forward-tracks.md:135` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:144` — One-core dissolution lap — the two draws are converged; what remains is two adapter divergences (owner-routed 2026-08-19, RE-BASELINED 2026-08-27).
+- `forward-tracks.md:169` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 

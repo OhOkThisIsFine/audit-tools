@@ -52,6 +52,7 @@ function runHook(
   // tests pin. A case testing one re-adds it via `env`.
   const inherited = { ...process.env };
   delete inherited.AUDIT_TOOLS_CHILD_SESSION;
+  delete inherited.LLM_RELAY_DISPATCH_DEPTH;
   delete inherited.AUDIT_TOOLS_AGENT_GIT;
   delete inherited.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE;
   delete inherited.AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY;

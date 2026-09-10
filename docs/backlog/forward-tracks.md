@@ -51,15 +51,6 @@ opt-out and dry-run, which makes the mutation refusable but leaves it ON by defa
 either the read-only framing names auto-fix as its one declared exception, or the phase defaults to
 off and a host opts IN — the two documents and the executor agree on which.
 
-**Metric-pool empirical program — grouping/characterization metrics (owner-directed 2026-08-19).**
-The in-tree grouping (`shared_file ∧ same_lens` eligibility + constant-free modularity-peak
-refinement + per-file aggregated seams) is INTERIM: it is the best-measured choice on one run, not a
-selected one. Build the pool catalog and the five-repo dataset in the lab
-(`C:\Code\metrics-lab`), then run the experiment that selects which combination of signals actually
-groups and characterizes work best. **Property:** the shipped combination is chosen by measurement
-across repos, or it is labelled interim wherever it is documented — no in-tool ceiling of any
-denomination re-enters, and sizing stays host-side whichever combination wins.
-
 **Track 2.5 — keep production-orphan detection beside knip.** The dated
 [`slimdown-review-2026-07-28.md`](../reviews/slimdown-review-2026-07-28.md) is a historical lead set,
 not a current deletion list; the provider and dispatch subgraphs it identified have since been retired.
@@ -73,30 +64,6 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
 
 
 ## Forward tracks
-
-- **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
-  self-audit runs.** A contract-valid empty result cannot be scored for quality without ground truth;
-  raw finding yield is a noisy signal. Its affirmation half (`reviewed_clean`) is shipped. The
-  `score-audit` scorer exists. The REFUTED alternative — hand-labelling a live run's findings into
-  `corpus/<run-id>.labels.json` — must not be re-proposed; it has two structural flaws: (a) labels against our own moving tree ROT — findings reference
-  file:lines that drift within days, so a labeled run is a one-shot number, never a regression
-  gate; (b) labeling only what the tool FOUND measures precision only — misses are invisible, so
-  recall is unmeasurable without ground truth the tool didn't author.
-  <!-- doc-citation-exempt: proposed dir, not yet created -->
-  **SPEC:** `corpus/` becomes a manifest of pinned public repos — `{repo_url, commit_sha,
-  labels[]}`, each label a ground-truth defect (file, region, kind, evidence — ideally the upstream
-  FIX commit that proves it). Ground truth comes from someone-else-maintained inventories where
-  possible (bugs fixed in later upstream commits; CVE-tagged pre-fix versions; suites like
-  Defects4J / BugsInPy) per the synced-not-forked table principle; hand-authored labels are a
-  bounded one-time cost per repo and never rot (the SHA is pinned). `score-audit` gains a
-  corpus-repo mode: clone at the pinned SHA (hermetic state via `AUDIT_CODE_STATE_DIR`), have the
-  host execute the emitted audit workload, and match findings against labels → precision AND
-  recall as a repeatable release-time gate. Prefer small-but-REAL repos (real libraries at pre-fix
-  commits) over purely synthetic bug suites — synthetic-only corpora overestimate transfer. Rust /
-  Ruby pins double as clippy/rubocop analyzer targets (toolchain availability still gates the live
-  spawn). **Scope honesty:** this measures finding QUALITY; pipeline-at-scale behavior (charters
-  over 1000+ components and deepening) stays validated by dogfood runs. The re-dogfood
-  run's hand-label is optional large-target calibration, never a blocker for this.
 
 - **End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).** The
   node:test-gate bug ([[remediate-gate-nodetest-runner-bug]], fixed v0.32.61) blocked EVERY remediate run
@@ -198,29 +165,5 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   shape rather than the reverse. Re-open that quarter only on a measured defect, and only after
   CX-02. Full brief, with both adversarial lanes and the limits of the measurement:
   [`one-core-lap-scope-2026-08-27.md`](../reviews/one-core-lap-scope-2026-08-27.md).
-
-- **▶ Audit-tools deep-review acceptance benchmark still needs its external run.** Pointer only — the eight confirmed gaps, the P0 rewiring sequence, its
-  contract-test plan, the conditional P1/P2 extensions, the blinded paired-benchmark gate, and the
-  explicit what-not-to-build list are ALL in
-  [`audit-tools-simplification-workflow-gap-2026-08-26.md`](../reviews/audit-tools-simplification-workflow-gap-2026-08-26.md),
-  with the current execution evidence and executor limitations in
-  [`pipeline-quality-2026-09-07.md`](../reviews/pipeline-quality-2026-09-07.md),
-  which is deliberately the single home for this work. Nothing is restated here, so there is no
-  second copy to drift. Its verdict is that the reviewers already exist and the normal execution
-  path starves them, so P0 adds no audit phase, no objective schema, and no MCP client to
-  audit-tools core; P1 and P2 are contingencies that must each cite a failed benchmark axis, never
-  added pre-emptively. P0 and its provider-neutral harness are implemented; that harness is not
-  acceptance evidence. The remaining work is the real acceptance gate — ten pinned, blinded paired
-  trials scored on six separate non-inferiority axes — using an operator-supplied external executor
-  and credentials plus two independent blinded evaluators, then adding a durable contract only where
-  a measured axis fails. Acceptance corpus is the two 2026-08-26
-  standalone runs,
-  [`complexity-reduction-audit-2026-08-26.md`](../reviews/complexity-reduction-audit-2026-08-26.md)
-  (the review CX-02 draws from) and
-  [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md),
-  plus a held-out repository chosen before tuning. Gaps of its own that are already bounded defects
-  on the working queue — the systemic adversary handed a prior-finding count instead of the banked
-  set, that lane's adversary-minted finding ids, and the loop's dry-signal convergence having no
-  ceiling — are worked there, not here.
 
 - **The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).** `scripts/release-and-publish.mjs` ends at registry visibility; global reinstall, the allowed postinstall lifecycle scripts and both binary smokes live in `.claude/skills/ship/SKILL.md` as instructions an agent must remember and execute — the host-remembering shape the auditor-agnostic rule bans, applied to the project's own pipeline-ownership rule. There is also no single resumable record spanning the phases, so a stall part-way is recovered by hand. **Property:** one idempotent command owns gated ref verification, exactly-once tag/release/publish creation, delayed release observation, registry verification, reinstall with allowed lifecycle scripts, and smoke checks of both global binaries and the installed host assets — resuming only its observation and completion phases and never retrying a destructive creation. The observation half already has its own entry (the await-run timeout shorter than a release-event delivery delay); fix it inside this command rather than beside it. YAML critical-path profiling moves out of release correctness into best-effort reporting.

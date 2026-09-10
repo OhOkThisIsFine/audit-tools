@@ -262,12 +262,27 @@ export function enforcementArmed(root) {
   }
 }
 
+// A dispatched child announces itself by ENVIRONMENT, and both spellings are
+// honoured: the explicit `AUDIT_TOOLS_CHILD_SESSION=1` a hand-launched lane sets,
+// and `LLM_RELAY_DISPATCH_DEPTH` (a positive integer) that llm-relay `dispatch`
+// sets in EVERY lane child it spawns. Measured 2026-09-10 (probe job-0011): a
+// relay lane in a fresh worktree carried only the depth marker, registered itself
+// as an owner session, and was recruited by the closeout Stop gate — its report
+// came back as a gate answer. Recognizing the relay's own marker is what lets the
+// child split hold without the dispatcher remembering a flag.
+export function isDispatchedChildEnv(env = process.env) {
+  if (env.AUDIT_TOOLS_CHILD_SESSION === '1') return true;
+  return /^[1-9]\d*$/.test(env.LLM_RELAY_DISPATCH_DEPTH ?? '');
+}
+
 // One-call read for every Stop/PreToolUse gate. An EMPTY sessionId is never
 // classified as a child: real children always carry session_id (probed
 // 2026-08-18), so an empty one means an older payload shape — gates keep their
 // current empty-sid behavior (closeout/question: fail open for cap reasons;
-// friction: proceed).
-export function readSessionRegistry(root, rawSessionId) {
+// friction: proceed). A child by env marker is a child ARMED OR NOT: a fresh
+// worktree holds no owner record to arm the registry, and a delegated lane must
+// never be recruited there either.
+export function readSessionRegistry(root, rawSessionId, env = process.env) {
   const sessionId = sanitizeSessionId(rawSessionId);
   const armed = enforcementArmed(root);
   const { state: recordState, record } = readSessionRecord(root, sessionId);
@@ -276,7 +291,8 @@ export function readSessionRegistry(root, rawSessionId) {
     sessionId,
     recordState,
     record,
-    isUnregisteredChild: armed && sessionId !== '' && recordState === 'absent',
+    isUnregisteredChild:
+      isDispatchedChildEnv(env) || (armed && sessionId !== '' && recordState === 'absent'),
   };
 }
 

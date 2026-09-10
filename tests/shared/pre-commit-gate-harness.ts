@@ -49,6 +49,7 @@ export function runGate(
   const inherited = { ...process.env };
   delete inherited.AUDIT_TOOLS_AGENT_GIT;
   delete inherited.AUDIT_TOOLS_CHILD_SESSION;
+  delete inherited.LLM_RELAY_DISPATCH_DEPTH;
   return spawnSync(process.execPath, [GATE], {
     input: JSON.stringify({
       tool_name: "Bash",
@@ -80,6 +81,7 @@ export function runCommitGate(
   const inherited = { ...process.env };
   delete inherited.AUDIT_TOOLS_AGENT_GIT;
   delete inherited.AUDIT_TOOLS_CHILD_SESSION;
+  delete inherited.LLM_RELAY_DISPATCH_DEPTH;
   delete inherited.GIT_INDEX_FILE;
   delete inherited.CLAUDE_CODE_SESSION_ID;
   delete inherited.CLAUDE_PID;

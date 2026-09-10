@@ -147,6 +147,7 @@ describe('session-start-guards: stale agent worktrees are reaped', () => {
     backdate(wt('landed2'));
     const inherited = { ...process.env };
     delete inherited.AUDIT_TOOLS_CHILD_SESSION; // a child env must not skip registration here
+    delete inherited.LLM_RELAY_DISPATCH_DEPTH;
     const r = spawnSyncHidden(process.execPath, [GUARDS], {
       cwd: repo,
       encoding: 'utf8',

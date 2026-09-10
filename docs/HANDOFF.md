@@ -5,17 +5,9 @@
 
 ## Live state
 
-- **v0.51.7 is published and installed globally.** Release commit `a5ced6e3`
-  passed the publish workflow; npm resolves 0.51.7 and
-  both installed command surfaces report 0.51.7. The release workflow is
-  [run 34189090341](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34189090341).
-  Conceptual retries preserve the review round and valid perspective outputs, reopen
-  malformed perspectives with their rejection evidence, and validate lane paths before quarantine.
-- **Pipeline verification defaults and rejection history are implemented** in `4b977383`.
-  Omitted test/e2e commands come from persisted project facts and pass current-manifest
-  admission at close. Both ingestion flows retain rejection explanations across calls;
-  recovery acceptance stays distinct from clean acceptance. The combined implementation
-  passed 6,460 local tests and every non-test release gate.
+- **v0.51.7 is published and installed globally.** Release commit `a5ced6e3` passed the publish
+  workflow; npm resolves 0.51.7 and both installed command surfaces report 0.51.7. The release
+  workflow is [run 34189090341](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34189090341).
 - **The commit gate runs at git's own boundary.** The tracked `.githooks/` run
   `.claude/hooks/commit-gate.mjs` for every commit into this repository; the PreToolUse
   `pre-commit-gate.mjs` keeps only what git cannot see (the hook-bypass refusal, the push
@@ -24,45 +16,24 @@
   points at `.githooks` (writing the worktree scope too where `extensions.worktreeConfig` makes a
   `.git/config.worktree` entry win). A clone that has never opened a session runs no commit gate
   until it does; the registry row states this as the uncovered half.
-- **The 2026-09-06 maintenance decision queue is closed.** The tracked inbox is empty and every
-  answer carries completion evidence in the decision ledger. Generator freshness and
-  invariant-glossary completeness are reconciled gates; eligible document gates report at write
-  time without blocking; shell-guard remedies round-trip through their guards; source installs
-  build shared output before host deployment; and a full-suite failure now owns its isolated
-  diagnostic, load-only record, recurrence warning and repair-investigation dispatch.
+- **The benchmark track is retired (owner decision 2026-09-10).** Its three forward-track entries
+  are deleted; the `benchmarks/p0/` harness and its contract tests are deleted by the wave-1 packet
+  of the lap below. The shipped `score-audit` command stays.
+- **A relay lane child is recognized as a dispatched child.** `readSessionRegistry` treats a
+  positive `LLM_RELAY_DISPATCH_DEPTH` (set by llm-relay `dispatch` in every lane child) exactly like
+  `AUDIT_TOOLS_CHILD_SESSION=1`, so the session-scoped Stop gates never recruit a lane's report.
 
 ## Immediate next
 
-**Finish the active pipeline-quality lap.** The shared JSON byte-marker fix and bare
-full-audit depth correction are released; benchmark objective forwarding is fixed on main.
-The recovery and fixture corrections through `f3327f34` passed 6,508 local tests,
-the complete CI suite, and non-test CI checks. The free Muse host
-now has verified graph search, trace, snippet, and coverage through a fixture-bound helper.
-The held-out calibration reached final design review but exceeded its wall deadline
-during a host quota pause. Completed native outputs are preserved for an explicitly
-unscored continuation. Benchmark crash recovery is integrated in `86f512d1`, with
-39 focused tests passing, original-source verification, and SQLite run ownership.
-The isolated graph-disabled trial exposed a late capability notice after semantic
-review. The early loader stop rule passed a fresh isolated live trial and is
-released in 0.51.4. The unscored continuation accepted the repaired conceptual judge,
-and a fresh invocation passed the previous no-progress stop. That invocation used
-the frozen v0.51.3 checkout and did not prove the published metadata fix ran.
-The first systemic challenge round was accepted, then the runner rejected the next
-round's reused identity. Round identity and quiet-result replay fixes are published
-in v0.51.7 after 58 targeted tests, independent review, and complete release CI.
-The continuation now explicitly uses the isolated published backend, with immutable
-unscored upgrade lineage preserving its first 553 calls (23,529,315 input and
-274,263 output tokens). Its fresh round-2 identity passed the repeated-step guard,
-but three Muse attempts then returned retryable HTTP 429 responses with no result.
-They add three error-only calls and zero tokens, retained separately from accepted
-task receipts. The next eligible retry is after the existing continuation deadline.
-Owner decision: authorize a separate unscored recovery window of at most four
-hours after Muse capacity returns, retaining cumulative call/token caps and every
-earlier failure, or leave the benchmark paused. No existing deadline may change.
-After a genuine terminal, complete the ten paired quality comparisons.
-Evidence and limits are in
-[pipeline-quality-2026-09-07.md](reviews/pipeline-quality-2026-09-07.md).
-No quality score exists; successful preflight and contract tests are not acceptance.
+**Cleanup-and-implementation lap (opened 2026-09-10).** P00 cleanup is on `main`: the maintenance
+routine's commits are fast-forwarded, stray worktrees, merged branches and the forensics stash are gone,
+and the benchmark track is retired. Seven implementation waves follow — each packet in its own
+worktree outside the repo root on a DeepSeek lane through llm-relay, landed by fast-forward, the
+full suite re-run on `main` after every wave, and a `/ship` release after the last wave. The plan,
+the per-packet briefs and the 161-entry coverage check live in the lap's machine-local plan
+directory, `C:/Code-worktrees/audit-tools/_lap-plan/` <!-- doc-citation-exempt: machine-local plan directory, outside every repo -->.
+The waiting maintenance decisions are settled there by standing convictions and are ticked in
+the inbox when their packets land.
 
 ## Deliberate state, not bugs
 
@@ -110,10 +81,10 @@ No quality score exists; successful preflight and contract tests are not accepta
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 1 pinned item(s).
+> `verify:checks` and at commit). 0 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ Audit-tools deep-review acceptance benchmark still needs its external run. · [`forward-tracks.md`](backlog/forward-tracks.md)
+*(nothing pinned — no immediate next step is set. Every open item is in [`docs/backlog/`](backlog/).)*
 
 <!-- END GENERATED ROADMAP -->

@@ -45,6 +45,7 @@ function realCommit(...args: string[]) {
   const env = { ...process.env };
   delete env.AUDIT_TOOLS_AGENT_GIT;
   delete env.AUDIT_TOOLS_CHILD_SESSION;
+  delete env.LLM_RELAY_DISPATCH_DEPTH;
   delete env.GIT_INDEX_FILE;
   const r = spawnSync("git", ["commit", "-q", ...args], { cwd: repo, encoding: "utf8", env });
   return { status: r.status, stderr: r.stderr ?? "", stdout: r.stdout ?? "", landed: head() !== before };
@@ -168,6 +169,7 @@ describe("commit-gate at git's boundary: a real `git commit` is judged by git ru
     const env = { ...process.env };
     delete env.AUDIT_TOOLS_AGENT_GIT;
     delete env.AUDIT_TOOLS_CHILD_SESSION;
+    delete env.LLM_RELAY_DISPATCH_DEPTH;
     g("cherry-pick", "-n", sha);
     expect(g("diff", "--cached", "--name-only").stdout).toContain("src/shared/engine/x.ts");
     const r = spawnSync("git", ["commit", "-q", "-m", "land the pick"], { cwd: repo, encoding: "utf8", env });
