@@ -15,6 +15,9 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnHidden as spawn } from "../../helpers/spawn.mjs";
+// From `trackedSpawn.js`, the module that owns the bound — a `.mjs` re-export is
+// invisible to `check:deadcode` (see the note in tests/shared/sync-spawn-budget).
+import { runBounded } from "../../helpers/trackedSpawn.js";
 import { declineDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
 
 // Loose shapes for the JSON the wrapper prints / writes. Only the fields the
@@ -95,22 +98,16 @@ export function spawnWrapper(args: string[], options: WrapperOptions = {}) {
 }
 
 export function runWrapper(args: string[], options: WrapperOptions = {}): Promise<WrapperOutput> {
-  return new Promise<WrapperOutput>((resolve, reject) => {
-    const { child, stdoutRef, stderrRef } = spawnWrapper(args, {
-      ...options,
-      onError: reject,
-    });
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve({ stdout: stdoutRef.value, stderr: stderrRef.value });
-        return;
-      }
-      reject(
-        new Error(
-          stderrRef.value || stdoutRef.value || `wrapper exited with ${code}`,
-        ),
-      );
-    });
+  // `runBounded`, not a local promise over the child's `exit` event: resolving
+  // only on `exit` leaves a WEDGED wrapper pending forever, so the failure lands
+  // as a 300s test-ceiling abort on a different test each run with the child
+  // still alive. The bound reports at the command instead. See
+  // `tests/helpers/trackedSpawn.ts` for the deadline and its rationale.
+  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
+  return runBounded(process.execPath, [wrapperPath, ...args], {
+    cwd: options.cwd ?? repoRoot,
+    env: { ...cleanEnv, ...(options.env ?? {}) },
+    timeoutMs: options.timeoutMs,
   });
 }
 

@@ -30,6 +30,7 @@ import { groundExtractedFindings, groundAffectedFiles, evidenceCitesRealPath } f
 import { enumerateTrackedFilePaths } from "audit-tools/shared";
 import { runTriagePhase } from "../../src/remediate/phases/triage.js";
 import type { RemediationBlock } from "../../src/remediate/state/types.js";
+import type { ClosingPlan } from "../../src/remediate/state/types.js";
 import { makeState } from "./test-helpers.js";
 import { scratchDir } from "../helpers/scratch.js";
 
@@ -580,7 +581,7 @@ describe("runClosePhase — INV-remediate-phases-10: ClosingResult always has co
   const OUTPUT_DIR = join(REPO_DIR, ".audit-tools");
   const BASE_OPTIONS = { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR };
 
-  function makeClosingState(actionOverride: string) {
+  function makeClosingState(actionOverride: ClosingPlan["action"]) {
     return makeState({
       status: "closing",
       plan: {
@@ -887,7 +888,14 @@ describe("buildRemediationOutcomesReport — TST-cb981ad0: final_status mappings
       plan: {
         plan_id: "P-FSO",
         findings,
-        blocks: [{ block_id: "B1", items: findings.map((f) => f.id), parallel_safe: true }],
+        blocks: [
+          {
+            block_id: "B1",
+            items: findings.map((f) => f.id),
+            parallel_safe: true,
+            touched_files: ["src/a.ts"],
+          },
+        ],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },
@@ -914,7 +922,7 @@ describe("buildRemediationOutcomesReport — TST-cb981ad0: final_status mappings
       plan: {
         plan_id: "P-VNC",
         findings: [mkPlanFinding("F-vnc")],
-        blocks: [{ block_id: "B1", items: ["F-vnc"], parallel_safe: true }],
+        blocks: [{ block_id: "B1", items: ["F-vnc"], parallel_safe: true, touched_files: ["src/a.ts"] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },

@@ -1,14 +1,5 @@
 import { assertNonEmptyString, assertStringArray, describeValue, fail, isRecord } from "./validate.mjs";
-import { countLines } from "./countLines.mjs";
-
-async function buildFileCoverage(task, root) {
-  return Promise.all(
-    task.file_paths.map(async (path) => ({
-      path,
-      total_lines: await countLines(root, path),
-    })),
-  );
-}
+import { buildSyntheticResults as buildSyntheticResultsImpl } from "../../../scripts/audit/smoke-audit-flow.mjs";
 
 export function validatePendingTask(task, index) {
   if (!isRecord(task)) {
@@ -21,26 +12,28 @@ export function validatePendingTask(task, index) {
   assertStringArray(task.file_paths, `pending task ${index}.file_paths`);
 }
 
+/**
+ * Synthesize one AuditResult per assigned task — by calling the PRODUCTION
+ * producer, never by re-building the payload here.
+ *
+ * This file used to hand-build the AuditResult: the same field list, the same
+ * `countLines` call, the same `reviewed_clean` affirmation as
+ * `scripts/audit/smoke-audit-flow.mjs`. It was the SECOND AuditResult
+ * construction site in the repo, and `tests/audit/smoke-producer-contract.test.ts`
+ * documents exactly what that class costs: when `reviewed_clean` joined the
+ * contract, the `scripts/` producer was missed by a `tests/**` fixture sweep and
+ * failed release CI. The fix there was to make the producer validate its own
+ * output. The same fix applies here, and it is simpler: there is one producer,
+ * and this calls it.
+ *
+ * The delegation is not cosmetic. A hand-built copy cannot fail on a contract it
+ * never consults — it goes on producing the old shape silently, and the test
+ * that consumes it goes on passing against a payload the tool would reject.
+ *
+ * `tests/shared/test-mirrors-production.test.ts` is the invariant that keeps a
+ * third construction site from appearing.
+ */
 export async function buildSyntheticResults(tasks, root) {
-  return Promise.all(tasks.map(async (task, index) => {
-    validatePendingTask(task, index);
-    const notes = ["Synthetic provider-assisted completion result."];
-    if (typeof task.priority === "string" && task.priority.trim().length > 0) {
-      notes.push(`Priority: ${task.priority}`);
-    }
-    if (Array.isArray(task.tags) && task.tags.length > 0) {
-      notes.push(`Tags: ${task.tags.join(", ")}`);
-    }
-    return {
-      task_id: task.task_id,
-      unit_id: task.unit_id,
-      pass_id: task.pass_id,
-      lens: task.lens,
-      agent_role: "provider-assisted-reviewer",
-      file_coverage: await buildFileCoverage(task, root),
-      findings: [],
-      notes,
-      requires_followup: false,
-    };
-  }));
+  tasks.forEach((task, index) => validatePendingTask(task, index));
+  return buildSyntheticResultsImpl(tasks, root, "test-fixture");
 }

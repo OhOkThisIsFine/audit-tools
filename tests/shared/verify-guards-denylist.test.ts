@@ -39,31 +39,23 @@ function listTestFiles(): string[] {
   return out;
 }
 
-/** Minimal glob → RegExp (supports `**` / `**\/` / `*`), anchored, "/"-separated paths. */
-function globToRegExp(glob: string): RegExp {
-  let re = "";
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === "*") {
-      if (glob[i + 1] === "*") {
-        i++;
-        if (glob[i + 1] === "/") {
-          i++;
-          re += "(?:.*/)?";
-        } else {
-          re += ".*";
-        }
-      } else {
-        re += "[^/]*";
-      }
-    } else if (".+^${}()|[]\\".includes(c)) {
-      re += "\\" + c;
-    } else {
-      re += c;
-    }
-  }
-  return new RegExp("^" + re + "$");
-}
+// `globToRegExp` is IMPORTED, never re-declared. This file carried a "minimal"
+// local copy whose comment conceded the gap ("supports `**` / `**\/` / `*`") —
+// and it had already drifted from the production compiler in
+// `scripts/check-doc-manifest.mjs`: no `<date>` token, a bare `?` emitted as a
+// live regex quantifier instead of `[^/]`, `**\/` widened to `(?:.*/)?` where
+// production uses `(?:[^/]+/)*`, and a narrower escape class. The same repo
+// imports the production one in `tests/shared/doc-manifest-gate.test.ts`, so the
+// question "which glob grammar does THIS test mean?" had two answers.
+//
+// The consequence was concrete: this test decides whether an `--exclude` glob in
+// `verify:guards` still matches a real test file, i.e. whether the denylist is
+// honest. Grading the denylist with a different matcher than the runner uses is
+// the one thing an honest denylist check cannot do.
+//
+// `tests/shared/test-mirrors-production.test.ts` is the invariant that keeps a
+// third copy from appearing.
+import { globToRegExp } from "../../scripts/check-doc-manifest.mjs";
 
 /**
  * Pull the `--exclude "<glob>"` values out of the verify:guards script string.

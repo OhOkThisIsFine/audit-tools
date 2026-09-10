@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, test } from "vitest";
+import { compareCodeUnits, stableStringify } from "audit-tools/shared";
 import {
   canonicalSha256 as harnessCanonicalSha256,
   closureSha256,
@@ -279,10 +280,15 @@ function loadArtifact<T>(name: string): Artifact<T> {
   return { raw, value: JSON.parse(raw) as T };
 }
 
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
+// `compareCodeUnits` and `stableStringify` are IMPORTED, never re-declared.
+// This file carried local copies of both. The comparator was byte-identical to
+// production's, and the serializer was not: production normalizes `undefined`
+// (top-level to `"null"`, array entries to `null`, `undefined`-valued object keys
+// DROPPED), while the local copy passed it straight to `JSON.stringify` — so the
+// same fixture could hash two ways. Its own module header states the rule this
+// file was breaking: "There must be exactly ONE such serializer — never write a
+// second." `tests/shared/test-serializer-single-source.test.ts` is the guard that
+// keeps a third from appearing.
 function sortedUnique(values: readonly string[]): string[] {
   return [...new Set(values)].sort(compareCodeUnits);
 }
@@ -303,23 +309,6 @@ function expectExactKeys(
   );
 }
 
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return "[" + value.map(stableStringify).join(",") + "]";
-  }
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return (
-      "{" +
-      Object.keys(record)
-        .sort(compareCodeUnits)
-        .map((key) => JSON.stringify(key) + ":" + stableStringify(record[key]))
-        .join(",") +
-      "}"
-    );
-  }
-  return JSON.stringify(value);
-}
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");

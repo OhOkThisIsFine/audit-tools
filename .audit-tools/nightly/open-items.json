@@ -405,50 +405,6 @@
       "nights_open": 2
     },
     {
-      "id": "solutions-tar-drive-letter-fix-form",
-      "leg": "solutions",
-      "path": "scripts/shared/dispatch-load-flake-investigation.mjs",
-      "subject": "spawnSync(\"tar\", [\"-xf\", archive, \"-C\", snapshot]",
-      "title": "A green test suite here depends on which shell launched it, because a bare `tar` can resolve to one that cannot read a Windows path — which of three fixes?",
-      "eli5": "One helper in this repository unpacks a tar archive by calling the command `tar` by name and letting the operating system decide which program that means. On this machine two different programs answer to that name. If the suite is started from Git Bash, the name resolves to GNU tar, and GNU tar treats the leading part of a Windows path before the colon — the `C` in `C:\\Users\\...` — as the name of a REMOTE MACHINE to connect to, so it never opens the file and reports 'Cannot connect to C: resolve failed'. If the suite is started from PowerShell, the same name resolves to a different program, bsdtar, which reads the path correctly. Both were run this session on the same code: red from Git Bash, and green from PowerShell with 6520 tests passing and none failing. Linux never sees this, because Linux paths have no drive letter, so the continuous-integration server has always been green. This is not a recent breakage — the code landed about eight hours before the last recorded successful run. What it means in practice is that a passing test suite on this machine is currently a fact about which shell you happened to use, not about the code. An agent that starts from the wrong shell meets a failing suite it did not cause, and has to work out why; that happened during this run and cost a wrong diagnosis before the real cause was measured. The three fixes differ in how general they are.",
-      "question": "scripts/shared/dispatch-load-flake-investigation.mjs calls `tar` by bare name to unpack a snapshot, so the suite passes or fails depending on which `tar` the launching shell's PATH resolves. Which fix should land?",
-      "options": [
-        {
-          "label": "Name the Windows system tar",
-          "answer": "On Windows call C:\\Windows\\System32\\tar.exe, which reads drive-lettered paths correctly, and keep the bare name everywhere else. BENEFIT: this exact form is already proven green in the proposal's measured record, it changes nothing off Windows, and it alters only which program is named rather than what counts as success. COST: it writes a system path into the source, and Windows 10 version 1803 and older ship no such program, so it needs a fallback to the bare name. CONFIDENCE: high — both the failure and the fix were measured on this machine this session."
-        },
-        {
-          "label": "Pass GNU tar --force-local",
-          "answer": "Add the --force-local option, which tells GNU tar to treat the argument as a local file even though it contains a colon. BENEFIT: one code path on every platform, and no system path written into the source. COST: --force-local exists only in GNU tar, so it breaks if the other program is ever the one resolved — the two fixes fail in opposite directions. CONFIDENCE: medium — the option's behaviour is documented, but I did not measure this form."
-        },
-        {
-          "label": "Route it through the existing resolver",
-          "answer": "Send the call through resolveExecArgv, the helper this repository already owns for deciding which executable to run on a given platform, so one place answers that question for every caller. BENEFIT: the only option that stops the next call site repeating the mistake — and a second, independent instance of the same mistake was found the same night in the machine-wide lane probe. COST: the largest change of the three, and it touches a shared boundary rather than one line. CONFIDENCE: medium — the helper exists and the instruction file names it, but I did not trace whether it handles a plain executable as well as a wrapper script."
-        },
-        {
-          "label": "Leave it",
-          "answer": "Change nothing. The suite passes from PowerShell, which is where releases run. BENEFIT: no source change and no risk. COST: the local green gate keeps depending on which shell launched it, so any agent working from a Git Bash shell meets a failing suite it did not cause and must diagnose this again from scratch. CONFIDENCE: high on that cost — it is exactly what happened during this run."
-        }
-      ],
-      "evidence": [
-        "scripts/shared/dispatch-load-flake-investigation.mjs contains the literal call `spawnSync(\"tar\", [\"-xf\", archive, \"-C\", snapshot]` (grep, HEAD 23079f37).",
-        "Full suite from Git Bash: RED, exit 1, one failure — tests/shared/load-flake-record.test.ts, 'snapshot extraction failed (128): tar: Cannot connect to C: resolve failed'. The vitest gate re-ran the file alone and it failed alone. Log: .audit-tools/nightly/suite-0909.log.",
-        "Full suite from PowerShell: GREEN, 6520 passed / 0 failed. Log: .audit-tools/nightly/suite-0909-syspath.log.",
-        "Two-PATH probe over one archive (.audit-tools/nightly/tar-probe.mjs): inherited PATH resolves GNU tar 1.35, extract status 128; System32-first resolves bsdtar 3.8.4, extract status 0.",
-        "NOT a regression: the helper and its test both landed in a1616d1d at 2026-09-07 12:04 -0700, and the last recorded full-suite green is 2026-09-08T03:24:59Z — about eight hours later with that code present. An earlier draft of the proposal called it a regression; that was wrong and the correction is kept visible in the proposal's RED-AT.txt.",
-        "Full analysis: .audit-tools/nightly/proposals/P62-tar-cannot-take-a-drive-lettered-path/."
-      ],
-      "premise_probes": [
-        {
-          "file": "scripts/shared/dispatch-load-flake-investigation.mjs",
-          "contains": "spawnSync(\"tar\", [\"-xf\", archive, \"-C\", snapshot]"
-        }
-      ],
-      "subject_key": "17604a2e41b978ed",
-      "first_seen": "2026-09-09",
-      "nights_open": 2
-    },
-    {
       "id": "solutions-nightly-output-placement-on-a-feature-branch",
       "leg": "solutions",
       "path": ".audit-tools/nightly/proposals/INDEX-2026-09-09.md",

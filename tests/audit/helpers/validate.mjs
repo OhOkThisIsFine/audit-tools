@@ -1,17 +1,15 @@
 import { access } from "node:fs/promises";
+// `describeValue` and `isRecord` are IMPORTED, never re-declared. Both stood
+// here as byte-identical copies of `src/shared/validation/basic.ts`. The copies
+// is the defect, not their fidelity: a duplicated predicate stays correct only
+// until someone edits one of them, and the failure mode is a test helper
+// disagreeing with the validator it is helping to exercise.
+// `tests/shared/test-mirrors-production.test.ts` is the invariant that keeps a
+// third copy from appearing.
+export { describeValue, isRecord } from "audit-tools/shared";
 
 export function fail(message) {
   throw new Error(message);
-}
-
-export function describeValue(value) {
-  if (Array.isArray(value)) return "array";
-  if (value === null) return "null";
-  return typeof value;
-}
-
-export function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function assertNonEmptyString(value, label) {

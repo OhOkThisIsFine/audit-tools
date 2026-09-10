@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { spawnHidden } from "../helpers/spawn.mjs";
+// From `trackedSpawn.js`, the module that owns the bound — a `.mjs` re-export is
+// invisible to `check:deadcode` (see the note in tests/shared/sync-spawn-budget).
+import { runBounded } from "../helpers/trackedSpawn.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
@@ -17,31 +19,41 @@ import {
 const harness = createNextStepHarness(".test-next-step-pipeline-dispatch");
 const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint, writeReadyStructuredAuditIntake, approveReviewGate, writeCompleteContractPipelineDag } = harness;
 
-// Async CLI spawn — the child (a full `remediate-code next-step` boot) can run for
-// seconds, and a sync spawn would hold this worker's event loop for the child's whole
-// wall-time in ONE stretch. vitest workers must answer birpc within 60s, so a test
-// worker never blocks on a long child synchronously (backlog: RPC starvation).
-// Mirrors spawnSync's return shape so assertions read identically.
+/**
+ * Async CLI spawn, under the suite's per-CLI-call deadline.
+ *
+ * The child is a full `remediate-code next-step` boot, so it can run for seconds
+ * — and a SYNC spawn would hold this worker's event loop for the child's whole
+ * wall-time in one stretch, which is what starves vitest's worker RPC (the
+ * backlog's RPC-starvation entry). This was already async for that reason.
+ *
+ * What it was NOT is BOUNDED. It resolved only from `close`, so a wedged CLI
+ * left the promise pending until the 300s test ceiling fired — on whichever test
+ * happened to be running — with the child still alive afterwards. `runBounded`
+ * (tests/helpers/trackedSpawn.ts) is the shared formulation: the same spawn,
+ * plus a deadline that rejects NAMING the command, the elapsed bound and the
+ * output it produced, and that SIGTERMs then SIGKILLs the child. Writing a
+ * second local copy of the spawn here is how the two drifted apart the first
+ * time; there is now one.
+ *
+ * Mirrors spawnSync's return shape so assertions read identically.
+ */
 function spawnCli(
   args: string[],
   options: { cwd: string },
 ): Promise<{ status: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawnHidden(process.execPath, args, {
-      cwd: options.cwd,
-      stdio: ["ignore", "pipe", "pipe"],
+  return runBounded(process.execPath, args, { cwd: options.cwd })
+    .then(({ stdout, stderr }) => ({ status: 0, stdout, stderr }))
+    .catch((error: Error) => {
+      // `runBounded` rejects on a non-zero exit with the output in the message.
+      // The call sites assert on `status`, so an exit-code or deadline failure
+      // must still arrive as a non-zero status carrying that message — not as a
+      // thrown error, which would change what every one of them is asserting.
+      if (/exited|did not exit within|failed to spawn/u.test(error.message)) {
+        return { status: 1, stdout: "", stderr: error.message };
+      }
+      throw error;
     });
-    let stdout = "";
-    let stderr = "";
-    child.stdout?.on("data", (chunk: unknown) => {
-      stdout += String(chunk);
-    });
-    child.stderr?.on("data", (chunk: unknown) => {
-      stderr += String(chunk);
-    });
-    child.on("error", reject);
-    child.on("close", (status: number | null) => resolve({ status, stdout, stderr }));
-  });
 }
 
 beforeEach(async () => {

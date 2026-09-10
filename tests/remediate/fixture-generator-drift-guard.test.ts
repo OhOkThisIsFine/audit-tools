@@ -8,6 +8,26 @@
  *   - NEVER overwrites the committed fixture (generator is redirected via argv).
  *   - Raw-string equality (not parsed/re-serialized) — detects key-order, whitespace, or newline drift.
  *   - Targeted sub-assertion on contract_version field.
+ *
+ * HERMETICITY — the verdict is a function of the SOURCE TREE alone. The guard's
+ * claim is "the committed fixture is what the current generator renders", so it
+ * must not also be measuring whether some other process happens to have built
+ * `dist/` yet. Two mechanisms used to make it do exactly that:
+ *
+ *   - the generator imports `audit-tools/shared`, whose `exports` map resolves to
+ *     `dist/shared/index.js` — so the guard silently compared a STALE producer
+ *     against the committed fixture whenever `src/shared` had moved on without a
+ *     rebuild (a false RED), and a fresh one whenever a build happened to land
+ *     (a false GREEN only because something else had run);
+ *   - `npm run build`'s `clean-dist.mjs` DELETES `dist/` wholesale before `tsc`
+ *     re-emits, so a build running concurrently in the same checkout could leave
+ *     the generator's import unresolvable mid-test.
+ *
+ * Running the generator through the tsx loader (the same `node --import
+ * tsx/esm` form `check:readme-sample-report` and `generate-schemas` use) resolves
+ * `audit-tools/shared` through the tsconfig `paths` map to `src/shared/index.ts`.
+ * The guard then measures the source tree and nothing else, which is what its
+ * name always claimed.
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { readFile, rm, mkdtemp } from "node:fs/promises";
@@ -37,12 +57,17 @@ const GENERATOR_SCRIPT = join(
  * than `promisify`d because the helper is untyped JS, so `promisify` cannot
  * recover its `(file, args, options, callback)` arity from the inferred type.
  * Rejects on a non-zero exit exactly as `promisify(execFile)` did.
+ *
+ * `--import tsx/esm` is passed as an argv pair, never through a shell: on win32
+ * the loader specifier is a bare module name tsx's own resolver owns, and a
+ * `shell: true` spawn here would make cmd.exe the child — the grandchild-that-
+ * outlives-its-parent shape `tests/helpers/trackedSpawn.ts` exists to avoid.
  */
 function runGenerator(outPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     execFileHidden(
       process.execPath,
-      [GENERATOR_SCRIPT, outPath],
+      ["--import", "tsx/esm", GENERATOR_SCRIPT, outPath],
       { cwd: PACKAGE_ROOT },
       (error: Error | null) => {
         if (error) reject(error);

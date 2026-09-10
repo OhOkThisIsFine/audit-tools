@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { compareCodeUnits, stableStringify } from "audit-tools/shared";
 
 export type JsonRecord = Record<string, unknown>;
 export type ByteSource = string | Uint8Array;
@@ -123,34 +124,31 @@ export interface WriteOnceGateOracle {
   readonly foundation_owned_paths: readonly string[];
 }
 
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-export function stableJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return "[" + value.map(stableJson).join(",") + "]";
-  }
-  if (value !== null && typeof value === "object") {
-    const record = value as Readonly<Record<string, unknown>>;
-    return (
-      "{" +
-      Object.keys(record)
-        .sort(compareCodeUnits)
-        .map((key) => JSON.stringify(key) + ":" + stableJson(record[key]))
-        .join(",") +
-      "}"
-    );
-  }
-  return JSON.stringify(value);
-}
-
 function bytes(value: ByteSource): Uint8Array {
   return typeof value === "string" ? Buffer.from(value, "utf8") : value;
 }
 
 export function sha256Bytes(value: ByteSource): string {
   return createHash("sha256").update(bytes(value)).digest("hex");
+}
+
+/**
+ * The canonical content hash, over the ONE production serializer.
+ *
+ * This module used to carry its own `stableJson` + `compareCodeUnits` pair.
+ * That was not merely duplicate code: the local copy sorted with the same
+ * comparator but omitted production's `undefined` normalization (top-level
+ * `undefined` → `"null"`, `undefined` array entries → `null`, `undefined`-valued
+ * object keys DROPPED). So a fixture holding a present-but-undefined field
+ * hashed differently here than under the production code that WROTE the artifact
+ * being verified — a green test over a hash the tool would never have produced.
+ *
+ * `src/shared/stableStringify.ts` states the rule outright: "There must be
+ * exactly ONE such serializer — never write a second." This module is the
+ * second one, so it now imports the first.
+ */
+export function stableJson(value: unknown): string {
+  return stableStringify(value);
 }
 
 export function canonicalSha256(value: unknown): string {

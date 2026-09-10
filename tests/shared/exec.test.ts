@@ -130,6 +130,44 @@ test("resolveExecArgv tolerates an empty argv", () => {
   expect(resolveExecArgv([])).toEqual([]);
 });
 
+// ── P62: a bare name PATH answers with the WRONG executable ───────────────────
+// `tar` is the case. On win32 a bare `tar` resolves through PATH to Git Bash's
+// GNU tar wherever a Git Bash sits ahead of System32, and GNU tar reads the
+// leading `C:` of the absolute archive path `git archive` always produces as a
+// REMOTE HOST: `tar: Cannot connect to C: resolve failed`. Which tar PATH yields
+// is a property of the LAUNCHER, so the name is resolved in `platformCommand`
+// instead. These cases are driven from any host, since `win32.join` builds the
+// Windows path regardless of where the test runs.
+test("platformCommand resolves a Windows-native command under SystemRoot on win32", () => {
+  expect(platformCommand("tar", "win32")).toBe("C:\\Windows\\System32\\tar.exe");
+  // The root is READ, never hard-coded: a Windows installed elsewhere resolves
+  // to its own tar rather than to a path that need not exist.
+  expect(platformCommand("tar", "win32", "D:\\Win")).toBe("D:\\Win\\System32\\tar.exe");
+  // An already-absolute invocation is left alone — the caller has answered the
+  // question this exists to answer.
+  expect(platformCommand("C:\\Windows\\System32\\tar.exe", "win32")).toBe(
+    "C:\\Windows\\System32\\tar.exe",
+  );
+  // Off win32 the bare name is already the right answer.
+  expect(platformCommand("tar", "linux")).toBe("tar");
+  // Unrelated commands are untouched — this is not a general rewrite.
+  expect(platformCommand("git", "win32")).toBe("git");
+});
+
+test("resolveExecArgv carries the tar resolution through to the spawned argv", () => {
+  // The property that matters is on the ARGV, not on `platformCommand`: a
+  // resolution that stops at the helper and never reaches the spawn changes
+  // nothing.
+  const argv = resolveExecArgv(["tar", "-xf", "C:\\snap\\source.tar", "-C", "C:\\snap"], {
+    platform: "win32",
+    systemRoot: "C:\\Windows",
+  });
+  expect(argv[0]).toBe("C:\\Windows\\System32\\tar.exe");
+  expect(argv.slice(1)).toEqual(["-xf", "C:\\snap\\source.tar", "-C", "C:\\snap"]);
+  // No batch wrapping: `tar.exe` is a real executable, not a `.cmd` shim.
+  expect(argv.includes("/d")).toBe(false);
+});
+
 // ── runTracked result fields ──────────────────────────────────────────────────
 
 test("runTracked result includes cwd when option is provided", () => {

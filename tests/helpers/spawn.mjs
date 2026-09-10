@@ -35,8 +35,18 @@
  */
 import { execFileSync, execSync } from "node:child_process";
 
-export { spawnSyncHidden } from "../../src/shared/tooling/exec.ts";
-export { spawnHidden, execFileHidden } from "./trackedSpawn.ts";
+// `spawnSyncHidden` is re-exported from `trackedSpawn.ts` rather than from
+// `src/shared/tooling/exec.ts` directly: the tracked twin is the same helper
+// plus the blocking-duration ledger, which is what makes "no worker blocks its
+// event loop >= 60s" a measured property instead of a reviewed one. The shared
+// module stays the single implementation; this is the recording wrapper.
+export {
+  spawnSyncHidden,
+  spawnHidden,
+  execFileHidden,
+  runBounded,
+  CLI_CALL_DEADLINE_MS,
+} from "./trackedSpawn.ts";
 
 /** `child_process.execFileSync` with `windowsHide` forced on. */
 export const execFileSyncHidden = (command, args, options) =>

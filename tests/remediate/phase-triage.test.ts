@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RemediationState } from "../../src/remediate/state/store.js";
+import type { RemediationItemState } from "../../src/remediate/state/types.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
 import { scratchDir } from "../helpers/scratch.js";
 
@@ -14,7 +15,7 @@ const TEST_DIR = scratchDir(".test-triage");
 
 const BASE_OPTIONS = { root: dirname(TEST_DIR), artifactsDir: TEST_DIR };
 
-function makeState(items: Record<string, unknown>): RemediationState {
+function makeState(items: Record<string, RemediationItemState>): RemediationState {
   return makeBaseState({ status: "triage", items });
 }
 

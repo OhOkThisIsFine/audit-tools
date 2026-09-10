@@ -330,6 +330,16 @@ test("INV-WH: tests/helpers/spawn.mjs exists and exports the window-hidden spawn
   for (const name of ["spawnHidden", "spawnSyncHidden", "execFileSyncHidden", "execSyncHidden", "execFileHidden"]) {
     expect(typeof helper[name], `tests/helpers/spawn.mjs must export ${name} — INV-WH`).toBe("function");
   }
+  // The BOUNDED async runner (P14). Listed here with the wrappers because it is
+  // the one every CLI-driving test must reach for: the local
+  // `new Promise(... child.on("exit"))` shape it replaces has no deadline, so a
+  // wedged CLI stays pending into the test ceiling and outlives the abort. A
+  // caller that cannot find it here writes that shape again.
+  expect(typeof helper.runBounded, "tests/helpers/spawn.mjs must export runBounded — P14").toBe("function");
+  expect(
+    Number.isFinite(helper.CLI_CALL_DEADLINE_MS),
+    "tests/helpers/spawn.mjs must export the one CLI deadline formulation — P14",
+  ).toBe(true);
 });
 
 test("INV-WH: shared exec.ts exports both spawnSyncHidden and spawnHidden (single source)", async () => {

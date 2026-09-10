@@ -830,6 +830,35 @@ export const GUARDS = [
       'pins the full-suite green stamp (P48): the full-suite predicate, the tree-bound stamp path, ' +
       'the run-vitest-gate write wiring, and the closeout-challenge-gate read wiring',
   },
+  {
+    id: 'sync-spawn-budget-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/sync-spawn-budget.test.ts',
+    note:
+      'no worker blocks its event loop for >= SYNC_BLOCK_BUDGET_MS (60s) in one synchronous spawn ' +
+      '(the P14 worktree-RPC-starvation half): tests/helpers/trackedSpawn.ts records (file, command, ms) ' +
+      'per spawnSync call into a run-scoped ledger and this test is the gate over it, so a checker that ' +
+      'acquires a network call or a full-tree walk goes red naming the command rather than surfacing as ' +
+      'an unattributable flaky worker. UNCOVERED: a sync spawn that bypasses tests/helpers/spawn.mjs ' +
+      'with a raw node:child_process import is not recorded — INV-WH ' +
+      '(tests/shared/shared-tests-invariants.test.mjs) is the sibling guard that fails exactly that ' +
+      'import, so the half is closed by a different mechanism, not left to memory.',
+  },
+  {
+    id: 'test-mirrors-production-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/test-mirrors-production.test.ts',
+    note:
+      'a test file may not re-implement its subject: a test-declared function whose NAME matches a ' +
+      'production export, whose body BRANCHES, and whose body calls nothing imported from production ' +
+      'is a copy, and a copy stays green after the original changes. Three signals together separate a ' +
+      'mirror from a fixture builder (no branching) and from a delegation wrapper (imports the name). ' +
+      'Drove five live conversions — stableStringify x2, compareCodeUnits, globToRegExp, countLines, ' +
+      'the AuditResult producer x2. UNCOVERED, stated: detection is textual, so an SEMANTIC mirror ' +
+      'under a different name is not caught (the survey that sized this guard found ~13 of those, ' +
+      'including a hand-rolled cycle detector and a release poll loop); and a mirror whose name ' +
+      'coincides with no production export is invisible to the name-match signal.',
+  },
   { id: 'hook-trap-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-trap-guards.test.ts' },
   {
     id: 'green-mechanism-declaration-test',

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { test } from "vitest";
+import { stableStringify } from "audit-tools/shared";
 
 const CONTRACT_FAILURE =
   "contract:attribution-contract-retirement:not-yet-satisfied";
@@ -21,16 +22,15 @@ interface SchemaLike {
   safeParse(value: unknown): SchemaResult;
 }
 
+// The ONE production serializer. This file carried its own copy, which was
+// doubly wrong: `.sort()` with no comparator is UTF-16 code-unit order by
+// accident (the same as `compareCodeUnits`, but by luck rather than by
+// statement), and it omitted production's `undefined` normalization — so a
+// fixture with a present-but-undefined field hashed differently here than under
+// the producer. `src/shared/stableStringify.ts` states the rule directly:
+// "There must be exactly ONE such serializer — never write a second."
 function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const record = value as Readonly<Record<string, unknown>>;
-    return `{${Object.keys(record)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
+  return stableStringify(value);
 }
 
 function sha256(value: string): string {

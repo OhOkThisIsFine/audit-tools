@@ -7,18 +7,40 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolveExecArgv } from "../../dist/shared/tooling/exec.js";
 import { openDispatchLane } from "./mcp-dispatch-lane.mjs";
+
+/**
+ * Spawn a logical argv with the platform resolution applied.
+ *
+ * `tar` is why this exists (P62): the archive path below is absolute, so on
+ * Windows it begins `C:\`, and a bare `tar` resolved through PATH is GNU tar
+ * wherever a Git Bash sits ahead of `System32` — which died with
+ * `tar: Cannot connect to C: resolve failed`, because GNU tar reads a leading
+ * `host:` as a REMOTE MACHINE. `resolveExecArgv` is the repo's one answer to
+ * "which executable is the right one on this platform"; a raw name here is the
+ * defect, not a style choice.
+ *
+ * Imported from `dist/` deliberately, and this is the ONLY such import in
+ * scripts/: this module runs as a detached child of the vitest gate, i.e. only
+ * ever inside a built tree, so the compiled twin is always present. Modules
+ * that can run pre-build (`.claude/hooks/`, `prebuild`) must not copy this line.
+ */
+function spawnResolved(argv, options) {
+  const [command, ...args] = resolveExecArgv(argv);
+  return spawnSync(command, args, options);
+}
 
 export function createIsolatedSnapshot(repoRoot, tree) {
   if (!/^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(tree)) throw new Error(`invalid tree id: ${tree}`);
   const snapshot = mkdtempSync(join(tmpdir(), "audit-tools-load-flake-"));
   const archive = join(snapshot, "source.tar");
   try {
-    const packed = spawnSync("git", ["archive", "--format=tar", `--output=${archive}`, tree], {
+    const packed = spawnResolved(["git", "archive", "--format=tar", `--output=${archive}`, tree], {
       cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60_000, windowsHide: true,
     });
     if (packed.status !== 0) throw new Error(`git archive failed (${packed.status}): ${packed.stderr}`);
-    const unpacked = spawnSync("tar", ["-xf", archive, "-C", snapshot], {
+    const unpacked = spawnResolved(["tar", "-xf", archive, "-C", snapshot], {
       encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60_000, windowsHide: true,
     });
     if (unpacked.status !== 0) throw new Error(`snapshot extraction failed (${unpacked.status}): ${unpacked.stderr}`);

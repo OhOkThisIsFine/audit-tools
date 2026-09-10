@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type StdioOptions } from "node:child_process";
+import { win32 } from "node:path";
 
 // Single synchronous command runner shared by both orchestrators. Before
 // Phase 0 the remediator (`utils/commands.ts`) and the auditor
@@ -57,6 +58,54 @@ export interface RunTrackedResult {
 }
 
 const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
+
+/**
+ * Bare command names whose PATH resolution is WRONG on Windows, mapped to their
+ * location under the Windows directory.
+ *
+ * `tar` is the live case (P62, 2026-09-10). Windows ships bsdtar at
+ * `%SystemRoot%\System32\tar.exe`, but a shell with Git Bash ahead on PATH —
+ * which is what this suite is launched from under Bash, and what an agent
+ * session is launched from under many IDE terminals — resolves the bare name to
+ * GNU tar first. GNU tar parses a leading `C:` in an argument as a REMOTE HOST,
+ * so `tar -xf C:\…\source.tar`, the absolute archive path `git archive` always
+ * produces, dies with:
+ *
+ *     tar: Cannot connect to C: resolve failed
+ *
+ * Same command, same argument, two different tars on one box. Which one PATH
+ * yields is a property of the LAUNCHER, not of the code, so — per *Everything-
+ * agnostic by default* — the name is resolved here instead, in the one place
+ * that already answers "which executable is the right one on this platform".
+ *
+ * The system path is named through `%SystemRoot%` rather than a hard-coded
+ * `C:\Windows`, so a Windows installed elsewhere still resolves to its own tar.
+ *
+ * Reach, stated: Windows 10 1803 and older ship no `System32\tar.exe`. There the
+ * bare name comes back and behaviour is exactly what it is today — this is not a
+ * regression guard, it is a launcher-independent resolution.
+ */
+const WINDOWS_NATIVE_COMMANDS: ReadonlyMap<string, string> = new Map([
+  ["tar", win32.join("System32", "tar.exe")],
+]);
+
+/**
+ * The absolute Windows path a bare command name must resolve to, or `null` when
+ * the plain name is already correct. `win32.join` is used explicitly rather than
+ * `join` so the value is the WINDOWS path even when this runs on another host
+ * (a test driving the win32 branch from Linux CI).
+ */
+function windowsNativeCommand(
+  command: string,
+  systemRoot: string | undefined,
+): string | null {
+  const relative = WINDOWS_NATIVE_COMMANDS.get(command);
+  if (relative === undefined) return null;
+  // `C:\Windows` as the last resort matches Node's own `process.env.ComSpec ??
+  // "cmd.exe"` idiom below; `SystemRoot` is set on every supported Windows.
+  const root = systemRoot ?? process.env.SystemRoot ?? "C:\\Windows";
+  return win32.join(root, relative);
+}
 
 /**
  * How long {@link runTrackedAsync} waits after SIGTERM before escalating to an
@@ -263,15 +312,20 @@ export function coerceJsonObjectArg<T extends Record<string, unknown>>(
  * batch files that `spawn` cannot launch without a shell. Map them to their
  * `.cmd` form so the batch-wrapping path below applies. Anything already
  * carrying an executable extension is returned unchanged.
+ *
+ * `WINDOWS_NATIVE_COMMANDS` names are resolved to their `%SystemRoot%` path at
+ * the same time — a bare name that PATH answers with the WRONG executable
+ * (`tar`, P62) rather than with a launcher.
  */
 export function platformCommand(
   command: string,
   platform: NodeJS.Platform = process.platform,
+  systemRoot?: string,
 ): string {
   if (platform !== "win32") return command;
   if (/\.(?:cmd|bat|com|exe)$/iu.test(command)) return command;
   if (SHELL_SHIM_COMMANDS.has(command)) return `${command}.cmd`;
-  return command;
+  return windowsNativeCommand(command, systemRoot) ?? command;
 }
 
 function isWindowsBatch(command: string, platform: NodeJS.Platform): boolean {
@@ -320,17 +374,18 @@ export function quoteForShellInterpreterCmd(value: string): string {
 
 /**
  * Resolve a logical argv into the concrete `[command, ...args]` that should be
- * spawned on this platform, applying package-manager shim mapping and Windows
- * batch wrapping. Exposed for callers that spawn asynchronously and only need
- * the resolved argv.
+ * spawned on this platform, applying package-manager shim mapping, the
+ * `WINDOWS_NATIVE_COMMANDS` resolution, and Windows batch wrapping. Exposed for
+ * callers that spawn asynchronously and only need the resolved argv — and for
+ * `spawnSync` callers, which need the same answer without the runner.
  */
 export function resolveExecArgv(
   argv: string[],
-  options: { platform?: NodeJS.Platform } = {},
+  options: { platform?: NodeJS.Platform; systemRoot?: string } = {},
 ): string[] {
   if (argv.length === 0) return [];
   const platform = options.platform ?? process.platform;
-  const command = platformCommand(argv[0], platform);
+  const command = platformCommand(argv[0], platform, options.systemRoot);
   const args = argv.slice(1);
   const wrapped = wrapForWindowsBatch(command, args, platform);
   return [wrapped.command, ...wrapped.args];

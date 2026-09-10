@@ -6,9 +6,9 @@
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { countLines } from "./countLines.mjs";
 import { walkStepsUntilTerminal } from "./step-driver.js";
 import { declineDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
+import { buildSyntheticResults as buildSyntheticResultsImpl } from "../../../scripts/audit/smoke-audit-flow.mjs";
 import type { AuditTask } from "../../../src/audit/types.js";
 
 const { GATE_LANES, laneSubmissionPath } = await import(
@@ -19,24 +19,27 @@ const { currentStepPath } = await import("audit-tools/shared");
 const { cmdNextStep } = await import("../../../src/audit/cli/nextStepCommand.js");
 const { cmdIngestResults } = await import("../../../src/audit/cli/ingestResultsCommand.js");
 
+/**
+ * Synthesize one AuditResult per assigned task — by calling the PRODUCTION
+ * producer, never by re-building the payload here.
+ *
+ * This file hand-built the AuditResult, byte-identical in shape to
+ * `scripts/audit/smoke-audit-flow.mjs`'s producer and equally invisible to every
+ * typechecker and contract sweep. That is the class
+ * `tests/audit/smoke-producer-contract.test.ts` records as having failed RELEASE
+ * CI: `reviewed_clean` was added to the contract, a `tests/**` fixture sweep went
+ * green, and the hand-built producers were missed because a payload built
+ * without consulting the contract cannot fail on it.
+ *
+ * The production producer validates its own output against the contract, so
+ * routing through it means a contract change breaks here — at `npm test`,
+ * cheaply — rather than in a packaged smoke.
+ *
+ * `tests/shared/test-mirrors-production.test.ts` is the invariant that keeps a
+ * third construction site from appearing.
+ */
 export async function buildSyntheticResults(tasks: AuditTask[], root: string) {
-  return Promise.all(tasks.map(async (task) => ({
-    task_id: task.task_id,
-    unit_id: task.unit_id,
-    pass_id: task.pass_id,
-    lens: task.lens,
-    agent_role: "smoke-reviewer",
-    file_coverage: await Promise.all(
-      task.file_paths.map(async (path) => ({
-        path,
-        total_lines: await countLines(root, path),
-      })),
-    ),
-    findings: [],
-    reviewed_clean: true,
-    notes: ["Synthetic completion result for wrapper integration coverage."],
-    requires_followup: false,
-  })));
+  return buildSyntheticResultsImpl(tasks, root, "wrapper integration coverage");
 }
 
 // Capture console.log output (and silence the non-git-repo warning + the
