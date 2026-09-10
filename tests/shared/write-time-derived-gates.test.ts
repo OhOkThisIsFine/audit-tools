@@ -10,6 +10,28 @@ import {
 } from '../../scripts/shared/derived-file-preflight.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
+
+// The live hook detaches its typecheck work, so a grandchild can still hold the
+// fixture directory on Windows after the hook itself has exited — `rmSync`
+// then reports EPERM (measured under full-suite load and once alone,
+// 2026-09-10). That is the detached child, not the property under test: wait
+// for it, bounded, and if it still holds the directory leave the temp dir for
+// the OS rather than fail a test whose assertions already passed.
+function removeFixtureWithPatience(dir: string): void {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      return;
+    } catch (error) {
+      if (Date.now() > deadline) {
+        process.stderr.write(`write-time fixture left in place (held by a detached child): ${dir} — ${String(error)}\n`);
+        return;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    }
+  }
+}
 const PACKAGE_SCRIPTS = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts as Record<
   string,
   string
@@ -75,7 +97,7 @@ describe('write-time derived gate advisories', () => {
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stderr).toContain('[ADVISORY]');
     } finally {
-      rmSync(fixture, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }); // a spawned hook child can still hold the dir on Windows (EPERM under load, 2026-09-10)
+      removeFixtureWithPatience(fixture);
     }
   });
 });
