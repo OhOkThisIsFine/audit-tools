@@ -171,16 +171,28 @@ for (const sub of subCmds) {
 // re-apply of a 187-line diff, once losing an `assertWindowScopes` call that was
 // only noticed because a red-green then behaved impossibly.
 //
+// `git stash push -- <path>` MOVES the path's uncommitted edits into the stash
+// and restores the index (and, where `git restore --staged` also ran, HEAD): the
+// file is left CLEAN-looking while the work sits somewhere the caller did not put
+// it. That is the same removal from the working tree by a different verb, and it
+// was hit live — a pathspec'd `stash push` swept a 200k-line uncommitted
+// retirement edit, recovered only by a `stash pop`. So the rule is stated over
+// the CLASS (any git verb that removes unstaged edits from the working tree)
+// rather than extended one verb at a time.
+//
 // Fires only on forms that TARGET PATHS: `git checkout -- <paths>`,
-// `git checkout <ref> -- <paths>`, `git checkout .`, and `git restore` (unless
-// it is the index-only `--staged` form, which does not touch the worktree).
-// Plain `git checkout <branch>` is branch switching and is never flagged.
+// `git checkout <ref> -- <paths>`, `git checkout .`, `git restore` (unless it is
+// the index-only `--staged` form, which does not touch the worktree), and the
+// `stash` verbs that move edits out (`push`/`save`, or the bare `git stash` that
+// means `push`). `git stash list`/`show`/`pop`/`apply`/`drop`/`clear`/`store` are
+// admitted — they read the stash or put work BACK. Plain `git checkout <branch>`
+// is branch switching and is never flagged.
 const DESTRUCTIVE_RESTORE_REMEDIES = defineRemedies({
   id: 'destructive-restore',
   remedies: [
     {
       kind: 'prose',
-      text: 'fix: undo a temporary edit by INVERTING it with a second targeted edit, copy it to the scratchpad and back, or preserve it with `git stash push -- <path>`.',
+      text: 'fix: undo a temporary edit by INVERTING it with a second targeted edit, or copy the file to the scratchpad and back. Every git verb that rewrites the worktree is the trap — stashing the path is not a way to protect it.',
     },
     {
       kind: 'command',
@@ -204,6 +216,23 @@ function restoreTargets(sub) {
     if (/--staged\b/.test(stripped) && !/--worktree\b/.test(stripped)) return null;
     const args = sub.split(/\s+/).slice(sub.split(/\s+/).indexOf('restore') + 1);
     return args.filter((a) => !a.startsWith('-'));
+  }
+
+  // The stash verbs that MOVE edits out of the working tree. Tested the same way
+  // as `checkout --` / `restore` — porcelain's WORKTREE column (Y) is non-space
+  // only for a file carrying edits the index does not have, which is exactly what
+  // the stash takes. A bare `git stash` and a pathspec-less `git stash push` take
+  // the WHOLE worktree, so they are tested as the path `.` rather than skipped.
+  // `list`/`show`/`pop`/`apply`/`drop`/`clear`/`store` read the stash or put work
+  // BACK, and stay admitted.
+  if (/\bgit\b[^|]*\bstash\b/.test(stripped)) {
+    const stashTokens = sub.split(/\s+/);
+    const args = stashTokens
+      .slice(stashTokens.indexOf('stash') + 1)
+      .filter((t) => !t.startsWith('-'));
+    const verb = args[0] ?? 'push'; // a bare `git stash` IS `git stash push`
+    if (!/^(?:push|save)$/.test(verb)) return null;
+    return args.length <= 1 ? ['.'] : args.slice(1);
   }
 
   if (!/\bgit\b[^|]*\bcheckout\b/.test(stripped)) return null;
@@ -233,8 +262,10 @@ for (const sub of subCmds) {
   if (atRisk.length > 0) {
     deny(
       DESTRUCTIVE_RESTORE_REMEDIES,
-      'destructive restore — this would silently discard UNSTAGED work (git restores from the INDEX, ' +
-        'and the resulting tree looks clean):\n' +
+      'destructive restore — this would silently REMOVE the unstaged work below from the ' +
+        'working tree, leaving a tree that looks clean. `checkout --` / `restore` rewrite the file ' +
+        'from the INDEX; a `stash push` naming the path takes the edits into the stash. Either way the ' +
+        'change is gone from where you left it:\n' +
         atRisk.map((p) => `  - ${p}`).join('\n'),
     );
   }
@@ -328,6 +359,25 @@ if (isBash) {
   }
   // PowerShell here-string in a POSIX shell: parsed as literal `@` plus a syntax
   // error, and a commit lands with a mangled/truncated message.
+  //
+  // Scanned on the HEREDOC-BLANKED text, like every other rule. Reading the raw
+  // command here let a heredoc opener ANYWHERE ELSE in the call blank this
+  // construct away (stripHeredocBodies was matched on the raw line, so a quoted
+  // mention of a heredoc read as an opener and swallowed the rest of the command).
+  // That is why the same form was admitted twice and refused once on 2026-08-27:
+  // nothing about the here-string differed between the three attempts — the text
+  // AROUND it did. stripHeredocBodies is now a function of its input alone, and
+  // this rule reads a command in which no heredoc is unterminated, so the verdict
+  // is a property of this construct. The one form that legitimately escapes it is
+  // stated: an unterminated heredoc is left unblanked rather than swallowing the
+  // command (bash rejects such a command outright), and a here-string after one
+  // is therefore still refused rather than silently admitted.
+  //
+  // The form: an opener `@'` / `@"` at a NON-WORD boundary, then any body, then a
+  // closing quote of the SAME kind. Anchoring on the closer rather than on a line
+  // break is what makes the SINGLE-LINE `-m @'x'@` refused too — the older
+  // whitespace-anchored pattern admitted it silently. Requiring the opener to sit
+  // at a non-word boundary keeps an email address (`a@'`) out of it.
   const BASH_HERE_STRING_REMEDIES = defineRemedies({
     id: 'bash-powershell-here-string',
     remedies: [
@@ -342,7 +392,19 @@ if (isBash) {
       },
     ],
   });
-  if (/@['"]\s*\r?\n/.test(cmd)) {
+  const HERE_STRING_OPEN = /(?:^|[^\w])@(['"])/;
+  const HERE_STRING_CLOSE = /(['"])@/;
+  // Opener at a NON-WORD boundary, then a closing quote of the SAME kind later in
+  // the text. The body may be anything, including empty, and may start on the
+  // same line — `-m @'x'@` is one line and mangles exactly like the long form.
+  function isPowerShellHereString(text) {
+    const open = HERE_STRING_OPEN.exec(text);
+    if (!open) return false;
+    const quote = open[1];
+    const close = HERE_STRING_CLOSE.exec(text.slice(open.index + open[0].length));
+    return close !== null && close[1] === quote;
+  }
+  if (isPowerShellHereString(cmd)) {
     deny(
       BASH_HERE_STRING_REMEDIES,
       'PowerShell here-string (@\'...\'@) in a Bash-tool command — POSIX sh parses it as literal `@` ' +
@@ -579,11 +641,59 @@ const SUITE_CMD =
 // Read-only verbs (`log`, `status`, `diff`, `show`, `branch`) are deliberately
 // ABSENT: piping those into a filter is correct usage, and a false red would
 // cost as much as the false green this rule exists to stop.
-const STATE_CHANGING_CMD =
-  /\bgit\s+(?:push|commit|merge|rebase|cherry-pick|tag)\b|\b(?:npm|pnpm|yarn)\s+publish\b/;
+// A CURATED registry, not a derived predicate: whether an exit status is
+// load-bearing cannot be computed from command text. Each entry states WHY its
+// verb's status matters, and the denial prints that reason, so the list is data a
+// reviewer can weigh a candidate against rather than an implication to re-derive.
+//
+// The axis is the consequence, not the verb: what makes a masked exit dangerous
+// is that the command changes state where a success is BELIEVED — outside this
+// working tree (remote, registry, registry-of-record, cluster) or in local
+// history. The admitted remainder is a stated set too: verbs whose failure leaves
+// the working tree ITSELF visibly wrong (`git reset`, `git stash`, `git branch -D`)
+// cost a bad-looking tree, not a false green. A narrow entry must precede a
+// broader one that would also match, since the first match wins.
+const STATE_CHANGING_VERBS = [
+  {
+    match: /\bgit\s+(?:push|commit|merge|rebase|cherry-pick|revert|tag)\b/,
+    why: 'a refused history-writing git verb leaves the work where it was while the call reports success',
+  },
+  {
+    match: /\bgit\s+remote\s+(?:add|remove|rm|rename|set-url|set-branches|prune)\b/,
+    why: 'a refused remote change leaves the old URL or ref set in place',
+  },
+  {
+    match: /\bgit\s+(?:fetch|pull)\b/,
+    why: 'a failed fetch or pull leaves the local refs stale, and an agent that believes it synced stops checking',
+  },
+  {
+    match: /\b(?:npm|pnpm|yarn|bun)\s+(?:publish|version)\b/,
+    why: 'a refused publish or version bump leaves the registry or the manifest untouched',
+  },
+  {
+    match: /\bgh\s+(?:pr\s+merge|release\s+(?:create|delete))\b/,
+    why: 'a refused PR merge or release leaves the change unlanded or the release unpublished',
+  },
+  {
+    match: /\b(?:docker|podman)\s+push\b/,
+    why: 'a refused image push leaves the registry serving the old digest',
+  },
+  {
+    match: /\bterraform\s+(?:apply|destroy|import)\b/,
+    why: 'a failed apply leaves the infrastructure PARTIALLY changed',
+  },
+];
+// UNCOVERED, stated rather than implied: this is a curated list, so a
+// state-changing command outside it is still admitted — `kubectl`, `aws`,
+// `gcloud`, `helm`, a bespoke deploy script, or any verb whose status is
+// load-bearing for a reason only the caller knows. `node scripts/… --deploy`
+// is the live example. The list grows by naming a verb and its reason here.
+const STATE_CHANGING_CMD = new RegExp(STATE_CHANGING_VERBS.map((v) => v.match.source).join('|'));
 // ONE rule, two families. They differ only in their example command and their
 // consequence sentence, so the skeleton stays single-sourced and the family is a
 // policy axis of it — never a second copy of the rule.
+// A family's `consequence` may be a FUNCTION of the statement, which the
+// state-changing family uses to carry the matched verb's own reason into the denial.
 const MASK_FAMILIES = [
   {
     name: 'suite',
@@ -601,10 +711,13 @@ const MASK_FAMILIES = [
     subject: 'a state-changing command',
     example: 'git push origin main',
     exitNoun: "command's",
-    consequence:
-      'so a REFUSED push/commit/merge comes back EXIT 0, its rejection hint scrolled past inside ' +
-      'the captured tail. An agent that believes the push landed stops verifying, and ' +
-      'pipeline-ownership then reads as satisfied while the work sits only on the local branch.',
+    consequence: (text) =>
+      'so a REFUSED or failed command comes back EXIT 0, its rejection hint scrolled past inside ' +
+      'the captured tail. An agent that believes the change landed stops verifying, and ' +
+      'pipeline-ownership then reads as satisfied while the work sits only on the local branch.\n' +
+      `Why this verb's status is load-bearing: ${
+        STATE_CHANGING_VERBS.find((v) => v.match.test(text))?.why ?? 'state outside this working tree changes'
+      }.`,
   },
 ];
 /**
@@ -651,10 +764,12 @@ for (const sub of subCmds) {
   if (!family || !FILTER_PIPE.test(stripped)) continue;
   if (PIPE_STATUS_PRESERVED) continue;
   if (bypassEnabled('AUDIT_TOOLS_ALLOW_MASKED_EXIT', cmd)) continue;
+  const consequence =
+    typeof family.consequence === 'function' ? family.consequence(stripped) : family.consequence;
   deny(
     MASKED_EXIT_REMEDIES,
     `masked ${family.name} exit code — ${family.subject} piped into a filter reports the FILTER's ` +
-      `status, ${family.consequence}\n` +
+      `status, ${consequence}\n` +
       `The remedy preserves the ${family.exitNoun} status; do not append a status-printing statement.\n` +
       `  offending statement: ${sub.slice(0, 200)}`,
     { example: family.example, exitNoun: family.exitNoun },
@@ -927,7 +1042,7 @@ if (
 // statement sequence's last exit-producing element), never a third named
 // syntactic instance. A statement matching either MASK_FAMILIES entry — a suite
 // OR a state-changing command, the same load-bearing-exit axis as the pipe rule
-// above — followed transitively by
+// above, and now the same widened registry — followed transitively by
 // any non-`&&` separator (`;`, `||`, newline) can have its red replaced by
 // the trailing statement's status; `&&` chains short-circuit and PRESERVE a
 // failure, and a terminal `exit $?` / `exit $LASTEXITCODE` /

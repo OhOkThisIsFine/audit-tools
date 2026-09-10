@@ -262,6 +262,55 @@ describe('shell-trap-guard: Bash-tool syntax traps', () => {
     expect(runHook(SHELL_GUARD, bash('d=$(mktemp -d) && node x.mjs $d')).code).toBe(2);
   });
 
+  // The here-string rule was observed firing on one `git commit -m @'…'@` and
+  // admitting two near-identical siblings in the same session (2026-08-27). The
+  // cause was not the here-string: `stripHeredocBodies` matched a heredoc OPENER
+  // on the raw line, so a quoted mention of one (`rg "<<EOF" docs/`) read as an
+  // opener and blanked the rest of the command — here-string included — before
+  // any rule saw it. The construct is now refused as a function of the command
+  // text ALONE, which is what these cases pin: the same here-string, wrapped in
+  // unrelated text that used to erase it.
+  describe('the PowerShell here-string rule is deterministic over the command text', () => {
+    const HERE_STRING = "git commit -m @'\nsubject\nbody\n'@";
+    // Every one of these wrappers blanked or preserved the construct under the
+    // old raw-line opener match. The last three are the OLD false negatives.
+    const wrappers: Array<[string, string]> = [
+      ['bare', HERE_STRING],
+      ['after a QUOTED heredoc mention', `rg -n "cat <<EOF" docs/\n${HERE_STRING}`],
+      ['after a real heredoc', `cat > m.txt <<'EOF'\nhi\nEOF\n${HERE_STRING}`],
+      ['after an UNTERMINATED heredoc', `cat > m.txt <<'EOF'\nhi\n${HERE_STRING}`],
+      ['after a plain quoted string', `echo "a << b"\n${HERE_STRING}`],
+    ];
+
+    for (const [name, cmd] of wrappers) {
+      it(`refuses the same here-string ${name}`, () => {
+        const { code, stderr } = runHook(SHELL_GUARD, bash(cmd));
+        expect(code, `expected block; stderr:\n${stderr}`).toBe(2);
+        expect(stderr).toMatch(/here-string/);
+        expect(stderr).toMatch(/commit -F/);
+      });
+    }
+
+    it('refuses the SINGLE-LINE form too — it is the same construct', () => {
+      // Pins the opener floor: requiring a line break after `@'` admitted this.
+      expect(runHook(SHELL_GUARD, bash(`git commit -m @'subject'@`)).code).toBe(2);
+    });
+
+    it('admits the forms that are NOT here-strings', () => {
+      // A heredoc body is data, an email address is an address, and a quote at a
+      // word character is not a here-string opener.
+      const allowed = [
+        `cat > m.txt <<'EOF'\nhi\nEOF\ngit commit -F m.txt`,
+        `git commit -m 'mail me at a@b.com'`,
+        `git commit -m "see x@'y"`,
+      ];
+      for (const cmd of allowed) {
+        const { code, stderr } = runHook(SHELL_GUARD, bash(cmd));
+        expect(code, `${cmd}\n${stderr}`).toBe(0);
+      }
+    });
+  });
+
   it('does NOT apply the bash-only syntax rules to PowerShell', () => {
     const payload = { tool_name: 'PowerShell', tool_input: { command: 'node C:\\Code\\x.mjs' } };
     expect(runHook(SHELL_GUARD, payload).code).toBe(0);
@@ -533,7 +582,160 @@ describe('shell-trap-guard: a masked STATE-CHANGING exit code is REFUSED (same c
   it('does not fire on a QUOTED mention of the shape', () => {
     expect(runHook(SHELL_GUARD, bash('rg "git push origin main | tail" docs/')).code).toBe(0);
   });
+
+  // The entry's stated remainder: a command that changes state OUTSIDE this
+  // working tree was still admitted when piped into a filter — `gh pr merge`,
+  // `gh release create`, `npm version`, `docker push`, `terraform apply` were the
+  // named examples. The family is a CURATED registry (`STATE_CHANGING_VERBS`),
+  // because whether an exit status is load-bearing is not derivable from command
+  // text; each entry carries the verb and the reason, and the denial prints it.
+  describe('the widened registry: state changed outside this tree', () => {
+    const outside = [
+      'gh pr merge 42 --squash 2>&1 | tail -3',
+      'gh release create v1.0.2 2>&1 | tail -3',
+      'gh release delete v1.0.2 2>&1 | tail -3',
+      'npm version patch 2>&1 | tail -3',
+      'docker push registry.example.com/app:1 2>&1 | tail -3',
+      'terraform apply -auto-approve 2>&1 | tail -3',
+      'terraform destroy -auto-approve 2>&1 | tail -3',
+      'git fetch origin main 2>&1 | tail -3',
+      'git pull --rebase 2>&1 | tail -3',
+      'git remote set-url origin git@example.com:x/y.git 2>&1 | tail -3',
+      'git revert abc1234 2>&1 | tail -3',
+    ];
+
+    for (const cmd of outside) {
+      it(`refuses \`${cmd}\``, () => {
+        const { code, stderr } = runHook(SHELL_GUARD, bash(cmd));
+        expect(code, `expected block; stderr:\n${stderr}`).toBe(2);
+        expect(stderr).toMatch(/masked state-changing exit code/);
+      });
+    }
+
+    it('states the matched verb\'s own reason in the denial, not a generic one', () => {
+      const { stderr } = runHook(SHELL_GUARD, bash('gh pr merge 42 2>&1 | tail -3'));
+      expect(stderr).toMatch(/refused PR merge or release leaves the change unlanded/);
+    });
+
+    it('still leaves the local, self-evidenting verbs admitted', () => {
+      // These DO change state, but a failure leaves the working tree visibly
+      // wrong, so a piped exit costs a bad-looking tree rather than a false green.
+      for (const cmd of [
+        'git reset --hard HEAD~1 2>&1 | tail -3',
+        'git stash list 2>&1 | tail -3',
+        'git branch -D stale 2>&1 | tail -3',
+        'git apply --check patch.diff 2>&1 | tail -3',
+        'git remote -v 2>&1 | tail -3',
+      ]) {
+        const { code, stderr } = runHook(SHELL_GUARD, bash(cmd));
+        expect(code, `${cmd}\n${stderr}`).toBe(0);
+      }
+    });
+
+    it('the same two escapes and the same bypass still work', () => {
+      expect(runHook(SHELL_GUARD, bash('set -o pipefail; gh pr merge 42 | tail -3')).code).toBe(0);
+      expect(
+        runHook(SHELL_GUARD, bash('gh pr merge 42 | tail -3; exit ${PIPESTATUS[0]}')).code,
+      ).toBe(0);
+      expect(
+        runHook(SHELL_GUARD, bash('gh pr merge 42 | tail -3'), {
+          env: { AUDIT_TOOLS_ALLOW_MASKED_EXIT: '1' },
+        }).code,
+      ).toBe(0);
+    });
+
+    it('the background-laundering rule reads the same registry', () => {
+      // One rule, two families — the widened verb set reaches the exit-FLOW rule
+      // too, so a backgrounded `gh pr merge` followed by anything is refused.
+      const { code, stderr } = runHook(SHELL_GUARD, bashBg('gh pr merge 42 > log 2>&1; echo done'));
+      expect(code, stderr).toBe(2);
+      expect(stderr).toMatch(/laundered/i);
+    });
+  });
 });
+
+// The escape hatch every denial text advertises (`AUDIT_TOOLS_ALLOW_X=1`) was
+// honored only at string start, after `;`/`&`/`|`, or after `export` — while the
+// SAME module treats a newline as a statement separator. A multi-line Bash call
+// therefore got its later statements checked by rules whose documented escape was
+// silently ignored on them (measured 2026-09-04: a line-3 destructive-restore was
+// refused with a remedy that refused identically when applied). The property is
+// agreement between the two sets, so the pin drives ONE pattern through both.
+describe('a guard\'s advertised escape works on every statement the splitter sees', () => {
+  it('the separator set `bypassEnabled` accepts equals the set the splitter splits on', async () => {
+    const split = (await import('../../.claude/hooks/shell-split.mjs')) as {
+      STATEMENT_SEPARATORS: string;
+      splitShellStatements: (cmd: string) => string[];
+      bypassEnabled: (name: string, cmd: string) => boolean;
+    };
+    expect(typeof split.STATEMENT_SEPARATORS).toBe('string');
+    // Every separator the SPLITTER splits on must also let a bypass through after
+    // it — the newline was the one that did not, and that is the whole defect.
+    for (const sep of [';', '&&', '||', '\n']) {
+      const cmd = `echo a${sep}AUDIT_TOOLS_ALLOW_X=1 echo b`;
+      expect(
+        split.splitShellStatements(cmd).length,
+        `separator ${JSON.stringify(sep)} did not split the command`,
+      ).toBeGreaterThan(1);
+      expect(
+        split.bypassEnabled('AUDIT_TOOLS_ALLOW_X', cmd),
+        `separator ${JSON.stringify(sep)} did not admit the bypass`,
+      ).toBe(true);
+    }
+    // The lone `&` is the one-way case, and it is one-way by construction: the
+    // splitter does not split on a backgrounding `&` (a pipe rule needs to see
+    // the whole pipeline), but the bypass set admits it so an escape after one is
+    // still honored. Asserted so the asymmetry cannot be mistaken for drift.
+    expect(split.STATEMENT_SEPARATORS).toContain('&');
+    expect(split.bypassEnabled('AUDIT_TOOLS_ALLOW_X', 'echo a & AUDIT_TOOLS_ALLOW_X=1 echo b')).toBe(
+      true,
+    );
+    // And the set is not merely present — it is what the check reads. A second,
+    // hand-written separator list inside shell-split.mjs would pass every case
+    // above while the two silently diverged again.
+    const source = readFileSync(join(REPO_ROOT, '.claude', 'hooks', 'shell-split.mjs'), 'utf8');
+    expect([...source.matchAll(/STATEMENT_SEPARATORS/gu)].length).toBeGreaterThanOrEqual(2);
+    expect(source).toMatch(/\[;\|\\n\]|\[\$\{STATEMENT_SEPARATORS\}\]/u);
+  });
+
+  it('the guard honors an inline bypass on a statement after a NEWLINE', () => {
+    const dir = makeRepoForBypass();
+    try {
+      writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+      const cmd = `echo one\necho two\nAUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1 git restore a.txt`;
+      const { code, stderr } = runHook(SHELL_GUARD, bash(cmd), { root: dir });
+      expect(code, `expected allow; stderr:\n${stderr}`).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the same inline bypass is ignored when it is merely MENTIONED', () => {
+    // The anchor that keeps documenting the escape from disabling the guard.
+    const dir = makeRepoForBypass();
+    try {
+      writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+      const cmd = `echo "set AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1 to override"\ngit restore a.txt`;
+      expect(runHook(SHELL_GUARD, bash(cmd), { root: dir }).code).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/** A throwaway git repo with one committed file — the stash/restore fixtures. */
+function makeRepoForBypass(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'trap-guard-sep-'));
+  const git = (...args: string[]) =>
+    spawnSyncHidden('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true });
+  git('init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'test');
+  writeFileSync(join(dir, 'a.txt'), 'committed\n');
+  git('add', '-A');
+  git('commit', '-qm', 'base');
+  return dir;
+}
 
 describe('shell-trap-guard: a BACKGROUNDED suite exit laundered by a trailing statement (2026-08-12)', () => {
   // Under run_in_background the harness completion notice reads the COMPOUND's
@@ -905,6 +1107,99 @@ describe('shell-trap-guard: destructive restore (silently discards unstaged work
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // `git stash push <pathspec>` removes the path's uncommitted edits from the
+  // working tree just as silently as `checkout --` does — hit live on a 200k-line
+  // uncommitted retirement edit, recovered only by a `stash pop` (2026-08-12).
+  // The rule is stated over the CLASS (any git verb that removes unstaged edits
+  // from the working tree), and the read-only stash verbs are pinned ADMITTED so
+  // the widened rule cannot become the false red that costs as much.
+  describe('git stash: the verbs that MOVE edits out get the same deny-once', () => {
+    for (const cmd of [
+      'git stash push -- a.txt',
+      'git stash push a.txt',
+      'git stash save a.txt',
+      'git stash push',
+      'git stash',
+    ]) {
+      it(`blocks \`${cmd}\` when the worktree carries unstaged work`, () => {
+        const { dir } = makeRepo();
+        try {
+          writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+          const { code, stderr } = runHook(SHELL_GUARD, bash(cmd), { root: dir });
+          expect(code, `expected block; stderr:\n${stderr}`).toBe(2);
+          expect(stderr).toMatch(/REMOVE the unstaged work/);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
+    }
+
+    it('blocks the bulk forms when only a DIFFERENT file is dirty', () => {
+      // `git stash` / `git stash push` with no pathspec sweep the whole worktree,
+      // so they are tested as `.` — a dirty b.txt must trip them.
+      const { dir } = makeRepo();
+      try {
+        writeFileSync(join(dir, 'b.txt'), 'uncommitted elsewhere\n');
+        for (const cmd of ['git stash', 'git stash push']) {
+          expect(runHook(SHELL_GUARD, bash(cmd), { root: dir }).code, cmd).toBe(2);
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('admits the stash verbs that read the stash or put work BACK', () => {
+      const { dir } = makeRepo();
+      try {
+        writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+        for (const cmd of [
+          'git stash list',
+          'git stash show',
+          'git stash show -p',
+          'git stash pop',
+          'git stash apply',
+          'git stash drop',
+          'git stash clear',
+          'git stash store x',
+        ]) {
+          const { code, stderr } = runHook(SHELL_GUARD, bash(cmd), { root: dir });
+          expect(code, `${cmd}\n${stderr}`).toBe(0);
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('admits a clean-tree stash — nothing to lose', () => {
+      const { dir } = makeRepo();
+      try {
+        expect(runHook(SHELL_GUARD, bash('git stash push -- a.txt'), { root: dir }).code).toBe(0);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('honors the same escape hatch as `checkout --`', () => {
+      const { dir } = makeRepo();
+      try {
+        writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+        expect(
+          runHook(SHELL_GUARD, bash('AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1 git stash push -- a.txt'), {
+            root: dir,
+          }).code,
+        ).toBe(0);
+        expect(
+          runHook(SHELL_GUARD, bash('git stash push -- a.txt'), {
+            root: dir,
+            env: { AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE: '1' },
+          }).code,
+        ).toBe(0);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 });
 

@@ -11,6 +11,17 @@
 // live 2026-07-23). Rules that reason about one statement's flags must see
 // the whole statement.
 
+// THE statement separators, in ONE place. `splitShellStatements` splits on
+// exactly this set and `bypassEnabled` accepts a bypass prefix after exactly
+// this set, so the two cannot drift: the guard's advertised inline escape works
+// on any statement the splitter can produce. They DID drift — the splitter
+// treated a newline as a boundary while the bypass check did not, so a
+// destructive-restore statement on line 3 of a multi-line Bash call was refused
+// with a remedy that refused identically when applied (measured 2026-09-04).
+// The set is a character-class body, not a regex alternation: `&` here also
+// admits the LONE `&` background separator, which the splitter does not split on.
+export const STATEMENT_SEPARATORS = ';&|\n';
+
 // Blank out single/double-quoted span CONTENT (the quote characters remain,
 // and length is preserved) so shell-syntax reasoning is not fooled by quoted
 // text. Bash-shaped escape handling: inside DOUBLE quotes a backslash escapes
@@ -80,26 +91,86 @@ export function collapseQuoted(s) {
 // `mktemp`, say) is refused as if it were the trap — which is how this function
 // came to exist.
 //
+// Output is a function of the INPUT ALONE. Two over-matches used to break that,
+// and both broke it the same way — a rule downstream silently lost reach over the
+// rest of the command, so ONE construct was admitted or refused according to
+// unrelated text elsewhere in the same call (shell-trap-guard's PowerShell
+// here-string rule, 2026-08-27: the same form admitted twice, refused once).
+//   (1) The opener was matched on the RAW line, so a QUOTED mention of a heredoc
+//       read as an opener and blanked everything after it.
+//   (2) A body was blanked whether or not its terminator ever arrived, so an
+//       unterminated opener swallowed the remainder of the command.
+// Both are fixed: the opener is quote-aware (heredocOpener), and body lines are
+// held as CANDIDATES, blanked only once the closing delimiter is actually seen.
+// An opener that never closes is not a body — bash rejects that command outright,
+// and blanking to end-of-input would hide every later statement from every rule
+// in the guard.
+//
 // Deliberately NOT the same policy as the commit gate's bypass-token scan: a
 // genuinely quoted `"--no-verify"` still reaches git, so that scan reads the
 // whole command on purpose. A heredoc body reaches nothing.
+
+// The delimiter a heredoc OPENS on this line, or null. Quote-aware: only a `<<`
+// in UNQUOTED position opens one (`cat <<'EOF'`, `cat << EOF`, `cat <<-EOF`), so
+// a quoted MENTION — `rg "<<EOF" docs/`, prose in a commit message — is not an
+// opener. The delimiter may itself be quoted (the most common form) and therefore
+// cannot be read off the quote-STRIPPED line, whose blanking eats it; the raw
+// text at the operator is parsed instead. `<<<` is a here-STRING, not a heredoc,
+// and `<<` is also an arithmetic shift — the delimiter must be a NAME followed by
+// a boundary, so neither matches.
+/**
+ * @param {string} line
+ * @returns {string | null}
+ */
+function heredocOpener(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote === '"' && c === '\\' && i + 1 < line.length) {
+      i++;
+      continue;
+    }
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '\\' && i + 1 < line.length) {
+      i++;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      continue;
+    }
+    if (c !== '<' || line[i + 1] !== '<') continue;
+    const m = /^<<-?\s*(?:'([^']*)'|"([^"]*)"|([A-Za-z_][\w-]*))(?=[\s;&|<>]|$)/.exec(line.slice(i));
+    if (m) return m[1] ?? m[2] ?? m[3];
+    i++; // `<<<` or a shift — not an opener; step past this `<<`
+  }
+  return null;
+}
+
 export function stripHeredocBodies(cmd) {
   const lines = cmd.split('\n');
   const out = [];
   let terminator = null;
+  let bodyStart = -1;
   for (const line of lines) {
-    if (terminator !== null) {
-      out.push(line.trim() === terminator ? line : '');
-      if (line.trim() === terminator) terminator = null;
+    if (terminator !== null && line.trim() !== terminator) {
+      out.push(line); // candidate body — blanked only if the delimiter arrives
       continue;
     }
+    if (terminator !== null) {
+      for (let i = bodyStart; i < out.length; i++) out[i] = '';
+      terminator = null;
+      bodyStart = -1;
+    }
     out.push(line);
-    // Matched on the RAW line: stripQuoted blanks quoted CONTENT, which eats the
-    // delimiter in the `<<'EOF'` form (the most common one) and leaves nothing to
-    // match. Over-matching here only blanks more text, i.e. yields fewer denials —
-    // the safe direction for a guard.
-    const m = /<<-?\s*(['"]?)([A-Za-z_][\w-]*)\1/.exec(line);
-    if (m) terminator = m[2];
+    const opener = heredocOpener(line);
+    if (opener) {
+      terminator = opener;
+      bodyStart = out.length;
+    }
   }
   return out.join('\n');
 }
@@ -211,10 +282,12 @@ export function findLiveExpansions(s, names) {
 export function bypassEnabled(name, cmd) {
   if (process.env[name] === '1') return true;
   const assign = String.raw`${name}=(?:'1'|"1"|1)(?=\s|$|;|&)`;
-  // A bare newline is a statement boundary too. Keep this separator set in
-  // lockstep with splitShellStatements: the guard's advertised inline bypass
-  // must work on a checked statement regardless of which separator precedes it.
-  return new RegExp(String.raw`(?:^|[;&|\n]\s*|\bexport\s+)${assign}`).test(cmd);
+  // The separator set is STATEMENT_SEPARATORS, shared with splitShellStatements,
+  // so the escape works on every statement the splitter can hand a rule — the two
+  // used to disagree on the newline, which silently ignored the advertised escape
+  // on any statement after the first line of a multi-line call (measured
+  // 2026-09-04).
+  return new RegExp(String.raw`(?:^|[${STATEMENT_SEPARATORS}]\s*|\bexport\s+)${assign}`).test(cmd);
 }
 
 // Split a command into shell statements on `&&`, `||`, `;`, and newlines that

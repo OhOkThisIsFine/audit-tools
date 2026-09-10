@@ -728,6 +728,10 @@ export const GUARDS = [
         payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
         sample: 'git checkout -- src/x.ts', expect: 'destructive restore',
         rootGit: { files: { 'src/x.ts': 'export const x = 1;\n' }, unstaged: { 'src/x.ts': 'export const x = 2;\n' } } },
+      { name: 'pathspec stash removes unstaged work', drive: 'hook', hook: '.claude/hooks/shell-trap-guard.mjs',
+        payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
+        sample: 'git stash push -- src/x.ts', expect: 'destructive restore',
+        rootGit: { files: { 'src/x.ts': 'export const x = 1;\n' }, unstaged: { 'src/x.ts': 'export const x = 2;\n' } } },
       { name: 'suite exit code masked by a pipe', drive: 'hook', hook: '.claude/hooks/shell-trap-guard.mjs',
         payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
         sample: 'npm test | tail -50', expect: 'masked suite exit code' },
@@ -1420,8 +1424,11 @@ export const REACH = [
       'check:scripts',
     ],
     uncovered:
-      'shell-split (the trap-guard split helper, home of bypassEnabled) has no dedicated contract test ' +
-      '— it is exercised only through hook-trap-guards-test and pre-commit-child-session-test. ' +
+      'shell-split (the trap-guard split helper, home of bypassEnabled) has no dedicated test FILE of ' +
+      'its own — its separator set and heredoc determinism are pinned inside hook-trap-guards-test, and ' +
+      'the rest is exercised through pre-commit-child-session-test. What that leaves uncovered: ' +
+      'stripQuoted/collapseQuoted/findLiveBackticks/findLiveExpansions/findQuotedSpans have no direct ' +
+      'assertions, so a defect there is caught only when it changes a guard verdict. ' +
       '(question-philosophy-gate and closeout-challenge-gate are covered ' +
       'by hook-session-gates-test; attest-loop-core-review by the attestation and parity tests; ' +
       'nightly-surface by nightly-routine-test.)' +
