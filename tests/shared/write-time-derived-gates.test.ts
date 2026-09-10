@@ -75,7 +75,7 @@ describe('write-time derived gate advisories', () => {
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stderr).toContain('[ADVISORY]');
     } finally {
-      rmSync(fixture, { recursive: true, force: true });
+      rmSync(fixture, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }); // a spawned hook child can still hold the dir on Windows (EPERM under load, 2026-09-10)
     }
   });
 });
