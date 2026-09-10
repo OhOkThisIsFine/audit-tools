@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
 import { runGeneratedArtifactCli } from "./generatedArtifacts.mjs";
+import { compareCodeUnits } from './primitives.mjs';
 
 const repoRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 
@@ -36,7 +37,7 @@ export const SOURCE_FILE = "src/audit/orchestrator/executors.ts";
 export const RENDER_FILE = "spec/audit/executor-producers.generated.md";
 
 /** Byte-order sort — locale-independent, so the render is identical everywhere. */
-const byKey = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const byKey = (a, b) => compareCodeUnits(a, b);
 
 /** Read one top-level `export const <name> = [ … ]` array literal as plain data. */
 function readArrayLiteral(sourceFile, name) {

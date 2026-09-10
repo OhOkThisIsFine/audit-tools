@@ -15,14 +15,27 @@
 // predicate, inline sha256 chain, ICU-collation sort) are pattern-banned so a
 // re-roll under a NEW name is red too.
 //
-// SCOPE, stated outright: this gate scans tracked `src/**/*.ts` only. The test
-// tree is deliberately out of scope — a test oracle must not import the code it
-// validates, so `tests/**` may carry its own comparator copies (e.g. the
-// remediation contract-harness). That uncovered half is declared here and in
-// scripts/guard-reach-data.mjs, not hidden.
+// SCOPE, stated outright: this gate scans every tracked TypeScript source in
+// `src/`, every `.mjs` of the governance tree (scripts/, wrapper/, dispatch/,
+// .claude/hooks/, the root bins and the test helpers), and its own rule source.
+// The TEST TREE's `.ts` files are deliberately out of scope — a test oracle
+// must not import the code it validates, so `tests/**` may carry its own
+// comparator copies (e.g. the remediation contract-harness). Both uncovered
+// halves are declared here and in scripts/guard-reach-data.mjs, not hidden.
+//
+// WHY THE GOVERNANCE TREE IS IN SCOPE (ceremony review 2026-08-29, F1). It used
+// to be exempt by construction, which is exactly why the review found the
+// generated-artifact pattern written fifteen times and the anti-duplication rule
+// stated seven times: the tree that ENFORCES one-definition-per-primitive was
+// the one tree the rule did not reach. The governance tree cannot import
+// `audit-tools/shared` (it is pre-build — see scripts/shared/primitives.mjs), so
+// it carries portable twins of the three primitives, and those twins are listed
+// as second homes below.
 //
 // Exceptions are DATA (file + reason), never prose. An exception naming a file
-// that no longer exists is itself a violation, so the list self-cleans.
+// that no longer exists is itself a violation, so the list self-cleans. An
+// exception is for a site where the banned SPELLING is genuinely the right
+// code — never for a copy that should have adopted the shared helper.
 //
 //   node scripts/check-shared-primitives.mjs
 //
@@ -34,20 +47,48 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 /**
+ * The tracked trees this gate scans, as `git ls-files` pathspecs.
+ *
+ * TWO GIT PATHSPEC TRAPS, both live here. `**\/` requires at least one
+ * intervening directory, so `scripts/**\/*.mjs` silently omits `scripts/*.mjs`
+ * — every top-level check script, including this one. And a bare `*.mjs`
+ * matches at EVERY depth rather than only the root, so it would sweep in
+ * `.audit-tools/` and the test fixtures. Each tree therefore names both levels
+ * explicitly.
+ */
+export const SCAN_PATHSPECS = [
+  'src/**/*.ts',
+  'scripts/*.mjs',
+  'scripts/**/*.mjs',
+  'wrapper/*.mjs',
+  'wrapper/**/*.mjs',
+  'dispatch/*.mjs',
+  'dispatch/**/*.mjs',
+  '.claude/hooks/*.mjs',
+  'audit-code.mjs',
+  'remediate-code.mjs',
+];
+
+/**
  * @typedef {{ file: string, line: number, rule: string, detail: string }} Violation
  */
 
 /**
  * Single-definition rules: a `function <name>(` / `const <name> =` definition
- * of a listed name anywhere in src/ outside its declared home is a violation.
+ * of a listed name anywhere in the scanned tree outside its declared home is a
+ * violation. `home` may be a single path or an ARRAY of paths — the primitives
+ * whose consumers span the build boundary have two: the `src/` home, and the
+ * pre-build twin in `scripts/shared/primitives.mjs` that the governance tree
+ * imports (it cannot reach `dist/`).
+ *
  * A name with home `null` is banned outright — it names a deleted fork whose
- * regrowth (under the same name) must stay dead; adopt the canonical helper
- * instead.
+ * regrowth (under the same name) must stay dead; adopt the canonical helper.
  */
 export const SINGLE_DEFINITION_RULES = [
   { name: 'isRecord', home: 'src/shared/validation/basic.ts' },
-  { name: 'compareCodeUnits', home: 'src/shared/compareCodeUnits.ts' },
-  { name: 'hashContent', home: 'src/shared/hash.ts' },
+  { name: 'compareCodeUnits', home: ['src/shared/compareCodeUnits.ts', 'scripts/shared/primitives.mjs'] },
+  { name: 'hashContent', home: ['src/shared/hash.ts', 'scripts/shared/primitives.mjs'] },
+  { name: 'resolveWithinRoot', home: ['src/shared/io/pathContainment.ts', 'scripts/shared/primitives.mjs'] },
   { name: 'stableStringify', home: 'src/shared/stableStringify.ts' },
   { name: 'formatSchemaFailure', home: 'src/shared/validation/schemaFailure.ts' },
   { name: 'errorMessage', home: 'src/shared/io/json.ts' },
@@ -70,6 +111,42 @@ export const SINGLE_DEFINITION_RULES = [
   { name: 'sha256', home: null },
 ];
 
+/** Normalize a rule's `home` (path or paths) to an array. */
+export function homesOf(rule) {
+  if (rule.home === null || rule.home === undefined) return [];
+  return Array.isArray(rule.home) ? rule.home : [rule.home];
+}
+
+/**
+ * Files whose CONTENT is the banned spelling AS DATA, exempt from every rule.
+ *
+ * A rule table carries its banned regexes and positive samples as literals; a
+ * form-fixture table carries sample text the recognizer must flag; and a rule's
+ * own `detail` string names the primitives it governs. Scanning those is
+ * scanning the DECLARATION, not the defect — and the alternatives are worse than
+ * an exemption: rewriting a sample would make the guard stop exercising the form
+ * it declares, and a rule that cannot name the thing it bans is not a rule.
+ *
+ * This is a CLOSED list with a reason per row, and `staleDataRows` refuses a row
+ * naming a file that is not in the scanned set — so it self-cleans like every
+ * other exception here.
+ */
+export const PATTERN_DATA_SOURCES = [
+  {
+    file: 'scripts/check-shared-primitives.mjs',
+    reason:
+      'the rule table itself: every banned regex, every form fixture and every rule detail ' +
+      'string is a literal here, and this file is the one place that must be able to spell them',
+  },
+  {
+    file: 'scripts/guard-reach-data.mjs',
+    reason:
+      'the guard-form-reach registry: `forms[].sample` literals are the positive fixtures ' +
+      'tests/shared/guard-form-reach.test.ts drives the REAL recognizer over, so they must ' +
+      'spell the banned form verbatim or the form stops being covered',
+  },
+];
+
 /**
  * Pattern rules: a defect-class body is banned wherever it appears in src/,
  * whatever its name. Each rule: id, regex over file content, the home file(s)
@@ -81,7 +158,7 @@ export const PATTERN_RULES = [
     // The code-unit comparator body: `x < y ? -1 : x > y ? 1 : 0` (any
     // identifiers/property chains, any spacing). Adopt compareCodeUnits.
     regex: /([$\w.]+)\s*<\s*([$\w.]+)\s*\?\s*-1\s*:\s*\1\s*>\s*\2\s*\?\s*1\s*:\s*0/g,
-    homes: ['src/shared/compareCodeUnits.ts'],
+    homes: ['src/shared/compareCodeUnits.ts', 'scripts/shared/primitives.mjs'],
     exceptions: [],
     fix: 'import { compareCodeUnits } from the shared home instead of re-rolling the body',
   },
@@ -89,10 +166,11 @@ export const PATTERN_RULES = [
     id: 'containment-predicate',
     // A hand-rolled root-containment check: `relative(` combined with a
     // `.startsWith("..")`-shaped test in the same file. Adopt
-    // resolveWithinRoot / assertWithinRoot (src/shared/io/pathContainment.ts).
+    // resolveWithinRoot / assertWithinRoot (pathContainment.ts, or the
+    // pre-build twin scripts/shared/primitives.mjs for the governance tree).
     regex: /\.startsWith\(\s*["'`]\.\./g,
     requiresAlso: /\brelative\(/,
-    homes: ['src/shared/io/pathContainment.ts'],
+    homes: ['src/shared/io/pathContainment.ts', 'scripts/shared/primitives.mjs'],
     exceptions: [],
     fix: 'route the predicate through resolveWithinRoot/assertWithinRoot (pathContainment.ts)',
   },
@@ -101,14 +179,14 @@ export const PATTERN_RULES = [
     // An inline sha256 construction outside the hash home. Adopt hashContent
     // (or contentSha256 for canonical-JSON digests).
     regex: /createHash\(\s*["'`]sha256["'`]\s*\)/g,
-    homes: ['src/shared/hash.ts'],
+    homes: ['src/shared/hash.ts', 'scripts/shared/primitives.mjs'],
     exceptions: [
       {
         file: 'src/audit/io/toolingManifest.ts',
         reason: 'incremental multi-update digest across a directory walk — not a single-shot hashContent call',
       },
     ],
-    fix: 'route the digest through hashContent (src/shared/hash.ts)',
+    fix: 'route the digest through hashContent (src/shared/hash.ts, or scripts/shared/primitives.mjs for the pre-build governance tree)',
   },
   {
     id: 'hash-chain-truncated',
@@ -121,7 +199,7 @@ export const PATTERN_RULES = [
     // in a const first, which breaks the chain this regex requires.
     regex:
       /createHash\(\s*["'`][\w-]+["'`]\s*\)[\s\S]{0,200}?\.digest\(\s*["'`]hex["'`]\s*\)\s*\.slice\(\s*0\s*,\s*\d+\s*\)/g,
-    homes: ['src/shared/hash.ts'],
+    homes: ['src/shared/hash.ts', 'scripts/shared/primitives.mjs'],
     exceptions: [],
     fix: 'route the truncated digest through hashContent with an explicit length (src/shared/hash.ts)',
   },
@@ -179,8 +257,10 @@ export function scanFile(file, content) {
   /** @type {Violation[]} */
   const violations = [];
 
+  const isPatternDataSource = PATTERN_DATA_SOURCES.some((row) => row.file === file);
+
   for (const rule of SINGLE_DEFINITION_RULES) {
-    if (rule.home === file) continue;
+    if (isPatternDataSource || homesOf(rule).includes(file)) continue;
     const re = definitionRegex(rule.name);
     for (const m of content.matchAll(re)) {
       violations.push({
@@ -190,7 +270,7 @@ export function scanFile(file, content) {
         detail:
           rule.home === null
             ? `"${rule.name}" is a retired fork name — adopt the canonical shared helper`
-            : `second definition of "${rule.name}" — the single home is ${rule.home}`,
+            : `second definition of "${rule.name}" — the single home is ${homesOf(rule).join(' (or) ')}`,
       });
     }
   }
@@ -198,6 +278,7 @@ export function scanFile(file, content) {
   for (const rule of PATTERN_RULES) {
     if (rule.homes.includes(file)) continue;
     if (rule.exceptions.some((e) => e.file === file)) continue;
+    if (isPatternDataSource) continue;
     if (rule.requiresAlso && !rule.requiresAlso.test(content)) continue;
     for (const m of content.matchAll(rule.regex)) {
       violations.push({
@@ -223,13 +304,15 @@ export function staleDataRows(trackedSrc) {
   /** @type {Violation[]} */
   const violations = [];
   for (const rule of SINGLE_DEFINITION_RULES) {
-    if (rule.home !== null && !trackedSrc.has(rule.home)) {
-      violations.push({
-        file: 'scripts/check-shared-primitives.mjs',
-        line: 1,
-        rule: `single-definition:${rule.name}:missing-home`,
-        detail: `declared home ${rule.home} is not a tracked src file — fix the row or restore the home`,
-      });
+    for (const home of homesOf(rule)) {
+      if (!trackedSrc.has(home)) {
+        violations.push({
+          file: 'scripts/check-shared-primitives.mjs',
+          line: 1,
+          rule: `single-definition:${rule.name}:missing-home`,
+          detail: `declared home ${home} is not in the scanned set — fix the row or restore the home`,
+        });
+      }
     }
   }
   for (const rule of PATTERN_RULES) {
@@ -239,7 +322,7 @@ export function staleDataRows(trackedSrc) {
           file: 'scripts/check-shared-primitives.mjs',
           line: 1,
           rule: `${rule.id}:missing-home`,
-          detail: `declared home ${home} is not a tracked src file — fix the row or restore the home`,
+          detail: `declared home ${home} is not in the scanned set — fix the row or restore the home`,
         });
       }
     }
@@ -249,9 +332,19 @@ export function staleDataRows(trackedSrc) {
           file: 'scripts/check-shared-primitives.mjs',
           line: 1,
           rule: `${rule.id}:stale-exception`,
-          detail: `exception names ${e.file}, which is not a tracked src file — delete the row`,
+          detail: `exception names ${e.file}, which is not in the scanned set — delete the row`,
         });
       }
+    }
+  }
+  for (const row of PATTERN_DATA_SOURCES) {
+    if (!trackedSrc.has(row.file)) {
+      violations.push({
+        file: 'scripts/check-shared-primitives.mjs',
+        line: 1,
+        rule: 'pattern-data-source:stale-row',
+        detail: `declared pattern data source ${row.file} is not in the scanned set — delete the row`,
+      });
     }
   }
   return violations;
@@ -259,13 +352,15 @@ export function staleDataRows(trackedSrc) {
 
 function main() {
   // win32: suppress the console-window flash on every gate run — INV-WH.
-  const tracked = execFileSync('git', ['ls-files', 'src/**/*.ts'], {
+  const tracked = execFileSync('git', ['ls-files', '-z', ...SCAN_PATHSPECS], {
     encoding: 'utf8',
     windowsHide: true,
   })
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
+    .split('\0')
+    .filter(Boolean)
+    // win32: `git ls-files` emits `/`, but normalize defensively so a hand-typed
+    // rule row and a tracked path compare equal.
+    .map((l) => l.replace(/\\/g, '/'));
   const trackedSet = new Set(tracked);
 
   /** @type {Violation[]} */
@@ -290,7 +385,9 @@ function main() {
     }
     process.exit(1);
   }
-  console.log(`check-shared-primitives: ${scanned} tracked src files clean`);
+  console.log(
+    `check-shared-primitives: ${scanned} tracked files clean (src/ + the governance tree)`,
+  );
 }
 
 const invokedDirectly =

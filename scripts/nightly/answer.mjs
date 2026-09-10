@@ -37,6 +37,7 @@ import {
   partitionBySettled,
   DECISIONS_RELPATH,
 } from './items.mjs';
+import { compareCodeUnits } from './../shared/primitives.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const argv = process.argv.slice(2);
@@ -125,7 +126,7 @@ function openRunWriteScope(root) {
     });
   }
   // Content-derived order, never object-key order.
-  rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  rows.sort((a, b) => compareCodeUnits(a.id, b.id));
   return rows.length > 0 ? rows : null;
 }
 

@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execFileSyncHidden } from "../helpers/spawn.mjs";
 
-import { STEP_GLOSS, ENUMERATION_TARGETS } from "../../scripts/gate-enumeration-data.mjs";
+import { ENUMERATION_TARGETS } from "../../scripts/gate-enumeration-data.mjs";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const CHECKER = join(REPO_ROOT, "scripts", "check-gate-enumeration.mjs");
@@ -43,9 +43,19 @@ describe("check:gate-enumeration — the docs cannot drift from the real gate", 
     expect(code, out).toBe(0);
   });
 
-  it("every verify:checks step has a gloss — an unglossed step is a build failure, not a silent bare name", () => {
-    const missing = verifyChecksSteps().filter((s) => !STEP_GLOSS[s]);
-    expect(missing, `add these to STEP_GLOSS: ${missing.join(", ")}`).toEqual([]);
+  it("no per-step description data module survives — a gloss no consumer renders is write-only", () => {
+    // `STEP_GLOSS` was deleted with the backlog entry that named it (2026-08-27):
+    // one registered target, rendering step names alone, was its only consumer.
+    // If a description set returns, it must come WITH the consumer that renders
+    // it in the same change — so this asserts the pair, not the absence alone.
+    const data = readFileSync(join(REPO_ROOT, "scripts", "gate-enumeration-data.mjs"), "utf8");
+    expect(data, "STEP_GLOSS is back; land the consumer that renders it in the same change").not.toContain(
+      "STEP_GLOSS",
+    );
+    for (const target of ENUMERATION_TARGETS) {
+      const body = readFileSync(join(REPO_ROOT, target.file), "utf8");
+      expect(body, `${target.file} must carry the rendered block`).toContain(`BEGIN ${target.marker}`);
+    }
   });
 
   it("both target docs actually contain the generated block and every step", () => {

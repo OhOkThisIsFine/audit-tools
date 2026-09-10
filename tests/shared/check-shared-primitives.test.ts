@@ -6,7 +6,9 @@
 // scripts/guard-reach-data.mjs as `shared-primitives-gate-test`.
 import { describe, expect, test } from "vitest";
 import {
+  PATTERN_DATA_SOURCES,
   PATTERN_RULES,
+  SCAN_PATHSPECS,
   SINGLE_DEFINITION_RULES,
   definitionRegex,
   scanFile,
@@ -225,8 +227,9 @@ describe("data hygiene", () => {
   test("a declared home missing from the tracked set is a violation (rule cannot go vacuous)", () => {
     const withoutBasic = new Set(
       [
-        ...SINGLE_DEFINITION_RULES.flatMap((r) => (r.home === null ? [] : [r.home])),
+        ...SINGLE_DEFINITION_RULES.flatMap((r) => (Array.isArray(r.home) ? r.home : r.home === null ? [] : [r.home])),
         ...PATTERN_RULES.flatMap((r) => [...r.homes, ...r.exceptions.map((e) => e.file)]),
+        ...PATTERN_DATA_SOURCES.map((r) => r.file),
       ].filter((f) => f !== "src/shared/validation/basic.ts"),
     );
     const stale = staleDataRows(withoutBasic);
@@ -236,10 +239,77 @@ describe("data hygiene", () => {
     );
   });
 
+  test("a pattern data source that leaves the scanned set is a violation (the exemption self-cleans)", () => {
+    // An exemption whose file is gone would silently widen the exemption set to
+    // nothing — the same rot every other row here is protected against.
+    const withoutDataSource = new Set(
+      [
+        ...SINGLE_DEFINITION_RULES.flatMap((r) => (Array.isArray(r.home) ? r.home : r.home === null ? [] : [r.home])),
+        ...PATTERN_RULES.flatMap((r) => [...r.homes, ...r.exceptions.map((e) => e.file)]),
+        ...PATTERN_DATA_SOURCES.map((r) => r.file),
+      ].filter((f) => f !== "scripts/guard-reach-data.mjs"),
+    );
+    const stale = staleDataRows(withoutDataSource);
+    expect(
+      stale.some((v) => v.rule === "pattern-data-source:stale-row" && v.detail.includes("guard-reach-data.mjs")),
+    ).toBe(true);
+  });
+
   test("definitionRegex anchors on declaration syntax only", () => {
     const re = definitionRegex("toPosix");
     expect(re.test("function toPosix(p) {}")).toBe(true);
     expect(definitionRegex("toPosix").test("const toPosix = (p) => p;")).toBe(true);
     expect(definitionRegex("toPosix").test("toPosixPath(p)")).toBe(false);
+  });
+});
+
+describe("scan reach — the enforcement layer is no longer the one tree exempt", () => {
+  test("the scan set reaches the governance tree, not src/ alone (ceremony review 2026-08-29, F1)", () => {
+    // The defect: `git ls-files 'src/**/*.ts'` was the whole scan set, so the
+    // repository's own one-definition-per-primitive gate did not apply to the
+    // tree that ENFORCES it. That is why the generated-artifact pattern was
+    // written fifteen times and the anti-duplication rule stated seven times.
+    const joined = SCAN_PATHSPECS.join(" ");
+    expect(joined).toContain("scripts/");
+    expect(joined).toContain(".claude/hooks/");
+    expect(joined).toContain("wrapper/");
+    expect(joined).toContain("dispatch/");
+  });
+
+  test("both levels of each tree are named — `**/` requires an intervening directory", () => {
+    // The trap: `scripts/**/*.mjs` omits `scripts/*.mjs`, so every top-level
+    // check script (including this gate's own) was outside the scan while the
+    // pathspec LOOKED like it covered the tree.
+    for (const tree of ["scripts/", "wrapper/", "dispatch/"]) {
+      expect(SCAN_PATHSPECS, `${tree} top level`).toContain(`${tree}*.mjs`);
+      expect(SCAN_PATHSPECS, `${tree} nested`).toContain(`${tree}**/*.mjs`);
+    }
+    // A bare `*.mjs` would match at EVERY depth (git pathspecs let `*` cross
+    // `/`) and sweep in .audit-tools/ and the test fixtures.
+    expect(SCAN_PATHSPECS).not.toContain("*.mjs");
+  });
+
+  test("the pre-build primitive twin is a declared home, so it is not a re-roll", () => {
+    // The governance tree cannot import audit-tools/shared (pre-build), so the
+    // twins in scripts/shared/primitives.mjs are the second home — declared, not
+    // exempted. A rule naming only the src home would flag the twin.
+    for (const name of ["compareCodeUnits", "hashContent", "resolveWithinRoot"]) {
+      const rule = SINGLE_DEFINITION_RULES.find((r) => r.name === name);
+      expect(rule?.home, `${name} must declare BOTH homes`).toEqual(
+        expect.arrayContaining(["scripts/shared/primitives.mjs"]),
+      );
+    }
+  });
+
+  test("a rule data source is exempt from EVERY rule, so the declaration can spell what it bans", () => {
+    // A rule table must be able to write the banned regex and a positive sample
+    // verbatim; a form registry must carry samples the recognizer flags.
+    for (const row of PATTERN_DATA_SOURCES) {
+      const declared = scanFile(row.file, "function isPlainObject(v) { return v; }\nconst cmp = (a, b) => a < b ? -1 : a > b ? 1 : 0;\nnames.sort((a, b) => a.localeCompare(b));\n");
+      expect(declared, `${row.file} must be exempt`).toEqual([]);
+    }
+    // ...and the exemption is scoped to those rows: an ordinary file with the
+    // same content is still a violation.
+    expect(scanFile("scripts/some-other.mjs", "names.sort((a, b) => a.localeCompare(b));\n").length).toBeGreaterThan(0);
   });
 });

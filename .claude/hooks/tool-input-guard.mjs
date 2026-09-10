@@ -11,6 +11,7 @@
 //   3. Stale-main deny-once before the first source edit  (Edit|Write)
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative, isAbsolute } from 'node:path';
+import { resolveWithinRoot } from '../../scripts/shared/primitives.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
@@ -41,8 +42,10 @@ function block(message) {
 function inProject(p) {
   if (!p) return false;
   const abs = isAbsolute(p) ? p : join(ROOT, p);
-  const rel = relative(ROOT, abs).replace(/\\/g, '/');
-  return rel !== '' && !rel.startsWith('../');
+  // A path on another win32 drive / UNC root is outside by definition —
+  // resolveWithinRoot tests that first, which a bare `startsWith("..")` on a
+  // `relative()` result cannot (it reads "contained" there).
+  return resolveWithinRoot(ROOT, abs) !== null;
 }
 
 // ── Rule 2: Agent worktree isolation on a dispatch node ──────────────────────

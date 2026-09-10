@@ -184,6 +184,48 @@ export function installAntigravityPlugin(
   }
 }
 
+/**
+ * Install the Claude Desktop plugin (manifest + command + skill) so the tool
+ * appears in the slash-command menu. Claude Desktop reads external plugins from
+ * `~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/`.
+ *
+ * One step, one succeeded/failed count — matching the installers' pre-extraction
+ * behaviour. `pluginDir` is derived by the PLAN (host-asset-plan.mjs), never
+ * spelled here, so the two tools cannot disagree about where it lands.
+ *
+ * @param {{toolName: string, pluginDir: string, manifest: object,
+ *          commandContent: Buffer|string, skillContent: Buffer|string}} options
+ * @param {{succeeded: number, failed: number}} counts
+ */
+export function installClaudeDesktopPlugin(
+  { toolName, pluginDir, manifest, commandContent, skillContent },
+  counts,
+) {
+  const manifestPath = join(pluginDir, ".claude-plugin", "plugin.json");
+  const commandPath = join(pluginDir, "commands", `${toolName}.md`);
+  const skillPath = join(pluginDir, "skills", toolName, "SKILL.md");
+  try {
+    const manifestAction = writeGeneratedFile(
+      manifestPath,
+      Buffer.from(JSON.stringify(manifest, null, 2) + "\n"),
+    );
+    console.log(`${toolName}: ${manifestAction} Claude Desktop plugin manifest at ${manifestPath}`);
+
+    const commandAction = writeGeneratedFile(commandPath, commandContent);
+    console.log(`${toolName}: ${commandAction} Claude Desktop plugin command at ${commandPath}`);
+
+    const skillAction = writeGeneratedFile(skillPath, skillContent);
+    console.log(`${toolName}: ${skillAction} Claude Desktop plugin skill at ${skillPath}`);
+
+    console.log(`${toolName}: restart Claude Desktop for /${toolName} to appear in the slash-command menu`);
+    counts.succeeded++;
+  } catch (err) {
+    console.warn(`${toolName}: could not install Claude Desktop plugin (${/** @type {any} */ (err).message})`);
+    console.warn(`  Plugin directory: ${pluginDir}`);
+    counts.failed++;
+  }
+}
+
 /** Log the final summary line and set a non-zero exit code on any failure. */
 export function finishPostinstall(toolName, counts, startTime) {
   console.log(

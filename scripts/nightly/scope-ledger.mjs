@@ -30,12 +30,12 @@
 //     counts beside the ledger. A missing or `aborted` stamp means leg 1 did
 //     not cover the corpus, and saying so is the point.
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { flattenManifest } from '../check-doc-manifest.mjs';
 import { DOC_MANIFEST } from '../doc-manifest-data.mjs';
+import { compareCodeUnits, hashContent } from '../shared/primitives.mjs';
 
 export const SCOPE_LEDGER_RELPATH = '.audit-tools/nightly/scope-ledger.json';
 export const SCOPE_LEDGER_VERSION = 1;
@@ -79,7 +79,7 @@ export function normalizeItemText(text) {
 }
 
 export function itemHash(text) {
-  return createHash('sha1').update(normalizeItemText(text), 'utf8').digest('hex').slice(0, 16);
+  return hashContent(normalizeItemText(text), { algorithm: 'sha1', length: 16 });
 }
 
 // Split a markdown document into reviewable items at blank lines, holding a
@@ -152,7 +152,7 @@ export function inScopeDocs(root, { manifest = DOC_MANIFEST } = {}) {
     if (hit.row.type === EXCLUDED_ROW_TYPE) continue;
     scoped.push({ path: file, type: hit.row.type, autoApply: hit.row.autoApply });
   }
-  return scoped.sort((a, b) => a.path.localeCompare(b.path));
+  return scoped.sort((a, b) => compareCodeUnits(a.path, b.path));
 }
 
 // ── the ledger ───────────────────────────────────────────────────────────────

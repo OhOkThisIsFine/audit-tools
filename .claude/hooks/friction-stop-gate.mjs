@@ -23,6 +23,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { sessionHasLiveBackgroundWork } from "../../scripts/shared/liveSessionWork.mjs";
 import { readSessionRegistry } from "../../scripts/shared/sessionRegistry.mjs";
+import { FRICTION_CATEGORIES } from '../../scripts/shared/friction-categories.generated.mjs';
 
 // Fail open on the kill-switch or a re-entrant stop (already blocked once).
 if (process.env.AUDIT_TOOLS_NO_FRICTION_STOP_GATE) process.exit(0);
@@ -59,15 +60,18 @@ if (readSessionRegistry(root, payload?.session_id).isUnregisteredChild) process.
 // to this session still has no exact signal — the mtime window stays the proxy.
 const RECENT_MS = 12 * 60 * 60 * 1000;
 
-// The three required friction categories. Hardcoded (a hook can't import the TS
-// source without a build) — kept in lockstep with FRICTION_CATEGORIES, single-sourced
-// in src/shared/friction/frictionRecord.ts (re-exported through triage.ts). A drift
-// here only weakens the backstop, never the authoritative close gate, but the parity
-// is pinned by a test (tests/shared/friction-derived-observations.test.mjs) that
-// asserts this literal equals the source array. Tool-derived pre-populated
-// observations land in the SAME open_observations[] shape this gate reads, so a
-// category the backend already saw re-work in counts as covered here for free.
-const FRICTION_CATEGORIES = ["ambiguous_direction", "tool_should_decide", "inefficient_feeding"];
+// The required friction categories, read from the SHARED vocabulary — never a
+// literal here. This hook runs before any build, so it imports the generated
+// pre-build sibling of src/shared/friction/frictionRecord.ts (the same module
+// scripts/closeout-sections-data.mjs reads), and `check:friction-categories`
+// reds the build the moment the two disagree. A hand-kept copy would weaken the
+// backstop silently, which is exactly what the single-source property forbids:
+// the copy would drift on the next category added, and only the authoritative
+// close gate would notice.
+//
+// Tool-derived pre-populated observations land in the SAME open_observations[]
+// shape this gate reads, so a category the backend already saw re-work in counts
+// as covered here for free.
 
 /**
  * Newest mtime (ms) among an area's genuine run markers, or 0 if none exist. Keying
@@ -87,6 +91,18 @@ function newestRunMarkerMs(dir, markers) {
   }
   return newest;
 }
+
+// The required friction categories come from the SHARED vocabulary (imported
+// above) — never a literal here. This hook runs before any build, so it reads the
+// generated pre-build sibling of src/shared/friction/frictionRecord.ts (the same
+// module scripts/closeout-sections-data.mjs reads), and `check:friction-categories`
+// reds the build the moment the two disagree. A hand-kept copy would weaken the
+// backstop SILENTLY on the next category added — only the authoritative close gate
+// would notice, which is exactly what the single-source property forbids.
+//
+// Tool-derived pre-populated observations land in the SAME open_observations[]
+// shape this gate reads, so a category the backend already saw re-work in counts
+// as covered here for free.
 
 /** Does a friction record cover every category (observation or attestation)? */
 function recordIsComplete(recordPath) {

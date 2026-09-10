@@ -1,8 +1,17 @@
 #!/usr/bin/env node
+// The remediate-code host-install entry.
+//
+// What this file owns: the REMEDIATE-CODE HALF OF THE PLAN — the OpenCode
+// permission tables (what a remediator may touch, including the retired-rule
+// migration) and the prompt renderer. Everything structural now comes from
+// `scripts/shared/host-asset-plan.mjs`: which hosts are served, what each target
+// path is, which source file feeds it, the command description, the agent name.
+// Before that module existed, this file and its audit twin each carried their own
+// copy of all of it — two installers built around one shared installer, differing
+// only by a tool token, and free to drift the moment either changed.
 import { homedir } from "os";
-import { join, dirname } from "path";
+import { join } from "path";
 import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
 import {
   readRequiredSource,
   readOptionalSource,
@@ -14,24 +23,19 @@ import {
   installAntigravityPlugin,
   finishPostinstall,
 } from "../shared/install-host-assets.mjs";
+import {
+  HOST_ASSET_PLANS,
+  PKG_ROOT,
+  planInstalls,
+  planOpenCodeCommand,
+  planOpenCodeConfigPath,
+  planSources,
+} from "../shared/host-asset-plan.mjs";
 
 const TOOL = "remediate-code";
-const pkgRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-const packageVersion = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version ?? '0.0.0';
-const promptSourceFile = join(
-  pkgRoot,
-  "skills",
-  "remediate-code",
-  "remediate-code.prompt.md",
-);
-const skillSourceFile = join(pkgRoot, "skills", "remediate-code", "SKILL.md");
-const codexOpenAiAgentSourceFile = join(
-  pkgRoot,
-  "skills",
-  "remediate-code",
-  "agents",
-  "openai.yaml",
-);
+const PLAN = HOST_ASSET_PLANS[TOOL];
+const SOURCES = planSources(PLAN);
+const packageVersion = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8")).version ?? "0.0.0";
 
 const OPENCODE_REMEDIATE_EDIT_PERMISSION = {
   "*": "ask",
@@ -177,28 +181,22 @@ function mergeOpenCodeGlobalConfig(existing, promptBody) {
     ...parsed,
     command: {
       ...objectValue(parsed.command),
-      "remediate-code": {
-        template: promptBody.trimStart(),
-        description: "Conversation-first code remediation",
-        agent: "remediator",
-        subtask: false,
-      },
+      [TOOL]: planOpenCodeCommand(PLAN, promptBody),
     },
     permission: renderOpenCodeGlobalPermissionConfig(parsed.permission),
     agent: {
       ...agent,
-      remediator: {
+      [PLAN.agentName]: {
         ...existingRemediator,
-        description:
-          "Bounded remediation orchestration agent for the /remediate-code workflow.",
+        description: PLAN.agentDescription,
         permission: renderOpenCodeAgentPermissionConfig(existingRemediator.permission),
       },
     },
   };
 }
 
-const promptSource = readRequiredSource(promptSourceFile, "prompt", TOOL);
-const skillSource = readRequiredSource(skillSourceFile, "skill", TOOL);
+const promptSource = readRequiredSource(SOURCES.prompt, "prompt", TOOL);
+const skillSource = readRequiredSource(SOURCES.skill, "skill", TOOL);
 
 if (!promptSource || !skillSource) {
   process.exit(0);
@@ -209,63 +207,25 @@ const counts = { succeeded: 0, failed: 0 };
 
 const promptBody = splitFrontmatter(promptSource.toString("utf8")).body;
 const codexOpenAiAgentSource = readOptionalSource(
-  codexOpenAiAgentSourceFile,
+  SOURCES.codexUiMetadata,
   "Codex skill UI metadata",
   TOOL,
 );
 
-const installs = [
-  {
-    label: "Claude command",
-    path: join(homedir(), ".claude", "commands", "remediate-code.md"),
-    sourcePath: promptSourceFile,
-    content: Buffer.from(promptBody, "utf8"),
-  },
-  {
-    label: "Codex skill",
-    path: join(homedir(), ".codex", "skills", "remediate-code", "SKILL.md"),
-    sourcePath: skillSourceFile,
-    content: skillSource,
-  },
-  {
-    label: "Codex prompt",
-    path: join(
-      homedir(),
-      ".codex",
-      "skills",
-      "remediate-code",
-      "remediate-code.prompt.md",
-    ),
-    sourcePath: promptSourceFile,
-    content: promptSource,
-  },
-  ...(codexOpenAiAgentSource
-    ? [
-        {
-          label: "Codex skill UI metadata",
-          path: join(
-            homedir(),
-            ".codex",
-            "skills",
-            "remediate-code",
-            "agents",
-            "openai.yaml",
-          ),
-          sourcePath: codexOpenAiAgentSourceFile,
-          content: codexOpenAiAgentSource,
-        },
-      ]
-    : []),
-];
-
-runInstalls(TOOL, installs, counts);
-
-const opencodeGlobalConfig = join(
-  homedir(),
-  ".config",
-  "opencode",
-  "opencode.json",
+runInstalls(
+  TOOL,
+  planInstalls(PLAN, {
+    // This tool installs the prompt's BODY as the Claude command (the frontmatter
+    // is host metadata); the plan's stripFrontmatter flag says which of the two
+    // is the command content.
+    promptContent: PLAN.stripFrontmatter ? Buffer.from(promptBody, "utf8") : promptSource,
+    skillContent: skillSource,
+    codexUiMetadataContent: codexOpenAiAgentSource ?? undefined,
+  }),
+  counts,
 );
+
+const opencodeGlobalConfig = planOpenCodeConfigPath();
 installOpenCodeGlobalConfig(
   {
     toolName: TOOL,
@@ -282,8 +242,8 @@ installAntigravityPlugin(
   {
     toolName: TOOL,
     homeDir: homedir(),
-    pluginName: "remediate-code",
-    pluginVersion: packageVersion,
+    pluginName: TOOL,
+    pluginVersion: PLAN.pluginVersion === "packageVersion" ? packageVersion : PLAN.pluginVersion,
     skillSource,
   },
   counts,

@@ -31,11 +31,11 @@
 // Drift is pinned by tests/shared/filelock-export-surface.test.ts, which
 // re-runs the extraction against the live source, diffs it against the tracked
 // render, and holds mutation controls proving the diff actually fires.
-import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
+import { hashContent } from './primitives.mjs';
 
 export const SOURCE_FILE = "src/shared/io/fileLock.ts";
 export const RENDER_FILE = "scripts/shared/filelock-export-surface.generated.json";
@@ -219,7 +219,7 @@ export function renderSurfacePin(surface) {
           "Drift test: tests/shared/filelock-export-surface.test.ts",
         ],
         ...body,
-        sha256: createHash("sha256").update(JSON.stringify(body)).digest("hex"),
+        sha256: hashContent(JSON.stringify(body)),
       },
       null,
       2,

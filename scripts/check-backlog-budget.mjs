@@ -60,6 +60,7 @@ import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { splitBacklogEntries } from "./shared/backlog-entry-grammar.mjs";
+import { compareCodeUnits } from './shared/primitives.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const backlogDir = join(repoRoot, "docs", "backlog");
@@ -192,7 +193,7 @@ export function evaluateBacklog(files, baseline) {
 
   nextBaseline.entries_over_budget.sort();
   nextBaseline.file_ceilings = Object.fromEntries(
-    Object.entries(nextBaseline.file_ceilings).sort(([a], [b]) => a.localeCompare(b)),
+    Object.entries(nextBaseline.file_ceilings).sort(([a], [b]) => compareCodeUnits(a, b)),
   );
   return { violations, totalEntries, grandfathered, staleAmnesty: [...staleAmnesty], nextBaseline, distribution };
 }

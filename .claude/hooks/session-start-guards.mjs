@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs'
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { compareCodeUnits } from '../../scripts/shared/primitives.mjs';
 import {
   baselineFromEntries,
   isDispatchedChildEnv,
@@ -302,7 +303,7 @@ try {
   const reaped = [];
   const stuck = [];
   // Sorted by path so the reported order is content-derived, not list order.
-  for (const wt of linked.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) {
+  for (const wt of linked.sort((a, b) => compareCodeUnits(a.path, b.path))) {
     if (wt.disqualified || !wt.head || !existsSync(wt.path)) continue;
     if (samePath(wt.path, selfPath) || samePath(wt.path, ROOT)) continue;
     // A repo with no main line at all yields no refs, so nothing is reachable

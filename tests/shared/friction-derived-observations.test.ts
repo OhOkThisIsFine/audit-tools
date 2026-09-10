@@ -248,17 +248,39 @@ test("decideFrictionTriage: re-derive is idempotent and PRESERVES host-authored 
   }
 });
 
-// ── hook parity: the Stop-gate categories stay in lockstep with the source ──────
+// ── hook parity: the Stop-gate READS the shared vocabulary, never a copy ───────
+//
+// This test used to parse a literal array out of the hook and compare it to the
+// source tuple. That is a parity check between TWO copies — it can only ever
+// catch a drift AFTER someone has already written the second copy, and the
+// backlog entry (2026-08-27, "Three governance vocabularies are copied per
+// consumer") names exactly that shape. The property is single-sourcing: the hook
+// now IMPORTS the generated pre-build sibling, so there is no second copy to
+// drift. What is pinned here is that import — and that the generated sibling
+// itself equals the source tuple, which is `check:friction-categories`'s job.
 
-test("friction-stop-gate hook FRICTION_CATEGORIES stays in parity with the source of truth", async () => {
+test("friction-stop-gate hook IMPORTS the shared vocabulary rather than copying it", async () => {
   const hookPath = join(HERE, "..", "..", ".claude", "hooks", "friction-stop-gate.mjs");
   const src = await readFile(hookPath, "utf8");
-  const match = src.match(/const FRICTION_CATEGORIES = (\[[^\]]*\]);/);
-  expect(match, "hook must declare a literal FRICTION_CATEGORIES array").toBeTruthy();
-  const hookCategories = JSON.parse(match![1].replace(/'/g, '"'));
-  expect(hookCategories, "hook list must equal the single-sourced categories").toEqual([
-    ...FRICTION_CATEGORIES,
-  ]);
+  expect(
+    src,
+    "the hook must import the generated pre-build vocabulary — a literal here is the copy the " +
+      "single-source property forbids",
+  ).toContain("from '../../scripts/shared/friction-categories.generated.mjs'");
+  expect(
+    /const FRICTION_CATEGORIES = \[/.test(src),
+    "no literal FRICTION_CATEGORIES array may survive in the hook",
+  ).toBe(false);
+});
+
+test("the hook's imported vocabulary is the same module the closeout renderer reads", async () => {
+  // One pre-build data module, two consumers: if the hook imported anything else
+  // (a fresh literal, a second generated file) the two could disagree about what
+  // a complete friction walk covers.
+  const { FRICTION_CATEGORIES: generated } = await import(
+    "../../scripts/shared/friction-categories.generated.mjs"
+  );
+  expect([...generated]).toEqual([...FRICTION_CATEGORIES]);
 });
 
 // ── INV-SCC-04 / COR-6fd1702f / TST-c0e7b3b3: single-encoding path derivation ──

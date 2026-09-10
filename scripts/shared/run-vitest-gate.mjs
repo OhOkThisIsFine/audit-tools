@@ -29,7 +29,7 @@
 // doesn't match (missing ledger, stale ledger, reporter never ran), the gate
 // fails closed rather than trusting a ledger it cannot prove belongs to this run.
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -46,6 +46,7 @@ import { isFullSuiteRun, writeSuiteGreenStamp } from "./suiteGreenStamp.mjs";
 import {
   observeAndClaimLoadFlake,
 } from "./load-flake-record.mjs";
+import { hashContent } from './primitives.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
@@ -227,7 +228,7 @@ async function runIsolatedDiagnostics({ record, attribution }) {
         tree,
         observedAt: new Date().toISOString(),
         startInvestigation: async (observation) => {
-          const slug = createHash("sha256").update(`${environment}\0${file}`).digest("hex").slice(0, 16);
+          const slug = hashContent(`${environment}\0${file}`, { length: 16 });
           const investigationDir = resolve(profileDir, "load-flake-investigations");
           const requestPath = resolve(investigationDir, `${slug}.request.json`);
           const reportPath = resolve(investigationDir, `${slug}.md`);

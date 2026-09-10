@@ -16,7 +16,6 @@
 // too. Anything else forces a repack, so a reused tarball can never be a false green.
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -30,6 +29,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSpawn } from "./spawn-shell.mjs";
+import { hashContent } from './primitives.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CACHE_MANIFEST = "pack-manifest.json";
@@ -40,7 +40,7 @@ const CACHE_MANIFEST = "pack-manifest.json";
  * a tree the release gate requires clean.
  */
 function cacheDirFor(repoRoot) {
-  const key = createHash("sha256").update(repoRoot).digest("hex").slice(0, 12);
+  const key = hashContent(repoRoot, { length: 12 });
   return join(tmpdir(), `audit-tools-smoke-pack-${key}`);
 }
 

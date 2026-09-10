@@ -255,6 +255,16 @@ test("retires provider attribution and preserves a provider-agnostic execution r
   // Only a RESOLUTION failure is evidence of retirement. A module that resolves
   // and then throws is still shipped — reporting it as retired is the false
   // green TST-248adff9 names.
+  //
+  // The THREW message states only what the probe established. It used to say
+  // "still resolves but throws", asserting a resolution fact the probe never
+  // tested for: a `not_found` whose error code is outside
+  // RESOLUTION_FAILURE_CODES (a future Node code, a bundler's own spelling)
+  // lands in this branch, and the message then claimed resolution for a module
+  // that does not resolve at all. The fail DIRECTION was safe — a violation
+  // either way — but an unestablished claim in a guard's own refusal text is
+  // how a later reader comes to trust a check that is not checking that
+  // (CP-NODE-25 residual).
   const retiredDeepImport = await optionalImport(
     "audit-tools/shared/types/attributionContract",
   );
@@ -262,7 +272,9 @@ test("retires provider attribution and preserves a provider-agnostic execution r
     violations.push("retired attribution deep import still resolves");
   } else if (retiredDeepImport.status === "threw") {
     violations.push(
-      `retired attribution deep import still resolves but throws during evaluation (${retiredDeepImport.detail})`,
+      `retired attribution deep import did not fail with a resolution-failure code — it may still ` +
+        `ship (this probe cannot distinguish "resolves then throws" from an unrecognized ` +
+        `not-found code) (${retiredDeepImport.detail})`,
     );
   }
 

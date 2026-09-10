@@ -651,11 +651,28 @@ test("every inline lens enum across generated schemas equals the LensSchema sour
     const parsed = JSON.parse(await readFile(join(schemasDir, file), "utf8"));
     collectLensEnumSites(parsed, file, "");
   }
-  // A selector that finds nothing reports zero offenders forever; assert it
-  // actually reached the inline enums before trusting the empty result.
+  // The anti-inert floor pins the site SET, not a COUNT. A bare `sites.length > 0`
+  // let coverage collapse from eight structural sites to one and still report
+  // green (CP-NODE-25 residual) — the guard would keep passing after losing
+  // almost everything it was written to check. The set is asserted by NAME, so
+  // dropping a schema from the walk is a red build and the message says which
+  // one; an ADDED site is deliberately not an error (a new schema joins the scan
+  // without ceremony — re-derive the set from a run if the list ever churns).
+  const LENS_ENUM_SITES = [
+    "audit_result.schema.json.properties.lens",
+    "audit_result.schema.json.properties.findings.items.properties.lens",
+    "audit_result.schema.json.properties.verification.properties.followup_tasks.items.properties.lens",
+    "audit_results.schema.json.items.properties.lens",
+    "audit_results.schema.json.items.properties.findings.items.properties.lens",
+    "audit_results.schema.json.items.properties.verification.properties.followup_tasks.items.properties.lens",
+    "audit_task.schema.json.properties.lens",
+    "finding.schema.json.properties.lens",
+  ];
+  const missing = LENS_ENUM_SITES.filter((expected) => !sites.some((s) => s.includes(expected)));
   expect(
-    sites.length > 0,
-    "the structural lens-enum selector matched no schema site — it cannot be reporting a real zero",
-  ).toBeTruthy();
+    missing,
+    `the structural lens-enum selector no longer reaches these schema site(s) — coverage dropped ` +
+      `silently, which is the failure the set-pin exists for: ${missing.join(", ")}`,
+  ).toEqual([]);
   expect(offenders, `these schemas contain a lens enum that drifted from LensSchema: ${offenders.join(", ")}`).toEqual([]);
 });

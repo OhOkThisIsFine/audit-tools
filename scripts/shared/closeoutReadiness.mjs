@@ -20,8 +20,8 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { hostMemoryDir } from './hostMemoryDir.mjs';
 import { readSuiteGreenStamp } from './suiteGreenStamp.mjs';
 import { worktreeTree } from './worktree-tree.mjs';
 
@@ -98,9 +98,15 @@ export function closeoutReadinessFindings(root) {
 
   // A memory file that never reached MEMORY.md is invisible to the next
   // session: the index is what loads, not the directory.
+  //
+  // The store path comes from the ONE derivation (scripts/shared/hostMemoryDir.mjs).
+  // This function formerly spelled the slug itself — `replace(/[:\\/]/g, '-')`
+  // against check-memory-citations' `replace(/[^a-zA-Z0-9]/g, '-')`. The two
+  // agreed on this repository's path (a colon and backslashes are all it carries)
+  // and diverged on any path with other punctuation, where the derived directory
+  // simply does not exist and the check reads as a clean skip.
   try {
-    const slug = root.replace(/[:\\/]/g, '-');
-    const memDir = join(homedir(), '.claude', 'projects', slug, 'memory');
+    const memDir = hostMemoryDir({ projectRoot: root });
     const index = readFileSync(join(memDir, 'MEMORY.md'), 'utf8');
     const orphans = readdirSync(memDir)
       .filter((n) => n.endsWith('.md') && n !== 'MEMORY.md')

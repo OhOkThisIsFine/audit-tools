@@ -16,14 +16,14 @@
 // this runs as `prebuild`, i.e. BEFORE dist/ exists, under plain node with no TS
 // loader — the same constraint that makes the .claude/hooks re-declare their
 // pattern lists. tests/shared/suite-lock-parity.test.mjs pins the two in sync.
-import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hashContent } from './primitives.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const key = createHash("sha256").update(repoRoot).digest("hex").slice(0, 12);
+const key = hashContent(repoRoot, { length: 12 });
 const lockDir = join(tmpdir(), `audit-tools-vitest-${key}.holders`);
 
 function processAlive(pid) {

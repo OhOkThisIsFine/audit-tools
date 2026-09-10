@@ -77,7 +77,6 @@
 // model incapacity. It is passed twice on purpose: as the dispatch `schema`,
 // which a relay lane answers through a forced tool call, and inline in the task
 // text, which is all a CLI agent lane ever sees.
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -89,6 +88,7 @@ import {
 } from './lane-dispatch.mjs';
 import { openDispatchLane } from './mcp-dispatch-lane.mjs';
 import { evaluateProbes } from '../nightly/items.mjs';
+import { hashContent } from './primitives.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 // Import-safe: tests import the exported helpers, so nothing below may exit or
@@ -236,7 +236,7 @@ function chunk(file) {
   return entries.map((e) => {
     const text = e.body.join('\n').trim();
     // Normalize whitespace so a reflow alone does not re-triage the entry.
-    const hash = createHash('sha256').update(text.replace(/\s+/g, ' ')).digest('hex').slice(0, 8);
+    const hash = hashContent(text.replace(/\s+/g, ' '), { length: 8 });
     return { id: `${file.replace('.md', '')}#${hash}`, file, text };
   });
 }

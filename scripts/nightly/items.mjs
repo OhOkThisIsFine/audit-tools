@@ -16,9 +16,9 @@
 // changes and the question legitimately returns — the same "a reword is a new
 // item" rule the doc-review ledger already used, applied to the durable side.
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { hashContent } from '../shared/primitives.mjs';
 
 export const DECISIONS_RELPATH = '.claude/nightly-decisions.json';
 export const OPEN_ITEMS_RELPATH = '.audit-tools/nightly/open-items.json';
@@ -63,7 +63,7 @@ export function normalizeSubject(text) {
 // guard exists because those land raw in source and turn the file binary.
 export function subjectKey(path, subject) {
   const material = `${String(path ?? '').replace(/\\/g, '/')}::${normalizeSubject(subject)}`;
-  return createHash('sha1').update(material, 'utf8').digest('hex').slice(0, 16);
+  return hashContent(material, { algorithm: 'sha1', length: 16 });
 }
 
 function readJson(file, fallback) {

@@ -33,6 +33,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeProfileLedger } from "./profile.mjs";
 import { shardSuffix } from "./vitestShard.mjs";
+import { compareCodeUnits } from './primitives.mjs';
 
 // tests/<area>/... → area subtotal bucket.
 function areaOf(filepath) {
@@ -193,7 +194,7 @@ export function collectObservations(files) {
       if (state === "pass" || state === "fail") observations.push({ testId: id, outcome: state });
     }
   }
-  return observations.sort((a, b) => (a.testId < b.testId ? -1 : a.testId > b.testId ? 1 : 0));
+  return observations.sort((a, b) => compareCodeUnits(a.testId, b.testId));
 }
 
 /**

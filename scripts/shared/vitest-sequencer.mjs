@@ -2,6 +2,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { BaseSequencer } from "vitest/node";
+import { resolveWithinRoot } from './primitives.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const defaultBaselinePath = resolve(here, "vitest-shard-duration-baseline.json");
@@ -50,9 +51,10 @@ function toRepoRelativeTestPath(spec, repoRoot) {
 
   try {
     const absolutePath = isAbsolute(candidate) ? candidate : resolve(repoRoot, candidate);
-    const relativePath = relative(repoRoot, absolutePath);
-    if (relativePath === "" || relativePath.startsWith("..")) return "";
-    const normalized = normalizePathToRepoSlashStyle(relativePath);
+    // allowRoot:false — a spec resolving to the repo root is not a test file.
+    const contained = resolveWithinRoot(repoRoot, absolutePath, { allowRoot: false });
+    if (contained === null) return "";
+    const normalized = normalizePathToRepoSlashStyle(relative(repoRoot, contained));
     return normalized.startsWith("./") ? normalized.slice(2) : normalized;
   } catch {
     const normalized = normalizePathToRepoSlashStyle(candidate);

@@ -15,22 +15,25 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildImporterGraph,
+  checkDeclaredClaims,
   collectSourceModules,
   evaluateClosure,
 } from "./shared/loopCoreClosure.mjs";
-import { declaredExclusions } from "./shared/loopCoreClosureData.mjs";
+import { declaredExclusions, declaredReasons } from "./shared/loopCoreClosureData.mjs";
 import { isLoopCorePath } from "../.claude/hooks/loop-core-patterns.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+const declared = declaredExclusions();
 const modules = collectSourceModules(repoRoot);
 const importers = buildImporterGraph(repoRoot, modules);
 const { undeclared, staleDeclarations } = evaluateClosure({
   modules,
   importers,
   isLoopCorePath,
-  declared: declaredExclusions(),
+  declared,
 });
+const claimFailures = checkDeclaredClaims(repoRoot, declared);
 
 let failed = false;
 
@@ -66,9 +69,34 @@ if (staleDeclarations.length > 0) {
   );
 }
 
+if (claimFailures.length > 0) {
+  failed = true;
+  const reasons = declaredReasons();
+  console.error(
+    `\nloop-core closure: ${claimFailures.length} declared exclusion(s) make a claim the source no ` +
+      `longer supports — the classification was MEASURED when the gate landed and nothing has ` +
+      `re-derived it since:`,
+  );
+  for (const failure of claimFailures) {
+    console.error(`  - ${failure.module}\n      ${failure.detail}`);
+    console.error(`      declared reason: ${reasons.get(failure.module) ?? "(none)"}`);
+  }
+  console.error(
+    `\nFix, choosing deliberately:\n` +
+      `  • the module IS core now → add it to LOOP_CORE_PATTERNS in src/shared/loopCorePaths.ts, ` +
+      `then run \`node scripts/shared/generate-loop-core-patterns.mjs\`\n` +
+      `  • it is NOT core       → update its \`claim\` (and its reason, if the argument changed) in ` +
+      `scripts/shared/loopCoreClosureData.mjs, having actually checked the new claim\n` +
+      `  • a 'mutates' row whose write is gone may be a RETIRED argument, not a re-classification — ` +
+      `read the reason before rewriting it`,
+  );
+}
+
 if (failed) process.exit(1);
 
+const claims = declaredReasons();
 console.log(
   `loop-core closure: ${modules.length} module(s) scanned; every module reachable only through ` +
-    `loop-core is either in the set or declared (${declaredExclusions().size} declared).`,
+    `loop-core is either in the set or declared (${claims.size} declared), and every declared ` +
+    `claim re-derives from the source.`,
 );

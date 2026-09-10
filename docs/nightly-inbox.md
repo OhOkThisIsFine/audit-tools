@@ -535,52 +535,6 @@ This run's output was committed and pushed on branch codex/pipeline-quality rath
 ---
 
 
-<!-- nightly:item key=51bcb94355fd9a32 -->
-
-## `solutions-agents-region-has-no-freshness-authority` — The AGENTS.md generated block has drifted from CLAUDE.md since 2026-09-07, and it has now blocked two nightly runs from applying anything — add a check here, fix the generator for every repository, or accept the drift? <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Recurring-problem solutions · open 1 night · `AGENTS.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-This repository has two instruction files. CLAUDE.md is the real one that people and agents read. AGENTS.md is mostly a short pointer that says "read CLAUDE.md instead", and part of AGENTS.md is written automatically by a program called sync.mjs that lives on this machine outside the repository, at ~/.agent-config/sync.mjs. That automatic part includes one sentence stating how large CLAUDE.md is: "It is 38.3 KB". Whenever somebody edits CLAUDE.md, that size changes, so AGENTS.md has to be regenerated and committed too. The only thing that makes anyone do that is a written instruction telling them to remember. On 2026-09-07 a commit edited CLAUDE.md and did not regenerate AGENTS.md, so the committed AGENTS.md still claims 38.3 KB while CLAUDE.md is really 38.5 KB. Three earlier commits exist that did nothing except catch this same block up after the fact. The practical damage is not the wrong number. When the generator does get run on this machine, the regenerated AGENTS.md appears as an uncommitted change, which makes the working tree "dirty". The nightly maintenance routine refuses to write anything to a dirty tree, so it applied nothing on 2026-09-09 and again tonight. The repository already has a mechanism for exactly this problem: a registry that pairs every generated file with a check that proves it is up to date. That registry can only see generators stored inside the repository, and this generator is not, so this one generated block is the only one in the tree with nothing watching it. A fix is straightforward and needs no access to the outside generator, because the automatic block depends on CLAUDE.md through that size number and nothing else: a check can simply compare the number AGENTS.md states against the real size of CLAUDE.md, and refuse a commit that leaves them different. The decision you are being asked for is where that fix should live, because the same generator writes the same kind of block into every project under C:/Code, so a fix inside this repository only protects this repository.
-
-### The question
-
-Where should the fix for the drifting AGENTS.md block live: a check inside this repository, a machine-wide fix in the generator that serves every project, both, or neither?
-
-### Your answer
-
-- [ ] **1. Repo check only** — Land the repository-side check (check:agents-region) as proposed in P64: a new script, a guard-registry row with preCommit "reach", and a contract test. Do not change anything machine-wide. Benefit: it lands entirely inside this repository, runs in CI and in a fresh clone, needs no access to ~/.agent-config, and stops this repository drifting again. Cost: every other project that the same generator writes into keeps the identical gap, so the same class of defect can still bite elsewhere. Confidence: high — the red failure and the green pass were both measured tonight, and the candidate script is written and attached.
-- [ ] **2. Machine-wide fix** — Fix it once in the machine-wide layer instead: make ~/.agent-config/sync.mjs, or a global commit hook, guarantee that a committed CLAUDE.md and its generated AGENTS.md region travel together. Benefit: one change protects every project the generator serves, which is where the defect class actually lives. Cost: the fix sits outside this repository, so this repository CI never proves it and a fresh clone on another machine has no guard at all; it is also the larger piece of work, and nothing in this repository can test it. Confidence: medium — the generator source was read tonight and the pointer-mode behaviour is confirmed, but no machine-wide patch was written or run. Note that the two routes interact: if the machine-wide fix is to stop printing the size sentence at all, the repository check described in the first option must be retired or rewritten in the same change, because it looks for that sentence.
-- [ ] **3. Both** — Do both: land the repository check now so this tree stops drifting, and file the machine-wide half in C:/Code/docs/backlog.md so every other project gets the same protection. Benefit: the repository is protected immediately and the general defect is not lost; it also matches the standing rule that a fix which would leave every other repository broken the same way belongs in the machine-wide backlog. Cost: two pieces of work instead of one, and for a while the same rule is enforced in two places. Confidence: high for the repository half (measured), medium for the machine-wide half (not yet designed).
-- [ ] **4. Accept the drift** — Change nothing. Accept that AGENTS.md can lag CLAUDE.md, and regenerate it by hand when it is noticed. Benefit: no new gate, no new false-refusal surface, and the stale number harms nobody directly because AGENTS.md only points at CLAUDE.md. Cost: the nightly routine keeps losing its ability to apply anything whenever the generator has run and the result is uncommitted — that has now happened on two consecutive nights. Confidence: high that the cost is real, because both blocked nights were measured.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-Full proposal: [`.audit-tools/nightly/proposals/P64-agents-region-has-no-freshness-authority/candidate-check-agents-region.mjs`](../.audit-tools/nightly/proposals/P64-agents-region-has-no-freshness-authority/candidate-check-agents-region.mjs) <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-<details>
-<summary>Evidence (7) — what was verified against code, and how</summary>
-
-- Committed tree at HEAD a33bc8d9: `git show HEAD:AGENTS.md` states "It is 38.3 KB," while `git show HEAD:CLAUDE.md` is 39431 bytes = 38.5 KB. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- Commit a1616d1d (2026-09-07, "chore: automate maintenance guardrails") edited CLAUDE.md and did not regenerate AGENTS.md; the divergence has stood since.
-- Three prior catch-up commits exist for this region alone: e4bfb97f (2026-08-26), 1efa125f (2026-08-28), 590b27b3 (2026-08-29).
-- buildBody in ~/.agent-config/sync.mjs computes the printed size as (Buffer.byteLength(sourceText,"utf8")/1024).toFixed(1) and buildRegion hashes the finished body into shared-region-id, so in pointer mode the size is the ONLY path from CLAUDE.md into the region — comparing it is exact, not approximate.
-- check:generated-artifacts reconciles tracked generators against declared freshness authorities; ~/.agent-config/sync.mjs is not tracked here, so no GENERATED row in scripts/guard-reach-data.mjs claims this region.
-- Measured cost: the 2026-09-09 run and this run both reported "M AGENTS.md" at start and applied nothing under the clean-tree rule.
-- Red at HEAD, verbatim, and its green half: .audit-tools/nightly/proposals/P64-agents-region-has-no-freshness-authority/RED-AT.txt (red-run.txt exit 1, green-run.txt exit 0).
-
-</details>
-
----
-
-
 <details>
 <summary>What the last run changed on its own</summary>
 

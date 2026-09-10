@@ -81,6 +81,175 @@ export function buildImporterGraph(root, modules) {
   return importers;
 }
 
+// ── the declared CLAIM vocabulary ────────────────────────────────────────────
+//
+// WHY THIS EXISTS (backlog 2026-08-30). The 25 rows the gate landed with record
+// what the tree MEASURED the night the gate landed, not a judgement that each
+// module is correctly outside the set. Their `reason` strings are prose: the
+// gate could not read them, so a row stayed green after the shape it described
+// had changed underneath it. The property the entry states is that a declared
+// exclusion says WHY the module is not core, and that the reason has been
+// CHECKED rather than inherited from the measurement.
+//
+// So the reason becomes a CLAIM drawn from a closed vocabulary, and each claim
+// is mechanically re-derived from the module's own source and its in-src
+// transitive import closure. A row whose claim no longer holds is an error.
+//
+// The claims are about CAPABILITY, not about style. What makes a module a leaf
+// body rather than part of the boundary is whether it can reach a filesystem
+// write at all, and whether it decides WHERE a write lands:
+//
+//   'pure'       neither the module nor anything it reaches imports a node I/O
+//                builtin. It cannot touch the filesystem even indirectly.
+//   'reads-only' I/O is reachable, but the module's own source performs no
+//                mutating filesystem call. It can observe, never change.
+//   'mutates'    the module's own source performs a mutating filesystem call,
+//                so its reason must go on to say what it writes and who owns
+//                that location — the boundary itself, or its caller.
+//
+// These are capability facts, chosen because they are the ones that can change
+// SILENTLY and invalidate the classification: a module that gains a write is no
+// longer the leaf body its row describes, and nothing else in the tree would
+// notice. They are deliberately exhaustive and heuristic-free — no attempt is
+// made to judge WHERE a mutating call writes from its source text, because that
+// judgement is not mechanical and a guess dressed as a check is worse than a
+// stated gap. The four 'mutates' rows therefore carry the location argument in
+// their `reason`, and that half is prose.
+//
+// The classification is a MEASUREMENT of today's tree, exactly as the original
+// 25 rows were. What changed is that it is now re-measured on every run: a row
+// cannot silently become false.
+
+/** Node builtins that let a module touch the filesystem or spawn a child. */
+const IO_BUILTINS = /^node:(fs|fs\/promises|child_process)$/;
+
+/** A mutating filesystem call — the verbs that change state on disk. */
+const MUTATING_CALL =
+  /\b(?:writeFile|writeFileSync|appendFile|appendFileSync|mkdir|mkdirSync|rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|copyFile|copyFileSync|chmod|chmodSync|symlink|symlinkSync|truncate|truncateSync)\s*\(/;
+
+/** The claim names, in strength order — for validation and for error text. */
+export const CLOSURE_CLAIMS = ['pure', 'reads-only', 'mutates'];
+
+/** Every module specifier of one source file, both forms. */
+function specifiersOf(text) {
+  const out = [];
+  for (const m of text.matchAll(/from\s+["'](\.[^"']+)["']/g)) out.push({ kind: 'relative', spec: m[1] });
+  for (const m of text.matchAll(/from\s+["'](audit-tools\/shared(?:\/[^"']+)?)["']/g)) {
+    out.push({ kind: 'package', spec: m[1] });
+  }
+  return out;
+}
+
+/** Resolve one specifier to a repo-relative module path that is in `known`, or null. */
+function resolveSpecifier(root, from, spec) {
+  const base = spec.startsWith('audit-tools/shared')
+    ? `src/shared/${spec.slice('audit-tools/shared'.length).replace(/^\//, '')}`
+    : null;
+  const raw = base !== null ? base : spec;
+  const abs = base !== null ? join(root, raw) : resolve(dirname(join(root, from)), raw);
+  const trimmed = abs.replace(/\.js$/, '').replace(/\.mjs$/, '');
+  for (const candidate of [`${trimmed}.ts`, `${trimmed}/index.ts`]) {
+    if (candidate.replace(/\\/g, '/').startsWith(root.replace(/\\/g, '/'))) {
+      const r = rel(root, candidate);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+/**
+ * Re-derive each declared claim from the tree.
+ *
+ * @param {string} root
+ * @param {Map<string, string>} declared module -> claim
+ * @returns {{module: string, claim: string, actual: string|null, detail: string}[]}
+ *   rows whose declared claim the source does not support (or whose claim is
+ *   not a known one), each naming what the source actually shows.
+ */
+export function checkDeclaredClaims(root, declared) {
+  const modules = collectSourceModules(root);
+  const known = new Set(modules);
+  /** @type {Map<string, string[]>} */
+  const edges = new Map();
+  for (const module of modules) {
+    const text = readFileSync(join(root, module), 'utf8');
+    const targets = [];
+    for (const { spec } of specifiersOf(text)) {
+      const target = resolveSpecifier(root, module, spec);
+      if (target && target !== module && known.has(target)) targets.push(target);
+    }
+    edges.set(module, targets);
+  }
+
+  /** The in-src transitive closure of one module — itself included. */
+  const closureOf = (module) => {
+    const seen = new Set();
+    const stack = [module];
+    while (stack.length) {
+      const m = /** @type {string} */ (stack.pop());
+      if (seen.has(m)) continue;
+      seen.add(m);
+      for (const t of edges.get(m) ?? []) if (!seen.has(t)) stack.push(t);
+    }
+    return [...seen];
+  };
+
+  const failures = [];
+  for (const [module, claim] of declared) {
+    if (!known.has(module)) continue; // absence is the closure gate's own report
+    let text;
+    try {
+      text = readFileSync(join(root, module), 'utf8');
+    } catch {
+      continue; // unreadable is reported elsewhere; do not manufacture a second verdict
+    }
+    if (!CLOSURE_CLAIMS.includes(claim)) {
+      failures.push({
+        module,
+        claim,
+        actual: null,
+        detail: `"${claim}" is not a known claim — expected one of ${CLOSURE_CLAIMS.join(', ')}`,
+      });
+      continue;
+    }
+    const closure = closureOf(module);
+    const ioModules = closure.filter((m) => {
+      const t = readFileSync(join(root, m), 'utf8');
+      return [...t.matchAll(/from\s+["'](node:[^"']+)["']/g)].some((x) => IO_BUILTINS.test(x[1]));
+    });
+    const mutates = MUTATING_CALL.test(text);
+
+    if (claim === 'pure' && ioModules.length > 0) {
+      failures.push({
+        module,
+        claim,
+        actual: 'reads-only',
+        detail: `declared 'pure' but node I/O is reachable through ${ioModules.join(', ')}`,
+      });
+    } else if (claim === 'reads-only' && mutates) {
+      failures.push({
+        module,
+        claim,
+        actual: 'mutates',
+        detail: "declared 'reads-only' but the module's own source performs a mutating filesystem call",
+      });
+    } else if (claim === 'mutates' && !mutates) {
+      // The other direction: the row's reason argues about what it writes, and
+      // the write is gone — the argument now describes a module that no longer
+      // exists, which is how a data list rots into prose.
+      failures.push({
+        module,
+        claim,
+        actual: 'reads-only',
+        detail:
+          "declared 'mutates' but the module's own source performs no mutating filesystem call — " +
+          'its reason argues about a write that is no longer there',
+      });
+    }
+  }
+  return failures;
+}
+
 /**
  * The closure verdict. Two failures, and the second is what stops the declared
  * list from rotting: a declaration whose condition no longer holds is an error,

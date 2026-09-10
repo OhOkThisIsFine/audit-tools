@@ -23,7 +23,15 @@
 // Lives under tests/shared because vitest excludes `.claude/**` — same reason
 // as doc-manifest-gate.test.ts.
 import { describe, it, expect } from 'vitest';
-import { reconcile as reconcileImpl } from '../../scripts/check-guard-reach.mjs';
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import {
+  reconcile as reconcileImpl,
+  gateHomeGaps as gateHomeGapsImpl,
+} from '../../scripts/check-guard-reach.mjs';
+import { GUARDS as LIVE_GUARDS, REACH as LIVE_REACH } from '../../scripts/guard-reach-data.mjs';
+
+const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 
 /** Mirrors the JSDoc typedefs in scripts/guard-reach-data.mjs. */
 interface GuardRow {
@@ -289,6 +297,70 @@ describe('win32 — comparisons survive backslashed inputs', () => {
       onDisk: ON_DISK.map((f) => f.replace(/\//g, '\\')),
     });
     expect(errors).toEqual([]);
+  });
+});
+
+describe('gate registration is ONE report, not a serial walk (backlog 2026-08-30)', () => {
+  const gateHomeGaps = gateHomeGapsImpl as (args: {
+    guards: GuardRow[];
+    reach: ReachRow[];
+    packageScripts: Record<string, string>;
+  }) => { id: string; missing: string[] }[];
+
+  const gapsOf = (over: Partial<Parameters<typeof gateHomeGaps>[0]> = {}) =>
+    gateHomeGaps({ guards: GUARDS, reach: REACH, packageScripts: SCRIPTS, ...over });
+
+  it('the healthy fixture has no gaps — every registered gate is whole', () => {
+    expect(gapsOf()).toEqual([]);
+  });
+
+  it('a gate missing THREE homes is reported ONCE, naming all three', () => {
+    // The 2026-08-30 walk: a new `check:omega` whose script, step, GUARDS row
+    // and REACH row are all absent. Before this pass the build revealed them one
+    // per run; here the whole remainder arrives together.
+    const gaps = gapsOf({
+      guards: [...GUARDS, { id: 'check:omega', kind: 'gate', impl: 'check:omega', preCommit: 'reach', fix: 'x' }],
+    });
+    expect(gaps.map((g) => g.id)).toEqual(['check:omega']);
+    const missing = gaps[0]?.missing.join(' | ') ?? '';
+    expect(missing).toContain('package.json scripts["check:omega"]');
+    expect(missing).toContain('verify:checks step list');
+    expect(missing).toContain('REACH row');
+  });
+
+  it('a bare npm script with no GUARDS row at all is reported with its missing homes', () => {
+    const gaps = gapsOf({
+      packageScripts: { ...SCRIPTS, 'check:omega': 'node scripts/check-omega.mjs' },
+    });
+    expect(gaps.map((g) => g.id)).toEqual(['check:omega']);
+    expect(gaps[0]?.missing.join(' | ')).toContain('a GUARDS row');
+  });
+
+  it('a gate missing only ONE home is left to that home\'s precise message — no duplicate report', () => {
+    // check:alpha exists everywhere; drop only its REACH citation.
+    const gaps = gapsOf({ reach: REACH.map((r) => (r.area === 'gates' ? { ...r, guardedBy: ['build'] } : r)) });
+    expect(gaps).toEqual([]);
+    // ...and the precise rule still refuses it.
+    const errors = run({ reach: REACH.map((r) => (r.area === 'gates' ? { ...r, guardedBy: ['build'] } : r)) });
+    expect(errors.some((e) => e.includes('check:alpha') && e.includes('no REACH row'))).toBe(true);
+  });
+
+  it('the LIVE registry has no half-registered gate', () => {
+    // A gate registered in some homes but not others is exactly the friction
+    // this closes, so the shipped registry is asserted whole — not just the
+    // synthetic fixtures above.
+    const pkg = JSON.parse(
+      readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'),
+    ) as { scripts: Record<string, string> };
+    const liveGaps = gateHomeGaps({
+      guards: LIVE_GUARDS as GuardRow[],
+      reach: LIVE_REACH as ReachRow[],
+      packageScripts: pkg.scripts,
+    });
+    expect(
+      liveGaps,
+      `half-registered gate(s): ${liveGaps.map((g) => `${g.id} (${g.missing.join(', ')})`).join('; ')}`,
+    ).toEqual([]);
   });
 });
 

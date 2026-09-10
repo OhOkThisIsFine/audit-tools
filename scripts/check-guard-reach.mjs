@@ -44,6 +44,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isGlob, globToRegExp } from './check-doc-manifest.mjs';
 import { GUARDS, REACH } from './guard-reach-data.mjs';
+import { verifyChecksSteps } from './shared/verify-steps.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_FILE = 'scripts/guard-reach-data.mjs';
@@ -81,6 +82,59 @@ function reachableScripts(packageScripts, root = 'verify:release') {
 }
 
 /**
+ * Every home a gate is missing from, named in ONE report.
+ *
+ * The defect this closes (backlog 2026-08-30): registering ONE new gate took
+ * edits in five separate homes — the `package.json` script, the `verify:checks`
+ * step list, a GUARDS row, a REACH row, and (then) a `STEP_GLOSS` entry — and
+ * nothing stated the SET, so each one was discovered by failing the next check
+ * in turn. Every guard below is doing its job; what was missing was a single
+ * reading that names the whole remainder at once.
+ *
+ * Scope: gates that FOLLOW the npm-script convention (`impl === id`), which is
+ * the registration procedure the five-home walk describes. A path-impl gate
+ * (`vitest-gate`, invoked by path from a reachable script) has a different
+ * procedure and is reconciled by the wiring rules below, not here.
+ *
+ * A gate missing exactly ONE home is left to the precise message that already
+ * describes it — aggregating one item would only duplicate that text. The
+ * aggregate fires from TWO missing homes up, which is precisely the case where
+ * the operator would otherwise learn them serially.
+ *
+ * @param {{guards: any[], reach: any[], packageScripts: Record<string,string>}} input
+ * @returns {{id: string, missing: string[]}[]}
+ */
+export function gateHomeGaps({ guards, reach, packageScripts }) {
+  let steps;
+  try {
+    steps = new Set(verifyChecksSteps(packageScripts));
+  } catch {
+    // verify:checks is unrunnable — the wiring rules below report that loudly
+    // and this aggregate has no step list to reconcile against.
+    steps = new Set();
+  }
+  const cited = new Set(reach.flatMap((row) => (row.guardedBy === 'declared-gap' ? [] : row.guardedBy)));
+  const gateRows = guards.filter((g) => g.kind === 'gate' && g.impl === g.id);
+
+  const ids = new Set(gateRows.map((g) => g.id));
+  for (const name of Object.keys(packageScripts)) if (name.startsWith('check:')) ids.add(name);
+
+  const gaps = [];
+  for (const id of [...ids].sort()) {
+    const missing = [];
+    if (!(id in packageScripts)) missing.push(`package.json scripts["${id}"]`);
+    if (steps.size > 0 && !steps.has(id)) missing.push('the verify:checks step list');
+    const row = gateRows.find((g) => g.id === id);
+    if (!row) missing.push('a GUARDS row (kind "gate")');
+    else if ((row.preCommit === 'reach' || row.preCommit === 'final') && !cited.has(id)) {
+      missing.push('a REACH row citing it (its preCommit trigger has no reach otherwise)');
+    }
+    if (missing.length >= 2) gaps.push({ id, missing });
+  }
+  return gaps;
+}
+
+/**
  * Reconcile the guard registry against the tracked tree. Pure — takes the file
  * list, the package.json scripts object and the settings.json hook command
  * strings; returns error strings (empty = clean).
@@ -111,6 +165,21 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
     errors.push(
       `Reach row(s) cite guard id(s) with no GUARDS row (${DATA_FILE}):\n` +
         phantom.map((p) => `  - ${p}`).join('\n'),
+    );
+  }
+
+  // ── gate registration is ONE report, not a serial walk ─────────────────────
+  const gaps = gateHomeGaps({ guards, reach, packageScripts });
+  if (gaps.length) {
+    errors.push(
+      `Gate(s) registered in some homes but not others — every missing home is named here, so ` +
+        `this is ONE fix pass rather than a red build per missing file:\n` +
+        gaps
+          .map((g) => `  - ${g.id}\n` + g.missing.map((m) => `      missing: ${m}`).join('\n'))
+          .join('\n') +
+        `\n  → the two generated artifacts follow from these homes and must be re-rendered in the ` +
+        `same change: \`node scripts/shared/generate-ci-trigger-paths.mjs\` (from the REACH rows) and ` +
+        `\`node scripts/check-gate-enumeration.mjs --write\` (from the verify:checks step list).`,
     );
   }
 

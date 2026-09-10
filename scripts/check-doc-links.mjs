@@ -32,6 +32,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve, relative, basename } from "node:path";
 import { isGeneratedRender } from "./shared/generated-renders.mjs";
+import { compareCodeUnits, resolveWithinRoot } from './shared/primitives.mjs';
 
 const root = resolve(process.argv[2] ?? process.cwd());
 
@@ -164,10 +165,13 @@ function classify(sourceFile, target) {
 function gitIgnored(absolutePaths) {
   const relatives = [];
   for (const absolute of absolutePaths) {
-    const rel = relative(root, absolute).replace(/\\/g, "/");
     // Outside the repo entirely — git has no opinion, and check-ignore errors.
-    if (rel === "" || rel.startsWith("../")) continue;
-    relatives.push(rel);
+    // resolveWithinRoot also rejects the allowRoot case (rel === ""), which is
+    // exactly what the old prefix test did: the repo root is not a path git
+    // can be asked to ignore.
+    const contained = resolveWithinRoot(root, absolute, { allowRoot: false });
+    if (contained === null) continue;
+    relatives.push(relative(root, contained).replace(/\\/g, "/"));
   }
   if (relatives.length === 0) return new Set();
   try {
@@ -223,7 +227,7 @@ export function findDeadLinks(files = trackedMarkdown()) {
   }
   for (const f of findings) delete f.absolute; // internal only — never rendered
 
-  findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+  findings.sort((a, b) => compareCodeUnits(a.file, b.file) || a.line - b.line);
   return findings;
 }
 

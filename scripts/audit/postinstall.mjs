@@ -1,26 +1,43 @@
 #!/usr/bin/env node
+// The audit-code host-install entry.
+//
+// What this file owns: the AUDIT-CODE HALF OF THE PLAN — the OpenCode permission
+// tables (what an auditor may touch) and the two prompt renderers. Everything
+// structural now comes from `scripts/shared/host-asset-plan.mjs`: which hosts are
+// served, what each target path is, which source file feeds it, the command
+// description, the agent name. Before that module existed, this file and its
+// remediate twin each carried their own copy of all of it — two installers built
+// around one shared installer, differing only by a tool token, and free to
+// drift the moment either changed.
 import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
 import {
   readRequiredSource,
   readOptionalSource,
-  writeGeneratedFile,
   objectValue,
   resolveSharedOpenCodePermissions,
   runInstalls,
   installOpenCodeGlobalConfig,
   installAntigravityPlugin,
+  installClaudeDesktopPlugin,
   finishPostinstall,
 } from '../shared/install-host-assets.mjs';
+import {
+  HOST_ASSET_PLANS,
+  PKG_ROOT,
+  planClaudePluginDir,
+  planInstalls,
+  planOpenCodeCommand,
+  planOpenCodeConfigPath,
+  planSources,
+} from '../shared/host-asset-plan.mjs';
 
 const TOOL = 'audit-code';
-const pkgRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const PLAN = HOST_ASSET_PLANS[TOOL];
+const SOURCES = planSources(PLAN);
+const pkgRoot = PKG_ROOT;
 const packageVersion = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version ?? '0.0.0';
-const promptSourceFile = join(pkgRoot, 'skills', 'audit-code', 'audit-code.prompt.md');
-const skillSourceFile = join(pkgRoot, 'skills', 'audit-code', 'SKILL.md');
-const codexOpenAiAgentSourceFile = join(pkgRoot, 'skills', 'audit-code', 'agents', 'openai.yaml');
 
 const OPENCODE_AUDIT_EDIT_PERMISSION = {
   '*': 'ask',
@@ -175,21 +192,18 @@ function mergeOpenCodeGlobalConfig(existing) {
       ...(parsed.command && typeof parsed.command === 'object' && !Array.isArray(parsed.command)
         ? parsed.command
         : {}),
-      'audit-code': {
-        template: OPENCODE_MCP_COMMAND_TEMPLATE,
-        description: 'Autonomous local loop code auditing',
-        agent: 'auditor',
-        subtask: false,
-      },
+      // The command ENTRY comes from the plan; only the template is this tool's
+      // (an MCP-server invocation rather than the prompt body).
+      [TOOL]: planOpenCodeCommand(PLAN, OPENCODE_MCP_COMMAND_TEMPLATE),
     },
     permission: mergeOpenCodeGlobalPermissionConfig(parsed.permission, auditPermission),
     agent: {
       ...(parsed.agent && typeof parsed.agent === 'object' && !Array.isArray(parsed.agent)
         ? parsed.agent
         : {}),
-      auditor: {
+      [PLAN.agentName]: {
         ...existingAuditor,
-        description: 'Read-heavy audit orchestration agent for the /audit-code workflow.',
+        description: PLAN.agentDescription,
         permission: {
           ...mergeOpenCodeAgentPermissionConfig(existingAuditor.permission, auditPermission),
           'auditor_*': 'allow',
@@ -201,57 +215,31 @@ function mergeOpenCodeGlobalConfig(existing) {
   };
 }
 
-function claudePluginExternalDir() {
-  return join(homedir(), '.claude', 'plugins', 'marketplaces', 'claude-plugins-official', 'external_plugins', 'audit-code');
-}
-
-const promptSource = readRequiredSource(promptSourceFile, 'prompt', TOOL);
-const skillSource = readRequiredSource(skillSourceFile, 'skill', TOOL);
+const promptSource = readRequiredSource(SOURCES.prompt, 'prompt', TOOL);
+const skillSource = readRequiredSource(SOURCES.skill, 'skill', TOOL);
 
 if (!promptSource || !skillSource) {
   process.exit(0);
 }
 
-const codexOpenAiAgentSource = readOptionalSource(codexOpenAiAgentSourceFile, 'Codex skill UI metadata', TOOL);
+const codexOpenAiAgentSource = readOptionalSource(SOURCES.codexUiMetadata, 'Codex skill UI metadata', TOOL);
 
 const postinstallStart = Date.now();
 const counts = { succeeded: 0, failed: 0 };
 
-const installs = [
-  {
-    label: 'Claude command',
-    path: join(homedir(), '.claude', 'commands', 'audit-code.md'),
-    sourcePath: promptSourceFile,
-    content: promptSource,
-  },
-  {
-    label: 'Codex skill',
-    path: join(homedir(), '.codex', 'skills', 'audit-code', 'SKILL.md'),
-    sourcePath: skillSourceFile,
-    content: skillSource,
-  },
-  {
-    label: 'Codex prompt',
-    path: join(homedir(), '.codex', 'skills', 'audit-code', 'audit-code.prompt.md'),
-    sourcePath: promptSourceFile,
-    content: promptSource,
-  },
-  ...(codexOpenAiAgentSource
-    ? [
-        {
-          label: 'Codex skill UI metadata',
-          path: join(homedir(), '.codex', 'skills', 'audit-code', 'agents', 'openai.yaml'),
-          sourcePath: codexOpenAiAgentSourceFile,
-          content: codexOpenAiAgentSource,
-        },
-      ]
-    : []),
-];
-
-runInstalls(TOOL, installs, counts);
+runInstalls(
+  TOOL,
+  planInstalls(PLAN, {
+    promptContent: promptSource,
+    skillContent: skillSource,
+    // readOptionalSource yields null when absent; the plan omits the target then.
+    codexUiMetadataContent: codexOpenAiAgentSource ?? undefined,
+  }),
+  counts,
+);
 
 // Install OpenCode global command and MCP via merged config
-const opencodeGlobalConfig = join(homedir(), '.config', 'opencode', 'opencode.json');
+const opencodeGlobalConfig = planOpenCodeConfigPath();
 installOpenCodeGlobalConfig(
   {
     toolName: TOOL,
@@ -272,51 +260,35 @@ installAntigravityPlugin(
   {
     toolName: TOOL,
     homeDir: homedir(),
-    pluginName: 'audit-code',
-    pluginVersion: '1.0.0',
+    pluginName: TOOL,
+    pluginVersion: PLAN.pluginVersion === 'packageVersion' ? packageVersion : PLAN.pluginVersion,
     skillSource,
   },
   counts,
 );
 
 // Install Claude Desktop plugin so /audit-code appears in the slash-command menu
-// Claude Desktop reads external plugins from ~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/
-const claudePluginDir = claudePluginExternalDir();
-const claudePluginManifestPath = join(claudePluginDir, '.claude-plugin', 'plugin.json');
-const claudePluginCommandPath = join(claudePluginDir, 'commands', 'audit-code.md');
-const claudePluginSkillPath = join(claudePluginDir, 'skills', 'audit-code', 'SKILL.md');
-try {
-  const manifest = {
-    name: 'audit-code',
-    description: 'Autonomous local-loop code auditing workflow',
-    version: packageVersion,
-    author: {
-      name: 'audit-tools',
-      url: 'https://github.com/OhOkThisIsFine/audit-tools',
+installClaudeDesktopPlugin(
+  {
+    toolName: TOOL,
+    pluginDir: planClaudePluginDir(PLAN),
+    manifest: {
+      name: TOOL,
+      description: 'Autonomous local-loop code auditing workflow',
+      version: packageVersion,
+      author: {
+        name: 'audit-tools',
+        url: 'https://github.com/OhOkThisIsFine/audit-tools',
+      },
+      homepage: 'https://github.com/OhOkThisIsFine/audit-tools',
+      repository: 'https://github.com/OhOkThisIsFine/audit-tools',
+      license: 'MIT',
+      keywords: ['audit', 'code-audit', 'static-analysis', 'orchestration'],
     },
-    homepage: 'https://github.com/OhOkThisIsFine/audit-tools',
-    repository: 'https://github.com/OhOkThisIsFine/audit-tools',
-    license: 'MIT',
-    keywords: ['audit', 'code-audit', 'static-analysis', 'orchestration'],
-  };
-  const manifestAction = writeGeneratedFile(
-    claudePluginManifestPath,
-    Buffer.from(JSON.stringify(manifest, null, 2) + '\n'),
-  );
-  console.log(`audit-code: ${manifestAction} Claude Desktop plugin manifest at ${claudePluginManifestPath}`);
-
-  const commandAction = writeGeneratedFile(claudePluginCommandPath, promptSource);
-  console.log(`audit-code: ${commandAction} Claude Desktop plugin command at ${claudePluginCommandPath}`);
-
-  const skillAction = writeGeneratedFile(claudePluginSkillPath, skillSource);
-  console.log(`audit-code: ${skillAction} Claude Desktop plugin skill at ${claudePluginSkillPath}`);
-
-  console.log(`audit-code: restart Claude Desktop for /audit-code to appear in the slash-command menu`);
-  counts.succeeded++;
-} catch (err) {
-  console.warn(`audit-code: could not install Claude Desktop plugin (${/** @type {any} */ (err).message})`);
-  console.warn(`  Plugin directory: ${claudePluginDir}`);
-  counts.failed++;
-}
+    commandContent: promptSource,
+    skillContent: skillSource,
+  },
+  counts,
+);
 
 finishPostinstall(TOOL, counts, postinstallStart);

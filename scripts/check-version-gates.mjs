@@ -47,6 +47,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { compareCodeUnits } from './shared/primitives.mjs';
 
 // ── Source collection ─────────────────────────────────────────────────────────
 
@@ -295,7 +296,7 @@ export function scanVersionGates(sources) {
     else violations.push(record);
   }
   const order = (a, b) =>
-    a.decl.file.localeCompare(b.decl.file) || a.decl.name.localeCompare(b.decl.name);
+    compareCodeUnits(a.decl.file, b.decl.file) || compareCodeUnits(a.decl.name, b.decl.name);
   return { violations: violations.sort(order), gated: gated.sort(order) };
 }
 

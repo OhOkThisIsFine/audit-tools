@@ -1,8 +1,9 @@
 import { open, stat, unlink } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { dirname, isAbsolute, join, relative } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileExists, newestMtimeMs } from './audit-code-wrapper-io.mjs';
+import { resolveWithinRoot } from '../scripts/shared/primitives.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const distEntry = join(repoRoot, 'dist', 'audit', 'index.js');
@@ -151,8 +152,10 @@ export function assertWorkspaceInstalled({ checkoutRoot, sharedManifestPath }) {
     );
   }
 
-  const relToCheckout = relative(checkoutRoot, sharedManifestPath);
-  if (relToCheckout.startsWith('..') || isAbsolute(relToCheckout)) {
+  // The containment decision, through the shared primitive: a manifest on
+  // another win32 drive / UNC root makes `relative()` return an ABSOLUTE path,
+  // where the bare prefix test read "contained".
+  if (resolveWithinRoot(checkoutRoot, sharedManifestPath) === null) {
     throw new Error(
       `audit-tools/shared resolved to ${sharedManifestPath}, outside this ` +
         `checkout (${checkoutRoot}). node_modules was never installed here — ` +

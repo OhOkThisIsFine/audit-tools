@@ -187,7 +187,37 @@ export const GUARDS = [
       'scripts/check-shared-primitives.mjs — an exception is a file + reason row, never prose',
     note:
       'single-definition rules plus defect-class pattern rules (comparator body, containment ' +
-      'predicate, sha256 chain, localeCompare/ICU collation) over tracked src/**/*.ts',
+      'predicate, sha256 chain, localeCompare/ICU collation) over tracked src/**/*.ts AND the ' +
+      'governance tree (scripts/, wrapper/, dispatch/, .claude/hooks/, the root bins) — the ' +
+      'enforcement layer used to be the one tree exempt from the rule it enforces (ceremony review ' +
+      '2026-08-29, F1), which is why the generated-artifact pattern was written fifteen times there. ' +
+      'Three primitives have TWO declared homes: the src/ file and the pre-build twin in ' +
+      'scripts/shared/primitives.mjs (the governance tree cannot reach dist/). ' +
+      'PATTERN_DATA_SOURCES exempts the two declaration files whose literals ARE the banned ' +
+      'spelling as data. UNCOVERED: tests/**/*.ts stays out of scope — a test oracle must not ' +
+      'import the code it validates — as does tests/**.mjs, so a comparator copy in a test helper ' +
+      'passes; and the pattern rules match SPELLINGS, not semantics',
+  },
+  {
+    id: 'check:agents-region',
+    kind: 'gate',
+    impl: 'check:agents-region',
+    preCommit: 'reach',
+    fix:
+      "AGENTS.md's generated region states a CLAUDE.md size that no longer matches the tree — run " +
+      '`node ~/.agent-config/sync.mjs --projects` and stage AGENTS.md in the SAME commit as the ' +
+      'CLAUDE.md edit (the generator lives outside this repository, so nothing else can fix it)',
+    note:
+      'the ONE generated region whose generator is not tracked here: `~/.agent-config/sync.mjs` ' +
+      'writes the shared:start/shared:end block, and check:generated-artifacts can only reconcile ' +
+      'TRACKED generators — so this file had no freshness authority at all. In POINTER mode the ' +
+      'printed byte length is the only CLAUDE.md-derived input to the region body (the generator ' +
+      'computes bytes/1024 to one decimal and hashes the body into shared-region-id), which makes ' +
+      'comparing the stated figure exact rather than a proxy. UNCOVERED HALF: only the pointer-mode ' +
+      'size sentence is checked — the rest of the region (the shared-region-id hash, the ' +
+      'remediate-code/audit-code blocks above it) is unverified, and if the machine-wide fix retires ' +
+      'the sentence this gate fails closed with the message saying so rather than passing vacuously ' +
+      '(P64, owner decision 2026-09-10; the machine-wide half is filed separately)',
   },
   {
     id: 'check:deadcode',
@@ -212,8 +242,16 @@ export const GUARDS = [
     note:
       'closes the orphan-module class that refilled after the 2026-08-12 slimdown (CY-01, ceremony ' +
       'review): knip cannot see the class — its vitest plugin makes test files entries, so a module ' +
-      'consumed only by its own test counts as used. UNCOVERED: a non-literal dynamic import of an ' +
-      'in-repo module is unresolvable (today both such sites load external packages)',
+      'consumed only by its own test counts as used. TWO passes: a file-level walk from the ' +
+      'production roots, plus the RELATIVE-IMPORT pass (Track 2.5) asking the symbol question over a ' +
+      'TypeScript program — a src module that is not a package entry, declares exports of its own, ' +
+      'is reached by the tests, and has none of those names referenced from any other production src ' +
+      'file is production-dead however many barrels re-export it. ' +
+      'UNCOVERED: a non-literal dynamic import of an in-repo module is unresolvable (today both such ' +
+      'sites load external packages); the symbol pass reads only the TYPE CHECKER\'s view, so a ' +
+      'module whose exports are addressed purely by string (a reflection-shaped lookup) would be ' +
+      'flagged and needs an ORPHAN_ALLOW row; and the pass costs ~4-5s, since binding symbols over ' +
+      'all of src/ is what makes the name flow followable at all',
   },
   {
     id: 'check:doc-manifest',
@@ -277,8 +315,9 @@ export const GUARDS = [
     impl: 'check:gate-enumeration',
     preCommit: 'reach',
     fix:
-      'add the step gloss to scripts/gate-enumeration-data.mjs and re-render with ' +
-      '`node scripts/check-gate-enumeration.mjs --write`',
+      'a registered enumeration target is stale against package.json — re-render with ' +
+      '`node scripts/check-gate-enumeration.mjs --write`; step order and membership are READ from ' +
+      'package.json, so fix the gate wiring rather than a rendered copy',
   },
   {
     id: 'check:philosophy-brief',
@@ -936,6 +975,39 @@ export const GUARDS = [
   { id: 'doc-manifest-gate-test', kind: 'contract-test', impl: 'tests/shared/doc-manifest-gate.test.ts' },
   { id: 'guard-reach-gate-test', kind: 'contract-test', impl: 'tests/shared/guard-reach-gate.test.ts' },
   {
+    id: 'orphan-modules-relative-import-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/orphan-modules-relative-import.test.ts',
+    note:
+      'Track 2.5: drives the relative-import pass over fixture trees on disk, pinning both the ' +
+      'detection (a module whose only production edge is an unconsumed re-export chain) and each ' +
+      'exemption that keeps it from becoming a noise list — package entries, a barrel production ' +
+      'actually consumes, a production file that re-exports the name, and a module the tests never ' +
+      'reach (left to the file-level pass and knip)',
+  },
+  {
+    id: 'host-asset-plan-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/host-asset-plan.test.ts',
+    note:
+      'the declared host-asset install plan the two postinstalls execute: one row per bin (pinned ' +
+      'against package.json `bin`), derived per-tool TARGET paths, the declared-optional Codex UI ' +
+      'metadata target, the per-tool agent name, and the per-tool policy that legitimately differs ' +
+      '(template trim, frontmatter stripping). Its last case asserts each postinstall entry READS ' +
+      'the plan and hand-spells no host target path — the two-installers-drifting shape the backlog ' +
+      'entry names',
+  },
+  {
+    id: 'agents-region-gate-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/agents-region-gate.test.ts',
+    note:
+      'P64: pins check:agents-region in both polarities (equal figure fresh, different figure ' +
+      'refused naming both figures) plus the fail-closed shape when the pointer sentence is absent, ' +
+      'so a machine-wide retirement of the sentence cannot leave a green check over an ' +
+      'unrecognized region',
+  },
+  {
     id: 'sync-spawn-fold-safety-test',
     kind: 'contract-test',
     impl: 'tests/shared/sync-spawn-fold-safety.test.ts',
@@ -1192,7 +1264,21 @@ export const GUARDS = [
 export const REACH = [
   {
     area: 'shared primitive single-source (comparator / containment / hash / paths / collation)',
-    files: ['src/**/*.ts', 'scripts/check-shared-primitives.mjs'],
+    // The scan set, both levels of each tree: `**/` requires an intervening
+    // directory, so `scripts/**/*.mjs` alone omits `scripts/*.mjs`.
+    files: [
+      'src/**/*.ts',
+      'scripts/*.mjs',
+      'scripts/**/*.mjs',
+      'wrapper/*.mjs',
+      'wrapper/**/*.mjs',
+      'dispatch/*.mjs',
+      'dispatch/**/*.mjs',
+      '.claude/hooks/*.mjs',
+      'audit-code.mjs',
+      'remediate-code.mjs',
+      'scripts/check-shared-primitives.mjs',
+    ],
     guardedBy: ['check:shared-primitives', 'shared-primitives-gate-test'],
     uncovered:
       'tests/** is deliberately out of the scan set — a test oracle must not import the code it ' +
@@ -1242,9 +1328,13 @@ export const REACH = [
     uncovered:
       'the rule claims a module only when EVERY importer is loop-core, so a genuinely-core module ' +
       'that also has one ordinary consumer is not claimed and must still be added by hand. The 25 ' +
-      'modules declared at the gate\'s landing are grandfathered by measurement, not by ' +
-      'classification: the gate is forward-looking, and it does not assert that today\'s 25 are ' +
-      'correctly outside the set',
+      "rows' CAPABILITY is now re-derived every run (a claim from the closed set pure | reads-only | " +
+      'mutates), so a row can no longer stay green after the shape it describes changed — but the ' +
+      "claim is a capability fact, not a judgement that the module is correctly outside the set: a " +
+      "row reading 'pure' may still be workflow-core on some other axis, and nothing checks that. " +
+      "For the four 'mutates' rows the WHERE argument (every write location derives from a " +
+      'caller-supplied artifactsDir) is prose in the row reason — which location a write targets is ' +
+      'not mechanically decidable from source text, and that half is declared rather than guessed',
   },
   {
     area: 'friction-category parity sources',
@@ -1680,6 +1770,18 @@ export const REACH = [
     files: ['.claude/settings.json'],
     guardedBy: ['check:guard-reach'],
     note: 'hook registrations reconciled against tracked hook files and this registry',
+  },
+  {
+    area: 'generated AGENTS.md region (untracked generator)',
+    files: ['AGENTS.md', 'CLAUDE.md'],
+    guardedBy: ['check:agents-region', 'agents-region-gate-test'],
+    note:
+      'the pointer-mode size sentence in AGENTS.md is the one region body input derived from ' +
+      'CLAUDE.md, so comparing the two IS the freshness check; the generator that writes the region ' +
+      'is machine-wide and untracked, which is why no GENERATED row can claim it',
+    uncovered:
+      'only the size sentence. The shared-region-id hash beside it, and the audit-code / ' +
+      'remediate-code blocks above the region, are outside the scan (P64 scope)',
   },
   {
     area: 'owner skills',
