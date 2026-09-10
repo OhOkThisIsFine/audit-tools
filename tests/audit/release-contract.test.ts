@@ -108,8 +108,21 @@ test("one-command release helper wires the trusted publishing path", async () =>
   expect(helper).toMatch(/function resolveReleasePushRefspec\(/);
   expect(helper).toMatch(/const pushRefspec = resolveReleasePushRefspec\(releaseGate\)/);
   expect(helper).toMatch(/run\("git", \["push", remoteName, pushRefspec\.target\]\)/);
-  expect(helper).toMatch(/waiting for publish run/);
+  // The await-run phase says what it is waiting for AND that re-dispatching is
+  // the one wrong move: the tag + release already exist, so a slow
+  // `release`-event delivery must read as slow, never as missing (v0.49.0: a
+  // ~13-minute delay read as "no run", the operator re-dispatched by hand, and
+  // the delayed canonical run then published — parking each duplicate as a
+  // permanent red).
+  expect(helper).toMatch(/waiting for the publish-package run for \$\{tag\}/);
+  expect(helper).toMatch(/Do NOT re-dispatch a publish run by hand/);
+  expect(helper).toMatch(/still waiting for the publish run for \$\{tag\}/);
   expect(helper).toMatch(/waiting for npm registry/);
+  // The pre-tag gate watches an in-flight run out rather than refusing on it
+  // (2026-08-29 friction) — the gate's own message used to name the remedy it
+  // declined to perform.
+  expect(helper).toMatch(/classifyCiInFlight/);
+  expect(helper).toMatch(/watching them to conclusion rather than/);
   expect(helper).toMatch(/run\("git", \["push", remoteName, tag\]\)/);
   expect(helper).toMatch(/run\("gh", \["release", "create", tag, "--title", tag, "--generate-notes"\]\)/);
   expect(helper).toMatch(/publish-package\.yml/);

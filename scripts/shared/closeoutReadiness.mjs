@@ -22,8 +22,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostMemoryDir } from './hostMemoryDir.mjs';
-import { readSuiteGreenStamp } from './suiteGreenStamp.mjs';
-import { worktreeTree } from './worktree-tree.mjs';
+import { readSuiteGreenStamp, suiteGreenVerdict } from './suiteGreenStamp.mjs';
+import { worktreeTrees } from './worktree-tree.mjs';
 
 /**
  * Deterministic, session-independent reasons a hand-back is not ready.
@@ -74,21 +74,23 @@ export function closeoutReadinessFindings(root) {
     // commits, git fault) neither half can assert anything — fail open, per
     // this module's rule. With an identity, a MISSING stamp is itself the
     // meaningful absence.
-    const currentTree = worktreeTree(root);
-    if (currentTree) {
-      const green = readSuiteGreenStamp(root);
-      if (!green?.tree) {
+    const current = worktreeTrees(root);
+    if (current?.tree) {
+      // The verdict is the single-sourced one, so this check and the CLI named
+      // in .claude/green-mechanism.json cannot disagree — including on the
+      // release-bump delta, which is admitted here for the same reason the push
+      // gate admits it: the release script rewrites two version values after a
+      // green run, and that is the whole difference being handed off.
+      const verdict = suiteGreenVerdict(readSuiteGreenStamp(root), current);
+      if (!verdict.ok) {
         findings.push(
-          'no full-suite green on record for this repo — `npm test` has not passed since the stamp ' +
-            'was last cleared. The closeout requires green on the FINAL tree, so run it after your ' +
-            'last edit, not before.',
-        );
-      } else if (green.tree !== currentTree) {
-        findings.push(
-          `the last full-suite green ran on different content than the tree being handed off ` +
-            `(green at ${String(green.tree).slice(0, 8)}, tree ${currentTree.slice(0, 8)}, ` +
-            `${green.ran_at ?? 'unknown time'}). An edit after a green run is not evidence for the ` +
-            'tree you are pushing — re-run `npm test`.',
+          /no full-suite green stamp exists/.test(verdict.reason)
+            ? 'no full-suite green on record for this repo — `npm test` has not passed since the stamp ' +
+              'was last cleared. The closeout requires green on the FINAL tree, so run it after your ' +
+              'last edit, not before.'
+            : `the last full-suite green ran on different content than the tree being handed off ` +
+              `(${verdict.reason}, ${readSuiteGreenStamp(root)?.ran_at ?? 'unknown time'}). An edit ` +
+              'after a green run is not evidence for the tree you are pushing — re-run `npm test`.',
         );
       }
     }

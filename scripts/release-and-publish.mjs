@@ -5,8 +5,9 @@
 //
 // Usage: node scripts/release-and-publish.mjs <patch|minor|major> [--bump-only] [--dry-run] [--skip-ci-green]
 
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
@@ -34,13 +35,34 @@ const skipCiGreen = process.argv.includes("--skip-ci-green");
 const pollIntervalMs = 5_000;
 const releaseRunTimeoutMs = 10 * 60 * 1000;
 const registryTimeoutMs = 2 * 60 * 1000;
-// Tag-trigger watchdog: the publish-package run for a just-pushed tag must be
+// Tag-trigger watch: the publish-package run for a just-pushed tag must be
 // DETECTED within this window, or the trigger itself is broken — never silently
 // keep waiting the full releaseRunTimeoutMs for a run that will never appear, and
 // never dispatch it by hand (a workflow_dispatch run would not carry this
 // release's tag/SHA provenance). Only gates detection; once a run is found,
 // waitForRunCompletion's unchanged 10-minute watch takes over.
-const tagTriggerTimeoutMs = 60_000;
+//
+// WHY 30 MINUTES AND NOT 60 SECONDS. This was 60s, justified as "the trigger is
+// either working or it is not". It is not: GitHub's `release`-event DELIVERY is
+// upstream weather. For v0.49.0 the event fired ~13 minutes after
+// `gh release create` (v0.48.0 triggered in seconds the same morning), so the
+// local watchdog declared "no run matched" and exited 1 — and the operator's
+// hand-built recovery dispatches turned out to be COLLISIONS with the delayed
+// canonical run that arrived, went green and published. A delay read as a
+// missing run is the failure; the note below makes the correct action explicit
+// for the whole wait rather than only at the exit.
+const tagTriggerTimeoutMs = 30 * 60 * 1000;
+
+// Bounded wait for a CI run already IN FLIGHT on the pre-tag HEAD SHA. The gate
+// used to refuse immediately ("no completed run with conclusion=success") while
+// the runs for that exact SHA were still `in_progress`, and its own message said
+// "wait for CI (or the in-flight run) to complete, then retry" — so it knew the
+// state and declined to act on it, costing the operator a hand-rolled
+// `gh run watch <id> --exit-status && npm run release:patch:publish` chain that
+// re-implemented a wait this script already knows how to do. 30 minutes covers
+// the whole gate+test matrix on every supported Node major with room to spare;
+// a run still in flight past it is named as such rather than reported as absent.
+const ciInFlightWaitMs = 30 * 60 * 1000;
 
 // Consecutive-failure budget for `gh api` polls (401/403/5xx/network/timeout, etc.)
 // during the CI-monitoring phase. The run's status on GitHub is ground truth, so a
@@ -351,27 +373,42 @@ export function evaluateCiGreenForSha(rawRuns, { headSha } = {}) {
   return { ok: true, reason: "green", redWorkflows: [], successfulRuns };
 }
 
-// Pre-tag CI-green gate. Resolves the exact SHA `bumpVersionAndTag` is about to
-// build the tag commit on top of (the tag itself lands on a NEW bump commit
-// that CI deliberately never runs on — see ci.yml's release-bump skip guard —
-// so gating on this pre-bump HEAD is gating on the code actually being shipped)
-// and requires GitHub Actions to have already confirmed it green. `skip`
-// defaults to the --skip-ci-green flag; tests override it directly.
-/** @param {string} repoSlug @param {{skip?: boolean}} [options] */
-export async function ensureCiGreenOnHeadSha(repoSlug, { skip = skipCiGreen } = {}) {
-  const headSha = run("git", ["rev-parse", "HEAD"], { capture: true }).stdout.trim();
-  if (skip) {
-    console.warn(
-      `WARNING: --skip-ci-green set — bypassing the pre-tag CI-green gate for ${headSha}. ` +
-        "Tagging without a confirmed green CI run risks shipping a broken release.",
-    );
-    return { headSha, skipped: true };
-  }
+// Pure split of the NOT-YET-GREEN case into the two states the gate must tell
+// apart, because the right action differs and only one of them is a reason to
+// stop: a run that has not CONCLUDED will conclude and can be waited out (the
+// 2026-08-29 friction — the gate refused ~2 min after a push while both runs for
+// that exact SHA were `in_progress`), while a SHA with no run at all is "CI never
+// ran here" and waiting changes nothing. Kept pure and separate from
+// `evaluateCiGreenForSha` so the green/red verdict stays order-independent and
+// testable without a clock.
+/** @param {any[]} rawRuns @param {{headSha?: string}} [options] */
+export function classifyCiInFlight(rawRuns, { headSha } = {}) {
+  const runs = (Array.isArray(rawRuns) ? rawRuns : []).filter(
+    (runEntry) => runEntry != null && runEntry.head_sha === headSha,
+  );
+  const inFlight = runs.filter(
+    (runEntry) =>
+      runEntry.status !== "completed" &&
+      (typeof runEntry.status !== "string" || runEntry.status.length > 0),
+  );
+  return {
+    inFlight,
+    /** True when GitHub has at least one run for this SHA that has not concluded. */
+    waiting: inFlight.length > 0,
+    workflows: [
+      ...new Set(
+        inFlight.map((runEntry) => (typeof runEntry.name === "string" ? runEntry.name : "(unnamed workflow)")),
+      ),
+    ].sort(),
+  };
+}
 
-  console.log(`[release] pre-tag CI-green gate: checking GitHub Actions runs for HEAD ${headSha}`);
-  let response;
+// How long the pre-tag gate will wait for in-flight runs on HEAD before it
+// refuses. Injectable so tests never sit out a real 30-minute wait.
+/** @param {string} repoSlug @param {string} headSha */
+function fetchRunsForSha(repoSlug, headSha) {
   try {
-    response = runJson("gh", [
+    return runJson("gh", [
       "api",
       `repos/${repoSlug}/actions/runs?head_sha=${headSha}&per_page=100`,
     ]);
@@ -382,8 +419,68 @@ export async function ensureCiGreenOnHeadSha(repoSlug, { skip = skipCiGreen } = 
         "unverified commit — retry, or bypass with --skip-ci-green (not recommended).",
     );
   }
+}
 
-  const verdict = evaluateCiGreenForSha(response.workflow_runs, { headSha });
+// Pre-tag CI-green gate. Resolves the exact SHA `bumpVersionAndTag` is about to
+// build the tag commit on top of (the tag itself lands on a NEW bump commit
+// that CI deliberately never runs on — see ci.yml's release-bump skip guard —
+// so gating on this pre-bump HEAD is gating on the code actually being shipped)
+// and requires GitHub Actions to have confirmed it green.
+//
+// When the SHA's runs are merely IN FLIGHT the gate WATCHES THEM OUT rather than
+// refusing, and it refuses only when no run exists for the SHA at all or one has
+// concluded red. That is the whole point of the gate — a tag is the one
+// expensive-to-undo step — so declining to wait on a run that is going to
+// conclude in a few minutes was never protecting anything: it turned the
+// script's own remedy into operator prose ("wait for CI (or the in-flight run)
+// to complete, then retry"), and the retry re-ran the entire pre-tag gate from
+// scratch. `skip` defaults to the --skip-ci-green flag; tests override it
+// directly. `waitMs` and `pollMs` are seams for the same reason.
+/** @param {string} repoSlug @param {{skip?: boolean, waitMs?: number, pollMs?: number}} [options] */
+export async function ensureCiGreenOnHeadSha(
+  repoSlug,
+  { skip = skipCiGreen, waitMs = ciInFlightWaitMs, pollMs = pollIntervalMs } = {},
+) {
+  const headSha = run("git", ["rev-parse", "HEAD"], { capture: true }).stdout.trim();
+  if (skip) {
+    console.warn(
+      `WARNING: --skip-ci-green set — bypassing the pre-tag CI-green gate for ${headSha}. ` +
+        "Tagging without a confirmed green CI run risks shipping a broken release.",
+    );
+    return { headSha, skipped: true };
+  }
+
+  console.log(`[release] pre-tag CI-green gate: checking GitHub Actions runs for HEAD ${headSha}`);
+  let response = fetchRunsForSha(repoSlug, headSha);
+  let verdict = evaluateCiGreenForSha(response.workflow_runs, { headSha });
+  const waitedFrom = Date.now();
+  let announcedWait = false;
+
+  while (!verdict.ok && verdict.reason === "no_successful_run") {
+    const inFlight = classifyCiInFlight(response.workflow_runs, { headSha });
+    if (!inFlight.waiting) break; // no run at all for this SHA — waiting changes nothing
+    if (Date.now() - waitedFrom >= waitMs) {
+      throw new Error(
+        `Pre-tag CI-green gate: ${inFlight.workflows.length} run(s) for HEAD ${headSha} are still in ` +
+          `flight after waiting ${Math.round((Date.now() - waitedFrom) / 1000)}s ` +
+          `(${inFlight.workflows.join(", ")}). This is a WAIT TIMEOUT, not a red run — the runs exist ` +
+          `and have not concluded. Inspect them with \`gh run list --commit ${headSha}\`, wait for ` +
+          "them to finish, then retry the release; nothing has been tagged or pushed yet.",
+      );
+    }
+    if (!announcedWait) {
+      console.log(
+        `[release] pre-tag CI-green gate: ${inFlight.workflows.length} run(s) already in flight for ` +
+          `${headSha} (${inFlight.workflows.join(", ")}) — watching them to conclusion rather than ` +
+          "refusing. Nothing has been tagged or pushed; do NOT dispatch anything by hand.",
+      );
+      announcedWait = true;
+    }
+    await sleep(pollMs);
+    response = fetchRunsForSha(repoSlug, headSha);
+    verdict = evaluateCiGreenForSha(response.workflow_runs, { headSha });
+  }
+
   if (!verdict.ok) {
     const detail =
       verdict.reason === "red_workflows"
@@ -392,17 +489,42 @@ export async function ensureCiGreenOnHeadSha(repoSlug, { skip = skipCiGreen } = 
         : "no completed run with conclusion=success was found for this SHA";
     throw new Error(
       `Pre-tag CI-green gate FAILED for HEAD ${headSha}: ${detail}. Refusing to tag an ` +
-        "unverified commit. Push and wait for CI (or the in-flight run) to complete, then " +
-        "retry, or bypass with --skip-ci-green (not recommended).",
+        "unverified commit. Push and wait for CI to complete, then retry, or bypass with " +
+        "--skip-ci-green (not recommended).",
     );
   }
 
+  if (announcedWait) {
+    const waitedSec = Math.round((Date.now() - waitedFrom) / 1000);
+    console.log(`[release] in-flight run(s) for ${headSha} concluded green after ${waitedSec}s.`);
+  }
   for (const successRun of verdict.successfulRuns) {
     console.log(
       `[release] CI green: ${successRun.name ?? "workflow"} ${successRun.html_url} (head_sha ${headSha})`,
     );
   }
   return { headSha, successfulRuns: verdict.successfulRuns };
+}
+
+/**
+ * The version `npm version <bump>` would produce, computed locally so the
+ * resumption check can name the tag this checkout implies BEFORE anything
+ * destructive runs. Prerelease/build metadata is dropped the same way `npm
+ * version` drops it, and any "next" field is dropped rather than carried.
+ *
+ * A shape this cannot parse returns null, which makes the resumption check
+ * report "no resume" — the safe direction, since a resume skips the bump.
+ * @param {string} version @param {string} kind
+ * @returns {string | null}
+ */
+export function nextVersion(version, kind) {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(String(version ?? "").trim());
+  if (!match) return null;
+  const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  if (![major, minor, patch].every(Number.isInteger)) return null;
+  if (kind === "major") return `${major + 1}.0.0`;
+  if (kind === "minor") return `${major}.${minor + 1}.0`;
+  return `${major}.${minor}.${patch + 1}`;
 }
 
 function bumpVersionAndTag(npm) {
@@ -487,6 +609,19 @@ export async function waitForReleaseRun(
   run("gh", ["workflow", "view", "publish-package.yml"]);
   const deadline = Date.now() + detectionTimeoutMs;
   const startedAt = Date.now();
+  // Said ONCE, up front, and repeated in every heartbeat below: the tag and the
+  // GitHub Release already exist, so the only wrong move is a second one. For
+  // v0.49.0 the `release` event took ~13 minutes to deliver; the operator, seeing
+  // a timeout, dispatched recovery runs by hand — and the delayed canonical run
+  // then arrived and published, leaving each duplicate parked as a permanent red
+  // (`npm publish` refuses publish-over) that had to be deleted with `gh run
+  // delete`. A slow event must read as slow, never as missing.
+  console.log(
+    `[release] waiting for the publish-package run for ${tag}. The tag and GitHub Release already ` +
+      `exist — a GitHub \`release\`-event delivery delay of several minutes is normal upstream ` +
+      `weather, so this wait is ${Math.round(detectionTimeoutMs / 1000)}s. ` +
+      "Do NOT re-dispatch a publish run by hand.",
+  );
   let attempt = 0;
   let lastLoggedStatusKey = null;
   let consecutivePollFailures = 0;
@@ -532,7 +667,7 @@ export async function waitForReleaseRun(
     const statusKey = "pending";
     if (shouldLogPollAttempt(attempt, statusKey, lastLoggedStatusKey)) {
       console.log(
-        `[release] waiting for publish run ${tag}: attempt ${attempt}, elapsed ${Date.now() - startedAt}ms`,
+        `[release] still waiting for the publish run for ${tag} after ${Math.round((Date.now() - startedAt) / 1000)}s (attempt ${attempt}) — the tag and release exist, this is a delivery delay, do NOT re-dispatch`,
       );
       lastLoggedStatusKey = statusKey;
     }
@@ -845,6 +980,175 @@ async function waitForRegistryVersion(packageName, version) {
   );
 }
 
+// ── the resumable release record ─────────────────────────────────────────────
+//
+// The release spans phases that cannot all be re-entered the same way: the
+// observation half (await the run, await the registry, reinstall, smoke) is
+// idempotent and safe to repeat, while `bumpVersionAndTag` is DESTRUCTIVE and
+// would double-bump if it ran twice on the same checkout. A stall part-way used
+// to be recovered by hand — re-deriving which phases had already happened from
+// git log and `gh release view` — which is the host-remembering shape this
+// project bans. The journal is that derivation, written mechanically.
+//
+// It lives under `.audit-tools-profile/`, which is gitignored: the release gate
+// requires a CLEAN worktree (tracked dirt blocks), and a record of the release
+// is not a change to what is being released.
+
+/** @param {string} root */
+export function releaseJournalPath(root) {
+  return resolve(root, ".audit-tools-profile", "release-journal.json");
+}
+
+/**
+ * @param {string} root
+ * @returns {{schema?: string, tag?: string, version?: string, commit?: string, updated_at?: string, phases?: Record<string, unknown>} | null}
+ */
+export function readReleaseJournal(root) {
+  try {
+    return JSON.parse(readFileSync(releaseJournalPath(root), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Record a phase of the in-flight release. Best-effort by design: losing the
+ * journal costs a hand-derived resume, which is exactly what it replaced — it
+ * must never fail a release that is otherwise proceeding.
+ * @param {string} root
+ * @param {string} phase
+ * @param {Record<string, unknown>} [detail]
+ */
+export function recordReleasePhase(root, phase, detail = {}) {
+  const path = releaseJournalPath(root);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const journal = readReleaseJournal(root) ?? {};
+    journal.phases = { ...(journal.phases ?? {}), [phase]: { at: new Date().toISOString(), ...detail } };
+    journal.updated_at = new Date().toISOString();
+    writeFileSync(path, `${JSON.stringify(journal, null, 2)}\n`);
+  } catch {
+    /* the journal is a convenience; failing to write it must not fail the release */
+  }
+}
+
+/** @param {string} root @param {{tag: string, version: string, commit: string|null}} identity */
+function openReleaseJournal(root, identity) {
+  try {
+    mkdirSync(dirname(releaseJournalPath(root)), { recursive: true });
+    writeFileSync(
+      releaseJournalPath(root),
+      `${JSON.stringify({ schema: "release-journal/v1alpha1", ...identity, phases: {} }, null, 2)}\n`,
+    );
+  } catch {
+    /* see recordReleasePhase */
+  }
+}
+
+/**
+ * Is this invocation a RESUMPTION of an in-flight release, i.e. must the
+ * destructive bump be SKIPPED? True only when the journal names THIS checkout's
+ * HEAD commit and the tag that version implies — so a stale journal from an
+ * earlier release, or a checkout that has moved, is never treated as a resume
+ * (which would silently skip the bump and re-tag an old commit).
+ *
+ * Pure over the two facts, so the rule is unit-testable without a repository.
+ * @param {{tag?: string, commit?: string} | null} journal
+ * @param {{tag?: string, headSha?: string|null}} [current]
+ */
+export function planReleaseResume(journal, { tag, headSha } = {}) {
+  if (!journal || typeof journal.tag !== "string" || journal.tag.length === 0) {
+    return { resume: false, reason: "no release journal" };
+  }
+  if (typeof headSha !== "string" || headSha.length === 0) {
+    return { resume: false, reason: "HEAD could not be resolved" };
+  }
+  if (journal.commit !== headSha) {
+    return { resume: false, reason: `the journal names commit ${String(journal.commit).slice(0, 8)}, HEAD is ${headSha.slice(0, 8)}` };
+  }
+  if (journal.tag !== tag) {
+    return { resume: false, reason: `the journal names ${journal.tag}, this checkout's version implies ${tag}` };
+  }
+  return { resume: true, tag: journal.tag, reason: `resuming ${journal.tag} at ${headSha.slice(0, 8)}` };
+}
+
+/** Does the GitHub Release for `tag` already exist? Idempotence guard — never recreate. */
+function releaseExists(repoSlug, tag) {
+  const result = spawnSync("gh", ["release", "view", tag, "--repo", repoSlug], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  return !result.error && result.status === 0;
+}
+
+/**
+ * The FINISH half of the pipeline: what used to be agent prose in
+ * `.claude/skills/ship/SKILL.md` §5 — reinstall the global bin, finish the
+ * postinstall npm defers on a `-g` install, and smoke both binaries. It ran only
+ * because a host remembered to run it, which is the host-discretion shape the
+ * auditor-agnostic rule bans; a release that stopped at registry visibility
+ * shipped a package nobody had installed or executed.
+ *
+ * `--allow-scripts` is passed so npm 12+ runs our postinstall, and the deferred
+ * case is then VERIFIED rather than trusted: the installed slash commands are
+ * the postinstall's observable effect, so a missing one re-runs the global
+ * package's own postinstall explicitly and a still-missing one refuses.
+ */
+/** @param {string} npm @param {string} packageName */
+async function finishGlobalInstall(npm, packageName) {
+  const globalRoot = run(npm, ["root", "-g"], { capture: true }).stdout.trim();
+  // `--allow-scripts=<pkg>` is npm 12+'s per-package approval for the install
+  // lifecycle scripts; older npm ignores the unknown config and runs them.
+  run(npm, ["install", "-g", `--allow-scripts=${packageName}`, packageName]);
+
+  const globalPackageRoot = join(globalRoot, packageName);
+  const deployedCommands = ["audit-code", "remediate-code"].map((name) =>
+    join(homedir(), ".claude", "commands", `${name}.md`),
+  );
+  if (!deployedCommands.every((path) => existsSync(path))) {
+    const postinstall = join(globalPackageRoot, "scripts", "postinstall.mjs");
+    if (existsSync(postinstall)) {
+      console.log(
+        "[release] npm deferred the global postinstall (host assets not deployed) — running the " +
+          `installed package's own postinstall: ${postinstall}`,
+      );
+      run(process.execPath, [postinstall]);
+    }
+  }
+  const stillMissing = deployedCommands.filter((path) => !existsSync(path));
+  if (stillMissing.length > 0) {
+    throw new Error(
+      `Global reinstall finished but the host assets were not deployed: ${stillMissing.join(", ")}. ` +
+        `Run \`node ${join(globalPackageRoot, "scripts", "postinstall.mjs")}\` and retry; the slash ` +
+        "commands are what a consumer actually invokes.",
+    );
+  }
+
+  // Both binaries, executed from the GLOBAL install — `--version` is the one
+  // command that proves the bin resolves and the package loads. MODULE_NOT_FOUND
+  // here means a dangling npm-link junction, not a bad release.
+  for (const bin of ["audit-code", "remediate-code"]) {
+    const command = commandName(bin);
+    const result = spawnSync(command, ["--version"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      shell: false,
+    });
+    if (result.error || (result.status ?? 1) !== 0) {
+      throw new Error(
+        `\`${bin} --version\` failed after the global reinstall (` +
+          `${result.error?.message ?? `exit ${result.status}`}). MODULE_NOT_FOUND usually means a ` +
+          "dangling npm-link junction to a deleted worktree — clear it and reinstall.",
+      );
+    }
+    console.log(`[release] global smoke ok: ${bin} ${result.stdout.trim()}`);
+  }
+}
+
 async function main() {
   const npm = commandName("npm");
   const repoSlug = getRepoSlug();
@@ -902,45 +1206,107 @@ async function main() {
   // destructured binding or a newly-dead import, which is exactly what a refactor
   // leaves. The vitest suite stays in CI (sharded, parallel) — this adds the ~27
   // non-test gates, not minutes of tests, and it fails BEFORE the tag exists.
-  console.log("[release] checking pre-tag CI-green gate");
-  await runPhase("pre-tag-gate(ci-green)", () => ensureCiGreenOnHeadSha(repoSlug));
+  // ── resumption: is this a CONTINUATION of an in-flight release? ────────────
+  //
+  // Decided from the journal before anything destructive runs. The observation
+  // half is idempotent and always safe to re-enter; the bump is not, so a
+  // resume skips it and re-verifies the refs it already produced instead of
+  // re-deriving which phases happened by hand.
+  const expectedTag = `v${nextVersion(packageBefore.version, bump)}`;
+  const headAtStart = tryGitSha("HEAD");
+  const resume = planReleaseResume(readReleaseJournal(repoRoot), {
+    tag: expectedTag,
+    headSha: headAtStart,
+  });
 
-  console.log("[release] running local pre-tag gate (verify:checks)");
-  await runPhase("pre-tag-gate(verify:checks)", () => run(npm, ["run", "verify:checks"]));
+  if (resume.resume) {
+    console.log(`[release] ${resume.reason} — skipping the pre-tag gate and the bump (both already ran).`);
+  } else {
+    // The pre-tag gate runs the WHOLE non-test gate, because a tag is the one thing
+    // this script does that cannot be taken back cheaply: once `vX.Y.Z` exists and the
+    // GitHub Release is created, a CI failure costs a delete + cleanup-tag + forward-bump.
+    //
+    // It was `npm run check` (typecheck) alone, justified by "the /ship preflight already
+    // ran it locally" — but the preflight is deliberately a fast SUBSET and never runs
+    // verify:checks, so nothing linted before the tag. v0.39.7 was tagged and released
+    // with five eslint errors and had to be deleted; `tsc` cannot see an unused
+    // destructured binding or a newly-dead import, which is exactly what a refactor
+    // leaves. The vitest suite stays in CI (sharded, parallel) — this adds the ~27
+    // non-test gates, not minutes of tests, and it fails BEFORE the tag exists.
+    console.log("[release] checking pre-tag CI-green gate");
+    await runPhase("pre-tag-gate(ci-green)", () => ensureCiGreenOnHeadSha(repoSlug));
 
-  console.log(`[release] bumping ${bump} version`);
-  const { packageAfter, tag } = await runPhase("bump+tag", () => bumpVersionAndTag(npm));
-  const remoteName = getRemoteName();
-
-  const pushRefspec = resolveReleasePushRefspec(releaseGate);
-  console.log(
-    `[release] pushing ${releaseGate.branch} -> ${remoteName}/${releaseGate.defaultBranch} (${tag})`,
-  );
-  run("git", ["push", remoteName, pushRefspec.target]);
-
-  // Resolve the tag commit SHA so the publish-run waiter can key on run identity
-  // (head_sha) rather than the reusable display name. Degrade to timestamp-only
-  // selection if rev-parse fails.
-  let headSha = null;
-  try {
-    headSha = run("git", ["rev-parse", `${tag}^{commit}`], { capture: true }).stdout.trim() || null;
-  } catch (error) {
-    console.log(
-      `[release] could not resolve tag commit SHA for ${tag}; falling back to timestamp-only ` +
-        `run selection (${error instanceof Error ? error.message : String(error)}).`,
-    );
+    console.log("[release] running local pre-tag gate (verify:checks)");
+    await runPhase("pre-tag-gate(verify:checks)", () => run(npm, ["run", "verify:checks"]));
   }
 
-  // Capture the push instant immediately BEFORE pushing the tag: any genuine
-  // publish run is created at or after this moment, so it gates out stale
-  // same-name runs from an earlier reverted release of the same version.
-  const tagPushedAtMs = Date.now();
-  await runPhase("push+release", () => {
-    console.log(`[release] pushing tag ${tag}`);
-    run("git", ["push", remoteName, tag]);
-    console.log(`[release] creating GitHub Release ${tag}`);
-    run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);
-  });
+  const remoteName = getRemoteName();
+  const pushRefspec = resolveReleasePushRefspec(releaseGate);
+  let packageAfter = packageBefore;
+  let tag = expectedTag;
+  let headSha = null;
+  let tagPushedAtMs = Date.now();
+
+  if (resume.resume) {
+    tag = /** @type {string} */ (resume.tag);
+    packageAfter = readPackageJson();
+    headSha = tryGitSha(`${tag}^{commit}`);
+    // The ORIGINAL push instant, not "now". `selectReleaseRun` falls back to a
+    // freshness gate on `created_at > tagPushedAtMs - skew` when the run cannot be
+    // keyed by SHA; stamped at resume time it would reject the very run the resume
+    // is here to observe. The journal recorded it when the tag was pushed.
+    const recordedPush = readReleaseJournal(repoRoot)?.phases?.["tag+release"];
+    const recordedMs =
+      recordedPush && typeof recordedPush === "object" && "tagPushedAtMs" in recordedPush
+        ? Number(recordedPush.tagPushedAtMs)
+        : Number.NaN;
+    tagPushedAtMs = Number.isFinite(recordedMs) ? recordedMs : Date.now();
+  } else {
+    console.log(`[release] bumping ${bump} version`);
+    const bumped = await runPhase("bump+tag", () => bumpVersionAndTag(npm));
+    packageAfter = bumped.packageAfter;
+    tag = bumped.tag;
+    openReleaseJournal(repoRoot, { tag, version: packageAfter.version, commit: tryGitSha("HEAD") });
+    recordReleasePhase(repoRoot, "bump+tag", { tag, version: packageAfter.version });
+
+    console.log(
+      `[release] pushing ${releaseGate.branch} -> ${remoteName}/${releaseGate.defaultBranch} (${tag})`,
+    );
+    run("git", ["push", remoteName, pushRefspec.target]);
+    recordReleasePhase(repoRoot, "push-branch", { target: pushRefspec.target });
+
+    // Resolve the tag commit SHA so the publish-run waiter can key on run identity
+    // (head_sha) rather than the reusable display name. Degrade to timestamp-only
+    // selection if rev-parse fails.
+    try {
+      headSha = run("git", ["rev-parse", `${tag}^{commit}`], { capture: true }).stdout.trim() || null;
+    } catch (error) {
+      console.log(
+        `[release] could not resolve tag commit SHA for ${tag}; falling back to timestamp-only ` +
+          `run selection (${error instanceof Error ? error.message : String(error)}).`,
+      );
+    }
+
+    // Capture the push instant immediately BEFORE pushing the tag: any genuine
+    // publish run is created at or after this moment, so it gates out stale
+    // same-name runs from an earlier reverted release of the same version.
+    tagPushedAtMs = Date.now();
+    await runPhase("push+release", () => {
+      // Exactly-once, by INSPECTION rather than by retry: a tag/release pair that
+      // already exists is left alone (a re-create is the one unrecoverable-cheaply
+      // mistake here — `gh release create` on an existing tag fails, and a retry
+      // loop around it would re-upload assets). Every other phase is idempotent.
+      console.log(`[release] pushing tag ${tag}`);
+      run("git", ["push", remoteName, tag]);
+      if (releaseExists(repoSlug, tag)) {
+        console.log(`[release] GitHub Release ${tag} already exists — leaving it untouched.`);
+      } else {
+        console.log(`[release] creating GitHub Release ${tag}`);
+        run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);
+      }
+    });
+    recordReleasePhase(repoRoot, "tag+release", { tag, headSha, tagPushedAtMs });
+  }
 
   const releaseMeta = { version: packageAfter.version, tag };
 
@@ -959,6 +1325,7 @@ async function main() {
     waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha }),
   );
   console.log(`[release] publish run detected: ${runEntry.html_url}`);
+  recordReleasePhase(repoRoot, "await-run-detect", { runId: runEntry.id, htmlUrl: runEntry.html_url });
 
   const completedRun = await runPhase("await-ci-complete", () =>
     waitForRunCompletion(repoSlug, runEntry.id, {
@@ -967,6 +1334,7 @@ async function main() {
     }),
   );
   console.log(`[release] publish run completed: ${completedRun.html_url}`);
+  recordReleasePhase(repoRoot, "await-ci-complete", { conclusion: completedRun.conclusion ?? "success" });
 
   // Profile the CI half from the completed run's job/step timings.
   summarizeCiTiming(repoSlug, runEntry, releaseMeta);
@@ -975,9 +1343,17 @@ async function main() {
   await runPhase("await-npm-propagation", () =>
     waitForRegistryVersion(packageAfter.name, packageAfter.version),
   );
+  recordReleasePhase(repoRoot, "await-npm-propagation", { version: packageAfter.version });
+
+  // ── the finish: reinstall + host assets + both binary smokes ───────────────
+  await runPhase("reinstall+smoke", () => finishGlobalInstall(npm, packageAfter.name));
+  recordReleasePhase(repoRoot, "reinstall+smoke", { packageName: packageAfter.name });
 
   writeProfileLedger("release", phases, releaseMeta);
-  console.log(`[release] published ${packageAfter.name}@${packageAfter.version} successfully.`);
+  console.log(
+    `[release] published ${packageAfter.name}@${packageAfter.version} successfully — registry, global ` +
+      "reinstall, host assets and both binaries verified.",
+  );
 }
 
 // Only run the release flow when invoked directly as the entry script. Importing

@@ -24,6 +24,8 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 - Fast local checks, Bash tool:
   `npx vitest run --changed` (only tests touching your uncommitted edits) +
   `npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code` +
+  `npm run smoke:remediate-gate` (drives the tool-owned final gate over a fixture repo — the gate
+  EXECUTION path the packaged-bin smokes do not touch) +
   `npm run check:doc-manifest` (fast — ANY new/renamed tracked `*.md` anywhere in the repo, not just
   `docs/**`, unregistered in `scripts/doc-manifest-data.mjs`; the pre-commit gate already runs this
   whenever the staged set touches markdown, so running it here is fast feedback, not the only gate) +
@@ -51,24 +53,38 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   if the lap HEAD has not been fast-forwarded onto the remote default ref first, the guard refuses (fix the sync, do not
   add a flag).
 
-## 3. Publish (single package)
+## 3. Publish, observe, and FINISH — one command
 
-- Repo root: `npm run release:patch:publish` (or `:minor:` / `:major:`).
-  `scripts/release-and-publish.mjs` runs the full non-test gate before tagging (`npm run verify:checks` — a tag is
-  the one unrecoverable-cheaply step, so it fails BEFORE `vX.Y.Z` exists rather than after), bumps, tags `vX.Y.Z`, pushes, creates
-  the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`). That workflow runs the gate as
+- Repo root: `npm run release:patch:publish` (or `:minor:` / `:major:`). This is the WHOLE pipeline; do
+  not hand-run anything it owns, and do not re-derive its state if it stalls — re-run it and let the
+  release journal decide where to resume (`.audit-tools-profile/release-journal.json`, gitignored;
+  written mechanically, so a resume never depends on remembering which phases already ran).
+  `scripts/release-and-publish.mjs` owns, in order:
+  1. the pre-tag CI-green gate **and** the pre-tag `verify:checks` (a tag is the one
+     unrecoverable-cheaply step, so both fail BEFORE `vX.Y.Z` exists rather than after). An IN-FLIGHT
+     CI run on HEAD is WATCHED to its conclusion, not refused on;
+  2. exactly-once `bump` → tag → push → GitHub Release (a release that already exists is left untouched,
+     never recreated), which triggers OIDC trusted-publishing `publish-package.yml`;
+  3. delayed observation of the publish run — the wait is sized for GitHub's `release`-event delivery
+     weather (v0.49.0 took ~13 min) and says so throughout. **Never re-dispatch a publish run by hand**:
+     the tag and release already exist, so a duplicate can never go green and parks a permanent red as the
+     workflow's latest run;
+  4. registry propagation (`npm view`), then **global reinstall with the install lifecycle scripts
+     allowed**, the deferred-postinstall check, and both binary smokes (`audit-code --version` +
+     `remediate-code --version`). MODULE_NOT_FOUND = dangling npm-link junction to a deleted worktree.
+  Nothing destructive is ever retried; every observation phase is idempotent and safe to re-enter.
+- That workflow runs the gate as
   parallel jobs — `gate`, whose steps are generated from `package.json`:
 
 <!-- BEGIN gate-enumeration — generated from package.json by scripts/check-gate-enumeration.mjs -->
 
-`verify:checks` = `check:control-bytes` + `check:shared-primitives` + `check:agents-region` + `check:loader-fragments` + `check:version-gates` + `check:guard-reach` + `check:pin-obligations` + `check:generated-artifacts` + `check:invariant-glossary` + `check:nightly-inbox` + `check:ci-trigger-paths` + `check:loop-core-patterns` + `check:loop-core-closure` + `check:constitutional-doc-paths` + `check:runtime-artifact-names` + `check:friction-categories` + `check:executor-producers` + `check:spec-mirrors` + `check:cli-surface` + `check:ingestion-checks` + `check:deadcode` + `check:orphan-modules` + `check:lint` + `check:dup` + `check:depgraph` + `check:doc-manifest` + `check:doc-links` + `check:doc-code-citations` + `check:gate-enumeration` + `check:philosophy-brief` + `check:readme-sample-report` + `check:proposal-red-at` + `check:handoff-roadmap` + `check:backlog-index` + `check:memory-citations` + `check:backlog-budget` + `check:backlog-status` + `check:backlog-line-numbers` + `check:tests` + `build` + `check:scripts` + `verify:hosts` + `verify:remediate-hosts` + `pack:smoke` + `smoke:packaged-audit-code` + `smoke:packaged-remediate-code`
+`verify:checks` = `check:control-bytes` + `check:shared-primitives` + `check:agents-region` + `check:loader-fragments` + `check:version-gates` + `check:guard-reach` + `check:pin-obligations` + `check:generated-artifacts` + `check:invariant-glossary` + `check:nightly-inbox` + `check:ci-trigger-paths` + `check:loop-core-patterns` + `check:loop-core-closure` + `check:constitutional-doc-paths` + `check:runtime-artifact-names` + `check:friction-categories` + `check:executor-producers` + `check:spec-mirrors` + `check:cli-surface` + `check:ingestion-checks` + `check:deadcode` + `check:orphan-modules` + `check:lint` + `check:dup` + `check:depgraph` + `check:doc-manifest` + `check:doc-links` + `check:doc-code-citations` + `check:gate-enumeration` + `check:philosophy-brief` + `check:readme-sample-report` + `check:proposal-red-at` + `check:handoff-roadmap` + `check:backlog-index` + `check:memory-citations` + `check:backlog-budget` + `check:backlog-status` + `check:backlog-line-numbers` + `check:tests` + `build` + `check:scripts` + `verify:hosts` + `verify:remediate-hosts` + `pack:smoke` + `smoke:packaged-audit-code` + `smoke:packaged-remediate-code` + `smoke:remediate-gate`
 
 <!-- END gate-enumeration -->
 
   plus a `test` matrix (vitest sharded 4 ways) — and only the `publish` job
   (`needs: [gate, test]`)
-  uploads. The release script then waits for the whole run + npm propagation. **Trusted publishing is
-  configured + working** — no tokens, no local bootstrap.
+  uploads. **Trusted publishing is configured + working** — no tokens, no local bootstrap.
 - CRLF trap: the clean-tree guard fails from a CRLF worktree → renormalize to LF first.
 - The smokes pack ONE tarball; Windows-flaky on temp-dir EPERM/EBUSY — re-run a smoke before calling it a regression.
 - Local Windows-green ≠ Linux-CI-green — the release CI run is the real signal.
@@ -78,14 +94,9 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 
 - `npm view audit-tools version` — must match the bump (the release script already waits on registry propagation;
   pre-release `-` versions land on the `next` dist-tag).
-
-## 5. Reinstall global bin
-
-- `npm i -g audit-tools`.
-- allow-scripts trap: npm defers postinstall on `-g` install (host-integration deploy to ~/.claude, ~/.codex,
-  ~/.config/opencode, ~/.gemini silently skipped) → finish by running the global package's `scripts/postinstall.mjs`
-  manually (`node "$(npm root -g)/audit-tools/scripts/postinstall.mjs"`) or `npm i -g --allow-scripts=audit-tools`.
-- Smoke: `audit-code --version` + `remediate-code --version`. MODULE_NOT_FOUND = dangling npm-link junction to a deleted worktree.
+- A release bump changes two `"version"` values and nothing else, so the full-suite green stamp stays
+  valid across it (the stamp carries a bump-agnostic tree id). `node scripts/shared/suite-green-status.mjs`
+  is the one command that answers "is this tree green" — never hand-compare a tree id against a stamp.
 
 ## Release pipeline shape (reference)
 
@@ -113,11 +124,11 @@ under GitHub Actions each profile also appends a markdown table to the job summa
 - **Gate:** `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs` (profiled npm-script runner, fail-fast preserved) → `.audit-tools-profile/verify-checks-latest.json` + `-history.ndjson` per step (the `check`/`build` double-`tsc`, host verifies, packaged smokes are each timed).
 - **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `.audit-tools-profile/vitest-latest.json` (shard runs write `vitest-shard<X>of<Y>-latest.json` — the suffix goes on the
   profile name, not the file suffix).
-- **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / push+release / await-run / await-npm) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
+- **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / push+release / await-run / await-npm / reinstall+smoke) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
 
 `*-history.ndjson` is the trend line — diff the latest record against prior runs to catch a time regression.
 
-## 6. Close out
+## 5. Close out
 
 - Update the project memory state file (version, release commit/run); refresh `docs/HANDOFF.md` if mid-stream work remains.
 - Report: published version, CI run link, suite counts.

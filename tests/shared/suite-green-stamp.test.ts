@@ -48,6 +48,33 @@ describe('full-suite green is recorded as tree-bound evidence', () => {
       ok: true,
       tree: 'a'.repeat(40),
       ranAt: '2026-09-07T00:00:00.000Z',
+      viaBumpDelta: false,
+    });
+  });
+
+  it('does NOT read a missing masked id as a bump match — a stamp from before the mechanism cannot certify a bump', () => {
+    // Both sides of the bump comparison must be present. An old stamp (or a tree
+    // whose id could not be taken) has no masked half, and "cannot tell" must
+    // never become "unchanged" — that is the whole contract of a null tree id.
+    const stampModulePromise = import(/* @vite-ignore */ MODULE);
+    return stampModulePromise.then((mod) => {
+      const oldStamp = { tree: 'a'.repeat(40), ran_at: '2026-09-07T00:00:00.000Z' };
+      const current = { tree: 'b'.repeat(40), bumpAgnosticTree: 'c'.repeat(40) };
+      expect(mod.suiteGreenVerdict(oldStamp, current).ok).toBe(false);
+      // A current tree whose masked id could not be taken is the same "cannot tell".
+      expect(
+        mod.suiteGreenVerdict(
+          { tree: 'a'.repeat(40), bump_agnostic_tree: 'c'.repeat(40) },
+          { tree: 'b'.repeat(40), bumpAgnosticTree: null },
+        ).ok,
+      ).toBe(false);
+      // Two DIFFERENT masked ids are a real content difference, not a bump.
+      expect(
+        mod.suiteGreenVerdict(
+          { tree: 'a'.repeat(40), bump_agnostic_tree: 'c'.repeat(40) },
+          { tree: 'b'.repeat(40), bumpAgnosticTree: 'd'.repeat(40) },
+        ).ok,
+      ).toBe(false);
     });
   });
 
@@ -94,6 +121,234 @@ describe('full-suite green is recorded as tree-bound evidence', () => {
     const hook = readFileSync(resolve(ROOT, '.claude/hooks/closeout-challenge-gate.mjs'), 'utf8');
     expect(hook).toContain('closeoutReadinessFindings');
     expect(hook).not.toContain('readSuiteGreenStamp');
+  });
+
+  it('masks ONLY the release version values, never a dependency version', async () => {
+    const { maskReleaseVersionValues } = await import(
+      /* @vite-ignore */ pathToFileURL(resolve(ROOT, 'scripts/shared/worktree-tree.mjs')).href
+    );
+
+    // A `package.json` whose version moved. The nested `"version"` under a
+    // dependency must survive: masking it would let a dependency bump read as
+    // "the release bump", which is the false green this mask could introduce.
+    const pkg = [
+      '{',
+      '  "name": "audit-tools",',
+      '  "version": "0.51.7",',
+      '  "dependencies": {',
+      '    "yaml": {',
+      '      "version": "2.5.1"',
+      '    }',
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+    const maskedPkg = maskReleaseVersionValues('package.json', pkg);
+    expect(maskedPkg).toContain('"version": "<release-bump>"');
+    expect(maskedPkg, 'a dependency version must survive the mask').toContain(
+      '"version": "2.5.1"',
+    );
+    // Idempotent: masking the masked text changes nothing more.
+    expect(maskReleaseVersionValues('package.json', maskedPkg)).toBe(maskedPkg);
+
+    // A lockfile: the top-level version and the root package entry's version are
+    // bumped by `npm version`; a transitive dependency's is not.
+    const lock = [
+      '{',
+      '  "name": "audit-tools",',
+      '  "version": "0.51.7",',
+      '  "lockfileVersion": 3,',
+      '  "packages": {',
+      '    "": {',
+      '      "name": "audit-tools",',
+      '      "version": "0.51.7",',
+      '    },',
+      '    "node_modules/yaml": {',
+      '      "version": "2.5.1"',
+      '    }',
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+    const maskedLock = maskReleaseVersionValues('package-lock.json', lock);
+    expect(maskedLock.match(/"version": "<release-bump>"/g)).toHaveLength(2);
+    expect(maskedLock, 'a transitive dependency version must survive the mask').toContain(
+      '"version": "2.5.1"',
+    );
+
+    // An unrecognized shape is returned UNCHANGED, so it masks nothing and two
+    // different contents stay different (the safe direction).
+    expect(maskReleaseVersionValues('package-lock.json', '{"version":"1.0.0"}')).toBe(
+      '{"version":"1.0.0"}',
+    );
+  });
+
+  it('admits a RELEASE-BUMP-ONLY delta as content it already certified', async () => {
+    // The measured friction (commitFold-unlink friction walk, 2026-08-30): the
+    // release script bumps package.json/package-lock.json AFTER its pre-tag gate,
+    // so every release ends with a stamp pointing at the pre-bump tree and pays
+    // one extra full local suite (~3.2 min) to re-certify a two-line version
+    // change the publish run's own sharded suite already runs.
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { execFileSync } = await import('node:child_process');
+    const treeModule = await import(
+      /* @vite-ignore */ pathToFileURL(resolve(ROOT, 'scripts/shared/worktree-tree.mjs')).href
+    );
+    const stampModule = await import(/* @vite-ignore */ MODULE);
+
+    const root = mkdtempSync(join(tmpdir(), 'suite-green-bump-'));
+    try {
+      const git = (args: string[]) =>
+        execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
+      mkdirSync(join(root, 'src'), { recursive: true });
+      writeFileSync(join(root, '.gitignore'), '.claude/\n');
+      writeFileSync(
+        join(root, 'package.json'),
+        '{\n  "name": "audit-tools",\n  "version": "0.51.7"\n}\n',
+      );
+      writeFileSync(
+        join(root, 'package-lock.json'),
+        [
+          '{',
+          '  "name": "audit-tools",',
+          '  "version": "0.51.7",',
+          '  "lockfileVersion": 3,',
+          '  "packages": {',
+          '    "": {',
+          '      "name": "audit-tools",',
+          '      "version": "0.51.7"',
+          '    },',
+          '    "node_modules/yaml": {',
+          '      "version": "2.5.1"',
+          '    }',
+          '  }',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      writeFileSync(join(root, 'src', 'a.txt'), 'content\n');
+      git(['init']);
+      git(['config', 'user.email', 'test@example.com']);
+      git(['config', 'user.name', 'Test']);
+      git(['add', '-A']);
+      git(['commit', '-m', 'baseline']);
+
+      const greenTrees = treeModule.worktreeTrees(root);
+      expect(greenTrees?.tree).toBeTruthy();
+      expect(greenTrees?.bumpAgnosticTree).toBeTruthy();
+      stampModule.writeSuiteGreenStamp(root, greenTrees.tree);
+      expect(stampModule.readSuiteGreenStamp(root).bump_agnostic_tree).toBe(
+        greenTrees.bumpAgnosticTree,
+      );
+
+      // THE RELEASE BUMP: exactly what `npm version --no-git-tag-version` writes.
+      const bump = (text: string, from: string, to: string) => text.split(from).join(to);
+      writeFileSync(
+        join(root, 'package.json'),
+        bump(
+          '{\n  "name": "audit-tools",\n  "version": "0.51.7"\n}\n',
+          '"version": "0.51.7"',
+          '"version": "0.51.8"',
+        ),
+      );
+      writeFileSync(
+        join(root, 'package-lock.json'),
+        bump(
+          await (await import('node:fs/promises')).readFile(join(root, 'package-lock.json'), 'utf8'),
+          '"version": "0.51.7"',
+          '"version": "0.51.8"',
+        ),
+      );
+
+      const bumpedTrees = treeModule.worktreeTrees(root);
+      expect(bumpedTrees.tree, 'the bump moves the tree id — that is its cost').not.toBe(
+        greenTrees.tree,
+      );
+      expect(
+        bumpedTrees.bumpAgnosticTree,
+        'the masked identity must be EQUAL across the release bump',
+      ).toBe(greenTrees.bumpAgnosticTree);
+
+      expect(stampModule.suiteGreenVerdict(stampModule.readSuiteGreenStamp(root), bumpedTrees)).toEqual(
+        { ok: true, tree: bumpedTrees.tree, ranAt: expect.any(String), viaBumpDelta: true },
+      );
+      // The same verdict through the closeout readiness seam, so a bumped tree
+      // does not refuse the FIRST render of the release's own hand-back.
+      const readiness = await import(
+        /* @vite-ignore */ pathToFileURL(resolve(ROOT, 'scripts/shared/closeoutReadiness.mjs')).href
+      );
+      expect(
+        readiness
+          .closeoutReadinessFindings(root)
+          .filter((f: string) => /full-suite green|different content/u.test(f)),
+      ).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT admit a dependency-version change — masking must not swallow it', async () => {
+    // The false green this mechanism could introduce: if the mask swallowed any
+    // `"version"`, a dependency bump (a real change to what ships) would read as
+    // "just the release bump". A dep bump moves the masked tree, so the verdict
+    // stays a refusal.
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { execFileSync } = await import('node:child_process');
+    const treeModule = await import(
+      /* @vite-ignore */ pathToFileURL(resolve(ROOT, 'scripts/shared/worktree-tree.mjs')).href
+    );
+    const stampModule = await import(/* @vite-ignore */ MODULE);
+
+    const root = mkdtempSync(join(tmpdir(), 'suite-green-depbump-'));
+    try {
+      const git = (args: string[]) =>
+        execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
+      writeFileSync(join(root, '.gitignore'), '.claude/\n');
+      writeFileSync(
+        join(root, 'package.json'),
+        '{\n  "name": "audit-tools",\n  "version": "0.51.7"\n}\n',
+      );
+      const lockfile = (dep: string) =>
+        [
+          '{',
+          '  "name": "audit-tools",',
+          '  "version": "0.51.7",',
+          '  "packages": {',
+          '    "": {',
+          '      "name": "audit-tools",',
+          '      "version": "0.51.7"',
+          '    },',
+          '    "node_modules/yaml": {',
+          `      "version": "${dep}"`,
+          '    }',
+          '  }',
+          '}',
+          '',
+        ].join('\n');
+      writeFileSync(join(root, 'package-lock.json'), lockfile('2.5.1'));
+      git(['init']);
+      git(['config', 'user.email', 'test@example.com']);
+      git(['config', 'user.name', 'Test']);
+      git(['add', '-A']);
+      git(['commit', '-m', 'baseline']);
+
+      const greenTrees = treeModule.worktreeTrees(root);
+      stampModule.writeSuiteGreenStamp(root, greenTrees.tree);
+
+      // A dependency bump ONLY — no release version change at all.
+      writeFileSync(join(root, 'package-lock.json'), lockfile('2.6.0'));
+      const after = treeModule.worktreeTrees(root);
+      expect(after.bumpAgnosticTree).not.toBe(greenTrees.bumpAgnosticTree);
+      expect(stampModule.suiteGreenVerdict(stampModule.readSuiteGreenStamp(root), after).ok).toBe(
+        false,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('readiness reports a missing or tree-mismatched stamp, and accepts a matching one', async () => {

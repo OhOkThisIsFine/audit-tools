@@ -763,6 +763,17 @@ export const GUARDS = [
       'bin entry it names, never the smoke',
   },
   {
+    id: 'smoke:remediate-gate',
+    kind: 'gate',
+    impl: 'smoke:remediate-gate',
+    preCommit: false,
+    fix:
+      'the tool-owned final gate failed its fixture drive — fix the GATE (runToolOwnedFinalGate / ' +
+      'toolOwnedFinalGateCommands in src/remediate/steps/), never the smoke: a gate that cannot pass ' +
+      'on a clean tree blocks every remediate run (the v0.32.61 node:test-runner bug shipped exactly ' +
+      'that way because the gate execution path had no end-to-end check)',
+  },
+  {
     id: 'smoke:linked-audit-code',
     kind: 'gate',
     impl: 'smoke:linked-audit-code',
@@ -970,6 +981,21 @@ export const GUARDS = [
       'coincides with no production export is invisible to the name-match signal.',
   },
   { id: 'hook-trap-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-trap-guards.test.ts' },
+  {
+    id: 'shipped-import-closure-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/shipped-import-closure.test.ts',
+    note:
+      'the packed package must carry everything its shipped scripts import: the walk derives its ' +
+      'roots from package.json `files` and follows RELATIVE import edges from every shipped module, ' +
+      'so a reachable file `files` does not cover is RED. Closes the 2026-09-10 defect where ' +
+      'wrapper/audit-code-wrapper-build.mjs began importing scripts/shared/primitives.mjs and only ' +
+      'smoke:packaged-audit-code noticed, as an ERR_MODULE_NOT_FOUND inside a temp install. ' +
+      'UNCOVERED, stated: a non-literal specifier is invisible to the reader, a bare specifier is ' +
+      'never followed (external packages, and audit-tools/shared which resolves into dist/**), and a ' +
+      'relative specifier that resolves to nothing on disk is skipped — that is a broken import, ' +
+      'which the packaged smokes catch directly, not a coverage hole.',
+  },
   {
     id: 'green-mechanism-declaration-test',
     kind: 'contract-test',
@@ -1569,6 +1595,21 @@ export const REACH = [
       'child_process.spawn that bypasses spawnLoggedCommand (durable-traps). Registry shape rules ' +
       'are not full field-set reconciliation; manual-validator consumers are declared-gap rows; ' +
       'render fixtures cover the rows that have them',
+  },
+  {
+    area: 'launcher entrypoints + packaging manifest',
+    files: [
+      'package.json',
+      'audit-code.mjs',
+      'remediate-code.mjs',
+      'scripts/shared/shipCoverage.mjs',
+    ],
+    guardedBy: ['shipped-import-closure-test', 'smoke:packaged-audit-code', 'smoke:packaged-remediate-code'],
+    note:
+      'the two root bins are the package launchers and package.json `files` is the manifest this pair ' +
+      'of claims reads; shipCoverage.mjs is the shared walk substrate reached from the test named ' +
+      'here (so a change to the walk itself re-runs the closure). The smokes execute the packaged ' +
+      'bins end-to-end, which is the same property observed from outside the tree.',
   },
   {
     area: 'tests',

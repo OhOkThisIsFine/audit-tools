@@ -297,6 +297,7 @@ describe('reach — the guarded set is a ratchet, and the gap is declared', () =
     'scripts/check-guard-reach.mjs',
     'scripts/check-invariant-glossary.mjs',
     'scripts/check-loader-fragments.mjs',
+    'scripts/remediate/smoke-remediate-gate.mjs',
     'scripts/check-orphan-modules.mjs',
     'scripts/check-philosophy-brief.mjs',
     'scripts/check-readme-sample-report.mjs',
