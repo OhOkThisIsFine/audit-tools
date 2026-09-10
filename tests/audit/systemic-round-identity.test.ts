@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { bindCandidateTerminalStep, driveCandidateLoop } from "../../benchmarks/p0/runner.mjs";
+import { bindCandidateTerminalStep, driveCandidateLoop } from "../helpers/candidateDriver.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditState } from "../../src/audit/types/auditState.js";
 import type { SystemicChallengeRegister } from "../../src/audit/types/systemicChallenge.js";
@@ -151,7 +151,7 @@ describe("systemic challenge round identity", () => {
     expect(branch).toMatchObject({ branch: "await_submission", lane });
   });
 
-  test("real emission resumes within a round, then changes benchmark identity after progress", async () => {
+  test("real emission resumes within a round, then changes round identity after progress", async () => {
     const { root, artifactsDir } = await makeRoot();
     const firstBundle = systemicBundle(openRegister());
 
@@ -175,8 +175,8 @@ describe("systemic challenge round identity", () => {
     const secondBound = bindCandidateTerminalStep(second);
     expect(firstBound.step_id).not.toBe(secondBound.step_id);
 
-    // The benchmark's existing repeat guard remains intact: equal emitted
-    // identity is still rejected by the candidate driver.
+    // The candidate driver's repeat guard remains intact: equal emitted
+    // identity is still rejected.
     await expect(
       driveCandidateLoop({
         snapshot_root: root,

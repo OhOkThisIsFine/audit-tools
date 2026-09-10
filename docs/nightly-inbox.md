@@ -197,48 +197,6 @@ skills/audit-code/audit-code.prompt.md states the target-directory rule and call
 ---
 
 
-<!-- nightly:item key=7aff25f6b983b0df -->
-
-## `docs-benchmark-readme-omits-run-contract` — The benchmark README omits `run`'s checkpoint and recovery behaviour, and one acceptance threshold — document them, or point at the runner as authoritative? <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 2 nights · `benchmarks/p0/README.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-benchmarks/p0/README.md is the operator guide for the P0 benchmark. It has fallen behind benchmarks/p0/runner.mjs in two places, and in both the problem is OMISSION rather than a wrong statement. First, the README documents how to invoke `run` and says nothing about what happens when a run does not complete. The runner has grown a durable checkpoint: it takes an exclusive lock, so a second concurrent `run` fails with the message 'checkpoint is busy'; it writes a checkpoint file beside the prepared requests; it resumes automatically from the completed prefix after an interruption; and it REFUSES to continue past a recorded execution failure, treating that as terminal. An operator whose run is interrupted therefore has no documented recovery path, and one who meets the terminal-failure refusal has no documented explanation for it. Second, the README's final acceptance paragraph is short by one substantive condition: evaluateBenchmarkScores requires that ZERO high-confidence unsupported claims were admitted, and the README mentions unsupported counts without ever stating that the threshold is zero. So a run can fail acceptance for a reason the paragraph never names. The two gaps are the same question — how complete is this README meant to be — which is why they are asked together. <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### The question
-
-benchmarks/p0/README.md documents `run` without its checkpoint, resume and terminal-failure behaviour, and its acceptance paragraph never states that admitted high-confidence unsupported claims must be zero. Should the README document both, or declare `evaluateBenchmarkScores` and the runner authoritative and the README illustrative? <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### Your answer
-
-- [ ] **1. Document both** — Document the checkpoint behaviour that already exists — the `checkpoint is busy` refusal on a concurrent run, automatic resume after an interruption, how pending responses settle, and that a recorded execution failure is terminal — and state the zero-admitted-unsupported acceptance threshold. Describe only what the runner does; do not invent a reset procedure it does not have. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- [ ] **2. Document the checkpoint only** — Document the checkpoint and recovery behaviour, because an operator has no other way to recover an interrupted run, and mark the acceptance paragraph as illustrative with `evaluateBenchmarkScores` named as authoritative. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- [ ] **3. Declare the runner authoritative** — Keep the README short. State once that benchmarks/p0/runner.mjs is authoritative for both the run contract and the acceptance conditions, and stop enumerating either in prose where they will drift again.
-- [ ] **4. Leave it** — The benchmark has one operator who reads the runner directly. Leave the README as it is.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (5) — what was verified against code, and how</summary>
-
-- benchmarks/p0/README.md contains "invokes the supplied executor without a shell" and zero occurrences of `run.checkpoint.json` or `admitted_high_confidence_unsupported` (grep, HEAD 23079f37) — independently re-verified by this run. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- benchmarks/p0/runner.mjs contains the literal `checkpoint is busy`, plus `checkpointLock`, `loadAndValidateCheckpoint`, `P0_CHECKPOINT_FILENAME` and `checkpointPathForRequests`; it refuses to resume past a recorded execution failure. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- `evaluateBenchmarkScores` additionally requires `admitted_high_confidence_unsupported` to be zero. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- `git diff a53bb7e1..HEAD -- benchmarks/p0/` shows the 999-line runner change landed with no README change. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- ADVERSARY CORRECTIONS, folded in (Codex lane, independent). (a) The README never literally says `run` is a "single unbroken pass" — that was reviewer inference, and this item now claims OMISSION rather than a contradicting statement. (b) The README already requires two independent evaluators and a separate adjudicator earlier, so the evaluator-coverage half of the acceptance gap was dropped; the substantive undocumented threshold is the zero-unsupported one. (c) The runner has no reset procedure — the fix must document interruption recovery, pending-response settlement and the failure refusal as they exist, not invent one. <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-</details>
-
----
-
-
 <!-- nightly:item key=569ce0323e227c76 -->
 
 ## `docs-audit-pkg-language-convictions-two-homes` — Three language/analyzer convictions are stated twice, in different words, across two audit-pkg docs — pick one home? <!-- doc-citation-exempt: quoted item prose, not citations -->

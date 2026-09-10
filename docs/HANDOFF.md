@@ -16,22 +16,21 @@
   points at `.githooks` (writing the worktree scope too where `extensions.worktreeConfig` makes a
   `.git/config.worktree` entry win). A clone that has never opened a session runs no commit gate
   until it does; the registry row states this as the uncovered half.
-- **The benchmark track is retired (owner decision 2026-09-10).** Its three forward-track entries
-  are deleted; the `benchmarks/p0/` harness and its contract tests are deleted by the wave-1 packet
-  of the lap below. The shipped `score-audit` command stays.
 - **A relay lane child is recognized as a dispatched child.** `readSessionRegistry` treats a
   positive `LLM_RELAY_DISPATCH_DEPTH` (set by llm-relay `dispatch` in every lane child) exactly like
   `AUDIT_TOOLS_CHILD_SESSION=1`, so the session-scoped Stop gates never recruit a lane's report.
+- **The benchmark track is retired (owner decision 2026-09-10).** Its forward-track entries, its
+  harness and its contract tests are gone; the shipped `score-audit` command stays.
 
 ## Immediate next
 
 **Cleanup-and-implementation lap (opened 2026-09-10).** P00 cleanup is on `main`: the maintenance
-routine's commits are fast-forwarded, stray worktrees, merged branches and the forensics stash are gone,
-and the benchmark track is retired. Seven implementation waves follow — each packet in its own
-worktree outside the repo root on a DeepSeek lane through llm-relay, landed by fast-forward, the
-full suite re-run on `main` after every wave, and a `/ship` release after the last wave. The plan,
-the per-packet briefs and the 161-entry coverage check live in the lap's machine-local plan
-directory, `C:/Code-worktrees/audit-tools/_lap-plan/` <!-- doc-citation-exempt: machine-local plan directory, outside every repo -->.
+routine's commits are fast-forwarded, and stray worktrees, merged branches and the forensics stash
+are gone. Seven implementation waves follow — each packet in its own worktree outside the repo root
+on a DeepSeek lane through llm-relay, landed by fast-forward, the full suite re-run on `main` after
+every wave, and a `/ship` release after the last wave. The plan, the per-packet briefs and the
+161-entry coverage check live in the lap's machine-local plan directory,
+`C:/Code-worktrees/audit-tools/_lap-plan/` <!-- doc-citation-exempt: machine-local plan directory, outside every repo -->.
 The waiting maintenance decisions are settled there by standing convictions and are ticked in
 the inbox when their packets land.
 
@@ -51,12 +50,11 @@ the inbox when their packets land.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
-- **15 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+- **14 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
   - `docs-dependency-map-analyzer-vocabulary` — A constitutional spec still describes the analyzer-capability marker with a vocabulary the code deliberately removed — restate it, or move the code back?
   - `docs-remediation-goals-output-order-omits-two-exclusion-classes` — The remediation goals document states the report's section order, and the render has two categories that order has no bullet for — widen it, or declare it a minimum?
   - `docs-audit-prompt-reflection-destination-unnamed` — The audit loader prompt tells the host to record a reflection but never says which file to write it to — name the destination, and pin it in the contract test?
   - `docs-remediate-prompt-has-no-target-directory-rule` — The remediate loader prompt carries no target-directory rule while its audit twin does — copy the rule across, or single-source it?
-  - `docs-benchmark-readme-omits-run-contract` — The benchmark README omits `run`'s checkpoint and recovery behaviour, and one acceptance threshold — document them, or point at the runner as authoritative?
   - `docs-audit-pkg-language-convictions-two-homes` — Three language/analyzer convictions are stated twice, in different words, across two audit-pkg docs — pick one home?
   - `docs-risk-tier-semantics-in-three-specs` — The risk-tier collapse rule is stated three times across three specs — reduce two of them to a pointer?
   - `docs-s8-conceptual-review-contract-split-across-specs` — The conceptual design review's contract is split across two specs — fold section S8 into the review's own design-of-record?
