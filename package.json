@@ -33,6 +33,7 @@
     "scripts/remediate/postinstall.mjs",
     "scripts/shared/install-host-assets.mjs",
     "scripts/shared/host-asset-plan.mjs",
+    "scripts/shared/primitives.mjs",
     "opencode.json",
     "README.md",
     "docs/audit-pkg/product.md",
