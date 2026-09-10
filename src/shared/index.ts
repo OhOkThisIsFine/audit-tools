@@ -695,6 +695,7 @@ export {
   commandLeavesDeclaredShape,
   partitionCommandsByDeclaredShape,
   parseCommandString,
+  splitSequentialCommandChain,
 } from "./tooling/commandShape.js";
 
 // Tooling: project-test admission gate (CP-NODE-4 obligation 3) — a SECOND,

@@ -40,6 +40,38 @@ test("MNT-20d66e48: comma-within-clause preserved by clauseInterpreter", async (
   expect(!texts.some((t) => t === "B"), `comma should not split 'A, B, and C' into standalone 'B' clause; got: ${texts.join(" | ")}`).toBeTruthy();
 });
 
+test("MNT-20d66e48: the two splitters agree on every boundary EXCEPT comma/and", async () => {
+  const { splitIntentClauses } = await import("../../src/shared/intent/clauseBoundaries.js");
+  const { decomposeIntent } = await import("../../src/shared/intent/clauseInterpreter.js");
+  const { interpretFreeFormIntent } = await import("../../src/shared/intent/freeFormIntentInterpreter.js");
+
+  // The comma/`and` difference is the ONLY intentional one; the boundary scan
+  // itself is shared, so a `;`-inside-an-aside or an `(a) …; (b) …` enumeration
+  // must decompose identically in both draws.
+  //
+  // Every probe is `and`-free BY CONSTRUCTION: the blocking draw adds " and " as
+  // a boundary, so with no `and` present the two draws must agree on the count
+  // EXACTLY. A `>=` here could not fail — the hint draw is a strict sub-case of
+  // the blocking draw — and asserted nothing.
+  const probes = [
+    "keep the API stable (this is the contract; see docs/x.md)",
+    "(a) keep the public API stable; (b) do not touch the generated client",
+    "focus on security; ignore vendor/",
+    "look at open-bugs.md there. also check the config",
+  ];
+  for (const probe of probes) {
+    const shared = splitIntentClauses(probe, { splitOnCommas: true, splitOnAnd: false });
+    expect(
+      interpretFreeFormIntent(probe).clauseCount,
+      `hint interpreter must draw the shared scan for: ${probe}`,
+    ).toBe(shared.length);
+    expect(
+      decomposeIntent(probe).length,
+      `an \`and\`-free probe must decompose identically in both draws: ${probe}`,
+    ).toBe(shared.length);
+  }
+});
+
 // ── MNT-ccdc8329: quoteForCmd vs quoteForShellInterpreterCmd distinct behavior ─
 
 test("MNT-ccdc8329: quoteForCmd uses double-quote doubling (argv-parser context)", async () => {

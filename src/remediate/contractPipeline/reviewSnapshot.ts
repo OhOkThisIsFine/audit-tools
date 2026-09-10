@@ -21,7 +21,6 @@
  */
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import {
   diffProjections,
   discardOnSchemaVersionMismatch,
@@ -32,11 +31,15 @@ import {
 
 export { diffProjections };
 import {
-  contractPipelineDir,
   DEPENDENCY_MAP,
   readContractArtifact,
+  reviewSnapshotDirPath,
   type ContractPipelineArtifactName,
 } from "./artifactStore.js";
+// The path helper is IMPORTED and re-exported (the archive boundary reaches the
+// same file from a module that cannot import this one), so the two can never
+// disagree about where a snapshot lives.
+import { reviewSnapshotFilePath } from "./artifactStore.js";
 import { semanticProjection } from "./semanticProjection.js";
 
 /** The verdict-bearing review artifacts whose re-run is expensive (diff-eligible). */
@@ -57,6 +60,17 @@ const SNAPSHOT_SCHEMA_VERSION =
 export interface ReviewSnapshot {
   schema_version: typeof SNAPSHOT_SCHEMA_VERSION;
   artifact_name: ContractPipelineArtifactName;
+  /**
+   * Where this snapshot lives on disk. Carried ON the record so the re-review
+   * prompt can name the file the prior verdict is readable from — the reviewer
+   * is an independent lane that reads the files it is given and has no memory of
+   * the prior round, so a verdict that exists only as pasted prompt prose is not
+   * readable to it. Present on every snapshot `captureReviewSnapshot` writes;
+   * optional for READING because a snapshot persisted by a build that predates
+   * the field is still a valid prior verdict, and refusing to read it would cost
+   * a full re-review for a purely presentational gap.
+   */
+  path?: string;
   /** ISO-8601 capture time (caller-supplied for deterministic tests). */
   reviewed_at: string;
   /** The verdict payload this review emitted — what a re-review re-affirms. */
@@ -65,15 +79,17 @@ export interface ReviewSnapshot {
   reviewed_inputs: Partial<Record<ContractPipelineArtifactName, unknown>>;
 }
 
-function reviewSnapshotDir(artifactsDir: string): string {
-  return join(contractPipelineDir(artifactsDir), "review-snapshots");
-}
+/**
+ * Re-exported rather than re-derived: the ARCHIVE boundary (`archiveContractArtifact`,
+ * which drops the snapshot of an artifact it rejects) must reach this path from a
+ * module that cannot import this one without a cycle. Two copies of the same
+ * `join` is the shape that drifts, so the path lives in `artifactStore` beside
+ * the other artifact-path helpers and this module consumes it.
+ */
+export const reviewSnapshotPath = reviewSnapshotFilePath;
 
-export function reviewSnapshotPath(
-  artifactsDir: string,
-  name: ContractPipelineArtifactName,
-): string {
-  return join(reviewSnapshotDir(artifactsDir), `${name}.json`);
+function reviewSnapshotDir(artifactsDir: string): string {
+  return reviewSnapshotDirPath(artifactsDir);
 }
 
 export function reviewSnapshotExists(
@@ -125,15 +141,17 @@ export async function captureReviewSnapshot(
       reviewed_inputs[dep] = semanticProjection(dep, depEnvelope.payload);
     }
   }
+  const path = reviewSnapshotPath(artifactsDir, name);
   const snapshot: ReviewSnapshot = {
     schema_version: SNAPSHOT_SCHEMA_VERSION,
     artifact_name: name,
+    path,
     reviewed_at: reviewedAt,
     prior_payload: payload,
     reviewed_inputs,
   };
   await mkdir(reviewSnapshotDir(artifactsDir), { recursive: true });
-  await writeJsonFile(reviewSnapshotPath(artifactsDir, name), snapshot);
+  await writeJsonFile(path, snapshot);
 }
 
 // ── Projection diffing ─────────────────────────────────────────────────────────
@@ -192,5 +210,11 @@ export function renderReReviewSection(
     })),
     allUnchanged: delta.allUnchanged,
     subjectNoun: "artifact",
+    // Naming the file is what makes the prior verdict READABLE to the reviewer:
+    // the independent review lane is told to read the artifact files it is
+    // given, and a verdict living only inside the prompt's prose is not one of
+    // them. The path is the snapshot this section was rendered from, so the
+    // named file and the pasted payload cannot disagree.
+    priorVerdictPath: snapshot.path,
   });
 }

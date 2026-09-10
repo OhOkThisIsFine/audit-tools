@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
 import { isAuditFindingsReport } from "../phases/plan.js";
 import { writeCurrentStep } from "./stepWriter.js";
-import type { RemediationStep } from "./types.js";
+import type { InputResolution, RemediationStep } from "./types.js";
 import {
   buildConversationSourceManifest,
   buildDocumentSourceManifest,
@@ -353,7 +353,10 @@ export async function resolveIntakeStep(params: {
   }
 
   if (manifestRefreshed) {
-    intake = { manifest };
+    // A refreshed manifest means the whole prior read is discarded (summary,
+    // brief and resolution below), so there is no resolution left whose resolved
+    // questions could matter.
+    intake = { manifest, resolvedQuestions: [] };
   }
 
   const summary = manifestRefreshed ? undefined : intake.summary;
@@ -366,13 +369,28 @@ export async function resolveIntakeStep(params: {
   // A malformed or empty resolution file must not silently corrupt the synthesis
   // pass — re-emit collect_intake_clarifications with the validation errors so the
   // host can supply a corrected resolution.
+  //
+  // `summary` here is the read-time-reconciled one: the questions the resolution
+  // ANSWERS are already cleared from `open_questions`, so the two validator
+  // inputs are rebuilt from that reconciliation rather than from the raw file —
+  // the answered ids are re-admitted to the known-id set (an answer naming its
+  // own question is not a typo) and to the blocking set (the question must still
+  // be shown as answered, or the "addresses no blocking question" check would
+  // refuse a resolution that just resolved the last one).
   let clarificationResolution: unknown = rawClarificationResolution;
-  if (rawClarificationResolution !== undefined && summary && !isIntakeReady(summary)) {
-    const blocking = blockingIntakeQuestions(summary);
+  if (rawClarificationResolution !== undefined && summary) {
+    const resolved = intake.resolvedQuestions;
+    // The reconciled summary plus the questions it just cleared is the summary
+    // as authored, which is what the id-join must be checked against.
+    const knownQuestions = [...(summary.open_questions ?? []), ...resolved];
+    const blocking = [
+      ...blockingIntakeQuestions(summary),
+      ...resolved.filter((question) => question.blocking === true),
+    ];
     const validation = validateClarificationResolution(
       rawClarificationResolution,
       blocking,
-      summary.open_questions ?? [],
+      knownQuestions,
     );
     if (!validation.valid) {
       const errorDetail = validation.errors.map((e) => `- ${e}`).join("\n");
@@ -487,15 +505,8 @@ export async function resolveIntakeStep(params: {
   return { kind: "pipeline_ready" };
 }
 
-export interface InputResolution {
-  supplied: boolean;
-  existing: string[];
-  missing: string[];
-  checked: string[];
-  /**
-   * Every discovered source that exists — the full context set surfaced to the
-   * host at the discovered-sources gate, not just the single `existing[0]` the
-   * pipeline auto-selects. Equals `existing` on the `--input` path.
-   */
-  allExisting: string[];
-}
+// `InputResolution` is declared ONCE, in `./types.js` — the module both this
+// resolver and the decide loop import — and re-exported here so existing
+// importers of this module are unchanged. It used to be declared a second time
+// in `nextStep.ts` under the same name with a different field set.
+export type { InputResolution } from "./types.js";

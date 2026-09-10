@@ -52,6 +52,88 @@ test("interpretFreeFormIntent — periods inside file paths do not split clauses
   expect(!hasFragmentStartingWithMd, `period in filename must not fragment the clause; unencodable: ${JSON.stringify(r.unencodableClauses)}`).toBeTruthy();
 });
 
+// ---------------------------------------------------------------------------
+// A bare `;` is NOT a clause boundary (open-bugs.md: the splitter shreds prose)
+//
+// A semicolon punctuates INSIDE one thought when it sits within a parenthetical
+// aside, so splitting there produced fragments that are unencodable *because*
+// they are fragments, and each fragment surfaced as a blocking question about
+// text the operator never wrote as a directive. A depth-0 `;` still separates
+// two directives — including `(a) …; (b) …` and `…; (see …) …` — because the
+// merged text takes ONE polarity and inverts the sign (COR-a0648a7d).
+// ---------------------------------------------------------------------------
+
+test("interpretFreeFormIntent — a `;` inside a parenthetical does not split the clause", () => {
+  const input = "keep the API stable (this is the contract; see docs/x.md)";
+  const r = interpretFreeFormIntent(input);
+  // The aside keeps its clause whole, so the directive is never shredded into
+  // "…(this is the contract" + "see docs/x.md)".
+  expect(
+    r.unencodableClauses.length,
+    `one clause with an aside must not shred: ${JSON.stringify(r.unencodableClauses)}`,
+  ).toBe(1);
+  expect(
+    r.unencodableClauses[0],
+    `the aside must survive inside its clause: ${JSON.stringify(r.unencodableClauses)}`,
+  ).toContain("this is the contract; see docs/x.md");
+  // Count is reported alongside the clauses, so "one directive, unencodable" is
+  // distinguishable from "six fragments, all unencodable".
+  expect(r.clauseCount, `expected exactly 1 clause, got ${r.clauseCount}`).toBe(1);
+});
+
+test("interpretFreeFormIntent — a `; (b) …` enumeration splits with per-item polarity", () => {
+  // A depth-0 `;` is a boundary even when the next clause OPENS with `(` —
+  // `(b) ignore vendor/` is a directive in its own right. Merging it into `(a)`
+  // gave the pair ONE polarity, so the excluded path landed in `scopeEmphasis`
+  // and `applyIntentOrdering` ordered it FIRST (COR-a0648a7d inverted).
+  const input = "(a) focus on src/api; (b) ignore vendor/";
+  const r = interpretFreeFormIntent(input);
+  expect(r.clauseCount, `two directives are two clauses: ${JSON.stringify(r.scopeEmphasis)}`).toBe(2);
+  expect(
+    r.scopeEmphasis.some((s) => /src\/api/i.test(s)),
+    `scopeEmphasis: ${JSON.stringify(r.scopeEmphasis)}`,
+  ).toBeTruthy();
+  expect(
+    r.scopeExclusions.some((s) => /vendor/i.test(s)),
+    `scopeExclusions: ${JSON.stringify(r.scopeExclusions)}`,
+  ).toBeTruthy();
+  expect(
+    r.scopeEmphasis.some((s) => /vendor/i.test(s)),
+    `the excluded item must not be boosted with the included one: ${JSON.stringify(r.scopeEmphasis)}`,
+  ).toBeFalsy();
+});
+
+test("interpretFreeFormIntent — a `; (see …)` aside does not swallow the directive after it", () => {
+  const input = "focus on src/api; (see ADR-7) ignore vendor/";
+  const r = interpretFreeFormIntent(input);
+  expect(r.clauseCount, `two directives are two clauses: ${JSON.stringify(r.scopeEmphasis)}`).toBe(2);
+  expect(
+    r.scopeExclusions.some((s) => /vendor/i.test(s)),
+    `the second directive is an exclusion: ${JSON.stringify(r.scopeExclusions)}`,
+  ).toBeTruthy();
+  expect(
+    r.scopeEmphasis.some((s) => /vendor/i.test(s)),
+    `the excluded directive must not be boosted: ${JSON.stringify(r.scopeEmphasis)}`,
+  ).toBeFalsy();
+});
+
+test("interpretFreeFormIntent — a `;` between two independent directives STILL splits", () => {
+  // The positional rule is not a blanket off-switch: two genuinely distinct
+  // directives must stay separate, or the whole string takes ONE polarity and
+  // the `ignore` half is boosted as an inclusion (COR-a0648a7d).
+  const r = interpretFreeFormIntent("focus on src/api; ignore vendor/");
+  expect(r.scopeEmphasis.some((s) => /src\/api/i.test(s)), `scopeEmphasis: ${JSON.stringify(r.scopeEmphasis)}`).toBeTruthy();
+  expect(r.scopeExclusions.some((s) => /vendor/i.test(s)), `scopeExclusions: ${JSON.stringify(r.scopeExclusions)}`).toBeTruthy();
+  expect(r.scopeEmphasis.some((s) => /vendor/i.test(s)), "the excluded half must not be boosted with the included half").toBeFalsy();
+});
+
+test("interpretFreeFormIntent — clauseCount is reported and bounded by the clause set", () => {
+  const r = interpretFreeFormIntent("review all security vulnerabilities. freeze the public API of PackageX");
+  expect(r.clauseCount, `expected 2 clauses, got ${r.clauseCount}`).toBe(2);
+  // Blank input decomposes to no clauses at all.
+  expect(interpretFreeFormIntent("   ").clauseCount).toBe(0);
+});
+
 test("interpretFreeFormIntent — sentence-ending period followed by space still splits", () => {
   const r = interpretFreeFormIntent("look at open-bugs.md there. also check the config");
 

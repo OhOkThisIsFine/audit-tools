@@ -302,6 +302,74 @@ export function blockingIntakeQuestions(
   );
 }
 
+/**
+ * Reconcile an intake summary against the clarification file that answers its
+ * open questions — the mechanical form of "resolved at the checkpoint is
+ * resolved everywhere" (open-bugs: answering an intake question did not clear
+ * `open_questions`).
+ *
+ * The defect was a split authority, not a missing check: the host answered in
+ * `intake-clarifications.json` (the file the tool's own step names), while
+ * `decideNextStep` gated on `intake-summary.json`'s `open_questions[]`. The two
+ * could only agree if the host ALSO hand-edited the summary — a workflow that
+ * depended on the host remembering, which is exactly the latent failure mode the
+ * tool must not have. So the answer file is applied HERE, at the single read
+ * every consumer already goes through (`readIntakeArtifacts`), rather than at
+ * each gate: the reconcile cannot be skipped by a consumer that forgot to ask.
+ *
+ * `answered` is the resolution's ids that actually carry a decision. A blank
+ * answer is not one: `validateClarificationResolution` requires the field to be
+ * present, but a whitespace-only string decides nothing, and treating it as a
+ * resolution would clear a blocking question the user never addressed.
+ *
+ * Pure and idempotent, and it never invents a `ready`: it removes resolved
+ * questions and leaves `ready` exactly as authored. A run whose only blocking
+ * question is now answered still becomes unusable if the host left `ready:
+ * false` — that stays the author's claim about completeness, and the
+ * `ready:false` path already re-issues synthesize_intake.
+ *
+ * The RESOLVED questions are returned rather than merely dropped, because a
+ * second read of the same tree (the loader re-passes the same files every
+ * next-step) must still recognize an answer naming a question this pass removed
+ * — see the resolver's id-join.
+ */
+export function reconcileIntakeQuestions(
+  summary: IntakeSummary | undefined,
+  resolution: unknown,
+): { summary: IntakeSummary | undefined; resolvedQuestions: IntakeOpenQuestion[] } {
+  if (!summary) return { summary, resolvedQuestions: [] };
+  const answered = new Set<string>();
+  if (isRecord(resolution) && Array.isArray(resolution.answers)) {
+    for (const answer of resolution.answers as unknown[]) {
+      if (!isRecord(answer)) continue;
+      const id = answer.question_id;
+      const text = answer.answer;
+      if (
+        typeof id === "string" &&
+        id.length > 0 &&
+        typeof text === "string" &&
+        text.trim().length > 0
+      ) {
+        answered.add(id);
+      }
+    }
+  }
+  if (answered.size === 0) return { summary, resolvedQuestions: [] };
+  const resolvedQuestions = summary.open_questions.filter((question) =>
+    answered.has(question.id),
+  );
+  if (resolvedQuestions.length === 0) return { summary, resolvedQuestions: [] };
+  return {
+    summary: {
+      ...summary,
+      open_questions: summary.open_questions.filter(
+        (question) => !answered.has(question.id),
+      ),
+    },
+    resolvedQuestions,
+  };
+}
+
 export function intakeSummaryContentErrors(summary: IntakeSummary): string[] {
   if (!summary.ready) return [];
   const errors: string[] = [];
@@ -408,11 +476,34 @@ export async function readIntakeArtifacts(
   manifest?: IntakeSourceManifest;
   conversationStart?: string;
   summary?: IntakeSummary;
+  /**
+   * The `open_questions` entries this read REMOVED from `summary` because the
+   * clarification resolution answered them, so a caller validating that file can
+   * still recognize an id the reconciliation just cleared — otherwise a re-run
+   * carrying an already-applied answer would be refused for naming an "unknown"
+   * id, and the run would be stuck on a question it had already answered.
+   */
+  resolvedQuestions: IntakeOpenQuestion[];
   clarificationResolution?: unknown;
   brief?: string;
 }> {
   const paths = intakePaths(artifactsDir);
   const rawSummary = await readOptionalJsonFile<unknown>(paths.summary);
+  const clarificationResolution = await (async (): Promise<unknown> => {
+    try {
+      return await readOptionalJsonFile<unknown>(paths.clarificationResolution);
+    } catch {
+      // Malformed JSON in the clarification file is treated as absent;
+      // validation in resolveIntakeStep will re-emit collect_intake_clarifications.
+      return undefined;
+    }
+  })();
+  const reconciliation = reconcileIntakeQuestions(
+    rawSummary === undefined
+      ? undefined
+      : validateIntakeSummary(rawSummary, paths.summary),
+    clarificationResolution,
+  );
   return {
     manifest: await readOptionalJsonFile<IntakeSourceManifest>(
       paths.sourceManifest,
@@ -421,19 +512,13 @@ export async function readIntakeArtifacts(
     // File absent → undefined (no summary yet, not a defect). File present →
     // validated at read time (see validateIntakeSummary); malformed content
     // throws rather than being trusted as a well-formed IntakeSummary.
-    summary:
-      rawSummary === undefined
-        ? undefined
-        : validateIntakeSummary(rawSummary, paths.summary),
-    clarificationResolution: await (async () => {
-      try {
-        return await readOptionalJsonFile<unknown>(paths.clarificationResolution);
-      } catch {
-        // Malformed JSON in the clarification file is treated as absent;
-        // validation in resolveIntakeStep will re-emit collect_intake_clarifications.
-        return undefined;
-      }
-    })(),
+    //
+    // Applied through `reconcileIntakeQuestions` so the answered questions are
+    // gone for EVERY consumer of this read — the decide loop's `isIntakeReady`
+    // gate, the resolver, and the clarification prompt alike.
+    summary: reconciliation.summary,
+    resolvedQuestions: reconciliation.resolvedQuestions,
+    clarificationResolution,
     brief: await readOptionalTextFile(paths.brief),
   };
 }

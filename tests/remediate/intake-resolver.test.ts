@@ -7,6 +7,8 @@ import { resolveIntakeStep } from "../../src/remediate/steps/intakeResolver.js";
 import {
   intakePaths,
   intakeSummaryContentErrors,
+  isIntakeReady,
+  readIntakeArtifacts,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
   INTAKE_SUMMARY_SCHEMA_VERSION,
   type IntakeSourceManifest,
@@ -506,6 +508,124 @@ describe("resolveIntakeStep", () => {
     if (result.kind !== "step") throw new Error("expected step");
     expect(result.step.step_kind).toBe("collect_intake_clarifications");
     expect(result.step.status).toBe("blocked");
+  });
+
+  it("an answered intake question is cleared for EVERY consumer, not just the resolver", async () => {
+    // open-bugs: `decideNextStep` gates on `intake-summary.json`
+    // (`ready` + `open_questions[]`), so answering at the clarification file
+    // still routed to collect_intake_clarifications until the host ALSO
+    // hand-edited the summary. Resolved at the checkpoint must be resolved
+    // everywhere — the reconcile lives in the single read, not in one gate.
+    const artifactsDir = join(TEST_DIR, "artifacts-answered");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    const docPath = join(TEST_DIR, "notes3.md");
+    await writeFile(docPath, "# Notes 3", "utf8");
+    await writeFile(
+      join(intakeDir, "source-manifest.json"),
+      JSON.stringify({
+        schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+        created_from: "input",
+        sources: [{ type: "document", path: docPath, label: "input-01" }],
+      }),
+      "utf8",
+    );
+
+    const summary: IntakeSummary = {
+      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+      ready: true,
+      source_type: "documents",
+      goals: ["Fix the parser"],
+      non_goals: [],
+      constraints: [],
+      affected_files: [{ path: "src/parser.ts" }],
+      open_questions: [
+        { id: "Q1", question: "Target language?", blocking: true },
+        { id: "Q2", question: "Style guide?", blocking: false },
+      ],
+    };
+    await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
+    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief", "utf8");
+
+    // Before the answer: the blocking question gates the run.
+    const before = await readIntakeArtifacts(artifactsDir);
+    expect(isIntakeReady(before.summary)).toBe(false);
+
+    await writeFile(
+      join(intakeDir, "intake-clarifications.json"),
+      JSON.stringify({ answers: [{ question_id: "Q1", answer: "TypeScript" }] }),
+      "utf8",
+    );
+
+    const after = await readIntakeArtifacts(artifactsDir);
+    expect(
+      after.summary?.open_questions.map((q) => q.id),
+      "an answered question must not survive in open_questions",
+    ).toEqual(["Q2"]);
+    expect(
+      isIntakeReady(after.summary),
+      "the run must proceed on the answer without the host editing the summary",
+    ).toBe(true);
+    // The cleared question is REPORTED, so the resolver's id-join can still
+    // recognize an answer naming it on the loader's next pass.
+    expect(after.resolvedQuestions.map((q) => q.id)).toEqual(["Q1"]);
+
+    // And the resolver routes the run forward rather than re-asking.
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [],
+        missing: [],
+        checked: [],
+        allExisting: [],
+      },
+      ...makeStubs(),
+    });
+    expect(result.kind).toBe("pipeline_ready");
+  });
+
+  it("a whitespace-only answer decides nothing and leaves the question blocking", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-blank-answer");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    const docPath = join(TEST_DIR, "notes4.md");
+    await writeFile(docPath, "# Notes 4", "utf8");
+    await writeFile(
+      join(intakeDir, "source-manifest.json"),
+      JSON.stringify({
+        schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+        created_from: "input",
+        sources: [{ type: "document", path: docPath, label: "input-01" }],
+      }),
+      "utf8",
+    );
+    const summary: IntakeSummary = {
+      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+      ready: true,
+      source_type: "documents",
+      goals: ["g"],
+      non_goals: [],
+      constraints: [],
+      affected_files: [{ path: "src/a.ts" }],
+      open_questions: [{ id: "Q1", question: "Which one?", blocking: true }],
+    };
+    await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
+    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief", "utf8");
+    await writeFile(
+      join(intakeDir, "intake-clarifications.json"),
+      JSON.stringify({ answers: [{ question_id: "Q1", answer: "   " }] }),
+      "utf8",
+    );
+
+    const after = await readIntakeArtifacts(artifactsDir);
+    expect(
+      after.summary?.open_questions.map((q) => q.id),
+      "a blank answer must not clear a blocking question",
+    ).toEqual(["Q1"]);
+    expect(isIntakeReady(after.summary)).toBe(false);
   });
 
   it("N-R06: summary ready for document source returns pipeline_ready (extract_findings deleted)", async () => {

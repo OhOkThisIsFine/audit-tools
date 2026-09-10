@@ -382,6 +382,40 @@ function renderIndependentCriticDirective(
   );
 }
 
+/**
+ * Per-role OUTPUT constraints — the field rules that are mechanically enforced
+ * downstream, stated in the prompt that produces the field.
+ *
+ * Why these live in the prompt at all, given the tool also enforces them: the
+ * tool's enforcement is the guarantee, but it can only REFUSE — repair costs a
+ * bounded re-emit, and a re-emit that does not state the rule re-earns the same
+ * refusal. Stating the rule where the field is authored is what makes the first
+ * attempt admissible; the tool still refuses an inadmissible one regardless of
+ * whether the producer read this. The rule is single-sourced in
+ * `audit-tools/shared` (`commandLeavesDeclaredShape`), so this text and the
+ * refusal cannot drift on what the rule IS.
+ *
+ * `implementation_planning` is the one role with such a constraint today: its
+ * `targeted_commands` are executed verbatim through a shell, one invocation per
+ * entry. A worker that emitted `npm run build && npm run check` on 23 nodes
+ * burned a whole DAG regeneration on a defect the tool can also repair
+ * mechanically — but the repair still costs a round-trip, and the one-invocation
+ * rule was nowhere in the prompt that asked for the field.
+ */
+function renderOutputConstraints(role: string): string {
+  if (role !== "implementation_planning") return "";
+  return `
+## Field Constraints — enforced, not advisory
+
+Each node's \`targeted_commands\` entries are executed ONE INVOCATION PER ENTRY,
+verbatim through a shell. Write \`"npm run build"\` and \`"npm run check"\` as TWO
+entries — never \`"npm run build && npm run check"\`, and never with a pipe,
+redirect, \`;\` or command substitution. A bare \`&&\` chain is split for you, but
+every other chained or substituting form is REFUSED and costs a full DAG
+regeneration.
+`;
+}
+
 export interface ContractPipelineRenderResult {
   prompt: string;
   outputPath: string;
@@ -469,6 +503,8 @@ export function renderContractPipelinePrompt(
     input.adversarialDepth,
   );
 
+  const outputConstraints = renderOutputConstraints(input.role);
+
   const prompt = `# ${role.title}
 
 ${role.description}
@@ -489,7 +525,7 @@ The output must conform to this JSON schema shape:
 \`\`\`json
 ${role.outputSchema}
 \`\`\`
-
+${outputConstraints}
 Before advancing, you can self-check the output against its contract:
 
 \`${loaderCommand(

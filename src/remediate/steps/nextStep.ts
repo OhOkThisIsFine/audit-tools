@@ -92,7 +92,7 @@ import {
   resolveRepoRoot,
 } from "../../shared/io/repoRoot.js";
 import { writeCurrentStep } from "./stepWriter.js";
-import type { RemediationStep } from "./types.js";
+import type { InputResolution, RemediationStep } from "./types.js";
 import {
   isTerminalStatus,
   isVerifiedCompleteStatus,
@@ -305,22 +305,6 @@ export function defaultInputCandidates(root: string): string[] {
     autonomousLeftoverFindingsPath(root),
     autonomousLeftoverReportPath(root),
   ];
-}
-
-interface InputResolution {
-  supplied: boolean;
-  existing: string[];
-  missing: string[];
-  checked: string[];
-  /**
-   * EVERY discovered source that exists — the full context set surfaced to the
-   * host, not just the single `existing[0]` the pipeline auto-selects. On the
-   * no-`--input` path this is all default candidates that exist on disk; on the
-   * `--input` path it equals `existing`. Used only to build the awareness
-   * manifest at the discovered-sources gate; never narrows the pipeline's own
-   * single-best selection (which still uses `existing`).
-   */
-  allExisting: string[];
 }
 
 function inputValues(input?: string | string[]): string[] {

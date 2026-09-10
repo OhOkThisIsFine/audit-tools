@@ -116,6 +116,57 @@ export function commandLeavesDeclaredShape(command: string): boolean {
 }
 
 /**
+ * The ONE mechanical repair of a declared command that leaves the shape: split
+ * a sequential chain into its separate invocations.
+ *
+ * `a && b` is not an arbitrary shell construct — it declares two invocations,
+ * IN ORDER, which is exactly what two entries in `targeted_commands` already
+ * mean. Splitting it is therefore meaning-preserving, and the author's intent
+ * (run both) is preserved rather than reinterpreted. It is also the form LLM
+ * producers reach for by reflex: one dispatch emitted `npm run build && npm run
+ * check` on 23 nodes, and the DAG was regenerated twice for a defect that had a
+ * mechanical answer.
+ *
+ * Split ONLY on a bare, unquoted `&&`:
+ *   - `&` inside double quotes is an ordinary character (the shared scan never
+ *     reports it), so `echo "a && b"` is one invocation and is left whole;
+ *   - a lone `&`, a pipe, a redirect or `;` is NOT repaired, because those
+ *     change what runs rather than merely how many invocations there are — a
+ *     declaration carrying one is REFUSED, not quietly rewritten;
+ *   - `&&&` and other runs never split (a malformed operator is not a chain).
+ *
+ * Returns the parts (trimmed, in order), or `undefined` when there is nothing
+ * to split here — the caller keeps its refusal. Whether the PARTS are
+ * admissible is decided by the caller against {@link commandLeavesDeclaredShape}
+ * (a chain of an inadmissible part is still inadmissible), so this function
+ * stays the split and not the rule.
+ */
+export function splitSequentialCommandChain(command: string): string[] | undefined {
+  const positions: number[] = [];
+  scanStringAware(
+    command,
+    { quoteChars: ['"'], escapedQuotes: [] },
+    {
+      onUnquoted: (char, index) => {
+        if (char !== "&" || command[index + 1] !== "&") return;
+        if (command[index - 1] === "&" || command[index + 2] === "&") return;
+        positions.push(index);
+      },
+    },
+  );
+  if (positions.length === 0) return undefined;
+
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const position of positions) {
+    parts.push(command.slice(cursor, position).trim());
+    cursor = position + 2;
+  }
+  parts.push(command.slice(cursor).trim());
+  return parts;
+}
+
+/**
  * Partition declared commands into the admitted ones and refusal LINES —
  * refusals as data, never a throw, for producers that must turn a malformed
  * command into a bounded re-emit rather than an unclassified stack.
@@ -123,10 +174,18 @@ export function commandLeavesDeclaredShape(command: string): boolean {
  * Entries are trimmed; an entry that is absent, non-string or blank is refused
  * as `"empty"`. `describeRefusal` owns the wording (which artifact field, which
  * block), so this module stays the RULE and never the vocabulary.
+ *
+ * `repairShape` is the optional MECHANICAL repair, consulted only for an entry
+ * that leaves the shape. Its parts are admitted only when EVERY part is
+ * non-empty and itself admissible — a chain is exactly as admissible as its
+ * worst link — so a repair can never widen what the rule admits, only restate a
+ * violation in the form the rule already accepts. Without it (the default) every
+ * violation is refused, which is what the consumers that do not opt in want.
  */
 export function partitionCommandsByDeclaredShape(
   commands: readonly string[],
   describeRefusal: (kind: "empty" | "leaves-shape", raw: unknown) => string,
+  repairShape?: (command: string) => string[] | undefined,
 ): { commands: string[]; refusals: string[] } {
   const admitted: string[] = [];
   const refusals: string[] = [];
@@ -136,11 +195,22 @@ export function partitionCommandsByDeclaredShape(
       refusals.push(describeRefusal("empty", raw));
       continue;
     }
-    if (commandLeavesDeclaredShape(command)) {
-      refusals.push(describeRefusal("leaves-shape", raw));
+    if (!commandLeavesDeclaredShape(command)) {
+      admitted.push(command);
       continue;
     }
-    admitted.push(command);
+    const parts = repairShape?.(command);
+    if (
+      parts !== undefined &&
+      parts.length > 1 &&
+      parts.every(
+        (part) => part.length > 0 && !commandLeavesDeclaredShape(part),
+      )
+    ) {
+      admitted.push(...parts);
+      continue;
+    }
+    refusals.push(describeRefusal("leaves-shape", raw));
   }
   return { commands: admitted, refusals };
 }

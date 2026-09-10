@@ -135,6 +135,19 @@ export interface ReReviewSectionInput {
    * `"review"`.
    */
   subjectNoun?: string;
+  /**
+   * On-disk path of the prior verdict, when the caller keeps one.
+   *
+   * Named in the section because the section's own instruction — "Read only the
+   * artifact files listed above" — is addressed to an INDEPENDENT reviewer that
+   * did not author this artifact and has no memory of the prior round, and a
+   * verdict that exists only as JSON pasted into a prompt is not a file that
+   * reviewer can read. Without a path, "diff against your prior verdict" names
+   * something the reviewer cannot open; with one, the verdict is an input like
+   * any other. Optional so a caller that keeps no on-disk verdict still gets the
+   * inline copy and never a dangling path.
+   */
+  priorVerdictPath?: string;
 }
 
 /**
@@ -164,7 +177,7 @@ and re-examine ONLY the changes below.
 
 ### Your prior verdict (re-affirm it verbatim if the changes below do not affect it)
 
-\`\`\`json
+${input.priorVerdictPath ? `Also on disk, readable directly:\n\n\`${input.priorVerdictPath}\`\n\n` : ""}\`\`\`json
 ${priorJson}
 \`\`\`
 

@@ -14,6 +14,7 @@ import {
   PRIORITY_PATTERNS,
   scopeClausePolarity,
 } from "./sharedIntentData.js";
+import { splitIntentClauses } from "./clauseBoundaries.js";
 import type { Lens } from "../types/lens.js";
 
 // Re-export shared data so callers that only import from this module keep working.
@@ -51,8 +52,19 @@ export interface InterpretedIntent {
    * Clauses that could not be encoded as a lens weight, scope emphasis, or
    * priority signal. Callers SHOULD promote these to blocking checkpoint
    * questions rather than silently dropping them.
+   *
+   * Each entry is the clause TEXT. The sentence-boundary splitter keeps these
+   * whole clauses rather than fragments, so an entry is a directive the operator
+   * actually wrote — see `clauseBoundaries.ts`.
    */
   unencodableClauses: string[];
+  /**
+   * How many clauses the input decomposed into. Reported so a reader can tell
+   * "one directive, unencodable" from "six fragments, all unencodable" — the
+   * two look identical when only the unencodable list is shown, and the second
+   * shape was the fragmentation defect this splitter no longer produces.
+   */
+  clauseCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,8 +78,8 @@ const DEFAULT_WEIGHT_BOOST = 1.5;
 // ---------------------------------------------------------------------------
 
 /**
- * Split input into clauses on sentence, semicolon, comma, and newline
- * boundaries.
+ * Split input into clauses on sentence, comma and newline boundaries — but NOT
+ * on a bare `;`.
  *
  * **Why comma-splitting is intentional here:**
  * This function is used for free-form intent *hint* extraction where the input
@@ -75,28 +87,35 @@ const DEFAULT_WEIGHT_BOOST = 1.5;
  * maintainability"). Commas are the most natural separator for such lists and
  * splitting on them maximises individual lens keyword coverage.
  *
+ * **Why a `;` inside a parenthetical is NOT a separator — the fragmentation this
+ * closes.** `… (this is the contract; see docs/x.md)` is one thought with a
+ * parenthetical aside, and splitting on that `;` shredded it into fragments that
+ * are unencodable *because* they are fragments — a half-clause names no lens, no
+ * scope and no priority, so each surfaced as an operator-facing blocking
+ * question about text the operator never wrote as a standalone clause.
+ *
+ * **A `;` at depth 0 ALWAYS separates.** `focus on src/api; ignore vendor/` must
+ * stay two clauses: merged, the text has ONE polarity and the excluded half is
+ * boosted as an inclusion (COR-a0648a7d). That holds when the next clause opens
+ * with a parenthesis too — `(a) …; (b) ignore …` is two directives, and a
+ * `(see ADR-7)` aside introduces the one after it. Suppressing a depth-0 `;`
+ * merely because the next non-space char is `(` re-inverted the sign for exactly
+ * those forms. Sentence-ending `.` and newlines still split.
+ *
  * **Compare with `clauseInterpreter.decomposeIntent`:**
  * That function is used for the *blocking-checkpoint* intent pipeline where
  * clauses must be independently assessable and commas within a clause should
  * NOT split it (e.g. "focus on modules A, B, and C" is one clause, not three).
- * It therefore splits only on semicolons, " and ", newlines, and ". " sentence
- * boundaries — NOT on commas.
+ * It therefore splits on " and ", newlines, and ". " sentence boundaries — NOT
+ * on commas — and does not treat `;` as a boundary either.
  *
- * The two functions intentionally have different splitting rules. Any change to
- * one should be evaluated against the contract of the other. See
- * `tests/maintainability-split-rules.test.ts` for a regression assertion that
- * guards the difference.
+ * The two functions still differ on commas, and that difference is intentional.
+ * Any change to one should be evaluated against the contract of the other. See
+ * `tests/shared/maintainability-split-rules.test.ts` for a regression assertion
+ * that guards the difference.
  */
 function decomposeClauses(input: string): string[] {
-  // Split on `;`, `,`, newlines, and sentence-ending `.` — but ONLY when the
-  // period is followed by whitespace or end-of-input. This preserves periods
-  // in file paths and version numbers: "docs/backlog/open-bugs.md" stays
-  // intact (period followed by "m"), and "Windows PowerShell 5.1" stays
-  // intact (period followed by "1"). A run of separators collapses to one split.
-  return input
-    .split(/(?:[;,\n]|\.(?=\s|$))+/)
-    .map((c) => c.trim())
-    .filter((c) => c.length > 0);
+  return splitIntentClauses(input, { splitOnCommas: true, splitOnAnd: false });
 }
 
 /** Return matched Lens values for a clause (may be empty). */
@@ -137,6 +156,7 @@ export function interpretFreeFormIntent(input: string): InterpretedIntent {
     scopeEmphasis: [],
     scopeExclusions: [],
     unencodableClauses: [],
+    clauseCount: 0,
   };
 
   if (!input || !input.trim()) {
@@ -144,6 +164,12 @@ export function interpretFreeFormIntent(input: string): InterpretedIntent {
   }
 
   const clauses = decomposeClauses(input);
+
+  // The clause COUNT is reported alongside the clauses themselves, so a caller
+  // (and the operator reading the emission) can see how many directives the
+  // intent decomposed into without re-counting the arrays below. A count is not
+  // a promise that each clause was encodable — `unencodableClauses` is.
+  result.clauseCount = clauses.length;
 
   for (const clause of clauses) {
     let encoded = false;

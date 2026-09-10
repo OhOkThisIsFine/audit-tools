@@ -15,7 +15,7 @@
  *     instructs re-affirm-or-revise-only-affected.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -34,8 +34,12 @@ import {
   readReviewSnapshot,
   renderReReviewSection,
   reviewSnapshotExists,
+  reviewSnapshotPath,
 } from "../../src/remediate/contractPipeline/reviewSnapshot.js";
-import { ingestContractArtifacts } from "../../src/remediate/steps/contractPipeline.js";
+import {
+  archiveContractArtifact,
+  ingestContractArtifacts,
+} from "../../src/remediate/steps/contractPipeline.js";
 
 let tmpDir: string;
 let artifactsDir: string;
@@ -140,6 +144,88 @@ describe("B2 diff-based re-review — snapshot membership + capture", () => {
     const result = await ingestContractArtifacts(artifactsDir);
     expect(result.ingested).toContain("counterexample");
     expect(reviewSnapshotExists(artifactsDir, "counterexample")).toBe(true);
+  });
+
+  it("the captured snapshot names its own on-disk path, and that path is readable", async () => {
+    // The re-review section tells an INDEPENDENT reviewer to "diff against your
+    // prior verdict". That reviewer did not author the artifact and reads the
+    // files it is given, so the verdict must be one of them — a verdict living
+    // only as pasted prompt prose is not readable, which is exactly the open
+    // defect. The snapshot carries its own path so the named file and the pasted
+    // payload cannot disagree.
+    await seedCounterexampleDeps();
+    await captureReviewSnapshot(artifactsDir, "counterexample", makeCounterexamplePayload(), AT);
+    const snapshot = (await readReviewSnapshot(artifactsDir, "counterexample"))!;
+    expect(snapshot.path, "a captured snapshot must name its own path").toBe(
+      reviewSnapshotPath(artifactsDir, "counterexample"),
+    );
+    // The named file is on disk and holds the prior verdict verbatim.
+    const onDisk = JSON.parse(await readFile(snapshot.path!, "utf8"));
+    expect(onDisk.prior_payload).toEqual(makeCounterexamplePayload());
+
+    const delta = await computeReReviewDelta(artifactsDir, "counterexample", snapshot);
+    const section = renderReReviewSection("counterexample", snapshot, delta);
+    expect(
+      section,
+      "the re-review section must name a file the reviewer can read the prior verdict from",
+    ).toContain(snapshot.path!);
+  });
+});
+
+describe("B2 diff-based re-review — the snapshot dies with the input it describes", () => {
+  it("an invalid archive of a review artifact drops its snapshot", async () => {
+    // The snapshot's whole worth is being the LAST verdict for THAT input. When
+    // the input is destroyed (archived as invalid) the verdict is no longer the
+    // prior verdict for anything: ingest captures a fresh snapshot only AFTER
+    // its own staleness pass, so a surviving one would be diffed against the
+    // NEXT payload while still claiming to be the prior verdict.
+    await seedCounterexampleDeps();
+    // The artifact the verdict is FOR is on disk, as it is in any real run whose
+    // review output got rejected.
+    await writeContractArtifact(
+      artifactsDir,
+      "counterexample",
+      makeCounterexamplePayload(),
+    );
+    await captureReviewSnapshot(artifactsDir, "counterexample", makeCounterexamplePayload(), AT);
+    expect(reviewSnapshotExists(artifactsDir, "counterexample")).toBe(true);
+
+    const outcome = await archiveContractArtifact(artifactsDir, "counterexample", "invalid");
+    expect(outcome.originalFree).toBe(true);
+    expect(
+      reviewSnapshotExists(artifactsDir, "counterexample"),
+      "a verdict whose input was rejected must not survive as a prior verdict",
+    ).toBe(false);
+  });
+
+  it("a STALE archive KEEPS the snapshot — it is what the re-review diffs against", async () => {
+    // Staleness is exactly what re-opens a review phase, and the diff-based
+    // re-review only fires when a prior snapshot is still there to diff against.
+    // Dropping it on the stale path would silently turn every staleness re-emit
+    // back into the blind full review this whole mechanism exists to avoid.
+    await seedCounterexampleDeps();
+    await captureReviewSnapshot(artifactsDir, "counterexample", makeCounterexamplePayload(), AT);
+    await archiveContractArtifact(artifactsDir, "counterexample", "stale");
+    expect(
+      reviewSnapshotExists(artifactsDir, "counterexample"),
+      "the stale archive is the re-review's own trigger — it must not consume its input",
+    ).toBe(true);
+  });
+
+  it("a snapshot persisted before the path field is still READ (costs a line, not a re-review)", async () => {
+    await seedCounterexampleDeps();
+    await captureReviewSnapshot(artifactsDir, "counterexample", makeCounterexamplePayload(), AT);
+    const legacy = (await readReviewSnapshot(artifactsDir, "counterexample"))!;
+    delete legacy.path;
+    await writeFile(reviewSnapshotPath(artifactsDir, "counterexample"), JSON.stringify(legacy));
+    const reread = await readReviewSnapshot(artifactsDir, "counterexample");
+    expect(reread, "a legacy snapshot is a valid prior verdict").not.toBeNull();
+    // No path to name, so the section carries the inline copy and no dangling path.
+    const section = renderReReviewSection("counterexample", reread!, {
+      changedInputs: [],
+      allUnchanged: true,
+    });
+    expect(section).toMatch(/No upstream semantic change/i);
   });
 });
 

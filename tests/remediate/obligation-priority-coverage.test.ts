@@ -47,11 +47,12 @@ async function buildCtx(): Promise<RemediateCtx> {
     options: {},
     runLogger: RunLogger.disabled(),
     store: new StateStore(artifactsDir),
-    // NB: `RemediateCtx.inputResolution` is the LOCAL `InputResolution` declared
-    // in nextStep.ts, not the wider one exported from intakeResolver.ts — the two
-    // are separate declarations of the same name and the local one has no
-    // `discovered`. Logged as friction; matched here rather than papered over
-    // with a cast, so a shape change reds this file.
+    // `RemediateCtx.inputResolution` is the ONE `InputResolution` declared in
+    // `src/remediate/steps/types.ts` and imported by both the resolver and the
+    // decide loop. It used to be declared twice under this name (a private copy
+    // here and a wider exported one in intakeResolver.ts) with no cross-
+    // reference; the shape below is written out rather than cast, so a shape
+    // change reds this file.
     inputResolution: {
       supplied: false,
       existing: [],

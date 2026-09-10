@@ -21,7 +21,7 @@
  * state machine.
  */
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { hashContent, isRecord, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
 import {
@@ -137,6 +137,54 @@ export function contractPipelineDir(artifactsDir: string): string {
  */
 export function pathASeedFilePath(artifactsDir: string): string {
   return join(contractPipelineDir(artifactsDir), "path_a_seed.json");
+}
+
+/**
+ * Where a review artifact's diff-based re-review snapshot lives.
+ *
+ * Single-sourced here, beside the artifact path helpers, because the ARCHIVE
+ * boundary has to reach it from a module that must not import the snapshot
+ * module's own read/write surface. Kept as a filename rather than a computed
+ * `join` in each caller so the two can never disagree about the directory.
+ */
+export const REVIEW_SNAPSHOT_DIRNAME = "review-snapshots";
+
+export function reviewSnapshotDirPath(artifactsDir: string): string {
+  return join(contractPipelineDir(artifactsDir), REVIEW_SNAPSHOT_DIRNAME);
+}
+
+export function reviewSnapshotFilePath(
+  artifactsDir: string,
+  name: ContractPipelineArtifactName,
+): string {
+  return join(reviewSnapshotDirPath(artifactsDir), `${name}.json`);
+}
+
+/**
+ * Drop a review artifact's diff-based re-review snapshot.
+ *
+ * Called when the artifact's INPUT is destroyed — the ordinary re-emit after an
+ * archive, and the promotion rejection that rolls a promoted plan back. The
+ * snapshot holds the verdict a re-review would re-affirm, and its whole value
+ * depends on being the LAST verdict for THAT input. Left in place across a
+ * rewrite it becomes worse than absent: `captureReviewSnapshot` runs at INGEST,
+ * which happens AFTER ingest's own staleness pass, so the archive pass inside
+ * THIS invocation has already gone by — a snapshot surviving the intervening
+ * call would be diffed against the NEW payload while claiming to be the prior
+ * verdict, and the worker would be told to re-affirm a verdict about content it
+ * never saw. With none present, `buildReReviewSection` renders no section and
+ * the phase runs as an ordinary full review, which is correct.
+ *
+ * Deliberately NOT called for the `stale` archive: that path re-opens a
+ * DOWNSTREAM artifact, which by construction has no snapshot of its own (its
+ * producer never ran), so there is nothing there to drop and the call would be
+ * noise in a hot loop.
+ */
+export async function dropReviewSnapshot(
+  artifactsDir: string,
+  name: ContractPipelineArtifactName,
+): Promise<void> {
+  await rm(reviewSnapshotFilePath(artifactsDir, name), { force: true });
 }
 
 /**

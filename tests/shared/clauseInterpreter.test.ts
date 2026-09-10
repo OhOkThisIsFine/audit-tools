@@ -36,6 +36,35 @@ test("decomposeIntent — leading/trailing whitespace is trimmed from each claus
   expect(clauses[1].text).toBe("prioritize correctness");
 });
 
+test("decomposeIntent — a `;` inside a parenthetical does not split the clause", () => {
+  // The blocking-checkpoint decomposer draws the SAME boundary scan the hint
+  // interpreter does (they differ only on commas / " and "), so a semicolon
+  // inside an aside must not shred a directive into unencodable fragments here
+  // either.
+  const clauses = decomposeIntent("keep the API stable (this is the contract; see docs/x.md)");
+  expect(clauses.length, `one clause with an aside must not shred: ${JSON.stringify(clauses.map((c) => c.text))}`).toBe(1);
+  expect(clauses[0].text).toContain("this is the contract; see docs/x.md");
+});
+
+test("decomposeIntent — an `(a) …; (b) …` enumeration is two clauses", () => {
+  // A depth-0 `;` is a boundary even when the next clause OPENS with `(`.
+  // `(b) ignore vendor/` is a directive in its own right: merged, the pair takes
+  // ONE polarity and `applyIntentOrdering` orders the excluded path first
+  // (COR-a0648a7d inverted). The same rule the hint interpreter draws.
+  const clauses = decomposeIntent("(a) keep the public API stable; (b) do not touch the generated client");
+  const texts = clauses.map((c) => c.text);
+  expect(clauses.length, `two enumerated items are two clauses: ${JSON.stringify(texts)}`).toBe(2);
+  expect(texts[0]).toContain("keep the public API stable");
+  expect(texts[1]).toContain("(b)");
+});
+
+test("decomposeIntent — a `;` between two independent directives still splits", () => {
+  const clauses = decomposeIntent("focus on security; ignore vendor/");
+  expect(clauses.length, `two directives stay two clauses: ${JSON.stringify(clauses.map((c) => c.text))}`).toBe(2);
+  expect(clauses[0].text).toBe("focus on security");
+  expect(clauses[1].text).toBe("ignore vendor/");
+});
+
 test("decomposeIntent — empty string returns empty array", () => {
   const clauses = decomposeIntent("");
   expect(clauses).toEqual([]);

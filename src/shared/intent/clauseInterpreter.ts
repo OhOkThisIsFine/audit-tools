@@ -13,6 +13,7 @@
  */
 
 import { LENS_KEYWORD_MAP, SCOPE_PATTERNS, PRIORITY_PATTERNS } from "./sharedIntentData.js";
+import { splitIntentClauses } from "./clauseBoundaries.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -65,9 +66,11 @@ export interface ClauseInterpretResult {
 
 /**
  * Split a compound free-form intent string into discrete single-purpose
- * clauses. Splits on semicolons, " and ", newlines, and sentence boundaries
- * (". " followed by an uppercase letter or end-of-string). Returns an empty
- * array for empty/whitespace-only input.
+ * clauses. Splits on " and ", newlines, and sentence boundaries (a `.` followed
+ * by whitespace or end-of-input); a `;` splits at bracket depth 0 and never
+ * inside a parenthetical aside (see `clauseBoundaries.ts` for the positional
+ * rule and the fragments it prevents). Returns an empty array for
+ * empty/whitespace-only input.
  *
  * **Why commas do NOT split here:**
  * This function is used in the *blocking-checkpoint* intent pipeline where
@@ -80,51 +83,19 @@ export interface ClauseInterpretResult {
  * That function splits on commas because it processes brief hint lists where
  * commas are the primary separator (e.g. "security, performance"). Its output
  * is a set of keyword-match inputs, not independently assessable directives.
+ * It also does NOT split on " and ".
  *
- * The two functions intentionally have different splitting rules. See
- * `tests/maintainability-split-rules.test.mjs` for a regression assertion.
+ * Comma-vs-`and` is the ONLY intentional difference between the two; every
+ * other boundary (including the `;` rule above) is the shared
+ * {@link splitIntentClauses} scan, so the two cannot drift on it. See
+ * `tests/shared/maintainability-split-rules.test.ts` for a regression assertion
+ * that guards the difference.
  */
 export function decomposeIntent(free_form_intent: string): IntentClause[] {
-  if (!free_form_intent || !free_form_intent.trim()) {
-    return [];
-  }
-
-  // Split on `;`, ` and ` (word boundary), newlines, and `. ` sentence breaks.
-  // We use a multi-step split so we can preserve ordering without a complex regex.
-  const raw = free_form_intent
-    // Normalise newlines
-    .replace(/\r\n/g, "\n")
-    // Split on semicolons
-    .split(/;/)
-    .flatMap((seg) =>
-      // Split each segment on " and " (word-boundary variant)
-      seg.split(/\band\b/i)
-    )
-    .flatMap((seg) =>
-      // Split on newlines
-      seg.split(/\n/)
-    )
-    .flatMap((seg) => {
-      // Split on ". " sentence boundaries (keep the remainder)
-      const parts: string[] = [];
-      let remaining = seg;
-      let match: RegExpExecArray | null;
-      const sentenceRe = /\.\s+/g;
-      let lastIndex = 0;
-      sentenceRe.lastIndex = 0;
-      while ((match = sentenceRe.exec(remaining)) !== null) {
-        parts.push(remaining.slice(lastIndex, match.index + 1));
-        lastIndex = match.index + match[0].length;
-        // sentenceRe.lastIndex is already at lastIndex after exec; no reassignment needed.
-      }
-      parts.push(remaining.slice(lastIndex));
-      return parts;
-    })
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-
-  // Assess each raw clause
-  return raw.map((text) => assessClauseEncodabilityAsClause(text));
+  return splitIntentClauses(free_form_intent, {
+    splitOnCommas: false,
+    splitOnAnd: true,
+  }).map((text) => assessClauseEncodabilityAsClause(text));
 }
 
 // ---------------------------------------------------------------------------

@@ -39,6 +39,7 @@ import {
   captureStepBoundaryFriction,
   climbOutOfAuditTools,
   partitionCommandsByDeclaredShape,
+  splitSequentialCommandChain,
   normalizeRepoPath,
   repoRelativePath,
   toPosixPath,
@@ -59,6 +60,7 @@ import {
   contractInputFilePath,
   contractPipelineDir,
   detectStaleArtifacts,
+  dropReviewSnapshot,
   envelopePayload,
   envelopeSemanticHash,
   isEnvelope,
@@ -420,6 +422,26 @@ export async function archiveContractArtifact(
   const canonicalSource = contractArtifactFilePath(artifactsDir, name);
   const hasInput = existsSync(inputSource);
   const hasCanonical = existsSync(canonicalSource);
+
+  // The `invalid` label rejects the artifact this snapshot is the verdict FOR, so
+  // the snapshot dies with it — unconditionally, and before the nothing-to-
+  // archive short-circuit below, so an orphaned snapshot is cleaned up too. A
+  // surviving copy is worse than an absent one: ingest captures a fresh snapshot
+  // only AFTER its own staleness pass, so the NEXT invocation would diff the new
+  // payload against a verdict about content the reviewer never saw. Dropped even
+  // when the history move itself fails, because the re-emit that follows tells
+  // the worker to overwrite the input in place — the old verdict is void either
+  // way.
+  //
+  // The `stale` label must NOT drop it, and that asymmetry is the whole point:
+  // staleness is what re-opens a review phase, and the diff-based re-review only
+  // fires when a prior snapshot is there to diff against. Dropping on the stale
+  // path would silently turn every staleness re-emit back into the blind full
+  // review this mechanism exists to avoid.
+  if (label === "invalid") {
+    await dropReviewSnapshot(artifactsDir, name);
+  }
+
   if (!hasInput && !hasCanonical) return { originalFree: true };
 
   const historyDir = join(contractPipelineDir(artifactsDir), "history");
@@ -784,6 +806,121 @@ export interface SeedSourceDigestMismatch {
   expected: string;
   /** The path's current sha256, or `null` when it is no longer readable. */
   actual: string | null;
+}
+
+/**
+ * The tool-named accept lane for seed-source drift — the file an OPERATOR writes
+ * to record "this drift is reviewed and does not invalidate the findings".
+ *
+ * A digest is a whole-file byte binding, so it moves for changes no finding is
+ * about: a release `version` bump in `package.json` moves the digest of every
+ * finding that cited `package.json` and blocked the run. The alarm was right
+ * that SOMETHING moved and wrong about whether the findings still held — there
+ * was no way to say so, and the run's remaining options were re-auditing or
+ * deleting the seed.
+ *
+ * WHY THE ACCEPT IS AN OPERATOR FILE AND NOT A DERIVED VERDICT. The tempting
+ * mechanical predicate is "do the drifted file's cited locations still exist"
+ * (line N still present). It is unsound in the direction that matters: a finding
+ * asserting "`parseConfig` returns null on malformed input" cites line 42, and
+ * rewriting that line to return a THROWS leaves line 42 present, the digest
+ * moved, and the finding FALSE — the predicate accepts and the run designs
+ * against a claim the code no longer makes. That inference cannot be made from
+ * line counts by a language-neutral tool, and a predicate that is right about
+ * version bumps and wrong about behaviour changes is worse than no predicate:
+ * it silently converts "the alarm fired" into "the alarm was satisfied". So the
+ * judgment stays where it can actually be made — with the operator, recorded,
+ * and attributable — and the tool enforces only the shape of the record.
+ */
+export interface SeedSourceAcceptance {
+  /** The seed-recorded source path this decision covers (repo-relative). */
+  path: string;
+  /** Why the drift does not invalidate the findings. Required, non-empty. */
+  rationale: string;
+  /**
+   * Who decided. Attributable identity, like the counterexample waiver and the
+   * loop-core review attestation — no mechanical channel can prove WHO decided,
+   * so the record names the decider rather than pretending to verify them.
+   */
+  accepted_by: string;
+}
+
+interface SeedSourceAcceptanceFile {
+  acceptances?: unknown;
+}
+
+/** The tool-named host lane: the operator's drift acceptances land here. */
+export function seedSourceAcceptancesPath(artifactsDir: string): string {
+  return join(contractPipelineDir(artifactsDir), "seed-source-acceptances.json");
+}
+
+/**
+ * Read the operator's acceptances, keyed by the same path normalization the
+ * mismatch side uses. A malformed entry is DROPPED, never widened: an acceptance
+ * missing its rationale or its decider records no decision, and treating it as
+ * one would turn a shape defect into a silent bypass of the alarm.
+ */
+export async function readSeedSourceAcceptances(
+  artifactsDir: string,
+): Promise<Map<string, SeedSourceAcceptance>> {
+  const raw = await readOptionalJsonFile<SeedSourceAcceptanceFile>(
+    seedSourceAcceptancesPath(artifactsDir),
+  );
+  const byPath = new Map<string, SeedSourceAcceptance>();
+  if (!isRecord(raw) || !Array.isArray(raw.acceptances)) return byPath;
+  for (const entry of raw.acceptances as unknown[]) {
+    if (!isRecord(entry)) continue;
+    const path = entry.path;
+    const rationale = entry.rationale;
+    const acceptedBy = entry.accepted_by;
+    if (
+      typeof path !== "string" ||
+      path.trim().length === 0 ||
+      typeof rationale !== "string" ||
+      rationale.trim().length === 0 ||
+      typeof acceptedBy !== "string" ||
+      acceptedBy.trim().length === 0
+    ) {
+      continue;
+    }
+    byPath.set(normalizeRepoPath(path), {
+      path: path.trim(),
+      rationale: rationale.trim(),
+      accepted_by: acceptedBy.trim(),
+    });
+  }
+  return byPath;
+}
+
+/**
+ * The seed paths the operator's acceptance file covers, applied to the drifted
+ * set under the ONE path normalization both sides share; everything else blocks.
+ *
+ * This is the accept path and it is deliberately the ONLY automatic one: the
+ * gate cannot tell a benign drift from a falsifying one, and the one predicate
+ * that claimed to (cited line counts) was unsound — see {@link SeedSourceAcceptance}.
+ */
+export async function partitionSeedSourceDrift(
+  artifactsDir: string,
+  mismatches: readonly SeedSourceDigestMismatch[],
+): Promise<{
+  accepted: Array<SeedSourceAcceptance & { mismatch: SeedSourceDigestMismatch }>;
+  blocking: SeedSourceDigestMismatch[];
+}> {
+  if (mismatches.length === 0) return { accepted: [], blocking: [] };
+  const acceptances = await readSeedSourceAcceptances(artifactsDir);
+  if (acceptances.size === 0) return { accepted: [], blocking: [...mismatches] };
+  const accepted: Array<SeedSourceAcceptance & { mismatch: SeedSourceDigestMismatch }> = [];
+  const blocking: SeedSourceDigestMismatch[] = [];
+  for (const mismatch of mismatches) {
+    const acceptance = acceptances.get(normalizeRepoPath(mismatch.path));
+    if (acceptance) {
+      accepted.push({ ...acceptance, mismatch });
+      continue;
+    }
+    blocking.push(mismatch);
+  }
+  return { accepted, blocking };
 }
 
 /**
@@ -2312,13 +2449,37 @@ const PRE_CRITIC_REQUIRED_GATES: ReadonlySet<GateOutcome["gate"]> = new Set([
  * a classified blocked step on a mismatch — rather than spending the whole
  * design pipeline on content that no longer holds the findings the seed
  * enumerates. Runs first, before anything is ingested or derived.
+ *
+ * The refusal names the operator's ACCEPT lane: a drift the operator has
+ * reviewed and judged not to invalidate the findings is recorded in
+ * `seed-source-acceptances.json` and stops blocking. That lane exists because
+ * the gate cannot tell a version bump from a behaviour change, and the honest
+ * answer to "can the tool tell?" is no — see `SeedSourceAcceptance`.
  */
 const seedSourceDigestGate: ContractGate = async (ctx) => {
   if (!ctx.pathASeedPath) return null;
   const seed = await readOptionalJsonFile<PathASeed>(ctx.pathASeedPath);
-  const mismatches = await detectSeedSourceDigestMismatches(ctx.root, seed);
-  if (mismatches.length === 0) return null;
-  const lines = mismatches
+  const allMismatches = await detectSeedSourceDigestMismatches(ctx.root, seed);
+  if (allMismatches.length === 0) return null;
+
+  // A digest is a WHOLE-FILE byte binding, so it moves for changes no finding is
+  // about — a release `version` bump in `package.json` moved the digest of every
+  // finding that cited it and blocked the run. The operator's acceptance file is
+  // the way to say "reviewed, and the findings still hold"; anything it does not
+  // cover still blocks. The tool cannot infer this (see `SeedSourceAcceptance`),
+  // so it enforces the record's shape and the join, never the judgment.
+  const { accepted, blocking } = await partitionSeedSourceDrift(
+    ctx.artifactsDir,
+    allMismatches,
+  );
+  if (blocking.length === 0) return null;
+  const acceptedLines = accepted
+    .map(
+      (entry) =>
+        `- \`${entry.path}\` — accepted by ${entry.accepted_by}: ${entry.rationale}`,
+    )
+    .join("\n");
+  const lines = blocking
     .map(
       (mismatch) =>
         `- \`${mismatch.path}\` — recorded \`${mismatch.expected.slice(0, 12)}…\`, ` +
@@ -2336,8 +2497,19 @@ ${lines}
 The findings this pipeline is designing against were derived from the recorded content, so re-deriving them is the only thing that makes the design sound again. Decide with the user:
 
 1. **Re-run the audit extraction** against the current tree, so the findings describe the code as it now stands; or
-2. **Restore the drifted sources** to the content the audit read, if the change was unintended.
+2. **Restore the drifted sources** to the content the audit read, if the change was unintended; or
+3. **Accept the drift**, when the operator has reviewed it and the findings still hold — a release version bump touches no finding the seed enumerates. Write to \`${seedSourceAcceptancesPath(ctx.artifactsDir)}\`:
 
+\`\`\`json
+{
+  "acceptances": [
+    { "path": "<the path above, repo-relative>", "rationale": "<why the findings still hold>", "accepted_by": "<who decided>" }
+  ]
+}
+\`\`\`
+
+The tool does not and cannot infer this: it can see that bytes moved and cannot see whether a finding citing those bytes is still true. Record an acceptance ONLY for a decision the operator actually made — the record names its decider.
+${acceptedLines ? `\nAlready accepted this run (not blocking):\n\n${acceptedLines}\n` : ""}
 Only as an explicit LAST resort — an accepted, recorded decision to design against findings that no longer match the code — delete \`${ctx.pathASeedPath}\` and re-run next-step. That rebuilds the seed from the CURRENT sources while keeping the OLD findings, which clears this alarm without re-deriving anything.`,
     stopCondition:
       "Stop — the contract pipeline is blocked on a source whose content no longer matches the audit seed.",
@@ -4071,13 +4243,23 @@ export function normalizeBlockTargetedCommands(
   commands: readonly string[],
   blockId: string,
 ): BlockCommandNormalization {
-  const partitioned = partitionCommandsByDeclaredShape(commands, (kind, raw) =>
-    kind === "empty"
-      ? `Block "${blockId}" declares an empty targeted_commands entry.`
-      : `Block "${blockId}" declares the targeted_commands entry ${JSON.stringify(raw)}, ` +
-        `which carries shell chaining, substitution or redirection. A targeted command is ` +
-        `executed verbatim through a shell, so it must be one invocation — split it into ` +
-        `separate entries.`,
+  // The ONE mechanical repair: a bare `&&` chain already MEANS "these
+  // invocations, in order", which is what two entries mean, so it is split here
+  // rather than spending a whole DAG regeneration on it (open-bugs: one dispatch
+  // emitted `npm run build && npm run check` on 23 nodes and the DAG was
+  // regenerated twice for a defect with a mechanical answer). Everything the
+  // split cannot faithfully restate — a pipe, a redirect, `;`, substitution, an
+  // inadmissible half — still takes the bounded re-emit below.
+  const partitioned = partitionCommandsByDeclaredShape(
+    commands,
+    (kind, raw) =>
+      kind === "empty"
+        ? `Block "${blockId}" declares an empty targeted_commands entry.`
+        : `Block "${blockId}" declares the targeted_commands entry ${JSON.stringify(raw)}, ` +
+          `which carries shell chaining, substitution or redirection. A targeted command is ` +
+          `executed verbatim through a shell, so it must be one invocation — split it into ` +
+          `separate entries.`,
+    splitSequentialCommandChain,
   );
   return { targeted_commands: partitioned.commands, refusals: partitioned.refusals };
 }

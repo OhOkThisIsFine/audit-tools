@@ -122,3 +122,35 @@ export interface RemediationStep {
 
 export const REMEDIATION_CLOSING_RESULT_CONTRACT_VERSION =
   "remediate-code-closing-result/v1alpha1" as const;
+
+/**
+ * How the run's remediation sources were resolved — the ONE declaration.
+ *
+ * This shape used to exist TWICE under this one name: an exported copy in
+ * `intakeResolver.ts` and a private copy in `nextStep.ts`, neither referencing
+ * the other. Two declarations under one name is a reader trap — a reader cannot
+ * tell which one a given annotation means, and the shared name is a standing
+ * invitation for the two to diverge the moment either is edited. So the shape is
+ * single-sourced here (the module both the resolver and the decide loop already
+ * import) and the two sites import it rather than restating it.
+ */
+export interface InputResolution {
+  /** True when the host supplied `--input` explicitly. */
+  supplied: boolean;
+  /** The resolved candidate paths that exist on disk. */
+  existing: string[];
+  /** Supplied paths that do not exist — the collect-starting-point prompt names them. */
+  missing: string[];
+  /** Every path probed, in probe order (supplied paths, or the default candidates). */
+  checked: string[];
+  /**
+   * EVERY discovered source that exists — the full context set surfaced to the
+   * host at the discovered-sources gate, not just the single `existing[0]` the
+   * pipeline auto-selects. On the no-`--input` path this is all default
+   * candidates that exist on disk; on the `--input` path it equals `existing`.
+   * Used only to build the awareness manifest at the discovered-sources gate;
+   * never narrows the pipeline's own single-best selection (which still uses
+   * `existing`).
+   */
+  allExisting: string[];
+}

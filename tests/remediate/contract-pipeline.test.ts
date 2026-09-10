@@ -11,6 +11,9 @@ import {
   classifyObligationKind,
   consumeGateOutcomes,
   detectSeedSourceDigestMismatches,
+  partitionSeedSourceDrift,
+  readSeedSourceAcceptances,
+  seedSourceAcceptancesPath,
   evaluateContractObligationsPromotionGate,
   evaluatePromotedPlanWriteScope,
   normalizeBlockTargetedCommands,
@@ -29,7 +32,9 @@ import {
 import {
   renderContractPipelinePrompt,
   CONTRACT_PIPELINE_PHASE_ORDER,
+  PHASE_TO_ARTIFACT,
 } from "../../src/remediate/steps/contractPipelinePrompts.js";
+import { CP_ARTIFACT_NAMES } from "../../src/remediate/contractPipeline/artifactNames.js";
 import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
 import { intakePaths } from "../../src/remediate/intake.js";
 import {
@@ -467,6 +472,43 @@ describe("N-R08: obligation_ledger as first-class phase", () => {
     });
     expect(result.outputPath).toBe(`${ARTIFACTS_PATH}/obligation_ledger.json`);
     expect(result.prompt).toContain("contract_version");
+  });
+
+  /**
+   * Every artifact path the renderer requires, for a role-specific prompt.
+   *
+   * The role is a plain `string` because it is BOTH the renderer's role key and
+   * a key into `PHASE_TO_ARTIFACT` (whose output artifact is the one whose
+   * `.input.json` sibling the renderer additionally demands).
+   */
+  function artifactPathsFor(role: string): Record<string, string> {
+    const paths: Record<string, string> = {};
+    for (const name of CP_ARTIFACT_NAMES) paths[name] = `/a/${name}.json`;
+    const artifact = PHASE_TO_ARTIFACT[role];
+    if (artifact) paths[artifact] = `/a/${artifact}.input.json`;
+    return paths;
+  }
+
+  it("the implementation_planning prompt states the one-invocation rule for targeted_commands", () => {
+    // The rule is enforced mechanically too (the promotion gate splits a bare
+    // `&&` chain and refuses the rest), but a refusal costs a DAG regeneration —
+    // so the prompt that ASKS for the field states the rule. This asserts the
+    // rule is actually in the body, not merely that the tool enforces it.
+    const result = renderContractPipelinePrompt({
+      role: "implementation_planning",
+      artifactPaths: artifactPathsFor("implementation_planning"),
+    });
+    expect(result.prompt).toMatch(/ONE INVOCATION PER ENTRY/i);
+    expect(result.prompt).toContain("targeted_commands");
+    expect(result.prompt).toMatch(/npm run build && npm run check/);
+  });
+
+  it("a role with no declared output constraint carries no constraint section", () => {
+    const result = renderContractPipelinePrompt({
+      role: "obligation_ledger",
+      artifactPaths: artifactPathsFor("obligation_ledger"),
+    });
+    expect(result.prompt).not.toMatch(/Field Constraints — enforced/i);
   });
 });
 
@@ -1770,13 +1812,60 @@ describe("CP-NODE-13 inv-6: block write scope + targeted commands are normalized
     expect(commands.refusals).toEqual([]);
   });
 
+  it("POSITIVE: a bare `&&` chain is SPLIT into one entry per invocation, not refused", () => {
+    // open-bugs: one dispatch emitted `npm run build && npm run check` on 23
+    // nodes and the promotion gate regenerated the whole DAG TWICE (the second
+    // would have blocked the pipeline) for a defect with a mechanical answer.
+    // `a && b` already means "these invocations, in order" — which is exactly
+    // what two entries mean — so the tool normalizes it and spends no attempt.
+    const result = normalizeBlockTargetedCommands(
+      ["npm run build && npm run check"],
+      "B-1",
+    );
+    expect(result.targeted_commands).toEqual(["npm run build", "npm run check"]);
+    expect(result.refusals).toEqual([]);
+  });
+
+  it("POSITIVE: a multi-link `&&` chain splits into every link, in order", () => {
+    const result = normalizeBlockTargetedCommands(
+      ["npm run build && npm run check:tests && npx vitest run tests/x.test.ts"],
+      "B-1",
+    );
+    expect(result.targeted_commands).toEqual([
+      "npm run build",
+      "npm run check:tests",
+      "npx vitest run tests/x.test.ts",
+    ]);
+    expect(result.refusals).toEqual([]);
+  });
+
+  it("POSITIVE: a quoted `&&` is one invocation, never split", () => {
+    const result = normalizeBlockTargetedCommands(['echo "a && b"'], "B-1");
+    expect(result.targeted_commands).toEqual(['echo "a && b"']);
+    expect(result.refusals).toEqual([]);
+  });
+
+  it("NEGATIVE: a chain with an inadmissible half is REFUSED whole, never half-applied", () => {
+    // The split must not launder a violation: `npm test | tee out.log` is still
+    // a pipe, and admitting the `npm test` half while silently dropping the rest
+    // would run something other than what the block declared.
+    const result = normalizeBlockTargetedCommands(
+      ["npm run build && npm test | tee out.log"],
+      "B-1",
+    );
+    expect(result.targeted_commands).toEqual([]);
+    expect(result.refusals).toHaveLength(1);
+    expect(result.refusals[0]).toMatch(/shell chaining, substitution or redirection/);
+  });
+
   it("NEGATIVE: a shell-chained or substituting command is REFUSED as data", () => {
     for (const command of [
-      "npm run build && npm run check",
       "npm test; rm -rf /",
       "echo `whoami`",
       "npm test | tee out.log",
       "npm test > out.log",
+      "npm test & rm -rf /",
+      "npm run build &&& npm run check",
     ]) {
       const result = normalizeBlockTargetedCommands([command], "B-1");
       expect(result.targeted_commands).toEqual([]);
@@ -1939,6 +2028,188 @@ describe("CP-NODE-13 inv-7: the path_a seed binds its sources by digest", () => 
     const prompt = await readFile(step!.prompt_path, "utf8");
     expect(prompt).toContain("Source Content Changed Since the Audit Seed Was Built");
     expect(prompt).toContain("src/seeded.ts");
+  });
+
+  describe("the operator accept lane for a benign drift", () => {
+    // open-bugs (minor): a release version bump in `package.json` moved the
+    // digest of every finding that cited `package.json` and tripped the alarm on
+    // a change no finding is about. A digest is a whole-file byte binding; the
+    // alarm was right that something moved and wrong about whether the findings
+    // still held. The tool cannot tell those apart (a rewrite of the cited line
+    // moves no line number), so the accept is an operator record, not a derived
+    // verdict.
+    const CITED_REPORT = buildAuditFindingsDeliverable([
+      {
+        id: "F-1",
+        title: "t",
+        category: "General",
+        severity: "medium",
+        confidence: "high",
+        lens: "correctness",
+        summary: "s",
+        affected_files: [{ path: "package.json" }],
+        evidence: ["package.json:3"],
+      } as Finding,
+    ]);
+
+    async function seedCitedThenBumpVersion(reportPath: string): Promise<void> {
+      await mkdir(join(TEST_DIR, "src"), { recursive: true });
+      await writeFile(
+        join(TEST_DIR, "package.json"),
+        '{\n  "name": "x",\n  "version": "1.0.0"\n}\n',
+        "utf8",
+      );
+      await writeJson(reportPath, CITED_REPORT);
+      await writePathASeedFromFindings(ARTIFACTS_DIR, reportPath, CITED_REPORT);
+      await writeFile(
+        join(TEST_DIR, "package.json"),
+        '{\n  "name": "x",\n  "version": "1.0.1"\n}\n',
+        "utf8",
+      );
+    }
+
+    it("NEGATIVE with no acceptance: the drift still blocks, and names the accept lane", async () => {
+      const reportPath = join(TEST_DIR, "audit-findings.json");
+      await seedCitedThenBumpVersion(reportPath);
+
+      const step = await buildNextContractPipelineStep({
+        root: TEST_DIR,
+        artifactsDir: ARTIFACTS_DIR,
+        runId: "seed-digest-version-bump",
+      });
+      expect(step?.status).toBe("blocked");
+      const prompt = await readFile(step!.prompt_path, "utf8");
+      expect(prompt).toContain("Source Content Changed Since the Audit Seed Was Built");
+      // The alarm is not a dead end: it names the file that clears it.
+      expect(prompt).toContain("seed-source-acceptances.json");
+      expect(prompt).toContain("accepted_by");
+    });
+
+    it("POSITIVE: recording the operator's acceptance clears it, without a re-audit", async () => {
+      const reportPath = join(TEST_DIR, "audit-findings.json");
+      await seedCitedThenBumpVersion(reportPath);
+
+      const seed = JSON.parse(
+        await readFile(pathASeedFilePath(ARTIFACTS_DIR), "utf8"),
+      );
+      const mismatches = await detectSeedSourceDigestMismatches(TEST_DIR, seed);
+      // The digest genuinely moved — this is the alarm's own signal.
+      expect(mismatches.map((m) => m.path)).toContain("package.json");
+
+      await writeJson(seedSourceAcceptancesPath(ARTIFACTS_DIR), {
+        acceptances: [
+          {
+            path: "package.json",
+            rationale: "release version bump only; the findings touch the dependency list",
+            accepted_by: "operator",
+          },
+        ],
+      });
+
+      const partition = await partitionSeedSourceDrift(ARTIFACTS_DIR, mismatches);
+      expect(
+        partition.blocking,
+        `an accepted drift must not block: ${JSON.stringify(partition.blocking)}`,
+      ).toEqual([]);
+      expect(partition.accepted.map((a) => a.path)).toContain("package.json");
+
+      // And the pipeline advances on it. Blocking here is the whole defect: a
+      // release burn stopped by a version string.
+      const step = await buildNextContractPipelineStep({
+        root: TEST_DIR,
+        artifactsDir: ARTIFACTS_DIR,
+        runId: "seed-digest-version-bump-accepted",
+      });
+      expect(step?.status).not.toBe("blocked");
+    });
+
+    it("NEGATIVE: a malformed acceptance records no decision and never widens the alarm", async () => {
+      const reportPath = join(TEST_DIR, "audit-findings.json");
+      await seedCitedThenBumpVersion(reportPath);
+
+      // Every entry here is missing what makes it a RECORD of a decision — the
+      // rationale, or the decider. A shape defect must not become a bypass.
+      await writeJson(seedSourceAcceptancesPath(ARTIFACTS_DIR), {
+        acceptances: [
+          { path: "package.json", accepted_by: "operator" },
+          { path: "package.json", rationale: "looks fine" },
+          { rationale: "nameless path", accepted_by: "operator" },
+          { path: "package.json", rationale: "   ", accepted_by: "operator" },
+          "not an object",
+        ],
+      });
+      const acceptances = await readSeedSourceAcceptances(ARTIFACTS_DIR);
+      expect(
+        acceptances.size,
+        `a malformed acceptance must not be read as a decision: ${JSON.stringify([...acceptances])}`,
+      ).toBe(0);
+
+      const step = await buildNextContractPipelineStep({
+        root: TEST_DIR,
+        artifactsDir: ARTIFACTS_DIR,
+        runId: "seed-digest-malformed-acceptance",
+      });
+      expect(step?.status).toBe("blocked");
+      expect(await readFile(step!.prompt_path, "utf8")).toContain(
+        "Source Content Changed Since the Audit Seed Was Built",
+      );
+    });
+
+    it("POSITIVE: the acceptance joins the mismatch under ONE path normalization", async () => {
+      // Both sides are operator/artifact-authored strings, and an unmatched
+      // path is not a near-miss: it classifies as "not accepted", which BLOCKS
+      // — the safe direction. The unsafe one is the reverse: a join that keys
+      // one file under two names could match nothing while appearing to work,
+      // or (worse, on the finding-index side) match nothing and ACCEPT. So the
+      // acceptances are keyed through the same `normalizeRepoPath` the mismatch
+      // side uses, and a Windows-spelled or `./`-prefixed spelling still lands.
+      const reportPath = join(TEST_DIR, "audit-findings.json");
+      await seedCitedThenBumpVersion(reportPath);
+      await writeJson(seedSourceAcceptancesPath(ARTIFACTS_DIR), {
+        acceptances: [
+          {
+            path: "./Package.JSON",
+            rationale: "same file, differently spelled",
+            accepted_by: "operator",
+          },
+        ],
+      });
+      // The SEED side is the operator-uncontrolled spelling: `affected_files`
+      // comes from the auditor, so a Windows-spelled entry is what the seed
+      // genuinely records. Only the shared normalization joins the two.
+      const seedPath = pathASeedFilePath(ARTIFACTS_DIR);
+      const seedRaw = JSON.parse(await readFile(seedPath, "utf8"));
+      for (const entry of seedRaw.source_digests as Array<{ path: string }>) {
+        if (entry.path === "package.json") entry.path = ".\\package.json";
+      }
+      await writeJson(seedPath, seedRaw);
+      const seed = seedRaw;
+      const mismatches = await detectSeedSourceDigestMismatches(TEST_DIR, seed);
+      // The mismatch reports the spelling the seed RECORDED (that is what the
+      // operator sees); the join is what normalizes.
+      expect(mismatches).toHaveLength(1);
+      const partition = await partitionSeedSourceDrift(ARTIFACTS_DIR, mismatches);
+      expect(
+        partition.blocking,
+        `a differently-spelled acceptance must still cover the path: ${JSON.stringify(partition.blocking)}`,
+      ).toEqual([]);
+    });
+
+    it("NEGATIVE: an acceptance for a DIFFERENT path does not cover this one", async () => {
+      const reportPath = join(TEST_DIR, "audit-findings.json");
+      await seedCitedThenBumpVersion(reportPath);
+      await writeJson(seedSourceAcceptancesPath(ARTIFACTS_DIR), {
+        acceptances: [
+          { path: "src/other.ts", rationale: "unrelated", accepted_by: "operator" },
+        ],
+      });
+      const seed = JSON.parse(
+        await readFile(pathASeedFilePath(ARTIFACTS_DIR), "utf8"),
+      );
+      const mismatches = await detectSeedSourceDigestMismatches(TEST_DIR, seed);
+      const partition = await partitionSeedSourceDrift(ARTIFACTS_DIR, mismatches);
+      expect(partition.blocking.map((b) => b.path)).toEqual(["package.json"]);
+    });
   });
 
   it("POSITIVE: a seed with no recorded digests binds nothing (back-compat)", async () => {
