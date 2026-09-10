@@ -95,6 +95,7 @@ function scrubbedEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of Object.keys(env)) {
     if (key.startsWith("AUDIT_TOOLS_")) delete env[key];
+    if (key === "LLM_RELAY_DISPATCH_DEPTH") delete env[key]; // a relay lane child marker; see isDispatchedChildEnv
   }
   return { ...env, ...extra };
 }

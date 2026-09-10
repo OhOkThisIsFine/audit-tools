@@ -487,11 +487,11 @@ describe('the registry keys on the repository, not on the checkout', () => {
 
     expect(enforcementArmed(linked)).toBe(true);
     // The owner is recognized in the worktree it dispatched from...
-    const owner = readSessionRegistry(linked, 'owner-sid');
+    const owner = readSessionRegistry(linked, 'owner-sid', {});
     expect(owner.recordState).toBe('ok');
     expect(owner.isUnregisteredChild).toBe(false);
     // ...and an unregistered session in that worktree is a child, as it is at the root.
-    expect(readSessionRegistry(linked, 'stranger').isUnregisteredChild).toBe(true);
+    expect(readSessionRegistry(linked, 'stranger', {}).isUnregisteredChild).toBe(true);
   });
 
   it('ignores records that exist ONLY in the checkout — a copied state dir arms nothing', () => {
@@ -504,7 +504,7 @@ describe('the registry keys on the repository, not on the checkout', () => {
     writeFileSync(join(copied, 'ghost.json'), JSON.stringify(record('ghost')));
 
     expect(enforcementArmed(linked)).toBe(false);
-    expect(readSessionRegistry(linked, 'ghost').recordState).toBe('absent');
+    expect(readSessionRegistry(linked, 'ghost', {}).recordState).toBe('absent');
   });
 
   it('registers into the repository store, so a worktree session is seen from the root', () => {
@@ -512,7 +512,7 @@ describe('the registry keys on the repository, not on the checkout', () => {
     const linked = linkedWorktree(main);
     writeSessionRecord(linked, record('worktree-sid'));
 
-    expect(readSessionRegistry(main, 'worktree-sid').recordState).toBe('ok');
+    expect(readSessionRegistry(main, 'worktree-sid', {}).recordState).toBe('ok');
     expect(existsSync(join(linked, '.claude', 'hooks', '.state', 'sessions'))).toBe(false);
   });
 
