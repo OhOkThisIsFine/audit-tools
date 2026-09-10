@@ -992,6 +992,7 @@ export {
   currentStepPath,
   currentPromptPath,
   writeStepContract,
+  invalidateStepContracts,
   runWithBlockedStepBackstop,
   renderBlockedStepPrompt,
   writeBlockedStepContract,

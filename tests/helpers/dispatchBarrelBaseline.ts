@@ -17,4 +17,5 @@ export const DISPATCH_BARREL_EXPORTS = [
   "remediationHostResultFilePath",
   "remediationSubmissionBinding",
   "runRequiredTest",
+  "workloadBindingIdentity",
 ] as const;

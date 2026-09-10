@@ -476,6 +476,33 @@ const COUNTER_SCRIPT_SOURCE = [
   "",
 ].join("\n");
 
+/**
+ * A required-test command must satisfy the consumed-shape scan: it executes
+ * VERBATIM through a shell, so anything that chains, redirects, substitutes or
+ * embeds a quote is refused at handoff preparation. These two behaviors — a
+ * hang past a deadline, and a child that outruns the capture buffer — therefore
+ * need their own SCRIPTS rather than a `node -e` one-liner, exactly as the
+ * non-idempotent counter above does.
+ */
+const HANG_SCRIPT = "hang-past-deadline.mjs";
+const HANG_TEST = `node ${HANG_SCRIPT}`;
+const HANG_SCRIPT_SOURCE = [
+  'console.log("partial suite output");',
+  "setTimeout(function () {}, 60000);",
+  "",
+].join("\n");
+
+const OVERFLOW_SCRIPT = "outrun-capture-buffer.mjs";
+const OVERFLOW_TEST = `node ${OVERFLOW_SCRIPT}`;
+// NO `process.exit(0)`, deliberately: on linux a pipe write is ASYNCHRONOUS and
+// `process.exit` truncates whatever is still pending, so the child would exit 0
+// for real and never overflow the cap. Left to exit naturally, node stays alive
+// until the stream drains, so all 9MiB must cross the pipe on every platform.
+const OVERFLOW_SCRIPT_SOURCE = [
+  'process.stdout.write("x".repeat(9 * 1024 * 1024));',
+  "",
+].join("\n");
+
 async function counterRuns(root: string): Promise<number> {
   try {
     return (await readFile(join(root, ".counter"), "utf8")).length;
@@ -492,12 +519,14 @@ async function counterRuns(root: string): Promise<number> {
 async function recoveryOptions(
   value: Fixture,
   state: CurrentRemediationHostState = boundState(value),
+  requiredTestTimeoutMs?: number,
 ): Promise<{ requiredTestVerdicts: RemediationRequiredTestVerdicts }> {
   const requiredTestVerdicts = await precomputeRecoveryTestVerdicts({
     root: value.root,
     artifactsDir: value.artifactsDir,
     runId: value.runId,
     state,
+    requiredTestTimeoutMs,
   });
   if (requiredTestVerdicts === "unsupported_retired_state") {
     throw new Error("fixture state unexpectedly rejected");
@@ -628,6 +657,40 @@ describe("remediation host handoff repository corroboration", () => {
     expect(ingested.state.items.F1!.status).toBe("resolved");
     expect(ingested.state.applied_edit_surface).toEqual(["src/a.ts"]);
     expect(ingested.state.host_handoff).toBeUndefined();
+    // The CORROBORATED landing, persisted per item. `applied_edit_surface` is
+    // the run-wide union and cannot attribute a file to an item;
+    // `host_result_evidence` is deleted on the resolved path. Without this the
+    // only way to recover "what landed for this item" was to re-run the git
+    // probes — which a rewrite-orphaned baseline makes unanswerable.
+    expect(ingested.state.items.F1!.host_landed_commit).toBe(after);
+    expect(ingested.state.items.F1!.host_landed_files).toEqual(["src/a.ts"]);
+  });
+
+  it("records no landed commit for a decision outcome — only a real landing claims one", async () => {
+    // The negative half. `resolved_no_change` settles the item without landing
+    // anything, and writing a commit there would attribute work the host
+    // explicitly said it did not do.
+    const value = await fixture();
+    // Deliberately NO landing: a resolved_no_change claims the tree is
+    // unchanged, so landing a commit and then claiming that would be refused
+    // (correctly) by the no-change corroboration — a different test.
+    await writeResult(
+      value,
+      decisionFor(value, {
+        status: "resolved_no_change",
+        evidence: ["The existing code already satisfies the contract."],
+      }),
+    );
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+    });
+    if (ingested === "unsupported_retired_state") throw new Error("state rejected");
+    expect(ingested.state.items.F1!.status).toBe("resolved_no_change");
+    expect(ingested.state.items.F1!.host_landed_commit).toBeUndefined();
+    expect(ingested.state.items.F1!.host_landed_files).toBeUndefined();
   });
 
   it("accepts a real commit beneath a prompt-bound directory write scope", async () => {
@@ -1598,6 +1661,80 @@ describe("remediation host handoff repository corroboration", () => {
     });
   });
 
+  it("refuses recovery when the orphaned-looking baseline is a linked worktree's HEAD", async () => {
+    // The THIRD source of reachability, and the one git does not enumerate as a
+    // ref: a linked worktree parked (detached) exactly on the trusted baseline.
+    // `git worktree add --detach` writes no branch, and this repository's own
+    // HEAD has moved on, so `for-each-ref --contains` and the HEAD-ancestry
+    // probe BOTH read "orphaned" — while the repository is in fact keeping that
+    // commit alive as another worktree's checkout, which is exactly the state a
+    // parallel remediation lane sits in. Without the worktree probe the
+    // relaxation is handed out and the stale-worker protection is waived for a
+    // commit the repository never let go of.
+    const value = await fixture();
+    const sibling = await mkdtemp(join(tmpdir(), "remediation-linked-worktree-"));
+    cleanupRoots.push(sibling);
+    git(value.root, ["worktree", "add", "--detach", sibling, value.baseline]);
+
+    const landed = await orphanBaselineAndLand(value);
+    // Precondition, so the refusal below can only be the worktree arm firing:
+    // the baseline really is invisible to BOTH of the original probes, and the
+    // sibling worktree is the only thing left holding it.
+    expect(refsContaining(value.root, value.baseline)).toBe("");
+    expect(isAncestor(value.root, value.baseline, "HEAD")).toBe(false);
+    expect(git(sibling, ["rev-parse", "HEAD"])).toBe(value.baseline);
+    await writeResult(value, resultFor(value, landed));
+
+    const refused = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+      recovery: await recoveryOptions(value),
+    });
+    expect(refused).not.toBe("unsupported_retired_state");
+    if (refused === "unsupported_retired_state") return;
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.issues.map((issue) => issue.code)).toEqual([
+      "baseline_not_ancestor",
+    ]);
+    expect(refused.issues[0]!.message).toContain("NOT orphaned");
+
+    // CONTROL: the identical fixture with the sibling worktree GONE is genuinely
+    // orphaned, and recovery accepts it. The two runs differ only in whether a
+    // worktree HEAD kept the commit — so the refusal above is that arm, not this
+    // fixture being unacceptable for some unrelated reason.
+    const control = await fixture();
+    const controlSibling = await mkdtemp(
+      join(tmpdir(), "remediation-linked-worktree-"),
+    );
+    cleanupRoots.push(controlSibling);
+    git(control.root, [
+      "worktree",
+      "add",
+      "--detach",
+      controlSibling,
+      control.baseline,
+    ]);
+    git(control.root, ["worktree", "remove", "--force", controlSibling]);
+    const controlLanded = await orphanBaselineAndLand(control);
+    expect(refsContaining(control.root, control.baseline)).toBe("");
+    await writeResult(control, resultFor(control, controlLanded));
+
+    const accepted = await ingestRemediationHostResults({
+      root: control.root,
+      artifactsDir: control.artifactsDir,
+      runId: control.runId,
+      state: boundState(control),
+      recovery: await recoveryOptions(control),
+    });
+    expect(accepted).not.toBe("unsupported_retired_state");
+    if (accepted === "unsupported_retired_state") return;
+    expect(accepted.issues).toEqual([]);
+    expect(accepted.accepted_count).toBe(1);
+  });
+
   it("refuses a recovery acceptance whose ledger mark cannot be recorded", async () => {
     const value = await fixture();
     const landed = await orphanBaselineAndLand(value);
@@ -1796,7 +1933,59 @@ describe("remediation host handoff repository corroboration", () => {
     expect(await readFile(statePath, "utf8")).toBe(afterFirst);
   });
 
-  it("never spawns a required test under recovery — a missing verdict fails closed", async () => {
+  it("refuses a hand-built verdict table that no runner produced", async () => {
+    // The table's TYPE says "verdicts"; it cannot say "verdicts from actually
+    // running the tests". A caller that constructs `new Map()` — or any plain
+    // object cast to the type — can assert green for everything without
+    // spawning anything, and the ingest would read that as evidence. The guard
+    // is a runtime brand only `precomputeRecoveryTestVerdicts` can mint, and it
+    // fires before any ledger append, git probe, or acceptance.
+    //
+    // A green table is asserted here on purpose: the fail-closed property is not
+    // "the fabricated table is refused because it is empty", it is "a fabricated
+    // table is refused whatever it says".
+    const value = await fixture();
+    const landed = await orphanBaselineAndLand(value);
+    await writeResult(value, resultFor(value, landed));
+    const command = value.item.required_tests[0]!;
+    const fabricated = new Map([[`${String(value.root.length)}:${value.root}:${command}`, null]]);
+
+    await expect(
+      ingestRemediationHostResults({
+        root: value.root,
+        artifactsDir: value.artifactsDir,
+        runId: value.runId,
+        state: boundState(value),
+        recovery: { requiredTestVerdicts: fabricated },
+      }),
+    ).rejects.toThrow(/precomputeRecoveryTestVerdicts/u);
+
+    // Nothing was accepted and nothing was recorded on the ledger.
+    expect(await readSubmissionLedger(value.artifactsDir)).toEqual([]);
+  });
+
+  it("accepts the table the minter produces — the brand does not refuse the real thing", async () => {
+    // CONTROL for the guard above: the same shape, minted by the real
+    // precompute, must still pass. Without this the brand check could be
+    // vacuously green by refusing every recovery ingest.
+    const value = await fixture({ requiredTest: COUNTER_TEST });
+    const landed = await orphanBaselineAndLand(value);
+    await writeResult(value, resultFor(value, landed));
+
+    const recovery = await recoveryOptions(value);
+    const accepted = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+      recovery,
+    });
+    if (accepted === "unsupported_retired_state") throw new Error("state rejected");
+    expect(accepted.issues).toEqual([]);
+    expect(accepted.accepted_count).toBe(1);
+  });
+
+  it("refuses a caller-supplied verdict table before it can spawn anything", async () => {
     // The locked phase must not spawn: it reads the phase-1 verdict table and
     // nothing else. An EMPTY table therefore refuses every item WITHOUT running
     // the (deliberately observable) command.
@@ -1804,12 +1993,29 @@ describe("remediation host handoff repository corroboration", () => {
     const landed = await orphanBaselineAndLand(value);
     await writeResult(value, resultFor(value, landed));
 
+    // A real, MINTED table that happens to be empty: the item's finding is not
+    // pending in the state the minter scoped to, so no command entered it. Every
+    // command is therefore absent, and the ingest fails closed rather than
+    // spawning. (A bare `new Map()` would be refused up front instead — it is
+    // not the minter's brand — which is a DIFFERENT refusal; this test is about
+    // the fail-closed READ path, not the brand guard.)
+    //
+    // The minter is scoped by a state in which F1 is already settled, while the
+    // INGEST reads the ordinary pending state — so the table is legitimately
+    // empty for the item the ingest then corroborates.
+    const scoped = {
+      ...boundState(value),
+      items: {
+        ...boundState(value).items,
+        F1: { ...boundState(value).items.F1!, status: "resolved" },
+      },
+    } as CurrentRemediationHostState;
     const refused = await ingestRemediationHostResults({
       root: value.root,
       artifactsDir: value.artifactsDir,
       runId: value.runId,
       state: boundState(value),
-      recovery: { requiredTestVerdicts: new Map() },
+      recovery: await recoveryOptions(value, scoped),
     });
     expect(refused).not.toBe("unsupported_retired_state");
     if (refused === "unsupported_retired_state") return;
@@ -1828,6 +2034,63 @@ describe("remediation host handoff repository corroboration", () => {
       kind: "rejected",
       issue_code: "required_test_failed",
     });
+  });
+
+  it("aborts when the WORKLOAD BINDING moves between the phases, though HEAD does not", async () => {
+    // The sibling of the HEAD guard, and the window HEAD cannot see: a
+    // concurrent state writer settles items and re-mints the binding without
+    // touching a single commit. The phase-1 verdict table then describes a
+    // frontier that no longer exists, and the mismatch would surface as a
+    // spurious `required_test_failed` — a bookkeeping race reported as the
+    // host's work being wrong.
+    const value = await fixture({ requiredTest: COUNTER_TEST });
+    const landed = await orphanBaselineAndLand(value);
+    await writeResult(value, resultFor(value, landed));
+    const { contract_version: _contractVersion, ...persistable } =
+      boundState(value);
+    await mkdir(value.artifactsDir, { recursive: true });
+    await writeFile(
+      join(value.artifactsDir, "state.json"),
+      JSON.stringify(persistable, null, 2),
+      "utf8",
+    );
+
+    // The required test a host authored SETTLES THE ITEM — the real residual,
+    // and the one no digest in the state tracks. The phase-1 verdict table was
+    // keyed on F1 being pending; by the time the lock is taken it is not, so the
+    // table describes a frontier that no longer exists. (`tree_moved_between_phases`
+    // is asserted separately above; this run's HEAD is untouched, so only the
+    // frontier half of the guard can catch it.)
+    const settled = COUNTER_SCRIPT_SOURCE.replace(
+      'appendFileSync(new URL("./.counter", import.meta.url), "x");',
+      [
+        'appendFileSync(new URL("./.counter", import.meta.url), "x");',
+        'import { readFileSync, writeFileSync } from "node:fs";',
+        "const p = new URL(",
+        '  "./.audit-tools/remediation/state.json",',
+        "  import.meta.url,",
+        ");",
+        'const s = JSON.parse(readFileSync(p, "utf8"));',
+        's.items.F1.status = "resolved";',
+        'writeFileSync(p, JSON.stringify(s, null, 2));',
+      ].join("\n"),
+    );
+    await writeFile(join(value.root, COUNTER_SCRIPT), settled, "utf8");
+    const headBefore = git(value.root, ["rev-parse", "HEAD"]);
+
+    const summary = await recoverIngestHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+    });
+    // HEAD is untouched, so this is not the tree guard firing.
+    expect(git(value.root, ["rev-parse", "HEAD"])).toBe(headBefore);
+    expect(summary.accepted_count).toBe(0);
+    expect(summary.issues.map((issue) => issue.code)).toEqual([
+      "state_moved_between_phases",
+    ]);
+    // The abort left the concurrent writer's own state alone.
+    expect(summary.state_changed).toBe(false);
   });
 
   it("runs every required test before the lock and none inside it", async () => {
@@ -2206,32 +2469,22 @@ describe("remediation host handoff repository corroboration", () => {
   });
 
   it("reports a hung required test under its own issue code, distinguishable without parsing prose", async () => {
-    const value = await fixture();
+    // The timeout verdict is produced by the MINTER, not hand-built: the table
+    // is the minter's brand, so the only way to get one is to actually run a
+    // command that outlives a deadline. That is also why the runner takes a
+    // deadline — this test would otherwise wait ten real minutes. The child
+    // prints before hanging, so the captured output is asserted too.
+    const value = await fixture({ requiredTest: HANG_TEST });
+    await writeFile(join(value.root, HANG_SCRIPT), HANG_SCRIPT_SOURCE, "utf8");
     const landed = await orphanBaselineAndLand(value);
     await writeResult(value, resultFor(value, landed));
-    const command = value.item.required_tests[0]!;
 
-    // The recovery lane READS a pre-computed verdict table, so a timeout verdict
-    // can be delivered without a ten-minute wait — the same record
-    // `runRequiredTest` would have produced.
-    const verdicts = new Map<string, RequiredTestFailure | null>([
-      [
-        `${String(value.root.length)}:${value.root}:${command}`,
-        {
-          command,
-          outcome: "timed_out",
-          exit_code: null,
-          stdout: "partial suite output",
-          stderr: "",
-        },
-      ],
-    ]);
     const refused = await ingestRemediationHostResults({
       root: value.root,
       artifactsDir: value.artifactsDir,
       runId: value.runId,
       state: boundState(value),
-      recovery: { requiredTestVerdicts: verdicts },
+      recovery: await recoveryOptions(value, boundState(value), 5_000),
     });
     if (refused === "unsupported_retired_state") throw new Error("state rejected");
     expect(refused.accepted_count).toBe(0);
@@ -2241,7 +2494,7 @@ describe("remediation host handoff repository corroboration", () => {
     ]);
     expect(refused.issues[0]!.message).toContain("timed out");
     expect(refused.issues[0]!.message).toContain("partial suite output");
-  });
+  }, 60_000);
 
   it("reports a genuine red under required_test_failed, not the timeout code", async () => {
     const value = await fixture({ requiredTest: 'node -e "process.exit(1)"' });
@@ -2262,29 +2515,26 @@ describe("remediation host handoff repository corroboration", () => {
   });
 
   it("reports a buffer-killed required test under its own code, calling the verdict unknown", async () => {
-    const value = await fixture();
+    // A child that INTENDS a clean exit after printing more than the capture
+    // buffer holds, so node kills it and reports ENOBUFS. The verdict is
+    // produced by the real minter (the table is its brand), so this is the
+    // runner's own classification rather than a hand-written record — which is
+    // the property that makes the `output_overflow` arm trustworthy at all.
+    const value = await fixture({ requiredTest: OVERFLOW_TEST });
+    await writeFile(
+      join(value.root, OVERFLOW_SCRIPT),
+      OVERFLOW_SCRIPT_SOURCE,
+      "utf8",
+    );
     const landed = await orphanBaselineAndLand(value);
     await writeResult(value, resultFor(value, landed));
-    const command = value.item.required_tests[0]!;
 
-    const verdicts = new Map<string, RequiredTestFailure | null>([
-      [
-        `${String(value.root.length)}:${value.root}:${command}`,
-        {
-          command,
-          outcome: "output_overflow",
-          exit_code: null,
-          stdout: "the last of a very long log",
-          stderr: "",
-        },
-      ],
-    ]);
     const refused = await ingestRemediationHostResults({
       root: value.root,
       artifactsDir: value.artifactsDir,
       runId: value.runId,
       state: boundState(value),
-      recovery: { requiredTestVerdicts: verdicts },
+      recovery: await recoveryOptions(value),
     });
     if (refused === "unsupported_retired_state") throw new Error("state rejected");
     expect(refused.accepted_count).toBe(0);
@@ -2296,7 +2546,6 @@ describe("remediation host handoff repository corroboration", () => {
       "required_test_output_overflow",
     ]);
     expect(refused.issues[0]!.message).toMatch(/UNKNOWN/u);
-    expect(refused.issues[0]!.message).toContain("the last of a very long log");
   });
 });
 

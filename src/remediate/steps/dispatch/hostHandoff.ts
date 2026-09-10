@@ -178,6 +178,14 @@ export const REMEDIATION_ISSUE_CODES = [
    * tree that is no longer current. The whole recovery aborts.
    */
   "tree_moved_between_phases",
+  /**
+   * The run's own WORKLOAD BINDING changed between the recovery verb's unlocked
+   * test phase and its locked write phase — the sibling of
+   * `tree_moved_between_phases` for a concurrent state writer that settles items
+   * and re-mints the binding without moving a commit. The pre-computed verdicts
+   * describe work that is no longer pending, so the whole recovery aborts.
+   */
+  "state_moved_between_phases",
 ] as const;
 
 export type RemediationIssueCode = (typeof REMEDIATION_ISSUE_CODES)[number];
@@ -273,6 +281,12 @@ const CURRENT_ITEM_KEYS = new Set([
   "completed_at",
   "failure_context",
   "failure_reason",
+  // The corroborated landing this ingest itself writes on an accepted item (see
+  // RemediationItemState.host_landed_commit). Listed because this gate is an
+  // ALLOWLIST: without them the first ingest persists them and the very next
+  // one refuses the whole state as a retired shape it cannot parse.
+  "host_landed_commit",
+  "host_landed_files",
   "host_result_evidence",
   "finding_id",
   "incomplete_coverage_attempts",
@@ -1589,9 +1603,29 @@ async function gitCommitIsAncestor(
  * So orphanhood is the CONJUNCTION of two probes: `git for-each-ref --contains`
  * lists every branch/tag/remote ref whose history contains the commit (empty
  * output = no live ref keeps it), and the HEAD ancestry check rides alongside
- * it because a detached HEAD is not a ref `for-each-ref` enumerates and would
- * otherwise scan clean. A failed scan is not evidence of orphanhood — it fails
- * closed, so a git that cannot answer never unlocks the relaxation.
+ * it.
+ *
+ * A THIRD source of reachability sits outside `for-each-ref` entirely: the
+ * HEADs of this repository's OTHER worktrees, checked into no ref at all. In a
+ * linked worktree git DETACHES HEAD (or parks a per-worktree branch), so a
+ * baseline that is the live HEAD of a sibling worktree — exactly the state a
+ * parallel remediation lane is in — would be reported as contained by nothing,
+ * i.e. orphaned, and the relaxation would be handed out for a commit the
+ * repository is actively keeping. `git worktree list --porcelain` enumerates
+ * every worktree with its current HEAD, so it is read and compared. The linked
+ * worktree's own HEAD is included by this probe, which is why the ordinary
+ * detached-HEAD case needs no separate arm.
+ *
+ * RESIDUAL, deliberately not closed: that probe compares HEAD for EQUALITY, so
+ * it covers a worktree detached at the baseline ONLY when its HEAD *is* the
+ * baseline. A sibling worktree detached at a DESCENDANT of the baseline — a
+ * lane that landed further commits on top — keeps the baseline reachable while
+ * matching no ref and no worktree HEAD, and is still reported orphaned. Closing
+ * it means an ancestry probe per enumerated worktree HEAD; the residual is
+ * stated here rather than left as an implied full cover.
+ *
+ * A failed scan is not evidence of orphanhood — any probe that cannot answer
+ * fails closed, so a git that cannot answer never unlocks the relaxation.
  */
 async function gitCommitIsOrphaned(
   root: string,
@@ -1603,7 +1637,19 @@ async function gitCommitIsOrphaned(
     { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
   );
   if (result.error || result.status !== 0) return false;
-  return result.stdout.trim().length === 0;
+  if (result.stdout.trim().length > 0) return false;
+  // Reached only when no REF keeps the commit. Every worktree HEAD is then
+  // checked, so the detached (and per-worktree-branch) HEADs git does not
+  // enumerate as refs are still seen.
+  const worktrees = await runTrackedAsync(
+    ["git", "worktree", "list", "--porcelain"],
+    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
+  );
+  if (worktrees.error || worktrees.status !== 0) return false;
+  return !worktrees.stdout
+    .split("\n")
+    .filter((line) => line.startsWith("HEAD "))
+    .some((line) => line.slice("HEAD ".length).trim() === commit);
 }
 
 async function gitChangedFilesOfCommit(
@@ -1812,6 +1858,98 @@ export type RemediationRequiredTestVerdicts = ReadonlyMap<
   string,
   RequiredTestFailure | null
 >;
+
+/**
+ * The MINTED verdict table: a Map subclass that exists only inside this module.
+ *
+ * The type above says "a table of verdicts"; it cannot say "a table produced by
+ * actually running the tests". A plain-JS caller at the package boundary — or a
+ * `as unknown as` cast — can hand the ingest a hand-built map in which every
+ * command reads `null`, i.e. green, without spawning anything. So the trust the
+ * ingest needs is a RUNTIME property, and a module-private subclass is exactly
+ * that: {@link precomputeRecoveryTestVerdicts} is the only code that can produce
+ * one, and because the class is never exported, no other module can construct or
+ * subclass it. A caller that wants a trusted table can still get one — by
+ * calling the minter, which runs the tests, which is the whole point.
+ */
+class MintedRequiredTestVerdicts extends Map<string, RequiredTestFailure | null> {}
+
+/** Whether a caller-supplied verdict table came from {@link precomputeRecoveryTestVerdicts}. */
+function isMintedVerdictTable(
+  value: unknown,
+): value is RemediationRequiredTestVerdicts {
+  return value instanceof MintedRequiredTestVerdicts;
+}
+
+/**
+ * The FRONTIER a recovery verdict table describes, as a comparable identity.
+ *
+ * The recovery verb splits into an unlocked phase that runs the required tests
+ * and a locked phase that ingests their verdicts, and it used to bind the two
+ * by HEAD alone. HEAD says the TREE has not moved; it says nothing about whether
+ * the RUN's own state changed underneath those unlocked spawns — and a
+ * concurrent state writer can settle items without touching a single commit.
+ * The verdict table phase 1 computed is keyed on which findings were PENDING
+ * (`precomputeRecoveryTestVerdicts` filters on exactly that), so once the
+ * frontier moves, a command the table no longer covers reads as
+ * `required_test_failed` — a bookkeeping race reported as the host's work being
+ * wrong. Both halves of the comparison degrade safely: a mismatch refuses.
+ *
+ * So the identity carries three things, and each catches a writer the others
+ * cannot:
+ *
+ *  - the binding record's own parts (run, baseline, workload digest, item ids),
+ *    which the ordinary workload-integrity check would also catch — kept here so
+ *    this guard is the one place that says "the frontier moved";
+ *  - the sorted set of work items with at least one still-PENDING finding, which
+ *    is what the verdict table is actually keyed on. This is the residual's real
+ *    shape, and no digest in the state tracks it.
+ *
+ * `null` means "no binding", which is itself a distinct identity: a phase-1
+ * snapshot with no handoff and a phase-2 read that grew one describe different
+ * runs.
+ */
+export function workloadBindingIdentity(
+  state: CurrentRemediationHostState,
+): string | null {
+  const record = state.host_handoff;
+  if (!record) return null;
+  const pendingWorkItemIds = unresolvedFrontierWorkItemIds(state, record);
+  return JSON.stringify([
+    record.run_id,
+    record.baseline_commit,
+    record.workload_sha256,
+    [...record.work_item_ids].sort(compareCodeUnits),
+    pendingWorkItemIds,
+  ]);
+}
+
+/**
+ * The bound work item ids with at least one finding still `pending`, sorted.
+ *
+ * Derived from the STATE alone — the workload document is not read, because the
+ * caller may be comparing a snapshot whose workload file is no longer on disk
+ * (which is one of the situations this guard exists to refuse). A finding with
+ * no item record is NOT counted: the state is corrupt in that case, and the
+ * ingest's own parse refuses it with a better message than this guard could.
+ */
+function unresolvedFrontierWorkItemIds(
+  state: CurrentRemediationHostState,
+  record: { readonly work_item_ids: readonly string[] },
+): readonly string[] {
+  const items = state.items as Record<
+    string,
+    { readonly block_id?: string; readonly status?: string } | undefined
+  >;
+  const pendingBlockIds = new Set(
+    Object.values(items)
+      .filter((item) => item?.status === "pending")
+      .map((item) => item!.block_id),
+  );
+  return [...record.work_item_ids]
+    .filter((id) => pendingBlockIds.has(id))
+    .sort(compareCodeUnits);
+}
 
 /**
  * A required-test rerun that did not pass, CLASSIFIED.
@@ -2086,11 +2224,18 @@ export async function precomputeRecoveryTestVerdicts(params: {
   readonly artifactsDir: string;
   readonly runId: string;
   readonly state: unknown;
+  /**
+   * Per-command deadline, forwarded to {@link runRequiredTest}. Optional for the
+   * same reason `runRequiredTest` takes one: a `timed_out` or `output_overflow`
+   * verdict is a first-class outcome of this function, and an outcome reachable
+   * only by waiting ten real minutes is an outcome nothing ever tests.
+   */
+  readonly requiredTestTimeoutMs?: number;
 }): Promise<RemediationRequiredTestVerdicts | UnsupportedRetiredRemediationState> {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
   const paths = resolveBoundaryPaths(params);
-  const verdicts = new Map<string, RequiredTestFailure | null>();
+  const verdicts = new MintedRequiredTestVerdicts();
 
   const workloadRead = await readSubmissionDocument(paths.workloadPath);
   if (workloadRead.kind !== "value") return verdicts;
@@ -2117,7 +2262,7 @@ export async function precomputeRecoveryTestVerdicts(params: {
   for (const command of commands) {
     verdicts.set(
       requiredTestVerdictKey(paths.root, command),
-      await runRequiredTest(paths.root, command),
+      await runRequiredTest(paths.root, command, params.requiredTestTimeoutMs),
     );
   }
   return verdicts;
@@ -2387,6 +2532,21 @@ export async function ingestRemediationHostResults(params: {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
 
+  // The verdict table is the ONE input whose validity the type system cannot
+  // check: a hand-built map of all-green verdicts asserts tests ran that never
+  // did. Refuse it up front — before any ledger append, any git probe, and any
+  // acceptance — rather than letting the per-item loop read a fabricated table
+  // as evidence. See MintedRequiredTestVerdicts.
+  if (
+    params.recovery !== undefined &&
+    !isMintedVerdictTable(params.recovery.requiredTestVerdicts)
+  ) {
+    throw new Error(
+      "recovery.requiredTestVerdicts must come from precomputeRecoveryTestVerdicts: " +
+        "a caller-supplied verdict table asserts required tests ran that no runner produced",
+    );
+  }
+
   const paths = resolveBoundaryPaths(params);
   const nextState = structuredClone(state);
   const validated = await validateHostResultBundle({
@@ -2508,6 +2668,16 @@ type HostItemVerdict =
       readonly workItem: RemediationHostWorkItem;
       readonly pendingItems: readonly string[];
       readonly at: string;
+      /**
+       * The CORROBORATED landing — read from the result only after
+       * `corroborateHostResult` verified the commit resolves, is reachable from
+       * HEAD, and that its mechanically derived diff exactly equals
+       * `changedFiles` within the item's write scope. Persisted onto each
+       * settled item (see `RemediationItemState.host_landed_commit`) for a
+       * later boundary to attribute; nothing reads it back yet.
+       */
+      readonly landedCommit: string;
+      readonly changedFiles: readonly string[];
     };
 
 /**
@@ -2887,6 +3057,8 @@ async function executeHostVerificationReruns(
       workItem,
       pendingItems,
       at: new Date().toISOString(),
+      landedCommit: result.commit_evidence.after,
+      changedFiles: corroborated.changedFiles,
     });
     for (const changedFile of corroborated.changedFiles) {
       acc.landedFiles.add(changedFile);
@@ -2950,6 +3122,11 @@ function commitRemediationStateUpdates(
       item.status = "resolved";
       item.started_at ??= verdict.at;
       item.completed_at = verdict.at;
+      // The corroborated outcome is PERSISTED per item, not just folded into the
+      // run-wide `applied_edit_surface`, so the attribution survives the process
+      // that observed it. Persisted only: no reader consumes it yet.
+      item.host_landed_commit = verdict.landedCommit;
+      item.host_landed_files = [...verdict.changedFiles];
       delete item.failure_reason;
       delete item.host_result_evidence;
     }

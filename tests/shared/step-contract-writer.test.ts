@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,6 +7,7 @@ import {
   writeStepContract,
   currentStepPath,
   currentPromptPath,
+  invalidateStepContracts,
   processAgentId,
   type BaseStepContract,
   type WriteStepContractInput,
@@ -208,6 +209,45 @@ test("writeStepContract returns a PER-AGENT prompt_path and also mirrors a share
     );
     expect(sharedStep.agent_id, "shared latest current-step.json mirrors the step").toBe(agentId);
   } finally {
+    await cleanup();
+  }
+});
+
+test("invalidateStepContracts removes the per-agent slot DIRECTORY, so a later write emits no unreadable_marker gc", async () => {
+  const { dir, cleanup } = await makeTempDir();
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
+  try {
+    const artifactsDir = join(dir, ".audit-tools", "remediation");
+    // A PEER's slot — any id but this process's, since the GC always keeps the
+    // writing process's own slot, so a husk only ever surfaces on a later
+    // process's write. Shape it exactly as `writeStepContract` leaves one.
+    const peerSlot = join(stepsDir(artifactsDir), "a-1-1-peernotlive");
+    await mkdir(peerSlot, { recursive: true });
+    await writeFile(join(peerSlot, "current-step.json"), "{}\n", "utf8");
+    await writeFile(join(peerSlot, "current-prompt.md"), "peer prompt\n", "utf8");
+    await writeFile(join(peerSlot, "owner.json"), '{"pid":1}\n', "utf8");
+
+    await invalidateStepContracts(artifactsDir);
+
+    // `gcStaleAgentSlots` stats `current-step.json` FIRST, so a husk (dir left
+    // holding `owner.json`, its two files deleted) would take the
+    // `unreadable_marker` branch on EVERY later write, forever — and never reach
+    // the removal path that could clear it. The next write must be silent.
+    warnings.length = 0;
+    await writeStepContract<TestStepContract>(baseInput(artifactsDir));
+    const gcWarnings = warnings.filter((w) => w.includes("agent-slot gc"));
+    expect(
+      gcWarnings.filter((w) => w.includes("unreadable_marker")),
+      `no unreadable_marker gc warning, got: ${gcWarnings.join(" | ")}`,
+    ).toEqual([]);
+
+    // The per-agent slot is a DIRECTORY and must be gone WHOLE: deleting only its
+    // two files leaves the dir holding `owner.json` — the husk above.
+    await expect(stat(peerSlot)).rejects.toThrow();
+  } finally {
+    console.warn = originalWarn;
     await cleanup();
   }
 });

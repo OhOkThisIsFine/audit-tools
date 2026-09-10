@@ -335,6 +335,66 @@ export async function writeStepContract<
 }
 
 /**
+ * Invalidate the persisted step contract after a verb MUTATED run state without
+ * emitting a step of its own.
+ *
+ * The step contract is a live INSTRUCTION ("do this work, then call next-step"),
+ * and the two operator recovery verbs — `recover-ingest` and
+ * `recover-submission` — mutate the run behind the host's back. Left alone, the
+ * last persisted contract keeps describing work that the mutation just resolved
+ * (or whose `host_handoff` binding it just cleared), so a host that re-reads it
+ * resumes a prompt for a run that no longer exists. That is why `next-step`
+ * carries `runWithBlockedStepBackstop` for its own exits: after ANY terminal
+ * exit of a state-mutating invocation, the on-disk contract must reflect that
+ * invocation's outcome.
+ *
+ * Both slots are removed — the per-agent ones (which are what a peer actually
+ * addresses) and the shared "latest" mirror. The per-agent slot is removed as a
+ * DIRECTORY, the same operation {@link gcStaleAgentSlots}' own removal path
+ * performs, because deleting only its two files would leave the slot dir behind
+ * holding a stale `owner.json`: `gcStaleAgentSlots` stats `current-step.json`
+ * FIRST, so every later `next-step` write would take the `unreadable_marker`
+ * branch on that husk forever (and never reach the removal path that could clear
+ * it). The shared mirror is two FILES with no directory of its own, so both are
+ * removed because a reader takes the prompt from `current-prompt.md` and the
+ * binding from `current-step.json`; leaving either one behind leaves a half-live
+ * instruction.
+ * Absence is the correct invalidation here: unlike `next-step`, a bare recovery
+ * verb has no successor step to write, and a stale step is worse than none —
+ * `next-step` re-emits a fresh contract on the very next call, which is the
+ * action the refresh prompt names.
+ *
+ * Best-effort and idempotent: an already-absent contract is not an error, and a
+ * recovery must never fail because it could not clean up a stale prompt.
+ */
+export async function invalidateStepContracts(artifactsDir: string): Promise<void> {
+  const stepsDirPath = stepsDir(artifactsDir);
+  let slots: string[];
+  try {
+    const entries = await readdir(stepsDirPath, { withFileTypes: true });
+    slots = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    // No steps dir at all: nothing was ever persisted, so nothing is stale.
+    return;
+  }
+  // The path helpers take the ARTIFACTS dir (plus an optional agent id) and
+  // derive `steps/` themselves — passing them a steps dir would silently build
+  // `steps/steps/current-step.json` and delete nothing, which is exactly the
+  // bug this function shipped with until a test asserted the files were gone.
+  const sharedTargets = [currentStepPath(artifactsDir), currentPromptPath(artifactsDir)];
+  await Promise.all([
+    ...sharedTargets.map((path) => rm(path, { force: true }).catch(() => undefined)),
+    // Whole slot DIRECTORY, not its two files: see the header. Best-effort and
+    // idempotent like the rest of this function (a vanished slot is not an error).
+    ...slots.map((slot) =>
+      rm(join(stepsDirPath, slot), { recursive: true, force: true }).catch(() => undefined),
+    ),
+  ]);
+}
+
+/**
  * Run `body` under the terminal-exit backstop both next-step CLIs share
  * (backlog: abnormal-exit no-step-contract). If `body` throws — a
  * mis-shaped-submission parse crash, a host-handoff abort, an IO failure —

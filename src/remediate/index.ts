@@ -27,6 +27,7 @@ import {
   discoverRepoRoot,
   remediationArtifactsDir,
   resolveRepoRoot,
+  invalidateStepContracts,
   readOptionalJsonFile,
   recoverSubmission,
   runTracked,
@@ -216,50 +217,19 @@ program
     // is paid only on the rare rescue, by an operator at a terminal.
     const root = resolveRootOption(options.root);
     const artifactsDir = resolveArtifactsDirOption(root, options.artifactsDir);
-    const binding = await remediationSubmissionBinding({
+    const result = await recoverSubmissionVerb({
       root,
       artifactsDir,
       runId: options.runId,
-      workItemId: options.submissionId,
+      submissionId: options.submissionId,
+      from: resolve(options.from),
     });
-    if (binding === null) {
-      // No contract to check against must never read as "passes".
-      console.error(
-        `No live workload for run '${options.runId}' names work item ` +
-          `'${options.submissionId}'. Recovery refuses a submission it cannot validate.`,
-      );
+    if (result.status === "unrunnable") {
+      console.error(result.message);
       process.exit(1);
     }
-    const outcome = await recoverSubmission(
-      {
-        root,
-        artifactsDir,
-        runId: options.runId,
-        submissionId: options.submissionId,
-        fromPath: resolve(options.from),
-        lane: options.submissionId,
-        submissionDir: binding.submissionDir,
-      },
-      binding.validate,
-    );
-    if (!outcome.ok) {
-      console.error(
-        `recover-submission refused the payload for '${options.submissionId}' ` +
-          `(${outcome.issue.code}): ${outcome.issue.message}`,
-      );
-      process.exit(1);
-    }
-    console.log(
-      JSON.stringify(
-        {
-          status: "recovered",
-          work_item_id: options.submissionId,
-          submission_path: outcome.submission_path,
-        },
-        null,
-        2,
-      ),
-    );
+    console.log(JSON.stringify(result.body, null, 2));
+    if (result.status !== "recovered") process.exit(result.exitCode);
   });
 
 program
@@ -279,43 +249,18 @@ program
     // lane needs no command (next-step ingests), so the relaxed evidence bar is
     // never reachable by a host that merely calls the normal loop.
     const root = resolveRootOption(options.root);
-    let summary: RemediationHostIngestSummary;
-    try {
-      summary = await recoverIngestHostResults({
-        root,
-        artifactsDir: resolveArtifactsDirOption(root, options.artifactsDir),
-        runId: options.runId,
-      });
-    } catch (error) {
+    const result = await recoverIngestVerb({
+      root,
+      artifactsDir: resolveArtifactsDirOption(root, options.artifactsDir),
+      runId: options.runId,
+    });
+    if (result.status === "unrunnable") {
       // An operator at a terminal gets the reason, not a stack trace.
-      console.error(
-        `recover-ingest could not run: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      console.error(`recover-ingest could not run: ${result.message}`);
       process.exit(1);
     }
-    // A run that recovered NOTHING is not a recovery. Saying "recovered" and
-    // exiting 0 over an empty accept set is the one outcome an operator could
-    // mistake for success, so it gets its own status and a non-zero exit — as
-    // does any partial run, since an operator who asked for N items back must
-    // not read a partial ingest as a complete one. The body names what landed.
-    const recoveredNothing =
-      summary.accepted_count === 0 &&
-      summary.completed_work_item_ids.length === 0;
-    console.log(
-      JSON.stringify(
-        {
-          status: recoveredNothing ? "nothing-to-recover" : "recovered",
-          run_id: options.runId,
-          accepted_count: summary.accepted_count,
-          completed_work_item_ids: summary.completed_work_item_ids,
-          pending_work_item_ids: summary.pending_work_item_ids,
-          issues: summary.issues,
-        },
-        null,
-        2,
-      ),
-    );
-    if (recoveredNothing || summary.issues.length > 0) process.exit(1);
+    console.log(JSON.stringify(result.body, null, 2));
+    if (result.status !== "recovered") process.exit(result.exitCode);
   });
 
 program
@@ -611,6 +556,153 @@ export function resolveArtifactsDirOption(
   return artifactsDir === ".audit-tools/remediation"
     ? remediationArtifactsDir(root)
     : resolve(artifactsDir);
+}
+
+/**
+ * The outcome of one operator recovery verb, as data: the JSON body to print,
+ * the process exit code, and (for a failure that should read as a reason rather
+ * than as a result) the message to print on stderr. Both recovery verbs return
+ * this so the commander action branches are thin argv→call→print shims and the
+ * real decisions — the recovered-nothing classification, the exit code, the
+ * step-contract invalidation — are callable directly by a test. The branches
+ * used to be testable only by spawning the CLI, which is why the
+ * nothing-recovered path and the two `process.exit(1)` sites were covered by
+ * exactly nothing.
+ */
+export type RecoveryVerbResult =
+  | { readonly status: "recovered"; readonly body: Record<string, unknown> }
+  | {
+      readonly status: "nothing-to-recover" | "pending";
+      readonly body: Record<string, unknown>;
+      readonly exitCode: number;
+    }
+  /** The verb could not run at all (an exception, or no live binding). */
+  | { readonly status: "unrunnable"; readonly message: string };
+
+/**
+ * `recover-ingest`'s whole decision, minus argv parsing and printing.
+ *
+ * Exit code, not prose, is what an operator scripts on — so the three outcomes
+ * are told apart mechanically, in this precedence:
+ *
+ *   75 the EXPECTED-PENDING outcome, tested FIRST: every issue is
+ *      `submission_missing`, i.e. the run is waiting on results the host simply
+ *      has not written yet. No operator action is implied, so this must not read
+ *      as a fault — not even when a sibling item was accepted in the same pass,
+ *      because the issues are what an operator acts on and none of them asks for
+ *      anything. (`accepted_count` in the body still reports the acceptance.)
+ *   0  otherwise, something was accepted
+ *   1  otherwise (nothing accepted, and not every issue is expected-pending): a
+ *      run that recovered NOTHING is not a recovery, and any REAL issue — a
+ *      partial ingest, a moved tree, a refused payload — is a failure.
+ *
+ * The middle arm is the distinction the entry asks for: "the host hasn't
+ * finished" must not read identically to "the run is wedged", or an operator's
+ * retry loop cannot tell a normal wait from a real fault. `submission_missing`
+ * is the ONLY issue code that means expected-pending — every other code
+ * describes something the operator must act on. (75 = EX_TEMPFAIL, the
+ * conventional "try again" code.)
+ */
+export async function recoverIngestVerb(options: {
+  root: string;
+  artifactsDir: string;
+  runId: string;
+}): Promise<RecoveryVerbResult> {
+  let summary: RemediationHostIngestSummary;
+  try {
+    summary = await recoverIngestHostResults(options);
+  } catch (error) {
+    return {
+      status: "unrunnable",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+  const expectedPendingOnly =
+    summary.issues.length > 0 &&
+    summary.issues.every((issue) => issue.code === "submission_missing");
+  const recoveredNothing =
+    summary.accepted_count === 0 &&
+    summary.completed_work_item_ids.length === 0 &&
+    !expectedPendingOnly;
+  const body = {
+    status: recoveredNothing
+      ? "nothing-to-recover"
+      : expectedPendingOnly
+        ? "pending"
+        : "recovered",
+    run_id: options.runId,
+    accepted_count: summary.accepted_count,
+    completed_work_item_ids: summary.completed_work_item_ids,
+    pending_work_item_ids: summary.pending_work_item_ids,
+    issues: summary.issues,
+  };
+  if (recoveredNothing) return { status: "nothing-to-recover", body, exitCode: 1 };
+  if (expectedPendingOnly) return { status: "pending", body, exitCode: 75 };
+  return { status: "recovered", body };
+}
+
+/**
+ * `recover-submission`'s whole decision, minus argv parsing and printing — the
+ * same extraction, so its no-live-binding refusal and its refusal path are
+ * covered by a test instead of by a manual smoke log.
+ *
+ * A successful rescue LANDS a submission, which changes what the run's persisted
+ * step contract is still asking for, so it invalidates that contract exactly as
+ * `recover-ingest` does. The invalidation is best-effort by construction
+ * (`invalidateStepContracts` swallows a missing steps tree), so a rescue can
+ * never be reported as failed because a stale prompt could not be removed.
+ */
+export async function recoverSubmissionVerb(options: {
+  root: string;
+  artifactsDir: string;
+  runId: string;
+  submissionId: string;
+  from: string;
+}): Promise<RecoveryVerbResult> {
+  const binding = await remediationSubmissionBinding({
+    root: options.root,
+    artifactsDir: options.artifactsDir,
+    runId: options.runId,
+    workItemId: options.submissionId,
+  });
+  if (binding === null) {
+    // No contract to check against must never read as "passes".
+    return {
+      status: "unrunnable",
+      message:
+        `No live workload for run '${options.runId}' names work item ` +
+        `'${options.submissionId}'. Recovery refuses a submission it cannot validate.`,
+    };
+  }
+  const outcome = await recoverSubmission(
+    {
+      root: options.root,
+      artifactsDir: options.artifactsDir,
+      runId: options.runId,
+      submissionId: options.submissionId,
+      fromPath: options.from,
+      lane: options.submissionId,
+      submissionDir: binding.submissionDir,
+    },
+    binding.validate,
+  );
+  if (!outcome.ok) {
+    return {
+      status: "unrunnable",
+      message:
+        `recover-submission refused the payload for '${options.submissionId}' ` +
+        `(${outcome.issue.code}): ${outcome.issue.message}`,
+    };
+  }
+  await invalidateStepContracts(options.artifactsDir);
+  return {
+    status: "recovered",
+    body: {
+      status: "recovered",
+      work_item_id: options.submissionId,
+      submission_path: outcome.submission_path,
+    },
+  };
 }
 
 export function runValidateCommand(

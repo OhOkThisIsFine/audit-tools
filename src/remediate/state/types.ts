@@ -367,6 +367,27 @@ export interface RemediationItemState {
   /** Prompt-bound evidence supplied for a verified no-change host outcome. */
   host_result_evidence?: string[];
   /**
+   * WHAT LANDED for this item, persisted at acceptance — the corroborated
+   * worktree outcome, not the host's claim. `commit_evidence.after` was verified
+   * reachable from HEAD and its diff-tree was verified to equal
+   * {@link host_landed_files} and to lie inside the item's prompt-bound write
+   * scope, so this is ground truth by the time it is written.
+   *
+   * It is persisted PER ITEM so a later boundary — the outcomes contract, the
+   * report — can attribute the landing to this item without re-running the
+   * ingest's git probes. `applied_edit_surface` is the run-wide union of
+   * {@link host_landed_files}; this is the per-item attribution that union
+   * cannot express.
+   *
+   * NOTHING READS IT YET: no resume path, no close gate, no artifact. It is
+   * written at acceptance and nothing consumes it. (Stated outright rather than
+   * left as an implied promise — the earlier comment here advertised a resume
+   * reader that does not exist.)
+   */
+  host_landed_commit?: string;
+  /** Repo-relative, path-sorted files the landed commit changed (see above). */
+  host_landed_files?: string[];
+  /**
    * Item C — close-gate mechanical re-verify verdict for an analyzer-born
    * finding (set by `verifyAnalyzerLeads`; copied into the outcomes contract).
    */

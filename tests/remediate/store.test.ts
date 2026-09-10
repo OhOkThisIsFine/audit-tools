@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { StateStore, RemediationState, LOCK_TIMEOUT_MS } from "../../src/remediate/state/store.js";
-import { STALE_LOCK_MS } from "audit-tools/shared";
-import { rm, mkdir, writeFile, utimes, readdir } from "node:fs/promises";
+import { SKIP_WRITE, STALE_LOCK_MS } from "audit-tools/shared";
+import { rm, mkdir, writeFile, utimes, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -229,6 +229,49 @@ describe("StateStore.mutate — INV-remediate-state-02: no lost updates under co
 
     const loaded = await store.loadState();
     expect(loaded?.status).toBe("complete");
+  });
+
+  // ── SKIP_WRITE: a no-op mutation writes nothing ──────────────────────────
+
+  it("mutate returning SKIP_WRITE resolves with the read state and leaves the file byte-identical", async () => {
+    const store = new StateStore(TEST_DIR);
+    // A completeness-FREE status: implementing/triage/closing now require a
+    // persisted plan/items (INV-RSM-STATE-COMPLETE) and would fail load
+    // validation as a bare shell.
+    await store.saveState({ status: "planning", step_count: 3 });
+    const statePath = join(TEST_DIR, "state.json");
+    const before = await readFile(statePath, "utf8");
+    const mtimeBefore = (await stat(statePath)).mtimeMs;
+
+    const seen: Array<RemediationState | null> = [];
+    const result = await store.mutate(async (current) => {
+      seen.push(current);
+      return SKIP_WRITE;
+    });
+
+    // The callback still OBSERVED the current state (the skip is decided under
+    // the same held lock as the write it avoids, never by a lockless pre-read).
+    expect(seen[0]?.status).toBe("planning");
+    // ...and the caller gets that state back, so a skip is indistinguishable
+    // from a write of the same value at every call site.
+    expect(result.status).toBe("planning");
+    expect(result.step_count).toBe(3);
+    // Nothing was written: same bytes, same mtime.
+    expect(await readFile(statePath, "utf8")).toBe(before);
+    expect((await stat(statePath)).mtimeMs).toBe(mtimeBefore);
+  });
+
+  it("mutate returning SKIP_WRITE on an absent file refuses rather than inventing a state", async () => {
+    const store = new StateStore(TEST_DIR);
+    // There is no state to resolve with, and the caller asked for no write — a
+    // silent `null` here would hand the state machine a state that does not
+    // exist on disk, so it is a loud refusal instead.
+    await expect(
+      store.mutate(async () => SKIP_WRITE),
+    ).rejects.toThrow(/SKIP_WRITE/i);
+    await expect(stat(join(TEST_DIR, "state.json"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("concurrent mutate calls serialize — second observes first's write (no lost update)", async () => {

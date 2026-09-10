@@ -277,13 +277,17 @@ export async function acquireLock(
       }
     }
 
-    // Check the deadline BEFORE any stale-check IO (stat/readFile) or sleep, so a
-    // slow filesystem cannot push the actual return time past timeoutMs.
-    if (now() >= deadline) {
-      logger?.event({ kind: "error", note: "lock_timeout", lock_path: lockPath, timeout_ms: timeoutMs } as never);
-      throw new FileLockTimeoutError(lockPath);
-    }
-
+    // The stale scan runs BEFORE the deadline check, deliberately. The scan is
+    // the ONLY recovery path a non-blocking acquirer has: a zero-timeout caller
+    // (remediate's phase mutex) arrives here on its first and only iteration, so
+    // a deadline check placed first would return FileLockTimeoutError without
+    // ever looking — and a lock whose holder died (a `next-step` killed by a
+    // shell timeout) would then wedge EVERY later call, with a hand deletion as
+    // the only exit. Ordering it first costs one stat on the timeout path and
+    // makes dead-holder recovery independent of the timeout budget: after a
+    // successful steal the loop retries the exclusive create immediately and the
+    // same call can win the lock. (Read the freshness gate inside
+    // `readStaleLockToken` for why this cannot steal a live holder's lock.)
     const checkAt = now();
     if (checkAt - lastStaleCheckAt >= STALE_CHECK_INTERVAL_MS) {
       lastStaleCheckAt = checkAt;
@@ -301,6 +305,14 @@ export async function acquireLock(
         retryInterval = RETRY_INTERVAL_INITIAL_MS;
         continue;
       }
+    }
+
+    // Check the deadline BEFORE any sleep, so a slow filesystem cannot push the
+    // actual return time past timeoutMs. Reached only after the scan above, so an
+    // expired deadline still owes the caller that one recovery attempt.
+    if (now() >= deadline) {
+      logger?.event({ kind: "error", note: "lock_timeout", lock_path: lockPath, timeout_ms: timeoutMs } as never);
+      throw new FileLockTimeoutError(lockPath);
     }
 
     // Exponential backoff, clamped to the time left so we never sleep past the

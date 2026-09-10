@@ -4,6 +4,7 @@ import {
   type LockedJsonStore,
   createLockedJsonStore,
   LOCKED_JSON_STORE_TIMEOUT_MS,
+  SKIP_WRITE,
   assertNotNodeWorktreeCwd,
 } from "audit-tools/shared";
 import {
@@ -282,20 +283,40 @@ export class StateStore {
    * current state (or null), passes it to `fn`, and writes the returned state
    * before releasing the lock. No other holder can interleave between the load
    * and the save. INV-remediate-state-02 + INV-remediate-state-03.
+   *
+   * Returning the shared `SKIP_WRITE` sentinel from `fn` is the no-op: the write
+   * is skipped and this resolves with the state that was READ. The skip decision
+   * is taken inside the SAME held lock as the write it avoids, so it cannot race
+   * a concurrent writer. Whole-run verbs that routinely change nothing — the
+   * `recover-ingest` retry loop is the live one — otherwise replace `state.json`
+   * with byte-identical content on every pass, which makes "did anything
+   * change?" unanswerable from the file and rewrites an artifact other readers
+   * treat as the run's ground truth.
    */
   async mutate(
-    fn: (current: RemediationState | null) => Promise<RemediationState>,
+    fn: (
+      current: RemediationState | null,
+    ) => Promise<RemediationState | typeof SKIP_WRITE>,
   ): Promise<RemediationState> {
     // Node-worktree guard (defense-in-depth behind the CLI-entry guard): a
     // dispatched worker's process must never transition shared run state,
     // whatever invocation shape reached this writer.
     assertNotNodeWorktreeCwd("a remediation state.json transition");
-    let next!: RemediationState;
-    await this.store.mutate(async (current) => {
+    let next: RemediationState | typeof SKIP_WRITE = SKIP_WRITE;
+    const readValue = await this.store.mutate(async (current) => {
       next = await fn(current);
       return next;
     });
-    return next;
+    if (next !== SKIP_WRITE) return next;
+    // The store resolves a skipped write with the value it read. A skipped write
+    // over an ABSENT file has no state to resolve with — the caller asked to
+    // leave nothing there and nothing was there, so there is nothing to return.
+    if (readValue === null) {
+      throw new Error(
+        "StateStore.mutate returned SKIP_WRITE but no state.json exists to resolve with",
+      );
+    }
+    return readValue;
   }
 
   /**
