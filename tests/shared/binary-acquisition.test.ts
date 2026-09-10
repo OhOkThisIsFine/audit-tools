@@ -798,3 +798,83 @@ test("RV-2: the integrity layer still catches drift inside a trusted cache root"
     await rm(cacheDir, { recursive: true, force: true });
   }
 });
+
+// ── P61 / actionlint: "resolved then failed to unpack" must be distinguishable
+// from "not applicable to this repo". Both used to land on `not_resolved`, so a
+// workflow linter that was fetched, verified and then failed to extract read
+// exactly like one with no asset for the platform — and the run reported it as
+// such while the linter silently never ran.
+test("an extraction failure is reported as extract_failed, not as not_resolved", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "extract-fail-"));
+  try {
+    // `tar` fails; PATH probe fails; the asset downloads and checksum-verifies.
+    const failingTar: BinaryCommandRunner = async (argv: string[]): Promise<RunTrackedResult> =>
+      argv[0] === "tar"
+        ? { status: 128, stdout: "", stderr: "tar: bad archive", argv, duration_ms: 1 }
+        : { status: 1, stdout: "", stderr: "not found", argv, duration_ms: 1, error: new Error("ENOENT") };
+
+    const out = await resolveBinaryCandidates([binaryCandidate({ defaultRun: true })], dir, {
+      run: failingTar,
+      fetch: fetcher(),
+      cacheDir: join(dir, "cache"),
+      platform: "linux",
+      arch: "x64",
+    });
+
+    expect(out.resolvedBinaries).toEqual({});
+    expect(out.unresolvedStatuses).toHaveLength(1);
+    expect(
+      out.unresolvedStatuses[0].status,
+      "a tool that resolved and then failed to unpack must not be flattened into not_resolved",
+    ).toBe("extract_failed");
+    expect(out.unresolvedStatuses[0].error).toContain("extract failed");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a tool with no asset for this platform stays not_resolved", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "no-asset-"));
+  try {
+    const out = await resolveBinaryCandidates(
+      // No release asset is published for this platform — the "does not apply
+      // here" case, which must remain a DIFFERENT answer from a failed unpack.
+      [binaryCandidate({ defaultRun: true, binary: makeSpec({ assetFor: () => null }) })],
+      dir,
+      {
+        run: offlineRunnerExtractingTo("gitleaks"),
+        fetch: fetcher(),
+        cacheDir: join(dir, "cache"),
+        platform: "aix" as NodeJS.Platform,
+        arch: "x64",
+      },
+    );
+    expect(out.unresolvedStatuses[0].status).toBe("not_resolved");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a killed analyzer spawn is recorded spawn_error, not left to the caller's own timeout", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "spawn-killed-"));
+  try {
+    const candidate = binaryCandidate({ defaultRun: true });
+    // A runner that reports exactly what runTrackedAsync stamps for a child that
+    // outlived its deadline — a NULL status + ETIMEDOUT.
+    const killed: BinaryCommandRunner = async (argv: string[]): Promise<RunTrackedResult> => {
+      const error: NodeJS.ErrnoException = new Error(
+        `child exceeded the 5000ms deadline after 5001ms: ${argv.join(" ")} — child killed on the deadline (SIGTERM)`,
+      );
+      error.code = "ETIMEDOUT";
+      return { status: null, stdout: "", stderr: "", argv, duration_ms: 5_001, error };
+    };
+    const outcome = await runExternalAnalyzer(candidate, dir, {
+      run: killed,
+      resolvedBinaries: { [candidate.id]: "gitleaks" },
+    });
+    expect(outcome.status.status).toBe("spawn_error");
+    expect(outcome.status.error).toMatch(/deadline/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

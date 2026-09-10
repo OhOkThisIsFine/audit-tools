@@ -3,6 +3,8 @@
 // src/audit/adapters/ set was removed (CY-01, ceremony review 2026-08-29).
 // Everything here targets src/shared/analyzers/* — the live normalization seam.
 import { test, expect } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { normalizeGenericExternalResults } from "../../src/shared/analyzers/normalizeExternal.js";
 import { normalizeClippyJson, parseClippy } from "../../src/shared/analyzers/clippy.js";
@@ -114,4 +116,73 @@ test("normalizeGenericExternalResults maps native severity aliases onto schema e
     ]);
     expect(result.results[0].severity, `severity '${input}' should map to '${expected}'`).toBe(expected);
   }
+});
+
+// ── CP-NODE-1(a): the adapter entry points must be able to persist a
+// repo-RELATIVE path. Both tools are handed the ABSOLUTE repository root as
+// their target and echo absolute paths back, so an adapter that offers no way to
+// pass the root persists a machine-specific path — un-joinable against every
+// repo-relative consumer, and unreadable by the provenance reader
+// (`join(root, "/abs/path")` names nothing).
+test("normalizeClippyJson rebases absolute paths onto the repo root", () => {
+  const root = join(tmpdir(), "adapter-rebase-repo");
+  const stdout = JSON.stringify({
+    reason: "compiler-message",
+    message: {
+      level: "error",
+      message: "mismatched types",
+      code: { code: "E0308" },
+      spans: [{ file_name: join(root, "src", "lib.rs"), line_start: 3, line_end: 3, is_primary: true }],
+    },
+  });
+  const normalized = normalizeClippyJson(stdout, root);
+  expect(
+    normalized.results[0].path,
+    "an absolute path in the persisted artifact is machine-specific and never joins",
+  ).toBe("src/lib.rs");
+});
+
+test("normalizeRubocopJson rebases absolute paths onto the repo root", () => {
+  const root = join(tmpdir(), "adapter-rebase-rubocop");
+  const normalized = normalizeRubocopJson(
+    JSON.stringify({
+      files: [
+        {
+          path: join(root, "app", "foo.rb"),
+          offenses: [
+            { severity: "warning", message: "nit", cop_name: "Style/Nit", location: { line: 9 } },
+          ],
+        },
+      ],
+    }),
+    root,
+  );
+  expect(normalized.results[0].path).toBe("app/foo.rb");
+});
+
+test("a path outside the repo root is left as reported, never silently rewritten", () => {
+  // The tool may legitimately name something that is not in the repo; inventing a
+  // repo-relative identity for it would be a lie about what it reported.
+  const root = join(tmpdir(), "adapter-rebase-inside");
+  const outside = join(tmpdir(), "adapter-rebase-outside", "lib.rs");
+  const normalized = normalizeClippyJson(
+    JSON.stringify({
+      reason: "compiler-message",
+      message: {
+        level: "error",
+        message: "x",
+        code: { code: "E1" },
+        spans: [{ file_name: outside, line_start: 1, is_primary: true }],
+      },
+    }),
+    root,
+  );
+  // Asserted on the IDENTITY, not the exact string: the shared path helper folds
+  // separators to "/" on the way through, so the value is not byte-identical to
+  // the input — but it must still name the file the tool reported, not a
+  // repo-relative invention.
+  const reported = normalized.results[0].path;
+  expect(reported, "a path outside the root must not be rebased into it").not.toBe("lib.rs");
+  expect(reported).toContain("adapter-rebase-outside");
+  expect(reported).toContain("lib.rs");
 });

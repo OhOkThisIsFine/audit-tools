@@ -26,8 +26,18 @@ process.env.AUDIT_CODE_STATE_DIR = stateDir;
 const analyzerCache = mkdtempSync(join(tmpdir(), "audit-tools-test-analyzer-cache-"));
 process.env.AUDIT_TOOLS_ANALYZER_CACHE = analyzerCache;
 
+// Same again for the ACQUIRED (external) analyzer cache (~/.audit-tools/bincache,
+// single-sourced in src/shared/analyzers/binaryAcquisition.ts defaultCacheDir):
+// the e2e CLI suites reach the real acquisition path, and a binary that is absent
+// or unverifiable there makes the run DOWNLOAD a pinned release, while one already
+// cached makes it resolve. Either way the verdict would depend on what this
+// machine's home directory happens to hold. Pinned here, at the single point every
+// spawned CLI child inherits, rather than per-suite.
+const binaryCache = mkdtempSync(join(tmpdir(), "audit-tools-test-binary-cache-"));
+process.env.AUDIT_TOOLS_BINARY_CACHE = binaryCache;
+
 process.on("exit", () => {
-  for (const dir of [stateDir, analyzerCache]) {
+  for (const dir of [stateDir, analyzerCache, binaryCache]) {
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {

@@ -77,7 +77,22 @@ export const EXTERNAL_ANALYZER_TOOL_STATUSES = [
   "failed",
   /** The downloaded release asset did not match the pinned release checksums. */
   "checksum_mismatch",
+  /**
+   * The release asset downloaded and verified, but the tool could not be made
+   * runnable from it — `tar` failed, or the archive held no executable under the
+   * expected name. Its OWN member for the same reason `checksum_mismatch` has
+   * one: "this tool does not apply to this repository" (`not_resolved` — no
+   * asset published for the platform, no checksum listed, nothing on PATH and
+   * nothing downloadable) and "this tool applies, we fetched it, and unpacking
+   * it failed" are different answers to the operator's actual question, and a
+   * shared `not_resolved` cannot tell them apart. The measured case is
+   * `actionlint`, recorded `not_resolved` with `extract failed: tar exit 128`
+   * for a whole run's worth of audits while the workflow linter silently never
+   * ran.
+   */
+  "extract_failed",
 ] as const;
+
 
 export type ExternalAnalyzerToolStatusValue =
   (typeof EXTERNAL_ANALYZER_TOOL_STATUSES)[number];
@@ -131,6 +146,7 @@ export const EXTERNAL_ANALYZER_STATUS_CLASSIFICATION: Record<
   parse_error: "degraded",
   failed: "degraded",
   checksum_mismatch: "degraded",
+  extract_failed: "degraded",
 };
 
 /**

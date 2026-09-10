@@ -14,9 +14,11 @@ import { homedir } from "node:os";
 import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
 import { resolveWithinRoot } from "../io/pathContainment.js";
 import {
+  resolveSpawnDeadline,
   runTrackedAsync,
   TRACKED_CHILD_DEADLINE_MS,
   type RunTrackedResult,
+  type SpawnDeadline,
 } from "../tooling/exec.js";
 
 /**
@@ -68,7 +70,14 @@ export interface BinaryFetcher {
  * starve that lock's mtime heartbeat.
  */
 export interface BinaryCommandRunner {
-  (argv: string[], cwd: string): Promise<RunTrackedResult>;
+  /**
+   * `timeoutMs` is the RESOLVED bound for this spawn — the smaller of this
+   * layer's own cap and the caller's remaining budget, computed by
+   * {@link resolveSpawnDeadline} at the call site. It is a resolved duration
+   * rather than a {@link SpawnDeadline} because an injected runner (the test
+   * doubles) spawns nothing; only the default runner consumes it.
+   */
+  (argv: string[], cwd: string, timeoutMs: number): Promise<RunTrackedResult>;
 }
 
 /** Pinned, os/arch-aware description of one acquirable release binary. */
@@ -104,6 +113,13 @@ export interface BinarySpec {
 export interface BinaryResolveOptions {
   fetch?: BinaryFetcher;
   run?: BinaryCommandRunner;
+  /**
+   * The caller's own remaining budget, as an absolute instant. Folded into both
+   * spawns this module issues (the version probe and `tar`) as
+   * `min(TRACKED_CHILD_DEADLINE_MS, caller remaining)`, so a cold download that
+   * outlives its caller is bounded by the caller, not by this layer's own cap.
+   */
+  deadline?: SpawnDeadline;
   /** Root cache dir for downloaded binaries; default `<homedir>/.audit-tools/bincache`. */
   cacheDir?: string;
   platform?: NodeJS.Platform;
@@ -153,7 +169,7 @@ export interface BinaryResolution {
  * are simply never consulted again — the first resolution under the new root
  * re-downloads, or degrades to `unavailable` offline.
  */
-function defaultCacheDir(): string {
+export function defaultCacheDir(): string {
   const override = process.env.AUDIT_TOOLS_BINARY_CACHE;
   if (override && override.trim().length > 0) return override;
   return join(homedir(), AUDIT_TOOLS_DIRNAME, "bincache");
@@ -303,13 +319,17 @@ export async function resolveBinary(
   // and a hung child hangs the resolution forever.
   const run =
     options.run ??
-    ((argv: string[], cwd?: string) =>
-      runTrackedAsync(argv, { cwd, timeout: TRACKED_CHILD_DEADLINE_MS }));
+    ((argv: string[], cwd?: string, timeoutMs?: number) =>
+      runTrackedAsync(argv, { cwd, timeout: timeoutMs ?? TRACKED_CHILD_DEADLINE_MS }));
   const cacheDir = options.cacheDir ?? defaultCacheDir();
 
   // 1. PATH — already installed. Nothing below this point runs, so a tool the machine
   // already has must not cause a cache directory to be created as a side effect.
-  const probe = await run(spec.versionProbeArgs, process.cwd());
+  const probe = await run(
+    spec.versionProbeArgs,
+    process.cwd(),
+    resolveSpawnDeadline(options.deadline, TRACKED_CHILD_DEADLINE_MS),
+  );
   if (!probe.error && probe.status === 0) {
     return { status: "path", command: spec.binaryName };
   }
@@ -413,7 +433,11 @@ export async function resolveBinary(
     mkdirSync(versionDir, { recursive: true });
     const archivePath = join(versionDir, assetName);
     writeFileSync(archivePath, assetBytes);
-    const extract = await run(["tar", "-xf", archivePath, "-C", versionDir], versionDir);
+    const extract = await run(
+      ["tar", "-xf", archivePath, "-C", versionDir],
+      versionDir,
+      resolveSpawnDeadline(options.deadline, TRACKED_CHILD_DEADLINE_MS),
+    );
     rmSync(archivePath, { force: true });
     if (extract.error || extract.status !== 0) {
       // Whatever tar managed to write before failing must NOT survive as a cache hit.

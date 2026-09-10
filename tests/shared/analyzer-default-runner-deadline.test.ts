@@ -48,6 +48,31 @@ const { resolveBinary } = await import(
   "../../src/shared/analyzers/binaryAcquisition.js"
 );
 
+/** The one candidate both deadline tests drive — curated-default, so admitted token-free. */
+function defaultAdmittedCandidate(): ExternalAnalyzerCandidate {
+  return {
+    id: "eslint",
+    runner: "npx" as EcosystemRunner,
+    spec: "eslint@9",
+    safetyProfile: {
+      config_execution: "executable",
+      network_egress: false,
+      version_pinning: "pinned",
+    },
+    // Curated-default so the consent chokepoint admits without a token.
+    defaultRun: true,
+    detect: () => true,
+    buildArgv: (prefix: string[], root: string) => [
+      ...prefix,
+      "--format",
+      "json",
+      root,
+    ],
+    parse: (stdout: string) =>
+      JSON.parse(stdout) as ReturnType<ExternalAnalyzerCandidate["parse"]>,
+  };
+}
+
 function expectEverySpawnBounded(): void {
   expect(
     spawnOptions.length,
@@ -81,27 +106,7 @@ test("binary resolver's DEFAULT runner declares a deadline on every spawn", asyn
 
 test("acquisition engine's DEFAULT runner declares a deadline on every spawn", async () => {
   spawnOptions.length = 0;
-  const candidate: ExternalAnalyzerCandidate = {
-    id: "eslint",
-    runner: "npx" as EcosystemRunner,
-    spec: "eslint@9",
-    safetyProfile: {
-      config_execution: "executable",
-      network_egress: false,
-      version_pinning: "pinned",
-    },
-    // Curated-default so the consent chokepoint admits without a token.
-    defaultRun: true,
-    detect: () => true,
-    buildArgv: (prefix: string[], root: string) => [
-      ...prefix,
-      "--format",
-      "json",
-      root,
-    ],
-    parse: (stdout: string) =>
-      JSON.parse(stdout) as ReturnType<ExternalAnalyzerCandidate["parse"]>,
-  };
+  const candidate = defaultAdmittedCandidate();
   const root = await mkdtemp(join(tmpdir(), "aq-deadline-"));
   try {
     await runExternalAnalyzer(candidate, root, {});
@@ -109,4 +114,42 @@ test("acquisition engine's DEFAULT runner declares a deadline on every spawn", a
     await rm(root, { recursive: true, force: true });
   }
   expectEverySpawnBounded();
+});
+
+// ── P61: the deadline is PROPAGATED, not re-typed ────────────────────────────
+// The test above pins only that a bound EXISTS. A bound that exists but is
+// ten minutes long satisfies it while still handing a child a longer wait than
+// the caller awaiting it will wait — which is the measured defect. These pin
+// the two halves of the propagation contract: the caller's remaining budget
+// reaches the child, and the layer's own cap can shorten it but never lengthen
+// it.
+test("a caller-supplied deadline reaches the spawned child as its timeout", async () => {
+  spawnOptions.length = 0;
+  const candidate = defaultAdmittedCandidate();
+  const root = await mkdtemp(join(tmpdir(), "aq-prop-"));
+  try {
+    await runExternalAnalyzer(candidate, root, { deadline: { at: Date.now() + 4_000 } });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  expect(spawnOptions.length).toBeGreaterThan(0);
+  for (const options of spawnOptions) {
+    const timeout = options["timeout"] as number;
+    // The cap is two minutes; a 4-second caller must not be handed it.
+    expect(
+      timeout,
+      "the caller's remaining budget must bound the child, not this layer's cap",
+    ).toBeLessThanOrEqual(4_000);
+    expect(timeout).toBeGreaterThan(0);
+  }
+});
+
+test("the acquisition cap never exceeds the fold child deadline", async () => {
+  const { ANALYZER_CHILD_DEADLINE_MS } = await import(
+    "../../src/shared/analyzers/acquisitionEngine.js"
+  );
+  const { TRACKED_CHILD_DEADLINE_MS } = await import("../../src/shared/tooling/exec.js");
+  // Ten minutes under a five-minute caller is the defect this constant used to
+  // BE. A cap is only meaningful relative to the caller that must outlive it.
+  expect(ANALYZER_CHILD_DEADLINE_MS).toBeLessThanOrEqual(TRACKED_CHILD_DEADLINE_MS);
 });

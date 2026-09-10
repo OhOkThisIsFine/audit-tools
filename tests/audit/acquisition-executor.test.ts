@@ -131,3 +131,75 @@ test("enabled ⇒ gitleaks (PATH-resolved) findings upserted + marker records st
   expect(finding.category).toBe("security");
   expect(!JSON.stringify(finding).includes("SHOULD-NOT-LEAK"), "raw secret value must never be carried into the artifact").toBeTruthy();
 });
+
+// ── CP-NODE-1(d): the SCOPED consent grant has a production producer.
+//
+// The residual read "the bare-string consent token is retired only additively;
+// the scoped grant has no production producer until the caller-side node lands".
+// The caller-side node landed in the fold (`handleAnalyzerConsentBranch` builds
+// `{ value, tools }` from the ids the operator actually answered), and it reaches
+// the spawn chokepoint through this production executor. Pinned END TO END here,
+// because "a producer exists" and "the produced scope survives to admission" are
+// different claims: the grant must still be per-tool at the moment it matters,
+// and only the real dispatch path proves that.
+test("a scoped grant admits exactly the tool it names, through the production executor", async () => {
+  const { EXTERNAL_ANALYZER_CANDIDATES } = await import("audit-tools/shared");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+
+  const root = await mkdtemp(join(tmpdir(), "grant-scope-"));
+  try {
+    // A Node repo, so the npx candidates are applicable and the grant is what
+    // decides — not ecosystem detection.
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture" }), "utf8");
+    mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+
+    const spawnedArgs: string[][] = [];
+    const run: BinaryCommandRunner = async (argv) => {
+      spawnedArgs.push(argv);
+      return {
+        status: 1,
+        stdout: "",
+        stderr: "probe unavailable",
+        argv,
+        duration_ms: 1,
+        error: new Error("ENOENT"),
+      };
+    };
+
+    const grantedId = "eslint";
+    const result = await runExternalAnalyzerAcquisitionExecutor(bundleAfterIntake(), root, {
+      enabled: true,
+      run,
+      fetch: async () => null,
+      // The shape `handleAnalyzerConsentBranch` produces from the operator's answers.
+      consentToken: { value: "run-scoped-token", tools: [grantedId] },
+    });
+
+    const statuses = result.updated.external_analyzer_acquisition!.tool_statuses;
+    const granted = statuses.find((s) => s.tool === grantedId);
+    expect(granted, "the granted candidate must still be reported").toBeDefined();
+    expect(
+      granted?.error,
+      "a candidate the operator GRANTED must not be refused at the spawn chokepoint",
+    ).not.toBe("consent not recorded for this analyzer (not yet decided; no consent token for this run)");
+
+    // Every OTHER consent-gated candidate is still owed its own offer: the grant
+    // names one tool and must not widen into a run-wide admission.
+    const ungranted = EXTERNAL_ANALYZER_CANDIDATES.filter(
+      (c) => !c.defaultRun && c.id !== grantedId && c.detect(root),
+    ).map((c) => c.id);
+    expect(ungranted.length).toBeGreaterThan(0);
+    for (const id of ungranted) {
+      const status = statuses.find((s) => s.tool === id);
+      expect(
+        status?.error,
+        `candidate '${id}' was never granted — a scoped grant must not admit it`,
+      ).toContain("consent");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

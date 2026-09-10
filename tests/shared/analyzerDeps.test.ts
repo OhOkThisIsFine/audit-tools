@@ -1,9 +1,17 @@
 import { test, expect } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveAnalyzerDep, parseAnalyzerSpec, installToCache } from "../../src/shared/tooling/analyzerDeps.js";
+import { fileURLToPath } from "node:url";
+import {
+  resolveAnalyzerDep,
+  parseAnalyzerSpec,
+  installToCache,
+  ANALYZER_CACHE_ROOT_MODE,
+} from "../../src/shared/tooling/analyzerDeps.js";
+
+const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 import type { RunTrackedResult } from "../../src/shared/tooling/exec.js";
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -433,5 +441,50 @@ test("F5 fail-10: a cache-write failure degrades to ok:false, never throws, neve
     expect(existsSync(join(projectRoot, "node_modules")), "a cache-write failure must never touch the audited project tree").toBe(false);
     // The blocker file is untouched (the engine never clobbered it to force a dir).
     expect(existsSync(blocker), "the engine must not destroy existing paths").toBe(true);
+  });
+});
+
+// ── CP-NODE-1(b): the analyzer cache holds EXECUTABLE npm packages under a
+// PUBLIC, fully derivable path (`~/.audit-tools/analyzer-cache/<name>@<version>`),
+// so "a package exists there" is a claim rather than a proof unless the
+// directory is not writable by other local processes. The binary-acquisition
+// cache was moved to a per-user 0o700 root for exactly this reason; the same
+// reasoning applies verbatim here.
+test("installToCache creates the cache root with owner-only modes", async () => {
+  await withTempDir(async (parent) => {
+    // A root that does NOT yet exist — the mode is applied at creation, which is
+    // the only moment chmod-of-a-new-dir is meaningful.
+    const cacheRoot = join(parent, "fresh", "analyzer-cache");
+    const run = async (_argv: string[], cwd: string): Promise<RunTrackedResult> => {
+      const pkgDir = join(cwd, "node_modules", "typescript");
+      mkdirSync(pkgDir, { recursive: true });
+      writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "typescript" }));
+      return { status: 0, stdout: "", stderr: "", argv: _argv, duration_ms: 0 };
+    };
+    const result = await installToCache("typescript@5.8.0", { cacheRoot, run, log: () => {} });
+    expect(result.ok).toBe(true);
+
+    // The mode is declared as CONSTANT DATA and asserted directly. It cannot be
+    // read back from the filesystem: win32 synthesizes directory modes (`666`
+    // regardless of the mode passed to mkdir) and a POSIX box with umask 0
+    // applies 0o700 as written but one with umask 0o077 would mask it — so a
+    // statSync assertion would be green here and red on a colleague's machine,
+    // or vacuous on this one. The declared constant is what every platform reads.
+    expect(ANALYZER_CACHE_ROOT_MODE & 0o077).toBe(0);
+    expect(ANALYZER_CACHE_ROOT_MODE & 0o700).toBe(0o700);
+
+    // …and the value actually reaches the mkdir: the constant is only a contract
+    // if the one creation site consumes it (asserted against source, the shape
+    // this repo uses for "the single site reads the single source").
+    const source = readFileSync(
+      join(PACKAGE_ROOT, "src", "shared", "tooling", "analyzerDeps.ts"),
+      "utf8",
+    );
+    expect(
+      /mkdirSync\(cacheRoot,\s*\{\s*recursive:\s*true,\s*mode:\s*ANALYZER_CACHE_ROOT_MODE\s*\}\)/u.test(
+        source,
+      ),
+      "the cache root must be created with the declared owner-only mode",
+    ).toBe(true);
   });
 });

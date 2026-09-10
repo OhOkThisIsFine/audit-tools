@@ -1134,6 +1134,16 @@ test("inv-18: the status union, the zod enum, and the exhaustive classification 
   expect([...affirmative].sort()).toEqual(["findings", "success"]);
   // A checksum mismatch is its own member — never flattened into not_resolved.
   expect(EXTERNAL_ANALYZER_TOOL_STATUSES).toContain("checksum_mismatch");
+  // …and so is a failed unpack: "we fetched and verified this tool and could not
+  // make it runnable" is a different answer from "this tool does not apply here".
+  // Asserted against the tuple, not only through the schema: the schema is BUILT
+  // from the tuple, so a `safeParse` check would also pass for an enum widened
+  // from some other source and would not name the member this is about.
+  expect(
+    EXTERNAL_ANALYZER_TOOL_STATUSES,
+    "a failed unpack needs its own member, not a shared not_resolved",
+  ).toContain("extract_failed");
+  expect(isDegradedExternalAnalyzerStatus({ status: "extract_failed", exit_code: 0 })).toBe(true);
   expect(
     ExternalAnalyzerToolStatusSchema.safeParse({ tool: "t", resolved: true, status: "invented" })
       .success,

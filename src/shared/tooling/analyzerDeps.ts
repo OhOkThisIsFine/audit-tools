@@ -42,7 +42,30 @@ export interface ResolveAnalyzerDepOptions {
  * `AUDIT_TOOLS_ANALYZER_CACHE` environment variable overrides it so a run can be
  * pinned to an isolated cache (e.g. tests that need dependency resolution to be
  * deterministic regardless of what the host machine has previously cached).
+ *
+ * The mode is the same privilege-boundary reasoning the binary-acquisition
+ * cache carries, and it applies verbatim: this directory holds executable npm
+ * packages, and the path is fully derivable from a public convention, so "a
+ * package exists there" is only evidence of anything when the directory is not
+ * writable by other local processes. Created `0o700` where the platform honours
+ * modes; on win32 the mode is ignored (ACLs govern) and the per-user home root
+ * is the protection.
+ *
+ * ⚠ The mode applies AT CREATION ONLY. `mkdirSync` does not chmod a directory it
+ * did not create, so a root already created loosely by an earlier version is not
+ * repaired here; the caller-supplied `cacheRoot` override is the caller's own
+ * directory and its permissions are the caller's own concern.
  */
+export const ANALYZER_CACHE_ROOT_MODE = 0o700;
+
+function ensureAnalyzerCacheRoot(cacheRoot: string): void {
+  try {
+    mkdirSync(cacheRoot, { recursive: true, mode: ANALYZER_CACHE_ROOT_MODE });
+  } catch {
+    /* a later mkdir of the install dir surfaces any real failure */
+  }
+}
+
 export function analyzerCacheRoot(): string {
   const override = process.env.AUDIT_TOOLS_ANALYZER_CACHE;
   if (override && override.trim().length > 0) return override;
@@ -189,6 +212,7 @@ export async function installToCache(
   const log = options.log ?? ((...args: unknown[]) => { console.error(...args); });
 
   try {
+    ensureAnalyzerCacheRoot(cacheRoot);
     mkdirSync(installDir, { recursive: true });
     const manifestPath = join(installDir, "package.json");
     if (!existsSync(manifestPath)) {

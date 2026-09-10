@@ -122,7 +122,18 @@ export function parseClippy(stdout: string): Array<{
  * Dedicated severity adapter: route clippy's parsed items through the shared
  * generic normalizer so its output matches the exact ExternalAnalyzerResults
  * contract every other analyzer emits.
+ *
+ * `repoRoot` is threaded through to the normalizer rather than left to the
+ * caller's discretion: clippy reports span file names as ABSOLUTE paths (cargo
+ * runs it with cwd = the repo, and rustc emits what it was handed), so an
+ * adapter that omits the root persists a machine-specific path — un-joinable
+ * against every repo-relative consumer and unreadable by the provenance reader,
+ * whose `join(root, path)` then names nothing. Optional only because a caller
+ * normalizing already-relative input has nothing to rebase.
  */
-export function normalizeClippyJson(stdout: string): ExternalAnalyzerResults {
-  return normalizeGenericExternalResults("clippy", parseClippy(stdout));
+export function normalizeClippyJson(
+  stdout: string,
+  repoRoot?: string,
+): ExternalAnalyzerResults {
+  return normalizeGenericExternalResults("clippy", parseClippy(stdout), { repoRoot });
 }

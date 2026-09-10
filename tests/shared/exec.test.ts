@@ -13,6 +13,9 @@ const {
   renderPromptCommand,
   toPromptPathToken,
   coerceJsonObjectArg,
+  resolveSpawnDeadline,
+  describeDeadlineMiss,
+  TRACKED_CHILD_DEADLINE_MS,
 } = await import("../../src/shared/tooling/exec.js");
 
 test("platformCommand maps package-manager shims to .cmd on win32 only", () => {
@@ -236,4 +239,75 @@ test("runTracked child does not inherit the wrapper caller-cwd stamp", () => {
   });
   expect(result.status, `node exited non-zero: ${result.stderr}`).toBe(0);
   expect(result.stdout).toBe("undefined");
+});
+
+// ── P61: nested deadlines propagate as an ABSOLUTE instant, and an expiry
+// NAMES what it waited on. Both halves exist because either alone is
+// insufficient: a named expiry over a ten-minute child still holds a
+// three-hundred-second caller, and a propagated deadline that expires mutely
+// still leaves the reader with a bare "timed out" to diagnose.
+test("resolveSpawnDeadline takes min(caller remaining, this layer's caps)", () => {
+  const now = Date.now();
+  // Caller has 5s left, this layer caps at 60s → the caller wins.
+  expect(resolveSpawnDeadline({ at: now + 5_000 }, 60_000)).toBeLessThanOrEqual(5_000);
+  expect(resolveSpawnDeadline({ at: now + 5_000 }, 60_000)).toBeGreaterThan(4_000);
+  // Caller has a minute left, this layer caps at 5s → the cap wins.
+  expect(resolveSpawnDeadline({ at: now + 60_000 }, 5_000)).toBe(5_000);
+  // Several caps: the tightest one wins.
+  expect(resolveSpawnDeadline(undefined, 60_000, 3_000, 9_000)).toBe(3_000);
+  // No caller budget and no cap → the fold child deadline is the floor, so the
+  // result is never "no deadline armed at all".
+  expect(resolveSpawnDeadline(undefined)).toBe(TRACKED_CHILD_DEADLINE_MS);
+  // A cap of 0/NaN expresses "no cap", not "expire immediately".
+  expect(resolveSpawnDeadline(undefined, 0, Number.NaN)).toBe(TRACKED_CHILD_DEADLINE_MS);
+  // An already-expired caller budget refuses promptly instead of granting a
+  // fresh full-length wait — and never returns 0, which runTrackedAsync reads
+  // as "arm no timer".
+  expect(resolveSpawnDeadline({ at: now - 1 }, 60_000)).toBe(1);
+});
+
+test("describeDeadlineMiss names the argv, the elapsed time and the child's fate", () => {
+  const message = describeDeadlineMiss(["npx", "-y", "type-coverage@2.29.7"], 120_000, {
+    elapsed_ms: 120_004,
+    child_exited: false,
+    survived_grace: false,
+  });
+  expect(message).toContain("npx -y type-coverage@2.29.7");
+  expect(message).toContain("120004ms");
+  expect(message).toContain("SIGTERM");
+
+  // The three fates must be DISTINGUISHABLE — an expired deadline that the child
+  // had already beaten is not the same event as a child that ignored SIGTERM.
+  const alreadyExited = describeDeadlineMiss(["slow"], 10, {
+    elapsed_ms: 11,
+    child_exited: true,
+    survived_grace: false,
+  });
+  const survived = describeDeadlineMiss(["stubborn"], 10, {
+    elapsed_ms: 12,
+    child_exited: false,
+    survived_grace: true,
+  });
+  expect(alreadyExited).toContain("already exited");
+  expect(survived).toContain("SIGKILLed");
+  expect(new Set([message, alreadyExited, survived]).size).toBe(3);
+});
+
+test("an over-deadline child's error names the argv it was waiting on", async () => {
+  // A real child that outlives a 300ms deadline. The ERROR is the assertion
+  // target: the reported reason must name the command and the elapsed time, so a
+  // caller whose own timeout fires first is not left guessing which child was
+  // still alive. `error` is narrowed to `Error | undefined` and the CODE is
+  // asserted off that value: an `as`-cast in the assertion buys nothing a reader
+  // (or `check:tests`) can check, and `readonly code?: string` is not a member
+  // `Error` actually declares.
+  const result = await runTrackedAsync(
+    ["node", "-e", "setTimeout(() => {}, 60000)"],
+    { timeout: 300 },
+  );
+  const error: NodeJS.ErrnoException | undefined = result.error;
+  expect(error?.code).toBe("ETIMEDOUT");
+  expect(error?.message).toContain("setTimeout(() => {}, 60000)");
+  expect(error?.message).toContain("300ms deadline");
+  expect(error?.message).toMatch(/after \d+ms/u);
 });

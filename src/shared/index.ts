@@ -639,11 +639,15 @@ export type {
   RunTrackedOptions,
   RunTrackedSyncOptions,
   RunTrackedResult,
+  SpawnDeadline,
+  SpawnDeadlineMiss,
 } from "./tooling/exec.js";
 export {
   runTracked,
   runTrackedAsync,
   TRACKED_CHILD_DEADLINE_MS,
+  resolveSpawnDeadline,
+  describeDeadlineMiss,
   spawnSyncHidden,
   spawnHidden,
   resolveExecArgv,
@@ -724,6 +728,7 @@ export type {
   InstallToCacheResult,
 } from "./tooling/analyzerDeps.js";
 export {
+  ANALYZER_CACHE_ROOT_MODE,
   analyzerCacheRoot,
   parseAnalyzerSpec,
   resolveAnalyzerDep,
@@ -1196,6 +1201,8 @@ export { applyGuidanceFile } from "./intake/guidanceBootstrap.js";
 // draw and remediate's close-verify draw both run analyzers through this).
 export {
   OWNED_TOOL_IDS,
+  ANALYZER_CHILD_DEADLINE_MS,
+  analyzerStatusForBinaryReason,
   admitSpawn,
   admitLocalSpawn,
   localToolIdFor,
@@ -1226,6 +1233,7 @@ export type {
   BinaryCommandRunner,
   BinaryResolveOptions,
   BinaryResolution,
+  BinaryUnavailableReason,
 } from "./analyzers/binaryAcquisition.js";
 export {
   ExternalAnalyzerResultItemSchema,

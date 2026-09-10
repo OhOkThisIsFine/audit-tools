@@ -127,6 +127,98 @@ const KILL_ESCALATION_GRACE_MS = 2_000;
  */
 export const TRACKED_CHILD_DEADLINE_MS = 120_000;
 
+/**
+ * An ABSOLUTE instant (epoch ms) by which an in-flight spawn must be finished.
+ *
+ * Propagated DOWN a call chain instead of a duration, so no layer has to guess
+ * what its caller already spent and no layer can hand a child a longer wait than
+ * the process waiting on it will actually wait. A caller that owns a budget
+ * converts it once (`{ at: Date.now() + budgetMs }`); every layer below folds it
+ * in with {@link resolveSpawnDeadline} rather than re-typing a duration.
+ *
+ * Why absolute rather than "remaining ms": a remaining-ms parameter is re-typed
+ * at every hop and silently RESTARTS the clock, which is the recurrence this
+ * type exists to end — five layers each hand-typing a duration, none of them
+ * knowing what its caller had left (`ANALYZER_CHILD_DEADLINE_MS` at ten minutes
+ * under a vitest file that gives up at five is the measured instance).
+ */
+export interface SpawnDeadline {
+  /** Absolute epoch-ms instant. */
+  readonly at: number;
+}
+
+/**
+ * The deadline handed to a child whose caller's budget has ALREADY expired.
+ * Deliberately tiny rather than the caller's own cap: an expired budget must
+ * refuse the spawn promptly, never grant a fresh full-length wait. Zero is not
+ * used because `runTrackedAsync` reads a non-positive timeout as "no deadline
+ * armed at all", which is the opposite of the intent.
+ */
+const EXPIRED_BUDGET_DEADLINE_MS = 1;
+
+/**
+ * THE one place a child's timeout is decided: the smallest of the caller's
+ * REMAINING budget (when a {@link SpawnDeadline} was supplied) and this layer's
+ * own caps. Every spawn site declares its cap and hands it here; none hand-types
+ * a duration into `runTrackedAsync`.
+ *
+ * Non-finite and non-positive caps are ignored (they express "no cap", not "a
+ * cap of zero"). When nothing bounds the child at all the fold child deadline is
+ * the floor, so the result is ALWAYS a positive finite number and no spawn is
+ * ever unbounded by accident.
+ */
+export function resolveSpawnDeadline(
+  deadline: SpawnDeadline | undefined,
+  ...caps: ReadonlyArray<number | undefined>
+): number {
+  const candidates: number[] = [];
+  if (deadline !== undefined && Number.isFinite(deadline.at)) {
+    candidates.push(Math.max(EXPIRED_BUDGET_DEADLINE_MS, deadline.at - Date.now()));
+  }
+  for (const cap of caps) {
+    if (typeof cap === "number" && Number.isFinite(cap) && cap > 0) candidates.push(cap);
+  }
+  if (candidates.length === 0) return TRACKED_CHILD_DEADLINE_MS;
+  return Math.max(EXPIRED_BUDGET_DEADLINE_MS, Math.floor(Math.min(...candidates)));
+}
+
+/**
+ * What was observed at the instant a deadline fired, captured THERE because the
+ * `close` handler runs later and can no longer see it.
+ */
+export interface SpawnDeadlineMiss {
+  /** Wall-clock ms elapsed between spawn and the deadline firing. */
+  elapsed_ms: number;
+  /** Whether the child had already exited when the deadline fired. */
+  child_exited: boolean;
+  /** Whether the child outlived the SIGTERM grace and needed SIGKILL. */
+  survived_grace: boolean;
+}
+
+/**
+ * The message an over-deadline child ends with. It names the three things a bare
+ * "Test timed out in 300000ms" cannot: WHAT was waited on (the argv actually
+ * spawned), HOW LONG it actually took, and whether the child was still alive to
+ * be killed. A caller that reports only its own timeout leaves the reader with
+ * no way to tell a hung child from a slow-but-finished one, which is how a
+ * diagnosed red decays into a red the team learns to skip.
+ */
+export function describeDeadlineMiss(
+  argv: readonly string[],
+  deadlineMs: number,
+  miss: SpawnDeadlineMiss,
+): string {
+  const fate = miss.survived_grace
+    ? "child outlived the SIGTERM grace and was SIGKILLed"
+    : miss.child_exited
+      ? "child had already exited when the deadline fired"
+      : "child killed on the deadline (SIGTERM)";
+  return (
+    `child exceeded the ${String(deadlineMs)}ms deadline after ${String(miss.elapsed_ms)}ms: ` +
+    `${argv.join(" ")} — ${fate}`
+  );
+}
+
 // --- cmd.exe quoting helpers ---
 //
 // There are two distinct contexts in which a token must be quoted for cmd.exe,
@@ -536,6 +628,10 @@ export async function runTrackedAsync(
     // Which bound killed the child, when one did. Read on `close` to stamp the
     // matching `spawnSync` error code.
     let killedBy: "timeout" | "overflow" | null = null;
+    // Captured at the instant the deadline fires, not on `close`: by `close`
+    // time neither the elapsed wall-clock at the miss nor the child's state at
+    // that moment is still observable. Folded into the message below.
+    let deadlineMiss: SpawnDeadlineMiss | null = null;
     // Bounded: a hostile/oversized emitter cannot grow the heap without limit.
     // An explicit `maxBuffer` is the caller's stricter bound and is REPORTED as
     // an overflow; the 10MiB default is the silent backstop. A caller that
@@ -564,7 +660,12 @@ export async function runTrackedAsync(
       child.kill();
       if (killTimer) return;
       killTimer = setTimeout(() => {
-        if (!settled) child.kill("SIGKILL");
+        if (!settled) {
+          // Reaching here means the child ignored SIGTERM — the one point at
+          // which "did anything survive the kill?" is answerable.
+          if (deadlineMiss) deadlineMiss.survived_grace = true;
+          child.kill("SIGKILL");
+        }
       }, KILL_ESCALATION_GRACE_MS);
       killTimer.unref?.();
     };
@@ -573,6 +674,11 @@ export async function runTrackedAsync(
       options.timeout !== undefined && options.timeout > 0
         ? setTimeout(() => {
             killedBy = "timeout";
+            deadlineMiss = {
+              elapsed_ms: Date.now() - start,
+              child_exited: child.exitCode !== null || child.signalCode !== null,
+              survived_grace: false,
+            };
             killForBound();
           }, options.timeout)
         : null;
@@ -672,7 +778,15 @@ export async function runTrackedAsync(
       if (killedBy !== null) {
         const bound: NodeJS.ErrnoException = new Error(
           killedBy === "timeout"
-            ? `child exceeded the ${String(options.timeout)}ms deadline`
+            ? describeDeadlineMiss(
+                resolved,
+                options.timeout as number,
+                deadlineMiss ?? {
+                  elapsed_ms: Date.now() - start,
+                  child_exited: code !== null,
+                  survived_grace: false,
+                },
+              )
             : `child exceeded the ${String(overflowLimit)}-byte output bound`,
         );
         bound.code = killedBy === "timeout" ? "ETIMEDOUT" : "ENOBUFS";

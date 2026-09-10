@@ -1,6 +1,12 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { runTrackedAsync, type RunTrackedResult } from "../tooling/exec.js";
+import {
+  resolveSpawnDeadline,
+  runTrackedAsync,
+  TRACKED_CHILD_DEADLINE_MS,
+  type RunTrackedResult,
+  type SpawnDeadline,
+} from "../tooling/exec.js";
 import type { AnalyzerSetting } from "../analyzerPolicy.js";
 import {
   normalizeGenericExternalResults,
@@ -12,11 +18,13 @@ import {
   type ExternalAnalyzerParsedItem,
   type ExternalAnalyzerResults,
   type ExternalAnalyzerToolStatus,
+  type ExternalAnalyzerToolStatusValue,
 } from "./types.js";
 import {
   resolveBinary,
-  type BinarySpec,
   type BinaryResolveOptions,
+  type BinarySpec,
+  type BinaryUnavailableReason,
 } from "./binaryAcquisition.js";
 
 /**
@@ -50,14 +58,23 @@ import {
  */
 
 /**
- * Deadline for one acquired-analyzer child (capability probe or the real
- * analyzer run). Wider than the fold's `TRACKED_CHILD_DEADLINE_MS`: a real
- * analyzer sweep over a large repository is suite-scale work, and a
- * false-positive kill silently degrades lead quality — while the probe is
- * sub-second and never feels the extra headroom. The miss classifies as
- * `ETIMEDOUT` and degrades to a reported tool failure, never a hang.
+ * This layer's OWN cap for one acquired-analyzer child (capability probe, the
+ * real analyzer run, and the runner fetch that precedes it).
+ *
+ * It is the fold child deadline, NOT a second hand-typed number. The former
+ * value here was a literal ten minutes — ten times what the tightest real caller
+ * waits (vitest's own 300-second per-file budget, and the one-bounded-step fold)
+ * — so an analyzer that never exited held its caller for a bound the caller
+ * could not outlive, and the caller's `Test timed out in 300000ms` named neither
+ * the child nor the argv. A cap is only meaningful relative to the caller that
+ * must outlive it, so this layer declares the same one the rest of the fold
+ * does and lets {@link resolveSpawnDeadline} fold in the caller's own remaining
+ * budget below.
+ *
+ * The miss classifies `ETIMEDOUT` and degrades to a reported tool failure
+ * (`spawn_error`), never a hang.
  */
-const ANALYZER_CHILD_DEADLINE_MS = 10 * 60 * 1_000;
+export const ANALYZER_CHILD_DEADLINE_MS: number = TRACKED_CHILD_DEADLINE_MS;
 
 /**
  * Tool ids OWNED in-house and never acquired. Only git-history mining is OWNED — it
@@ -244,9 +261,16 @@ function runnerPrefix(candidate: ExternalAnalyzerCandidate): string[] {
  * {@link runTrackedAsync} (the shared exec boundary's async twin) so a stalled
  * child cannot block the event loop and starve the liveness/file-lock
  * heartbeats; tests inject an async fake at this seam.
+ *
+ * The third parameter is the RESOLVED timeout for this spawn — already
+ * `min(this layer's cap, the caller's remaining budget)` by the time it
+ * arrives, computed by {@link resolveSpawnDeadline} at the call site. It is a
+ * resolved duration rather than a {@link SpawnDeadline} on purpose: the fake
+ * runners tests inject do not spawn anything, so a deadline they cannot act on
+ * would be bookkeeping. The default runner is the only consumer.
  */
 export interface AcquisitionRunner {
-  (argv: string[], cwd: string): Promise<RunTrackedResult>;
+  (argv: string[], cwd: string, timeoutMs: number): Promise<RunTrackedResult>;
 }
 
 /**
@@ -274,6 +298,15 @@ export interface AnalyzerConsentTokenGrant {
 }
 
 export interface AcquisitionEngineOptions {
+  /**
+   * The caller's own remaining budget, as an ABSOLUTE instant. Folded into every
+   * spawn this engine issues (runner probe, tool run, gitleaks/jscpd report
+   * read) as `min(this layer's cap, caller remaining)`, so a child can never be
+   * granted a longer wait than the process awaiting it will actually wait. A
+   * caller with no budget of its own omits it and inherits
+   * {@link ANALYZER_CHILD_DEADLINE_MS}.
+   */
+  deadline?: SpawnDeadline;
   /**
    * Per-run, tool-SCOPED consent grant. REQUIRED to spawn any non-DEFAULT candidate
    * (and any candidate whose setting is ephemeral/permanent). It is the ONLY way a
@@ -455,13 +488,18 @@ export async function runSafetyGate(
   candidate: ExternalAnalyzerCandidate,
   run: AcquisitionRunner,
   root: string,
+  deadline?: SpawnDeadline,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   // Pinned version is mandatory for reproducibility — a candidate without a
   // pinned tool spec is never executed (degrades to empty + status).
   if (!candidate.spec || candidate.spec.trim().length === 0) {
     return { ok: false, reason: `tool '${candidate.id}' has no pinned version spec` };
   }
-  const probe = await run(runnerProbeArgv(candidate.runner), root);
+  const probe = await run(
+    runnerProbeArgv(candidate.runner),
+    root,
+    resolveSpawnDeadline(deadline, ANALYZER_CHILD_DEADLINE_MS),
+  );
   if (probe.error || probe.status !== 0) {
     return {
       ok: false,
@@ -519,8 +557,7 @@ export async function runExternalAnalyzer(
   // NO timer, and an analyzer that never exits hangs the awaiting fold.
   const run =
     options.run ??
-    ((argv, cwd) =>
-      runTrackedAsync(argv, { cwd, timeout: ANALYZER_CHILD_DEADLINE_MS }));
+    ((argv, cwd, timeoutMs) => runTrackedAsync(argv, { cwd, timeout: timeoutMs }));
   const log = options.log ?? (() => {});
   const setting = settingFor(options.analyzers, candidate.id);
 
@@ -563,7 +600,7 @@ export async function runExternalAnalyzer(
     }
     prefix = [resolved];
   } else {
-    const gate = await runSafetyGate(candidate, run, root);
+    const gate = await runSafetyGate(candidate, run, root, options.deadline);
     if (!gate.ok) {
       log("[f5] %s safety gate failed: %s", candidate.id, gate.reason);
       return {
@@ -578,7 +615,11 @@ export async function runExternalAnalyzer(
   const command = argv.join(" ");
   let result: RunTrackedResult;
   try {
-    result = await run(argv, root);
+    result = await run(
+      argv,
+      root,
+      resolveSpawnDeadline(options.deadline, ANALYZER_CHILD_DEADLINE_MS),
+    );
   } catch (error) {
     return {
       results: emptyResults(candidate.id),
@@ -770,6 +811,28 @@ export function registerExternalAnalyzers(
   return accepted;
 }
 
+/**
+ * The status member a binary-resolution failure is reported under. ONE mapping,
+ * consumed by both draws that record a binary outcome (the acquisition engine
+ * and its resolver loop) — a second copy would be free to classify the same
+ * event differently on the two paths.
+ *
+ * The two supply-chain-adjacent causes get their OWN members; everything else
+ * (offline, no asset for this platform, download failed/empty, no checksum
+ * listed, a write that failed) is genuinely "the thing is not here", which is
+ * what `not_resolved` says. `extract_failed` and `not_found_in_archive` share
+ * one member deliberately: from the operator's side both mean "we resolved this
+ * tool and could not make it runnable from the asset", and the free-text note
+ * carries which of the two it was.
+ */
+export function analyzerStatusForBinaryReason(
+  reason: BinaryUnavailableReason | undefined,
+): ExternalAnalyzerToolStatusValue {
+  if (reason === "checksum_mismatch") return "checksum_mismatch";
+  if (reason === "extract_failed" || reason === "not_found_in_archive") return "extract_failed";
+  return "not_resolved";
+}
+
 export interface ResolvedBinaries {
   /** id → resolved executable path/name, for candidates that resolved. */
   resolvedBinaries: Record<string, string>;
@@ -822,11 +885,12 @@ export async function resolveBinaryCandidates(
       // A supply-chain event gets its OWN status member: "the release asset did not
       // match the pinned checksums" must never be flattened into the same record as
       // "this machine is offline", which is all a shared `not_resolved` could say.
+      // `extract_failed` is the second such member — see
+      // {@link analyzerStatusForBinaryReason}.
       unresolvedStatuses.push({
         tool: candidate.id,
         resolved: false,
-        status:
-          resolution.reason === "checksum_mismatch" ? "checksum_mismatch" : "not_resolved",
+        status: analyzerStatusForBinaryReason(resolution.reason),
         error: resolution.note ?? "binary unavailable",
       });
     }
