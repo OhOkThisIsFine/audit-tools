@@ -80,7 +80,7 @@ No quality score exists; successful preflight and contract tests are not accepta
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
-- **14 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+- **15 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
   - `docs-dependency-map-analyzer-vocabulary` — A constitutional spec still describes the analyzer-capability marker with a vocabulary the code deliberately removed — restate it, or move the code back?
   - `docs-remediation-goals-output-order-omits-two-exclusion-classes` — The remediation goals document states the report's section order, and the render has two categories that order has no bullet for — widen it, or declare it a minimum?
   - `docs-audit-prompt-reflection-destination-unnamed` — The audit loader prompt tells the host to record a reflection but never says which file to write it to — name the destination, and pin it in the contract test?
@@ -95,6 +95,7 @@ No quality score exists; successful preflight and contract tests are not accepta
   - `solutions-nightly-output-placement-on-a-feature-branch` — This run's output was committed to a feature branch rather than the main line — cherry-pick it, wait for the branch, or re-run the whole routine later?
   - `backlog-handoff-immediate-next-is-a-chronology` — docs/HANDOFF.md's Immediate next has become a run chronology — cut it to the next action, or relax the never-a-changelog rule for a benchmark lap?
   - `backlog-open-bugs-entries-carry-narrative-before-the-open-half` — Three open-bugs entries put shipped history, an incident report, or a refuted framing ahead of the open half — condense them to mechanism plus open property?
+  - `solutions-agents-region-has-no-freshness-authority` — The AGENTS.md generated block has drifted from CLAUDE.md since 2026-09-07, and it has now blocked two nightly runs from applying anything — add a check here, fix the generator for every repository, or accept the drift?
 
 <!-- END GENERATED LIVE STATUS -->
 

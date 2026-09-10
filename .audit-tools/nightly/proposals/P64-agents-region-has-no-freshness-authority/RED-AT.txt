@@ -1,0 +1,50 @@
+RED-AT — P64, measured 2026-09-10.
+
+HEAD: a33bc8d91a7cfeca9fc2be4ba42006d74971c602 (branch codex/pipeline-quality)
+Command (run from this proposal directory):
+    node --test agents-region-freshness.test.mjs
+
+OBSERVED FAILURE, verbatim:
+
+    ✖ the AGENTS.md generated region states CLAUDE.md's current size (36.4391ms)
+    ℹ pass 0
+    ℹ fail 1
+      AssertionError [ERR_ASSERTION]: AGENTS.md's generated region is stale:
+      it states 38.3 KB, CLAUDE.md is 38.5 KB. Regenerate with
+      `node ~/.agent-config/sync.mjs --projects` and commit AGENTS.md in the
+      SAME commit as the CLAUDE.md edit.
+
+      '38.3' !== '38.5'
+
+Full run: red-run.txt (exit 1).
+
+GREEN HALF, proven without landing anything. The same two exported functions,
+run against the REGENERATED working copy that the machine-wide generator has
+already produced on this box:
+
+    stated: 38.5   actual: 38.5   verdict: FRESH (check passes)
+
+Full run: green-run.txt (exit 0).
+
+THE SUBJECT IS THE COMMITTED TREE. The test reads both files through
+`git show HEAD:<path>`, which is what CI checks out and what a release ships.
+That is deliberate: on this night the working copy already held an uncommitted
+regeneration, so a working-copy test would have reported green over a committed
+tree that has been divergent since 2026-09-07.
+
+WHEN THE DIVERGENCE ENTERED THE TREE. Commit a1616d1d, 2026-09-07,
+"chore: automate maintenance guardrails", edited CLAUDE.md and did not
+regenerate AGENTS.md. `git show HEAD:AGENTS.md` has said 38.3 KB ever since.
+
+THIS IS NOT THE FIRST TIME. Three commits exist for no purpose other than
+catching this region up after the fact:
+
+    e4bfb97f  2026-08-26  docs: regenerate AGENTS.md after the CLAUDE.md closeout edit
+    1efa125f  2026-08-28  chore: AGENTS.md generated region catches up with the committed CLAUDE.md
+    590b27b3  2026-08-29  chore: refresh generated AGENTS.md region (sync.mjs)
+
+WHAT IT COST, TWICE. A regenerated-but-uncommitted AGENTS.md is a DIRTY TREE,
+and the nightly routine's clean-tree rule then blocks every auto-apply. The
+2026-09-09 run applied nothing for exactly this reason, and so did this one.
+Two consecutive nights of leg-1 auto-apply capacity, lost to a generated file
+that nothing in the repository watches.

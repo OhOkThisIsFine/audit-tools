@@ -1,0 +1,4 @@
+GREEN HALF - the same two exported functions against the REGENERATED working copy:
+  stated: 38.5
+  actual: 38.5
+  verdict: FRESH (check passes)

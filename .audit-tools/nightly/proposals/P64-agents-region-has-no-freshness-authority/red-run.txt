@@ -1,0 +1,30 @@
+✖ the AGENTS.md generated region states CLAUDE.md's current size (36.4391ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 93.9385
+
+✖ failing tests:
+
+test at agents-region-freshness.test.mjs:62:1
+✖ the AGENTS.md generated region states CLAUDE.md's current size (36.4391ms)
+  AssertionError [ERR_ASSERTION]: AGENTS.md's generated region is stale: it states 38.3 KB, CLAUDE.md is 38.5 KB. Regenerate with `node ~/.agent-config/sync.mjs --projects` and commit AGENTS.md in the SAME commit as the CLAUDE.md edit.
+  
+  '38.3' !== '38.5'
+  
+      at TestContext.<anonymous> (file:///C:/Code/audit-tools/.audit-tools/nightly/proposals/P64-agents-region-has-no-freshness-authority/agents-region-freshness.test.mjs:67:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '38.3',
+    expected: '38.5',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

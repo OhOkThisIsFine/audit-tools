@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-09-09 at `23079f37ea25c9b899a0134205057654ac1cae33`.*
+*Last run: 2026-09-10 at `a33bc8d91a7cfeca9fc2be4ba42006d74971c602`.*
 
 
 ---
@@ -35,7 +35,7 @@ records them in the tracked ledger, and does the work.
 
 ## `docs-dependency-map-analyzer-vocabulary` — A constitutional spec still describes the analyzer-capability marker with a vocabulary the code deliberately removed — restate it, or move the code back? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `spec/audit/dependency-map.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 2 nights · `spec/audit/dependency-map.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -76,7 +76,7 @@ spec/audit/dependency-map.md describes analyzer_capability.json as recording the
 
 ## `docs-remediation-goals-output-order-omits-two-exclusion-classes` — The remediation goals document states the report's section order, and the render has two categories that order has no bullet for — widen it, or declare it a minimum? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `spec/remediate/remediation-goals.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 2 nights · `spec/remediate/remediation-goals.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -118,7 +118,7 @@ spec/remediate/remediation-goals.md says remediation-report.md "lists, in order"
 
 ## `docs-audit-prompt-reflection-destination-unnamed` — The audit loader prompt tells the host to record a reflection but never says which file to write it to — name the destination, and pin it in the contract test? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `skills/audit-code/audit-code.prompt.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 2 nights · `skills/audit-code/audit-code.prompt.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -160,7 +160,7 @@ Should the audit loader body name the reflection destination — append one JSON
 
 ## `docs-remediate-prompt-has-no-target-directory-rule` — The remediate loader prompt carries no target-directory rule while its audit twin does — copy the rule across, or single-source it? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `skills/remediate-code/remediate-code.prompt.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 2 nights · `skills/remediate-code/remediate-code.prompt.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -201,7 +201,7 @@ skills/audit-code/audit-code.prompt.md states the target-directory rule and call
 
 ## `docs-benchmark-readme-omits-run-contract` — The benchmark README omits `run`'s checkpoint and recovery behaviour, and one acceptance threshold — document them, or point at the runner as authoritative? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `benchmarks/p0/README.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 2 nights · `benchmarks/p0/README.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -243,7 +243,7 @@ benchmarks/p0/README.md documents `run` without its checkpoint, resume and termi
 
 ## `docs-audit-pkg-language-convictions-two-homes` — Three language/analyzer convictions are stated twice, in different words, across two audit-pkg docs — pick one home? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `docs/audit-pkg/product.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 2 nights · `docs/audit-pkg/product.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -284,7 +284,7 @@ Should docs/audit-pkg/product.md be the one home for the language and analyzer c
 
 ## `docs-risk-tier-semantics-in-three-specs` — The risk-tier collapse rule is stated three times across three specs — reduce two of them to a pointer? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `spec/self-scaling-pipeline-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 2 nights · `spec/self-scaling-pipeline-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -325,7 +325,7 @@ Should the risk-tier semantics live only in spec/self-scaling-pipeline-design.md
 
 ## `docs-s8-conceptual-review-contract-split-across-specs` — The conceptual design review's contract is split across two specs — fold section S8 into the review's own design-of-record? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `spec/contract-authoring-determinism-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 2 nights · `spec/contract-authoring-determinism-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -366,7 +366,7 @@ Should section S8 of spec/contract-authoring-determinism-design.md be folded int
 
 ## `docs-five-recorded-condensation-findings-batch` — Five spec condensation findings recorded last run still stand, and one was routed at the wrong file — apply them as a batch, or keep recording them? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `spec/audit/artifact-contract.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 2 nights · `spec/audit/artifact-contract.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -407,7 +407,7 @@ Five recorded condensation findings still stand at HEAD: the dated owner attribu
 
 ## `docs-repo-start-lap-skill-is-shadowed-by-the-global-one` — The repository's own /start-lap skill never runs — the global skill of the same name shadows it. Re-home its steps, rename it, or delete it? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `.claude/skills/start-lap/SKILL.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 2 nights · `.claude/skills/start-lap/SKILL.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -452,7 +452,7 @@ The repository's `.claude/skills/start-lap/SKILL.md` is shadowed by the global s
 
 ## `backlog-handoff-immediate-next-is-a-chronology` — docs/HANDOFF.md's Immediate next has become a run chronology — cut it to the next action, or relax the never-a-changelog rule for a benchmark lap? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · open 1 night · `docs/HANDOFF.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Backlog disambiguation · open 2 nights · `docs/HANDOFF.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -494,7 +494,7 @@ Should docs/HANDOFF.md's Immediate next be cut back to the single next action pl
 
 ## `backlog-open-bugs-entries-carry-narrative-before-the-open-half` — Three open-bugs entries put shipped history, an incident report, or a refuted framing ahead of the open half — condense them to mechanism plus open property? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Backlog disambiguation · open 2 nights · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -539,7 +539,7 @@ Should the three named entries in docs/backlog/open-bugs.md be condensed to mech
 
 ## `solutions-tar-drive-letter-fix-form` — A green test suite here depends on which shell launched it, because a bare `tar` can resolve to one that cannot read a Windows path — which of three fixes? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `scripts/shared/dispatch-load-flake-investigation.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · open 2 nights · `scripts/shared/dispatch-load-flake-investigation.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -582,7 +582,7 @@ scripts/shared/dispatch-load-flake-investigation.mjs calls `tar` by bare name to
 
 ## `solutions-nightly-output-placement-on-a-feature-branch` — This run's output was committed to a feature branch rather than the main line — cherry-pick it, wait for the branch, or re-run the whole routine later? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `.audit-tools/nightly/proposals/INDEX-2026-09-09.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · open 2 nights · `.audit-tools/nightly/proposals/INDEX-2026-09-09.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -620,19 +620,57 @@ This run's output was committed and pushed on branch codex/pipeline-quality rath
 ---
 
 
+<!-- nightly:item key=51bcb94355fd9a32 -->
+
+## `solutions-agents-region-has-no-freshness-authority` — The AGENTS.md generated block has drifted from CLAUDE.md since 2026-09-07, and it has now blocked two nightly runs from applying anything — add a check here, fix the generator for every repository, or accept the drift? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `AGENTS.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+This repository has two instruction files. CLAUDE.md is the real one that people and agents read. AGENTS.md is mostly a short pointer that says "read CLAUDE.md instead", and part of AGENTS.md is written automatically by a program called sync.mjs that lives on this machine outside the repository, at ~/.agent-config/sync.mjs. That automatic part includes one sentence stating how large CLAUDE.md is: "It is 38.3 KB". Whenever somebody edits CLAUDE.md, that size changes, so AGENTS.md has to be regenerated and committed too. The only thing that makes anyone do that is a written instruction telling them to remember. On 2026-09-07 a commit edited CLAUDE.md and did not regenerate AGENTS.md, so the committed AGENTS.md still claims 38.3 KB while CLAUDE.md is really 38.5 KB. Three earlier commits exist that did nothing except catch this same block up after the fact. The practical damage is not the wrong number. When the generator does get run on this machine, the regenerated AGENTS.md appears as an uncommitted change, which makes the working tree "dirty". The nightly maintenance routine refuses to write anything to a dirty tree, so it applied nothing on 2026-09-09 and again tonight. The repository already has a mechanism for exactly this problem: a registry that pairs every generated file with a check that proves it is up to date. That registry can only see generators stored inside the repository, and this generator is not, so this one generated block is the only one in the tree with nothing watching it. A fix is straightforward and needs no access to the outside generator, because the automatic block depends on CLAUDE.md through that size number and nothing else: a check can simply compare the number AGENTS.md states against the real size of CLAUDE.md, and refuse a commit that leaves them different. The decision you are being asked for is where that fix should live, because the same generator writes the same kind of block into every project under C:/Code, so a fix inside this repository only protects this repository.
+
+### The question
+
+Where should the fix for the drifting AGENTS.md block live: a check inside this repository, a machine-wide fix in the generator that serves every project, both, or neither?
+
+### Your answer
+
+- [ ] **1. Repo check only** — Land the repository-side check (check:agents-region) as proposed in P64: a new script, a guard-registry row with preCommit "reach", and a contract test. Do not change anything machine-wide. Benefit: it lands entirely inside this repository, runs in CI and in a fresh clone, needs no access to ~/.agent-config, and stops this repository drifting again. Cost: every other project that the same generator writes into keeps the identical gap, so the same class of defect can still bite elsewhere. Confidence: high — the red failure and the green pass were both measured tonight, and the candidate script is written and attached.
+- [ ] **2. Machine-wide fix** — Fix it once in the machine-wide layer instead: make ~/.agent-config/sync.mjs, or a global commit hook, guarantee that a committed CLAUDE.md and its generated AGENTS.md region travel together. Benefit: one change protects every project the generator serves, which is where the defect class actually lives. Cost: the fix sits outside this repository, so this repository CI never proves it and a fresh clone on another machine has no guard at all; it is also the larger piece of work, and nothing in this repository can test it. Confidence: medium — the generator source was read tonight and the pointer-mode behaviour is confirmed, but no machine-wide patch was written or run. Note that the two routes interact: if the machine-wide fix is to stop printing the size sentence at all, the repository check described in the first option must be retired or rewritten in the same change, because it looks for that sentence.
+- [ ] **3. Both** — Do both: land the repository check now so this tree stops drifting, and file the machine-wide half in C:/Code/docs/backlog.md so every other project gets the same protection. Benefit: the repository is protected immediately and the general defect is not lost; it also matches the standing rule that a fix which would leave every other repository broken the same way belongs in the machine-wide backlog. Cost: two pieces of work instead of one, and for a while the same rule is enforced in two places. Confidence: high for the repository half (measured), medium for the machine-wide half (not yet designed).
+- [ ] **4. Accept the drift** — Change nothing. Accept that AGENTS.md can lag CLAUDE.md, and regenerate it by hand when it is noticed. Benefit: no new gate, no new false-refusal surface, and the stale number harms nobody directly because AGENTS.md only points at CLAUDE.md. Cost: the nightly routine keeps losing its ability to apply anything whenever the generator has run and the result is uncommitted — that has now happened on two consecutive nights. Confidence: high that the cost is real, because both blocked nights were measured.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P64-agents-region-has-no-freshness-authority/candidate-check-agents-region.mjs`](../.audit-tools/nightly/proposals/P64-agents-region-has-no-freshness-authority/candidate-check-agents-region.mjs) <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+<details>
+<summary>Evidence (7) — what was verified against code, and how</summary>
+
+- Committed tree at HEAD a33bc8d9: `git show HEAD:AGENTS.md` states "It is 38.3 KB," while `git show HEAD:CLAUDE.md` is 39431 bytes = 38.5 KB. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Commit a1616d1d (2026-09-07, "chore: automate maintenance guardrails") edited CLAUDE.md and did not regenerate AGENTS.md; the divergence has stood since.
+- Three prior catch-up commits exist for this region alone: e4bfb97f (2026-08-26), 1efa125f (2026-08-28), 590b27b3 (2026-08-29).
+- buildBody in ~/.agent-config/sync.mjs computes the printed size as (Buffer.byteLength(sourceText,"utf8")/1024).toFixed(1) and buildRegion hashes the finished body into shared-region-id, so in pointer mode the size is the ONLY path from CLAUDE.md into the region — comparing it is exact, not approximate.
+- check:generated-artifacts reconciles tracked generators against declared freshness authorities; ~/.agent-config/sync.mjs is not tracked here, so no GENERATED row in scripts/guard-reach-data.mjs claims this region.
+- Measured cost: the 2026-09-09 run and this run both reported "M AGENTS.md" at start and applied nothing under the clean-tree rule.
+- Red at HEAD, verbatim, and its green half: .audit-tools/nightly/proposals/P64-agents-region-has-no-freshness-authority/RED-AT.txt (red-run.txt exit 1, green-run.txt exit 0).
+
+</details>
+
+---
+
+
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- NOTHING WAS APPLIED. The working tree was dirty at run start and HEAD was on branch codex/pipeline-quality, not main, so the clean-tree rule held every edit. The run reviewed and reported in full.
-
-- Leg-3: four proposal records written to .audit-tools/nightly/proposals/ (P58, P59, P60, P61) with INDEX-2026-09-09.md. P58 carries a candidate patch and an OBSERVED red-green measurement; the other three carry no patch because the owner is being asked which form, and the forms share no code.
-
-- Leg-2 triage sweep: 89 of 95 backlog entries classified through llm-relay dispatch (free-pool 85, opencode-muse-spark 4), 6 errored. Coverage stamp: .audit-tools/nightly/triage-2026-09-09-coverage.json.
-
-- Leg-1 scope ledger stamped for the 45 docs an agent actually examined this run; leg1-2026-09-09-coverage.json written beside it.
-
-- Standing review-retirement rule applied (review-retirement-candidates.mjs): no candidate older than 30 days with zero outside citations.
+- NOTHING WAS APPLIED. The working tree was dirty at run start (`M AGENTS.md`) and HEAD sat on branch codex/pipeline-quality rather than main, so the clean-tree rule held every edit. The run reviewed, verified and reported in full. The scope ledger was stamped for the eight documents examined this run — a ledger stamp is a coverage record, not a doc edit, and is autonomous by contract. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 
 </details>
@@ -642,23 +680,11 @@ This run's output was committed and pushed on branch codex/pipeline-quality rath
 <summary>What the last run could NOT cover</summary>
 
 
-- APPLIED NOTHING — the tree was dirty. `git status --porcelain` reported `M AGENTS.md` at run start: a regenerated shared region from the machine-wide sync generator (a region id and a KB figure). HEAD also sat on branch codex/pipeline-quality rather than main. Under the clean-tree rule the run still reviewed and still reported, but wrote no doc edit, deleted no backlog entry, and pushed nothing. Reviewing a dirty tree is fine; writing to one is how uncommitted work is lost. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- APPLIED NOTHING — the tree was dirty and HEAD was not on main. `git status --porcelain` reported `M AGENTS.md` at run start: the machine-wide generator ~/.agent-config/sync.mjs had regenerated its shared region (a region id and a size figure) and nothing had committed the result. This is the second consecutive night blocked by the same file, which is why it is now escalated as its own item rather than only recorded here. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- FIVE VERIFIED STALE-FACTUAL DOC FIXES ARE HELD, not applied — each was independently re-verified from source by this run, so a clean run can apply them directly without re-deriving them. (1) spec/remediation-workflow-design.md attributes the workload digest to each work item; buildWorkItem (src/remediate/steps/dispatch/hostHandoff.ts) returns no such field — workload_sha256 is a per-HANDOFF binding on RemediationHostHandoffBindingFields, assigned in prepareRemediationHostHandoff. (2) docs/HANDOFF.md says pre-commit-gate.mjs "keeps only what git cannot see" and lists three residuals; the hook's own header and its guard-registry row both name a fourth, healing a crashed staged-snapshot round-trip. (3) docs/backlog.md points the A2 oracle entry at "Deferred / waiting"; the entry lives in forward-tracks.md and deferred.md contains no match. (4) docs/backlog.md's live-run-watch matrix has two rows — Two cooperating hosts, and any live remediation on a dirty checkout — whose named items resolve nowhere in docs/backlog/ (five greps, zero hits); lane A offered deleting the rows or re-attaching watch lines, so the remedy is a judgment even though the staleness is a fact. (5) docs/glossary-ids.md declares itself the lookup for opaque identifiers in src/**/*.ts, and N-IDEMPOTENCY is live in src/shared/contentKey.ts and src/audit/orchestrator/resultBaseline.ts with no row; check-invariant-glossary.mjs reconciles only INV-* ids, so nothing catches it.
+- Codex lane UNAVAILABLE. The session-start guard reported that `codex exec` direct to the OpenAI Responses API is not answering. Its share of independent verification was routed to the llm-relay free-pool lane and to mechanical gates run locally (the host-asset renderer drift tests, check:doc-links, check:doc-code-citations, check:doc-manifest, check:executor-producers, npm run check). No coverage was silently dropped, but the independent-adversary half of leg 1 ran with one lane rather than two. <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-- LEG-1 COVERAGE, read from the ledger file and never eyeballed: 45 of 54 in-scope docs examined item by item by five reviewer lanes plus an independent Codex adversary. The nine not examined are renderer- or generator-owned by manifest rule — the seven generated host assets under .agent/skills and .github, docs/nightly-inbox.md, and spec/audit/executor-producers.generated.md. A hand edit to any of them is drift rather than a fix, and their drift is gated by the renderer tests. Deliberate exclusion, not a coverage failure. At run start 57 items across 17 docs carried no evidence window and were reviewed cold; that is the honest state, not a defect.
-
-- THE ADVERSARY REFUTED TWO FINDINGS, AND BOTH WERE DROPPED RATHER THAN RAISED. (a) A reviewer lane claimed spec/remediate/remediation-goals.md's five terminal states had fallen behind PerFindingDisposition's seven. TERMINAL_STATUS in src/remediate/state/itemStatus.ts marks exactly five statuses terminal, matching the document; verified_already_fixed and refuted are per-FINDING disposition overrides, a different vocabulary. Verified directly by this run rather than taken on the lane's word, and removed. (b) The same lane cited the report's Verified Already Correct section as missing from the document's output ordering; collectReportEntries groups resolved_no_change items there, fairly read as covered by the existing resolved bullet. That example was dropped and the item narrowed to the two exclusion classes the ordering genuinely has no bullet for. The adversary also narrowed four surviving items, and each narrowing is recorded inside the item's own evidence.
-
-- LEG-2 COVERAGE, read from the stamp: 89 of 95 entries classified, 6 errored, none aborted. Lanes: free-pool 85, opencode-muse-spark 4 — the relay failed over to a second lane on its own rather than shrinking coverage. The six errors were five schema-shaped refusals (verdict null) and one malformed JSON body — five on docs/backlog/open-bugs.md entries and one on docs/backlog/deferred.md. Those six entries were NOT classified this run and no conclusion about them should be drawn from this sweep.
-
-- LEG 2 DELETED NOTHING, and both of its shipped leads were refuted. open-bugs#1c68b4dd (packaged smoke racing a wrapper rebuild) was called shipped because the entry says separate benchmark tooling prevented recurrence in that lap — that describes a lap workaround, not a fix, and the entry's Property, that build replacement and smoke reads coordinate at the checkout boundary, is unmet. forward-tracks#55883634 (CI wall-clock) was called stale because it is a pointer-only entry whose implementation was assigned outside this repo's agent loop; being assigned elsewhere is not being done, and the entry exists precisely so the queue does not lose the pointer. Worth recording as a pattern: BOTH leads carried premise `unprobed`, meaning each reasoned from the entry's own prose and verified nothing against code — which is the exact failure mode the verify-before-deleting rule exists for. <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-- CONDENSATION FINDINGS FOUND BUT NOT RAISED AS THEIR OWN ITEMS. The corpus lane surfaced an overlap between docs/audit-pkg/product.md and docs/audit-pkg/development.md, a risk-tier statement duplicated across three specs, and a fold candidate in spec/contract-authoring-determinism-design.md — all three ARE raised. Not raised: the ship skill (.claude/skills/ship/SKILL.md) documents the release pipeline without naming the pre-tag CI-green-on-exact-SHA gate or the 60-second tag-trigger watchdog that scripts/release-and-publish.mjs actually owns, so an operator reading a refusal cannot tell which gate spoke. Recorded rather than raised to keep tonight's queue answerable; it is neither closed nor refuted, and everything else that lane checked in that file verified live.
-
-- THE WEEKLY /insights PASS WAS NOT DUE and did not run: .audit-tools/nightly/insights-last-run.json records ran_at 2026-09-04, five days old against a seven-day cadence. Not-due is not a skipped leg; it is recorded here only so the absence is not read as a failure.
-
-- THE SESSION-START GUARD REPORTED THE CODEX LANE DOWN, AND IT WAS UP. The run probed it rather than planning around the notice: `codex --version` exits 0 in about 260 ms and `codex exec` answered correctly, so Codex served as this run's independent adversary lane over every leg-1 finding. The cause is a defect in the machine-wide lane registry and is filed as proposal P58 with a measured red-green: probeCommand in ~/.agent-config/offload-lane-data.mjs spawns a bare argv[0] with no shim resolution, so the npm codex.cmd shim raises ENOENT, and the error handler maps that to DOWN. A launch defect is therefore indistinguishable from a dead lane. Coverage did not shrink this run, but a false DOWN either shrinks coverage or spends effort routing around a working lane, and last night's run recorded not using Codex at all. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- Leg 2 backlog sweep PARTIAL — see the coverage stamp .audit-tools/nightly/triage-2026-09-10-coverage.json for the exact attempted/classified/errored counts. The free-pool lane returned "dispatch returned a running job" on a growing share of entries as the run went on; errored rows are dropped on load, so a plain re-run retries exactly the failures.
 
 
 </details>
