@@ -85,7 +85,8 @@ export async function resolveSharedOpenCodePermissions() {
       typeof shared.mergeOpenCodeAgentPermissionRule === "function" &&
       typeof shared.mergeOpenCodeGlobalPermissionRule === "function" &&
       typeof shared.migrateOpenCodeGlobalExternalDirectory === "function" &&
-      typeof shared.withoutOpenCodeWildcard === "function"
+      typeof shared.withoutOpenCodeWildcard === "function" &&
+      typeof shared.orderOpenCodePermissionRule === "function"
     ) {
       return shared;
     }

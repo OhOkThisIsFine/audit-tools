@@ -28,6 +28,42 @@ function permissionRuleObject(value: unknown): PermissionRule {
     : {};
 }
 
+/**
+ * Emit a permission rule block in a STABLE, content-derived key order: the `"*"`
+ * wildcard first (when present), then every other key lexicographically.
+ *
+ * Every merge below composes three sources (generated / existing / managed)
+ * whose relative key order depends on which installer wrote the file last, so
+ * emitting in composition order made `opencode.json` a pure key-reorder diff on
+ * every `ensure` — the file churned between the audit-first and
+ * remediate-first orders without a single value changing, dirtying every tree
+ * it touches and violating the stable content-derived ordering invariant. The
+ * merged key SET was already order-independent; only its emission was not.
+ *
+ * EXPORTED because ordering the merges is not sufficient: a deployer that finds
+ * no existing block returns its generated seed VERBATIM (the postinstall agent
+ * scope short-circuits on a fresh config), so the seed literals must already be
+ * in this order or the first run emits composition order and the second emits
+ * sorted — the same churn, one run later. Every seed and every merge goes
+ * through here, so one canonical order exists in the file's whole lifecycle.
+ *
+ * Callers pass already precedence-resolved values, so this changes placement
+ * only — the same reason `unionOpenCodeBashCeiling` emits `"*"` first, then sorts.
+ */
+export function orderOpenCodePermissionRule(
+  rule: Record<string, unknown> | null | undefined,
+): PermissionRule {
+  const values = permissionRuleObject(rule);
+  const ordered: PermissionRule = {};
+  if (values["*"] !== undefined) {
+    ordered["*"] = values["*"] as string;
+  }
+  for (const key of Object.keys(values).sort()) {
+    if (key !== "*") ordered[key] = values[key] as string;
+  }
+  return ordered;
+}
+
 /** Returns a copy of `rules` without its `"*"` wildcard entry. */
 export function withoutOpenCodeWildcard(rules: PermissionRule): PermissionRule {
   const copy: PermissionRule = { ...rules };
@@ -55,23 +91,30 @@ export function mergeOpenCodeAgentPermissionRule(
   }
   const generatedObject = generatedRule as PermissionRule;
   const existingObject = permissionRuleObject(existingRule);
-  const merged: PermissionRule = {};
 
-  if (typeof existingRule === "string") {
-    merged["*"] = existingRule;
-  } else {
-    merged["*"] = existingObject["*"] ?? generatedObject["*"] ?? "ask";
-  }
+  // Precedence is resolved first (managed > existing > generated), then the
+  // block is emitted in the one canonical order — see orderOpenCodePermissionRule.
+  const values: PermissionRule = {};
   for (const [key, value] of Object.entries(generatedObject)) {
-    if (key !== "*") merged[key] = value;
+    if (key !== "*") values[key] = value;
   }
   for (const [key, value] of Object.entries(existingObject)) {
-    if (key !== "*") merged[key] = value;
+    if (key !== "*") values[key] = value;
   }
   for (const [key, value] of Object.entries(managedRules)) {
-    merged[key] = value;
+    if (key !== "*") values[key] = value;
   }
-  return merged;
+
+  // A managed wildcard wins outright (it is the caller's explicit policy); then
+  // a string-form existing rule promotes to the wildcard; then the existing
+  // wildcard beats the generated one; then the generated default "ask".
+  const wildcard =
+    managedRules["*"] ??
+    (typeof existingRule === "string"
+      ? existingRule
+      : existingObject["*"] ?? generatedObject["*"] ?? "ask");
+  values["*"] = wildcard;
+  return orderOpenCodePermissionRule(values);
 }
 
 /**
@@ -90,25 +133,28 @@ export function mergeOpenCodeGlobalPermissionRule(
     typeof existingRule === "string"
       ? { "*": existingRule }
       : permissionRuleObject(existingRule);
-  const merged: PermissionRule = {};
 
+  const values: PermissionRule = {};
+  for (const [key, value] of Object.entries(generatedRule)) {
+    if (key !== "*") values[key] = value;
+  }
+  for (const [key, value] of Object.entries(existingObject)) {
+    if (key !== "*") values[key] = value;
+  }
+  for (const [key, value] of Object.entries(managedRules)) {
+    if (key !== "*") values[key] = value;
+  }
+
+  // An existing wildcard survives verbatim unless it IS the managed broad
+  // value, in which case it is migration cleanup. Never seeded from generated.
   const existingWildcard = existingObject["*"];
   if (
     existingWildcard !== undefined &&
     existingWildcard !== OPENCODE_MANAGED_BROAD_VALUE
   ) {
-    merged["*"] = existingWildcard;
+    values["*"] = existingWildcard;
   }
-  for (const [key, value] of Object.entries(generatedRule)) {
-    if (key !== "*") merged[key] = value;
-  }
-  for (const [key, value] of Object.entries(existingObject)) {
-    if (key !== "*") merged[key] = value;
-  }
-  for (const [key, value] of Object.entries(managedRules)) {
-    if (key !== "*") merged[key] = value;
-  }
-  return merged;
+  return orderOpenCodePermissionRule(values);
 }
 
 /**
@@ -134,7 +180,13 @@ export function migrateOpenCodeGlobalExternalDirectory(
     return existingRule;
   }
   const rest = withoutOpenCodeWildcard(existingObject);
-  return Object.keys(rest).length > 0 ? rest : undefined;
+  if (Object.keys(rest).length === 0) {
+    return undefined;
+  }
+  // The survivors go through the same canonical order, so a migrated entry
+  // matches every other generated block rather than keeping the order it
+  // happened to have on disk.
+  return orderOpenCodePermissionRule(rest);
 }
 
 // ── Union permission ceiling (INV-RCI-16, reframed) ──────────────────────────
@@ -229,9 +281,10 @@ export function unionOpenCodeBashCeiling(
 
 /**
  * Compose the top-level bash block an installer should write: the managed union
- * ceiling of all agents (emitted in its stable, content-derived order — `"*"`
- * first, then sorted keys) followed by any user-authored top-level keys the
- * union does not cover (appended in sorted order, non-clobber). The result is
+ * ceiling of all agents followed by any user-authored top-level keys the union
+ * does not cover (non-clobber). The union's own managed keys stay in their
+ * stable order (a test pins `"*"` first, then lexicographic); the user extras
+ * follow in a stable sorted order. The result is
  * therefore order-stable regardless of which installer ran last: the managed
  * portion is always the same sorted union, so re-running either installer in
  * any order is byte-idempotent and never churns the artifact's content hash.
@@ -242,7 +295,10 @@ export function composeOpenCodeBashCeiling(
 ): PermissionRule {
   const ceiling = unionOpenCodeBashCeiling(agentBashRuleSets);
   const existing = permissionRuleObject(existingTopBash);
-  const composed: PermissionRule = { ...ceiling };
+  const composed: PermissionRule = {};
+  for (const [key, value] of Object.entries(ceiling)) {
+    composed[key] = value;
+  }
   // Append user-authored keys the union does not manage, in a stable sorted
   // order so their placement can't churn either.
   for (const key of Object.keys(existing).sort()) {

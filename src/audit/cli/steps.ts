@@ -5,6 +5,7 @@ import {
   writeStepContract,
   StepStatusSchema,
   AccessDeclarationSchema,
+  AGENT_FEEDBACK_FILENAME,
 } from "audit-tools/shared";
 import type { AccessDeclaration, StepStatus } from "audit-tools/shared";
 import {
@@ -140,6 +141,24 @@ export function scopeEchoLine(artifactsDir: string): string | null {
   }
 }
 
+/**
+ * The reserved `artifact_paths` key carrying the run's agent-reflection file
+ * (`<artifactsDir>/agent-feedback.jsonl`, append-only NDJSON).
+ *
+ * WHY IT IS ON THE STEP. The loader prompt asks the host to append reflections
+ * (and requires one for a degraded quick/shallow run), but a host can only do
+ * that if it knows WHICH FILE. `parseReflectionsNdjson` reports a malformed line
+ * inside a file it FOUND; it returns an empty list, silently, when the file is
+ * absent — so a host that guessed a different filename produced no reflection,
+ * no error, and a quietly thinner audit report. Handing the path over on the
+ * contract is what makes the filename something the tool SUPPLIES rather than
+ * something a host must reproduce from prose (auditor-agnostic robustness).
+ *
+ * Set HERE, in the one funnel every audit step emission goes through, so no
+ * step kind can be added that forgets it.
+ */
+export const AGENT_FEEDBACK_ARTIFACT_KEY = "agent_feedback";
+
 export async function writeCurrentStep(params: {
   artifactsDir: string;
   stepKind: StepKind;
@@ -166,7 +185,17 @@ export async function writeCurrentStep(params: {
     repoRoot: params.repoRoot,
     artifactsDir: params.artifactsDir,
     prompt: echo ? `${echo}\n\n${params.prompt}` : params.prompt,
-    artifactPaths: params.artifactPaths,
+    artifactPaths: {
+      ...params.artifactPaths,
+      // The canonical reflection destination, supplied on EVERY step and
+      // overwriting any caller entry of the same name — a reserved slot, the
+      // same rule as current_step / current_prompt, so no caller can repoint a
+      // host at a file the loader will not read.
+      [AGENT_FEEDBACK_ARTIFACT_KEY]: join(
+        params.artifactsDir,
+        AGENT_FEEDBACK_FILENAME,
+      ),
+    },
     extraFields: {
       // Optional audit fields keep their conditional-omission semantics; they
       // ride before the canonical path fields so they can never clobber them.

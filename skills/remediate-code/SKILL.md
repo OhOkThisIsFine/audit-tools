@@ -36,13 +36,17 @@ remediate-code ensure --quiet
 remediate-code next-step
 ```
 
-Pass a supplied path with `--input`. Pass conversational guidance using the
-loader's temporary guidance file and `--guidance-file`. Do not add capability,
-provider, model, quota, context-window, or concurrency flags.
+The target-directory rule and the `--input` / `--guidance-file` rule each have
+one full statement in `skills/remediate-code/remediate-code.prompt.md`; follow
+them as written there.
+
+Do not add capability, provider, model, quota, context-window, or concurrency
+flags.
 
 Read the returned JSON only far enough to find `prompt_path`, then read and
-follow only that prompt. When it says to continue, call `next-step` again. Stop
-when it says to stop.
+follow only that prompt. Do not inspect workload, result, schema, or state files
+unless the current prompt directs you to them. When it says to continue, call
+`next-step` again. Stop when it says to stop.
 
 When developing audit-tools itself, prefer `node remediate-code.mjs`. Use
 `remediate-code install` for repair or forced asset refresh.

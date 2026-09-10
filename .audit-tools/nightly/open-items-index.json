@@ -3,7 +3,7 @@
     "date": "2026-09-10",
     "head": "a33bc8d91a7cfeca9fc2be4ba42006d74971c602"
   },
-  "count": 12,
+  "count": 11,
   "items": [
     {
       "id": "docs-dependency-map-analyzer-vocabulary",
@@ -36,17 +36,6 @@
       "nights_open": 2,
       "target": {
         "path": "skills/audit-code/audit-code.prompt.md"
-      }
-    },
-    {
-      "id": "docs-remediate-prompt-has-no-target-directory-rule",
-      "leg": "docs",
-      "path": "skills/remediate-code/remediate-code.prompt.md",
-      "title": "The remediate loader prompt carries no target-directory rule while its audit twin does — copy the rule across, or single-source it?",
-      "subject_key": "d566b484062036be",
-      "nights_open": 2,
-      "target": {
-        "path": "skills/remediate-code/remediate-code.prompt.md"
       }
     },
     {

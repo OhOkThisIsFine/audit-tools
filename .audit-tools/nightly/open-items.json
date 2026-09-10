@@ -135,52 +135,6 @@
       "nights_open": 2
     },
     {
-      "id": "docs-remediate-prompt-has-no-target-directory-rule",
-      "leg": "docs",
-      "path": "skills/remediate-code/remediate-code.prompt.md",
-      "subject": "Preserve user arguments: pass an existing path with `--input <path>`, write conversational feedback to a temporary file and pass it with `--guidance-file <path>`",
-      "title": "The remediate loader prompt carries no target-directory rule while its audit twin does — copy the rule across, or single-source it?",
-      "eli5": "The two shipped loader bodies are the canonical instructions a host agent reads: skills/audit-code/audit-code.prompt.md for auditing and skills/remediate-code/remediate-code.prompt.md for remediating. The audit one explains how the tool decides which repository it is working on: run from inside the target repository, and pass `--root <path>` only when running from outside it. It even calls itself the one full statement of that rule. The remediate one never mentions `--root` at all, though the remediate CLI declares exactly the same option in src/remediate/index.ts with the same resolution behaviour. So a host asked to remediate a repository that is not its current directory has no rule to follow and must infer one. Nothing catches this: the drift guard that keeps the rendered .agent/ and .github/ copies in step with these bodies compares each body against its own renders, so an instruction present in one body and missing from the other is invisible to it. Two answers are reasonable. Copying the rule into the remediate body is the smaller change and matches how the two bodies are written today. Single-sourcing it means both bodies render one shared statement, which is the repository's stated preference for anything that would otherwise be kept in parity by hand — but it is a change to how loader bodies are authored, not just to their text.",
-      "question": "skills/audit-code/audit-code.prompt.md states the target-directory rule and calls itself \"the one full statement of the target-directory rule\"; skills/remediate-code/remediate-code.prompt.md never mentions `--root`. Should the rule be copied into the remediate body, or should both bodies render one shared statement?",
-      "options": [
-        {
-          "label": "Copy the rule across",
-          "answer": "Add the same target-directory rule to skills/remediate-code/remediate-code.prompt.md — run from inside the target repository, `--root <path>` only from outside it — and re-render the generated host assets in the same commit."
-        },
-        {
-          "label": "Single-source it",
-          "answer": "Make the target-directory rule one shared fragment both loader bodies render, so the two can never disagree again, and drop the audit body's claim to be its one full statement in favour of the shared source."
-        },
-        {
-          "label": "Add a drift test instead",
-          "answer": "Keep the two bodies hand-authored but add a contract test asserting that both carry the target-directory rule, so the asymmetry is a red build rather than a discovery."
-        },
-        {
-          "label": "Leave it",
-          "answer": "Remediation in practice runs from inside the repository being remediated, so the rule is not load-bearing there. Leave the remediate body unchanged."
-        }
-      ],
-      "evidence": [
-        "skills/remediate-code/remediate-code.prompt.md contains zero occurrences of `--root` (grep count 0, HEAD 23079f37) — independently re-verified by this run.",
-        "skills/audit-code/audit-code.prompt.md contains `--root` twice and the phrase \"the one full statement of the target-directory rule\".",
-        "src/remediate/index.ts declares `--root <path>` on `next-step` via the shared ROOT_OPTION_DESCRIPTION, with `--root X` resolving through `resolveRepoRoot` and its absence through `discoverRepoRoot` from the caller's cwd.",
-        "The host-asset drift tests compare each body against its own renders, so a rule missing from one body is invisible to them."
-      ],
-      "premise_probes": [
-        {
-          "file": "skills/remediate-code/remediate-code.prompt.md",
-          "contains": "guidance-file"
-        },
-        {
-          "file": "skills/remediate-code/remediate-code.prompt.md",
-          "absent": "--root"
-        }
-      ],
-      "subject_key": "d566b484062036be",
-      "first_seen": "2026-09-09",
-      "nights_open": 2
-    },
-    {
       "id": "docs-audit-pkg-language-convictions-two-homes",
       "leg": "docs",
       "path": "docs/audit-pkg/product.md",

@@ -450,6 +450,23 @@ export const GUARDS = [
       'must be filed under a section with its prose before it can render',
   },
   {
+    id: 'check:loader-fragments',
+    kind: 'gate',
+    impl: 'check:loader-fragments',
+    preCommit: 'reach',
+    fix:
+      'a shipped loader asset drifted from its canonical fragment — reconcile it against ' +
+      'scripts/shared/loader-fragments-data.mjs (embed the fragment verbatim where it is declared ' +
+      '`verbatimIn`, or point at the `home` asset in prose where it is not), then re-run ' +
+      '`npm run check:loader-fragments`',
+    note:
+      'the four shipped loader assets (skills/<tool>/<tool>.prompt.md + skills/<tool>/SKILL.md, both ' +
+      'pairs) previously carried the same instruction in four drifted copies. UNCOVERED HALF: the ' +
+      'check reconciles only the fragments DECLARED in the data module, so a NEW duplicated ' +
+      'instruction is invisible until someone adds a fragment row for it — the module is the ' +
+      'inventory, not a detector of duplication',
+  },
+  {
     id: 'check:cli-surface',
     kind: 'gate',
     impl: 'check:cli-surface',
@@ -1769,8 +1786,12 @@ export const REACH = [
   {
     area: 'rendered host assets',
     files: ['skills/**', '.github/prompts/**', '.github/agents/**', '.gemini/**', '.agent/**', 'opencode.json'],
-    guardedBy: ['verify:hosts', 'verify:remediate-hosts'],
-    note: 'rendered per-IDE from universal sources; renderer drift is what the two gates pin',
+    guardedBy: ['verify:hosts', 'verify:remediate-hosts', 'check:loader-fragments'],
+    note:
+      'rendered per-IDE from universal sources; renderer drift is what the two gates pin. The ' +
+      'canonical loader SOURCES under skills/** are additionally reconciled for loader-pair ' +
+      'instruction duplication by check:loader-fragments, which the IDE renders inherit (they ' +
+      'embed the canonical body verbatim)',
   },
   {
     area: 'CI workflow trigger paths',

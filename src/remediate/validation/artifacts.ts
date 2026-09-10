@@ -434,7 +434,12 @@ async function validateHostSubmissions(
 
 export async function validateArtifacts(
   artifactsDir: string,
-  root = ".",
+  // REQUIRED, deliberately: this feeds `verificationReportPath(root)`, which
+  // resolves `<root>/.audit-tools/verification_report.json`. A default of "."
+  // silently validated a DIFFERENT (cwd-relative) report path than the run's,
+  // so a missing report read as present or vice versa depending on the caller's
+  // cwd. Every call site already passes the resolved root.
+  root: string,
 ): Promise<ArtifactValidationResult> {
   const issues: string[] = [];
   const store = new StateStore(artifactsDir);

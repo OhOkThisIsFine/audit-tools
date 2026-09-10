@@ -39,6 +39,11 @@ const SOURCES = planSources(PLAN);
 const pkgRoot = PKG_ROOT;
 const packageVersion = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version ?? '0.0.0';
 
+// Seed literals are passed through the shared canonical orderer below
+// (orderOpenCodePermissionRule) so the FIRST deploy already emits the order
+// every later merge emits — a fresh config takes the short-circuit branch that
+// returns the seed verbatim, so an out-of-order literal here would make run 1
+// and run 2 differ byte-wise with no value changed.
 const OPENCODE_AUDIT_EDIT_PERMISSION = {
   '*': 'ask',
   '.audit-code/**': 'allow',
@@ -170,12 +175,20 @@ function mergeOpenCodeGlobalPermissionConfig(existingPermission, generatedPermis
 }
 
 function renderOpenCodePermissionConfig() {
+  const { orderOpenCodePermissionRule } = sharedOpenCodePermissions ?? {};
+  // Guarded: on a fresh checkout before `npm run build` the shared helpers are
+  // unavailable and the caller skips the OpenCode deployment entirely, so the
+  // un-ordered literal below simply never reaches a file.
+  const ordered = (rule) =>
+    typeof orderOpenCodePermissionRule === 'function'
+      ? orderOpenCodePermissionRule(rule)
+      : { ...rule };
   return {
     read: 'allow',
     glob: 'allow',
     grep: 'allow',
-    edit: { ...OPENCODE_AUDIT_EDIT_PERMISSION },
-    bash: { ...OPENCODE_AUDIT_BASH_PERMISSION },
+    edit: ordered(OPENCODE_AUDIT_EDIT_PERMISSION),
+    bash: ordered(OPENCODE_AUDIT_BASH_PERMISSION),
   };
 }
 

@@ -22,14 +22,14 @@ repository root.
 
 Preserve user arguments:
 
-- run `audit-code` from inside the target repository; every command resolves
-  that repository's root from the working directory on its own, so normal usage
-  passes no `--root`
-- pass the user-supplied target directory with `--root <path>` only when running
-  from outside that repository
+- run from inside the target repository; every command resolves that repository's
+  root from the working directory on its own, so normal usage passes no `--root`.
+  Pass the user-supplied target directory with `--root <path>` only when running
+  from outside that repository.
 
-This is the one full statement of the target-directory rule; the `audit-code`
-skill points here instead of restating it.
+This target-directory rule is one shared fragment, rendered into this body and
+the `remediate-code` loader body in the same words; both skills point here
+instead of restating it.
 
 Ask for exactly one step:
 
@@ -52,8 +52,8 @@ source-only review for a comprehensive request. A user-chosen quick/shallow audi
 may proceed with the stated limitation and the reflection required below.
 
 Read the returned JSON only far enough to find `prompt_path`, then read and
-follow only that prompt. Do not inspect workload, result, schema, command
-catalog, or state files unless the current prompt directs you to them.
+follow only that prompt. Do not inspect workload, result, schema, or state files
+unless the current prompt directs you to them.
 
 When the prompt emits semantic review items, assign them with the host's native
 subagent facilities when available. Do not send provider, model, quota,
@@ -61,7 +61,11 @@ context-window, routing, or launch configuration to audit-tools. If the user has
 chosen a degraded quick/shallow run, record one reserved AgentReflection with task_id exactly
 `audit-capability-preflight`. Every reflection requires all three of `task_id`,
 `instruction_clarity` (one of `clear`, `mostly_clear`, `ambiguous`, `unclear`)
-and `severity`; a line missing any of the three is discarded whole. Use severity
+and `severity`; a line missing any of the three is discarded whole. Append each
+reflection as one JSON object per line to the run's agent-reflection file, whose
+path the step contract supplies as `artifact_paths.agent_feedback` — never
+reproduce that filename from memory, because a wrongly named file is read as
+\"no reflections\" rather than reported. Use severity
 `high` or `critical` when material to claimed coverage, with concrete
 `tool_friction`, `ambiguities`, and `suggestions` details. A structurally incapable run must not be labelled comprehensive. Keep
 the conversation-first flow and loader contract; do not add provider, routing,

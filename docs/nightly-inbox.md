@@ -156,47 +156,6 @@ Should the audit loader body name the reflection destination — append one JSON
 ---
 
 
-<!-- nightly:item key=d566b484062036be -->
-
-## `docs-remediate-prompt-has-no-target-directory-rule` — The remediate loader prompt carries no target-directory rule while its audit twin does — copy the rule across, or single-source it? <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Documentation · open 2 nights · `skills/remediate-code/remediate-code.prompt.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-The two shipped loader bodies are the canonical instructions a host agent reads: skills/audit-code/audit-code.prompt.md for auditing and skills/remediate-code/remediate-code.prompt.md for remediating. The audit one explains how the tool decides which repository it is working on: run from inside the target repository, and pass `--root <path>` only when running from outside it. It even calls itself the one full statement of that rule. The remediate one never mentions `--root` at all, though the remediate CLI declares exactly the same option in src/remediate/index.ts with the same resolution behaviour. So a host asked to remediate a repository that is not its current directory has no rule to follow and must infer one. Nothing catches this: the drift guard that keeps the rendered .agent/ and .github/ copies in step with these bodies compares each body against its own renders, so an instruction present in one body and missing from the other is invisible to it. Two answers are reasonable. Copying the rule into the remediate body is the smaller change and matches how the two bodies are written today. Single-sourcing it means both bodies render one shared statement, which is the repository's stated preference for anything that would otherwise be kept in parity by hand — but it is a change to how loader bodies are authored, not just to their text. <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### The question
-
-skills/audit-code/audit-code.prompt.md states the target-directory rule and calls itself "the one full statement of the target-directory rule"; skills/remediate-code/remediate-code.prompt.md never mentions `--root`. Should the rule be copied into the remediate body, or should both bodies render one shared statement? <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### Your answer
-
-- [ ] **1. Copy the rule across** — Add the same target-directory rule to skills/remediate-code/remediate-code.prompt.md — run from inside the target repository, `--root <path>` only from outside it — and re-render the generated host assets in the same commit. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- [ ] **2. Single-source it** — Make the target-directory rule one shared fragment both loader bodies render, so the two can never disagree again, and drop the audit body's claim to be its one full statement in favour of the shared source.
-- [ ] **3. Add a drift test instead** — Keep the two bodies hand-authored but add a contract test asserting that both carry the target-directory rule, so the asymmetry is a red build rather than a discovery.
-- [ ] **4. Leave it** — Remediation in practice runs from inside the repository being remediated, so the rule is not load-bearing there. Leave the remediate body unchanged.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (4) — what was verified against code, and how</summary>
-
-- skills/remediate-code/remediate-code.prompt.md contains zero occurrences of `--root` (grep count 0, HEAD 23079f37) — independently re-verified by this run. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- skills/audit-code/audit-code.prompt.md contains `--root` twice and the phrase "the one full statement of the target-directory rule". <!-- doc-citation-exempt: quoted item prose, not citations -->
-- src/remediate/index.ts declares `--root <path>` on `next-step` via the shared ROOT_OPTION_DESCRIPTION, with `--root X` resolving through `resolveRepoRoot` and its absence through `discoverRepoRoot` from the caller's cwd. <!-- doc-citation-exempt: quoted item prose, not citations -->
-- The host-asset drift tests compare each body against its own renders, so a rule missing from one body is invisible to them.
-
-</details>
-
----
-
-
 <!-- nightly:item key=569ce0323e227c76 -->
 
 ## `docs-audit-pkg-language-convictions-two-homes` — Three language/analyzer convictions are stated twice, in different words, across two audit-pkg docs — pick one home? <!-- doc-citation-exempt: quoted item prose, not citations -->

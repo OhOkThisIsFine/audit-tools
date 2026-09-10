@@ -7,18 +7,35 @@
  * occurrence outside a documented allowlist, so a new hand-constructed join can't
  * silently reintroduce the drift the V5 sweep removed.
  *
- * Heuristic for "path-construction context": a single- or double-quoted string
- * literal that BEGINS with `.audit-tools` followed by a quote end or a path
- * separator (e.g. `join(root, ".audit-tools", ...)`, `const X = ".audit-tools"`,
- * `".audit-tools/audit"`). Deliberately excluded:
+ * Two V5-RESIDUAL BLIND SPOTS were closed here (both were declared, neither was
+ * covered — see the tests at the bottom of this file, which pin the closure):
+ *
+ *  1. **Template-literal construction.** The scanner only saw `"`/`'`-quoted
+ *     joins, so `` join(root, `.audit-tools/audit`) `` was invisible. The scan
+ *     now takes a backtick literal too, and distinguishes it from the prompt
+ *     PROSE that caused backticks to be excluded originally by stripping
+ *     ESCAPED backticks first: a host-prompt body embeds its markdown code spans
+ *     inside a template literal, so they arrive as `` \` `` (text), while a real
+ *     construction's opening backtick is unescaped. DECLARED RESIDUAL: an
+ *     unescaped backtick code span in prompt prose on a non-comment line still
+ *     reads as a construction (false positive, no live occurrence — every
+ *     in-template code span in src/ + wrapper/ is escaped). The remedy is the
+ *     existing one: escape it, comment the line, or allowlist the file.
+ *  2. **A substring-only allowlist honesty check.** The check that a stale
+ *     allowlist entry gets removed asserted `text.includes(".audit-tools")`,
+ *     which a bare COMMENT or prose mention satisfies — so an entry could keep
+ *     its slot after its last real literal was cleaned up. It now requires the
+ *     entry to still carry a path-construction literal ({@link pathLiteralIn}),
+ *     the same shape the main scan flags.
+ *
+ * Deliberately excluded (and each exclusion is a claim about the text, not a
+ * convenience):
  *   - comment lines (trimmed line starts with `//`, `*`, or `/*`) — doc prose;
- *   - backtick contexts — template-literal PROSE in host prompts quotes paths as
- *     markdown code spans (\`.audit-tools/...\`), which is display text;
  *   - mid-string prose mentions (not immediately after a quote);
  *   - `.audit-tools-visibility` (the committed repo-root pin FILE, a distinct
- *     literal owned by gitignoreArtifacts.ts — the lookahead requires `"`/`'`/
- *     `/`/`\` right after `.audit-tools`, so the `-visibility` suffix never
- *     matches).
+ *     literal owned by gitignoreArtifacts.ts — the lookahead requires a
+ *     quote/backtick/`/`/`\` right after `.audit-tools`, so the `-visibility`
+ *     suffix never matches).
  */
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
@@ -108,12 +125,39 @@ const CODE_FILE_RE = /\.(?:[cm]?[jt]s)$/;
 const SKIP_DIR_NAMES = new Set<string>(["node_modules", "dist"]);
 
 /**
- * A quoted string literal beginning with `.audit-tools` followed by a quote end
- * or a path separator — the path-construction shape. Backticks intentionally
- * omitted (template-literal prose in prompts), `-visibility` intentionally
- * excluded by the lookahead.
+ * A string literal beginning with `.audit-tools` followed by a path separator or
+ * a quote end — the path-construction shape. Covers all three quote characters
+ * (blind spot 1): a backtick literal qualifies only when a separator or the
+ * closing backtick follows, which is what separates `` `.audit-tools/audit` ``
+ * (a construction) from `` `.audit-tools/` tree `` (prompt prose).
+ *
+ * `-visibility` stays excluded by the lookahead, as before.
  */
-const VIOLATION_RE = /["']\.audit-tools(?=["'/\\])/;
+const VIOLATION_RE = /(?<!\\)["'`]\.audit-tools(?=["'`/\\])/;
+
+/**
+ * Whether a file's text contains a `.audit-tools` PATH-CONSTRUCTION literal —
+ * the honesty check's real requirement (blind spot 2). A comment or prose
+ * mention does NOT satisfy it, so a stale allowlist entry is removed rather
+ * than left holding a slot with nothing behind it.
+ */
+function pathLiteralIn(text: string): boolean {
+  return text.split(/\r?\n/).some(
+    (line) => !isCommentLine(line) && VIOLATION_RE.test(stripEscapedBackticks(line)),
+  );
+}
+
+/**
+ * A backtick preceded by `\` is an ESCAPED backtick inside a template literal —
+ * text, not a delimiter. Stripping those pairs before scanning keeps a
+ * host-prompt line such as `` … in \`.audit-tools/\`, which … `` (a markdown
+ * code span written inside a template literal) from reading as a construction,
+ * while an interpolation like `` `${root}/.audit-tools` `` keeps its closing
+ * backtick and is still caught.
+ */
+function stripEscapedBackticks(line: string): string {
+  return line.replace(/\\`/g, "");
+}
 
 /** A comment-only line (block-comment bodies start with `*` in this codebase). */
 function isCommentLine(line: string): boolean {
@@ -154,7 +198,9 @@ function violationsIn(relPath: string): string[] {
     const line = lines[i];
     if (!line.includes(".audit-tools")) continue;
     if (isCommentLine(line)) continue;
-    if (VIOLATION_RE.test(line)) hits.push(`${relPath}:${i + 1}: ${line.trim()}`);
+    if (VIOLATION_RE.test(stripEscapedBackticks(line))) {
+      hits.push(`${relPath}:${i + 1}: ${line.trim()}`);
+    }
   }
   return hits;
 }
@@ -184,13 +230,91 @@ describe(".audit-tools path-literal guard — layout single-sourced in auditTool
   });
 
   it.each([...ALLOWLIST.keys()])(
-    "allowlist entry %s still exists and still carries the literal (honesty check)",
+    "allowlist entry %s still exists and still carries a path-construction literal (honesty check)",
     (file) => {
       // A stale entry (file deleted, or its occurrences cleaned up) must be
-      // removed rather than sit as a silent hole in the gate.
+      // removed rather than sit as a silent hole in the gate. The requirement
+      // is a path-CONSTRUCTION literal, not merely the substring: a comment or
+      // prose mention must not keep a slot alive (blind spot 2).
       expect(existsSync(join(repoRoot, file))).toBe(true);
       const text = readFileSync(join(repoRoot, file), "utf8");
-      expect(text.includes(".audit-tools")).toBe(true);
+      expect(
+        pathLiteralIn(text),
+        `${file} is allowlisted for a \`.audit-tools\` path literal but no longer carries one ` +
+          `(a comment or prose mention does not count) — drop the allowlist entry.`,
+      ).toBe(true);
     },
   );
+});
+
+// ── Blind-spot closure (V5 residuals) ────────────────────────────────────────
+//
+// These pin the SCANNER itself, not the tree: the two residuals were declared
+// blind spots, so a regression that re-opens either must fail here even if the
+// tree happens to be clean at the time.
+
+describe(".audit-tools path-literal guard — the two V5 residual blind spots are closed", () => {
+  it("sees a TEMPLATE-LITERAL path construction (blind spot 1)", () => {
+    expect(VIOLATION_RE.test("const p = join(root, `.audit-tools/audit`, x);")).toBe(true);
+    expect(VIOLATION_RE.test("const p = `.audit-tools`;")).toBe(true);
+    expect(pathLiteralIn("const p = join(root, `.audit-tools/audit`);")).toBe(true);
+    expect(pathLiteralIn("const p = `.audit-tools/audit/`;")).toBe(true);
+  });
+
+  it("ignores ESCAPED-backtick prose — how host prompts quote paths inside a template literal", () => {
+    // A host-prompt body embeds markdown code spans inside template literals, so
+    // they arrive as ESCAPED backticks: text, not delimiters. This is the real
+    // shape in the tree (src/remediate/steps/nextStep.ts prompt bodies).
+    const escaped = "in \\`.audit-tools/\\`, which would otherwise be overwritten";
+    expect(VIOLATION_RE.test(stripEscapedBackticks(escaped))).toBe(false);
+    expect(pathLiteralIn(escaped)).toBe(false);
+    const escapedPath = "at \\`.audit-tools/remediation/intake\\` (and the report).";
+    expect(pathLiteralIn(escapedPath)).toBe(false);
+  });
+
+  it("is scoped to literals that BEGIN with `.audit-tools` — an interpolation is out of scope by design", () => {
+    // `${root}/.audit-tools/...` does not START a literal with the segment, so it
+    // is not the hand-constructed-join shape this guard exists to catch (the
+    // root prefix means the caller is already composing from a root variable).
+    // Pinned so the scope is a stated decision, not an accident of the regex.
+    expect(VIOLATION_RE.test("const p = `${root}/.audit-tools/remediation`;")).toBe(false);
+  });
+
+  // DECLARED RESIDUAL (blind spot 1's uncovered half): an UNESCAPED backtick
+  // code span in prompt prose on a non-comment line would be read as a
+  // construction — a false positive. No live occurrence exists (grep: every
+  // in-template code span in src/ + wrapper/ is escaped), and the remedy is the
+  // existing one: escape it, comment the line, or allowlist the file with a
+  // reason. Stated here rather than papered over, per the partly-enforced rule.
+  it("the residual — an unescaped backtick code span IS flagged (remedy: escape it or allowlist)", () => {
+    expect(
+      VIOLATION_RE.test("see the `.audit-tools/` tree for details"),
+      "unescaped backtick prose on a non-comment line reads as a construction — declared residual",
+    ).toBe(true);
+  });
+
+  it("requires a real path literal for the allowlist honesty check (blind spot 2)", () => {
+    // A comment or plain-prose mention must NOT satisfy it…
+    expect(pathLiteralIn("// see .audit-tools docs")).toBe(false);
+    expect(pathLiteralIn("the .audit-tools dir")).toBe(false);
+    expect(pathLiteralIn("* `.audit-tools/` is documented here")).toBe(false);
+    expect(pathLiteralIn("// `.audit-tools/` is documented here")).toBe(false);
+    // …but any real construction must, in every quote form.
+    expect(pathLiteralIn('const p = ".audit-tools/audit";')).toBe(true);
+    expect(pathLiteralIn("const p = '.audit-tools/audit';")).toBe(true);
+    expect(pathLiteralIn("const p = join(root, `.audit-tools/audit`);")).toBe(true);
+  });
+
+  it("the committed tree still passes with the widened scanner", () => {
+    // Guards against 'tightening' the scanner into a false-positive machine:
+    // whatever it now flags must still be genuinely allowlistable, so the main
+    // scan over the real tree stays clean.
+    for (const file of collectFiles()) {
+      if (ALLOWLIST.has(file)) continue;
+      expect(
+        violationsIn(file),
+        `${file} must not hand-construct a \`.audit-tools\` path (any quote form)`,
+      ).toEqual([]);
+    }
+  });
 });
