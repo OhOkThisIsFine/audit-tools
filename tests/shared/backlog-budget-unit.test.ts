@@ -43,6 +43,7 @@ const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const BACKLOG_DIR = join(REPO_ROOT, "docs", "backlog");
 const SCRIPT = join(REPO_ROOT, "scripts", "check-backlog-budget.mjs");
 const ENTRY_GRAMMAR = join(REPO_ROOT, "scripts", "shared", "backlog-entry-grammar.mjs");
+const PRIMITIVES = join(REPO_ROOT, "scripts", "shared", "primitives.mjs"); // the script imports it since the primitives were single-sourced
 
 const {
   sizeOf,
@@ -325,6 +326,7 @@ describe("--update-baseline may lower a ceiling, never raise one", () => {
       // The script imports the shared entry grammar; the skeleton has to carry it
       // too, or the copy dies at import time instead of exercising the CLI.
       copyFileSync(ENTRY_GRAMMAR, join(dir, "scripts", "shared", "backlog-entry-grammar.mjs"));
+      copyFileSync(PRIMITIVES, join(dir, "scripts", "shared", "primitives.mjs"));
 
       const text = file(...bulk(60, 2000));
       measured = sizeOf(text);
