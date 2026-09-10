@@ -17,10 +17,19 @@
 //
 // Usage:
 //   node scripts/nightly/ingest-answers.mjs [--root <repo>] [--dry-run]
+//
+// ARGV IS REFUSED, NOT IGNORED. This script's default action writes the durable
+// decisions ledger, so an unrecognized flag must never read as consent to do it:
+// `--help` used to ingest ten answers and write `.claude/nightly-decisions.json`
+// (2026-09-06). An unrecognized argument is now a refusal, and a mistyped
+// `--dryrun` can no longer perform the write `--dry-run` was meant to prevent.
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { recordDecision, readOpenItems, INBOX_RELPATH } from './items.mjs';
 import { MARKER_RE, CITATION_EXEMPT_RE, writeInbox } from './render-inbox.mjs';
+import { guardArgv } from '../shared/argvGuard.mjs';
+
+const USAGE = 'node scripts/nightly/ingest-answers.mjs [--root <repo>] [--dry-run]';
 
 const TICK_RE = /^\s*-\s*\[([ xX])\]\s*\*\*(.+?)\*\*\s*(?:—\s*([\s\S]*?))?$/;
 
@@ -129,10 +138,14 @@ export function ingestAnswers(root, { dryRun = false } = {}) {
 }
 
 if (process.argv[1] && process.argv[1].endsWith('ingest-answers.mjs')) {
-  const args = process.argv.slice(2);
-  const rootIdx = args.indexOf('--root');
-  const root = rootIdx >= 0 ? args[rootIdx + 1] : process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  const res = ingestAnswers(root, { dryRun: args.includes('--dry-run') });
+  const parsed = guardArgv(process.argv.slice(2), {
+    name: 'ingest-answers',
+    usage: USAGE,
+    values: ['--root'],
+    flags: ['--dry-run'],
+  });
+  const root = parsed.get('--root') ?? (process.env.CLAUDE_PROJECT_DIR || process.cwd());
+  const res = ingestAnswers(root, { dryRun: parsed.has('--dry-run') });
 
   if (res.missing) {
     console.log(`nightly: no inbox at ${INBOX_RELPATH} — nothing to ingest.`);

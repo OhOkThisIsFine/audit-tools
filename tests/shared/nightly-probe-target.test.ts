@@ -204,11 +204,13 @@ describe("record-path probes are refused by direction, not outright", () => {
 
   const escalation = (overrides: Record<string, unknown> = {}) => ({
     id: "backlog-1",
+    title: "This backlog entry may no longer describe live work",
     subject_key: "kb1",
     auto_close: false,
-    // P32: options[] and eli5 are refused at write when missing — the probe
-    // refusals under test here all fire BEFORE those two, so the throw tests
-    // are unaffected, but the success-path writes need both fields.
+    // P32 + the title/subject_key refusals: options[], eli5 and title are all
+    // refused at write when missing — the probe refusals under test here all
+    // fire BEFORE those, so the throw tests are unaffected, but the success-path
+    // writes need every mandatory field.
     eli5:
       "This backlog entry has no code side left to probe, so only the owner can say " +
       "whether it is still worth keeping or what it should turn into next.",
@@ -329,6 +331,7 @@ describe(".claude/hooks is probe-able source; the rest of .claude stays a record
       items: [
         {
           id: "h-1",
+          title: "A guard hook still carries a rule the docs call retired",
           subject_key: "kh1",
           eli5:
             "A guard hook still carries this rule while the docs say it was retired; " +

@@ -109,6 +109,11 @@ skills-lock.json
 # stays ignored.
 !.audit-tools/nightly/
 !.audit-tools/nightly/open-items.json
+# The bounded, enumerable projection of the queue (scripts/nightly/items.mjs,
+# `OPEN_ITEMS_INDEX_RELPATH`). Tracked for the same reason the store is: it is
+# what a reader enumerates instead of the 26k-token store, and `check:nightly-inbox`
+# reconciles it against the ledger so it can never assert open what is settled.
+!.audit-tools/nightly/open-items-index.json
 !.audit-tools/nightly/proposals/
 !.audit-tools/nightly/proposals/**
 

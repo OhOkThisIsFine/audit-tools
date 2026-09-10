@@ -134,22 +134,88 @@ describe("the diff window", () => {
 
 describe("the coverage stamp", () => {
   it("persists the real counts, and carries `aborted` so a partial run cannot read as complete", () => {
-    writeCoverage(root, "2026-08-14", {
+    // Stamp the examined items first, the way a run does (review → stamp →
+    // write coverage). One of them already carried a window from an EARLIER run;
+    // the other had never been examined, so it is reviewed cold.
+    const at = headCommit(root);
+    writeScopeLedger(root, {
+      version: 1,
+      items: { windowed: { lastCheckedCommit: at, lastCheckedAt: at } },
+    });
+    writeScopeLedger(
+      root,
+      stampExamined(readScopeLedger(root), ["windowed", "cold"], { commit: at, run: "2026-08-14" }),
+    );
+
+    const record = writeCoverage(root, "2026-08-14", {
       head: "abc1234",
       docs_in_scope: 53,
       docs_examined: 12,
       items_in_scope: 1856,
-      items_examined: 400,
+      items_examined: 2,
       aborted: "lane died at doc 12",
     });
-    const record = readCoverage(root, "2026-08-14");
     expect(record).toMatchObject({
       run: "2026-08-14",
       docs_in_scope: 53,
       docs_examined: 12,
+      items_examined: 2,
+      items_reviewed_cold: 1,
+      items_with_window: 1,
       aborted: "lane died at doc 12",
     });
     expect(readFileSync(coveragePath(root, "2026-08-14"), "utf8")).toContain('"aborted"');
+  });
+
+  it("derives the cold count from the ledger BEFORE the run stamped — the 2026-09-06 false zero", () => {
+    // The natural order is review → stamp → write coverage, so by the time
+    // coverage is written EVERY examined item carries a stamp. A count derived
+    // from "does this item have a stamp" therefore reads 0 and the run reports
+    // that it reviewed nothing cold — which is the false green the field exists
+    // to prevent. The count must come from what each stamp REPLACED.
+    const at = headCommit(root);
+    const never = docItems(root, "docs/concept.md")[0].hash;
+    writeScopeLedger(
+      root,
+      stampExamined(readScopeLedger(root), [never], { commit: at, run: "2026-09-06" }),
+    );
+    // Every item now looks windowed if you ask the ledger "has a stamp?"…
+    expect(readScopeLedger(root).items[never].lastCheckedCommit).toBe(at);
+    // …and the coverage record still says it was examined cold.
+    const record = writeCoverage(root, "2026-09-06", { items_examined: 1 });
+    expect(record.items_reviewed_cold).toBe(1);
+    expect(record.items_with_window).toBe(0);
+  });
+
+  it("counts only THIS run's stamps — a previous run's examinations are not this run's coverage", () => {
+    const at = headCommit(root);
+    writeScopeLedger(
+      root,
+      stampExamined(readScopeLedger(root), ["yesterday"], { commit: at, run: "2026-09-05" }),
+    );
+    writeScopeLedger(
+      root,
+      stampExamined(readScopeLedger(root), ["today"], { commit: at, run: "2026-09-06" }),
+    );
+    const record = writeCoverage(root, "2026-09-06", { items_examined: 1 });
+    expect(record.items_reviewed_cold).toBe(1);
+  });
+
+  it("re-stamping the same item within one run keeps the run's FIRST prior", () => {
+    // A doc examined twice in one night must not invent a window for itself.
+    const at = headCommit(root);
+    let ledger = readScopeLedger(root);
+    ledger = stampExamined(ledger, ["h"], { commit: at, run: "2026-09-06" });
+    ledger = stampExamined(ledger, ["h"], { commit: at, path: "docs/concept.md", run: "2026-09-06" });
+    expect(ledger.items.h.priorCheckedCommit).toBeUndefined();
+    writeScopeLedger(root, ledger);
+    expect(writeCoverage(root, "2026-09-06", { items_examined: 1 }).items_reviewed_cold).toBe(1);
+  });
+
+  it("REFUSES to report examined items with no run-tagged stamps rather than writing a silent 0", () => {
+    expect(() => writeCoverage(root, "2026-08-14", { items_examined: 400 })).toThrow(
+      /items_reviewed_cold|cold count cannot be derived/,
+    );
   });
 
   it("defaults `aborted` to null and the counts to zero — an unwritten field never reads as coverage", () => {
@@ -157,6 +223,7 @@ describe("the coverage stamp", () => {
     expect(record.aborted).toBeNull();
     expect(record.docs_examined).toBe(0);
     expect(record.items_examined).toBe(0);
+    expect(record.items_reviewed_cold).toBe(0);
   });
 
   it("reads a missing stamp as null — absent coverage is not zero coverage", () => {

@@ -941,6 +941,7 @@ export const GUARDS = [
   { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
   { id: 'nightly-items-mandatory-fields-test', kind: 'contract-test', impl: 'tests/shared/nightly-items-mandatory-fields.test.ts' },
   { id: 'nightly-scope-ledger-test', kind: 'contract-test', impl: 'tests/shared/nightly-scope-ledger.test.ts' },
+  { id: 'script-argv-refusal-test', kind: 'contract-test', impl: 'tests/shared/script-argv-refusal.test.ts' },
   { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
   { id: 'hook-friction-stop-test', kind: 'contract-test', impl: 'tests/shared/hook-friction-stop-gate.test.ts' },
   { id: 'hook-session-start-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-session-start-guards.test.ts' },
@@ -1664,28 +1665,49 @@ export const REACH = [
       'items.mjs, render-inbox.mjs, ingest-answers.mjs, answer.mjs and the nightly-surface hook are all ' +
       'exercised by tests/shared/nightly-routine.test.ts — subject-key identity, the settled/resolved ' +
       'partition, premise probing, the inbox round-trip (a ticked box becomes a ledger entry) and its ' +
-      'refusals. The P32 answerability refusals in writeOpenItems (options[]/eli5) are pinned by ' +
-      'tests/shared/nightly-items-mandatory-fields.test.ts. ' +
+      'refusals. The P32 answerability refusals in writeOpenItems (options[]/eli5), the subject_key ' +
+      'derive-or-refuse, the title refusal, the bounded queue index and the in-write HANDOFF ' +
+      'regeneration are pinned by tests/shared/nightly-items-mandatory-fields.test.ts. ' +
       'scope-ledger.mjs is covered by tests/shared/nightly-scope-ledger.test.ts — item ' +
       'identity, the refusal of an unanchored stamp, the never-examined window, and the coverage ' +
-      'record. UNCOVERED HALF: nothing executes the routine end-to-end, so the ORDER of the legs, the ' +
+      'record, including the run-derived cold count. UNCOVERED HALF: nothing executes the routine ' +
+      'end-to-end, so the ORDER of the legs, the ' +
       'decision to escalate-vs-apply, and whether a run actually CALLS `stamp` for the docs it claims ' +
       'to have examined all remain behavioural, guarded by docs/nightly-routine.md and the three-agent ' +
       'gate rather than by a test.',
+  },
+  {
+    area: 'script argv refusal',
+    files: ['scripts/**'],
+    guardedBy: ['script-argv-refusal-test', 'check:scripts', 'check:lint'],
+    note:
+      'a script that reads process.argv and does not adopt scripts/shared/argvGuard.mjs must appear in ' +
+      'ARGV_GUARD_GAP inside tests/shared/script-argv-refusal.test.ts — the ratchet fails on a new ' +
+      'unguarded reader and on a stale gap entry. The behaviour is pinned end-to-end on the nightly ' +
+      'CLIs whose default action writes durable state: a bogus flag exits non-zero naming it and ' +
+      'creates no artifact, --help prints usage without writing. ⚠ UNCOVERED HALF, stated rather than ' +
+      'implied per the durable-traps rule: 42 of the tracked scripts still read process.argv without ' +
+      'the guard, and the list above is a DECLARED boundary, not a clean sweep — those scripts can ' +
+      'still ignore an unrecognized flag. Migrating them is mechanical but reaches gate entry points ' +
+      'such as run-vitest-gate.mjs and profile-run.mjs, which forward variadic arguments to another ' +
+      'process; each needs its own spec, so it is its own change.',
   },
   {
     area: 'nightly inbox projection',
     files: [
       'docs/nightly-inbox.md',
       '.audit-tools/nightly/open-items.json',
+      '.audit-tools/nightly/open-items-index.json',
       '.claude/nightly-decisions.json',
       'scripts/nightly/items.mjs',
       'scripts/nightly/render-inbox.mjs',
     ],
     guardedBy: ['check:nightly-inbox'],
     note:
-      'render-inbox --check projects the tracked queue through the decisions ledger and compares ' +
-      'the tracked markdown inbox; settled items therefore cannot survive in the rendered surface',
+      'render-inbox --check projects the tracked queue through the decisions ledger and byte-compares ' +
+      'ALL THREE derived artifacts — the markdown inbox, the queue snapshot, and the bounded ' +
+      'open-items-index — so none of them can assert open what the ledger records settled. The index ' +
+      'is a pure projection (no timestamp) precisely so two writers can emit identical bytes.',
   },
   {
     area: 'rendered host assets',

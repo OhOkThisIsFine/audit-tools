@@ -18,7 +18,10 @@
 // is the input surface, the ledger is the record. One home per fact.
 //
 // Usage:
-//   node scripts/nightly/render-inbox.mjs [--root <repo>]
+//   node scripts/nightly/render-inbox.mjs [--root <repo>] [--check]
+//
+// ARGV IS REFUSED, NOT IGNORED — writing the queue is the default action, so a
+// query-shaped flag must never perform it (see `scripts/shared/argvGuard.mjs`).
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import {
@@ -26,11 +29,17 @@ import {
   readDecisions,
   partitionBySettled,
   answeredNotDone,
+  renderQueueIndex,
   LEGS,
   LEG_TITLES,
   INBOX_RELPATH,
   OPEN_ITEMS_RELPATH,
+  OPEN_ITEMS_INDEX_RELPATH,
+  DECISIONS_RELPATH,
 } from './items.mjs';
+import { guardArgv } from '../shared/argvGuard.mjs';
+
+const USAGE = 'node scripts/nightly/render-inbox.mjs [--root <repo>] [--check]';
 
 const MARKER = 'nightly:item';
 
@@ -243,55 +252,106 @@ export function projectInbox(root) {
     skipped: state.skipped ?? [],
   });
   const snapshot = JSON.stringify({ ...state, items: open }, null, 2) + '\n';
-  return { body, snapshot, open: open.length };
+  const index = renderQueueIndex({ items: open, run: state.run });
+  return { body, snapshot, index, open: open.length };
 }
 
 export function writeInbox(root) {
-  const { body, snapshot, open } = projectInbox(root);
+  const { body, snapshot, index, open } = projectInbox(root);
   const snapshotPath = join(root, OPEN_ITEMS_RELPATH);
+  const indexPath = join(root, OPEN_ITEMS_INDEX_RELPATH);
   const out = join(root, INBOX_RELPATH);
   mkdirSync(dirname(snapshotPath), { recursive: true });
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(snapshotPath, snapshot, 'utf8');
+  writeFileSync(indexPath, index, 'utf8');
   writeFileSync(out, body, 'utf8');
   return { path: out, open };
 }
 
-/** Read-only parity arm for the tracked inbox projection. */
+/**
+ * Read-only parity arm for the tracked inbox projection.
+ *
+ * Both tracked artifacts are DERIVED — the markdown render and the persisted
+ * queue are projections of `open-items.json` folded through
+ * `.claude/nightly-decisions.json`. This arm re-derives both and name-compares
+ * them, so neither can keep asserting an item is open once the ledger records
+ * it done. That is the whole point: on 2026-08-27 the queue and the snapshot
+ * still presented six settled propositions as open, and a lap read four of them
+ * and put them back to the owner — one answer would have REVERTED a completed
+ * decision. Nothing reconciled the three artifacts then; this is the arm that
+ * does, and `check:nightly-inbox` plus its pre-commit leg are where it runs.
+ *
+ * A ledger that cannot be read is a REFUSAL, not a stale render: it lands the
+ * same non-zero verdict but names itself, instead of surfacing as an uncaught
+ * parse error from inside the projection.
+ */
+function readIfPresent(file) {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return null; // missing is stale; the write arm owns creation
+  }
+}
+
 export function checkInbox(root) {
-  const { body, snapshot, open } = projectInbox(root);
   const out = join(root, INBOX_RELPATH);
   const snapshotPath = join(root, OPEN_ITEMS_RELPATH);
-  let current = null;
-  let currentSnapshot = null;
+  const indexPath = join(root, OPEN_ITEMS_INDEX_RELPATH);
+  let projection;
   try {
-    current = readFileSync(out, 'utf8');
-  } catch {
-    // Missing is stale; the write arm owns creation.
+    projection = projectInbox(root);
+  } catch (err) {
+    return {
+      path: out,
+      snapshotPath,
+      indexPath,
+      open: 0,
+      fresh: false,
+      stale: [DECISIONS_RELPATH],
+      reason:
+        `${DECISIONS_RELPATH} could not be read, so the queue cannot be reconciled against it: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    };
   }
-  try {
-    currentSnapshot = readFileSync(snapshotPath, 'utf8');
-  } catch {
-    // Missing is stale; the write arm owns creation.
-  }
+  const { body, snapshot, index, open } = projection;
+
+  const stale = [];
+  if (readIfPresent(out) !== body) stale.push(INBOX_RELPATH);
+  if (readIfPresent(snapshotPath) !== snapshot) stale.push(OPEN_ITEMS_RELPATH);
+  if (readIfPresent(indexPath) !== index) stale.push(OPEN_ITEMS_INDEX_RELPATH);
   return {
     path: out,
     snapshotPath,
+    indexPath,
     open,
-    fresh: current === body && currentSnapshot === snapshot,
+    fresh: stale.length === 0,
+    stale,
+    reason:
+      stale.length === 0
+        ? null
+        : `${stale.join(' and ')} no longer match the queue projected through ` +
+          `${DECISIONS_RELPATH} — the ledger settles an item that the tracked artifact still ` +
+          `asserts open, or an item's premise has gone from the tree.`,
   };
 }
 
 if (process.argv[1] && process.argv[1].endsWith('render-inbox.mjs')) {
-  const args = process.argv.slice(2);
-  const rootIdx = args.indexOf('--root');
-  const root = rootIdx >= 0 ? args[rootIdx + 1] : process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  if (args.includes('--check')) {
+  const parsed = guardArgv(process.argv.slice(2), {
+    name: 'render-inbox',
+    usage: USAGE,
+    values: ['--root'],
+    flags: ['--check'],
+  });
+  const rootArg = parsed.get('--root');
+  const root = rootArg ?? (process.env.CLAUDE_PROJECT_DIR || process.cwd());
+  if (parsed.has('--check')) {
     const result = checkInbox(root);
     if (!result.fresh) {
       console.error(
-        `${INBOX_RELPATH} or ${OPEN_ITEMS_RELPATH} is stale or missing.\n` +
-          `Fix: node scripts/nightly/render-inbox.mjs${rootIdx >= 0 ? ` --root ${root}` : ''}`,
+        `${result.stale.join(' and ')} stale or missing.\n` +
+          `${result.reason ? `${result.reason}\n` : ''}` +
+          `Fix: node scripts/nightly/render-inbox.mjs${rootArg ? ` --root ${rootArg}` : ''}`,
       );
       process.exit(1);
     }

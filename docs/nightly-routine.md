@@ -219,6 +219,29 @@ still reviews and still reports, but applies **nothing** and says so in the
 inbox's *What the last run could NOT cover* block — reviewing a dirty tree is fine, writing to one
 is how you lose the owner's uncommitted work.
 
+The rule blocks one class and not the other, and both are named here so no run has
+to judge it (2026-08-22: a run had to decide for itself that emitting its own
+queue is not an "apply", which is the host-discretion shape this repo bans):
+
+- **BLOCKED — the review's own derived edits.** Anything a leg proposes to change
+  *because of what it found*: a stale-factual doc fix, a backlog entry deletion or
+  status-strip, an instruction-file edit. These are the writes that would land on
+  top of the owner's uncommitted work, and they are what "applies **nothing**"
+  means.
+- **ALWAYS WRITTEN — the routine's own generated output.** The run still writes
+  everything it generates about *itself*, dirty tree or not, because these files
+  are reports of the run rather than edits derived from the review, and because
+  gates independently REQUIRE them to be current: `.audit-tools/nightly/open-items.json`
+  and `docs/nightly-inbox.md` (through `writeOpenItems()` / `writeInbox()`, which also
+  refresh the generated live-status block in `docs/HANDOFF.md`), the leg-1 coverage
+  stamp, the leg-3 proposal records under `.audit-tools/nightly/proposals/`, and the
+  leg-1 scope ledger. Skipping these would leave the queue, the stamp, or the generated
+  `docs/HANDOFF.md` block silently stale and redden a gate the dirty tree did not
+  cause.
+
+A leg that could not run still goes in the *skipped* list; "the tree was dirty" is
+never a reason to leave the queue unwritten.
+
 ## Machine output contract
 
 Write `.audit-tools/nightly/open-items.json` through `writeOpenItems()`; it is
@@ -229,6 +252,11 @@ shape:
 { id, leg (docs|backlog|solutions), subject_key, path, title, eli5, question,
   options[], evidence[], premise_probes[], auto_close?, proposal?, patch_path? }
 ```
+
+`id`, `title`, `subject_key` and `eli5` are refused at write when missing;
+`subject_key` is DERIVED from `path` + `subject` (the prose in question) when the
+item does not carry one, so a writer never has to compute it by hand — but an
+item naming neither is refused rather than persisted unanswerable.
 
 - `title` is the front-loaded one-line decision, not a summary of the
   investigation.
@@ -301,6 +329,26 @@ Call `writeOpenItems(root, { items: open, applied, skipped, run })` so
 `skipped` names every leg or scope that could not run and why. Never hand-write
 the JSON or discard the previous state before this merge.
 
+That ONE call is the whole persistence contract, because it also writes the two
+artifacts derived from the queue — do not write either by hand:
+
+- **`title` and `subject_key` are derived-or-refused at write.** `subject_key` is
+  computed from the item's own `path` + `subject` when it is absent; an item that
+  names neither is refused, naming the item. `title` is refused when absent. Both
+  are mandatory because the generator reads them, and a refusal two steps later
+  in `generate-handoff-roadmap.mjs` names `items[N]` and HANDOFF rather than the
+  malformed item (2026-08-14, re-hit 2026-08-19).
+- **`.audit-tools/nightly/open-items-index.json`** is the bounded, enumerable
+  form of the queue — every open item reduced to `{id, leg, path, title,
+  subject_key, nights_open, target}`, folded through the decisions ledger so an
+  answered item leaves it on the next write. The items store remains the machine
+  contract the renderer reads in full; the index exists because enumerating that
+  store needed a hand-written `node -e` (2026-07-26).
+- **`docs/HANDOFF.md`'s generated live-status block** is regenerated in the same
+  call, because `check:handoff-roadmap` requires it to be current — including at
+  commit. Leaving it to whoever notices was caught only afterwards by the
+  closeout gate (2026-08-20).
+
 ## Surfacing — the inbox, not the conversation
 
 Each item carries three layers, so the reader spends only the attention the
@@ -336,10 +384,17 @@ an escalation that lives only in one machine's untracked scratch is lost the
 moment you are not sitting at that machine. Deleting the renderer and the server
 removed ~560 lines and the entire "is the server up?" question.
 
-The machine contract (`.audit-tools/nightly/open-items.json`) and the full
-proposals (`.audit-tools/nightly/proposals/**/*.md`) are tracked for the same
-reason. When nothing was applied, open, or skipped, stay silent rather than
-churning the inbox.
+The machine contract (`.audit-tools/nightly/open-items.json`), its bounded
+enumerable projection (`.audit-tools/nightly/open-items-index.json` — one line
+per open item, with the target the item names), and the full proposals
+(`.audit-tools/nightly/proposals/**/*.md`) are tracked for the same reason:
+an escalation that lives only on one machine is lost the moment you are not
+sitting at it. When nothing was applied, open, or skipped, stay silent rather
+than churning the inbox.
+
+`check:nightly-inbox` reconciles all three derived artifacts against the ledger,
+so the index cannot become a fourth stale surface: it is a pure projection with
+no timestamp of its own, which is what lets the gate byte-compare it.
 
 A SessionStart hook (`.claude/hooks/nightly-surface.mjs`) prints **one line**, at
 most once per subject, and is otherwise silent. It has exactly two things to

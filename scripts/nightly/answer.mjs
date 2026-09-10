@@ -38,9 +38,27 @@ import {
   DECISIONS_RELPATH,
 } from './items.mjs';
 import { compareCodeUnits } from './../shared/primitives.mjs';
+import { parseArgv, refusalMessage, USAGE_EXIT } from './../shared/argvGuard.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const argv = process.argv.slice(2);
+
+// ARGV IS REFUSED, NOT IGNORED. This script's default action writes the durable
+// decisions ledger, so a mistyped flag must never be read as an item id or as
+// consent to settle something (2026-09-06). `--help`/`-h` print usage rather
+// than erroring, so the universal query flag is answered, never performed.
+//
+// The parsed form is used ONLY for that verdict: the settle path below keeps
+// its full argv, because an answer is free prose that may itself begin with a
+// dash (`answer.mjs DOC-1 -- "--keep the pin"` is a legitimate answer).
+const USAGE = [
+  'Usage:',
+  '  node scripts/nightly/answer.mjs <ID> "the answer"',
+  '  node scripts/nightly/answer.mjs <ID> --wontfix "why"',
+  '  node scripts/nightly/answer.mjs <ID> --question "what you need answered"  (stays OPEN)',
+  '  node scripts/nightly/answer.mjs --done <SUBJECT_KEY> "<commit|note>"',
+  '  node scripts/nightly/answer.mjs --list | --settled',
+].join('\n');
 
 /** @returns {never} */
 function fail(message) {
@@ -74,16 +92,31 @@ try {
 }
 const { open, resolved } = partitionBySettled(state.items, decisions, ROOT);
 
-if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {
-  console.log(
-    'Usage:\n' +
-      '  node scripts/nightly/answer.mjs <ID> "the answer"\n' +
-      '  node scripts/nightly/answer.mjs <ID> --wontfix "why"\n' +
-      '  node scripts/nightly/answer.mjs <ID> --question "what you need answered"  (stays OPEN)\n' +
-      '  node scripts/nightly/answer.mjs --done <SUBJECT_KEY> "<commit|note>"\n' +
-      '  node scripts/nightly/answer.mjs --list | --settled',
-  );
+if (argv.length === 0) {
+  console.log(USAGE);
   process.exit(0);
+}
+
+// One union spec: which flag is present selects the branch below, and the
+// variadic tail is the answer (or `--done`'s ref). An unrecognized flag is
+// refused rather than absorbed, and the parsed positionals — not raw argv — are
+// what the settle path records, so the `--` data separator never lands in the
+// answer text.
+const parsedArgv = parseArgv(argv, {
+  flags: ['--list', '--settled', '--done', '--wontfix', '--question'],
+  positionals: Infinity,
+});
+if (parsedArgv.help) {
+  console.log(USAGE);
+  process.exit(0);
+}
+if (!parsedArgv.ok) {
+  const refusal = refusalMessage(parsedArgv, {
+    name: 'answer',
+    usage: 'node scripts/nightly/answer.mjs --help   (prose starting with "-" goes after `--`)',
+  });
+  if (refusal) process.stderr.write(refusal);
+  process.exit(USAGE_EXIT);
 }
 
 // An answered decision often implies a CODE fix, and a remediation run in flight
@@ -188,8 +221,8 @@ A REMEDIATION RUN IS OPEN — ${scope.length} item(s) still claim a write scope.
 }
 
 if (argv[0] === '--done') {
-  const key = argv[1];
-  const ref = argv.slice(2).join(' ').trim();
+  const key = parsedArgv.positionals[0];
+  const ref = parsedArgv.positionals.slice(1).join(' ').trim();
   if (!key) fail('--done needs a SUBJECT KEY (see --list or --settled).');
   if (!ref) fail('--done needs a ref: a commit sha, a PR, or "verified already true at HEAD".');
   try {
@@ -213,10 +246,13 @@ if (argv[0] === '--settled') {
   process.exit(0);
 }
 
-// A leading `-` is always a flag, never an id — so a mistyped flag can never be
-// recorded as a decision about a subject that does not exist.
-const id = argv[0];
-if (id.startsWith('-')) fail(`Not an item id: "${id}" (a leading "-" is a flag).`);
+// The id is the FIRST POSITIONAL, so the guard has already refused any flag
+// this CLI does not declare — a mistyped flag can never be recorded as a
+// decision about a subject that does not exist.
+const id = parsedArgv.positionals[0];
+if (!id || id.startsWith('-')) {
+  fail(`Not an item id: "${id ?? ''}" (a leading "-" is a flag). Run with --help for usage.`);
+}
 
 const item = open.find((it) => it.id === id) || state.items.find((it) => it.id === id);
 if (!item) {
@@ -230,17 +266,19 @@ if (resolved.some((it) => it.id === id)) {
   console.log(`note: ${id} was auto-closed — the code it quoted is no longer in the tree. Recording anyway.`);
 }
 
-const rest = argv.slice(1);
-const wontfixAt = rest.indexOf('--wontfix');
+// The answer is the variadic tail after the id, with the `--` data separator
+// already consumed by the guard — so prose beginning with a dash is carried
+// verbatim instead of being read as a flag.
+const rest = parsedArgv.positionals.slice(1);
 // `--question` is an answer that asks something BACK. It is recorded (so the
 // exchange is not lost) but does NOT settle the subject, because there is nothing
 // executable in it — `partitionBySettled` keeps it in the open list. Two of the
 // eighteen determinations on 2026-07-28 were exactly this shape and were filed as
 // `settled`, which made them unaskable while carrying no answer anyone could act on.
-const questionAt = rest.indexOf('--question');
-const flagAt = wontfixAt !== -1 ? wontfixAt : questionAt;
+const wontfixAt = argv.indexOf('--wontfix');
+const questionAt = argv.indexOf('--question');
 const disposition = wontfixAt !== -1 ? 'wontfix' : questionAt !== -1 ? 'question' : 'settled';
-const answer = (flagAt !== -1 ? rest.slice(flagAt + 1) : rest).join(' ').trim();
+const answer = rest.join(' ').trim();
 
 if (!answer) {
   // An empty answer would suppress the question while recording nothing about

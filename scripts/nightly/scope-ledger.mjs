@@ -36,6 +36,7 @@ import { dirname, join } from 'node:path';
 import { flattenManifest } from '../check-doc-manifest.mjs';
 import { DOC_MANIFEST } from '../doc-manifest-data.mjs';
 import { compareCodeUnits, hashContent } from '../shared/primitives.mjs';
+import { USAGE_EXIT } from '../shared/argvGuard.mjs';
 
 export const SCOPE_LEDGER_RELPATH = '.audit-tools/nightly/scope-ledger.json';
 export const SCOPE_LEDGER_VERSION = 1;
@@ -177,16 +178,29 @@ export function writeScopeLedger(root, ledger) {
 /**
  * Record that an agent actually examined these items at `commit`. Called after
  * the examination, never before — see the header.
+ *
+ * `run` tags the stamp with the run that made it, and `priorCheckedCommit`
+ * carries what the entry said BEFORE this run touched it. Together they are
+ * what makes the cold count derivable (see `coldCount`): the natural order —
+ * review, stamp, then write coverage — otherwise makes every examined item
+ * look windowed, because the stamp is already on disk by the time coverage is
+ * written. Re-stamping within the SAME run keeps the run's FIRST prior, so a
+ * doc stamped twice does not invent a window for itself.
  */
-/** @param {any} ledger @param {string[]} hashes @param {{commit?: string, at?: string, path?: string}} [options] */
-export function stampExamined(ledger, hashes, { commit, at, path } = {}) {
+/** @param {any} ledger @param {string[]} hashes @param {{commit?: string, at?: string, path?: string, run?: string}} [options] */
+export function stampExamined(ledger, hashes, { commit, at, path, run } = {}) {
   if (!commit) throw new Error('stampExamined: a commit is required — an unanchored stamp has no window');
   const items = ledger?.items ?? {};
   for (const hash of Array.isArray(hashes) ? hashes : [hashes]) {
     if (!hash) continue;
+    const prior = items[hash];
+    const sameRun = Boolean(run) && prior?.run === run;
+    const priorCheckedCommit = sameRun ? prior.priorCheckedCommit : prior?.lastCheckedCommit;
     items[hash] = {
       lastCheckedCommit: commit,
       lastCheckedAt: at ?? new Date().toISOString(),
+      ...(run ? { run } : {}),
+      ...(priorCheckedCommit ? { priorCheckedCommit } : {}),
       ...(path ? { path } : {}),
     };
   }
@@ -225,11 +239,55 @@ export function coveragePath(root, date) {
 }
 
 /**
+ * How many of THIS run's examined items were reviewed COLD — they carried no
+ * ledger entry when the run started, so there was no window to narrow.
+ *
+ * Derived from the ledger's own `run` / `priorCheckedCommit` fields, never
+ * accepted from the caller. That is the whole point: the natural order is
+ * review → stamp → write coverage, so by the time coverage is written every
+ * examined item carries a stamp and a caller-derived cold count reads 0. The
+ * 2026-09-06 run wrote `items_reviewed_cold: 0` and had to recompute 22 across
+ * 8 docs from a snapshot taken at run start. Deriving it from the stamp's own
+ * record of what it replaced makes the count invariant under stamping order.
+ *
+ * Entries not tagged with this `run` are not this run's examinations and do
+ * not contribute either way.
+ */
+export function coldCount(ledger, run) {
+  let cold = 0;
+  let windowed = 0;
+  for (const entry of Object.values(ledger?.items ?? {})) {
+    if (!entry || entry.run !== run) continue;
+    if (entry.priorCheckedCommit) windowed++;
+    else cold++;
+  }
+  return { cold, windowed, examined: cold + windowed };
+}
+
+/**
  * Leg 1's counterpart to leg 2's `<out>-coverage.json`. `aborted` is the field
  * that matters: a run that could not cover the corpus says so here, and the
  * report reads this file rather than the agent's recollection.
+ *
+ * `items_reviewed_cold` and `items_with_window` are DERIVED, never passed — see
+ * `coldCount`. They are the same fact measured two ways, so accepting either
+ * from the caller would let the pair contradict itself; deriving both also
+ * removes `items_reviewed_cold`'s silent 0, which is the false green the field
+ * exists to prevent. A run that reports examined items but left no run-tagged
+ * stamps cannot have this derived at all, so that is a refusal, not a default.
  */
 export function writeCoverage(root, date, stats = {}) {
+  const { cold, windowed, examined } = coldCount(readScopeLedger(root), date);
+  const claimed = Number(stats.items_examined ?? stats.docs_examined) || 0;
+  if (examined === 0 && claimed > 0) {
+    throw new Error(
+      `writeCoverage: ${claimed} item(s) are reported as examined for ${date}, but the ledger holds no ` +
+        `entry tagged run="${date}" — the cold count cannot be derived, and defaulting it to 0 is the ` +
+        `false green this field exists to prevent. Record each examined doc through ` +
+        `stampExamined(ledger, hashes, { commit, run: "${date}" }) (the \`stamp\` verb does this) ` +
+        `before writing coverage.`,
+    );
+  }
   const record = {
     run: date,
     head: stats.head ?? null,
@@ -238,8 +296,8 @@ export function writeCoverage(root, date, stats = {}) {
     docs_examined: stats.docs_examined ?? 0,
     items_in_scope: stats.items_in_scope ?? 0,
     items_examined: stats.items_examined ?? 0,
-    items_with_window: stats.items_with_window ?? 0,
-    items_reviewed_cold: stats.items_reviewed_cold ?? 0,
+    items_with_window: windowed,
+    items_reviewed_cold: cold,
     aborted: stats.aborted ?? null,
     notes: stats.notes ?? [],
   };
@@ -259,9 +317,41 @@ export function readCoverage(root, date) {
 // `plan` is what a run reads at leg-1 entry: every in-scope doc, its item
 // count, and how many of those items carry an evidence window. `stamp` is
 // called per doc AFTER it was examined.
+//
+// Both verbs refuse an argument they do not recognize, so a query-shaped flag
+// (`--help`, a mistyped `--days`) cannot be read as consent to write the
+// ledger. See `scripts/shared/argvGuard.mjs` for the repo-wide rule.
+const STAMP_FLAGS = new Set(['--run']);
+
+/** Args past the verb and the doc path that this verb does not recognize. */
+function stampUnknownArgs(argv) {
+  const unknown = [];
+  for (let i = 2; i < argv.length; i++) {
+    const arg = argv[i];
+    if (!arg.startsWith('-')) continue;
+    if (!STAMP_FLAGS.has(arg)) unknown.push(arg);
+    else i++; // the flag's value
+  }
+  return unknown;
+}
+
 function main(argv) {
   const root = process.cwd();
   const verb = argv[0] ?? 'plan';
+  if (!['plan', 'stamp'].includes(verb)) {
+    process.stderr.write(
+      `unknown verb: ${verb} (expected plan|stamp)\n` +
+        `usage: node scripts/nightly/scope-ledger.mjs [plan|stamp <doc> [--run <date>]]\n`,
+    );
+    return 1;
+  }
+  if (verb === 'plan' && argv.length > 1) {
+    process.stderr.write(
+      `plan: unrecognized argument(s) ${argv.slice(1).map((a) => `"${a}"`).join(', ')}.\n` +
+        `usage: node scripts/nightly/scope-ledger.mjs plan\n`,
+    );
+    return USAGE_EXIT;
+  }
 
   if (verb === 'plan') {
     const ledger = readScopeLedger(root);
@@ -289,9 +379,26 @@ function main(argv) {
 
   if (verb === 'stamp') {
     const relPath = argv[1];
-    if (!relPath) {
+    if (!relPath || relPath.startsWith('-')) {
       process.stderr.write('stamp: a doc path is required\n');
       return 1;
+    }
+    const unknown = stampUnknownArgs(argv);
+    if (unknown.length > 0) {
+      process.stderr.write(
+        `stamp: unrecognized argument(s) ${unknown.map((a) => `"${a}"`).join(', ')}.\n` +
+          `usage: node scripts/nightly/scope-ledger.mjs stamp <doc> [--run <date>]\n`,
+      );
+      return USAGE_EXIT;
+    }
+    const runIdx = argv.indexOf('--run');
+    // The run tag defaults to TODAY, because that is the date the coverage
+    // stamp is written under — the cold count is derived by matching the two,
+    // so a run that forgets the tag is exactly the false green being fixed.
+    const run = runIdx >= 0 ? argv[runIdx + 1] : new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(run))) {
+      process.stderr.write(`stamp: --run must be a YYYY-MM-DD date, got "${run}".\n`);
+      return USAGE_EXIT;
     }
     const head = headCommit(root);
     const items = docItems(root, relPath);
@@ -300,9 +407,9 @@ function main(argv) {
       return 1;
     }
     let ledger = readScopeLedger(root);
-    ledger = stampExamined(ledger, items.map((i) => i.hash), { commit: head, path: relPath });
+    ledger = stampExamined(ledger, items.map((i) => i.hash), { commit: head, path: relPath, run });
     writeScopeLedger(root, ledger);
-    process.stdout.write(`stamped ${items.length} items from ${relPath} at ${head.slice(0, 8)}\n`);
+    process.stdout.write(`stamped ${items.length} items from ${relPath} at ${head.slice(0, 8)} (run ${run})\n`);
     return 0;
   }
 

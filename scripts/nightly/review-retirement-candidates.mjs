@@ -30,6 +30,11 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { parseArgv, refusalMessage, USAGE_EXIT } from "../shared/argvGuard.mjs";
+
+const USAGE_NAME = "review-retirement-candidates";
+const USAGE = "node scripts/nightly/review-retirement-candidates.mjs [--days N] [--retire]";
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const norm = (/** @type {string} */ p) => p.replace(/\\/g, "/");
 
@@ -51,12 +56,31 @@ export function filenameDate(name) {
 }
 
 function main() {
-  const daysArg = process.argv.indexOf("--days");
-  const days = daysArg !== -1 ? Number(process.argv[daysArg + 1]) : 30;
-  const retire = process.argv.includes("--retire");
+  // ARGV IS REFUSED, NOT IGNORED. `--retire` DELETES tracked records, so an
+  // unrecognized flag must never be read as the enumeration-only default being
+  // safe to skip past — nor as consent to retire (see `scripts/shared/argvGuard.mjs`).
+  // A bare `-` is a positional here, which the spec's zero-positional cap refuses.
+  const parsed = parseArgv(process.argv.slice(2), {
+    name: USAGE_NAME,
+    usage: USAGE,
+    values: ["--days"],
+    flags: ["--retire"],
+  });
+  if (parsed.help) {
+    process.stdout.write(`${USAGE}\n`);
+    process.exit(0);
+  }
+  const refusal = refusalMessage(parsed, { name: USAGE_NAME, usage: USAGE });
+  if (refusal) {
+    process.stderr.write(refusal);
+    process.exit(USAGE_EXIT);
+  }
+
+  const days = parsed.has("--days") ? Number(parsed.get("--days")) : 30;
+  const retire = parsed.has("--retire");
   if (!Number.isFinite(days) || days < 0) {
     process.stderr.write(`--days must be a non-negative number\n`);
-    process.exit(2);
+    process.exit(USAGE_EXIT);
   }
 
   const tracked = trackedFiles();

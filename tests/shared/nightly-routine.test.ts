@@ -558,6 +558,39 @@ describe('render-inbox --check', () => {
     expect(`${result.stdout}${result.stderr}`).toMatch(/stale or missing/);
     expect(readFileSync(path, 'utf8')).toMatch(/stale/);
   });
+
+  it('fails when the QUEUE SNAPSHOT is the stale half, naming it', () => {
+    // The 2026-08-27 drift was the snapshot, not the markdown: both artifacts
+    // are derived, so each must be reconciled independently.
+    writeOpenItems(root, { items: [item()] });
+    writeInbox(root);
+    const snap = join(root, '.audit-tools', 'nightly', 'open-items.json');
+    writeFileSync(snap, readFileSync(snap, 'utf8') + '\n');
+    const result = runCheck();
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toMatch(/open-items\.json/);
+  });
+
+  it('fails when the ENUMERABLE INDEX is the stale half, naming it', () => {
+    writeOpenItems(root, { items: [item()] });
+    writeInbox(root);
+    const indexPath = join(root, '.audit-tools', 'nightly', 'open-items-index.json');
+    writeFileSync(indexPath, readFileSync(indexPath, 'utf8') + '\n');
+    const result = runCheck();
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toMatch(/open-items-index\.json/);
+  });
+
+  it('names the LEDGER, not a stale file, when the ledger itself is unreadable', () => {
+    // A corrupt ledger is a REFUSAL about the reconciliation, not a claim that
+    // a tracked artifact drifted — the fix is a different one.
+    writeOpenItems(root, { items: [item()] });
+    writeInbox(root);
+    writeFileSync(join(root, '.claude', 'nightly-decisions.json'), '{ not json', 'utf8');
+    const result = runCheck();
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toMatch(/nightly-decisions\.json/);
+  });
 });
 
 describe('SessionStart surface hook', () => {
@@ -681,9 +714,22 @@ describe('answer CLI', () => {
   });
 
   it('treats a leading dash as a flag, never an id', () => {
+    // Strengthened by the argv guard (2026-09-06): the flag is now refused at
+    // the boundary with the shared usage exit, before the id lookup is reached
+    // at all — so it cannot be recorded as a decision about a subject.
     const r = runAnswer(['--oops', 'text']);
-    expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/a flag/);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/unrecognized argument/i);
+    expect(existsSync(join(root, '.claude/nightly-decisions.json'))).toBe(false);
+  });
+
+  it('--help prints usage and records nothing', () => {
+    // The reported incident, at this CLI: a query-shaped flag must never
+    // perform the durable write the default action performs.
+    const r = runAnswer(['--help']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/answer\.mjs/);
+    expect(existsSync(join(root, '.claude/nightly-decisions.json'))).toBe(false);
   });
 
   it('supports --wontfix as a distinct, recorded disposition', () => {

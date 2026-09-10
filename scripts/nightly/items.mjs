@@ -19,9 +19,29 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { hashContent } from '../shared/primitives.mjs';
+// Cycle-safe: `runGenerator` is called only from `regenerateHandoffRoadmap`,
+// long after both modules have evaluated. See that function's header.
+import { runGenerator } from '../shared/generate-handoff-roadmap.mjs';
 
 export const DECISIONS_RELPATH = '.claude/nightly-decisions.json';
 export const OPEN_ITEMS_RELPATH = '.audit-tools/nightly/open-items.json';
+// The ENUMERABLE projection of the queue — the same items, each reduced to the
+// fields an agent needs to act, in a bounded read.
+//
+// WHY A SECOND FILE AND NOT A SMALLER `items` ARRAY. `open-items.json` is the
+// machine contract, and the RENDERER reads it in full: `writeInbox` re-renders
+// eli5, question, options and evidence for every item, so trimming the array
+// would break rendering. It is one 659-line / 26k-token document that exceeds
+// the Read cap, so enumerating it needs a hand-written `node -e` (2026-07-26
+// friction walk). Splitting the store would be a larger change with a real
+// blast radius; adding a derived, self-describing index beside it makes the
+// enumerable form exist without touching what the renderer consumes, and the
+// two are written by the same function so they cannot drift.
+//
+// It is ALSO the answered-state projection: the index holds `partitionBySettled`
+// `open` only, so answering an item removes it here on the next write. That is
+// the half `answer.mjs --list` already gets right and the raw file does not.
+export const OPEN_ITEMS_INDEX_RELPATH = '.audit-tools/nightly/open-items-index.json';
 // The answering surface is a TRACKED markdown file, not an HTML page.
 //
 // It was an HTML digest plus a localhost server (`npm run nightly:review`),
@@ -543,6 +563,95 @@ export function evaluateProbes(root, item, options = {}) {
   return { status, probes: evaluated };
 }
 
+/**
+ * The ONE actionable target an item names, or null when it names none.
+ *
+ * `path` is the file the QUESTION is about, which is frequently not the file the
+ * FIX touches — so the index reports the target the item itself declares rather
+ * than guessing at a fix site, exactly as `answer.mjs --list` refuses to label
+ * an item ready or blocked off a path match. What it removes is the second
+ * derivation: an answered items' work used to mean re-reading the eli5 to
+ * rediscover which file was even meant (2026-07-26 friction walk).
+ *
+ * `options[0]` is the recorded answer's prose for a numbered option and is
+ * deliberately NOT included — an answer is chosen at answer time, not at write
+ * time, so pre-selecting one would assert a decision the owner has not made.
+ */
+function actionableTarget(item) {
+  const path = typeof item?.path === 'string' ? item.path.trim() : '';
+  return path ? { path } : null;
+}
+
+/**
+ * The bounded, enumerable projection of the queue: `{ run, count, items: [{ id,
+ * leg, path, title, subject_key, nights_open, target }] }`.
+ *
+ * Every item is reduced to what an agent needs to pick one up and act, which
+ * keeps the whole file inside one Read for a queue of any realistic size —
+ * the 2026-07-26 walk needed a hand-written `node -e` for exactly this.
+ *
+ * Deliberately NO timestamp. The index is a pure function of the queue and the
+ * ledger, and that is what lets `checkInbox` byte-compare it: a `generated_at`
+ * would differ between the two writers of this file (the queue write and the
+ * inbox render) and the freshness arm would be permanently red, which is how a
+ * gate stops being read. The store keeps the timestamp; a projection of state
+ * does not need one of its own.
+ */
+export function queueIndex({ items, run = null }) {
+  return {
+    run,
+    count: items.length,
+    items: items.map((item) => ({
+      id: item.id,
+      leg: item.leg,
+      path: item.path ?? '',
+      title: item.title,
+      subject_key: item.subject_key,
+      nights_open: item.nights_open ?? 1,
+      target: actionableTarget(item),
+    })),
+  };
+}
+
+/** The on-disk form of `queueIndex`, so every writer emits identical bytes. */
+export function renderQueueIndex({ items, run = null }) {
+  return JSON.stringify(queueIndex({ items, run }), null, 2) + '\n';
+}
+
+export function readOpenItemsIndex(root) {
+  return readJson(join(root, OPEN_ITEMS_INDEX_RELPATH), { count: 0, items: [] });
+}
+
+// `subject_key` is the identity EVERYTHING downstream keys on: the settled
+// lookup in `partitionBySettled`, `first_seen`/`nights_open` carry-forward, the
+// generated HANDOFF live-status block, and the SessionStart viewed ledger. This
+// writer consumed it while validating every OTHER field exhaustively and never
+// checked the one the whole durable-answer mechanism is keyed on — so a missing
+// key was persisted to `open-items.json` and the refusal landed two steps later
+// in `generate-handoff-roadmap.mjs`, as a BLOCKED COMMIT naming `items[N]` and
+// HANDOFF rather than the malformed item (2026-08-14, re-hit 2026-08-19).
+//
+// A field the writer reads is either DERIVED or REFUSED, here. Every item
+// already carries the `subject` its key is computed from, so derivation is
+// possible in every well-formed case; the refusal is for an item that names
+// neither side of the identity.
+export function withSubjectKey(item) {
+  const trimmed = typeof item?.subject_key === 'string' ? item.subject_key.trim() : '';
+  if (trimmed) return item.subject_key === trimmed ? item : { ...item, subject_key: trimmed };
+  const subject = typeof item?.subject === 'string' ? item.subject.trim() : '';
+  const path = typeof item?.path === 'string' ? item.path.trim() : '';
+  if (!subject || !path) {
+    throw new Error(
+      `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no subject_key and none can be derived ` +
+        `(need a non-empty path and subject; ${path ? 'path is present' : 'path is missing'}, ` +
+        `${subject ? 'subject is present' : 'subject is missing'}). The subject key is the identity the ` +
+        `durable-answer ledger keys on — an item without one can never be settled, never carries ` +
+        `nights_open forward, and cannot be re-asked correctly when its prose changes.`,
+    );
+  }
+  return { ...item, subject_key: subjectKey(path, subject) };
+}
+
 // Persist this run's items, carrying `first_seen` forward from the previous run
 // so `nights_open` is real. An item that has been open for many nights is the
 // signal the old channel destroyed by repeating everything identically: it means
@@ -556,7 +665,8 @@ export function evaluateProbes(root, item, options = {}) {
 // it). Refusal is the load-bearing half; without it a probe-less item would
 // ride the store forever immune to auto-close.
 export function writeOpenItems(root, { items, applied = [], skipped = [], run = null }) {
-  for (const item of items) {
+  const normalized = items.map(withSubjectKey);
+  for (const item of normalized) {
     const raw = Array.isArray(item?.premise_probes) ? item.premise_probes : [];
     // A leg-2 escalation asks what a RECORD should become ("is this backlog
     // entry still worth keeping, or what should it turn into"), so its premise
@@ -663,13 +773,28 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
           `not an internal id or symbol-name shorthand).`,
       );
     }
+    // `title` is the same class of defect as `subject_key` above, and it is
+    // refused here for the same reason: `readOpenNightlyItems` requires it, so
+    // an item without one makes the generated HANDOFF live-status block
+    // un-regenerable — and the regeneration this writer performs would silently
+    // no-op, leaving `check:handoff-roadmap` red for a defect introduced HERE.
+    // The front-loaded one-line decision is also what the pointers render, so a
+    // title-less item reaches the owner as a bare id.
+    if (typeof item?.title !== 'string' || !item.title.trim()) {
+      throw new Error(
+        `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no usable title ` +
+          `(need the front-loaded one-line decision — not a summary of the investigation, ` +
+          `and not the id restated). It is what the generated HANDOFF pointer and the inbox ` +
+          `heading render.`,
+      );
+    }
   }
 
   const previous = readOpenItems(root);
   const seenBefore = new Map(previous.items.map((it) => [it.subject_key, it]));
   const today = new Date().toISOString().slice(0, 10);
 
-  const merged = items.map((item) => {
+  const merged = normalized.map((item) => {
     const prior = seenBefore.get(item.subject_key);
     const firstSeen = item.first_seen ?? prior?.first_seen ?? today;
     return {
@@ -679,15 +804,57 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
     };
   });
 
+  const generatedAt = new Date().toISOString();
   const payload = {
-    generated_at: new Date().toISOString(),
+    generated_at: generatedAt,
     run,
     items: merged,
     applied,
     skipped,
   };
   writeJson(join(root, OPEN_ITEMS_RELPATH), payload);
+
+  // The enumerable projection, folded through the ledger so it can never assert
+  // open what the ledger records settled. Written HERE, beside the store, so the
+  // two are one write — there is no ordering a caller can get wrong.
+  const { open } = partitionBySettled(merged, readDecisions(root), root);
+  mkdirSync(dirname(join(root, OPEN_ITEMS_INDEX_RELPATH)), { recursive: true });
+  writeFileSync(join(root, OPEN_ITEMS_INDEX_RELPATH), renderQueueIndex({ items: open, run }), 'utf8');
+
+  // The generated live-status block in docs/HANDOFF.md derives from this queue
+  // and the ledger, and `check:handoff-roadmap` REQUIRES it to be current —
+  // including at commit. Leaving it to be regenerated by whoever notices is the
+  // trap the backlog recorded on 2026-08-20: the desync was caught only
+  // afterwards, by the closeout gate. So the write that invalidates the block is
+  // the write that refreshes it.
+  regenerateHandoffRoadmap(root);
+
   return payload;
+}
+
+/**
+ * Refresh the generated HANDOFF state after a queue write.
+ *
+ * The import is a CYCLE (`generate-handoff-roadmap.mjs` reads
+ * `readOpenNightlyItems` from this module) and that is safe here for the one
+ * reason it can be: the binding is used at CALL time, never during module
+ * evaluation, so both modules are fully initialized before either needs the
+ * other. Making it a dynamic `await import` instead would turn a synchronous
+ * write into a fire-and-forget race, which is worse than the cycle.
+ *
+ * A failed regeneration must NOT fail the queue write — the queue is the
+ * durable record and the generated block is re-derivable from it — so the error
+ * is swallowed here, not thrown. `check:handoff-roadmap` (in `verify:checks`,
+ * at commit, and at closeout) is the gate that makes a stale block loud, and a
+ * root with no `docs/HANDOFF.md` at all (a test fixture) simply has nothing to
+ * regenerate.
+ */
+function regenerateHandoffRoadmap(root) {
+  try {
+    runGenerator({ root, check: false, out: () => {}, err: () => {} });
+  } catch {
+    // See above: the gate is the gate.
+  }
 }
 
 export function nightsBetween(fromDate, toDate) {
