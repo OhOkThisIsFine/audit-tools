@@ -66,7 +66,7 @@ interface Run {
   stderr: string;
 }
 
-function runCli(cli: string, args: string[], cwd: string): Run {
+function runScriptCli(cli: string, args: string[], cwd: string): Run {
   try {
     const stdout = execFileSync(process.execPath, [cli, ...args], {
       cwd,
@@ -118,7 +118,7 @@ describe('the reported incident: a query flag must not perform the write', () =>
       '# inbox\n\n<!-- nightly:item key=abc -->\n\n- [x] **1. Keep it** — keep it\n\n```notes\n\n```\n',
       'utf8',
     );
-    const res = runCli(NIGHTLY('ingest-answers.mjs'), ['--help'], cwd);
+    const res = runScriptCli(NIGHTLY('ingest-answers.mjs'), ['--help'], cwd);
 
     expect(res.status).toBe(0);
     expect(res.stdout).toMatch(/ingest-answers/);
@@ -132,7 +132,7 @@ describe('the reported incident: a query flag must not perform the write', () =>
     '$name refuses an unrecognized flag and performs no write',
     ({ cli, args, artifact }) => {
       const cwd = emptyRoot();
-      const res = runCli(cli, [...args, '--bogus-flag-xyz'], cwd);
+      const res = runScriptCli(cli, [...args, '--bogus-flag-xyz'], cwd);
 
       expect(res.status, `${cli} should refuse, not run`).toBe(USAGE_EXIT);
       expect(res.stderr).toMatch(/unrecognized argument/i);
@@ -145,7 +145,7 @@ describe('the reported incident: a query flag must not perform the write', () =>
     // The real shape of the trap: `--chek` is a query-shaped flag, and the
     // DEFAULT action is a write. Before the guard it rendered the inbox.
     const cwd = emptyRoot();
-    const res = runCli(NIGHTLY('render-inbox.mjs'), ['--root', '.', '--chek'], cwd);
+    const res = runScriptCli(NIGHTLY('render-inbox.mjs'), ['--root', '.', '--chek'], cwd);
     expect(res.status).toBe(USAGE_EXIT);
     expect(res.stderr).toMatch(/unrecognized argument/i);
     expect(existsSync(join(cwd, 'docs', 'nightly-inbox.md'))).toBe(false);
@@ -155,9 +155,9 @@ describe('the reported incident: a query flag must not perform the write', () =>
     // Seed and render a current projection first, so --check's verdict is about
     // freshness and not about a missing file; then prove it wrote nothing.
     const cwd = emptyRoot();
-    runCli(NIGHTLY('render-inbox.mjs'), ['--root', '.'], cwd);
+    runScriptCli(NIGHTLY('render-inbox.mjs'), ['--root', '.'], cwd);
     const before = readFileSync(join(cwd, 'docs', 'nightly-inbox.md'), 'utf8');
-    const res = runCli(NIGHTLY('render-inbox.mjs'), ['--root', '.', '--check'], cwd);
+    const res = runScriptCli(NIGHTLY('render-inbox.mjs'), ['--root', '.', '--check'], cwd);
     expect(res.status, `${res.stdout}${res.stderr}`).toBe(0);
     expect(readFileSync(join(cwd, 'docs', 'nightly-inbox.md'), 'utf8')).toBe(before);
   });
@@ -166,21 +166,21 @@ describe('the reported incident: a query flag must not perform the write', () =>
     // The 2026-08-27 shape: the tracked queue still asserts an item open after
     // the ledger settles it. Nothing else reconciles the two, so --check must.
     const cwd = emptyRoot();
-    runCli(NIGHTLY('render-inbox.mjs'), ['--root', '.'], cwd);
+    runScriptCli(NIGHTLY('render-inbox.mjs'), ['--root', '.'], cwd);
     // Settle a subject the queue is holding, WITHOUT re-rendering.
     writeFileSync(
       join(cwd, '.claude', 'nightly-decisions.json'),
       JSON.stringify({ abc: { disposition: 'settled', answer: 'done', decided_at: '2026-08-27T00:00:00Z' } }),
       'utf8',
     );
-    const res = runCli(NIGHTLY('render-inbox.mjs'), ['--root', '.', '--check'], cwd);
+    const res = runScriptCli(NIGHTLY('render-inbox.mjs'), ['--root', '.', '--check'], cwd);
     expect(res.status).not.toBe(0);
     expect(`${res.stdout}${res.stderr}`).toMatch(/nightly-decisions\.json/);
   });
 
   it('scope-ledger refuses an unknown flag on a verb that writes the ledger', () => {
     const cwd = emptyRoot();
-    const res = runCli(NIGHTLY('scope-ledger.mjs'), ['stamp', 'docs/x.md', '--quiety'], cwd);
+    const res = runScriptCli(NIGHTLY('scope-ledger.mjs'), ['stamp', 'docs/x.md', '--quiety'], cwd);
     expect(res.status).toBe(USAGE_EXIT);
     expect(res.stderr).toMatch(/unrecognized argument/i);
     expect(existsSync(join(cwd, '.audit-tools', 'nightly', 'scope-ledger.json'))).toBe(false);
@@ -188,14 +188,14 @@ describe('the reported incident: a query flag must not perform the write', () =>
 
   it('scope-ledger refuses an unknown VERB rather than defaulting to plan', () => {
     const cwd = emptyRoot();
-    const res = runCli(NIGHTLY('scope-ledger.mjs'), ['plna'], cwd);
+    const res = runScriptCli(NIGHTLY('scope-ledger.mjs'), ['plna'], cwd);
     expect(res.status).not.toBe(0);
     expect(res.stderr).toMatch(/unknown verb/);
   });
 
   it('review-retirement-candidates refuses a bogus flag rather than enumerating', () => {
     const cwd = emptyRoot();
-    const res = runCli(NIGHTLY('review-retirement-candidates.mjs'), ['--retier'], cwd);
+    const res = runScriptCli(NIGHTLY('review-retirement-candidates.mjs'), ['--retier'], cwd);
     expect(res.status).toBe(USAGE_EXIT);
     expect(res.stderr).toMatch(/unrecognized argument/i);
   });
@@ -205,7 +205,7 @@ describe('the reported incident: a query flag must not perform the write', () =>
     // mistyped flag in the tail must not be absorbed into the ledger as text.
     // The guard resolves it by refusing, and `--` carries genuine dash-prose.
     const cwd = emptyRoot();
-    const res = runCli(NIGHTLY('answer.mjs'), ['DOC-1', '--wontfix', '--not worth it'], cwd);
+    const res = runScriptCli(NIGHTLY('answer.mjs'), ['DOC-1', '--wontfix', '--not worth it'], cwd);
     expect(res.status).toBe(USAGE_EXIT);
     expect(res.stderr).toMatch(/unrecognized argument/i);
     expect(existsSync(join(cwd, '.claude', 'nightly-decisions.json'))).toBe(false);
@@ -296,6 +296,7 @@ describe('reach — the guarded set is a ratchet, and the gap is declared', () =
     'scripts/check-generated-artifacts.mjs',
     'scripts/check-guard-reach.mjs',
     'scripts/check-invariant-glossary.mjs',
+    'scripts/check-loader-fragments.mjs',
     'scripts/check-orphan-modules.mjs',
     'scripts/check-philosophy-brief.mjs',
     'scripts/check-readme-sample-report.mjs',
@@ -393,7 +394,7 @@ describe('the guard never breaks a clean invocation', () => {
     const cwd = emptyRoot();
     // No --dry-run: the write IS expected here. This is the green half of the
     // pair — proving the refusal did not disable the script's real work.
-    const res = runCli(NIGHTLY('render-inbox.mjs'), ['--root', '.'], cwd);
+    const res = runScriptCli(NIGHTLY('render-inbox.mjs'), ['--root', '.'], cwd);
     expect(res.status, `${res.stdout}${res.stderr}`).toBe(0);
     expect(existsSync(join(cwd, 'docs', 'nightly-inbox.md'))).toBe(true);
     expect(readFileSync(join(cwd, 'docs', 'nightly-inbox.md'), 'utf8')).toMatch(/Nothing to answer/);
