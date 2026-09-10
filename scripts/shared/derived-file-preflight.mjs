@@ -28,7 +28,7 @@
 // Deliberately NOT covered: the doc-contract test leg (`test:doc-contract`, up
 // to 240s) — including it would make attest cost as much as the gate. That
 // bound is stated in docs/backlog/durable-traps.md.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
 import { isGlob, globToRegExp } from '../check-doc-manifest.mjs';
@@ -118,6 +118,145 @@ export function handoffStateTriggered({ root, staged, git = (args) => gitRun(roo
   return false;
 }
 
+// ── SUBJECT-KEYED pinning legs (T-pins) ──────────────────────────────────────
+// A literal pinned in a test OUTSIDE the change's neighborhood reds only in CI.
+// Measured: a shared expectation literal lived in two files, one was updated,
+// and the second went red shard-by-shard in CI (`a8daeef9` closed that
+// instance, and `tests/helpers/precommitLegExpectations.ts` single-sourced it).
+// The open half — "nothing makes the NEXT duplicated derived literal red
+// locally" — is this.
+//
+// THE MECHANISM. `PINS` maps a SUBJECT path to the test files that assert
+// something ABOUT it. Staging the subject OBLIGES those tests: a bound test that
+// fails blocks the commit even though neither the test nor the pinned literal
+// was staged, which is exactly the case the reach triggers cannot see (the CI
+// red arrived with the pin's owner untouched).
+//
+// WHAT THIS IS NOT. It is not the doc-contract leg, and it deliberately does not
+// reuse it: `test:doc-contract` is a hand-listed trio at the twenty-minute end
+// of the budget, and the legs here are individual fast files run when ONE
+// subject is staged. Nor is it a second copy of the leg set — a pin row names a
+// test file, not a gate or a trigger, so there is no registry fact to derive it
+// from and no second derivation to drift.
+//
+// REQUIRED shape of every bound test. Note that importing the SUBJECT is
+// expected and correct — a pin is a hand-written literal COMPARED against what
+// the subject derives, so the import is the comparison, not a cycle. What a row
+// must not do is depend on a BUILD:
+//   1. the test must not import `dist/` (the package subpath). The pre-commit
+//      gate runs its legs against the staged snapshot, which in a fresh
+//      worktree has no `dist/` — a dist-dependent leg would fail there for a
+//      reason that has nothing to do with the pin;
+//   2. it must assert a literal that mirrors a fact the subject owns. That half
+//      is NOT mechanically checkable here, which is why each row is one line in
+//      `PINS` and gets read; the reconciler holds the row to what it CAN prove.
+//
+// UNCOVERED, stated because a partly-enforced trap is not deletable: the
+// reconciler proves the row RESOLVES and is build-free, never that the bound
+// test still pins something. A row whose test stopped asserting the literal (or
+// asserts it tautologically) stays green here. And nothing detects a duplicated
+// derived literal in a test for a subject that has no `PINS` row at all — the
+// graph can only cover subjects someone declared.
+const PINS = new Map([
+  // `loop-core-gate-parity`, not `loop-core-paths`: the latter imports the
+  // package subpath (`audit-tools/shared`), which resolves through dist/, and
+  // the gate's legs run against a staged snapshot with no dist/ in a fresh
+  // worktree. The parity test reads the TS source by RELATIVE path and the
+  // generated hook sibling, so it is build-free — and it is the stronger pin
+  // anyway: it is the one that asserts the generated list equals the source.
+  ['src/shared/loopCorePaths.ts', ['tests/shared/loop-core-gate-parity.test.ts']],
+  [
+    'scripts/guard-reach-data.mjs',
+    [
+      'tests/shared/precommit-leg-derivation.test.ts',
+      'tests/shared/attest-derived-file-preflight.test.ts',
+      'tests/shared/guard-form-reach.test.ts',
+      'tests/shared/guard-reach-gate.test.ts',
+    ],
+  ],
+  ['src/shared/constitutionalDocPaths.ts', ['tests/shared/doc-manifest-gate.test.ts']],
+]);
+
+/** Repo-relative path with backslashes normalized and any leading `./` dropped. */
+const normPinPath = (p) => String(p).replace(/\\/g, '/').replace(/^\.\//, '');
+
+/** Does `text` import the built package (the `dist/`-backed subpath)? */
+function importsBuiltPackage(text) {
+  const re = /(?:^|\n)\s*import\s+(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]/g;
+  for (const m of text.matchAll(re)) {
+    const spec = m[1];
+    if (/^audit-tools(?:\/|$)/.test(spec) || /^(?:\.\.\/)+dist\//.test(normPinPath(spec))) return true;
+  }
+  return false;
+}
+
+// Reconcile the PIN graph against the tracked tree. Pure — takes the tracked
+// path list and a path→content reader; returns error strings (empty = clean).
+// Wired into `verify:checks` as `check:pin-obligations` so a row that stops
+// meaning anything repairs at CONFIGURATION time. Without it a stale row would
+// land silently, obliging a test forever and reading as coverage that had been
+// checked — the durable-traps rule that a half-enforced trap states its
+// uncovered half applies to the row itself, not only to the mechanism.
+/**
+ * @param {string[]} tracked repo-relative tracked paths
+ * @param {(path: string) => string} readText
+ * @param {Map<string, string[]>} [pins] the graph to reconcile; defaults to the
+ *   shipped `PINS`. The seam exists so a test can exercise the REFUSALS against
+ *   a fixture graph — asserting them against the real one is impossible without
+ *   breaking the real tree, and a refusal path that is never exercised is the
+ *   half-enforced trap this check exists to prevent.
+ * @returns {string[]}
+ */
+export function reconcilePinObligations(tracked, readText, pins = PINS) {
+  const files = new Set(tracked.map(normPinPath));
+  const errors = [];
+  for (const [subject, tests] of pins) {
+    if (!files.has(subject)) {
+      errors.push(`PINS names the subject ${subject}, which is NOT a tracked file — the pin can never fire.`);
+      continue;
+    }
+    if (tests.length === 0) {
+      errors.push(`PINS names ${subject} with NO bound test — an obligation that obliges nothing.`);
+      continue;
+    }
+    for (const test of tests) {
+      if (!files.has(test)) {
+        errors.push(`PINS binds ${subject} to ${test}, which is NOT a tracked file.`);
+        continue;
+      }
+      let text;
+      try {
+        text = readText(test);
+      } catch {
+        errors.push(`PINS binds ${subject} to ${test}, which could not be read.`);
+        continue;
+      }
+      if (importsBuiltPackage(text)) {
+        errors.push(
+          `PINS binds ${subject} to ${test}, but that test imports the BUILT package (audit-tools / ` +
+            `dist/) — the pre-commit gate runs its legs against the staged snapshot, which has no ` +
+            `dist/ in a fresh worktree, so the leg would red for a reason unrelated to the pin.`,
+        );
+      }
+    }
+  }
+  return errors;
+}
+
+// How a caller RUNS a leg. Gate legs are npm scripts (wired, run by name); pin
+// legs are test files (run by path through the one vitest gate). Single-sourced
+// here so the commit gate and the attest preflight cannot disagree about which
+// kind a leg is — and so a future leg kind is one branch in one place.
+/**
+ * @param {{script: string, testPath?: string}} leg
+ * @returns {{kind: 'npm', command: string} | {kind: 'test', command: string}}
+ */
+export function legCommand(leg) {
+  return leg.testPath
+    ? { kind: 'test', command: `node scripts/shared/run-vitest-gate.mjs ${leg.testPath}` }
+    : { kind: 'npm', command: `npm run ${leg.script}` };
+}
+
 // Per-gate custom widening predicates, OR-ed onto the derived reach trigger.
 // A widening may only ADD firings — narrowing belongs in the registry as data.
 const CUSTOM_WIDENING = {
@@ -131,6 +270,19 @@ export function scriptWired(root, script) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether a leg can run in `root`. Gate legs are npm scripts (`scriptWired`);
+ * pin legs are test files judged by their own presence on disk — a fixture repo
+ * has no `tests/` tree, and reporting a pin leg "unwired" there would be a
+ * misleading announcement rather than the honest fail-open it is meant to be.
+ * @param {string} root
+ * @param {{script: string, testPath?: string}} leg
+ */
+export function legRunnable(root, leg) {
+  if (leg.testPath) return existsSync(join(root, leg.testPath));
+  return scriptWired(root, leg.script);
 }
 
 // The first repo-relative .mjs path in an npm-script command string —
@@ -199,7 +351,36 @@ export function buildPreCommitLegs({ guards = GUARDS, reach = REACH, packageScri
       },
     });
   }
-  return [...legs.filter((l) => l.phase === 'main'), ...legs.filter((l) => l.phase === 'final')];
+  // Subject-keyed pin legs ride along in the SAME list and the SAME shape, so
+  // both consumers run them through identical wiring (scriptWired, the
+  // announced unwired-skip, the fix hint) rather than growing a parallel loop.
+  // Their trigger reads the staged set the caller passes to `triggered`, so the
+  // binding is evaluated per call exactly like a reach trigger. Phase 'main':
+  // they are not the broad-corpus check the ordering rule protects.
+  for (const [subject, tests] of PINS) {
+    for (const test of tests) {
+      legs.push({
+        id: `pin:${test}`,
+        // No npm script — the leg IS a test file, run by path. `scriptWired`
+        // would read `package.json` for a script named after the path and
+        // report it unwired, so `testPath` marks it for the runners below.
+        script: test,
+        testPath: test,
+        pinSubject: subject,
+        phase: 'main',
+        fix:
+          `\`${subject}\` is staged and \`${test}\` pins a fact it owns, so that pin is OBLIGED — this ` +
+          `is exactly how a shared expectation literal went red in CI on 2026-08-29 (one copy updated, ` +
+          `the other found shard-by-shard). Update the pin in the same change, or drop the row from ` +
+          `PINS in scripts/shared/derived-file-preflight.mjs if the binding no longer holds.`,
+        triggered: ({ staged }) => (staged ?? []).map(norm).includes(norm(subject)),
+      });
+    }
+  }
+  return [
+    ...legs.filter((l) => l.phase === 'main'),
+    ...legs.filter((l) => l.phase === 'final'),
+  ];
 }
 
 /**
@@ -277,8 +458,9 @@ function readPackageScripts(root) {
  * a repo un-attestable.
  *
  * ── ATTRIBUTABILITY: why a leg result is not always a verdict ────────────────
- * The legs run `npm run <script>` in the real root, so every one of them reads
- * the WORKING TREE. The attestation binds to the STAGED tree (`git write-tree`).
+ * The legs run in the real root (an npm script, or a pinned test file), so every
+ * one of them reads the WORKING TREE. The attestation binds to the STAGED tree
+ * (`git write-tree`).
  * When those two trees differ, a leg's result describes the disk and not the
  * object being bound — and refusing on it is a false red. That is not
  * hypothetical: an UNSTAGED guard-registry row naming a not-yet-tracked test
@@ -305,12 +487,20 @@ function readPackageScripts(root) {
  * tree id, a torn read, a git fault. The mechanism cannot manufacture a false
  * red — which is the defect class it exists to remove.
  *
- * Returns `{ failures, skipped, attributable, stagedTree, worktreeTreeBefore,
- * worktreeTreeAfter, unattributed }`. `failures` is non-empty ONLY when
- * attributable, so the caller's existing refusal is now sound as written. On the
- * abstaining path every executed leg — failed AND passed — lands in
- * `unattributed`, because the false-GREEN half (an unstaged fix masking a broken
- * staged tree) is today completely silent.
+ * Returns `{ failures, skipped, attributable, abstention, stagedTree,
+ * worktreeTreeBefore, worktreeTreeAfter, unattributed }`. `failures` is non-empty
+ * ONLY when attributable, so the caller's existing refusal is now sound as
+ * written. On the abstaining path every executed leg — failed AND passed — lands
+ * in `unattributed`, because the false-GREEN half (an unstaged fix masking a
+ * broken staged tree) is today completely silent.
+ *
+ * `abstention` NAMES the divergence, or is null when the preflight reached a
+ * verdict. "No verdict" and "the checks passed" are otherwise the same shape to
+ * a caller, and the divergent case is the one where the caller most needs to
+ * know which of the two it is holding: a `failures.length === 0` result reads
+ * identically whether every leg judged the bound tree green or no leg judged it
+ * at all. The reason string is built here, where the two tree ids are in hand,
+ * so no caller has to reconstruct which side moved.
  */
 /**
  * @param {{root: string, staged: string[], stagedTree: string, git?: Function}} options
@@ -329,7 +519,11 @@ export function runDerivedFilePreflight({ root, staged, stagedTree, git }) {
   const skipped = [];
   for (const leg of buildPreCommitLegs({ packageScripts: readPackageScripts(root) })) {
     if (!leg.triggered(git ? { root, staged, git } : { root, staged })) continue;
-    if (!scriptWired(root, leg.script)) {
+    // Gate legs are npm scripts, pin legs are test files — the KIND is a
+    // property of the leg, so both the runnability probe and the command come
+    // from the one shared decision (legRunnable / legCommand) rather than from
+    // this caller re-deriving `npm run` for a leg that is not an npm script.
+    if (!legRunnable(root, leg)) {
       skipped.push(`${leg.script} is not wired in this repo — preflight leg SKIPPED (fail-open)`);
       continue;
     }
@@ -337,7 +531,7 @@ export function runDerivedFilePreflight({ root, staged, stagedTree, git }) {
     // advisory the operator wants, and short-circuiting would create a second
     // code path that can drift from the gate's leg set.
     try {
-      execSync(`npm run ${leg.script}`, /** @type {any} */ ({
+      execSync(legCommand(leg).command, /** @type {any} */ ({
         cwd: root,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -361,10 +555,33 @@ export function runDerivedFilePreflight({ root, staged, stagedTree, git }) {
         .filter((e) => e.outcome === 'failed')
         .map(({ id, script, fix, tail }) => ({ id, script, fix, tail }))
     : [];
+  const short = (t) => (typeof t === 'string' && t !== '' ? t.slice(0, 12) : 'unknown');
+  let abstention = null;
+  if (!attributable) {
+    if (worktreeTreeBefore === null || worktreeTreeAfter === null) {
+      abstention = {
+        reason:
+          `the preflight could not read the worktree tree (${worktreeTreeBefore === null ? 'before' : 'after'} ` +
+          `the legs ran, it came back null), so it cannot say whether the legs judged the staged tree`,
+      };
+    } else if (worktreeTreeBefore !== worktreeTreeAfter) {
+      abstention = {
+        reason:
+          `the worktree CHANGED while the legs ran (${short(worktreeTreeBefore)} → ${short(worktreeTreeAfter)}), ` +
+          `so the legs judged at least two different trees and neither is the staged tree (${short(stagedTree)})`,
+      };
+    } else {
+      abstention = {
+        reason:
+          `the worktree is not the staged tree (worktree ${short(worktreeTreeBefore)}, staged ${short(stagedTree)})`,
+      };
+    }
+  }
   return {
     failures,
     skipped,
     attributable,
+    abstention,
     stagedTree,
     worktreeTreeBefore,
     worktreeTreeAfter,

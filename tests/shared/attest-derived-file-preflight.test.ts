@@ -16,6 +16,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   buildPreCommitLegs,
+  legCommand,
+  legRunnable,
+  reconcilePinObligations,
   scriptWired,
 } from "../../scripts/shared/derived-file-preflight.mjs";
 import { worktreeTree } from "../../scripts/shared/worktree-tree.mjs";
@@ -153,6 +156,41 @@ describe("the preflight issues a verdict only about the tree it actually judged"
     });
   }
 
+  // ── the abstention NAMES the divergence ────────────────────────────────────
+  // The entry this closes: "the attest preflight's REFUSAL is now sound, but the
+  // divergent case gets no verdict at all". The half that was still wrong is the
+  // SILENCE — `failures.length === 0` looks identical whether the legs judged the
+  // bound tree green or no leg judged it at all, so a caller holding an
+  // abstention could not tell it apart from a pass. The reason is built where
+  // both tree ids are in hand, and recorded, so the record says which side moved.
+  it("names the divergence and records it — an abstention is not a silent pass", () => {
+    const root = makeFixture({ backlogIndexScript: 'node -e "process.exit(0)"', divergence: "unstaged-edit" });
+    const r = runAttest(root);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+    const record = readAttestation(root);
+    expect(record.preflight.attributable).toBe(false);
+    // Recorded as data, not merely printed: the record outlives the scrollback.
+    expect(typeof record.preflight.abstention).toBe("string");
+    expect(record.preflight.abstention).toMatch(/the worktree is not the staged tree/);
+    // It names BOTH sides by their tree ids, which is what makes it diagnosable.
+    expect(record.preflight.abstention).toContain(String(record.preflight.worktree_tree_before).slice(0, 12));
+    expect(record.preflight.abstention).toContain(String(record.preflight.staged_tree).slice(0, 12));
+    // And the announcement on stderr says the same thing.
+    expect(`${r.stdout}${r.stderr}`).toMatch(/the preflight ABSTAINED — NOT a verdict about the staged tree/);
+    expect(`${r.stdout}${r.stderr}`).toMatch(/the worktree is not the staged tree/);
+  });
+
+  it("records NO abstention when the trees are identical — the field means something", () => {
+    // The negative half: if `abstention` were set unconditionally it would carry
+    // no information, and the case above would pass vacuously.
+    const root = makeFixture({ backlogIndexScript: 'node -e "process.exit(0)"' });
+    const r = runAttest(root);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+    const record = readAttestation(root);
+    expect(record.preflight.attributable).toBe(true);
+    expect(record.preflight.abstention).toBeNull();
+  });
+
   it("records an unattributed PASS too — the false-GREEN half, silent until now", () => {
     const root = makeFixture({
       backlogIndexScript: 'node -e "process.exit(0)"',
@@ -224,14 +262,14 @@ describe("the preflight issues a verdict only about the tree it actually judged"
   });
 });
 
-describe("the leg set is the gate's, derived from the registry — single-sourced", () => {
-  /** The leg ids buildPreCommitLegs would fire for a staged set in `root`. */
-  function triggeredIds(root: string, staged: string[]): string[] {
-    return buildPreCommitLegs({})
-      .filter((leg) => leg.triggered({ root, staged }))
-      .map((leg) => leg.id);
-  }
+/** The leg ids buildPreCommitLegs would fire for a staged set in `root`. */
+function triggeredIds(root: string, staged: string[]): string[] {
+  return buildPreCommitLegs({})
+    .filter((leg) => leg.triggered({ root, staged }))
+    .map((leg) => leg.id);
+}
 
+describe("the leg set is the gate's, derived from the registry — single-sourced", () => {
   it("script wiring is probed per repo (fixture unwired, this repo wired)", () => {
     const root = makeFixture();
     expect(scriptWired(root, "check:guard-reach")).toBe(false);
@@ -285,5 +323,135 @@ describe("the leg set is the gate's, derived from the registry — single-source
       .join("\n");
     const hardcoded = [...code.matchAll(/npm run (check:[A-Za-z0-9:._-]+)/g)].map((m) => m[1]);
     expect(hardcoded).toEqual([]);
+  });
+});
+
+// ── SUBJECT-KEYED pin legs ────────────────────────────────────────────────────
+// The open half of the 2026-08-29 bite: a derived literal is pinned in a test
+// OUTSIDE the change's neighborhood, one copy is updated, and the other is
+// found shard-by-shard in CI. Reach triggers cannot see it (the pin's owner is
+// untouched), so the obligation is declared as data — `PINS` maps a SUBJECT to
+// the tests that assert about it — and the reconciler holds each row to what it
+// CAN prove.
+describe("subject-keyed pin legs oblige the tests that assert about a staged subject", () => {
+  it("the SHIPPED PINS rows all resolve against this tracked tree", () => {
+    // The real graph, not a fixture: a row that stops resolving obliges nothing
+    // and would read as coverage. This is the same reconciliation
+    // `check:pin-obligations` runs in verify:checks, asserted here so the
+    // failure lands in the suite that owns the mechanism.
+    const tracked = spawnSyncHidden("git", ["ls-files"], { cwd: REPO_ROOT, encoding: "utf8" })
+      .stdout.split(/\r?\n/)
+      .filter(Boolean);
+    expect(
+      reconcilePinObligations(tracked, (rel) => readFileSync(join(REPO_ROOT, rel), "utf8")),
+    ).toEqual([]);
+  });
+
+  it("staging a pinned SUBJECT fires its pin leg — the case reach triggers cannot see", () => {
+    const root = makeFixture();
+    // No reach row covers this binding: the subject's own guard row fires
+    // check:guard-reach, and the pin adds the TESTS that assert about it.
+    const ids = triggeredIds(root, ["scripts/guard-reach-data.mjs"]);
+    expect(ids).toContain("pin:tests/shared/precommit-leg-derivation.test.ts");
+    expect(ids).toContain("pin:tests/shared/guard-reach-gate.test.ts");
+    // …and the leg is IDENTIFIED by its subject, so the refusal can name why.
+    const leg = buildPreCommitLegs({}).find(
+      (l) => l.id === "pin:tests/shared/precommit-leg-derivation.test.ts",
+    );
+    expect(leg?.pinSubject).toBe("scripts/guard-reach-data.mjs");
+    expect(leg?.testPath).toBe("tests/shared/precommit-leg-derivation.test.ts");
+  });
+
+  it("staging an UNPINNED file fires no pin leg — the obligation stays narrow", () => {
+    const root = makeFixture();
+    const ids = triggeredIds(root, ["src/audit/orchestrator/advance.ts"]);
+    expect(ids.filter((id) => id.startsWith("pin:"))).toEqual([]);
+  });
+
+  it("a pin leg is run as a TEST FILE, not as an npm script", () => {
+    // The kind is a property of the leg, and both runners (the commit gate and
+    // the attest preflight) ask the one shared decision for it. Deriving
+    // `npm run <path>` here would make the leg silently unwired — and a skipped
+    // leg reads as a pass.
+    const pin = buildPreCommitLegs({}).find((l) => l.id.startsWith("pin:"));
+    expect(pin).toBeDefined();
+    expect(legCommand(pin!)).toEqual({
+      kind: "test",
+      command: `node scripts/shared/run-vitest-gate.mjs ${pin!.testPath}`,
+    });
+    expect(legCommand({ script: "check:guard-reach" })).toEqual({
+      kind: "npm",
+      command: "npm run check:guard-reach",
+    });
+  });
+
+  it("runnability is judged per leg kind — a fixture repo has no tests/ tree", () => {
+    const root = makeFixture();
+    // The npm kind probes package.json; the test kind probes the file on disk.
+    expect(legRunnable(root, { script: "check:guard-reach" })).toBe(false);
+    expect(legRunnable(REPO_ROOT, { script: "check:guard-reach" })).toBe(true);
+    expect(legRunnable(root, { script: "t", testPath: "tests/shared/nope.test.ts" })).toBe(false);
+    expect(
+      legRunnable(REPO_ROOT, { script: "t", testPath: "tests/shared/doc-manifest-gate.test.ts" }),
+    ).toBe(true);
+  });
+});
+
+describe("the PINS reconciler refuses a row that obliges nothing", () => {
+  // Each error text is the FIX HINT the check prints, so the case asserts the
+  // message names the broken half rather than merely a count.
+  // A FIXTURE graph, not the shipped one: the refusals cannot be exercised
+  // against `PINS` without breaking the real tree, and the `pins` seam exists
+  // precisely so these paths are exercised rather than merely written.
+  const SUBJECT = "src/shared/loopCorePaths.ts";
+  const TEST = "tests/shared/loop-core-gate-parity.test.ts";
+  const fixture = new Map([[SUBJECT, [TEST]]]);
+  const clean = (p: string) => (p === TEST ? "import { x } from '../../src/shared/y.js';\n" : "");
+
+  it("a subject that is not tracked is reported — the pin can never fire", () => {
+    const errors = reconcilePinObligations([TEST], () => "export {};\n", fixture);
+    expect(errors.join("\n")).toMatch(/src\/shared\/loopCorePaths\.ts/);
+    expect(errors.join("\n")).toMatch(/NOT a tracked file — the pin can never fire/);
+  });
+
+  it("a subject with NO bound test is reported — an obligation that obliges nothing", () => {
+    const errors = reconcilePinObligations([SUBJECT], () => "", new Map([[SUBJECT, []]]));
+    expect(errors.join("\n")).toMatch(/with NO bound test/);
+  });
+
+  it("a bound test that is not tracked is reported", () => {
+    const errors = reconcilePinObligations([SUBJECT], () => "", fixture);
+    expect(errors.join("\n")).toMatch(/tests\/shared\/loop-core-gate-parity\.test\.ts/);
+    expect(errors.join("\n")).toMatch(/which is NOT a tracked file/);
+  });
+
+  it("a bound test that cannot be read is reported rather than crashing the check", () => {
+    const errors = reconcilePinObligations([SUBJECT, TEST], () => {
+      throw new Error("EACCES");
+    }, fixture);
+    expect(errors.join("\n")).toMatch(/could not be read/);
+  });
+
+  it("a bound test importing the BUILT package is reported — no dist/ in a fresh worktree", () => {
+    // A dist-dependent leg would red for a reason unrelated to the pin, so the
+    // row is refused at CONFIGURATION time instead of at commit time.
+    for (const source of [
+      "import { isLoopCorePath } from 'audit-tools/shared';\n",
+      "import { x } from '../../dist/shared/index.js';\n",
+    ]) {
+      const errors = reconcilePinObligations([SUBJECT, TEST], () => source, fixture);
+      expect(errors.join("\n"), source).toMatch(/imports the BUILT package/);
+    }
+  });
+
+  it("a well-formed row reconciles clean — the errors above are not unconditional", () => {
+    // The negative half: without it every case above would pass vacuously
+    // against a reconciler that reported something for any input.
+    expect(reconcilePinObligations([SUBJECT, TEST], clean, fixture)).toEqual([]);
+    // And a row that is clean EXCEPT for one broken half still reports exactly
+    // that half — the checks are independent, not one early-return.
+    const errors = reconcilePinObligations([SUBJECT, TEST], clean, new Map([[SUBJECT, [TEST, "tests/shared/ghost.test.ts"]]]));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/ghost\.test\.ts/);
   });
 });

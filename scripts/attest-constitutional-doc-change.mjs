@@ -40,6 +40,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONSTITUTIONAL_DOC_PATHS } from './shared/constitutional-doc-paths.generated.mjs';
 import { runDerivedFilePreflight } from './shared/derived-file-preflight.mjs';
+import { resolveNightlyDecisionKeys } from './shared/nightlyDecisionKey.mjs';
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
@@ -55,6 +56,7 @@ function git(args) {
   return { ok: r.status === 0, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
 }
 
+/** @returns {never} */
 function fail(msg) {
   console.error(`attest-constitutional-doc-change: ${msg}`);
   process.exit(1);
@@ -109,6 +111,35 @@ if (ownerDecision.replace(/\s/g, '').length < 20) {
   );
 }
 
+// A decision that rests on a settled nightly question usually cites that
+// question's key, and the record is the artifact that OUTLIVES the work — a
+// typo in it is a dangling reference nobody can later follow. 2026-09-04:
+// `cde41c31c1c6a7f3` was recorded where the ledger held `cde41c31f1c6a7f3`, and
+// only a later `answer.mjs --done` noticed. A citation is mechanically
+// checkable, so it is checked before the record is written. An absent or
+// unreadable ledger FAILS OPEN — announced, never silent (see the module).
+const keyCheck = resolveNightlyDecisionKeys(root, ownerDecision);
+if (!keyCheck.ok) {
+  fail(
+    `the --owner-decision ${keyCheck.reason}. ` +
+      (keyCheck.suggestion
+        ? `Did you mean "${keyCheck.suggestion}"? `
+        : `Look the key up with \`node scripts/nightly/answer.mjs --list\`. `) +
+      `The attestation is the durable audit record, so a key it cites must resolve.`,
+  );
+}
+if (keyCheck.skipped) {
+  console.error(
+    `attest-constitutional-doc-change: note — the nightly-ledger citation check was SKIPPED: ${keyCheck.skipped}. ` +
+      `Any 16-hex key in --owner-decision is UNVERIFIED.`,
+  );
+} else if (keyCheck.keys.length > 0) {
+  console.error(
+    `attest-constitutional-doc-change: resolved ${keyCheck.keys.length} nightly ledger key(s) cited by --owner-decision: ` +
+      keyCheck.keys.join(', '),
+  );
+}
+
 let reviewedBy = (flags.reviewedBy ?? '').trim();
 if (!reviewedBy) {
   const u = git(['config', 'user.name']);
@@ -156,10 +187,11 @@ const preflight = runDerivedFilePreflight({ root, staged, stagedTree: sha });
         'Fix + re-stage, THEN attest — nothing was written, so nothing is wasted.',
     );
   }
-  if (preflight.unattributed.length > 0) {
+  if (preflight.abstention) {
+    console.error(`\n… the preflight ABSTAINED — NOT a verdict about the staged tree: ${preflight.abstention.reason}`);
     for (const u of preflight.unattributed) {
       console.error(
-        `\n… ${u.script} ${u.outcome.toUpperCase()} — NOT a verdict about the staged tree` +
+        `  · ${u.script} ${u.outcome.toUpperCase()} — judged the WORKTREE, not the tree being bound` +
           (u.tail ? `\n${u.tail}` : ''),
       );
     }
@@ -196,6 +228,7 @@ const record = {
     staged_tree: preflight.stagedTree,
     worktree_tree_before: preflight.worktreeTreeBefore,
     worktree_tree_after: preflight.worktreeTreeAfter,
+    abstention: preflight.abstention?.reason ?? null,
     unattributed: preflight.unattributed.map((u) => ({ id: u.id, outcome: u.outcome })),
   },
   git_head: gitHead,

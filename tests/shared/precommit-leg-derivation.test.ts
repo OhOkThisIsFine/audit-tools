@@ -59,7 +59,12 @@ describe('leg-set membership follows the registry preCommit flags', () => {
       .filter((g) => g.kind === 'gate' && g.preCommit !== false && g.preCommit != null)
       .map((g) => g.id)
       .sort();
-    expect(legs().map((l) => l.id).sort()).toEqual(expected);
+    // Pin legs (id `pin:<test>`) are derived from PINS, not from a gate row; every other leg is a gate.
+    const gateLegs = legs().filter((l) => !l.id.startsWith('pin:'));
+    expect(gateLegs.map((l) => l.id).sort()).toEqual(expected);
+    for (const pin of legs().filter((l) => l.id.startsWith('pin:'))) {
+      expect((pin as { testPath?: string }).testPath, `${pin.id} must name its test file`).toBeTruthy();
+    }
   });
 
   it('check:doc-links is phase final and ordered last — the masking fix survives derivation', () => {

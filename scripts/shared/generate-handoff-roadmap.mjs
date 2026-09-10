@@ -564,6 +564,42 @@ function readSources(backlogDir) {
  * location, so the spawned CLI always targets the real repo). Returns the
  * process exit code; `out`/`err` receive what the CLI would print.
  */
+// The EMPTY-QUEUE PROJECTION contract, at the gate that already reads HANDOFF.
+//
+// `renderNightlyQueue([])` emits no visible text at all (an empty block is a
+// valid state and says so in an HTML comment). But the hand-written region can
+// assert the queue's state in prose, and nothing caught that: a hand-written
+// line using the banned word landed through a green pre-commit gate and green
+// targeted suites, and only a voluntary FULL-SUITE run caught it — which is
+// how tag v0.50.0 burned, exactly as the backlog entry predicted.
+//
+// WHY IT BELONGS HERE. The contract's subject is HANDOFF, and this generator is
+// the check HANDOFF's own trigger paths fire; that is the whole of the rule
+// "every live-tree doc contract runs in the gate leg its trigger paths fire".
+// `runGenerator` already assembles the projected text — it is `rendered` — so
+// the case needs no second renderer and no second reading of the tree.
+//
+// The projection is hypothetical BY DESIGN: it answers "if the queue emptied
+// tonight, would HANDOFF still claim otherwise?", which is a question about the
+// FIXED hand-written prose and is exactly the state the full-suite case
+// constructs. It therefore fires regardless of the queue's current size.
+//
+// Scope is the HAND-WRITTEN region: generated lines are DERIVED from the queue,
+// so they legitimately say "nightly" when there is a queue, and the contract is
+// about prose that survives the queue emptying. HTML comments are stripped
+// first — that is where the empty block declares itself.
+/**
+ * @param {string} handoffText
+ * @returns {boolean} whether the hand-written region claims a nightly state
+ */
+export function hasHandwrittenNightlyClaim(handoffText) {
+  const emptyProjection = spliceRoadmap(
+    spliceLiveStatus(handoffText, renderNightlyQueue([])),
+    `${BEGIN_MARKER}\n${END_MARKER}`,
+  );
+  return /\bnightly\b/iu.test(emptyProjection.replace(/<!--[\s\S]*?-->/gu, ""));
+}
+
 export function runGenerator({
   root = repoRoot,
   check = false,
@@ -589,10 +625,23 @@ export function runGenerator({
   // range blanking cannot misfire on broken markers.
   const creep = findHandwrittenCreep(current);
 
+  // The empty-queue projection contract — see hasHandwrittenNightlyClaim.
+  const nightlyClaim = hasHandwrittenNightlyClaim(current);
+
   if (check) {
     // Creep is reported FIRST but never masks staleness — both halves print,
     // so one fix-and-retry lap surfaces every problem.
     if (creep.length > 0) err(creepReport(creep));
+    if (nightlyClaim) {
+      err(
+        `\ndocs/HANDOFF.md's HAND-WRITTEN region claims a nightly state.\n` +
+          `Projected against an EMPTY queue, the hand-written prose still says "nightly" — so the\n` +
+          `moment the queue empties, HANDOFF asserts a state that no longer holds. The generated\n` +
+          `blocks already track the queue on their own; the hand-written region must not restate it.\n` +
+          `Fix: delete or reword the hand-written line naming the nightly queue (regenerating cannot\n` +
+          `help — the line is not generated).\n\n`,
+      );
+    }
     if (current !== rendered) {
       err(
         `\ndocs/HANDOFF.md's generated state is STALE — it no longer matches the nightly queue,\n` +
@@ -602,14 +651,26 @@ export function runGenerator({
       );
       return 1;
     }
-    if (creep.length > 0) return 1;
+    if (creep.length > 0 || nightlyClaim) return 1;
     const roadmapCount = (rendered.match(/^- .+ · \[`/gm) ?? []).length;
     out(
       `✓ handoff-roadmap: generated HANDOFF state matches its sources ` +
         `(${nightlyItems.length} nightly pointer(s), ${roadmapCount} roadmap pointer(s)); ` +
-        `hand-written region carries no changelog creep\n`,
+        `hand-written region carries no changelog creep and no nightly-queue claim\n`,
     );
     return 0;
+  }
+
+  // The write path refuses on the same contract the check path does: a silent
+  // regenerate would leave the offending hand-written line exactly where it was
+  // while making the file otherwise green.
+  if (nightlyClaim) {
+    err(
+      `docs/HANDOFF.md's hand-written region claims a nightly state ` +
+        `(it still says "nightly" when projected against an EMPTY queue).\n` +
+        `refusing to write docs/HANDOFF.md until that line is trimmed — regenerating cannot fix it.\n`,
+    );
+    return 1;
   }
 
   if (creep.length > 0) {

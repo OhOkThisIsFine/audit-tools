@@ -501,6 +501,86 @@ describe('pre-commit gate — constitutional-doc refusal', () => {
     expect(r.stderr).toMatch(/--attester-class is REQUIRED/);
   });
 
+  // The 2026-09-04 bite: `--owner-decision` recorded a 16-hex nightly ledger key
+  // one character off the real one, and the attestation is the DURABLE record —
+  // the typo outlived the work, and only a later `answer.mjs --done` noticed.
+  // The citation is mechanically checkable, so the producer refuses it now.
+  // A ledger in the FIXTURE root (the producer resolves against its own root,
+  // never this repo's), so these cases are hermetic and the expected key is
+  // known. `.claude/` is gitignored here, so `git clean -fd` in resetWorktree
+  // does NOT remove it — the writer owns removing it, or the next case in this
+  // describe would see a ledger it never asked for and the fail-open case
+  // (which needs NO ledger) would refuse instead of passing.
+  // `repo` is assigned in beforeAll, so this must resolve lazily — a
+  // module-scope `join(repo, …)` reads `undefined` at collection time.
+  const ledgerPath = () => join(repo, '.claude', 'nightly-decisions.json');
+  const withLedger = <T,>(ledger: Record<string, unknown>, body: () => T): T => {
+    const path = ledgerPath();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(ledger), 'utf8');
+    try {
+      return body();
+    } finally {
+      rmSync(path, { force: true });
+    }
+  };
+
+  const runConstitutionalProducer = (ownerDecision: string) =>
+    spawnSyncHidden(
+      process.execPath,
+      [
+        join(REPO_ROOT, 'scripts', 'attest-constitutional-doc-change.mjs'),
+        '--attester-class',
+        'agent',
+        '--owner-decision',
+        ownerDecision,
+      ],
+      { cwd: repo, encoding: 'utf8', windowsHide: true, env: { ...process.env, CLAUDE_PROJECT_DIR: repo } },
+    );
+
+  it('the producer REFUSES an --owner-decision citing a nightly key that does not resolve', () => {
+    const realKey = 'abcdef0123456789';
+    // ONE character differs — a transposition would be Hamming-distance 2 and
+    // would correctly earn no "did you mean", which is the behaviour the
+    // sibling case in nightly-decision-key.test.ts pins.
+    const typoKey = 'abcdef0123456780';
+    stage('spec/audit/audit-goals.md', '# audit goals\n\nowner-approved change\n');
+    const r = withLedger({ [realKey]: { disposition: 'settled' } }, () =>
+      runConstitutionalProducer(`owner settled nightly item ${typoKey} and this change implements it`),
+    );
+    expect(r.status, `${r.stdout ?? ''}${r.stderr ?? ''}`).toBe(1);
+    expect(r.stderr).toMatch(/NOT a key in \.claude\/nightly-decisions\.json/);
+    // The nearest real key is named, so the typo case is self-healing.
+    expect(r.stderr).toContain(realKey);
+    resetWorktree();
+  });
+
+  it('the producer ACCEPTS the same citation once the key resolves', () => {
+    const realKey = 'abcdef0123456789';
+    stage('spec/audit/audit-goals.md', '# audit goals\n\nowner-approved change, key corrected\n');
+    const r = withLedger({ [realKey]: { disposition: 'settled' } }, () =>
+      runConstitutionalProducer(`owner settled nightly item ${realKey} and this change implements it`),
+    );
+    expect(r.status, `${r.stdout ?? ''}${r.stderr ?? ''}`).toBe(0);
+    expect(r.stderr).toMatch(/resolved 1 nightly ledger key/);
+    resetWorktree();
+  });
+
+  it('the producer FAILS OPEN, announced, when the root carries no ledger', () => {
+    // Fixture repos and fresh checkouts have no ledger. Refusing there would
+    // make a repo un-attestable; a SILENT pass would make an unverified
+    // citation read exactly like a verified one. So: pass, and say so. No
+    // `withLedger` wrapper — the absence IS the case.
+    stage('spec/audit/audit-goals.md', '# audit goals\n\nno ledger in this fixture\n');
+    const r = runConstitutionalProducer(
+      'owner settled nightly item cde41c31f1c6a7f3 and this change implements it',
+    );
+    expect(r.status, `${r.stdout ?? ''}${r.stderr ?? ''}`).toBe(0);
+    expect(r.stderr).toMatch(/citation check was SKIPPED/);
+    expect(r.stderr).toMatch(/UNVERIFIED/);
+    resetWorktree();
+  });
+
   it('does NOT fire on an ordinary doc — the refusal stays narrow', () => {
     stage('docs/HANDOFF.md', '# handoff\n\nnext steps\n');
     const { code, stderr } = runGate();
@@ -598,6 +678,27 @@ describe('pre-commit gate — the doc-manifest trigger covers every manifest inp
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(0);
+    git(['reset', '--hard', 'HEAD']);
+    git(['clean', '-fd']);
+  });
+
+  it('runs the doc-manifest check for a staged DELETION of a manifest-listed doc', () => {
+    // The 2026-08-26 bite: `a56f274d` deleted GEMINI.md and committed clean,
+    // leaving check:doc-manifest red on HEAD until `2a1faa1f`. The entry left
+    // open WHICH half failed — the reach leg not triggering on a staged
+    // DELETION, or the committing session running no hooks at all. The second
+    // half is structurally closed by P53 (git runs its own hook); this case
+    // pins the first. A deletion is a path in `git diff --cached` like any
+    // other, so a reach trigger keyed on the staged PATH must fire for it —
+    // and the real check reds, because `git ls-files` reads the index and the
+    // deleted doc is no longer in it while its manifest row still lists it
+    // ("Manifest lists doc(s) that no longer exist on disk", pinned above).
+    // What would NOT fire is a trigger that keyed on a file EXISTING on disk.
+    rmSync(join(repo, 'README.md'));
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/check:doc-manifest FAILED/);
     git(['reset', '--hard', 'HEAD']);
     git(['clean', '-fd']);
   });

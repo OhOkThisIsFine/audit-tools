@@ -649,6 +649,71 @@ describe('runGenerator — the creep leg refuses at --check and at write time', 
     }
   });
 
+  // ── the empty-queue projection contract, in THIS leg ───────────────────────
+  // The live-tree case in `describe('the live tree')` above asserts the same
+  // property against the real docs/HANDOFF.md — but it ran only in the FULL
+  // SUITE, so a hand-written live-state edit using the banned word landed
+  // through a green pre-commit gate and green targeted suites, and only a
+  // voluntary full-suite run caught it before push. That is how tag v0.50.0
+  // burned, exactly as the backlog entry predicted. The commit leg for HANDOFF
+  // is `check:handoff-roadmap` (the reach trigger fires on any HANDOFF edit),
+  // so the contract has to be enforced HERE. These cases pin that it is.
+  it('--check refuses a hand-written line claiming a nightly state', () => {
+    const { root } = makeTree('- The nightly queue holds 2 items.');
+    try {
+      const { code, err } = run(root, true);
+      expect(code, err).toBe(1);
+      expect(err).toMatch(/HAND-WRITTEN region claims a nightly state/);
+      expect(err).toMatch(/reword|delete/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('write mode refuses too — regenerating cannot fix a hand-written line', () => {
+    const { root, handoff } = makeTree('- Pending nightly decisions are listed below.');
+    try {
+      const { code, err } = run(root, false);
+      expect(code, err).toBe(1);
+      expect(err).toMatch(/refusing to write/);
+      expect(readFileSync(join(root, 'docs', 'HANDOFF.md'), 'utf8')).toBe(handoff);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('the projection is hypothetical — a NON-empty queue does not license the word', () => {
+    // The whole point is the state the queue EMPTIES into. With two open items
+    // the generated block legitimately says "nightly"; the hand-written claim
+    // is still refused, because it is the prose that survives the emptying.
+    const root = mkdtempSync(join(tmpdir(), 'audit-tools-handoff-nightly-claim-'));
+    try {
+      mkdirSync(join(root, 'docs', 'backlog'), { recursive: true });
+      mkdirSync(join(root, '.audit-tools', 'nightly'), { recursive: true });
+      for (const [file, body] of backlogSources()) {
+        writeFileSync(join(root, 'docs', 'backlog', file), body, 'utf8');
+      }
+      const items = [
+        { id: 'docs-1', title: 'Decide whether to retire the old routing specs', subject_key: 'open-key-1' },
+        { id: 'sol-2', title: 'Validate nightly triage records before counting them', subject_key: 'open-key-2' },
+      ];
+      writeFileSync(
+        join(root, '.audit-tools', 'nightly', 'open-items.json'),
+        JSON.stringify({ items }),
+        'utf8',
+      );
+      const handoff =
+        `# HANDOFF\n\nThere are 2 nightly decisions waiting.\n\n` +
+        `${renderNightlyQueue(items)}\n\n${renderRoadmap(collectRoadmap(backlogSources()))}\n`;
+      writeFileSync(join(root, 'docs', 'HANDOFF.md'), handoff, 'utf8');
+      const { code, err } = run(root, true);
+      expect(code, err).toBe(1);
+      expect(err).toMatch(/HAND-WRITTEN region claims a nightly state/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('creep and staleness are BOTH reported — creep does not mask a stale block', () => {
     const { root, handoff } = makeTree('- 2026-08-12: creep');
     try {

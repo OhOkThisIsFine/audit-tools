@@ -110,7 +110,8 @@ import { isConstitutionalDocPath } from "../../scripts/shared/constitutional-doc
 // path and grep domain the handoff widening depends on ride along inside.)
 import {
   buildPreCommitLegs,
-  scriptWired,
+  legCommand,
+  legRunnable,
 } from "../../scripts/shared/derived-file-preflight.mjs";
 
 // Which git hook invoked us — for the messages only; every leg is the same.
@@ -396,12 +397,16 @@ function runGate(committedPaths) {
   const derivedLegs = buildPreCommitLegs({ packageScripts: rootScripts });
   const runDerivedLeg = (leg) => {
     if (!leg.triggered({ root, staged, git })) return null;
-    if (!scriptWired(root, leg.script)) {
+    // The leg's KIND decides both halves: an npm-script gate leg is probed in
+    // package.json, a subject-keyed pin leg is a test file probed on disk — and
+    // run through the one vitest gate, not as a nonexistent npm script (which
+    // would report the leg unwired, and a SKIPPED leg reads as a pass).
+    if (!legRunnable(root, leg)) {
       noteFailOpen(`${leg.script} is not wired in this repo — ${leg.id} leg SKIPPED`);
       return null;
     }
     try {
-      execSync(`npm run ${leg.script}`, /** @type {any} */ ({
+      execSync(legCommand(leg).command, /** @type {any} */ ({
         cwd: root,
         env: gateChildEnv,
         shell: true,

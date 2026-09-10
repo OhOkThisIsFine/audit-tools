@@ -50,6 +50,7 @@ function git(args) {
   return { ok: r.status === 0, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
 }
 
+/** @returns {never} */
 function fail(msg) {
   console.error(`attest-loop-core-review: ${msg}`);
   process.exit(1);
@@ -63,6 +64,7 @@ function fail(msg) {
 // `npm run check:loop-core-patterns` in verify:checks.
 import { isLoopCorePath } from './loop-core-patterns.mjs';
 import { runDerivedFilePreflight } from '../../scripts/shared/derived-file-preflight.mjs';
+import { resolveNightlyDecisionKeys } from '../../scripts/shared/nightlyDecisionKey.mjs';
 
 // ── parse argv ────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -121,6 +123,38 @@ if (verdict !== 'clear' && verdict !== 'concerns') {
 }
 const override = flags.override != null ? String(flags.override).trim() : null;
 
+// A `--override` is the decision-bearing free text on this side: it is where a
+// review that raises concerns states the owner's call to proceed anyway, and it
+// is recorded durably. An owner call that rests on a settled nightly question
+// usually cites that question's key, and a typo in the record is a dangling
+// reference nobody can later follow (2026-09-04: `cde41c31c1c6a7f3` recorded
+// where the ledger held `cde41c31f1c6a7f3`; only a later `answer.mjs --done`
+// noticed). A citation is mechanically checkable, so it is checked before the
+// record is written. An absent or unreadable ledger FAILS OPEN — announced,
+// never silent (see the module).
+const keyCheck = resolveNightlyDecisionKeys(root, override ?? '');
+if (!keyCheck.ok) {
+  fail(
+    `the --override ${keyCheck.reason}. ` +
+      (keyCheck.suggestion
+        ? `Did you mean "${keyCheck.suggestion}"? `
+        : `Look the key up with \`node scripts/nightly/answer.mjs --list\`. `) +
+      `The attestation is the durable audit record, so a key it cites must resolve.`,
+  );
+}
+if (keyCheck.skipped) {
+  console.error(
+    `attest-loop-core-review: note — the nightly-ledger citation check was SKIPPED: ${keyCheck.skipped}. ` +
+      `Any 16-hex key in --override is UNVERIFIED.`,
+  );
+} else if (keyCheck.keys.length > 0) {
+  console.error(
+    `attest-loop-core-review: resolved ${keyCheck.keys.length} nightly ledger key(s) cited by --override: ` +
+      keyCheck.keys.join(', '),
+  );
+}
+
+
 // reviewed-by defaults to git user.name.
 let reviewedBy = (flags.reviewedBy ?? '').trim();
 if (!reviewedBy) {
@@ -172,10 +206,11 @@ if (preflight.failures.length > 0) {
       'Fix + re-stage, THEN attest — nothing was written, so nothing is wasted.',
   );
 }
-if (preflight.unattributed.length > 0) {
+if (preflight.abstention) {
+  console.error(`\n… the preflight ABSTAINED — NOT a verdict about the staged tree: ${preflight.abstention.reason}`);
   for (const u of preflight.unattributed) {
     console.error(
-      `\n… ${u.script} ${u.outcome.toUpperCase()} — NOT a verdict about the staged tree` +
+      `  · ${u.script} ${u.outcome.toUpperCase()} — judged the WORKTREE, not the tree being bound` +
         (u.tail ? `\n${u.tail}` : ''),
     );
   }
@@ -223,6 +258,7 @@ const record = {
     staged_tree: preflight.stagedTree,
     worktree_tree_before: preflight.worktreeTreeBefore,
     worktree_tree_after: preflight.worktreeTreeAfter,
+    abstention: preflight.abstention?.reason ?? null,
     unattributed: preflight.unattributed.map((u) => ({ id: u.id, outcome: u.outcome })),
   },
   git_head: gitHead,

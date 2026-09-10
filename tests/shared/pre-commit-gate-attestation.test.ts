@@ -4,7 +4,7 @@
 // end-to-end. Fixture + rationale in pre-commit-gate-harness.ts (shared across
 // the pre-commit-gate-*.test.ts family).
 import { test, describe, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   g as gIn,
@@ -13,7 +13,9 @@ import {
   runCommitGate,
   runGate as runGateIn,
   stageLoopCoreFile as stageLoopCoreFileIn,
+  STAGED_LOOP_CORE_PATH,
 } from "./pre-commit-gate-harness.js";
+import { isLoopCorePath } from "../../.claude/hooks/loop-core-patterns.mjs";
 
 let repo: string;
 const g = (...args: string[]) => gIn(repo, ...args);
@@ -22,12 +24,7 @@ const g = (...args: string[]) => gIn(repo, ...args);
 const runGate = (command?: string) => runGateIn(repo, command);
 const runCommit = () => runCommitGate(repo);
 const runAttest = (args: string[]) => runAttestIn(repo, args);
-const stageLoopCoreFile = () => {
-  stageLoopCoreFileIn(repo);
-  mkdirSync(join(repo, "src", "shared", "engine"), { recursive: true });
-  writeFileSync(join(repo, "src", "shared", "engine", "x.ts"), "export const x = 1;\n");
-  g("add", "-A");
-};
+const stageLoopCoreFile = () => stageLoopCoreFileIn(repo);
 
 beforeEach(() => {
   repo = initGateRepo();
@@ -35,6 +32,31 @@ beforeEach(() => {
 
 afterEach(() => {
   if (repo && existsSync(repo)) rmSync(repo, { recursive: true, force: true });
+});
+
+describe("the fixture helper arms what it says it arms", () => {
+  // The helper's own comment says it stages a file "so the loop-core
+  // attestation gate arms". It used to write src/shared/quota/x.ts, which
+  // isLoopCorePath returns FALSE for — the quota substrate was retired and the
+  // pattern list moved on without the fixture. Nothing was broken only because
+  // one consumer wrapped the helper and added a real loop-core path; a NEW test
+  // calling the helper alone would have passed VACUOUSLY against a gate that
+  // never fired. This case is the demanded pin: a future narrowing of the
+  // pattern list reds the FIXTURE instead of silently emptying it.
+  test("stageLoopCoreFile writes a path isLoopCorePath accepts", () => {
+    expect(isLoopCorePath(STAGED_LOOP_CORE_PATH)).toBe(true);
+    stageLoopCoreFile();
+    expect(g("diff", "--cached", "--name-only").stdout).toContain(STAGED_LOOP_CORE_PATH);
+  });
+
+  test("the helper alone is enough to block the commit for a missing attestation", () => {
+    // End-to-end proof the arming is real, not just a matcher assertion: with
+    // no attestation on disk the gate must refuse.
+    stageLoopCoreFile();
+    const r = runCommit();
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("no adversarial-review attestation");
+  });
 });
 
 describe("pre-commit gate: bypass scoping, attester class, destination-keyed concerns", () => {

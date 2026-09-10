@@ -3,11 +3,12 @@
 // pre-commit-gate-*.test.ts family).
 import { test, describe, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   g as gIn,
   initGateRepo,
   runGate as runGateIn,
+  STAGED_LOOP_CORE_PATH,
 } from "./pre-commit-gate-harness.js";
 
 let repo: string;
@@ -104,13 +105,11 @@ describe("pre-commit gate: every commit-creating subcommand is DETECTED (P9)", (
 describe("pre-commit gate: a history-moving verb is judged on its INCOMING paths", () => {
   // Put the loop-core change on a SIDE BRANCH and come back with a clean index,
   // so the only way to see that content is to resolve the ref.
-  // NOT the harness `stageLoopCoreFile` helper: it writes src/shared/quota/x.ts,
-  // which isLoopCorePath returns FALSE for, so it does not arm the gate on its
-  // own (docs/backlog/open-bugs.md). src/shared/engine/ is a real loop-core path.
   function sideBranchWithLoopCore(): string {
     g("checkout", "-q", "-b", "side");
-    mkdirSync(join(repo, "src", "shared", "engine"), { recursive: true });
-    writeFileSync(join(repo, "src", "shared", "engine", "x.ts"), "export const x = 1;\n");
+    const path = join(repo, ...STAGED_LOOP_CORE_PATH.split("/"));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "export const x = 1;\n");
     g("add", "-A");
     g("commit", "-qm", "loop-core change");
     const sha = g("rev-parse", "HEAD").stdout.trim();

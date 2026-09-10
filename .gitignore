@@ -27,6 +27,10 @@ dist/
 # run pre-build and cannot regenerate it themselves.
 !.claude/hooks/loop-core-patterns.mjs
 !.claude/hooks/async-typecheck.mjs
+# PreToolUse: refuse an agent push to main unless a full-suite green stamp binds
+# the pushed tree (scripts/shared/suiteGreenStamp.mjs). Tracked with its siblings
+# above — an untracked hook a settings.json references is a hook main cannot run.
+!.claude/hooks/push-gate.mjs
 !.claude/hooks/friction-stop-gate.mjs
 !.claude/hooks/nightly-surface.mjs
 !.claude/hooks/shell-split.mjs

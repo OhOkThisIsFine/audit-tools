@@ -11,7 +11,7 @@
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -100,10 +100,20 @@ export function runAttest(repo: string, args: string[]) {
   });
 }
 
+// The path `stageLoopCoreFile` writes. Exported so a test can assert the
+// loop-core MATCHER accepts it (see the harness-contract case in
+// pre-commit-gate-attestation.test.ts): the helper used to write
+// `src/shared/quota/x.ts`, which `isLoopCorePath` returns FALSE for — the quota
+// substrate was retired and the pattern list moved on without the fixture. A
+// helper documented as "arms the loop-core gate" that arms nothing makes a new
+// test that calls it PASS VACUOUSLY, against a gate that never fired.
+export const STAGED_LOOP_CORE_PATH = "src/shared/engine/x.ts";
+
 // Stage a loop-core file in the fixture repo so the loop-core attestation gate arms.
 export function stageLoopCoreFile(repo: string) {
-  mkdirSync(join(repo, "src", "shared", "quota"), { recursive: true });
-  writeFileSync(join(repo, "src", "shared", "quota", "x.ts"), "export const x = 1;\n");
+  const path = join(repo, ...STAGED_LOOP_CORE_PATH.split("/"));
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, "export const x = 1;\n");
   g(repo, "add", "-A");
 }
 

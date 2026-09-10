@@ -70,6 +70,12 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-gate.mjs\"",
             "timeout": 300,
             "statusMessage": "Pre-commit gate: npm run check"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/push-gate.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Push gate: full-suite stamp before main"
           }
         ]
       },

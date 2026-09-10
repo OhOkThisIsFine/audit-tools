@@ -254,6 +254,21 @@ export const GUARDS = [
       'all of src/ is what makes the name flow followable at all',
   },
   {
+    id: 'check:pin-obligations',
+    kind: 'gate',
+    impl: 'check:pin-obligations',
+    preCommit: 'reach',
+    fix:
+      'a PINS row in scripts/shared/derived-file-preflight.mjs names a subject or a test that is not ' +
+      'tracked, or a test that imports the BUILT package (no dist/ in a fresh worktree) — point the ' +
+      'row at the right tracked file, or delete it. This check is what keeps a subject-keyed pin leg ' +
+      'from silently obliging nothing',
+    note:
+      'configuration-time reconciliation of the PINS graph: every row resolves against the tracked ' +
+      'tree and is build-free. It does NOT prove a bound test still asserts the literal — that is a ' +
+      'reading, not a mechanism, and it is stated in the check header',
+  },
+  {
     id: 'check:doc-manifest',
     kind: 'gate',
     impl: 'check:doc-manifest',
@@ -262,6 +277,14 @@ export const GUARDS = [
       'register the staged doc (type + reason to exist) in scripts/doc-manifest-data.mjs and re-render ' +
       'with `node scripts/check-doc-manifest.mjs --write`, or delete the doc — this is the check that ' +
       'fails RELEASE CI and burns a release tag',
+    note:
+      'the reach trigger keys on the staged PATH SET (`git diff --cached --name-only`), so a staged ' +
+      'DELETION of a manifest-listed doc fires it exactly as an edit does — the half left open by the ' +
+      '2026-08-26 bite (`a56f274d` deleted GEMINI.md and committed clean). Pinned by a contract test ' +
+      "in tests/shared/doc-manifest-gate.test.ts ('runs the doc-manifest check for a staged DELETION " +
+      "of a manifest-listed doc'), whose control case proves the trigger is what fires. The other " +
+      'half the entry left open — the committing session running no hooks at all — is closed ' +
+      'structurally by P53: git runs its own hook for its own commits',
   },
   {
     id: 'check:doc-links',
@@ -839,6 +862,31 @@ export const GUARDS = [
         sample: 'Landed the fix.\n\nWant me to also split the backlog?', expect: 'ends in a question to the owner' },
     ],
   },
+  {
+    id: 'push-gate',
+    kind: 'hook',
+    impl: '.claude/hooks/push-gate.mjs',
+    forms: [
+      // A refspec that NAMES the protected branch decides the case without
+      // reading HEAD, so the fixture needs no branch state.
+      { name: 'agent push to main with no suite-green stamp', drive: 'hook', hook: '.claude/hooks/push-gate.mjs',
+        payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
+        sample: 'git push origin main', expect: 'push to a PROTECTED branch',
+        rootGit: { files: { 'package.json': '{"name":"x","private":true}\n' } } },
+      { name: 'relocated push, announced not judged', drive: 'hook', hook: '.claude/hooks/push-gate.mjs',
+        payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
+        sample: 'cd /tmp/other && git push origin main', expect: 'relocated push',
+        rootGit: { files: { 'package.json': '{"name":"x","private":true}\n' } } },
+    ],
+    note:
+      'PreToolUse on Bash|PowerShell. Refuses an AGENT push that would put a PROTECTED branch (main/master) ' +
+      'on the remote unless suiteGreenVerdict (scripts/shared/suiteGreenStamp.mjs) certifies the tree being ' +
+      'pushed. The gap it closes: every narrow gate passes on a touched area, and a CROSS-AREA invariant is ' +
+      'reachable only by the full suite — which nothing local runs before a push (two commits shipped red on ' +
+      '2026-08-27 this way). The stamp is minted by the one gate runner on a FULL run, so the only way to ' +
+      'satisfy this hook is to have actually run the suite on this content. Its uncovered halves are ' +
+      'stated on its REACH row.',
+  },
   { id: 'async-typecheck', kind: 'hook', impl: '.claude/hooks/async-typecheck.mjs' },
   { id: 'friction-stop-gate', kind: 'hook', impl: '.claude/hooks/friction-stop-gate.mjs' },
   { id: 'closeout-challenge-gate', kind: 'hook', impl: '.claude/hooks/closeout-challenge-gate.mjs' },
@@ -860,6 +908,16 @@ export const GUARDS = [
     note:
       'pins the rule matching semantics of check:shared-primitives on synthetic content; its forms are ' +
       'the gate\'s own (declared on the check:shared-primitives row), driven through the same scanFile export',
+  },
+  {
+    id: 'push-gate-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/push-gate.test.ts',
+    note:
+      'spawns the REAL push-gate hook with a PreToolUse payload against a throwaway repo, and mints its ' +
+      'stamp through the REAL writeSuiteGreenStamp — so the refusal case, the bound case, the STALE case ' +
+      '(a stamp covering different content) and the announced relocated-push fail-open are all pinned ' +
+      'against the shipped mechanism rather than a hand-rolled stamp file',
   },
   {
     id: 'suite-green-stamp-test',
@@ -1637,6 +1695,9 @@ export const REACH = [
       'precommit-leg-derivation-test',
       'lane-dispatch-driver-test',
       'check:scripts',
+      // Reads the PINS graph declared beside it, and reconciles it against the
+      // tracked tree.
+      'check:pin-obligations',
     ],
     uncovered:
       'release-and-publish, update-languages, triage-backlog, rebaseline-flakes and ' +
@@ -1872,7 +1933,13 @@ export const REACH = [
     area: 'HANDOFF',
     files: ['docs/HANDOFF.md'],
     guardedBy: ['check:handoff-roadmap'],
-    note: 'generated-block parity PLUS hand-written-region creep heuristics over the handoff itself; its queue/ledger sources have their own rows below',
+    note:
+      'generated-block parity PLUS hand-written-region creep heuristics AND the empty-queue ' +
+      'projection contract (`hasHandwrittenNightlyClaim`) over the handoff itself — the projection ' +
+      'case used to be reachable ONLY from the full suite (`tests/shared/handoff-roadmap.test.ts`, ' +
+      "describe 'the live tree'), which is how a hand-written live-state edit using the banned word " +
+      'landed through a green pre-commit gate and burned tag v0.50.0. It now runs in this leg, ' +
+      'which fires on any HANDOFF edit; its queue/ledger sources have their own rows below',
   },
   {
     area: 'relative-link lift',
