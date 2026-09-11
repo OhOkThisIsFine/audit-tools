@@ -66,6 +66,7 @@ async function buildCtx(): Promise<RemediateCtx> {
 
 const EMPTY_SNAPSHOT: PreIntakeSnapshot = {
   existingCheckpoint: undefined,
+  rejectedCheckpointFields: [],
   resumeAck: undefined,
   entryState: null,
   suppliedInputUnchanged: false,

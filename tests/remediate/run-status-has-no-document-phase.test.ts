@@ -143,7 +143,13 @@ describe("planning transitions directly to implementing", () => {
     );
     await writeFile(
       join(ARTIFACTS_DIR, "intent_checkpoint.json"),
-      JSON.stringify({ acknowledged: true }),
+      JSON.stringify({
+        schema_version: "intent-checkpoint/v1",
+        confirmed_at: new Date().toISOString(),
+        confirmed_by: "host",
+        scope_summary: "Test scope",
+        intent_summary: "Test intent",
+      }),
       "utf8",
     );
     await writeFile(

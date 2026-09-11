@@ -5,9 +5,10 @@
  * State written by an older version of the tool is read back under the CURRENT
  * version's semantics. A reader that never compares the stamped version (spelled
  * `schema_version` on artifacts, `contract_version` on contracts — both are read
- * here) silently reinterprets old bytes as new-shape data. Stamping a version on
- * WRITE and not comparing it on READ is therefore not "versioned" at all — it is
- * an unchecked cast wearing a version field.
+ * here, at the top level or on the `payload` of a content-hash envelope) silently
+ * reinterprets old bytes as new-shape data. Stamping a version on WRITE and not
+ * comparing it on READ is therefore not "versioned" at all — it is an unchecked
+ * cast wearing a version field.
  *
  * There are exactly two correct policies, and which one applies is a property
  * of the STATE, not of the module:
@@ -62,9 +63,27 @@ export class SchemaVersionMismatchError extends Error {
 // always-discard is indistinguishable from a working guard in review, so the
 // helper resolves the key rather than making each call site remember it.
 // `schema_version` wins when a payload carries both.
+//
+// TWO DEPTHS are recognized for the same reason, on the contract-pipeline's own
+// file family. Every artifact the pipeline writes to disk is a content-hash
+// ENVELOPE (`{artifact_name, content_hash, dependency_hashes, payload}`) whose
+// `payload` is the contract, and the contract's version is `contract_version` —
+// one level DOWN. A helper that read only the top level therefore returned
+// `undefined` for every envelope, i.e. treated each one as stale and reported a
+// version problem that did not exist. The payload arm applies only when the top
+// level carried NO version at all: an envelope that stamps its own version is
+// judged by that, never by whatever its payload happens to say.
 function stampedVersion(value: object): unknown {
   const record = value as Record<string, unknown>;
-  return "schema_version" in record ? record.schema_version : record.contract_version;
+  if ("schema_version" in record) return record.schema_version;
+  if ("contract_version" in record) return record.contract_version;
+  const payload = record.payload;
+  if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+    const inner = payload as Record<string, unknown>;
+    if ("schema_version" in inner) return inner.schema_version;
+    if ("contract_version" in inner) return inner.contract_version;
+  }
+  return undefined;
 }
 
 /**

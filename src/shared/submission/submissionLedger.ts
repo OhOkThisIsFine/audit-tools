@@ -155,6 +155,26 @@ export interface SubmissionLedgerEvent<
    * with no round of their own.
    */
   readonly round_id?: string;
+  /**
+   * The landed commit an `accepted_via_recovery` row is ABOUT, when the emitter
+   * has one — the structured twin of the fact the message narrates.
+   *
+   * Why a field rather than "read the sha out of the message". A recovery mark's
+   * identity is (run, submission, LANDED COMMIT): an item re-opened and later
+   * re-accepted from a DIFFERENT landing is a different relaxed acceptance and
+   * earns its own record, while a retry of the SAME landing is a duplicate. The
+   * writer matched that fact by searching the free-text `message` for a 40-hex
+   * token it had itself interpolated — a value that cannot be read back out of
+   * prose, because prose is exactly what a later message rewording changes. An
+   * event carries its own identity as data.
+   *
+   * Written by the remediation ingest's recovery-acceptance path. Absent on
+   * every other kind, and absent on rows written before this field existed —
+   * a reader that needs the identity treats a missing value as "not this
+   * commit", which is the same answer an unrelated landing gives (see
+   * `recoveryMarkMatches`).
+   */
+  readonly landed_commit?: string;
   /** ISO-8601. A faithful event record is allowed to say when. */
   readonly recorded_at: string;
 }
@@ -162,6 +182,110 @@ export interface SubmissionLedgerEvent<
 /** `<artifactsDir>/submissions/submission-ledger.jsonl`. */
 export function submissionLedgerPath(artifactsDir: string): string {
   return join(submissionsDir(artifactsDir), "submission-ledger.jsonl");
+}
+
+/**
+ * The ONE identity question for a recovery mark: is this already-recorded
+ * `accepted_via_recovery` row the mark about THIS (run, submission, landed
+ * commit)?
+ *
+ * A recovery mark's identity is (run, submission, landed commit) rather than
+ * just (run, submission): an item re-opened and later re-accepted from a
+ * DIFFERENT landing is a different relaxed acceptance and earns its own record,
+ * while a retry of the SAME landing is a duplicate. The writer used to answer
+ * this by searching the free-text `message` for a sha it had itself
+ * interpolated — see {@link SubmissionLedgerEvent.landed_commit} for why the
+ * fact belongs in a field.
+ *
+ * An event with no `landed_commit` never matches. That is the whole read policy
+ * for rows written before the field existed: an old row's absence is not
+ * evidence of a different landing, and the two possible readings ("same commit"
+ * / "no commit recorded") have opposite consequences — matching would suppress
+ * a mark the run genuinely owed, so the fail-safe direction is NOT to match.
+ * The cost is one duplicate row on a re-entry that spans the upgrade, which is
+ * a faithful record of two acceptances rather than a lost one.
+ */
+export function recoveryMarkMatches(
+  event: SubmissionLedgerEvent,
+  submissionId: string,
+  landedCommit: string,
+): boolean {
+  return (
+    event.kind === "accepted_via_recovery" &&
+    event.submission_id === submissionId &&
+    event.landed_commit !== undefined &&
+    event.landed_commit === landedCommit
+  );
+}
+
+// ── The event schema ──────────────────────────────────────────────────────────
+
+/**
+ * The fields every event carries whatever its kind. `contract_version` is NOT
+ * here: it is the version gate's own key, and `discardOnSchemaVersionMismatch`
+ * owns that question (an event that fails it is classified
+ * `schema_version_mismatch`, never `shape_invalid` — the two are different
+ * facts about a line and the drop reason says which).
+ */
+const SUBMISSION_LEDGER_EVENT_REQUIRED_FIELDS = [
+  "run_id",
+  "submission_id",
+  "lane",
+  "recorded_at",
+] as const;
+
+const SUBMISSION_LEDGER_EVENT_STRING_FIELDS = [
+  ...SUBMISSION_LEDGER_EVENT_REQUIRED_FIELDS,
+  "issue_code",
+  "message",
+  "round_id",
+  "landed_commit",
+  "outcome",
+] as const;
+
+/**
+ * Validate a parsed line as a ledger event, past the version gate.
+ *
+ * Why this is a schema and not a cast. The reader is a REPORTING surface whose
+ * callers read `kind` to decide whether a lane is outstanding, and read
+ * `submission_id` to attribute a refusal — so a line that parsed as JSON but is
+ * not an event was being reinterpreted under THIS contract's field semantics.
+ * A `kind` outside the vocabulary flowed into every `Record<SubmissionEventKind,
+ * …>` lookup as an absent key; an event with no `submission_id` joined no
+ * caller's map; and both read exactly like a ledger that had never recorded
+ * anything, which is the one thing the ledger exists to prevent.
+ *
+ * Deliberately structural and hand-written rather than a zod schema: this
+ * module is in `src/shared`'s submission area and already owns its own event
+ * vocabulary as a const tuple, so the membership test derives from
+ * {@link SUBMISSION_EVENT_KINDS} (one home, no second list) exactly as the
+ * version gate derives from {@link SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION}.
+ */
+export function validateSubmissionLedgerEvent(
+  value: unknown,
+): { readonly ok: true } | { readonly ok: false; readonly reason: string } {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, reason: "the line is not a JSON object" };
+  }
+  const record = value as Record<string, unknown>;
+  for (const field of SUBMISSION_LEDGER_EVENT_REQUIRED_FIELDS) {
+    if (typeof record[field] !== "string" || (record[field] as string).length === 0) {
+      return { ok: false, reason: `"${field}" is missing or not a non-empty string` };
+    }
+  }
+  for (const field of SUBMISSION_LEDGER_EVENT_STRING_FIELDS) {
+    const fieldValue = record[field];
+    if (fieldValue !== undefined && typeof fieldValue !== "string") {
+      return { ok: false, reason: `"${field}" is present but is not a string` };
+    }
+  }
+  if (!(SUBMISSION_EVENT_KINDS as readonly string[]).includes(record["kind"] as string)) {
+    return {
+      ok: false,
+      reason: `"kind" is not one of: ${SUBMISSION_EVENT_KINDS.join(", ")}`,
+    };
+  }
+  return { ok: true };
 }
 
 // Sibling lock serializing every append. Two concurrent appends used to be two
@@ -198,13 +322,28 @@ export type SubmissionLedgerDropReason =
   /** The line is not JSON — a torn write, typically a crash mid-append. */
   | "unparsable"
   /** The line parsed but carries another release's contract version. */
-  | "schema_version_mismatch";
+  | "schema_version_mismatch"
+  /**
+   * The line parsed, IS the current version, and is still not an event — an
+   * unknown `kind`, a missing `submission_id`, a field of the wrong type. A
+   * distinct reason from `schema_version_mismatch` because it is a distinct
+   * fact: the version gate says "another release wrote this", the shape gate
+   * says "this release's writer emitted something this release cannot read".
+   */
+  | "shape_invalid";
 
 /** One line the reader skipped, with enough to find it in the file. */
 export interface SubmissionLedgerDrop {
   /** 1-based physical line number in the ledger file. */
   readonly line: number;
   readonly reason: SubmissionLedgerDropReason;
+  /**
+   * Why the shape gate refused it, for `shape_invalid` lines only. The line
+   * number alone sends a reader to the right place but says nothing about what
+   * is wrong there; the discriminated union keeps this off the other reasons
+   * rather than leaving an always-undefined field for them to ignore.
+   */
+  readonly detail?: string;
 }
 
 /**
@@ -271,6 +410,10 @@ function ledgerRead(
  * line now lands in `dropped` with its 1-based line number and a classified
  * reason, so no caller can be handed a ledger cleaner than the run actually
  * was.
+ *
+ * A current-version line is then parsed against the event schema and skipped
+ * (`shape_invalid`) when it is not an event at all — see
+ * {@link validateSubmissionLedgerEvent}.
  */
 export async function readSubmissionLedger(
   artifactsDir: string,
@@ -313,6 +456,18 @@ export async function readSubmissionLedger(
     );
     if (event === undefined) {
       dropped.push({ line: lineNumber, reason: "schema_version_mismatch" });
+      continue;
+    }
+    // Past the version gate the event is still untrusted: the version says
+    // WHICH contract wrote it, never that the bytes satisfy it. See
+    // `validateSubmissionLedgerEvent` for why a cast here was unsound.
+    const shape = validateSubmissionLedgerEvent(event);
+    if (!shape.ok) {
+      dropped.push({
+        line: lineNumber,
+        reason: "shape_invalid",
+        detail: shape.reason,
+      });
       continue;
     }
     events.push(event);

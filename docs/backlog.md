@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 234 entr(y/ies) indexed.
+> and at commit). 232 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -92,16 +92,15 @@
 - `open-bugs.md:742` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
 - `open-bugs.md:752` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
 - `open-bugs.md:759` — A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run, medium).
-- `open-bugs.md:768` — Three persisted contracts are read back without the schema that defines them (2026-08-27, from the philosophy audit, medium).
-- `open-bugs.md:770` — The pre-split design-review lane is still polled beside the two current judgment types (2026-08-27, from the philosophy audit, medium).
-- `open-bugs.md:772` — The N-R13 status invariant asserts its own literal, and the status vocabulary exists in three unlinked copies (2026-08-27, low-medium).
-- `open-bugs.md:788` — The dispatch boundary strips every per-node field the contract pipeline writes onto a promoted finding but `FindingSchema` does not declare (2026-08-27, medium).
-- `open-bugs.md:808` — The two evidence-bearing terminal dispositions have a producer but no input — `verified_already_fixed` and `refuted` still never reach a real run (2026-08-27, restated 2026-09-11, medium, from [`reviews/wave2-dispositions-2026-08-20.md`](./reviews/wave2-dispositions-2026-08-20.md)).
-- `open-bugs.md:827` — The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](./reviews/closeout-generation-failure-2026-08-26.md)).
-- `open-bugs.md:829` — An analysis record can identify work and reach no work queue, and every gate stays green while it happens (2026-08-27, medium, from the orphan-routing lap).
-- `open-bugs.md:850` — The masked-exit guard keyed on TEST RUNNERS, not on whether the exit status is load-bearing — NARROWED to its curated-list half (2026-08-27, narrowed 2026-08-29, medium, friction: tool_should_decide).
-- `open-bugs.md:867` — An agent push to `main` is not gated on a full-suite stamp, and the "touched area's suite" rule cannot see a cross-area invariant (2026-09-03, medium, friction: tool_should_decide).
-- `open-bugs.md:879` — `type-coverage`'s acquired-analyzer spawn carries a deadline ten times longer than the callers actually waiting on it, and an orphaned npm lock makes every later spawn re-pay the same wait (2026-09-04, medium, friction: tool_should_decide).
+- `open-bugs.md:769` — The pre-split design-review lane is still polled beside the two current judgment types (2026-08-27, from the philosophy audit, medium).
+- `open-bugs.md:771` — The N-R13 status invariant asserts its own literal, and the status vocabulary exists in three unlinked copies (2026-08-27, low-medium).
+- `open-bugs.md:787` — The dispatch boundary strips every per-node field the contract pipeline writes onto a promoted finding but `FindingSchema` does not declare (2026-08-27, medium).
+- `open-bugs.md:807` — The two evidence-bearing terminal dispositions have a producer but no input — `verified_already_fixed` and `refuted` still never reach a real run (2026-08-27, restated 2026-09-11, medium, from [`reviews/wave2-dispositions-2026-08-20.md`](./reviews/wave2-dispositions-2026-08-20.md)).
+- `open-bugs.md:826` — The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](./reviews/closeout-generation-failure-2026-08-26.md)).
+- `open-bugs.md:828` — An analysis record can identify work and reach no work queue, and every gate stays green while it happens (2026-08-27, medium, from the orphan-routing lap).
+- `open-bugs.md:849` — The masked-exit guard keyed on TEST RUNNERS, not on whether the exit status is load-bearing — NARROWED to its curated-list half (2026-08-27, narrowed 2026-08-29, medium, friction: tool_should_decide).
+- `open-bugs.md:866` — An agent push to `main` is not gated on a full-suite stamp, and the "touched area's suite" rule cannot see a cross-area invariant (2026-09-03, medium, friction: tool_should_decide).
+- `open-bugs.md:878` — `type-coverage`'s acquired-analyzer spawn carries a deadline ten times longer than the callers actually waiting on it, and an orphaned npm lock makes every later spawn re-pay the same wait (2026-09-04, medium, friction: tool_should_decide).
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
@@ -147,21 +146,20 @@
 - `minor-bugs.md:327` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
 - `minor-bugs.md:332` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
 - `minor-bugs.md:334` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `minor-bugs.md:339` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
-- `minor-bugs.md:350` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
-- `minor-bugs.md:369` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
-- `minor-bugs.md:382` — A dated measurement sits inside durable routine prose (2026-08-23, low).
-- `minor-bugs.md:390` — The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction: hermeticity).
-- `minor-bugs.md:412` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
-- `minor-bugs.md:420` — The release-gate gloss table is required by a gate and rendered by no consumer (2026-08-27, from the philosophy audit, low).
-- `minor-bugs.md:422` — HANDOFF's hand-written region and the closeout both re-narrate state the repository already holds (2026-08-27, from the philosophy audit, low).
-- `minor-bugs.md:424` — Three governance vocabularies are copied per consumer instead of shared (2026-08-27, from the philosophy audit, low).
-- `minor-bugs.md:426` — `check:memory-citations` gates two of the three citation directions, and its guard-reach row names the wrong uncovered half (2026-08-27, low, friction: tool_should_decide).
-- `minor-bugs.md:448` — `buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low, friction: tool_should_decide).
-- `minor-bugs.md:459` — The repo owns its green mechanism but exposes no way to ASK it, so a lap re-derives the answer by hand (2026-08-30, low, friction: tool_should_decide).
-- `minor-bugs.md:468` — `refuseSuppliedVerificationStatus` cannot fire on the production judge path (2026-09-03, low).
-- `minor-bugs.md:479` — The runtime-artifact-name generator's source list omits two modules that mint runtime names (2026-09-03, low).
-- `minor-bugs.md:491` — The leg-1 scope ledger never prunes entries for deleted documents (2026-09-11, low).
+- `minor-bugs.md:339` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
+- `minor-bugs.md:358` — On remediate the fully-green close walks a different friction record than the run wrote (2026-08-23, low).
+- `minor-bugs.md:371` — A dated measurement sits inside durable routine prose (2026-08-23, low).
+- `minor-bugs.md:379` — The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction: hermeticity).
+- `minor-bugs.md:401` — The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).
+- `minor-bugs.md:409` — The release-gate gloss table is required by a gate and rendered by no consumer (2026-08-27, from the philosophy audit, low).
+- `minor-bugs.md:411` — HANDOFF's hand-written region and the closeout both re-narrate state the repository already holds (2026-08-27, from the philosophy audit, low).
+- `minor-bugs.md:413` — Three governance vocabularies are copied per consumer instead of shared (2026-08-27, from the philosophy audit, low).
+- `minor-bugs.md:415` — `check:memory-citations` gates two of the three citation directions, and its guard-reach row names the wrong uncovered half (2026-08-27, low, friction: tool_should_decide).
+- `minor-bugs.md:437` — `buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low, friction: tool_should_decide).
+- `minor-bugs.md:448` — The repo owns its green mechanism but exposes no way to ASK it, so a lap re-derives the answer by hand (2026-08-30, low, friction: tool_should_decide).
+- `minor-bugs.md:457` — `refuseSuppliedVerificationStatus` cannot fire on the production judge path (2026-09-03, low).
+- `minor-bugs.md:468` — The runtime-artifact-name generator's source list omits two modules that mint runtime names (2026-09-03, low).
+- `minor-bugs.md:480` — The leg-1 scope ledger never prunes entries for deleted documents (2026-09-11, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

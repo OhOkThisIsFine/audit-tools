@@ -94,6 +94,52 @@ describe("schema-version read policy pair", () => {
     ).toBeUndefined();
   });
 
+  // The contract-pipeline's own file family: every artifact on disk is a
+  // content-hash ENVELOPE whose `payload` is the contract, and the contract's
+  // version key is one level DOWN. A helper that read only the top level
+  // returned `undefined` for every envelope — reporting a version mismatch on
+  // files that were current, which is the always-discard failure the two
+  // spellings above exist to prevent, one level deeper.
+  it("reads a version stamped on the payload of a content-hash envelope", () => {
+    const envelope = {
+      artifact_name: "goal_spec",
+      content_hash: "abc123",
+      dependency_hashes: {},
+      payload: { contract_version: "thing/v1", objective: "x" },
+    };
+    expect(discardOnSchemaVersionMismatch(envelope, "thing/v1")).toBe(envelope);
+    expect(discardOnSchemaVersionMismatch(envelope, "thing/v2")).toBeUndefined();
+    expect(() =>
+      throwOnSchemaVersionMismatch(envelope, "goal_spec.json", "thing/v1"),
+    ).not.toThrow();
+    expect(() =>
+      throwOnSchemaVersionMismatch(envelope, "goal_spec.json", "thing/v2"),
+    ).toThrow(SchemaVersionMismatchError);
+  });
+
+  it("an envelope's OWN version wins over its payload's", () => {
+    // An envelope that stamps a version of its own is judged by that one; the
+    // payload arm is the fallback for a payload that carries no envelope, never
+    // an override.
+    const envelope = {
+      contract_version: "envelope/v2",
+      payload: { contract_version: "thing/v1" },
+    };
+    expect(discardOnSchemaVersionMismatch(envelope, "envelope/v2")).toBeTruthy();
+    expect(discardOnSchemaVersionMismatch(envelope, "thing/v1")).toBeUndefined();
+  });
+
+  it("a payload that is not an object carries no version", () => {
+    // The arm narrows to a plain object; an array or a primitive payload is
+    // unstamped, exactly as a non-object top level is.
+    expect(
+      discardOnSchemaVersionMismatch({ payload: ["thing/v1"] }, "thing/v1"),
+    ).toBeUndefined();
+    expect(
+      discardOnSchemaVersionMismatch({ payload: "thing/v1" }, "thing/v1"),
+    ).toBeUndefined();
+  });
+
   it("discardOnSchemaVersionMismatch passes an absent payload through as absent", () => {
     expect(discardOnSchemaVersionMismatch(undefined, "thing/v1")).toBeUndefined();
     expect(discardOnSchemaVersionMismatch(null, "thing/v1")).toBeUndefined();

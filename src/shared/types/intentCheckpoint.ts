@@ -2,6 +2,7 @@ import { z } from "zod";
 import { FileDispositionStatusSchema } from "./disposition.js";
 import { CeilingSchema } from "./charter.js";
 import { CLOSING_ACTIONS } from "./closingActions.js";
+import { readOptionalJsonFile } from "../io/json.js";
 
 /**
  * The accepted scope and intent for a run, confirmed by the host before
@@ -350,4 +351,196 @@ export function resolveRunBoundDesignReview(
 ): DesignReviewSettings | undefined {
   const binding = resolveDesignReviewBinding(checkpoint);
   return binding.kind === "bound" ? binding.settings : undefined;
+}
+
+// ── The validated read ────────────────────────────────────────────────────────
+
+/**
+ * A checkpoint whose bytes did NOT satisfy {@link IntentCheckpointSchema}, with
+ * the zod issues rendered as paths.
+ *
+ * A refusal is a THROW rather than `undefined` because "the file is not a
+ * checkpoint" and "there is no file" are different facts with different
+ * remedies: absent means the host has not confirmed yet (a normal fresh-run
+ * state), while present-but-unparseable means a write went wrong and the run's
+ * confirmed scope is not what the file appears to say. Returning `undefined`
+ * for both would let a corrupted checkpoint silently re-enter the pre-confirm
+ * path — the run would re-ask, and an operator would never learn that a
+ * confirmation they made had been discarded.
+ */
+export class IntentCheckpointInvalidError extends Error {
+  readonly path: string;
+  readonly issues: readonly string[];
+  constructor(path: string, issues: readonly string[]) {
+    super(`${path} is not a valid intent checkpoint: ${issues.join("; ")}`);
+    this.name = "IntentCheckpointInvalidError";
+    this.path = path;
+    this.issues = issues;
+  }
+}
+
+/**
+ * One top-level key the schema refused, with the value as it was WRITTEN.
+ *
+ * The value is carried here rather than left on the returned checkpoint because
+ * the returned checkpoint must satisfy {@link IntentCheckpointSchema} — and a
+ * key that failed validation is not part of a schema-valid value. A gate that
+ * reports `closing_action: "deploy" is not one of …` needs to name the value it
+ * is refusing, so the raw one travels beside the parsed value rather than
+ * inside it.
+ */
+export interface RejectedCheckpointField {
+  /** The top-level key the schema refused, exactly as written. */
+  readonly key: string;
+  /** The value that was written there, unvalidated and unmodified. */
+  readonly value: unknown;
+}
+
+/**
+ * The result of a lenient read: the checkpoint as far as it satisfies the
+ * schema, plus the offending top-level fields the schema refused.
+ *
+ * `checkpoint` is `undefined` only when the file is not a checkpoint at all
+ * (absent, non-object, or too damaged to prune to a valid value) — the same
+ * cases the strict read treats as absent-or-invalid.
+ */
+export interface LenientIntentCheckpointRead {
+  /**
+   * A value {@link IntentCheckpointSchema} ACCEPTS. Every key that failed
+   * validation is ABSENT from it — including keys inside a nested record,
+   * which take their whole offending top-level record with them.
+   */
+  readonly checkpoint: IntentCheckpoint | undefined;
+  /** The offending top-level fields, for a gate to quote by name. */
+  readonly rejected: readonly RejectedCheckpointField[];
+}
+
+/**
+ * Parse LENIENTLY: the checkpoint as far as it satisfies the schema, with the
+ * offending FIELDS DROPPED rather than failing the whole read, and the raw
+ * rejected values carried beside it.
+ *
+ * Why this is not just `safeParse`-and-undefined. The checkpoint's consumers
+ * split into two kinds. Some act on a field as a VALUE and must see only
+ * validated data (`customCommandOf`, the free-form-intent interpreter). Others
+ * ask a PRESENCE question — "is this checkpoint confirmed by the host?" — whose
+ * answer is a different field entirely, and which must still be answerable when
+ * some OTHER field is out of vocabulary. A whole-file rejection conflates the
+ * two: the gate that exists to report `closing_action: "deploy" is not one of …`
+ * would lose the `confirmed_by` it needs to even reach that branch.
+ *
+ * THE RETURNED `checkpoint` IS SCHEMA-VALID, and a rejected key is ABSENT from
+ * it. The earlier version of this function pruned the offending keys, re-parsed,
+ * then re-attached them VERBATIM — which is unsound the moment the defect is
+ * nested, because `IntentCheckpointSchema` is `.strict()` at every level: a
+ * `filters` object carrying one bad member was deleted as a whole, re-parsed,
+ * and then put back whole, so `{severity: ["high"], bogus: 1}` came back with
+ * `filters.bogus === 1` on a value the schema REJECTS. A consumer reading it as
+ * a value was reading unvalidated data through a function whose contract said
+ * otherwise. The offending raw value travels on {@link
+ * LenientIntentCheckpointRead.rejected} instead, so a caller that needs to
+ * QUOTE a refused value can, and a caller that needs to USE one must still
+ * validate it itself.
+ *
+ * A nested defect therefore takes its whole top-level record: the record is
+ * what the schema refused, and re-attaching the record would reintroduce the
+ * same unsoundness one level in. The gate can still quote the offending member
+ * — it reads it from `rejected` — but nothing downstream can mistake it for
+ * validated.
+ */
+function parseIntentCheckpointLenient(raw: unknown): LenientIntentCheckpointRead {
+  const wholesale = IntentCheckpointSchema.safeParse(raw);
+  if (wholesale.success) return { checkpoint: wholesale.data, rejected: [] };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { checkpoint: undefined, rejected: [] };
+  }
+  const record = raw as Record<string, unknown>;
+  // Drop each top-level key the schema complained about, then retry. One pass is
+  // enough: dropping a key cannot make a DIFFERENT key's value valid or invalid,
+  // so the second parse either succeeds or fails on keys that were already
+  // reported. A nested issue names its top-level head here — that is the record
+  // the second parse drops.
+  const offending = new Set<string>();
+  for (const issue of wholesale.error.issues) {
+    const [head] = issue.path;
+    if (typeof head === "string") offending.add(head);
+    else offending.add("<root>");
+  }
+  if (offending.has("<root>")) return { checkpoint: undefined, rejected: [] };
+  const pruned: Record<string, unknown> = { ...record };
+  for (const key of offending) delete pruned[key];
+  const second = IntentCheckpointSchema.safeParse(pruned);
+  if (!second.success) return { checkpoint: undefined, rejected: [] };
+  return {
+    checkpoint: second.data,
+    rejected: [...offending]
+      .filter((key) => key in record)
+      .map((key) => ({ key, value: record[key] })),
+  };
+}
+
+/**
+ * Read and validate an intent checkpoint — the ONE reader for both
+ * orchestrators.
+ *
+ * Why this exists rather than each caller doing
+ * `readOptionalJsonFile<IntentCheckpoint>(path)`. That call's type parameter is
+ * an ASSERTION the compiler erases: it checks nothing, and the value it returns
+ * is whatever JSON happened to be at the path, cast. Every remediate-side read
+ * of `intent_checkpoint.json` was exactly that cast (five sites in
+ * `steps/nextStep.ts`), while the schema that defines the file — this module's
+ * — sat unused outside tests. A shape the reader never checked is a shape no
+ * reader can rely on: `confirmed_by`, `closing_action` and `free_form_intent`
+ * were each read off an unchecked object.
+ *
+ * ABSENT IS `undefined`, not an error (the fresh-run case). PRESENT AND INVALID
+ * THROWS, per {@link IntentCheckpointInvalidError}.
+ *
+ * `lenient: true` does NOT loosen that guarantee: the value returned is always
+ * one {@link IntentCheckpointSchema} accepts, with every offending field
+ * dropped. A caller that must report an offending value reads it from
+ * {@link readIntentCheckpointLenient}, which returns the raw rejections beside
+ * the parsed value.
+ */
+export async function readIntentCheckpoint(
+  path: string,
+  opts: { readonly lenient?: boolean } = {},
+): Promise<IntentCheckpoint | undefined> {
+  const raw = await readOptionalJsonFile<unknown>(path);
+  if (raw === undefined || raw === null) return undefined;
+  const parsed = IntentCheckpointSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  if (opts.lenient) return parseIntentCheckpointLenient(raw).checkpoint;
+  throw new IntentCheckpointInvalidError(
+    path,
+    parsed.error.issues.map(
+      (issue) =>
+        `${issue.path.length > 0 ? issue.path.join(".") : "<root>"}: ${issue.message}`,
+    ),
+  );
+}
+
+/**
+ * Read an intent checkpoint LENIENTLY, keeping the fields the schema refused.
+ *
+ * The one reader for a caller that must NAME an offending value — the
+ * confirm-intent gate renders `closing_action: "deploy" is not one of …`, and it
+ * cannot do that from a value the field was dropped out of. Every other lenient
+ * caller wants only {@link readIntentCheckpoint}'s `checkpoint` and should use
+ * that instead: this function exists for the reporting case, not as a wider
+ * door onto unvalidated data.
+ *
+ * `rejected` carries each refused TOP-LEVEL key with the value as written. A
+ * defect nested inside a record appears under that record's key — the record is
+ * what the schema refused, and the whole record is what stays out of the
+ * returned checkpoint.
+ */
+export async function readIntentCheckpointLenient(
+  path: string,
+): Promise<LenientIntentCheckpointRead> {
+  const raw = await readOptionalJsonFile<unknown>(path);
+  if (raw === undefined || raw === null) {
+    return { checkpoint: undefined, rejected: [] };
+  }
+  return parseIntentCheckpointLenient(raw);
 }

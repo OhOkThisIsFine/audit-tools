@@ -18,6 +18,9 @@ import {
 import { recoverIngestHostResults } from "../../src/remediate/steps/nextStep.js";
 import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
 import {
+  REMEDIATION_STATE_CONTRACT_VERSION,
+} from "../../src/remediate/state/store.js";
+import {
   RemediationHostHandoffRecordSchema,
   type RemediationHostHandoffRecord,
 } from "../../src/remediate/state/types.js";
@@ -362,11 +365,15 @@ async function persistBoundState(
   value: Fixture,
   state: CurrentRemediationHostState = boundState(value),
 ): Promise<void> {
-  const storedState: Record<string, unknown> = { ...state };
-  delete storedState.contract_version;
+  // Written WITH its contract version, because that is the only state shape the
+  // store can produce: it stamps the version on every write and its load path
+  // passes the on-disk value through to `parseCurrentState` unchanged. (This
+  // helper used to delete the field, and the reader used to fabricate it back —
+  // so the version check in `parseCurrentState` compared a constant to itself
+  // and could not fail. The fixture now writes what the store writes.)
   await writeFile(
     join(value.artifactsDir, "state.json"),
-    JSON.stringify(storedState),
+    JSON.stringify(state),
     "utf8",
   );
 }
@@ -1918,8 +1925,13 @@ describe("remediation host handoff repository corroboration", () => {
       string,
       unknown
     > & { items: Record<string, { status: string }> };
-    // The boundary-only contract_version must never reach the persisted state.
-    expect(persisted.contract_version).toBeUndefined();
+    // The version DOES reach the persisted state — the store stamps it on every
+    // write, and the version it stamps is the store's own declaration rather
+    // than the boundary view's. (It used to be peeled off here because
+    // `currentHostBoundaryState` supplied it and nothing on disk carried it; the
+    // store now owns the field, so peeling would persist a state whose identity
+    // the next read has to re-invent.)
+    expect(persisted.contract_version).toBe(REMEDIATION_STATE_CONTRACT_VERSION);
     expect(persisted.items.F1!.status).toBe("resolved");
 
     const afterFirst = await readFile(statePath, "utf8");

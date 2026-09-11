@@ -119,9 +119,16 @@ export type {
   DesignReviewSettings,
   IntentCheckpoint,
 } from "./types/intentCheckpoint.js";
+export type {
+  LenientIntentCheckpointRead,
+  RejectedCheckpointField,
+} from "./types/intentCheckpoint.js";
 export {
   DESIGN_REVIEW_PROVENANCE_FIELDS,
+  IntentCheckpointInvalidError,
   IntentCheckpointSchema,
+  readIntentCheckpoint,
+  readIntentCheckpointLenient,
   resolveDesignReviewBinding,
   resolveRunBoundDesignReview,
 } from "./types/intentCheckpoint.js";
@@ -536,7 +543,10 @@ export {
 } from "./submission/expectedSubmissions.js";
 export type {
   SubmissionEventKind,
+  SubmissionLedgerDrop,
+  SubmissionLedgerDropReason,
   SubmissionLedgerEvent,
+  SubmissionLedgerRead,
 } from "./submission/submissionLedger.js";
 export {
   INGEST_EVENT_KINDS,
@@ -545,7 +555,9 @@ export {
   appendSubmissionEvent,
   isIngestEvent,
   readSubmissionLedger,
+  recoveryMarkMatches,
   submissionLedgerPath,
+  validateSubmissionLedgerEvent,
 } from "./submission/submissionLedger.js";
 export type {
   HandRecoveryOutcome,
@@ -1137,6 +1149,11 @@ export type {
   FindingVerificationTrace,
   TestSpec,
   TestValidatorPlan,
+} from "./types/contractPipeline.js";
+export {
+  CONTRACT_REPAIR_TARGETS,
+  CONTRACT_REPAIR_TARGETS_LEGACY,
+  CONTRACT_REPAIR_TARGETS_OFFERED,
 } from "./types/contractPipeline.js";
 export {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,

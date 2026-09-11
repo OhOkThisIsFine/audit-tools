@@ -23,7 +23,13 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { hashContent, isRecord, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
+import {
+  hashContent,
+  isRecord,
+  readOptionalJsonFile,
+  stableStringify,
+  writeJsonFile,
+} from "audit-tools/shared";
 import {
   semanticProjection,
   stableStringifyProjection,
@@ -82,7 +88,18 @@ export const DEPENDENCY_MAP: Record<ContractPipelineArtifactName, ContractPipeli
 
 export interface ContractPipelineArtifactEnvelope {
   artifact_name: ContractPipelineArtifactName;
-  /** SHA-256 of the raw payload bytes — byte identity of this exact emission. */
+  /**
+   * Identity of this exact emission: `hashContent(stableStringify(payload))`.
+   * KEY-ORDER INDEPENDENT — the same payload assembled in a different field
+   * order hashes identically (see `computeHash`).
+   *
+   * A stored header that disagrees with the payload it sits beside is CORRECTED
+   * IN MEMORY on read and NOT persisted: `readContractArtifact` recomputes,
+   * returns the recomputed value, and emits a
+   * `contract_artifact_content_hash_mismatch` warning naming both hashes. The
+   * file on disk keeps whatever it was written with, so this field is the
+   * identity of the payload AS READ, never a claim about the stored bytes.
+   */
   content_hash: string;
   /** Semantic-projection hashes of upstream dependency artifacts at write time. */
   dependency_hashes: Partial<Record<ContractPipelineArtifactName, string>>;
@@ -90,21 +107,78 @@ export interface ContractPipelineArtifactEnvelope {
 }
 
 /**
+ * Surface a `content_hash` header that no longer describes its payload.
+ *
+ * The correction itself is silent-by-design (the payload is authoritative and
+ * the read still returns), but a disagreement between a stored header and the
+ * bytes beside it is a FACT someone needs: it means the envelope was edited in
+ * place, copied, or written by an older hash definition, and the recorded value
+ * is the identity the judge/critique repair ledger keys on. A silent in-memory
+ * rewrite turns that into a run that behaves correctly and explains nothing.
+ *
+ * Same shape as the repository's other structured warnings
+ * (`file_integrity_io_error` in `utils/fileIntegrity.ts`,
+ * `truncated_verification_file_list` in the audit side): one `level: "warn"`
+ * JSON object per line on stderr, so a log reader that already parses these
+ * needs no new case.
+ */
+function reportContentHashMismatch(
+  name: ContractPipelineArtifactName,
+  stored: string,
+  recomputed: string,
+): void {
+  process.stderr.write(
+    JSON.stringify({
+      level: "warn",
+      event: "contract_artifact_content_hash_mismatch",
+      artifact_name: name,
+      stored_content_hash: stored,
+      recomputed_content_hash: recomputed,
+      ts: new Date().toISOString(),
+    }) + "\n",
+  );
+}
+
+/** One dependency hash entry: a contract-pipeline artifact name → sha. */
+function isDependencyHashes(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Object.entries(value).every(
+      ([key, hash]) =>
+        (CP_ARTIFACT_NAMES as readonly string[]).includes(key) &&
+        typeof hash === "string",
+    )
+  );
+}
+
+/**
  * Canonical predicate for a stored content-hash envelope. Single-sourced here so
  * any consumer (the contract-pipeline ingest path, the `validate-artifact` CLI)
  * unwraps with identical structural rules and cannot drift. A plain payload that
  * happens to carry an `artifact_name` but no `content_hash` is NOT an envelope.
+ *
+ * The THREE-KEY test this used to be (`artifact_name` string, `content_hash`
+ * string, `"payload" in value`) was a cast wearing a predicate's name: it admits
+ * a bare payload that carries `await`-shaped fields, and — more to the point —
+ * it does not check that `artifact_name` is one of the fifteen names the
+ * dependency DAG and the semantic projection are keyed by. An envelope whose
+ * `artifact_name` was misspelled passes `isEnvelope`, then reads a projection
+ * table with an absent key. See {@link readContractArtifact}, which is where
+ * that binding is now enforced.
  */
 export function isEnvelope(
   value: unknown,
 ): value is ContractPipelineArtifactEnvelope {
   return (
     isRecord(value) &&
-    typeof value.artifact_name === "string" &&
+    (CP_ARTIFACT_NAMES as readonly string[]).includes(value.artifact_name as string) &&
     typeof value.content_hash === "string" &&
-    "payload" in value
+    value.content_hash.length > 0 &&
+    "payload" in value &&
+    isDependencyHashes(value.dependency_hashes)
   );
 }
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -213,8 +287,23 @@ export function contractInputFilePath(
   return join(contractPipelineDir(artifactsDir), `${name}.input.json`);
 }
 
+/**
+ * The content hash of a payload — the artifact's IDENTITY, and the value the
+ * judge/critique repair ledger keys on.
+ *
+ * `stableStringify`, not `JSON.stringify`. The hash must depend on the payload's
+ * CONTENT and on nothing else, and raw `JSON.stringify` makes it depend on KEY
+ * INSERTION ORDER as well: the same contract assembled in a different field
+ * order hashes differently. That was latent while the only reader of the header
+ * was the writer's own round trip, but the moment a read RECOMPUTES and compares
+ * (see {@link readContractArtifact}) it becomes a false tamper report on a file
+ * nobody touched. The single deterministic serializer is the shared one
+ * (INV-CK-2: "there must be exactly ONE such serializer — never write a second"),
+ * so write and read agree by construction rather than by both happening to call
+ * the same expression.
+ */
 function computeHash(value: unknown): string {
-  return hashContent(JSON.stringify(value), { length: 32 });
+  return hashContent(stableStringify(value), { length: 32 });
 }
 
 /**
@@ -323,16 +412,72 @@ export function envelopePayload(
   return isEnvelope(envelope) ? envelope.payload : envelope;
 }
 
-/** Read a stored artifact envelope, or null if absent. */
+/**
+ * Read a stored artifact envelope, or null if absent.
+ *
+ * Three checks, all of them about IDENTITY — the file at `<name>.json` must BE
+ * the artifact `<name>`, not merely a JSON document that was found there:
+ *
+ *  1. **Shape.** Parsed against {@link isEnvelope}, never cast. The previous
+ *     body was `readOptionalJsonFile<ContractPipelineArtifactEnvelope>` — a
+ *     generic TYPE PARAMETER, which is an assertion the compiler erases. A file
+ *     containing `{"hello":1}` came back typed as an envelope, and every
+ *     downstream `.artifact_name` / `.payload` read was an unchecked property
+ *     access on `unknown`-shaped data.
+ *  2. **Binding.** `artifact_name` must equal the name that was REQUESTED. The
+ *     two are the same value by construction on the write path
+ *     ({@link writeContractArtifact} passes one name to both), so a disagreement
+ *     means the file was written by something else — a hand edit, a copy, a
+ *     rename that missed the header. This is not cosmetic: `artifact_name` is
+ *     the key into `DEPENDENCY_MAP` and `semanticProjection`, and a mismatched
+ *     name silently reads another artifact's projection table. A mismatched
+ *     envelope reads as ABSENT, so the caller's staleness DAG re-opens the
+ *     producing phase rather than consuming bytes that cannot be trusted.
+ *  3. **Content hash.** Recomputed from the payload and, when it disagrees with
+ *     the recorded one, the envelope is returned with
+ *     {@link ContractPipelineArtifactEnvelope.content_hash} rewritten to the
+ *     RECOMPUTED value. The payload is authoritative — it is what every
+ *     consumer reads and what `envelopeSemanticHash` projects — so a header
+ *     that no longer describes its payload must not be allowed to keep
+ *     speaking. Reading the payload but reporting the stale header's hash is
+ *     exactly the failure `detectStaleArtifacts`'s recompute-on-read exists to
+ *     prevent (see its note on in-place edits), and the hash is the identity
+ *     the judge/critique repair ledger keys on (`judge_hash` /
+ *     `critique_hash` in repairState.ts), so a drifted value would make
+ *     "already repaired for this report" answer about the wrong report.
+ *
+ *     Deliberately NOT a null: treating a payload edit as an absent artifact
+ *     would erase the distinction the caller needs (absent ⇒ re-emit the
+ *     producer; edited ⇒ re-stale the downstreams), and it is a real thing
+ *     hosts and tests do.
+ *
+ * A shape or binding refusal is silent-by-return (null), not a throw: every
+ * caller already handles absent (that IS the fresh-run case), and throwing here
+ * would turn one damaged file into a failed `next-step` rather than a re-emitted
+ * phase.
+ */
 export async function readContractArtifact(
   artifactsDir: string,
   name: ContractPipelineArtifactName,
 ): Promise<ContractPipelineArtifactEnvelope | null> {
-  const envelope = await readOptionalJsonFile<ContractPipelineArtifactEnvelope>(
+  const raw = await readOptionalJsonFile<unknown>(
     contractArtifactFilePath(artifactsDir, name),
   );
-  if (!envelope) return null;
-  return envelope;
+  if (raw === undefined || raw === null) return null;
+  if (!isEnvelope(raw)) return null;
+  if (raw.artifact_name !== name) return null;
+  // Recompute through the SAME `computeHash` the writer used — one serializer
+  // for both directions (`stableStringify`, key-order independent), so a
+  // round-trip through disk always agrees and only a real payload edit fails.
+  // Re-deriving the expression here instead of calling the writer's would be a
+  // second copy of the hash definition, which is how a write and a read come to
+  // disagree about what "the same payload" means.
+  const actualHash = computeHash(raw.payload);
+  if (actualHash !== raw.content_hash) {
+    reportContentHashMismatch(name, raw.content_hash, actualHash);
+    return { ...raw, content_hash: actualHash };
+  }
+  return raw;
 }
 
 export interface StalenessResult {

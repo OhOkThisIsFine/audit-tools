@@ -116,6 +116,13 @@ import {
   captureTestPlanCarry,
   readTestPlanCarry,
 } from "../contractPipeline/testPlanCarry.js";
+import type { JudgeRepairTarget } from "audit-tools/shared";
+import {
+  CYCLIC_SEAM_BREAK_STRATEGIES,
+  CYCLIC_SEAM_RESOLUTION_STATUSES,
+  isCyclicSeamBreakStrategy,
+  sketchValues,
+} from "../contractPipeline/sketchSource.js";
 import {
   readRepairState,
   writeRepairState,
@@ -959,9 +966,18 @@ export async function detectSeedSourceDigestMismatches(
  * the failing classifications. Post-redesign the default is
  * `finalized_module_contracts` (not `design_spec`).
  */
-// Post-redesign: finalized_module_contracts replaces the deprecated design_spec target.
-// ExtendedRepairTarget supersedes the shared JudgeRepairTarget (which still lists design_spec).
-type ExtendedRepairTarget = "finalized_module_contracts" | "obligation_ledger" | "contract_assessment_report";
+// Post-redesign: finalized_module_contracts replaces the deprecated design_spec
+// target, which is no longer a member of the shared `JudgeRepairTarget` either.
+//
+// ExtendedRepairTarget EXCLUDES `counterexample`: the validator admits it (a
+// judge may demand the critic re-run), but this loop's repair renderer has a
+// schema sketch for the three contract artifacts only, so it cannot regenerate a
+// counterexample report. Deriving from the shared union and narrowing here states
+// that gap as a type rather than leaving it to a runtime lookup.
+type ExtendedRepairTarget = Exclude<
+  JudgeRepairTarget,
+  "counterexample" | "design_spec"
+>;
 
 /**
  * Infer the most appropriate repair target from judge classifications when no
@@ -1100,17 +1116,41 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
   }
 
   const judgeHash = judgeEnvelope.content_hash;
+  // ONE-TIME UPGRADE EFFECT: `computeHash` now serializes with
+  // `stableStringify` (artifactStore.ts), so a repair-ledger entry recorded
+  // before that change stores a key-order-sensitive `judge_hash` the recomputed
+  // value can never equal. A run sitting mid-repair-loop across the upgrade
+  // therefore misses on this compare and escalates ONCE as "not converging".
+  // Deliberate: the escalation is fail-safe (the operator resolves it and the
+  // loop re-enters on the freshly hashed report), and back-compat code for a
+  // value the next read recomputes would be carried forever for one run.
   const alreadyHandled = repairState.repairs.some(
     (repair) => repair.judge_hash === judgeHash,
   );
 
   // Map judge.repair_directive.target if present; if absent, infer from classifications.
+  //
+  // No `design_spec` normalization. The validator and the shared `JudgeRepairTarget`
+  // union now derive from ONE declaration of the repair-target vocabulary
+  // (`contractPipeline/sketchSource.ts`), so `design_spec` — the pre-redesign name
+  // for `finalized_module_contracts` — is not a value the type admits and not a
+  // value the validator accepts. The branch that rewrote it used to be the only
+  // thing keeping a legacy name working, and carried a cast that erased the very
+  // check it was performing.
+  //
+  // `counterexample` is admitted by the contract and refused HERE, at the one
+  // place that would have to act on it: this loop's repair renderer has a schema
+  // sketch for the three contract artifacts only (see REPAIR_TARGET_SCHEMA), so a
+  // directive naming the critic's own report falls back to the inferred contract
+  // repair rather than being carried into a renderer that cannot honour it.
   const rawDirective = judge.repair_directive;
   const directive: { target: ExtendedRepairTarget; instruction: string } = rawDirective
     ? {
-        target: (rawDirective.target === "design_spec"
-          ? "finalized_module_contracts"
-          : rawDirective.target) as ExtendedRepairTarget,
+        target:
+          rawDirective.target === "counterexample" ||
+          rawDirective.target === "design_spec"
+            ? inferRepairDirective(judge).target
+            : rawDirective.target,
         instruction: rawDirective.instruction,
       }
     : inferRepairDirective(judge);
@@ -1217,6 +1257,11 @@ export async function evaluateCritiqueGate(artifactsDir: string): Promise<Critiq
   const repairState = await readRepairState(artifactsDir);
   const critiqueRepairs = repairState.critique_repairs ?? [];
   const critiqueHash = env.content_hash;
+  // ONE-TIME UPGRADE EFFECT, the critique gate's twin of the judge site above:
+  // a `critique_hash` recorded before `computeHash` moved to `stableStringify`
+  // cannot equal the recomputed value, so an in-flight design-repair loop
+  // crossing the upgrade escalates once as a stall instead of re-emitting.
+  // Fail-safe and deliberately not mitigated — see that site for the reasoning.
   const alreadyHandled = critiqueRepairs.some((r) => r.critique_hash === critiqueHash);
 
   // Idempotent re-entry: this exact critique already drove a repair (its design
@@ -3450,13 +3495,13 @@ Two files, both required — the record alone is not a break:
   "cycles": [
     {
       "members": ["<obligation-id>", "..."],
-      "break_strategy": "mediator | single_authority",
+      "break_strategy": "${sketchValues(CYCLIC_SEAM_BREAK_STRATEGIES)}",
       "designated_obligation_id": "<the mediating obligation, or the single authority — must exist in the rewritten ledger>",
       "resolution_description": "<what was changed and why>",
       "exception_registration": "<if single_authority: the named scoped exception; otherwise null>"
     }
   ],
-  "status": "resolved"
+  "status": "${sketchValues(CYCLIC_SEAM_RESOLUTION_STATUSES)}"
 }
 \`\`\`
 
@@ -3511,10 +3556,14 @@ const cyclicSeamRecheckGate: ContractGate = async (ctx) => {
       (member): member is string => typeof member === "string",
     );
     const strategy = cycleRecord.break_strategy;
-    if (strategy !== "mediator" && strategy !== "single_authority") {
+    // The vocabulary is the shared declaration the prompt sketch also renders
+    // (`contractPipeline/sketchSource.ts`). It was two inline literals here and
+    // a hand-written alternation in the prompt — three statements of one rule,
+    // in two modules, none of which the contract validator checked at all.
+    if (!isCyclicSeamBreakStrategy(strategy)) {
       rejection =
         `Cycle [${members.join(", ")}] declares break_strategy ` +
-        `${JSON.stringify(strategy ?? null)}, which is neither "mediator" nor "single_authority".`;
+        `${JSON.stringify(strategy ?? null)}, which is not one of: ${CYCLIC_SEAM_BREAK_STRATEGIES.join(", ")}.`;
       break;
     }
     const authored: AuthoredCycleBreak = {
