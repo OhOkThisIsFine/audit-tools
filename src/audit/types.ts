@@ -201,6 +201,11 @@ export type AuditTask = z.infer<typeof AuditTaskSchema>;
 // now a direct alias so the wire contract can never drift from shared.
 export type Finding = SharedFinding;
 
+// contract-construction-sites: exempt — AuditVerification is authored by the HOST:
+// it answers the verification work item, and the tool only VALIDATES what arrives
+// (`validateOneAuditResult`). No producer in this repo constructs one, so there is
+// no site to mark — the absence is the design, not an oversight. The schema's own
+// required fields are still reconciled against the rendered worker schema.
 export const AuditVerificationSchema = z.object({
   verified: z.boolean(),
   needs_followup: z.boolean(),

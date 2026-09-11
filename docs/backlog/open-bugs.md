@@ -497,25 +497,13 @@
   and no round judges anything it authored. ⚠ Sharing an agent SESSION across rounds is the wrong version
   of this and forfeits exactly what the round is for.
 
-- **A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.**
-  The idea: revert each site of a change individually and require each reversion to turn the suite red,
-  so "every changed site is pinned by a test" stops being a claim the author makes about their own work.
-  A prototype (`assert-sites-pinned.mjs`) existed on an unmerged branch, reachable from NO ref at HEAD. <!-- doc-citation-exempt: prototype on an unmerged branch, reachable from no ref -->
-  The independent review that exercised it named both fail-open shapes
-  ([`account-metering-round2-independent-review-2026-07-19.md`](../reviews/account-metering-round2-independent-review-2026-07-19.md),
-  *The evidence apparatus is itself fail-open*): it measured *"the suite went red"*, not *"a test
-  asserting THIS behavior went red"*; and a hand-written site list declared 7 sites against ≥11
-  substantive hunks, so "all N pinned" was literally true and materially misleading.
-  Nothing stands in for it at HEAD — the loop-core gate checks attestation existence, staged-tree
-  binding and verdict only, and `--checked` is free text with a ≥20-char floor — so "red-green
-  validated" in an attestation is still the author's word about their own work.
-  **Properties to hold:** each site binds to the NAME(s) of the test(s) expected to fail, and the site
-  list is DERIVED from the diff so an omitted hunk is impossible.
-  ⚠ **OWNER DECISION 2026-07-25 — BUILD it, with a DIFF-DERIVED site list**, closing the denominator
-  hole. ⚠ The second property is NOT thereby solved: expected-failing test names are still
-  author-supplied, so a naive build relocates the claim instead of removing it. Derive the name binding
-  (e.g. from a baseline coverage/ownership map), or the gate measures "the suite went red" again — the
-  exact fail-open it exists to catch. Until then its output is not admissible as attestation evidence.
+- **The per-site pinning gate's name binding is author-supplied (2026-07-25).**
+  `scripts/check-sites-pinned.mjs` derives each changed site from the staged diff, so an omitted hunk
+  is impossible, and requires a `// sites-pinned: <test file names>` declaration above it. The names
+  are read from that declaration, so the gate moves the claim one level up rather than removing it;
+  its output says so and is not admissible as loop-core attestation evidence. **Property:** the
+  expected-failing test name for a site is DERIVED (from a baseline coverage or ownership map), not
+  author-supplied. Not yet designed.
 
 - **Friction walk (copy-fallback lap, 2026-08-30):** (1) **ambiguous-direction:** none — the goal
   came from the backlog and was approved, and the one scope decision it raised (widening the

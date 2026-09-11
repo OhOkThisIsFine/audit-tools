@@ -191,6 +191,7 @@ function parseSemgrep(stdout: string): ExternalAnalyzerParseReport {
     const end = (r.end ?? {}) as Record<string, unknown>;
     const checkId = typeof r.check_id === "string" ? r.check_id : "semgrep-rule";
     const sev = typeof extra.severity === "string" ? extra.severity.toLowerCase() : "warning";
+    // construction-site: FindingLocation (the semgrep diagnostic mapped to a finding location)
     return {
       id: `${checkId}:${typeof r.path === "string" ? r.path : ""}:${typeof start.line === "number" ? start.line : 0}`,
       category: sev === "error" ? "correctness" : "maintainability",

@@ -38,6 +38,7 @@ function toHostTask(task: AuditTask): AuditHostTask {
     fileCount: task.file_paths.length,
     riskScore: task.risk_estimate ?? 0,
   });
+  // construction-site: AuditTask (the host-facing work item; `demand` is handoff metadata, the rest is the contract)
   return {
     task_id: task.task_id,
     unit_id: task.unit_id,

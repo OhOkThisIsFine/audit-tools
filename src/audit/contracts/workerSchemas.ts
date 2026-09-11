@@ -1,5 +1,10 @@
 // Worker-facing contract schemas derived from the canonical zod sources.
 
+//
+// sites-pinned: tests/shared/contract-construction-sites.test.ts, tests/audit/schema-contracts.test.ts
+//   Each site of this file is pinned by the named tests; `npm run check:sites-pinned`
+//   derives the sites from the staged diff and refuses an unbound one.
+
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
@@ -148,6 +153,68 @@ export const WORKER_SCHEMA_SOURCES: Record<
   "audit-code-v1alpha1.schema.json": {
     schema: AuditCodeResponseSchema,
     title: "Audit Code Response",
+  },
+};
+
+/**
+ * The differences a rendered schema may declare against its canonical contract.
+ * Nothing here is implicit: a difference that is NOT declared is drift, and
+ * `scripts/check-contract-sites.mjs` reds on it.
+ *
+ * `omitted` — the contract declares the field; this projection deliberately does
+ * not (the tool-owned fields above, omitted so `.strict()` REJECTS a supplied
+ * value rather than silently accepting an inherited optional one).
+ *
+ * `requiredOverride` / `added` — carried for the same reason and read by the
+ * same gate. `requiredOverride` names a field whose required-ness this projection
+ * sets differently (`finding.schema.json` requires `evidence` and
+ * `affected_files` where the shared Finding leaves them optional — the asymmetry
+ * `FindingEvidenceLaneSchema` documents); `added` names a field the projection
+ * carries that the contract does not declare at all (the worker surface narrows
+ * `lens` to `LensSchema` and adds `reviewed_lines`).
+ *
+ * The property SET is what the gate compares. Required-ness is deliberately not
+ * compared against the BASE contract, because the worker projection is a
+ * different contract that relaxes and strengthens on purpose — comparing it
+ * would report a settled design decision as drift on every run.
+ */
+export const CONTRACT_SCHEMA_PRODUCERS: Record<
+  string,
+  {
+    contract: string;
+    omitted?: readonly string[];
+    requiredOverride?: readonly string[];
+    added?: readonly string[];
+    message: string;
+  }
+> = {
+  "schemas/finding.schema.json": {
+    contract: "Finding",
+    omitted: [
+      "grounding",
+      "verification_status",
+      "severity_downgraded_from",
+      "evidence_lane",
+      "lead_lineage",
+    ],
+    requiredOverride: ["evidence", "affected_files"],
+    added: [],
+    message:
+      "a FIELD was added to or dropped from the shared FindingSchema without updating the worker " +
+      "projection in the SAME change — run `npm run generate-schemas` and commit the rendered " +
+      "schema/ file. If the new field is TOOL-OWNED, add it to WorkerFindingSchema's `.omit`, to " +
+      "WORKER_REFUSED_FINDING_VERDICTS, and to this pairing's `omitted` list; if it is " +
+      "worker-facing, extend the projection.",
+  },
+  "schemas/audit_result.schema.json": {
+    contract: "AuditResult",
+    omitted: [],
+    requiredOverride: [],
+    added: [],
+    message:
+      "a FIELD was added to or dropped from the worker contract this schema renders — run " +
+      "`npm run generate-schemas` and commit the rendered schema/ file in the SAME change as the " +
+      "contract edit.",
   },
 };
 

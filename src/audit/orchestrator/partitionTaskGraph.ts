@@ -87,5 +87,6 @@ export function buildTaskCoherencePartition(
       risk_score: Math.round(riskScore * 1_000) / 1_000,
     };
   });
+  // construction-site: ContentCoherenceTrace
   return { coherence_trace: coherenceTrace, packets };
 }

@@ -606,6 +606,11 @@ export function projectAuditFindingsReportSubset(
   const projected: AuditFindingsReport = {
     ...report,
     findings,
+    // construction-site: ContentCoherenceTrace fields=normalized_items,components
+    //   The trace is REBUILT here from the narrowed populations rather than
+    //   carried over — the same reason the seams below are re-derived: a
+    //   persisted trace would describe the report as it was before this
+    //   projection narrowed it.
     coherence_trace: {
       normalized_items: normalizedItems,
       components: componentBlocks.map(({ component }) => component),

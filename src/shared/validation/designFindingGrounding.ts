@@ -57,6 +57,7 @@ export function groundDesignFinding(
       reason: `cited component(s) not found in the repository: ${cited.slice(0, 3).join(", ")}`,
     };
   }
+  // construction-site: FindingGrounding
   return { status: "grounded" };
 }
 

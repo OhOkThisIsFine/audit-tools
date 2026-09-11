@@ -1115,6 +1115,44 @@ export {
   groundDesignFindings,
 } from "./validation/designFindingGrounding.js";
 
+// Validation: per-type contract construction sites. The walk is shared because
+// the CONTRACT-TYPE registry it reads is shared — an area's gate imports the
+// walk rather than re-deriving it, so the two halves cannot drift.
+//
+// sites-pinned: tests/shared/contract-construction-sites.test.ts
+//   This file declares no behaviour — it is the shared surface's re-export
+//   barrel, and the rows below are pinned by the registry suite that holds the
+//   contract shapes against the real zod schemas.
+export {
+  deriveConstructionSites,
+  isProducerPath,
+  parseSiteMarkers,
+  reconcileRenderedSchema,
+  SITE_EXEMPTION_MARKER,
+  SITE_MARKER,
+} from "./validation/contractConstructionSites.js";
+export type {
+  ContractFieldSet,
+  DerivedSiteMap,
+  DerivedSites,
+  FileSiteMarkers,
+  RenderedJsonSchema,
+  SiteMarker,
+} from "./validation/contractConstructionSites.js";
+
+// The CONTRACT-TYPE registry: every validated contract type, its canonical
+// schema, and the property shapes a construction-site walk decides on.
+export { CONTRACT_PROPERTY_SHAPES } from "./types/contractPropertyShapes.js";
+export type {
+  ContractPropertyShape,
+  ContractTypeShape,
+} from "./types/contractPropertyShapes.js";
+
+// sites-pinned: tests/shared/contract-construction-sites.test.ts
+//   This file declares no behaviour — it is the shared surface's re-export
+//   barrel, and the rows above are pinned by the registry suite that holds the
+//   contract shapes against the real zod schemas.
+
 export type { CacheablePromptParts } from "./prompts.js";
 export {
   buildCacheablePrompt,

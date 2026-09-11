@@ -110,6 +110,7 @@ export function mergeGrounding(
     g?.status === "grounded" ? 3 : g?.status === "refuted" ? 2 : g?.status === "ungrounded" ? 1 : 0;
   const winner = rank(incoming) > rank(existing) ? incoming : existing;
   // Normalize a grounded winner to the bare verdict (grounded carries no reason).
+  // construction-site: FindingGrounding
   return winner?.status === "grounded" ? { status: "grounded" } : winner;
 }
 

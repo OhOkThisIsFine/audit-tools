@@ -233,15 +233,15 @@
   [`reviews/analysis-tools-plan-2026-08-07.md`](../reviews/analysis-tools-plan-2026-08-07.md) §4/§5.
   **Property:** no regex over audited-repo content is super-linear on adversarial input.
 
-- **Contract-type coverage is derived from where TESTS live, not from the contract (2026-07-25, low,
-  friction: inefficient-feeding).** `scripts/` was covered by no tsconfig at the time (closed
-  2026-08-26 — `check:scripts` now typechecks it), so a producer there could not fail
-  on a contract it never consulted — that is how adding `reviewed_clean` swept `tests/**`, missed the
-  `scripts/` producers, and failed release CI ([[lap-green-must-match-ci-evidence]]). AuditResult is
-  closed by a per-type gate written by hand for it. **Property:** for every validated contract type, the
-  set of construction sites is derivable FROM THE CONTRACT, not from test placement. Not yet designed —
-  the doc-manifest data+refusal shape (`2adc716c`) is the precedent to follow, and a typecheck gate is
-  NOT (a cast makes it inert, [[test-tree-typecheck-gate-and-its-cost]]).
+- **Contract construction-site coverage proves presence, not completeness or reach (2026-07-25, low,
+  friction: inefficient-feeding).** `scripts/check-contract-sites.mjs` derives each validated
+  contract type's construction sites from the contract (`deriveConstructionSites`), following the
+  doc-manifest data+refusal shape (`2adc716c`) rather than a typecheck gate (a cast makes it inert,
+  [[test-tree-typecheck-gate-and-its-cost]]). Two halves stay open: a `// construction-site: <Type>`
+  marker proves neither that the site fills every field nor that it is reached, and a type with no
+  `CONTRACT_PROPERTY_SHAPES` row (`src/shared/types/contractPropertyShapes.ts`) is not walked at all.
+  **Property:** every validated contract type is walked, and each marked site is checked for field
+  completeness and reach.
 
 - **A deletion of a manifest-listed doc landed with the doc-manifest gate red (2026-08-26, low,
   <!-- doc-citation-exempt: the deleted file IS the subject — it no longer exists by design -->
