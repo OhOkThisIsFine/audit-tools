@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { hashContent } from "../hash.js";
 import { cp, readdir } from "node:fs/promises";
-import { readOptionalJsonFile } from "./json.js";
+import { isFileMissingError, readOptionalJsonFile } from "./json.js";
 import { discardOnSchemaVersionMismatch } from "./schemaVersion.js";
 
 /**
@@ -240,18 +240,30 @@ export async function frictionCaptured(
 
 /**
  * Every per-run friction record filename under `<artifactsDir>/friction/`, sorted by
- * name — a stable, content-derived order, never `readdir` order. A missing friction
- * dir yields `[]` (nothing captured yet is not an error). Single-sourced here, where
- * the dir itself is owned, so every reader of the dir applies the same `.json` filter.
+ * name — a stable, content-derived order, never `readdir` order. Single-sourced here,
+ * where the dir itself is owned, so every reader of the dir applies the same `.json`
+ * filter.
+ *
+ * ERRNO-SPLIT: an ABSENT friction dir yields `[]` (nothing captured yet is not an
+ * error — the ordinary clean run); any OTHER readdir failure PROPAGATES. The two
+ * used to collapse into one `catch { return [] }`, which made a directory that
+ * exists but cannot be READ (ENOTDIR when the path is a file, EACCES, EPERM)
+ * indistinguishable from an empty one — and the audit promote walk compares this
+ * listing against what {@link archiveFrictionRecords} archived, so BOTH sides
+ * returned zero and the rm that follows destroyed the records with nothing gating
+ * it. Errno-blind, the CP-NODE-5 class at lower stakes. The throw is the refusal:
+ * a caller whose next act is a delete must treat it as "records may exist and were
+ * NOT archived", never as "there was nothing to archive".
  */
 export async function listFrictionRecordFilenames(artifactsDir: string): Promise<string[]> {
+  let entries: string[];
   try {
-    return (await readdir(frictionCaptureDir(artifactsDir)))
-      .filter((name) => name.endsWith(".json"))
-      .sort();
-  } catch {
-    return [];
+    entries = await readdir(frictionCaptureDir(artifactsDir));
+  } catch (error) {
+    if (isFileMissingError(error)) return [];
+    throw error;
   }
+  return entries.filter((name) => name.endsWith(".json")).sort();
 }
 
 /**
@@ -265,6 +277,14 @@ export async function listFrictionRecordFilenames(artifactsDir: string): Promise
  * rides along with the promoted deliverables. Best-effort per file: a failed
  * copy is reported through `warn` and never blocks completion (parity with the
  * promoted-findings copy).
+ *
+ * NOT best-effort about the LISTING: the walk starts from
+ * {@link listFrictionRecordFilenames}, so an UNLISTABLE dir throws out of here
+ * rather than degrading to "no records". That is the half a caller cannot
+ * recover from — `[]` reads as "nothing to archive" and licenses the delete that
+ * follows — so the refusal is raised where the errno is still visible. A caller
+ * that must complete at any cost catches it and reads it as a shortfall (see the
+ * audit promote walk's `friction Listing failed` leg).
  */
 export async function archiveFrictionRecords(params: {
   artifactsDir: string;

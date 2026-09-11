@@ -141,25 +141,51 @@ export function mechanismContradictsOutcome(
  * `executed`   — the command list ran; `passed` is a real verdict.
  * `scoped_out` — the suite does not apply to this target; zero commands ran.
  * `disabled`   — a gate was DUE but did not run.
+ * `history`    — a verdict for this exact tree content was already recorded, so
+ *                the floor was NOT re-spawned; `passed` is that recorded verdict
+ *                and `commands_run` counts the commands the RECORD held, never
+ *                commands this evaluation ran. A fourth kind rather than a
+ *                flavour of `executed`, because "the judge ran just now" and
+ *                "a judge already ruled on this unchanged tree" are different
+ *                facts about the same verdict — and a reader that cannot tell
+ *                them apart cannot tell whether the floor is still being
+ *                exercised at all.
  */
 export const FinalGateOutcomeKindSchema = z.enum([
   "executed",
   "scoped_out",
   "disabled",
+  "history",
 ]);
 export type FinalGateOutcomeKind = z.infer<typeof FinalGateOutcomeKindSchema>;
 
 /**
+ * Which outcomes carry a REAL verdict. `executed` because a judge just ran;
+ * `history` because a judge ran on this identical tree content and the answer
+ * cannot have changed. Every other outcome — the not-run kinds AND the report's
+ * own `absent` — has no verdict to report.
+ *
+ * Accepts `absent` as well as the gate kinds so the REPORT reader can ask this
+ * one question rather than restating the list: a second hand-written list is
+ * exactly how the next verdict-bearing kind comes back to read as absent.
+ */
+export function carriesGateVerdict(
+  outcome: FinalGateOutcomeKind | "absent",
+): boolean {
+  return outcome === "executed" || outcome === "history";
+}
+
+/**
  * What the outcomes contract says about the run's tool-owned gate.
  *
- * `outcome` widens the three gate kinds with `absent` — which is NOT a fourth
- * gate kind but the report's own statement that no gate record existed for this
- * run. It is stated rather than inferred: the alternative is silence, and
- * silence about a gate reads as "fine".
+ * `outcome` widens the gate kinds with `absent` — which is NOT a gate kind but
+ * the report's own statement that no gate record existed for this run. It is
+ * stated rather than inferred: the alternative is silence, and silence about a
+ * gate reads as "fine".
  *
- * `passed` is `boolean | null`. Only an `executed` gate carries a verdict; the
- * other three carry `null`, so no consumer of this contract can read a gate
- * that did not run as a green floor.
+ * `passed` is `boolean | null`. Only a verdict-bearing kind ({@link
+ * carriesGateVerdict}) carries one; every other kind carries `null`, so no
+ * consumer of this contract can read a gate that did not run as a green floor.
  */
 export const FinalGateReportSchema = z
   .object({

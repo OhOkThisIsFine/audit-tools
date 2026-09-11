@@ -620,14 +620,32 @@ export async function promoteFinalAuditReport(params: {
   // surfaces a per-file failure without reaching into that module's internals.
   // The listing is the SAME helper `archiveFrictionRecords` walks, so the two
   // counts cannot drift into under-reporting a destroyed record.
-  const frictionNames = await listFrictionRecordFilenames(params.artifactsDir);
-  const archivedFriction = await archiveFrictionRecords({
-    artifactsDir: params.artifactsDir,
-    destDir: dirname(destination),
-    prefix: "audit-friction",
-    copyFile: copy,
-    warn: (message) => warn(`audit-code: ${message}`),
-  });
+  //
+  // AN UNLISTABLE DIR IS A SHORTFALL, not an empty one. The listing used to
+  // return `[]` for every readdir failure alike, and the archive that walks the
+  // same helper degraded the same way — so both sides read zero, the comparison
+  // below was satisfied, and the rm destroyed a directory full of records with
+  // nothing gating it. It now throws on anything but ENOENT: an absent dir
+  // really has nothing to lose, any other errno means records may exist and
+  // were NOT archived, so the delete is refused — the same answer an
+  // unarchivable FILE already gets (the CP-NODE-3 residual: "an unlistable
+  // directory refuses the delete, same as an unarchivable file").
+  let frictionNames: string[] = [];
+  let archivedFriction: string[] = [];
+  try {
+    frictionNames = await listFrictionRecordFilenames(params.artifactsDir);
+    archivedFriction = await archiveFrictionRecords({
+      artifactsDir: params.artifactsDir,
+      destDir: dirname(destination),
+      prefix: "audit-friction",
+      copyFile: copy,
+      warn: (message) => warn(`audit-code: ${message}`),
+    });
+  } catch (error) {
+    lost.push(
+      `the friction directory listing (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
   if (archivedFriction.length < frictionNames.length) {
     lost.push(
       String(frictionNames.length - archivedFriction.length) +

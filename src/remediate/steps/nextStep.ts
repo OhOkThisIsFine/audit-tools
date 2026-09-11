@@ -1,3 +1,4 @@
+import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
 import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -107,14 +108,23 @@ import {
 import { checkAffectedFileIntegrity } from "../utils/fileIntegrity.js";
 import { applyIntentOrdering } from "../intent/intentOrdering.js";
 import { resolveIntakeStep } from "./intakeResolver.js";
+import { carriesGateVerdict } from "../../shared/types/remediationOutcome.js";
 import {
+  RUNTIME_RESIDUAL_DECLARATION,
+  readFinalGateVerdict,
   runToolOwnedFinalGate,
   writeFinalGateRedRecord,
   writeFinalGateOutcomeRecord,
+  writeFinalGateVerdict,
   type FinalGateOutcomeKind,
   type GateRunner,
   type ToolOwnedFinalGateResult,
 } from "./finalGate.js";
+import {
+  renderGateAttribution,
+  worktreeContentId,
+  type GateRedAttribution,
+} from "./gateCommands.js";
 import {
   buildNextContractPipelineStep,
   shouldEnterContractPipeline,
@@ -3145,7 +3155,7 @@ async function recordFinalGateOutcome(ctx: {
   reason?: string;
   durationMs?: number;
 }): Promise<void> {
-  const ran = ctx.outcome === "executed";
+  const verdict = carriesGateVerdict(ctx.outcome);
   await writeFinalGateOutcomeRecord(ctx.artifactsDir, {
     scope: ctx.scope,
     outcome: ctx.outcome,
@@ -3161,9 +3171,10 @@ async function recordFinalGateOutcome(ctx: {
       `${ctx.gateKey} outcome=${ctx.outcome} ` +
       // "n/a", never "true": a gate that ran nothing has no verdict, and the
       // durable record it is written beside carries `passed: null` for the
-      // same reason.
-      `passed=${ran ? String(ctx.passed) : "n/a"} ` +
-      `commands=${ran ? String(ctx.commandsRun) : "0"}` +
+      // same reason. A `history` outcome DOES carry a verdict — a judge ruled
+      // on this exact tree — so it prints its verdict like an executed one.
+      `passed=${verdict ? String(ctx.passed) : "n/a"} ` +
+      `commands=${verdict ? String(ctx.commandsRun) : "0"}` +
       (ctx.reason === undefined ? "" : ` reason=${ctx.reason}`),
     ...(ctx.durationMs === undefined ? {} : { duration_ms: ctx.durationMs }),
   });
@@ -3188,12 +3199,12 @@ async function recordFinalGateOutcome(ctx: {
  * the captured output, which stays in the artifact where a multi-KB suite log
  * costs nothing.
  *
- * COST OF THE PAUSE, stated in the prompt rather than discovered: there is no
- * cached verdict, so EVERY next-step taken while the suite is red re-runs the
- * whole gate — a full build plus the whole suite, minutes, holding the phase
- * lock throughout. That is the deliberate price of having no counter to strand
- * the run on, and it makes polling expensive: the host should re-run once it has
- * actually fixed something, not on a timer.
+ * COST OF THE PAUSE. The gate's verdict is cached against the TREE CONTENT, so
+ * re-entering a boundary with the tree untouched serves the recorded verdict —
+ * the pause re-emits from cache without spawning a builder or a suite. A green
+ * on a fixed tree, and a re-run on a tree that MOVED, both go to the floor as
+ * before: the cache is an equality check on content, never a counter and never a
+ * reason to skip a tree nobody judged.
  */
 async function emitFinalGateRedStep(ctx: {
   root: string;
@@ -3202,19 +3213,61 @@ async function emitFinalGateRedStep(ctx: {
   scope: string;
   gate: ToolOwnedFinalGateResult;
   runLogger: RunLogger;
+  /**
+   * The content id this red is bound to, as the CALLER measured it — the same
+   * value the verdict record was written (or read) against, never a second
+   * derivation taken here. `null` when no identity could be taken, and
+   * `undefined` when this red is not cached at all (the all-terminal funnel
+   * re-runs the floor on every arrival, so there is nothing to be bound to).
+   */
+  tree?: string | null;
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, scope, gate, runLogger } = ctx;
   const failed = gate.results.find((r) => !r.passed);
-  const recordPath = await writeFinalGateRedRecord(artifactsDir, scope, failed);
+  const recordPath = await writeFinalGateRedRecord(artifactsDir, scope, failed, {
+    root,
+    state,
+  });
   const failingCommand = failed
     ? `${failed.argv.join(" ")} (exit ${String(failed.exit_code)})`
     : "(the gate reported no failing command)";
+  // Read the attribution back OFF THE RECORD rather than recomputing it: the
+  // record is the durable statement, and a prompt that derived its own answer
+  // from a fresh git read could disagree with the artifact the same step points
+  // at. Absent (the record was written by the no-state path, or attribution
+  // chose not to run) means no verdict is asserted, which is exactly what the
+  // prompt then says.
+  const attribution = (
+    await readOptionalJsonFile<{ attribution?: GateRedAttribution }>(recordPath)
+  )?.attribution;
+  const attributionBlock = renderGateAttribution(attribution);
   runLogger.event({
     phase: "next-step",
     kind: "outcome",
     obligation: state.status,
-    note: `final_gate_red scope=${scope} command=${failed ? failed.argv.join(" ") : "unknown"}`,
+    note:
+      `final_gate_red scope=${scope} command=${failed ? failed.argv.join(" ") : "unknown"}` +
+      (attribution ? ` attribution=${attribution.verdict}` : ""),
   });
+  // THE BINDING, named in the prompt. The verdict this pause repeats is cached
+  // against the CONTENT of the tree, so an operator who reads "the suite is
+  // still red" and fixes something the run cannot see — or, worse, who assumes
+  // the message will change on its own — is left looping on a red that is being
+  // SERVED, not observed. State the id and state exactly what moves it: any
+  // edit to a non-ignored file outside the run's own artifacts. This is the
+  // same carve-out `worktreeContentId` applies, said in the operator's terms.
+  const bindingBlock =
+    ctx.tree === undefined
+      ? "Binding: this gate re-runs the floor on every arrival here, so this red\n" +
+        "describes the tree as it stands right now."
+      : ctx.tree === null
+        ? "Binding: no tree content id could be taken, so this red is NOT cached —\n" +
+          "the floor will run again on your next next-step whatever you change."
+        : `Binding: this red is bound to tree \`${ctx.tree}\`. Any edit to a file\n` +
+          `outside \`${AUDIT_TOOLS_DIRNAME}/\` — and outside anything git ignores — moves that\n` +
+          "id, which invalidates the cached verdict and makes the next next-step run\n" +
+          "the WHOLE floor again against what you changed. Editing nothing leaves the\n" +
+          "id identical, so the cached red is served back without spawning anything.";
   const nextCommand = loaderCommand("next-step");
   return {
     kind: "emit",
@@ -3243,6 +3296,10 @@ A red here is whole-repo and says nothing about which remediation item caused
 it — it may not be this run's doing at all (a commit landed alongside the run is
 enough). So this is a PAUSE, not a verdict on the work.
 
+${attributionBlock}
+
+${bindingBlock}
+
 Fix the failing command — or confirm it was already broken independently of this
 run — then run:
 
@@ -3251,10 +3308,11 @@ run — then run:
 The gate re-runs from scratch. The moment it is green the run continues exactly
 where it left off.
 
-Re-run it DELIBERATELY, not on a timer: there is no cached verdict, so every
-next-step taken while the suite is red re-runs the entire gate — a full build
-plus the whole suite, minutes, holding the run's phase lock the whole time.
-Fix something first, then re-run.
+Re-run it DELIBERATELY, not on a timer. The gate's verdict is cached against the
+content of the tree, so a re-run with nothing changed serves the recorded verdict
+without spawning anything — and the moment you fix something the tree moves, the
+cache misses, and the whole floor (a full build plus the suite, minutes, holding
+the run's phase lock) runs against your change. Fix something first, then re-run.
 `,
       allowedCommands: [nextCommand],
       stopCondition:
@@ -3312,19 +3370,89 @@ async function runPhaseBoundaryGate(ctx: {
     return null;
   }
 
+  // The TREE this verdict will be about. Taken BEFORE the floor runs so the
+  // cached verdict describes the state the floor actually saw; taken ONCE so
+  // the identity written and the identity read back cannot be two derivations
+  // that disagree.
+  //
+  // A boundary that re-dispatches work will get a different id on the next call
+  // and the floor re-runs — which is correct: the tree it certified is gone.
+  const tree = await worktreeContentId(root);
+  const gateKey = `phase_boundary_gate phase=${phase}`;
+
+  // THE CACHE. The fold re-enters this boundary on every next-step taken before
+  // the next phase dispatches, and the floor is build + typecheck + the whole
+  // suite — minutes, holding the phase lock. Re-running it on a tree that cannot
+  // have changed since the last verdict buys nothing: the answer is already
+  // known and was already recorded. A HIT is therefore a full substitute,
+  // including for a RED one (see {@link readFinalGateVerdict} — the pause is
+  // rebuilt from the cached results rather than re-derived).
+  const cached = await readFinalGateVerdict(artifactsDir, scope, tree);
+  if (cached !== undefined) {
+    // Recorded as a distinct outcome from a real run: the judge is `history`,
+    // not a spawned command, and `commands_run` counts what HISTORY held, never
+    // what this call executed. `passed` is echoed unchanged, so a cached green
+    // still reads green and a cached red still reads red.
+    await recordFinalGateOutcome({
+      artifactsDir,
+      state,
+      scope,
+      gateKey,
+      runLogger,
+      outcome: "history",
+      passed: cached.passed,
+      commandsRun: cached.results.length,
+      reason:
+        `a verdict for this exact tree content is already recorded (scope "${cached.scope}", ` +
+        `recorded_at ${cached.recorded_at}); the floor was NOT re-run because the tree it ` +
+        "would run against has not changed",
+    });
+    if (cached.passed) return null; // cached green (or scope-out) → dispatch
+    // Cached RED. The run has not progressed since that verdict — the pause
+    // mutates nothing — so re-entering it is the same pause, rebuilt from the
+    // cached command results so the record keeps its failing command, exit code
+    // and output tail.
+    return emitFinalGateRedStep({
+      root,
+      artifactsDir,
+      state,
+      scope,
+      gate: {
+        passed: false,
+        results: cached.results,
+        outcome: cached.outcome,
+        scoped_out: cached.scoped_out,
+        runtime_residual: RUNTIME_RESIDUAL_DECLARATION,
+      },
+      // The RECORD's own tree, not the freshly-measured one: the prompt must
+      // name the identity the cached verdict is actually bound to, which is the
+      // one readFinalGateVerdict just matched on.
+      tree: cached.tree,
+      runLogger,
+    });
+  }
+
   const gateStart = Date.now();
   runLogger.event({
     phase: "next-step",
     kind: "executor_start",
     obligation: state.status,
-    note: `phase_boundary_gate phase=${phase}`,
+    note: gateKey,
   });
   const gate = await runToolOwnedFinalGate(root, { runner: options.finalGateRunner });
+  await writeFinalGateVerdict(artifactsDir, {
+    scope,
+    tree,
+    passed: gate.passed,
+    scoped_out: gate.scoped_out,
+    outcome: gate.outcome,
+    results: gate.results,
+  });
   await recordFinalGateOutcome({
     artifactsDir,
     state,
     scope,
-    gateKey: `phase_boundary_gate phase=${phase}`,
+    gateKey,
     runLogger,
     outcome: gate.outcome,
     passed: gate.passed,
@@ -3344,6 +3472,9 @@ async function runPhaseBoundaryGate(ctx: {
     state,
     scope,
     gate,
+    // The id taken BEFORE the floor ran, which is what writeFinalGateVerdict
+    // just recorded — so the prompt names the binding the cache will match on.
+    tree,
     runLogger,
   });
 }
@@ -3398,6 +3529,10 @@ async function handleAllTerminalTransition(
       // one at a phase boundary, so it gets the same answer: record and pause.
       // The run does NOT advance to `closing` — closing on a red would write a
       // report claiming an outcome the suite never corroborated.
+      // No `tree` here on purpose: this funnel caches nothing (it runs the floor
+      // on every arrival), so there is no verdict record for a red to be bound
+      // to, and the prompt says exactly that instead of naming an id that would
+      // be re-measured on the next call anyway.
       return emitFinalGateRedStep({
         root,
         artifactsDir,

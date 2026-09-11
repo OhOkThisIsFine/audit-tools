@@ -317,7 +317,19 @@ export async function findFrictionRecordsByRunLink(
   const wantDispatch = normalizeRunRefs(link.dispatch_run_ids);
   if (wantStep.length === 0 && wantDispatch.length === 0) return [];
   const dir = frictionCaptureDir(artifactsDir);
-  const names = await listFrictionRecordFilenames(artifactsDir);
+  // An UNLISTABLE dir degrades to "no linkage visible" HERE, and only here. This
+  // reader's whole product is cross-record visibility, and no delete is keyed on
+  // it — `listFrictionRecordFilenames` raises on any errno but ENOENT precisely
+  // so a DELETE gate cannot mistake an unreadable dir for an empty one, but
+  // letting that refusal reach this caller would turn a missing cross-reference
+  // into a crash inside the friction close-out decider. Stated, not swallowed:
+  // the alternative (silently empty) is the same value for a different reason.
+  let names: string[];
+  try {
+    names = await listFrictionRecordFilenames(artifactsDir);
+  } catch {
+    return [];
+  }
   const found: FrictionRecordReference[] = [];
   for (const name of names) {
     const path = join(dir, name);

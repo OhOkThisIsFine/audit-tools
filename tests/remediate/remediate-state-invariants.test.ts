@@ -14,6 +14,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IntakeSummary, IntakeOpenQuestion } from "../../src/remediate/intake.js";
 import { scratchDir } from "../helpers/scratch.js";
+import { stripComments } from "../helpers/recognizers.js";
 import {
   autonomousLeftoverFindingsPath,
   autonomousLeftoverReportPath,
@@ -40,6 +41,52 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-remediate-state-inv");
+
+/**
+ * The text of the CALL STATEMENT enclosing offset `at` — from the opening token
+ * back to the `(` that opened it, forward to its matching `)`.
+ *
+ * Used by the `[remediate-code]` prefix scan below, which must not depend on how
+ * many lines a call happens to be formatted across. The delimiter walk is
+ * string-aware at the crude level that matters here: a quote or a template
+ * literal toggles a flag so a `)` inside a message string is not read as the
+ * closer (these diagnostics are template literals full of parens, path
+ * separators and interpolation).
+ *
+ * Degrades to the enclosing LINE when no opening paren can be found, which is a
+ * NARROWER window than the call — the safe direction for a scan that fails on a
+ * missing label.
+ */
+function enclosingCallStatement(source: string, at: number): string {
+  // FORWARD from the write site, never backward: the nearest `(` BEFORE the
+  // match is routinely one inside a `${…}` interpolation on the same line (these
+  // messages are template literals), whose matching `)` is the interpolation's —
+  // a window over a fragment of string, with the label outside it. The write
+  // site's own opener is the first `(` at or after the match, since nothing but
+  // optional whitespace separates the callee from it.
+  const opener = source.indexOf("(", at);
+  if (opener === -1) return source.slice(at).split("\n")[0] ?? "";
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = opener; i < source.length; i += 1) {
+    const char = source[i]!;
+    if (quote !== null) {
+      if (char === "\\") i += 1;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char === "(") depth += 1;
+    else if (char === ")") {
+      depth -= 1;
+      if (depth === 0) return source.slice(opener, i + 1);
+    }
+  }
+  return source.slice(opener);
+}
 
 // ---------------------------------------------------------------------------
 // INV-remediate-state-06: blockingIntakeQuestions — blocking===true only
@@ -591,7 +638,7 @@ describe("CP-NODE-15 inv-6/fail-9: grounding drops are recorded, not just printe
     // with no trace of a plan being destroyed, findings being dropped, or a run
     // being rerouted.
     //
-    // Two ways the first version of this pin was FALSIFIED, both closed below:
+    // THREE ways this pin was FALSIFIED, all closed below:
     //   (a) "any event within N chars" is satisfiable by a NEIGHBOUR's event, so
     //       a brand-new unpaired write dropped beside a paired one passed. The
     //       nearest preceding event must now fall AFTER the previous diagnostic
@@ -601,11 +648,30 @@ describe("CP-NODE-15 inv-6/fail-9: grounding drops are recorded, not just printe
     //   (b) no anti-vacuity guard: rewriting the diagnostics as `console.error`
     //       emptied the needle and the test passed having scanned nothing. The
     //       needle is now a FAMILY, and a zero-site scan fails outright.
-    const source = await readFile(
+    //   (c) THE FAMILY WAS THE HOLE. It read `process.stderr.write(` +
+    //       `console.error|warn` — so migrating ONE diagnostic to `console.log`
+    //       (admissible: `console.log` is what this repo's loaders treat as the
+    //       ordinary channel) and deleting its event stayed GREEN, because the
+    //       in-family survivors satisfied the vacuity guard. Four entry points
+    //       now, `console.log` and `process.stdout.write` included: which stream
+    //       a diagnostic takes is not the property, so it must not decide
+    //       whether the property is checked.
+    //
+    // ⚠ ORDERING MANDATE — the event must be written BEFORE the diagnostic it
+    // pairs with (`event < write`), and the check enforces exactly that. A
+    // legitimate write-then-log pairing therefore false-reds BY DESIGN rather
+    // than by accident: write the durable record first, then announce it. The
+    // failure text below states the mandate so the next reader is not left
+    // guessing at an ordering requirement that only the test's arithmetic knows.
+    const raw = await readFile(
       join(__dirname, "..", "..", "src", "remediate", "steps", "nextStep.ts"),
       "utf8",
     );
-    const WRITE_RE = /process\.stderr\.write\(|console\.(?:error|warn)\(/gu;
+    // Comment-aware: a diagnostic NAMED in a comment is not a diagnostic. The
+    // scan and the line numbers below are computed on the same stripped text.
+    const source = stripComments(raw);
+    const WRITE_RE =
+      /process\.stderr\.write\(|process\.stdout\.write\(|console\.(?:error|warn|log)\(/gu;
     const EVENT_RE = /runLogger\??\.event\(/gu;
     const writes = [...source.matchAll(WRITE_RE)].map((m) => m.index);
     const events = [...source.matchAll(EVENT_RE)].map((m) => m.index);
@@ -628,7 +694,54 @@ describe("CP-NODE-15 inv-6/fail-9: grounding drops are recorded, not just printe
     });
     expect(
       unpaired,
-      "each line number above writes a diagnostic the artifact directory never records",
+      "each line number above writes a diagnostic the artifact directory never records. " +
+        "Pair it with a `runLogger?.event({...})` carrying the same fact, written BEFORE " +
+        "the diagnostic (event first, then announce) and after the previous diagnostic — " +
+        "the pairing is positional, so a neighbouring site's event cannot stand in.",
+    ).toEqual([]);
+  });
+
+  it("NEGATIVE: every diagnostic write in nextStep.ts is labelled with the [remediate-code] prefix", async () => {
+    // The other half of the door (c). Widening the family catches a diagnostic
+    // that CHANGES STREAM; this catches one that arrives UNLABELLED — a bare
+    // `console.log(msg)` on a stream shared with every other advisory in the
+    // process is un-greppable from a host log, so the durable run log is again
+    // the only way to find it. The prefix is what makes the stream searchable by
+    // tool rather than by eye, which is the whole point of writing it there.
+    const source = stripComments(
+      await readFile(
+        join(__dirname, "..", "..", "src", "remediate", "steps", "nextStep.ts"),
+        "utf8",
+      ),
+    );
+    const WRITE_RE =
+      /process\.stderr\.write\(|process\.stdout\.write\(|console\.(?:error|warn|log)\(/gu;
+    const sites = [...source.matchAll(WRITE_RE)].map((m) => m.index);
+    expect(
+      sites.length,
+      "ANTI-VACUITY: a scan that matched no diagnostics proves nothing",
+    ).toBeGreaterThan(0);
+
+    const unlabelled: number[] = [];
+    for (const at of sites) {
+      const line = source.slice(0, at).split("\n").length;
+      // The ENCLOSING CALL STATEMENT, not a fixed three-line window. A prefix
+      // scan over `[line-1, line+1]` only sees the write line itself and the two
+      // after it, so a perfectly labelled multi-line call whose `write(` sits
+      // more than two lines above its `[remediate-code]` argument false-reds —
+      // and the fix for that would have been to hand-edit the window to whatever
+      // the current source shape needs, which is the same bug one size larger.
+      const statement = enclosingCallStatement(source, at);
+      // The claim this scan can actually prove, and no more: the label is
+      // SOMEWHERE inside the call statement the write opens. It is not a claim
+      // about which argument the label belongs to (a nested call could carry it),
+      // and it is deliberately not a claim that the write emits it.
+      if (!statement.includes("[remediate-code]")) unlabelled.push(line);
+    }
+    expect(
+      unlabelled,
+      "each line number above writes a diagnostic that does not name [remediate-code], " +
+        "so nothing reading the stream can tell which tool produced it",
     ).toEqual([]);
   });
 
