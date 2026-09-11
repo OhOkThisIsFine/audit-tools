@@ -38,6 +38,7 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { withTempDir } from "./helpers/withTempDir.mjs";
 
@@ -593,5 +594,52 @@ test("H5: a friction record that cannot be archived also aborts the delete", asy
       result.unarchived?.join(" "),
       "the friction shortfall must be nameable by the caller",
     ).toContain("friction record");
+  });
+});
+
+test("H6: a friction dir that cannot be LISTED also aborts the delete", async () => {
+  await withTempDir("seam-promote-H6-", async (root) => {
+    const artifactsDir = await seedArtifacts(root);
+    // The dir EXISTS and holds records; it simply cannot be enumerated, because
+    // the path is a plain FILE. `readdir` refuses with ENOTDIR — any errno but
+    // ENOENT is the same answer here.
+    //
+    // This is the CP-NODE-3 residual, and it is a strictly worse sibling of H5:
+    // the listing and the archive walk share `listFrictionRecordFilenames`, so
+    // BOTH used to degrade to `[]` on this errno. The comparison below was then
+    // satisfied (0 < 0 is false), the shortfall went unnamed, and the rm below
+    // destroyed the whole dir with the records inside it. H5's unarchivable FILE
+    // could already refuse the delete; an unlistable DIRECTORY could not.
+    const frictionPath = join(artifactsDir, "friction");
+    await writeFile(frictionPath, "not a directory\n", "utf8");
+
+    const result = await promoteFinalAuditReport({ artifactsDir });
+
+    expect(
+      (await stat(artifactsDir)).isDirectory(),
+      "a directory whose friction records could not be enumerated must NOT be deleted",
+    ).toBe(true);
+    expect(result.cleaned).toBe(false);
+    expect(
+      result.unarchived?.join(" "),
+      "the unlistable-directory refusal must be nameable by the caller",
+    ).toContain("friction directory listing");
+  });
+});
+
+test("H7: an ABSENT friction dir is not a shortfall — the delete still happens", async () => {
+  // The counterweight to H6, and the reason the errno split exists rather than a
+  // blanket throw: a run that recorded no friction has no `friction/` dir at
+  // all, which is the ordinary clean run. Treating ENOENT as a shortfall would
+  // preserve every artifacts dir forever and red every green audit.
+  await withTempDir("seam-promote-H7-", async (root) => {
+    const artifactsDir = await seedArtifacts(root);
+    expect(existsSync(join(artifactsDir, "friction"))).toBe(false);
+
+    const result = await promoteFinalAuditReport({ artifactsDir });
+
+    expect(result.cleaned).toBe(true);
+    expect(result.unarchived ?? []).toEqual([]);
+    expect(existsSync(artifactsDir)).toBe(false);
   });
 });

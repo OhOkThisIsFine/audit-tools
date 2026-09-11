@@ -45,6 +45,7 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "extracted-plan.json",
   "file_disposition.json",
   "final-gate-outcome.json",
+  "final-gate-verdict.json",
   "final-gate.json",
   "finding-enumeration.json",
   "findings-digest.json",

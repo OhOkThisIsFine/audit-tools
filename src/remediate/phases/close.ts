@@ -64,6 +64,7 @@ import {
 import {
   ABSENT_FINAL_GATE_REPORT,
   FinalGateReportSchema,
+  carriesGateVerdict,
   isCompleteEvidence,
   mechanismContradictsOutcome,
   missingEvidenceParts,
@@ -180,10 +181,12 @@ export async function readFinalGateReport(
         "treated as no verdict",
     };
   }
-  // Defense in depth against a hand-edited or older record: only an EXECUTED
-  // gate may carry a verdict. A not-run kind asserting `passed: true` is
-  // normalized away here rather than reprinted into the report.
-  return parsed.data.outcome === "executed"
+  // Defense in depth against a hand-edited or older record: only a
+  // verdict-bearing kind may carry a verdict — `executed` because a judge just
+  // ran, `history` because one ruled on this exact tree content and the answer
+  // cannot have changed. A not-run kind asserting `passed: true` is normalized
+  // away here rather than reprinted into the report.
+  return carriesGateVerdict(parsed.data.outcome)
     ? parsed.data
     : { ...parsed.data, passed: null, commands_run: 0 };
 }
@@ -1472,13 +1475,33 @@ function buildRemediationReportMarkdown(
   // scoped out, suppressed, or never reached used to produce a report identical
   // to one written after a green floor — "the suite passed" and "no suite ran"
   // were the same document. Every branch below names which happened.
+  // The SPLIT is `carriesGateVerdict`, NOT `outcome === "executed"`. A `history`
+  // outcome carries a REAL verdict — a judge ruled on this exact tree content —
+  // so branching on the executed literal sent it to the not-run arm, which
+  // printed "the repository floor did NOT run (0 commands) … This is not a pass"
+  // directly beside a `commands_run` of 4, contradicting itself in one section.
+  // The question the render asks is the one the shared predicate answers: did
+  // anything JUDGE this tree? Only the not-run kinds get the not-a-pass
+  // sentence, and the predicate — not a second literal list here — is what draws
+  // that line.
   const gate = outcomesReport.final_gate;
   reportContent += `\n## Repository Gate\n\n`;
   if (gate.outcome === "executed") {
     reportContent += `Outcome: executed — the repository build/typecheck/test floor RAN (${gate.commands_run} command(s)) and ${gate.passed ? "PASSED" : "FAILED"}.\n`;
+  } else if (carriesGateVerdict(gate.outcome)) {
+    // Reached only for a verdict-bearing kind that is NOT `executed` — i.e.
+    // `history`, told apart from `executed` because the FACT is distinct: the
+    // floor ran, on this same tree content, and this evaluation was served its
+    // recorded verdict instead of re-spawning it. Saying "RAN" would claim a
+    // judge executed in this evaluation; saying "did NOT run" would claim the
+    // tree is unjudged. Neither is true.
+    reportContent += `Outcome: ${gate.outcome} — the repository floor ran on an UNCHANGED tree and this evaluation was served the recorded verdict (${gate.commands_run} command(s) held by that record), which ${gate.passed ? "PASSED" : "FAILED"}.\n`;
   } else if (gate.outcome === "absent") {
     reportContent += `Outcome: absent — NO gate outcome was recorded for this run, so nothing here corroborates it. This is not a pass.\n`;
   } else {
+    // Reachable only for a kind `carriesGateVerdict` rejects — i.e. a gate that
+    // ran nothing. Stated as its own line rather than folded into the `absent`
+    // sentence above, which is about the RECORD being missing, not the floor.
     reportContent += `Outcome: ${gate.outcome} — the repository floor did NOT run (0 commands), so nothing here corroborates this run. This is not a pass.\n`;
   }
   if (gate.reason) reportContent += `Reason: ${gate.reason}\n`;
@@ -1632,12 +1655,41 @@ export async function cleanupTempBranchesAndArtifacts(
   // Archive the friction close-out record with the promoted deliverables BEFORE
   // deleting the artifacts dir — same property as the audit side's
   // promoteFinalAuditReport: the record must outlive the run it walked.
+  //
+  // AN ARCHIVE THAT DID NOT HAPPEN MUST NOT LICENSE THE DELETE. `archiveFrictionRecords`
+  // deliberately PROPAGATES an unlistable directory rather than reporting it as an
+  // empty one (see `listFrictionRecordFilenames`), because `[]` reads as "nothing
+  // to archive" — and the rm below would then destroy records the archive never
+  // saw. The two sides were built the same errno-blind way once (the CP-NODE-3
+  // residual); the audit promote walk refuses the delete outright, and so does
+  // this one. The difference is what "refuse" costs here: this is the run's own
+  // scratch under `.audit-tools/`, deleted only on a fully-green close, and a
+  // non-green close already preserves it — so the answer is to KEEP the
+  // directory and say why, not to abort a close that has already written its
+  // report.
   const { archiveFrictionRecords, outputDirFor } = await import("audit-tools/shared");
-  await archiveFrictionRecords({
-    artifactsDir: options.artifactsDir,
-    destDir: outputDirFor(options.artifactsDir),
-    prefix: "remediation-friction",
-  });
+  try {
+    await archiveFrictionRecords({
+      artifactsDir: options.artifactsDir,
+      destDir: outputDirFor(options.artifactsDir),
+      prefix: "remediation-friction",
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(
+      "Friction close-out records could not be enumerated, so the artifacts " +
+        "directory is kept rather than deleted: " +
+        reason,
+    );
+    runLogger?.event({
+      phase: "close",
+      kind: "artifact_write",
+      obligation: "closing",
+      artifact: options.artifactsDir,
+      note: `friction archive listing failed — artifacts dir preserved (records may exist and were NOT archived): ${reason}`,
+    });
+    return { artifacts_residue: options.artifactsDir };
+  }
   try {
     const { rm } = await import("node:fs/promises");
     await rm(options.artifactsDir, { recursive: true, force: true });

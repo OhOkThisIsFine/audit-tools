@@ -662,6 +662,40 @@ describe("OBL-…-inv-1: the completion report names which gate happened", () =>
     expect(report).not.toContain("PASSED");
   });
 
+  it("POSITIVE: a HISTORY verdict is named as a judge on an unchanged tree, never as a not-run", async () => {
+    // The `history` kind carries a REAL verdict — a judge ruled on this exact
+    // tree content — so a render that branched on `executed` printed "the
+    // repository floor did NOT run (0 commands) … This is not a pass" on the
+    // line after `commands_run: 4`. Self-contradicting in one section, and
+    // wrong in the direction that matters: it tells a reader the tree is
+    // unjudged when it has been judged.
+    const { report, outcomes } = await closeWithGateRecord({
+      schema_version: "remediate-code-final-gate-outcome/v1alpha1",
+      scope: "phase 1 boundary",
+      outcome: "history",
+      passed: true,
+      commands_run: 4,
+      reason:
+        "a verdict for this exact tree content is already recorded; the floor " +
+        "was NOT re-run because the tree it would run against has not changed",
+      recorded_at: new Date().toISOString(),
+    });
+    const gate = outcomes.final_gate as Record<string, unknown>;
+    expect(gate.outcome).toBe("history");
+    expect(gate.passed, "a judge ruled on this tree content").toBe(true);
+    expect(gate.commands_run).toBe(4);
+
+    expect(report).toContain("Outcome: history");
+    // The three things the sentence must carry, and the one it must not.
+    expect(report).toContain("ran on an UNCHANGED tree");
+    expect(report).toContain("served the recorded verdict");
+    expect(report).toContain("PASSED");
+    expect(report, "a judged tree is not an unjudged one").not.toContain(
+      "did NOT run",
+    );
+    expect(report).not.toContain("This is not a pass");
+  });
+
   it("NEGATIVE: an ABSENT record is stated as absent, never inferred as green", async () => {
     const { report, outcomes } = await closeWithGateRecord(undefined);
     const gate = outcomes.final_gate as Record<string, unknown>;

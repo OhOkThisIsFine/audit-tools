@@ -35,6 +35,13 @@ const FOLD_REACHABLE_MODULES = [
   "src/remediate/phases/triage.ts", //             phase lock (blocked-item reverify)
   "src/remediate/validation/contractPipelineGates.ts", // phase lock (promotion gates)
   "src/shared/validation/findingGrounding.ts", //  phase lock (grounding corpus)
+  // The tool-owned final gate is spawned INLINE by the phase-boundary gate, which
+  // `advanceUnderPhaseLock` runs with the phase lock HELD — and its unit leg is a
+  // whole vitest run, minutes. It was the longest sync spawn under a held lock in
+  // the tree, so a synchronous runner here starved the lock's mtime heartbeat and
+  // exposed a LIVE lock to stale-reclaim (CP-NODE-5). The spawns this module makes
+  // must stay on the async twin; `isAuditToolsMonorepo` beside them is pure fs.
+  "src/remediate/steps/finalGate.ts", //           phase lock (tool-owned floor)
 ];
 
 for (const module of FOLD_REACHABLE_MODULES) {

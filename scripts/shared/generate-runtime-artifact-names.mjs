@@ -55,7 +55,7 @@ export const RUNTIME_NAME_SOURCES = [
   { file: "src/remediate/intake.ts", rules: ["joinLiterals"] },
   { file: "src/remediate/state/store.ts", rules: ["filenameConstants"] },
   { file: "src/remediate/steps/nextStep.ts", rules: ["joinLiterals"] },
-  { file: "src/remediate/steps/finalGate.ts", rules: ["filenameConstants"] },
+  { file: "src/remediate/steps/finalGate.ts", rules: ["filenameConstants", "joinLiterals"] },
   { file: "src/remediate/validation/artifacts.ts", rules: ["joinLiterals"] },
 ];
 

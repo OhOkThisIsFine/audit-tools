@@ -1210,6 +1210,174 @@ describe("runClosePhase", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// The force-close backstop is the ONLY thing standing between an unanswered
+// question and a green close (CP-NODE-15 residual, named in the CP-NODE-3/15
+// review entry).
+//
+// The coarse-backstop terminal branch used to convert a still-non-terminal item
+// before close could ever see one. It is retired, so the guarantee that a
+// `needs_clarification` item never SURVIVES into a green close is owned solely
+// by `runClosePhase`'s non-terminal arm (`buildRemediationOutcomesReport`) plus
+// the green-close guard (`cleanupTempBranchesAndArtifacts`). The item status
+// itself is deliberately NOT rewritten — an unanswered question is not a
+// disposition the tool gets to invent — so the property is that it is RECORDED
+// as a failure and REFUSES the landing, three ways at once. Delete any one of
+// these legs and a run paused on an unanswered question reports green.
+// ---------------------------------------------------------------------------
+describe("the force-close backstop: a needs_clarification item never lands green", () => {
+  it("records it as blocked with its original state, and refuses to land the run", async () => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        findings: [
+          {
+            id: "F-ANSWERED",
+            title: "Answered finding",
+            category: "correctness",
+            severity: "high",
+            confidence: "high",
+            lens: "correctness",
+            summary: "",
+            affected_files: [{ path: "src/a.ts" }],
+          },
+          {
+            id: "F-UNANSWERED",
+            title: "Unanswered finding",
+            category: "correctness",
+            severity: "high",
+            confidence: "high",
+            lens: "correctness",
+            summary: "",
+            affected_files: [{ path: "src/b.ts" }],
+          },
+        ],
+        blocks: [],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+      } as any,
+      items: {
+        "F-ANSWERED": {
+          finding_id: "F-ANSWERED",
+          status: "resolved",
+          block_id: "B1",
+        },
+        // Non-terminal ON PURPOSE: this is the shape a worker question leaves
+        // behind when the clarification round is swept into close.
+        "F-UNANSWERED": {
+          finding_id: "F-UNANSWERED",
+          status: "needs_clarification",
+          block_id: "B1",
+          failure_reason: "Which auth provider should the token come from?",
+        },
+      } as any,
+    });
+
+    const next = await runClosePhase(state, BASE_OPTIONS);
+    expect(next.status).toBe("complete");
+
+    const outcomes = JSON.parse(
+      await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
+    );
+    const unanswered = outcomes.outcomes.find(
+      (o: any) => o.finding_id === "F-UNANSWERED",
+    );
+    // Leg 1 — never dropped. The item is in the outcomes contract.
+    expect(
+      unanswered,
+      "an unanswered item must not vanish from the outcomes report",
+    ).toBeTruthy();
+    // Leg 2 — recorded as a failure, with the status it actually held, so a
+    // retry sees where it stood rather than a fabricated disposition.
+    expect(unanswered.outcome).toBe("blocked");
+    expect(unanswered.final_status).toBe("failed");
+    expect(unanswered.original_state).toBe("needs_clarification");
+    expect(unanswered.reason).toContain("Force-closed while non-terminal");
+    // ...and the question the worker asked is preserved, not replaced by it.
+    expect(unanswered.reason).toContain("Which auth provider");
+    expect(outcomes.by_outcome.blocked).toBe(1);
+
+    // Leg 3 — the landing is refused. `needs_clarification` is an unsuccessful
+    // END status, so the artifacts directory survives for diagnosis and the run
+    // is never "landed green" as if it had completed.
+    expect(
+      existsSync(TEST_DIR),
+      "a run with an unanswered question must not delete its artifacts as if complete",
+    ).toBe(true);
+
+    const verification = JSON.parse(
+      await readFile(join(OUTPUT_DIR, "verification_report.json"), "utf8"),
+    );
+    expect(verification.overall_status).toBe("failed");
+    const trace = verification.findings.find(
+      (f: any) => f.finding_id === "F-UNANSWERED",
+    );
+    expect(trace.overall_status).toBe("failed");
+  });
+
+  it("a friction archive that cannot be LISTED keeps the artifacts dir instead of deleting it", async () => {
+    // The close-side twin of the audit promote walk's H6. `archiveFrictionRecords`
+    // walks `listFrictionRecordFilenames`, which propagates any errno but ENOENT
+    // rather than reporting an unreadable directory as an empty one — because `[]`
+    // reads as "nothing to archive", which is what licenses the rm that follows.
+    // Ungated, THAT is a green close destroying records it never archived.
+    //
+    // The artifacts dir exists exactly to be preserved on a non-green close, so
+    // "refuse the delete" here means keeping the directory and saying so — never
+    // aborting a close that has already written its report.
+    //
+    // The friction dir EXISTS and holds records; it simply cannot be enumerated,
+    // because the path is a plain FILE (`readdir` refuses with ENOTDIR — any
+    // errno but ENOENT is the same answer).
+    writeFileSync(join(TEST_DIR, "friction"), "not a directory\n");
+
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        findings: [
+          {
+            id: "F-000",
+            title: "Answered finding",
+            category: "correctness",
+            severity: "high",
+            confidence: "high",
+            lens: "correctness",
+            summary: "",
+            affected_files: [{ path: "src/a.ts" }],
+          },
+        ],
+        blocks: [],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+      } as any,
+      items: {
+        "F-000": { finding_id: "F-000", status: "resolved", block_id: "B1" },
+      } as any,
+    });
+
+    // Log OUTSIDE the artifacts dir: the whole point is that this close does not
+    // delete it, but the ordinary close does — and the assertion below must not
+    // depend on which happened.
+    const logPath = join(REPO_DIR, "run.log.jsonl");
+    const next = await runClosePhase(
+      state,
+      BASE_OPTIONS,
+      new RunLogger(logPath, { enabled: true }),
+    );
+    expect(next.status).toBe("complete");
+
+    // The directory SURVIVES — the delete was refused, not attempted-and-failed.
+    expect(
+      existsSync(TEST_DIR),
+      "a close whose friction records could not be enumerated must not delete them",
+    ).toBe(true);
+    // And the refusal is nameable in the run log rather than silent.
+    expect(await readFile(logPath, "utf8")).toContain(
+      "friction archive listing failed",
+    );
+  });
+});
+
 describe("collectStagingFiles", () => {
   const GIT_DIR = scratchDir(".test-close-git");
 

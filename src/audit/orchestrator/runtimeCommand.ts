@@ -15,9 +15,11 @@ import {
 
 // Wrapper-only control-variable stripping is owned by the shared execution
 // substrate so runtime validation never inherits driver lifecycle authority.
-// This strips the host-signaling env vars so a runtime-validation command sees a
-// clean environment — a suite that branches on CLAUDECODE would otherwise be graded
-// against the host's interactive-session state, marking healthy code "not_confirmed".
+// What `stripAuditToolsControlEnv` removes is exactly ONE variable —
+// `AUDIT_TOOLS_CALLER_CWD`, the wrapper's one-hop caller-cwd stamp, which a child
+// must not read as its own location. It does NOT clear the host session's
+// CLAUDECODE / CLAUDE_CODE_* variables: a runtime-validation command inherits
+// them like any other child (this comment used to claim otherwise).
 
 /**
  * The bounded wait every runtime-validation command runs under.
