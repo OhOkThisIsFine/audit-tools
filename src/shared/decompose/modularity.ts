@@ -117,7 +117,7 @@ interface AdjacencyGraph {
   totalWeight: number;
 }
 
-function buildAdjacency(graph: WeightedGraph): AdjacencyGraph {
+export function buildAdjacency(graph: WeightedGraph): AdjacencyGraph {
   const normalizedEdges = graph.edges.map((edge, index) => {
     assertNodeId(edge.a, `Edge ${index} endpoint a`);
     assertNodeId(edge.b, `Edge ${index} endpoint b`);
@@ -192,11 +192,87 @@ function buildAdjacency(graph: WeightedGraph): AdjacencyGraph {
   };
 }
 
+/**
+ * Hard ceiling on local-moving passes at ONE hierarchy level — a floor under the
+ * fixpoint, never the convergence criterion: the loop exits the moment a full
+ * pass makes no move.
+ *
+ * MEASURED 2026-09-10, and the measurement corrects the premise this ceiling was
+ * added under. The loop was bounded at `nodes + 8`, which reads like a pass
+ * budget but is not the terminator: instrumenting the compiled loop over five
+ * adversarial constructions — a banded dense graph, a SATURATED CLIQUE (the
+ * dense shape refinement exists for), a 1,600-node chain, a two-scale nested
+ * graph, and an LCG-sparse graph — gives ONE local-moving pass per level in
+ * every case, at every level. A separate greedy-ascent replication confirms the
+ * same shape from the other direction: the natural ascending sweep reaches its
+ * fixpoint in 1-3 passes at n = 8…200. So the fixpoint always fires first.
+ *
+ * ⚠ THE CEILING IS THEREFORE NOT RED-DETECTABLE BY ANY TIMING TEST, and this is
+ * stated rather than papered over: reverting it to `nodes + 8` leaves every
+ * fixture partition byte-identical and every timing figure unchanged (verified —
+ * `tests/shared/decompose.test.ts` + `tests/shared/content-coherence.test.ts`,
+ * 51 passed both ways). It cannot bite a convergent run, and a PASS BUDGET is
+ * not what bounds refinement cost anyway — that is the Θ(Σ degree) Louvain call
+ * over a component carrying ~n² edges, pinned by
+ * `tests/shared/content-coherence.test.ts`.
+ *
+ * What it protects is the non-convergent case, and the form of that protection
+ * is what {@link localMovingPassBudget} exists to pin: at `nodes + 8` an O(n²)
+ * pass on a saturated component was permitted O(n³) total; the budget is now
+ * bounded by a CONSTANT independent of node count. A small constant cannot make
+ * a convergent run converge differently; it bounds one that does not.
+ */
+export const MAX_LOCAL_MOVING_PASSES = 64;
+
+/**
+ * Pass budget for one level's local-moving loop: the node-count allowance,
+ * SATURATED by {@link MAX_LOCAL_MOVING_PASSES} so the total work at one level is
+ * bounded by a constant rather than by the graph size.
+ *
+ * Exported because it is the whole of the property the ceiling adds, and the
+ * saturation is invisible to every behavioural input (see the constant's note).
+ */
+export function localMovingPassBudget(nodeCount: number): number {
+  return Math.min(nodeCount + 8, MAX_LOCAL_MOVING_PASSES);
+}
+
 /** One level of the Louvain hierarchy: the community assignment per node. */
 interface Level {
   /** node → community id (a representative node id). */
   communityOf: Map<string, string>;
 }
+
+/**
+ * The loop's SECOND stop condition, and the only seam in it.
+ *
+ * Termination is normally the FIXPOINT (a full pass that moves nothing). The
+ * pass ceiling exists for the case where that never arrives — and that case is
+ * not reachable through any input: a measured sweep over banded-dense, clique,
+ * chain, two-scale-nested, LCG-sparse and 1,200 randomized graphs (n = 6…200,
+ * integral and fractional weights, γ = 0.5…2) reached its fixpoint in at most
+ * 17 passes, against budgets of 14 to 64. So "the loop actually consults
+ * {@link localMovingPassBudget}" is not observable from a `Partition`, and a
+ * behavioral test cannot distinguish the budget from the retired `nodes + 8`:
+ * measured, reverting it changes every fixture's partition and timing NOT AT
+ * ALL.
+ *
+ * Hence this parameter: the caller's acceptance test for the partition a pass
+ * reached. Left undefined — every production caller — the loop is exactly what
+ * it always was. A caller that returns `false` refuses to stop at that
+ * partition, which is precisely the non-convergent case the ceiling is for, and
+ * makes the ceiling the terminator on demand. It is an ordinary predicate, so
+ * the tests reach it through `louvain` and not through a parallel replica of the
+ * loop: one definition, driven from the real entry point.
+ *
+ * Called once per pass, in order, at the end of that pass's sweep — on EVERY
+ * pass, not only the ones that could end the loop, so a caller that also counts
+ * them observes the loop rather than merely steering it. The return value only
+ * matters where the fixpoint would otherwise stop it.
+ */
+export type PartitionAcceptance = (
+  communityOf: ReadonlyMap<string, string>,
+  levelIndex: number,
+) => boolean;
 
 /**
  * Local-moving phase: greedily move each node to the neighboring community that
@@ -206,6 +282,8 @@ interface Level {
 function localMoving(
   graph: AdjacencyGraph,
   resolution: number,
+  partitionAccepted?: PartitionAcceptance,
+  levelIndex = 0,
 ): { communityOf: Map<string, string>; moved: boolean } {
   const twoM = checkedMultiply(graph.totalWeight, 2, "Graph mass");
   // A community's degree is repeatedly added to and subtracted from as nodes
@@ -231,10 +309,18 @@ function localMoving(
 
   let movedEver = false;
   let improved = true;
-  // Bound the passes so a pathological weight pattern can never loop forever;
-  // Louvain converges in a handful of passes in practice.
+  // Terminate on the FIXPOINT (a full pass with no move) and carry a hard pass
+  // ceiling as the floor under it — see {@link MAX_LOCAL_MOVING_PASSES} for why
+  // the ceiling is a small constant and not the node count, and why shrinking it
+  // cannot change a convergent partition.
+  //
+  // The ceiling is consulted through TWO conditions, and both are real: `guard`
+  // counts passes against the budget, and `partitionAccepted` is the caller's
+  // refusal to stop here. The second is undefined in production and the first is
+  // never reached there either (measured: at most 17 passes against a budget of
+  // 14–64), which is exactly why the budget needs a seam to be observed at all.
   let guard = 0;
-  const maxPasses = graph.nodes.length + 8;
+  const maxPasses = localMovingPassBudget(graph.nodes.length);
   while (improved && guard < maxPasses) {
     improved = false;
     guard += 1;
@@ -312,6 +398,19 @@ function localMoving(
         movedEver = true;
       }
     }
+    // The caller's verdict on this pass's partition — see
+    // {@link PartitionAcceptance}. Consulted ONLY where the fixpoint would
+    // otherwise end the loop: a caller that accepts (the only kind production
+    // has, by absence) leaves the stop condition exactly as it was, and a caller
+    // that refuses replaces the fixpoint with the pass ceiling. Called on EVERY
+    // pass, so a caller can also count them — which is the only way the ceiling
+    // is observable at all.
+    const accepted = partitionAccepted
+      ? partitionAccepted(communityOf, levelIndex)
+      : true;
+    if (!improved && !accepted) {
+      improved = true;
+    }
   }
 
   return { communityOf, moved: movedEver };
@@ -384,7 +483,17 @@ function aggregate(
  * improving. Returns a flat node→community partition (community ids are the
  * lexicographically smallest member). Deterministic for a given graph + γ.
  */
-export function louvain(graph: WeightedGraph, resolution: number): Partition {
+export function louvain(
+  graph: WeightedGraph,
+  resolution: number,
+  /**
+   * The pass-level acceptance test — see {@link PartitionAcceptance}. Undefined
+   * for every production caller, which is the loop exactly as it always was; a
+   * caller that refuses every partition drives the ceiling instead of the
+   * fixpoint, which is how the ceiling's own test observes it.
+   */
+  partitionAccepted?: PartitionAcceptance,
+): Partition {
   assertPositiveBounded(resolution, "Modularity resolution");
   const base = buildAdjacency(graph);
   if (base.nodes.length === 0) return new Map();
@@ -396,7 +505,12 @@ export function louvain(graph: WeightedGraph, resolution: number): Partition {
   const maxLevels = base.nodes.length + 4;
   while (guard < maxLevels) {
     guard += 1;
-    const { communityOf, moved } = localMoving(current, resolution);
+    const { communityOf, moved } = localMoving(
+      current,
+      resolution,
+      partitionAccepted,
+      levels.length,
+    );
     const canonical = canonicalizeCommunities(communityOf);
     levels.push({ communityOf: canonical });
     if (!moved) break;
@@ -440,7 +554,23 @@ export function modularityOf(
   resolution: number,
 ): number {
   assertPositiveBounded(resolution, "Modularity resolution");
-  const base = buildAdjacency(graph);
+  return modularityOfBase(buildAdjacency(graph), partition, resolution);
+}
+
+/**
+ * {@link modularityOf} over an ALREADY-BUILT adjacency. Building one costs a
+ * sort of every edge and the construction of two maps per node, which dominates
+ * the score itself on a dense graph — and the one caller that compares two
+ * partitions of the SAME graph (`refineAtModularityPeak`, which weighs a Louvain
+ * proposal against keeping the component whole) was paying for that build twice
+ * on identical input. `resolution` is passed through rather than re-validated:
+ * the public entry point owns the guard, and a second one here would be a copy.
+ */
+export function modularityOfBase(
+  base: AdjacencyGraph,
+  partition: Partition,
+  resolution: number,
+): number {
   if (base.totalWeight === 0) return 0;
   const twoM = checkedMultiply(base.totalWeight, 2, "Graph mass");
 

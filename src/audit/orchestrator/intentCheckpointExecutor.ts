@@ -5,7 +5,15 @@ import type { DesignAssessment } from "../types/designAssessment.js";
 import type { DocsDigestEntry } from "../types/docsDigest.js";
 import { resolveAuditScope } from "./scope.js";
 import { detectMisScopeSmells } from "./intakeExecutors.js";
-import { isAuditExcludedStatus } from "../extractors/disposition.js";
+import {
+  isAuditExcludedStatus,
+  VCS_IGNORED_REASON,
+  UNTRACKED_REASON,
+} from "../extractors/disposition.js";
+import type {
+  FileDispositionWithScopeRules,
+  ScopeRuleSummary,
+} from "../extractors/disposition.js";
 import {
   isBuildOutput,
   isVendorPath,
@@ -115,6 +123,45 @@ export interface ScopePreDigest {
    * it. Empty on a well-targeted root — the render omits the section then.
    */
   mis_scope_smells: string[];
+  /**
+   * Outcome of each of the disposition's two SCOPE RULES (gitignore /
+   * untracked), including the ones that were SKIPPED — a clean fallback (git
+   * absent, not a work tree) or a guard (`root_ignored` / `root_untracked` /
+   * `share_exceeded`).
+   *
+   * This is the operator-facing half of the summary `buildFileDisposition`
+   * already persists on `file_disposition.json`: the per-file entry list shows
+   * WHICH files were excluded but can never express "a rule declined to run",
+   * so the files a skipped rule WOULD have excluded sit in scope with nothing
+   * saying so. Ordered by the fixed rule sequence (gitignore, then untracked),
+   * never by object key order. Empty when the digest has no scope-rule records
+   * (a heuristics-only disposition built without a root) — the render omits the
+   * section then, so absence reads as "no rules to report" rather than as a
+   * silent claim that both ran clean.
+   */
+  scope_rules?: ScopeRuleOutcome[];
+}
+
+/** One scope rule's outcome, flattened for the pre-digest render. */
+export interface ScopeRuleOutcome {
+  /** Which rule this row reports. */
+  rule: "vcs_ignore" | "untracked";
+  /** True when the rule's exclusions were applied to the disposition. */
+  applied: boolean;
+  /** Candidate files the rule matched (the count it would have excluded). */
+  matched_count: number;
+  /** Why the rule was skipped, as the disposition recorded it. */
+  skipped_reason?: string;
+  /** Which guard branch fired, when a guard (not a clean fallback) skipped it. */
+  guard_branch?: ScopeRuleSummary["guard_branch"];
+  /**
+   * Files the disposition actually holds at this rule's reason — the rule's
+   * DELIVERED effect, as opposed to `matched_count`, which is the raw match
+   * count and includes files an earlier, higher-precedence exclusion claimed.
+   * Both numbers are shown because they disagree exactly when the rules
+   * interact, and only the pair lets an operator read that correctly.
+   */
+  excluded_count: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +441,43 @@ function buildLensPropositions(
   });
 }
 
+/**
+ * Flatten the disposition's two scope-rule outcomes into render rows, in the
+ * FIXED rule sequence the disposition applies them (gitignore, then untracked)
+ * — never `Object.entries` order, which would let a key rename reorder the
+ * operator-facing prompt. A rule with no recorded summary (heuristics-only
+ * disposition, or an older artifact written before the summaries existed) is
+ * reported as SKIPPED with the explicit reason rather than omitted: a missing
+ * record is exactly the "we could not tell you which rule ran" case this
+ * section exists to surface, and silence would read as "the rule ran clean".
+ */
+const NO_RULE_RECORD_REASON =
+  "no rule record on file_disposition.json (heuristics-only disposition)";
+
+export function buildScopeRuleOutcomes(
+  disposition: FileDispositionWithScopeRules | undefined,
+): ScopeRuleOutcome[] {
+  if (!disposition) return [];
+  const files = disposition.files;
+  const countAt = (reason: string) =>
+    files.filter((file) => file.reason === reason).length;
+  const summaries: Array<
+    [ScopeRuleOutcome["rule"], string, ScopeRuleSummary | undefined]
+  > = [
+    ["vcs_ignore", VCS_IGNORED_REASON, disposition.vcs_ignore],
+    ["untracked", UNTRACKED_REASON, disposition.untracked],
+  ];
+  return summaries.map(([rule, reason, summary]) => ({
+    rule,
+    applied: summary?.applied ?? false,
+    matched_count: summary?.ignored_count ?? 0,
+    excluded_count: countAt(reason),
+    ...(summary?.skipped_reason ? { skipped_reason: summary.skipped_reason } : {}),
+    ...(summary?.guard_branch ? { guard_branch: summary.guard_branch } : {}),
+    ...(summary ? {} : { skipped_reason: NO_RULE_RECORD_REASON }),
+  }));
+}
+
 export async function computeScopePreDigest(
   bundle: ArtifactBundle,
   root: string,
@@ -446,5 +530,6 @@ export async function computeScopePreDigest(
     lens_propositions,
     docs_digest: bundle.docs_digest?.docs ?? [],
     mis_scope_smells: await detectMisScopeSmells(root),
+    scope_rules: buildScopeRuleOutcomes(bundle.file_disposition),
   };
 }

@@ -71,6 +71,22 @@ export const RepoManifestSchema = z.object({
   }),
   generated_at: z.string(),
   files: z.array(FileRecordSchema),
+  /**
+   * Content key of the git INDEX state for this manifest's candidate paths —
+   * the tracked intersection, sorted and hashed. Set by the live probe
+   * (`scopeIndexBaseline.ts`) on every advance, like `tooling_manifest.json`'s
+   * environment probe, so an index-only move (a file staged or unstaged with no
+   * content edit) moves the manifest's content hash and re-stales
+   * `file_disposition.json` through the EXISTING declared edge.
+   *
+   * It lives on the manifest rather than as its own artifact deliberately: the
+   * index is an input the manifest's own reader (`buildFileDisposition`) is
+   * already downstream of, so the edge needs no addition to the staleness DAG —
+   * `spec/audit/dependency-map.md` is untouched. Absent when git could not be
+   * read (no root / no work tree / git absent): absence is "no index claim",
+   * never a claim that the index is empty.
+   */
+  scope_index_key: z.string().optional(),
 });
 export type RepoManifest = z.infer<typeof RepoManifestSchema>;
 

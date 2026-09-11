@@ -78,6 +78,7 @@ import {
   MAX_DRAIN_STEPS,
   type AdvanceAuditResult,
 } from "../orchestrator/advance.js";
+import type { ScopeIndexMemo } from "../orchestrator/scopeIndexBaseline.js";
 import {
   buildDesignReviewSnapshot,
   isDesignReviewStale,
@@ -235,6 +236,19 @@ export type NextStepParams = {
    */
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
   since?: string;
+  /**
+   * The FOLD's git-index probe cache (see `ScopeIndexMemo`), created once by
+   * `runDeterministicForNextStep` and read by every git probe the fold makes.
+   *
+   * It rides `NextStepParams` rather than the fold's `AuditNextStepCtx` because
+   * the submission-polling gate handlers (`handleCriticalFlowFallbackBranch` and
+   * its four siblings) reach `runAuditStepUnlocked` through the `params` they
+   * are handed, with no ctx in scope — so a memo kept only on the ctx left those
+   * dispatches probing with none, which is one extra `git` spawn per consumed
+   * submission. `params` is the one channel every dispatch path already shares.
+   * Undefined for a caller that is not a fold: the probes then simply re-run.
+   */
+  scopeIndexMemo?: ScopeIndexMemo;
 };
 
 export type TerminalStepResult =
@@ -1677,7 +1691,7 @@ interface OmittableGateDescriptor<TIncoming, TStepKind extends string> {
   apply: (
     value: TIncoming,
     path: string,
-    params: Pick<NextStepParams, "root" | "artifactsDir">,
+    params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
     bundle: ArtifactBundle,
     staged: { contentHash?: string },
   ) => Promise<AdvanceAuditResult>;
@@ -1700,7 +1714,7 @@ interface OmittableGateDescriptor<TIncoming, TStepKind extends string> {
  */
 async function runOmittableGate<TIncoming, TStepKind extends string>(
   descriptor: OmittableGateDescriptor<TIncoming, TStepKind>,
-  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -1762,7 +1776,10 @@ async function runOmittableGate<TIncoming, TStepKind extends string>(
  *     stays actionable and the fold spins (the guards do not cover this branch).
  */
 export async function handleSynthesisNarrativeBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "narrativeEnabled">,
+  params: Pick<
+    NextStepParams,
+    "root" | "artifactsDir" | "narrativeEnabled" | "scopeIndexMemo"
+  >,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -1779,6 +1796,7 @@ export async function handleSynthesisNarrativeBranch(
             artifactsDir: p.artifactsDir,
             preferredExecutor: "synthesis_narrative_executor",
             narrativeResultsPath: path,
+            scopeIndexMemo: p.scopeIndexMemo,
           },
           foldBundle,
         ),
@@ -1806,7 +1824,7 @@ export async function handleSynthesisNarrativeBranch(
  *   - `return`    → a prose-only delta awaits the host judge; emit the step.
  */
 export async function handleIntentEquivalenceBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -1830,6 +1848,7 @@ export async function handleIntentEquivalenceBranch(
           artifactsDir: params.artifactsDir,
           preferredExecutor: "intent_equivalence_executor",
           intentEquivalenceVerdictPath: incoming.path,
+          scopeIndexMemo: params.scopeIndexMemo,
         },
         bundle,
       );
@@ -1864,7 +1883,7 @@ export async function handleIntentEquivalenceBranch(
  * `run_omit` is never returned (shouldOmit is constant-false).
  */
 export async function handleCriticalFlowFallbackBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -1881,6 +1900,7 @@ export async function handleCriticalFlowFallbackBranch(
             artifactsDir: p.artifactsDir,
             preferredExecutor: "critical_flow_fallback_executor",
             criticalFlowFallbackResultsPath: path,
+            scopeIndexMemo: p.scopeIndexMemo,
           },
           foldBundle,
         ),
@@ -1907,7 +1927,7 @@ export async function handleCriticalFlowFallbackBranch(
  *     that renders the charter-extraction prompt.
  */
 export async function handleCharterExtractionBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -1989,6 +2009,7 @@ export async function handleCharterExtractionBranch(
         artifactsDir: params.artifactsDir,
         preferredExecutor: "charter_extraction_executor",
         charterSubmissionPath: mergedPath,
+        scopeIndexMemo: params.scopeIndexMemo,
       },
       bundle,
     );
@@ -2040,7 +2061,7 @@ export async function handleCharterExtractionBranch(
  *     that renders the charter-delta prompt for the independent miner.
  */
 export async function handleCharterDeltaBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -2057,6 +2078,7 @@ export async function handleCharterDeltaBranch(
             artifactsDir: p.artifactsDir,
             preferredExecutor: "charter_delta_executor",
             charterDeltaSubmissionPath: path,
+            scopeIndexMemo: p.scopeIndexMemo,
           },
           foldBundle,
         ),
@@ -2086,7 +2108,7 @@ export async function handleCharterDeltaBranch(
  *     yet → `return` the host step that relays the VOI queue.
  */
 export async function handleCharterClarificationBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -2103,6 +2125,7 @@ export async function handleCharterClarificationBranch(
             artifactsDir: p.artifactsDir,
             preferredExecutor: "charter_clarification_executor",
             clarificationAnswersPath: path,
+            scopeIndexMemo: p.scopeIndexMemo,
           },
           foldBundle,
         ),
@@ -2132,7 +2155,7 @@ export async function handleCharterClarificationBranch(
  * it (the priority scan skips a satisfied obligation).
  */
 export async function handleSystemicChallengeBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -2155,6 +2178,7 @@ export async function handleSystemicChallengeBranch(
             systemicChallengeSubmissionHash: staged.contentHash === undefined
               ? undefined
               : hashContent(`${lane}\n${staged.contentHash}`),
+            scopeIndexMemo: p.scopeIndexMemo,
           },
           foldBundle,
         ),
@@ -2185,7 +2209,7 @@ export async function handleSystemicChallengeBranch(
  * lock acquisition (the deleted O2 RMW).
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since" | "scopeIndexMemo">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -2217,6 +2241,8 @@ export async function executeAndRecord(
       since: params.since,
       lineIndex: indexes.lineIndex,
       sizeIndex: indexes.sizeIndex,
+      // ONE git-index probe per fold (see `ScopeIndexMemo`).
+      scopeIndexMemo: params.scopeIndexMemo,
     });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
@@ -3291,6 +3317,11 @@ function trackFoldBundle(obligations: AuditObligationDef[]): AuditObligationDef[
 export async function runDeterministicForNextStep(
   params: NextStepParams,
 ): Promise<NextStepResult> {
+  // THE fold's one git-index probe cache (`ScopeIndexMemo`). It is created here
+  // and held on `params` — the object every dispatch path already shares, the
+  // gate handlers included — so one `next-step` call spawns `git` once rather
+  // than once per obligation execution.
+  params.scopeIndexMemo = {};
   const analyzersRef: { value: Record<string, AnalyzerSetting> | undefined } = {
     value: params.analyzers,
   };

@@ -55,6 +55,50 @@ export const FindingEvidenceLaneSchema = z.enum([
 ]);
 export type FindingEvidenceLane = z.infer<typeof FindingEvidenceLaneSchema>;
 
+/**
+ * Lineage of a finding a DETERMINISTIC producer emitted — which producer, and
+ * over what source content. This is what makes such a finding a LEAD; it is
+ * stamped by the producing code (`stampLeadLineage`), and it is ENFORCED to be
+ * tool-only — every schema that parses a submitted finding omits this field and
+ * refuses it by name, and the design-review ingest strips it where the array
+ * door does not parse a schema at all. See `FindingSchema.lead_lineage` for the
+ * three sites; the enforcement is the point, because the claim "a host cannot
+ * author this" is exactly the kind that decays into prose if nothing tests it.
+ *
+ * WHY IT IS NOT JUST BOOKKEEPING. A deterministic graph heuristic (a cut-edge
+ * bridge, a co-change pair with no structural edge, a behaviorally-smeared
+ * doc grouping) computes over a GENERATION of the repo. Its verdict is
+ * falsifiable only against that generation: the same heuristic over a moved
+ * tree is a different claim, and a finding with no generation recorded cannot
+ * be re-checked at all — a reader cannot tell a live lead from one whose
+ * evidence was deleted three commits ago. The `source_hash` is the identity
+ * that lets a later pass re-derive the same signal and confirm or refute it.
+ *
+ * `producer` is the detector, not the artifact: `design_assessment` carries
+ * nine unrelated detectors, and naming only the artifact would leave a reader
+ * unable to tell a cut-edge fragility claim from a complexity-hotspot one.
+ */
+export const FindingLeadLineageSchema = z
+  .object({
+    /** Detector that emitted the lead (e.g. `detectSeams`, `detectHiddenCoupling`). */
+    producer: z.string(),
+    /**
+     * Content hash of the signal the producer read — the deterministic source
+     * this lead is bound to. Two runs over identical inputs produce the same
+     * hash; any input move produces a different one.
+     */
+    source_hash: z.string(),
+    /**
+     * `lead` — deterministic output awaiting semantic confirmation (the
+     * default for every graph heuristic). `confirmed` is never set by a
+     * deterministic producer: only a semantic pass may promote a lead, and it
+     * records the promotion on its own verdict, not here.
+     */
+    confirmation: z.literal("lead"),
+  })
+  .strict();
+export type FindingLeadLineage = z.infer<typeof FindingLeadLineageSchema>;
+
 export const FindingLocationObjectSchema = z.object({
   path: z.string(),
   line_start: z.number().int().min(1).optional(),
@@ -351,6 +395,24 @@ export const FindingSchema = z.object({
    */
   analyzer_provenance: AnalyzerLeadProvenanceSchema.optional().describe(
     "Content-anchored identity of the analyzer lead this finding was born from. Copy it VERBATIM from the injected lead's provenance object; omit for findings not born from an analyzer lead.",
+  ),
+  /**
+   * Lineage of a finding a DETERMINISTIC producer emitted: which detector, over
+   * what source content, as an unconfirmed lead. TOOL-STAMPED by the producer,
+   * and host supply is REFUSED at every door into a finding array, because the
+   * field decides its own row's trust class: a submission that could set it
+   * would let a claim it made itself wear provenance it never had, and one that
+   * could omit it would let a real lead read as a first-hand finding. The
+   * refusals are `WorkerFindingSchema` (omit + `WORKER_REFUSED_FINDING_VERDICTS`,
+   * which `.strict()` turns into a rejection), `ConceptualSubmittedFindingSchema`
+   * (omit + `refuseSuppliedToolVerdict`), and the strip in `groundDesignFindings`
+   * for the design-review arrays, which reach ingestion through an array check
+   * rather than a parsing schema — see each site for why its door needs the shape
+   * it has. Absent on host-authored findings (per-file and design-review lanes),
+   * which are claims in their own right rather than leads awaiting confirmation.
+   */
+  lead_lineage: FindingLeadLineageSchema.optional().describe(
+    "Tool-stamped lineage of a deterministically produced lead. Never supply this yourself.",
   ),
 });
 export type Finding = z.infer<typeof FindingSchema>;

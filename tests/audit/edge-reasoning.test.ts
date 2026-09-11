@@ -1,10 +1,23 @@
 import { test, expect } from "vitest";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { GraphBundle, GraphEdge } from "../../src/shared/index.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
 const { applyEdgeReasoning, collectLowConfidenceEdges, buildEdgeReasoningPrompt } =
   await import("../../src/audit/orchestrator/edgeReasoning.js");
+const { renderEdgeReasoningDispatchPrompt } = await import(
+  "../../src/audit/cli/prompts.js"
+);
 const { runGraphEnrichmentExecutor } = await import("../../src/audit/orchestrator/graphEnrichmentExecutor.js");
+const { hostScratchDir } = await import("../../src/shared/index.js");
+const { AUDIT_GATE_SUBMISSION_SCOPE } = await import(
+  "../../src/audit/cli/laneSubmissions.js"
+);
+const { NEXT_STEP_EMISSION_TABLE } = await import(
+  "../../src/audit/cli/nextStepCommand.js"
+);
 
 function sampleBundle(): GraphBundle {
   return {
@@ -97,6 +110,94 @@ test("buildEdgeReasoningPrompt lists each candidate edge", () => {
   expect(prompt).toMatch(/heuristic-container-edge/);
   expect(prompt).toMatch(/heuristic-auth-session-link/);
   expect(prompt).toMatch(/"rewrites"/);
+});
+
+// ── The dispatch prompt carries the scratch-dir note ─────────────────────────
+//
+// `renderHostScratchNote` / `hostScratchDir` had ZERO callers for over a year —
+// definitions plus a `src/shared/index.ts` re-export, which is all knip's
+// default mode needs to count as a consumer, so the dead-code gate stayed green
+// while the note reached no prompt. Its whole purpose is the one thing the
+// untracked scope rule cannot undo: scratch a lane's executor improvises lands
+// in the AUDITED tree, where the next run's manifest walk picks it up as
+// untracked litter. This pins the wiring on the emission side — the parameter
+// is required, so the only way to render the prompt without it is to not
+// compile.
+
+test("the edge-reasoning dispatch prompt names the run-scoped scratch dir", () => {
+  const scratchDirPath = join("artifacts", "scratch", "edge_reasoning");
+  const prompt = renderEdgeReasoningDispatchPrompt({
+    promptPath: "artifacts/lanes/edge_reasoning-prompt.md",
+    resultsPath: "artifacts/lanes/edge_reasoning-results.json",
+    continueCommand: "audit-code next-step",
+    contentHash: "deadbeef",
+    candidateCount: 2,
+    scratchDirPath,
+  });
+  expect(prompt).toContain(scratchDirPath);
+  // The note forbids the repo tree, which is the hazard it exists for.
+  expect(prompt).toMatch(/never at the repository root/);
+  // …and it sits on the dispatch prompt only, never in the lane prompt body:
+  // a lane file is advance-free and worker-facing, and the lane executor is
+  // told where it may write by the dispatch, not by its own instructions.
+  const lanePrompt = buildEdgeReasoningPrompt(
+    collectLowConfidenceEdges(sampleBundle()),
+  );
+  expect(lanePrompt).not.toContain(scratchDirPath);
+});
+
+// ── …and the directory the note names actually EXISTS ────────────────────────
+//
+// Naming a directory is not the same as providing one. `renderHostScratchNote`
+// points the host at a path built by a pure `join`; nothing on the emit path
+// created it, so "write your working files there" was an instruction the host
+// had to satisfy by running `mkdir` first. A host that skips that step — or
+// improvises a batch list with a plain redirect — writes at the repository root,
+// which is precisely the untracked litter the note exists to prevent (it enters
+// the next audit's intake walk and findings cite the previous run's litter).
+//
+// So the emission owns the directory, and this drives the REAL emission row
+// rather than the note renderer: asserting on the rendered string alone would
+// stay green with the `mkdir` deleted, which is the state this test exists to
+// make impossible.
+
+test("emitting the edge-reasoning dispatch creates the scratch dir its note names", async () => {
+  const root = mkdtempSync(join(tmpdir(), "edge-reasoning-scratch-"));
+  try {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const scratchDirPath = hostScratchDir(artifactsDir, AUDIT_GATE_SUBMISSION_SCOPE);
+    expect(
+      existsSync(scratchDirPath),
+      "precondition: nothing has created the scratch dir before the step is emitted",
+    ).toBe(false);
+
+    const row = NEXT_STEP_EMISSION_TABLE.edge_reasoning;
+    const plan = (await row({
+      argv: ["node", "audit-code", "--root", root],
+      root,
+      artifactsDir,
+      analyzerPolicy: null,
+      result: {
+        kind: "edge_reasoning",
+        state: { status: "active", obligations: [] },
+        bundle: {},
+        candidates: collectLowConfidenceEdges(sampleBundle()),
+      },
+    } as Parameters<typeof row>[0])) as unknown as {
+      params: { prompt: string };
+    };
+
+    // The emitted prompt addresses THIS directory — so the directory asserted
+    // below is the one the host was actually told to use, not a parallel guess.
+    expect(plan.params.prompt).toContain(scratchDirPath);
+    expect(
+      existsSync(scratchDirPath) && statSync(scratchDirPath).isDirectory(),
+      `the dispatch note names ${scratchDirPath}, so emission must create it — ` +
+        "a host following the note must not have to mkdir first",
+    ).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("graph-enrichment executor applies edge reasoning when gated on and writes the graph", async () => {

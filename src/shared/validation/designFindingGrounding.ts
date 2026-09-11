@@ -61,7 +61,8 @@ export function groundDesignFinding(
 }
 
 /**
- * Annotate each design finding with its lane and its grounding verdict.
+ * Annotate each design finding with its lane and its grounding verdict, and
+ * remove the one tool-owned verdict a submission can forge.
  *
  * The LANE stamp is unconditional and comes first: every finding reaching this
  * function arrived on a design-review lane (that is what the call sites are —
@@ -71,6 +72,22 @@ export function groundDesignFinding(
  * here rather than exposing a second function is deliberate — the lane is
  * provenance the ingest owns, and a separate call is a call a future ingest site
  * can forget.
+ *
+ * The `lead_lineage` STRIP is unconditional for the same reason, and it is the
+ * same "a separate call is a call someone forgets" argument: these lanes ingest
+ * host-authored findings, and the array door (`consumeArraySubmission`) checks
+ * only that the value IS an array — it does not parse through a schema that
+ * omits the tool-owned verdicts the way the per-file worker contract does. So
+ * without a strip here, a submission carrying `{producer: "host-forged", …}`
+ * lands verbatim in `contract_findings` / `conceptual_findings` and thereafter
+ * reads as a generation-bound deterministic lead: a claim wearing provenance it
+ * never had. Dropping the field leaves the row what it actually is — an
+ * unlineaged host finding, which the review prompt already calls out by count.
+ *
+ * A host that legitimately re-emits a lead is unaffected in substance: the
+ * provenance it could not have verified is exactly the part the tool refuses to
+ * take on its word, and its own `evidence` and `affected_files` ride through
+ * unchanged.
  *
  * The GROUNDING verdict is conditional. When no repo manifest is available the
  * findings cannot be grounded against a known file set, so they are returned
@@ -82,7 +99,7 @@ export function groundDesignFindings(
   findings: Finding[],
   repoManifest: { files?: Array<{ path: string }> } | undefined,
 ): Finding[] {
-  const marked = findings.map((finding) => ({
+  const marked = findings.map(({ lead_lineage: _forged, ...finding }) => ({
     ...finding,
     evidence_lane: "design-review-lane" as const,
   }));

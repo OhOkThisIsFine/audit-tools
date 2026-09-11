@@ -15,6 +15,7 @@
 import type { Finding } from "../types.js";
 import type { Partition } from "audit-tools/shared";
 import { clustersFromPartitions, compareCodeUnits } from "audit-tools/shared";
+import { leadSourceHash, stampLeadLineage } from "../extractors/leadLineage.js";
 
 /** Structural boundary-integrity findings carry the architecture lens. */
 const LENS = "architecture";
@@ -116,21 +117,35 @@ export function detectNonColocalization(
         ? `Behavioral coupling consensus across ${input.behaviorPartitions.length} resolution levels.`
         : `Declared as one unit by an intent-declared source (doc/comment).`;
 
-      findings.push({
-        id: nextId(),
-        title: titleSuffix,
-        category: label === "behavioral" ? "non_colocalization_behavioral" : "non_colocalization_purpose",
-        severity: "low",
-        confidence: "low",
-        lens: LENS,
-        summary: summaryText,
-        affected_files: group.map((path) => ({ path })),
-        evidence: [
-          evidenceText,
-          `Best containment in any ${label === "behavioral" ? "declared boundary" : "behavioral cluster"}: ${(best * 100).toFixed(0)}% (threshold ${(overlapThreshold * 100).toFixed(0)}%).`,
-        ],
-        systemic: true,
-      });
+      // Lineage over the group's MEMBERSHIP — the coupling evidence this lead
+      // stands on. Both detectors share this stamp shape, but the producer name
+      // distinguishes them so a reader can tell a "cluster with no owner" lead
+      // from a "purpose smeared" one without re-parsing the category.
+      const sourceHash = leadSourceHash([...group].sort(compareCodeUnits));
+
+      findings.push(
+        stampLeadLineage(
+          {
+            id: nextId(),
+            title: titleSuffix,
+            category: label === "behavioral" ? "non_colocalization_behavioral" : "non_colocalization_purpose",
+            severity: "low",
+            confidence: "low",
+            lens: LENS,
+            summary: summaryText,
+            affected_files: group.map((path) => ({ path })),
+            evidence: [
+              evidenceText,
+              `Best containment in any ${label === "behavioral" ? "declared boundary" : "behavioral cluster"}: ${(best * 100).toFixed(0)}% (threshold ${(overlapThreshold * 100).toFixed(0)}%).`,
+            ],
+            systemic: true,
+          },
+          label === "behavioral"
+            ? "detectNonColocalization:behavioral"
+            : "detectNonColocalization:purpose",
+          sourceHash,
+        ),
+      );
     }
   }
 

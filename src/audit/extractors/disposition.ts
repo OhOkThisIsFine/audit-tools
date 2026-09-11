@@ -276,10 +276,22 @@ type TrackedFilesEvaluation =
 
 /**
  * Enumerates the repository's tracked paths through ONE batched
- * `git ls-files -z` invocation (never per-file). Output paths are repo-root
- * (cwd)-relative posix, matching the manifest's normalized candidate paths.
- * Anything other than exit 0 (git absent, not a work tree) = clean fallback —
- * the caller skips the untracked rule. Never throws.
+ * `git ls-files -z --recurse-submodules` invocation (never per-file). Output
+ * paths are repo-root (cwd)-relative posix, matching the manifest's normalized
+ * candidate paths. Anything other than exit 0 (git absent, not a work tree) =
+ * clean fallback — the caller skips the untracked rule. Never throws.
+ *
+ * `--recurse-submodules` is REQUIRED, and it is one half of an ATOMIC pair: the
+ * other half is the same flag on {@link enumerateTrackedFilePaths} in
+ * `src/shared/validation/findingGrounding.ts`, the ONE git enumeration behind
+ * both grounding corpora. Without it, a parent `ls-files` lists only the gitlink
+ * for a first-party submodule, so every file inside one classified as absent
+ * from the index — i.e. excluded as `untracked` — while the citation-grounding
+ * gate (once it recursed) would have accepted a citation naming it. The two
+ * rules must agree about what "tracked" means or a finding grounds against a
+ * file the disposition excluded from scope. Never change one without the other;
+ * `tests/audit/submodule-tracked-corpus.test.ts` builds a real submodule and
+ * pins BOTH halves (each reverts red on its own).
  */
 async function evaluateTrackedFiles(
   root: string,
@@ -287,7 +299,7 @@ async function evaluateTrackedFiles(
 ): Promise<TrackedFilesEvaluation> {
   let result: GitSpawnResult;
   try {
-    result = await spawn("git", ["ls-files", "-z"], {
+    result = await spawn("git", ["ls-files", "-z", "--recurse-submodules"], {
       cwd: root,
       maxBuffer: 256 * 1024 * 1024,
     });

@@ -4,6 +4,8 @@ import {
   modularityOf,
   resolutionSweep,
   DEFAULT_RESOLUTIONS,
+  MAX_LOCAL_MOVING_PASSES,
+  localMovingPassBudget,
   decompose,
   clustersFromPartitions,
 } from "audit-tools/shared";
@@ -520,5 +522,108 @@ describe("modularity — arithmetic envelope", () => {
     expect(() =>
       louvain(banded(60, (i, j) => (220 + ((i * 7 + j) % 130)) * 100_000_000_000), 1),
     ).toThrow(/mass/i);
+  });
+});
+
+// ── The local-moving pass budget is bounded by a CONSTANT ────────────────────
+//
+// THE PASS BUDGET IS THE WHOLE OF WHAT THE CEILING ADDS, and it is not
+// observable through any partition or timing: a convergent run exits on the
+// fixpoint long before either bound. MEASURED 2026-09-10 — instrumenting the
+// compiled loop over a banded dense graph, a saturated clique, a 1,600-node
+// chain, a two-scale nested graph and an LCG-sparse graph gives ONE pass per
+// level in every case, and a separate greedy-ascent replication reaches its
+// fixpoint in 1-3 passes at n = 8…200.
+// Reverting the ceiling to the old `nodes + 8` leaves every fixture partition
+// and every timing figure byte-identical (verified: this file plus
+// `content-coherence.test.ts`, 51 passed both ways).
+//
+// That equality is exactly why the budget cannot be pinned as a pure function
+// and left there: `localMoving` could stop CALLING it — the reviewer's finding —
+// and the block below stayed green. A wider search (1,200 randomized graphs at
+// n = 6…200, integral and fractional weights, γ = 0.5…2; 3,000 more at n = 6…12
+// where the budget is smallest) found no input whose fixpoint the budget ever
+// binds, so no fixture can reach the ceiling the honest way.
+//
+// So the loop exposes `louvain`'s optional `PartitionAcceptance`: the caller's
+// test for whether a pass's partition may END the loop. Omitting it — every
+// production call site — is the loop unchanged. Returning `false` refuses the
+// fixpoint and drives the ceiling instead, which is the case the ceiling exists
+// for; the assertion below is then a pass COUNT, and it is read off the real
+// entry point rather than a replica of the loop.
+describe("localMovingPassBudget: one level's work is bounded by a constant", () => {
+  it("applies the node-count allowance unchanged below the knee", () => {
+    expect(localMovingPassBudget(0)).toBe(8);
+    expect(localMovingPassBudget(1)).toBe(9);
+    expect(localMovingPassBudget(56)).toBe(MAX_LOCAL_MOVING_PASSES);
+  });
+
+  it("is FLAT at and above the knee — the budget does not grow with node count", () => {
+    expect(localMovingPassBudget(64)).toBe(MAX_LOCAL_MOVING_PASSES);
+    expect(localMovingPassBudget(10_000)).toBe(MAX_LOCAL_MOVING_PASSES);
+    expect(localMovingPassBudget(1_000_000)).toBe(localMovingPassBudget(10_000));
+    expect(localMovingPassBudget(1_000_000)).toBeLessThan(1_000_000);
+  });
+
+  it("localMoving STOPS at the budget when the partition is never accepted", () => {
+    // ABOVE THE KNEE, deliberately. At n = 6 the saturated budget (14) equals
+    // the retired `nodes + 8` (14), so a small fixture cannot tell the two
+    // apart: it would stay green with the saturating call deleted. Two 60-node
+    // cliques put the budget at the constant 64 while `nodes + 8` would be 128,
+    // which is the difference the whole entry is about.
+    const clique = (prefix: string, size: number) => {
+      const nodes = Array.from(
+        { length: size },
+        (_, i) => `${prefix}${String(i).padStart(3, "0")}`,
+      );
+      const edges: Array<{ a: string; b: string; weight: number }> = [];
+      for (let i = 0; i < size; i += 1) {
+        for (let j = i + 1; j < size; j += 1) {
+          edges.push({ a: nodes[i], b: nodes[j], weight: 1 });
+        }
+      }
+      return { nodes, edges };
+    };
+    const left = clique("l", 60);
+    const right = clique("r", 60);
+    const g: WeightedGraph = {
+      nodes: [...left.nodes, ...right.nodes],
+      edges: [...left.edges, ...right.edges],
+    };
+
+    const budget = localMovingPassBudget(g.nodes.length);
+    expect(budget, "the fixture must sit above the knee").toBe(
+      MAX_LOCAL_MOVING_PASSES,
+    );
+    expect(
+      g.nodes.length + 8,
+      "…and the retired allowance must differ from it here",
+    ).toBeGreaterThan(budget);
+
+    const countsByLevel: number[] = [];
+    louvain(g, 1, (_communityOf, levelIndex) => {
+      countsByLevel[levelIndex] = (countsByLevel[levelIndex] ?? 0) + 1;
+      return false; // never satisfied → only the ceiling can stop this loop
+    });
+
+    // Level 0 is where the refusal actually bites: the partition is never
+    // accepted, so the loop cannot exit on the fixpoint and the guard alone
+    // terminates it — at exactly the saturated budget, not at `nodes + 8`.
+    expect(
+      countsByLevel[0],
+      `level 0 ran ${String(countsByLevel[0])} passes; the ceiling is ${String(budget)}`,
+    ).toBe(budget);
+
+    // And the SAME graph, accepted, converges far below the ceiling — which is
+    // the measured reason the ceiling is invisible without this seam.
+    let acceptedPasses = 0;
+    louvain(g, 1, () => {
+      acceptedPasses += 1;
+      return true;
+    });
+    expect(
+      acceptedPasses,
+      "an accepted partition must stop on the fixpoint, well under the budget",
+    ).toBeLessThan(budget);
   });
 });

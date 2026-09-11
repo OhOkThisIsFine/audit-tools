@@ -18,12 +18,13 @@ import { AuditCodeResponseSchema } from "./wrapperResponse.js";
 export const WorkerFindingLocationSchema =
   FindingLocationObjectSchema.strict().superRefine(refineFindingLocationLines);
 
-// `grounding`, `verification_status`, `severity_downgraded_from` and
-// `evidence_lane` are OMITTED, not merely left un-extended: each is a TOOL-owned
-// verdict — the re-check of the worker's quote (computed at ingest by
-// `ingestAuditHostResults`), the defect-presence claim derived at conceptual
-// ingest, the severity bar synthesis applies, and the lane synthesis reads to
-// decide whether a finding was ever asked for an `evidence` array — so the
+// `grounding`, `verification_status`, `severity_downgraded_from`,
+// `evidence_lane` and `lead_lineage` are OMITTED, not merely left un-extended:
+// each is a TOOL-owned verdict — the re-check of the worker's quote (computed at
+// ingest by `ingestAuditHostResults`), the defect-presence claim derived at
+// conceptual ingest, the severity bar synthesis applies, the lane synthesis
+// reads to decide whether a finding was ever asked for an `evidence` array, and
+// the deterministic-producer lineage that is what makes a lead a LEAD — so the
 // worker-facing contract must not advertise any of them. `.extend` inherits the
 // parent's optional field, and `.strict()` rejects only UNKNOWN keys, so an
 // inherited optional field would be silently ACCEPTED: the omit is what makes
@@ -50,6 +51,8 @@ export const WORKER_REFUSED_FINDING_VERDICTS = {
     "severity_downgraded_from is tool-derived at ingest and must not be supplied",
   evidence_lane:
     "evidence_lane is tool-derived at ingest and must not be supplied",
+  lead_lineage:
+    "lead_lineage is stamped by the deterministic producer and must not be supplied",
 } as const;
 
 export const WorkerFindingSchema = FindingSchema.omit({
@@ -57,6 +60,7 @@ export const WorkerFindingSchema = FindingSchema.omit({
   verification_status: true,
   severity_downgraded_from: true,
   evidence_lane: true,
+  lead_lineage: true,
 })
   .extend({
     category: z.string().min(1),

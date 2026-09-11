@@ -189,6 +189,8 @@ export {
 export type { WeightedGraph, Partition } from "./decompose/modularity.js";
 export {
   DEFAULT_RESOLUTIONS,
+  MAX_LOCAL_MOVING_PASSES,
+  localMovingPassBudget,
   louvain,
   modularityOf,
   resolutionSweep,

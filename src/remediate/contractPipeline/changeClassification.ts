@@ -224,12 +224,101 @@ export type AssertionPolarity = "positive" | "negative" | "both" | "none";
  * before keyword classification. A run must have at least one internal delimiter to
  * qualify — ordinary prose words (no internal `-_./:`)  are left untouched, as are
  * multiword phrases like "does not" (space-separated, not a single token).
+ *
+ * SCANNED, NOT MATCHED — and the reason is a measured quadratic, not taste. The
+ * obvious regex here is `[A-Za-z0-9]+(?:[-_/.:]+[A-Za-z0-9]+)+`, and on a long
+ * UNBROKEN alphanumeric run it is Θ(n²): the engine starts at every position and
+ * each start consumes the rest of the run before the (absent) delimiter fails the
+ * whole match, so a 16,000-char run took 3.36 SECONDS (measured on the `word-run`
+ * family: 44/186/741/3360ms across 2k/4k/8k/16k, a clean 4×-per-doubling). An
+ * assertion arrives from a host-authored test plan with no length bound, so the
+ * input class is reachable.
+ *
+ * Restructuring the regex does NOT fix it: the failure is the per-start-position
+ * rescan, so a possessive/atomic leading run only replaces an O(n) giveback with
+ * an O(n) take, and a lookahead made of the same character class still has to
+ * scan the run to fail. A single forward pass over a two-character-class grammar
+ * is the linear form, and the grammar is tiny and fully ours. Same replacement
+ * semantics as the regex it replaces, pinned by
+ * `tests/remediate/change-classification-backtracking.test.ts`.
  */
-const IDENTIFIER_TOKEN_PATTERN = /[A-Za-z0-9]+(?:[-_/.:]+[A-Za-z0-9]+)+/g;
+function isAsciiAlphanumeric(code: number): boolean {
+  return (
+    (code >= 48 && code <= 57) || // 0-9
+    (code >= 65 && code <= 90) || // A-Z
+    (code >= 97 && code <= 122) // a-z
+  );
+}
 
-/** Blank out identifier tokens so their embedded words don't leak polarity. */
+/** The token's internal delimiters: `-`, `_`, `/`, `.`, `:`. */
+function isIdentifierDelimiter(code: number): boolean {
+  return (
+    code === 45 || // -
+    code === 95 || // _
+    code === 47 || // /
+    code === 46 || // .
+    code === 58 //   :
+  );
+}
+
+/**
+ * Blank out identifier tokens so their embedded words don't leak polarity.
+ *
+ * One left-to-right pass, O(n) — and the pass must SKIP, not step, on failure.
+ * The regex's token is `alnum+ (delimiter+ alnum+)+`: it starts and ends on an
+ * alphanumeric and contains at least one delimiter that is FOLLOWED by an
+ * alphanumeric. So a maximal run of `alnum|delimiter` that holds no such
+ * delimiter-then-alphanumeric pair cannot contain a token starting anywhere
+ * inside it, and the scan jumps past the whole run in one step. Emitting the
+ * leading character and re-entering would rescan the rest of the run at every
+ * position — the same quadratic the regex had, merely relocated.
+ *
+ * On a match the replacement ends at the LAST alphanumeric of the run, leaving
+ * any trailing delimiters in place, which is exactly where the regex's greedy
+ * match ended.
+ */
 function stripIdentifierTokens(assertion: string): string {
-  return assertion.replace(IDENTIFIER_TOKEN_PATTERN, " ");
+  const out: string[] = [];
+  const length = assertion.length;
+  let index = 0;
+  while (index < length) {
+    if (!isAsciiAlphanumeric(assertion.charCodeAt(index))) {
+      out.push(assertion[index]!);
+      index += 1;
+      continue;
+    }
+    // Extend over the maximal alphanumeric/delimiter run, tracking whether a
+    // delimiter has been followed by an alphanumeric (the qualifying shape).
+    let cursor = index;
+    let lastAlphanumeric = index;
+    let sawDelimiter = false;
+    let qualifies = false;
+    while (cursor < length) {
+      const current = assertion.charCodeAt(cursor);
+      if (isAsciiAlphanumeric(current)) {
+        if (sawDelimiter) qualifies = true;
+        lastAlphanumeric = cursor;
+        cursor += 1;
+        continue;
+      }
+      if (isIdentifierDelimiter(current)) {
+        sawDelimiter = true;
+        cursor += 1;
+        continue;
+      }
+      break;
+    }
+    if (qualifies) {
+      out.push(" ");
+      index = lastAlphanumeric + 1;
+      continue;
+    }
+    // No token can begin inside this run — copy it through verbatim and resume
+    // after it.
+    out.push(assertion.slice(index, cursor));
+    index = cursor;
+  }
+  return out.join("");
 }
 
 /**

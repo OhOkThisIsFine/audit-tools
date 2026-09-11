@@ -242,6 +242,13 @@ function projectDesignAssessmentFindings(bundle: DesignReviewBundle): unknown {
       (finding.affected_files ?? []).map((location) => location.path),
     ),
     systemic: finding.systemic ?? false,
+    // The lead lineage rides the projection: this slice IS what a review pass
+    // reads, so dropping the lineage here would hand the reviewer a deterministic
+    // heuristic with nothing marking it as an unconfirmed lead — the exact
+    // promotion-without-a-boundary failure the property forbids. `null` when the
+    // finding has no lineage (a host-authored finding), so an old artifact and a
+    // new one project identically where there is nothing to say.
+    lead_lineage: finding.lead_lineage ?? null,
   }));
   return sortByProjection(projected);
 }

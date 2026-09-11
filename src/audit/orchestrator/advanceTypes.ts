@@ -7,6 +7,7 @@ import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission,
 import type { IntentEquivalenceVerdictSubmission } from "./intentEquivalenceExecutor.js";
 import type { EdgeReasoningResults } from "./edgeReasoning.js";
 import type { ExternalAcquisitionAdvanceOptions } from "./acquisitionExecutor.js";
+import type { ScopeIndexMemo } from "./scopeIndexBaseline.js";
 
 /**
  * Public input/output contract of `advanceAudit`. Lives in this leaf module —
@@ -102,6 +103,26 @@ export interface AdvanceAuditOptions {
    */
   submissionProbe?: (lane: string) => Promise<boolean>;
   runLogger?: RunLogger;
+  /**
+   * FOLD-SCOPED memo for the git-index probe behind `scope_index_key`.
+   *
+   * The probe is a `git ls-files` SPAWN, and `runSingleAdvanceStep` used to run
+   * it once per obligation execution — up to `MAX_DRAIN_STEPS` spawns for a
+   * single `next-step` call, on a value that cannot change between them. The
+   * fold creates this object once and passes it to every dispatch; a bare
+   * `advanceAudit` call leaves it unset and probes per step, which is correct
+   * (there is no fold to share with) and preserves the old behaviour exactly.
+   *
+   * Correctness rests on the KEY, not on the memo: the probe's inputs are the
+   * repo root and the manifest's candidate paths, so `key` carries both. A step
+   * that re-derives the manifest — the auto-fix phase, which writes into the
+   * audited tree — changes the key and re-probes. Nothing inside a fold moves
+   * the INDEX itself: no deterministic executor runs `git add` / `git rm
+   * --cached` (the two directions the rule reads), and a fold is in-process, so
+   * the host is not staging files underneath it. See
+   * `probeScopeIndexKeyCached`.
+   */
+  scopeIndexMemo?: ScopeIndexMemo;
   /**
    * INTERNAL — the liveness heartbeat `advanceAudit` creates for its own call;
    * `runSingleAdvanceStep` labels each beat with the selected obligation.
