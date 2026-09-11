@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { deriveLaneDemand } from "../../src/shared/types/stepContract.js";
 
 // Fail exactly ONE render write when armed, delegating everything else.
 const harness = vi.hoisted(() => ({ failNextRenderWrite: false }));
@@ -66,8 +67,7 @@ async function setup() {
   const task = {
     ...AUDIT_TASK,
     priority: "medium",
-    complexity: "standard",
-    risk: "medium",
+    demand: deriveLaneDemand({ tokenEstimate: 1200, fileCount: 1, riskScore: 0.5 }),
     token_estimate: 1200,
     file_line_counts: { "src/a.ts": 2 },
   };

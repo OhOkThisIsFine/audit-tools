@@ -172,18 +172,6 @@ export function hostHandoffResultPath(
   );
 }
 
-/** Absolute form of {@link hostHandoffResultPath}, for readers on disk. */
-export function absoluteHostHandoffResultPath(
-  paths: HostHandoffPaths,
-  id: string,
-): string {
-  return resolveContainedPath(
-    paths.root,
-    hostHandoffResultPath(paths, id),
-    `result path for ${id}`,
-  );
-}
-
 /** Content digest of one prompt text — the binding between ask and answer. */
 export function promptSha256(promptText: string): string {
   return hashContent(promptText);
@@ -250,11 +238,6 @@ export function parseAllWorkloadItems<T>(
   return items;
 }
 
-/** Every id distinct — the duplicate-work-item refusal. */
-export function idsAreUnique(ids: readonly string[]): boolean {
-  return new Set(ids).size === ids.length;
-}
-
 /**
  * Strictly ascending in code-unit order — which is BOTH "sorted" and
  * "duplicate-free", the two properties every persisted workload's id list must
@@ -267,27 +250,115 @@ export function idsAreStrictlyAscending(ids: readonly string[]): boolean {
   );
 }
 
+/** The binding facts every submitted result is checked against, in one place. */
+export interface IdentityBindingParams {
+  readonly runId: string;
+  readonly workItemId: string;
+  readonly promptSha256: string;
+}
+
 /**
- * The identity binding EVERY submitted result carries, identical on both
- * draws: a non-empty `result_id`, this run's id, this work item's id, and the
- * prompt digest of the ask. A refusal here is a REFUSAL, never a repair — the
- * tool cannot know which of the three the host meant.
+ * The name of one identity component, in the order both draws check them.
+ *
+ * ORDER IS THE CONTRACT, and it is why this is a list rather than the single
+ * conjunction the two draws used to evaluate. A submission can fail several
+ * components at once — a stale worker's answer typically carries another run's
+ * id AND the wrong prompt digest — and a conjunction reports all of them as one
+ * undifferentiated "identity binding" refusal. The host then has to re-derive
+ * which component it got wrong from a message that names none of them.
+ *
+ * The order is most-fundamental first: the submission's own id, then the run it
+ * answers, then the item, then the ask it was bound to. The FIRST failed
+ * component is the one reported, so the two draws tell a host the same thing
+ * about the same submission — they previously reported it in their own orders
+ * (and with their own vocabularies), so the same broken submission produced two
+ * different diagnostics depending on which half of the pipeline read it.
  */
-export function resultIdentityIsBound(
+export const IDENTITY_COMPONENTS = [
+  "result_id",
+  "run_id",
+  "work_item_id",
+  "prompt_sha256",
+] as const;
+
+export type IdentityComponent = (typeof IDENTITY_COMPONENTS)[number];
+
+/**
+ * The predicate for each component, keyed by the SAME union the order is drawn
+ * from — a component added to one without the other is a type error, not a
+ * silently unchecked field.
+ */
+const IDENTITY_COMPONENT_HOLDS: Readonly<
+  Record<
+    IdentityComponent,
+    (value: Record<string, unknown>, params: IdentityBindingParams) => boolean
+  >
+> = {
+  result_id: (value) => typeof value.result_id === "string" && value.result_id.length > 0,
+  run_id: (value, params) => value.run_id === params.runId,
+  work_item_id: (value, params) => value.work_item_id === params.workItemId,
+  prompt_sha256: (value, params) => value.prompt_sha256 === params.promptSha256,
+};
+
+/**
+ * The first identity component this submission fails, or `null` when it is
+ * fully bound. The ONE walk both draws' parse paths run, so "which component
+ * broke" is answered identically on both sides of the pipeline.
+ */
+export function firstFailedIdentityComponent(
   value: Record<string, unknown>,
-  params: {
-    readonly runId: string;
-    readonly workItemId: string;
-    readonly promptSha256: string;
-  },
-): boolean {
-  return (
-    typeof value.result_id === "string" &&
-    value.result_id.length > 0 &&
-    value.run_id === params.runId &&
-    value.work_item_id === params.workItemId &&
-    value.prompt_sha256 === params.promptSha256
-  );
+  params: IdentityBindingParams,
+): IdentityComponent | null {
+  for (const component of IDENTITY_COMPONENTS) {
+    if (!IDENTITY_COMPONENT_HOLDS[component](value, params)) return component;
+  }
+  return null;
+}
+
+/**
+ * What the failed component IS, in words — keyed by the same union the walk
+ * returns from, so a component added to {@link IDENTITY_COMPONENTS} without a
+ * description here is a type error rather than a silent empty rendering.
+ *
+ * Every draw renders this SAME sentence for the SAME broken submission. Before
+ * it, the walk shared an ORDER but not a VOCABULARY: audit named the broken
+ * component (`identity binding: run_id is not this run's '…'`), while remediate
+ * emitted one of two undifferentiated sentences that named none of them — so an
+ * operator repairing a rejected result learned which field to fix only when the
+ * audit half happened to be the one that read it. Naming the component is the
+ * whole point of classifying it.
+ *
+ * The value the submission carried is deliberately NOT rendered: a `run_id` or
+ * `prompt_sha256` echoed back into a host-facing step is noise at best, and the
+ * digest is not something a host can act on. The component NAME and what it was
+ * supposed to be are what the repair needs.
+ */
+const IDENTITY_COMPONENT_DESCRIPTIONS: Readonly<
+  Record<IdentityComponent, string>
+> = {
+  result_id: "result_id is not a non-empty string",
+  run_id: "run_id is not the run that issued this workload",
+  work_item_id: "work_item_id is not the work item this result was read for",
+  prompt_sha256: "prompt_sha256 is not the digest of the prompt this work item was issued with",
+};
+
+/** The description of one identity component's failure — see the table above. */
+export function describeIdentityFailure(component: IdentityComponent): string {
+  return IDENTITY_COMPONENT_DESCRIPTIONS[component];
+}
+
+/**
+ * The ONE diagnostic both draws render for a submission that fails the identity
+ * binding, or `null` when it is fully bound. Shared so the same broken
+ * submission produces the same sentence whichever half of the pipeline reads
+ * it — the draw supplies only its own framing around this phrase.
+ */
+export function identityFailureDiagnostic(
+  value: Record<string, unknown>,
+  params: IdentityBindingParams,
+): string | null {
+  const component = firstFailedIdentityComponent(value, params);
+  return component === null ? null : describeIdentityFailure(component);
 }
 
 /** The minimal view of a parsed work item the result-map check needs. */

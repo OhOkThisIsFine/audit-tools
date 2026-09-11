@@ -17,11 +17,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { execFileHidden } from "../helpers/spawn.mjs";
 
 import { DISPATCH_BARREL_EXPORTS } from "../helpers/dispatchBarrelBaseline.js";
+// The producer's own weight function, imported rather than restated: the walk
+// below is only a proof of the SHARED vocabulary if it reads the same function
+// the builder calls.
+import { severityRiskWeight } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
 import {
   readSubmissionLedger,
   submissionLedgerPath,
 } from "../../src/shared/submission/submissionLedger.js";
+import {
+  LaneDemandSchema,
+  SEVERITIES,
+} from "../../src/shared/index.js";
 
 const FAILURE_SIGNATURE =
   "contract:remediation-zero-adapter-boundary:not-yet-satisfied";
@@ -54,7 +62,7 @@ interface HostWorkItem {
 }
 
 interface HostWorkload {
-  readonly contract_version: "remediation-host-workload/v1alpha1";
+  readonly contract_version: "remediation-host-workload/v1alpha2";
   readonly run_id: string;
   readonly work_items: readonly HostWorkItem[];
 }
@@ -1702,5 +1710,90 @@ describe("work items carry the approved module contracts (open-bugs.md:474)", ()
     // A block with no owning module carries no contract section.
     const unbound = handoff.workload.work_items.find((item) => item.id === "block-b")!;
     expect(unbound.prompt.text).not.toContain("MUST conform");
+  });
+});
+
+// ── F3: the severity weight follows the shared severity vocabulary ────────────
+//
+// `blockRiskScore` turns a block's finding severities into the risk input of the
+// shared demand ranking. It used to do that through a hand-written
+// `Record<string, number>` — a SECOND copy of the severity vocabulary that
+// `FindingSeveritySchema` / `SEVERITIES` / `severityRank` single-source in
+// `src/shared/types/lens.ts` — read through `?? 0`. A severity added to the
+// shared union would fall through that fallback and weight as ZERO (the safest
+// possible rank), so a block of brand-new-critical findings would dispatch as if
+// it fixed nothing. The weight now DERIVES from the shared tuple, and this walks
+// every member of it — the WALK is what makes the class of miss impossible
+// rather than merely unfound, because it reads the same tuple the producer does.
+describe("F3: the severity risk weight is total over the shared severity set", () => {
+  it("weights every member the shared vocabulary declares, and no others", () => {
+    for (const severity of SEVERITIES) {
+      const weight = severityRiskWeight(severity);
+      expect(Number.isFinite(weight), severity).toBe(true);
+      expect(weight, `'${severity}' must not weight as zero`).toBeGreaterThan(0);
+      expect(weight, `'${severity}' must be a probability`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("orders the weights exactly as the shared tuple orders severity", () => {
+    const weights = SEVERITIES.map((severity) => severityRiskWeight(severity));
+    for (let index = 1; index < weights.length; index += 1) {
+      expect(
+        weights[index]!,
+        `${SEVERITIES[index]!} (${weights[index]!}) must weigh below ` +
+          `${SEVERITIES[index - 1]!} (${weights[index - 1]!})`,
+      ).toBeLessThan(weights[index - 1]!);
+    }
+  });
+
+  it("keeps the least-severe tier off zero, so it is not confusable with no signal", () => {
+    // `blockRiskScore` returns exactly 0 for a block whose findings are all
+    // absent from the plan — "we could not resolve this block". A severity
+    // weighing 0 would say the same thing about a block we resolved perfectly,
+    // and the two are different facts. This is the one weight the derivation
+    // does NOT take from the ladder (which would put it at 0), so it is pinned.
+    const least = SEVERITIES[SEVERITIES.length - 1]!;
+    expect(severityRiskWeight(least)).toBe(0.1);
+    expect(severityRiskWeight(least)).toBeGreaterThan(0);
+  });
+
+  it("produces the block's risk rank end to end, for the extreme severities", async () => {
+    // The derivation is pure, so the walk above is the real proof; this pins
+    // that the weight actually REACHES the emitted workload's demand.
+    for (const [severity, expected] of [
+      ["critical", "high"],
+      ["medium", "medium"],
+      ["low", "low"],
+      ["info", "low"],
+    ] as const) {
+      const boundary = await loadBoundary();
+      const root = await mkdtemp(join(tmpdir(), "host-handoff-risk-"));
+      cleanupRoots.push(root);
+      const artifactsDir = join(root, ".audit-tools", "remediation");
+      const baselineCommit = await initGitRoot(root);
+      await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(join(root, "src", "a.ts"), "export const a = 1;\n", "utf8");
+
+      const state = currentState();
+      const findings = state.plan.findings as Array<{ id: string; severity: string }>;
+      findings.find((entry) => entry.id === "finding-a")!.severity = severity;
+
+      const handoff = requirePrepared(
+        await boundary.prepareRemediationHostHandoff({
+          root,
+          artifactsDir,
+          runId: FIXTURE_RUN_ID,
+          baselineCommit,
+          state,
+        }),
+      );
+      const item = handoff.workload.work_items.find((entry) => entry.id === "block-a");
+      expect(item, `block-a planned under '${severity}'`).toBeDefined();
+      const demand = (item as unknown as {
+        readonly demand: { readonly risk: string };
+      }).demand;
+      expect(LaneDemandSchema.safeParse(demand).success, severity).toBe(true);
+      expect(demand.risk, `risk rank for a '${severity}' block`).toBe(expected);
+    }
   });
 });

@@ -860,6 +860,7 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
             label: lane.label,
             promptPath: lane.promptPath,
             resultPath: lane.resultPath,
+            demand: lane.demand,
           })),
         }),
         "",
@@ -932,6 +933,7 @@ const emitCharterDelta = emissionRow<"charter_delta">(
             lanes: fanout.pendingLanes.map((lane) => ({
               label: lane.label,
               promptPath: lane.promptPath,
+              demand: lane.demand,
             })),
           }),
           writeSentence: "The executor must write its CharterDeltaSubmission JSON to:",
@@ -1073,6 +1075,7 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
             lanes: fanout.pendingLanes.map((lane) => ({
               label: lane.label,
               promptPath: lane.promptPath,
+              demand: lane.demand,
             })),
           }),
           writeSentence: "The executor must write its findings JSON to:",
@@ -1435,6 +1438,7 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
             lanes: fanout.pendingLanes.map((lane) => ({
               label: lane.label,
               promptPath: lane.promptPath,
+              demand: lane.demand,
             })),
           }),
           writeSentence:
@@ -1497,6 +1501,7 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
             lanes: fanout.pendingLanes.map((lane) => ({
               label: lane.label,
               promptPath: lane.promptPath,
+              demand: lane.demand,
             })),
           }),
           writeSentence: "The executor must write the SynthesisNarrative JSON object to:",

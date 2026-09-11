@@ -23,6 +23,7 @@ import {
 import { readSubmissionLedger } from "../../src/shared/submission/submissionLedger.js";
 import { currentStepPath } from "../../src/shared/io/stepContractWriter.js";
 import type { AuditTask } from "../../src/audit/types.js";
+import { deriveLaneDemand } from "../../src/shared/types/stepContract.js";
 
 const cleanupRoots: string[] = [];
 
@@ -57,8 +58,7 @@ async function setup() {
   const tasks = [TASK_A, taskB()].map((task) => ({
     ...task,
     priority: "medium" as const,
-    complexity: "standard",
-    risk: "medium",
+    demand: deriveLaneDemand({ tokenEstimate: 1200, fileCount: 1, riskScore: 0.5 }),
     token_estimate: 1200,
     file_line_counts: { [task.file_paths[0]!]: 2 },
   }));

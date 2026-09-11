@@ -26,6 +26,20 @@ export const AUDIT_INGEST_ISSUE_CODES = [
    * coverage, not the shape of the envelope.
    */
   "result_validation_failed",
+  /**
+   * The persisted host workload was issued under a contract version this build
+   * no longer mints, so it cannot be re-derived and no submission can be
+   * accepted against it. Distinct from every other workload refusal because it
+   * is RECOVERABLE BY EXACTLY ONE ACTION — re-prepare, which publishes a
+   * current workload — and because the host holding a bound result path from
+   * the stale document needs to be told that, not told its bytes are wrong.
+   *
+   * The trigger is a contract-version bump that changed the work item's SHAPE
+   * (v1alpha1 `{complexity, risk}` metadata → v1alpha2's shared `demand`
+   * ranking). Without this code the class collapsed into a bare shape refusal
+   * naming neither the version nor the repair.
+   */
+  "workload_stale",
 ] as const;
 
 export type AuditIngestIssueCode = (typeof AUDIT_INGEST_ISSUE_CODES)[number];

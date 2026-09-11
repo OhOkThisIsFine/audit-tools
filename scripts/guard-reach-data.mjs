@@ -1181,6 +1181,19 @@ export const GUARDS = [
       'provider/model/budget field, in the emitted objects OR as a source identifier',
   },
   {
+    id: 'lane-demand-no-execution-identity-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/lane-demand.test.ts',
+    forms: [
+      { name: 'execution-choice key on an emitted demand ranking', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'bannedLaneExecutionKeys', call: 'text',
+        sample: '{"size": "small", "complexity": "focused", "risk": "low", "model_tier": "pool/medium"}' },
+    ],
+    note:
+      'the emitted-lane demand ranking names DEMAND only (size/complexity/risk); backend, provider, ' +
+      'model and tier selection belong to the host, so a lane that names one has moved execution ' +
+      'selection into the tool. The schema is .strict() and this row pins the emitted key set',
+  },
+  {
     id: 'submission-path-tool-owned-test',
     kind: 'contract-test',
     impl: 'tests/shared/submission-path-is-tool-owned.test.ts',

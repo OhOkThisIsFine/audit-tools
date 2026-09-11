@@ -5,6 +5,8 @@
 import { describe, it, expect } from "vitest";
 import {
   CP_BLOCK_PREFIX,
+  moduleSlugForObligationId,
+  obligationId,
   toBlockId,
   ensureNodeId,
 } from "../../src/remediate/contractPipeline/idRegistry.js";
@@ -39,5 +41,50 @@ describe("ensureNodeId (single fallback authority — closes the finding<->block
     expect(findingId).toBe("CP-001");
     expect(blockId).toBe("CP-BLOCK-CP-001");
     expect(blockId).toBe(toBlockId(findingId));
+  });
+});
+
+describe("moduleSlugForObligationId (the obligation-id / module-name join)", () => {
+  // The join was a longest-prefix match over the slug set, which is a guess
+  // whenever one module slug is a prefix of another. These pin the EXACT join
+  // the mint's suffix grammar makes possible.
+  const slugs = new Set(["auth", "auth-service"]);
+
+  it("resolves the more specific module when one slug prefixes another", () => {
+    expect(moduleSlugForObligationId(obligationId("auth-service", "contract"), slugs)).toBe(
+      "auth-service",
+    );
+    expect(moduleSlugForObligationId(obligationId("auth", "contract"), slugs)).toBe("auth");
+  });
+
+  it("returns null rather than another module's slug when the specific module is out of scope", () => {
+    // With only `auth` in scope, `OBL-auth-service-contract` used to resolve to
+    // `auth` — handing an `auth-service` obligation `auth`'s phase and file
+    // scope. The suffix grammar makes it unresolvable instead, which the phase
+    // walk already handles (fail toward the last phase).
+    expect(
+      moduleSlugForObligationId(obligationId("auth-service", "contract"), new Set(["auth"])),
+    ).toBeNull();
+  });
+
+  it("resolves every suffix form the deriver mints, including mintUniqueId's numeric tail", () => {
+    for (const suffixed of [
+      obligationId("auth", "contract"),
+      obligationId("auth", "inv-1"),
+      obligationId("auth", "fail-12"),
+      // mintUniqueId appends `-<n>` to a colliding base.
+      `${obligationId("auth", "contract")}-2`,
+      `${obligationId("auth", "inv-1")}-3`,
+    ]) {
+      expect(moduleSlugForObligationId(suffixed, slugs), suffixed).toBe("auth");
+    }
+  });
+
+  it("refuses an id that is not an obligation id, or carries an unknown module", () => {
+    expect(moduleSlugForObligationId("CP-BLOCK-CP-001", slugs)).toBeNull();
+    expect(moduleSlugForObligationId("OBL-unknown-contract", slugs)).toBeNull();
+    // A module slug alone is not an obligation id — the mint always appends a
+    // suffix, so a bare body must not join.
+    expect(moduleSlugForObligationId("OBL-auth", slugs)).toBeNull();
   });
 });

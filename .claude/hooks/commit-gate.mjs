@@ -667,13 +667,18 @@ function workingTreeDivergesFromIndex() {
 }
 
 // ── Branch-strand refusal ────────────────────────────────────────────────────
-// A remediation run switches the PRIMARY checkout onto `remediation/<runId>`
-// (`ensureRemediationBranchCheckedOut`) at implement-dispatch and leaves it
-// there, so every later commit from that checkout lands on the run branch — a
-// docs/closeout commit made afterwards strands off main. It has bitten three
-// times; HANDOFF has carried a "verify HEAD before committing" warning since the
-// second bite and the warning did not prevent the third, because remembering is
-// not a mechanism.
+// A branch named `remediation/<runId>` used to be created by the TOOL — a
+// remediation run switched the PRIMARY checkout onto it at implement-dispatch
+// and left it there, so every later commit from that checkout landed on the run
+// branch and a docs/closeout commit made afterwards stranded off main. It bit
+// three times; HANDOFF carried a "verify HEAD before committing" warning since
+// the second bite and the warning did not prevent the third, because remembering
+// is not a mechanism.
+//
+// The tool no longer creates that branch (the switching function was deleted
+// with the execution substrate, 467b1e8f; nothing in src/ creates a branch now).
+// The refusal STAYS: a host may still create the branch itself, and the
+// discriminator below is about the HEAD's NAME, not about who made it.
 //
 // The discriminator is mechanical, not a judgement call: remediation edits are
 // produced in the per-node LINKED worktrees and merged by accept-node, so a

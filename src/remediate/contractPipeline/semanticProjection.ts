@@ -25,6 +25,7 @@
  */
 import { isRecord, stableStringifyProjection } from "audit-tools/shared";
 import type { ContractPipelineArtifactName } from "./artifactNames.js";
+import { DERIVABLE_MODULE_CONTRACT_FIELDS } from "./finalizedContractFields.js";
 
 export { stableStringifyProjection };
 
@@ -52,15 +53,11 @@ const UNIVERSAL_NON_SEMANTIC_FIELDS: readonly string[] = ["created_at", "generat
  * whole obligation-bearing chain fresh, while a changed interface, a new
  * invariant, or a changed side effect correctly re-stales it.
  */
-const DERIVABLE_MODULE_CONTRACT_FIELDS: readonly string[] = [
-  "name",
-  "inputs",
-  "outputs",
-  "invariants",
-  "failure_modes",
-  "side_effects",
-  "validation_boundary",
-];
+// The projection's field list is the COPIED half of the ONE module-contract
+// vocabulary (`finalizedContractFields.ts`) — see that module for why
+// `seam_adjustments` (DERIVED at finalization, read by no deterministic
+// consumer) is excluded: a re-agreed seam must not re-stale the ledger.
+export { DERIVABLE_MODULE_CONTRACT_FIELDS };
 
 function stripFields(
   record: Record<string, unknown>,

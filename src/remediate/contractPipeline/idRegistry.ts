@@ -73,3 +73,55 @@ export function moduleSlug(name: string): string {
 export function obligationId(moduleName: string, suffix: string): string {
   return `${OBLIGATION_PREFIX}${moduleSlug(moduleName) || "module"}-${suffix}`;
 }
+
+/**
+ * The suffix GRAMMAR of a derived obligation id — the `…-<suffix>` half, and the
+ * half that makes the id → module join exact rather than longest-prefix.
+ *
+ * Why it has to exist. The decoders (`phaseOrdinalForObligations`, the
+ * promotion's module-contract attachment) recover a module from its obligation
+ * ids by matching a slug against the id BODY. Two distinct module names can
+ * collide there in one direction: `auth` and `auth-service` are different
+ * modules, and `OBL-auth-service-contract` starts with `auth-`. Longest-slug-
+ * first picks `auth-service` and happens to be right, but only because the
+ * SLUG SET is what decides — a plan whose `auth-service` obligations were
+ * emitted before the module registry knew that name would silently resolve them
+ * to `auth`, and the node would take `auth`'s phase and file scope.
+ *
+ * The suffix is the tiebreak that removes the guess: once the grammar is
+ * stripped, the remaining body must equal a known slug EXACTLY. A module name
+ * is free-form prose, so it can contain `contract` or `inv-2`; what it cannot
+ * do is make the exact-equality test pass for a DIFFERENT module, because the
+ * candidate body is only ever the id minus its one grammatical suffix.
+ *
+ * Kept here, beside the mint, for the same reason `moduleSlug` is: a grammar
+ * only the encoder knows is a drift test made of memory. `derive.ts` is the
+ * encoder and imports `obligationId` from this module; the suffixed forms it
+ * mints are `contract`, `inv-<n>`, and `fail-<n>`, and `mintUniqueId`
+ * (`audit-tools/shared`) appends `-<n>` to disambiguate a collision.
+ */
+const OBLIGATION_SUFFIX_PATTERN = /^(?:contract|inv-\d+|fail-\d+)(?:-\d+)?$/u;
+
+/**
+ * The ONE exact join from a derived obligation id back to its module slug, or
+ * `null` when the id carries no obligation prefix or its body is not
+ * `<knownSlug>-<grammaticalSuffix>`.
+ *
+ * `knownSlugs` MUST be the module slugs in scope; the match is exact, so the
+ * caller need not pre-sort them (the previous longest-first sort existed only
+ * to arbitrate the prefix ambiguity this rule removes).
+ */
+export function moduleSlugForObligationId(
+  id: string,
+  knownSlugs: ReadonlySet<string>,
+): string | null {
+  if (!id.startsWith(OBLIGATION_PREFIX)) return null;
+  const body = id.slice(OBLIGATION_PREFIX.length);
+  for (let index = body.lastIndexOf("-"); index > 0; index = body.lastIndexOf("-", index - 1)) {
+    const slug = body.slice(0, index);
+    if (knownSlugs.has(slug) && OBLIGATION_SUFFIX_PATTERN.test(body.slice(index + 1))) {
+      return slug;
+    }
+  }
+  return null;
+}

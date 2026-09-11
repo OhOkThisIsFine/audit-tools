@@ -35,27 +35,13 @@ import {
 } from "./changeClassification.js";
 import { derivePhaseCut, phaseCutModulesFromContracts } from "./phaseCut.js";
 import { obligationId } from "./idRegistry.js";
+import {
+  COPIED_MODULE_CONTRACT_FIELDS,
+  DERIVED_MODULE_CONTRACT_FIELDS,
+  type DerivableModuleContract,
+} from "./finalizedContractFields.js";
 import { CP_FINALIZED_MODULE_CONTRACTS_VERSION } from "../validation/contractPipeline.js";
 import { isTestablePhaseObligation } from "../validation/contractPipelineGates.js";
-
-/**
- * The finalized-module-contract fields the obligation deriver reads. This is the
- * SAME field set the semantic projection keeps (`semanticProjection.ts`'s
- * `DERIVABLE_MODULE_CONTRACT_FIELDS`) — including `side_effects`, which
- * `buildBaselineSymbolCorpus` folds into the change-vs-addition corpus even
- * though the ledger loop below does not name it. Carrying it here keeps the
- * deriver's narrowed view from silently dropping a field the classification
- * depends on (CP-NODE-19).
- */
-interface DerivableModuleContract {
-  name: string;
-  inputs: string[];
-  outputs: string[];
-  invariants: string[];
-  failure_modes: string[];
-  side_effects: string[];
-  validation_boundary: string;
-}
 
 interface DerivableFinalizedContracts {
   goal_id: string;
@@ -215,6 +201,22 @@ function seamAdjustmentsForModule(
  * the module. A draft entry that is not an object is passed through unchanged
  * (the downstream validator reports it).
  */
+/**
+ * The producer for each DERIVED module-contract field, keyed by the SAME union
+ * the field list is drawn from — so adding a derived field to the vocabulary
+ * without a producer here is a compile error rather than a field that silently
+ * finalizes as `undefined` and then fails validation on every module.
+ */
+const DERIVED_MODULE_CONTRACT_VALUES: Readonly<
+  Record<
+    (typeof DERIVED_MODULE_CONTRACT_FIELDS)[number],
+    (moduleName: string, seamReconciliationReport: unknown) => unknown
+  >
+> = {
+  seam_adjustments: (moduleName, seamReconciliationReport) =>
+    seamAdjustmentsForModule(moduleName, seamReconciliationReport),
+};
+
 export function deriveFinalizedModuleContracts(
   draftedModuleContracts: unknown,
   seamReconciliationReport: unknown,
@@ -235,16 +237,19 @@ export function deriveFinalizedModuleContracts(
       : [];
   const module_contracts = drafts.map((mod) => {
     if (!isRecord(mod) || typeof mod.name !== "string") return mod;
-    const finalized: Record<string, unknown> = {
-      name: mod.name,
-      inputs: mod.inputs,
-      outputs: mod.outputs,
-      invariants: mod.invariants,
-      side_effects: mod.side_effects,
-      validation_boundary: mod.validation_boundary,
-      failure_modes: mod.failure_modes,
-      seam_adjustments: seamAdjustmentsForModule(mod.name, seamReconciliationReport),
-    };
+    // COPIED first, DERIVED second, both drawn from the ONE field vocabulary
+    // (`finalizedContractFields.ts`). The literal this replaced was the third
+    // hand-written copy of the shape; a field added here and missed in the
+    // reader narrowed every downstream silently.
+    const finalized: Record<string, unknown> = Object.fromEntries(
+      COPIED_MODULE_CONTRACT_FIELDS.map((field) => [field, mod[field]]),
+    );
+    for (const field of DERIVED_MODULE_CONTRACT_FIELDS) {
+      finalized[field] = DERIVED_MODULE_CONTRACT_VALUES[field](
+        mod.name,
+        seamReconciliationReport,
+      );
+    }
     return finalized;
   });
   return {
@@ -585,6 +590,29 @@ function strArray(value: unknown): string[] {
     : [];
 }
 
+/**
+ * The defensive coercion per COPIED field, keyed by the SAME union the field
+ * list is drawn from — a field added to the vocabulary without a coercion here
+ * is a compile error, not a field silently read as `undefined` at runtime.
+ * `name` is the only non-array string; every other copied field is an array of
+ * strings, with `validation_boundary` the one scalar outside `name`.
+ */
+const COPIED_MODULE_CONTRACT_COERCIONS: Readonly<
+  Record<
+    (typeof COPIED_MODULE_CONTRACT_FIELDS)[number],
+    (raw: Record<string, unknown>) => unknown
+  >
+> = {
+  name: (raw) => (typeof raw.name === "string" ? raw.name : "module"),
+  inputs: (raw) => strArray(raw.inputs),
+  outputs: (raw) => strArray(raw.outputs),
+  invariants: (raw) => strArray(raw.invariants),
+  side_effects: (raw) => strArray(raw.side_effects),
+  validation_boundary: (raw) =>
+    typeof raw.validation_boundary === "string" ? raw.validation_boundary : "",
+  failure_modes: (raw) => strArray(raw.failure_modes),
+};
+
 /** Defensive read of the validated finalized-module-contracts payload. */
 function readFinalizedContracts(payload: unknown): DerivableFinalizedContracts {
   const record = isRecord(payload) ? payload : {};
@@ -593,17 +621,13 @@ function readFinalizedContracts(payload: unknown): DerivableFinalizedContracts {
     ? record.module_contracts
     : [];
   const module_contracts = rawModules.map((m): DerivableModuleContract => {
-    const mr = isRecord(m) ? m : {};
-    return {
-      name: typeof mr.name === "string" ? mr.name : "module",
-      inputs: strArray(mr.inputs),
-      outputs: strArray(mr.outputs),
-      invariants: strArray(mr.invariants),
-      failure_modes: strArray(mr.failure_modes),
-      side_effects: strArray(mr.side_effects),
-      validation_boundary:
-        typeof mr.validation_boundary === "string" ? mr.validation_boundary : "",
-    };
+    const raw = isRecord(m) ? m : {};
+    return Object.fromEntries(
+      COPIED_MODULE_CONTRACT_FIELDS.map((field) => [
+        field,
+        COPIED_MODULE_CONTRACT_COERCIONS[field](raw),
+      ]),
+    ) as unknown as DerivableModuleContract;
   });
   return { goal_id: goalId, module_contracts };
 }

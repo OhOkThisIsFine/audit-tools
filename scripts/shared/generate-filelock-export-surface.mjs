@@ -74,7 +74,7 @@ function renderParameter(param, sf) {
   return parts.join("");
 }
 
-function renderMembers(members, sf, { includeBodies = false } = {}) {
+function renderMembers(members, sf) {
   return members.map((m) => {
     let out;
     switch (m.kind) {
@@ -98,7 +98,7 @@ function renderMembers(members, sf, { includeBodies = false } = {}) {
           `unsupported member kind ${ts.SyntaxKind[m.kind]} in ${SOURCE_FILE} — extend renderMembers rather than silently dropping it`,
         );
     }
-    return out + (includeBodies ? "" : "");
+    return out;
   });
 }
 

@@ -1,7 +1,12 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { laneAssetsDir } from "audit-tools/shared";
+import {
+  deriveLaneDemand,
+  estimateTokensFromBytes,
+  laneAssetsDir,
+  type LaneDemand,
+} from "audit-tools/shared";
 
 import {
   laneSubmissionPath,
@@ -56,6 +61,20 @@ export interface FanoutLaneSpec {
    * says otherwise.
    */
   expected?: boolean;
+  /**
+   * The lane's per-mode DEMAND inputs, beyond what the prompt text itself
+   * already says.
+   *
+   * Size and judgment come from the lane's prompt text, which the tool holds —
+   * every lane's prompt is on disk before its demand is derived, so the biggest
+   * term is content-derived and no caller can forget it. What a caller may
+   * still know and the text does not is genuinely per-mode: which files the
+   * lane will read, and how much is riding on it. Both default to `0`, which
+   * the shared deriver reads as "no signal" — honestly the smallest band, never
+   * a guess. Never a model, provider, or tier: see `LaneDemandSchema`.
+   */
+  fileCount?: number;
+  riskScore?: number;
 }
 
 export interface MaterializedFanoutLane {
@@ -66,6 +85,15 @@ export interface MaterializedFanoutLane {
   resultPath: string;
   /** True when the lane's submission already exists (K-of-N resume). */
   resultExists: boolean;
+  /**
+   * The lane's demand ranking (size / complexity / risk), DERIVED here rather
+   * than declared by the caller — every fan-out lane in the package is
+   * materialized through this one function, so a lane without a demand is not
+   * expressible. Same vocabulary and same shape as the work items both
+   * orchestrators publish, so a host matching a model to work reads one
+   * ranking whether the work arrives as a review task or a fan-out lane.
+   */
+  demand: LaneDemand;
 }
 
 export interface MaterializedFanout {
@@ -191,6 +219,14 @@ export async function materializeFanoutLanes(params: {
       promptPath,
       resultPath,
       resultExists,
+      // Derived from the prompt text the tool just wrote — the lane's own
+      // bytes, not the caller's claim about them — plus whatever per-mode
+      // signal the caller had. See {@link FanoutLaneSpec}.
+      demand: deriveLaneDemand({
+        tokenEstimate: estimateTokensFromBytes(Buffer.byteLength(promptText, "utf8")),
+        fileCount: spec.fileCount ?? 0,
+        riskScore: spec.riskScore ?? 0,
+      }),
     });
   }
 

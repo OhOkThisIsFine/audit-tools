@@ -1718,13 +1718,21 @@ async function buildNodeWriteScopeResolver(artifactsDir: string): Promise<{
 }> {
   const decomposedModules = await readDecomposedModules(artifactsDir);
   const contractTargetsBySlug = await readModuleContractWriteTargets(artifactsDir);
-  const moduleScopesBySlug = decomposedModules
-    .map((m) => ({
-      slug: moduleSlug(m.name),
-      files: m.file_scope,
-      targets: contractTargetsBySlug.get(moduleSlug(m.name)) ?? [],
-    }))
-    .sort((a, b) => b.slug.length - a.slug.length);
+  const moduleScopesBySlug = decomposedModules.map((m) => ({
+    slug: moduleSlug(m.name),
+    files: m.file_scope,
+    targets: contractTargetsBySlug.get(moduleSlug(m.name)) ?? [],
+  }));
+  // The join is the EXACT one (`idRegistry.moduleSlugForObligationId`), not a
+  // longest-prefix match. Longest-prefix guessed whenever one module slug
+  // prefixed another: with `auth` and `auth-service` both decomposed the guess
+  // resolved correctly by luck of the sort, but with `auth-service` out of
+  // scope, `OBL-auth-service-contract` matched `auth` and the node silently
+  // took `auth`'s targets — another module's write boundary, granted without
+  // anyone choosing it. The suffix grammar makes the unresolvable case
+  // UNRESOLVABLE, which the empty-scope refusal below already reports loudly.
+  const scopeBySlug = new Map(moduleScopesBySlug.map((m) => [m.slug, m]));
+  const knownSlugs = new Set(scopeBySlug.keys());
   const resolve = (node: DagScopeNode): string[] => {
     const declared = [...new Set(node.output_files ?? node.files_likely_touched ?? [])];
     const obligationIds = [
@@ -1734,7 +1742,8 @@ async function buildNodeWriteScopeResolver(artifactsDir: string): Promise<{
     const inherited = new Set<string>();
     const ownedTargets = new Set<string>();
     for (const id of obligationIds) {
-      const owner = moduleScopesBySlug.find((m) => id.startsWith(`OBL-${m.slug}-`));
+      const slug = moduleSlugForObligationId(id, knownSlugs);
+      const owner = slug === null ? undefined : scopeBySlug.get(slug);
       if (!owner) continue;
       // file_scope inheritance is the scope-less fallback ONLY; the contract's
       // declared targets are unioned in either way.
@@ -4294,39 +4303,70 @@ export async function collectDagWriteScopeRefusals(
 }
 
 /**
- * Path-A canonical-block membership validation, run BEFORE anything is promoted
- * (OBL-seam-prep-remediate-core-inv-2 / COR-114e4941). These are exactly the
- * checks the promoter itself performs while building its node→canonical-group
- * map — but there they THROW out of `promoteImplementationDagToExtractedPlan`,
- * an unclassified stack that wedged every subsequent next-step. Hoisted here so
- * an invalid `source_finding_ids` declaration takes the same bounded re-emit as
- * every other promotion rejection, with no gate having executed past it.
+ * The ONE Path-A canonical-group membership evaluator, in ONE body.
  *
- * Returns one line per violation; empty means the DAG is promotable on this
- * axis (or Path A is not in play at all).
+ * The promoter and the pre-promotion gate ask the byte-identical question — is
+ * each DAG node's `source_finding_ids` declaration a canonical audit work block,
+ * exactly once each? — and they used to answer it with two hand-mirrored copies
+ * of the same forty lines: one returning refusal lines, one throwing. Two copies
+ * of an identity rule drift, and a drift between THESE two is the worst kind:
+ * the gate would certify a DAG promotable and the promoter would then throw on
+ * it, or (worse) the gate would refuse a DAG the promoter would have accepted,
+ * wedging a run behind a rule nothing in the emitter can satisfy.
+ *
+ * So the body is `ok`/`refusals`, plus the node→canonical-group map the promoter
+ * needs for its projection, and each caller renders what it needs from the SAME
+ * result. `refusals` is empty exactly when the DAG is promotable on this axis;
+ * `byNodeId` is populated exactly on that path.
+ *
+ * The caller supplies `nodes` and `approvedSource` because they read them for
+ * their own purposes too (the gate must not read the DAG twice; the promoter
+ * filters the canonical group map through its own sort).
  */
-export async function collectPathARefusals(
-  artifactsDir: string,
-): Promise<string[]> {
-  const dag = envelopePayload(
-    await readContractArtifact(artifactsDir, "implementation_dag"),
-  ) as ImplementationDAG | undefined;
-  const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
-  if (nodes.length === 0) return [];
-  if (!nodes.some((node) => Array.isArray(node.source_finding_ids))) return [];
-
-  const pathASeed = await readOptionalJsonFile<PathASeed>(
-    pathASeedFilePath(artifactsDir),
-  );
-  const approvedSource = pathASeed
-    ? projectApprovedFindings(
-        await readOptionalJsonFile<unknown>(pathASeed.audit_findings_path),
-      )
-    : undefined;
+function evaluatePathACanonicalGroups(params: {
+  /**
+   * The minimal node view this rule reads — deliberately structural rather
+   * than the full `ImplementationDAG` node type. The gate reads the persisted
+   * artifact through its own parse (which admits a looser shape) and the
+   * promoter reads the same document through a narrower local cast, so
+   * requiring the strict type here would force one of them to assert a shape it
+   * does not have — in the one place whose whole point is that both sides ask
+   * the identical question.
+   */
+  readonly nodes: readonly {
+    readonly id?: string | undefined;
+    readonly source_finding_ids?: readonly string[] | undefined;
+  }[];
+  readonly approvedSource:
+    | { readonly workBlocks: readonly { readonly finding_ids: readonly string[] }[] }
+    | undefined;
+  /** False when the caller already knows Path A is out of play (no seed). */
+  readonly seedPresent: boolean;
+}): {
+  readonly refusals: string[];
+  readonly byNodeId: ReadonlyMap<string, readonly string[]>;
+} {
+  const { nodes, approvedSource, seedPresent } = params;
+  const byNodeId = new Map<string, readonly string[]>();
+  if (nodes.length === 0) return { refusals: [], byNodeId };
+  if (!nodes.some((node) => Array.isArray(node.source_finding_ids))) {
+    return { refusals: [], byNodeId };
+  }
   if (!approvedSource) {
-    return [
-      "implementation_dag declares source_finding_ids but no Path-A seed is present, so the ids cannot be joined to a canonical audit work block.",
-    ];
+    return {
+      refusals: [
+        "implementation_dag declares source_finding_ids but no Path-A seed is present, so the ids cannot be joined to a canonical audit work block.",
+      ],
+      byNodeId,
+    };
+  }
+  if (!seedPresent) {
+    return {
+      refusals: [
+        "implementation_dag declares source_finding_ids but no Path-A seed is present, so the ids cannot be joined to a canonical audit work block.",
+      ],
+      byNodeId,
+    };
   }
 
   const signature = (ids: readonly string[]): string =>
@@ -4368,16 +4408,56 @@ export async function collectPathARefusals(
       );
     }
     usedGroups.add(groupSignature);
+    byNodeId.set(nodeId, canonicalGroup);
   }
-  if (
-    refusals.length === 0 &&
-    usedGroups.size !== canonicalGroups.size
-  ) {
+  if (refusals.length === 0 && usedGroups.size !== canonicalGroups.size) {
     refusals.push(
       "implementation_dag source_finding_ids do not cover every canonical audit work block exactly once.",
     );
   }
-  return refusals;
+  return { refusals, byNodeId };
+}
+
+/**
+ * Path-A canonical-block membership validation, run BEFORE anything is promoted
+ * (OBL-seam-prep-remediate-core-inv-2 / COR-114e4941). These are exactly the
+ * checks the promoter itself performs while building its node→canonical-group
+ * map — but there they THROW out of `promoteImplementationDagToExtractedPlan`,
+ * an unclassified stack that wedged every subsequent next-step. Hoisted here so
+ * an invalid `source_finding_ids` declaration takes the same bounded re-emit as
+ * every other promotion rejection, with no gate having executed past it.
+ *
+ * The checks themselves are {@link evaluatePathACanonicalGroups} — the ONE body
+ * both this gate and the promoter call, so the gate can never certify a DAG the
+ * promoter then refuses.
+ *
+ * Returns one line per violation; empty means the DAG is promotable on this
+ * axis (or Path A is not in play at all).
+ */
+export async function collectPathARefusals(
+  artifactsDir: string,
+): Promise<string[]> {
+  const dag = envelopePayload(
+    await readContractArtifact(artifactsDir, "implementation_dag"),
+  ) as ImplementationDAG | undefined;
+  const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
+  if (nodes.length === 0) return [];
+  if (!nodes.some((node) => Array.isArray(node.source_finding_ids))) return [];
+
+  const pathASeed = await readOptionalJsonFile<PathASeed>(
+    pathASeedFilePath(artifactsDir),
+  );
+  const approvedSource = pathASeed
+    ? projectApprovedFindings(
+        await readOptionalJsonFile<unknown>(pathASeed.audit_findings_path),
+      )
+    : undefined;
+
+  return evaluatePathACanonicalGroups({
+    nodes,
+    approvedSource,
+    seedPresent: pathASeed !== undefined,
+  }).refusals;
 }
 
 /**
@@ -4473,9 +4553,7 @@ export async function promoteImplementationDagToExtractedPlan(
       contractSlugToName.set(moduleSlug(mod.name), mod.name);
     }
   }
-  const contractSlugsByLength = [...contractSlugToName.keys()].sort(
-    (a, b) => b.length - a.length,
-  );
+  const contractSlugs = new Set(contractSlugToName.keys());
   const moduleContractsForNode = (node: {
     satisfies_obligations?: string[];
     verification_obligation_ids?: string[];
@@ -4485,7 +4563,7 @@ export async function promoteImplementationDagToExtractedPlan(
       ...(node.satisfies_obligations ?? []),
       ...(node.verification_obligation_ids ?? []),
     ]) {
-      const slug = moduleSlugForObligationId(obligationId, contractSlugsByLength);
+      const slug = moduleSlugForObligationId(obligationId, contractSlugs);
       const name = slug === null ? undefined : contractSlugToName.get(slug);
       if (name !== undefined) names.add(name);
     }
@@ -4522,50 +4600,21 @@ export async function promoteImplementationDagToExtractedPlan(
     approvedSource &&
     nodes.some((node) => Array.isArray(node.source_finding_ids))
   ) {
-    const signature = (ids: readonly string[]): string =>
-      JSON.stringify(
-        [...ids].sort((left, right) => compareCodeUnits(left, right)),
-      );
-    const canonicalGroups = new Map(
-      approvedSource.workBlocks.map((block) => [
-        signature(block.finding_ids),
-        [...block.finding_ids].sort((left, right) => compareCodeUnits(left, right)),
-      ]),
-    );
-    const usedGroups = new Set<string>();
-    for (const [index, node] of nodes.entries()) {
-      const nodeId = ensureNodeId(node.id, index);
-      const sourceIds = node.source_finding_ids;
-      if (!Array.isArray(sourceIds) || sourceIds.length === 0) {
-        throw new Error(
-          `implementation_dag node "${nodeId}" must declare source_finding_ids for Path-A promotion.`,
-        );
-      }
-      const uniqueIds = [...new Set(sourceIds)];
-      if (uniqueIds.length !== sourceIds.length) {
-        throw new Error(
-          `implementation_dag node "${nodeId}" repeats a source_finding_ids member.`,
-        );
-      }
-      const groupSignature = signature(uniqueIds);
-      const canonicalGroup = canonicalGroups.get(groupSignature);
-      if (!canonicalGroup) {
-        throw new Error(
-          `implementation_dag node "${nodeId}" source_finding_ids do not match a canonical audit work block.`,
-        );
-      }
-      if (usedGroups.has(groupSignature)) {
-        throw new Error(
-          `implementation_dag node "${nodeId}" duplicates a canonical audit work block.`,
-        );
-      }
-      usedGroups.add(groupSignature);
-      canonicalItemsByNodeId.set(nodeId, canonicalGroup);
+    // The SAME evaluator `collectPathARefusals` runs as the pre-promotion gate.
+    // The projection this loop used to build inline was a second copy of that
+    // gate's rule, and the two could disagree about which declarations are
+    // canonical — the gate certifying a DAG this throws on, or the reverse.
+    // This side renders refusals as the THROW the promoter's contract promises.
+    const evaluation = evaluatePathACanonicalGroups({
+      nodes,
+      approvedSource,
+      seedPresent: true,
+    });
+    if (evaluation.refusals.length > 0) {
+      throw new Error(evaluation.refusals.join("\n"));
     }
-    if (usedGroups.size !== canonicalGroups.size) {
-      throw new Error(
-        "implementation_dag source_finding_ids do not cover every canonical audit work block exactly once.",
-      );
+    for (const [nodeId, canonicalGroup] of evaluation.byNodeId) {
+      canonicalItemsByNodeId.set(nodeId, [...canonicalGroup]);
     }
   }
 

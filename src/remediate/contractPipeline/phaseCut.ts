@@ -19,7 +19,7 @@
  * cyclic module never front-runs a real foundation it transitively needs).
  */
 
-import { OBLIGATION_PREFIX } from "./idRegistry.js";
+import { moduleSlugForObligationId } from "./idRegistry.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 import { findCyclicComponents } from "../../shared/graph/directedCycles.js";
 
@@ -139,13 +139,17 @@ export { moduleSlug } from "./idRegistry.js";
 
 /**
  * Resolve the phase ordinal for an implementation-DAG node from the obligation
- * ids it discharges. Every derived obligation id is `OBL-<moduleSlug>-…`, so the
- * owning module (hence phase) is recoverable by longest-slug prefix match — no
- * lossy slug reversal. A node spanning modules in several phases takes the MAX
- * ordinal (fail-toward-later: it cannot land before the latest module it touches
- * is reachable). A node whose obligations match no in-scope module slug — a
- * counterexample-only node, or an obligation from a module dropped from the cut —
- * defaults to the LAST phase (integration), never front-running a foundation.
+ * ids it discharges. Every derived obligation id is `OBL-<moduleSlug>-<suffix>`,
+ * so the owning module (hence phase) is recoverable by the EXACT join in
+ * `idRegistry.moduleSlugForObligationId` — no lossy slug reversal, and no
+ * longest-prefix guess (that rule resolved `OBL-auth-service-…` to `auth`
+ * whenever `auth-service` was not in the slug set, silently handing the node
+ * another module's phase and file scope). A node spanning modules in several
+ * phases takes the MAX ordinal (fail-toward-later: it cannot land before the
+ * latest module it touches is reachable). A node whose obligations match no
+ * in-scope module slug — a counterexample-only node, or an obligation from a
+ * module dropped from the cut — defaults to the LAST phase (integration), never
+ * front-running a foundation.
  *
  * `slugToOrdinal` is the module-phase map re-keyed by `moduleSlug(name)`.
  */
@@ -154,13 +158,11 @@ export function phaseOrdinalForObligations(
   slugToOrdinal: Map<string, number>,
   lastOrdinal: number,
 ): number {
-  // Longest-first so a slug that is a prefix of another (e.g. `auth` vs
-  // `auth-service`) resolves to the most specific module.
-  const slugsByLength = [...slugToOrdinal.keys()].sort((a, b) => b.length - a.length);
+  const knownSlugs = new Set(slugToOrdinal.keys());
   let max = -1;
   let matchedAny = false;
   for (const id of obligationIds) {
-    const slug = moduleSlugForObligationId(id, slugsByLength);
+    const slug = moduleSlugForObligationId(id, knownSlugs);
     if (slug === null) continue;
     max = Math.max(max, slugToOrdinal.get(slug) ?? 0);
     matchedAny = true;
@@ -168,25 +170,7 @@ export function phaseOrdinalForObligations(
   return matchedAny ? max : lastOrdinal;
 }
 
-/**
- * The ONE longest-prefix slug match for an `OBL-<moduleSlug>-…` obligation id.
- * `slugsByLength` MUST be sorted longest-first (the callers own the sort so a
- * hot loop sorts once). Returns the matched slug, or null when the id carries
- * no obligation prefix or matches no known module — shared by the phase-ordinal
- * decoder above and the promotion's module-contract attachment
- * (open-bugs.md:474), so the two decoders cannot drift.
- */
-export function moduleSlugForObligationId(
-  obligationId: string,
-  slugsByLength: readonly string[],
-): string | null {
-  if (!obligationId.startsWith(OBLIGATION_PREFIX)) return null;
-  const rest = obligationId.slice(OBLIGATION_PREFIX.length);
-  for (const slug of slugsByLength) {
-    if (rest === slug || rest.startsWith(`${slug}-`)) return slug;
-  }
-  return null;
-}
+export { moduleSlugForObligationId };
 
 /**
  * A structured artifact reference embedded anywhere inside a module's free-prose
