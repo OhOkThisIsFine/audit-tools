@@ -221,6 +221,27 @@ export function writeSessionRecord(root, record) {
   }
 }
 
+// The starting HEAD, as a DERIVABLE FACT rather than an author-supplied one.
+//
+// The closeout's commit range used to be typed by the report's author (or
+// passed as `--start` from a lap file), which is the same defect class as any
+// hand-written state the repository already holds: the value is knowable at
+// session start and unknowable-with-certainty afterwards. So SessionStart
+// records it here, beside the registered_at stamp it already keeps, and
+// `scripts/render-closeout.mjs` derives `x..HEAD` from THAT — meaning a report
+// rendered in the session that did the work lists its commits without anyone
+// pasting a sha.
+//
+// It is NOT a second copy of `git log`: the record holds only the STARTING
+// point, and the range is computed at render time against the live HEAD. A
+// stale record therefore yields a wrong RANGE, never a wrong list of commits.
+export function readSessionStartingHead(root, sessionId) {
+  const { state, record } = readSessionRecord(root, sessionId);
+  if (state !== 'ok') return null;
+  const head = record?.starting_head;
+  return typeof head === 'string' && /^[0-9a-f]{7,40}$/i.test(head) ? head : null;
+}
+
 // Read + classify: { state: 'absent' | 'ok' | 'corrupt', record: object|null }.
 //   absent  — file does not exist
 //   ok      — parsed, record.session_id matches, baseline is an array
@@ -353,10 +374,27 @@ if (invokedDirectly) {
     process.exit(1);
   }
   const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  // The starting HEAD, same as the SessionStart leg records: a recovery
+  // registration is still the START of a session's work, and the closeout
+  // derives its commit range from this rather than from a hand-typed sha.
+  let head = '';
+  try {
+    const r = spawnSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000,
+      windowsHide: true,
+    });
+    head = r.error || r.status !== 0 ? '' : (r.stdout ?? '').trim();
+  } catch {
+    /* not a repository — the field is null, nothing else changes */
+  }
   const wrote = writeSessionRecord(root, {
     version: 1,
     session_id: sid,
     registered_at: new Date().toISOString(),
+    starting_head: head || null,
     source: 'self-registration',
     baseline: [],
   });

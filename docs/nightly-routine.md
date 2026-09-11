@@ -78,9 +78,11 @@ nightly is its unattended half: it finds the under-specified items and asks the
 same reviewer+adversary-characterized question, but posts it to the inbox
 instead of asking live.
 
-*Verify before deleting.* An entry claiming to be shipped is a LEAD, not a fact —
-a 2026-07-19 pass found ~21% of entries stale or already closed, in both
-directions. Deletion requires the same code anchor a doc auto-apply requires.
+*Verify before deleting.* An entry claiming to be shipped is a LEAD, not a fact,
+and an entry that reads as open may already be closed — the error runs in both
+directions, which is why each entry is checked against the tree rather than
+against its own prose. Deletion requires the same code anchor a doc auto-apply
+requires.
 
 *Coverage is read from the stamp, never eyeballed.* The mechanical sweep
 (`scripts/shared/triage-backlog.mjs`) names no model: it hands each entry to

@@ -132,3 +132,11 @@ skills-lock.json
 # External-analyzer sweep droppings (owner-run or dev-side runs): raw run
 # output only — conclusions land in docs/reviews/; the raw dir is disposable.
 analysis-results-*/
+
+# A delegated implementation LANE's scratch dir (logs, and the whole-file copies a
+# lane writes under lane-scratch/hooks/ for paths its tools cannot edit directly).
+# Ignored for the reason the *.log rule above states, and one more: a lane copy
+# of a file that also lives at its real path makes every BARE basename citation
+# to that file ambiguous, so check:doc-code-citations reds on a doc the lane
+# never touched. Scratch is scratch; nothing here is a deliverable.
+lane-scratch/

@@ -21,6 +21,7 @@ const SCRIPT = join(REPO_ROOT, 'scripts', 'render-closeout.mjs');
 function render(
   input: unknown,
   extraArgs: string[] = [],
+  envOverrides: Record<string, string> = {},
 ): { code: number; stdout: string; stderr: string } {
   const dir = mkdtempSync(join(tmpdir(), 'closeout-'));
   const file = join(dir, 'in.json');
@@ -31,7 +32,11 @@ function render(
   const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file, ...extraArgs], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
-    env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+    // CLAUDE_SESSION_ID is CLEARED by default: the session record is a range
+    // source, and a developer running this suite inside a real session would
+    // otherwise have the repo's own `.claude/hooks/.state/sessions/<id>.json`
+    // picked up against the throwaway temp dir, which has no such commit.
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CLAUDE_SESSION_ID: '', ...envOverrides },
   });
   return { code: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
@@ -110,10 +115,122 @@ describe('render-closeout: --start, the flag the closeout SKILL instructs', () =
     expect(stderr).toContain('not-a-real-commit');
   });
 
-  it('renders no commit section at all when --start is omitted', () => {
-    const { code, stdout } = render(minimal());
+  it('renders no commit section when --start is omitted AND no session record exists', () => {
+    // The temp CLAUDE_PROJECT_DIR holds no `.claude/hooks/.state/sessions`, and
+    // CLAUDE_SESSION_ID is unset in this env — so neither derivation source is
+    // available and the section is honestly absent rather than invented.
+    const { code, stdout } = render(minimal(), [], { CLAUDE_SESSION_ID: '' });
     expect(code).toBe(0);
     expect(stdout).not.toContain('### Commits in this sprint');
+  });
+
+  // The author-supplied sha is the LAST resort, not the only one: the range is
+  // a fact the repository holds at session start, so SessionStart records it
+  // (`readSessionStartingHead`) and the renderer derives from that. A value
+  // typed at the end is a second copy of a fact that was already knowable.
+  it('derives the range from the session record when --start is not passed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'closeout-session-head-'));
+    const git = (...args: string[]) => spawnSyncHidden('git', args, { cwd: dir, encoding: 'utf8' });
+    git('init', '-q');
+    git('config', 'user.email', 'closeout-test@example.invalid');
+    git('config', 'user.name', 'closeout test');
+    writeFileSync(join(dir, '.gitignore'), '.claude/hooks/*\n', 'utf8');
+    writeFileSync(join(dir, 'seed.txt'), 'seed', 'utf8');
+    git('add', '-A');
+    git('commit', '-qm', 'the commit the session opened on');
+    const sessionStart = (git('rev-parse', 'HEAD').stdout ?? '').trim();
+
+    writeFileSync(join(dir, 'work.txt'), 'the work this sprint landed', 'utf8');
+    git('add', '-A');
+    git('commit', '-qm', 'the work this sprint landed');
+
+    // The SessionStart leg's own write, in the shape the hook produces.
+    const sessionId = 'test-session-abcdef';
+    const sessionsDir = join(dir, '.claude', 'hooks', '.state', 'sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.json`),
+      JSON.stringify({
+        version: 1,
+        session_id: sessionId,
+        registered_at: '2026-09-10T00:00:00.000Z',
+        starting_head: sessionStart,
+        source: 'startup',
+        baseline: [],
+      }),
+      'utf8',
+    );
+
+    const file = join(dir, 'in.json');
+    writeFileSync(file, JSON.stringify(minimal()), 'utf8');
+    writeSuiteGreenStamp(dir, worktreeTree(dir));
+    const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CLAUDE_SESSION_ID: sessionId },
+    });
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('### Commits in this sprint');
+    expect(r.stdout).toContain(sessionStart);
+    // The DERIVED half: the subject came from git, and the commit the session
+    // OPENED on is the range's exclusive base, so it is NOT listed.
+    expect(r.stdout).toContain('the work this sprint landed');
+    expect(r.stdout).not.toContain('the commit the session opened on');
+  });
+
+  it('--start still WINS over the session record — the explicit flag is the override', () => {
+    // A temp repo where BOTH sources exist and disagree: the flag names the base
+    // commit, the session record names a LATER one. Only the flag's range may
+    // render, and the provenance line must say so.
+    const dir = mkdtempSync(join(tmpdir(), 'closeout-start-wins-'));
+    const git = (...args: string[]) => spawnSyncHidden('git', args, { cwd: dir, encoding: 'utf8' });
+    git('init', '-q');
+    git('config', 'user.email', 'closeout-test@example.invalid');
+    git('config', 'user.name', 'closeout test');
+    writeFileSync(join(dir, '.gitignore'), '.claude/hooks/*\n', 'utf8');
+    writeFileSync(join(dir, 'a.txt'), 'one', 'utf8');
+    git('add', '-A');
+    git('commit', '-qm', 'commit the flag will name');
+    const flagBase = (git('rev-parse', 'HEAD').stdout ?? '').trim();
+    writeFileSync(join(dir, 'b.txt'), 'two', 'utf8');
+    git('add', '-A');
+    git('commit', '-qm', 'commit the session record will name');
+
+    const sessionId = 'session-that-disagrees';
+    const sessionsDir = join(dir, '.claude', 'hooks', '.state', 'sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+    // The session record names a LATER commit than the flag: if the record won,
+    // the earlier commit would drop out of the rendered range.
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.json`),
+      JSON.stringify({
+        version: 1,
+        session_id: sessionId,
+        registered_at: '2026-09-10T00:00:00.000Z',
+        starting_head: 'HEAD',
+        source: 'startup',
+        baseline: [],
+      }),
+      'utf8',
+    );
+
+    const file = join(dir, 'in.json');
+    writeFileSync(file, JSON.stringify(minimal()), 'utf8');
+    writeSuiteGreenStamp(dir, worktreeTree(dir));
+    const r = spawnSyncHidden(
+      process.execPath,
+      [SCRIPT, '--in', file, '--start', flagBase],
+      { cwd: dir, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CLAUDE_SESSION_ID: sessionId } },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    // The provenance line names the FLAG, not the record.
+    expect(r.stdout).toContain(flagBase);
+    expect(r.stdout).toContain('commit the session record will name');
+    // `git log base..HEAD` is exclusive of the base, so the flag's own commit
+    // must NOT be listed — the same property the --start test above pins.
+    expect(r.stdout).not.toContain('commit the flag will name');
   });
 });
 

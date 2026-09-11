@@ -497,6 +497,16 @@ export const GUARDS = [
         exportName: 'findHandwrittenCreep', call: 'text', sample: 'Built red-tests-first (7 contract tests).' },
       { name: 'verification-state heading', drive: 'export', module: 'scripts/shared/generate-handoff-roadmap.mjs',
         exportName: 'findHandwrittenCreep', call: 'text', sample: '## Verification state' },
+      // The length bound recognizes no phrasing, so its one form is the SHAPE it
+      // fires on: an Immediate-next section carrying more WORDS than the bound
+      // allows. The sample is the real recurrence (the 2026-09-10 lap
+      // paragraph), not an arbitrary long string — a form fixture that drifts
+      // under the bound would otherwise pass vacuously.
+      { name: 'Immediate-next over its length bound', drive: 'export',
+        module: 'scripts/shared/generate-handoff-roadmap.mjs',
+        exportName: 'findImmediateNextOverrun', call: 'text',
+        sample:
+          '## Immediate next\n\n**Cleanup-and-implementation lap (opened 2026-09-10).** P00 cleanup is on `main`: the maintenance routine\'s commits are fast-forwarded, and stray worktrees, merged branches and the forensics stash are gone. Seven implementation waves follow — each packet in its own worktree outside the repo root on a DeepSeek lane through llm-relay, landed by fast-forward, the full suite re-run on `main` after every wave, and a `/ship` release after the last wave. The plan, the per-packet briefs and the 161-entry coverage check live in the lap\'s machine-local plan directory. The waiting maintenance decisions are settled there by standing convictions and are ticked in the inbox when their packets land.\n' },
     ],
     impl: 'check:handoff-roadmap',
     preCommit: 'reach',
@@ -506,12 +516,51 @@ export const GUARDS = [
       'roadmap entry text lives in the backlog. If the check instead names hand-written changelog ' +
       'creep (dated bullet / landing narrative / Verification-state heading), regenerating fixes ' +
       'NOTHING — trim or reword the named line; shipped-work narration belongs in git log, the ' +
-      'backlog, or memory',
+      'backlog, or memory. If it names the `## Immediate next` bound, cut that section to the ' +
+      'single next action plus the live owner decision — the lap chronology it regrew into belongs ' +
+      'in git log and the documents that own each fact — and note that REWRAPPING does not help: ' +
+      'the bound counts words',
     note:
-      'uncovered half of the hand-written creep leg: narration avoiding all three shapes passes — ' +
-      'mid-line dates ("decided 2026-08-18"), a date as the bullet\'s second word, lowercase ' +
-      '"landed", "is COMPLETE", novel phrasings; the nightly doc leg remains the semantic backstop ' +
-      '(2026-08-18)',
+      'uncovered halves, declared. (1) The creep leg is a shape-catch: narration avoiding all five ' +
+      'shapes passes — mid-line dates ("decided 2026-08-18"), a date as the bullet\'s second word, ' +
+      'lowercase "landed", "is COMPLETE", novel phrasings; the nightly doc leg remains the semantic ' +
+      'backstop (2026-08-18). (2) The `## Immediate next` leg is a WORD BUDGET, not a semantic ' +
+      'one: a chronology dense enough to fit inside it passes, and so does a short section naming ' +
+      'the wrong action — the bound raises the cost of the recurrence and reds the common case, it ' +
+      'does not make the section immediate-next by construction. Words rather than lines because a ' +
+      'line count measures the wrap width, not the content',
+  },
+  {
+    id: 'check:retired-infrastructure',
+    kind: 'gate',
+    forms: [
+      { name: 'a live-sounding mention of a retired service', drive: 'export',
+        module: 'scripts/check-retired-infrastructure.mjs',
+        exportName: 'findRetiredMentions', call: 'text',
+        sample: 'Restart the freellmapi router before the fan-out.' },
+    ],
+    impl: 'check:retired-infrastructure',
+    preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
+    fix:
+      'a doc names infrastructure that has been RETIRED — the register of those is ' +
+      'scripts/shared/retired-infrastructure-data.mjs, and this gate found a mention of one. Two ' +
+      'legal answers: DELETE the entry (a trap that existed only because the retired thing existed ' +
+      'retires with it), or KEEP it deliberately as a record and say what REPLACED the retired ' +
+      'infrastructure, marking the line `<!-- retired-infrastructure-exempt: <id> — <replacement> -->`. ' +
+      'The replacement is the point: an entry naming dead infrastructure and no successor still ' +
+      'sends the reader to a wrong action',
+    note:
+      'the register is the DECLARATION half and this gate is the ENFORCEMENT half, so a retirement ' +
+      'is a one-line edit there rather than a sweep somebody remembers to do. SCOPE IS DECLARED ' +
+      'AND NARROW (SCANNED_DOCS in the gate): docs/backlog/durable-traps.md only, because that is ' +
+      'the standing REFERENCE a session reads to decide what to run, where a stale entry costs a ' +
+      'wrong action. UNCOVERED HALVES, stated: (1) a retirement nobody ADDS A ROW FOR is invisible — ' +
+      'the gate cannot see a service being shut down, only a declaration that it was; (2) the ' +
+      'exemption marker is a line-level assertion and the gate does not judge whether the stated ' +
+      'replacement is real, so a marker with a false successor passes; (3) the scan is a literal ' +
+      'identifier match, so an entry that refers to retired infrastructure only by DESCRIPTION ' +
+      '("the old router on the other port") is not caught',
   },
   {
     id: 'check:backlog-index',
@@ -1997,11 +2046,15 @@ export const REACH = [
       'check:backlog-line-numbers',
       'check:backlog-friction-tags',
       'check:handoff-roadmap',
+      // Reads exactly ONE of these files today (docs/backlog/durable-traps.md — SCANNED_DOCS
+      // in the gate); cited here because that is the glob its scan target lives under.
+      'check:retired-infrastructure',
     ],
     note:
-      'the six gates that actually read the split backlog files (seek-index parity, size budget, ' +
+      'the gates that actually read the split backlog files (seek-index parity, size budget, ' +
       'status-label ban, line-number-citation ban, friction-category vocabulary, roadmap title ' +
-      'lift); the markdown-corpus row carries the generic doc gates. Four of them (doc-code-' +
+      'lift, retired-infrastructure mentions); the markdown-corpus row carries the generic doc ' +
+      'gates. Four of them (doc-code-' +
       'citations, budget, line-numbers, memory-citations) additionally carry writeTime metadata, ' +
       'so the PostToolUse hook runs them against the file the moment it is edited — the budget leg ' +
       'reported there and DEFERRED to commit, because its remedy rewrites lap-scoped baseline state',
@@ -2060,7 +2113,9 @@ export const REACH = [
       'case used to be reachable ONLY from the full suite (`tests/shared/handoff-roadmap.test.ts`, ' +
       "describe 'the live tree'), which is how a hand-written live-state edit using the banned word " +
       'landed through a green pre-commit gate and burned tag v0.50.0. It now runs in this leg, ' +
-      'which fires on any HANDOFF edit; its queue/ledger sources have their own rows below',
+      'which fires on any HANDOFF edit; its queue/ledger sources have their own rows below. The ' +
+      'hand-written region additionally carries the `## Immediate next` length bound ' +
+      '(`findImmediateNextOverrun`), whose uncovered half is stated on the gate row above',
   },
   {
     area: 'relative-link lift',

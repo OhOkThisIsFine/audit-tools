@@ -35,6 +35,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CLOSEOUT_SECTIONS } from './closeout-sections-data.mjs';
 import { closeoutReadinessFindings } from './shared/closeoutReadiness.mjs';
+import { readSessionStartingHead } from './shared/sessionRegistry.mjs';
 import { worktreeTree } from './shared/worktree-tree.mjs';
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -280,24 +281,46 @@ if (notReady.length > 0) {
 }
 
 // ── render ───────────────────────────────────────────────────────────────────
+// ── the sprint's commit range, DERIVED before it is authored ────────────────
+//
+// `--start` is the author-supplied fallback. The PRIMARY source is the
+// SessionStart record (`starting_head` — see `readSessionStartingHead` in
+// scripts/shared/sessionRegistry.mjs), because which commits a sprint landed is
+// a fact the repository already holds at the moment the session opens, and a
+// value the author types at the end is a second copy of it. That is the same
+// defect class as any hand-written state: it drifts, and nothing compares it.
+//
+// The record is read for THIS session (`CLAUDE_SESSION_ID`), and the range is
+// still computed against the LIVE HEAD — so a record left over from an earlier
+// session yields a wrong RANGE, never a wrong list: whatever `git log` prints
+// is genuinely in that range.
+const sessionStartingHead =
+  startCommit === '' && process.env.CLAUDE_SESSION_ID
+    ? readSessionStartingHead(root, process.env.CLAUDE_SESSION_ID)
+    : null;
+const rangeBase = startCommit || sessionStartingHead || '';
+
 const out = ['## Sprint closeout', ''];
 for (const { section, lines } of rendered) {
   out.push(`### ${section.heading}`, ...lines, '');
 }
-if (startCommit) {
+if (rangeBase) {
   // Derived, never authored: this is the one part of the report the author
   // cannot phrase. A range that disagrees with what `landed` claims is exactly
   // the discrepancy a reader should see without re-running git.
-  const range = git(['log', '--oneline', `${startCommit}..HEAD`]);
+  const range = git(['log', '--oneline', `${rangeBase}..HEAD`]);
   if (!range.ok) {
     fail(
-      `--start ${startCommit}: git could not resolve ${startCommit}..HEAD. Pass the sprint's ` +
+      `--start ${rangeBase}: git could not resolve ${rangeBase}..HEAD. Pass the sprint's ` +
         `start commit (\`/start-lap\` records it in .claude/lap-start.json).`,
     );
   }
   const commits = range.stdout.split(/\r?\n/).filter(Boolean);
+  const provenance =
+    startCommit === '' ? `derived from this session's starting HEAD \`${rangeBase}\``
+      : `derived from \`${rangeBase}..HEAD\``;
   out.push(
-    `### Commits in this sprint (derived from \`${startCommit}..HEAD\`)`,
+    `### Commits in this sprint (${provenance})`,
     ...(commits.length > 0
       ? commits.map((c) => `- ${c}`)
       : ['- none — HEAD is unchanged since the sprint started']),

@@ -100,11 +100,20 @@ try {
     // EMPTY baseline rather than skipping: an unregistered owner session loses
     // its Stop gates entirely, while an empty baseline merely restores
     // whole-tree over-firing (the safe direction).
+    // The starting HEAD is captured HERE, at the one moment it is knowable, so
+    // the closeout can DERIVE the sprint's commit range instead of asking the
+    // report's author to remember a sha (`readSessionStartingHead` in
+    // scripts/shared/sessionRegistry.mjs). A git fault records null rather than
+    // skipping the write: an unregistered owner session loses its Stop gates
+    // entirely, while a null head merely makes the renderer fall back to its
+    // `--start` flag.
     const status = runPorcelainStatus(ROOT);
+    const head = git(['rev-parse', 'HEAD'], 5_000);
     writeSessionRecord(ROOT, {
       version: 1,
       session_id: sessionId,
       registered_at: new Date().toISOString(),
+      starting_head: head.ok && head.stdout ? head.stdout : null,
       source: sanitizeSessionId(payload?.source) || 'unknown',
       baseline: status.ok ? baselineFromEntries(status.entries) : [],
     });

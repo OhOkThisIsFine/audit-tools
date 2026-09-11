@@ -502,6 +502,170 @@ export const HANDWRITTEN_CREEP_RULES = [
   },
 ];
 
+// ── the hand-written Immediate-next length bound ─────────────────────────────
+//
+// `HANDWRITTEN_CREEP_RULES` catches NARRATIVE SHAPES, and its stated uncovered
+// half is "any novel phrasing" — which is exactly how the section regrew as a
+// run chronology: a lap paragraph naming P00, seven waves, the routing of each
+// lane and the plan directory. None of those lines matched a creep rule, and
+// every one of them was status the repository already holds (`git log` for what
+// landed, `docs/backlog/` for what is open, the plan directory itself).
+//
+// A shape-catch cannot close that, and a semantic one is not available at this
+// boundary. What IS mechanical is the LENGTH: the section is scoped by its own
+// header to the single next action plus the live owner decision, and a
+// chronology needs a paragraph where that needs a sentence. So the bound is a
+// budget, not a phrasing test — any wording is legal and the section simply may
+// not grow. That is the same trade the creep rules make, one level up: it
+// cannot say WHICH sentence is the chronology, only that the section has
+// stopped being an immediate-next statement.
+//
+// COUNTED IN WORDS, NOT LINES, and that is load-bearing rather than cosmetic.
+// A line count is not invariant under REFLOW: the same paragraph wrapped at 90
+// columns instead of 120 is fewer lines, so a line bound is satisfied by not
+// wrapping the editor — it would measure the author's wrap width, not the
+// section's content. A word count does not move when the text is rewrapped.
+//
+// TUNED AGAINST MEASURED TEXT, both directions. The legitimate shapes run 8-69
+// words: a bare action (8); the live HANDOFF's action + "none" decision, the
+// largest shape in the tree today (69); an action plus two open decisions (41).
+// The chronology this bound exists to refuse — the 2026-09-10 lap paragraph,
+// recoverable verbatim from the `git log` of the commit that cut it — is 105.
+// Ninety therefore passes the largest legitimate shape with ~30% headroom while
+// refusing the recurrence with ~15% margin, and NEITHER edge moves when the
+// prose is rewrapped. Both measurements are pinned in
+// `tests/shared/handoff-roadmap.test.ts`, so a bound that drifts into either
+// the legitimate or the recurrence range fails there rather than silently
+// stopping catching anything.
+//
+// Not counted, deliberately: HTML comments (the `doc-citation-exempt` marker is
+// bookkeeping, not content) and everything inside the two generated ranges
+// (they are derived, and this bound is on the HAND-WRITTEN region — in the real
+// HANDOFF and in every fixture tree the markers fall under this heading, since
+// they carry no `##` of their own).
+//
+// STATED UNCOVERED HALF: this is a budget, not a semantic test. A chronology
+// dense enough to fit inside ninety words passes, and so does a short section
+// that names the wrong next action — the bound raises the cost of the
+// recurrence and reds the common case, it does not make the section
+// immediate-next by construction.
+export const IMMEDIATE_NEXT_HEADING = "## Immediate next";
+
+/** The bound, in hand-written words (reflow-invariant). */
+export const IMMEDIATE_NEXT_MAX_WORDS = 90;
+
+/**
+ * Blank the two generated ranges LINE-PRESERVINGLY, so 1-based line numbers
+ * still refer to the original text. Shared by the creep scan and the
+ * Immediate-next bound: both are contracts on the HAND-WRITTEN region, and a
+ * generated block that happened to sit under the `## Immediate next` heading
+ * (which it does in every fixture tree, since the markers carry no `##` of
+ * their own) must not be counted as hand-written prose.
+ */
+function blankGeneratedRanges(lines) {
+  for (const [beginMarker, endMarker] of GENERATED_RANGE_PAIRS) {
+    const begin = lines.findIndex((l) => l.includes(beginMarker));
+    if (begin === -1) continue;
+    const end = lines.findIndex((l, i) => i >= begin && l.includes(endMarker));
+    const stop = end === -1 ? lines.length - 1 : end;
+    for (let i = begin; i <= stop; i++) lines[i] = "";
+  }
+  return lines;
+}
+
+/**
+ * The body of the hand-written `## Immediate next` section: from the heading to
+ * the next `## ` heading. Returns null when the heading is absent — the section
+ * is part of HANDOFF's contract, so its absence is itself a refusal.
+ */
+function immediateNextSection(lines) {
+  const start = lines.findIndex((l) => l.trim() === IMMEDIATE_NEXT_HEADING);
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^## /.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start + 1, end);
+}
+
+/**
+ * The hand-written text of the Immediate-next section, with HTML comments
+ * (which may span lines) and the two generated ranges removed. Returns null
+ * when the section heading is absent — the section is part of HANDOFF's
+ * contract, so its absence is itself a refusal.
+ */
+function immediateNextText(text) {
+  const section = immediateNextSection(blankGeneratedRanges(text.split(/\r?\n/)));
+  if (section === null) return null;
+  let inComment = false;
+  const visible = [];
+  for (const line of section) {
+    let rest = line;
+    if (inComment) {
+      const close = rest.indexOf("-->");
+      if (close === -1) continue;
+      rest = rest.slice(close + 3);
+      inComment = false;
+    }
+    let open = rest.indexOf("<!--");
+    while (open !== -1) {
+      const close = rest.indexOf("-->", open + 4);
+      if (close === -1) {
+        inComment = true;
+        rest = rest.slice(0, open);
+        break;
+      }
+      rest = rest.slice(0, open) + rest.slice(close + 3);
+      open = rest.indexOf("<!--");
+    }
+    visible.push(rest);
+  }
+  return visible.join("\n");
+}
+
+/**
+ * Count the hand-written WORDS of the Immediate-next section. Words, not
+ * lines, because a line count moves when the text is merely rewrapped (see
+ * IMMEDIATE_NEXT_MAX_WORDS). Returns `{ count }`, or null when the section
+ * heading is absent.
+ */
+export function measureImmediateNext(text) {
+  const body = immediateNextText(text);
+  if (body === null) return null;
+  return { count: body.split(/\s+/).filter(Boolean).length };
+}
+
+/**
+ * The Immediate-next overrun, or null when the section is within its bound.
+ * A MISSING heading is reported as an overrun-shaped refusal of its own, so the
+ * CLI has one branch rather than two.
+ */
+export function findImmediateNextOverrun(text) {
+  const measured = measureImmediateNext(text);
+  if (measured === null) {
+    return { reason: "the section is MISSING", count: 0, bound: IMMEDIATE_NEXT_MAX_WORDS };
+  }
+  if (measured.count <= IMMEDIATE_NEXT_MAX_WORDS) return null;
+  return { reason: "the section is over its bound", ...measured, bound: IMMEDIATE_NEXT_MAX_WORDS };
+}
+
+function overrunReport(overrun) {
+  return (
+    `\ndocs/HANDOFF.md's hand-written \`${IMMEDIATE_NEXT_HEADING}\` ${overrun.reason}: ` +
+    `${overrun.count} word(s) against a bound of ${overrun.bound}.\n` +
+    `HANDOFF is immediate state and next action only (its own header): that section states the\n` +
+    `SINGLE next action plus the live owner decision. A paragraph that narrates a lap — which\n` +
+    `packets ran, how each was routed, what already landed — is a chronology, and the repository\n` +
+    `already holds it: \`git log\` for what landed, \`docs/backlog/\` for what is open.\n` +
+    `Fix: cut the section back to the next action and the live owner decision (say "none" when\n` +
+    `nothing is open), and put any detail in the document that owns it. Regenerating does NOT\n` +
+    `help — the text is not generated. Rewrapping does not help either: the bound counts words.\n\n`
+  );
+}
+
 const GENERATED_RANGE_PAIRS = [
   [LIVE_STATUS_BEGIN_MARKER, LIVE_STATUS_END_MARKER],
   [BEGIN_MARKER, END_MARKER],
@@ -521,14 +685,7 @@ const GENERATED_RANGE_PAIRS = [
  * before this runs.
  */
 export function findHandwrittenCreep(text) {
-  const lines = text.split(/\r?\n/);
-  for (const [beginMarker, endMarker] of GENERATED_RANGE_PAIRS) {
-    const begin = lines.findIndex((l) => l.includes(beginMarker));
-    if (begin === -1) continue;
-    const end = lines.findIndex((l, i) => i >= begin && l.includes(endMarker));
-    const stop = end === -1 ? lines.length - 1 : end;
-    for (let i = begin; i <= stop; i++) lines[i] = "";
-  }
+  const lines = blankGeneratedRanges(text.split(/\r?\n/));
   const violations = [];
   lines.forEach((line, i) => {
     for (const rule of HANDWRITTEN_CREEP_RULES) {
@@ -627,11 +784,14 @@ export function runGenerator({
 
   // The empty-queue projection contract — see hasHandwrittenNightlyClaim.
   const nightlyClaim = hasHandwrittenNightlyClaim(current);
+  // ...and the Immediate-next length bound — see IMMEDIATE_NEXT_MAX_WORDS.
+  const overrun = findImmediateNextOverrun(current);
 
   if (check) {
     // Creep is reported FIRST but never masks staleness — both halves print,
     // so one fix-and-retry lap surfaces every problem.
     if (creep.length > 0) err(creepReport(creep));
+    if (overrun) err(overrunReport(overrun));
     if (nightlyClaim) {
       err(
         `\ndocs/HANDOFF.md's HAND-WRITTEN region claims a nightly state.\n` +
@@ -651,12 +811,13 @@ export function runGenerator({
       );
       return 1;
     }
-    if (creep.length > 0 || nightlyClaim) return 1;
+    if (creep.length > 0 || nightlyClaim || overrun) return 1;
     const roadmapCount = (rendered.match(/^- .+ · \[`/gm) ?? []).length;
     out(
       `✓ handoff-roadmap: generated HANDOFF state matches its sources ` +
         `(${nightlyItems.length} nightly pointer(s), ${roadmapCount} roadmap pointer(s)); ` +
-        `hand-written region carries no changelog creep and no nightly-queue claim\n`,
+        `hand-written region carries no changelog creep, no nightly-queue claim, and an ` +
+        `Immediate-next section within its ${IMMEDIATE_NEXT_MAX_WORDS}-word bound\n`,
     );
     return 0;
   }
@@ -670,6 +831,12 @@ export function runGenerator({
         `(it still says "nightly" when projected against an EMPTY queue).\n` +
         `refusing to write docs/HANDOFF.md until that line is trimmed — regenerating cannot fix it.\n`,
     );
+    return 1;
+  }
+
+  if (overrun) {
+    err(overrunReport(overrun));
+    err(`refusing to write docs/HANDOFF.md until the section above is cut to its bound.\n`);
     return 1;
   }
 

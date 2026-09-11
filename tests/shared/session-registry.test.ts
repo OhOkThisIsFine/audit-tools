@@ -17,6 +17,7 @@ import {
   pruneStaleSessionRecords,
   readSessionRecord,
   readSessionRegistry,
+  readSessionStartingHead,
   runPorcelainStatus,
   sanitizeSessionId,
   sessionsDir,
@@ -212,6 +213,80 @@ describe('readSessionRegistry: the one predicate every gate imports (Build 1 con
     // Even a REGISTERED resident is a child under the marker: a delegated lane is never recruited.
     writeSessionRecord(root, record('resident'));
     expect(readSessionRegistry(root, 'resident', { LLM_RELAY_DISPATCH_DEPTH: '1' }).isUnregisteredChild).toBe(true);
+  });
+});
+
+// The starting HEAD is what lets the closeout DERIVE a sprint's commit range
+// instead of asking the report's author to remember a sha. It is captured at
+// SessionStart, the one moment it is knowable — so its contract is that a
+// session record written by the HOOK carries a real 40-hex head, and that every
+// degenerate record (absent, corrupt, pre-field) reads as "no derivation
+// available" rather than as a wrong range.
+describe('readSessionStartingHead: the derivable starting point, fail-soft', () => {
+  it('reads the head the SessionStart leg recorded', () => {
+    const root = gitRepo();
+    const head = spawnSyncHidden('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
+      .stdout!.trim();
+    writeSessionRecord(root, { ...record('head-sid'), starting_head: head });
+    expect(readSessionStartingHead(root, 'head-sid')).toBe(head);
+  });
+
+  it('the HOOK actually records it — a record with no starting_head is a regression', () => {
+    // Driving the real hook is the only way to catch the field being dropped
+    // from the write while the reader's unit tests stay green: the reader would
+    // simply find nothing, fail soft, and the closeout would quietly go back to
+    // an author-supplied sha.
+    const root = gitRepo();
+    // The two child markers are STRIPPED: this lane runs as a dispatched child,
+    // and a child skips registration entirely — so leaving either set would make
+    // the case pass without the hook ever writing a record.
+    const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_PROJECT_DIR: root };
+    delete env.LLM_RELAY_DISPATCH_DEPTH;
+    delete env.AUDIT_TOOLS_CHILD_SESSION;
+    const r = spawnSyncHidden(process.execPath, [GUARDS], {
+      cwd: root,
+      encoding: 'utf8',
+      input: JSON.stringify({ session_id: 'hook-writes-head', source: 'startup' }),
+      env,
+      timeout: 60_000,
+      windowsHide: true,
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const head = spawnSyncHidden('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
+      .stdout!.trim();
+    expect(readSessionStartingHead(root, 'hook-writes-head')).toBe(head);
+    // …and the write is a plain addition: the fields the gates already read
+    // survive it.
+    const rec = readSessionRecord(root, 'hook-writes-head').record!;
+    expect(rec.baseline).toEqual([]);
+    expect(typeof rec.registered_at).toBe('string');
+  });
+
+  it('returns null for every degenerate record rather than a wrong range', () => {
+    const root = gitRepo();
+    expect(readSessionStartingHead(root, 'never-registered')).toBeNull();
+
+    // Pre-field records exist in the live store: a session that started before
+    // this landed carries no `starting_head`, and must read as "no derivation",
+    // not as an error or an empty string.
+    writeSessionRecord(root, record('legacy-sid'));
+    expect(readSessionStartingHead(root, 'legacy-sid')).toBeNull();
+
+    // A malformed value is no better than a missing one — a truncated sha would
+    // render `git log <garbage>..HEAD`, which is a refusal, not a range.
+    for (const bad of ['', 'not-a-sha', 'abc', 'HEAD']) {
+      const root2 = gitRepo();
+      writeSessionRecord(root2, { ...record('bad-sid'), starting_head: bad });
+      expect(readSessionStartingHead(root2, 'bad-sid'), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it('a corrupt record is null, never a throw — the closeout must still render', () => {
+    const root = gitRepo();
+    const dir = sessionsDir(root);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'corrupt-sid.json'), '{ not json', 'utf8');
+    expect(readSessionStartingHead(root, 'corrupt-sid')).toBeNull();
   });
 });
 

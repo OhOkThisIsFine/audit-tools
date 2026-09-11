@@ -86,7 +86,10 @@ export const CLOSEOUT_SECTIONS = [
     id: 'verification',
     heading: 'Verification',
     required: true,
-    prompt: 'what was run, what it returned, and the clean pushed commit it ran on',
+    prompt:
+      'what was run and what it returned. The commit range is DERIVED (SessionStart records the ' +
+      'starting HEAD; `--start` is the fallback), so do not restate it here — name the commands and ' +
+      'their verdicts, and let the range section below carry the commits',
   },
   {
     id: 'cleanup',

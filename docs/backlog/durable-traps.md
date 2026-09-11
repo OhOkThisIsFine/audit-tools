@@ -114,7 +114,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 
 - **Each `dispatch_review` `next-step` re-mints EVERY outstanding binding (measured 2026-08-21).** One partial ingest published a new run directory and changed `prompt_sha256` for 494/494 carried-over items and `result_path` for 494/494; only `work_item_id` stayed stable. A host holding bindings from before that call has 100% stale identity, so results written against them are refused. Two consequences: do not call `next-step` while work is in flight, and prefer a dispatch shape where workers return FINDINGS ONLY while the host binds identity and `file_coverage` mechanically from the CURRENT `host-task-bindings.json` — that shape is immune by construction and is what made a 498-item fan-out survivable. Evidence for the "Wave-friendly host dispatch" forward track.
 
-- **The llm-relay process dies with the dispatching session, and nothing restarts it (2026-08-21).** A dropped connection took the relay down; every offloaded child then failed with `API Error: 502 backend unreachable` until it was restarted by hand. There is no Startup entry for it (only `freellmapi.vbs` and `headroom.vbs`). Probe `127.0.0.1:8791/telemetry` before and during a long fan-out. (Update 2026-08-29: `Startup\llm-relay.vbs` has existed since 2026-08-27, so a logon restores the relay, and freellmapi plus its `.vbs` are retired. The probe advice stands — a mid-session relay death still needs a hand restart, via `wscript.exe` on that `.vbs`.)
+- **A mid-session llm-relay death needs a hand restart — its autostart only covers LOGON (2026-08-21, corrected 2026-09-10).** <!-- retired-infrastructure-exempt: freellmapi — the retirement of its predecessor is the correction this entry records --> A dropped connection took the relay down; every offloaded child then failed with `API Error: 502 backend unreachable` until it was restarted by hand. The machine-wide `CLAUDE.md` and `Startup\llm-relay.vbs` settle the lifetime half: the relay AUTOSTARTS AT LOGON (that `.vbs` has existed since 2026-08-27), so it does not die with the dispatching session and is back after any reboot — what is NOT covered is the window between a mid-session death and the next logon, which is the one a long fan-out can fall into. Probe `127.0.0.1:8791/telemetry` before and during a long fan-out, and restart through `wscript.exe` on that `.vbs`.
 
 - **A tracked generated doc that links to an UNTRACKED file blocks every docs-touching commit
   (2026-08-20).** The commit gate materializes the STAGED tree — untracked files vanish — before
@@ -209,7 +209,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 
 - **A long multi-line prompt passed INLINE to a peer-CLI lane arrives truncated, and the lane then
   offers to work from whatever file it can find (2026-08-23).** A nightly adversary dispatch sent
-  nine numbered claims through `claude.ps1 -p "<payload>"`; the lane received the framing sentence
+  nine numbered claims through a peer-CLI `-p "<payload>"`; the lane received the framing sentence
   and none of the claims, said so, and proposed verifying against an unrelated proposals file it had
   located by itself. It did not error. Re-sending the identical claims as a repo-relative PATH — the
   lane reads the file itself — worked first try. **Always write a long lane prompt to a file and send
@@ -369,7 +369,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 - **The free offload lane is a local router — it must be RUNNING, and callers should request the
   `auto` alias.** ⚠ **RETIRED (2026-08-29): this router is stopped and its autostart removed —
   the free lane is llm-relay on `127.0.0.1:8791` (`llm-relay dispatch`; liveness `GET /telemetry`
-  — `/health` is 403 BY DESIGN). `claude.ps1`/`start.ps1` would START it again; do not run them.
+  — `/health` is 403 BY DESIGN).
+  <!-- retired-infrastructure-exempt: freellmapi — the retirement statement IS this paragraph -->
   The record below stands.** Requests went to `127.0.0.1:3001`. ⚠ This lane has now outlived THREE
   transports — two earlier local brokers on other ports were each retired within weeks — so treat
   any endpoint, port or model name written down here as stale until probed. Three consequences:
@@ -647,13 +648,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `00d6fbfd`, `c687fed9`). No record at all (fresh clone, wiped
   `.claude/hooks/.state/`) = pre-feature behavior. Uncovered halves, stated outright:
   - A NESTED `claude -p` with this repo as cwd DOES fire SessionStart and self-registers as an
-    owner unless the dispatcher sets `AUDIT_TOOLS_CHILD_SESSION=1` on the child env, per
-    dispatch. Lanes: the freellmapi pool launcher (`claude.ps1`) pointed at this repo, the
-    nightly `/insights` invocation (docs/nightly-routine.md), any ad-hoc `claude -p` worker, and
-    the freellmapi MCP offload pool lane (`claude.exe -p`, repo cwd, server-side env; observed
-    2026-08-18: child self-registered, Stop closeout-challenge REPLACED the final answer;
-    `claude.ps1` fixed same day. FIXED 2026-08-19, config-only, no restart — detail on the
-    `mcp-pool` row of `~/.agent-config/offload-lane-data.mjs`).
+    owner — observed 2026-08-18: the child self-registered and Stop closeout-challenge REPLACED
+    the final answer. FIXED (2026-09-10): a relay lane child carries `LLM_RELAY_DISPATCH_DEPTH`
+    and `isDispatchedChildEnv` reads it, so this no longer rests on the dispatcher remembering
+    `AUDIT_TOOLS_CHILD_SESSION=1` per dispatch. Still uncovered: any OTHER nested `claude -p`
+    worker (the nightly `/insights` invocation, an ad-hoc lane) registers as an owner unless its
+    dispatcher sets that flag by hand.
   - Script-mediated commits: `node scripts/release-and-publish.mjs` and `npm version` run git in
     a child process the PreToolUse hook never sees.
   - The refusal is a footgun guard, not an adversary gate: the allow token and recovery CLI are
@@ -719,38 +719,19 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   which is the same shape the shell-trap guard already forces on suite commands for the exit-code
   reason.
 
-- **Right after the free router restarts, its `/v1` Anthropic surface can forward a router-local key
-  UPSTREAM — a transient 401 window, not a permanent property (2026-08-09).** When
-  `FREELLMAPI_ANTHROPIC_PASSTHROUGH=subagent-offload` is enabled the server delegates auth on the
-  whole `/v1` Anthropic surface. In the minutes after the restart that enabled it, `POST /v1/messages`
-  with the `freellmapi-…` key returned `invalid x-api-key` carrying an **Anthropic-shaped `request_id`
-  (`req_011C…`)** — the request had left the machine. **Re-probed ~15 min later the same call
-  succeeded**, so the documented credential table (unified key → everything free) does hold; the
-  failure was a startup window, and treating it as a permanent surface property would send every
-  later session to the wrong endpoint.
-  **How to tell it apart from a dead pool**, which is the mistake this entry exists to stop: an
-  Anthropic `request_id` means auth was delegated upstream (wait and re-probe); the router's own
-  refusal reads `Invalid API key` with **no** request id; and a pool problem says
-  `rate_limit_error` / `All models exhausted` with a reset time. `POST /v1/chat/completions` with
-  `Authorization: Bearer <key>` kept working throughout and is the safe fallback surface.
-  ⚠ Check `Get-Process` start time on the listener before diagnosing anything — the router restarts on
-  config change, so behaviour can flip under a running session with nothing in its own log output.
-
-- **A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s
-  (2026-08-09).** The cost is nested Claude Code **session startup**, not the lane, so a hung
-  `claude.ps1` is not evidence the pool is down — probe the router directly before concluding
-  anything about lane health. It compounds with the nested-session trap below: launched from the repo
-  cwd it is a full session in the SHARED checkout. For bounded recon, POST to the router and skip the
-  nested agent entirely. (2026-08-29: the launcher is retired; the lesson TRANSFERS to the llm-relay
-  pool lane — a rendered `claude -p` lane command still pays nested session startup, so probe
-  `127.0.0.1:8791/telemetry` directly before concluding anything about the pool.)
+- **A trivial peer-CLI `-p` prompt did not return in 5 min while the relay answered in 0.4s
+  (2026-08-09).** The cost is nested Claude Code **session startup**, not the lane, so a hung lane
+  command is not evidence the pool is down. It compounds with the nested-session trap above:
+  launched from the repo cwd it is a full session in the SHARED checkout. For bounded recon,
+  `POST 127.0.0.1:8791/telemetry` and skip the nested agent entirely — that probe distinguishes a
+  slow lane from a dead one without paying session startup.
 
 - **An external-delegation directive and the Workflow tool are in tension — Workflow has no external
   lane (2026-08-27).** Workflow's agents run on the session's own model; `opts.model` selects an
-  Anthropic tier, and no `agentType` reaches `agy`, `codex`, or the freellmapi pool. So "delegate to
+  Anthropic tier, and no `agentType` reaches `agy`, `codex`, or a relay lane. So "delegate to
   external agents" and "use a Workflow for every substantive task" cannot both be honoured by one
-  call: the external lanes are reachable only through the `mcp__freellmapi__offload_*` tools, driven
-  by hand. When the owner asks for external delegation, the offload tools are the instrument and
+  call: the external lanes are reachable only through the relay's `dispatch` tools, driven
+  by hand. When the owner asks for external delegation, the relay tools are the instrument and
   Workflow is not — reaching for Workflow spends Anthropic quota on exactly the bulk recon the
   directive was routing away.
 
@@ -770,7 +751,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   the signature alone is not death; check whether stdout arrives before cancelling. Still true:
   `offload_start`'s `model` parameter substitutes only into lane args that carry a `{model}` token,
   and this lane's args carry none, so the override lands nowhere and the argv shows `--model auto`
-  regardless. The lane-config fix stays in the freellmapi server, outside this repo.
+  regardless. The lane-config fix lives in the lane registry, outside this repo
+  (`~/.agent-config/offload-lane-data.mjs`).
 
 - **A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak
   model (2026-08-09).** The router's `auto` alias resolves to a reasoning model that spends its whole

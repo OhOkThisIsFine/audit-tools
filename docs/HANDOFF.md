@@ -24,15 +24,13 @@
 
 ## Immediate next
 
-**Cleanup-and-implementation lap (opened 2026-09-10).** P00 cleanup is on `main`: the maintenance
-routine's commits are fast-forwarded, and stray worktrees, merged branches and the forensics stash
-are gone. Seven implementation waves follow — each packet in its own worktree outside the repo root
-on a DeepSeek lane through llm-relay, landed by fast-forward, the full suite re-run on `main` after
-every wave, and a `/ship` release after the last wave. The plan, the per-packet briefs and the
-161-entry coverage check live in the lap's machine-local plan directory,
-`C:/Code-worktrees/audit-tools/_lap-plan/` <!-- doc-citation-exempt: machine-local plan directory, outside every repo -->.
-The waiting maintenance decisions are settled there by standing convictions and are ticked in
-the inbox when their packets land.
+**Land the seven implementation waves of the cleanup-and-implementation lap, then `/ship`.** Each
+packet lands by fast-forward from its own worktree and the full suite is re-run on `main` after
+every wave; the per-packet briefs and the entry-coverage check live in the lap's machine-local plan
+directory `C:/Code-worktrees/audit-tools/_lap-plan/` <!-- doc-citation-exempt: machine-local plan directory, outside every repo -->.
+
+**Live owner decision:** none. The waiting maintenance decisions are settled by standing
+convictions and are ticked in the inbox as their packets land.
 
 ## Deliberate state, not bugs
 

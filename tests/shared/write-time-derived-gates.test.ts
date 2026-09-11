@@ -83,6 +83,7 @@ describe('the write-time leg set is drawn from the guard registry', () => {
   it('a backlog edit draws the whole file-scoped backlog family, in registry order', () => {
     expect(writeTimeIds('docs/backlog/open-bugs.md')).toEqual([
       'check:doc-code-citations',
+      'check:retired-infrastructure',
       'check:backlog-budget',
       'check:backlog-friction-tags',
       'check:backlog-line-numbers',
@@ -100,6 +101,7 @@ describe('the write-time leg set is drawn from the guard registry', () => {
     ]) {
       expect(writeTimeIds(file), `${file} must draw the backlog family`).toEqual([
         'check:doc-code-citations',
+        'check:retired-infrastructure',
         'check:backlog-budget',
         'check:backlog-friction-tags',
         'check:backlog-line-numbers',

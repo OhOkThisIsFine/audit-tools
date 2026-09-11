@@ -28,6 +28,7 @@ import {
   BEGIN_MARKER,
   END_MARKER,
   HANDWRITTEN_CREEP_RULES,
+  IMMEDIATE_NEXT_MAX_WORDS,
   LIVE_STATUS_BEGIN_MARKER,
   LIVE_STATUS_END_MARKER,
   PIN_MARKER,
@@ -35,6 +36,8 @@ import {
   assertGeneratedTopology,
   collectRoadmap,
   findHandwrittenCreep,
+  findImmediateNextOverrun,
+  measureImmediateNext,
   parseBulletEntries,
   parseTrackEntries,
   readOpenNightlyItems,
@@ -566,6 +569,150 @@ describe('hand-written creep heuristics — refuse the observed changelog shapes
   });
 });
 
+// ── the Immediate-next length bound ──────────────────────────────────────────
+// The creep rules are a SHAPE catch, and their declared uncovered half is "any
+// novel phrasing" — which is exactly how the section regrew into a run
+// chronology after the creep rules landed: a lap paragraph naming packets,
+// waves, lane routing and a plan directory matched no shape. A semantic catch
+// is not available at this boundary, so the bound is a LENGTH budget on the
+// hand-written region: any wording is legal, the section simply may not grow.
+//
+// The budget counts WORDS, not lines, because a line count is not invariant
+// under REWRAP — the same paragraph narrowed to 90 columns is fewer lines, so a
+// line bound is satisfied by not wrapping and measures the author's editor
+// width. The reflow case below pins that.
+describe('Immediate next — the hand-written length bound', () => {
+  const section = (bodyLines: string[]) =>
+    ['# HANDOFF', '', '## Immediate next', '', ...bodyLines, '', '## Deliberate state', '', 'x'].join('\n');
+  const words = (count: number) => Array.from({ length: count }, () => 'w').join(' ');
+
+  it('measures only the hand-written section, stopping at the next `## ` heading', () => {
+    const measured = measureImmediateNext(
+      section(['one two', '', 'three']).replace('## Deliberate state', '## Deliberate state\n\nfour five'),
+    );
+    // `four five` sits AFTER the section, so it must not be counted.
+    expect(measured).toEqual({ count: 3 });
+  });
+
+  it('accepts a section exactly at the bound and refuses one word past it', () => {
+    expect(findImmediateNextOverrun(section([words(IMMEDIATE_NEXT_MAX_WORDS)]))).toBeNull();
+
+    const overrun = findImmediateNextOverrun(section([words(IMMEDIATE_NEXT_MAX_WORDS + 1)]));
+    expect(overrun).toMatchObject({
+      count: IMMEDIATE_NEXT_MAX_WORDS + 1,
+      bound: IMMEDIATE_NEXT_MAX_WORDS,
+    });
+  });
+
+  it('is REWRAP-INVARIANT — the same text, narrowed, does not slip under the bound', () => {
+    // The whole reason the budget is words. This is the recurrence verbatim
+    // (measured at 105 words): wide, then re-wrapped at 40 columns, which is
+    // roughly twice the line count. Both forms must be refused.
+    const recurrence = [
+      '**Cleanup-and-implementation lap (opened 2026-09-10).** P00 cleanup is on `main`: the maintenance',
+      "routine's commits are fast-forwarded, and stray worktrees, merged branches and the forensics stash",
+      'are gone. Seven implementation waves follow — each packet in its own worktree outside the repo root',
+      'on a DeepSeek lane through llm-relay, landed by fast-forward, the full suite re-run on `main` after',
+      'every wave, and a `/ship` release after the last wave. The plan, the per-packet briefs and the',
+      "161-entry coverage check live in the lap's machine-local plan directory,",
+      '`C:/Code-worktrees/audit-tools/_lap-plan/`. The waiting maintenance decisions are settled there by',
+      'standing convictions and are ticked in the inbox when their packets land.',
+    ];
+    const rewrap = (lines: string[], width: number) => {
+      const out: string[] = [];
+      let current = '';
+      for (const word of lines.join(' ').split(' ')) {
+        if (current !== '' && (current + ' ' + word).length > width) {
+          out.push(current);
+          current = word;
+        } else current = current === '' ? word : `${current} ${word}`;
+      }
+      if (current !== '') out.push(current);
+      return out;
+    };
+
+    const wide = measureImmediateNext(section(recurrence));
+    const narrowLines = rewrap(recurrence, 40);
+    const narrow = measureImmediateNext(section(narrowLines));
+    expect(narrowLines.length).toBeGreaterThan(recurrence.length); // the rewrap DID narrow
+    expect(narrow!.count).toBe(wide!.count);
+    expect(findImmediateNextOverrun(section(recurrence))).not.toBeNull();
+    expect(findImmediateNextOverrun(section(narrowLines))).not.toBeNull();
+  });
+
+  it('leaves every legitimate shape standing, with headroom', () => {
+    // The shapes the section is FOR, at their realistic size: a bare action, and
+    // the live HANDOFF's own action + "none" decision line.
+    const shapes = [
+      '**Resume the audit run at the synthesis step.**',
+      [
+        '**Land the seven implementation waves of the cleanup-and-implementation lap, then `/ship`.** Each',
+        'packet lands by fast-forward from its own worktree and the full suite is re-run on `main` after',
+        'every wave; the per-packet briefs live in the lap\'s machine-local plan directory.',
+        '',
+        '**Live owner decision:** none. The waiting maintenance decisions are settled by standing',
+        'convictions and ticked in the inbox as their packets land.',
+      ].join('\n'),
+    ];
+    for (const shape of shapes) {
+      const measured = measureImmediateNext(section([shape]));
+      expect(measured!.count, shape).toBeLessThan(IMMEDIATE_NEXT_MAX_WORDS);
+      expect(findImmediateNextOverrun(section([shape]))).toBeNull();
+    }
+  });
+
+  it('does not count HTML comments — the doc-citation-exempt marker is bookkeeping', () => {
+    const measured = measureImmediateNext(
+      section([
+        'Do the thing (see `C:/elsewhere/plan/`).',
+        '<!-- doc-citation-exempt: machine-local plan directory, outside every repo',
+        '     — the marker may wrap) -->',
+        '',
+        '**Live owner decision:** none.',
+      ]),
+    );
+    // "Do the thing (see `C:/elsewhere/plan/`)." is 5 tokens —
+    // "Do","the","thing","(see","`C:/elsewhere/plan/`)." — and
+    // "**Live owner decision:** none." is 4; the marker's 14 contribute none.
+    expect(measured).toEqual({ count: 9 });
+  });
+
+  it('ignores generated blocks — both markers fall under this heading', () => {
+    // In the real HANDOFF and in every `runGenerator` fixture the section runs
+    // past the markers, because the generated blocks carry no `##` of their own.
+    // Counting them would red the gate on the generator's own output.
+    const text = [
+      '# HANDOFF',
+      '## Immediate next',
+      'the single next action',
+      LIVE_STATUS_BEGIN_MARKER,
+      '- **3 nightly decisions are waiting.**',
+      '- `a` — something',
+      '- `b` — something else',
+      LIVE_STATUS_END_MARKER,
+      BEGIN_MARKER,
+      '### ▶ Next up — pinned in the backlog',
+      '*(nothing pinned)*',
+      END_MARKER,
+    ].join('\n');
+    expect(measureImmediateNext(text)).toEqual({ count: 4 });
+    expect(findImmediateNextOverrun(text)).toBeNull();
+  });
+
+  it("refuses a MISSING section — the heading is part of HANDOFF's contract", () => {
+    const overrun = findImmediateNextOverrun('# HANDOFF\n\n## Live state\n\nx\n');
+    expect(overrun?.reason).toMatch(/MISSING/);
+  });
+
+  it("the live tree's own Immediate next is within the bound", () => {
+    // Keeps HEAD demonstrably green under plain `npm test`, the same way the
+    // creep case does — a bound only the commit leg enforces is one an author
+    // meets after the work is already written.
+    const onDisk = readFileSync(join(REPO_ROOT, 'docs', 'HANDOFF.md'), 'utf8');
+    expect(findImmediateNextOverrun(onDisk)).toBeNull();
+  });
+});
+
 // ── the creep leg wired into --check and write mode, on a throwaway tree ─────
 // The generator's repo root is baked from its own location, so the CLI cannot
 // be spawned against a fixture tree; `runGenerator` is the same body main()
@@ -586,8 +733,11 @@ describe('runGenerator — the creep leg refuses at --check and at write time', 
       writeFileSync(join(root, 'docs', 'backlog', file), body, 'utf8');
     }
     writeFileSync(join(root, '.audit-tools', 'nightly', 'open-items.json'), '{"items":[]}', 'utf8');
+    // The `## Immediate next` heading is part of the hand-written contract the
+    // generator now checks, so a fixture without it would test the missing-
+    // section refusal in every case rather than the behaviour each one names.
     const handoff =
-      `# HANDOFF\n\n${handwritten}\n\n` +
+      `# HANDOFF\n\n## Immediate next\n\n${handwritten}\n\n` +
       `${renderNightlyQueue([])}\n\n${renderRoadmap(collectRoadmap(backlogSources()))}\n`;
     writeFileSync(join(root, 'docs', 'HANDOFF.md'), handoff, 'utf8');
     return { root, handoff };
@@ -610,11 +760,15 @@ describe('runGenerator — the creep leg refuses at --check and at write time', 
   };
 
   it('--check exits 1 on hand-written creep, naming file, line and rule', () => {
+    // Line 5: the hand-written body sits under the `## Immediate next` heading
+    // the fixture carries (heading on 3, blank on 4). The assertion names the
+    // real line on purpose — a creep report that pointed at the wrong one would
+    // send the fix to a line that is not the creep.
     const { root } = makeTree("- 2026-08-12: the day's decision queue was answered in full");
     try {
       const { code, err } = run(root, true);
       expect(code, err).toBe(1);
-      expect(err).toMatch(/docs\/HANDOFF\.md:3/);
+      expect(err).toMatch(/docs\/HANDOFF\.md:5/);
       expect(err).toMatch(/dated-bullet/);
       // Creep alone fails the check — the generated blocks in this fixture are
       // FRESH, so a staleness message here would be a false signal.
@@ -709,6 +863,76 @@ describe('runGenerator — the creep leg refuses at --check and at write time', 
       const { code, err } = run(root, true);
       expect(code, err).toBe(1);
       expect(err).toMatch(/HAND-WRITTEN region claims a nightly state/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // ── the Immediate-next length bound, in THIS leg ───────────────────────────
+  // Same reasoning as the nightly-claim contract above: the section regrew
+  // through a green pre-commit gate and green targeted suites because the bound
+  // lived only in the full suite. `check:handoff-roadmap` is the commit leg for
+  // HANDOFF, so the contract has to be enforced HERE.
+  // THE recurrence this bound exists to catch: the 2026-09-10 lap paragraph
+  // verbatim, recoverable from `git log` on the commit that cut it. Using an
+  // invented long string instead would test the comparison operator and nothing
+  // about the shape the bound is tuned against — the case below asserts the
+  // premise, so a fixture that drifted under the bound fails loudly rather than
+  // passing vacuously.
+  const overLong = () =>
+    '**Cleanup-and-implementation lap (opened 2026-09-10).** P00 cleanup is on `main`: the maintenance\n' +
+    "routine's commits are fast-forwarded, and stray worktrees, merged branches and the forensics stash\n" +
+    'are gone. Seven implementation waves follow — each packet in its own worktree outside the repo root\n' +
+    'on a DeepSeek lane through llm-relay, landed by fast-forward, the full suite re-run on `main` after\n' +
+    'every wave, and a `/ship` release after the last wave. The plan, the per-packet briefs and the\n' +
+    "161-entry coverage check live in the lap's machine-local plan directory,\n" +
+    '`C:/Code-worktrees/audit-tools/_lap-plan/` <!-- doc-citation-exempt: machine-local plan directory -->.\n' +
+    'The waiting maintenance decisions are settled there by standing convictions and are ticked in\n' +
+    'the inbox when their packets land.';
+
+  it('--check refuses an Immediate next over its bound, naming the section and the count', () => {
+    // The recurrence is genuinely over: a fixture that would pass the bound it
+    // claims to test proves nothing, so the premise is asserted first.
+    const overrun = findImmediateNextOverrun(`## Immediate next\n\n${overLong()}\n`);
+    expect(overrun?.count).toBeGreaterThan(IMMEDIATE_NEXT_MAX_WORDS);
+    const { root } = makeTree(overLong());
+    try {
+      const { code, err } = run(root, true);
+      expect(code, err).toBe(1);
+      expect(err).toMatch(/## Immediate next/);
+      expect(err).toMatch(/over its bound/);
+      // The generated blocks in this fixture are FRESH, so a staleness message
+      // here would be a false signal.
+      expect(err).not.toMatch(/STALE/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('--check refuses a tree whose Immediate next heading is gone', () => {
+    const { root } = makeTree('- Published state: v0.0.0 (fixture).');
+    try {
+      const onDisk = readFileSync(join(root, 'docs', 'HANDOFF.md'), 'utf8');
+      writeFileSync(
+        join(root, 'docs', 'HANDOFF.md'),
+        onDisk.replace(/^## Immediate next$/m, '## Not the section'),
+        'utf8',
+      );
+      const { code, err } = run(root, true);
+      expect(code, err).toBe(1);
+      expect(err).toMatch(/MISSING/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('write mode refuses too — regenerating cannot cut a hand-written section', () => {
+    const { root, handoff } = makeTree(overLong());
+    try {
+      const { code, err } = run(root, false);
+      expect(code, err).toBe(1);
+      expect(err).toMatch(/refusing to write/);
+      expect(readFileSync(join(root, 'docs', 'HANDOFF.md'), 'utf8')).toBe(handoff);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -229,7 +229,10 @@ describe('the queue index is enumerable in one bounded read', () => {
 // ledger, and the nightly run contract did not list regenerating it, so the
 // desync was caught only afterwards by the closeout gate.
 describe('writing the queue refreshes the generated HANDOFF state', () => {
-  /** A minimal HANDOFF with both generated marker pairs, plus the backlog sources. */
+  /**
+   * A minimal HANDOFF: both generated marker pairs, the `## Immediate next` section the
+   * write path requires, and the backlog sources.
+   */
   function seedHandoff(): string {
     mkdirSync(join(root, 'docs', 'backlog'), { recursive: true });
     writeFileSync(
@@ -254,6 +257,10 @@ describe('writing the queue refreshes the generated HANDOFF state', () => {
         '',
         '<!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->',
         '<!-- END GENERATED ROADMAP -->',
+        '',
+        '## Immediate next',
+        '',
+        'None.',
         '',
       ].join('\n'),
       'utf8',
