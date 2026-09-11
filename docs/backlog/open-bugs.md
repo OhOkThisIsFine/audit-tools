@@ -837,30 +837,24 @@
   [[write-only-data-looks-authoritative]] Trace:
   [`n-r13-and-lean-fast-path-trace-2026-08-25.md`](../reviews/n-r13-and-lean-fast-path-trace-2026-08-25.md).
 
-- **The two evidence-bearing terminal dispositions have no producer — `verified_already_fixed` and
-  `refuted` are unreachable in any real run (2026-08-27, medium, from
+- **The two evidence-bearing terminal dispositions have a producer but no input — `verified_already_fixed`
+  and `refuted` still never reach a real run (2026-08-27, restated 2026-09-11, medium, from
   [`reviews/wave2-dispositions-2026-08-20.md`](../reviews/wave2-dispositions-2026-08-20.md)).**
-  `resolveDisposition` (`src/remediate/state/itemStatus.ts`) reaches those two members ONLY through
-  `RemediationItemState.disposition_override`, and `buildRemediationOutcomesReport`
-  (`src/remediate/phases/close.ts`, called by `runClosePhase`) downgrades either to a `blocked`
-  outcome unless the item carries a complete file/line/mechanism triple (`isCompleteEvidence`,
-  INV-ISC-EVIDENCE-EMITTED). But the three item fields that gate reads —
-  `disposition_override`, `evidence`, `recorded_by_module` — have no production writer: every
-  literal that sets one lives under `tests/remediate`. Nor can a host supply one. The remediation
-  host-result and host-decision envelopes are closed key sets checked by `hasExactKeys`
-  (`src/shared/submission/hostHandoffCore.ts`) in `src/remediate/steps/dispatch/hostHandoff.ts`; a
-  decision's `outcome.status` admits only `resolved_no_change` / `blocked` /
-  `needs_clarification`, and its one evidence channel is a free-text string array on the first of
-  those — never the structured triple `EvidenceSchema` (`src/shared/types/remediationOutcome.ts`)
-  demands, and never either disposition. So both members, the `mechanismContradictsOutcome` check
-  that guards them, and three persisted state fields are unreachable in production; the only route
-  from a worker's determination to run state is hand-transcribing a markdown document no code
-  reads, which is what the cited record is. Same class as the steward-verification-metadata entry
-  (an instruction with no channel the ingest reads), one layer deeper: here the destination fields
-  exist and nothing writes them. **Property:** every disposition the outcomes writer can emit has a
-  producer that can reach it — a module records the triple at its own phase, or the host envelope
-  carries it and ingestion binds it — so no run's terminal accounting depends on a hand-written
-  document.
+  The producer exists: `verifyHeadEvidenceAgainstFindings`
+  (`src/remediate/phases/closeVerifyHeadEvidence.ts`), a close-gate verify leg in `runClosePhase`,
+  re-reads a `resolved_no_change` item's cited span at the commit the audit read (B) and at HEAD, and
+  records the complete triple and override that `buildRemediationOutcomesReport`
+  (`src/remediate/phases/close.ts`) requires. A read at HEAD alone supports neither verdict, so
+  without B the leg withholds every candidate — and nothing supplies B. The findings contract
+  (`audit-findings.json`, the `Finding` schema) records no audit-read commit; the one rev the audit
+  keeps (`artifact_metadata.git_history_baseline.head`) is an internal staleness cache that is never
+  promoted to the deliverable; the host-handoff `baseline_commit` is a remediation-side commit and is
+  refused by name. The seam is `HeadEvidenceOverrides.findingBase`, and production passes none. The
+  host envelopes still carry neither disposition (closed key sets checked by `hasExactKeys` in
+  `src/shared/submission/hostHandoffCore.ts`). **Property:** the findings contract records the commit
+  the audit read, and the remediator threads it into the leg as B, so both dispositions are reachable
+  on a real run. A new field on the findings contract is an owner decision: it can touch the
+  constitutional `spec/audit/artifact-contract.md`.
 
 - **The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](../reviews/closeout-generation-failure-2026-08-26.md)).** The render record under `.claude/hooks/.state/closeout-render/` binds to worktree CONTENT (`worktreeTree`), but its SESSION ownership rests on a timestamp: `.claude/hooks/closeout-challenge-gate.mjs` compares the record's `rendered_at` against the session registry's `registered_at`, so only a render that PREDATES this session is refused. A concurrent session's render — written after this one started — reads as this session's own, and the tree comparison catches it only when the content differs. The stated reason for the timestamp, that the renderer cannot read a session id, does not hold: `scripts/render-closeout.mjs` reads `CLAUDE_SESSION_ID`, which nothing in this harness sets, so the recorded `session_id` is always null; the environment does carry `CLAUDE_CODE_SESSION_ID`, and its value is exactly the filename of that session's record in the registry directory `readSessionRegistry` (`scripts/shared/sessionRegistry.mjs`) resolves from the hook payload. Second half of the same defect: the record is ONE repo-global file, so even a correctly-named id is last-writer-wins across concurrent sessions. **Property:** a closeout render record identifies the session that produced it, and the Stop gate accepts only a record this session wrote — never another session's render that happens to share the tree, and never on a name the environment does not supply. The false premise has a second copy, as data in the gate-scripts `uncovered` field of `scripts/guard-reach-data.mjs`; it moves in the same change. `tests/shared/closeout-render.test.ts` is the home for the pin.
 

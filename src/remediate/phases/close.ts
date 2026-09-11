@@ -36,6 +36,10 @@ import type {
 import { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "audit-tools/shared";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import { verifyAnalyzerLeads } from "./closeVerifyAnalyzerLeads.js";
+import {
+  verifyHeadEvidenceAgainstFindings,
+  type HeadEvidenceOutcome,
+} from "./closeVerifyHeadEvidence.js";
 import type { ClosingAction } from "audit-tools/shared";
 import type {
   CoverageLedgerEntry,
@@ -257,6 +261,59 @@ export async function readFinalGateReport(
   return carriesGateVerdict(parsed.data.outcome)
     ? parsed.data
     : { ...parsed.data, passed: null, commands_run: 0 };
+}
+
+/**
+ * Surface the read-at-HEAD evidence leg's verdicts. Recorded, never silent:
+ * an item the leg DECLINED to determine is exactly the case a reader must be
+ * able to tell apart from one it determined, so the reason is stated even
+ * though the item's outcome is unchanged.
+ *
+ * The WITHHELD reason is the whole point of this function on a real run. The
+ * leg's rule needs the two reads (the audit's commit `B` and HEAD), and no
+ * audit artifact records `B` — so every candidate is withheld with that reason,
+ * and an operator reading only stderr must not be left guessing whether the leg
+ * ran and found nothing or never ran at all.
+ */
+function reportHeadEvidence(
+  outcome: HeadEvidenceOutcome,
+  runLogger: RunLogger | undefined,
+): void {
+  if (!outcome.ran) {
+    if (outcome.withheld.length > 0) {
+      console.warn(
+        `Read-at-HEAD evidence leg did not run: ${
+          outcome.head === null ? "no resolvable HEAD" : "no candidate items"
+        }.`,
+      );
+    }
+    return;
+  }
+  const determined = Object.values(outcome.recorded);
+  for (const record of determined) {
+    if (!record.determined) continue;
+    console.log(
+      `[head-evidence] ${record.finding_id}: ${record.disposition} (${record.evidence.file}:${record.evidence.line || "?"})`,
+    );
+  }
+  for (const record of outcome.withheld) {
+    console.warn(
+      `[head-evidence] ${record.finding_id}: no determination recorded — ${
+        record.determined ? "" : record.reason
+      }`,
+    );
+  }
+  if (determined.length > 0 || outcome.withheld.length > 0) {
+    runLogger?.event({
+      phase: "close",
+      kind: "state",
+      obligation: "closing",
+      note:
+        `Read-at-HEAD evidence leg: recorded ${determined.length} terminal disposition(s) ` +
+        `against audit-read commit ${outcome.base ?? "(none recorded)"} and HEAD ${outcome.head}` +
+        `${outcome.withheld.length > 0 ? `, withheld ${outcome.withheld.length}` : ""}.`,
+    });
+  }
 }
 
 export function buildRemediationOutcomesReport(
@@ -2104,6 +2161,31 @@ export async function runClosePhase(
       return { ...state, status: "triage" };
     }
   }
+
+  // 2c. CDC-25/CDC-26 — the read-at-HEAD evidence leg: the PRODUCER for the two
+  // evidence-bearing terminal dispositions (`verified_already_fixed` /
+  // `refuted`), which were otherwise reachable only through a hand-transcribed
+  // document no code reads. For each item the host resolved `resolved_no_change`
+  // it re-reads the finding's own cited anchor at the AUDIT's commit and at HEAD
+  // and records the file/line/mechanism triple plus its module stamp, so the
+  // writer can emit a real disposition rather than a generic one.
+  //
+  // NO AUDIT-READ COMMIT IS RECORDED, so on a real run this leg withholds every
+  // candidate and records nothing — production passes no `findingBase`, by
+  // design, rather than substituting a remediation-side commit (a span absent at
+  // the remediation's own baseline can be a fix made since the audit, not a
+  // misquote). The leg is wired and the rule is shipped; supplying B is all a
+  // later packet has to do. An item whose finding carries too little evidence to
+  // decide keeps the disposition it already had — the leg withholds and says
+  // why, it never guesses. No qualifying item is a no-op.
+  const headEvidence = await verifyHeadEvidenceAgainstFindings({
+    state,
+    root: options.root,
+    ...(options.headEvidenceOverrides
+      ? { overrides: options.headEvidenceOverrides }
+      : {}),
+  });
+  reportHeadEvidence(headEvidence, runLogger);
 
   // 3. Run end-to-end tests on the fully merged post-remediation state. Mirrors
   // the combined-test-failure branch's own guard above: a failure transitions
