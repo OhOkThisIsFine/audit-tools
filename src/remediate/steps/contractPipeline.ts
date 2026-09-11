@@ -822,8 +822,8 @@ export interface SeedSourceDigestMismatch {
  * WHY THE ACCEPT IS AN OPERATOR FILE AND NOT A DERIVED VERDICT. The tempting
  * mechanical predicate is "do the drifted file's cited locations still exist"
  * (line N still present). It is unsound in the direction that matters: a finding
- * asserting "`parseConfig` returns null on malformed input" cites line 42, and
- * rewriting that line to return a THROWS leaves line 42 present, the digest
+ * asserting "the config parser returns null on malformed input" cites line 42,
+ * and rewriting that line to throw leaves line 42 present, the digest
  * moved, and the finding FALSE — the predicate accepts and the run designs
  * against a claim the code no longer makes. That inference cannot be made from
  * line counts by a language-neutral tool, and a predicate that is right about
@@ -3984,6 +3984,7 @@ async function buildReReviewSection(
 
 // ── Obligation-kind → lens/severity mappings ──────────────────────────────────
 
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * The obligation-kind vocabulary, in priority order (higher index = higher
  * priority; `invariant` is highest).

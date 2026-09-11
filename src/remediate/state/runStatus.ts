@@ -8,7 +8,7 @@
  *
  * Why this module exists. The vocabulary used to exist in three unlinked
  * copies: the inline union on `RemediationState.status`, the module-private
- * `KNOWN_STATUSES` Set the load gate rejects unknown states with, and a third
+ * accepted-status Set the load gate rejects unknown states with, and a third
  * literal written inside the N-R13 test. Nothing joined them, so the load gate
  * and the type could drift apart with no red build — and the N-R13 assertion
  * ("`documenting` is not a status") was a tautology over a literal the test

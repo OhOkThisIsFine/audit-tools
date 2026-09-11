@@ -89,22 +89,33 @@ function git(args, options = {}) {
  * on retired docs and reject citations to files being added in the same change.
  * The union below models the tree that `git add -A` would stage without
  * mutating the index.
+ *
+ * TWO SETS, because the two uses must not move together. `examined` is what the
+ * tree COMMITS to — tracked files plus the index, never an untracked scratch
+ * file — and it is what the rules that decide WHICH citations are checked read
+ * (the bare-name extension-skip set). `universe` adds untracked non-ignored
+ * files, which may only RESOLVE a citation as a target: a file being authored in
+ * this change must resolve, but a stray `notes.log` at the root must not widen
+ * the extension census and flip an unrelated doc's citation from skipped to
+ * failing (the 2026-08-19 release-gate refusal, where the same docs had passed
+ * the commit gate minutes earlier).
  */
 function trackedFiles() {
   const deleted = new Set(
     git(["ls-files", "-z", "--deleted"]).split("\0").filter(Boolean),
   );
-  const present = new Set(
+  const examined = new Set(
     git(["ls-files", "-z"])
     .split("\0")
     .filter((path) => path && !deleted.has(path)),
   );
+  const universe = new Set(examined);
   for (const path of git(["ls-files", "-z", "--others", "--exclude-standard"])
     .split("\0")
     .filter(Boolean)) {
-    present.add(path);
+    universe.add(path);
   }
-  return [...present];
+  return { examined: [...examined], universe: [...universe] };
 }
 
 /**
@@ -214,8 +225,67 @@ function trackedDirs(tracked) {
   return dirs;
 }
 
+/**
+ * Every identifier the tree declares or names in a string — the resolution set
+ * for the `spec/**` symbol rule. Deliberately WIDER than "declared": a symbol
+ * cited from a spec is one the code OWNS, and the spellings that legitimately
+ * count are a binding, a type body's field, a member access, a quoted string
+ * (an env-var name is a value, not an identifier), and a module's own basename
+ * (`nextStepHelpers` is how prose cites a file). Anything narrower reds real
+ * citations; anything wider — a template literal's contents, a bare `index` —
+ * swallows drift.
+ *
+ * Reads the same file set the FILE-RESOLUTION rule reads, so a symbol in a
+ * source file the tree does not carry cannot green a spec citation.
+ */
+function declaredIdentifierUniverse(paths) {
+  const names = new Set();
+  const SOURCE = /\.(ts|tsx|mjs|cjs|js|jsx)$/;
+  const DECLARATION =
+    /\b(?:function|class|interface|type|const|let|var|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
+  const FIELD = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:/gm;
+  const MEMBER = /\.([A-Za-z_$][A-Za-z0-9_$]*)/g;
+  const QUOTED = /["']([A-Za-z_$][A-Za-z0-9_$]*)["']/g;
+  for (const path of paths) {
+    if (!SOURCE.test(path)) continue;
+    let source;
+    try {
+      source = readFileSync(join(root, path), "utf8");
+    } catch {
+      continue; // a tracked file absent from this worktree contributes nothing
+    }
+    for (const re of [DECLARATION, FIELD, MEMBER, QUOTED]) {
+      for (const match of source.matchAll(re)) names.add(match[1]);
+    }
+    const base = path.slice(path.lastIndexOf("/") + 1).replace(SOURCE, "");
+    if (base !== "index") names.add(base);
+  }
+  return names;
+}
+
+/**
+ * Symbol-shaped backticked tokens: a compound CONSTANT or a lowerCamelCase name.
+ * BOTH anchored, and the camel arm anchored at BOTH ends — `/…[A-Z]/` alone
+ * matches a PREFIX, so `writeContractArtifact(...)` and `deriveNodeFiles(node)`
+ * were reported as dangling symbols when they are call-shaped example prose.
+ */
+function isSymbolShaped(token) {
+  return (
+    /^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(token) ||
+    /^[a-z_$][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*$/.test(token)
+  );
+}
+
+const SYMBOL_EXEMPT = /<!--\s*symbol-citation-exempt:.*?-->/;
+
 function main() {
-  const tracked = trackedFiles();
+  // `universe` is the RESOLUTION set (tracked + index + untracked non-ignored):
+  // a file being authored in this change must resolve as a target. `examined`
+  // is what the tree COMMITS to, and it is what decides WHICH citations are
+  // looked at — the two must not move together, or an untracked scratch doc
+  // changes the verdict of a tree that was green a moment earlier.
+  const { examined, universe } = trackedFiles();
+  const tracked = universe;
   const trackedSet = new Set(tracked);
   const dirSet = trackedDirs(tracked);
   const topDirs = new Set(
@@ -232,14 +302,23 @@ function main() {
     if (bucket) bucket.push(path);
     else byBasename.set(name, [path]);
   }
+  // The EXTENSION-SKIP census reads `examined`, never the resolution universe.
+  // This is the rule that decides which bare-name citations are looked at, so an
+  // untracked scratch file must not be able to change it (see `trackedFiles`).
   const trackedExtensions = new Set();
-  for (const path of tracked) {
+  for (const path of examined) {
     const ext = HAS_EXTENSION.exec(path);
     if (ext) trackedExtensions.add(ext[1].toLowerCase());
   }
   const runtimeNames = new Set(RUNTIME_ARTIFACT_NAMES);
   const excluded = excludedMatchers();
-  const markdown = tracked.filter(
+  // WHICH DOCS ARE READ is a decision about the citations the gate examines, so
+  // it reads `examined` — an untracked doc may be CITED (it joins `trackedSet`
+  // above as a resolution target) but must never add citations of its own to
+  // the corpus. The first version of this gate built both from `universe`,
+  // which made an untracked `spec/zz-probe.md` able to red a green tree with a
+  // citation path resolution would never have visited.
+  const markdown = examined.filter(
     (p) => p.endsWith(".md") && !excluded.some((re) => re.test(p)),
   );
 
@@ -260,10 +339,29 @@ function main() {
   //
   // The runtime state dirs stay out because they are generated: the next run
   // rewrites them, so a refusal there would be unfixable by editing.
-  const anchorScope = tracked.filter(
+  const anchorScope = examined.filter(
     (p) => p.endsWith(".md") && !RUNTIME_STATE_PREFIXES.some((s) => p.startsWith(s)),
   );
   const resolutionScope = new Set(markdown);
+
+  // A THIRD RULE, on `spec/**` ONLY: a backticked SYMBOL citation that names
+  // nothing in the tree.
+  //
+  // The wiring is what rots. `spec/remediate/remediation-goals.md` named
+  // `dependencyAwaitingClarification` as the held-pending mechanism long after
+  // the frontier unification deleted it, and `check:doc-code-citations` stayed
+  // green — the gate resolves PATHS and has always ignored a bare identifier.
+  // A constitutional doc cannot silently drift from the code it measures while
+  // an owner decision is outstanding, so the dangling symbol is surfaced.
+  //
+  // A WARNING, not a red, and the reason is the message: `spec/**` includes the
+  // escalate-only constitutional subset, where a mechanical edit is exactly what
+  // the commit gate refuses. Reddening would block a commit the constitution
+  // says only an owner may resolve — the gate would be enforcing at a boundary it
+  // does not own (PH-05). So it prints, names the file and line, and exits 0;
+  // the mechanical part is that it can no longer be INVISIBLE.
+  const declaredSymbols = declaredIdentifierUniverse(tracked);
+  const danglingSymbols = [];
 
   // Pass 1 — collect classified citation records, so gitignore scoping can run
   // as ONE batched git call over every candidate instead of a spawn per token.
@@ -273,6 +371,7 @@ function main() {
   for (const relPath of anchorScope) {
     const resolves = resolutionScope.has(relPath);
     const lines = readFileSync(join(root, relPath), "utf8").split("\n");
+    const isSpec = relPath.startsWith("spec/");
     lines.forEach((line, i) => {
       for (const match of line.matchAll(/`([^`\n]+)`/g)) {
         const token = match[1];
@@ -284,6 +383,19 @@ function main() {
         const exempt =
           EXEMPT_MARKER.test(line) || (i > 0 && EXEMPT_MARKER.test(lines[i - 1]));
         const base = { relPath, line: i + 1, token, exempt };
+
+        // The SYMBOL rule, `spec/**` only. A token that is a repo path (it has
+        // a slash or an extension) is the other rule's business; this one is
+        // about the bare identifier a spec names as a mechanism.
+        if (isSpec && !path.includes("/") && !HAS_EXTENSION.test(path) && isSymbolShaped(path)) {
+          const symbolExempt =
+            exempt ||
+            SYMBOL_EXEMPT.test(line) ||
+            (i > 0 && SYMBOL_EXEMPT.test(lines[i - 1]));
+          if (!symbolExempt && !declaredSymbols.has(path)) {
+            danglingSymbols.push({ relPath, line: i + 1, token: path });
+          }
+        }
 
         // The line-anchor rule rides the same scan: this loop already has the
         // token, the line and the exemption, so a second pass over the corpus
@@ -404,6 +516,27 @@ function main() {
         "put `<!-- doc-citation-exempt: <reason> -->` on the line above it, saying what is at that line.",
     );
     process.exit(1);
+  }
+
+  // The symbol rule PRINTS but does not fail — see the comment at its collection
+  // site. A spec citing a symbol the tree does not carry is surfaced on every run
+  // rather than discovered by whoever next reads the doc, which is the property
+  // the entry asked for; the escalation stays the owner's, because `spec/**`
+  // includes the constitutional subset a mechanical edit may not touch.
+  if (danglingSymbols.length > 0) {
+    console.warn(
+      `⚠ check-doc-code-citations: ${danglingSymbols.length} backticked symbol citation(s) in spec/ ` +
+        `name nothing the tree declares:`,
+    );
+    for (const d of danglingSymbols) {
+      console.warn(`  ${d.relPath}:${d.line}  \`${d.token}\``);
+    }
+    console.warn(
+      "The code a spec measures has moved on. Re-point the citation at the symbol that replaced " +
+        "it, or — for a design record deliberately naming a retired mechanism — put " +
+        "`<!-- symbol-citation-exempt: <what it was> -->` on the line above it. Not a failure: a " +
+        "constitutional spec is escalate-only, so only an owner may resolve it.",
+    );
   }
 
   console.log(

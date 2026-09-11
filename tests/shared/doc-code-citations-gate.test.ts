@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 // INV-WH: never a raw child_process entry point in a test file — a windowless
 // parent spawning a console child flashes a window on win32.
-import { execFileSyncHidden } from "../helpers/spawn.mjs";
+import { execFileSyncHidden, spawnSyncHidden } from "../helpers/spawn.mjs";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -38,7 +38,13 @@ function write(dir: string, relPath: string, body: string): void {
   writeFileSync(abs, body, "utf8");
 }
 
-/** Returns { code, out } — never throws, so a failing gate is data not an exception. */
+/**
+ * Returns { code, out } — never throws, so a failing gate is data not an
+ * exception. `out` is stdout AND stderr: the gate writes its advisory
+ * (the spec-symbol warning) to stderr while exiting 0, and `execFileSync`
+ * discards stderr on SUCCESS — capturing only the throw path would make a
+ * warning untestable, i.e. exactly the invisibility the warning exists to end.
+ */
 function runChecker(dir: string): { code: number; out: string } {
   try {
     const out = execFileSyncHidden("node", [CHECKER, dir], {
@@ -52,6 +58,19 @@ function runChecker(dir: string): { code: number; out: string } {
     const e = err as { status?: number | null; stdout?: string; stderr?: string };
     return { code: e.status ?? 1, out: `${e.stdout ?? ""}${e.stderr ?? ""}` };
   }
+}
+
+/** The same run, with stderr merged on BOTH paths — for advisory (exit 0) output. */
+function runCheckerWithStderr(dir: string): { code: number; out: string } {
+  const result = spawnSyncHidden(
+    process.execPath,
+    [CHECKER, dir],
+    { cwd: dir, encoding: "utf8", windowsHide: true },
+  );
+  return {
+    code: result.status ?? 1,
+    out: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+  };
 }
 
 describe("check-doc-code-citations — backticked repo paths must name tracked files", () => {
@@ -391,6 +410,154 @@ describe("check-doc-code-citations — backticked repo paths must name tracked f
     expect(red.out).toMatch(/src\/gone\.ts/);
 
     rmSync(join(repo.dir, "docs", "nightly-inbox.md"));
+    repo.git("add", "-A");
+  });
+
+  // ── the spec symbol leg (a WARNING, never a red) ───────────────────────────
+  //
+  // A `spec/**` backticked SYMBOL that names nothing in the tree is surfaced on
+  // every run but does not fail: `spec/**` includes the escalate-only
+  // constitutional subset, so a mechanical edit is exactly what the commit gate
+  // refuses and reddening would enforce at a boundary this gate does not own
+  // (PH-05). The property asked for is that the drift can no longer be INVISIBLE.
+
+  it("WARNS (exit 0) on a spec symbol that names nothing the tree declares", () => {
+    write(repo.dir, "src/thing.ts", "export const x = 1;\n");
+    write(
+      repo.dir,
+      "spec/design.md",
+      "A separate `leanFastPath` was the wrong shape, so it was rejected.\n",
+    );
+    repo.git("add", "-A");
+    const { code, out } = runCheckerWithStderr(repo.dir);
+    expect(code, `expected exit 0 (a warning), got:\n${out}`).toBe(0);
+    expect(out).toMatch(/name nothing the tree declares/);
+    expect(out).toMatch(/leanFastPath/);
+    // The warning teaches the remedy, not merely the offence.
+    expect(out).toMatch(/symbol-citation-exempt/);
+    rmSync(join(repo.dir, "spec", "design.md"));
+    repo.git("add", "-A");
+  });
+
+  it("stays silent for a spec symbol the tree declares, and outside spec/", () => {
+    write(repo.dir, "src/thing.ts", "export function renderConceptualReviewPrompt() {}\n");
+    write(repo.dir, "spec/declared.md", "See `renderConceptualReviewPrompt` for the shape.\n");
+    // The SAME dangling token outside spec/ is not this rule's business.
+    write(repo.dir, "docs/elsewhere.md", "A `leanFastPath` was rejected there too.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+    expect(out).not.toMatch(/name nothing the tree declares/);
+    rmSync(join(repo.dir, "spec", "declared.md"));
+    rmSync(join(repo.dir, "docs", "elsewhere.md"));
+    repo.git("add", "-A");
+  });
+
+  it("skips call-shaped example prose", () => {
+    // The camel arm MUST be anchored at both ends. Prefix-anchored, it matched
+    // `writeContractArtifact(...)` and `deriveNodeFiles(node)` — genuinely
+    // example prose in this very spec — and reported them as dangling symbols.
+    // ONE file, ONE case: the exempted citation below is a separate case so a
+    // reader of a failure knows which rule moved.
+    write(repo.dir, "src/thing.ts", "export const x = 1;\n");
+    write(
+      repo.dir,
+      "spec/shapes.md",
+      "Compute the artifact with `writeContractArtifact(...)` then `deriveNodeFiles(node)`.\n",
+    );
+    repo.git("add", "-A");
+    const { code, out } = runCheckerWithStderr(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+    expect(out).not.toMatch(/name nothing the tree declares/);
+    rmSync(join(repo.dir, "spec", "shapes.md"));
+    repo.git("add", "-A");
+  });
+
+  it("an exempted spec symbol is silent", () => {
+    write(repo.dir, "src/thing.ts", "export const x = 1;\n");
+    write(
+      repo.dir,
+      "spec/exempt.md",
+      "A separate `leanFastPath` <!-- symbol-citation-exempt: a rejected design --> was wrong.\n",
+    );
+    repo.git("add", "-A");
+    const { code, out } = runCheckerWithStderr(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+    expect(out).not.toMatch(/name nothing the tree declares/);
+    rmSync(join(repo.dir, "spec", "exempt.md"));
+    repo.git("add", "-A");
+  });
+
+  // ── untracked files: a target, never a rule input ──────────────────────────
+
+  it("an UNTRACKED file does not widen which citations are examined", () => {
+    // The 2026-08-19 bite: the bare-name EXTENSION-SKIP census was built from the
+    // same universe that resolves targets, so an untracked scratch `notes.log` at
+    // the root added `.log` to the census and flipped an unrelated durable-traps
+    // line from skipped to failing — the release gate refused a tree whose
+    // identical docs had passed the commit gate minutes earlier.
+    write(repo.dir, "docs/scratch-census.md", "Prose about `server.log` and `vi.spyOn`.\n");
+    write(repo.dir, "notes.log", "untracked scratch\n");
+    repo.git("add", "docs/scratch-census.md");
+
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+    expect(out).toMatch(/every one resolves/);
+
+    rmSync(join(repo.dir, "docs", "scratch-census.md"));
+    rmSync(join(repo.dir, "notes.log"));
+    repo.git("add", "-A");
+  });
+
+  it("the SAME token is RED once a TRACKED file uses the extension — the census is live, not inert", () => {
+    // Without this half the case above would pass for a checker that had simply
+    // stopped resolving bare names at all: what makes the `notes.log` exclusion
+    // meaningful is that a tracked `.log` DOES red the same token.
+    const other = makeRepo();
+    try {
+      write(other.dir, "logs/tracked.log", "a tracked log\n");
+      write(other.dir, "docs/scratch-census.md", "Prose about `server.log`.\n");
+      other.git("add", "-A");
+
+      const { code, out } = runChecker(other.dir);
+      expect(code, `expected red, got:\n${out}`).toBe(1);
+      expect(out).toMatch(/server\.log/);
+      expect(out).toMatch(/matches no tracked file/);
+    } finally {
+      rmSync(other.dir, { recursive: true, force: true });
+    }
+  });
+
+  it("an UNTRACKED doc is never EXAMINED — only its own citations are out of the corpus", () => {
+    // The acceptance clause, second half: untracked files may RESOLVE but never
+    // change which citations are examined. Every other case in this file `git
+    // add`s the doc it writes, so the corpus and the resolution universe moved
+    // together and the first version — which built `markdown` AND `anchorScope`
+    // from `universe` — passed all of them while an untracked doc could red a
+    // tree whose identical tracked content was green.
+    //
+    // The probe is left UNTRACKED and carries both citation classes the corpus
+    // decides: a path that resolves nowhere (path resolution runs over the
+    // corpus) and a source LINE ANCHOR (the wider rule over `anchorScope`).
+    write(repo.dir, "spec/zz-untracked-probe.md", "See `src/does-not-exist.ts` and `src/thing.ts:42`.\n");
+
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+    expect(out).toMatch(/every one resolves/);
+
+    rmSync(join(repo.dir, "spec", "zz-untracked-probe.md"));
+  });
+
+  it("an untracked file still RESOLVES a citation as a target", () => {
+    write(repo.dir, "src/being-authored.ts", "export const wip = true;\n");
+    write(repo.dir, "docs/wip.md", "See `src/being-authored.ts`.\n");
+    repo.git("add", "docs/wip.md");
+
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+
+    rmSync(join(repo.dir, "src", "being-authored.ts"));
+    rmSync(join(repo.dir, "docs", "wip.md"));
     repo.git("add", "-A");
   });
 

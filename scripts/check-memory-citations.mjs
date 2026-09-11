@@ -132,6 +132,139 @@ for (const note of readdirSync(memoryDir).filter((f) => f.endsWith(".md"))) {
   }
 }
 
+// THE THIRD DIRECTION: a memory note citing a repo PATH.
+//
+// The store lives OUTSIDE the tree, so no doc gate reaches it and this script
+// read notes only for wikilinks — the direction was scanned by nothing. A note
+// whose point is that a subsystem was DELETED legitimately cites paths that no
+// longer resolve, and that archaeology is the majority of what a scan finds; so
+// the rule is an explicit exemption marker (the same idiom the doc gates use),
+// NEVER a bare existence check, and never inferred from words like "deleted".
+//
+// Confidence is total for a SLASHED path (a `src/foo/bar.ts` token names one
+// file and nothing else). Globs, `<placeholders>`, `*`, line suffixes and
+// non-repo tokens are out of scope by rule — a pattern is not a citation, and a
+// `docs/backlog/` directory citation is resolved against the tracked dir set.
+// The marker exempts every path citation on its line, or on the line above.
+const MEMORY_PATH_EXEMPT = /<!--\s*memory-path-exempt:.*?-->/;
+
+function stripLineSuffix(token) {
+  return token.replace(/:[~\d][\d,~–-]*$/, "");
+}
+
+// The repo the notes' paths resolve against is the one the gate is run FROM —
+// exactly the repo the doc census above reads (`git ls-files "*.md"` with no
+// `cwd`). Resolving from `import.meta.url` instead would make the gate read this
+// repo while a caller pointed at another, and would make the fixture-repo tests
+// resolve against the wrong tree entirely.
+function repoFiles() {
+  return execFileSync("git", ["ls-files"], { encoding: "utf8", windowsHide: true })
+    .split(/\r?\n/)
+    .filter(Boolean);
+}
+
+/** Top-level dirs that actually hold code — a token under anything else is prose. */
+const repoTopDirs = new Set(
+  repoFiles().flatMap((p) => (p.includes("/") ? [p.split("/", 1)[0]] : [])),
+);
+const trackedSet = new Set(repoFiles());
+
+/**
+ * Gitignored paths are out of scope by rule, the same way the doc gate scopes
+ * them: a note naming `.claude/lap-start.json` or an untracked run artifact
+ * names a file the run really does write, and there is no tracked file for it to
+ * resolve against. One batched `git check-ignore --stdin`, rules-based, so a
+ * fresh clone classifies identically.
+ */
+function ignoredPaths(candidates) {
+  const unique = [...new Set(candidates)].filter(Boolean);
+  if (unique.length === 0) return new Set();
+  let out = "";
+  try {
+    out = execFileSync("git", ["check-ignore", "--stdin", "-z"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      windowsHide: true,
+      input: unique.join("\0") + "\0",
+    });
+  } catch (err) {
+    // `git check-ignore` exits 1 when nothing matched — not an error. The cast
+    // mirrors the sibling doc gate, where `checkJs` narrows a caught value to
+    // `{}` and the status is not reachable without it.
+    if (err && /** @type {any} */ (err).status === 1) return new Set();
+    throw err;
+  }
+  return new Set(out.split("\0").filter(Boolean));
+}
+const trackedDirSet = new Set();
+for (const p of trackedSet) {
+  const parts = p.split("/");
+  for (let i = 1; i < parts.length; i += 1) trackedDirSet.add(parts.slice(0, i).join("/"));
+}
+
+/** A token that could name a repo path — never a glob, template, or non-repo form. */
+function pathCandidate(token) {
+  const path = stripLineSuffix(token).replace(/^\.\//, "");
+  if (!path.includes("/")) return null;
+  if (/[*?{<>…]/.test(path)) return null;
+  if (path.startsWith("~") || /^[A-Za-z]:[\\/]/.test(path) || path.includes("://")) return null;
+  if (path.includes("\\")) return null;
+  if (path.split("/").some((s) => s === "." || s === ".." || s === "" )) return null;
+  if (RUNTIME_STATE_PREFIXES.some((p) => path.startsWith(p))) return null;
+  if (!repoTopDirs.has(path.split("/", 1)[0])) return null;
+  return path;
+}
+
+const RUNTIME_STATE_PREFIXES = [".audit-tools/", ".audit-tools-visibility/"];
+
+// Pass 1 — collect every path candidate, so the gitignore scoping runs as ONE
+// batched git call over the whole store instead of a spawn per token.
+const candidates = [];
+for (const note of readdirSync(memoryDir).filter((f) => f.endsWith(".md"))) {
+  const file = join(memoryDir, note);
+  const noteLines = readFileSync(file, "utf8").split(/\r?\n/);
+  noteLines.forEach((line, i) => {
+    if (MEMORY_PATH_EXEMPT.test(line) || (i > 0 && MEMORY_PATH_EXEMPT.test(noteLines[i - 1]))) return;
+    for (const match of line.matchAll(/`([^`\n]+)`/g)) {
+      const path = pathCandidate(match[1]);
+      if (path) candidates.push({ note, line: i + 1, path });
+    }
+  });
+}
+
+// Pass 2 — resolve. A gitignored candidate is out of scope, not checked.
+const ignored = ignoredPaths(candidates.map((c) => c.path));
+const danglingPaths = [];
+for (const { note, line, path } of candidates) {
+  if (ignored.has(path)) continue;
+  const bare = path.replace(/\/+$/, "");
+  // A trailing slash is unambiguous: that is a directory citation. Anything
+  // else resolves as a FILE first and falls back to the tracked dir set, which
+  // is what makes BOTH `.githooks/pre-commit` (a tracked extension-less FILE)
+  // and `docs/backlog` (an extension-less DIRECTORY citation) resolve. Guessing
+  // "no extension means directory" would red the first class.
+  const resolves =
+    trackedSet.has(bare) || (path.endsWith("/") && trackedDirSet.has(bare)) ||
+    (!path.endsWith("/") && !/\.[A-Za-z0-9]+$/.test(bare) && trackedDirSet.has(bare));
+  if (!resolves) danglingPaths.push({ note, line, path });
+}
+
+if (danglingPaths.length > 0) {
+  console.error(
+    `✗ memory-citations: ${danglingPaths.length} repo path(s) cited by a memory note do not resolve\n`,
+  );
+  for (const { note, line, path } of danglingPaths) {
+    console.error(`  ${note}:${line} → ${path}`);
+  }
+  console.error(
+    `\n  A note citing a path that is gone re-asserts a retired layout with the\n` +
+      `  authority of a citation nobody can follow. Repoint it at what exists now,\n` +
+      `  or — for a note whose POINT is that a subsystem was deleted — put\n` +
+      `  \`<!-- memory-path-exempt: <what that path was> -->\` on the line above it.`,
+  );
+  process.exit(1);
+}
+
 if (dangling.length > 0) {
   console.error(`✗ memory-citations: ${dangling.length} citation(s) resolve to no memory file\n`);
   for (const { file, line, name, form } of dangling) {

@@ -34,6 +34,7 @@ import { execSync, spawnSync } from 'node:child_process';
 import { isGlob, globToRegExp } from '../check-doc-manifest.mjs';
 import { GUARDS, REACH } from '../guard-reach-data.mjs';
 import { OPEN_ITEMS_RELPATH, PREMISE_GREP_PATHSPECS } from '../nightly/items.mjs';
+import { DOC_TEST_CONSUMERS } from '../doc-test-consumers-data.mjs';
 import { worktreeTree } from './worktree-tree.mjs';
 
 const norm = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '');
@@ -157,6 +158,7 @@ export function handoffStateTriggered({ root, staged, git = (args) => gitRun(roo
 // asserts it tautologically) stays green here. And nothing detects a duplicated
 // derived literal in a test for a subject that has no `PINS` row at all — the
 // graph can only cover subjects someone declared.
+/** @type {Map<string, string[]>} */
 const PINS = new Map([
   // `loop-core-gate-parity`, not `loop-core-paths`: the latter imports the
   // package subpath (`audit-tools/shared`), which resolves through dist/, and
@@ -175,6 +177,18 @@ const PINS = new Map([
     ],
   ],
   ['src/shared/constitutionalDocPaths.ts', ['tests/shared/doc-manifest-gate.test.ts']],
+  // The DECLARED doc → test consumer map, projected into the pin graph. The map
+  // and this graph answer the same question — "which test asserts this doc's
+  // content?" — so they are ONE declaration rather than two that drift: staging
+  // a mapped doc obliges exactly the tests the map names, and
+  // `check:pin-obligations` reconciles every row against the tracked tree.
+  //
+  // WHY THE MAP HAS TO BE PROJECTED HERE AT ALL. The map's own gate
+  // (`check:doc-test-consumers`) runs at CONFIGURATION time and only checks the
+  // rows' SHAPE; it cannot oblige a test, because a repo-wide check has no
+  // staged subject. The pin graph is what has a subject, and a subject is what
+  // "before it ships" requires. Without this projection the map is a comment.
+  ...DOC_TEST_CONSUMERS.map((row) => /** @type {[string, string[]]} */ ([row.doc, row.tests])),
 ]);
 
 /** Repo-relative path with backslashes normalized and any leading `./` dropped. */

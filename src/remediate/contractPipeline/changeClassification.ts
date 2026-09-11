@@ -1,3 +1,4 @@
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * DC-5 — obligation change-vs-addition classification + paired/scoped negative
  * test-spec gate (single source).
@@ -56,6 +57,7 @@ export function extractSymbolTokens(text: string): string[] {
     const token = raw.toLowerCase().replace(/^[./-]+|[./-]+$/g, "");
     if (token.length < 3) continue;
     if (SYMBOL_STOPWORDS.has(token)) continue;
+    // <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
     // A token must carry a "code-ish" shape — a case hump, an underscore, a dot,
     // a slash, or a digit — so a plain prose word ("rejects") is not mistaken for
     // a symbol while `writeRecord`, `flush_buffer`, `src/a.ts`, `O_1` are kept.
@@ -100,6 +102,7 @@ export function buildBaselineSymbolCorpus(finalizedModuleContracts: unknown): Se
 
 // ── Deterministic classification (FIRST pass) ──────────────────────────────────
 
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * Classify one obligation change-vs-addition deterministically.
  *

@@ -37,6 +37,12 @@ interface FormFixture {
   sample: string;
   drive: "script" | "export" | "hook" | "test";
   expect?: string;
+  /**
+   * The guard reports this form and exits 0 — a warning it cannot fail on,
+   * because the fix belongs to a boundary it does not own (the spec-symbol leg:
+   * a constitutional spec is escalate-only). The form must still be recognized.
+   */
+  advisory?: boolean;
   env?: Record<string, string>; // script and hook drives — see formEnv
   // script
   script?: string;
@@ -256,7 +262,17 @@ describe("guard form reach", () => {
         switch (form.drive) {
           case "script": {
             const r = driveScript(form);
-            expect(r.status, `exit code; output was:\n${r.output}`).not.toBe(0);
+            // A guard may be ADVISORY: it recognizes the form and reports it on
+            // stderr while exiting 0, because the fix belongs to a boundary it
+            // does not own (the spec-symbol warning — a constitutional spec is
+            // escalate-only, so a mechanical red would enforce where the
+            // constitution says only an owner may act, PH-05). The form still
+            // has to be RECOGNIZED, which is what both assertions below check.
+            if (form.advisory === true) {
+              expect(r.status, `advisory guard must exit 0; output was:\n${r.output}`).toBe(0);
+            } else {
+              expect(r.status, `exit code; output was:\n${r.output}`).not.toBe(0);
+            }
             expect(r.output).toContain(form.expect);
             break;
           }

@@ -83,6 +83,7 @@ export const SUBMISSION_EVENT_KINDS = [
 
 export type SubmissionEventKind = (typeof SUBMISSION_EVENT_KINDS)[number];
 
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * Which kinds mean "the TOOL ingested this submission and decided about it".
  *

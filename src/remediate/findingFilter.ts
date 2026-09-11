@@ -1,3 +1,4 @@
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 // Single finding-filter pass (review-gate convergence, chunk A).
 //
 // The pre-planning filters — no-evidence drop, cross-lens dedup, phantom-path

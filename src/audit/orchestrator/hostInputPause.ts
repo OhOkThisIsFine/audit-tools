@@ -127,6 +127,7 @@ export function graphEnrichmentLowConfidenceEdges(
   return collectLowConfidenceEdges(bundle.graph_bundle);
 }
 
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 // The composite stop predicates (`nextStepPausesForHostInput`,
 // `nextStepIsDrainableRegen`) that used to live here were SUPERSEDED by the
 // per-obligation classification in `obligationPolicy.ts` (CX-02: pause policy

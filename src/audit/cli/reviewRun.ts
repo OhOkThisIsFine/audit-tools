@@ -99,7 +99,7 @@ export interface MaterializeReviewRunParams {
    */
   runIdOverride?: string;
   /**
-   * The wave generation this pause already resolved (`effectiveWaveGeneration`).
+   * The wave generation this pause already resolved.
    * Absent means "resolve it here" — the direct-call path. Present means the
    * caller resolved it, which the pause does because the counter is advanced
    * exactly once, only on the branch that OPENS a wave.
