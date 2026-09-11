@@ -36,7 +36,7 @@
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSyncHidden } from '../helpers/spawn.mjs';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { parseArgv, refusalMessage, isHelpFlag, USAGE_EXIT } from '../../scripts/shared/argvGuard.mjs';
@@ -68,7 +68,7 @@ interface Run {
 
 function runScriptCli(cli: string, args: string[], cwd: string): Run {
   try {
-    const stdout = execFileSync(process.execPath, [cli, ...args], {
+    const stdout = execFileSyncHidden(process.execPath, [cli, ...args], {
       cwd,
       encoding: 'utf8',
       windowsHide: true,

@@ -12,7 +12,7 @@
  * Deterministic order (sorted by code units) so a test's diff is readable and a
  * failure names the same file every run. Node built-ins only.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSyncHidden } from './spawn.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -28,7 +28,7 @@ const cache = new Map();
 export function listTrackedScripts(root) {
   const hit = cache.get(root);
   if (hit) return hit;
-  const out = execFileSync('git', ['ls-files', '-z', '--', 'scripts'], {
+  const out = execFileSyncHidden('git', ['ls-files', '-z', '--', 'scripts'], {
     cwd: root,
     encoding: 'utf8',
     windowsHide: true,
