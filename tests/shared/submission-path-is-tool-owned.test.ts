@@ -618,7 +618,7 @@ describe("the audit accepted-results ledger", () => {
     expect(await readFile(fixture.ledgerPath, "utf8")).toBe(first);
   });
 
-  it("re-filters an already-satisfied lane out of the next prepared workload", async () => {
+  it("publishes exactly the still-owed partition the caller hands it, whatever the ledger holds", async () => {
     const fixture = await auditFixture(["T1", "T2"]);
     const first = fixture.items[0]!;
     await submit(fixture, first, auditSubmission(first));
@@ -629,13 +629,30 @@ describe("the audit accepted-results ledger", () => {
     auditTasks: auditManifest(fixture.items.map((item) => item.id)),
       });
 
-    const next = await prepareAuditHostHandoff({
+    // The caller's partition is the still-owed set — T1 is accepted, so only T2
+    // is owed. The boundary publishes it whole.
+    const owed = await prepareAuditHostHandoff({
+      root: fixture.root,
+      artifactsDir: fixture.artifactsDir,
+      runId: AUDIT_RUN_ID,
+      tasks: ["T2"].map(auditTask),
+    });
+    expect(owed.workload.work_items.map((item) => item.id)).toEqual(["T2"]);
+
+    // T1 comes BACK into the owed set — a re-plan moved its ask, so its earlier
+    // acceptance no longer satisfies it. The ledger still names T1, and the
+    // boundary must publish it anyway: suppressing it on account of a historical
+    // acceptance is how a re-opened item becomes invisible to replay.
+    const reopened = await prepareAuditHostHandoff({
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
       tasks: ["T1", "T2"].map(auditTask),
     });
-    expect(next.workload.work_items.map((item) => item.id)).toEqual(["T2"]);
+    expect(reopened.workload.work_items.map((item) => item.id)).toEqual([
+      "T1",
+      "T2",
+    ]);
   });
 
   it("classifies and locates every refusal separately", async () => {

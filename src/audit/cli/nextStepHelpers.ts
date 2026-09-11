@@ -3137,11 +3137,11 @@ async function runHostDelegationObligation(
   }
 
   // The UNLOCKED variant: the fold already holds the artifact-tree lock, and
-  // `withFileLock` is non-reentrant — the locking `ensureSemanticReviewRun`
-  // here would be a deterministic FileLockTimeoutError on the audit loop's
-  // most common exit path. Its blocked core state rides the emit's `state`
-  // below, so the fold's single commit persists it (the pause's own persist
-  // was the split's other half).
+  // `withFileLock` is non-reentrant — taking the artifact-tree hold here would
+  // be a deterministic FileLockTimeoutError on the audit loop's most common
+  // exit path. Its blocked core state rides the emit's `state` below, so the
+  // fold's single commit persists it (the pause's own persist was the split's
+  // other half).
   const review = await ensureSemanticReviewRunUnlocked({
     root: ctx.params.root,
     artifactsDir: ctx.params.artifactsDir,

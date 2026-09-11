@@ -34,10 +34,14 @@ import {
   hashToolingInputs,
 } from "../../src/audit/io/toolingManifest.js";
 import {
-  buildRunId,
+  deriveReviewRunId,
   ensureSupervisorDirs,
   getRunPaths,
+  reviewWaveDigest,
   writeReviewRunFiles,
+  RUN_ID_DIGEST_LENGTH,
+  RUN_ID_PREFIX,
+  RUN_ID_SLUG_MAX_LENGTH,
 } from "../../src/audit/io/runArtifacts.js";
 import type { ActiveReviewRun } from "../../src/audit/supervisor/operatorHandoff.js";
 import type { ToolingManifest } from "../../src/audit/types/toolingManifest.js";
@@ -469,12 +473,58 @@ test("promoteFinalAuditReport announces a failed audit-findings.json copy AND ex
 test("run artifact helpers persist only provider-neutral review identity and canonical pending tasks", async () => {
   await withTempDir("audit-code-run-artifacts-", async (tempDir: string) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
-    const fixedNow = new Date("2026-04-22T15:16:17.089Z");
-    const runId = buildRunId(" flow:auth/entry ", 7, fixedNow);
+    const waveGeneration = 0;
+    const runId = deriveReviewRunId({
+      obligationId: " flow:auth/entry ",
+      waveGeneration,
+    });
     const paths = getRunPaths(artifactsDir, runId);
 
-    expect(runId).toBe("20260422T151617089Z_flow-auth-entry_007");
-    expect(buildRunId("", 1, fixedNow)).toBe("20260422T151617089Z_terminal_001");
+    // The readable half is the obligation slug; the identity rides the digest,
+    // because the slug is lossy and capped. No clock anywhere in the form.
+    expect(runId).toMatch(/^review-flow-auth-entry-[0-9a-f]{16}$/u);
+    expect(
+      deriveReviewRunId({ obligationId: "flow-auth-entry", waveGeneration }),
+      "the readable half is a SLUG, so a reformatted obligation still derives the " +
+        "same id — the derivation normalizes rather than trusting the caller's " +
+        "spelling",
+    ).toBe(runId);
+    expect(
+      deriveReviewRunId({ obligationId: " flow:auth/entry ", waveGeneration }),
+      "a re-derivation is stable — no clock, no per-call input",
+    ).toBe(runId);
+    expect(
+      deriveReviewRunId({ obligationId: " flow:auth/entry ", waveGeneration: 1 }),
+      "the WAVE generation is salted in: the next wave of one artifacts dir does " +
+        "not share the previous wave's run directory",
+    ).not.toBe(runId);
+    expect(
+      deriveReviewRunId({ obligationId: " flow:auth/entry ", waveGeneration: null }),
+    ).not.toBe(runId);
+    expect(
+      deriveReviewRunId({ obligationId: null, waveGeneration }),
+    ).toMatch(/^review-terminal-[0-9a-f]{16}$/u);
+    // The digest is a function of the generation ALONE, so the wave's run
+    // directory is findable from the counter without knowing which obligation
+    // opened it (the same generation under two slugs shares its digest).
+    expect(
+      deriveReviewRunId({ obligationId: "other", waveGeneration }).endsWith(
+        reviewWaveDigest(waveGeneration),
+      ),
+    ).toBe(true);
+
+    // The slug segment is CAPPED: the shared run-id grammar (`assertSubmissionRunId`)
+    // admits at most 128 characters, and the obligation id is the one unbounded
+    // input, so an uncapped slug would mint a run id the shared boundary refuses.
+    const longId = deriveReviewRunId({
+      obligationId: "x".repeat(400),
+      waveGeneration,
+    });
+    expect(longId.length).toBe(
+      RUN_ID_PREFIX.length + RUN_ID_SLUG_MAX_LENGTH + 1 + RUN_ID_DIGEST_LENGTH,
+    );
+    expect(longId.length).toBeLessThanOrEqual(128);
+    expect(longId.endsWith("-")).toBe(false);
 
     await ensureSupervisorDirs(artifactsDir);
 

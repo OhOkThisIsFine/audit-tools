@@ -605,16 +605,109 @@ describe(FAILURE_SIGNATURE, () => {
     expect([...replay.completed_work_item_ids].sort()).toEqual(expectedIds);
     expect(await snapshotTree(artifactsDir)).toEqual(beforeReplay);
 
+    // The drain's paused state: the caller hands the boundary the STILL-OWED
+    // partition, and here that partition is empty because every task this run
+    // owes has been accepted. The empty workload is therefore the caller's
+    // statement, not the boundary's inference — the accepted ledger is never an
+    // input to what is published (a bind that the ledger's own entries would
+    // suppress is pinned by the sibling test below). What this pins is the
+    // WRITE: an empty partition still republishes, so nothing is left on disk
+    // advertising work that is no longer owed.
     const complete = await boundary.prepareAuditHostHandoff({
       root,
       artifactsDir,
       runId,
-      tasks,
+      tasks: [],
     });
     expect(complete.workload.work_items).toEqual([]);
     expect(complete.result_map.entries).toEqual([]);
     expect((await stat(complete.workload_path)).isFile()).toBe(true);
     expect((await stat(complete.result_map_path)).isFile()).toBe(true);
+
+    // And the boundary republishes exactly the partition it is handed — here
+    // one task whose acceptance is ALREADY on the ledger, because a re-plan
+    // moved its ask and put it back in the owed set. Suppressing it on account
+    // of that earlier acceptance is how a re-opened item becomes invisible to
+    // replay; the ingest's own dedupe (work item × prompt digest) is what
+    // decides whether an arrival is new, and it can only do that if the item is
+    // published at all.
+    const reopened = await boundary.prepareAuditHostHandoff({
+      root,
+      artifactsDir,
+      runId,
+      tasks: [tasks[0]!],
+    });
+    expect(reopened.workload.work_items.map((entry) => entry.id)).toEqual([
+      "audit-task-b",
+    ]);
+    expect(reopened.result_map.entries.map((entry) => entry.work_item_id)).toEqual([
+      "audit-task-b",
+    ]);
+  });
+
+  it("never withholds a still-pending work item because an earlier acceptance of its binding is on the ledger", async () => {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "audit-host-reopen-"));
+    cleanupRoots.push(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const runId = "host-run-reopen";
+    const tasks = [
+      task(
+        "audit-reopen-a",
+        "security",
+        "src/a.ts",
+        { size: "small", complexity: "standard", risk: "high" },
+        1200,
+      ),
+      task(
+        "audit-reopen-b",
+        "correctness",
+        "src/b.ts",
+        { size: "small", complexity: "standard", risk: "medium" },
+        1200,
+      ),
+    ];
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+    await writeFile(join(root, "src", "b.ts"), "one\ntwo\n", "utf8");
+
+    const first = await boundary.prepareAuditHostHandoff({
+      root,
+      artifactsDir,
+      runId,
+      tasks,
+    });
+    for (const item of first.workload.work_items) {
+      await mkdir(join(root, item.result_path, ".."), { recursive: true });
+      await writeFile(
+        join(root, item.result_path),
+        JSON.stringify(boundResult(runId, item)),
+        "utf8",
+      );
+    }
+    const accepted = await boundary.ingestAuditHostResults({
+      root,
+      artifactsDir,
+      runId,
+      auditTasks: tasks,
+    });
+    expect(accepted.accepted_count).toBe(2);
+
+    // The wave re-opens `audit-reopen-a` — its accepted result went stale, so
+    // the task is pending again — while `audit-reopen-b` stays settled.
+    const reopened = await boundary.prepareAuditHostHandoff({
+      root,
+      artifactsDir,
+      runId,
+      tasks: [tasks[0]!],
+    });
+
+    expect(
+      reopened.workload.work_items.map((entry) => entry.id),
+      "a work item that is STILL PENDING must be published even though an earlier " +
+        "binding for it sits on the accepted ledger — the ledger records what arrived, " +
+        "it does not decide what is still owed",
+    ).toEqual(["audit-reopen-a"]);
   });
 
   it("refuses a workload from a superseded contract version as a CLASSIFIED stale, never a bare parse throw", async () => {

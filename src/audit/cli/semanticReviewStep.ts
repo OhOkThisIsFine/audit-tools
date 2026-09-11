@@ -4,6 +4,8 @@ import { deriveLaneDemand, linkFrictionRunIds, readJsonFile } from "audit-tools/
 
 import { AUDIT_FRICTION_RUN_ID } from "../orchestrator/nextStep.js";
 
+import type { ArtifactBundle } from "../io/artifacts.js";
+import { derivePendingTaskPartition } from "../orchestrator/pendingTasks.js";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AuditTask } from "../types.js";
 import type { AuditHostIngestIssue } from "../validation/ingestIssueCodes.js";
@@ -65,11 +67,15 @@ function renderIngestIssueLines(
         `${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`,
     ),
     "",
-    // NOT "the bindings are unchanged": ingesting anything changes the pending
-    // task set, and a changed pending set re-mints the review run — new run id,
-    // new run directory, new bound result paths. The paths quoted above are the
-    // ones the ingest READ; the workload published below is always the authority.
-    "Each named work item is still pending and is republished in the workload below. Write its repaired result at that workload's bound `result_path` — a path quoted above belongs to the ingest just consumed and is stale whenever the run was re-minted.",
+    // NOT "the bindings are unchanged": the run id is derived from the review
+    // obligation, so a partial ingest does NOT re-mint the run and the bound
+    // paths of carried-over items are stable. What still moves is the ASK — a
+    // re-planned task's prompt digest, and therefore its bound path, is
+    // different, and a result written against the old ask is correctly refused.
+    // So the workload published below is the authority for what to write, and a
+    // path quoted above is only guaranteed current for an item whose ask the
+    // ingest did not change.
+    "Each named work item is still pending and is republished in the workload below. Write its repaired result at that workload's bound `result_path` — that workload is always the authority for where a result is read.",
     "",
   ];
 }
@@ -105,6 +111,14 @@ export async function renderSemanticReviewStep(params: {
   root: string;
   artifactsDir: string;
   activeReviewRun: ActiveReviewRun;
+  /**
+   * The bundle this draw's review obligation was selected against. REQUIRED:
+   * the completed count has no second derivation — it comes from the ONE
+   * pending-set partition (`derivePendingTaskPartition`), which is the same
+   * source the published workload's task list is built from. A caller that has
+   * no bundle has no review obligation either.
+   */
+  bundle: ArtifactBundle;
   selectedExecutor?: string | null;
   inProcessMadeProgress?: boolean;
   /** Failures the ingest that preceded this emission classified. */
@@ -122,6 +136,14 @@ export async function renderSemanticReviewStep(params: {
   const tasks = await readJsonFile<AuditTask[]>(
     activeReviewRun.pending_audit_tasks_path,
   );
+  // The completed half of this pause's count comes from the ONE pending-set
+  // partition — the same derivation `buildPendingAuditTasks` projects the
+  // published tasks from — never from `tasks.length - work_items.length`. That
+  // subtraction only ever measured how many items the handoff boundary HID, so
+  // it read zero for every run whose publish was exhaustive (which is every
+  // run: the boundary suppresses nothing), and it would misreport the moment a
+  // task left the pending set for any reason other than acceptance.
+  const { completedTaskIds } = derivePendingTaskPartition(params.bundle);
   const handoff = await prepareAuditHostHandoff({
     root,
     artifactsDir,
@@ -162,7 +184,7 @@ export async function renderSemanticReviewStep(params: {
           ? ` ${issues.length} prior submission(s) could not be accepted — see "Result status requiring attention".`
           : ""),
       pending_tasks: handoff.workload.work_items.length,
-      completed_tasks: tasks.length - handoff.workload.work_items.length,
+      completed_tasks: completedTaskIds.size,
     },
     stopCondition:
       "Execute the published host workload, write each bound result, then run next-step.",

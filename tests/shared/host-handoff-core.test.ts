@@ -11,6 +11,12 @@ import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  RUN_ID_DIGEST_LENGTH,
+  RUN_ID_PREFIX,
+  RUN_ID_SLUG_MAX_LENGTH,
+} from "../../src/audit/io/runArtifacts.js";
+
+import {
   bindingIdentity,
   contentSha256,
   describeIdentityFailure,
@@ -90,6 +96,52 @@ describe("resolveHostHandoffPaths", () => {
     ).toBe("implement");
     // The submission rule is unchanged by the segment: same result dir name.
     expect(laneScoped.resultDir.endsWith("host-results")).toBe(true);
+  });
+
+  it("accepts every run id the audit draw's discovery grammar produces, and refuses the rest", () => {
+    // The audit draw's run id is DERIVED, not minted from a clock, so a
+    // republication re-derives an id a host is already holding — and the derived
+    // form is what the shared grammar has to admit. The two rules are ONE
+    // contract and must not disagree.
+    const derived = `review-audit_tasks_completed-${"f".repeat(RUN_ID_DIGEST_LENGTH)}`;
+    expect(() =>
+      resolveHostHandoffPaths({
+        root: "/tmp/x",
+        artifactsDir: "/tmp/x/.audit-tools/audit",
+        runId: derived,
+      }),
+    ).not.toThrow();
+
+    // The derived id at its WORST CASE, built from the derivation's own
+    // constants rather than a transcription of them: a maximal obligation slug
+    // (capped at `RUN_ID_SLUG_MAX_LENGTH`) under the fixed prefix and digest. If
+    // the cap or the digest grows past the shared 128-character limit, THIS id
+    // stops being accepted and this test reds — which is the point. A
+    // hand-written fixture would keep passing while production minted run ids
+    // whose own paths throw.
+    const worstCase = `${RUN_ID_PREFIX}${"a".repeat(RUN_ID_SLUG_MAX_LENGTH)}${"-"}${"f".repeat(RUN_ID_DIGEST_LENGTH)}`;
+    expect(() =>
+      resolveHostHandoffPaths({
+        root: "/tmp/x",
+        artifactsDir: "/tmp/x/.audit-tools/audit",
+        runId: worstCase,
+      }),
+    ).not.toThrow();
+
+    // A path segment can never be "." / ".." or start outside the grammar. The
+    // 128-character limit is EXCLUSIVE, so it is crossed by PADDING the derived
+    // form to just past it — derived here rather than transcribed, so this arm
+    // tracks the shared rule instead of a remembered number.
+    const tooLong = `${worstCase}${"a".repeat(128)}`;
+    for (const refused of ["", ".", "..", "-leading", `has/slash`, tooLong]) {
+      expect(() =>
+        resolveHostHandoffPaths({
+          root: "/tmp/x",
+          artifactsDir: "/tmp/x/.audit-tools/audit",
+          runId: refused,
+        }),
+      ).toThrow(/Invalid host handoff run id/u);
+    }
   });
 
   it("refuses a run id outside the shared grammar", () => {

@@ -135,12 +135,48 @@ test("cmdStatus includes recent run ledger entries", async () => {
   });
 });
 
-test("cmdStatus includes pending task counts from the most recent run directory", async () => {
+/**
+ * Write the ACTIVE review-run manifest plus its pending manifest — the pair a
+ * review pause leaves behind, and now the only thing `status` reads to find the
+ * run the loop is on.
+ */
+async function writeActiveRun(
+  artifactsDir: string,
+  runId: string,
+  pendingTasks: unknown[],
+): Promise<void> {
+  const runDir = join(artifactsDir, "runs", runId);
+  await mkdir(runDir, { recursive: true });
+  const pendingPath = join(runDir, "pending-audit-tasks.json");
+  await writeFile(pendingPath, JSON.stringify(pendingTasks, null, 2));
+  await mkdir(join(artifactsDir, "dispatch"), { recursive: true });
+  await writeFile(
+    join(artifactsDir, "dispatch", "current-review-run.json"),
+    JSON.stringify({
+      contract_version: "audit-review-run/v1alpha1",
+      run_id: runId,
+      review_run_path: join(runDir, "review-run.json"),
+      pending_audit_tasks_path: pendingPath,
+      host_workload_path: join(runDir, "host-workload.json"),
+      host_result_map_path: join(runDir, "host-result-map.json"),
+    }),
+  );
+}
+
+test("cmdStatus includes pending task counts from the ACTIVE run, not the newest-named directory", async () => {
   await withTempDir(async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
-    const runId = "20260101T000000000Z_audit_tasks_001";
-    const runDir = join(artifactsDir, "runs", runId);
-    await mkdir(runDir, { recursive: true });
+    // The run the loop is ON. Its name sorts BEFORE the other run's, which is
+    // exactly the case a name-sorted scan gets wrong: a derived run id leads
+    // with the obligation slug, so "newest name" stopped meaning "newest run"
+    // the moment the id stopped being clock-minted.
+    const activeRunId = "review-audit_tasks_completed-0123456789abcdef";
+    const otherRunId = "review-zzz-ffffffffffffffff";
+    await mkdir(join(artifactsDir, "runs", otherRunId), { recursive: true });
+    await writeFile(
+      join(artifactsDir, "runs", otherRunId, "pending-audit-tasks.json"),
+      JSON.stringify([{ task_id: "other", unit_id: "u", pass_id: "p", lens: "security", file_paths: [], rationale: "r" }]),
+    );
 
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -152,10 +188,7 @@ test("cmdStatus includes pending task counts from the most recent run directory"
       { task_id: "t2", unit_id: "u1", pass_id: "p1", lens: "security", file_paths: [], rationale: "r" },
       { task_id: "t3", unit_id: "u2", pass_id: "p1", lens: "security", file_paths: [], rationale: "r" },
     ];
-    await writeFile(
-      join(runDir, "pending-audit-tasks.json"),
-      JSON.stringify(pendingTasks, null, 2),
-    );
+    await writeActiveRun(artifactsDir, activeRunId, pendingTasks);
 
     const result = await runStatus(artifactsDir);
     expect(result.exitCode).toBe(0);
@@ -165,7 +198,57 @@ test("cmdStatus includes pending task counts from the most recent run directory"
     expect(parsed.pending_tasks !== null, "pending_tasks should not be null").toBeTruthy();
     expect(parsed.pending_tasks.total).toBe(3);
     expect(parsed.pending_tasks.remaining).toBe(2);
-    expect(parsed.pending_tasks.run_id).toBe(runId);
+    expect(parsed.pending_tasks.run_id).toBe(activeRunId);
+  });
+});
+
+test("cmdStatus degrades to no run when the active review-run manifest is malformed", async () => {
+  await withTempDir(async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(join(artifactsDir, "dispatch"), { recursive: true });
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "active", obligations: [] }, null, 2),
+    );
+    await writeFile(
+      join(artifactsDir, "dispatch", "current-review-run.json"),
+      "{not-json\n",
+    );
+
+    const result = await runStatus(artifactsDir);
+
+    // `status` reports on the run; it is not the run's validator. A manifest it
+    // cannot read says one true thing — this command does not know of an active
+    // run — and a stack trace says nothing an operator can use.
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.pending_tasks).toBe(null);
+    expect(parsed.status).toBe("active");
+  });
+});
+
+test("cmdStatus degrades to no run when no active review run exists, even with run directories present", async () => {
+  await withTempDir(async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    // A directory under runs/ is not an active run: without the manifest that
+    // names it, which run the loop is on is simply unknown.
+    await mkdir(join(artifactsDir, "runs", "review-orphan-0123456789abcdef"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(artifactsDir, "runs", "review-orphan-0123456789abcdef", "pending-audit-tasks.json"),
+      JSON.stringify([{ task_id: "t1", unit_id: "u1", pass_id: "p1", lens: "security", file_paths: [], rationale: "r" }]),
+    );
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "active", obligations: [] }, null, 2),
+    );
+
+    const result = await runStatus(artifactsDir);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.pending_tasks).toBe(null);
   });
 });
 
