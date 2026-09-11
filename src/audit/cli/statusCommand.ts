@@ -1,4 +1,3 @@
-import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
 import type { AuditTask } from "../types.js";
@@ -6,6 +5,7 @@ import type { AuditState } from "../types/auditState.js";
 import { loadRunLedger } from "../supervisor/runLedger.js";
 import { getArtifactsDir } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
+import { loadCurrentActiveReviewRun } from "./reviewRun.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
@@ -62,49 +62,47 @@ export async function cmdStatus(argv: string[]): Promise<void> {
       };
     });
 
-  // 3. Find the most recent run directory and read pending-audit-tasks.json
+  // 3. Read the ACTIVE run's pending-audit-tasks.json
+  //
+  // The active run is the one the loop is on, named by the review-run manifest
+  // the pause wrote — never "the newest directory under runs/". That inference
+  // sorted the directory NAMES, which only meant "newest" while a run id began
+  // with a UTC timestamp: with the derived id (obligation slug + digest) the
+  // sort is alphabetical, so the command would report an arbitrary obligation's
+  // pending count and call it current.
+  //
+  // Both reads degrade to "no run" rather than to a stack. A malformed
+  // manifest, an unreadable manifest and an absent manifest all say the same
+  // true thing about the ACTIVE run: `status` does not know of one. A status
+  // command that throws tells an operator nothing it could have reported.
   let pendingTasksSummary: {
     run_id: string;
     total: number;
     remaining: number;
   } | null = null;
 
-  const runsDir = join(artifactsDir, "runs");
-  let runDirs: string[] = [];
   try {
-    const entries = await readdir(runsDir, { withFileTypes: true });
-    runDirs = entries
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .sort()
-      .reverse();
-  } catch {
-    // runs directory may not exist yet
-  }
+    const activeRun = await loadCurrentActiveReviewRun(artifactsDir);
+    if (activeRun) {
+      const tasks = await readJsonFile<AuditTask[]>(
+        activeRun.pending_audit_tasks_path,
+      );
+      if (Array.isArray(tasks)) {
+        // Count remaining: tasks without status "complete"
+        const total = tasks.length;
+        const remaining = tasks.filter(
+          (t) => t.status !== "complete",
+        ).length;
 
-  for (const runDirName of runDirs) {
-    const runDir = join(runsDir, runDirName);
-    const tasksPath = join(runDir, "pending-audit-tasks.json");
-    let tasks: AuditTask[] | null = null;
-    try {
-      tasks = await readJsonFile<AuditTask[]>(tasksPath);
-    } catch {
-      continue; // no pending-audit-tasks.json in this run dir — try previous
+        pendingTasksSummary = {
+          run_id: activeRun.run_id,
+          total,
+          remaining,
+        };
+      }
     }
-    if (!Array.isArray(tasks)) continue;
-
-    // Count remaining: tasks without status "complete"
-    const total = tasks.length;
-    const remaining = tasks.filter(
-      (t) => t.status !== "complete",
-    ).length;
-
-    pendingTasksSummary = {
-      run_id: runDirName,
-      total,
-      remaining,
-    };
-    break;
+  } catch {
+    // Malformed / unreadable active-run manifest: report "no run", never throw.
   }
 
   // Derive the started_at and elapsed time for the current last_obligation from

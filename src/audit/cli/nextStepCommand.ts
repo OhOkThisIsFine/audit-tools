@@ -1683,6 +1683,7 @@ const NEXT_STEP_EMISSION = createStepEmissionScaffold<
       root: ctx.root,
       artifactsDir: ctx.artifactsDir,
       activeReviewRun: result.activeReviewRun,
+      bundle: result.bundle,
       selectedExecutor: result.selectedExecutor,
       inProcessMadeProgress: result.inProcessMadeProgress,
       ingestIssues: result.ingestIssues,

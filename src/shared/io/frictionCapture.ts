@@ -64,8 +64,9 @@ export interface FrictionItem {
  * "no relation recorded" is a stated answer rather than an absent key.
  *
  * They are arrays because the relation is genuinely ONE-TO-MANY: one record can span
- * many rounds (audit keys its record by a fixed literal for the whole session, while
- * `ensureSemanticReviewRun` re-mints a review/dispatch run id per round). A scalar would
+ * many rounds (audit keys its friction record by the fixed `AUDIT_FRICTION_RUN_ID`
+ * for the whole session, while the review draw opens a NEW wave — and so a new run
+ * id — every time the previous wave's pending set is fully accepted). A scalar would
  * be first-writer-wins and hide rounds 2..N — the very invisibility this linkage exists
  * to close. So the merge ACCUMULATES: a supplied id is appended if new, never replaces
  * one already present, and no writer can drop one. Entries are deduped and held in

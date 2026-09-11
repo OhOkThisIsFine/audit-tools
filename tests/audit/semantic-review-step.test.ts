@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { renderSemanticReviewStep } from "../../src/audit/cli/semanticReviewStep.js";
+import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { LaneDemandSchema } from "../../src/shared/types/stepContract.js";
 import { bannedLaneExecutionKeys } from "../helpers/recognizers.js";
 import type { ActiveReviewRun } from "../../src/audit/supervisor/operatorHandoff.js";
@@ -17,11 +18,20 @@ afterEach(async () => {
   );
 });
 
-async function fixture(): Promise<{
+async function fixture(
+  completedTaskIds: readonly string[] = [],
+): Promise<{
   root: string;
   artifactsDir: string;
   activeReviewRun: ActiveReviewRun;
   taskCount: number;
+  /**
+   * The artifact bundle the review obligation's pending partition is derived
+   * from. A caller that has results already accepted is modelled by results
+   * already IN it — never by a `completed_tasks` number handed in beside the
+   * task list.
+   */
+  bundle: ArtifactBundle;
 }> {
   const root = await mkdtemp(join(tmpdir(), "audit-semantic-review-"));
   roots.push(root);
@@ -45,11 +55,36 @@ async function fixture(): Promise<{
     token_estimate: 1_000 + index,
   }));
   const pendingPath = join(runDir, "pending-audit-tasks.json");
-  await writeFile(pendingPath, JSON.stringify(tasks), "utf8");
+  // The manifest is refreshed by the pause from the partition, never the other
+  // way round — so the fixture writes what the pause would have: the tasks the
+  // bundle's results do not already cover.
+  const covered = new Set(completedTaskIds);
+  await writeFile(
+    pendingPath,
+    JSON.stringify(tasks.filter((task) => !covered.has(task.task_id))),
+    "utf8",
+  );
   return {
     root,
     artifactsDir,
     taskCount: tasks.length,
+    bundle: {
+      audit_tasks: tasks as ArtifactBundle["audit_tasks"],
+      ...(completedTaskIds.length === 0
+        ? {}
+        : {
+            audit_results: completedTaskIds.map((taskId) => ({
+              task_id: taskId,
+              unit_id: `unit-${taskId}`,
+              pass_id: "pass:correctness",
+              lens: "correctness",
+              file_coverage: [],
+              findings: [],
+              reviewed_clean: true,
+              run_id: runId,
+            })),
+          }),
+    },
     activeReviewRun: {
       contract_version: "audit-review-run/v1alpha1",
       run_id: runId,
@@ -63,11 +98,13 @@ async function fixture(): Promise<{
 
 describe("renderSemanticReviewStep zero-adapter host handoff", () => {
   it("publishes the complete workload with no local dispatch or merge instruction", async () => {
-    const { root, artifactsDir, activeReviewRun, taskCount } = await fixture();
+    const { root, artifactsDir, activeReviewRun, taskCount, bundle } =
+      await fixture();
     const step = await renderSemanticReviewStep({
       root,
       artifactsDir,
       activeReviewRun,
+      bundle,
     });
 
     expect(step.step_kind).toBe("dispatch_review");
@@ -103,11 +140,12 @@ describe("renderSemanticReviewStep zero-adapter host handoff", () => {
     // and nothing else: a `model`, `provider`, `tier` or `backend` key here
     // would move execution selection into the tool, which is the boundary this
     // package exists downstream of.
-    const { root, artifactsDir, activeReviewRun } = await fixture();
+    const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
     const step = await renderSemanticReviewStep({
       root,
       artifactsDir,
       activeReviewRun,
+      bundle,
     });
     const workload = JSON.parse(
       await readFile(step.artifact_paths.host_workload!, "utf8"),
@@ -125,18 +163,47 @@ describe("renderSemanticReviewStep zero-adapter host handoff", () => {
     }
   });
 
+  it("counts the completed tasks from the pending-set partition, not from what the publish hid", async () => {
+    // `completed_tasks` used to be `tasks.length - work_items.length` — a
+    // subtraction that measured how many items the handoff boundary WITHHELD,
+    // which is nothing now that the boundary publishes every task it is handed,
+    // so it read a flat 0 for a run that had accepted results. The count comes
+    // from the same partition the pending list is projected from instead.
+    const { root, artifactsDir, activeReviewRun, bundle } = await fixture([
+      "task-b",
+    ]);
+    const step = await renderSemanticReviewStep({
+      root,
+      artifactsDir,
+      activeReviewRun,
+      bundle,
+    });
+
+    expect(step.progress?.completed_tasks).toBe(1);
+    expect(step.progress?.pending_tasks).toBe(2);
+    const workload = JSON.parse(
+      await readFile(step.artifact_paths.host_workload!, "utf8"),
+    ) as { work_items: Array<{ id: string }> };
+    expect(workload.work_items.map((item) => item.id)).toEqual([
+      "task-a",
+      "task-c",
+    ]);
+  });
+
   it("emits stable workload bytes when the same pending run is rendered again", async () => {
-    const { root, artifactsDir, activeReviewRun } = await fixture();
+    const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
     const first = await renderSemanticReviewStep({
       root,
       artifactsDir,
       activeReviewRun,
+      bundle,
     });
     const firstBytes = await readFile(first.artifact_paths.host_workload!, "utf8");
     const second = await renderSemanticReviewStep({
       root,
       artifactsDir,
       activeReviewRun,
+      bundle,
     });
     expect(await readFile(second.artifact_paths.host_workload!, "utf8")).toBe(
       firstBytes,

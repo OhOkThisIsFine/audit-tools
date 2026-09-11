@@ -55,6 +55,7 @@ import type {
   AuditHostIngestIssue,
   AuditIngestIssueCode,
 } from "../../validation/ingestIssueCodes.js";
+import { reviewWaveClosedPath } from "../../io/runArtifacts.js";
 
 // v1alpha2 (the emitted-lane demand ranking): each work item's `metadata`
 // carries the shared `demand` ranking (size / complexity / risk) beside its
@@ -69,6 +70,8 @@ const RESULT_MAP_CONTRACT_VERSION = "audit-host-result-map/v1alpha1" as const;
 const RESULT_CONTRACT_VERSION = "audit-host-result/v1alpha1" as const;
 const TASK_BINDINGS_CONTRACT_VERSION =
   "audit-host-task-bindings/v1alpha1" as const;
+const REVIEW_WAVE_CLOSED_CONTRACT_VERSION = "audit-review-wave-closed/v1alpha1";
+
 const ACCEPTED_RESULTS_CONTRACT_VERSION =
   "audit-host-accepted-results/v1alpha1" as const;
 
@@ -603,30 +606,43 @@ export async function prepareAuditHostHandoff(params: {
   await mkdir(paths.resultDir, { recursive: true });
   await writeJsonFile(paths.taskBindingsPath, taskBindings);
 
-  // The already-satisfied filter READS the ledger and the rewrite WRITES it, so
-  // both sit inside the one acquisition — a prepare that snapshotted before a
-  // concurrent ingest's additions must not replace them with its stale copy, and
-  // it must not re-ask for a lane that ingest has meanwhile satisfied.
+  // Say out loud whether this wave has drained. The caller hands in the run's
+  // still-OWED partition, so an EMPTY one is the wave's own statement that every
+  // work item it published has been accepted — and that is the only evidence
+  // there is: from the review-run resolution, a fully-accepted wave and a wave
+  // with one lane still out look identical (both are "fewer pending than
+  // published"). The next wave's identity is derived from this, so it is written
+  // where the run itself lives and never inferred. A comment stating this does
+  // NOT survive; the marker is what does.
+  await writeJsonFile(reviewWaveClosedPath(params.artifactsDir, params.runId), {
+    contract_version: REVIEW_WAVE_CLOSED_CONTRACT_VERSION,
+    run_id: params.runId,
+    closed: allWorkItems.length === 0,
+  });
+
+  // What is PUBLISHED is every task this caller handed in. This boundary does
+  // not suppress work items the accepted ledger names, and deliberately so —
+  // the ledger records what ARRIVED, it never decides what is still OWED.
+  //
+  // A suppression filter used to sit here, keyed on the whole accepted set. It
+  // read as "do not re-ask for work already delivered", but the set it consulted
+  // was historical: a task that was accepted, re-planned, and is pending again
+  // stayed suppressed forever, so a re-opened item was silently invisible to
+  // replay — the one failure mode the ingest's own dedupe (fresh, per-binding,
+  // `bindingIdentity` over work item × prompt digest) already covers correctly.
+  // The ledger read and its paired rewrite still sit inside the one
+  // acquisition: a prepare that snapshotted before a concurrent ingest's
+  // additions must not replace them with its stale copy.
   return withAcceptedResultsLock(paths, params.logger, async (accepted) => {
-    const acceptedBindings = new Set(accepted.entries.map(bindingIdentity));
-    const workItems = allWorkItems.filter(
-      (item) =>
-        !acceptedBindings.has(
-          bindingIdentity({
-            work_item_id: item.id,
-            prompt_sha256: item.prompt.sha256,
-          }),
-        ),
-    );
     const workload: AuditHostWorkload = {
       contract_version: WORKLOAD_CONTRACT_VERSION,
       run_id: params.runId,
-      work_items: workItems,
+      work_items: allWorkItems,
     };
     const resultMap: AuditHostResultMap = {
       contract_version: RESULT_MAP_CONTRACT_VERSION,
       run_id: params.runId,
-      entries: workItems.map((item) => ({
+      entries: allWorkItems.map((item) => ({
         work_item_id: item.id,
         prompt_sha256: item.prompt.sha256,
         result_path: item.result_path,
