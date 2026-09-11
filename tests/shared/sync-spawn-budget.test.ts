@@ -65,11 +65,21 @@ describe("the sync-spawn ledger records what it claims to", () => {
       "the wrapper must record one row per sync spawn, or the gate over it is vacuous",
     ).toBeGreaterThan(before);
 
-    const last = after[after.length - 1]!;
-    expect(last.command).toContain(process.execPath);
-    expect(typeof last.ms).toBe("number");
-    expect(last.ms).toBeGreaterThanOrEqual(0);
-    expect(last.file, "each row must name the test file that spawned it").toMatch(/\.test\.ts$/);
+    // The ledger is RUN-scoped and every worker appends to it, so the newest row
+    // can belong to a concurrent test file: CI shard 1 once read a parallel
+    // `git config` spawn there. Find THIS spawn's row among the new rows instead.
+    const mine = after
+      .slice(before)
+      .find(
+        (row) =>
+          /sync-spawn-budget\.test\.ts$/.test(row.file) && row.command.includes(process.execPath),
+      );
+    expect(
+      mine,
+      "the new rows must include this spawn, attributed to the test file that spawned it",
+    ).toBeDefined();
+    expect(typeof mine!.ms).toBe("number");
+    expect(mine!.ms).toBeGreaterThanOrEqual(0);
   });
 
   it("the budget predicate separates an over-budget row from the rest — non-vacuous self-check", () => {
