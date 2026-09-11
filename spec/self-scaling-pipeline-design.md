@@ -10,7 +10,7 @@ contracts → seam → finalize → critique → obligation-ledger → cyclic-se
 → assessment → counterexample → judge(+repair) → impl-DAG → review → dispatch → triage → close)
 applies the **same full ceremony to every input regardless of size or risk** — that makes a
 one-line log-removal cost roughly the same orchestration as a
-concurrency-correctness change. A separate `leanFastPath` that *skipped*
+concurrency-correctness change. A separate `leanFastPath` <!-- symbol-citation-exempt: names a design this document REJECTS; never implemented --> that *skipped*
 the whole design ceremony for pre-vetted structured-audit findings was the wrong shape: too
 trusting (remediation routinely re-finds errors in audit conclusions), too narrow in scope
 (document/backlog input could not reach it), and structurally-forked (a separate

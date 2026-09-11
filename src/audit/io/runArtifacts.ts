@@ -75,7 +75,7 @@ function normalizeRunIdSegment(value: string | null): string {
 /**
  * FROZEN MIGRATION READER — the retired clock-minted run id.
  *
- * `buildRunId` mints `<UTC timestamp>_<obligation>_<3-digit index>` and is
+ * The retired clock minter produced `<UTC timestamp>_<obligation>_<3-digit index>` and was
  * deleted with this change, so this pattern describes an artefact of the past
  * that can no longer change; it has nothing to drift FROM. It exists only so a
  * run an earlier build published can be recognized as one and ADOPTED rather

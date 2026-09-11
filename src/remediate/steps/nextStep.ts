@@ -1434,6 +1434,7 @@ async function handlePendingExtractedPlan(
   // that a plan had been destroyed or that findings had been dropped.
   runLogger: RunLogger,
 ): Promise<ExtractedPlanOutcome> {
+  // <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
   // The discard-and-re-extract recovery below covers EXACTLY the region whose
   // failures mean the extracted PLAN is unusable: normalization and grounding.
   // It deliberately stops there. Everything after it — sizing, the dirty

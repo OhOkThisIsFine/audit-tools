@@ -5,11 +5,19 @@ import { collectGraphEdges, normalizeGraphPath } from "./graph/graphPaths.js";
 /**
  * Continuity scoring (context-efficiency access-memory track, increment 2b/2d).
  *
- * SINGLE-SOURCED in `audit-tools/shared` so BOTH orchestrators consume the
+ * SINGLE-SOURCED in `audit-tools/shared` so BOTH orchestrators can consume the
  * identical scorer — the auditor/remediator mirroring the harvest core
- * (`deriveAccessMemoryFromEvents`) already established. Audit re-exports
- * `computeContinuityScores` (thin adapter, byte-identical) and biases review-
- * packet ORDERING with it; remediate biases file-ownership sub-wave admission.
+ * (`deriveAccessMemoryFromEvents`) already established. It is the ONE home for
+ * the algorithm, and today the seam is REAL but UNUSED: the audit
+ * `reviewPackets` builder carries an optional `continuityScores` input and
+ * `continuityMassForPaths` is how a caller applies one, but no production call
+ * site passes either — the only consumer of this module is the shared barrel.
+ * So the ORDERING described below is a capability the seam provides, not a bias
+ * audit or remediate currently applies. (The former claim here — that audit
+ * re-exported `computeContinuityScores` and biased review-packet ORDERING with
+ * it, and that remediate biased file-ownership sub-wave admission — was false
+ * at HEAD; the wiring was retired with the execution substrate and the header
+ * outlived it.)
  *
  * Turns the per-run `access_memory.json` record (which files earlier steps
  * covered/edited, with step-ordinal recency) into a per-file continuity score

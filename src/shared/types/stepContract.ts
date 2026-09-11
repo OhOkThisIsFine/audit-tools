@@ -5,6 +5,7 @@ import { compareCodeUnits } from "../compareCodeUnits.js";
 export const StepStatusSchema = z.enum(["ready", "blocked", "complete"]);
 export type StepStatus = z.infer<typeof StepStatusSchema>;
 
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 // ── The emitted-lane DEMAND RANKING ─────────────────────────────────────────
 //
 // Every lane a step contract emits — an audit review task, a remediation work

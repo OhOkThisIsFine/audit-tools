@@ -1,3 +1,4 @@
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 // Canonical machine contract for audit findings — the shape that flows from the
 // auditor's `audit-findings.json` into the remediator. Before Phase 0 `Finding`
 // was redefined in each package; this is the single source of truth. The
@@ -29,6 +30,7 @@ export type FindingSeverity = z.infer<typeof FindingSeveritySchema>;
 export const FindingConfidenceSchema = z.enum(["high", "medium", "low"]);
 export type FindingConfidence = z.infer<typeof FindingConfidenceSchema>;
 
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * Which producer CONTRACT a finding came from, named by the one difference that
  * matters downstream: whether that contract carries an `evidence` array.

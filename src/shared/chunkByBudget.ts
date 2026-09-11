@@ -1,3 +1,4 @@
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * Generic greedy token/size-budget chunker. Independently duplicated
  * "accumulate items into `current`, flush when adding the next one would
@@ -30,6 +31,7 @@ export interface ChunkByBudgetOptions<T> {
   budget: number;
   /** Optional max item count per chunk. 0/undefined disables the count check. */
   maxItems?: number;
+  // <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
   /**
    * When supplied and it returns true for `item` (given `current` BEFORE this
    * item is considered), `current` is flushed (if non-empty) and `item` is

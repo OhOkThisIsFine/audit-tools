@@ -26,8 +26,8 @@ export interface LensDefinition {
 }
 
 /** Single source of truth for all lens metadata. Adding or renaming a lens
- * requires a single edit here; `ALL_LENSES`, `ENABLED_LENSES`, and
- * `LENS_ORDER` (in auditTaskUtils) are all derived from this registry. */
+ * requires a single edit here; `ALL_LENSES` (below) and `LENS_ORDER` (in
+ * auditTaskUtils) are both derived from this registry. */
 export const LENS_REGISTRY: readonly LensDefinition[] = [
   { id: "security",           display_name: "Security",           order_weight: 10, default_enabled: true },
   { id: "correctness",        display_name: "Correctness",        order_weight: 20, default_enabled: true },

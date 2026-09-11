@@ -1,3 +1,4 @@
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * The closing-action vocabulary shared by the remediation plan
  * (`candidate_closing_actions`), the closing plan (`action`), and the intent

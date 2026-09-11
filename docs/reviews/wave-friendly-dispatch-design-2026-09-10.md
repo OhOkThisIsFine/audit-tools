@@ -1,4 +1,5 @@
 # Design gate — wave-friendly host dispatch (2026-09-10)
+<!-- review-routing: no-forward-work -->
 
 Packet P26b, design lane. Closes the forward-track entry *"Wave-friendly host dispatch: run identity
 survives partial ingest"* and narrows the durable-trap entry *"Each `dispatch_review` `next-step`

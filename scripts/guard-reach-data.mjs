@@ -79,6 +79,11 @@ import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror
  *            tracked file `path` (default docs/fixture.md), with `extraFiles`
  *            and `fixtureDirs` beside it and `env` set ($FIXTURE_ROOT expands);
  *            expect a non-zero exit whose output contains `expect`.
+ *            Set `advisory: true` when the guard reports the form and exits 0 —
+ *            a WARNING the guard cannot fail on, because the fix belongs to a
+ *            boundary it does not own (the spec-symbol leg: a constitutional
+ *            spec is escalate-only, PH-05). The form must still be recognized;
+ *            the assertion is exit 0 + `expect` present, never "no output".
  *   export — import `module`, call `exportName` per `call` — `text`: fn(sample);
  *            `file-content`: fn(fixturePath, sample); `sources-map`:
  *            fn(new Map([[fixturePath, sample]])) — expect a non-empty result.
@@ -91,6 +96,7 @@ import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror
  *   test   — the form is pinned by the dedicated harness test `test`; the
  *            declared sample must still appear in it.
  * @property {string} [expect]
+ * @property {boolean} [advisory] the guard reports this form but exits 0
  * @property {string} [script]
  * @property {string} [path]
  * @property {Record<string,string>} [env]
@@ -315,6 +321,12 @@ export const GUARDS = [
       { name: 'backticked path citation', drive: 'script', script: 'scripts/check-doc-code-citations.mjs',
         sample: 'the reader lives in `src/does-not-exist.ts`', extraFiles: { 'src/present.ts': 'export {};\n' },
         expect: 'does-not-exist.ts' },
+      // The spec SYMBOL leg — a warning at exit 0, so the expect string is the
+      // advisory's own text; `src/present.ts` keeps `src/` a real top-level dir.
+      { name: 'dangling symbol citation in spec/', drive: 'script', script: 'scripts/check-doc-code-citations.mjs',
+        sample: 'A separate `leanFastPath` was the wrong shape.\n', path: 'spec/design.md',
+        extraFiles: { 'src/present.ts': 'export {};\n' }, advisory: true,
+        expect: 'name nothing the tree declares' },
     ],
     impl: 'check:doc-code-citations',
     preCommit: 'reach',
@@ -326,11 +338,21 @@ export const GUARDS = [
       'scripts/shared/runtime-artifact-names.generated.mjs are skipped) — fix the citation, cite the ' +
       'full path, or add a doc-citation-exempt marker',
     note:
+      'THREE rules, and their scopes differ deliberately: path resolution over the manifest set, the ' +
+      'line-anchor refusal over every tracked doc outside the runtime state dirs, and — new 2026-09-10 ' +
+      '— the spec-symbol leg over spec/** only, which PRINTS a dangling backticked symbol and exits 0 ' +
+      '(a constitutional spec is escalate-only, so only an owner may resolve one; a red would enforce ' +
+      'at a boundary this gate does not own, PH-05). ' +
       'uncovered halves, declared: unbackticked path mentions in prose/tables (the P29 glossary case) ' +
       'are out of scope; bare names with a leading dot or dash (.gitignore/.npmrc — extension-mention ' +
-      'idiom) and bare names whose extension no tracked file uses go unchecked; slashed tokens with no ' +
+      'idiom) and bare names whose extension no TRACKED file uses go unchecked (the extension census ' +
+      'reads tracked + index only, so an untracked scratch file cannot change which citations are ' +
+      'examined); slashed tokens with no ' +
       'extension and no trailing slash, and backslashed Windows-path prose, are skipped; gitignored and ' +
-      'non-repo (~/drive/URL) citations are out of scope by construction (2026-08-18)',
+      'non-repo (~/drive/URL) citations are out of scope by construction; the symbol leg reads only ' +
+      'spec/**, only un-slashed extension-less identifiers in one of two spellings, and takes a ' +
+      '`symbol-citation-exempt:` marker for a record naming a retired mechanism ' +
+      '(2026-08-18; extension-census source narrowed 2026-09-10)',
   },
   {
     id: 'check:gate-enumeration',
@@ -646,6 +668,32 @@ export const GUARDS = [
       'drifted number to the nearest declaration (dropping the number beats false precision)',
   },
   {
+    id: 'check:review-routing',
+    kind: 'gate',
+    forms: [
+      { name: 'routing declaration in a review record', drive: 'export', module: 'scripts/check-review-routing.mjs',
+        exportName: 'findRoutingDeclarations', call: 'text',
+        sample: '<!-- review-routing: backlog-bugs -->' },
+    ],
+    impl: 'check:review-routing',
+    preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
+    fix:
+      'a review record added since this mechanism landed carries no routing declaration — add ' +
+      '`<!-- review-routing: <row> -->` in its first lines, naming a row from ' +
+      'scripts/review-routing-data.mjs; a record whose analysis produced no work declares ' +
+      '`no-forward-work` explicitly rather than by omitting the line',
+    note:
+      'A record is a RATCHET, not each record. 73 dated records predate the mechanism and sit on the ' +
+      'declared-debt baseline (docs/reviews/.routing-baseline.json), which only SHRINKS: a declared ' +
+      'record still listed there is a RED, as is a baseline path that no longer exists. Uncovered, ' +
+      'declared: the gate checks the declaration EXISTS and names a live row — it cannot check that ' +
+      'the author picked the TRUE row, because whether a prose analysis identified work is the ' +
+      'semantic judgment that made the obvious "every review is cited from somewhere" gate wrong ' +
+      '(it reds a dogfood log and a measurement record, and a false red gets a gate disabled). A ' +
+      'baselined record is announced in the pass line, never silently exempt (2026-09-10)',
+  },
+  {
     id: 'check:memory-citations',
     kind: 'gate',
     forms: [
@@ -660,19 +708,35 @@ export const GUARDS = [
       { name: 'wikilink between memories', drive: 'script', script: 'scripts/check-memory-citations.mjs',
         sample: 'related: [[this-note-does-not-exist]]', path: 'memory/fixture-note.md',
         env: { AUDIT_TOOLS_MEMORY_DIR: '$FIXTURE_ROOT/memory' }, expect: 'this-note-does-not-exist' },
+      // The third direction: a NOTE citing a repo path. The fixture repo carries
+      // `src/` so `src/does-not-exist.ts` is a repo-shaped token, not prose.
+      { name: 'note citing a repo path that is gone', drive: 'script', script: 'scripts/check-memory-citations.mjs',
+        sample: 'the reader was `src/does-not-exist.ts` then', path: 'memory/fixture-note.md',
+        extraFiles: { 'src/present.ts': 'export {};\n' },
+        env: { AUDIT_TOOLS_MEMORY_DIR: '$FIXTURE_ROOT/memory' }, expect: 'does-not-exist.ts' },
     ],
     impl: 'check:memory-citations',
     preCommit: 'reach',
     writeTime: { scope: 'file', maxMs: 1000 },
-    fix: 'a staged doc cites a memory file that does not exist — fix the citation or restore the memory file',
+    fix:
+      'a staged doc cites a memory file that does not exist, or a memory note cites a repo path ' +
+      'that does not resolve — fix the citation, restore the file, or (for a note whose point is ' +
+      'that a subsystem was DELETED) put `<!-- memory-path-exempt: <what that path was> -->` on ' +
+      'the line above it',
     note:
-      'the store is resolved from the REPOSITORY (its common git dir), so every linked worktree ' +
-      'reaches its main checkout store — a cwd-derived slug made this gate inert in every lap ' +
-      'worktree and ticked the skip (2026-08-30); uncovered half: a store that cannot be found ' +
-      'is a non-tick warning at exit 0, never a RED, because a fresh CI clone genuinely has none, ' +
-      'so an authoring machine whose store MOVED is announced but not failed; generated ' +
-      'deliverable renders (.audit-tools/audit-report.md, remediation-report.md) are excluded — ' +
-      'their worker-authored prose may quote citation-shaped text (2026-08-18)',
+      'ALL THREE DIRECTIONS, and the roster is stated here rather than implied: doc → memory ' +
+      '(`memory: <name>`), memory → memory (`[[name]]`), and memory → repo PATH (the direction ' +
+      'scanned by nothing until 2026-09-10 — the previous row declared the [[name]] half ' +
+      'uncovered, which the script had already closed, while saying nothing about the path ' +
+      'direction it had not). Uncovered halves, declared: a store that cannot be found is a ' +
+      'non-tick warning at exit 0, never a RED, because a fresh CI clone genuinely has none, so ' +
+      'an authoring machine whose store MOVED is announced but not failed; the path leg needs an ' +
+      'exemption marker for deliberate archaeology and skips globs, `<placeholders>`, ' +
+      'non-repo tokens and gitignored paths by rule, so a note citing a DELETED path inside a ' +
+      'glob or a bare filename (no slash) goes unchecked; generated deliverable renders ' +
+      '(.audit-tools/audit-report.md, remediation-report.md) are excluded — their worker-authored ' +
+      'prose may quote citation-shaped text (2026-08-18; store-resolution note 2026-08-30; path ' +
+      'direction 2026-09-10)',
   },
   {
     id: 'check:version-gates',
@@ -1457,6 +1521,84 @@ export const GUARDS = [
       'lines for 3+ canonical token enumerations. Uncovered: comments naming 1-2 tokens (accepted ' +
       'as topical discussion rather than enumeration) and non-.ts files are outside the scan',
   },
+  {
+    id: 'check:doc-test-consumers',
+    kind: 'gate',
+    forms: [
+      // The map recognises a STAGED DOC as one whose consumers must be named.
+      { name: 'a staged doc with declared test consumers', drive: 'export', module: 'scripts/check-doc-test-consumers.mjs',
+        exportName: 'describeStagedHits', call: 'text', sample: 'docs/HANDOFF.md',
+        expect: 'docs/HANDOFF.md → asserts:' },
+    ],
+    impl: 'check:doc-test-consumers',
+    // No reach semantics: it validates a repo-wide MAP and surfaces it for the
+    // staged docs. A staged-path trigger would make the map's own rows the only
+    // thing that fires it, which is not what it checks.
+    preCommit: false,
+    fix:
+      'the declared doc → test consumer map names a doc or test that is not tracked, a duplicate doc, ' +
+      'a row with no consumer, or a row with no `what` — fix the row in ' +
+      'scripts/doc-test-consumers-data.mjs, or drop it and declare the doc UNCLAIMED',
+    note:
+      'A map plus a stderr SURFACE, never an enforcement. When a mapped doc is staged the map is ' +
+      'printed with the tests that assert it (`--staged`), so the editor is handed the list without ' +
+      'grepping — which is the cost the record names (a nightly-routine.md edit green through every ' +
+      'local doc gate, red in release CI on a parity test that pinned the retired helper, burning tag ' +
+      'v0.34.40). Uncovered, declared: it does NOT check that the named tests still ASSERT the doc, nor ' +
+      'that an unmapped doc is uncovered — it is only UNCLAIMED. Both need assertion-level provenance ' +
+      '(which string in a test came from which doc), the undecidable class the acquired-analyzer ' +
+      'boundary already declares, so the map is CURATED and only its SHAPE is checked (2026-09-10)',
+  },
+  {
+    id: 'doc-test-consumers-map-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/doc-test-consumers-gate.test.ts',
+    note:
+      'P09: pins the map check itself — a row must name a tracked doc, tracked tests, and a `what`; ' +
+      'duplicates are refused, because a second row for one doc is how a map grows two answers',
+  },
+  {
+    id: 'review-routing-gate-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/review-routing-gate.test.ts',
+    forms: [
+      { name: 'routing declaration recognized', drive: 'export', module: 'scripts/check-review-routing.mjs',
+        exportName: 'findRoutingDeclarations', call: 'text',
+        sample: '<!-- review-routing: no-forward-work -->' },
+    ],
+    note:
+      'P09: `docs/reviews/` records are the analysis surface no gate reconciled against a work queue, ' +
+      'so a review could identify a whole program and reach nothing. The mechanism is an author-written ' +
+      'declaration checked for existence and shape, with pre-mechanism records on a shrinking ' +
+      'declared-debt baseline. Uncovered: the gate cannot tell whether the author picked the TRUE row',
+  },
+  {
+    id: 'comment-symbol-drift-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/comment-symbol-drift.test.ts',
+    forms: [
+      { name: 'comment citing a symbol the tree does not declare', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'backtickedSymbolsInComments', call: 'text',
+        sample: '// the reader is `goneForeverHelper` and the set is `GONE_FOREVER_SET`' },
+    ],
+    note:
+      'P09: a COMMENT naming a backticked symbol was gated by nothing — DOCS are covered by ' +
+      'check:doc-code-citations and LINKS by check:doc-links, so a comment could keep describing a ' +
+      'symbol the tree had renamed or deleted (the 2026-08-31 finding: continuityScore.ts claimed ' +
+      'audit re-exported computeContinuityScores and biased packet ORDERING with it, long after that ' +
+      'wiring was gone). Resolution is against identifiers, FIELD/MEMBER names, static member ' +
+      'access, string literals, and module basenames declared anywhere in the tracked tree. ' +
+      'UNCOVERED HALF, two directions and neither is "nothing could have noticed". (1) A comment ' +
+      'stating a workflow SHAPE names no identifier, so no text rule reaches it — the two P50-era ' +
+      'category comments are that class and were reconciled by editing them, not by this gate. ' +
+      '(2) A symbol that ALSO appears as a NON-comment token in the same file is skipped, because a ' +
+      'comment referencing the symbol its own file declares is self-evidencing and needs no ' +
+      'cross-tree lookup — the continuityScore case above is exactly that shape (the name survived ' +
+      'as a declaration in its own module while the header described deleted WIRING), so THIS GATE ' +
+      'WOULD NOT HAVE CAUGHT IT either. Also excluded: a host-global camelCase API ' +
+      '(structuredClone, setInterval) by a closed list in the recognizer. Covered by an inline ' +
+      'marker: `comment-symbol-exempt:` reaching the rest of its comment block, for deliberate ' +
+      'archaeology',
+  },
 ];
 
 /** @type {ReachRow[]} */
@@ -1729,6 +1871,18 @@ export const REACH = [
       'the four whole-corpus doc gates (memory-citations scans every tracked *.md for memory-file ' +
       'cites); backlog, HANDOFF and README are additionally claimed by ' +
       'their own precise rows below',
+  },
+  {
+    area: 'review-record routing',
+    // The records themselves are already claimed by `**/*.md`; what this row
+    // adds is the DECLARATION each one must carry and the baseline the ratchet
+    // reads. A record with no declaration is what the gate exists to catch.
+    files: ['docs/reviews/**', 'docs/reviews/.routing-baseline.json', 'scripts/review-routing-data.mjs'],
+    guardedBy: ['check:review-routing', 'review-routing-gate-test'],
+    uncovered:
+      'the declaration is checked for EXISTENCE and for naming a live row — never for truth, ' +
+      'because whether a prose analysis identified work is a semantic judgment; a baselined ' +
+      'pre-mechanism record is announced in the pass line rather than silently exempt',
   },
   {
     area: 'hooks',

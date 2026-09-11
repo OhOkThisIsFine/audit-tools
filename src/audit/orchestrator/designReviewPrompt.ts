@@ -443,9 +443,11 @@ function conceptualCritiqueInstructions(): string[] {
  * had to be special-cased or skipped for design-review packets; the object
  * envelope is universally emittable and matches every other host-gate
  * submission. The design-review ingest
- * (`consumeArrayIncoming`) tolerantly unwraps the single `findings` array, so
- * the shape round-trips. `categoryEnum` is the per-pass category field (the one
- * line that differs between the contract / conceptual / combined passes).
+ * (`unwrapSubmissionArray`) tolerantly unwraps the single `findings` array, so
+ * the shape round-trips. `categoryEnum` is the per-pass category field — the one
+ * line that differs between the TWO passes the tool runs: the contract pass
+ * (`renderContractReviewPrompt`) and the conceptual pass
+ * (`CONCEPTUAL_FINDING_CATEGORIES`).
  */
 function findingsEnvelopeExample(
   categoryEnum: string,

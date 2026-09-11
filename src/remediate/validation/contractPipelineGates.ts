@@ -560,6 +560,7 @@ export function isTestablePhaseObligation(kind: string): boolean {
   return true;
 }
 
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * OBL-CO-01 / DC-5 — paired-obligation gate (fail-closed, change-scoped).
  *
@@ -2032,6 +2033,7 @@ export async function evaluateContractPipelineCrossGateOutcomes(
 }
 
 // ── (removed) Downstream-only repair propagation — S2, dropped ─────────────────
+// <!-- comment-symbol-exempt: names deliberately-deleted symbols; this block records their removal -->
 // The dead `repairDownstreamPhases` / `CONTRACT_PHASE_SEQUENCE` / `ARTIFACT_NAME_TO_PHASE`
 // were deleted (contract-authoring determinism design, S2). A linear phase-slice
 // ("every phase after the repaired one") is a coarser, AD-HOC re-run authority that

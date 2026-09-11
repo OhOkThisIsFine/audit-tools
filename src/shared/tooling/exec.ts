@@ -219,6 +219,7 @@ export function describeDeadlineMiss(
   );
 }
 
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 // --- cmd.exe quoting helpers ---
 //
 // There are two distinct contexts in which a token must be quoted for cmd.exe,
@@ -436,6 +437,7 @@ function wrapForWindowsBatch(
   };
 }
 
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * Quote a single argv token for embedding in a full command-line *string*
  * that `cmd.exe /c` will interpret as a shell command.

@@ -1,3 +1,4 @@
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * The ONE per-item host-submission scan both ingests draw from.
  *

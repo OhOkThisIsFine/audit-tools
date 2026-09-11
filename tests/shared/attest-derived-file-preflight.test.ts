@@ -362,6 +362,22 @@ describe("subject-keyed pin legs oblige the tests that assert about a staged sub
     expect(leg?.testPath).toBe("tests/shared/precommit-leg-derivation.test.ts");
   });
 
+  it("staging a MAPPED contract-bearing doc obliges the tests the map names — the projection is live", () => {
+    // The doc → test consumer map answers "which test asserts this doc's
+    // content?" at CONFIGURATION time, where there is no subject to oblige; the
+    // pin graph is what has a subject. So `PINS` is PROJECTED from the map, and
+    // this case is what makes that projection mechanical rather than a comment:
+    // without it the map is a repo-wide shape check that names tests nothing
+    // ever runs when the doc it maps is the thing being edited.
+    const root = makeFixture();
+    const ids = triggeredIds(root, ["docs/HANDOFF.md"]);
+    expect(ids).toContain("pin:tests/shared/handoff-roadmap.test.ts");
+    const leg = buildPreCommitLegs({}).find(
+      (l) => l.id === "pin:tests/shared/handoff-roadmap.test.ts",
+    );
+    expect(leg?.pinSubject).toBe("docs/HANDOFF.md");
+  });
+
   it("staging an UNPINNED file fires no pin leg — the obligation stays narrow", () => {
     const root = makeFixture();
     const ids = triggeredIds(root, ["src/audit/orchestrator/advance.ts"]);

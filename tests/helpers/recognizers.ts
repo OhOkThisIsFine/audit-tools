@@ -47,6 +47,148 @@ export function enumeratingCommentLines(
   return hits;
 }
 
+// ── comment-symbol-drift ─────────────────────────────────────────────────────
+
+/**
+ * Identifier-shaped tokens a COMMENT cites in backticks — the ones a rename or
+ * a deletion can strand.
+ *
+ * The rule this feeds: a comment that names a symbol must be reconciled against
+ * the code it describes. It was previously gated by NOTHING, which is exactly
+ * how `src/shared/continuityScore.ts`'s header went on claiming that audit
+ * re-exported `computeContinuityScores` and biased review-packet ORDERING with
+ * it long after the wiring was deleted — and `check-doc-code-citations` scans
+ * DOCS, never comments, so no gate was even in a position to notice.
+ *
+ * Deliberately NARROW, because a comment is prose and the cost of a false red is
+ * a gate nobody trusts. The exclusions are RULES, never a hand-list:
+ *   • only backticked spans on a comment line (`//`, `*`, `/*`);
+ *   • only bare identifiers — dotted, slashed, or quoted forms are a path or a
+ *     member access, not a symbol this module could look up;
+ *   • only names in one of the two spellings a SYMBOL actually takes: a
+ *     compound ALL_CAPS constant (`STALE_LOCK_MS`) or a lowerCamelCase
+ *     identifier (`voiQueue`, `renderConceptualReviewPrompt`). Prose words
+ *     (`findings`), JS built-ins (`NaN`, `RangeError`), errno codes (`ENOENT`)
+ *     and short device names (`COM1`) are single capitalised tokens, so they
+ *     match neither spelling. A camelCase HOST GLOBAL (`structuredClone`,
+ *     `setInterval`) does match, so those are excluded by an explicit name set
+ *     rather than by shape — a finite, stable list of platform APIs, which is
+ *     exactly the kind of thing a list IS right for;
+ *   • never a name that also appears as a NON-comment token in the same file —
+ *     a comment referencing the symbol its own file declares is self-evidencing
+ *     and needs no cross-tree lookup.
+ *
+ * This returns CANDIDATES, not verdicts: the caller applies the resolution rule
+ * (is this name exported anywhere in the tree?). Keeping the predicate in the
+ * caller is what lets the same recognizer drive both the whole-tree guard and a
+ * text-only shape check, which is how P51's form-reach data drives it.
+ *
+ * What this still CANNOT catch, declared rather than implied: a comment that
+ * states a workflow SHAPE (which pass runs first, how many lanes exist) names no
+ * identifier, so no text rule reaches it — those are the cases the reconciliation
+ * is honest about not covering. And the exclusion of names appearing in the same
+ * file's code means a comment can cite a symbol the file MENTIONS but no longer
+ * declares without this firing; the export rule is what makes that rare, since a
+ * genuinely-deleted import would take the mention with it.
+ */
+/** Same exemption idiom as the doc gates: explicit, inline, never inferred from prose. */
+export const COMMENT_SYMBOL_EXEMPT = /comment-symbol-exempt:/;
+
+/**
+ * camelCase HOST GLOBALS — platform APIs a comment may name as prose. A closed,
+ * stable list of the runtime's own surface, not of this repo's symbols; a name
+ * in here is never a citation to something the tree is supposed to declare.
+ */
+export const HOST_GLOBALS: ReadonlySet<string> = new Set([
+  "structuredClone",
+  "setInterval",
+  "clearInterval",
+  "setTimeout",
+  "clearTimeout",
+  "queueMicrotask",
+  "requestAnimationFrame",
+  "process",
+  "require",
+]);
+
+/**
+ * Comment-line indices an exemption marker covers: the marked line, and every
+ * comment line after it in the same contiguous block.
+ *
+ * The block reach is what makes ONE marker enough for the class this exists for
+ * — a comment recording that symbols were DELETED names several of them across
+ * several lines, and a citation to a correctly-absent symbol is not drift. The
+ * reach stops at the first non-comment line so a marker can never silently
+ * exempt an unrelated comment further down the file.
+ */
+function exemptLines(lines: readonly string[]): Set<number> {
+  const isComment = (line: string) => {
+    const trimmed = line.trim();
+    return trimmed.startsWith("*") || trimmed.startsWith("//") || trimmed.startsWith("/*");
+  };
+  const exempt = new Set<number>();
+  let open = false;
+  lines.forEach((raw, index) => {
+    const comment = isComment(raw);
+    if (!comment) {
+      open = false;
+      return;
+    }
+    if (COMMENT_SYMBOL_EXEMPT.test(raw)) open = true;
+    if (open) exempt.add(index);
+  });
+  return exempt;
+}
+
+export function backtickedSymbolsInComments(
+  text: string,
+): { line: number; text: string; symbol: string }[] {
+  const hits: { line: number; text: string; symbol: string }[] = [];
+  const lines = text.split(/\r?\n/);
+  const exempt = exemptLines(lines);
+  const codeTokens = new Set<string>();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const isComment =
+      trimmed.startsWith("*") || trimmed.startsWith("//") || trimmed.startsWith("/*");
+    if (isComment) continue;
+    for (const match of line.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) codeTokens.add(match[0]);
+  }
+  lines.forEach((raw, index) => {
+    const trimmed = raw.trim();
+    const isComment =
+      trimmed.startsWith("*") || trimmed.startsWith("//") || trimmed.startsWith("/*");
+    if (!isComment) return;
+    // Deliberate ancient-history prose: a comment SAYING a symbol used to live
+    // here and was superseded names something that is correctly absent, and
+    // reddening it would force the history out of the comment that exists to
+    // record it. Same class, same fix, as the doc gates' inline marker.
+    if (exempt.has(index)) return;
+    for (const match of raw.matchAll(/`([^`\n]+)`/g)) {
+      const token = match[1].trim();
+      if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(token)) continue;
+      // A compound ALL_CAPS constant (`STALE_LOCK_MS`, `CONCEPTUAL_FINDING_
+      // CATEGORIES`) or a lowerCamelCase identifier. A single-token capitalised
+      // word is neither: `NaN`/`RangeError` name JS built-ins, `ENOENT`/
+      // `ENOBUFS`/`ETIMEDOUT` name errno codes, and `COM1` a device — all of
+      // them things a comment may legitimately name as PROSE about a host API,
+      // none a symbol this tree declares. Excluding them by shape needs no list.
+      // BOTH anchored, and the camel arm anchored at BOTH ends: the doc gate's
+      // spec-symbol rule learned this the hard way — `/…[A-Z]/` alone matches a
+      // PREFIX, so a call-shaped example in prose (`writeContractArtifact(...)`,
+      // `deriveNodeFiles(node)`) was reported as a dangling symbol when it is
+      // simply not a citation. The two legs share one spelling rule.
+      const isConstant = /^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(token);
+      const isCamel = /^[a-z_$][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*$/.test(token);
+      if (!isConstant && !isCamel) continue;
+      if (HOST_GLOBALS.has(token)) continue;
+      if (codeTokens.has(token)) continue;
+      hits.push({ line: index + 1, text: trimmed, symbol: token });
+    }
+  });
+  return hits;
+}
+
 // ── sync-spawn-fold-safety ───────────────────────────────────────────────────
 
 // Sync spawn entry points. `runTrackedAsync(` also contains `runTracked` as a

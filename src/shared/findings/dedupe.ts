@@ -131,6 +131,7 @@ export function mergeVerificationStatus(
   return rank(incoming) > rank(existing) ? incoming : existing;
 }
 
+// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * Union `absorbed`'s affected_files into `survivor` (dedup by
  * path:line_start:line_end:symbol), optionally sorting by path then line. Shared by
