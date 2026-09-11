@@ -1,9 +1,9 @@
 {
   "run": {
-    "date": "2026-09-10",
-    "head": "a33bc8d91a7cfeca9fc2be4ba42006d74971c602"
+    "date": "2026-09-11",
+    "head": "5708ef115e6c3ef310145f80ae63f888ba4d294e"
   },
-  "count": 11,
+  "count": 14,
   "items": [
     {
       "id": "docs-dependency-map-analyzer-vocabulary",
@@ -11,7 +11,7 @@
       "path": "spec/audit/dependency-map.md",
       "title": "A constitutional spec still describes the analyzer-capability marker with a vocabulary the code deliberately removed — restate it, or move the code back?",
       "subject_key": "4da5d39fe61a07d4",
-      "nights_open": 2,
+      "nights_open": 3,
       "target": {
         "path": "spec/audit/dependency-map.md"
       }
@@ -22,7 +22,7 @@
       "path": "spec/remediate/remediation-goals.md",
       "title": "The remediation goals document states the report's section order, and the render has two categories that order has no bullet for — widen it, or declare it a minimum?",
       "subject_key": "cde86125b1d4cb83",
-      "nights_open": 2,
+      "nights_open": 3,
       "target": {
         "path": "spec/remediate/remediation-goals.md"
       }
@@ -33,7 +33,7 @@
       "path": "skills/audit-code/audit-code.prompt.md",
       "title": "The audit loader prompt tells the host to record a reflection but never says which file to write it to — name the destination, and pin it in the contract test?",
       "subject_key": "0d8be5dc91cffb42",
-      "nights_open": 2,
+      "nights_open": 3,
       "target": {
         "path": "skills/audit-code/audit-code.prompt.md"
       }
@@ -44,7 +44,7 @@
       "path": "docs/audit-pkg/product.md",
       "title": "Three language/analyzer convictions are stated twice, in different words, across two audit-pkg docs — pick one home?",
       "subject_key": "569ce0323e227c76",
-      "nights_open": 2,
+      "nights_open": 3,
       "target": {
         "path": "docs/audit-pkg/product.md"
       }
@@ -55,7 +55,7 @@
       "path": "spec/self-scaling-pipeline-design.md",
       "title": "The risk-tier collapse rule is stated three times across three specs — reduce two of them to a pointer?",
       "subject_key": "0bd83243c5ea487d",
-      "nights_open": 2,
+      "nights_open": 3,
       "target": {
         "path": "spec/self-scaling-pipeline-design.md"
       }
@@ -66,7 +66,7 @@
       "path": "spec/contract-authoring-determinism-design.md",
       "title": "The conceptual design review's contract is split across two specs — fold section S8 into the review's own design-of-record?",
       "subject_key": "bdf6ba59b50f068a",
-      "nights_open": 2,
+      "nights_open": 3,
       "target": {
         "path": "spec/contract-authoring-determinism-design.md"
       }
@@ -77,7 +77,7 @@
       "path": "spec/audit/artifact-contract.md",
       "title": "Five spec condensation findings recorded last run still stand, and one was routed at the wrong file — apply them as a batch, or keep recording them?",
       "subject_key": "b94dd16a08ac6a08",
-      "nights_open": 2,
+      "nights_open": 3,
       "target": {
         "path": "spec/audit/artifact-contract.md"
       }
@@ -88,7 +88,7 @@
       "path": ".claude/skills/start-lap/SKILL.md",
       "title": "The repository's own /start-lap skill never runs — the global skill of the same name shadows it. Re-home its steps, rename it, or delete it?",
       "subject_key": "e978fad576fb2473",
-      "nights_open": 2,
+      "nights_open": 3,
       "target": {
         "path": ".claude/skills/start-lap/SKILL.md"
       }
@@ -99,20 +99,9 @@
       "path": ".audit-tools/nightly/proposals/INDEX-2026-09-09.md",
       "title": "This run's output was committed to a feature branch rather than the main line — cherry-pick it, wait for the branch, or re-run the whole routine later?",
       "subject_key": "a7ea6748f7fbcd99",
-      "nights_open": 2,
+      "nights_open": 3,
       "target": {
         "path": ".audit-tools/nightly/proposals/INDEX-2026-09-09.md"
-      }
-    },
-    {
-      "id": "backlog-handoff-immediate-next-is-a-chronology",
-      "leg": "backlog",
-      "path": "docs/HANDOFF.md",
-      "title": "docs/HANDOFF.md's Immediate next has become a run chronology — cut it to the next action, or relax the never-a-changelog rule for a benchmark lap?",
-      "subject_key": "1d0c20709c1e1868",
-      "nights_open": 2,
-      "target": {
-        "path": "docs/HANDOFF.md"
       }
     },
     {
@@ -121,9 +110,53 @@
       "path": "docs/backlog/open-bugs.md",
       "title": "Three open-bugs entries put shipped history, an incident report, or a refuted framing ahead of the open half — condense them to mechanism plus open property?",
       "subject_key": "bb4d63e7385554d2",
-      "nights_open": 2,
+      "nights_open": 3,
       "target": {
         "path": "docs/backlog/open-bugs.md"
+      }
+    },
+    {
+      "id": "docs-glossary-omits-a-live-n-idempotency-identifier",
+      "leg": "docs",
+      "path": "docs/glossary-ids.md",
+      "title": "The identifier glossary declares itself the lookup for opaque ids in src/**/*.ts, and N-IDEMPOTENCY is live in two modules with no row — add a row, fold it under INV-CK, or narrow the glossary's claim?",
+      "subject_key": "e3b0d0fda979d8e6",
+      "nights_open": 1,
+      "target": {
+        "path": "docs/glossary-ids.md"
+      }
+    },
+    {
+      "id": "backlog-a2-oracle-parenthetical-cites-a-retired-track",
+      "leg": "backlog",
+      "path": "docs/backlog.md",
+      "title": "The live-validation guide still qualifies the A2 oracle corpus and points at \"Deferred / waiting\", but the A2 track was retired and no such entry exists — delete the parenthetical, or keep the statement without the pointer?",
+      "subject_key": "2684a1913f61a409",
+      "nights_open": 1,
+      "target": {
+        "path": "docs/backlog.md"
+      }
+    },
+    {
+      "id": "backlog-live-run-watch-matrix-names-items-that-resolve-nowhere",
+      "leg": "backlog",
+      "path": "docs/backlog.md",
+      "title": "The live-validation matrix tells a live run which items to watch, and most of the names it lists match no entry in docs/backlog/ — derive the matrix from the entries, or cut it to the rows that resolve?",
+      "subject_key": "e27562eb240b9d55",
+      "nights_open": 1,
+      "target": {
+        "path": "docs/backlog.md"
+      }
+    },
+    {
+      "id": "solutions-unearned-shipped-verdict-authorizes-deletion",
+      "leg": "solutions",
+      "path": "scripts/shared/triage-backlog.mjs",
+      "title": "The backlog sweep may claim an entry SHIPPED while checking nothing, and five nightly runs have re-refuted the same lead by hand — enforce the pairing the module header already states (proposal P65)?",
+      "subject_key": "0d0ed2c10063a01f",
+      "nights_open": 1,
+      "target": {
+        "path": "scripts/shared/triage-backlog.mjs"
       }
     }
   ]

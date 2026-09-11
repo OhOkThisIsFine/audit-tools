@@ -1,0 +1,7 @@
+ok  downgrades already_shipped_or_stale when the premise is unprobed
+ok  downgrades already_shipped_or_stale when the premise is probes_unusable
+ok  downgrades already_shipped_or_stale when the premise is premise_unconfirmed
+ok  keeps already_shipped_or_stale when the premise is holds
+ok  keeps already_shipped_or_stale when the premise is partial
+ok  never rewrites a verdict that does not authorize deletion
+6 passed

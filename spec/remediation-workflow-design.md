@@ -305,8 +305,9 @@ The backend emits every currently eligible DAG node in one
 `remediation-host-workload/v1alpha2` artifact. Eligibility is deterministic: a
 node is emitted only after every dependency and lower phase is verified complete.
 Each work item contains its obligations, declared write scope, complete prompt,
-prompt digest, baseline commit, workload digest, and repository-contained result
-path. Complexity, risk, and token estimates are advisory metadata only.
+prompt digest, baseline commit, and repository-contained result path; the
+workload digest binds the handoff record as a whole. Complexity, risk, and
+token estimates are advisory metadata only.
 
 The host chooses whether to use subagents, branches, or worktrees and whether to
 parallelize mutually eligible items. audit-tools does not create workers, select

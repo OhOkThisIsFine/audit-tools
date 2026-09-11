@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 238 entr(y/ies) indexed.
+> and at commit). 239 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -166,6 +166,7 @@
 - `minor-bugs.md:462` — The repo owns its green mechanism but exposes no way to ASK it, so a lap re-derives the answer by hand (2026-08-30, low, friction: tool_should_decide).
 - `minor-bugs.md:471` — `refuseSuppliedVerificationStatus` cannot fire on the production judge path (2026-09-03, low).
 - `minor-bugs.md:482` — The runtime-artifact-name generator's source list omits two modules that mint runtime names (2026-09-03, low).
+- `minor-bugs.md:494` — The leg-1 scope ledger never prunes entries for deleted documents (2026-09-11, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

@@ -1,0 +1,83 @@
+npm notice run audit-tools@0.51.7 npx
+npm notice run vitest run tests/shared/triage-unearned-shipped-verdict.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools[39m
+
+ [31m❯[39m tests/shared/triage-unearned-shipped-verdict.test.ts [2m([22m[2m6 tests[22m[2m | [22m[31m6 failed[39m[2m)[22m[32m 7[2mms[22m[39m
+[31m   [31m×[31m an unearned shipped verdict is downgraded at revive[2m > [22mdowngrades already_shipped_or_stale when the premise is unprobed[39m[32m 4[2mms[22m[39m
+[31m     → (0 , downgradeUnearnedShippedVerdict) is not a function[39m
+[31m   [31m×[31m an unearned shipped verdict is downgraded at revive[2m > [22mdowngrades already_shipped_or_stale when the premise is probes_unusable[39m[32m 0[2mms[22m[39m
+[31m     → (0 , downgradeUnearnedShippedVerdict) is not a function[39m
+[31m   [31m×[31m an unearned shipped verdict is downgraded at revive[2m > [22mdowngrades already_shipped_or_stale when the premise is premise_unconfirmed[39m[32m 0[2mms[22m[39m
+[31m     → (0 , downgradeUnearnedShippedVerdict) is not a function[39m
+[31m   [31m×[31m an unearned shipped verdict is downgraded at revive[2m > [22mkeeps already_shipped_or_stale when the premise is holds[39m[32m 0[2mms[22m[39m
+[31m     → (0 , downgradeUnearnedShippedVerdict) is not a function[39m
+[31m   [31m×[31m an unearned shipped verdict is downgraded at revive[2m > [22mkeeps already_shipped_or_stale when the premise is partial[39m[32m 0[2mms[22m[39m
+[31m     → (0 , downgradeUnearnedShippedVerdict) is not a function[39m
+[31m   [31m×[31m an unearned shipped verdict is downgraded at revive[2m > [22mnever rewrites a verdict that does not authorize deletion[39m[32m 0[2mms[22m[39m
+[31m     → (0 , downgradeUnearnedShippedVerdict) is not a function[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 6 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/shared/triage-unearned-shipped-verdict.test.ts[2m > [22man unearned shipped verdict is downgraded at revive[2m > [22mdowngrades already_shipped_or_stale when the premise is unprobed
+[41m[1m FAIL [22m[49m tests/shared/triage-unearned-shipped-verdict.test.ts[2m > [22man unearned shipped verdict is downgraded at revive[2m > [22mdowngrades already_shipped_or_stale when the premise is probes_unusable
+[41m[1m FAIL [22m[49m tests/shared/triage-unearned-shipped-verdict.test.ts[2m > [22man unearned shipped verdict is downgraded at revive[2m > [22mdowngrades already_shipped_or_stale when the premise is premise_unconfirmed
+[31m[1mTypeError[22m: (0 , downgradeUnearnedShippedVerdict) is not a function[39m
+[36m [2m❯[22m tests/shared/triage-unearned-shipped-verdict.test.ts:[2m32:19[22m[39m
+    [90m 30| [39m  for (const premise of ['unprobed', 'probes_unusable', 'premise_uncon…
+    [90m 31| [39m    it(`downgrades already_shipped_or_stale when the premise is ${prem…
+    [90m 32| [39m      [35mconst[39m out [33m=[39m [34mdowngradeUnearnedShippedVerdict[39m({
+    [90m   | [39m                  [31m^[39m
+    [90m 33| [39m        [33m...[39mbase[33m,[39m
+    [90m 34| [39m        premise[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/shared/triage-unearned-shipped-verdict.test.ts[2m > [22man unearned shipped verdict is downgraded at revive[2m > [22mkeeps already_shipped_or_stale when the premise is holds
+[41m[1m FAIL [22m[49m tests/shared/triage-unearned-shipped-verdict.test.ts[2m > [22man unearned shipped verdict is downgraded at revive[2m > [22mkeeps already_shipped_or_stale when the premise is partial
+[31m[1mTypeError[22m: (0 , downgradeUnearnedShippedVerdict) is not a function[39m
+[36m [2m❯[22m tests/shared/triage-unearned-shipped-verdict.test.ts:[2m44:19[22m[39m
+    [90m 42| [39m  [35mfor[39m ([35mconst[39m premise [35mof[39m [[32m'holds'[39m[33m,[39m [32m'partial'[39m] [35mas[39m [35mconst[39m) {
+    [90m 43| [39m    it(`keeps already_shipped_or_stale when the premise is ${premise}`…
+    [90m 44| [39m      [35mconst[39m out [33m=[39m [34mdowngradeUnearnedShippedVerdict[39m({
+    [90m   | [39m                  [31m^[39m
+    [90m 45| [39m        [33m...[39mbase[33m,[39m
+    [90m 46| [39m        premise[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/shared/triage-unearned-shipped-verdict.test.ts[2m > [22man unearned shipped verdict is downgraded at revive[2m > [22mnever rewrites a verdict that does not authorize deletion
+[31m[1mTypeError[22m: (0 , downgradeUnearnedShippedVerdict) is not a function[39m
+[36m [2m❯[22m tests/shared/triage-unearned-shipped-verdict.test.ts:[2m54:17[22m[39m
+    [90m 52| [39m
+    [90m 53| [39m  it('never rewrites a verdict that does not authorize deletion', () =…
+    [90m 54| [39m    [35mconst[39m out [33m=[39m [34mdowngradeUnearnedShippedVerdict[39m({
+    [90m   | [39m                [31m^[39m
+    [90m 55| [39m      [33m...[39mbase[33m,[39m
+    [90m 56| [39m      premise[33m:[39m [32m'unprobed'[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m6 failed[39m[22m[90m (6)[39m
+[2m   Start at [22m 02:12:13
+[2m   Duration [22m 1.08s[2m (transform 125ms, setup 12ms, collect 144ms, tests 7ms, environment 0ms, prepare 106ms)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   shared     0.3s
+   collect≈0.1s  run≈0.0s  files=1
+   slowest files:
+     0.3s  tests/shared/triage-unearned-shipped-verdict.test.ts (collect 0.1s, run 0.0s)
+   outcome: 0 passed, 6 failed, 0 skipped, 0 unfinished (total 6)
+   failed files (advisory console echo — the ledger's `outcome` field is the source of truth):
+     - tests/shared/triage-unearned-shipped-verdict.test.ts
+   parallel-flake baseline (win32-cpu16-w16, load=solo):
+     6 UNRECOGNIZED — these stay RED:
+       - tests/shared/triage-unearned-shipped-verdict.test.ts > an unearned shipped verdict is downgraded at revive > downgrades already_shipped_or_stale when the premise is premise_unconfirmed
+       - tests/shared/triage-unearned-shipped-verdict.test.ts > an unearned shipped verdict is downgraded at revive > downgrades already_shipped_or_stale when the premise is probes_unusable
+       - tests/shared/triage-unearned-shipped-verdict.test.ts > an unearned shipped verdict is downgraded at revive > downgrades already_shipped_or_stale when the premise is unprobed
+       - tests/shared/triage-unearned-shipped-verdict.test.ts > an unearned shipped verdict is downgraded at revive > keeps already_shipped_or_stale when the premise is holds
+       - tests/shared/triage-unearned-shipped-verdict.test.ts > an unearned shipped verdict is downgraded at revive > keeps already_shipped_or_stale when the premise is partial
+       - tests/shared/triage-unearned-shipped-verdict.test.ts > an unearned shipped verdict is downgraded at revive > never rewrites a verdict that does not authorize deletion

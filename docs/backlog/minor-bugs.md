@@ -491,3 +491,20 @@
   runtime artifact basename is in the generator's source list, or the omission is a declared,
   mechanically-checked exclusion.
 
+- **The leg-1 scope ledger never prunes entries for deleted documents (2026-09-11, low).**
+  `.audit-tools/nightly/scope-ledger.json` holds 2,012 item entries across 57 documents, and four of
+  those documents no longer exist — each path below is cited BECAUSE it is gone:
+  <!-- doc-citation-exempt: the deleted document IS the subject — this entry is about ledger entries for files that no longer exist -->
+  `spec/mechanical-analyzer-layer-design.md` (deleted 2026-08-27, `f41d2442`),
+  <!-- doc-citation-exempt: the deleted document IS the subject — this entry is about ledger entries for files that no longer exist -->
+  `src/audit/adapters/README.md` (2026-08-29, `224c8d4d`),
+  <!-- doc-citation-exempt: the deleted document IS the subject — this entry is about ledger entries for files that no longer exist -->
+  `docs/nightly-routine-prompt.md` (2026-08-29, `7afb99a3`) and
+  <!-- doc-citation-exempt: the deleted document IS the subject — this entry is about ledger entries for files that no longer exist -->
+  `benchmarks/p0/README.md` (2026-09-10, `2f1e4adb`).
+  `scripts/nightly/scope-ledger.mjs` has no prune path at all. Nothing
+  READS the orphans, because `plan` enumerates through the doc manifest, so the harm is unbounded
+  growth plus a per-document "last examined" table that lists documents which are gone.
+  **Property:** a ledger entry whose document the doc manifest no longer enumerates is removed, or
+  its retention is a declared, mechanically-checked exception.
+

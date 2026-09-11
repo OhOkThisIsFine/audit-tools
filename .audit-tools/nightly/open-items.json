@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-09-10T09:36:17.667Z",
+  "generated_at": "2026-09-11T09:30:18.823Z",
   "run": {
-    "date": "2026-09-10",
-    "head": "a33bc8d91a7cfeca9fc2be4ba42006d74971c602"
+    "date": "2026-09-11",
+    "head": "5708ef115e6c3ef310145f80ae63f888ba4d294e"
   },
   "items": [
     {
@@ -42,7 +42,7 @@
       ],
       "subject_key": "4da5d39fe61a07d4",
       "first_seen": "2026-09-09",
-      "nights_open": 2
+      "nights_open": 3
     },
     {
       "id": "docs-remediation-goals-output-order-omits-two-exclusion-classes",
@@ -85,7 +85,7 @@
       ],
       "subject_key": "cde86125b1d4cb83",
       "first_seen": "2026-09-09",
-      "nights_open": 2
+      "nights_open": 3
     },
     {
       "id": "docs-audit-prompt-reflection-destination-unnamed",
@@ -132,7 +132,7 @@
       ],
       "subject_key": "0d8be5dc91cffb42",
       "first_seen": "2026-09-09",
-      "nights_open": 2
+      "nights_open": 3
     },
     {
       "id": "docs-audit-pkg-language-convictions-two-homes",
@@ -178,7 +178,7 @@
       ],
       "subject_key": "569ce0323e227c76",
       "first_seen": "2026-09-09",
-      "nights_open": 2
+      "nights_open": 3
     },
     {
       "id": "docs-risk-tier-semantics-in-three-specs",
@@ -224,7 +224,7 @@
       ],
       "subject_key": "0bd83243c5ea487d",
       "first_seen": "2026-09-09",
-      "nights_open": 2
+      "nights_open": 3
     },
     {
       "id": "docs-s8-conceptual-review-contract-split-across-specs",
@@ -266,7 +266,7 @@
       ],
       "subject_key": "bdf6ba59b50f068a",
       "first_seen": "2026-09-09",
-      "nights_open": 2
+      "nights_open": 3
     },
     {
       "id": "docs-five-recorded-condensation-findings-batch",
@@ -312,7 +312,7 @@
       ],
       "subject_key": "b94dd16a08ac6a08",
       "first_seen": "2026-09-09",
-      "nights_open": 2
+      "nights_open": 3
     },
     {
       "id": "docs-repo-start-lap-skill-is-shadowed-by-the-global-one",
@@ -356,7 +356,7 @@
       ],
       "subject_key": "e978fad576fb2473",
       "first_seen": "2026-09-09",
-      "nights_open": 2
+      "nights_open": 3
     },
     {
       "id": "solutions-nightly-output-placement-on-a-feature-branch",
@@ -400,51 +400,7 @@
       ],
       "subject_key": "a7ea6748f7fbcd99",
       "first_seen": "2026-09-09",
-      "nights_open": 2
-    },
-    {
-      "id": "backlog-handoff-immediate-next-is-a-chronology",
-      "leg": "backlog",
-      "path": "docs/HANDOFF.md",
-      "auto_close": false,
-      "subject": "The unscored continuation accepted the repaired conceptual judge, and a fresh invocation passed the previous no-progress stop.",
-      "title": "docs/HANDOFF.md's Immediate next has become a run chronology — cut it to the next action, or relax the never-a-changelog rule for a benchmark lap?",
-      "eli5": "docs/HANDOFF.md is the one document this project deliberately allows to describe current state rather than durable concepts, and the allowance is narrow. Its own header says immediate state and next action only, and CLAUDE.md binds it as lean and accurate, immediate-next only, never a changelog. Its Immediate next section has grown into a sequential account of the benchmark lap: a repaired judge, then a fresh invocation, then a frozen checkout, then a systemic round accepted, then an identity rejected, then three rate-limit responses, then the next eligible retry. Nothing in it is factually wrong — the commits it names all resolve and the version it states matches what is published. The problem is form. Read in order, it is history, so the two things a reader actually opens the document for — the single next action, and the live owner decision about whether to authorise another benchmark window — sit at the end of a paragraph instead of at the top. The narrative already has a durable home that the section itself cites, the dated review record for that lap. Two answers are honest here: cut the section back and let the review record hold the story, or decide that a long benchmark lap genuinely needs its running log in HANDOFF and relax the binding for that case. This item does not close on its own — the question is what the document should become, so it leaves the queue when it is answered.",
-      "question": "Should docs/HANDOFF.md's Immediate next be cut back to the single next action plus the live owner decision, with the benchmark chronology left to the dated review record it already cites — or should the never-a-changelog binding be relaxed for a long benchmark lap?",
-      "options": [
-        {
-          "label": "Cut it back",
-          "answer": "Cut Immediate next to the single next action plus the live owner decision. The benchmark chronology moves to the dated review record the section already cites, and HANDOFF goes back to what its header promises."
-        },
-        {
-          "label": "Relax the binding for benchmark laps",
-          "answer": "A long benchmark lap needs its running log where the next session will see it. Relax the never-a-changelog binding for that case explicitly in CLAUDE.md, so the section is sanctioned rather than quietly non-conforming."
-        },
-        {
-          "label": "Cut it back and add a length bound",
-          "answer": "Cut the section back AND give HANDOFF a mechanical bound the way the backlog entries have one, so this recurs as a red build rather than as a nightly finding."
-        },
-        {
-          "label": "Leave it",
-          "answer": "The lap is live and the detail is being used. Leave the section alone until the benchmark work closes."
-        }
-      ],
-      "evidence": [
-        "docs/HANDOFF.md contains \"The first systemic challenge round was accepted\" and roughly thirty lines of past-tense sequential narration under a header that reads \"Immediate state and next action only\" (grep, HEAD 23079f37).",
-        "CLAUDE.md binds the document as \"lean and accurate, correct HEAD/commits, immediate-next only, never a changelog\".",
-        "Nothing in the section is factually wrong: the commits it names resolve and package.json, npm and both global bins all report the same published version.",
-        "The narrative's durable home, docs/reviews/pipeline-quality-2026-09-07.md, is already cited by the section.",
-        "Raised independently by two lanes this run — the document reviewer and the corpus-level condensation pass."
-      ],
-      "premise_probes": [
-        {
-          "file": "docs/HANDOFF.md",
-          "contains": "The first systemic challenge round was accepted"
-        }
-      ],
-      "subject_key": "1d0c20709c1e1868",
-      "first_seen": "2026-09-09",
-      "nights_open": 2
+      "nights_open": 3
     },
     {
       "id": "backlog-open-bugs-entries-carry-narrative-before-the-open-half",
@@ -488,21 +444,204 @@
       ],
       "subject_key": "bb4d63e7385554d2",
       "first_seen": "2026-09-09",
-      "nights_open": 2
+      "nights_open": 3
+    },
+    {
+      "id": "docs-glossary-omits-a-live-n-idempotency-identifier",
+      "leg": "docs",
+      "path": "docs/glossary-ids.md",
+      "subject": "This is the lookup table for opaque identifiers that still occur in src/**/*.ts",
+      "title": "The identifier glossary declares itself the lookup for opaque ids in src/**/*.ts, and N-IDEMPOTENCY is live in two modules with no row — add a row, fold it under INV-CK, or narrow the glossary's claim?",
+      "eli5": "The file docs/glossary-ids.md opens by saying it is the lookup table for opaque identifiers that still occur anywhere in src/**/*.ts, and that the source tree is the authority: when the last occurrence of an identifier disappears, its glossary entry is deleted too. The identifier N-IDEMPOTENCY is live in the source tree right now — five times in src/shared/contentKey.ts and once in src/audit/orchestrator/resultBaseline.ts — and the glossary has no row for it anywhere. So a reader who meets the identifier in the code has no place to look it up, which is the exact gap the file exists to close. What the identifier means is not in dispute: it marks the per-split discriminator, the component that makes file-split sibling tasks of one unit, lens and pass derive DISTINCT idempotency keys instead of all deriving the same one. What is in dispute is where it belongs. The glossary's N- family row says N- means a historical plan node used as a source-code cross-reference, and N-IDEMPOTENCY is not a plan node; it names an algorithmic property. A second home already exists that fits better — the INV-CK namespace row, whose stated contract is 'Deterministic identity, idempotency, and content keys' and whose owner is the very file the identifier lives in. A third answer is that the identifier is self-describing rather than opaque, so the glossary's opening claim should be narrowed instead. This run's adversary lane refused to treat the missing row as a simple factual omission for exactly this reason, so it is being asked rather than applied. Nothing checks this automatically: check-invariant-glossary.mjs reconciles INV-* ids only.",
+      "question": "docs/glossary-ids.md says it is \"the lookup table for opaque identifiers that still occur in src/**/*.ts\", and N-IDEMPOTENCY occurs in src/shared/contentKey.ts and src/audit/orchestrator/resultBaseline.ts with no row. Add a row, fold the identifier under the existing INV-CK namespace, or narrow the glossary's scope claim?",
+      "options": [
+        {
+          "label": "Add an N-IDEMPOTENCY row",
+          "answer": "Add a row naming N-IDEMPOTENCY, its meaning (the per-split discriminator component that makes file-split sibling tasks of one unit+lens+pass derive distinct idempotency and live keys) and its owners (src/shared/contentKey.ts; src/audit/orchestrator/resultBaseline.ts). State it in the Live invariant namespaces table, not under the N- family row, whose stated meaning is a historical plan node."
+        },
+        {
+          "label": "Fold it under INV-CK",
+          "answer": "Do not give the identifier its own row. Rename the in-code citations to the INV-CK namespace that already owns \"Deterministic identity, idempotency, and content keys\" in src/shared/contentKey.ts, so one namespace covers the property and the glossary needs no new entry."
+        },
+        {
+          "label": "Narrow the glossary's claim",
+          "answer": "N-IDEMPOTENCY is self-describing rather than opaque, so it needs no lookup. Narrow the glossary's opening sentence to the identifier families it actually indexes, so an unindexed but readable identifier is no longer a gap by the file's own definition."
+        }
+      ],
+      "evidence": [
+        "docs/glossary-ids.md line 3 states verbatim: \"This is the lookup table for opaque identifiers that still occur in src/**/*.ts.\" (read at HEAD 2c81a406).",
+        "grep -rn \"N-IDEMPOTENCY\" src/ returns 6 hits: 5 in src/shared/contentKey.ts (e.g. \"Per-split discriminator (N-IDEMPOTENCY)\") and 1 in src/audit/orchestrator/resultBaseline.ts.",
+        "grep -n \"N-IDEMPOTENCY\" docs/glossary-ids.md returns nothing.",
+        "The glossary's N- family row reads \"N-PHASE-N | A historical plan node still used as a source-code cross-reference\", which does not describe this identifier — the taxonomy question is why this is escalated rather than applied.",
+        "This run's independent adversary lane (agy-gemini, via llm-relay dispatch) REFUTED the proposed row as insufficient on that same ground, while agreeing with the run's two other proposed edits, both of which were applied.",
+        "scripts/check-invariant-glossary.mjs reconciles INV-* ids only, so no gate observes this class."
+      ],
+      "premise_probes": [
+        {
+          "file": "docs/glossary-ids.md",
+          "contains": "lookup table for opaque identifiers that still occur in src/**/*.ts"
+        },
+        {
+          "file": "docs/glossary-ids.md",
+          "absent": "N-IDEMPOTENCY"
+        }
+      ],
+      "subject_key": "e3b0d0fda979d8e6",
+      "first_seen": "2026-09-11",
+      "nights_open": 1
+    },
+    {
+      "id": "backlog-a2-oracle-parenthetical-cites-a-retired-track",
+      "leg": "backlog",
+      "path": "docs/backlog.md",
+      "subject": "(The A2 oracle corpus is now pinned public repos, not labeled live runs — a run's findings are at most optional calibration data; see Deferred / waiting.)",
+      "title": "The live-validation guide still qualifies the A2 oracle corpus and points at \"Deferred / waiting\", but the A2 track was retired and no such entry exists — delete the parenthetical, or keep the statement without the pointer?",
+      "eli5": "docs/backlog.md ends its live-validation guide with a parenthetical explaining that the A2 finding-quality oracle draws its corpus from pinned public repositories rather than from labelled live runs, and it tells the reader to see the \"Deferred / waiting\" section for the rest. Two things have since changed. First, the owner retired the whole benchmark track on 2026-09-10, and the commit that did it (2f1e4adb) deleted the A2 entry along with the rest; the phrase \"A2 oracle\" now appears nowhere in docs/backlog/ except in this one parenthetical. Second, the pointer itself resolves to nothing: docs/backlog/deferred.md contains no occurrence of the word oracle at all, so a reader who follows the instruction lands in a section with no matching entry. The 2026-09-09 run read this as a simple mis-pointer and proposed re-aiming it at forward-tracks.md, where the entry lived at the time. That fix is now wrong, because the entry is gone from there too. What remains is a judgment the routine will not make on its own: whether the sentence should go entirely with the track it describes, or whether the statement about what a live run's findings are worth is guidance the live-validation guide should keep, with only the dangling pointer removed.",
+      "question": "docs/backlog.md carries \"(The A2 oracle corpus is now pinned public repos, not labeled live runs — a run's findings are at most optional calibration data; see Deferred / waiting.)\" The A2 track was retired on 2026-09-10 and the pointer resolves to no entry. Delete the whole parenthetical, keep the statement and drop the pointer, or re-home the statement?",
+      "options": [
+        {
+          "label": "Delete the parenthetical",
+          "answer": "The parenthetical describes a retired track. Delete it outright, the same way the retirement deleted the track's own entries; git history keeps it."
+        },
+        {
+          "label": "Keep the statement, drop the pointer",
+          "answer": "The claim that a live run's findings are at most optional calibration data is durable guidance for anyone running a live audit, independent of the retired track. Keep that sentence, delete the \"see Deferred / waiting\" pointer, and stop naming A2."
+        },
+        {
+          "label": "Re-home the statement",
+          "answer": "Move the calibration-data statement into the live-validation guide's own general fail-signals paragraph as a plain rule, so it is not a parenthetical hanging off a retired track name at all."
+        }
+      ],
+      "evidence": [
+        "docs/backlog.md contains the fragment \"The A2 oracle corpus is now\" (read at HEAD 2c81a406).",
+        "grep -rn \"oracle\" docs/backlog/*.md returns no match; the only occurrence in the whole backlog is the docs/backlog.md parenthetical itself.",
+        "grep -c \"oracle\" docs/backlog/deferred.md returns 0, so the \"see Deferred / waiting\" pointer resolves to no entry.",
+        "git log -S \"A2 finding-quality oracle\" -- docs/backlog/ names 2f1e4adb (\"retire the benchmark track\") as the commit that removed the entry, dated 2026-09-10.",
+        "The 2026-09-09 and 2026-09-10 runs both held a fix for this line that aimed the pointer at forward-tracks.md; that remedy is now stale, which is why the item is being asked rather than applied."
+      ],
+      "premise_probes": [
+        {
+          "file": "docs/backlog.md",
+          "contains": "The A2 oracle corpus is now"
+        }
+      ],
+      "subject_key": "2684a1913f61a409",
+      "first_seen": "2026-09-11",
+      "nights_open": 1
+    },
+    {
+      "id": "backlog-live-run-watch-matrix-names-items-that-resolve-nowhere",
+      "leg": "backlog",
+      "path": "docs/backlog.md",
+      "subject": "Live-validation guide — READ FIRST if you're running a live audit/remediate matrix of run configs and the items each exercises",
+      "title": "The live-validation matrix tells a live run which items to watch, and most of the names it lists match no entry in docs/backlog/ — derive the matrix from the entries, or cut it to the rows that resolve?",
+      "eli5": "docs/backlog.md opens the backlog with a live-validation guide. It says some open items carry a \"Live-run watch\" line naming exactly what to observe during a real run, and it gives a matrix: pick a run configuration from the table, then watch the items that configuration lights up. The matrix works only if the names in it can be found. Most cannot. Checking each name against docs/backlog/ tonight: \"Idempotent audit ingestion\", \"locked remediation state transitions\", \"stale workload rejection\", \"Allowed-file enforcement\", \"run-start-dirt overlap\" and \"pause/resume continuity\" match nothing at all; only \"Selective-deepening\" and the Rust/Ruby analyzer row resolve. So an operator following the guide on two of its four rows is sent looking for entries that are not there. The staleness is a plain fact, but the remedy is not, and that is why this is a question rather than an edit. The matrix could be generated from the entries that actually carry a Live-run watch line, which would make it impossible to drift again but ties the guide to a marker entries must keep using. It could be cut back to the rows whose names resolve, which is honest and small but silently loses the coverage the missing rows were describing. Or the names could be treated as categories rather than entry titles, in which case the guide needs to say so, because today it reads as a lookup.",
+      "question": "The live-validation matrix in docs/backlog.md names items per run configuration; six of the eight names resolve to no entry in docs/backlog/. Generate the matrix from entries carrying a \"Live-run watch\" line, cut it to the rows that resolve, or declare the names to be categories rather than entry titles?",
+      "options": [
+        {
+          "label": "Generate it from the entries",
+          "answer": "Derive the matrix from the entries that carry a \"Live-run watch\" line, so a row can never name an item the backlog does not hold. A generated block plus a gate, the same shape the HANDOFF roadmap already uses."
+        },
+        {
+          "label": "Cut it to what resolves",
+          "answer": "Keep the matrix hand-written but delete every row whose named items no longer resolve, leaving the Any-live-audit and Rust/Ruby rows. Accept that the deleted rows' coverage is no longer described anywhere."
+        },
+        {
+          "label": "They are categories, not titles",
+          "answer": "The names are meant to be categories of behaviour, not entry titles. Say so in the guide, so a reader stops trying to look them up, and leave the rows as they are."
+        },
+        {
+          "label": "Delete the matrix",
+          "answer": "The guide has drifted from the backlog twice and nothing keeps it honest. Delete the matrix and keep only the general fail-signals paragraph, which needs no cross-reference to stay true."
+        }
+      ],
+      "evidence": [
+        "docs/backlog.md contains the row fragment \"**Two cooperating hosts** | Idempotent audit ingestion\" (read at HEAD 2c81a406).",
+        "grep -ril over docs/backlog/ for each name: \"Idempotent audit ingestion\", \"locked remediation state\", \"stale workload rejection\", \"Allowed-file enforcement\", \"run-start-dirt\" and \"pause/resume continuity\" each return NO file.",
+        "\"Selective-deepening\" resolves to docs/backlog/open-bugs.md; \"clippy\" and \"rubocop\" resolve to docs/backlog/forward-tracks.md and open-bugs.md.",
+        "grep -rn \"Live-run watch\" docs/backlog/ returns four entries in total — one in forward-tracks.md, one in minor-bugs.md, two in open-bugs.md — against eight names promised by the matrix.",
+        "Carried from the 2026-09-09 and 2026-09-10 runs, which both verified the staleness and both declined to pick a remedy."
+      ],
+      "premise_probes": [
+        {
+          "file": "docs/backlog.md",
+          "contains": "**Two cooperating hosts** | Idempotent audit ingestion"
+        }
+      ],
+      "subject_key": "e27562eb240b9d55",
+      "first_seen": "2026-09-11",
+      "nights_open": 1
+    },
+    {
+      "id": "solutions-unearned-shipped-verdict-authorizes-deletion",
+      "leg": "solutions",
+      "path": "scripts/shared/triage-backlog.mjs",
+      "subject": "never evidence for deleting an entry when paired with",
+      "title": "The backlog sweep may claim an entry SHIPPED while checking nothing, and five nightly runs have re-refuted the same lead by hand — enforce the pairing the module header already states (proposal P65)?",
+      "eli5": "Each night a sweep hands every backlog entry to a language-model lane and stores the lane's verdict. One verdict, already_shipped_or_stale, is the only one that authorizes deleting an entry. Separately, each row carries a premise stamp recording whether the entry's own quoted fragments could be checked against the actual tree. Nothing couples the two, so a row can say \"this shipped\" while its premise stamp says nothing was checked at all. That is not hypothetical: one entry, the CI wall-clock pointer in forward-tracks.md, has been served exactly that way on five separate dates — 27 and 28 August, and 9, 10 and 11 September — and every one of those runs refuted it by hand and wrote the refutation into its own report. The rule is already written down. The module's own header says a row whose probes were unusable is \"never evidence for deleting an entry\" when paired with that verdict. But it is written as prose addressed to a reader, and the readers it must reach are a relay lane and whichever agent reads the output file at three in the morning. The proposal makes the pairing impossible instead of forbidden: at load time, a shipped claim whose premise is unprobed, unusable or unconfirmed is rewritten to a distinct verdict that authorizes nothing. The full proposal, the patch, and a test measured red at this commit and green against the patch are on disk at the path below.",
+      "question": "Proposal P65: couple the deletion-authorizing verdict to the premise stamp in scripts/shared/triage-backlog.mjs, so already_shipped_or_stale is downgraded to shipped_claim_unverified whenever the premise is unprobed, probes_unusable or premise_unconfirmed. Accept, accept with a different downgrade target, or leave the rule as prose?",
+      "options": [
+        {
+          "label": "Accept P65 as written",
+          "answer": "Apply the candidate: add downgradeUnearnedShippedVerdict to scripts/shared/triage-backlog.mjs, call it from reviveRecord, add shipped_claim_unverified to the verdict enum, and move the test into tests/shared/."
+        },
+        {
+          "label": "Accept, but suppress the row entirely",
+          "answer": "Agree with the coupling, but do not keep an unearned claim as its own verdict. Drop such a row from the stored output altogether and count it in the coverage stamp, so the sweep's file holds only earned verdicts."
+        },
+        {
+          "label": "Fix it at the prompt instead",
+          "answer": "Do not change the stored record. Change the task prompt so the lane may not emit already_shipped_or_stale without at least one usable probe, and re-measure whether the recurrence stops."
+        },
+        {
+          "label": "Leave it as prose",
+          "answer": "The sweep is advisory by contract and a deletion already needs the run's own code anchor, so the re-refutation is cheap and the coupling is not worth a new verdict value. Leave the header rule as it is."
+        }
+      ],
+      "evidence": [
+        "Recurrence counted from the stored sweeps, not asserted: forward-tracks#55883634 carries verdict already_shipped_or_stale with premise unprobed in triage-2026-08-27, -08-28, -09-09, -09-10 and -09-11.jsonl (five distinct dates).",
+        "The 2026-09-09, 2026-09-10 and 2026-09-11 runs each re-refuted the lead in their own skipped block, in different words.",
+        "The entry's prose says implementation was assigned outside this repository's agent loop, which is not the code anchor a deletion requires.",
+        "scripts/shared/triage-backlog.mjs states the rule in prose already: a probes_unusable row is \"never evidence for deleting an entry when paired with\" the shipped verdict — and the recurrence shows prose is not a refusal.",
+        "Tonight's coverage stamp measures the affected class: 27 of 89 rows carried unusable probes, and exactly 1 of the 89 claimed already_shipped_or_stale.",
+        "Test measured RED at HEAD 2c81a406 and GREEN against the candidate — .audit-tools/nightly/proposals/P65-unearned-shipped-verdict/RED-AT.txt, red-run.txt, green-run.txt."
+      ],
+      "proposal": "P65 — a deletion-authorizing triage verdict must be earned by a probe",
+      "patch_path": ".audit-tools/nightly/proposals/P65-unearned-shipped-verdict/candidate-triage-downgrade.mjs",
+      "premise_probes": [
+        {
+          "file": "scripts/shared/triage-backlog.mjs",
+          "contains": "never evidence for deleting an entry when paired with"
+        },
+        {
+          "file": "scripts/shared/triage-backlog.mjs",
+          "absent": "downgradeUnearnedShippedVerdict"
+        }
+      ],
+      "subject_key": "0d0ed2c10063a01f",
+      "first_seen": "2026-09-11",
+      "nights_open": 1
     }
   ],
   "applied": [
-    "NOTHING WAS APPLIED. The working tree was dirty at run start (`M AGENTS.md`) and HEAD sat on branch codex/pipeline-quality rather than main, so the clean-tree rule held every edit. The run reviewed, verified and reported in full. The scope ledger was stamped for the eight documents examined this run — a ledger stamp is a coverage record, not a doc edit, and is autonomous by contract. The two GENERATED blocks in docs/HANDOFF.md were re-rendered by their own generator (scripts/shared/generate-handoff-roadmap.mjs) because adding an item staled them; that is a generator run, not a doc edit, and check:handoff-roadmap is green."
+    "APPLIED THREE EDITS. The tree was clean and HEAD was on main at run start, so the clean-tree rule released work two previous runs had to hold. (1) spec/remediation-workflow-design.md said each work item contains its \"workload digest\"; buildWorkItem (src/remediate/steps/dispatch/hostHandoff.ts) returns no such field — the digest is workload_sha256 on the handoff RECORD (src/remediate/state/types.ts). The sentence now attributes the digest to the handoff record as a whole. (2) docs/HANDOFF.md described pre-commit-gate.mjs as keeping three residuals; the hook's own header and its guard-registry row both name a fourth — healing a crashed staged-snapshot round-trip. The sentence now names all four. Both edits were AGREED by the independent adversary lane before they were applied. (3) docs/backlog/minor-bugs.md gained one low-severity entry: the leg-1 scope ledger never prunes entries for deleted documents — four of its 57 documents no longer exist, and scripts/nightly/scope-ledger.mjs has no prune path at all. The 2026-09-10 run found that defect and could not file it against a dirty tree.",
+    "THE THIRD HELD FIX WAS NOT APPLIED, and the refusal came from the adversary rather than from a rule. The proposal was to add an N-IDEMPOTENCY row to docs/glossary-ids.md, which declares itself the lookup for opaque identifiers in src/**/*.ts while that identifier is live in two modules with no row. The adversary lane refuted it: the glossary's N- family row defines N- as a historical PLAN NODE, so whether the identifier belongs there, under the existing INV-CK namespace, or nowhere is a taxonomy call. It is now item docs-glossary-omits-a-live-n-idempotency-identifier.",
+    "THE REMAINING TWO HELD FIXES BECAME QUESTIONS, because their remedies are judgments and one had gone stale. The A2-oracle pointer in docs/backlog.md cannot be re-aimed as the 2026-09-09 run proposed: the entry it pointed at was deleted with the benchmark track on 2026-09-10 (2f1e4adb), so the whole parenthetical now describes a retired track. The live-run-watch matrix staleness was re-measured and is wider than reported — six of its eight item names resolve to no entry in docs/backlog/, not two rows' worth.",
+    "The leg-1 scope ledger was stamped for the six documents examined this run (263 items), and the coverage stamp was written from those stamps rather than from prose. The generated blocks in docs/HANDOFF.md were re-rendered by their own generator because tonight's queue staled them; that is a generator run, not a doc edit, and check:handoff-roadmap is green on the result.",
+    "Leg 3 produced one proposal, P65, with a measured red-green record: .audit-tools/nightly/proposals/P65-unearned-shipped-verdict/. It proposes coupling the one deletion-authorizing triage verdict to the premise stamp, so a sweep row cannot claim an entry shipped while having checked nothing. Leg 3 lands nothing by contract; the patch and its test are on disk for a one-step approval."
   ],
   "skipped": [
-    "APPLIED NOTHING — the tree was dirty and HEAD was not on main. `git status --porcelain` reported `M AGENTS.md` at run start: the machine-wide generator ~/.agent-config/sync.mjs had regenerated its shared region and nothing had committed the result. This is the SECOND consecutive night blocked by the same file, which is why it is now escalated as its own item (solutions-agents-region-has-no-freshness-authority, proposal P64) rather than only recorded here.",
-    "FIVE VERIFIED STALE-FACTUAL DOC FIXES ARE STILL HELD, carried forward unchanged from the 2026-09-09 run, which verified each from source. Nothing in the tree moved to invalidate them: no source file changed between that run and this HEAD. A clean run can apply them directly. (1) spec/remediation-workflow-design.md attributes the workload digest to each work item; buildWorkItem (src/remediate/steps/dispatch/hostHandoff.ts) returns no such field — workload_sha256 is a per-HANDOFF binding on RemediationHostHandoffBindingFields, assigned in prepareRemediationHostHandoff. (2) docs/HANDOFF.md says pre-commit-gate.mjs \"keeps only what git cannot see\" and lists three residuals; the hook's own header and its guard-registry row both name a fourth, healing a crashed staged-snapshot round-trip. (3) docs/backlog.md points the A2 oracle entry at \"Deferred / waiting\"; the entry lives in forward-tracks.md and deferred.md contains no match. (4) docs/backlog.md's live-run-watch matrix has two rows — Two cooperating hosts, and any live remediation on a dirty checkout — whose named items resolve nowhere in docs/backlog/; the remedy is a judgment even though the staleness is a fact. (5) docs/glossary-ids.md declares itself the lookup for opaque identifiers in src/**/*.ts, and N-IDEMPOTENCY is live in src/shared/contentKey.ts and src/audit/orchestrator/resultBaseline.ts with no row; check-invariant-glossary.mjs reconciles only INV-* ids, so nothing catches it.",
-    "LEG-1 COVERAGE, read from the ledger file and never eyeballed — and this pass was deliberately narrow. Between the previous run and this HEAD, NO source file changed: the only commits were the previous run's own output under .audit-tools/nightly, plus docs/HANDOFF.md and docs/nightly-inbox.md. The contract's \"changed docs + declared dependents\" half was therefore empty, and re-reading a corpus that had not moved would have re-derived the previous night's findings rather than adding coverage. The pass was run as the contract's PERIODIC SWEEP over the coldest part of the corpus: the eight documents that had never been examined at all — the seven generated host assets under .agent/skills and .github, and spec/audit/executor-producers.generated.md — were examined item by item and stamped (106 items). At run start the plan reported 54 docs, 1854 items, 1729 with an evidence window and 125 cold; the eight now carry windows. The whole corpus was additionally re-verified mechanically: check:doc-links, check:doc-code-citations, check:doc-manifest and check:executor-producers all exit 0, and the three renderer drift suites pass 19 of 19, so every generated host asset equals a fresh render of its canonical source. NO NEW LEG-1 ITEM was raised this run; the ten carried from 2026-09-09 all stand.",
-    "THE CODEX ADVERSARY LANE IS GENUINELY DOWN TONIGHT, and it was PROBED rather than assumed — last night the same session-start notice was a false DOWN (proposal P58), so the notice alone is not evidence. `codex --version` exits 0 (codex-cli 0.153.2), but `codex exec` returns \"You've hit your usage limit ... try again at Sep 16th, 2026 5:22 PM\". The death was recorded where lane state is authoritative rather than in prose: `llm-relay dispatch -x codex-sol --outcome quota_exhausted`, and the ladder now reads \"codex-sol [disabled until 2026-09-16T21:25:10.892Z]\". CONSEQUENCE FOR THIS RUN: leg 1 had no second independent lane. Its adversary role was filled by mechanical gates run locally (the four doc gates, the three renderer drift suites, npm run check, the full suite) and by an in-session refutation pass over the one new proposal, which is weaker than an independent agent and is stated as such.",
-    "LEG-2 COVERAGE, read from the stamp (.audit-tools/nightly/triage-2026-09-10-coverage.json): 94 of 95 entries classified, 1 errored, none aborted, every answer served by the free-pool lane. It took FOUR passes. The first attempted all 95 and errored on 29, every one of them \"dispatch returned a running job: job-NNNN\" — the lane handing back a job handle instead of an answer. Errored rows are dropped on load, so each re-run retried exactly the failures: 66, then 83, then 93, then 94 classified. One entry (open-bugs#6778a8db) never answered in four attempts and NO conclusion about it should be drawn from this sweep. The four-pass shape is new dated evidence for proposal P59 (a lane that terminated without an answer is handed back as an answer); it is not raised again as its own item.",
-    "LEG 2 DELETED NOTHING, and its single shipped lead was REFUTED. forward-tracks#55883634 (CI wall-clock: shard balance and single-file floor) was classified already_shipped_or_stale because the entry records that implementation was assigned outside this repository's agent loop. Being assigned elsewhere is not being done, that is not the code anchor a deletion requires, and the row carried premise `unprobed` — it reasoned from the entry's own prose and verified nothing against code. The pointer it holds is live: docs/reviews/ci-wallclock-plan-critique-2026-08-07.md exists. Note that the identical lead was raised and refuted on 2026-09-09; a lead that returns nightly is itself worth watching. The nine owner_decision_needed rows are lane hedges, not findings, and were NOT forwarded as items: fourteen items already sit unanswered, and padding the queue with a lane's habitual hedge is how a queue is taught to be ignored.",
-    "ONE SMALL DEFECT FOUND AND NOT FILED, because the tree was dirty. The leg-1 scope ledger (.audit-tools/nightly/scope-ledger.json) never prunes entries for documents that have been deleted: 91 of its 2012 item entries belong to three docs that are gone — spec/mechanical-analyzer-layer-design.md (deleted 2026-08-27, f41d2442), src/audit/adapters/README.md (2026-08-29, 224c8d4d) and docs/nightly-routine-prompt.md (2026-08-29, 7afb99a3). Nothing reads them, because `plan` enumerates through the doc manifest, so the harm is unbounded growth and a per-document \"last examined\" table that lists documents which do not exist. It belongs in docs/backlog/minor-bugs.md and is stated here so a clean run can file it.",
-    "THE WEEKLY /insights PASS WAS NOT DUE and did not run: .audit-tools/nightly/insights-last-run.json records ran_at 2026-09-04T09:06:10Z, exactly 6.00 days old against a seven-day cadence. Not-due is not a skipped leg; it is recorded here only so the absence is not read as a failure. It becomes due tomorrow.",
-    "THE FULL SUITE IS RED ON THIS MACHINE, unchanged and unrelated to this run. `npm test` exits 1 with 6519 passed and exactly ONE failure: tests/shared/load-flake-record.test.ts, \"snapshot extraction failed (128): tar: Cannot connect to C: resolve failed\". That is the known launcher-dependent trap already escalated as solutions-tar-drive-letter-fix-form (proposal P62) and still unanswered — GNU tar resolves first on this session's PATH and reads a Windows drive letter as a hostname. This run changed no code, and the failure reproduces in isolation exactly as it did on 2026-09-09. Full log: .audit-tools/nightly/suite-0910.log."
+    "ANOTHER SESSION IS LANDING WORK IN THIS SAME CHECKOUT WHILE THE ROUTINE RUNS, AND ITS COMMIT GATE MADE THIS RUN MISREAD ITS OWN TREE. At run start `git status --porcelain` was EMPTY and HEAD was 2c81a406 on main, so the clean-tree rule released the work two previous runs had to hold, and three verified edits were applied. Minutes later `git status` showed a set of staged files this run never touched (src/remediate/phases/closeVerifyHeadEvidence.ts and six modified files) and all three edits appeared to be gone. They were not: the commit gate's staged-snapshot round-trip had materialized the other session's staged tree over the worktree and restored it afterwards, exactly as designed. The run had already begun writing a record stating the edits were destroyed; that record was WRONG and was rewritten before anything was persisted. The lesson is the known one, hit live: a tree read during another session's commit gate is not that tree, and neither a red nor a green read from inside that window means anything. HEAD moved twice during this run (2c81a406 → 5dd53baf → 5708ef11).",
+    "THE FULL GREEN GATE PASSED, BUT ONLY ON THE SECOND RUN, AND THE FIRST RED IS EXPLAINED RATHER THAN EXCUSED. The first npm test was launched against the clean tree at 2c81a406 and the concurrent session replaced the worktree beneath it and moved HEAD twice while it ran; it ended 3 test files red (audit-code-completion-present, next-step-core-report, next-step-narrative — 4 cases). Re-run alone once the tree settled: 3 files, 6 cases, all pass. The gate was then re-run whole against a stable HEAD 5708ef11 — npm run build, npm run check and npm test all green, 543 of 543 test files, with HEAD verified unchanged before and after. Logs: suite-0911.log (the unattributable red), suite-retry-0911.log (the isolated pass), gate-build-0911.log, gate-check-0911.log, gate-test-0911.log (the green gate). Note that tests/shared/load-flake-record.test.ts, the known launcher-dependent tar failure escalated as proposal P62, passed in both runs tonight.",
+    "LEG-1 COVERAGE, read from the ledger file and never eyeballed (.audit-tools/nightly/leg1-2026-09-11-coverage.json): 6 documents examined and stamped, 263 items, 24 of them reviewed cold. The pass was scoped by the contract to the HELD WORK rather than to the corpus: the two previous runs each verified five stale-factual fixes and applied nothing, so tonight re-verified all five from source and disposed of every one — three applied, two escalated because their remedies are judgments. The 2026-09-10 run took the cold periodic sweep over the eight never-examined documents; this run took the held half. The rest of the corpus is NOT claimed as covered.",
+    "ONE HELD FIX HAD GONE STALE AND ITS REMEDY WAS WRONG. The 2026-09-09 run proposed re-aiming docs/backlog.md's A2-oracle pointer at forward-tracks.md. That entry exists nowhere now: the benchmark-track retirement (2f1e4adb, 2026-09-10) deleted it, and \"oracle\" greps to nothing across docs/backlog/. A carried fix is a LEAD, not a fact — applying this one would have written a second dangling pointer.",
+    "THE INDEPENDENT ADVERSARY LANE RAN, AND IT CHANGED THE OUTCOME. Codex is still quota-exhausted (recorded where lane state is authoritative — the ladder reads codex-sol disabled until 2026-09-16), so the adversary was dispatched through llm-relay instead. The first rung, free-pool, returned empty output after 10s; the relay walked to agy-gemini, which answered in 10s. It AGREED with two proposed edits and REFUTED the third — the glossary row — on the ground that the glossary's own N- family row defines N- as a historical plan node, which makes the placement a taxonomy judgment rather than an errata fix. That refusal is why docs/glossary-ids.md was escalated instead of edited.",
+    "LEG-2 COVERAGE, read from the stamp (.audit-tools/nightly/triage-2026-09-11-coverage.json): 89 of 89 entries classified, 0 errored, none aborted, every row served by the free-pool lane, in ONE pass. Last night the same sweep needed four passes and still lost an entry. 27 of the 89 rows carried probes that could not be evaluated at all — the highest share recorded (16 of 95 on 2026-09-09) — and that measurement is the basis of proposal P65.",
+    "LEG 2 DELETED NOTHING, and its single shipped lead was REFUTED for the fifth time. forward-tracks#55883634 (CI wall-clock: shard balance and single-file floor) was again classified already_shipped_or_stale with premise `unprobed`, on the entry's own statement that implementation was assigned outside this repository's agent loop. Being assigned elsewhere is not being done, the pointer it holds is live (docs/reviews/ci-wallclock-plan-critique-2026-08-07.md exists), and nothing was verified against code. The same row appeared on 2026-08-27, 2026-08-28, 2026-09-09, 2026-09-10 and tonight. The 15 owner_decision_needed rows are lane hedges, not findings, and were NOT forwarded as items: eleven items already sat unanswered before tonight's four.",
+    "ONE CARRIED ITEM WAS DROPPED RATHER THAN RE-ASKED, AND THE WRITER COULD NOT DROP IT ITSELF. backlog-handoff-immediate-next-is-a-chronology quoted \"The first systemic challenge round was accepted\" from docs/HANDOFF.md; the 2026-09-10 lean removed that prose, which is the outcome the item asked for. Because the item declared auto_close:false, partitionBySettled would not resolve it while writeOpenItems refused its failing probe — unwritable and unaskable at once. It was dropped by id, with the reason recorded in the build script. The flag's own contract says it exists for a question about a record; the gap is that nothing resolves such an item when its record moves anyway.",
+    "A SECOND WRITER GAP WAS HIT AND WORKED AROUND: docs/backlog.md IS NOT A RECOGNIZED RECORD PATH. The auto_close:false door accepts probes on docs/backlog (the directory), docs/reviews, docs/HANDOFF.md, docs/nightly-inbox.md, .audit-tools/nightly and .claude — but not the backlog INDEX file docs/backlog.md, which is as much a record as the files beneath it. Tonight's two questions about prose in that file were therefore written as ordinary auto-closing items. That is acceptable for both (each closes when its quoted prose goes, which is the resolution) but the omission is not deliberate.",
+    "THE WEEKLY /insights PASS WAS DUE (the stamp read 2026-09-04, seven days) AND IT RAN. Report: C:/Users/ethan/.claude/usage-data/report-2026-09-11-020816.html, over 3,789 messages across 357 sessions. TEN suggestions, each verified against HEAD before classification. SEVEN already shipped: the closeout gate (this repo's closeout Stop gate plus scripts/render-closeout.mjs), evidence discipline (the renderer binds its record to worktree content and the Stop challenge reads it), red-green tests (the /design-check skill and check:proposal-red-at), AskUserQuestion for decisions (the global Questions rule plus the question-clarity, question-philosophy and unasked-decision gates), checkpointing long work (compaction checkpoints plus the resumable per-step contract), a PostToolUse typecheck hook (already wired globally as posttooluse-typecheck.mjs) and a Stop uncommitted-artifacts hook (the friction and closeout Stop gates). THREE debatable, none promoted: a /resume-lap skill, a /verify-evidence skill, and an audit of hook matchers for word-boundary correctness. ZERO genuinely open. The stamp was written only after the pass completed.",
+    "ONE INSIGHTS FINDING COULD NOT BE FILED HERE BECAUSE IT IS MACHINE-WIDE, NOT THIS REPOSITORY'S. The report says a hook falsely blocked a legitimate `git add` on a substring match for the word 'restore'. No hook matching that description exists at HEAD in either .claude/hooks/ or ~/.claude/hooks/ — the only occurrences of the word are prose comments — so the matcher is either already gone or lives in a host this routine cannot see. It is not filable as a repository item: a premise probe must name a git-TRACKED source file in THIS repository, and a machine-wide guard has none. Its home is C:/Code/docs/backlog.md, and this run did not write to another repository.",
+    "THE MACHINE-WIDE STATIC-ANALYSIS SWEEP RAN AND FOUND ONE REPOSITORY IN TROUBLE, WHICH IS NOT THIS ONE. `static-analysis-runner.mjs --root C:/Code` skipped ten repositories that declare no tool set (audit-tools included — normal, it owns its own gates) and reported FINDING for llm-relay: its declared chain of eslint with sonarjs, knip, madge, dependency-cruiser, ts-prune and jscpd exits 1. The runner captured only the npm notice lines, not the failing tool's own output, so WHICH tool fails is not established here. Surfaced for a human or an agent to judge; this run did not touch a repository it was not told to work in. Report: C:/Users/ethan/.claude/scheduled-tasks/nightly-maintenance/static-analysis-report.md."
   ]
 }

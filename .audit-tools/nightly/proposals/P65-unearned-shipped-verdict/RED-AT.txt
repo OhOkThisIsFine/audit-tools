@@ -1,0 +1,42 @@
+RED observed at HEAD — not predicted.
+
+HEAD:    2c81a4067cc774a7ef0a3fc6a3531e133f068e83
+Date:    2026-09-11 (nightly leg 3)
+Command: npx vitest run tests/shared/triage-unearned-shipped-verdict.test.ts
+Exit:    1
+
+The test body is the file in this directory
+(`unearned-shipped-verdict.test.mjs`). For the RED run its import pointed at the
+REAL module, `scripts/shared/triage-backlog.mjs`; the copy kept here imports the
+candidate instead, so the suite stays green while the proposal is unapproved.
+The temporary `tests/shared/` copy was deleted after the run — leg 3 lands
+nothing.
+
+Verbatim failure (full run in red-run.txt):
+
+  tests/shared/triage-unearned-shipped-verdict.test.ts (6 tests | 6 failed) 7ms
+    x downgrades already_shipped_or_stale when the premise is unprobed
+      -> (0 , downgradeUnearnedShippedVerdict) is not a function
+    x downgrades already_shipped_or_stale when the premise is probes_unusable
+      -> (0 , downgradeUnearnedShippedVerdict) is not a function
+    x downgrades already_shipped_or_stale when the premise is premise_unconfirmed
+      -> (0 , downgradeUnearnedShippedVerdict) is not a function
+    x keeps already_shipped_or_stale when the premise is holds
+      -> (0 , downgradeUnearnedShippedVerdict) is not a function
+    x keeps already_shipped_or_stale when the premise is partial
+      -> (0 , downgradeUnearnedShippedVerdict) is not a function
+    x never rewrites a verdict that does not authorize deletion
+      -> (0 , downgradeUnearnedShippedVerdict) is not a function
+
+  TypeError: (0 , downgradeUnearnedShippedVerdict) is not a function
+   -> tests/shared/triage-unearned-shipped-verdict.test.ts:32:19
+
+GREEN with the candidate applied (green-run.txt), 6 of 6:
+
+  Command: node C:/Users/ethan/AppData/Local/Temp/p65-green.mjs
+  Exit:    0
+
+The green run uses node:assert rather than vitest, and it runs from OUTSIDE the
+repository, because vitest's exclude list covers `.audit-tools/**` — the same
+rule that keeps an unapproved proposal test out of the suite. The assertions are
+the six in `unearned-shipped-verdict.test.mjs`, one for one.
