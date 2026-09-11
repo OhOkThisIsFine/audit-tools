@@ -927,6 +927,7 @@ export const GUARDS = [
       { name: 'agent push to main with no suite-green stamp', drive: 'hook', hook: '.claude/hooks/push-gate.mjs',
         payload: { tool_name: 'Bash', tool_input: { command: '$SAMPLE' } },
         sample: 'git push origin main', expect: 'push to a PROTECTED branch',
+        env: { CLAUDE_CODE_SESSION_ID: 'guard-form-reach' },
         rootGit: { files: { 'package.json': '{"name":"x","private":true}\n' } } },
     ],
     note:

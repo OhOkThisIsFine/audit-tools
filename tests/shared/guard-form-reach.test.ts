@@ -37,10 +37,10 @@ interface FormFixture {
   sample: string;
   drive: "script" | "export" | "hook" | "test";
   expect?: string;
+  env?: Record<string, string>; // script and hook drives — see formEnv
   // script
   script?: string;
   path?: string;
-  env?: Record<string, string>;
   fixtureDirs?: string[];
   extraFiles?: Record<string, string>;
   // export
@@ -96,8 +96,24 @@ function scrubbedEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   for (const key of Object.keys(env)) {
     if (key.startsWith("AUDIT_TOOLS_")) delete env[key];
     if (key === "LLM_RELAY_DISPATCH_DEPTH") delete env[key]; // a relay lane child marker; see isDispatchedChildEnv
+    // Agent-session markers: a hook that judges only an agent session exits 0 without one, so a form
+    // that passes here on the ambient marker fails in CI. A form that needs one declares it in `env`.
+    if (key === "CLAUDE_CODE_SESSION_ID" || key === "CLAUDE_PID") delete env[key];
   }
   return { ...env, ...extra };
+}
+
+/**
+ * The variables a form's driver passes: the project root, plus the form's own declared `env`
+ * (`$FIXTURE_ROOT` resolved). Every driver reads it, so a form's declaration cannot be dropped by
+ * one of them.
+ */
+function formEnv(form: FormFixture, root: string): Record<string, string> {
+  const env: Record<string, string> = { CLAUDE_PROJECT_DIR: root };
+  for (const [key, value] of Object.entries(form.env ?? {})) {
+    env[key] = value.replaceAll("$FIXTURE_ROOT", root);
+  }
+  return env;
 }
 
 function driveScript(form: FormFixture): { status: number | null; output: string } {
@@ -115,16 +131,12 @@ function driveScript(form: FormFixture): { status: number | null; output: string
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `# fixture\n\n${form.sample}\n`);
   git(repo, "add", "-A");
-  const env: Record<string, string> = { CLAUDE_PROJECT_DIR: repo };
-  for (const [key, value] of Object.entries(form.env ?? {})) {
-    env[key] = value.replaceAll("$FIXTURE_ROOT", repo);
-  }
   const r = spawnSyncHidden(process.execPath, [join(ROOT, form.script ?? "")], {
     cwd: repo,
     encoding: "utf8",
     windowsHide: true,
     timeout: 60_000,
-    env: scrubbedEnv(env),
+    env: scrubbedEnv(formEnv(form, repo)),
   });
   return { status: r.status, output: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
@@ -199,7 +211,7 @@ function driveHook(form: FormFixture): { status: number | null; output: string }
     encoding: "utf8",
     windowsHide: true,
     timeout: 60_000,
-    env: scrubbedEnv({ CLAUDE_PROJECT_DIR: root }),
+    env: scrubbedEnv(formEnv(form, root)),
   });
   return { status: r.status, output: `${r.stderr ?? ""}${r.stdout ?? ""}` };
 }
