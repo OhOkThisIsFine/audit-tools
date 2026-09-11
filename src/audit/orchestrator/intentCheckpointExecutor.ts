@@ -230,7 +230,6 @@ function collectLensEvidence(
     assessment.findings,
     assessment.contract_findings,
     assessment.conceptual_findings,
-    assessment.review_findings,
   ];
   for (const group of groups) {
     for (const finding of group ?? []) {

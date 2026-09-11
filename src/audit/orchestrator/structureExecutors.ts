@@ -226,12 +226,14 @@ export function runDesignAssessmentExecutor(
       designAssessment.conceptual_reviewed = true;
       designAssessment.conceptual_findings = previous.conceptual_findings ?? [];
     }
-    // Backward-compat: legacy artifacts only have `reviewed` / `review_findings`.
-    if (previous.reviewed && !previous.contract_reviewed && !previous.conceptual_reviewed) {
-      designAssessment.reviewed = true;
-      designAssessment.review_findings = previous.review_findings ?? [];
-    }
   }
+  // A pre-split artifact's combined `reviewed` / `review_findings` pair is
+  // deliberately NOT carried across a structure refresh. The refresh rewrites
+  // every OTHER field, so carrying the pre-split verdict would have let the one
+  // fresh-looking artifact in the tree re-assert a pass the current vocabulary
+  // does not have — the invalidation `state.ts` performs at load, undone here on
+  // the next structure run. The stale pair stays readable on the old bytes until
+  // the refresh replaces them.
 
   return {
     updated: {

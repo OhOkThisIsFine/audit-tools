@@ -210,6 +210,42 @@ test("advance STOPS gracefully when transitions exceed maxTransitions (never thr
   ).toBe("loop");
 });
 
+// The doc/report off-by-one. `AdvanceResult` documents the `bound` stop as "the
+// fold spent `maxTransitions` transitions", and `stoppedBound` is the number a
+// caller renders into an operator line — so the count actually SPENT must equal
+// the number REPORTED. The comparison was `++transitions > maxTransitions`,
+// which performed one transition more than the bound it named: with a bound of
+// 5 the fold ran SIX transitions and told the host it had spent 5. This pins
+// which transition stops the loop, so neither half can drift again.
+test("the bound stop spends exactly maxTransitions transitions — the count equals the reported bound", async () => {
+  let transitions = 0;
+  const engine: ObligationEngine<Record<string, never>, unknown, unknown> = {
+    priority: ["loop"],
+    obligations: [
+      {
+        id: "loop",
+        derive: () => "missing",
+        execute: async (s) => {
+          transitions++;
+          return { kind: "transition", state: { ...s } };
+        },
+      },
+    ],
+  };
+  const outcome = await advance(engine, {}, {}, { maxTransitions: 5 });
+
+  expect(outcome.stopped).toBe("bound");
+  expect(
+    transitions,
+    "the transition that brings the count TO the bound is the last one performed",
+  ).toBe(5);
+  expect(
+    outcome.stoppedBound,
+    "the number reported as the bound that fired is the number actually spent",
+  ).toBe(5);
+  expect(outcome.executions).toBe(5);
+});
+
 test("a completed fold is distinguishable from a bounded one (stopped is absent)", async () => {
   const engine: ObligationEngine<Record<string, never>, unknown, unknown> = {
     priority: ["done"],

@@ -32,6 +32,7 @@ import { ARTIFACT_DEFINITIONS, AUDIT_REPORT_FILENAME, type ArtifactBundle } from
 import { AGENT_FEEDBACK_FILENAME } from "audit-tools/shared";
 import { buildPendingAuditTasks } from "../../src/audit/cli/dispatch/packetFilter.js";
 import type { AuditTask, RepoManifest } from "../../src/audit/types.js";
+import type { DesignAssessment } from "../../src/audit/types/designAssessment.js";
 import type { AuditScopeManifest } from "../../src/audit/types/auditScope.js";
 import type { AuditPlanMetrics } from "../../src/audit/types/reviewPlanning.js";
 
@@ -478,14 +479,31 @@ test("INV-08: orchestrator source files contain no hardcoded model names or wind
 });
 
 // ---------------------------------------------------------------------------
-// INV-09: legacyReviewed staleness gate (ARC-14c59af5-2)
+// INV-09: the pre-split artifact is invalidated at load (ARC-14c59af5-2)
 // ---------------------------------------------------------------------------
 
-test("INV-09: stale design_assessment.json does NOT activate legacyReviewed — both review obligations are missing", () => {
+/**
+ * A pre-split `design_assessment.json` as it exists ON DISK: the combined
+ * `reviewed` flag and nothing else. Built here rather than inline because the
+ * field is deliberately gone from the type — the shape has exactly one
+ * legitimate producer left (an artifact written by the previous release), so the
+ * cast IS the point: this is foreign bytes being read back, not a fixture the
+ * current release could author.
+ */
+function preSplitDesignAssessment(): DesignAssessment {
+  return {
+    generated_at: "2026-01-01T00:00:00Z",
+    findings: [],
+    reviewed: true,
+  } as unknown as DesignAssessment;
+}
+
+test("INV-09: a stale pre-split design_assessment.json leaves both review obligations missing", () => {
   // A design_assessment with reviewed:true but no contract_reviewed/conceptual_reviewed
-  // is a pre-split legacy artifact. When the artifact is NOT stale (no upstream change),
-  // the backward-compat path should still apply (satisfies both obligations).
-  // When it IS stale, the obligations must be missing (trigger fresh review passes).
+  // is a pre-split artifact. It cannot satisfy either modern obligation whether or
+  // not it is stale — the combined verdict answers a different question from the
+  // two the tool now asks. Staleness is irrelevant to that answer; this case pins
+  // that it stays irrelevant rather than becoming the only thing that saves it.
   //
   // We need a bundle where design_assessment.json is stale. To produce staleness we
   // give it computed metadata then change a dependency (unit_manifest).
@@ -497,12 +515,8 @@ test("INV-09: stale design_assessment.json does NOT activate legacyReviewed — 
     graph_bundle: { graphs: {} },
     critical_flows: { flows: [], fallback_required: false },
     risk_register: { items: [] },
-    design_assessment: {
-      generated_at: "2026-01-01T00:00:00Z",
-      findings: [],
-      // Legacy pre-split: only `reviewed`, neither contract_reviewed nor conceptual_reviewed
-      reviewed: true,
-    },
+    // Pre-split: only `reviewed`, neither contract_reviewed nor conceptual_reviewed
+    design_assessment: preSplitDesignAssessment(),
   };
   const metadata = computeArtifactMetadata(base);
   // Simulate a structural change: unit_manifest content changes, which stales design_assessment.json
@@ -517,34 +531,30 @@ test("INV-09: stale design_assessment.json does NOT activate legacyReviewed — 
   const conceptual = state.obligations.find((o) => o.id === "design_review_conceptual_completed");
   expect(contract, "design_review_contract_completed must be present").toBeTruthy();
   expect(conceptual, "design_review_conceptual_completed must be present").toBeTruthy();
-  expect(contract!.state, "design_review_contract_completed must be missing when design_assessment.json is stale (legacyReviewed gate)").toBe("missing");
-  expect(conceptual!.state, "design_review_conceptual_completed must be missing when design_assessment.json is stale (legacyReviewed gate)").toBe("missing");
+  expect(contract!.state, "a pre-split verdict cannot satisfy the contract pass").toBe("missing");
+  expect(conceptual!.state, "a pre-split verdict cannot satisfy the conceptual pass").toBe("missing");
 });
 
-test("INV-09: non-stale legacy design_assessment (reviewed:true) still satisfies both review obligations", () => {
-  // The backward-compat path must remain active when the artifact is present and fresh.
-  const bundle: ArtifactBundle = {
-    design_assessment: {
-      generated_at: "2026-01-01T00:00:00Z",
-      findings: [],
-      reviewed: true,
-      // no contract_reviewed or conceptual_reviewed
-    },
-  };
+test("INV-09: a NON-stale pre-split design_assessment (reviewed:true) satisfies neither obligation either", () => {
+  // Freshness is not what disqualifies it. The pair of assertions below is the
+  // one that matters: the invalidation is TOTAL, so a resumed pre-split run is
+  // re-asked for both passes rather than having its old combined verdict read as
+  // two.
+  const bundle: ArtifactBundle = { design_assessment: preSplitDesignAssessment() };
   const state = deriveAuditState(bundle);
   const contract = state.obligations.find((o) => o.id === "design_review_contract_completed");
   const conceptual = state.obligations.find((o) => o.id === "design_review_conceptual_completed");
   expect(contract, "design_review_contract_completed must be present").toBeTruthy();
   expect(conceptual, "design_review_conceptual_completed must be present").toBeTruthy();
-  // Without metadata, computeStaleArtifacts returns an empty stale set,
-  // so design_assessment.json is NOT in the stale set → legacyReviewed fires.
-  expect(contract!.state, "non-stale legacy reviewed:true must satisfy design_review_contract_completed").toBe("satisfied");
-  expect(conceptual!.state, "non-stale legacy reviewed:true must satisfy design_review_conceptual_completed").toBe("satisfied");
+  // Without metadata the stale set is empty, so nothing about staleness applies
+  // here — the obligations are missing on the flag alone.
+  expect(contract!.state, "non-stale pre-split reviewed:true must NOT satisfy the contract pass").toBe("missing");
+  expect(conceptual!.state, "non-stale pre-split reviewed:true must NOT satisfy the conceptual pass").toBe("missing");
 });
 
 test("INV-09: split design_assessment (contract_reviewed + conceptual_reviewed) satisfies both obligations regardless of staleness", () => {
-  // New-format artifacts with explicit split flags always satisfy the obligations
-  // as long as the flags are true (the staleness gate only applies to the legacy path).
+  // Current-format artifacts with explicit split flags always satisfy the
+  // obligations as long as the flags are true.
   const bundle: ArtifactBundle = {
     design_assessment: {
       generated_at: "2026-01-01T00:00:00Z",

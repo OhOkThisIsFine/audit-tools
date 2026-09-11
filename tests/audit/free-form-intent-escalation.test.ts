@@ -71,7 +71,7 @@ function bundleWithCheckpoint(
     design_assessment: {
       generated_at: "2026-01-01T00:00:00.000Z",
       findings: [],
-      reviewed: false,
+      contract_reviewed: false,
     },
     docs_digest: { generated_at: "2026-01-01T00:00:00.000Z", docs: [] },
     structure_decomposition: {

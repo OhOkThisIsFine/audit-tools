@@ -39,13 +39,21 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { hashContent, isFileMissingError } from "audit-tools/shared";
+import {
+  hashContent,
+  isFileMissingError,
+  readSubmissionIngestHistory,
+} from "audit-tools/shared";
 import { writeCoreArtifacts, type ArtifactBundle } from "../io/artifacts.js";
 import {
   writeDesignReviewSnapshot,
   type DesignReviewSnapshot,
 } from "../orchestrator/designReviewSnapshot.js";
-import { laneSubmissionPath, recordLaneOutcome } from "./laneSubmissions.js";
+import {
+  AUDIT_GATE_SUBMISSION_SCOPE,
+  laneSubmissionPath,
+  recordLaneOutcome,
+} from "./laneSubmissions.js";
 
 const STAGING_DIRNAME = "submission-staging";
 
@@ -375,6 +383,17 @@ export async function commitFold(
     await writeDesignReviewSnapshot(artifactsDir, tx.pendingSnapshots[0]!);
     tx.pendingSnapshots.shift();
   }
+  // ONE ledger read for the whole applied register. Each `recordLaneOutcome`
+  // below would otherwise re-read the ledger, once per staged submission, over
+  // a file this loop is itself appending to; the read is refreshed by each
+  // accepted append (see `recordLaneOutcome`), so it stays consistent with what
+  // this pass has already landed. `commitFold` re-enters on the same transaction
+  // after a mid-loop I/O error, and a re-entry reaches THIS line again — a fresh
+  // read of a ledger that already carries the first attempt's rows, which is
+  // exactly the question the re-entry has to ask.
+  const ingestHistory = await readSubmissionIngestHistory(artifactsDir, {
+    runId: AUDIT_GATE_SUBMISSION_SCOPE,
+  });
   while (tx.staged.length > 0) {
     const staged = tx.staged[0]!;
     if (staged.applied) {
@@ -391,10 +410,15 @@ export async function commitFold(
       } catch (error) {
         if (!isFileMissingError(error)) throw error;
       }
-      await recordLaneOutcome(artifactsDir, staged.lane, {
-        kind: "accepted",
-        ...(staged.acceptedMessage ? { message: staged.acceptedMessage } : {}),
-      });
+      await recordLaneOutcome(
+        artifactsDir,
+        staged.lane,
+        {
+          kind: "accepted",
+          ...(staged.acceptedMessage ? { message: staged.acceptedMessage } : {}),
+        },
+        ingestHistory,
+      );
     } else {
       try {
         await moveFile(staged.stagingPath, staged.boundPath);

@@ -58,6 +58,14 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/remediate/steps/dispatch/",
   "src/remediate/steps/nextStep.ts",
   "src/shared/engine/",
+  // The host-facing step-contract WRITE-AND-LOG site: `createStepEmissionScaffold`
+  // owns the ONE call site that turns a plan into a written, logged step for BOTH
+  // orchestrators. It is the boundary every host handoff is emitted through —
+  // "written exactly once, logged exactly once" is a property of this module, not
+  // of each adopter remembering to do both — so a change here can alter what any
+  // host is handed, which is the blast radius this set exists to cover. It was
+  // the last emission-path module outside the set.
+  "src/shared/steps/",
   "src/shared/submission/",
 ];
 

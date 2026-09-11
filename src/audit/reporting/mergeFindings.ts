@@ -59,13 +59,14 @@ export function mergeFindings(
 
   const allDesignFindings = [
     ...(designAssessment?.findings ?? []),
-    // New parallel-pass findings
+    // The two review passes, each carrying its own findings. A pre-split
+    // artifact's combined `review_findings` is deliberately NOT folded in: it
+    // records a pass the current vocabulary does not have, and the invalidation
+    // at load (`orchestrator/state.ts`) re-asks for both real passes — so the
+    // merged report can never carry a verdict whose current-pass review never
+    // ran.
     ...(designAssessment?.contract_findings ?? []),
     ...(designAssessment?.conceptual_findings ?? []),
-    // Backward-compat: legacy single-pass findings
-    ...((designAssessment?.contract_findings === undefined && designAssessment?.conceptual_findings === undefined)
-      ? (designAssessment?.review_findings ?? [])
-      : []),
     // Phase B deterministic non-co-localization leads (structure layer).
     ...(structureDecomposition?.findings ?? []),
     // Phase C routed charter-delta leads (charter layer).

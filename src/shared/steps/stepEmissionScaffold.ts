@@ -57,8 +57,11 @@ export interface StepEmissionScaffold<TCtx, TPlan, TStep> {
    * key exists (a config-load failure that must still leave a fresh step
    * contract on disk): it is deliberately not a second emission site — it is
    * the same one, reached with a hand-built plan.
+   *
+   * `ctx` is optional and only ever reaches `write` (a pre-table plan has no
+   * gate ctx to speak of); an adopter whose writer reads it should pass it.
    */
-  emitPlan(plan: TPlan): Promise<TStep>;
+  emitPlan(plan: TPlan, ctx?: TCtx): Promise<TStep>;
 }
 
 export interface StepEmissionScaffoldOptions<TCtx, TPlan, TStep> {
@@ -66,8 +69,17 @@ export interface StepEmissionScaffoldOptions<TCtx, TPlan, TStep> {
   table: Readonly<Record<string, StepGateHandler<TCtx, TPlan>>>;
   /** Reached when no row handled the key (or no gate applied). */
   fallback: StepEmissionHandler<TCtx, TPlan>;
-  /** Turn a plan into the written step. The ONLY writer the scaffold calls. */
-  write: (plan: TPlan) => TStep | Promise<TStep>;
+  /**
+   * Turn a plan into the written step. The ONLY writer the scaffold calls.
+   *
+   * `ctx` is passed so an adopter can decorate the plan with anything the
+   * EMISSION carries but the plan does not — audit's fold-drained advisory
+   * lines ride the invocation's result, and they belong on whichever step the
+   * emit produced. Without it the adopter would have to splice them into every
+   * table row individually, which is the repetition this scaffold exists to
+   * remove. An adopter that needs no context simply ignores the parameter.
+   */
+  write: (plan: TPlan, ctx: TCtx | undefined) => TStep | Promise<TStep>;
   /** Announce the written step (stdout contract). Called exactly once per emission. */
   log: (step: TStep) => void;
 }
@@ -93,20 +105,22 @@ export function createStepEmissionScaffold<TCtx, TPlan, TStep>(
    * "written exactly once, logged exactly once" is a property of the scaffold
    * rather than of each adopter remembering to do both.
    */
-  const emitPlan = async (plan: TPlan): Promise<TStep> => {
-    const step = await options.write(plan);
+  const emitPlan = async (plan: TPlan, ctx: TCtx | undefined): Promise<TStep> => {
+    const step = await options.write(plan, ctx);
     options.log(step);
     return step;
   };
 
   return {
     handledKeys,
-    emitPlan,
+    emitPlan: (plan, ctx) => emitPlan(plan, ctx),
     async emit(key, ctx) {
       const handler = table[key];
       const plan = handler ? await handler(ctx) : null;
       // Declines (null OR undefined) take the fallback — see StepGateHandler.
-      return plan == null ? emitPlan(await options.fallback(ctx)) : emitPlan(plan);
+      return plan == null
+        ? emitPlan(await options.fallback(ctx), ctx)
+        : emitPlan(plan, ctx);
     },
     async emitFirstApplicable(keys, ctx) {
       for (const key of keys) {
@@ -125,9 +139,9 @@ export function createStepEmissionScaffold<TCtx, TPlan, TStep>(
         }
         const plan = await handler(ctx);
         // Same decline predicate as `emit` — see StepGateHandler.
-        if (plan != null) return emitPlan(plan);
+        if (plan != null) return emitPlan(plan, ctx);
       }
-      return emitPlan(await options.fallback(ctx));
+      return emitPlan(await options.fallback(ctx), ctx);
     },
   };
 }

@@ -337,26 +337,41 @@ const TOOL_OWNED_FINDING_VERDICTS = [
 /**
  * The judge's own door into the finding contract. `ConceptualJudgeSubmissionSchema`
  * parses `findings` with the tool-owned verdicts OMITTED, which strips a supplied
- * value SILENTLY — so this pre-schema check names the field, exactly as the
- * per-file host handoff does for `grounding`. Stated before the schema parse for
- * the same reason: the strict envelope would report only a stripped/unknown key.
+ * value SILENTLY — so this pre-schema check NAMES the field, exactly as the
+ * per-file host handoff does for `grounding`.
+ *
+ * It reports rather than throws, and is exported, because the ingest fold must
+ * run it BEFORE it hands the submission to the schema: the fold's gate parses
+ * with `ConceptualJudgeSubmissionSchema.safeParse` itself (to quarantine a bad
+ * shape with a classified reason instead of throwing the fold), and that parse
+ * has already stripped the field by the time `buildConceptualReviewAdjudication`
+ * is reached. A check living only inside the builder therefore never fired on
+ * the production path — a judge could supply a tool-owned verdict and be told
+ * nothing, which is the exact silence the field omission exists to end.
  *
  * `evidence_lane` matters here more than the others: synthesis reads it to
  * decide whether a `critical` was ever asked for an `evidence` array, so a
  * host-supplied lane is a finding exempting ITSELF from the bar.
+ *
+ * Returns the issue message, or `null` when nothing was supplied.
  */
-function refuseSuppliedToolVerdict(submission: unknown): void {
-  if (!isRecord(submission) || !Array.isArray(submission.findings)) return;
+export function suppliedToolVerdictIssue(submission: unknown): string | null {
+  if (!isRecord(submission) || !Array.isArray(submission.findings)) return null;
   for (const [index, finding] of submission.findings.entries()) {
     if (!isRecord(finding)) continue;
     for (const verdict of TOOL_OWNED_FINDING_VERDICTS) {
       if (verdict in finding) {
-        fail(
-          `findings[${index}].${verdict}: ${verdict} is derived at ingest and must not be supplied`,
-        );
+        return `findings[${index}].${verdict}: ${verdict} is derived at ingest and must not be supplied`;
       }
     }
   }
+  return null;
+}
+
+/** {@link suppliedToolVerdictIssue} as the builder's refusal arm. */
+function refuseSuppliedToolVerdict(submission: unknown): void {
+  const issue = suppliedToolVerdictIssue(submission);
+  if (issue !== null) fail(issue);
 }
 
 

@@ -11,7 +11,12 @@ import type { Finding } from "../types.js";
  * given `pass` the next time that pass is validly consumed.
  */
 export interface RejectedDesignReviewSubmission {
-  pass: "legacy" | "contract" | "conceptual";
+  /**
+   * The pass whose submission was refused. Exactly the two the tool runs —
+   * the pre-split combined pass is retired, so a refusal recorded against it
+   * has no producer and no gate that could ever clear it.
+   */
+  pass: "contract" | "conceptual";
   /**
    * The lane the submission arrived on. Names the lane, not a filename: the
    * bound path is a digest, which would tell an operator nothing.
@@ -33,11 +38,8 @@ export interface RejectedDesignReviewSubmission {
 export interface DesignAssessment {
   generated_at: string;
   findings: Finding[];
-  /** @deprecated Use contract_findings instead */
-  review_findings?: Finding[];
-  /** @deprecated Derived from contract_reviewed && conceptual_reviewed */
-  reviewed?: boolean;
-  /** Contract-assessment pass (adversarial): inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap */
+  /**
+   * Contract-assessment pass (adversarial): inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap */
   contract_findings?: Finding[];
   /** Conceptual-design pass (generative); categories are CONCEPTUAL_FINDING_CATEGORIES. */
   conceptual_findings?: Finding[];

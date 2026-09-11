@@ -20,6 +20,7 @@ import {
   type CitationValidationSummary,
   type DeliveredExcerpt,
   type IntentCheckpoint,
+  resolveRunBoundDesignReview,
 } from "audit-tools/shared";
 import { charterExtractionCoverageFilename } from "../cli/laneSubmissions.js";
 import { charterExtractionKindsForCeiling } from "../cli/charterExtractionPrompt.js";
@@ -27,7 +28,7 @@ import { charterExtractionKindsForCeiling } from "../cli/charterExtractionPrompt
 /**
  * Resolve the charter-layer ceiling from the confirmed checkpoint. The ceiling is
  * the consent dial captured at `intent_checkpoint`; when the host never set it we
- * fall back to the legacy `conceptual_depth` (deep → a `deep` ceiling) and default
+ * fall back to the run-bound `conceptual_depth` (deep → a `deep` ceiling) and default
  * to `shallow` — conversation-first, the charter layer is opt-in. Exported so the
  * obligation gate and the prompt renderer resolve depth identically (one source).
  */
@@ -36,7 +37,14 @@ export function resolveCharterCeiling(
 ): Ceiling {
   const dr = checkpoint?.design_review;
   if (dr?.ceiling) return dr.ceiling;
-  if (dr?.conceptual_depth === "deep") return { rung: "deep" };
+  // The `conceptual_depth` fallback reads the RUN-BOUND block: depth is the
+  // per-run dial this module's caller names (see `resolveRunBoundDesignReview`),
+  // so a run that did not answer it does not inherit a `deep` ceiling from a
+  // prior run's answer. The explicit `ceiling` field above is a separate dial
+  // with its own semantics and is deliberately NOT bound here.
+  if (resolveRunBoundDesignReview(checkpoint)?.conceptual_depth === "deep") {
+    return { rung: "deep" };
+  }
   return { rung: "shallow" };
 }
 

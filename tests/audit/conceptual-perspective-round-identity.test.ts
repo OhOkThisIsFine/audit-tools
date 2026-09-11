@@ -194,7 +194,13 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
         confirmed_by: "host",
         scope_summary: "whole repository",
         intent_summary: "review the repository",
-        design_review: { conceptual_depth: "deep", perspectives: 3 },
+        // Bound to THIS confirmation: the depth dials are per-run, so an
+        // unbound block is read as unanswered and falls back to shallow.
+        design_review: {
+          answered_at: "2026-01-01T00:00:00.000Z",
+          conceptual_depth: "deep",
+          perspectives: 3,
+        },
       },
     } as ArtifactBundle);
     await persistAnalyzerConsent(root, {

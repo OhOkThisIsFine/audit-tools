@@ -1541,6 +1541,30 @@ describe("CP-NODE-13 inv-1: the cyclic-seam re-check validates the AUTHORED brea
     expect(result.reason).toMatch(/no member of cycle .* depends on/);
   });
 
+  it("NEGATIVE: a mediator only ONE side of the cycle depends on is refused", () => {
+    // The prompt this record answers states the requirement as "a THIRD
+    // obligation that BOTH sides depend on", but the check accepted ANY single
+    // member's edge: OBL-A is a cycle member, it needs OBL-M, OBL-M exists, and
+    // the graph is acyclic — so this passed while OBL-B still pointed at OBL-A,
+    // i.e. the break re-pointed one edge and left the cycle's other side
+    // untouched. Acceptance here means a worker can claim a mediated resolution
+    // over a ledger the mediator does not actually mediate.
+    const result = validateAuthoredCycleBreak(
+      { members: ["OBL-A", "OBL-B"] },
+      [
+        { id: "OBL-A", needs: ["OBL-M"] },
+        { id: "OBL-B", needs: ["OBL-A"] },
+        { id: "OBL-M", needs: [] },
+      ],
+      { strategy: "mediator", designatedId: "OBL-M" },
+    );
+    expect(
+      result.accepted,
+      "one side routing through the mediator does not mediate the cycle",
+    ).toBe(false);
+    expect(result.reason).toMatch(/BOTH sides depend on/);
+  });
+
   it("NEGATIVE: a single_authority break over a still-cyclic graph is refused (F5)", () => {
     // The named cycle IS broken, but the break left a cycle elsewhere. The
     // single_authority path used to reach the accept with no whole-graph check.

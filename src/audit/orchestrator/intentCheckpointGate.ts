@@ -36,6 +36,7 @@
  * baseline, which the executor resolves as `changed` (over-stale, safe).
  */
 import { hashContent, stableStringify } from 'audit-tools/shared';
+import { DESIGN_REVIEW_PROVENANCE_FIELDS } from 'audit-tools/shared';
 import type { IntentCheckpoint } from 'audit-tools/shared';
 
 /**
@@ -62,12 +63,14 @@ export interface NormalizeConfig {
  * The single active normalization config (INV-O2-inv-5 input). The two lists
  * together cover every `IntentCheckpoint` field except the provenance pair
  * (`confirmed_at`, `confirmed_by`) — which `NON_SEMANTIC_FIELDS_BY_ARTIFACT`
- * also strips from the canonical content hash. `schema_version` is deliberately
- * STRUCTURED (a schema migration is a semantic reinterpretation, not
- * provenance).
+ * also strips from the canonical content hash — and except the provenance
+ * INSIDE `design_review` (`answered_at`, stripped from the structured
+ * projection by `stripDesignReviewProvenance` and from the same content hash).
+ * `schema_version` is deliberately STRUCTURED (a schema migration is a semantic
+ * reinterpretation, not provenance).
  */
 export const DEFAULT_NORMALIZE_CONFIG: NormalizeConfig = {
-  version: 'intent-checkpoint-normalize/v3',
+  version: 'intent-checkpoint-normalize/v4',
   structuredFields: [
     'schema_version',
     'excluded_scope',
@@ -115,6 +118,33 @@ export interface CheckpointNormalForms {
   prose: string;
 }
 
+/**
+ * Strip PROVENANCE out of the projected `design_review` block.
+ *
+ * `answered_at` records WHICH confirmation answered the block — it is not part
+ * of the answer. It is therefore inside neither normal form, for the same
+ * reason `confirmed_at`/`confirmed_by` are not: a host re-confirming the SAME
+ * depth stamps a fresh `answered_at` (it must — see
+ * `resolveDesignReviewBinding`), and comparing that stamp would resolve an
+ * unchanged intent as `structured_changed` and re-stale the whole planning
+ * cascade on a timestamp. The field list is single-sourced with the canonical
+ * artifact hash's strip list ({@link DESIGN_REVIEW_PROVENANCE_FIELDS}).
+ *
+ * A non-object value is returned untouched: this projection never invents
+ * structure, and the gate's job is comparing what is there.
+ */
+function stripDesignReviewProvenance(value: unknown): unknown {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+  const drop = new Set(DESIGN_REVIEW_PROVENANCE_FIELDS);
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(
+      ([key]) => !drop.has(key),
+    ),
+  );
+}
+
 function projectFields(
   checkpoint: IntentCheckpoint,
   fields: readonly (keyof IntentCheckpoint)[],
@@ -126,7 +156,11 @@ function projectFields(
       // Prose is whitespace-insensitive at the edges; structured values are
       // compared structurally via the stable serializer (key order invisible).
       projection[field as string] =
-        typeof value === 'string' ? value.trim() : value;
+        typeof value === 'string'
+          ? value.trim()
+          : field === 'design_review'
+            ? stripDesignReviewProvenance(value)
+            : value;
     }
   }
   return stableStringify(projection);

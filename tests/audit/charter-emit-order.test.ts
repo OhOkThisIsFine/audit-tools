@@ -48,8 +48,6 @@ function deepCeilingBundle(): ArtifactBundle {
     design_assessment: {
       generated_at: "2026-01-01T00:00:00.000Z",
       findings: [],
-      review_findings: [],
-      reviewed: true,
       contract_findings: [],
       contract_reviewed: true,
       conceptual_findings: [],

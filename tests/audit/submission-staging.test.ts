@@ -271,3 +271,131 @@ test("a systemic-challenge round whose hash is already folded is IGNORED — nev
   expect(result.updated.systemic_challenge?.rounds).toHaveLength(1);
   expect(result.updated.systemic_challenge?.converged).toBe(false);
 });
+
+/**
+ * The re-entered-commit window. `commitFold`'s own header states the contract:
+ * "the throw path re-runs commitFold on the SAME transaction: a re-entry after a
+ * mid-loop I/O error must RESUME at the failed entry, never re-record an
+ * `accepted` event the first attempt already appended."
+ *
+ * The staged entry leaves the register LAST in the applied branch, so the window
+ * is real: `recordLaneOutcome` appends the event durably and THEN drops the
+ * submission from the expected set, and that second half can throw. The entry is
+ * still on `tx.staged`, the event is on the ledger, and the re-entry appends a
+ * second identical row — one submission, two `accepted` events.
+ *
+ * The re-entry state is built EXPLICITLY rather than by injecting an OS fault.
+ * What a mid-branch throw leaves behind is exactly: the ledger row present, the
+ * staged entry still at the head of the register, the staging file already
+ * deleted. That is the state constructed below, so the mechanism under test —
+ * `recordLaneOutcome` asking the ledger what already landed — is exercised
+ * without depending on a filesystem quirk that behaves differently per platform.
+ */
+test("a RE-ENTERED commit does not append a second accepted event for the same staged submission", async () => {
+  await withArtifactsDir(async (artifactsDir) => {
+    const bound = laneSubmissionPath(artifactsDir, LANE);
+    await writeFile(bound, JSON.stringify({ themes: [] }), "utf8");
+
+    const tx = createFoldTransaction();
+    const staged = await stageLaneSubmission(tx, artifactsDir, LANE);
+    if (staged.status !== "staged") throw new Error("expected staged");
+    markSubmissionApplied(tx, staged.staged.stagingPath, "with a note");
+
+    await commitFold(artifactsDir, {}, tx);
+    const acceptedAfterFirst = (await readSubmissionLedger(artifactsDir)).filter(
+      (e) => e.kind === "accepted",
+    );
+    expect(acceptedAfterFirst).toHaveLength(1);
+
+    // The throw window: the event landed, the entry never left the register.
+    tx.staged.push(staged.staged);
+    await commitFold(artifactsDir, {}, tx);
+
+    const accepted = (await readSubmissionLedger(artifactsDir)).filter(
+      (e) => e.kind === "accepted",
+    );
+    expect(
+      accepted,
+      "one staged submission, one accepted event — a re-entry must not double-record it",
+    ).toHaveLength(1);
+    expect(accepted[0]!.message).toBe("with a note");
+  });
+});
+
+/**
+ * The dedupe question is about HISTORY, not about the last row. An accepted
+ * submission can be followed by a rejection — the host resubmits at the bound
+ * path after the acceptance was consumed, and the repair fails again — so a
+ * recorder that asks only "is the TRAILING event an accepted?" reads the
+ * rejection, concludes nothing landed, and appends a SECOND accepted for one
+ * staged submission. The state built below is exactly that interleaving; the
+ * re-entry is the same explicit construction the test above uses.
+ */
+test("an accepted already on the ledger suppresses a re-entry even when a REJECTION is the trailing event", async () => {
+  await withArtifactsDir(async (artifactsDir) => {
+    const { recordLaneOutcome } = await import(
+      "../../src/audit/cli/laneSubmissions.js"
+    );
+    const bound = laneSubmissionPath(artifactsDir, LANE);
+    await writeFile(bound, JSON.stringify({ themes: [] }), "utf8");
+
+    const tx = createFoldTransaction();
+    const staged = await stageLaneSubmission(tx, artifactsDir, LANE);
+    if (staged.status !== "staged") throw new Error("expected staged");
+    markSubmissionApplied(tx, staged.staged.stagingPath, "with a note");
+    await commitFold(artifactsDir, {}, tx);
+
+    // The interleaving: the host resubmitted at the bound path and the repair
+    // was refused, so the TRAILING ingest event is now a rejection.
+    await recordLaneOutcome(artifactsDir, LANE, {
+      kind: "rejected",
+      issueCode: "submission_contract_invalid",
+      message: "repair failed again",
+    });
+
+    // The re-entry: the entry is still on the register, exactly as a mid-loop
+    // throw after the durable append would leave it.
+    tx.staged.push(staged.staged);
+    await commitFold(artifactsDir, {}, tx);
+
+    const accepted = (await readSubmissionLedger(artifactsDir)).filter(
+      (e) => e.kind === "accepted",
+    );
+    expect(
+      accepted,
+      "one staged submission, one accepted event — a later rejection must not reopen the question",
+    ).toHaveLength(1);
+    expect(accepted[0]!.message).toBe("with a note");
+  });
+});
+
+/**
+ * The other half of the same rule, so the idempotence cannot be over-applied: a
+ * REJECTION is deliberately re-recorded every time it is observed. A repeated
+ * missing observation is not substantive history (see
+ * `readTrailingSubmissionRefusals`), but a refusal a host has not repaired must
+ * stay on the ledger as the reason it is being re-asked — collapsing it to one
+ * row would erase that.
+ */
+test("a repeated rejection is still recorded — only the accepted arm is idempotent", async () => {
+  await withArtifactsDir(async (artifactsDir) => {
+    const { recordLaneOutcome } = await import(
+      "../../src/audit/cli/laneSubmissions.js"
+    );
+    await recordLaneOutcome(artifactsDir, LANE, {
+      kind: "rejected",
+      issueCode: "submission_contract_invalid",
+      message: "still the wrong shape",
+    });
+    await recordLaneOutcome(artifactsDir, LANE, {
+      kind: "rejected",
+      issueCode: "submission_contract_invalid",
+      message: "still the wrong shape",
+    });
+
+    const rejected = (await readSubmissionLedger(artifactsDir)).filter(
+      (e) => e.kind === "rejected",
+    );
+    expect(rejected).toHaveLength(2);
+  });
+});

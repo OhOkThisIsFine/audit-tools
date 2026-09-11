@@ -407,16 +407,16 @@ test("mergeFindings includes designAssessment.findings in output", () => {
   expect(merged[0].lens).toBe("architecture");
 });
 
-test("mergeFindings includes designAssessment.review_findings in output", () => {
+test("mergeFindings includes designAssessment.contract_findings in output", () => {
   const designFinding = makeFinding({
     id: "DA-001",
     title: "Design finding A",
     severity: "medium",
     lens: "architecture",
   });
-  const reviewFinding = makeFinding({
+  const contractFinding = makeFinding({
     id: "DA-002",
-    title: "Design review finding B",
+    title: "Design contract-review finding B",
     category: "Coupling",
     severity: "low",
     lens: "architecture",
@@ -429,13 +429,40 @@ test("mergeFindings includes designAssessment.review_findings in output", () => 
     {
       generated_at: "2026-01-01T00:00:00Z",
       findings: [designFinding],
-      review_findings: [reviewFinding],
+      contract_findings: [contractFinding],
     },
   );
   expect(merged.length).toBe(2);
   const titles = merged.map((f) => f.title);
   expect(titles.includes("Design finding A")).toBeTruthy();
-  expect(titles.includes("Design review finding B")).toBeTruthy();
+  expect(titles.includes("Design contract-review finding B")).toBeTruthy();
+});
+
+// The pre-split combined findings are NOT folded in. They belong to a pass the
+// current vocabulary does not have, and the load-time invalidation re-asks for
+// both real passes — so a report carrying them would state a verdict whose
+// current-pass review never ran. The object is cast because the field no longer
+// exists on the type: this pins that a STALE artifact on disk, read back with
+// the old key, still contributes nothing.
+test("mergeFindings ignores a pre-split review_findings array", () => {
+  const designFinding = makeFinding({
+    id: "DA-001",
+    title: "Design finding A",
+    severity: "medium",
+    lens: "architecture",
+  });
+  const legacyFinding = makeFinding({
+    id: "DA-LEGACY",
+    title: "Pre-split combined review finding",
+    severity: "low",
+    lens: "architecture",
+  });
+  const merged = mergeFindings([], undefined, undefined, {
+    generated_at: "2026-01-01T00:00:00Z",
+    findings: [designFinding],
+    review_findings: [legacyFinding],
+  } as never);
+  expect(merged.map((f) => f.title)).toEqual(["Design finding A"]);
 });
 
 test("mergeFindings merges an AuditResult finding into a matching designAssessment finding", () => {

@@ -322,43 +322,52 @@ await test("handleDesignReviewBranch returns single-pass design_review_conceptua
   });
 });
 
-await test("handleDesignReviewBranch returns continue after merging a valid legacy findings file and deleting it", async () => {
+// The pre-split combined lane is RETIRED: not polled, not translated, not
+// quarantined — there is no code path that reads it any more. A file left at
+// that bound path is inert leftover state, and the run is re-asked for both
+// current passes instead. Pinned here because "leaves it alone" and "silently
+// consumes it as the contract pass" are easy to confuse, and only the first is
+// the decision.
+await test("handleDesignReviewBranch ignores a leftover pre-split findings file and asks for BOTH current passes", async () => {
   await withTempDir(async (artifactsDir) => {
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const findingsPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_legacy);
-    await writeFile(findingsPath, JSON.stringify([{ id: "F-1", title: "test" }]), "utf8");
+    // The retired lane's bound path, derivable by the same rule every lane uses.
+    const legacyPath = laneSubmissionPath(artifactsDir, "design_review_legacy");
+    await writeFile(legacyPath, JSON.stringify([{ id: "F-1", title: "test" }]), "utf8");
 
-    // Write a stub design_assessment.json so writeCoreArtifacts has a path
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
-    await writeFile(designAssessmentPath, JSON.stringify({ reviewed: false }), "utf8");
+    await writeFile(designAssessmentPath, JSON.stringify({ findings: [], reviewed: true }), "utf8");
 
+    // A pre-split artifact as it exists ON DISK — the field is gone from the
+    // type, and the cast is the point: this is foreign bytes read back, not a
+    // fixture the current release could author.
     const bundle: ArtifactBundle = {
       design_assessment: {
         generated_at: "now",
         findings: [],
-        reviewed: false,
-        review_findings: [],
-      },
+        reviewed: true,
+      } as unknown as ArtifactBundle["design_assessment"],
     };
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
     const tx = createFoldTransaction();
     const branch = await handleDesignReviewBranch(params, bundle, state, tx);
-    expect(branch.action).toBe("continue");
-    if (branch.action !== "continue") throw new Error("expected continue");
-    // The handler CARRIES the merge; the fold commit lands it (CX-02 persist-once).
-    await commitFold(artifactsDir, branch.bundle, tx);
+    // Neither pass is done, so the branch asks for both — never "continue",
+    // which would have meant the retired file counted as a review.
+    expect(branch.action).toBe("return");
+    if (branch.action !== "return") throw new Error("expected return");
+    expect(branch.result.kind).toBe("design_review_parallel");
+    // And the pre-split verdict is not translated onto either pass.
+    expect(branch.result.bundle.design_assessment?.contract_reviewed).not.toBe(true);
+    expect(branch.result.bundle.design_assessment?.conceptual_reviewed).not.toBe(true);
 
-    // The submitted findings file should have been deleted
-    let exists = true;
-    try {
-      await import("node:fs/promises").then((m) => m.access(findingsPath));
-    } catch {
-      exists = false;
-    }
-    expect(exists, "findings file should be deleted after merge").toBe(false);
+    await commitFold(artifactsDir, branch.result.bundle, tx);
+    // The file is left where it is: a retired lane's leftovers are not this
+    // release's business to move, and quarantining them would record a refusal
+    // against a lane nothing can repair.
+    expect(await readFile(legacyPath, "utf8")).toContain("F-1");
   });
 });
 
@@ -640,7 +649,9 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
     // The re-emitted step's bundle carries the same note (same in-memory
     // design_assessment object) — this is what nextStepCommand.ts threads into
     // the re-emitted step's prompt via renderDesignReviewRejectionNotice.
-    const notice = renderDesignReviewRejectionNotice(branch.result.bundle, ["legacy", "contract"]);
+    const notice = renderDesignReviewRejectionNotice(branch.result.bundle, [
+      "contract",
+    ]);
     expect(notice).toBeTruthy();
     if (notice === undefined) throw new Error("expected a notice");
     expect(notice.includes(GATE_LANES.design_review_contract)).toBe(true);
@@ -744,47 +755,42 @@ await test("handleDesignReviewBranch quarantines an ambiguous two-array-property
   });
 });
 
-await test("handleDesignReviewBranch quarantines a malformed legacy findings file rather than destroying it", async () => {
+await test("a malformed file on the retired pre-split lane is not quarantined — there is no gate left to refuse it", async () => {
   await withTempDir(async (artifactsDir) => {
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const findingsPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_legacy);
-    await writeFile(findingsPath, JSON.stringify({ not: "an array or a single-array wrapper" }), "utf8");
+    const legacyPath = laneSubmissionPath(artifactsDir, "design_review_legacy");
+    await writeFile(
+      legacyPath,
+      JSON.stringify({ not: "an array or a single-array wrapper" }),
+      "utf8",
+    );
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
-    await writeFile(designAssessmentPath, JSON.stringify({ reviewed: false }), "utf8");
+    await writeFile(designAssessmentPath, JSON.stringify({ findings: [] }), "utf8");
 
     const bundle: ArtifactBundle = {
-      design_assessment: { generated_at: "now", findings: [], reviewed: false, review_findings: [] },
+      design_assessment: { generated_at: "now", findings: [] },
     };
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
     const tx = createFoldTransaction();
     const branch = await handleDesignReviewBranch(params, bundle, state, tx);
-    // Legacy quarantine folds ("continue") — the very next fold iteration
-    // (same drain call, carried bundle) re-evaluates contract/conceptual and
-    // surfaces the recorded rejection via the returned host step.
-    expect(branch.action).toBe("continue");
-    if (branch.action !== "continue") throw new Error("expected continue");
-    await commitFold(artifactsDir, branch.bundle, tx);
+    expect(branch.action).toBe("return");
+    await commitFold(
+      artifactsDir,
+      branch.action === "return" ? branch.result.bundle : branch.bundle,
+      tx,
+    );
 
-    const quarantined = await quarantinedFiles(artifactsDir);
-    expect(quarantined.length).toBe(1);
-    expect(quarantined[0].startsWith(`${GATE_LANES.design_review_legacy}.`)).toBe(true);
-
+    // Nothing was quarantined: a refusal recorded against a retired lane could
+    // never be cleared, because no gate re-reads it and no re-submission at that
+    // path would be polled. The file simply stays where it is, unread.
+    expect(await quarantinedFiles(artifactsDir)).toEqual([]);
+    expect(await readFile(legacyPath, "utf8")).toContain("single-array wrapper");
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
-    expect(written.rejected_submissions.length).toBe(1);
-    expect(written.rejected_submissions[0].pass).toBe("legacy");
-
-    // Legacy submission must be gone from its bound path (quarantined, not left in place).
-    let stillInIncoming = true;
-    try {
-      await readFile(findingsPath, "utf8");
-    } catch {
-      stillInIncoming = false;
-    }
-    expect(stillInIncoming).toBe(false);
+    expect(written.rejected_submissions ?? []).toEqual([]);
   });
 });
 
@@ -1185,7 +1191,12 @@ const OMITTABLE_GATES: OmittableGateCase[] = [
         confirmed_by: "host",
         scope_summary: "s",
         intent_summary: "i",
-        design_review: { conceptual_depth: "deep" },
+        // Bound to this confirmation: the depth dials are per-run, so the
+        // `deep` ceiling this entry needs is only read from an answered block.
+        design_review: {
+          answered_at: "2026-01-01T00:00:00Z",
+          conceptual_depth: "deep",
+        },
       },
     } satisfies ArtifactBundle,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>

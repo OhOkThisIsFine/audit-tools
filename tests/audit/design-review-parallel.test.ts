@@ -19,6 +19,20 @@ const { PRIORITY } = await import("../../src/audit/orchestrator/nextStep.js");
 
 // ── Minimal bundle factory ────────────────────────────────────────────────────
 
+/**
+ * A pre-split `design_assessment.json` as it exists ON DISK — the combined
+ * `reviewed` flag and nothing else. Cast because the field is deliberately gone
+ * from the type: the shape has exactly one legitimate producer left (an artifact
+ * written by the previous release), so the cast IS the point.
+ */
+function preSplitDesignAssessment(): DesignAssessment {
+  return {
+    generated_at: "2026-01-01T00:00:00Z",
+    findings: [],
+    reviewed: true,
+  } as unknown as DesignAssessment;
+}
+
 function minimalBundle(
   designAssessmentOverrides: Partial<DesignAssessment> = {},
 ): ArtifactBundle {
@@ -82,8 +96,15 @@ test("state.ts: both design_review obligations satisfied when both flags are tru
   expect(conceptual && conceptual.state === "satisfied").toBeTruthy();
 });
 
-test("state.ts: backward-compat — legacy reviewed:true satisfies both obligations", () => {
-  const bundle = minimalBundle({ reviewed: true });
+// The pre-split artifact is INVALIDATED AT LOAD, never translated. It carries
+// only the combined `reviewed` flag — ONE pass that answered a different
+// question ("was the design assessed?") from the two the tool now runs ("was
+// THIS pass reviewed against THIS round?"). Reading it as both would satisfy two
+// obligations whose reviews never happened under the current vocabulary, and the
+// operator would have no way to tell. So both stay `missing` and the run is
+// re-asked for each pass in its current shape.
+test("state.ts: a pre-split reviewed:true satisfies NEITHER modern obligation — it is invalidated, not translated", () => {
+  const bundle = minimalBundle(preSplitDesignAssessment());
   const state = deriveAuditState(bundle);
   const contract = state.obligations.find(
     (o) => o.id === "design_review_contract_completed",
@@ -91,8 +112,14 @@ test("state.ts: backward-compat — legacy reviewed:true satisfies both obligati
   const conceptual = state.obligations.find(
     (o) => o.id === "design_review_conceptual_completed",
   );
-  expect(contract && contract.state === "satisfied", "contract should be satisfied via legacy").toBeTruthy();
-  expect(conceptual && conceptual.state === "satisfied", "conceptual should be satisfied via legacy").toBeTruthy();
+  expect(
+    contract && contract.state === "missing",
+    "a pre-split combined verdict is not a contract-pass verdict",
+  ).toBeTruthy();
+  expect(
+    conceptual && conceptual.state === "missing",
+    "a pre-split combined verdict is not a conceptual-pass verdict",
+  ).toBeTruthy();
 });
 
 // ── renderContractReviewPrompt ────────────────────────────────────────────────

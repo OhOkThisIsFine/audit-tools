@@ -43,7 +43,7 @@ function readyForIntentBundle(): ArtifactBundle {
     design_assessment: {
       generated_at: "2026-01-01T00:00:00.000Z",
       findings: [],
-      reviewed: false,
+      contract_reviewed: false,
     },
     docs_digest: {
       generated_at: "2026-01-01T00:00:00.000Z",
@@ -118,6 +118,8 @@ test("production systemic dispatch never advertises the deleted deep-review judg
         scope_summary: "whole repository",
         intent_summary: "comprehensive repository-wide audit",
         design_review: {
+          // Bound to THIS confirmation — the depth dials are per-run.
+          answered_at: "2026-01-01T00:00:00.000Z",
           conceptual_depth: "deep",
           ceiling: { rung: "deep" },
           attention: 0,
@@ -333,5 +335,144 @@ test("the conceptual ingest fold stamps a verification status on every admitted 
       "every admitted conceptual finding must carry a status after ingest",
     ).toBe(true);
     expect(conceptual[0]?.verification_status).toBe("judge_confirmed");
+  });
+});
+
+// The production REACH proof for the supplied-`verification_status` refusal.
+//
+// The check lived only inside `buildConceptualReviewAdjudication`, which the
+// fold reaches with a submission `ConceptualJudgeSubmissionSchema.safeParse` has
+// ALREADY stripped — so on the only path that matters it never fired, and a
+// judge could supply the very field this vocabulary derives and be told nothing.
+// Moved to the gate, over the RAW value. Driven through the real ingest fold, so
+// what is proven is that the message reaches the operator, not that a helper
+// returns a string.
+test("the ingest fold quarantines a judge submission that supplies verification_status", async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+
+    const bundle: ArtifactBundle = {
+      ...readyForIntentBundle(),
+      design_assessment: {
+        generated_at: "2026-01-01T00:00:00.000Z",
+        findings: [],
+        contract_reviewed: true,
+        conceptual_reviewed: false,
+      },
+    };
+    const dispatch = await prepareConceptualDispatch({
+      artifactsDir,
+      bundle,
+      settings: { conceptual_depth: "deep", perspectives: 1 },
+    });
+    const round = await readConceptualReviewRoundManifest(artifactsDir);
+    if (!round) throw new Error("missing conceptual round manifest");
+    const perspective = round.perspectives[0];
+    if (!perspective) throw new Error("manifest carries no perspective");
+    await writeFile(
+      perspective.result_path,
+      JSON.stringify({
+        findings: [
+          {
+            id: "DR-001",
+            title: "DR-001",
+            category: "design_simplification",
+            severity: "medium",
+            confidence: "high",
+            lens: "architecture",
+            summary: "candidate",
+            affected_files: [{ path: "src/api/auth.ts" }],
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    // The supplied field rides on the FINDING, which is where the schema omits it.
+    await writeFile(
+      dispatch.conceptualResultsPath,
+      JSON.stringify({
+        round_id: round.round_id,
+        findings: [
+          {
+            id: "FINAL-001",
+            title: "FINAL-001",
+            category: "design_simplification",
+            severity: "medium",
+            confidence: "high",
+            lens: "architecture",
+            summary: "final",
+            affected_files: [{ path: "src/api/auth.ts" }],
+            verification_status: "judge_confirmed",
+          },
+        ],
+        candidate_dispositions: [
+          {
+            candidate_id: `${perspective.contributor_id}::DR-001`,
+            contributor_id: perspective.contributor_id,
+            source_finding_id: "DR-001",
+            disposition: "retained",
+            target_final_finding_ids: ["FINAL-001"],
+            modification_percent: 10,
+            rationale: "kept",
+            verification_status: "asserted",
+          },
+        ],
+        final_finding_shares: [
+          {
+            final_finding_id: "FINAL-001",
+            contributors: [
+              {
+                contributor_id: perspective.contributor_id,
+                source_candidate_ids: [`${perspective.contributor_id}::DR-001`],
+                contribution_percent: 85,
+                rationale: "perspective share",
+              },
+              {
+                contributor_id: round.judge.contributor_id,
+                source_candidate_ids: [],
+                contribution_percent: 15,
+                rationale: "judge share",
+              },
+            ],
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const tx = createFoldTransaction();
+    const branch = await handleDesignReviewBranch(
+      { artifactsDir },
+      bundle,
+      { status: "active", obligations: [] },
+      tx,
+    );
+    // The refusal is a CONSUMPTION, not a throw: the fold keeps going, and the
+    // conceptual pass is still owed — so the branch re-emits that step rather
+    // than reporting progress it did not make.
+    expect(branch.action).toBe("return");
+    if (branch.action !== "return") throw new Error("unreachable");
+    expect(branch.result.kind).toBe("design_review_conceptual");
+    // The `return` arm carries the bundle on the RESULT, not on the branch.
+    await commitFold(artifactsDir, branch.result.bundle, tx);
+
+    const ledger = await readFile(
+      join(artifactsDir, "submissions", "submission-ledger.jsonl"),
+      "utf8",
+    );
+    expect(
+      ledger,
+      "the refusal must be ON THE RECORD with the field it named, not silently stripped",
+    ).toContain("verification_status is derived at ingest and must not be supplied");
+
+    const committed = JSON.parse(
+      await readFile(join(artifactsDir, "design_assessment.json"), "utf8"),
+    ) as { conceptual_reviewed?: boolean };
+    expect(
+      committed.conceptual_reviewed,
+      "a refused submission must not mark the conceptual pass complete",
+    ).not.toBe(true);
   });
 });

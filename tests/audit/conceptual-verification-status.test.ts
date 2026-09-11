@@ -12,7 +12,11 @@
 // is write-only data that reads as authoritative.
 import { describe, expect, it } from "vitest";
 
-import { deriveConceptualVerificationStatus } from "../../src/audit/types/conceptualAdjudication.js";
+import {
+  ConceptualJudgeSubmissionSchema,
+  deriveConceptualVerificationStatus,
+  suppliedToolVerdictIssue,
+} from "../../src/audit/types/conceptualAdjudication.js";
 import type { ConceptualReviewAdjudication } from "../../src/audit/types/conceptualAdjudication.js";
 import type { Finding } from "../../src/audit/types.js";
 
@@ -120,6 +124,58 @@ describe("deriveConceptualVerificationStatus", () => {
     expect(derived.map((entry) => entry.verification_status)).not.toContain(
       "refuted_at_head",
     );
+  });
+
+  // The REACH half. `refuseSuppliedVerificationStatus` lived only inside
+  // `buildConceptualReviewAdjudication`, which the production fold reaches with
+  // an ALREADY-PARSED submission — and `ConceptualJudgeSubmissionSchema` omits
+  // `verification_status`, so the parse had stripped the supplied value before
+  // the check could look. The check named a field it could never see on the only
+  // path that matters. It is now stated BEFORE the parse, and stated over the RAW
+  // value: these two cases differ exactly there, and both must be caught, because
+  // "the schema already rejects it" is false — the schema ACCEPTS and strips.
+  it("names a supplied verification_status on the raw value, before the stripping parse", () => {
+    const supplied = {
+      round_id: "round-1",
+      findings: [
+        {
+          id: "FINAL-1",
+          title: "t",
+          category: "design_simplification",
+          severity: "medium",
+          confidence: "high",
+          lens: "architecture",
+          summary: "s",
+          affected_files: [{ path: "src/a.ts" }],
+          verification_status: "judge_confirmed",
+        },
+      ],
+      candidate_dispositions: [],
+      final_finding_shares: [],
+    };
+    expect(suppliedToolVerdictIssue(supplied)).toContain(
+      "findings[0].verification_status",
+    );
+    // And the schema's own parse is NOT what protects the invariant: it accepts
+    // the submission and silently drops the field.
+    const parsed = ConceptualJudgeSubmissionSchema.safeParse(supplied);
+    expect(
+      parsed.success,
+      "the stripping parse is not a refusal — it is why the raw-value check must exist",
+    ).toBe(true);
+    expect(
+      (parsed as { data?: { findings: { verification_status?: string }[] } }).data
+        ?.findings[0]?.verification_status,
+    ).toBeUndefined();
+  });
+
+  it("stays silent when no verification_status was supplied", () => {
+    expect(
+      suppliedToolVerdictIssue({
+        round_id: "round-1",
+        findings: [{ id: "FINAL-1" }],
+      }),
+    ).toBe(null);
   });
 
   it("does not mutate its input findings", () => {

@@ -3128,11 +3128,23 @@ Each node's source_finding_ids must name exactly one canonical audit work block,
     });
   }
 
+  // ONE payload read for the whole promotion boundary, shared by the integrity
+  // gate and the contract-obligation gates below. Both consume the SAME
+  // post-archive payloads, and nothing between these two consumers writes an
+  // artifact — so a second read bought no freshness and re-paid the whole
+  // read-and-parse of every contract-pipeline artifact (plus the repair-state
+  // and finding-enumeration reads it carries), on the path every plan promotion
+  // walks. The freshness RULE is unchanged and still enforced: the read below is
+  // `readCrossGatePayloads`, which refuses before this invocation's ingestion +
+  // staleness-archive pass, so neither consumer can be handed a pre-archive
+  // snapshot.
+  const crossGatePayloads = await readCrossGatePayloads(ctx);
+
   // DAG referential integrity + bidirectional coverage (ARC-86b18f1b-2), run
   // before the traceability check so specific referential violations are
   // reported first (traceability is a superset check).
   const outcomes = await evaluateContractPipelineCrossGateOutcomes(
-    await readCrossGatePayloads(ctx),
+    crossGatePayloads,
   );
   const integrity = gateOutcomeOf(outcomes, "implementation_dag_integrity");
   if (!integrity?.evaluated) {
@@ -3179,7 +3191,7 @@ The previous implementation_dag was rejected and archived. Every node must trace
   const obligationGate = await evaluateContractObligationsPromotionGate(
     ctx.artifactsDir,
     ctx.root,
-    await readCrossGatePayloads(ctx),
+    crossGatePayloads,
   );
   if (!obligationGate.ok) {
     return await dagRegenerationPlan(ctx, {

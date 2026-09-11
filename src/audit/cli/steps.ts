@@ -75,6 +75,20 @@ export const StepArtifactSchema = z
     prompt_path: z.string(),
     status: StepStatusSchema,
     run_id: z.string().nullable(),
+    /**
+     * The per-process agent id `writeStepContract` stamps on every step it
+     * writes — the owner of the `steps/<agentId>/` slot the step's canonical
+     * `prompt_path` points into.
+     *
+     * NAMED HERE because the schema is `.strict()`: the writer stamped it and
+     * this list omitted it, so the contract the tool WRITES was rejected by the
+     * schema the tool declares for reading it. The strictness is right and the
+     * omission was the bug — a reader must not be able to loosen `.strict()`
+     * away, because that is the property catching every future such drift.
+     * Optional for a HAND-BUILT fixture that predates the per-agent slot; the
+     * writer always supplies it.
+     */
+    agent_id: z.string().optional(),
     /** Run-level orientation; omitted for steps that have no meaningful summary. */
     progress: StepProgressSchema.optional(),
     /** Shell commands the host may run for this step. */

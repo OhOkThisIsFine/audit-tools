@@ -427,9 +427,15 @@ export async function advance<S, Ctx, Step>(
       return { state: outcome.state ?? current, step: outcome.step, executions };
     }
     current = outcome.state;
-    if (++transitions > maxTransitions) {
+    if (++transitions >= maxTransitions) {
       // The fold spent its whole bound without reaching an emit or completion —
-      // a transition obligation is not clearing its own actionable state. This
+      // a transition obligation is not clearing its own actionable state. The
+      // comparison is `>=` against the INCREMENTED count, not `>`: the bound is
+      // the number of transitions the fold is permitted, so the transition that
+      // brings the count TO the bound is the last one performed, and the number
+      // `stoppedBound` reports is exactly what was spent. `>` let the fold
+      // perform one more transition than it reported, so every operator line and
+      // every `describeStoppedFold` cause understated the spin by one. This
       // returns rather than throws (see the doc comment): the caller pauses
       // resumably and names `lastObligationId`, instead of recognizing the
       // condition by matching text in an exception.

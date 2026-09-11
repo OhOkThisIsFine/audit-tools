@@ -111,12 +111,18 @@ test("renderReuseNotice: fallback to resolvedDepth when checkpoint depth absent"
 // written in one phase and read back in another, which is exactly the position
 // this consumer is in. So the entry point is driven here and both paths are
 // asserted to resolve, alongside the field-set pin in io-remediation.test.ts.
-test("INV 11: resolveConceptualReviewSettings resolves both nested bundle paths it reads by name", () => {
+test("INV 11: resolveConceptualReviewSettings resolves both the run-bound depth and the charter path it reads by name", () => {
+  const confirmedAt = "2026-08-20T00:00:00Z";
   const bundle = {
     intent_checkpoint: {
       schema_version: "intent-checkpoint/v1",
-      confirmed_at: "2026-08-20T00:00:00Z",
-      design_review: { conceptual_depth: "deep", perspectives: 2 },
+      confirmed_at: confirmedAt,
+      // `answered_at` repeats the confirmation: this run's own answer.
+      design_review: {
+        answered_at: confirmedAt,
+        conceptual_depth: "deep",
+        perspectives: 2,
+      },
     },
     charter_register: {
       schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
@@ -145,6 +151,175 @@ test("INV 11: resolveConceptualReviewSettings resolves both nested bundle paths 
   // And the notice derives from the same checkpoint, so its presence is a third
   // witness that the nested read resolved.
   expect(settings.reuse_notice).toBeDefined();
+});
+
+// ── The dials are PER-RUN (owner, 2026-08-21) ─────────────────────────────────
+//
+// "these are per-run choices and should not be persisted — a user may not want
+// the same settings every audit." Property: a review-depth answer binds the run
+// that was asked, and the next run asks again. The failure this closes is not a
+// stale value, it is an ANNOUNCEMENT: `Reusing intent … conceptual depth deep`
+// reaching an operator who never chose it.
+describe("a review-depth answer binds the run that was asked", () => {
+  /** A checkpoint as a host would write it, with one knob varied. */
+  function checkpoint(designReview: Record<string, unknown> | undefined, at: string) {
+    return {
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: at,
+      confirmed_by: "host",
+      scope_summary: "s",
+      intent_summary: "i",
+      ...(designReview === undefined ? {} : { design_review: designReview }),
+    } as never;
+  }
+
+  it("honors a block THIS confirmation answered", () => {
+    const at = "2026-08-20T00:00:00Z";
+    const settings = resolveConceptualReviewSettings({
+      intent_checkpoint: checkpoint(
+        { answered_at: at, conceptual_depth: "deep", perspectives: 4 },
+        at,
+      ),
+    } as never);
+    expect(settings.conceptual_depth).toBe("deep");
+    expect(settings.perspectives).toBe(4);
+    expect(settings.reuse_notice).toContain("Confirmed intent");
+  });
+
+  it("IGNORES a block answered by a PRIOR confirmation, and drops the announcement", () => {
+    // The live defect: the checkpoint carries a block a previous run's
+    // confirmation supplied, while `confirmed_at` has moved on. The block is
+    // byte-identical to an answered one, so nothing but the binding separates
+    // them — and reading it would announce `conceptual depth deep` to an
+    // operator who never chose it.
+    const settings = resolveConceptualReviewSettings({
+      intent_checkpoint: checkpoint(
+        {
+          answered_at: "2026-01-01T00:00:00Z",
+          conceptual_depth: "deep",
+          perspectives: 4,
+        },
+        "2026-08-20T00:00:00Z",
+      ),
+    } as never);
+    expect(
+      settings.conceptual_depth,
+      "a prior run's answer is not this run's answer",
+    ).toBe("shallow");
+    expect(settings.perspectives).toBeUndefined();
+    expect(
+      settings.reuse_notice,
+      "the operator must never be told a depth they did not choose is in force",
+    ).toBeUndefined();
+  });
+
+  it("IGNORES a block that declares no binding at all", () => {
+    // Absence is UNANSWERED, not agreement. A host that copied a prior
+    // checkpoint forward and rewrote only `confirmed_at` produces exactly this,
+    // and treating it as this run's answer is the same announcement by another
+    // route.
+    const settings = resolveConceptualReviewSettings({
+      intent_checkpoint: checkpoint(
+        { conceptual_depth: "deep", perspectives: 4 },
+        "2026-08-20T00:00:00Z",
+      ),
+    } as never);
+    expect(settings.conceptual_depth).toBe("shallow");
+    expect(settings.reuse_notice).toBeUndefined();
+  });
+
+  it("falls back to the default when there is no checkpoint at all", () => {
+    const settings = resolveConceptualReviewSettings({} as never);
+    expect(settings.conceptual_depth).toBe("shallow");
+    expect(settings.reuse_notice).toBeUndefined();
+  });
+
+  // The binding is between two INSTANTS, never between two strings. Both are
+  // host-authored free text, so the same moment written two ways (`…00Z` vs
+  // `…00.000Z`) is one instant — and a string compare reads it as "a different
+  // run", silently downgrading the `deep` the host actually answered to
+  // `shallow`. Normalizing through `Date.parse` is what makes the compare ask
+  // the question it means to ask.
+  it("BINDS when answered_at is the same INSTANT written in a different format", () => {
+    const settings = resolveConceptualReviewSettings({
+      intent_checkpoint: checkpoint(
+        {
+          answered_at: "2026-08-20T00:00:00.000Z",
+          conceptual_depth: "deep",
+          perspectives: 4,
+        },
+        "2026-08-20T00:00:00Z",
+      ),
+    } as never);
+    expect(
+      settings.conceptual_depth,
+      "a formatting difference is not a different run",
+    ).toBe("deep");
+    expect(settings.perspectives).toBe(4);
+  });
+
+  // The other half: never downgrade in SILENCE. The host wrote a block, the
+  // block did not bind, and the depth fell back to the schema default — so the
+  // step must SAY that, with the reason, rather than arriving `shallow` with no
+  // explanation of the answer that was given.
+  it("STATES an ignored block whose answered_at is an unreadable instant (the prompt placeholder)", () => {
+    const settings = resolveConceptualReviewSettings({
+      intent_checkpoint: checkpoint(
+        {
+          answered_at: "<the same ISO-8601 timestamp as confirmed_at>",
+          conceptual_depth: "deep",
+          perspectives: 4,
+        },
+        "2026-08-20T00:00:00Z",
+      ),
+    } as never);
+    expect(settings.conceptual_depth).toBe("shallow");
+    expect(
+      settings.ignored_review_notice,
+      "a block that did not bind must be stated, never silently dropped",
+    ).toContain("was ignored");
+    expect(
+      settings.ignored_review_notice,
+      "the notice must say WHY the block did not bind",
+    ).toContain("not a readable instant");
+  });
+
+  it("STATES an ignored block as belonging to an earlier confirmation, naming both instants", () => {
+    const settings = resolveConceptualReviewSettings({
+      intent_checkpoint: checkpoint(
+        {
+          answered_at: "2026-01-01T00:00:00Z",
+          conceptual_depth: "deep",
+          perspectives: 4,
+        },
+        "2026-08-20T00:00:00Z",
+      ),
+    } as never);
+    expect(settings.ignored_review_notice).toContain(
+      "belongs to an earlier confirmation",
+    );
+    expect(settings.ignored_review_notice).toContain("2026-01-01T00:00:00Z");
+    expect(settings.ignored_review_notice).toContain("2026-08-20T00:00:00Z");
+  });
+
+  it("states NOTHING when the block bound, and nothing when there is no block", () => {
+    const at = "2026-08-20T00:00:00Z";
+    expect(
+      resolveConceptualReviewSettings({
+        intent_checkpoint: checkpoint(
+          { answered_at: at, conceptual_depth: "deep", perspectives: 4 },
+          at,
+        ),
+      } as never).ignored_review_notice,
+      "a block this run answered was not ignored — nothing to report",
+    ).toBeUndefined();
+    expect(
+      resolveConceptualReviewSettings({
+        intent_checkpoint: checkpoint(undefined, at),
+      } as never).ignored_review_notice,
+      "an absent block claims nothing, so it cannot have been ignored",
+    ).toBeUndefined();
+  });
 });
 
 // COR-4c8bd93a (CP-NODE-20): a RESUMED deep fan-out narrows the INSTRUCTION

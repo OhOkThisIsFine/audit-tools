@@ -13,6 +13,7 @@ import {
   type WriteStepContractInput,
 } from "../../src/shared/io/stepContractWriter.js";
 import { stepsDir } from "../../src/shared/io/auditToolsPaths.js";
+import { StepArtifactSchema } from "../../src/audit/cli/steps.js";
 
 interface TestStepContract extends BaseStepContract<string, string | null> {
   agent_id?: string;
@@ -173,6 +174,42 @@ test("writeStepContract trimPromptStart trims leading whitespace only when reque
       baseInput(artifactsDir, { prompt: "\n  hi", trimPromptStart: true }),
     );
     expect(await readFile(currentPromptPath(artifactsDir), "utf8")).toBe("hi");
+  } finally {
+    await cleanup();
+  }
+});
+
+// The writer and the schema are two halves of ONE contract, and they disagreed:
+// `writeStepContract` stamps `agent_id` on every step (it owns the per-agent
+// slot), while the audit step's declared schema (`StepArtifactSchema`,
+// `.strict()`) did not list the field — so the contract the tool WRITES was
+// REJECTED by the schema the tool declares for reading it. `.strict()` is what
+// turns the omission from a silently-ignored extra key into a hard failure, and
+// that is the right strictness: the fix is for the schema to name the field, not
+// for the reader to loosen. Driven through the real writer, over a step kind the
+// audit entry point actually emits, so this is a contract the tool writes, not a
+// hand-built object someone remembered to make match.
+test("a step contract the tool writes parses with the schema the audit step declares for it", async () => {
+  const { dir, cleanup } = await makeTempDir();
+  try {
+    const artifactsDir = join(dir, ".audit-tools", "audit");
+    const step = await writeStepContract<TestStepContract>(
+      baseInput(artifactsDir, {
+        contractVersion: "audit-code-step/v1alpha1",
+        stepKind: "dispatch_review",
+        status: "ready",
+      }),
+    );
+
+    const parsed = StepArtifactSchema.safeParse(step);
+    expect(
+      parsed.success,
+      `the written contract must satisfy its own declared schema; issues: ${
+        parsed.success ? "" : JSON.stringify(parsed.error.issues)
+      }`,
+    ).toBeTruthy();
+    // The field the writer stamps is the one the schema was missing.
+    expect((step as { agent_id?: string }).agent_id).toBe(processAgentId());
   } finally {
     await cleanup();
   }

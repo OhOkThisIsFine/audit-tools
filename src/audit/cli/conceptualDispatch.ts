@@ -1,7 +1,9 @@
 import {
+  type DesignReviewBinding,
   type IntentCheckpoint,
   charterReviewDisposition,
   readTrailingSubmissionRefusals,
+  resolveDesignReviewBinding,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
@@ -54,14 +56,32 @@ export interface ConceptualReviewSettings {
    * and the lens list it renders is content-sorted so the text never churns.
    */
   reuse_notice?: string;
+  /**
+   * Host-visible one-liner surfaced when the checkpoint CARRIES a `design_review`
+   * block that does NOT bind to this run. The block's dials are therefore not
+   * applied — the depth falls back to the schema default — and without this line
+   * the fallback is SILENT: a host that wrote `deep` would receive a shallow
+   * step with nothing said about the answer it gave. The notice names which
+   * confirmation the block belongs to and why it was ignored, so the downgrade
+   * is a stated fact the host can act on (re-run `confirm_intent`) rather than a
+   * surprising one.
+   */
+  ignored_review_notice?: string;
 }
 
 /**
- * Render the host-visible reuse notice when a prior `intent_checkpoint.design_review`
- * drives this workload. Content-sorted lens list keeps the text stable (no churn),
- * and every field degrades cleanly on a partial checkpoint: a missing `confirmed_at`
- * renders `unknown`, an absent/empty lens selection renders `all lenses`, and a
- * missing depth falls back to the resolved default `shallow`.
+ * Render the host-visible notice when the CONFIRMED `intent_checkpoint.design_review`
+ * block drives this workload. Content-sorted lens list keeps the text stable (no
+ * churn), and every field degrades cleanly on a partial checkpoint: a missing
+ * `confirmed_at` renders `unknown`, an absent/empty lens selection renders
+ * `all lenses`, and a missing depth falls back to the resolved default `shallow`.
+ *
+ * The wording is "confirmed", NOT "reusing". This notice is reachable only for a
+ * block bound to this run's own confirmation (see
+ * `resolveRunBoundDesignReview`), so what it states is the answer the operator
+ * just gave. "Reusing intent from <timestamp>" described the defect: a setting a
+ * PREVIOUS run chose, re-applied without being asked. Hearing that sentence is
+ * how the operator learned the tool had made a per-run decision durable.
  *
  * @internal Exported for testing purposes (TST-4c8bd93a-3).
  */
@@ -79,7 +99,33 @@ export function renderReuseNotice(
   if (excluded.length > 0) lensParts.push(`-${excluded.join(",")}`);
   const lenses = lensParts.length > 0 ? lensParts.join(" ") : "all lenses";
   const depth = checkpoint.conceptual_depth ?? resolvedDepth;
-  return `_Reusing intent from ${when}: ${lenses}; conceptual depth ${depth}._`;
+  return `_Confirmed intent at ${when}: ${lenses}; conceptual depth ${depth}._`;
+}
+
+/**
+ * The host-visible line stating that the checkpoint carries a `design_review`
+ * block this run did NOT answer, so its dials were ignored. `undefined` when
+ * nothing was ignored — an absent block claims nothing, so there is nothing to
+ * report.
+ *
+ * The lead-in states only the fact the tool KNOWS (the block did not bind); the
+ * binding's `reason` states WHY, and carries the "belongs to an earlier
+ * confirmation" fact when that is in fact the reason. A reason that hard-coded
+ * it would assert a provenance the tool cannot see for a block whose
+ * `answered_at` is simply unreadable.
+ *
+ * @internal Exported for testing purposes.
+ */
+export function renderIgnoredReviewNotice(
+  binding: DesignReviewBinding,
+): string | undefined {
+  if (binding.kind !== "unbound") return undefined;
+  return (
+    `_A \`design_review\` block is present on the intent checkpoint but was ignored: ` +
+    `${binding.reason}. The dials it carries ` +
+    `(conceptual depth, perspectives, attention) are NOT in force for this run; ` +
+    `re-run \`confirm_intent\` to answer them for it._`
+  );
 }
 
 /**
@@ -89,7 +135,18 @@ export function renderReuseNotice(
 export function resolveConceptualReviewSettings(
   bundle: ArtifactBundle,
 ): ConceptualReviewSettings {
-  const checkpoint = bundle.intent_checkpoint?.design_review;
+  // RUN-BOUND, never merely present. A `design_review` block a PRIOR
+  // confirmation supplied is not this run's answer: these dials are per-run
+  // (owner, 2026-08-21), and reading an inherited block here is what made the
+  // tool announce `Reusing intent … conceptual depth deep` to an operator who
+  // never chose it. The binding returns the block only when this confirmation's
+  // write supplied it; otherwise the depth falls back to the schema default and
+  // NO reuse notice is rendered, so the next confirm-intent step asks again —
+  // and when a block IS present but does not bind, the emitted step SAYS so
+  // (`ignored_review_notice`) rather than downgrading in silence.
+  const binding = resolveDesignReviewBinding(bundle.intent_checkpoint);
+  const checkpoint = binding.kind === "bound" ? binding.settings : undefined;
+  const ignoredReviewNotice = renderIgnoredReviewNotice(binding);
   // A low-confidence charter downgrades the dependent review to flag-for-human
   // (charterReviewDisposition). Charters live on the REGISTER — the checkpoint
   // carries only the ceiling as input (its never-written charter embed was
@@ -102,9 +159,12 @@ export function resolveConceptualReviewSettings(
   );
   const conceptualDepth =
     checkpoint?.conceptual_depth ?? "shallow";
-  // Surface a reuse notice only when a prior checkpoint design_review drives the
-  // workload. The notice is purely informational — it is derived AFTER the
-  // decision fields above so it can never change them (reuse stays byte-identical).
+  // Surface a notice only when the CONFIRMED block drives the workload. The
+  // notice is purely informational — it is derived AFTER the decision fields
+  // above so it can never change them (the resolution stays identical with and
+  // without it). It reads "confirmed", never "reusing": the block reaching here
+  // is bound to THIS confirmation, so the operator is being reminded of the
+  // answer they just gave, not told a prior run's choice is being re-applied.
   const reuseNotice = checkpoint
     ? renderReuseNotice(
         checkpoint,
@@ -118,6 +178,7 @@ export function resolveConceptualReviewSettings(
     perspectives: checkpoint?.perspectives,
     ...(flagForHuman ? { flag_for_human: true } : {}),
     ...(reuseNotice ? { reuse_notice: reuseNotice } : {}),
+    ...(ignoredReviewNotice ? { ignored_review_notice: ignoredReviewNotice } : {}),
   };
 }
 
@@ -223,6 +284,7 @@ export async function prepareConceptualDispatch(opts: {
       deep: false,
       conceptualResultsPath,
       instructionLines: [
+        ...(settings.ignored_review_notice ? [settings.ignored_review_notice] : []),
         ...(settings.reuse_notice ? [settings.reuse_notice] : []),
         "**Conceptual review** (generative): dispatch a subagent that reads the prompt at the conceptual prompt path and writes findings to the conceptual results path.",
       ],
@@ -386,6 +448,7 @@ export async function prepareConceptualDispatch(opts: {
     deep: true,
     conceptualResultsPath,
     instructionLines: [
+      ...(settings.ignored_review_notice ? [settings.ignored_review_notice] : []),
       ...(settings.reuse_notice ? [settings.reuse_notice] : []),
       `**Conceptual review** (generative, deep — ${total}-perspective fan-out):`,
       // A resumed round with some (but not all) perspectives already delivered

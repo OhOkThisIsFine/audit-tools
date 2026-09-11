@@ -45,6 +45,7 @@ import {
   mintSubmissionId,
   outputDirFor,
   readSubmissionDocument,
+  readSubmissionIngestHistory,
   readSubmissionLedger,
   readTrailingSubmissionRefusals,
   siblingLockPath,
@@ -58,6 +59,7 @@ import {
   type ExpectedSubmission,
   type ExpectedSubmissionSet,
   type MeasuredOutcome,
+  type SubmissionIngestHistory,
   type SubmissionIssueCode,
   type SubmissionLedgerEvent,
   type SubmissionReadOutcome,
@@ -76,7 +78,6 @@ export const GATE_LANES = {
   analyzer_consent: "analyzer_consent",
   analyzer_decisions: "analyzer_decisions",
   edge_reasoning: "edge_reasoning",
-  design_review_legacy: "design_review_legacy",
   design_review_contract: "design_review_contract",
   design_review_conceptual: "design_review_conceptual",
   critical_flow_fallback: "critical_flow_fallback",
@@ -600,6 +601,12 @@ export function renderLaneShortfallLines(
  * one stays owed (the host is asked again) but the refusal is on the record
  * with its reason, which is what makes a repaired run distinguishable from a
  * clean one.
+ *
+ * @param history A ledger read the CALLER already paid for, shared across a
+ *   batch of lane recordings. Omitted (a one-off caller, an operator verb) it
+ *   reads the ledger itself. ONE read per batch, never one per lane: a fold
+ *   commit records its whole staged register in a loop, and re-reading the
+ *   ledger per iteration was O(events) scans of the same growing file.
  */
 export async function recordLaneOutcome(
   artifactsDir: string,
@@ -611,11 +618,37 @@ export async function recordLaneOutcome(
         readonly issueCode: SubmissionIssueCode;
         readonly message: string;
       },
+  history?: SubmissionIngestHistory,
 ): Promise<void> {
   // ONE derivation of the scope: the id and the event's run field are the same
   // value by construction, not two sites spelling the same constant.
   const runId = AUDIT_GATE_SUBMISSION_SCOPE;
   const submissionId = laneSubmissionId(lane, runId);
+  // AT MOST ONCE per submission, read from the ledger rather than tracked in
+  // memory. `commitFold` re-enters on the SAME transaction after a mid-loop I/O
+  // error, and the two halves of this function are not atomic: the append lands
+  // durably, then the expected-set drop below can throw, and the re-entry would
+  // append a second identical `accepted`. The entry cannot simply be dropped
+  // from the register before the append instead — the whole reason the record is
+  // written first is that a submission must never be reported accepted while its
+  // durable evidence is missing. Asking the ledger what already landed keeps
+  // that order AND makes the append idempotent, which is the property a retry
+  // needs. Only the accepted arm can repeat: a rejection deliberately re-records
+  // on every re-observation (see `readTrailingSubmissionRefusals`'s note on
+  // repeated missing observations), so it is left alone.
+  //
+  // The question is whether an `accepted` for this submission is ALREADY on the
+  // ledger — not whether the trailing row is one. A submission that was accepted,
+  // then rejected on a later pass (the host resubmitted at the bound path and the
+  // repair failed again), then re-enters the fold has an accepted behind it; a
+  // trailing-only test would read the rejection, decide nothing had landed, and
+  // append a SECOND accepted for one staged submission.
+  if (outcome.kind === "accepted") {
+    const ledger =
+      history ??
+      (await readSubmissionIngestHistory(artifactsDir, { runId }));
+    if (ledger.accepted.has(submissionId)) return;
+  }
   await appendSubmissionEvent(artifactsDir, {
     contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
     run_id: runId,
@@ -631,6 +664,10 @@ export async function recordLaneOutcome(
     recorded_at: new Date().toISOString(),
   });
   if (outcome.kind !== "accepted") return;
+  // Keep the caller's shared view consistent with what just landed, so the
+  // next lane in the same batch (and a re-entry that re-walks the register)
+  // asks against a ledger that includes this row.
+  history?.accepted.add(submissionId);
   // The drop runs under the store's lock, so it cannot race a concurrent
   // emission's merge (which would otherwise re-add the lane being closed out).
   await expectedSetStore(artifactsDir).mutate((current) =>

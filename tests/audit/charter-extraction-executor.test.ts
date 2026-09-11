@@ -79,16 +79,82 @@ describe("resolveCharterCeiling / ceilingRequestsCharters", () => {
     expect(ceilingRequestsCharters({ rung: "deepest" })).toBe(true);
   });
 
-  test("legacy conceptual_depth:deep maps to a deep ceiling", () => {
+  test("a RUN-BOUND conceptual_depth:deep maps to a deep ceiling", () => {
+    const confirmedAt = "2026-01-01T00:00:00Z";
     const cp: IntentCheckpoint = {
       schema_version: "intent-checkpoint/v1",
-      confirmed_at: "2026-01-01T00:00:00Z",
+      confirmed_at: confirmedAt,
       confirmed_by: "host",
       scope_summary: "s",
       intent_summary: "i",
-      design_review: { conceptual_depth: "deep" },
+      design_review: { answered_at: confirmedAt, conceptual_depth: "deep" },
     };
     expect(resolveCharterCeiling(cp)).toEqual({ rung: "deep" });
+  });
+
+  test("an UNBOUND conceptual_depth:deep does NOT map to a deep ceiling — it stays at the default", () => {
+    // The depth is a per-run dial, so a block this confirmation did not answer
+    // must not raise the ceiling either. Pinned here because the ceiling is the
+    // second thing derived from it, and a fix applied to only one reader leaves
+    // the other quietly honoring an inherited answer.
+    const cp: IntentCheckpoint = {
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: "2026-08-20T00:00:00Z",
+      confirmed_by: "host",
+      scope_summary: "s",
+      intent_summary: "i",
+      design_review: {
+        answered_at: "2026-01-01T00:00:00Z",
+        conceptual_depth: "deep",
+      },
+    };
+    expect(resolveCharterCeiling(cp)).toEqual({ rung: "shallow" });
+  });
+});
+
+// `attention` is the THIRD dial off the same block, and it was the one reader
+// left unbound: `attention` decides whether the clarification loop pops
+// INTERACTIVE questions at the operator, so an inherited value takes a run that
+// never opted into a human loop and interrupts it. Same mechanism, same
+// consequence; pinned here so a fix applied to depth and ceiling cannot leave
+// this one quietly honoring a prior run's answer.
+const { resolveClarificationAttention } = await import(
+  "../../src/audit/orchestrator/charterClarificationExecutor.js"
+);
+
+describe("resolveClarificationAttention is RUN-BOUND", () => {
+  function withAttention(
+    attention: number,
+    answeredAt: string,
+    confirmedAt: string,
+  ): IntentCheckpoint {
+    return {
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: confirmedAt,
+      confirmed_by: "host",
+      scope_summary: "s",
+      intent_summary: "i",
+      design_review: { answered_at: answeredAt, attention },
+    };
+  }
+
+  test("honors the attention a block THIS confirmation answered supplies", () => {
+    const at = "2026-08-20T00:00:00Z";
+    expect(resolveClarificationAttention(withAttention(3, at, at))).toBe(3);
+  });
+
+  test("IGNORES the attention an earlier confirmation supplied", () => {
+    expect(
+      resolveClarificationAttention(
+        withAttention(3, "2026-01-01T00:00:00Z", "2026-08-20T00:00:00Z"),
+      ),
+      "a run that never chose attention must not be interrupted by an inherited one",
+    ).toBe(0);
+  });
+
+  test("defaults to 0 without a checkpoint or without a block", () => {
+    expect(resolveClarificationAttention(undefined)).toBe(0);
+    expect(resolveClarificationAttention(checkpoint())).toBe(0);
   });
 });
 

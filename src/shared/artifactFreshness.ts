@@ -2,9 +2,12 @@ import { contentSha256 } from "./submission/hostHandoffCore.js";
 
 import { compareCodeUnits } from "./compareCodeUnits.js";
 import { canonicalizeAffinityArtifactValue } from "./affinityArtifacts.js";
+import { DESIGN_REVIEW_PROVENANCE_FIELDS } from "./types/intentCheckpoint.js";
 
-// Non-semantic top-level fields stripped before hashing, per artifact. These
-// are provenance (wall-clock stamps, run ids), NOT content: two rebuilds with
+// Non-semantic fields stripped before hashing, per artifact. A bare name is a
+// TOP-LEVEL field; a dotted name (`design_review.answered_at`) is provenance
+// nested inside a sub-object, where only that key is dropped. These are
+// provenance (wall-clock stamps, run ids), NOT content: two rebuilds with
 // identical data but different stamps must hash equal, or the artifact's
 // revision churns every rebuild and perpetually re-stales its downstreams (e.g.
 // audit-report.md depends on design_assessment) — a finalization-oscillation
@@ -47,9 +50,17 @@ const NON_SEMANTIC_FIELDS_BY_ARTIFACT: Record<string, readonly string[]> = {
   // DD-9 layer 1: `confirmed_at`/`confirmed_by` are provenance — a re-confirm
   // that changes only them must not move the canonical hash (unstripped, every
   // provenance-only re-confirm re-staled the ENTIRE planning cascade purely on
-  // the timestamp). `schema_version` deliberately STAYS in the hash: a schema
-  // migration is a semantic reinterpretation, not provenance.
-  "intent_checkpoint.json": ["confirmed_at", "confirmed_by"],
+  // the timestamp). The same holds for the provenance INSIDE `design_review`:
+  // `answered_at` records WHICH confirmation answered the block, and a
+  // re-confirm of the same depth necessarily stamps a fresh one, so leaving it
+  // in the hash re-staled the cascade on that alone. `schema_version`
+  // deliberately STAYS in the hash: a schema migration is a semantic
+  // reinterpretation, not provenance.
+  "intent_checkpoint.json": [
+    "confirmed_at",
+    "confirmed_by",
+    ...DESIGN_REVIEW_PROVENANCE_FIELDS.map((field) => `design_review.${field}`),
+  ],
 };
 
 function stripFields(
@@ -57,10 +68,37 @@ function stripFields(
   fields: readonly string[],
 ): Record<string, unknown> {
   if (fields.length === 0) return record;
-  const drop = new Set(fields);
-  return Object.fromEntries(
-    Object.entries(record).filter(([key]) => !drop.has(key)),
+  // Two shapes, one list, because the provenance this strips is not always at
+  // the TOP level: a nested path (`design_review.answered_at`) names provenance
+  // inside a sub-object, and the sub-object's remaining keys must survive —
+  // dropping the whole `design_review` key would erase the dials themselves.
+  // A bare name is a top-level strip.
+  const topLevel = new Set(fields.filter((field) => !field.includes(".")));
+  const nested = new Map<string, Set<string>>();
+  for (const field of fields) {
+    const dot = field.indexOf(".");
+    if (dot < 0) continue;
+    const parent = field.slice(0, dot);
+    const child = field.slice(dot + 1);
+    const children = nested.get(parent) ?? new Set<string>();
+    children.add(child);
+    nested.set(parent, children);
+  }
+  const stripped = Object.fromEntries(
+    Object.entries(record).filter(([key]) => !topLevel.has(key)),
   );
+  for (const [parent, children] of nested) {
+    const value = stripped[parent];
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    stripped[parent] = Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).filter(
+        ([key]) => !children.has(key),
+      ),
+    );
+  }
+  return stripped;
 }
 
 /**

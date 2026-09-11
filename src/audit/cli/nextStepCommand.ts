@@ -150,10 +150,7 @@ async function designReviewNotesSection(
   pass: DesignReviewPass,
 ): Promise<{ reReviewSection?: string; rejectionNotice?: string }> {
   const reReview = await buildDesignReReviewSection(artifactsDir, bundle, pass);
-  const rejectionNotice = renderDesignReviewRejectionNotice(bundle, [
-    "legacy",
-    pass,
-  ]);
+  const rejectionNotice = renderDesignReviewRejectionNotice(bundle, [pass]);
   return { reReviewSection: reReview, rejectionNotice };
 }
 
@@ -360,10 +357,12 @@ async function cmdNextStepBody(
     since: getFlag(argv, "--since"),
   });
 
-  // The single dispatch: one table row per result kind, one emission site. A
-  // kind the table does not carry is the semantic-review dispatch (the
-  // scaffold's fallback), exactly as the old fallthrough branch was.
+  // The advisory lines the fold drained onto a step kind with no advisory
+  // channel of its own. Attached to the emitted result — the boundary BELOW the
+  // dispatch table, so it decorates whichever row emits, including the
+  // semantic-review fallback.
   await NEXT_STEP_EMISSION.emit(result.kind, {
+    advisoryNotice: result.advisoryNotice,
     argv,
     root,
     artifactsDir,
@@ -395,6 +394,13 @@ interface NextStepEmitContext {
    */
   analyzerPolicy: AnalyzerPolicy | null;
   result: NextStepResult;
+  /**
+   * The fold's carried advisories as prompt lines, when it drained a non-empty
+   * carry onto a result kind with no advisory channel of its own. Read from the
+   * RESULT ({@link NextStepResult.advisoryNotice}) rather than kept beside it —
+   * one value, one home — and applied uniformly below the dispatch table.
+   */
+  advisoryNotice?: readonly string[];
 }
 
 /**
@@ -518,6 +524,78 @@ async function writeAuditStep(plan: AuditStepPlan): Promise<EmittedAuditStep> {
   }
 }
 
+/**
+ * Insert the fold's drained advisory lines just under a prompt's first line —
+ * its `# <title>` heading — where session-scoped advisories belong: before the
+ * instructions they qualify.
+ *
+ * A prompt that does not start with a heading (or has no second line) is
+ * returned unchanged rather than spliced somewhere meaningless. Every audit
+ * plan's prompt opens with its heading — each row is a literal template
+ * starting with `# ` — so this is the degenerate-input arm, not the norm.
+ */
+function withAdvisoryNoticeInPrompt(
+  prompt: string,
+  advisoryNotice: readonly string[] | undefined,
+): string {
+  if (advisoryNotice === undefined || advisoryNotice.length === 0) return prompt;
+  const headingEnd = prompt.indexOf("\n");
+  if (!prompt.startsWith("# ") || headingEnd < 0) return prompt;
+  return [
+    prompt.slice(0, headingEnd),
+    "",
+    ...advisoryNotice,
+    prompt.slice(headingEnd + 1),
+  ].join("\n");
+}
+
+/**
+ * Apply the fold's drained advisory lines to a step plan.
+ *
+ * The ONE application point for the carry, by construction: it decorates the
+ * PLAN, so it reaches whichever writer the plan selects (`current`-kind steps,
+ * the semantic-review renderer, the blocked contract) without a second splice
+ * per row — the property the single-emission-site scaffold exists to hold.
+ *
+ * The blocked arm has no `prompt` parameter: its prompt is DERIVED from
+ * `reason` by the shared writer, so the lines are appended to the reason and
+ * render through the same single source.
+ */
+function withAdvisoryNotice(
+  plan: AuditStepPlan,
+  advisoryNotice: readonly string[] | undefined,
+): AuditStepPlan {
+  switch (plan.via) {
+    case "current":
+      return {
+        via: "current",
+        params: {
+          ...plan.params,
+          prompt: withAdvisoryNoticeInPrompt(plan.params.prompt, advisoryNotice),
+        },
+      };
+    case "blocked":
+      return {
+        via: "blocked",
+        params: {
+          ...plan.params,
+          reason:
+            advisoryNotice === undefined || advisoryNotice.length === 0
+              ? plan.params.reason
+              : `${plan.params.reason}\n\n${advisoryNotice.join("\n")}`,
+        },
+      };
+    case "semantic_review":
+      // Unreachable by construction: a carry drained onto a semantic-review
+      // result rides that result's advisory CHANNEL as data (the fold's
+      // `withFoldAdvisories`), so it never arrives here as lines. Passed
+      // through unchanged rather than spliced, because
+      // `renderSemanticReviewStep` owns where those sections land in the
+      // prompt — a second splice would render one advisory twice.
+      return plan;
+  }
+}
+
 type NextStepEmissionKind = Exclude<NextStepResult["kind"], "semantic_review">;
 type NextStepResultOf<K extends NextStepResult["kind"]> = Extract<
   NextStepResult,
@@ -618,6 +696,24 @@ const emitBlocked = emissionRow<"blocked">(
   },
 );
 
+/**
+ * The ignored-block notice for a step that resolves its dials but does NOT
+ * render the conceptual pass's own instruction lines.
+ *
+ * The parallel row needs nothing here: its prompt is built from the conceptual
+ * pass's `instructionLines`, which already carry the notice. The CONTRACT row
+ * resolves `max_units` from the same settings and renders only the contract
+ * half, so without this it would apply the unbound-dial fallback in silence —
+ * exactly the downgrade the notice exists to remove.
+ */
+function renderIgnoredReviewNoticeLines(
+  settings: ConceptualReviewSettings,
+): string[] {
+  return settings.ignored_review_notice
+    ? [settings.ignored_review_notice, ""]
+    : [];
+}
+
 const emitDesignReviewParallel = emissionRow<"design_review_parallel">(
   async ({ root, artifactsDir }, result) => {
     // Both passes are unsatisfied — dispatch the contract pass and the
@@ -688,16 +784,18 @@ const emitDesignReviewContract = emissionRow<"design_review_contract">(
     // rendering the adversarial review into the host's own prompt would have it
     // grade its own work (see prepareContractDispatch).
     const continueCommand = nextStepCommand(root, artifactsDir);
+    const conceptualSettings = resolveConceptualReviewSettings(result.bundle);
     const contract = await prepareContractDispatch({
       artifactsDir,
       bundle: result.bundle,
-      maxUnits: resolveConceptualReviewSettings(result.bundle).max_units,
+      maxUnits: conceptualSettings.max_units,
     });
 
     const dispatchPrompt = [
       "# Design review — contract pass",
       "",
       ...renderLaneShortfallLines(contract.shortfall),
+      ...renderIgnoredReviewNoticeLines(conceptualSettings),
       contract.instructionLine,
       "",
       "When the contract results have been written, run:",
@@ -1573,7 +1671,10 @@ const NEXT_STEP_EMISSION = createStepEmissionScaffold<
       validationWarnings: result.validationWarnings,
     });
   },
-  write: writeAuditStep,
+  // The drained advisory lines decorate the PLAN inside the one writer, so
+  // they reach every row (and the fallback) without a second splice per row.
+  write: (plan, ctx) =>
+    writeAuditStep(withAdvisoryNotice(plan, ctx?.advisoryNotice)),
   // The tool's only externally-observable per-invocation contract.
   log: (step) => {
     console.log(JSON.stringify(step, null, 2));
