@@ -77,9 +77,9 @@ Emergent nested depth would review endlessly. The bound is **not** a depth cap b
 - **Review-worthy predicate** — a node earns a review only if it has a charter *nameably distinct
   from its parent* **and** enough coupled implementation to be judged. (Filters degenerate levels.)
 - **Convergence (loop-until-dry)** — keep seeding overlapping reviews until TWO CONSECUTIVE rounds
-  surface no new misalignment (owner decision 2026-08-28: one quiet round let a single duplicate
-  submission terminate the loop; the enforcement executor derives the rule from the persisted
-  rounds and records it on the register as `convergence_rule`).
+  surface no new misalignment; a single quiet round never terminates the loop. The enforcement
+  executor derives the rule from the persisted rounds and records it on the register as
+  `convergence_rule`.
 
 Together these are the stop rule; blast radius (below) then ranks what remains.
 
@@ -262,6 +262,41 @@ never extracted). The attention dial = **how many rounds** / how far down the qu
 - **Leads-not-verdicts** — every finding, especially high-blast and True ones, is a lead the owner
   judges; nothing here is a verdict.
 - **Language-neutral** — goals and charters are not code; the layer stays repo/ecosystem-agnostic.
+
+## The reviewer's contract — enable the judgment, ground and gate the output
+
+The conceptual review is the **one place in either tool to lean *into* judgment, not toward
+determinism**. Architectural insight is irreducibly a judgment call — you cannot make it
+deterministic and should not try. So the tooling's job is to **enable** the judgment and to
+**ground and gate** its output — **never to constrain** it with checklists or project-specific
+lenses. The review is a **repo-agnostic** tool that audits any codebase, so it asks **general**
+first-principles questions. The restorations:
+
+- **Ask general first-principles questions (primary).** The prompt asks the general architectural
+  questions — *"is the fundamental approach the right one? what core assumption underlies this
+  design, and is it sound? what would a clean-sheet redesign do differently? where is the deepest
+  structural risk?"* Repo-agnostic by construction; no project-specific lenses baked in.
+- **Orient, then roam.** The reviewer gets a small **context package + the project docs + an
+  `/init`-style codebase overview**, then roams the actual files freely (read wherever the code
+  leads, not a risk-truncated summary feed).
+- **Make the judge judge.** The deep-path judge holds an evaluative role — assess
+  merit / validity / severity, decide what is real, and flag what is *missing* — not just fold
+  duplicates.
+- **Ground the output.** Conceptual/contract findings require component-level evidence, enforced at
+  ingest by `groundDesignFinding` (`src/shared/validation/designFindingGrounding.ts`), called from
+  `nextStepHelpers.ts`.
+- **Gate it — cannot auto-complete empty.** There is no auto-complete path. A pass's review flag
+  (`contract_reviewed` / `conceptual_reviewed`) is set ONLY when a validated host submission is
+  consumed (`src/audit/cli/nextStepHelpers.ts`); a submission that fails validation is quarantined
+  and recorded on `design_assessment.rejected_submissions` instead of merged, so it never sets the
+  flag. An absent or empty assessment is therefore deliberately NO-SIGNAL — it means "unreviewed /
+  nothing detected", never "reviewed and clean", and no consumer may read absence as evidence (the
+  documented stance of `collectLensEvidence`,
+  `src/audit/orchestrator/intentCheckpointExecutor.ts`). If auto-completion is ever reintroduced, a
+  stamp that distinguishes "a real review found nothing" from "auto-completed empty" must be
+  designed as part of that same unit — without one the two are indistinguishable on the artifact.
+
+Determinism for the mechanical; empowered, general, well-fed judgment for the architectural.
 
 ## What is explicitly rejected
 

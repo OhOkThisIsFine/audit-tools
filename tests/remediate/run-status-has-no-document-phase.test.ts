@@ -1,5 +1,5 @@
 /**
- * N-R13: Document phase dissolution — invariant tests.
+ * Run status has no document phase — invariant tests.
  *
  * Verifies that the document phase is fully removed:
  * - Planning transitions directly to implementing (no documenting hop).
@@ -51,7 +51,7 @@ afterEach(async () => {
 // 1. Type-level: "documenting" is not in the RemediationState.status union
 // ---------------------------------------------------------------------------
 
-describe("N-R13: RemediationState.status union", () => {
+describe("RemediationState.status union", () => {
   it("does not include 'documenting' as a valid status", async () => {
     // Read the SHIPPED vocabulary, never a literal re-written here. The previous
     // version of this block built a local `validStatuses` array and asserted it
@@ -93,13 +93,13 @@ describe("N-R13: RemediationState.status union", () => {
 // 2. Planning → implementing directly (no documenting hop)
 // ---------------------------------------------------------------------------
 
-describe("N-R13: planning transitions directly to implementing", () => {
+describe("planning transitions directly to implementing", () => {
   it("decideNextStep emits dispatch_implement (not dispatch_document) after planning", async () => {
     const { StateStore } = await import("../../src/remediate/state/store.js");
     const { decideNextStep } = await import("../../src/remediate/steps/nextStep.js");
 
-    const planId = "PLAN-N-R13";
-    const findingId = "F-N-R13-001";
+    const planId = "PLAN-DOC-DISSOLVED";
+    const findingId = "F-DOC-DISSOLVED-001";
     const state = {
       status: "planning" as const,
       plan: {
@@ -164,7 +164,7 @@ describe("N-R13: planning transitions directly to implementing", () => {
     expect(step.step_kind).not.toBe("document_single_item");
 
     // TST-4a7b1751: this fixture is a fully-ready implementing state (planning +
-    // a pending item + every ack written). The N-R13 contract
+    // a pending item + every ack written). The run-status contract
     // is that planning goes DIRECTLY to implementing — so the only acceptable
     // kind is the host-workload implementation handoff. Terminal/error kinds
     // (collect_starting_point, present_report, collect_triage,
@@ -180,7 +180,7 @@ describe("N-R13: planning transitions directly to implementing", () => {
 // 3. CLI: merge-document-results not registered
 // ---------------------------------------------------------------------------
 
-describe("N-R13: CLI command removal", () => {
+describe("CLI command removal", () => {
   it("merge-document-results is not a registered command in src/index.ts", async () => {
     const { readFileSync } = await import("node:fs");
     const indexSrc = readFileSync(
@@ -198,7 +198,7 @@ describe("N-R13: CLI command removal", () => {
 
 // (The steps/dispatch.ts barrel itself was deleted in CY-03 — the dispatch
 // surface is now the hostHandoff submodule, so the retirement pin holds there.)
-describe("N-R13: dispatch surface removed exports", () => {
+describe("dispatch surface removed exports", () => {
   it("prepareDocumentDispatch is not exported", async () => {
     const dispatch = await import("../../src/remediate/steps/dispatch/hostHandoff.js");
     expect((dispatch as Record<string, unknown>)["prepareDocumentDispatch"]).toBeUndefined();

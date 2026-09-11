@@ -125,7 +125,7 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
       }
 
       // (b) No per-item spec rides the outcomes contract. The document phase
-      // that produced one was dissolved (N-R13) and the field is gone; a retry
+      // that produced one was dissolved and the field is gone; a retry
       // reads the full Finding in (a) and the block scope in (c) instead.
       for (const id of ["F-001", "F-002"]) {
         expect(byId.get(id)).not.toHaveProperty("item_spec");

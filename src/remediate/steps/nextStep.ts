@@ -830,8 +830,8 @@ function carryForwardMatchingItems(
     // A still-pending item carries no work to preserve, so it is re-minted from
     // the fresh plan rather than carried forward. (This test used to also admit
     // a pending item that held an `item_spec`; the document phase that produced
-    // one was dissolved by N-R13 and the field is gone, so the second condition
-    // could never be true and is not restated here.)
+    // one was dissolved and the field is gone, so the second condition could
+    // never be true and is not restated here.)
     if (!previousFinding || !previousItem) {
       continue;
     }
@@ -3003,8 +3003,8 @@ async function handlePlanning(
     if (halt) return { kind: "emit", step: halt };
   }
 
-  // Document phase dissolved (N-R13): planning transitions directly to
-  // implementing, and the host workload reads finding context directly.
+  // Document phase dissolved: planning transitions directly to implementing,
+  // and the host workload reads finding context directly.
   const implementBlocks = dispatchFrontier(state);
   if (implementBlocks.length > 0) {
     if (state.plan) {

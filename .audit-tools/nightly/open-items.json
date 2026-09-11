@@ -6,45 +6,6 @@
   },
   "items": [
     {
-      "id": "docs-dependency-map-analyzer-vocabulary",
-      "leg": "docs",
-      "path": "spec/audit/dependency-map.md",
-      "subject": "graph-enrichment pass (`applied` / `omitted`, plus per-analyzer resolution + provenance)",
-      "title": "A constitutional spec still describes the analyzer-capability marker with a vocabulary the code deliberately removed — restate it, or move the code back?",
-      "eli5": "When audit-code runs its optional extra analysis pass over a repository, it writes a small record saying how that pass went. The design document spec/audit/dependency-map.md still says that record holds a status of either 'applied' or 'omitted'. The code stopped doing that. The type AnalyzerCapabilityRecordSchema in src/audit/types/analyzerCapability.ts now stores a field called coverage, and the comment written directly above it says in so many words that coverage replaces the old applied/omitted status, because that status was a yes/no guess over a partial set rather than a measurement. The newer vocabulary has five values (findings, clean, degraded, not_run, not_applicable) so the record can distinguish 'we looked and found nothing' from 'we never got to look'. A second design document, spec/audit/artifact-contract.md, already describes the same record using the new coverage vocabulary. So two normative documents now disagree with each other about one artifact. This is not being fixed automatically, because dependency-map.md is on the constitutional list in src/shared/constitutionalDocPaths.ts — those documents are the ones a doc-review sweep is forbidden to rewrite on its own, after a sweep once silently rewrote one. Answering 'restate the doc' means the document is brought into line with the code and with artifact-contract.md. Answering 'the doc is right' means the code is what should move, and the coverage field is a mistake to unwind.",
-      "question": "spec/audit/dependency-map.md describes analyzer_capability.json as recording the pass outcome as \"`applied` / `omitted`\". The code replaced that with a five-value `coverage` measurement, and spec/audit/artifact-contract.md already says so. Should the dependency-map sentence be restated to match, or does the normative intent differ from what shipped?",
-      "options": [
-        {
-          "label": "Restate the doc",
-          "answer": "Restate the dependency-map sentence to describe the marker as recording what the pass produced — `coverage`, in the shared measured-outcome vocabulary, derived over the analyzers that were asked for — plus per-analyzer resolution and provenance, matching artifact-contract.md and the code."
-        },
-        {
-          "label": "The doc is right, the code moves",
-          "answer": "The normative intent is the applied/omitted success predicate. Treat the `coverage` field as the drift and open work to reconcile the code to the doc rather than the doc to the code."
-        },
-        {
-          "label": "Neither — the doc should not describe the field at all",
-          "answer": "dependency-map.md is a dependency map, not an artifact contract. Cut the field-level description entirely and point at spec/audit/artifact-contract.md, which owns the artifact's shape, so the two can never disagree again."
-        }
-      ],
-      "evidence": [
-        "spec/audit/dependency-map.md contains the literal fragment \"applied` / `omitted`, plus per-analyzer resolution\" (grep, HEAD 23079f37).",
-        "src/audit/types/analyzerCapability.ts declares `coverage: MeasuredOutcomeSchema`, and its JSDoc states verbatim that it replaces `status: \"applied\" | \"omitted\"`, \"which was a success-predicate over a partial set\".",
-        "No `applied`/`omitted` producer or reader survives for this artifact; the roll-up is `analyzerCapabilityCoverage` over `wasOwedCoverage` entries.",
-        "spec/audit/dependency-map.md is listed in CONSTITUTIONAL_DOC_PATHS (src/shared/constitutionalDocPaths.ts), so this is escalate-only by rule, not by judgment.",
-        "Independently re-verified by this run's own grep, not only by the reviewer lane."
-      ],
-      "premise_probes": [
-        {
-          "file": "spec/audit/dependency-map.md",
-          "contains": "applied` / `omitted`, plus per-analyzer resolution"
-        }
-      ],
-      "subject_key": "4da5d39fe61a07d4",
-      "first_seen": "2026-09-09",
-      "nights_open": 3
-    },
-    {
       "id": "docs-remediation-goals-output-order-omits-two-exclusion-classes",
       "leg": "docs",
       "path": "spec/remediate/remediation-goals.md",
@@ -223,48 +184,6 @@
         }
       ],
       "subject_key": "0bd83243c5ea487d",
-      "first_seen": "2026-09-09",
-      "nights_open": 3
-    },
-    {
-      "id": "docs-s8-conceptual-review-contract-split-across-specs",
-      "leg": "docs",
-      "path": "spec/contract-authoring-determinism-design.md",
-      "subject": "S8 — Fix the conceptual design review itself (restore the original design; don't constrain it)",
-      "title": "The conceptual design review's contract is split across two specs — fold section S8 into the review's own design-of-record?",
-      "eli5": "spec/contract-authoring-determinism-design.md argues one thesis: determinism owns structure and the model owns meaning. Its section S8 is announced by the document itself as the exception to everything around it — the conceptual review being the one place to lean into judgment rather than toward determinism. The durable content of S8 is really the conceptual review's contract: ask general first-principles questions, orient then roam, the judge must actually judge, ground claims at ingest, and never auto-complete on an empty result so that absence reads as no-signal rather than as approval. That last invariant appears nowhere in spec/conceptual-design-review-design.md, which is the conceptual review's own design-of-record. So the review's contract is currently split across two documents, and the half sitting in the contract-authoring spec is the half a reader looking for the review design would never open. There is a second, separable question about the same section: S8 opens and closes with the same post-mortem about a past miss, stated twice in nearly the same words. Words like restore and the miss presuppose a run the reader cannot see, which is the document-history genre this project's documentation philosophy asks to be cut, and here it appears twice in one section.",
-      "question": "Should section S8 of spec/contract-authoring-determinism-design.md be folded into spec/conceptual-design-review-design.md with a pointer left behind? And should S8's duplicated post-mortem go in the same edit, keeping only the forward-facing rules?",
-      "options": [
-        {
-          "label": "Fold it and cut the post-mortem",
-          "answer": "Fold S8's durable rules into spec/conceptual-design-review-design.md — including the no-auto-complete-on-empty invariant that is missing there — leave a pointer in spec/contract-authoring-determinism-design.md, and cut both statements of the post-mortem, keeping only the forward-facing rules."
-        },
-        {
-          "label": "Fold it, keep one post-mortem",
-          "answer": "Fold S8 into the review's design-of-record but carry one statement of the post-mortem across, because the three axes it names (narrow questions, no roaming, a non-judging judge) are what the rules are guarding against."
-        },
-        {
-          "label": "Keep S8, move only the missing invariant",
-          "answer": "Leave S8 where it is — it earns its place as the stated exception to that document's thesis — and copy only the no-auto-complete-on-empty invariant into spec/conceptual-design-review-design.md so the review's own spec is complete."
-        },
-        {
-          "label": "Leave it",
-          "answer": "The split is deliberate: S8 is an argument about determinism's limits and belongs beside that thesis. Leave both documents unchanged."
-        }
-      ],
-      "evidence": [
-        "spec/contract-authoring-determinism-design.md contains the heading \"S8 — Fix the conceptual design review itself\" (grep, HEAD 23079f37) — independently re-verified by this run.",
-        "S8 declares itself the exception to its own document's thesis: \"the conceptual review is the one place to lean *into* judgment, not toward determinism\".",
-        "The no-auto-complete-on-empty invariant (absence is NO-SIGNAL) appears in S8 and not in spec/conceptual-design-review-design.md.",
-        "S8 opens and closes with the same post-mortem about narrow questions, no roaming and a non-judging judge."
-      ],
-      "premise_probes": [
-        {
-          "file": "spec/contract-authoring-determinism-design.md",
-          "contains": "S8 — Fix the conceptual design review itself"
-        }
-      ],
-      "subject_key": "bdf6ba59b50f068a",
       "first_seen": "2026-09-09",
       "nights_open": 3
     },

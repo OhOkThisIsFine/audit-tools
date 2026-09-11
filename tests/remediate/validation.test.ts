@@ -895,12 +895,13 @@ describe("validateDesignSpecGates", () => {
       expect(errors.filter((e) => e.message.includes("Circular"))).toHaveLength(0);
     });
 
-    it("warning message includes 'Circular interface-definition dependency' and 'N-R21'", () => {
+    it("warning message names the diagnostic and the action, never an internal record id", () => {
       const specNoInvariants = { ...minimalDesignSpec, invariants: [] };
       const issues = validateDesignSpecGates(specNoInvariants, circularLedger);
       const warnings = issues.filter((i) => i.severity === "warning");
       expect(warnings.some((w) => w.message.includes("Circular interface-definition dependency"))).toBe(true);
-      expect(warnings.some((w) => w.message.includes("N-R21"))).toBe(true);
+      expect(warnings.some((w) => w.message.includes("re-drafting the interface definitions"))).toBe(true);
+      expect(warnings.some((w) => /\bN-[A-Z]+\d+\b/.test(w.message))).toBe(false);
     });
   });
 

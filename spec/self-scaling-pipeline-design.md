@@ -20,10 +20,8 @@ not separate code — see Mechanisms, Dial A/B below for the shape.
 
 That fork is GONE: its plan producer, its bypass branch and its light-review gate were deleted
 together, so every run now enters the pipeline and the tier decides only how deeply it is
-traversed. The cost of that decision was measured rather than assumed — a clean low-tier run pays
-eight gated host turns, and only one further collapse was safe, so the fold made the cheapest case
-seven rather than one. The owner took that trade knowingly: the conviction outranks the saving.
-Per-phase evidence: [`../docs/reviews/low-tier-phase-cost-2026-08-25.md`](../docs/reviews/low-tier-phase-cost-2026-08-25.md).
+traversed. The fold costs gated host turns on the cheapest case, and the owner took that trade
+knowingly: the conviction outranks the saving.
 
 ## Two distinct cost drivers (measured)
 

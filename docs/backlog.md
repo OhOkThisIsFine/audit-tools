@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 235 entr(y/ies) indexed.
+> and at commit). 234 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -156,13 +156,12 @@
 - `minor-bugs.md:420` — The release-gate gloss table is required by a gate and rendered by no consumer (2026-08-27, from the philosophy audit, low).
 - `minor-bugs.md:422` — HANDOFF's hand-written region and the closeout both re-narrate state the repository already holds (2026-08-27, from the philosophy audit, low).
 - `minor-bugs.md:424` — Three governance vocabularies are copied per consumer instead of shared (2026-08-27, from the philosophy audit, low).
-- `minor-bugs.md:426` — A pipeline warning names an internal record id as its resolution action (2026-08-27, from the philosophy audit, low).
-- `minor-bugs.md:428` — `check:memory-citations` gates two of the three citation directions, and its guard-reach row names the wrong uncovered half (2026-08-27, low, friction: tool_should_decide).
-- `minor-bugs.md:450` — `buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low, friction: tool_should_decide).
-- `minor-bugs.md:461` — The repo owns its green mechanism but exposes no way to ASK it, so a lap re-derives the answer by hand (2026-08-30, low, friction: tool_should_decide).
-- `minor-bugs.md:470` — `refuseSuppliedVerificationStatus` cannot fire on the production judge path (2026-09-03, low).
-- `minor-bugs.md:481` — The runtime-artifact-name generator's source list omits two modules that mint runtime names (2026-09-03, low).
-- `minor-bugs.md:493` — The leg-1 scope ledger never prunes entries for deleted documents (2026-09-11, low).
+- `minor-bugs.md:426` — `check:memory-citations` gates two of the three citation directions, and its guard-reach row names the wrong uncovered half (2026-08-27, low, friction: tool_should_decide).
+- `minor-bugs.md:448` — `buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low, friction: tool_should_decide).
+- `minor-bugs.md:459` — The repo owns its green mechanism but exposes no way to ASK it, so a lap re-derives the answer by hand (2026-08-30, low, friction: tool_should_decide).
+- `minor-bugs.md:468` — `refuseSuppliedVerificationStatus` cannot fire on the production judge path (2026-09-03, low).
+- `minor-bugs.md:479` — The runtime-artifact-name generator's source list omits two modules that mint runtime names (2026-09-03, low).
+- `minor-bugs.md:491` — The leg-1 scope ledger never prunes entries for deleted documents (2026-09-11, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

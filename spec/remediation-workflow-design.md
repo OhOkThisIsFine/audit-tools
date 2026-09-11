@@ -158,12 +158,10 @@ with no obligations, no seam contracts, and no traceability, cannot support
 confident parallel implementation. Routing both paths through the pipeline closes
 that gap.
 
-**How the risk dial realizes this, per** [`self-scaling-pipeline-design.md`](self-scaling-pipeline-design.md)
-**(the newer design-of-record):** depth scales with the run's risk tier rather than
-branching to a separate path. EVERY run enters the contract pipeline; the tier sets
-how deeply it is traversed. At the `low` tier, coherent authoring phases collapse
-into shared round-trips and adversarial depth drops to a light inline self-check;
-`medium`/`high` keep every phase its own gated step at full depth. No tier skips a
+**How the risk dial realizes this:** the risk-tier semantics live in
+[`self-scaling-pipeline-design.md`](self-scaling-pipeline-design.md). Depth scales
+with the run's risk tier rather than branching to a separate path. EVERY run enters
+the contract pipeline; the tier sets how deeply it is traversed. No tier skips a
 phase, and none skips traceability or verification.
 
 This is not a parallel path, and no longer even a shallow one that bypasses the
@@ -345,11 +343,9 @@ stale installed bin or isolated worktree.
 **Token estimation** uses the shared `estimateTokensFromBytes`: node estimates
 from contract scope file sizes + spec length + pulled-in test files.
 
-**Convention scan** was cached once per run and used deliberately-loose
-basename matching to widen a node's write grant to the tests that reference its
-files. It was retired with the tool-side implement-prompt assembly: the host
-owns worker prompting, and the enforced scope is `block.touched_files`
-normalized into the work item's `allowed_files`.
+**Write scope** is `block.touched_files` normalized into the work item's
+`allowed_files`: the host owns worker prompting, and no basename-matched
+convention scan widens a node's write grant.
 
 ---
 

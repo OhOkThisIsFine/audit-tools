@@ -1,5 +1,5 @@
 /**
- * Versioned seam contract for the free_form_intent Interpreter (N-X06).
+ * Versioned seam contract for the free_form_intent Interpreter.
  *
  * Pins the output shape of the intent interpretation step so that consumers
  * (audit-code, remediate-code) can be validated against a single,

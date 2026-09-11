@@ -379,6 +379,10 @@ The machine contract is `remediation-outcomes.json`; its render
 - combined-state test result,
 - closing-action result.
 
+Apart from that ordered spine, the report also lists the findings excluded
+before remediation: those skipped at the intent checkpoint and those dropped by
+grounding. They carry no position in the order above.
+
 Root-cause clustering is not part of the product. Re-auditing is left to
 the user.
 

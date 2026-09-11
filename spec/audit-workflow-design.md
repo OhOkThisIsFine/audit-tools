@@ -18,9 +18,8 @@ intake
   → batch_deterministic     [graph_enrichment → design_assessment
                              → structure_decomposition → docs_digest]
   → intent_checkpoint       [user gate]
-  → intent_equivalence      [host_delegation for a prose-only delta; every other arm
-                             (baseline stamp, gate-version stale, structured delta)
-                             resolves deterministically — DD-9]
+  → intent_equivalence      [host_delegation for a prose-only delta; every other
+                             arm resolves deterministically — DD-9]
   → charter_extraction      [host_delegation, gated by the intent-checkpoint ceiling;
                              three blind estimator lanes fed channel-pure packets]
   → charter_delta           [host_delegation, independent delta-miner + triangulation over
