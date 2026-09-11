@@ -34,7 +34,7 @@ import {
   readObligationChangeClassification,
 } from "./changeClassification.js";
 import { derivePhaseCut, phaseCutModulesFromContracts } from "./phaseCut.js";
-import { obligationId } from "./idRegistry.js";
+import { coerceGoalId, obligationId } from "./idRegistry.js";
 import {
   COPIED_MODULE_CONTRACT_FIELDS,
   DERIVED_MODULE_CONTRACT_FIELDS,
@@ -227,10 +227,16 @@ export function deriveFinalizedModuleContracts(
   module_contracts: unknown[];
   created_at: string;
 } {
-  const goalId =
-    isRecord(draftedModuleContracts) && typeof draftedModuleContracts.goal_id === "string"
-      ? draftedModuleContracts.goal_id
-      : "";
+  // Validated on the way IN, never read verbatim. `goal_id` is the identity
+  // joining every contract-pipeline artifact and the key the consistency gate
+  // compares, and the LLM is its only producer — so the previous
+  // `typeof === "string"` read admitted `""`, an unsubstituted
+  // `<stable-identifier>` placeholder, and a free-text sentence alike, and the
+  // join silently degraded to "no identity" instead of failing. The grammar
+  // lives in the id registry beside the other mints; see `GOAL_ID_PATTERN`.
+  const goalId = isRecord(draftedModuleContracts)
+    ? coerceGoalId(draftedModuleContracts.goal_id)
+    : "";
   const drafts =
     isRecord(draftedModuleContracts) && Array.isArray(draftedModuleContracts.module_contracts)
       ? draftedModuleContracts.module_contracts
@@ -616,7 +622,9 @@ const COPIED_MODULE_CONTRACT_COERCIONS: Readonly<
 /** Defensive read of the validated finalized-module-contracts payload. */
 function readFinalizedContracts(payload: unknown): DerivableFinalizedContracts {
   const record = isRecord(payload) ? payload : {};
-  const goalId = typeof record.goal_id === "string" ? record.goal_id : "";
+  // Same validation as the mint above: this reader is the OTHER half of the
+  // same join, so a value that could not be minted must not be read back as one.
+  const goalId = coerceGoalId(record.goal_id);
   const rawModules = Array.isArray(record.module_contracts)
     ? record.module_contracts
     : [];

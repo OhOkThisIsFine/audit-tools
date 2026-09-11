@@ -40,6 +40,7 @@ import {
 } from "../contractPipeline/changeClassification.js";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import { TESTABLE_OBLIGATION_KINDS } from "../contractPipeline/obligationKinds.js";
+import { coerceGoalId } from "../contractPipeline/idRegistry.js";
 
 // ── DesignSpec structural gates ───────────────────────────────────────────────
 
@@ -263,6 +264,22 @@ export function validateDesignSpecGates(
  * Pass in a map of artifact-name → payload. Payloads that are not records, or
  * that have no `goal_id` field, are silently skipped (the per-artifact
  * validators already flag missing goal_ids). Issues are errors.
+ *
+ * Comparison is on the CANONICAL form (`coerceGoalId`), not the literal string.
+ * Two writers reach these artifacts by different routes — a host-authored
+ * artifact arrives through ingestion carrying whatever the model typed
+ * (`Goal-001`), while a TOOL-derived one has already been through the id
+ * registry's grammar (`goal-001`) — so comparing literals reds on a spelling
+ * difference that names no real disagreement. Worse, the red is not benign: the
+ * caller archives the artifact and re-emits the phase, so a `Goal-001`/`goal-001`
+ * pair would send a green pipeline back to re-author an artifact that was
+ * already correct. Canonicalizing here makes the equality test mean "the same
+ * goal", which is what the invariant has always said.
+ *
+ * A value the grammar cannot canonicalize at all (empty, a placeholder, prose)
+ * is skipped exactly as an absent one is: it is not an identity, so it cannot
+ * participate in an identity comparison. The per-artifact validators are the
+ * surface that refuses it.
  */
 export function validateGoalIdConsistency(
   artifacts: Record<string, unknown>,
@@ -270,19 +287,27 @@ export function validateGoalIdConsistency(
   const issues: ValidationIssue[] = [];
   let canonical: string | undefined;
   let canonicalSource: string | undefined;
+  let canonicalRaw: string | undefined;
 
   for (const [name, payload] of Object.entries(artifacts)) {
     if (!isRecord(payload)) continue;
-    if (typeof payload.goal_id !== "string" || payload.goal_id.length === 0) continue;
-    const id = payload.goal_id;
+    // Compare on the canonical form; REPORT the artifact's own literal. The
+    // operator is being sent back to a specific artifact to fix a specific
+    // field, so the message must quote the bytes they will find there — echoing
+    // a normalized value they never wrote would send them looking for text that
+    // is not in the file.
+    const raw = payload.goal_id;
+    const id = coerceGoalId(raw);
+    if (id.length === 0) continue;
     if (canonical === undefined) {
       canonical = id;
       canonicalSource = name;
+      canonicalRaw = typeof raw === "string" ? raw : id;
     } else if (id !== canonical) {
       pushValidationIssue(
         issues,
         `${name}.goal_id`,
-        `goal_id mismatch: "${name}" has goal_id "${id}" but "${canonicalSource}" has "${canonical}". All contract-pipeline artifacts must share the same goal_id.`,
+        `goal_id mismatch: "${name}" has goal_id "${String(raw)}" but "${canonicalSource}" has "${String(canonicalRaw)}". All contract-pipeline artifacts must share the same goal_id.`,
       );
     }
   }

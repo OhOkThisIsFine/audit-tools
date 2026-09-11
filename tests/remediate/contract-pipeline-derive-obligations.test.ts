@@ -158,7 +158,9 @@ describe("deriveObligationLedger (S1 deterministic derivation)", () => {
     });
 
     expect(ledger.contract_version).toBe(CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION);
-    expect(ledger.goal_id).toBe("G1");
+    // The goal id is case-folded by the registry's grammar on the way in
+    // (`coerceGoalId`), so the ledger carries the canonical lowercase form.
+    expect(ledger.goal_id).toBe("g1");
 
     const byKind = (kind: string) =>
       ledger.obligations.filter((o) => o.kind === kind);

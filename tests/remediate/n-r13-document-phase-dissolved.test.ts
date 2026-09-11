@@ -53,27 +53,39 @@ afterEach(async () => {
 
 describe("N-R13: RemediationState.status union", () => {
   it("does not include 'documenting' as a valid status", async () => {
+    // Read the SHIPPED vocabulary, never a literal re-written here. The previous
+    // version of this block built a local `validStatuses` array and asserted it
+    // did not contain "documenting" — a tautology over a literal the test itself
+    // wrote, so a `documenting` status reintroduced into `RemediationState`
+    // would have passed it silently. The array now comes from the module the
+    // load gate and the type both derive from, so the assertion is made against
+    // the shipped value: reintroducing `documenting` anywhere in that chain reds
+    // here.
+    const { REMEDIATION_RUN_STATUSES } = await import(
+      "../../src/remediate/state/runStatus.js"
+    );
     const { StateStore: _StateStore } = await import("../../src/remediate/state/store.js");
 
-    // Saving a state with status "documenting" should fail TypeScript compilation
-    // (this is a runtime guard: the union no longer includes "documenting").
-    // We verify by confirming the valid statuses and "documenting" is absent.
-    // The TypeScript compiler would reject `status: "documenting"` at compile time;
-    // here we confirm that the runtime round-trip rejects or at least doesn't
-    // perpetuate the old status string.
-    const validStatuses = [
-      "pending",
-      "planning",
-      "waiting_for_clarification",
-      "implementing",
-      "triage",
-      "waiting_for_triage",
-      "closing",
-      "complete",
-    ] as const;
+    expect(REMEDIATION_RUN_STATUSES).not.toContain("documenting");
+    // Non-vacuous: the array is the real vocabulary, not an empty or shrunken
+    // read that would make the assertion above true for the wrong reason.
+    expect(REMEDIATION_RUN_STATUSES).toContain("planning");
+    expect(REMEDIATION_RUN_STATUSES).toContain("implementing");
+  });
 
-    // None of the valid statuses is "documenting"
-    expect(validStatuses).not.toContain("documenting");
+  it("the load gate refuses 'documenting' as an unknown status", async () => {
+    // The RUNTIME half of the same invariant — the tautology above could not
+    // reach it. `validateState` is exercised through the store's own read path,
+    // so this reds if the gate's vocabulary ever diverges from the shipped one.
+    const { StateStore } = await import("../../src/remediate/state/store.js");
+    await writeFile(
+      join(ARTIFACTS_DIR, "state.json"),
+      JSON.stringify({ status: "documenting" }),
+      "utf8",
+    );
+    await expect(new StateStore(ARTIFACTS_DIR).loadState()).rejects.toThrow(
+      /Unknown status "documenting"/,
+    );
   });
 });
 

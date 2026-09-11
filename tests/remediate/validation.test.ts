@@ -1009,6 +1009,66 @@ describe("validateGoalIdConsistency", () => {
     // At minimum context_bundle and obligation_ledger mismatch G-001
     expect(errors.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("does NOT error on two spellings of the same goal", () => {
+    // A host-authored artifact arrives through ingestion carrying whatever the
+    // model typed; a tool-derived one has already been through the id
+    // registry's grammar. Comparing literals would red on `G-001` vs `g-001`,
+    // which names no disagreement — and the red is not benign: the caller
+    // archives the artifact and re-emits its phase, so a spelling difference
+    // would send a green pipeline back to re-author a correct artifact.
+    // NOTE: `Goal-001` is a DIFFERENT goal from `G-001` (it canonicalizes to
+    // `goal-001`, not `g-001`), so it is deliberately not in this fixture —
+    // folding case must not be mistaken for merging distinct ids.
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      obligation_ledger: { goal_id: "g-001" },
+      implementation_dag: { goal_id: "g-001" },
+    };
+    const issues = validateGoalIdConsistency(artifacts);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("still errors when two genuinely different goals differ only by slug", () => {
+    // The canonicalization must not be so aggressive that distinct ids merge.
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      obligation_ledger: { goal_id: "Goal-001" },
+    };
+    const issues = validateGoalIdConsistency(artifacts).filter(
+      (i) => i.severity === "error",
+    );
+    expect(issues).toHaveLength(1);
+  });
+
+  it("reports the artifact's OWN literal in the mismatch message", () => {
+    // The operator is sent back to a specific artifact to fix a specific field,
+    // so the message must quote the bytes they will find there — echoing a
+    // normalized value they never wrote would send them looking for text that
+    // is not in the file.
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      obligation_ledger: { goal_id: "G-999" },
+    };
+    const errors = validateGoalIdConsistency(artifacts).filter(
+      (i) => i.severity === "error",
+    );
+    expect(errors.some((e) => e.message.includes("G-999"))).toBe(true);
+    expect(errors.some((e) => e.message.includes("G-001"))).toBe(true);
+  });
+
+  it("skips a value the grammar cannot canonicalize, rather than comparing it", () => {
+    // A placeholder or prose is not an identity, so it cannot take part in an
+    // identity comparison — the per-artifact validators are the surface that
+    // refuses it.
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      obligation_ledger: { goal_id: "<stable-identifier>" },
+      implementation_dag: { goal_id: "Harden the auth flow." },
+    };
+    const issues = validateGoalIdConsistency(artifacts);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
 });
 
 // ── ARC-86b18f1b-2: validateImplementationDAGIntegrity ────────────────────────

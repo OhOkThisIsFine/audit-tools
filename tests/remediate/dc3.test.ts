@@ -544,6 +544,11 @@ describe("DC-3 source partition (inv-5)", () => {
     const ledger = (env as any).payload;
     // One invariant-bearing obligation set derived from the 3 module contracts.
     expect(Array.isArray(ledger.obligations)).toBe(true);
-    expect(ledger.goal_id).toBe("G1");
+    // The registry's goal-id grammar case-folds on the way in (`coerceGoalId`),
+    // so the derived ledger carries the canonical lowercase form of the fixture's
+    // "G1" — and the consistency gate compares canonically, so every artifact
+    // written for this goal agrees regardless of which spelling it was authored
+    // with.
+    expect(ledger.goal_id).toBe("g1");
   });
 });

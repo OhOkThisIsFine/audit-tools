@@ -17,17 +17,14 @@ import {
   RemediationHostHandoffRecordSchema,
 } from "./types.js";
 import { validateRemediationBlock } from "../validation/remediationState.js";
+import {
+  REMEDIATION_RUN_STATUSES,
+  isRemediationRunStatus,
+  type RemediationRunStatus,
+} from "./runStatus.js";
 
 export interface RemediationState {
-  status:
-    | "pending"
-    | "planning"
-    | "waiting_for_clarification"
-    | "implementing"
-    | "triage"
-    | "waiting_for_triage"
-    | "closing"
-    | "complete";
+  status: RemediationRunStatus;
   plan?: RemediationPlan;
   items?: Record<string, RemediationItemState>;
   clarifications?: ClarificationRequest[];
@@ -85,18 +82,6 @@ export interface RemediationState {
   host_handoff?: RemediationHostHandoffRecord;
 }
 
-/** Known status values for RemediationState — used for schema validation on load. */
-const KNOWN_STATUSES = new Set<string>([
-  "pending",
-  "planning",
-  "waiting_for_clarification",
-  "implementing",
-  "triage",
-  "waiting_for_triage",
-  "closing",
-  "complete",
-]);
-
 /**
  * Statuses whose derived step decisions READ the plan/items — a state in one of
  * these with those fields missing is unusable (the state machine would crash or,
@@ -123,13 +108,18 @@ function validateState(value: unknown): string[] {
     errors.push("Missing required field: status");
     return errors;
   }
-  const status = obj["status"] as string;
-  if (!KNOWN_STATUSES.has(status)) {
+  // The ONE membership test, derived from the same array the `status` type is —
+  // so the gate and the type cannot drift apart with no red build. This used to
+  // be a module-private `Set` hand-mirroring the inline union (DAT-017d52ff):
+  // adding a status to the union without updating the set compiled cleanly and
+  // then made the load gate reject every persisted state carrying it.
+  if (!isRemediationRunStatus(obj["status"])) {
     errors.push(
-      `Unknown status "${String(obj["status"])}"; expected one of: ${[...KNOWN_STATUSES].join(", ")}`,
+      `Unknown status "${String(obj["status"])}"; expected one of: ${REMEDIATION_RUN_STATUSES.join(", ")}`,
     );
     return errors;
   }
+  const status = obj["status"];
 
   // Status-conditional completeness (INV-RSM-STATE-COMPLETE): every field the
   // status's decision path reads must be present, or the load fails loudly
