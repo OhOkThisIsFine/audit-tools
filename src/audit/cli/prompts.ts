@@ -1,6 +1,7 @@
 import {
   DISPATCH_PROMPT_HANDOFF_NOTE,
   buildFrictionTriageBlock,
+  renderHostScratchNote,
   type FrictionTriageDecision,
 } from "audit-tools/shared";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
@@ -118,6 +119,16 @@ export function renderEdgeReasoningDispatchPrompt(params: {
   continueCommand: string;
   contentHash: string;
   candidateCount: number;
+  /**
+   * Run-scoped scratch directory (`hostScratchDir`) this lane's executor must
+   * improvise any working files under. REQUIRED, not optional: the pair had no
+   * caller at all until this note was wired, and an optional parameter would
+   * let the next emission site silently reintroduce the same gap. Scratch left
+   * at the audited repo's root is untracked litter that the NEXT audit's
+   * manifest walk picks up — the exact hazard the disposition's untracked rule
+   * exists to contain.
+   */
+  scratchDirPath: string;
 }): string {
   return [
     "# audit-code edge reasoning (host workload)",
@@ -127,6 +138,8 @@ export function renderEdgeReasoningDispatchPrompt(params: {
     "it only rewrites edge reasons and never changes topology or weights.",
     "",
     DISPATCH_PROMPT_HANDOFF_NOTE,
+    "",
+    renderHostScratchNote(params.scratchDirPath),
     "",
     `Prompt path: ${params.promptPath}`,
     `Result path: ${params.resultsPath}`,

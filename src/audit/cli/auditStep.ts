@@ -38,6 +38,7 @@ import type { AnalyzerSetting, Finding, SynthesisNarrative, CriticalFlowFallback
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
+import type { ScopeIndexMemo } from "../orchestrator/scopeIndexBaseline.js";
 
 export interface RunAuditStepOptions {
   root: string;
@@ -75,6 +76,16 @@ export interface RunAuditStepOptions {
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
   since?: string;
   runLog?: boolean;
+  /**
+   * The FOLD's git-index probe cache (see `ScopeIndexMemo`). Present only when
+   * this dispatch is one step of a fold (`runDeterministicForNextStep` creates
+   * it and threads it here); a standalone `runAuditStep` leaves it unset and
+   * probes the index on its own. It rides the options bag rather than an
+   * argument because it must reach `advanceAudit` INSIDE `executeAdvance`, and
+   * the submission-polling gates reach that same call without a fold context to
+   * read it from.
+   */
+  scopeIndexMemo?: ScopeIndexMemo;
 }
 
 export async function runAuditStep(
@@ -316,6 +327,9 @@ async function executeAdvance(
     externalAcquisition: options.externalAcquisition,
     since: options.since,
     preferredExecutor: options.preferredExecutor,
+    // The fold's probe cache rides through to every probe this dispatch makes
+    // (see `ScopeIndexMemo`). Undefined for a standalone `runAuditStep`.
+    scopeIndexMemo: options.scopeIndexMemo,
     // The plan-draw classification's lane probe: pure presence, never a read
     // or a consume — a pending submission is a boundary the unforced draw
     // halts at (see AdvanceAuditOptions.submissionProbe).

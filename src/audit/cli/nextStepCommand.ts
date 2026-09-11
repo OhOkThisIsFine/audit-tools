@@ -7,6 +7,7 @@ import {
   runWithBlockedStepBackstop,
   writeBlockedStepContract,
   laneAssetsDir,
+  hostScratchDir,
   renderFanoutExecutionLines,
   writeTextFile,
   writeJsonFile,
@@ -1332,6 +1333,17 @@ const emitEdgeReasoning = emissionRow<"edge_reasoning">(
     // fixes the shape instead of resubmitting the same honest mistake forever.
     const rejectionNotice = await renderEdgeReasoningRejectionNotice(artifactsDir);
 
+    // The scratch directory the dispatch note names, CREATED here rather than
+    // left as a pure `join`. A note that points at a directory which does not
+    // exist yet asks the host to create it — and a host that improvises a batch
+    // list first, or a host with no `mkdir` habit, writes the file at the repo
+    // root instead: the exact untracked litter the note exists to prevent (it
+    // enters the next audit's intake walk, and findings cite it). Creating it at
+    // emission makes the address in the prompt true, so following the note is
+    // the path of least resistance rather than a small extra step.
+    const scratchDirPath = hostScratchDir(artifactsDir, AUDIT_GATE_SUBMISSION_SCOPE);
+    await mkdir(scratchDirPath, { recursive: true });
+
     // Always-materialized (design resolution 2): the (potentially large)
     // edge-list prompt lives in a lane file on every host — a subagent-capable
     // host fans it out, any other host reads and follows the same file itself.
@@ -1372,6 +1384,12 @@ const emitEdgeReasoning = emissionRow<"edge_reasoning">(
           continueCommand,
           contentHash,
           candidateCount: result.candidates.length,
+          // The single-agent dispatch is the last path that could litter the
+          // audited tree: its lane prompt says "rewrite these edge reasons",
+          // and a batch list or helper script it improvises has nowhere else
+          // named to go. Derived from the artifact dir, so it is run-scoped and
+          // outside the next audit's intake walk by construction.
+          scratchDirPath,
         }),
       ].join("\n"),
       access: {

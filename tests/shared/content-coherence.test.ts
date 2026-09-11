@@ -948,6 +948,57 @@ describe(RED_SIGNATURE, () => {
     expect(digest).toMatch(/^[0-9a-f]{64}$/u);
   }, 120_000);
 
+  it("bounds refinement cost on one large eligible component", async () => {
+    const core = await loadCore();
+    // ONE eligible component of `n` members whose every pair is eligible: the
+    // saturated shape refinement exists for, and the shape that costs most.
+    //
+    // MEASURED 2026-09-10 with a lap-local benchmark and an instrumented pass
+    // counter. Two facts, and the second is the one that matters:
+    //
+    //  1. Refinement is Θ(n²) in the component size, and that is the algorithm,
+    //     not slack — a saturated component carries ~n²/2 eligible pairs and
+    //     Louvain reads them. Measured refinement over the eligibility scan:
+    //     40ms at n=200, 105ms at 400, 257ms at 600, 447ms at 800, 682ms at
+    //     1000 (scan: 38/82/187/335/481ms — ratio held to 0.48-0.52 µs/pair, so
+    //     the scan term is clean quadratic and the refinement term is not worse
+    //     than the scan it sits on).
+    //  2. The cost is NOT the pass budget. `MAX_LOCAL_MOVING_PASSES` bounds the
+    //     local-moving loop, and instrumenting the compiled loop shows ONE pass
+    //     per level on every construction tried — banded dense, saturated
+    //     clique, a 1,600-node chain, two-scale nested, LCG-sparse. The fixpoint
+    //     terminates the loop; the ceiling is only a floor under it. So this
+    //     test bounds the SCAN+REFINE term, and a regression in either shows up
+    //     as a blown ceiling rather than as a hang.
+    //
+    // The ceiling is deliberately generous (the measured figure is ~0.5s): it
+    // exists to catch an order-of-magnitude regression — a re-introduced second
+    // adjacency build, a pass budget that stops converging — not to police
+    // constant factors on a shared CI runner.
+    const items = (n: number): UnknownRecord[] =>
+      Array.from({ length: n }, (_, index) => ({
+        id: `m${String(index).padStart(5, "0")}`,
+        file_paths: ["src/shared.ts"],
+        unit_ids: [`u${Math.floor(index / 25)}`],
+        tags: ["security"],
+      }));
+
+    const policy = {
+      ...core.FINDINGS_DRAW_COHERENCE_POLICY,
+      refineAtModularityPeak: true,
+    };
+    const started = process.hrtime.bigint();
+    const trace = core.buildContentCoherenceTrace({ items: items(800) }, policy);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+
+    // Exhaustive: every member lands in exactly one component after refinement.
+    const components = trace.components as string[][];
+    expect(components.flat()).toHaveLength(800);
+    expect(new Set(components.flat()).size).toBe(800);
+    expect(elapsedMs, `refinement of an 800-member component took ${elapsedMs.toFixed(0)}ms`).toBeLessThan(5_000);
+  }, 120_000);
+
+
   it("deletes every local membership and backend-fit surface", async () => {
     const sources = await Promise.all(
       [

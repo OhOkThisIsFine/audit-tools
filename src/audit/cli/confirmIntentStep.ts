@@ -62,6 +62,20 @@ const LENS_DESCRIPTIONS: Record<string, string> = {
 };
 
 /**
+ * Operator-facing gloss per scope-rule guard branch. The disposition's own
+ * reason strings say WHICH branch fired; these say what it MEANS for the scope
+ * the operator is about to confirm, which is the only thing they can act on.
+ */
+const SCOPE_GUARD_GLOSS: Record<string, string> = {
+  root_ignored:
+    "every candidate file matched .gitignore, so applying it would empty the audit",
+  root_untracked:
+    "every included candidate is untracked — the repository has no tracked files in scope",
+  share_exceeded:
+    "the rule would have excluded more than the safety share of candidates",
+};
+
+/**
  * Render the host-facing prompt for the `confirm_intent` step. Shows the
  * deterministically-computed scope picture and asks the host to write (or
  * refine) `intent_checkpoint.json` — confirming scope/intent and optionally
@@ -103,6 +117,26 @@ export function renderConfirmIntentPrompt(
           )
           .join("\n")
       : "_(none)_";
+
+  // Render the scope-rule outcomes. A SKIPPED rule is the load-bearing row: the
+  // files it would have excluded are sitting in scope above, and without this
+  // line nothing in the prompt says why. The guard branches get their own
+  // operator-facing gloss because the disposition's reason strings are written
+  // for a log, not for someone deciding whether to confirm the scope.
+  const scopeRules = preDigest.scope_rules ?? [];
+  const ruleLines = scopeRules
+    .map((rule) => {
+      const label = rule.rule === "vcs_ignore" ? "gitignore" : "untracked";
+      if (rule.applied) {
+        return `- **${label}** — applied; ${rule.excluded_count} file(s) excluded.`;
+      }
+      const guardGloss = SCOPE_GUARD_GLOSS[rule.guard_branch ?? ""] ?? "";
+      return (
+        `- ⚠ **${label}** — SKIPPED (${guardGloss || "no guard branch"}); ` +
+        `${rule.excluded_count} file(s) excluded. ${rule.skipped_reason ?? ""}`.trimEnd()
+      );
+    })
+    .join("\n");
 
   // Render disposition override proposals
   const overrideProposalLines =
@@ -207,6 +241,18 @@ export function renderConfirmIntentPrompt(
     "",
     dirLines,
     "",
+    ...(scopeRules.length > 0
+      ? [
+          "## Scope rules (gitignore / untracked)",
+          "",
+          "Intake runs two scope rules. A **SKIPPED** rule excluded nothing — the",
+          "files it would have removed are in scope above, so review them as part",
+          "of the disposition and add `disposition_overrides` if they do not belong:",
+          "",
+          ruleLines,
+          "",
+        ]
+      : []),
     "## Already excluded (deterministic disposition)",
     "",
     excludedLines,

@@ -169,11 +169,62 @@ test("formatDeterministicFindings — caps at 20 items and emits '... and N more
   const prompt = renderContractReviewPrompt(bundle);
   const section = extractSection(prompt, "### Deterministic structural findings", "\n##");
 
-  expect(section).toMatch(/25 structural findings from deterministic analysis:/);
+  expect(section).toMatch(/25 structural findings from deterministic analysis/);
   expect(section.includes("Finding 0"), "first finding must be present").toBeTruthy();
   expect(section.includes("Finding 19"), "20th finding must be present").toBeTruthy();
   expect(!section.includes("Finding 20"), "21st finding must not be present").toBeTruthy();
   expect(section).toMatch(/\.\.\. and 5 more/);
+  // The lead boundary rides the same header (backlog 2026-08-03): deterministic
+  // output is a lead until semantically confirmed, and the header must say so or
+  // a reviewer reads 25 heuristics as 25 approved findings.
+  expect(
+    section.includes("leads, not verdicts"),
+    "the deterministic-findings header must state the lead boundary",
+  ).toBeTruthy();
+  // These fixture findings carry no lineage, so the section must say so rather
+  // than letting an unstamped row pass as confirmed.
+  expect(
+    section.includes("carry NO producer lineage record"),
+    "unstamped deterministic findings must be flagged, not silently absorbed",
+  ).toBeTruthy();
+});
+
+test("formatDeterministicFindings — a lineage-stamped lead renders its producer and source hash", () => {
+  const findings = [
+    {
+      id: "F-0",
+      title: "Architectural seam: a.ts ↔ b.ts",
+      summary: "cut-edge",
+      severity: "medium" as const,
+      confidence: "medium" as const,
+      lens: "architecture",
+      category: "architectural_seam",
+      affected_files: [],
+      evidence: [],
+      lead_lineage: {
+        producer: "detectSeams",
+        source_hash: "abcdef0123456789",
+        confirmation: "lead" as const,
+      },
+    },
+  ];
+  const bundle: ArtifactBundle = {
+    design_assessment: { generated_at: "2026-01-01T00:00:00Z", findings },
+  };
+  const section = extractSection(
+    renderContractReviewPrompt(bundle),
+    "### Deterministic structural findings",
+    "\n##",
+  );
+
+  expect(
+    section.includes("lead: detectSeams @ abcdef012345"),
+    `a stamped lead must name its producer and source hash in the prompt, got: ${section}`,
+  ).toBeTruthy();
+  expect(
+    section.includes("carry NO producer lineage record"),
+    "a fully stamped set must not be flagged as unlineaged",
+  ).toBe(false);
 });
 
 test("summarizeFlows — within cap shows all items without suffix", () => {

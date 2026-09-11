@@ -11,7 +11,12 @@ import { z } from "zod";
 import { compareCodeUnits } from "../compareCodeUnits.js";
 import { toPosixPath } from "../paths.js";
 import { isRecord } from "../validation/basic.js";
-import { louvain, modularityOf, type Partition } from "./modularity.js";
+import {
+  buildAdjacency,
+  louvain,
+  modularityOfBase,
+  type Partition,
+} from "./modularity.js";
 
 export const CONTENT_COHERENCE_SCORES = Object.freeze({
   call_import_reference_adjacency: 70,
@@ -55,8 +60,42 @@ export interface ContentCoherencePolicy {
 }
 
 /**
- * The audit TASK draw. Unmeasured for collapse — its eligibility is deliberately
- * left as-is until it is measured on its own lap (`docs/backlog/open-bugs.md`).
+ * The audit TASK draw. MEASURED 2026-09-10 and kept disjunctive — the collapse
+ * that forced the findings draw onto the conjunction does not reproduce here,
+ * and the reason is structural rather than lucky.
+ *
+ * The two draws read different item populations. A findings item is a FINDING,
+ * so its `file_paths` are the files it implicates and `tags` are its lens: at
+ * 3,230 findings the eligible graph is dense enough to union-find into one
+ * component, and no class-COUNT variant fixed it. A task item is an audit TASK,
+ * whose `unit_ids` are populated by construction — so `shared_unit`'s weight of
+ * 80 clears the 60 threshold on its own and the UNIT PARTITION is a floor on
+ * granularity: every task of a unit is in one component, and a component can only
+ * grow past one unit through an explicit cross-unit relation. That is the whole
+ * difference, and it is pinned as an invariant in
+ * `tests/audit/partition-task-graph.test.ts`.
+ *
+ * Measurement (a lap-local harness: the live repo's own tracked
+ * files through `buildChunkedAuditTasks` → `buildTaskAffinityGraph` →
+ * `buildContentCoherenceTrace`, then three further real repos):
+ *
+ * | repo                  | tasks | units | components | largest |
+ * |-----------------------|-------|-------|------------|---------|
+ * | audit-tools           |   197 |    47 |         47 |   10 (5.1%) |
+ * | llm-relay             |   889 |   298 |        298 |    7 (0.8%) |
+ * | codebase-memory-mcp   |   643 |   231 |        231 |    9 (1.4%) |
+ * | Polar-CV-KAN          |    60 |    23 |         23 |    7 (11.7%) |
+ * | friction-loop         |    26 |    12 |         10 |    6 (23.1%) |
+ *
+ * Components track units exactly, and the largest component is a single unit's
+ * task count (or two small units joined by a cross-unit edge) — never a
+ * repo-spanning blob. The worst case is the SMALLEST repo, where one shared file
+ * between two 3-task units is 23% of the population by arithmetic alone; the
+ * bound therefore is not "small in absolute terms" but "bounded by the unit
+ * partition", which is what the test asserts. The findings draw's conjunction
+ * would be wrong HERE for the same reason it is right THERE: `same_lens` is a
+ * hard partition, so applying it to tasks would shatter every unit into
+ * per-lens slivers and destroy the coupling the draw exists to preserve.
  */
 export const TASK_DRAW_COHERENCE_POLICY: ContentCoherencePolicy = Object.freeze({
   eligibility: "weighted_score_threshold",
@@ -408,9 +447,15 @@ function refineAtModularityPeak(
   const whole: Partition = new Map(
     members.map((id) => [id, members[0] ?? id] as const),
   );
+  // ONE adjacency built, two partitions scored against it. `louvain` has already
+  // built the same adjacency internally, so this is the third build of the same
+  // graph in this function; the cheap half of that is removed here, and the
+  // comparison is byte-identical because `modularityOf` is now exactly this
+  // function behind one `buildAdjacency` call.
+  const base = buildAdjacency(graph);
   if (
-    modularityOf(graph, proposed, MODULARITY_RESOLUTION) <=
-    modularityOf(graph, whole, MODULARITY_RESOLUTION)
+    modularityOfBase(base, proposed, MODULARITY_RESOLUTION) <=
+    modularityOfBase(base, whole, MODULARITY_RESOLUTION)
   ) {
     return [[...members]];
   }

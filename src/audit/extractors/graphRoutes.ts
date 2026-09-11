@@ -26,13 +26,226 @@ const ROUTE_METHODS = new Set([
   "HEAD",
   "ALL",
 ]);
-const IMPORT_BINDING_PATTERN =
-  /\bimport\s+(?:type\s+)?([^;"'](?:[^;]*?))\s+from\s+["']([^"']+)["']/g;
 const REQUIRE_BINDING_PATTERN =
   /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*["']([^"']+)["']\s*\)/g;
-const REQUIRE_DESTRUCTURING_PATTERN =
-  /\b(?:const|let|var)\s*\{([^}]+)\}\s*=\s*require\s*\(\s*["']([^"']+)["']\s*\)/g;
 const IDENTIFIER_PATTERN = /^[A-Za-z_$][\w$]*$/;
+
+// ── The two binding-clause scans (no regex over repo content) ────────────────
+//
+// "No regex over repo content" is the PROPERTY, not a coincidence of these two:
+// the module's other patterns are bounded so that the property holds with them
+// present (see the super-linearity suite in
+// `tests/audit/graph-route-backtracking.test.ts`). A pattern added here later is
+// bound by the same rule; these two were the sites where bounding was the wrong
+// instrument, because the match they must keep is the LONG one a bound would
+// drop.
+//
+// Both of these were regexes with an UNBOUNDED gap between two literals, and
+// both were quadratic on adversarial input — `docs/reviews/analysis-tools-plan-
+// 2026-08-07.md` §4/§5, measured at 12 → 49 → 194 → 800 ms per doubling for the
+// import clause and the same shape for the destructuring one.
+//
+// The cost was never the quantifier; it was that a FAILING start position had to
+// be expanded to the end before it could be known to fail, and every position in
+// the file is a start position. Bounding the gap would fix the cost by silently
+// dropping the long matches (`leads-not-verdicts` bought and paid for elsewhere,
+// but unnecessary here). These scans instead keep EVERY match the regexes found
+// and are linear by SKIPPING rather than stepping — the same correction
+// `stripIdentifierTokens` (`src/remediate/contractPipeline/changeClassification.ts`)
+// applies to its own bounded-token regex, and for the same reason: emitting a
+// character and re-entering re-runs the same failing scan one position later,
+// which is the quadratic relocated rather than removed.
+
+/** `\s` — the character test both scans share with their regex predecessors. */
+const WHITESPACE_CHARACTER = /\s/;
+
+/** `[A-Za-z0-9_]`, the class JS `\b` treats as word characters. */
+function isWordCharacterAt(content: string, index: number): boolean {
+  if (index < 0 || index >= content.length) return false;
+  const code = content.charCodeAt(index);
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    code === 95
+  );
+}
+
+function isWhitespaceAt(content: string, index: number): boolean {
+  return (
+    index >= 0 &&
+    index < content.length &&
+    WHITESPACE_CHARACTER.test(content[index]!)
+  );
+}
+
+function skipWhitespace(content: string, from: number): number {
+  let index = from;
+  while (index < content.length && WHITESPACE_CHARACTER.test(content[index]!)) {
+    index += 1;
+  }
+  return index;
+}
+
+/** End of the `;`-delimited segment containing `from` (the `;`, or EOF). */
+function segmentEnd(content: string, from: number): number {
+  const semicolon = content.indexOf(";", from);
+  return semicolon === -1 ? content.length : semicolon;
+}
+
+interface ImportClauseMatch {
+  /** Raw text between `import` (and any `type`) and `from`. */
+  clause: string;
+  specifier: string;
+}
+
+interface ImportTerminator {
+  /** Where the clause ends — the start of the whitespace run before `from`. */
+  clauseEnd: number;
+  specifier: string;
+  /** First index past the closing quote. */
+  end: number;
+}
+
+/**
+ * The first `\s+from\s+["']([^"']+)["']` at or after `clauseStart`, within the
+ * current `;`-delimited segment — `null` when there is none.
+ *
+ * Lazy-clause semantics, stated: the clause takes as FEW characters as possible,
+ * so this returns the FIRST `from` that completes the whole tail. A `from` whose
+ * tail does not complete (no quote, empty specifier, mixed quote kinds) is
+ * skipped and the search continues — exactly the backtracking the regex did,
+ * minus the repeated start positions.
+ */
+function findImportTerminator(
+  content: string,
+  clauseStart: number,
+): ImportTerminator | null {
+  const limit = segmentEnd(content, clauseStart);
+  let searchFrom = clauseStart;
+  for (;;) {
+    const at = content.indexOf("from", searchFrom);
+    // `at >= limit`: the clause is `[^;]*?`, so it cannot cross a `;`.
+    if (at === -1 || at >= limit) return null;
+    searchFrom = at + 4;
+    // `\s+from`, and `[^;"']` — the clause is non-empty and does not start here.
+    if (at <= clauseStart || !isWhitespaceAt(content, at - 1)) continue;
+    const quoteAt = skipWhitespace(content, at + 4);
+    if (quoteAt === at + 4) continue;
+    const quote = content[quoteAt];
+    if (quote !== '"' && quote !== "'") continue;
+    const closeAt = content.indexOf(quote, quoteAt + 1);
+    // `[^"']+`: at least one character, and of THIS quote kind only.
+    if (closeAt <= quoteAt + 1) continue;
+    const specifier = content.slice(quoteAt + 1, closeAt);
+    if (specifier.includes('"') || specifier.includes("'")) continue;
+    return { clauseEnd: at, specifier, end: closeAt + 1 };
+  }
+}
+
+/**
+ * Every `\bimport\s+(?:type\s+)?CLAUSE\s+from\s+["']SPEC["']` in `content`, in
+ * document order and non-overlapping (a match resumes the scan at its own end).
+ *
+ * THE SKIP. When `findImportTerminator` fails from a clause start, there is no
+ * completing `from` anywhere in the REST OF THE SEGMENT. Every later `import` in
+ * that segment searches a SUFFIX of the same region, so every one of them fails
+ * too — the scan jumps to the segment's end instead of stepping past the
+ * keyword. One failed scan per segment, whatever the marker count.
+ */
+function scanImportClauses(content: string): ImportClauseMatch[] {
+  const matches: ImportClauseMatch[] = [];
+  let index = 0;
+  while (index < content.length) {
+    const keyword = content.indexOf("import", index);
+    if (keyword === -1) break;
+    index = keyword + "import".length;
+    // `\bimport` — the keyword inside an identifier is not one.
+    if (isWordCharacterAt(content, keyword - 1)) continue;
+    const afterKeyword = skipWhitespace(content, index);
+    if (afterKeyword === index) continue;
+    // `(?:type\s+)?` — optional, and only when the `type` is its own token.
+    const clauseStart =
+      content.startsWith("type", afterKeyword) &&
+      isWhitespaceAt(content, afterKeyword + 4)
+        ? skipWhitespace(content, afterKeyword + 4)
+        : afterKeyword;
+    // The clause's first character is `[^;"']` — what keeps a side-effect
+    // `import "x"` from being read as a binding clause.
+    const first = content[clauseStart];
+    if (first === undefined || first === ";" || first === '"' || first === "'") {
+      continue;
+    }
+    const terminator = findImportTerminator(content, clauseStart);
+    if (!terminator) {
+      index = segmentEnd(content, clauseStart);
+      continue;
+    }
+    matches.push({
+      clause: content.slice(clauseStart, terminator.clauseEnd),
+      specifier: terminator.specifier,
+    });
+    index = terminator.end;
+  }
+  return matches;
+}
+
+/** `\b(?:const|let|var)\s+\{` — the head of a destructuring require. */
+const REQUIRE_DESTRUCTURING_HEAD_PATTERN = /\b(?:const|let|var)\s+\{/g;
+
+/**
+ * `\s*=\s*require\s*\(\s*["']SPEC["']\s*\)`, anchored where it is placed.
+ *
+ * Sticky rather than global: the tail is only ever tried at one known offset (the
+ * character after the closing brace), so there are no start positions to scan.
+ */
+const REQUIRE_DESTRUCTURING_TAIL_PATTERN =
+  /\s*=\s*require\s*\(\s*["']([^"']+)["']\s*\)/y;
+
+interface DestructuringMatch {
+  bindings: string;
+  specifier: string;
+}
+
+/**
+ * Every `\b(?:const|let|var)\s+\{BINDINGS\}\s*=\s*require("SPEC")`, in document
+ * order and non-overlapping.
+ *
+ * THE SKIP, and why it is exact here. `[^}]+` cannot contain `}`, so for a head
+ * whose brace sits at `b` the body is forced to run from `b + 1` to the FIRST
+ * `}` after it — there is no other `}` the terminator could match. Every head
+ * whose brace lies before that `}` therefore has the identical body END and the
+ * identical tail, so when one fails they all fail: the scan resumes past the
+ * brace rather than at the next start position. Two markers and two million
+ * markers both cost one tail probe.
+ *
+ * A `}` that does not exist in the rest of the content ends the scan outright —
+ * no body can close, so no later head can match either.
+ */
+function scanRequireDestructuring(content: string): DestructuringMatch[] {
+  const matches: DestructuringMatch[] = [];
+  REQUIRE_DESTRUCTURING_HEAD_PATTERN.lastIndex = 0;
+  let head: RegExpExecArray | null;
+  while ((head = REQUIRE_DESTRUCTURING_HEAD_PATTERN.exec(content)) !== null) {
+    const openBrace = head.index + head[0].length - 1;
+    const closeBrace = content.indexOf("}", openBrace + 1);
+    if (closeBrace === -1) break;
+    REQUIRE_DESTRUCTURING_TAIL_PATTERN.lastIndex = closeBrace + 1;
+    const tail = REQUIRE_DESTRUCTURING_TAIL_PATTERN.exec(content);
+    // No tail, or an empty body (`[^}]+` needs at least one character): resume
+    // past this brace — every head sharing it fails for the same reason.
+    if (!tail || closeBrace === openBrace + 1) {
+      REQUIRE_DESTRUCTURING_HEAD_PATTERN.lastIndex = closeBrace + 1;
+      continue;
+    }
+    matches.push({
+      bindings: content.slice(openBrace + 1, closeBrace),
+      specifier: tail[1]!,
+    });
+    REQUIRE_DESTRUCTURING_HEAD_PATTERN.lastIndex = tail.index + tail[0].length;
+  }
+  return matches;
+}
 
 function routeSignature(route: RouteEdge): string {
   return `${route.method ?? ""}\0${route.path}\0${route.handler}`;
@@ -146,11 +359,9 @@ function extractImportBindings(
 ): Map<string, ImportBinding> {
   const bindings = new Map<string, ImportBinding>();
 
-  IMPORT_BINDING_PATTERN.lastIndex = 0;
-  for (const match of content.matchAll(IMPORT_BINDING_PATTERN)) {
-    const clause = match[1]?.trim();
-    const specifier = match[2];
-    if (!clause || !specifier) continue;
+  for (const match of scanImportClauses(content)) {
+    const clause = match.clause.trim();
+    const specifier = match.specifier;
     const target = resolveSpecifier(fromPath, specifier, pathLookup);
     if (!target) continue;
     const binding = { target, specifier };
@@ -181,14 +392,14 @@ function extractImportBindings(
     }
   }
 
-  REQUIRE_DESTRUCTURING_PATTERN.lastIndex = 0;
-  for (const match of content.matchAll(REQUIRE_DESTRUCTURING_PATTERN)) {
-    const rawBindings = match[1];
-    const specifier = match[2];
-    if (!rawBindings || !specifier) continue;
-    const target = resolveSpecifier(fromPath, specifier, pathLookup);
+  for (const match of scanRequireDestructuring(content)) {
+    const target = resolveSpecifier(fromPath, match.specifier, pathLookup);
     if (target) {
-      addNamedImportBindings(bindings, rawBindings, { target, specifier });
+      addNamedImportBindings(
+        bindings,
+        match.bindings,
+        { target, specifier: match.specifier },
+      );
     }
   }
 
@@ -445,8 +656,21 @@ const ANGULAR_ROUTE_KEY_PATTERN =
   /\b(?:component|loadChildren|loadComponent|redirectTo)\s*:/;
 const ANGULAR_COMPONENT_PATTERN =
   /\b(?:component|loadComponent)\s*:\s*([A-Za-z_$][\w$]*)/;
+/**
+ * The lazy-import target of a route object. The gap between the key and
+ * `import(` is BOUNDED, and the bound is load-bearing rather than cosmetic: an
+ * unbounded `[\s\S]*?` makes the pattern Θ(n²) on a file that repeats the marker
+ * (`loadChildren:` × n — the family an analyzer sweep flagged at
+ * `docs/reviews/analysis-tools-plan-2026-08-07.md` §4/§5, confirmed here at
+ * 1.8/9.3/37.6/115.8ms across 2k/4k/8k/16k input): every start position scans the
+ * rest of the file looking for an `import(` that is not there. Bounding the gap
+ * makes each start O(200) and the whole scan linear. `{0,200}` is the same
+ * window {@link NEST_CONTROLLER_PATTERN} and the Python decorator patterns use,
+ * and is far wider than the real shape (`loadChildren: () => import('./x')`
+ * spans about 20 characters).
+ */
 const ANGULAR_LAZY_IMPORT_PATTERN =
-  /\b(?:loadChildren|loadComponent)\s*:[\s\S]*?import\s*\(\s*["']([^"']+)["']\s*\)/;
+  /\b(?:loadChildren|loadComponent)\s*:[\s\S]{0,200}?import\s*\(\s*["']([^"']+)["']\s*\)/;
 
 /** Join route segments (controller prefix + method path) into one clean path. */
 function joinRouteSegments(...segments: string[]): string {

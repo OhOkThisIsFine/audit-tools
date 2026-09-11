@@ -122,12 +122,25 @@ export async function enumerateTrackedFilePaths(
   root: string,
 ): Promise<Set<string>> {
   const known = new Set<string>();
-  const result = await runTrackedAsync(["git", "ls-files", "-z"], {
-    cwd: root,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    timeout: TRACKED_CHILD_DEADLINE_MS,
-  });
+  // `--recurse-submodules` is REQUIRED, and it is one half of an ATOMIC pair:
+  // the other half is the same flag on the audit disposition's
+  // `evaluateTrackedFiles`, which decides what enters the auditable SCOPE. Both
+  // sides read "tracked" from this one git enumeration (the M-B3 gate's
+  // `enumerateRepoTreePaths` is a lowercased draw over this set), so the two
+  // rules must agree — a parent-only listing returns just the gitlink for a
+  // first-party submodule, and a citation naming a file inside one would then
+  // fail to ground while it sat in scope, or vice versa. Never change one
+  // without the other; `tests/audit/submodule-tracked-corpus.test.ts` builds a
+  // real submodule and pins BOTH halves (each reverts red on its own).
+  const result = await runTrackedAsync(
+    ["git", "ls-files", "-z", "--recurse-submodules"],
+    {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: TRACKED_CHILD_DEADLINE_MS,
+    },
+  );
   if (result.error || result.status !== 0) return known;
   for (const entry of result.stdout.split("\0")) {
     const path = entry.replace(/\\/g, "/");

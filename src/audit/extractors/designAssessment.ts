@@ -1,6 +1,7 @@
 import type { Finding, UnitManifest } from "../types.js";
 import type { GraphBundle, CriticalFlowManifest, RiskRegister } from "audit-tools/shared";
 import { compareCodeUnits } from "audit-tools/shared";
+import { leadSourceHash, stampLeadLineage } from "./leadLineage.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import { allGraphEdges, deriveGraphSignals, type GraphSignals } from "./graphSignals.js";
 import { GIT_CO_CHANGE_CATEGORY } from "./gitHistory.js";
@@ -272,17 +273,28 @@ function detectSeams(
     (a, b) => compareCodeUnits(a.from, b.from) || compareCodeUnits(a.to, b.to),
   );
 
-  return seams.map((seam) => ({
-    id: nextId(),
-    title: `Architectural seam: ${seam.from} ↔ ${seam.to}`,
-    category: "architectural_seam",
-    severity: "medium",
-    confidence: "medium",
-    lens: "architecture" as const,
-    summary: `The dependency between ${seam.from} and ${seam.to} is a bridge (cut-edge): its removal disconnects the two regions. A single load-bearing link is a fragility and refactor risk.`,
-    affected_files: [{ path: seam.from }, { path: seam.to }],
-    systemic: true,
-  }));
+  // Lineage is bound to the SIGNAL SET the detector iterated (post-sort, so the
+  // hash is over a stable derivation), not to the tree: two runs whose seam sets
+  // agree carry the same source hash however the repo moved around them.
+  const sourceHash = leadSourceHash(seams);
+
+  return seams.map((seam) =>
+    stampLeadLineage(
+      {
+        id: nextId(),
+        title: `Architectural seam: ${seam.from} ↔ ${seam.to}`,
+        category: "architectural_seam",
+        severity: "medium",
+        confidence: "medium",
+        lens: "architecture" as const,
+        summary: `The dependency between ${seam.from} and ${seam.to} is a bridge (cut-edge): its removal disconnects the two regions. A single load-bearing link is a fragility and refactor risk.`,
+        affected_files: [{ path: seam.from }, { path: seam.to }],
+        systemic: true,
+      },
+      "detectSeams",
+      sourceHash,
+    ),
+  );
 }
 
 /**
@@ -337,17 +349,28 @@ function detectHiddenCoupling(
     )
     .slice(0, HIDDEN_COUPLING_CAP);
 
-  return hidden.map((edge) => ({
-    id: nextId(),
-    title: `Hidden coupling: ${edge.from} ↔ ${edge.to}`,
-    category: "hidden_coupling",
-    severity: "medium",
-    confidence: "medium",
-    lens: "architecture" as const,
-    summary: `${edge.from} and ${edge.to} repeatedly change together (${edge.reason ?? "temporal coupling"}) but have no import/call/reference edge between them. This hidden coupling is invisible to static dependency analysis — a change to one likely needs a matching change to the other, with nothing in the code to signal it.`,
-    affected_files: [{ path: edge.from }, { path: edge.to }],
-    systemic: true,
-  }));
+  // Bound to the CAPPED, sorted list actually emitted — the cap is part of this
+  // detector's definition (a churny repo would otherwise change the hash on
+  // every commit that adds an 11th coupling while the reported leads stand).
+  const sourceHash = leadSourceHash(hidden);
+
+  return hidden.map((edge) =>
+    stampLeadLineage(
+      {
+        id: nextId(),
+        title: `Hidden coupling: ${edge.from} ↔ ${edge.to}`,
+        category: "hidden_coupling",
+        severity: "medium",
+        confidence: "medium",
+        lens: "architecture" as const,
+        summary: `${edge.from} and ${edge.to} repeatedly change together (${edge.reason ?? "temporal coupling"}) but have no import/call/reference edge between them. This hidden coupling is invisible to static dependency analysis — a change to one likely needs a matching change to the other, with nothing in the code to signal it.`,
+        affected_files: [{ path: edge.from }, { path: edge.to }],
+        systemic: true,
+      },
+      "detectHiddenCoupling",
+      sourceHash,
+    ),
+  );
 }
 
 export function buildDesignAssessment(params: {

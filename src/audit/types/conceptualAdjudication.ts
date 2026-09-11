@@ -135,23 +135,30 @@ export const ConceptualCandidateDispositionSchema = z
   });
 
 /**
- * The findings a judge or perspective may SUBMIT. `verification_status` and
- * `evidence_lane` are omitted for the same reason `WorkerFindingSchema` omits
- * `grounding`: both are derived by the tool at ingest — the first from the
- * per-candidate claims, the second from the lane the finding arrived on — so a
- * supplied value would bypass the derivation and be un-cross-checkable. For
- * `evidence_lane` the stakes are the bar itself: synthesis reads it to decide
- * whether a `critical` was ever asked for an `evidence` array, so a
- * host-supplied lane is a finding that excuses ITSELF from the bar. The omit
- * keeps it out of the parsed value (this schema is not `.strict()`, so unlike
- * the worker projection the omit is what stops it being carried, not what makes
- * a supplied key fail); `refuseSuppliedToolVerdict` NAMES both, because a
- * silently dropped field teaches the host nothing.
+ * The findings a judge or perspective may SUBMIT. `verification_status`,
+ * `severity_downgraded_from`, `evidence_lane` and `lead_lineage` are omitted for
+ * the same reason `WorkerFindingSchema` omits `grounding`: each is derived or
+ * STAMPED by the tool at ingest — the first from the per-candidate claims, the
+ * second from the severity bar synthesis applies, the third from the lane the
+ * finding arrived on, the fourth by the deterministic producer that emitted the
+ * lead — so a supplied value would bypass the derivation and be
+ * un-cross-checkable. For `evidence_lane` the stakes are the bar itself:
+ * synthesis reads it to decide whether a `critical` was ever asked for an
+ * `evidence` array, so a host-supplied lane is a finding that excuses ITSELF
+ * from the bar. For `lead_lineage` the stakes are the LEAD boundary: the field
+ * is what marks a row as unconfirmed deterministic output, so a host that can
+ * stamp it can dress its own claim as someone else's generation-bound heuristic
+ * — or strip the mark off a real lead. The omit keeps it out of the parsed value
+ * (this schema is not `.strict()`, so unlike the worker projection the omit is
+ * what stops it being carried, not what makes a supplied key fail);
+ * `refuseSuppliedToolVerdict` NAMES all of them, because a silently dropped
+ * field teaches the host nothing.
  */
 export const ConceptualSubmittedFindingSchema = FindingSchema.omit({
   verification_status: true,
   severity_downgraded_from: true,
   evidence_lane: true,
+  lead_lineage: true,
 });
 
 export const ConceptualFinalFindingShareSchema = z
@@ -332,6 +339,7 @@ function fail(message: string): never {
 const TOOL_OWNED_FINDING_VERDICTS = [
   "verification_status",
   "evidence_lane",
+  "lead_lineage",
 ] as const;
 
 /**
@@ -352,6 +360,12 @@ const TOOL_OWNED_FINDING_VERDICTS = [
  * `evidence_lane` matters here more than the others: synthesis reads it to
  * decide whether a `critical` was ever asked for an `evidence` array, so a
  * host-supplied lane is a finding exempting ITSELF from the bar.
+ *
+ * `lead_lineage` matters for the same reason from the other direction: it is the
+ * mark that says a row is unconfirmed deterministic output, so a submission that
+ * can set it can also OMIT it on a lead it is re-emitting — the one field that
+ * separates a lead from a verdict, controlled by the party the distinction
+ * exists to constrain.
  *
  * Returns the issue message, or `null` when nothing was supplied.
  */

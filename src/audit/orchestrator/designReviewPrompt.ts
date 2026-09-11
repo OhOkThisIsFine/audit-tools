@@ -181,12 +181,41 @@ function formatDeterministicFindings(findings: Finding[], max = 20): string {
   if (findings.length === 0)
     return "No structural issues detected by deterministic analysis.";
 
-  return formatTopNList(
-    findings,
-    max,
-    (total) => `${total} structural findings from deterministic analysis:`,
-    (finding) => `- [${finding.severity}] ${finding.title}: ${finding.summary}`,
-  );
+  // Split by lineage: a finding a deterministic producer stamped is a LEAD and
+  // says so; anything else in this list arrived without a lineage record. The
+  // boundary is stated rather than left to the reader, because the failure it
+  // guards is a heuristic being read as an approved finding — a reader who does
+  // not know which rows are leads will treat them all as verdicts.
+  const unlineaged = findings.filter((finding) => finding.lead_lineage === undefined);
+
+  return [
+    formatTopNList(
+      findings,
+      max,
+      (total) =>
+        `${total} structural findings from deterministic analysis — **leads, not verdicts**. ` +
+        "Each is a deterministic heuristic over a generation of the repo; a heuristic can be " +
+        "right about the structure and wrong about the project. Confirm one against real code " +
+        "before treating it as a finding, and when you do confirm it, say so in your own " +
+        "finding rather than re-emitting the lead unchanged.",
+      (finding) =>
+        `- [${finding.severity}] ${finding.title}: ${finding.summary}` +
+        (finding.lead_lineage
+          ? ` _(lead: ${finding.lead_lineage.producer} @ ${finding.lead_lineage.source_hash.slice(0, 12)})_`
+          : ""),
+    ),
+    // Any finding here WITHOUT a lineage record is called out rather than
+    // silently absorbed into the list above: an unstamped row means a producer
+    // emitted it without declaring itself, which is the gap this section exists
+    // to make visible.
+    ...(unlineaged.length > 0
+      ? [
+          "",
+          `⚠ ${unlineaged.length} of these carry NO producer lineage record. Treat them as ` +
+            "unverified deterministic output and confirm each against code before reporting it.",
+        ]
+      : []),
+  ].join("\n");
 }
 
 export interface DesignReviewOptions {

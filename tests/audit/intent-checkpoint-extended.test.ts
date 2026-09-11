@@ -273,6 +273,87 @@ test("COR-2e048b54: excluded-summary includes the majority file when it is a gen
 });
 
 // ---------------------------------------------------------------------------
+// 3b. scope-rule outcomes — a SKIPPED rule must reach the operator
+// ---------------------------------------------------------------------------
+
+test("computeScopePreDigest surfaces a skipped scope rule (untracked root guard) with its guard branch", async () => {
+  // The shape `buildFileDisposition` persists when the untracked rule's root
+  // guard fires: the per-file records are UNCHANGED (the rule was skipped, so
+  // nothing was re-classified) and the summary carries the skip. Before the
+  // fix, the pre-digest was built from the per-file records alone, so this
+  // state was byte-identical to "the rule ran and matched nothing".
+  const files = [
+    { path: "src/a.ts", status: "included", reason: "Default included source or config artifact." },
+    { path: "src/b.ts", status: "included", reason: "Default included source or config artifact." },
+  ];
+  const bundle = makeBaseBundle({
+    file_disposition: {
+      files,
+      untracked: {
+        applied: false,
+        ignored_count: 2,
+        skipped_reason:
+          "untracked rule skipped: every included candidate is untracked (the repository has no tracked files in the audit scope)",
+        guard_branch: "root_untracked",
+      },
+    },
+  });
+
+  const digest = await computeScopePreDigest(bundle, "/repo");
+  const untracked = digest.scope_rules!.find((r) => r.rule === "untracked");
+
+  expect(untracked, "the untracked rule must have a row even though it was skipped").toBeDefined();
+  expect(untracked!.applied, "a guard-skipped rule is not applied").toBe(false);
+  expect(untracked!.guard_branch).toBe("root_untracked");
+  expect(
+    untracked!.skipped_reason?.includes("no tracked files"),
+    `skipped_reason must carry the rule's own explanation, got: ${untracked!.skipped_reason}`,
+  ).toBeTruthy();
+});
+
+test("computeScopePreDigest reports a rule with no record as skipped, never as applied", async () => {
+  // A heuristics-only disposition (`buildFileDisposition` with no root) carries
+  // no summaries at all. Reporting it as applied would be a false claim that a
+  // rule ran; omitting the row would read as "the rule ran clean".
+  const bundle = makeBaseBundle({
+    file_disposition: {
+      files: [{ path: "src/a.ts", status: "included", reason: "Default included source or config artifact." }],
+    },
+  });
+
+  const digest = await computeScopePreDigest(bundle, "/repo");
+  expect(digest.scope_rules!.map((r) => r.rule)).toEqual(["vcs_ignore", "untracked"]);
+  for (const rule of digest.scope_rules!) {
+    expect(rule.applied, `${rule.rule} has no record and must not claim it ran`).toBe(false);
+    expect(rule.skipped_reason, `${rule.rule} must state why it has no outcome`).toBeTruthy();
+  }
+});
+
+test("computeScopePreDigest counts each rule's delivered exclusions off the per-file records", async () => {
+  // The rule summary's `ignored_count` is the RAW match count (2, including a
+  // file the higher-precedence gitignore rule already claimed); the DELIVERED
+  // count is what the per-file records actually hold for that reason (1). Both
+  // are surfaced because they disagree exactly when the two rules interact.
+  const files = [
+    { path: "src/kept.ts", status: "included", reason: "Default included source or config artifact." },
+    { path: "build/out.js", status: "excluded", reason: "vcs_ignored" },
+    { path: "tmp/scratch.ts", status: "excluded", reason: "untracked" },
+  ];
+  const bundle = makeBaseBundle({
+    file_disposition: {
+      files,
+      vcs_ignore: { applied: true, ignored_count: 1 },
+      untracked: { applied: true, ignored_count: 2 },
+    },
+  });
+
+  const digest = await computeScopePreDigest(bundle, "/repo");
+  const untracked = digest.scope_rules!.find((r) => r.rule === "untracked")!;
+  expect(untracked.matched_count, "raw match count comes from the rule summary").toBe(2);
+  expect(untracked.excluded_count, "delivered count comes from the per-file records").toBe(1);
+});
+
+// ---------------------------------------------------------------------------
 // 4. runPlanningExecutor — disposition_overrides wiring
 // ---------------------------------------------------------------------------
 

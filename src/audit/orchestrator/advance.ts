@@ -18,6 +18,7 @@ import {
   resetStalenessDedup,
 } from "./staleness.js";
 import { DEPENDENCY_SLICE_PROJECTIONS } from "./dependencySlices.js";
+import { probeScopeIndexKeyCached, withScopeIndexKey } from "./scopeIndexBaseline.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import {
   AGENT_FEEDBACK_FILENAME,
@@ -494,13 +495,39 @@ export async function runSingleAdvanceStep(
   // content keeps its revision (no churn), changed content bumps it so
   // dependents re-stale exactly once instead of perpetually mismatching a
   // carried-forward stale hash.
+  // The git-INDEX probe rides the same always-updated channel: the untracked
+  // scope rule reads the index, and the index can move with no worktree content
+  // change, so re-probing live here is what lets an index-only move re-stale
+  // `file_disposition.json` through its EXISTING declared edge on
+  // `repo_manifest.json` (see scopeIndexBaseline.ts). Unchanged index ⇒ identical
+  // key ⇒ no revision bump ⇒ no churn.
+  //
+  // MEMOIZED on the fold (`options.scopeIndexMemo`): the probe's inputs are the
+  // root and the candidate set, and neither moves on a step that does not
+  // re-derive the manifest, so within one `next-step` fold this is one spawn
+  // rather than one per obligation execution. The key carries both inputs, so a
+  // step that DOES re-derive the manifest re-probes — the re-read is preserved,
+  // not traded away. A bare `advanceAudit` passes no memo and probes each step.
+  const scopeIndexKey = options.root
+    ? await probeScopeIndexKeyCached(
+        options.scopeIndexMemo,
+        options.root,
+        (run.updated.repo_manifest ?? bundle.repo_manifest)?.files.map(
+          (file) => file.path,
+        ) ?? [],
+      )
+    : null;
+  const probedBundle = {
+    ...run.updated,
+    repo_manifest: withScopeIndexKey(run.updated.repo_manifest, scopeIndexKey),
+  };
   const metadata = computeArtifactMetadata(
-    run.updated,
+    probedBundle,
     bundle.artifact_metadata,
     [...run.artifacts_written, "tooling_manifest.json", AGENT_FEEDBACK_FILENAME],
   );
   const metadataBundle = {
-    ...run.updated,
+    ...probedBundle,
     tooling_manifest: bundle.tooling_manifest,
     agent_reflections: bundle.agent_reflections,
     artifact_metadata: metadata,

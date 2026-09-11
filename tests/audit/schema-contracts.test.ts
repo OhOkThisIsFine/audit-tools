@@ -24,6 +24,7 @@ import {
   WorkerAuditTaskSchema,
   WorkerFindingSchema,
 } from "../../src/audit/contracts/workerSchemas.js";
+import { ConceptualSubmittedFindingSchema } from "../../src/audit/types/conceptualAdjudication.js";
 import { StepArtifactSchema } from "../../src/audit/cli/steps.js";
 import { buildUnitManifest } from "../../src/audit/orchestrator/unitBuilder.js";
 import { buildRiskRegister } from "../../src/audit/extractors/risk.js";
@@ -273,6 +274,39 @@ test("the worker finding schema omits exactly the refused tool-owned verdicts (D
       `worker finding supplying ${verdict}`,
     );
   }
+
+  // The SAME omission on the OTHER finding-submission schema — the conceptual
+  // judge's. It is a different zod object with its own `.omit` list, so pinning
+  // only the worker side left this door open: `lead_lineage` (or `evidence_lane`)
+  // supplied by a judge parsed through here and landed on a real finding.
+  //
+  // The two named are the verdicts BOTH doors must refuse. `grounding` is
+  // deliberately not among them: the conceptual ingest recomputes it
+  // unconditionally for every finding it takes (`groundDesignFindings`), so a
+  // supplied value is overwritten rather than carried — the omission would buy
+  // nothing here, and asserting it would pin a behavior this schema never had.
+  const CONCEPTUAL_REFUSED_VERDICTS = ["evidence_lane", "lead_lineage"] as const;
+  for (const verdict of CONCEPTUAL_REFUSED_VERDICTS) {
+    expect(
+      Object.keys(WORKER_REFUSED_FINDING_VERDICTS),
+      `the worker refusal table must carry ${verdict} — the two doors refuse the same set`,
+    ).toContain(verdict);
+    expect(
+      verdict in ConceptualSubmittedFindingSchema.shape,
+      `ConceptualSubmittedFindingSchema must omit ${verdict}, like the worker projection does`,
+    ).toBe(false);
+  }
+  // …and the omit really stops the value being CARRIED (this schema is not
+  // `.strict()`, so it strips rather than rejects — the strip is the property
+  // under test here, and `refuseSuppliedToolVerdict` is what makes it loud).
+  const stripped = ConceptualSubmittedFindingSchema.parse({
+    ...validFinding,
+    lead_lineage: { producer: "host-forged", source_hash: "x", confirmation: "lead" },
+  }) as Record<string, unknown>;
+  expect(
+    "lead_lineage" in stripped,
+    "a judge-supplied lead_lineage must not survive the conceptual parse",
+  ).toBe(false);
 });
 
 test("worker audit task rejects nonpositive line range bounds", () => {
