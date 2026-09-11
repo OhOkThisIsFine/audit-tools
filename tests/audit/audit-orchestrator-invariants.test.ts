@@ -337,6 +337,39 @@ test("INV-05: computeArtifactMetadata processes a full planning bundle without t
   expect(Object.keys(metadata.artifacts).length > 0, "metadata must contain at least one artifact entry").toBeTruthy();
 });
 
+// CP-NODE-10 residual 3: the producer-side affinity hash is GUARDED. The affinity
+// canonicalizer throws on a malformed body, and this path reaches every present
+// DAG artifact unconditionally on every advance — so an unguarded restamp turned
+// one bad persisted artifact into a run that dies before it can even restamp.
+test("INV-05: a malformed affinity body restamps instead of killing the metadata pass", () => {
+  const malformed = {
+    nodes: [{ task_id: "t1", file_paths: ["a.ts"] }],
+    // Dangling edge — `canonicalizeTaskAffinityGraph` throws on exactly this.
+    edges: [{ from: "t1", to: "MISSING", kind: "cochange", weight: 0.5 }],
+  };
+  const bundle = { task_affinity_graph: malformed } as unknown as ArtifactBundle;
+
+  let metadata: ReturnType<typeof computeArtifactMetadata>;
+  expect(
+    () => {
+      metadata = computeArtifactMetadata(bundle);
+    },
+    "a malformed affinity body must not take down the whole restamp",
+  ).not.toThrow();
+  const entry = metadata!.artifacts["task_affinity_graph.json"];
+  expect(entry, "the malformed artifact still gets an entry").toBeDefined();
+
+  // It CONVERGES: the fallback hash is content-derived, so an unchanged body
+  // neither churns (which would phantom-stale its dependents) nor re-derives.
+  const again = computeArtifactMetadata(bundle, metadata!, []);
+  expect(again.artifacts["task_affinity_graph.json"]!.content_hash).toBe(
+    entry!.content_hash,
+  );
+  expect(again.artifacts["task_affinity_graph.json"]!.revision).toBe(
+    entry!.revision,
+  );
+});
+
 // ---------------------------------------------------------------------------
 // INV-06: obligation derivation reflects real content
 // ---------------------------------------------------------------------------

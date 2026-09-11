@@ -498,6 +498,7 @@ function priorRegister(
     banked: [],
     findings: [],
     validation_issues: [],
+    refused_issues: [],
     ...REGISTER_V4_AFFIRMATION,
   };
 }
@@ -835,5 +836,107 @@ describe("D3 grounded findings are assigned verbatim", () => {
     expect(findings).toEqual(expected);
     // the ungrounded finding is NOT filtered out locally.
     expect(findings[0].grounding?.status).toBe("ungrounded");
+  });
+});
+
+describe("CP-NODE-18 residual: an empty-members subsystem is STATED, not silently ungrounded", () => {
+  test("a subsystem carrying no member files gets a note naming the consequence", () => {
+    const assembled = assembleClarificationRegister(
+      [
+        {
+          delta: askableDelta("unit:empty:d1", "unit:empty", "docs vs layout"),
+          node_id: "unit:empty",
+          members: [],
+        },
+      ],
+      { nodes: [], edges: [] },
+      0,
+      { partitionDeltasToQuestions, applyRiskGate, splitByAttention },
+    );
+    // The question is still asked (it may be worth asking) — the note states what
+    // its Finding will look like, which is otherwise indistinguishable from a
+    // genuine no-files-in-scope case.
+    expect(assembled.validation_issues).toHaveLength(1);
+    expect(assembled.validation_issues[0]).toContain("unit:empty");
+    expect(assembled.validation_issues[0]).toContain("no member files");
+    expect(assembled.findings[0]?.affected_files).toEqual([]);
+  });
+
+  test("a subsystem WITH members gets no such note", () => {
+    const assembled = assembleClarificationRegister(
+      [
+        {
+          delta: askableDelta("unit:alpha:d1", "unit:alpha", "docs vs layout"),
+          node_id: "unit:alpha",
+          members: ["src/a.ts"],
+        },
+      ],
+      { nodes: [], edges: [] },
+      0,
+      { partitionDeltasToQuestions, applyRiskGate, splitByAttention },
+    );
+    expect(assembled.validation_issues).toEqual([]);
+  });
+});
+
+describe("CP-NODE-18 residual: refusals are a structural class, not a message convention", () => {
+  test("the assembler reports refusals in their own list beside validation_issues", () => {
+    const assembled = assembleClarificationRegister(
+      [
+        {
+          delta: askableDelta("unit:alpha:d1", "unit:alpha", "docs vs layout"),
+          node_id: "unit:alpha",
+          members: ["src/a.ts"],
+        },
+      ],
+      { nodes: [], edges: [] },
+      0,
+      { partitionDeltasToQuestions, applyRiskGate, splitByAttention },
+    );
+    // The field exists and is a SUBSET-SAFE view: every refusal is also an issue.
+    expect(Array.isArray(assembled.refused_issues)).toBe(true);
+    for (const refusal of assembled.refused_issues) {
+      expect(assembled.validation_issues).toContain(refusal);
+    }
+  });
+
+  test("a refused delta is separated from a routine remediator-routed skip in the progress summary", () => {
+    const deltas: StampedCharterDelta[] = [
+      // A REMEDIATOR-ROUTED delta: the design working as intended — a routine skip.
+      {
+        delta_id: "unit:alpha:stated-structural",
+        pair: ["stated", "structural"],
+        kind: "doc_rot",
+        routed_to: "remediator",
+        summary: "spec drift",
+        node_id: "unit:alpha",
+      },
+      // A REFUSED delta: no node_id, so it can never become a question.
+      {
+        delta_id: "unit:orphan:stated-revealed",
+        pair: ["stated", "revealed"],
+        kind: "says_does_drift",
+        routed_to: "clarification",
+        summary: "orphan",
+      } as StampedCharterDelta,
+    ];
+    const run = runCharterClarificationExecutor({
+      intent_checkpoint: checkpoint({ rung: "deep", attention: 0 }),
+      charter_register: charterRegister(deltas),
+      repo_manifest: manifestWithFiles(["src/a.ts", "src/b.ts"]),
+    });
+    const register = run.updated.charter_clarification!;
+    const summary = run.progress_summary;
+
+    // The refusal is hoisted and NAMED as a refusal; the routine skip is not.
+    expect(register.refused_issues.length).toBeGreaterThan(0);
+    expect(summary).toContain("REFUSED");
+    expect(summary).toContain("will never be asked");
+    expect(register.refused_issues.some((m) => m.includes("orphan"))).toBe(true);
+    // The routine skip still prints — it is listed, just not as a refusal.
+    expect(summary).toContain("routes to the remediator");
+    expect(register.refused_issues.some((m) => m.includes("routes to the remediator"))).toBe(
+      false,
+    );
   });
 });

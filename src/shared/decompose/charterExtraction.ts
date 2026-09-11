@@ -33,6 +33,7 @@ import {
   type Charter,
   type CharterKind,
   type CharterDelta,
+  type StampedCharterDelta,
   type ChannelDisagreement,
   type GoalGraph,
   type TeleologyNode,
@@ -183,34 +184,25 @@ export interface AssembledCharters {
 }
 
 /**
- * A CharterDelta with its subsystem identity carried as EXPLICIT fields
- * (INV-CDI-EXPLICIT-NODE-FIELDS) — `delta_id` is therefore an OPAQUE identity,
- * free to gain a per-delta discriminator (see `assembleDeltas` below) without
- * any consumer, INCLUDING this module's own disagreement-density computation,
- * needing to parse it apart. Declared here as an extension of `CharterDelta`
- * rather than by widening `CharterDeltaSchema` itself
- * (src/shared/types/charter.ts, outside this module's write scope) — this is
- * the assembler's own return shape; the wire schema's `.strict()` boundary is
- * a separate, differently-owned concern (the seam
- * charter-clarification-ingestion--charter-delta-identity--node-id-recovery
- * names charter-clarification-ingestion as the consumer that reads these
- * fields once it stops parsing delta_id).
- */
-export interface CharterDeltaWithIdentity extends CharterDelta {
-  node_id: string;
-  /** Present when `node_id` is linked into the mined goal graph. */
-  goal_node_id?: string;
-}
-
-/**
  * The assembled delta layer (Phase C.2): the routed+gated deltas across all
  * units, the deltas surfaced as Finding leads, the triangulated teloses, the
  * tool-computed disagreement density, the (possibly True-augmented) subsystems,
  * the goal DAG, and the gate drops.
+ *
+ * `deltas` is the SAME {@link StampedCharterDelta} the persisted register
+ * declares — one type, not two. It used to be `CharterDeltaWithIdentity`, an
+ * identical shape declared here, and the duplication was pure drift surface:
+ * the assembler's return value is what the executor writes straight onto
+ * `charter_register.json`, so a field added to one and not the other would
+ * silently fail to typecheck at whichever boundary was reached second. The
+ * identity fields are carried as EXPLICIT properties on that one type
+ * (INV-CDI-EXPLICIT-NODE-FIELDS), so `delta_id` is opaque and may gain a
+ * per-delta discriminator (see the pass-2 minting below) without any consumer —
+ * this module's own disagreement-density computation included — parsing it.
  */
 export interface AssembledDeltas {
   subsystems: CharterSubsystem[];
-  deltas: CharterDeltaWithIdentity[];
+  deltas: StampedCharterDelta[];
   findings: Finding[];
   triangulated: TriangulatedTelos[];
   disagreement: ChannelDisagreement[];
@@ -541,7 +533,7 @@ export function assembleDeltas(
   subsystems: CharterSubsystem[],
   params: AssembleDeltasParams,
 ): AssembledDeltas {
-  const deltas: CharterDeltaWithIdentity[] = [];
+  const deltas: StampedCharterDelta[] = [];
   const findings: Finding[] = [];
   const validation_issues: string[] = [];
   const augmented = subsystems.map((s) => ({
@@ -668,7 +660,7 @@ export function assembleDeltas(
           group.length === 1
             ? `${sub.node_id}:${ka}-${kb}`
             : `${sub.node_id}:${ka}-${kb}:${hashContent(surv.summary, { length: 8 })}`;
-        const baseDelta: CharterDeltaWithIdentity = {
+        const baseDelta: StampedCharterDelta = {
           delta_id,
           pair: surv.pair,
           kind: surv.route.kind,
@@ -681,7 +673,7 @@ export function assembleDeltas(
         // gateCharterDelta either returns `delta` unchanged or spreads it
         // (`{ ...delta, routed_to: "human" }`), so node_id/goal_node_id
         // survive the call; the cast reflects that read, not an assumption.
-        const gated = gateCharterDelta(baseDelta, kept) as CharterDeltaWithIdentity;
+        const gated = gateCharterDelta(baseDelta, kept) as StampedCharterDelta;
         deltas.push(gated);
 
         findings.push(

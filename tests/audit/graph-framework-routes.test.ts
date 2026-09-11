@@ -262,6 +262,72 @@ test("inv-1: Python route detection requires a framework marker, not a .py exten
   ]);
 });
 
+// CP-NODE-19 accepted gaps, pinned so closing either is a DELIBERATE act (this
+// test must be updated) rather than a silent side effect of widening a gate.
+// Both are leads-not-verdicts trades: missing evidence over fabricated evidence.
+test("CP-NODE-19 gap: a sibling-imported router carries no marker, so its routes are dropped", () => {
+  // Asked at the FRAMEWORK boundary, not via `routesOf`: a path segment named
+  // `routes` also trips `fallbackRouteEdge`, and that conventional route would
+  // mask what this gap is actually about (the decorator scan contributing
+  // nothing). The gap is in the marker gate, so the marker gate is what is read.
+  const { routes } = extractFrameworkRouteEvidence(
+    "app/handlers.py",
+    [
+      "from .deps import router",
+      "",
+      '@router.get("/orders")',
+      "async def list_orders(): ...",
+    ].join("\n"),
+    new Map(),
+  );
+  // The file constructs no framework object and imports no framework by name, so
+  // the positive-marker gate (which exists to stop @mock.patch fabricating routes)
+  // cannot distinguish it from a test module. Recorded as an accepted false
+  // negative; a consumption trace that identifies the sibling `router` would close
+  // it without reopening the fabricated-route hole.
+  expect(
+    routes,
+    "a sibling-imported router is an ACCEPTED false negative — seeing this fail means the gap was closed, so update this test deliberately",
+  ).toEqual([]);
+});
+
+test("CP-NODE-19 gap: a .vue script block contributes no route — the accepted gap", () => {
+  const vue = [
+    "<template>",
+    '  <div class="app">router.get("/not-a-route", h)</div>',
+    "</template>",
+    "<script setup>",
+    "import { router } from './router'",
+    "router.get('/users', listUsers)",
+    "</script>",
+  ].join("\n");
+  // Read at the REGISTERED-route boundary, which is where the gap actually is —
+  // `TS_LIKE_EXTENSION_PATTERN` is the gate that skips the whole SFC. The
+  // framework entry point is a different gate and is not what this pins.
+  const { routes } = extractRegisteredRouteEvidence("src/App.vue", vue, new Map());
+  expect(
+    routes,
+    "a .vue script block is an ACCEPTED false negative — seeing this fail means the gap was closed, so update this test deliberately",
+  ).toEqual([]);
+
+  // WHAT CLOSING IT NAIVELY WOULD COST, measured: the same content under a
+  // TS-family extension reads the `<template>` MARKUP as route source and
+  // fabricates a `/not-a-route` edge alongside the real one. That is the
+  // prose-fabrication class this gate exists to prevent, so the gap is the
+  // cheaper error — closing it needs a real `<script>`-block extraction, never
+  // an extension addition. Pinning the mechanism here means the trade is stated
+  // as a measurement rather than as a claim in a comment.
+  const asModule = extractRegisteredRouteEvidence(
+    "src/App.svelte.ts",
+    vue,
+    new Map(),
+  );
+  expect(
+    asModule.routes.map((route) => route.path).sort(),
+    "reading the SFC as a module picks up the MARKUP's route — the fabrication the gap avoids",
+  ).toEqual(["/not-a-route", "/users"]);
+});
+
 test("inv-1: an unmarked .py test file contributes no fabricated route to the graph", () => {
   const routes = routesOf({
     "tests/test_env.py": [

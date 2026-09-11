@@ -7,8 +7,8 @@ import type {
   GoalGraph,
   Ceiling,
   TriangulatedTelos,
+  StampedCharterDelta,
 } from "audit-tools/shared";
-import type { StampedCharterDelta } from "../../shared/types/charter.js";
 
 /**
  * The stamped register schema version.

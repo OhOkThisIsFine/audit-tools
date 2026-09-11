@@ -897,6 +897,7 @@ async function advanceAuditInner(
     isMetadataMigrationStaleness(result.updated_bundle)
       ? "metadata_schema_version_migration"
       : undefined,
+    result.updated_bundle,
   );
 
   return result;

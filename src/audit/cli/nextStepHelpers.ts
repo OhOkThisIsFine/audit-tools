@@ -75,8 +75,10 @@ import {
   engineMaxTransitions,
   findExecutorFailure,
   runSingleAdvanceStep,
+  startAdvanceHeartbeat,
   MAX_DRAIN_STEPS,
   type AdvanceAuditResult,
+  type AdvanceHeartbeat,
 } from "../orchestrator/advance.js";
 import type { ScopeIndexMemo } from "../orchestrator/scopeIndexBaseline.js";
 import {
@@ -2630,6 +2632,15 @@ interface AuditNextStepCtx {
   analyzersRef: { value: Record<string, AnalyzerSetting> | undefined };
   lastSummaryRef: { value: string };
   /**
+   * Liveness for the fold's own drain — the interval beat naming the obligation
+   * currently executing (started by `runDeterministicForNextStep` around the
+   * whole hold). The fold drives the shared engine directly rather than through
+   * `advanceAudit`, so it does not inherit that call's heartbeat and would
+   * otherwise emit nothing at all for the duration of a long re-extraction
+   * cascade — the live 2026-07-17 dogfood case.
+   */
+  heartbeat?: AdvanceHeartbeat;
+  /**
    * Advisories an ingest classified on a fold iteration that ended in a
    * `transition` (see {@link runHostDelegationObligation}): the transition
    * returns before any emission, and the next ingest skips already-accepted
@@ -3282,15 +3293,46 @@ function trackFoldBundle(obligations: AuditObligationDef[]): AuditObligationDef[
   return obligations.map((obligation) => ({
     ...obligation,
     execute: async (bundle: ArtifactBundle, ctx: AuditNextStepCtx) => {
-      const outcome = await obligation.execute(bundle, ctx);
-      if (outcome.kind === "transition") {
-        ctx.currentBundleRef.value = outcome.state;
-      } else if (outcome.state !== undefined) {
-        ctx.currentBundleRef.value = outcome.state;
+      // Liveness for the LONG deterministic drain (the >2min stale-artifact
+      // re-extraction next-step that blew a caller timeout with no output). The
+      // per-execution label is set HERE because this is the one place every fold
+      // execution passes through, whatever it dispatches; `runSingleAdvanceStep`
+      // then refines it to the selected obligation once the engine has picked
+      // one, so a beat is never unattributed. `advanceAudit`'s heartbeat already
+      // covers the un-forced `advanceAudit` path; the fold drives the shared
+      // engine directly and so owns its own.
+      ctx.heartbeat?.setLabel(obligation.id);
+      const startedAt = Date.now();
+      try {
+        const outcome = await obligation.execute(bundle, ctx);
+        if (outcome.kind === "transition") {
+          ctx.currentBundleRef.value = outcome.state;
+        } else if (outcome.state !== undefined) {
+          ctx.currentBundleRef.value = outcome.state;
+        }
+        return outcome;
+      } finally {
+        foldHeartbeatRecord(obligation.id, Date.now() - startedAt);
       }
-      return outcome;
     },
   }));
+}
+
+/**
+ * One JSONL line naming an obligation the fold finished executing and how long
+ * it took. Written to stderr beside the interval beat (same channel and shape as
+ * `progress_heartbeat`, so one reader consumes both) and to the fold's run log
+ * via its own logger when one is attached.
+ */
+function foldHeartbeatRecord(obligation: string, durationMs: number): void {
+  process.stderr.write(
+    JSON.stringify({
+      kind: "progress_heartbeat",
+      phase: obligation,
+      duration_ms: durationMs,
+      ts: new Date().toISOString(),
+    }) + "\n",
+  );
 }
 
 // ── Coordinator ───────────────────────────────────────────────────────────────
@@ -3316,6 +3358,22 @@ function trackFoldBundle(obligations: AuditObligationDef[]): AuditObligationDef[
  */
 export async function runDeterministicForNextStep(
   params: NextStepParams,
+): Promise<NextStepResult> {
+  // The heartbeat wraps the WHOLE call, throw path included: a drain that dies
+  // halfway is exactly when a caller most needs to know how far it got, and the
+  // interval beat has no other owner on this path (the fold drives the shared
+  // engine directly rather than through `advanceAudit`).
+  const heartbeat = startAdvanceHeartbeat();
+  try {
+    return await runDeterministicFold(params, heartbeat);
+  } finally {
+    heartbeat.stop();
+  }
+}
+
+async function runDeterministicFold(
+  params: NextStepParams,
+  heartbeat: AdvanceHeartbeat,
 ): Promise<NextStepResult> {
   // THE fold's one git-index probe cache (`ScopeIndexMemo`). It is created here
   // and held on `params` — the object every dispatch path already shares, the
@@ -3364,6 +3422,7 @@ export async function runDeterministicForNextStep(
     params,
     analyzersRef,
     lastSummaryRef: { value: "" },
+    heartbeat,
     foldAdvisoriesRef: { value: emptyFoldAdvisories() },
     dispatchOrdinalRef: { value: 0 },
     dispatchedSignatures: new Set<string>(),
@@ -3469,6 +3528,7 @@ export async function runDeterministicForNextStep(
     isMetadataMigrationStaleness(outcome.state)
       ? "metadata_schema_version_migration"
       : undefined,
+    outcome.state,
   );
 
   // THE emission boundary — the one place every emitted step kind passes

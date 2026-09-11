@@ -205,6 +205,7 @@ async function setup() {
       banked: [],
       findings: [],
       validation_issues: [],
+      refused_issues: [],
     },
     systemic_challenge: {
       generated_at: "2026-01-01T00:00:00.000Z",
