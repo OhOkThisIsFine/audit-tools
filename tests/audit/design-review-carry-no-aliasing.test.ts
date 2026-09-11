@@ -86,7 +86,7 @@ test("a consumed design-review submission never mutates the carried bundle in pl
   }
 });
 
-test.each([GATE_LANES.design_review_contract, GATE_LANES.design_review_legacy])(
+test.each([GATE_LANES.design_review_contract])(
   "%s ingestion updates content without refreshing structural or old adjudication baselines",
   async (lane) => {
     const artifactsDir = await mkdtemp(join(tmpdir(), "dr-baseline-"));

@@ -34,13 +34,71 @@ import { runGeneratedArtifactCli } from "./generatedArtifacts.mjs";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const sourcePath = join(repoRoot, "src", "shared", "loopCorePaths.ts");
 
+/**
+ * Strip `//` line comments and `/* … *​/` block comments, leaving string
+ * literals alone.
+ *
+ * The array body is REAL TypeScript carrying the prose that justifies each
+ * entry, and that prose routinely quotes a phrase — `"written exactly once,
+ * logged exactly once"`, a lane id, a rendered sentence. A bare `/"([^"]+)"/g`
+ * over the body therefore harvests those phrases as if they were patterns,
+ * which is a gate that silently WIDENS with a comment (and, because the
+ * generated file is what the hooks import, does so without any test noticing
+ * until the byte-parity assertion trips over a phrase nobody meant to add).
+ * Scanning the comment-free body is what makes a quoted phrase in a comment
+ * inert.
+ *
+ * Deliberately string-literal-aware rather than regex-only: a `//` INSIDE a
+ * pattern string (there is none today, but a URL-shaped path would have one)
+ * must not be read as the start of a comment and truncate the list.
+ */
+function stripComments(source) {
+  let out = "";
+  let i = 0;
+  let quote = null;
+  while (i < source.length) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (quote !== null) {
+      out += ch;
+      if (ch === "\\") {
+        out += next ?? "";
+        i += 2;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      while (i < source.length && source[i] !== "\n") i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) i += 1;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 /** Pull the string entries out of the canonical `LOOP_CORE_PATTERNS` literal. */
 export function extractPatterns(tsSource) {
   const match = tsSource.match(/export const LOOP_CORE_PATTERNS[^=]*=\s*\[([\s\S]*?)\];/);
   if (!match) {
     throw new Error(`could not find the LOOP_CORE_PATTERNS array literal in ${sourcePath}`);
   }
-  const patterns = [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const patterns = [...stripComments(match[1]).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   if (patterns.length === 0) {
     throw new Error("LOOP_CORE_PATTERNS parsed as empty — refusing to generate an empty gate");
   }

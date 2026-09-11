@@ -73,6 +73,20 @@ test.each(HOOKS)("%s imports the generated predicate and declares no copy of its
 // redundancy: check:loop-core-patterns asserts the same bytes at commit and in
 // verify:checks, so the test duplicated the gate it was titled after.)
 
+// Byte-equality alone would pass over a set that had LOST a path: `toEqual`
+// between two equally-short lists proves they agree, never that they are
+// complete. This names the boundary the set is FOR — the one call site that
+// turns a plan into a written, logged step for both orchestrators — so dropping
+// it is a red test rather than a silently narrower gate.
+test("the host-facing step-contract write-and-log site is inside the loop-core set", () => {
+  const writeAndLogSite = "src/shared/steps/stepEmissionScaffold.ts";
+  expect(
+    isLoopCorePath(writeAndLogSite),
+    `${writeAndLogSite} is the emission boundary every host handoff passes through`,
+  ).toBe(true);
+  expect(generatedIsLoopCorePath(writeAndLogSite)).toBe(true);
+});
+
 test("the generated predicate agrees with the TS isLoopCorePath over a derived probe corpus", () => {
   // Derived mechanically from the pattern list itself (plus a handful of fixed
   // negatives), so the corpus cannot rot when the list changes. Covers: each

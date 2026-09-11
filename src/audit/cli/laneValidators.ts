@@ -190,7 +190,6 @@ export function laneSubmissionValidator(
   }
 
   if (
-    lane === GATE_LANES.design_review_legacy ||
     lane === GATE_LANES.design_review_contract ||
     lane === GATE_LANES.edge_reasoning ||
     lane.startsWith(CONCEPTUAL_PERSPECTIVE_LANE_PREFIX)

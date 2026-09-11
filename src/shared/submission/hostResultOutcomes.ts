@@ -83,12 +83,60 @@ export function enrichMissingSubmissionIssues<TIssueCode extends string>(
   });
 }
 
-function eventSignature(
+/**
+ * Content identity of one ledger event, across the two optional fields that
+ * carry its detail. The ONE home for "is this the same event", shared by the
+ * batch recorder below (dedupe against a submission's trailing row) and by the
+ * audit draw's single-lane recorder (`recordLaneOutcome`), which needs the same
+ * question answered for the same reason: an append that already landed must not
+ * land twice when the caller re-enters.
+ */
+export function eventSignature(
   kind: SubmissionEventKind,
   issueCode: string | undefined,
   message: string | undefined,
 ): string {
   return [kind, issueCode ?? "", message ?? ""].join("|");
+}
+
+/**
+ * Which submissions a ledger already records as ACCEPTED, from ONE read.
+ *
+ * The question is about HISTORY, not about the last row, and the ledger IS the
+ * history. A recorder whose append must land AT MOST ONCE per submission
+ * lifetime asks this: a submission whose acceptance is followed by a later
+ * rejection (the host resubmitted at the bound path and the repair failed
+ * again) has an accepted already recorded, so a "is the TRAILING row an
+ * accepted?" test reads the rejection, concludes nothing landed, and appends a
+ * second `accepted` for work the fold already consumed.
+ *
+ * Read once per BATCH — the fold commit records its whole staged register in a
+ * loop, so a per-lane read is O(events) scans of the same growing file.
+ */
+export interface SubmissionIngestHistory {
+  /**
+   * Submissions with an `accepted` row behind them. The BINDING is readonly,
+   * the SET is not: a recorder that appends an accepted adds its own id here,
+   * so one ledger read serves a whole batch and the view stays consistent with
+   * what this pass just recorded.
+   */
+  readonly accepted: Set<string>;
+}
+
+export async function readSubmissionIngestHistory(
+  artifactsDir: string,
+  options?: { readonly runId?: string },
+): Promise<SubmissionIngestHistory> {
+  const accepted = new Set<string>();
+  for (const event of await readSubmissionLedger(artifactsDir)) {
+    if (options?.runId !== undefined && event.run_id !== options.runId) continue;
+    if (!isIngestEvent(event.kind)) continue;
+    // `accepted` only, not `accepted_via_recovery`: the recovery verb is a
+    // different, operator-driven act with its own record, and folding the two
+    // would let one suppress the other's row.
+    if (event.kind === "accepted") accepted.add(event.submission_id);
+  }
+  return { accepted };
 }
 
 /**

@@ -131,8 +131,17 @@ export {
   AuditFindingsReportSchema,
 } from "./types/finding.js";
 export type { LensCoverageEntry } from "./types/finding.js";
-export type { IntentCheckpoint } from "./types/intentCheckpoint.js";
-export { IntentCheckpointSchema } from "./types/intentCheckpoint.js";
+export type {
+  DesignReviewBinding,
+  DesignReviewSettings,
+  IntentCheckpoint,
+} from "./types/intentCheckpoint.js";
+export {
+  DESIGN_REVIEW_PROVENANCE_FIELDS,
+  IntentCheckpointSchema,
+  resolveDesignReviewBinding,
+  resolveRunBoundDesignReview,
+} from "./types/intentCheckpoint.js";
 // Conceptual design-review charter spine (Phase A) — data model + hard gates.
 export type {
   CharterKind,
@@ -562,10 +571,13 @@ export type {
 export { scanBoundSubmission } from "./submission/submissionScan.js";
 export type {
   HostResultOutcomes,
+  SubmissionIngestHistory,
   TrailingSubmissionRefusal,
 } from "./submission/hostResultOutcomes.js";
 export {
   enrichMissingSubmissionIssues,
+  eventSignature,
+  readSubmissionIngestHistory,
   readTrailingSubmissionRefusals,
   recordHostResultOutcomes,
 } from "./submission/hostResultOutcomes.js";

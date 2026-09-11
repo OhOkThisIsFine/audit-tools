@@ -115,7 +115,7 @@ function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
     critical_flows: { flows: [], fallback_required: false },
     risk_register: { items: [] },
     analyzer_capability: { coverage: "not_applicable", analyzers: [] },
-    design_assessment: { generated_at: "2026-04-22T00:00:00Z", findings: [], review_findings: [], reviewed: true },
+    design_assessment: { generated_at: "2026-04-22T00:00:00Z", findings: [], contract_reviewed: true, conceptual_reviewed: true },
     docs_digest: { generated_at: "2026-04-22T00:00:00Z", docs: [] },
     structure_decomposition: {
       generated_at: "2026-01-01T00:00:00.000Z",

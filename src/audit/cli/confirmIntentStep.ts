@@ -309,7 +309,7 @@ export function renderConfirmIntentPrompt(
     '  "must_not_touch": ["<glob>"],',
     '  "disposition_overrides": [{ "path": "<path>", "status": "<generated|vendor|excluded|...>", "reason": "<why>" }],',
     '  "lens_selection": { "include": ["<lens>"], "exclude": ["<lens>"] },',
-    '  "design_review": { "conceptual_depth": "shallow", "perspectives": 5 }',
+    '  "design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "shallow", "perspectives": 5 }',
     "}",
     "```",
     "",
@@ -327,6 +327,11 @@ export function renderConfirmIntentPrompt(
     "- `lens_selection.include` and `lens_selection.exclude` accept both canonical",
     "  and custom lens names. Custom lenses generate tasks using the unit's files",
     "  with context derived from the lens name and `free_form_intent`.",
+    "- `design_review.answered_at` MUST repeat this run's `confirmed_at` verbatim.",
+    "  These dials are answered **per run** — the tool honors them only for the",
+    "  confirmation that supplied them, so the next audit asks again rather than",
+    "  silently re-applying this run's choice. A block without a matching",
+    "  `answered_at` is read as unanswered and falls back to the defaults above.",
     "- `design_review.conceptual_depth` is `shallow` (schema default) or `deep`; on `deep`,",
     "  `perspectives` bounds the parallel-reviewer fan-out. Omit for shallow.",
     "- Leave the optional fields out to audit the full discovered scope.",
@@ -334,7 +339,7 @@ export function renderConfirmIntentPrompt(
     `Then run: ${opts.continueCommand}`,
     "",
   ].join("\n").replace(
-    '"design_review": { "conceptual_depth": "shallow", "perspectives": 5 }',
-    `"design_review": { "conceptual_depth": "${proposedDepth}", "perspectives": 5 }`,
+    '"design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "shallow", "perspectives": 5 }',
+    `"design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "${proposedDepth}", "perspectives": 5 }`,
   );
 }

@@ -19,6 +19,7 @@ import {
   isJsonParseError,
   isRecord,
   readJsonFile,
+  readSubmissionIngestHistory,
   readTrailingSubmissionRefusals,
   persistAnalyzerConsent,
   persistAnalyzerSettings,
@@ -66,6 +67,7 @@ import {
   loadConceptualPerspectiveFindings,
   MalformedConceptualPerspectivesError,
   readConceptualReviewRoundManifest,
+  suppliedToolVerdictIssue,
   type ConceptualReviewAdjudication,
 } from "../types/conceptualAdjudication.js";
 import {
@@ -261,7 +263,15 @@ export interface TerminalFoldIntent {
  * inside an `emit` outcome (or a `transition` carrying the reloaded bundle when
  * the fold continues).
  */
-export type NextStepResult =
+/**
+ * The fold's carried advisories, as prompt lines, for an emitted step whose own
+ * kind has no advisory CHANNEL (see {@link NextStepResult.advisoryNotice}).
+ */
+export interface CarriedAdvisoryNotice {
+  readonly advisoryNotice: readonly string[];
+}
+
+export type NextStepResult = (
   | {
       kind: "semantic_review";
       state: AuditState;
@@ -299,7 +309,19 @@ export type NextStepResult =
   | { kind: "critical_flow_fallback"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string; triage?: import("audit-tools/shared").FrictionTriageDecision }
-  | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string };
+  | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string }
+) &
+  /**
+   * Advisories an EARLIER fold iteration carried, rendered as prompt lines.
+   *
+   * Present only when the fold drained a non-empty carry onto a step kind that
+   * has no advisory channel of its own — the semantic-review step carries
+   * `ingestIssues`/`validationWarnings` as DATA, and every other kind states
+   * this instead. OPTIONAL and shared by every variant, so the single drain
+   * point (the fold's emission boundary) can attach it to whichever step the
+   * drain produced.
+   */
+  Partial<CarriedAdvisoryNotice>;
 
 /**
  * The return-kind set as RUNTIME data, so a drift guard can IMPORT the real set
@@ -740,7 +762,10 @@ type BranchActionResult =
  *   - `design_review_contract` → only contract pass still needed.
  *   - `design_review_conceptual` → only conceptual pass still needed.
  *
- * Also handles legacy `design-review-findings.json` for backward compatibility.
+ * Exactly these two passes exist. The pre-split combined submission
+ * (`design-review-findings.json`) is retired: it is neither polled here nor
+ * translated anywhere, and a pre-split directory is re-asked for both current
+ * passes (see `orchestrator/state.ts`).
  */
 /** Whether a completed design-review pass has gone stale vs. its snapshot. */
 function passIsStale(bundle: ArtifactBundle, pass: DesignReviewPass): boolean {
@@ -1005,6 +1030,28 @@ async function consumeConceptualSubmission(
   if (incoming.status === "quarantined") {
     return { ...incoming, lane };
   }
+  // BEFORE the schema parse, deliberately. The schema omits
+  // `verification_status` from every submitted finding, so a supplied value is
+  // stripped SILENTLY by the parse below — and the check that names the field
+  // lived only inside `buildConceptualReviewAdjudication`, which is reached with
+  // the ALREADY-PARSED submission. It therefore never fired here, and a judge
+  // could supply the field this whole vocabulary derives and be told nothing.
+  // Refusing it at the gate is what makes the naming reach the production path.
+  const suppliedStatus = suppliedToolVerdictIssue(incoming.value);
+  if (suppliedStatus !== null) {
+    const quarantinePath = await quarantineMisshapedSubmission(
+      artifactsDir,
+      incoming.path,
+      lane,
+      suppliedStatus,
+    );
+    return {
+      status: "quarantined",
+      quarantinePath,
+      lane,
+      reason: suppliedStatus,
+    };
+  }
   const parsed = ConceptualJudgeSubmissionSchema.safeParse(incoming.value);
   if (!parsed.success) {
     const quarantinePath = await quarantineMisshapedSubmission(
@@ -1046,9 +1093,24 @@ async function consumeConceptualSubmission(
       manifest.perspectives.map((p) => laneSubmissionId(p.lane_id)),
       { runId: AUDIT_GATE_SUBMISSION_SCOPE },
     );
+    // ONE ledger read for this batch. `readTrailingSubmissionRefusals` above
+    // already paid for a scan; reusing ITS map as the accepted-history view
+    // would be wrong (it holds refusals, not acceptances) and re-reading per
+    // perspective would scan the ledger once per lane. So the shared view is
+    // taken here, and the refusal question above keeps its own reader — the two
+    // ask different questions and a single scan answering both would have to
+    // reimplement each.
+    const perspectiveHistory = await readSubmissionIngestHistory(artifactsDir, {
+      runId: AUDIT_GATE_SUBMISSION_SCOPE,
+    });
     for (const perspective of manifest.perspectives) {
       if (refusals.has(laneSubmissionId(perspective.lane_id))) {
-        await recordLaneOutcome(artifactsDir, perspective.lane_id, { kind: "accepted" });
+        await recordLaneOutcome(
+          artifactsDir,
+          perspective.lane_id,
+          { kind: "accepted" },
+          perspectiveHistory,
+        );
       }
     }
     // THE observation boundary for this round's perspective lanes. The tool
@@ -1347,7 +1409,7 @@ export async function handleDesignReviewBranch(
     if (consumed) {
       // A review changes the assessment's content, not its structural baseline.
       // Only a newly produced adjudication may bind the new assessment revision;
-      // a contract/legacy update must leave an older adjudication stale.
+      // a contract-only update must leave an older adjudication stale.
       next.artifact_metadata = computeArtifactMetadata(
         next,
         bundle.artifact_metadata,
@@ -1405,39 +1467,15 @@ export async function handleDesignReviewBranch(
       }) ?? assessment;
   };
 
-  // Legacy: consume the old combined findings submission. Tolerant-unwrap or
-  // quarantine (never a bare unconditional delete) — see the block comment above.
-  const legacyResult = await consumeArraySubmission<Finding>(
-    params.artifactsDir,
-    GATE_LANES.design_review_legacy,
-    tx,
-  );
-  if (legacyResult.status === "quarantined") {
-    assessment =
-      withRejectedDesignReviewSubmission(assessment, "legacy", legacyResult) ??
-      assessment;
-    return { action: "continue", bundle: carried() };
-  }
-  if (legacyResult.status === "ok") {
-    if (assessment) {
-      assessment = {
-        ...assessment,
-        review_findings: groundDesignFindings(legacyResult.value, bundle.repo_manifest),
-        reviewed: true,
-        rejected_submissions: (assessment.rejected_submissions ?? []).filter(
-          (r) => r.pass !== "legacy",
-        ),
-      };
-      consumed = true;
-      markSubmissionApplied(tx, legacyResult.path);
-      return { action: "continue", bundle: carried() };
-    }
-    await holdWithoutTarget("legacy", GATE_LANES.design_review_legacy, legacyResult.path);
-    return { action: "continue", bundle: carried() };
-  }
-  // absent: fall through to the contract/conceptual check.
-
-  // New: consume contract-findings and/or conceptual-findings independently.
+  // Only the two CURRENT passes are polled. The pre-split combined-findings lane
+  // (`design_review_legacy`) was retired: it was a third judgment type that no
+  // longer corresponds to anything the tool emits, and leaving it polled meant a
+  // directory written by the pre-split release kept satisfying a pass the modern
+  // tool never asked for. A resumed pre-split run now leaves BOTH modern
+  // obligations unmet and is re-asked for each pass in its current shape — never
+  // translated from the old lane. See the invalidation at load —
+  // `designReviewPassState` in `orchestrator/state.ts`, which reads only the two
+  // modern per-pass flags and never the retired combined one.
   const contractResult = await consumeArraySubmission<Finding>(
     params.artifactsDir,
     GATE_LANES.design_review_contract,
@@ -1589,8 +1627,7 @@ export async function handleDesignReviewBranch(
 //     `fallthrough`, not `run_omit` (same caller-side effect, kept as its own
 //     literal so `handleGraphEnrichmentBranch`'s existing action union — and
 //     the tests asserting `"fallthrough"` — stay untouched).
-//   - design_review polls THREE lane submissions: a legacy one handled and
-//     returned on its own first, then two (contract/conceptual) polled
+//   - design_review polls TWO lane submissions (contract and conceptual),
 //     INDEPENDENTLY of each other (both are checked and, if valid, applied —
 //     not first-match-wins) and merged into a single write plus a
 //     per-just-applied-pass snapshot capture; its final decision picks one of
@@ -1598,7 +1635,7 @@ export async function handleDesignReviewBranch(
 //     against one step kind. There is no `run_omit` branch at all — an
 //     unsatisfied pass always returns a host step, never an autonomous omit.
 
-/** The common action shape all four `runOmittableGate`-driven branches return. */
+/** The common action shape all five `runOmittableGate`-driven branches return. */
 type OmittableGateAction<TStepKind extends string> =
   | {
       /** A submission was consumed + applied; keep folding on the carried bundle. */
@@ -2403,21 +2440,99 @@ export async function checkFinalizationCycle(ctx: {
  * The advisory payload one fold iteration classified but could not render: an
  * ingest that ends in a `transition` (accepted results for still-pending
  * tasks) returns before any emission, so its `validation_warnings` and
- * classified ingest `issues` would otherwise die with the outcome. The carry is
- * fold-local (a `{ value }` ref on {@link AuditNextStepCtx}), never persisted —
- * the ledger (`recordHostResultOutcomes`) remains the only durable record, and
- * this only defers the PROMPT statement of what it already recorded to the next
- * emission within the same call.
+ * classified ingest `issues` would otherwise die with the outcome.
+ *
+ * DURABLE, not fold-local. The carry used to live only on a `{ value }` ref on
+ * {@link AuditNextStepCtx}, which handled a transition followed by an emission
+ * in the SAME call — but a transition that ENDS the call (the budget cap, the
+ * drain's budget stop, any fold boundary) took the ref with it, and the
+ * advisories were gone. The property is "stated on exactly ONE emitted step,
+ * whichever call emits it", and "whichever call" is the half a memory-only carry
+ * cannot satisfy.
+ *
+ * So it persists to `steps/pending-advisories.json` and is drained by the next
+ * emission, in this call or a later one. This is NOT a second durable record
+ * competing with the ledger (`recordHostResultOutcomes`, which stays the only
+ * place a refusal/acceptance is recorded): what persists here is only the
+ * PROMPT STATEMENT of advisories the ledger already holds, and it is drained
+ * (deleted) the moment it is rendered, so it can neither accumulate nor become
+ * a source of truth. A crash between persist and drain re-states an advisory the
+ * ledger already recorded — the safe direction, and the one the ledger's own
+ * idempotence is built around.
  */
 interface FoldAdvisories {
   ingestIssues: AuditHostIngestIssue[];
   validationWarnings: AuditHostValidationWarning[];
 }
 
-const EMPTY_FOLD_ADVISORIES: FoldAdvisories = {
-  ingestIssues: [],
-  validationWarnings: [],
-};
+/**
+ * A FRESH empty carry — a factory, never a shared constant. The carry is
+ * MUTATED in place (`mergeFoldAdvisoriesInto` appends to both arrays), so two
+ * holders that received the same object would alias: the persistent carry is
+ * read as `emptyFoldAdvisories()`, merged into, and persisted, and a shared
+ * constant would mean the "empty" sentinel itself grew the advisories — after
+ * which every `writePendingAdvisories(emptyFoldAdvisories())` call is no longer
+ * empty, stops deleting the file, and re-states the advisory on EVERY later
+ * emission. That is not hypothetical: it is what a shallow spread of the
+ * constant did, and it turned the once-only property into once-per-emission.
+ */
+function emptyFoldAdvisories(): FoldAdvisories {
+  return { ingestIssues: [], validationWarnings: [] };
+}
+
+/** `<artifactsDir>/steps/pending-advisories.json` — the drainable prompt carry. */
+function pendingAdvisoriesPath(artifactsDir: string): string {
+  return join(artifactsDir, "steps", "pending-advisories.json");
+}
+
+/**
+ * Read the persisted carry. Lenient by design: an absent or unreadable file is
+ * an empty carry, because this is a PROMPT convenience over a ledger that
+ * remains authoritative — a bookkeeping file must never be able to fail the
+ * call it decorates. Shape-checked rather than schema-parsed for the same
+ * reason: unrecognized entries are dropped, never thrown on.
+ */
+async function readPendingAdvisories(
+  artifactsDir: string,
+): Promise<FoldAdvisories> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(pendingAdvisoriesPath(artifactsDir), "utf8"));
+  } catch {
+    return emptyFoldAdvisories();
+  }
+  if (!isRecord(raw)) return emptyFoldAdvisories();
+  const take = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
+  return {
+    ingestIssues: take<AuditHostIngestIssue>(raw.ingestIssues),
+    validationWarnings: take<AuditHostValidationWarning>(raw.validationWarnings),
+  };
+}
+
+/**
+ * Persist the carry, or DELETE it when empty. Deleting rather than writing an
+ * empty object is what keeps presence a signal: a later fold reads "nothing
+ * pending" from absence, and no reader has to distinguish `[]` from "not yet
+ * written".
+ */
+async function writePendingAdvisories(
+  artifactsDir: string,
+  advisories: FoldAdvisories,
+): Promise<void> {
+  const path = pendingAdvisoriesPath(artifactsDir);
+  if (
+    advisories.ingestIssues.length === 0 &&
+    advisories.validationWarnings.length === 0
+  ) {
+    try {
+      await unlink(path);
+    } catch (error) {
+      if (!isFileMissingError(error)) throw error;
+    }
+    return;
+  }
+  await writeJsonFile(path, advisories);
+}
 
 /**
  * Append one fold iteration's advisories to the pending carry. Dedupe by
@@ -2454,16 +2569,23 @@ function mergeFoldAdvisoriesInto(
   }
 }
 
-/** Drain the carry: what the NEXT emission must state, now consumed. */
-function takeFoldAdvisories(ref: { value: FoldAdvisories }): FoldAdvisories {
+/**
+ * Drain the carry: what the NEXT emission must state, now consumed. Clears the
+ * in-memory ref AND the persisted copy TOGETHER, so the once-only property holds
+ * across a call boundary exactly as it does within one call — a ref cleared
+ * without the file would re-state on the next call, and a file left behind after
+ * a render would do the same.
+ */
+async function takeFoldAdvisories(
+  artifactsDir: string,
+  ref: { value: FoldAdvisories },
+): Promise<FoldAdvisories> {
   const taken: FoldAdvisories = {
     ingestIssues: ref.value.ingestIssues,
     validationWarnings: ref.value.validationWarnings,
   };
-  ref.value = {
-    ingestIssues: [...EMPTY_FOLD_ADVISORIES.ingestIssues],
-    validationWarnings: [...EMPTY_FOLD_ADVISORIES.validationWarnings],
-  };
+  ref.value = emptyFoldAdvisories();
+  await writePendingAdvisories(artifactsDir, emptyFoldAdvisories());
   return taken;
 }
 
@@ -2976,6 +3098,14 @@ async function runHostDelegationObligation(
         issues: ingestIssues,
         validationWarnings,
       });
+      // PERSIST with the merge, not at the emission: the transition below can
+      // end the call (the budget cap), and an emission-only write would lose
+      // exactly the advisory a call-ending transition produced — the case this
+      // carry exists to cover.
+      await writePendingAdvisories(
+        ctx.params.artifactsDir,
+        ctx.foldAdvisoriesRef.value,
+      );
       return { kind: "transition", state: ingested.updated_bundle };
     }
   }
@@ -2995,37 +3125,105 @@ async function runHostDelegationObligation(
     selfCliPath: ctx.params.selfCliPath,
     timeoutMs: ctx.params.timeoutMs,
   });
-  // Consume whatever earlier fold iterations of THIS call carried: each
-  // advisory is stated on exactly one emitted step (never duplicated on later
-  // folds), and an emit with nothing carried renders only what THIS ingest saw.
-  const carried = takeFoldAdvisories(ctx.foldAdvisoriesRef);
-  const emitted = {
-    kind: "semantic_review" as const,
-    selectedExecutor: decision.selected_executor,
-    ...review,
-    ...(ingestIssues.length > 0 ? { ingestIssues } : {}),
-    ...(validationWarnings.length > 0 ? { validationWarnings } : {}),
-  };
+  // What THIS ingest saw. Deliberately NOT drained here: the carried advisories
+  // are taken at the fold's single emission boundary (`runDeterministicForNextStep`),
+  // which every emitted step kind passes through — draining at this obligation
+  // would state them only for a semantic-review emission and silently drop them
+  // the moment the run's next step happened to be a different kind
+  // (design_review_conceptual, charter_*, synthesis_narrative…).
   return {
     kind: "emit",
-    step:
-      carried.ingestIssues.length > 0 || carried.validationWarnings.length > 0
-        ? {
-            ...emitted,
-            ingestIssues: [
-              ...(ingestIssues as AuditHostIngestIssue[]),
-              ...carried.ingestIssues,
-            ],
-            validationWarnings: [
-              ...(validationWarnings as AuditHostValidationWarning[]),
-              ...carried.validationWarnings,
-            ],
-          }
-        : emitted,
+    step: {
+      kind: "semantic_review" as const,
+      selectedExecutor: decision.selected_executor,
+      ...review,
+      ...(ingestIssues.length > 0 ? { ingestIssues } : {}),
+      ...(validationWarnings.length > 0 ? { validationWarnings } : {}),
+    },
     // The pause's blocked core state — the fold's single commit persists it
     // (the locking variant's own write was the other half of the split).
     state: review.bundle,
   };
+}
+
+/**
+ * State the fold's carried advisories on the step about to be emitted, and
+ * DRAIN them.
+ *
+ * THE single emission-boundary drain. It lives here, not at any one obligation,
+ * because the property is "stated on exactly one emitted step, whichever call
+ * and whichever step kind emits it": a carry produced by a call-ending
+ * transition must survive to a later fold, and that fold's step may be ANY
+ * kind. Hanging the drain off the semantic-review obligation made it correct
+ * only for as long as the next step happened to be a semantic review.
+ *
+ * Advisories are only ever RENDERED by the semantic-review step today (the
+ * other kinds carry no advisory channel), so a carry drained onto one of them
+ * still reaches the operator — as a stated line in this step's prompt — rather
+ * than being lost. A step with nothing carried is returned untouched.
+ */
+async function withFoldAdvisories(
+  step: NextStepResult,
+  ctx: AuditNextStepCtx,
+): Promise<NextStepResult> {
+  const carried = await takeFoldAdvisories(
+    ctx.params.artifactsDir,
+    ctx.foldAdvisoriesRef,
+  );
+  if (
+    carried.ingestIssues.length === 0 &&
+    carried.validationWarnings.length === 0
+  ) {
+    return step;
+  }
+  if (step.kind !== "semantic_review") {
+    return {
+      ...step,
+      advisoryNotice: renderCarriedAdvisoryLines(carried),
+    };
+  }
+  return {
+    ...step,
+    ingestIssues: [...(step.ingestIssues ?? []), ...carried.ingestIssues],
+    validationWarnings: [
+      ...(step.validationWarnings ?? []),
+      ...carried.validationWarnings,
+    ],
+  };
+}
+
+/**
+ * The advisory lines a step that carries no advisory CHANNEL still states. A
+ * carried advisory is never dropped on the floor because the run happened to
+ * move on to a different step kind — it is rendered as text, in the same
+ * wording the semantic-review step's own sections use.
+ */
+function renderCarriedAdvisoryLines(carried: FoldAdvisories): string[] {
+  const lines: string[] = [];
+  if (carried.ingestIssues.length > 0) {
+    lines.push(
+      "## Result status requiring attention",
+      "",
+      ...carried.ingestIssues.map(
+        (issue) =>
+          `- ${issue.work_item_id ? `\`${issue.work_item_id}\` (${issue.code}): ` : `${issue.code}: `}` +
+          `${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`,
+      ),
+      "",
+    );
+  }
+  if (carried.validationWarnings.length > 0) {
+    lines.push(
+      "## Advisory notes on accepted results",
+      "",
+      ...carried.validationWarnings.map(
+        (warning) =>
+          `- \`${warning.work_item_id}\` was ACCEPTED; advisory: ${warning.message}`,
+      ),
+      "",
+    );
+  }
+  return lines;
 }
 
 /** Emit the no-executor blocked step (the hand loop's `!selected_executor` arm). */
@@ -3135,12 +3333,7 @@ export async function runDeterministicForNextStep(
     params,
     analyzersRef,
     lastSummaryRef: { value: "" },
-    foldAdvisoriesRef: {
-      value: {
-        ingestIssues: [...EMPTY_FOLD_ADVISORIES.ingestIssues],
-        validationWarnings: [...EMPTY_FOLD_ADVISORIES.validationWarnings],
-      },
-    },
+    foldAdvisoriesRef: { value: emptyFoldAdvisories() },
     dispatchOrdinalRef: { value: 0 },
     dispatchedSignatures: new Set<string>(),
     seenStateSignatures: new Set<string>(),
@@ -3172,6 +3365,16 @@ export async function runDeterministicForNextStep(
       const holdStartMs = Date.now();
       let chargedExecutions: number | undefined;
       await recoverStagedSubmissions(params.artifactsDir);
+      // The PERSISTED carry, read back under the hold. A transition that ENDED
+      // an earlier call left its advisories on disk for the next emission to
+      // state, and that emission may be this call's — the ctx ref starts empty
+      // per call, so without this read the durable half would be write-only and
+      // the advisories would still die at the call boundary. Seeding the ref
+      // (rather than merging at the emit site) keeps ONE drain point, so the
+      // once-only property is the same one the in-call path already relies on.
+      ctx.foldAdvisoriesRef.value = await readPendingAdvisories(
+        params.artifactsDir,
+      );
       const startBundle = await loadArtifactBundle(params.artifactsDir);
       ctx.currentBundleRef.value = startBundle;
       try {
@@ -3237,18 +3440,26 @@ export async function runDeterministicForNextStep(
       : undefined,
   );
 
+  // THE emission boundary — the one place every emitted step kind passes
+  // through. Draining the carry here, rather than at the semantic-review
+  // obligation that produces most of it, is what makes "stated on exactly one
+  // emitted step, WHICHEVER step that is" true for every kind. A terminal
+  // intent is deliberately excluded: it is not a step, and the terminal
+  // conversion below promotes and deletes the artifacts dir — the carry has
+  // nowhere left to be stated, and the run is over.
+  if (outcome.step && outcome.step.kind !== "terminal_intent") {
+    return await withFoldAdvisories(outcome.step, ctx);
+  }
+
   if (outcome.step) {
-    if (outcome.step.kind === "terminal_intent") {
-      // Guard terminals convert POST-commit, POST-hold: buildTerminalStep can
-      // promote, and promotion deletes artifactsDir.
-      return await buildTerminalStep(
-        params,
-        outcome.step.bundle,
-        outcome.step.state,
-        outcome.step.reason,
-      );
-    }
-    return outcome.step;
+    // Guard terminals convert POST-commit, POST-hold: buildTerminalStep can
+    // promote, and promotion deletes artifactsDir.
+    return await buildTerminalStep(
+      params,
+      outcome.step.bundle,
+      outcome.step.state,
+      outcome.step.reason,
+    );
   }
 
   if (outcome.stopped === "budget") {

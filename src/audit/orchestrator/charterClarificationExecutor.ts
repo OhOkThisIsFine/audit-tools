@@ -10,6 +10,7 @@ import {
   type CharterClarificationAnswer,
   type Ceiling,
   type IntentCheckpoint,
+  resolveRunBoundDesignReview,
 } from "audit-tools/shared";
 import { resolveCharterCeiling, ceilingRequestsCharters } from "./charterExtractionExecutor.js";
 import { partitionDeltasToQuestions } from "../clarification/partition.js";
@@ -22,11 +23,17 @@ import { splitByAttention } from "../clarification/dials.js";
  * question becomes a written finding, no human loop), which is the
  * conversation-first default until the user opts into attention. Exported so the
  * obligation gate + the prompt renderer resolve appetite identically (one source).
+ *
+ * RUN-BOUND, like every other dial in that block. `attention` is a per-run
+ * choice (owner, 2026-08-21), so a block a PRIOR confirmation supplied must not
+ * govern this run — reading it unbound would take a run that never opted into a
+ * human loop and pop interactive questions at it, the same defect
+ * `resolveRunBoundDesignReview` exists to prevent for depth and ceiling.
  */
 export function resolveClarificationAttention(
   checkpoint: IntentCheckpoint | undefined,
 ): ClarificationAttention {
-  const attention = checkpoint?.design_review?.attention;
+  const attention = resolveRunBoundDesignReview(checkpoint)?.attention;
   return attention ?? 0;
 }
 

@@ -152,6 +152,29 @@ export const IntentCheckpointSchema = z
      */
     design_review: z
       .object({
+        /**
+         * The `confirmed_at` of the confirmation that ANSWERED this block —
+         * the run the depth was chosen for.
+         *
+         * These dials are PER-RUN choices (owner, 2026-08-21: "a user may not
+         * want the same settings every audit"), and the checkpoint is the only
+         * durable record between the confirm-intent answer and the design-review
+         * emission. Recording WHICH confirmation answered them is what lets the
+         * reader tell this run's answer from a prior run's block copied forward
+         * with a fresh `confirmed_at`; without it the two are byte-identical and
+         * the tool announces `Reusing intent … conceptual depth deep` to an
+         * operator who never chose it.
+         *
+         * ABSENT MEANS UNANSWERED — a missing `answered_at` is never
+         * back-filled from `confirmed_at`, because the only value that proves
+         * this confirmation answered the block is one this confirmation's write
+         * supplied. Treating absence as agreement would let a checkpoint
+         * carrying a PRIOR run's block (a host that copied the file forward and
+         * rewrote `confirmed_at` but not this field) read as freshly answered,
+         * which is precisely the announcement the owner directive forbids. See
+         * `resolveDesignReviewBinding` for how a PRESENT value is compared.
+         */
+        answered_at: z.string().optional(),
         conceptual_depth: z.enum(["shallow", "deep"]).optional(),
         perspectives: z.number().int().min(1).optional(),
         /**
@@ -183,3 +206,148 @@ export const IntentCheckpointSchema = z
   })
   .strict();
 export type IntentCheckpoint = z.infer<typeof IntentCheckpointSchema>;
+
+/**
+ * The per-run dials a confirmation answers, or `undefined` when it answered
+ * none.
+ *
+ * NOT every key of the block is RUN-BOUND. The three CHOICE dials —
+ * `conceptual_depth`, `perspectives`, `attention` — are per-run answers, so
+ * every reader reaches them through {@link resolveRunBoundDesignReview} and a
+ * block inherited from a prior confirmation governs nothing. `ceiling` is a
+ * separate dial with its own semantics and is read UNBOUND (see
+ * `resolveCharterCeiling`: "the explicit `ceiling` field is a separate dial with
+ * its own semantics and is deliberately NOT bound here"). `answered_at` is the
+ * block's own provenance — which confirmation answered it — and is read by
+ * neither a compared projection nor the canonical hash
+ * ({@link DESIGN_REVIEW_PROVENANCE_FIELDS}).
+ */
+export type DesignReviewSettings = NonNullable<IntentCheckpoint["design_review"]>;
+
+/**
+ * The keys INSIDE the `design_review` block that are PROVENANCE rather than
+ * meaning: they record WHICH confirmation answered the block, they are not the
+ * answer. `answered_at` is the whole list today.
+ *
+ * SINGLE-SOURCED because two independent surfaces must both exclude it, for the
+ * same reason and with the same consequence if either forgets:
+ *
+ *  - the O2 semantic gate's structured projection (`DEFAULT_NORMALIZE_CONFIG`);
+ *  - the canonical artifact content hash (`NON_SEMANTIC_FIELDS_BY_ARTIFACT`).
+ *
+ * A re-confirm of the SAME depth stamps a fresh `answered_at` (it must — see
+ * `resolveRunBoundDesignReview`, which binds the block to the run that answered
+ * it). Left inside either surface, that provenance-only edit reads as a
+ * `structured_changed` delta and re-stales the entire planning cascade — the
+ * exact churn both strip lists exist to prevent.
+ */
+export const DESIGN_REVIEW_PROVENANCE_FIELDS: readonly string[] = ["answered_at"];
+
+/**
+ * How `design_review` relates to the confirmation the checkpoint records.
+ *
+ *  - `unanswered` — the checkpoint carries NO block at all. Nothing was
+ *    claimed, so there is nothing to notice.
+ *  - `bound` — the block IS this confirmation's answer; its dials apply.
+ *  - `unbound` — a block is present and does NOT bind. `reason` states, in
+ *    operator-facing prose, which confirmation it belongs to instead — so a
+ *    consumer can SAY that the block was ignored rather than silently fall back
+ *    to the schema default (the silent downgrade is the defect: a host that
+ *    wrote `deep` sees a `shallow` step arrive with no explanation).
+ */
+export type DesignReviewBinding =
+  | { readonly kind: "unanswered" }
+  | { readonly kind: "bound"; readonly settings: DesignReviewSettings }
+  | { readonly kind: "unbound"; readonly reason: string };
+
+/**
+ * Parse one recorded instant to epoch milliseconds, or `undefined` when it is
+ * not a readable instant. THE normalization the binding compare runs through:
+ * a host authoring `2026-04-22T00:00:00Z` and the same moment as
+ * `2026-04-22T00:00:00.000Z` is one instant written two ways, and a comparison
+ * on the raw strings reads that as "a different run".
+ */
+function parseInstant(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim().length === 0) return undefined;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+/**
+ * Resolve how the checkpoint's `design_review` block relates to THIS run.
+ *
+ * These dials are per-run (owner, 2026-08-21). The checkpoint is the one durable
+ * record between the confirm-intent answer and the design-review emission, so
+ * the block must carry its own provenance: `answered_at` names this
+ * confirmation exactly when this confirmation supplied the block.
+ *
+ * The comparison is on the two instants, NORMALIZED to epoch milliseconds —
+ * never on the raw strings, and never on their order. Not the raw strings,
+ * because the value is host-authored free text and a formatting difference
+ * (`…00Z` vs `…00.000Z`, a prompt placeholder left in) would otherwise read as
+ * "a different run" and silently downgrade `deep` to `shallow`. Not an
+ * ordering ("is this block newer than that confirmation?"), because host clocks
+ * are not a trust anchor and an ordering would silently accept a block from a
+ * LATER write than the confirmation it is being attributed to. An instant that
+ * does not parse is UNBOUND — never a match.
+ *
+ * ONE home for the question, because more than one consumer asks it — the
+ * conceptual dispatch resolves its depth here, the charter extraction resolves
+ * the ceiling, the clarification loop resolves its attention — and the failure
+ * mode of a second, weaker copy is an operator-facing announcement of a setting
+ * nobody chose.
+ */
+export function resolveDesignReviewBinding(
+  checkpoint: IntentCheckpoint | undefined,
+): DesignReviewBinding {
+  const block = checkpoint?.design_review;
+  if (!block) return { kind: "unanswered" };
+  const confirmedAt = checkpoint.confirmed_at;
+  const answeredAt = parseInstant(block.answered_at);
+  if (answeredAt === undefined) {
+    return {
+      kind: "unbound",
+      reason:
+        `its \`answered_at\` (${
+          block.answered_at === undefined
+            ? "absent"
+            : `\`${block.answered_at}\``
+        }) is not a readable instant, so nothing records which confirmation answered it`,
+    };
+  }
+  const thisRun = parseInstant(confirmedAt);
+  if (thisRun === undefined) {
+    return {
+      kind: "unbound",
+      reason:
+        `this confirmation's \`confirmed_at\` (\`${confirmedAt}\`) is not a readable ` +
+        "instant, so the block cannot be attributed to it",
+    };
+  }
+  if (answeredAt !== thisRun) {
+    return {
+      kind: "unbound",
+      reason:
+        `it belongs to an earlier confirmation (answered at ` +
+        `\`${block.answered_at}\`; this run's confirmation is \`${confirmedAt}\`)`,
+    };
+  }
+  return { kind: "bound", settings: block };
+}
+
+/**
+ * The `design_review` block, but ONLY when the confirmation the checkpoint
+ * records is the one that ANSWERED it — the narrowed view of
+ * {@link resolveDesignReviewBinding} for the consumers that only need the
+ * dials. `undefined` for both non-bound outcomes, so every consumer falls back
+ * to the schema default rather than honoring a depth the operator never chose.
+ *
+ * A consumer that must TELL the operator the block was ignored asks
+ * {@link resolveDesignReviewBinding} instead and states its `reason`.
+ */
+export function resolveRunBoundDesignReview(
+  checkpoint: IntentCheckpoint | undefined,
+): DesignReviewSettings | undefined {
+  const binding = resolveDesignReviewBinding(checkpoint);
+  return binding.kind === "bound" ? binding.settings : undefined;
+}

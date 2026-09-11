@@ -8,7 +8,8 @@ import { MANDATORY_LENSES } from "../../src/audit/orchestrator/lensSelection.js"
 import { validateArtifactBundle } from "../../src/audit/validation/artifacts.js";
 import { applyIntentExclusionsToCoverage } from "../../src/audit/orchestrator/scope.js";
 import { renderAuditReportMarkdown } from "../../src/audit/reporting/synthesis.js";
-import { runIntentEquivalenceResolve } from "../../src/audit/orchestrator/intentEquivalenceExecutor.js";
+import { runIntentEquivalenceResolve, deriveIntentEquivalenceStatus } from "../../src/audit/orchestrator/intentEquivalenceExecutor.js";
+import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
 import { ARTIFACT_DEFINITIONS } from "../../src/audit/io/artifacts.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
@@ -74,7 +75,12 @@ function readyForIntentBundle(): ArtifactBundle {
     critical_flows: { flows: [] },
     risk_register: { items: [] },
     analyzer_capability: { coverage: "not_applicable", analyzers: [] },
-    design_assessment: { generated_at: "2026-01-01T00:00:00.000Z", findings: [], reviewed: false },
+    design_assessment: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      findings: [],
+      contract_reviewed: false,
+      conceptual_reviewed: false,
+    },
     docs_digest: { generated_at: "2026-01-01T00:00:00.000Z", docs: [] },
     structure_decomposition: {
       generated_at: "2026-01-01T00:00:00.000Z",
@@ -373,7 +379,17 @@ await test("renderConfirmIntentPrompt proposes deep for a bare full audit and of
   expect(prompt).toMatch(/\bdeep\b/);
   // The depth choice is part of the single confirmation round, and offered in the JSON shape.
   expect(prompt).toMatch(/Ask the conceptual design-review depth/);
-  expect(prompt).toMatch(/"design_review":\s*\{\s*"conceptual_depth":\s*"deep",\s*"perspectives":\s*5\s*\}/);
+  // The promised shape carries the per-run BINDING alongside the depth: the
+  // tool honors the dials only for the confirmation that supplied them, so a
+  // shape that omitted `answered_at` would produce a checkpoint whose own
+  // settings are read back as unanswered (see `resolveRunBoundDesignReview`).
+  expect(prompt).toMatch(
+    /"design_review":\s*\{\s*"answered_at":\s*"<the same ISO-8601 timestamp as confirmed_at>",\s*"conceptual_depth":\s*"deep",\s*"perspectives":\s*5\s*\}/,
+  );
+  expect(
+    prompt,
+    "the prompt must state what the binding means, not just emit the field",
+  ).toMatch(/these dials are answered \*\*per run\*\*/i);
 });
 
 await test("depth proposal keeps targeted full audits and bare delta audits shallow", async () => {
@@ -428,6 +444,78 @@ await test("validateArtifactBundle rejects a checkpoint missing a required key",
 // Retired by design resolution 4: charters no longer embed in the checkpoint.
 // They live on charter_register.json (the output artifact) to avoid a staleness
 // cycle. The schema now uses .strict() on design_review, rejecting extra fields.
+
+// ── Provenance inside `design_review` is not part of the answer ─────────────
+//
+// `answered_at` records WHICH confirmation answered the block. A host
+// re-confirming the same depth must stamp a fresh one — the binding requires it
+// (`resolveDesignReviewBinding`) — so leaving it inside either compared surface
+// makes a provenance-only edit read as a semantic change and re-stales the
+// whole planning cascade on a timestamp. The two surfaces are independent
+// (the O2 semantic gate's projection, and the canonical artifact hash), so both
+// halves are pinned here: a strip applied to one does not reach the other.
+await test("a re-confirm of the SAME dials differing only in provenance resolves satisfied", async () => {
+  const dials = { conceptual_depth: "deep", perspectives: 5 } as const;
+  const first: IntentCheckpoint = {
+    ...validCheckpoint(),
+    design_review: { answered_at: "2026-06-09T00:00:00Z", ...dials },
+  };
+  const reconfirmed: IntentCheckpoint = {
+    ...validCheckpoint(),
+    confirmed_at: "2026-07-01T00:00:00Z",
+    confirmed_by: "host",
+    design_review: { answered_at: "2026-07-01T00:00:00Z", ...dials },
+  };
+
+  const settled = runIntentEquivalenceResolve({
+    ...readyForIntentBundle(),
+    intent_checkpoint: first,
+    artifact_metadata: computeArtifactMetadata({
+      ...readyForIntentBundle(),
+      intent_checkpoint: first,
+    } as never),
+  }).updated;
+  expect(settled.artifact_metadata?.intent_baseline).toBeDefined();
+
+  const status = deriveIntentEquivalenceStatus({
+    ...settled,
+    intent_checkpoint: reconfirmed,
+  });
+  expect(
+    status.kind,
+    "only `confirmed_at`/`answered_at` moved — the intent is unchanged, so the cascade must not re-stale",
+  ).toBe("satisfied");
+});
+
+await test("the canonical intent_checkpoint hash ignores design_review.answered_at but keeps the dials", async () => {
+  const at = "2026-06-09T00:00:00Z";
+  const base: IntentCheckpoint = {
+    ...validCheckpoint(),
+    design_review: {
+      answered_at: at,
+      conceptual_depth: "deep",
+      perspectives: 5,
+    },
+  };
+  const restamped: IntentCheckpoint = {
+    ...base,
+    design_review: { ...base.design_review!, answered_at: "2026-07-01T00:00:00Z" },
+  };
+  expect(
+    hashArtifactValue("intent_checkpoint.json", restamped),
+    "provenance inside design_review is not content — a fresh stamp must not move the hash",
+  ).toBe(hashArtifactValue("intent_checkpoint.json", base));
+
+  // …and the strip is NARROW: the dials inside the same block still hash, so a
+  // real depth change is not hidden by the provenance strip.
+  const deeper: IntentCheckpoint = {
+    ...base,
+    design_review: { ...base.design_review!, conceptual_depth: "shallow" },
+  };
+  expect(hashArtifactValue("intent_checkpoint.json", deeper)).not.toBe(
+    hashArtifactValue("intent_checkpoint.json", base),
+  );
+});
 
 // ── A2: consume the accepted scope ──────────────────────────────────────────
 

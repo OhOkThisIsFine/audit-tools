@@ -1419,6 +1419,80 @@ test("CP-NODE-10 inv-1: a deferred downstream is REACHED on a later call once it
   ).not.toContain("charter_register.json");
 });
 
+test("CP-NODE-10 inv-1 (drain level): a deferral HOLDS the downstream back on the drain's own obligation state, and the re-derivation REACHES it", () => {
+  const { bundle: call1Bundle, manifest } = makeDeferralFixture();
+  const charterObligation = (
+    state: ReturnType<typeof deriveAuditState>,
+  ) => {
+    const found = state.obligations.find(
+      (obligation) => obligation.id === "charter_extraction_current",
+    );
+    expect(
+      found,
+      "the fixture must register a charter obligation, or this test proves nothing",
+    ).toBeTruthy();
+    return found!;
+  };
+
+  // Call 1, at the level the DRAIN consumes. The staleness pass's own result
+  // already says "deferred" (pinned above); what this pins is that the deferral
+  // reaches the OBLIGATION the drain selects from — the unit memo test covers
+  // the derivation, not what the drain reads out of it.
+  //
+  // The state is `satisfied`, and that is the deferral WORKING, not the
+  // suppression it guards against: "not decided yet" must hold the downstream
+  // back, so the drain selects the stale-and-pending UPSTREAM and re-derives it
+  // instead. Reporting the deferred downstream as actionable would run the
+  // pass against the slice it deliberately declined to compare.
+  const call1 = deriveAuditState(call1Bundle, { emitStaleness: false });
+  expect(
+    charterObligation(call1).state,
+    "a deferred downstream must be HELD BACK — not selected while its slice comparison is still undecided",
+  ).toBe("satisfied");
+
+  // The upstream re-derives and MOVES the slice the downstream consumes.
+  const rederived: ArtifactBundle = {
+    ...call1Bundle,
+    structure_decomposition: {
+      ...call1Bundle.structure_decomposition!,
+      consensus: [
+        {
+          ...call1Bundle.structure_decomposition!.consensus[0]!,
+          members: ["src/a.ts", "src/b.ts", "src/zz.ts"],
+        },
+      ],
+    },
+  };
+  const restamped = computeArtifactMetadata(rederived, manifest, [
+    "structure_decomposition.json",
+  ]);
+  const call2 = deriveAuditState(
+    { ...rederived, artifact_metadata: restamped },
+    { emitStaleness: false },
+  );
+  // The RELEASE is the thing under test, so it is asserted on the scan the
+  // obligation state was derived from rather than assumed: the downstream left
+  // the deferred set AND became stale in the same scan. Asserting only the
+  // obligation state would pass on a fixture where the upstream is simply stale
+  // again — the deferral RE-ARMING, not releasing.
+  const call2Stale = computeStaleArtifacts(
+    { ...rederived, artifact_metadata: restamped },
+    { emit: false },
+  );
+  expect(
+    [...call2Stale.deferred],
+    "the deferral released: the downstream is no longer being held back",
+  ).not.toContain("charter_register.json");
+  expect(
+    call2Stale.has("charter_register.json"),
+    "…and the released decision was STALE — the slice the upstream re-derived moved",
+  ).toBe(true);
+  expect(
+    charterObligation(call2).state,
+    "the held-back downstream must be REACHED once its upstream re-derives — a permanently held downstream is a suppressed obligation, which is the failure the deferral itself would become",
+  ).not.toBe("satisfied");
+});
+
 test("CP-NODE-10 fail-4: a present-but-truncated body classifies partial (stale), never intact", () => {
   const base = makeBaseBundle();
   const metadata = computeArtifactMetadata(base);

@@ -270,6 +270,41 @@ export function validateAuthoredCycleBreak(
     };
   }
 
+  // (3b) BOTH SIDES, for the mediator strategy. Step (3) above accepts a
+  // designated node that ANY single member needs, but the prompt this record
+  // answers states the stronger requirement: "a THIRD obligation that both sides
+  // depend on". A cycle of A ← B ← C (a two-sided cycle: A needs B, B needs C, C
+  // needs A) designating C as the mediator passes (3) on A's single edge while
+  // leaving B — one of the two sides the break is supposed to route through C —
+  // still pointing at the cycle. The break would then be recorded as a mediated
+  // resolution over a ledger whose edges the designated node does not mediate.
+  //
+  // The cycle is a real cycle, so "both sides" is answerable without guessing
+  // WHICH two members are the sides: the requirement enforced here is that at
+  // least TWO distinct cycle members depend on the designated node. For a
+  // two-member cycle that is exactly both; for a longer cycle it is the
+  // structural form of the same claim (a mediator one member uses is not shared,
+  // which is the defect). `single_authority` is deliberately NOT held to this:
+  // its own branch above already requires the designated node to BE a member,
+  // and the prompt asks the others to become its consumers, not to share it.
+  if (authored.strategy === "mediator") {
+    const dependingMembers = currentNodes.filter(
+      (node) => cycleSet.has(node.id) && node.needs.includes(designatedId),
+    );
+    if (dependingMembers.length < 2) {
+      const named = dependingMembers.map((node) => node.id);
+      return {
+        accepted: false,
+        reason:
+          `Mediator "${designatedId}" is depended on by ` +
+          `${named.length === 0 ? "no member" : `only [${named.join(", ")}]`} of cycle ` +
+          `[${members.join(", ")}]. A mediator is a THIRD obligation that BOTH sides depend on; ` +
+          `one member routing through it does not mediate the cycle, it re-points one edge. ` +
+          `Rewrite the ledger so every side of the cycle depends on "${designatedId}".`,
+      };
+    }
+  }
+
   // (4) The live edges, not the claim: any remaining cycle that still touches
   // the original members means the ledger was never actually rewritten.
   const allRemaining = detectCyclicSeamObligations(currentNodes);

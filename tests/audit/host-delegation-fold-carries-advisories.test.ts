@@ -165,8 +165,6 @@ async function setup() {
     design_assessment: {
       generated_at: "2026-04-22T00:00:00Z",
       findings: [],
-      review_findings: [],
-      reviewed: true,
       contract_findings: [],
       contract_reviewed: true,
       conceptual_findings: [],
@@ -364,6 +362,159 @@ describe("contract:host-delegation-fold-carries-advisories-to-the-next-emission"
       prompt,
       "the emitted prompt must name the accepted-with-warning work item",
     ).toContain(item.id);
+  });
+
+  // The CALL-BOUNDARY half. The case above is one call that ingests and emits;
+  // the case that broke is a transition that ENDS the call — the budget cap, the
+  // drain's budget stop, any fold boundary — where the in-memory carry died with
+  // the call and the advisories were never stated at all. The property is
+  // "stated on exactly ONE emitted step, WHICHEVER call emits it", and
+  // "whichever" is the half a memory-only carry cannot satisfy.
+  //
+  // The carry file is seeded DIRECTLY rather than produced by actually driving
+  // the drain to a budget stop: what is under test is the read-and-drain half
+  // (the emission that follows picks the carry up and consumes it), and the
+  // write half is the same file the ingest path already writes. Seeding keeps
+  // the test's cost off the ~20-obligation walk a real budget stop would need.
+  it("states a carry persisted by an EARLIER call, drains it, and never restates it", async () => {
+    const { root, artifactsDir } = await setup();
+    const first = (await advanceToDispatchReview(root, artifactsDir)) as {
+      step_kind: string;
+    };
+    expect(first.step_kind).toBe("dispatch_review");
+
+    const carriedMessage = "carried from a call that ended at its budget cap";
+    const carryPath = join(artifactsDir, "steps", "pending-advisories.json");
+    await writeFile(
+      carryPath,
+      JSON.stringify({
+        ingestIssues: [],
+        validationWarnings: [
+          {
+            work_item_id: "wi-carried-by-an-earlier-call",
+            result_path:
+              ".audit-tools/audit/runs/earlier/host-results/wi-carried.json",
+            message: carriedMessage,
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    await callNextStep(root, artifactsDir);
+    const prompt = await readFile(
+      join(artifactsDir, "steps", "current-prompt.md"),
+      "utf8",
+    );
+    expect(
+      prompt,
+      "an advisory a PREVIOUS call persisted must be stated by THIS call's emission",
+    ).toContain(carriedMessage);
+
+    // Drained, not merely read: presence is the signal, so an emission that
+    // stated the carry must leave nothing behind for the next one.
+    let stillPresent = true;
+    try {
+      await readFile(carryPath, "utf8");
+    } catch {
+      stillPresent = false;
+    }
+    expect(
+      stillPresent,
+      "the emission that stated the carry must drain it",
+    ).toBe(false);
+
+    // …so a LATER emission states it zero more times.
+    await callNextStep(root, artifactsDir);
+    const nextPrompt = await readFile(
+      join(artifactsDir, "steps", "current-prompt.md"),
+      "utf8",
+    );
+    expect(
+      nextPrompt,
+      "an advisory is stated on exactly ONE emitted step, never restated",
+    ).not.toContain(carriedMessage);
+  });
+
+  // The step-KIND half. The case above drains the carry onto a semantic-review
+  // step, which has an advisory CHANNEL (ingestIssues/validationWarnings) of its
+  // own. A run whose next emission is a DIFFERENT step kind has no such channel,
+  // so a drain hung off the semantic-review obligation drops the carry exactly
+  // when the run moved on — the advisory is lost with no record. The carry must
+  // therefore be stated on whichever step the emission produced.
+  //
+  // The next step kind is reached the same way the run reaches it: by putting
+  // the bundle in the state that selects it. Here a design review is due, so the
+  // emission is `design_review_contract`.
+  it("states a persisted carry on a NON-host-delegation step (design review), then drains it", async () => {
+    const { root, artifactsDir } = await setup();
+    const first = (await advanceToDispatchReview(root, artifactsDir)) as {
+      step_kind: string;
+      run_id: string;
+    };
+    expect(first.step_kind).toBe("dispatch_review");
+
+    // Revoke both review passes: the next emission is the design-review
+    // contract step, NOT a semantic review.
+    const { readJsonFile, writeJsonFile } = await import("audit-tools/shared");
+    const assessmentPath = join(artifactsDir, "design_assessment.json");
+    const assessment = (await readJsonFile(assessmentPath)) as Record<
+      string,
+      unknown
+    >;
+    await writeJsonFile(assessmentPath, {
+      ...assessment,
+      contract_reviewed: false,
+      conceptual_reviewed: false,
+    });
+
+    const carriedMessage = "carried onto a step that has no advisory channel";
+    const carryPath = join(artifactsDir, "steps", "pending-advisories.json");
+    await writeFile(
+      carryPath,
+      JSON.stringify({
+        ingestIssues: [],
+        validationWarnings: [
+          {
+            work_item_id: "wi-carried-onto-a-design-review",
+            result_path:
+              ".audit-tools/audit/runs/earlier/host-results/wi-carried.json",
+            message: carriedMessage,
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const emitted = (await callNextStep(root, artifactsDir)) as {
+      step_kind: string;
+    };
+    expect(
+      emitted.step_kind,
+      "the fixture must land on a non-host-delegation step kind",
+    ).not.toBe("semantic_review");
+
+    const prompt = await readFile(
+      join(artifactsDir, "steps", "current-prompt.md"),
+      "utf8",
+    );
+    expect(
+      prompt,
+      "a carry must be stated on WHICHEVER step the emission produced, not only on a semantic review",
+    ).toContain(carriedMessage);
+
+    // Stated once, then drained — the same one-statement property, on the kind
+    // that has no advisory channel to carry it as data.
+    let stillPresent = true;
+    try {
+      await readFile(carryPath, "utf8");
+    } catch {
+      stillPresent = false;
+    }
+    expect(
+      stillPresent,
+      "the emission that stated the carry must drain it",
+    ).toBe(false);
   });
 });
 

@@ -305,6 +305,7 @@ function checkpoint(
     scope_summary: "s",
     intent_summary: "i",
     design_review: {
+      answered_at: "2026-01-01T00:00:00Z",
       ...(rung ? { ceiling: { rung } } : {}),
       ...(attention !== undefined ? { attention } : {}),
     },

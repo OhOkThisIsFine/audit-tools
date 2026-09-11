@@ -19,6 +19,7 @@ export const LOOP_CORE_PATTERNS = [
   "src/remediate/steps/dispatch/",
   "src/remediate/steps/nextStep.ts",
   "src/shared/engine/",
+  "src/shared/steps/",
   "src/shared/submission/",
 ];
 

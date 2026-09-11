@@ -43,8 +43,10 @@ function staleOrSatisfied(
  * not completed is `missing`. A completed pass is `stale` when a snapshot exists
  * and the semantic projection of any structural input it reviewed has changed —
  * which triggers a *diff-based* re-review, not a blind full re-run — otherwise
- * `satisfied`. The legacy path (only the old `reviewed` flag, no snapshot) has no
- * snapshot, so it stays `satisfied` (never spuriously re-fires).
+ * `satisfied`. A completed pass with no snapshot stays `satisfied` (never
+ * spuriously re-fires) — reachable only for a pass the CURRENT release completed
+ * before snapshots existed for it, since the pre-split combined flag is
+ * invalidated at load and never reaches here as `completed`.
  */
 function designReviewPassState(
   bundle: ArtifactBundle,
@@ -328,27 +330,32 @@ export function deriveAuditState(
     ),
   );
 
-  // Backward-compat: old artifacts only have `reviewed`; new artifacts have
-  // contract_reviewed and conceptual_reviewed. Treat both as satisfied when
-  // the legacy flag is set and neither new flag is present.
-  // Guard: a stale design_assessment.json must NOT activate the legacy path —
-  // the artifact was written by an old executor before the split; once stale it
-  // triggers design_assessment_current and the executor will write a fresh
-  // artifact with the new fields. Letting a stale legacy artifact permanently
-  // satisfy both obligations bypasses the split-review passes (ARC-14c59af5-2).
-  const legacyReviewed =
-    bundle.design_assessment?.reviewed === true &&
-    bundle.design_assessment?.contract_reviewed !== true &&
-    bundle.design_assessment?.conceptual_reviewed !== true &&
-    !staleArtifacts.has("design_assessment.json");
-
+  // INVALIDATED AT LOAD, never translated. A pre-split `design_assessment.json`
+  // carries only the combined `reviewed` flag and `review_findings`; it records
+  // ONE pass that no longer exists, so it cannot satisfy either of the two the
+  // tool now runs — the question it answered ("was the design assessed?") is not
+  // the question asked ("was THIS pass run, against THIS round?"). Reading it as
+  // both would hand a resumed pre-split directory two satisfied obligations
+  // whose reviews never happened under the current vocabulary.
+  //
+  // The invalidation is TOTAL, deliberately: the old flag is not even read here,
+  // and the structural refresh does not carry it forward
+  // (`structureExecutors.ts`). So a resumed pre-split run leaves BOTH
+  // obligations actionable, is re-asked for each current pass, and its
+  // `review_findings` never re-enter the merged report through
+  // `mergeFindings`.
+  //
+  // What is deliberately NOT done is deleting the stale artifacts from disk: the
+  // run was paid for, the old findings stay readable for a human, and the
+  // re-review is scoped by the snapshot mechanism exactly as any other
+  // post-staleness re-review is.
   obligations.push(
     obligation(
       "design_review_contract_completed",
       designReviewPassState(
         bundle,
         "contract",
-        bundle.design_assessment?.contract_reviewed === true || legacyReviewed,
+        bundle.design_assessment?.contract_reviewed === true,
       ),
     ),
   );
@@ -359,7 +366,7 @@ export function deriveAuditState(
       designReviewPassState(
         bundle,
         "conceptual",
-        bundle.design_assessment?.conceptual_reviewed === true || legacyReviewed,
+        bundle.design_assessment?.conceptual_reviewed === true,
       ),
     ),
   );

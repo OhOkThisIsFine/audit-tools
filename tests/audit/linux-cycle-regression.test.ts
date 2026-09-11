@@ -122,14 +122,10 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
         );
         continue;
       }
-      if (step.step_kind === "design_review") {
-        await mkdir(submissionsDir(artifactsDir), { recursive: true });
-        await writeFile(
-          laneSubmissionPath(artifactsDir, GATE_LANES.design_review_legacy),
-          JSON.stringify([], null, 2) + "\n",
-        );
-        continue;
-      }
+      // `design_review` (the pre-split combined step kind) is deliberately NOT
+      // answered here: the lane it belonged to is retired, so a run reaching it
+      // is a pre-split directory being re-asked for both current passes. The
+      // walker answers those below, under their own kinds.
       if (step.step_kind === "design_review_parallel") {
         await mkdir(submissionsDir(artifactsDir), { recursive: true });
         await writeFile(
