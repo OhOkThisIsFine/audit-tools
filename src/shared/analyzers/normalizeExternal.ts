@@ -156,6 +156,7 @@ export function normalizeGenericExternalResults(
     };
   };
   const results = valid.map((item, index) => {
+      // construction-site: AnalyzerLeadProvenance (the provenance object spread into each normalized lead)
       const provenance = provenanceFor(item);
       return {
         id: item.id ?? `${tool}-${index + 1}`,

@@ -12,6 +12,7 @@ export function ingestAuditResults(
 ): CoverageMatrix {
   const matrix: CoverageMatrix = JSON.parse(JSON.stringify(coverageMatrix));
   const fileCoverage: FileCoverageRecord[] = results.flatMap((result) =>
+    // construction-site: CoverageFileRecord
     result.file_coverage.map((coverage) => ({
       path: coverage.path,
       total_lines: coverage.total_lines,

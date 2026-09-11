@@ -1123,6 +1123,7 @@ function toAuditResult(
     pass_id: binding.pass_id,
     lens: binding.lens,
     file_coverage: result.file_coverage
+      // construction-site: CoverageFileRecord
       .map((coverage) => ({
         path: coverage.path,
         total_lines: coverage.total_lines,
@@ -1355,6 +1356,8 @@ export async function ingestAuditHostResults(params: {
       );
     }
     resultIds.add(result.result_id);
+    // construction-site: AuditResult
+    // construction-site: Finding (the `findings` array; `lens` defaults from the enclosing contract, already spread in)
     additions.push({
       work_item_id: entry.work_item_id,
       prompt_sha256: entry.prompt_sha256,

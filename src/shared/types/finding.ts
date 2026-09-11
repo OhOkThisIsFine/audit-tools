@@ -380,6 +380,10 @@ export const FindingSchema = z.object({
    * quote-and-verify (tier-1) grounding in place. Absent for findings with no
    * runnable behavior claim.
    */
+  // contract-construction-sites: exempt — ExecutableAnchor is authored by the HOST
+  // on a finding it submits (S7 tier-2: it names a command the tool then runs).
+  // The tool only VALIDATES and RUNS what arrives; it never constructs one, so
+  // there is no producer site to mark.
   executable_anchor: ExecutableAnchorSchema.optional(),
   /** Contract-pipeline goal this generated remediation finding belongs to. */
   contract_goal_id: z.string().optional(),

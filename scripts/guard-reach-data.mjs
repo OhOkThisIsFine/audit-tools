@@ -20,8 +20,22 @@
 // Glob grammar is check-doc-manifest.mjs's: `*` within a segment, `**/` across
 // segments, `?` one character.
 
+// sites-pinned: tests/shared/guard-reach-gate.test.ts, tests/shared/guard-form-reach.test.ts
+//   Every row added to this registry is pinned by the guard-reach suite, which
+//   drives the real reconciler over synthetic registries and refuses a stale or
+//   phantom claim.
+
 import { RUNTIME_NAME_SOURCES } from "./shared/generate-runtime-artifact-names.mjs";
 import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror-data.mjs";
+// The gate's own scan set and the schemas its producer pairing names — imported
+// from the modules that OWN them, never re-listed here. This registry is loaded
+// pre-build by the commit gate, so both sides are `.mjs` DATA twins of the
+// TypeScript declarations: `npm run check:contract-sites` and
+// `npm run check:sites-pinned` fail the build if a twin drifts from its source.
+import {
+  CONTRACT_SCHEMA_PRODUCER_SCHEMAS,
+  SITES_PINNED_PATHS,
+} from "./shared/guard-reach-derived-paths.generated.mjs";
 
 /**
  * @typedef {object} GuardRow
@@ -797,6 +811,70 @@ export const GUARDS = [
     note: 'preCommit false is deliberate (CI-only) — cheap, flip to reach if wanted',
   },
   {
+    id: 'check:contract-sites',
+    kind: 'gate',
+    impl: 'check:contract-sites',
+    preCommit: 'reach',
+    fix:
+      'a validated contract type has no producer construction site, or a rendered worker schema no ' +
+      'longer carries its contract\'s field set — run `npm run check:contract-sites` for the exact ' +
+      'refusal. Add `// construction-site: <Type>` at the constructing site (or a ' +
+      '`// contract-construction-sites: exempt — <why>` where the absence is deliberate), and ' +
+      'regenerate the schema with `npm run generate-schemas`',
+    note:
+      'per-type construction-site derivation for every validated contract type. Answers the ' +
+      '"contract coverage is derived from where TESTS live" defect (minor-bugs, 2026-07-25): the ' +
+      'sites are derived FROM THE CONTRACT, so a producer under scripts/ cannot miss a field the ' +
+      'contract added. NOT a typecheck — a cast makes a typecheck inert. UNCOVERED: a site marker ' +
+      'says a producer constructs the contract HERE; it does not prove the construction passes ' +
+      'every field (a spread of a partial still compiles), and it does not prove the site is ' +
+      'reached at runtime. The half closed is the DENOMINATOR',
+  },
+  {
+    id: 'check:sites-pinned',
+    kind: 'gate',
+    impl: 'check:sites-pinned',
+    preCommit: 'reach',
+    fix:
+      'a staged source hunk has no `// sites-pinned: <test file names>` declaration binding it to ' +
+      'the test(s) expected to fail, or the declaration names a test file that is not tracked — ' +
+      'add or correct the declaration, or a `// sites-pinned: none — <why>` where the file asserts ' +
+      'no behaviour',
+    note:
+      'the per-site pinning gate (open-bugs, owner decision 2026-07-25 — BUILD it, with a ' +
+      'DIFF-DERIVED site list). The site list is derived from the staged diff, so the declared-7-vs-' +
+      '>=11-hunks fail-open is closed by construction. ⚠ THE NAME BINDING IS AUTHOR-SUPPLIED: the ' +
+      'expected-failing test names come from the declaration, so this measures "the declared tests ' +
+      'exist" and NOT "a test asserting THIS behaviour went red" — the gate prints that admission ' +
+      'in its own output and its result is NOT admissible as loop-core attestation evidence. The ' +
+      'derivation that would make it admissible is a baseline coverage/ownership map, which is not ' +
+      'built',
+  },
+  {
+    id: 'check:guard-reach-paths',
+    kind: 'gate',
+    impl: 'check:guard-reach-paths',
+    preCommit: 'reach',
+    fix:
+      'scripts/shared/guard-reach-derived-paths.generated.mjs no longer matches the declarations ' +
+      'it is projected from — re-render it with ' +
+      '`node scripts/shared/generate-guard-reach-paths.mjs`, then re-stage. Run ' +
+      '`npm run check:guard-reach-paths` for the exact drift',
+    note:
+      'freshness for the pre-build twins this registry imports (the pinning gate\'s scan set, and ' +
+      'the schemas the worker-schema producer writes). The registry is loaded by the commit gate ' +
+      'under plain node with no build, so those two declarations cannot be imported as TypeScript ' +
+      '— the twin is generated from both sources and this gate fails the build when it drifts. ' +
+      'REACH: the leg fires when the staged set intersects the union of the `files` globs of every ' +
+      'REACH row citing this gate — which is where both SOURCES and the twin itself are claimed ' +
+      '(the staged-source-hunks row carries `scripts/check-sites-pinned.mjs` and PINNED_PATHS\' ' +
+      'own contents; the contract row carries `src/audit/contracts/workerSchemas.ts` and the ' +
+      'schema files) plus the `scripts/shared/**` glob — ∪ its own impl script path and ' +
+      'package.json. That reach is what makes the leg honest: a changed CONTRACT_SCHEMA_PRODUCERS ' +
+      'or PINNED_PATHS with no unclaimed file and no unwired guard goes red HERE, at commit, ' +
+      'which is the only boundary that sees a stale twin before it lands',
+  },
+  {
     id: 'check:guard-reach',
     kind: 'gate',
     impl: 'check:guard-reach',
@@ -1090,6 +1168,24 @@ export const GUARDS = [
   { id: 'closeout-challenge-gate', kind: 'hook', impl: '.claude/hooks/closeout-challenge-gate.mjs' },
 
   // ── contract tests (the guards' own guards) ────────────────────────────────
+  {
+    id: 'sites-pinned-gate-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/sites-pinned-gate.test.ts',
+    note:
+      'drives scripts/check-sites-pinned.mjs against fixture diffs (the derivation, every exclusion ' +
+      'rule, and each refusal) and, for the one refusal that must fire exactly as shipped, spawns the ' +
+      'real CLI against a throwaway git repo',
+  },
+  {
+    id: 'contract-construction-sites-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/contract-construction-sites.test.ts',
+    note:
+      'drives the site walker against fixture trees AND holds the CONTRACT_PROPERTY_SHAPES registry ' +
+      'against the REAL zod schemas (property set and per-field optionality), so the registry cannot ' +
+      'drift from the contracts it describes',
+  },
   {
     id: 'guard-form-reach-test',
     kind: 'contract-test',
@@ -2018,6 +2114,61 @@ export const REACH = [
       'applies on top, so a record written for this session against different content is caught too',
   },
   {
+    area: 'validated contract types & their construction sites',
+    // DERIVED from the registry's own rows, never hand-listed: the contract
+    // registry and the schema-producer pairing are the sources, the gate reads
+    // them both, and a contract type added to the registry joins this reach in
+    // the same edit.
+    files: [
+      'src/shared/types/contractPropertyShapes.ts',
+      'src/shared/validation/contractConstructionSites.ts',
+      'scripts/check-contract-sites.mjs',
+      'src/audit/contracts/workerSchemas.ts',
+      ...CONTRACT_SCHEMA_PRODUCER_SCHEMAS,
+    ],
+    guardedBy: [
+      'check:contract-sites',
+      'contract-construction-sites-test',
+      // The schema-producer SOURCE and the schema files it names are also the
+      // inputs of the pre-build twin (CONTRACT_SCHEMA_PRODUCER_SCHEMAS in
+      // scripts/shared/guard-reach-derived-paths.generated.mjs), so this row is
+      // what gives check:guard-reach-paths its reach over them: editing
+      // CONTRACT_SCHEMA_PRODUCERS without re-rendering the twin goes red at
+      // commit rather than in release CI.
+      'check:guard-reach-paths',
+    ],
+    uncovered:
+      'a site MARKER says a producer constructs the contract at that point — it does not prove the ' +
+      'construction passes every field, so a producer spreading a partial object still compiles and ' +
+      'still passes; and nothing proves the marked site is REACHED at runtime. The derivation ' +
+      'closes the DENOMINATOR (a producer can no longer be absent from the list because nobody ' +
+      'remembered it), which is the half the backlog entry states',
+  },
+  {
+    area: 'staged source hunks & their declared pinning tests',
+    // The scan set is the gate's own PINNED_PATHS, imported rather than copied,
+    // so a path added there joins the commit gate's reach without an edit here.
+    files: [
+      ...SITES_PINNED_PATHS,
+      'scripts/check-sites-pinned.mjs',
+    ],
+    guardedBy: [
+      'check:sites-pinned',
+      'sites-pinned-gate-test',
+      // Same reasoning as the contract row above: PINNED_PATHS and its gate
+      // script are two of the twin's sources, so citing this gate here is what
+      // gives check:guard-reach-paths its reach over them.
+      'check:guard-reach-paths',
+    ],
+    uncovered:
+      'the SITE LIST is derived from the diff, but the expected-failing TEST NAMES are ' +
+      'author-supplied (read from the `// sites-pinned:` declaration), so the gate measures "the ' +
+      'declared tests exist as tracked test files" and NOT "a test asserting THIS behaviour went ' +
+      'red". A `--checked "red-green validated"` citing it is still the author\'s word about their ' +
+      'own work — the gate prints that admission in its own output. The derivation that would make ' +
+      'it admissible is a baseline coverage/ownership map, which is not built',
+  },
+  {
     area: 'pipeline, smoke & release scripts',
     files: [
       'scripts/audit/**',
@@ -2411,13 +2562,25 @@ export const REACH = [
  * @property {string} [contractTest]
  * @property {boolean} [onDemand]
  * @property {string} [reason]
- * @property {string[]} [artifacts]
+ * @property {string[]} [artifacts] every tracked file this generator WRITES.
+ *   Read by two gates: check:generated-artifacts (the artifact must be tracked)
+ *   and check:sites-pinned (a generated file needs no `sites-pinned:`
+ *   declaration, because its content is derived and a hand edit is exactly what
+ *   the freshness authority forbids).
+ * @property {string[]} [generatedArtifacts] tracked files this generator WRITES
+ *   whose freshness is held by a contract test that re-renders and byte-compares
+ *   without naming them as inputs — the same exclusion set as `artifacts`, split
+ *   out because these are not consumed by any freshness CHECK and so cannot be
+ *   written into an `artifacts` row without changing what that field means.
  * @property {string} [note]
  */
 
 /** @type {GeneratedRow[]} */
 export const GENERATED = [
   {
+    // Its own generator, in the sense this registry means: it renders the
+    // generated-block marker pair inside every doc that carries one, under
+    // `--write`. It generates no separate artifact, so it declares none.
     generator: 'scripts/check-doc-manifest.mjs',
     authority: 'check',
     npmScript: 'check:doc-manifest',
@@ -2452,13 +2615,39 @@ export const GENERATED = [
   { generator: 'scripts/shared/generate-backlog-index.mjs', authority: 'check', npmScript: 'check:backlog-index' },
   { generator: 'scripts/shared/generate-ci-trigger-paths.mjs', authority: 'check', npmScript: 'check:ci-trigger-paths' },
   { generator: 'scripts/shared/generate-cli-surface.mjs', authority: 'check', npmScript: 'check:cli-surface' },
-  { generator: 'scripts/shared/generate-constitutional-doc-paths.mjs', authority: 'check', npmScript: 'check:constitutional-doc-paths' },
+  {
+    generator: 'scripts/shared/generate-constitutional-doc-paths.mjs',
+    authority: 'check',
+    npmScript: 'check:constitutional-doc-paths',
+    artifacts: ['scripts/shared/constitutional-doc-paths.generated.mjs'],
+  },
   { generator: 'scripts/shared/generate-executor-producers.mjs', authority: 'check', npmScript: 'check:executor-producers' },
-  { generator: 'scripts/shared/generate-friction-categories.mjs', authority: 'check', npmScript: 'check:friction-categories' },
+  {
+    generator: 'scripts/shared/generate-friction-categories.mjs',
+    authority: 'check',
+    npmScript: 'check:friction-categories',
+    artifacts: ['scripts/shared/friction-categories.generated.mjs'],
+  },
+  {
+    generator: 'scripts/shared/generate-guard-reach-paths.mjs',
+    authority: 'check',
+    npmScript: 'check:guard-reach-paths',
+    artifacts: ['scripts/shared/guard-reach-derived-paths.generated.mjs'],
+    note:
+      'The pre-build twins this registry itself imports (the pinning gate\'s scan set and the ' +
+      'worker-schema producer\'s schema files). Loaded under plain node by the commit gate, so ' +
+      'neither source can be imported as TypeScript — and a hand-kept second copy is the drift ' +
+      'this repository bans.',
+  },
   { generator: 'scripts/shared/generate-handoff-roadmap.mjs', authority: 'check', npmScript: 'check:handoff-roadmap' },
   { generator: 'scripts/shared/generate-ingestion-checks.mjs', authority: 'check', npmScript: 'check:ingestion-checks' },
   { generator: 'scripts/shared/generate-loop-core-patterns.mjs', authority: 'check', npmScript: 'check:loop-core-patterns' },
-  { generator: 'scripts/shared/generate-runtime-artifact-names.mjs', authority: 'check', npmScript: 'check:runtime-artifact-names' },
+  {
+    generator: 'scripts/shared/generate-runtime-artifact-names.mjs',
+    authority: 'check',
+    npmScript: 'check:runtime-artifact-names',
+    artifacts: ['scripts/shared/runtime-artifact-names.generated.mjs'],
+  },
   { generator: 'scripts/shared/generate-spec-mirrors.mjs', authority: 'check', npmScript: 'check:spec-mirrors' },
   {
     generator: 'scripts/nightly/render-inbox.mjs',
@@ -2477,6 +2666,12 @@ export const GENERATED = [
     generator: 'scripts/audit/generate-schemas.mjs',
     authority: 'contractTest',
     contractTest: 'tests/audit/worker-schema-generation.test.ts',
+    // `schemas/*.schema.json` are the generator's real outputs, but they are also
+    // hand-declared inputs elsewhere (each is a CONTRACT_SCHEMA_PRODUCERS key),
+    // and this field means "written by this generator" only under a freshness
+    // CHECK — which this row does not use. Named here under the split field so
+    // the pinning gate excludes the file the schema test pins by generation.
+    generatedArtifacts: ['src/audit/extractors/languageMap.generated.ts'],
   },
   {
     generator: 'scripts/remediate/generate-auditor-contract-fixture.mjs',

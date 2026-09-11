@@ -228,6 +228,7 @@ async function runTsc(
         // is critical|high|medium|low|info — a tsc error maps to "high"
         // (COR-5d9f2421), not the raw "error".
         severity: "high",
+        // construction-site: FindingLocation
         path: match[1].replace(/\\/g, "/"),
         line_start: parseInt(match[2], 10),
         summary: match[3],

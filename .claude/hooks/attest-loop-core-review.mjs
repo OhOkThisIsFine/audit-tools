@@ -106,6 +106,28 @@ if (attesterClass !== 'agent' && attesterClass !== 'human') {
 const AGENT_ENV_MARKERS = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CODEX_SANDBOX', 'GEMINI_CLI'];
 const agentEnvMarkers = AGENT_ENV_MARKERS.filter((k) => process.env[k] != null && process.env[k] !== '');
 
+// ── what counts as ADMISSIBLE --checked evidence ─────────────────────────────
+// The floor below is a floor on LENGTH, and length is not evidence. What makes
+// the field worth anything is that it names a defect the writer went LOOKING
+// for and the mechanism that would have caught it — a claim a later reader can
+// check against the tree, not a verdict about the writer's own work.
+//
+//   ADMISSIBLE: a named defect class + the reach that was exercised, e.g.
+//     "checked admission-ledger double-release on 429 backoff; reverted the
+//      reservation guard and the ledger test went red"
+//   NOT ADMISSIBLE — and this is the shape to refuse to write:
+//     • "red-green validated" with nothing named — the author's word about
+//       their own work. `npm run check:sites-pinned` derives a site list from
+//       the diff, but its expected-failing TEST NAMES are author-supplied, so
+//       ITS OUTPUT IS NOT ADMISSIBLE EITHER (it prints that admission itself).
+//     • "all tests pass" / "the suite is green" — a fact about the tree, not
+//       about what was reviewed.
+//     • "reviewed by <agent>" alone — an identity, not a finding.
+//
+// The gate enforces existence, freshness, staged-tree binding and verdict; it
+// deliberately does NOT grade this text. This block is here because the field
+// is written HERE, and a rule that lives only in a doc is one nobody reads at
+// the moment they are typing the sentence.
 // --checked is REQUIRED and must describe a real review (>= 20 non-space chars).
 const checked = (flags.checked ?? '').trim();
 if (checked.replace(/\s/g, '').length < 20) {
