@@ -379,10 +379,12 @@ export interface RemediationItemState {
    * {@link host_landed_files}; this is the per-item attribution that union
    * cannot express.
    *
-   * NOTHING READS IT YET: no resume path, no close gate, no artifact. It is
-   * written at acceptance and nothing consumes it. (Stated outright rather than
-   * left as an implied promise — the earlier comment here advertised a resume
-   * reader that does not exist.)
+   * ITS READER IS `hasLandedCommitFor` (`steps/dispatch/hostHandoff.ts`), which
+   * asks whether ANY finding of a work item carries one. The ingest uses that
+   * answer to tell PARTIAL PROGRESS from unfinished work: a refusal that is
+   * "nothing is at the bound path" splits on it, so an item whose edits landed
+   * but whose result file is missing is reported to the host rather than
+   * disappearing as a bare missing-result line.
    */
   host_landed_commit?: string;
   /** Repo-relative, path-sorted files the landed commit changed (see above). */

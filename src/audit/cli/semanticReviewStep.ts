@@ -1,6 +1,11 @@
 import { resolve } from "node:path";
 
-import { deriveLaneDemand, linkFrictionRunIds, readJsonFile } from "audit-tools/shared";
+import {
+  deriveLaneDemand,
+  isMissingObservation,
+  linkFrictionRunIds,
+  readJsonFile,
+} from "audit-tools/shared";
 
 import { AUDIT_FRICTION_RUN_ID } from "../orchestrator/nextStep.js";
 
@@ -57,27 +62,48 @@ function toHostTask(task: AuditTask): AuditHostTask {
 function renderIngestIssueLines(
   issues: readonly AuditHostIngestIssue[],
 ): string[] {
-  if (issues.length === 0) return [];
+  // MISSING and REJECTED are stated under their OWN headings. They shared one
+  // before, which forced a host parser to special-case the message text — the
+  // measured friction — and told the reader the same thing about two situations
+  // whose remedies are opposite: one is patience, the other is a repair. The
+  // split is on the CODE, so rewording a message cannot move an item between
+  // the two.
+  const missing = issues.filter(isMissingObservation);
+  const rejected = issues.filter((issue) => !isMissingObservation(issue));
+  const section = (heading: string, lines: readonly string[]): string[] =>
+    lines.length === 0 ? [] : [heading, "", ...lines, ""];
   return [
-    "## Result status requiring attention",
-    "",
-    ...issues.map(
-      (issue) =>
-        `- ${issue.work_item_id ? `\`${issue.work_item_id}\` (${issue.code}): ` : `${issue.code}: `}` +
-        `${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`,
+    ...section(
+      "## Results not yet written",
+      missing.map((issue) => `- ${describeIssue(issue)}`),
     ),
-    "",
-    // NOT "the bindings are unchanged": the run id is derived from the review
-    // obligation, so a partial ingest does NOT re-mint the run and the bound
-    // paths of carried-over items are stable. What still moves is the ASK — a
-    // re-planned task's prompt digest, and therefore its bound path, is
-    // different, and a result written against the old ask is correctly refused.
-    // So the workload published below is the authority for what to write, and a
-    // path quoted above is only guaranteed current for an item whose ask the
-    // ingest did not change.
-    "Each named work item is still pending and is republished in the workload below. Write its repaired result at that workload's bound `result_path` — that workload is always the authority for where a result is read.",
-    "",
+    ...section(
+      "## Result status requiring attention",
+      rejected.map((issue) => `- ${describeIssue(issue)}`),
+    ),
+    ...(issues.length === 0
+      ? []
+      : [
+          // NOT "the bindings are unchanged": the run id is derived from the review
+          // obligation, so a partial ingest does NOT re-mint the run and the bound
+          // paths of carried-over items are stable. What still moves is the ASK — a
+          // re-planned task's prompt digest, and therefore its bound path, is
+          // different, and a result written against the old ask is correctly refused.
+          // So the workload published below is the authority for what to write, and a
+          // path quoted above is only guaranteed current for an item whose ask the
+          // ingest did not change.
+          "Each named work item is still pending and is republished in the workload below. Write its repaired result at that workload's bound `result_path` — that workload is always the authority for where a result is read.",
+          "",
+        ]),
   ];
+}
+
+/** One issue as a bullet, with its locators. Shared by both sections above. */
+function describeIssue(issue: AuditHostIngestIssue): string {
+  return (
+    `${issue.work_item_id ? `\`${issue.work_item_id}\` (${issue.code}): ` : `${issue.code}: `}` +
+    `${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`
+  );
 }
 
 /**
@@ -180,7 +206,8 @@ export async function renderSemanticReviewStep(params: {
         `Published ${handoff.workload.work_items.length} pending semantic-review ` +
         `work item(s) for host execution.` +
         (issues.length > 0
-          ? ` ${issues.length} prior submission(s) could not be accepted — see "Result status requiring attention".`
+          ? ` ${issues.length} prior submission(s) were not accepted — see "Result status requiring attention"` +
+            ` and "Results not yet written".`
           : ""),
       pending_tasks: handoff.workload.work_items.length,
       completed_tasks: completedTaskIds.size,

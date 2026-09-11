@@ -98,7 +98,17 @@ describe("host ingest issues are recorded before any exit path", () => {
   it("still renders the issues on the re-emit path", () => {
     // The durable half moving earlier must not cost the rendered half, which is
     // what the host reads when nothing was accepted.
+    //
+    // The render now lives in `remediationResultDiagnostics` — it grew a
+    // missing/rejected split, which is more than this function should carry —
+    // so this asserts the PROPERTY (the step's prompt is fed the diagnostics)
+    // rather than the heading's presence in this one function's body. Pinning
+    // the heading here made a correct extraction read as a regression.
     const body = bodyOfBuildImplementDispatchStep().join("\n");
-    expect(body).toContain("Result status requiring attention");
+    expect(body).toContain("remediationResultDiagnostics(ingested)");
+    const helper = readFileSync(SOURCE, "utf8");
+    expect(helper).toContain("## Result status requiring attention");
+    // Both sections the host needs to tell patience from a repair.
+    expect(helper).toContain("## Results not yet written");
   });
 });

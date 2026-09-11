@@ -10,6 +10,8 @@ import {
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   appendSubmissionEvent,
   enrichMissingSubmissionIssues,
+  isMissingObservation,
+  type WorkItemOutcome,
   compareCodeUnits,
   contentSha256,
   deriveLaneDemand,
@@ -220,6 +222,16 @@ export interface RemediationHostIngestSummary {
   readonly completed_work_item_ids: readonly string[];
   readonly pending_work_item_ids: readonly string[];
   readonly issues: readonly RemediationHostIngestIssue[];
+  /**
+   * Every work item this ingest OBSERVED, by the outcome it observed — so a
+   * caller never has to re-derive progress from the issue list, where an item
+   * with no result file and an item whose write succeeded but whose result is
+   * missing both used to read as the same absence.
+   *
+   * Keyed by work item id; content-sorted on insertion so a re-ingest of an
+   * unchanged frontier produces byte-identical content.
+   */
+  readonly work_item_outcomes: ReadonlyMap<string, WorkItemOutcome>;
   readonly state_changed: boolean;
   readonly state: CurrentRemediationHostState;
 }
@@ -2664,6 +2676,7 @@ export async function ingestRemediationHostResults(params: {
   const acc: HostIngestAccumulators = {
     issues: validated.issues,
     completed: [],
+    workItemOutcomes: new Map(),
     resultIds: new Set<string>(),
     landedFiles: new Set(nextState.applied_edit_surface ?? []),
     settledFindingIds: new Set<string>(),
@@ -2768,8 +2781,9 @@ type HostItemVerdict =
        * `corroborateHostResult` verified the commit resolves, is reachable from
        * HEAD, and that its mechanically derived diff exactly equals
        * `changedFiles` within the item's write scope. Persisted onto each
-       * settled item (see `RemediationItemState.host_landed_commit`) for a
-       * later boundary to attribute; nothing reads it back yet.
+       * settled item (see `RemediationItemState.host_landed_commit`), which
+       * `hasLandedCommitFor` reads back below to separate partial progress
+       * from unfinished work.
        */
       readonly landedCommit: string;
       readonly changedFiles: readonly string[];
@@ -2791,6 +2805,15 @@ type HostItemVerdict =
 interface HostIngestAccumulators {
   readonly issues: RemediationHostIngestIssue[];
   readonly completed: string[];
+  /**
+   * Per-item OBSERVED outcome, written where the item's bound path is read and
+   * carried onto the summary. A work item is recorded `rejected` when an issue
+   * names it, `missing_result_with_commit` when nothing is at its path but the
+   * run holds a corroborated commit for one of its findings, and
+   * `awaiting_result` otherwise — so "the host has not written this yet" and
+   * "the host wrote it and we refused it" never share a shape.
+   */
+  readonly workItemOutcomes: Map<string, WorkItemOutcome>;
   readonly resultIds: Set<string>;
   readonly landedFiles: Set<string>;
   /**
@@ -2856,6 +2879,7 @@ async function validateHostResultBundle(input: {
         completed_work_item_ids: [],
         pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
         issues,
+        work_item_outcomes: new Map(),
         state_changed: false,
         state: nextState,
       },
@@ -2891,6 +2915,7 @@ async function validateHostResultBundle(input: {
         completed_work_item_ids: [],
         pending_work_item_ids: [],
         issues,
+        work_item_outcomes: new Map(),
         state_changed: false,
         state: nextState,
       },
@@ -2915,6 +2940,7 @@ async function validateHostResultBundle(input: {
         completed_work_item_ids: [],
         pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
         issues,
+        work_item_outcomes: new Map(),
         state_changed: false,
         state: nextState,
       },
@@ -2957,6 +2983,29 @@ async function validateHostResultBundle(input: {
  * for a recovery acceptance still goes down before that item's verdict is
  * emitted, so no acceptance can outrun its record.
  */
+/**
+ * Did a corroborated commit already land for this work item, even though no
+ * result file is at its bound path?
+ *
+ * Ground truth, not a claim: `host_landed_commit` is written only after
+ * `corroborateHostResult` verified the commit resolves, is reachable from HEAD,
+ * and that its mechanically derived diff equals the result's `changed_files`
+ * within the item's write scope. Anything less is not a landing.
+ *
+ * ANY finding of the item counts, because the commit is attributed per FINDING
+ * and a work item is a bundle of them: a commit for one of its findings is work
+ * this item did, which is exactly what the host needs to know before rewriting
+ * the result from scratch.
+ */
+function hasLandedCommitFor(
+  state: CurrentRemediationHostState,
+  workItem: RemediationHostWorkItem,
+): boolean {
+  return workItem.finding_ids.some(
+    (findingId) => typeof state.items[findingId]?.host_landed_commit === "string",
+  );
+}
+
 async function executeHostVerificationReruns(
   ctx: HostIngestContext,
   acc: HostIngestAccumulators,
@@ -2997,6 +3046,26 @@ async function executeHostVerificationReruns(
     });
     if (!scan.ok) {
       acc.issues.push(scan.issue);
+      // A refusal is a REFUSAL — unless the refusal is "nothing is there", in
+      // which case it says nothing about whether the host did the work. The run
+      // holds a CORROBORATED commit for a settled item (see
+      // `RemediationItemState.host_landed_commit`), and an item whose edits
+      // landed but whose result is missing is PARTIAL PROGRESS the host must be
+      // told about; it used to disappear as a bare missing-result line.
+      // THREE-WAY, not two. "Nothing is at the bound path" is an OBSERVATION,
+      // and it splits again on whether the run holds a corroborated commit for
+      // this item: with one it is partial progress, without one it is simply
+      // unfinished work. Only a REFUSAL of something that WAS written is
+      // `rejected`. Collapsing the missing half into `rejected` would restore
+      // exactly the conflation this split exists to end.
+      acc.workItemOutcomes.set(
+        workItem.id,
+        !isMissingObservation(scan.issue)
+          ? "rejected"
+          : hasLandedCommitFor(nextState, workItem)
+            ? "missing_result_with_commit"
+            : "awaiting_result",
+      );
       continue;
     }
     const parsed = scan.parsed;
@@ -3222,7 +3291,9 @@ function commitRemediationStateUpdates(
       item.completed_at = verdict.at;
       // The corroborated outcome is PERSISTED per item, not just folded into the
       // run-wide `applied_edit_surface`, so the attribution survives the process
-      // that observed it. Persisted only: no reader consumes it yet.
+      // that observed it — and read back by `hasLandedCommitFor` on the next
+      // ingest, which is how an item whose edits landed but whose result file
+      // never arrived is told apart from one that was never attempted.
       item.host_landed_commit = verdict.landedCommit;
       item.host_landed_files = [...verdict.changedFiles];
       delete item.failure_reason;
@@ -3248,11 +3319,24 @@ function commitRemediationStateUpdates(
     stateChanged = true;
   }
 
+  // Every remaining work item is `awaiting_result` unless the verify loop
+  // already classified it: an item the loop never reached (a sibling's refusal
+  // ended the pass early) is still genuinely unread, and "not read" is the
+  // honest answer there — never a claim that something was refused.
+  const workItemOutcomes = new Map<string, WorkItemOutcome>();
+  for (const workItem of ctx.effectiveWorkload.work_items) {
+    workItemOutcomes.set(
+      workItem.id,
+      acc.workItemOutcomes.get(workItem.id) ?? "awaiting_result",
+    );
+  }
+
   return {
     accepted_count: acc.completed.length,
     completed_work_item_ids: acc.completed,
     pending_work_item_ids: pendingWorkItemIds,
     issues,
+    work_item_outcomes: workItemOutcomes,
     state_changed: stateChanged,
     state: nextState,
   };

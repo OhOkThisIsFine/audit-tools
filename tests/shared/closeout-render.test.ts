@@ -5,7 +5,7 @@
 // an empty section is omitted from the report (short), but omitting it requires
 // stating "none" in the input (intentional). A test, not prose, because the
 // prose version of this rule is exactly what decayed twice.
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,28 @@ import { writeSuiteGreenStamp } from '../../scripts/shared/suiteGreenStamp.mjs';
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const SCRIPT = join(REPO_ROOT, 'scripts', 'render-closeout.mjs');
 
+/**
+ * The renderer spawns in this file all share ONE environment rule: both
+ * session-id names are cleared unless the case sets them, so a developer
+ * running this suite inside a real session cannot have the fixture's record
+ * keyed to — or its commit range derived from — that live session.
+ *
+ * A helper rather than a repeated literal because the file has several spawn
+ * sites and the NEXT one added is exactly the one that would forget.
+ */
+function renderEnv(
+  dir: string,
+  overrides: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    CLAUDE_PROJECT_DIR: dir,
+    CLAUDE_SESSION_ID: '',
+    CLAUDE_CODE_SESSION_ID: '',
+    ...overrides,
+  };
+}
+
 function render(
   input: unknown,
   extraArgs: string[] = [],
@@ -28,15 +50,11 @@ function render(
   writeFileSync(file, JSON.stringify(input), 'utf8');
   // CLAUDE_PROJECT_DIR points at the temp dir on purpose: the renderer writes a
   // HEAD-bound record the closeout Stop gate reads, and a test run must not
-  // forge one for the real repo.
+  // forge one for the real repo. See `renderEnv` for the session-id rule.
   const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file, ...extraArgs], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
-    // CLAUDE_SESSION_ID is CLEARED by default: the session record is a range
-    // source, and a developer running this suite inside a real session would
-    // otherwise have the repo's own `.claude/hooks/.state/sessions/<id>.json`
-    // picked up against the throwaway temp dir, which has no such commit.
-    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CLAUDE_SESSION_ID: '', ...envOverrides },
+    env: renderEnv(dir, envOverrides),
   });
   return { code: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
@@ -98,7 +116,7 @@ describe('render-closeout: --start, the flag the closeout SKILL instructs', () =
     const r = spawnSyncHidden(
       process.execPath,
       [SCRIPT, '--in', file, '--start', 'HEAD~1'],
-      { cwd: dir, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: dir } },
+      { cwd: dir, encoding: 'utf8', env: renderEnv(dir) },
     );
 
     expect(r.status, r.stderr).toBe(0);
@@ -167,7 +185,7 @@ describe('render-closeout: --start, the flag the closeout SKILL instructs', () =
     const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
       cwd: dir,
       encoding: 'utf8',
-      env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CLAUDE_SESSION_ID: sessionId },
+      env: renderEnv(dir, { CLAUDE_SESSION_ID: sessionId }),
     });
 
     expect(r.status, r.stderr).toBe(0);
@@ -221,7 +239,7 @@ describe('render-closeout: --start, the flag the closeout SKILL instructs', () =
     const r = spawnSyncHidden(
       process.execPath,
       [SCRIPT, '--in', file, '--start', flagBase],
-      { cwd: dir, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CLAUDE_SESSION_ID: sessionId } },
+      { cwd: dir, encoding: 'utf8', env: renderEnv(dir, { CLAUDE_SESSION_ID: sessionId }) },
     );
 
     expect(r.status, r.stderr).toBe(0);
@@ -306,7 +324,7 @@ describe('render-closeout: silence is stated, then omitted', () => {
   // the only sections forbidden to use.
   it('never tells a REQUIRED section to write "none" — the advice --template used to walk into', () => {
     const dir = mkdtempSync(join(tmpdir(), 'closeout-tpl-'));
-    const env = { ...process.env, CLAUDE_PROJECT_DIR: dir };
+    const env = renderEnv(dir);
     const tpl = spawnSyncHidden(process.execPath, [SCRIPT, '--template'], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
@@ -357,11 +375,21 @@ describe('render-closeout: silence is stated, then omitted', () => {
     const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
       cwd: dir,
       encoding: 'utf8',
-      env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+      env: renderEnv(dir, { CLAUDE_CODE_SESSION_ID: 'content-bound-session' }),
     });
-    expect(r.status).toBe(0);
+    expect(r.status, r.stderr).toBe(0);
     const record = JSON.parse(
-      readFileSync(join(dir, '.claude', 'hooks', '.state', 'closeout-render', 'latest.json'), 'utf8'),
+      readFileSync(
+        join(
+          dir,
+          '.claude',
+          'hooks',
+          '.state',
+          'closeout-render',
+          'content-bound-session.json',
+        ),
+        'utf8',
+      ),
     );
     expect(record.version).toBe(2);
     expect(typeof record.tree).toBe('string');
@@ -372,6 +400,81 @@ describe('render-closeout: silence is stated, then omitted', () => {
     expect((git('rev-parse', 'HEAD').stdout ?? '').trim()).not.toBe(headBefore);
     // The content did not, so the record still describes the tree being handed off.
     expect(worktreeTree(dir)).toBe(record.tree);
+  });
+});
+
+describe('render-closeout: the record NAMES its session, and is keyed per session', () => {
+  // The record was ONE repo-global file whose ownership rested on a TIMESTAMP:
+  // the Stop gate compared `rendered_at` against the session registry's
+  // `registered_at`, so a CONCURRENT session's render — written after this one
+  // started — read as this one's own. The stated reason for the timestamp, that
+  // the renderer cannot read a session id, was false: it read
+  // `CLAUDE_SESSION_ID`, which nothing sets; the environment carries
+  // `CLAUDE_CODE_SESSION_ID`, whose value is exactly the filename of that
+  // session's record in the registry directory.
+  it('records CLAUDE_CODE_SESSION_ID and writes ONE FILE PER SESSION', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'closeout-sid-'));
+    const file = join(dir, 'in.json');
+    writeFileSync(file, JSON.stringify(minimal()), 'utf8');
+    const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      env: renderEnv(dir, { CLAUDE_CODE_SESSION_ID: 'sid-alpha' }),
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const stateDir = join(dir, '.claude', 'hooks', '.state', 'closeout-render');
+    const record = JSON.parse(readFileSync(join(stateDir, 'sid-alpha.json'), 'utf8'));
+    // The id the ENVIRONMENT supplies, not the one nothing sets.
+    expect(record.session_id).toBe('sid-alpha');
+    // Not one repo-global file: that is what made it last-writer-wins across
+    // concurrent sessions.
+    expect(existsSync(join(stateDir, 'latest.json'))).toBe(false);
+  });
+
+  it('two sessions rendering the SAME tree each keep their own record', () => {
+    // The load-bearing case. Both renders describe identical content, so a
+    // content-bound but session-blind reader cannot tell them apart — which is
+    // exactly how a concurrent session satisfied another's Stop gate.
+    const dir = mkdtempSync(join(tmpdir(), 'closeout-two-'));
+    const file = join(dir, 'in.json');
+    writeFileSync(file, JSON.stringify(minimal()), 'utf8');
+    const renderAs = (sid: string) =>
+      spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        env: renderEnv(dir, { CLAUDE_CODE_SESSION_ID: sid }),
+      });
+    expect(renderAs('sid-one').status).toBe(0);
+    expect(renderAs('sid-two').status).toBe(0);
+    const stateDir = join(dir, '.claude', 'hooks', '.state', 'closeout-render');
+    const one = JSON.parse(readFileSync(join(stateDir, 'sid-one.json'), 'utf8'));
+    const two = JSON.parse(readFileSync(join(stateDir, 'sid-two.json'), 'utf8'));
+    expect(one.session_id).toBe('sid-one');
+    expect(two.session_id).toBe('sid-two');
+    // Same tree, so a content comparison alone would have called these the same
+    // render — the session id is the only thing that separates them.
+    expect(one.tree).toBe(two.tree);
+  });
+
+  it('honours CLAUDE_SESSION_ID as the fallback when the code id is absent', () => {
+    // A host that sets only the older name keeps working; a name the
+    // environment does not supply is never guessed at.
+    const dir = mkdtempSync(join(tmpdir(), 'closeout-fallback-'));
+    const file = join(dir, 'in.json');
+    writeFileSync(file, JSON.stringify(minimal()), 'utf8');
+    const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      env: renderEnv(dir, { CLAUDE_SESSION_ID: 'legacy-id' }),
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const record = JSON.parse(
+      readFileSync(
+        join(dir, '.claude', 'hooks', '.state', 'closeout-render', 'legacy-id.json'),
+        'utf8',
+      ),
+    );
+    expect(record.session_id).toBe('legacy-id');
   });
 });
 
@@ -413,6 +516,197 @@ describe('render-closeout: the decisions section must ASK something', () => {
     expect(code).toBe(0);
     expect(stdout).not.toContain('### Decisions needed from you');
   });
+
+  // P63, repo half. A headless run with a genuinely open decision could not
+  // satisfy both this renderer (which refuses the section without a question)
+  // and the machine-wide unasked-decision gate (which refuses a question posed
+  // in prose, and directs the session to `AskUserQuestion` — a tool a headless
+  // session does not have). The queue item such a run writes instead IS an ask:
+  // it lands on the project's answerable page, and `npm run nightly:ingest`
+  // reads the answer back. Accepting it WIDENS what counts as asking; it does
+  // not narrow what counts as unasked.
+  describe('a written decision-queue item is an accepted answering route (P63)', () => {
+    /** A repo whose decision queue holds exactly `items`. */
+    function repoWithQueue(items: Array<Record<string, unknown>>): string {
+      const dir = mkdtempSync(join(tmpdir(), 'closeout-queue-'));
+      mkdirSync(join(dir, '.audit-tools', 'nightly'), { recursive: true });
+      writeFileSync(
+        join(dir, '.audit-tools', 'nightly', 'open-items.json'),
+        JSON.stringify({
+          generated_at: '2026-09-10T00:00:00.000Z',
+          run: 'test',
+          items,
+          applied: [],
+          skipped: [],
+        }),
+        'utf8',
+      );
+      return dir;
+    }
+    const openItem = (key: string) => ({
+      id: `item-${key}`,
+      subject_key: key,
+      subject: 'a subject',
+      title: 'a title',
+    });
+
+    it('accepts a decisions value naming an OPEN queue item, and renders it', () => {
+      const dir = repoWithQueue([openItem('e978fad576fb2473')]);
+      const file = join(dir, 'in.json');
+      writeFileSync(
+        file,
+        JSON.stringify(
+          minimal({
+            // DELIBERATELY carries no question mark: the interrogative arm would
+            // accept it anyway, and a test that passes with the queue channel
+            // disabled proves nothing about the queue channel. This is the shape
+            // a headless run actually produces — a statement pointing at where
+            // the question is posed and answerable.
+            decisions: [
+              'Open owner decision, posed and answerable as queue subject key ' +
+                'e978fad576fb2473 in docs/nightly-inbox.md: whether to re-home the shadowed ' +
+                'repository /start-lap skill into CLAUDE.md, rename it, or delete it.',
+            ],
+          }),
+        ),
+        'utf8',
+      );
+      const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        env: renderEnv(dir),
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain('### Decisions needed from you');
+      expect(r.stdout).toContain('e978fad576fb2473');
+    });
+
+    it('REFUSES a key that names no open item — the claim has to be checkable', () => {
+      // The conservative direction, and deliberately the opposite of every
+      // other check here. Those fail open because a readiness check that cannot
+      // see its evidence must not assert a problem; this one is the REPORT'S
+      // claim that a question was posed somewhere answerable, and an
+      // unverifiable claim is not one.
+      const dir = repoWithQueue([openItem('aaaa111122223333')]);
+      const file = join(dir, 'in.json');
+      writeFileSync(
+        file,
+        JSON.stringify(
+          minimal({ decisions: ['See subject key deadbeefdeadbeef in docs/nightly-inbox.md.'] }),
+        ),
+        'utf8',
+      );
+      const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        env: renderEnv(dir),
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('deadbeefdeadbeef');
+      expect(r.stderr).toContain('names an OPEN item');
+    });
+
+    it('accepts an OPEN key cited AFTER a settled one — every candidate is tried, not just the first', () => {
+      // The value is prose the author wrote, and prose legitimately cites a
+      // settled subject as context while asking about a live one. Reading only
+      // the FIRST 16-hex match made that shape unrenderable, and the refusal
+      // then named the SETTLED key as though the OPEN one were the problem —
+      // false, and unactionable for the author reading it.
+      const dir = repoWithQueue([openItem('aaaa111122223333')]);
+      const file = join(dir, 'in.json');
+      writeFileSync(
+        file,
+        JSON.stringify(
+          minimal({
+            decisions: [
+              'Supersedes the settled decision deadbeefdeadbeef. Still open and awaiting you: ' +
+                'aaaa111122223333 — whether to re-home the shadowed skill or delete it.',
+            ],
+          }),
+        ),
+        'utf8',
+      );
+      const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        env: renderEnv(dir),
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain('### Decisions needed from you');
+      expect(r.stdout).toContain('aaaa111122223333');
+    });
+
+    it('REFUSES naming EVERY key it tried when none of several candidates is open', () => {
+      // The other half of collecting them all: the refusal has to account for
+      // the whole value. Naming one key when three were cited sends the author
+      // to fix the wrong one.
+      const dir = repoWithQueue([]);
+      const file = join(dir, 'in.json');
+      writeFileSync(
+        file,
+        JSON.stringify(
+          minimal({
+            decisions: [
+              'Both of these were answered: deadbeefdeadbeef, and also aaaa111122223333.',
+            ],
+          }),
+        ),
+        'utf8',
+      );
+      const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        env: renderEnv(dir),
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('deadbeefdeadbeef');
+      expect(r.stderr).toContain('aaaa111122223333');
+    });
+
+    it('REFUSES a settled key — a settled subject asks nothing, so it cannot stand in for asking', () => {
+      const dir = repoWithQueue([]);
+      const file = join(dir, 'in.json');
+      writeFileSync(
+        file,
+        JSON.stringify(
+          minimal({ decisions: ['Answered already: see subject key e978fad576fb2473.'] }),
+        ),
+        'utf8',
+      );
+      const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        env: renderEnv(dir),
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('e978fad576fb2473');
+    });
+
+    it('refuses a settled-DECISION claim with no key at all, and says how to supply one', () => {
+      const dir = repoWithQueue([openItem('e978fad576fb2473')]);
+      const file = join(dir, 'in.json');
+      writeFileSync(
+        file,
+        JSON.stringify(
+          minimal({
+            decisions: [
+              'Four owner decisions were asked and are all answered and recorded. Nothing waits.',
+            ],
+          }),
+        ),
+        'utf8',
+      );
+      const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        env: renderEnv(dir),
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('subject key');
+      // And the original refusal still stands behind it.
+      expect(r.stderr).toContain('contains no question');
+    });
+  });
 });
 
 describe('render-closeout: readiness is checked BEFORE the report describes the tree', () => {
@@ -436,7 +730,7 @@ describe('render-closeout: readiness is checked BEFORE the report describes the 
     const r = spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
       cwd: dir,
       encoding: 'utf8',
-      env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+      env: renderEnv(dir),
     });
     expect(r.status).not.toBe(0);
     expect(r.stderr ?? '').toContain('not ready to hand back');

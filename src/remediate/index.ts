@@ -635,6 +635,13 @@ export async function recoverIngestVerb(options: {
     completed_work_item_ids: summary.completed_work_item_ids,
     pending_work_item_ids: summary.pending_work_item_ids,
     issues: summary.issues,
+    // The per-item progress the issues alone cannot express: an item whose
+    // edits LANDED but whose result file is missing is partial progress, and it
+    // would otherwise be indistinguishable here from one the host never started.
+    worked_but_unreported_work_item_ids: [...summary.work_item_outcomes]
+      .filter(([, outcome]) => outcome === "missing_result_with_commit")
+      .map(([id]) => id)
+      .sort(),
   };
   if (recoveredNothing) return { status: "nothing-to-recover", body, exitCode: 1 };
   if (expectedPendingOnly) return { status: "pending", body, exitCode: 75 };

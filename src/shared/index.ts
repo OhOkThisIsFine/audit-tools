@@ -577,9 +577,17 @@ export type {
   HostResultOutcomes,
   SubmissionIngestHistory,
   TrailingSubmissionRefusal,
+  // A TYPE, and it must be re-exported as one: a value re-export of a
+  // type-only binding emits nothing, so an importer's named import fails at
+  // RUNTIME ("does not provide an export named ...") after a green typecheck
+  // and a green build — the emit is syntactically valid, so nothing catches it
+  // until a module loads.
+  WorkItemOutcome,
 } from "./submission/hostResultOutcomes.js";
 export {
   enrichMissingSubmissionIssues,
+  isMissingObservation,
+  WORK_ITEM_OUTCOMES,
   eventSignature,
   readSubmissionIngestHistory,
   readTrailingSubmissionRefusals,

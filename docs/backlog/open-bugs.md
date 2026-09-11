@@ -121,17 +121,6 @@
   **Property:** the repo DETECTS a delegated lane rather than being told about one, so a lane cannot
   run the ceremony merely because its dispatcher forgot a variable.
 
-- **The closeout gate calls pushed commits "UNPUSHED" — it tests against `main` and says something
-  different from what it means (2026-08-29, low, friction: tool_should_decide).**
-  `closeout-challenge-gate.mjs` lists commits absent from `main` under the heading "UNPUSHED
-  commit(s) — the next agent clones origin/main and will not see these". The second clause is true and
-  is the useful part. The label is not: a lap that pushed every commit to its own branch, upstream
-  current, reads a flat assertion it can check and disprove in one command. A gate whose HEADLINE is
-  falsifiable teaches the reader to discount it and skim the accurate clause underneath, which is the
-  same corrosion a false red causes anywhere else. **Property:** the gate names the condition it
-  actually tested — not merged into `main` — and when a branch upstream exists and is current, it says
-  so instead of implying the work is only local.
-
 - **The gate fixture helper `stageLoopCoreFile` arms NOTHING, and its own comment says it arms the
   loop-core gate (2026-08-29, medium, friction: tool_should_decide).**
   <!-- doc-citation-exempt: a path written INTO a throwaway fixture repo, never a file of this tree -->
@@ -609,35 +598,12 @@
   **Property to hold:** an expensive automatic recovery explains itself at the moment it triggers. A user
   who cannot tell a correct cascade from a wedge will eventually defeat the cascade.
 
-- **Friction walk (niggle-fix lap, 2026-08-07):**
-  (1) **tool-should-decide (low):** a host worker landed sound edits but wrote no bound result, so the
-  verify stage never ran and the driver re-verified by hand. A work item whose commit exists but whose
-  result is missing should surface as explicit partial progress, never disappear as null.
-  (2) **tool-should-decide (low):** both implement agents left ~16 stray `*.log` files in the repo
-  ROOT despite prompts directing output elsewhere — the recorded offloaded-diff-scope class
-  ([[parallel-dispatch-bounded-current-verified]]); driver swept them before commit. The
-  `*.log` ignore rule now keeps such a log from reddening `check:doc-code-citations`, but it
-  also removes `git status` as the signal that surfaced this — a stray log is now invisible.
-  (3) **ambiguous-direction: none** — the two backlog entries stated their properties precisely
-  enough that both fixes landed against them verbatim.
-  (4) **tool-should-decide (low, observed post-fix):** the closeout-challenge gate cannot
-  attribute tree dirt, so a CONCURRENT session's uncommitted WIP in the shared checkout re-fired
-  the challenge after each of this session's commits (new stateKey, same foreign dirt) and spent
-  the full cap on paths this session never touched. Property: the gate's dirty-tree evidence
-  should exclude (or at least mark) paths whose dirt predates the session or is named deliberate
-  in HANDOFF — same attribution principle as the phase-boundary-gate entry above.
-
-- **Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):**
-  (1) **tool-should-decide (medium):** the closeout-challenge Stop gate fired twice MID-LAP while 15
-  background agents were live on the tree — it reads uncommitted paths as an unclean close and cannot
-  see in-flight background work, so a deliberate wait state consumed both of the session's challenges
-  before the real closeout. The gate needs a live-background-work signal before spending a challenge.
-  (Reproduced identically on the 2026-07-28 conversion fleet lap: both challenges again spent on
-  deliberate mid-fleet pauses, zero left for the actual close.)
-  (2) **inefficient-feeding (low):** `.audit-tools/nightly/open-items.json` was STALE at
-  presentation — all 17 surfaced items already answered and done in the ledger; the
-  [[queue-items-must-be-rechecked-at-presentation]] class, since mechanized (premise probes +
-  live-ledger partition).
+- **Friction walk (niggle-fix lap, 2026-08-07):** **tool-should-decide (low):** implement agents
+  left ~16 stray `*.log` files in the repo ROOT despite prompts directing output elsewhere — the
+  recorded offloaded-diff-scope class ([[parallel-dispatch-bounded-current-verified]]); the driver
+  swept them before commit. The `*.log` ignore rule keeps such a log from reddening
+  `check:doc-code-citations`, but it also removed `git status` as the signal that surfaced this —
+  a stray log is now invisible.
 
 - **Friction walk (nightly-determinations lap, 2026-07-26):**
   (1) **inefficient-feeding (medium):** `.audit-tools/nightly/open-items.json` is a single 659-line /
@@ -822,8 +788,6 @@
   the audit read, and the remediator threads it into the leg as B, so both dispositions are reachable
   on a real run. A new field on the findings contract is an owner decision: it can touch the
   constitutional `spec/audit/artifact-contract.md`.
-
-- **The closeout render record cannot name the session that wrote it, on a premise that is false (2026-08-27, medium, from [../reviews/closeout-generation-failure-2026-08-26.md](../reviews/closeout-generation-failure-2026-08-26.md)).** The render record under `.claude/hooks/.state/closeout-render/` binds to worktree CONTENT (`worktreeTree`), but its SESSION ownership rests on a timestamp: `.claude/hooks/closeout-challenge-gate.mjs` compares the record's `rendered_at` against the session registry's `registered_at`, so only a render that PREDATES this session is refused. A concurrent session's render — written after this one started — reads as this session's own, and the tree comparison catches it only when the content differs. The stated reason for the timestamp, that the renderer cannot read a session id, does not hold: `scripts/render-closeout.mjs` reads `CLAUDE_SESSION_ID`, which nothing in this harness sets, so the recorded `session_id` is always null; the environment does carry `CLAUDE_CODE_SESSION_ID`, and its value is exactly the filename of that session's record in the registry directory `readSessionRegistry` (`scripts/shared/sessionRegistry.mjs`) resolves from the hook payload. Second half of the same defect: the record is ONE repo-global file, so even a correctly-named id is last-writer-wins across concurrent sessions. **Property:** a closeout render record identifies the session that produced it, and the Stop gate accepts only a record this session wrote — never another session's render that happens to share the tree, and never on a name the environment does not supply. The false premise has a second copy, as data in the gate-scripts `uncovered` field of `scripts/guard-reach-data.mjs`; it moves in the same change. `tests/shared/closeout-render.test.ts` is the home for the pin.
 
 - **An analysis record can identify work and reach no work queue, and every gate stays green while
   it happens (2026-08-27, medium, from the orphan-routing lap).** Seven `docs/reviews/` records

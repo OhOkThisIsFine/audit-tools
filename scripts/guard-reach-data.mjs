@@ -2009,11 +2009,13 @@ export const REACH = [
       'attest-constitutional-doc-change is invoked per constitutional override, wired into no verify gate; ' +
       'render-closeout is invoked per hand-back, wired into no verify gate either — its enforcement is ' +
       'the closeout-challenge Stop gate reading the record it writes, so a session that never renders is ' +
-      'challenged, not blocked. That record OWNS ITS SESSION only by TIMESTAMP: the renderer cannot read ' +
-      'a session id (CLAUDE_SESSION_ID does not reach a Bash-invoked script, and record.session_id is ' +
-      'therefore null), so the gate compares rendered_at against the session registry registered_at. ' +
-      "A CONCURRENT session that rendered after this one started still reads as this one's render — " +
-      'the worktree-tree comparison is the only thing that catches it, and only when the content differs',
+      'challenged, not blocked. That record OWNS ITS SESSION by ID: the renderer reads ' +
+      'CLAUDE_CODE_SESSION_ID (the name the environment actually supplies, whose value is the filename ' +
+      'of the session record the registry resolves) and writes ONE FILE PER SESSION under the state ' +
+      'dir; the gate reads the record for its own session id, so an earlier or CONCURRENT render does ' +
+      'not satisfy it. A render made with no session id falls back to the legacy repo-global path and ' +
+      'is accepted by nobody, which is the conservative direction. The worktree-tree comparison still ' +
+      'applies on top, so a record written for this session against different content is caught too',
   },
   {
     area: 'pipeline, smoke & release scripts',

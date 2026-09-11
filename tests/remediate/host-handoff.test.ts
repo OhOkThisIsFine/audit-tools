@@ -74,10 +74,22 @@ interface CurrentState {
     readonly plan_id: string;
     readonly blocks: readonly HostBlock[];
   };
-  readonly items: Readonly<
-    Record<string, { readonly finding_id: string; readonly block_id: string; readonly status: string }>
+  readonly items: Record<
+    string,
+    {
+      readonly finding_id: string;
+      readonly block_id: string;
+      status: string;
+      /**
+       * The corroborated landing, written at acceptance — the field that makes
+       * "the edits landed but the result is missing" distinguishable from
+       * "nothing was done". Mutable like `status`: the partial-progress case
+       * re-opens a settled item to put it back on the frontier.
+       */
+      host_landed_commit?: string;
+    }
   >;
-  readonly host_handoff?: HandoffRecord;
+  host_handoff?: HandoffRecord;
 }
 
 type HandoffRecord = {
@@ -114,6 +126,11 @@ interface IngestSummary {
   readonly completed_work_item_ids: readonly string[];
   readonly pending_work_item_ids: readonly string[];
   readonly issues: readonly IngestIssue[];
+  /** Per-item OBSERVED outcome — see `WORK_ITEM_OUTCOMES` in audit-tools/shared. */
+  readonly work_item_outcomes: ReadonlyMap<
+    string,
+    "awaiting_result" | "missing_result_with_commit" | "rejected"
+  >;
   readonly state_changed: boolean;
   readonly state: CurrentState;
 }
@@ -1353,6 +1370,108 @@ describe("the remediate ingest is pure with respect to persisted state", () => {
       expect(issue.work_item_id).toBeTruthy();
       expect(issue.result_path).toBeTruthy();
     }
+  });
+});
+
+// The step prompt listed MISSING results in the same section, with the same
+// shape, as rejections — so a host parser had to special-case the message text
+// "no result file exists", and the two situations whose remedies are OPPOSITE
+// (patience vs. a repair) read identically. The split is on the CODE.
+describe("missing and rejected results are distinct, machine-readable statuses", () => {
+  it("classifies an item with nothing at its bound path as awaiting_result, not as a rejection", async () => {
+    const { boundary, root, artifactsDir, runId, state, handoff } =
+      await prepareFixture();
+    const summary = requireIngested(
+      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
+    );
+    expect(summary.work_item_outcomes.size).toBe(handoff.workload.work_items.length);
+    for (const item of handoff.workload.work_items) {
+      expect(summary.work_item_outcomes.get(item.id)).toBe("awaiting_result");
+    }
+  });
+
+  it("classifies a written-but-refused item as rejected", async () => {
+    const { boundary, root, artifactsDir, runId, state, handoff } =
+      await prepareFixture();
+    const first = handoff.workload.work_items[0]!;
+    const firstPath = expectContained(root, first.result_path, "first result");
+    await mkdir(resolve(firstPath, ".."), { recursive: true });
+    await writeFile(firstPath, "{ not json", "utf8");
+    const summary = requireIngested(
+      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
+    );
+    expect(summary.work_item_outcomes.get(first.id)).toBe("rejected");
+    // The distinction is on the CODE, so a reader never parses the message.
+    const issue = summary.issues.find((entry) => entry.work_item_id === first.id);
+    expect(issue?.code).toBe("submission_malformed");
+    expect(issue?.code).not.toBe("submission_missing");
+  });
+
+  // The measured friction, verbatim: "a host worker landed sound edits but wrote
+  // no bound result, so the verify stage never ran and the driver re-verified by
+  // hand. A work item whose commit exists but whose result is missing should
+  // surface as explicit partial progress, never disappear as null."
+  it("surfaces a LANDED commit with no result as missing_result_with_commit, not as absent progress", async () => {
+    const { boundary, root, artifactsDir, runId, state, handoff, baselineCommit } =
+      await prepareFixture();
+    const first = handoff.workload.work_items[0]!;
+    // Land the commit the item asked for, exactly as an accepted run would —
+    // then remove the result file, which is the state the friction describes.
+    const landed = await landCommit(root, first.allowed_files[0]!);
+    const firstPath = expectContained(root, first.result_path, "first result");
+    await mkdir(resolve(firstPath, ".."), { recursive: true });
+    await writeFile(
+      firstPath,
+      JSON.stringify(resultShape(runId, first, landed)),
+      "utf8",
+    );
+    const accepting = requireIngested(
+      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
+    );
+    expect(accepting.accepted_count).toBe(1);
+    const findingId = first.finding_ids[0]!;
+    expect(accepting.state.items[findingId]!.host_landed_commit).toBe(landed);
+    expect(accepting.state.items[findingId]!.status).not.toBe("pending");
+
+    // Now a SECOND run over the same landed commit with the result file gone.
+    // The finding is already settled, so re-open it to make the item pending
+    // again — the run holds the corroborated commit; the result is what is
+    // missing, which is precisely the partial-progress case.
+    const reopened = structuredClone(accepting.state);
+    reopened.items[findingId]!.status = "pending";
+    reopened.host_handoff = handoff.handoff_record;
+    await rm(firstPath, { force: true });
+    const missing = requireIngested(
+      await boundary.ingestRemediationHostResults({
+        root,
+        artifactsDir,
+        runId,
+        state: reopened,
+      }),
+    );
+    expect(missing.work_item_outcomes.get(first.id)).toBe(
+      "missing_result_with_commit",
+    );
+    // Still a missing OBSERVATION on the issue channel — the two channels carry
+    // different facts and must not be conflated in either direction.
+    const issue = missing.issues.find((entry) => entry.work_item_id === first.id);
+    expect(issue?.code).toBe("submission_missing");
+    expect(baselineCommit).toBeTruthy();
+  });
+
+  it("the same item with NO landed commit stays awaiting_result — the commit is what makes it progress", async () => {
+    // The discriminating half: without it, `missing_result_with_commit` could be
+    // returned for anything missing and the distinction would mean nothing.
+    const { boundary, root, artifactsDir, runId, state, handoff } =
+      await prepareFixture();
+    const first = handoff.workload.work_items[0]!;
+    const summary = requireIngested(
+      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
+    );
+    expect(summary.work_item_outcomes.get(first.id)).toBe("awaiting_result");
+    expect(summary.work_item_outcomes.get(first.id)).not.toBe(
+      "missing_result_with_commit",
+    );
   });
 });
 

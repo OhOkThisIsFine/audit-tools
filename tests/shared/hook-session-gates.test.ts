@@ -17,7 +17,7 @@ import {
   pendingQueuedResume,
   sessionHasLiveBackgroundWork,
 } from '../../scripts/shared/liveSessionWork.mjs';
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, delimiter } from 'node:path';
 
@@ -674,6 +674,93 @@ describe('closeout-challenge-gate: tree-dirt baseline partition (Build 3)', () =
 // #2 alone proves the SAME fixture stays silent once that trigger is removed
 // (dirt-free, unpushed-free) — without #2, #1 could pass for an unrelated
 // reason (e.g. an accidental default-dirty temp dir).
+// The gate named a condition it did not test. "UNPUSHED commit(s) — the next
+// agent clones origin/main and will not see these" asserts the work is only
+// local; what the gate reads is `git log origin/main..HEAD`, which is true of a
+// lap that pushed every commit to its own branch. A gate whose HEADLINE is
+// falsifiable teaches the reader to discount it and skim the accurate clause
+// underneath — the same corrosion a false red causes.
+describe('closeout-challenge-gate: the not-on-main finding names what it TESTS', () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* windows lock — leave it to the temp reaper */
+      }
+    }
+  });
+
+  /** A repo on branch `feat` with one commit past `main`, optionally pushed. */
+  function repoWithBranch({ pushed }: { pushed: boolean }): string {
+    const root = mkdtempSync(join(tmpdir(), 'closeout-upstream-'));
+    roots.push(root);
+    const g = (...args: string[]) => spawnSyncHidden('git', args, { cwd: root, encoding: 'utf8' });
+    g('init', '-q');
+    g('config', 'user.email', 'test@example.com');
+    g('config', 'user.name', 'test');
+    g('config', 'commit.gpgsign', 'false');
+    writeFileSync(join(root, 'a.txt'), 'one\n');
+    g('add', '.');
+    g('commit', '-qm', 'initial');
+    g('branch', '-M', 'main');
+    // A real local bare remote: a URL that does not resolve would make the
+    // upstream questions unanswerable for reasons unrelated to the gate.
+    const bare = mkdtempSync(join(tmpdir(), 'closeout-bare-'));
+    roots.push(bare);
+    spawnSyncHidden('git', ['init', '-q', '--bare', bare], { encoding: 'utf8' });
+    g('remote', 'add', 'origin', bare);
+    g('checkout', '-q', '-b', 'feat');
+    writeFileSync(join(root, 'b.txt'), 'work\n');
+    g('add', '.');
+    g('commit', '-qm', 'the work this branch carries');
+    // `origin/main` must exist for the range to resolve at all.
+    g('push', '-q', 'origin', 'main');
+    if (pushed) g('push', '-q', '-u', 'origin', 'feat');
+    g('fetch', '-q', 'origin');
+    return root;
+  }
+
+  it('names the tested condition — NOT MERGED into main — instead of asserting the work is local', () => {
+    const { code, stderr } = runHook(
+      CLOSEOUT_GATE,
+      { hook_event_name: 'Stop', session_id: sid('upstream-name') },
+      { root: repoWithBranch({ pushed: false }) },
+    );
+    expect(code).toBe(2);
+    expect(stderr).toContain('NOT MERGED into');
+    // The false headline must be gone: it is the thing this test exists for.
+    expect(stderr).not.toContain('UNPUSHED');
+  });
+
+  it('says the work is NOT local-only when the branch upstream exists and is current', () => {
+    // The case the entry was filed from: a lap that pushed every commit to its
+    // own branch, upstream current, read a flat assertion it could disprove in
+    // one command.
+    const { code, stderr } = runHook(
+      CLOSEOUT_GATE,
+      { hook_event_name: 'Stop', session_id: sid('upstream-current') },
+      { root: repoWithBranch({ pushed: true }) },
+    );
+    expect(code).toBe(2);
+    expect(stderr).toContain('NOT MERGED into');
+    expect(stderr).toMatch(/IS pushed and current on/);
+    expect(stderr).toMatch(/not local-only/);
+  });
+
+  it('says the work IS local-only when no upstream is configured for the branch', () => {
+    const { code, stderr } = runHook(
+      CLOSEOUT_GATE,
+      { hook_event_name: 'Stop', session_id: sid('upstream-absent') },
+      { root: repoWithBranch({ pushed: false }) },
+    );
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/No upstream is configured/);
+    expect(stderr).not.toMatch(/IS pushed and current/);
+  });
+});
+
 describe('closeout-challenge-gate: headMovedRecently is independently sufficient (hermetic, no shared fixture)', () => {
   const roots: string[] = [];
   afterAll(() => {
@@ -804,11 +891,385 @@ describe('closeout-challenge-gate: HEAD time vs session registered_at (foreign c
   });
 });
 
+// The closeout render record used to be ONE repo-global file, and its session
+// ownership rested on a TIMESTAMP — so a CONCURRENT session that rendered after
+// this one started read as this one's own render, and the tree comparison caught
+// it only when the content differed. The record is now keyed per session on the
+// id the environment actually supplies.
+describe('closeout-challenge-gate: only a record THIS session wrote closes it', () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* windows lock — leave it to the temp reaper */
+      }
+    }
+  });
+
+  async function armedRepo(): Promise<{ root: string; session: string; tree: string }> {
+    const root = mkdtempSync(join(tmpdir(), 'closeout-render-rec-'));
+    roots.push(root);
+    const g = (...args: string[]) => spawnSyncHidden('git', args, { cwd: root, encoding: 'utf8' });
+    g('init', '-q');
+    g('config', 'user.email', 'test@example.com');
+    g('config', 'user.name', 'test');
+    g('config', 'commit.gpgsign', 'false');
+    writeFileSync(join(root, 'a.txt'), 'one\n');
+    g('add', '.');
+    g('commit', '-qm', 'initial');
+    const session = sid('render-record');
+    const lib = await import('../../scripts/shared/sessionRegistry.mjs');
+    lib.writeSessionRecord(root, {
+      version: 1,
+      session_id: session,
+      registered_at: new Date().toISOString(),
+      source: 'test',
+      baseline: [],
+    });
+    const { worktreeTree } = await import('../../scripts/shared/worktree-tree.mjs');
+    // A fixture repo with no identity would make every case below vacuous, so
+    // this asserts rather than widening the type to a null no case can use.
+    const tree = worktreeTree(root);
+    expect(tree, 'fixture repo has no worktree tree identity').toBeTruthy();
+    return { root, session, tree: tree as string };
+  }
+
+  /**
+   * Write a render record. `sessionId` names the FILE (which session's record
+   * this is); `namedAs` overrides the id INSIDE it, so a case can reproduce a
+   * record that sits at one session's path while claiming to be another's.
+   */
+  function writeRecord(
+    root: string,
+    sessionId: string | null,
+    tree: string,
+    { namedAs }: { namedAs?: string } = {},
+  ): void {
+    const dir = join(root, '.claude', 'hooks', '.state', 'closeout-render');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, sessionId === null ? 'latest.json' : `${sessionId}.json`),
+      JSON.stringify({
+        version: 2,
+        tree,
+        head: null,
+        rendered_at: new Date().toISOString(),
+        session_id: namedAs === undefined ? sessionId : namedAs,
+        report_anchors: [],
+      }),
+    );
+  }
+
+  const stop = (session: string): HookPayload => ({ hook_event_name: 'Stop', session_id: session });
+
+  it("a CONCURRENT session's record — same tree, written after this one started — does NOT close it", async () => {
+    // The exact case the timestamp could not tell apart: the render is NEWER
+    // than this session's registration, so `rendered_at >= registered_at` held
+    // and the old arm accepted it. Only the session id separates the two.
+    //
+    // The record sits at THIS session's bound path but NAMES another session —
+    // the shape a concurrent writer actually produces, since the two sessions
+    // share a checkout and only the id tells them apart. (A record at the OTHER
+    // session's path is the ordinary nothing-here case, covered above.)
+    const { root, session, tree } = await armedRepo();
+    writeFileSync(join(root, 'own.txt'), 'this session did work\n');
+    writeRecord(root, session, tree, { namedAs: 'some-other-session' });
+    const { code, stderr } = runHook(CLOSEOUT_GATE, stop(session), { root });
+    expect(code).toBe(2);
+    expect(stderr).toContain("is NOT this session's hand-back");
+    expect(stderr).toContain('some-other-session');
+  });
+
+  it("a record written for THIS session, describing this tree, closes the render check", async () => {
+    const { root, session, tree } = await armedRepo();
+    writeFileSync(join(root, 'own.txt'), 'this session did work\n');
+    writeRecord(root, session, tree);
+    const { code, stderr } = runHook(CLOSEOUT_GATE, stop(session), { root });
+    // The gate still fires on other evidence (no suite-green stamp, no CI read
+    // here) — what this pins is that the render finding is ABSENT.
+    expect(stderr).not.toContain("is NOT this session's hand-back");
+    expect(stderr).not.toContain('no rendered closeout on record');
+    expect(code).toBe(2);
+  });
+
+  it('a legacy repo-global record — the old `latest.json`, session_id null — satisfies nobody', async () => {
+    // The upgrade path, and deliberately the conservative direction: the record
+    // lives at the OLD repo-global path and names no session, so a reader that
+    // looks up this session's own file finds nothing and re-renders once. An
+    // unattributable render is not evidence that THIS session rendered.
+    const { root, session, tree } = await armedRepo();
+    writeFileSync(join(root, 'own.txt'), 'this session did work\n');
+    writeRecord(root, null, tree);
+    const { stderr } = runHook(CLOSEOUT_GATE, stop(session), { root });
+    expect(stderr).toContain('no rendered closeout on record for THIS session');
+    // And specifically NOT accepted: neither arm that would mean the record was
+    // read and honoured may fire.
+    expect(stderr).not.toContain("is NOT this session's hand-back");
+  });
+});
+
 // The question gate's Build 1 leg: the unregistered-child skip is STOP-LEG ONLY.
 // A child's closing question is part of its returned deliverable — exit-2'ing it
 // hijacks the hand-back (P23). A child that explicitly calls AskUserQuestion is
 // performing an interactive act the philosophy injection legitimately governs,
 // so that leg still fires.
+// Step 8 of the global /start-lap skill MANDATES ending the turn with a direct
+// request to approve the lap plan, and requires it be asked WITH
+// AskUserQuestion. No standing conviction can settle it — the question asks for
+// scope AUTHORIZATION, not for how to proceed, and the brief this gate prints is
+// about the latter.
+//
+// The exemption is ONE QUESTION, not one boundary. The signal alone (a lap record
+// with nothing committed since) is true of every question asked between the lap
+// opening and its first commit, so the use is RECORDED, keyed on the lap record's
+// `lapId`, in this session's own state: the first question at the boundary passes
+// on BOTH legs, every later one is challenged as normal.
+//
+// It never applies to a lap record another session opened. The mechanical test is
+// the record FILE's mtime against this session's `registered_at`: /start-lap
+// writes the record at step 1, after the session registered, so a record older
+// than the registration belongs to a lap this session did not open.
+describe('question-philosophy-gate: the lap-APPROVAL question is exempt by construction', () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* windows lock — leave it to the temp reaper */
+      }
+    }
+  });
+
+  /** The `lapId` the hook keys the exemption on — 8 hex, as /start-lap mints it. */
+  const LAP_ID = 'deadbeef';
+
+  /**
+   * A repo at a lap boundary, with a registered owner session and a transcript.
+   * `lapMtimeMs` backdates the lap RECORD's mtime, the mechanical signal for
+   * "another session opened this lap".
+   *
+   * The once-per-session philosophy marker is deliberately NOT pre-written. It is
+   * checked unconditionally on both legs and exits 0 on its own, BEFORE the
+   * exemption is consulted — so a session carrying it never reaches the code
+   * these cases are about, and every question in that session exits 0 whatever
+   * the exemption decides. Leaving it unwritten is what makes the exemption the
+   * thing under test; the cost is that a case's FIRST question spends the marker,
+   * so the SECOND call is what the assertions below actually read.
+   *
+   * `finalText` is the transcript's closing message. The default ENDS in a
+   * question, which is what the Stop-leg cases need; a case proving that a
+   * statement-only Stop spends nothing must pass a text that does not.
+   */
+  async function lapQuestionRoot({
+    lapStart,
+    commitSinceRegistration,
+    lapMtimeMs = 0,
+    finalText = 'Shall I start the lap as planned?',
+  }: {
+    lapStart: boolean;
+    commitSinceRegistration: boolean;
+    lapMtimeMs?: number;
+    finalText?: string;
+  }): Promise<{ root: string; transcript: string; session: string }> {
+    const root = mkdtempSync(join(tmpdir(), 'philgate-lap-'));
+    roots.push(root);
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    cpSync(join(REPO_ROOT, 'docs', 'project-philosophy.md'), join(root, 'docs', 'project-philosophy.md'));
+    const g = (...args: string[]) => spawnSyncHidden('git', args, { cwd: root, encoding: 'utf8' });
+    g('init', '-q');
+    g('config', 'user.email', 'test@example.com');
+    g('config', 'user.name', 'test');
+    g('config', 'commit.gpgsign', 'false');
+    writeFileSync(join(root, 'seed.txt'), 'seed\n');
+    g('add', '.');
+    // BACKDATED by an hour: at second granularity a same-second registration
+    // and commit are indistinguishable, and the fixture would then be testing
+    // clock resolution rather than the boundary. Found the hard way — the first
+    // version of this fixture committed in the same second it registered and
+    // the exemption arm read it as "work has landed".
+    const when = new Date(Date.now() - 3600_000).toISOString();
+    spawnSyncHidden('git', ['commit', '-qm', 'seed'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when },
+    });
+    if (lapStart) {
+      mkdirSync(join(root, '.claude'), { recursive: true });
+      // The real record shape /start-lap's opener writes (lap-worktree.mjs):
+      // `lapId` is the 8-hex id the exemption is keyed on.
+      const lapPath = join(root, '.claude', 'lap-start.json');
+      writeFileSync(
+        lapPath,
+        JSON.stringify({ start: 'x', date: '2026-01-01', goal: 'the lap', lapId: LAP_ID, checkout: root }),
+      );
+      if (lapMtimeMs > 0) {
+        const t = new Date(Date.now() - lapMtimeMs);
+        utimesSync(lapPath, t, t);
+      }
+    }
+    // Arm the registry with a resident owner record: an unregistered session
+    // under an armed registry is a CHILD, and a child is skipped EARLIER on both
+    // legs — before the exemption is consulted. Without this record every
+    // AskUserQuestion case below would exit 0 for a reason that has nothing to
+    // do with the lap; the Stop-leg cases stay green either way, which is exactly
+    // why the record has to be here rather than only where it changes the answer.
+    const session = sid('lap-approval');
+    const lib = await import('../../scripts/shared/sessionRegistry.mjs');
+    lib.writeSessionRecord(root, {
+      version: 1,
+      session_id: session,
+      registered_at: new Date().toISOString(),
+      source: 'test',
+      baseline: [],
+    });
+    if (commitSinceRegistration) {
+      writeFileSync(join(root, 'later.txt'), 'later work\n');
+      g('add', '.');
+      g('commit', '-qm', 'work after the lap opened');
+    }
+    const transcript = join(root, 'transcript.jsonl');
+    writeFileSync(
+      transcript,
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: finalText }],
+        },
+      }) + '\n',
+    );
+    return { root, transcript, session };
+  }
+
+  const lapAsk = (session: string): HookPayload => askPayload(session);
+
+  it('does NOT challenge the approval request at a lap that has not begun', async () => {
+    const { root, transcript, session } = await lapQuestionRoot({
+      lapStart: true,
+      commitSinceRegistration: false,
+    });
+    const payload: HookPayload = {
+      hook_event_name: 'Stop',
+      session_id: session,
+      transcript_path: transcript,
+    };
+    expect(runHook(QUESTION_GATE, payload, { root }).code).toBe(0);
+  });
+
+  // D1: /start-lap step 8 requires the approval request be asked WITH
+  // AskUserQuestion, so a Stop-leg-only exemption challenged the one question it
+  // exists for. The first AskUserQuestion at the boundary must pass BOTH legs.
+  it('does NOT challenge the FIRST AskUserQuestion at the boundary — the approval request is asked with the tool', async () => {
+    const { root, session } = await lapQuestionRoot({ lapStart: true, commitSinceRegistration: false });
+    expect(runHook(QUESTION_GATE, lapAsk(session), { root }).code).toBe(0);
+  });
+
+  it('DOES challenge a SECOND AskUserQuestion in the same lap — the exemption is ONE question, not the boundary', async () => {
+    // The property the lapId-keyed record exists for. Without it, every question
+    // asked between the lap opening and its first commit would pass.
+    const { root, session } = await lapQuestionRoot({ lapStart: true, commitSinceRegistration: false });
+    expect(runHook(QUESTION_GATE, lapAsk(session), { root }).code).toBe(0);
+    expect(runHook(QUESTION_GATE, lapAsk(session), { root }).code).toBe(2);
+  });
+
+  it('DOES challenge an AskUserQuestion once the lap has committed — the exemption is the BOUNDARY, not the lap', async () => {
+    // The other half, and the one that keeps this from becoming a blanket
+    // exemption for every session that ever opened a lap.
+    const { root, session } = await lapQuestionRoot({ lapStart: true, commitSinceRegistration: true });
+    expect(runHook(QUESTION_GATE, lapAsk(session), { root }).code).toBe(2);
+  });
+
+  it("DOES challenge when the lap record is OLDER than this session's registration — another session opened it", async () => {
+    // /start-lap writes the record at step 1, after the session registered. A
+    // record predating the registration is a lap this session did not open, and
+    // its approval question is not this session's to spend the exemption on.
+    const { root, session } = await lapQuestionRoot({
+      lapStart: true,
+      commitSinceRegistration: false,
+      lapMtimeMs: 600_000, // the record was written 10 minutes before now
+    });
+    expect(runHook(QUESTION_GATE, lapAsk(session), { root }).code).toBe(2);
+  });
+
+  it('DOES challenge on the STOP leg once the lap has committed — the Stop leg keeps its behavior', async () => {
+    // The Stop leg keeps its current behaviour: the same boundary test governs
+    // it, so a committed lap challenges there too.
+    const { root, transcript, session } = await lapQuestionRoot({
+      lapStart: true,
+      commitSinceRegistration: true,
+    });
+    const payload: HookPayload = {
+      hook_event_name: 'Stop',
+      session_id: session,
+      transcript_path: transcript,
+    };
+    expect(runHook(QUESTION_GATE, payload, { root }).code).toBe(2);
+  });
+
+  // The exemption is spent by ONE question, and the question that spends it is
+  // the one the gate would otherwise CHALLENGE — the exemption is consulted after
+  // the once-per-session marker and after the Stop leg's trailing-question test.
+  // A Stop whose final message asks the owner nothing never reaches it, so it
+  // cannot use the exemption up. This is the pair that pins the placement: the
+  // same Stop payload, the same boundary, and the two cases differ ONLY in
+  // whether the closing line ends in a question.
+  it('does NOT spend the exemption on a Stop whose closing message asks NOTHING', async () => {
+    // The placement, not the exemption: the gate is consulted after the Stop
+    // leg's trailing-question test, so a turn that asks the owner nothing never
+    // reaches it. The value is that the approval request usually arrives as a
+    // Stop — the lap plan is presented and asked about in one message — so an
+    // exemption spent by every other turn's Stop would be gone by the time the
+    // mandated question is asked.
+    //
+    // Both halves are ONE behaviour, so they are ONE case: the second assertion
+    // IS the observation (the exemption is still unspent). The transcript must
+    // be statement-only — with a question-ending close the Stop legitimately
+    // reaches the exemption and this case would be asserting the opposite of
+    // what it says.
+    const { root, transcript, session } = await lapQuestionRoot({
+      lapStart: true,
+      commitSinceRegistration: false,
+      finalText: 'Landed the fix. Nothing pending.',
+    });
+    const payload: HookPayload = { hook_event_name: 'Stop', session_id: session, transcript_path: transcript };
+    expect(runHook(QUESTION_GATE, payload, { root }).code).toBe(0);
+    expect(runHook(QUESTION_GATE, lapAsk(session), { root }).code).toBe(0);
+  });
+
+  it('spends the exemption on a question-ending Stop, and challenges the question that follows', async () => {
+    // The other side of the same coin, and the half the first case cannot see:
+    // a Stop-leg use that is never RECORDED. The Stop below reaches the
+    // exemption (the marker is unwritten and its close does end in a question),
+    // so it passes either way — the second assertion is what observes whether
+    // the use was written down. An unrecorded use leaves the boundary looking
+    // unspent and the next question exempt as well.
+    const { root, transcript, session } = await lapQuestionRoot({ lapStart: true, commitSinceRegistration: false });
+    const payload: HookPayload = { hook_event_name: 'Stop', session_id: session, transcript_path: transcript };
+    expect(runHook(QUESTION_GATE, payload, { root }).code).toBe(0);
+    expect(runHook(QUESTION_GATE, lapAsk(session), { root }).code).toBe(2);
+  });
+
+  it('DOES challenge a question when no lap record exists at all', async () => {
+    // "Nothing committed recently" alone is true of any idle session, so the
+    // record is load-bearing: without it the exemption would swallow questions
+    // in sessions that never opened a lap.
+    const { root, transcript, session } = await lapQuestionRoot({
+      lapStart: false,
+      commitSinceRegistration: false,
+    });
+    const payload: HookPayload = {
+      hook_event_name: 'Stop',
+      session_id: session,
+      transcript_path: transcript,
+    };
+    expect(runHook(QUESTION_GATE, payload, { root }).code).toBe(2);
+  });
+});
+
+
 describe('question-philosophy-gate: unregistered-child skip is Stop-leg only (Build 1)', () => {
   const childRoots: string[] = [];
   afterAll(() => {

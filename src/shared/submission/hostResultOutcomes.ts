@@ -55,6 +55,54 @@ export async function readTrailingSubmissionRefusals(
 }
 
 /**
+ * Is this issue an OBSERVATION that nothing has been written yet, rather than a
+ * refusal of something that WAS written?
+ *
+ * The distinction is the whole point of the split. "The host has not finished"
+ * and "the host's work was refused" are different facts with different remedies
+ * — the first asks for patience, the second for a repair — and a rendering that
+ * gives them one shape forces every reader (a host parser, an operator, a
+ * retry loop) to special-case the message text to tell them apart. That is
+ * exactly what the measured friction was: a host parser special-casing the
+ * string "no result file exists".
+ *
+ * The code is authoritative, never the message: a draw's prose may be reworded
+ * at any time and the answer must not move with it.
+ */
+export function isMissingObservation<TIssueCode extends string>(
+  issue: SubmissionIssue<TIssueCode>,
+): boolean {
+  return issue.code === "submission_missing";
+}
+
+/**
+ * WHAT ONE WORK ITEM'S OUTCOME LOOKS LIKE to the host that has to finish it.
+ *
+ * The three were previously one channel ("Result status requiring attention"),
+ * which forced every reader to parse message text to tell "not written yet"
+ * from "written and refused". They differ in REMEDY — one is patience, the
+ * other is a repair — so they are stated separately, and the classification is
+ * a CODE, never prose.
+ *
+ * `missing_result_with_commit` is the case the outcomes contract was blind to:
+ * the item's edits LANDED (the run holds a corroborated commit for it) but no
+ * result file exists at the bound path. It read as absent progress, and the
+ * work disappeared into a null — the measured friction. It is progress the host
+ * must be told about, because the repair is not "write the result from scratch"
+ * but "write the result for the commit that is already there".
+ */
+export const WORK_ITEM_OUTCOMES = [
+  /** Nothing exists at the bound path, and nothing landed for it. */
+  "awaiting_result",
+  /** Nothing exists at the bound path, but a corroborated commit DID land. */
+  "missing_result_with_commit",
+  /** Something was written and refused; the named issue is the repair. */
+  "rejected",
+] as const;
+
+export type WorkItemOutcome = (typeof WORK_ITEM_OUTCOMES)[number];
+
+/**
  * Add the prior substantive refusal to a currently missing issue.
  *
  * Historic codes stay in the message as evidence. The caller supplies the
