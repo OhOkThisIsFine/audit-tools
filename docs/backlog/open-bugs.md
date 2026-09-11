@@ -771,7 +771,7 @@
 
 - **The N-R13 status invariant asserts its own literal, and the status vocabulary exists in three
   unlinked copies (2026-08-27, low-medium).** The first describe block of
-  `tests/remediate/n-r13-document-phase-dissolved.test.ts` builds a local `validStatuses` array and
+  `tests/remediate/run-status-has-no-document-phase.test.ts` builds a local `validStatuses` array and
   asserts it does not contain `"documenting"` — a tautology over a literal the test itself wrote, so
   a `documenting` status reintroduced into `RemediationState` would pass it silently. Its other
   three blocks (planning transitions straight to implementing, the removed CLI verb, the removed

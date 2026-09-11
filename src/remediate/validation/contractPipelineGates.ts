@@ -48,7 +48,8 @@ import { coerceGoalId } from "../contractPipeline/idRegistry.js";
  * Deterministic structural gates run before the adversarial critic phase.
  * Returns ValidationIssue[] — errors block the pipeline (re-emit design phase),
  * warnings are advisory (appended to the critic prompt). Circular obligation
- * dependency detection yields a warning (not an error) routing to N-R21.
+ * dependency detection yields a warning (not an error): the critic is told to
+ * break the cycle by re-drafting the interface definitions.
  *
  * Call this with the design_spec payload and, optionally, the obligation_ledger
  * payload for the invariant-coverage cross-check.
@@ -246,7 +247,7 @@ export function validateDesignSpecGates(
     if (cycleIds.length > 0) {
       issues.push({
         path: "obligation_ledger.obligations",
-        message: `Circular interface-definition dependency detected among obligations: [${cycleIds.join(", ")}]; route to N-R21 for resolution`,
+        message: `Circular interface-definition dependency detected among obligations: [${cycleIds.join(", ")}]; break the cycle by re-drafting the interface definitions so the obligations form a DAG`,
         severity: "warning",
       });
     }

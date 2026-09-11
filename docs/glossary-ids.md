@@ -69,9 +69,9 @@ identity.
 
 | Id | Meaning | Live owner |
 |---|---|---|
-| N-R13 | The former document phase remains dissolved; the item-specification field it produced is gone. | `src/remediate/steps/nextStep.ts` |
-| N-R21 | Circular interface-definition dependencies route to explicit resolution. | `src/remediate/validation/contractPipelineGates.ts` |
-| N-X06 | Deterministic free-form intent interpretation seam. | `src/audit/orchestrator/intentInterpreter.ts` |
+| N-R13 | The former document phase remains dissolved; the item-specification field it produced is gone. | design record only — the code it named now carries no such id: the run-status vocabulary (`REMEDIATION_RUN_STATUSES`, `src/remediate/state/runStatus.ts`) and the planning→implementing transition (`decideNextStep`, `src/remediate/steps/nextStep.ts`) |
+| N-R21 | Circular interface-definition dependencies are reported to the design critic, which breaks the cycle by re-drafting the interface definitions. | design record only — the warning is emitted by `validateDesignSpecGates` in `src/remediate/validation/contractPipelineGates.ts`; the message carries the diagnostic and the action, never the id |
+| N-X06 | Deterministic free-form intent interpretation seam. | design record only — the seam contract is `FreeFormIntentInterpretation` in `src/shared/types/intentInterpretation.ts`, consumed by `src/audit/orchestrator/intentInterpreter.ts` |
 
 ## Live finding citations
 

@@ -174,46 +174,13 @@ Tier the grounding by claim type:
   day-to-day — but it costs almost nothing and is precisely the safety net for the weak-auditor case
   the project is built around. Don't over-tax; tier-3 hallucination is triangulated, never "proven."
 
-### S8 — Fix the conceptual design review itself (restore the original design; don't constrain it)
-The audit's **conceptual design review** is the lens meant to catch deep architectural mistakes. The
-fix for it missing this class is **not** to teach it this project's concerns: it is a **repo-agnostic**
-tool that audits any codebase, so it must ask **general** first-principles questions, never
-project-specific lenses. The root cause of the miss was an implementation that **degraded the original
-design** into a narrow, constrained step, on three axes — narrow questions, no roaming, a non-judging
-judge — not a reviewer lacking the project's vocabulary. The restorations:
-- **Ask general first-principles questions (primary).** The prompt asks the general
-  architectural questions — *"is the fundamental approach the right one? what core assumption
-  underlies this design, and is it sound? what would a clean-sheet redesign do differently? where is
-  the deepest structural risk?"* Repo-agnostic by construction; no project-specific lenses baked in.
-- **Orient, then roam (restore the original scope intent).** The reviewer gets a small
-  **context package + the project docs + an `/init`-style codebase overview**, then roams the actual
-  files freely (read wherever the code leads, not a risk-truncated summary feed).
-- **Make the judge judge.** The deep-path judge holds an evaluative role — assess
-  merit / validity / severity, decide what is real, and flag what is *missing* — not just fold
-  duplicates.
-- **Ground the output (general; = S7 applied to the reviewer).** Conceptual/contract
-  findings require component-level evidence, enforced at ingest by `groundDesignFinding`
-  (`src/shared/validation/designFindingGrounding.ts`), called from `nextStepHelpers.ts`.
-- **Gate it — cannot auto-complete empty.** There is no auto-complete path. A pass's review flag
-  (`contract_reviewed` / `conceptual_reviewed`) is set ONLY when a validated host submission is
-  consumed (`src/audit/cli/nextStepHelpers.ts`); a submission that fails validation is quarantined
-  and recorded on `design_assessment.rejected_submissions` instead of merged, so it never sets the
-  flag. An absent or empty assessment is therefore deliberately NO-SIGNAL — it means "unreviewed /
-  nothing detected", never "reviewed and clean", and no consumer may read absence as evidence (the
-  documented stance of `collectLensEvidence`,
-  `src/audit/orchestrator/intentCheckpointExecutor.ts`). If auto-completion is ever reintroduced, a
-  stamp that distinguishes "a real review found nothing" from "auto-completed empty" must be
-  designed as part of that same unit — without one the two are indistinguishable on the artifact.
-
-**Synthesis — why S8 is the exception to S1–S7.** The conceptual review is the **one place to lean
-*into* judgment, not toward determinism**. Architectural insight is irreducibly tier-3 (S7) — you
-cannot make it deterministic and should not try. So the tooling's job is to **enable** the judgment
-(general questions + orientation package + project docs + `/init` overview + freedom to roam) and to
-**ground/gate the output** (evidence required; cannot auto-complete empty) — **never to constrain**
-the judgment with checklists or project-specific lenses. Determinism for the mechanical (S1–S7);
-empowered, general, well-fed judgment for the architectural (S8). The self-audit missed our issue
-because the implementation did the opposite on all three axes — narrow questions, no roaming, a
-non-judging judge — not because the reviewer lacked our project's vocabulary.
+### S8 — The conceptual design review is the deliberate exception to this track
+The audit's **conceptual design review** is the one place either tool leans *into* judgment rather
+than toward determinism, so it does not follow the S1–S7 pattern of shrinking the model's surface.
+Its contract — general first-principles questions, orient-then-roam, a judging judge, grounded
+findings, and no auto-complete on an empty assessment — lives with the review it governs, in
+[`conceptual-design-review-design.md`](conceptual-design-review-design.md). S1–S7 constrain the
+mechanical authoring the contract pipeline owns; S8 enables judgment and grounds its output.
 
 ## 3. Why this serves all three goals
 

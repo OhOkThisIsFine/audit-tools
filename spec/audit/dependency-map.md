@@ -79,8 +79,9 @@ the merged flows (no self-clobber from a separate post-hoc rewrite). Absent on t
 common bar-met path → recorded at revision 0, never stale.
 
 `analyzer_capability.json` is the marker recording the outcome of the optional
-graph-enrichment pass (`applied` / `omitted`, plus per-analyzer resolution +
-provenance); the merged analyzer edges themselves live in `graph_bundle.json`
+graph-enrichment pass (its shape is defined in
+[`spec/audit/artifact-contract.md`](artifact-contract.md)); the merged analyzer
+edges themselves live in `graph_bundle.json`
 (with `analyzers_used[]` provenance). No cycle: the enrichment executor writes
 `graph_bundle.json` **and** the marker in one `advanceAudit` call, and metadata
 is computed dependency-first, so the marker records the post-enrichment graph

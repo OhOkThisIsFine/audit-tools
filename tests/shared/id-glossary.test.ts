@@ -14,6 +14,11 @@
  * Scoped to families, not individual ids: per-id node/finding identifiers
  * (`N-R13`, `OBS-1234abcd`) are coined freely and consumed once — the finding's
  * recommendation is one row per family, with load-bearing ids enumerated under it.
+ *
+ * A design-record id whose mechanism has been renamed out of the code stays a
+ * glossary row (a doc that cites a record id is that id's correct home), but its
+ * `Live owner` column must then point at what the code now does — see the
+ * "design record only —" rows.
  */
 import { test, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";

@@ -49,13 +49,11 @@ convictions and are ticked in the inbox as their packets land.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
-- **14 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `docs-dependency-map-analyzer-vocabulary` — A constitutional spec still describes the analyzer-capability marker with a vocabulary the code deliberately removed — restate it, or move the code back?
+- **12 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
   - `docs-remediation-goals-output-order-omits-two-exclusion-classes` — The remediation goals document states the report's section order, and the render has two categories that order has no bullet for — widen it, or declare it a minimum?
   - `docs-audit-prompt-reflection-destination-unnamed` — The audit loader prompt tells the host to record a reflection but never says which file to write it to — name the destination, and pin it in the contract test?
   - `docs-audit-pkg-language-convictions-two-homes` — Three language/analyzer convictions are stated twice, in different words, across two audit-pkg docs — pick one home?
   - `docs-risk-tier-semantics-in-three-specs` — The risk-tier collapse rule is stated three times across three specs — reduce two of them to a pointer?
-  - `docs-s8-conceptual-review-contract-split-across-specs` — The conceptual design review's contract is split across two specs — fold section S8 into the review's own design-of-record?
   - `docs-five-recorded-condensation-findings-batch` — Five spec condensation findings recorded last run still stand, and one was routed at the wrong file — apply them as a batch, or keep recording them?
   - `docs-repo-start-lap-skill-is-shadowed-by-the-global-one` — The repository's own /start-lap skill never runs — the global skill of the same name shadows it. Re-home its steps, rename it, or delete it?
   - `solutions-nightly-output-placement-on-a-feature-branch` — This run's output was committed to a feature branch rather than the main line — cherry-pick it, wait for the branch, or re-run the whole routine later?

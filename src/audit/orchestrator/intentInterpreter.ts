@@ -2,7 +2,7 @@
  * audit-code free_form_intent interpreter consumer.
  *
  * Bridges the audit-tools/shared clause interpreter to the pinned
- * FreeFormIntentInterpretation seam contract (N-X06).
+ * FreeFormIntentInterpretation seam contract.
  *
  * INV-S04: the WHOLE verbatim free_form_intent string is never emitted, and
  * worker/dispatch prompt material never carries it in any form. Individual

@@ -1336,7 +1336,7 @@ describe("design-spec structural gates: critic phase gate checks", () => {
     expect(step?.stop_condition ?? "").toMatch(/phase "decomposition"/);
   });
 
-  it("appends N-R21 advisory when circular obligation dependency warning is present", async () => {
+  it("appends a circular-dependency advisory naming the action when the warning is present", async () => {
     const circularLedger = {
       contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
       goal_id: "G1",
@@ -1354,8 +1354,10 @@ describe("design-spec structural gates: critic phase gate checks", () => {
     const prompt = await promptOf(step!);
     // Should emit the critic phase step (not re-emit design)
     expect(prompt).toMatch(/Critic|counterexample/i);
-    // Advisory section for circular dependency warning
-    expect(prompt).toContain("N-R21");
+    // Advisory section for circular dependency warning — the diagnostic plus the
+    // action, never an internal record id.
+    expect(prompt).toContain("Circular interface-definition dependency");
+    expect(prompt).toContain("re-drafting the interface definitions");
   });
 });
 

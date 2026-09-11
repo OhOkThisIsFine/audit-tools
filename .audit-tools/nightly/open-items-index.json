@@ -3,19 +3,8 @@
     "date": "2026-09-11",
     "head": "5708ef115e6c3ef310145f80ae63f888ba4d294e"
   },
-  "count": 14,
+  "count": 12,
   "items": [
-    {
-      "id": "docs-dependency-map-analyzer-vocabulary",
-      "leg": "docs",
-      "path": "spec/audit/dependency-map.md",
-      "title": "A constitutional spec still describes the analyzer-capability marker with a vocabulary the code deliberately removed — restate it, or move the code back?",
-      "subject_key": "4da5d39fe61a07d4",
-      "nights_open": 3,
-      "target": {
-        "path": "spec/audit/dependency-map.md"
-      }
-    },
     {
       "id": "docs-remediation-goals-output-order-omits-two-exclusion-classes",
       "leg": "docs",
@@ -58,17 +47,6 @@
       "nights_open": 3,
       "target": {
         "path": "spec/self-scaling-pipeline-design.md"
-      }
-    },
-    {
-      "id": "docs-s8-conceptual-review-contract-split-across-specs",
-      "leg": "docs",
-      "path": "spec/contract-authoring-determinism-design.md",
-      "title": "The conceptual design review's contract is split across two specs — fold section S8 into the review's own design-of-record?",
-      "subject_key": "bdf6ba59b50f068a",
-      "nights_open": 3,
-      "target": {
-        "path": "spec/contract-authoring-determinism-design.md"
       }
     },
     {
