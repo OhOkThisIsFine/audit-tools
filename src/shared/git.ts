@@ -79,6 +79,36 @@ export async function headCommit(root: string): Promise<string | null> {
 }
 
 /**
+ * The content of `path` (a repo-relative path, forward- or back-slash) as it
+ * stands at `ref` — the committed blob, not the working tree. `undefined` when
+ * the path is not a readable blob at that ref (absent, a directory, a
+ * submodule, or `ref`/`root` is not a git repo): every failure collapses to one
+ * answer, because a caller asking "is this file like this at HEAD" has no use
+ * for which of the two it was.
+ *
+ * The `--` separator is load-bearing: without it a path that collides with a
+ * ref name is resolved as the ref. `-z`-free plain capture, and the text is
+ * returned byte-exact (no trim, no newline normalization) so a caller counting
+ * lines or matching a quoted span sees the blob as git stores it.
+ */
+export async function fileContentAtRef(
+  root: string,
+  ref: string,
+  path: string,
+): Promise<string | undefined> {
+  const result = await runTrackedAsync(
+    ["git", "show", `${ref}:${path.replace(/\\/g, "/")}`],
+    {
+      cwd: root,
+      encoding: "utf8",
+      timeout: TRACKED_CHILD_DEADLINE_MS,
+      maxBuffer: GIT_MAX_BUFFER,
+    },
+  );
+  return result.status === 0 ? result.stdout : undefined;
+}
+
+/**
  * Files differing between `since` (a ref/SHA) and the current working tree —
  * committed, staged, and unstaged. Backs the auditor's `--since` delta mode.
  */

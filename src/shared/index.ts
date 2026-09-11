@@ -759,6 +759,7 @@ export {
   gitRefExists,
   changedFiles,
   fileCommits,
+  fileContentAtRef,
   headCommit,
   gitRemotes,
   stagedAndUntracked,
@@ -1081,7 +1082,9 @@ export {
 export type { DeliveredExcerpt } from "./validation/citationGrounding.js";
 export {
   checkCitations,
+  countSourceLines,
   extractCitationRefs,
+  stripEmittedLinePrefix,
 } from "./validation/citationGrounding.js";
 
 // Validation: design-finding grounding (S8 = S7 applied to the reviewer; cites a

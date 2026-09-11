@@ -417,9 +417,13 @@ export interface RemediationItemState {
    * CDC-25/CDC-26 — SOURCE-SIDE SHAPE. The per-finding verification-evidence
    * triple (file/line/mechanism) a producing module RECORDS onto this item at
    * its OWN phase (INV-COVERAGE's "evidence producer" half) before the single
-   * run-terminal `runClosePhase` PERSISTS it (INV-ISC-EVIDENCE-EMITTED). A
-   * runtime data flow through this already-existing state item, not a
-   * build-phase dependency: no cross-phase artifact token is minted for it.
+   * run-terminal `runClosePhase` PERSISTS it (INV-ISC-EVIDENCE-EMITTED). The
+   * producer is `verifyHeadEvidenceAgainstFindings`
+   * (`src/remediate/phases/closeVerifyHeadEvidence.ts`), whose own reads of the
+   * finding's cited location — at the audit's commit and at HEAD — are what the
+   * triple names. A runtime data flow through this already-existing state item,
+   * not a build-phase dependency: no cross-phase artifact token is minted for
+   * it.
    * This field lives here — inside item-status-partition-and-close's own
    * file_scope — and is therefore owned BY SCOPE, not by a clause 1(c)
    * declaration (that channel is only for a file outside every module's
