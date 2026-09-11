@@ -5,6 +5,31 @@
  * schema-grounded rather than embedding raw artifact content.
  */
 import { DEPENDENCY_MAP } from "../contractPipeline/artifactStore.js";
+import {
+  ASSESSMENT_FINDING_STATUSES,
+  ASSESSMENT_VERDICTS,
+  CONTRACT_REPAIR_TARGETS_OFFERED,
+  CONTEXT_ENTRY_KINDS,
+  COUNTEREXAMPLE_CLASSIFICATIONS,
+  CRITIQUE_ITEM_KINDS,
+  CRITIQUE_ITEM_SEVERITIES,
+  CRITIQUE_VERDICTS,
+  CYCLIC_SEAM_BREAK_STRATEGIES,
+  CYCLIC_SEAM_RESOLUTION_STATUSES,
+  GOAL_SOURCE_TYPES,
+  IMPLEMENTATION_EDGE_KINDS,
+  IMPLEMENTATION_NODE_STATUSES,
+  JUDGE_VERDICTS,
+  OBLIGATION_KINDS,
+  OBLIGATION_STATUSES,
+  SEAM_RESOLUTION_DECISIONS,
+  TEST_SPEC_KINDS,
+  VERIFICATION_FINDING_STATUSES,
+  VERIFICATION_REPORT_STATUSES,
+  VERIFICATION_TRACE_KINDS,
+  VERIFICATION_TRACE_STATUSES,
+  sketchValues,
+} from "../contractPipeline/sketchSource.js";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import type { AdversarialDepth } from "../riskSignal.js";
 import { renderIndependentReviewMandate } from "audit-tools/shared";
@@ -43,7 +68,7 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "objective": "<single-sentence primary objective>",
   "non_goals": ["<explicit out-of-scope items>"],
   "success_criteria": ["<measurable criteria>"],
-  "source_type": "conversation | document | structured_audit | mixed"
+  "source_type": "${sketchValues(GOAL_SOURCE_TYPES)}"
 }`,
     description:
       "Normalize the remediation objective into a bounded, unambiguous goal spec.",
@@ -54,7 +79,7 @@ export const ROLES: Record<string, ContractPipelineRole> = {
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/context-bundle/v1alpha1",
   "goal_id": "<from goal_spec>",
-  "entries": [{ "path": "<repo-relative>", "kind": "source|test|config|doc", "relevance_reason": "..." }],
+  "entries": [{ "path": "<repo-relative>", "kind": "${sketchValues(CONTEXT_ENTRY_KINDS)}", "relevance_reason": "..." }],
   "context_summary": "<free-text summary>"
 }`,
     description:
@@ -112,7 +137,7 @@ export const ROLES: Record<string, ContractPipelineRole> = {
     "module_b": "<module-name>",
     "description": "<what A declares vs. what B declares — the mismatch>",
     "resolution": {
-      "decision": "<which side adjusts — A | B | both>",
+      "decision": "<which side adjusts — ${sketchValues(SEAM_RESOLUTION_DECISIONS)}>",
       "agreed_interface": "<the reconciled interface both sides must adopt>"
     }
   }]
@@ -148,11 +173,12 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "goal_id": "<from obligation_ledger>",
   "cycles": [{
     "members": ["<obligation-id>", "..."],
-    "break_strategy": "mediator | single_authority",
+    "break_strategy": "${sketchValues(CYCLIC_SEAM_BREAK_STRATEGIES)}",
+    "designated_obligation_id": "<the mediating obligation, or the single authority — must exist in the rewritten ledger>",
     "resolution_description": "<what was changed and why>",
     "exception_registration": "<scoped exception name when single_authority, otherwise null>"
   }],
-  "status": "no_cycles | resolved"
+  "status": "${sketchValues(CYCLIC_SEAM_RESOLUTION_STATUSES)}"
 }`,
     description:
       "Detect and resolve circular interface-definition obligations in the obligation ledger. If no cycles exist, record status=no_cycles and an empty cycles array. For each detected cycle, choose a sanctioned break strategy (mediator module or single authority) and record the resolution. Verify mentally that the break does not re-introduce a cycle before writing the output.",
@@ -171,9 +197,9 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "obligations": [{
     "id": "<obligation-id>",
     "description": "<concrete obligation>",
-    "kind": "invariant|behavioral|structural|test",
+    "kind": "${sketchValues(OBLIGATION_KINDS)}",
     "depends_on": [],
-    "status": "pending"
+    "status": "${sketchValues(OBLIGATION_STATUSES)}"
   }]
 }`,
     description:
@@ -185,8 +211,8 @@ export const ROLES: Record<string, ContractPipelineRole> = {
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1",
   "goal_id": "<from goal_spec>",
-  "items": [{ "id": "<id>", "kind": "concern|alternative|suggestion", "description": "...", "severity": "blocking|advisory" }],
-  "verdict": "approved | approved_with_concerns | rejected"
+  "items": [{ "id": "<id>", "kind": "${sketchValues(CRITIQUE_ITEM_KINDS)}", "description": "...", "severity": "${sketchValues(CRITIQUE_ITEM_SEVERITIES)}" }],
+  "verdict": "${sketchValues(CRITIQUE_VERDICTS)}"
 }`,
     description:
       "Provide philosophy/alternatives/directions critique of the finalized module contracts.",
@@ -201,7 +227,7 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "test_specs": [{
     "obligation_id": "<id from obligation_ledger>",
     "name": "<short test name>",
-    "kind": "unit | integration | schema | invariant | e2e",
+    "kind": "${sketchValues(TEST_SPEC_KINDS)}",
     "assertions": ["<concrete, falsifiable assertion>"],
     "inapplicable_claim": {
       "obligation_id": "<must match obligation_id above>",
@@ -218,8 +244,8 @@ export const ROLES: Record<string, ContractPipelineRole> = {
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/contract-assessment-report/v1alpha1",
   "goal_id": "<from goal_spec>",
-  "findings": [{ "obligation_id": "<id>", "status": "satisfied|violated|uncertain", "evidence": ["..."], "rationale": "..." }],
-  "verdict": "passed | failed | partial"
+  "findings": [{ "obligation_id": "<id>", "status": "${sketchValues(ASSESSMENT_FINDING_STATUSES)}", "evidence": ["..."], "rationale": "..." }],
+  "verdict": "${sketchValues(ASSESSMENT_VERDICTS)}"
 }`,
     description:
       "Assess whether the design spec satisfies all invariants and obligations.",
@@ -249,14 +275,14 @@ export const ROLES: Record<string, ContractPipelineRole> = {
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/judge-report/v1alpha1",
   "goal_id": "<from goal_spec>",
-  "verdict": "approved | needs_repair",
+  "verdict": "${sketchValues(JUDGE_VERDICTS)}",
   "classifications": [{
     "counterexample_id": "<id from the counterexample report>",
-    "classification": "accepted | out_of_scope | duplicate | invalid | residual_risk",
+    "classification": "${sketchValues(COUNTEREXAMPLE_CLASSIFICATIONS)}",
     "rationale": "<one-line justification>"
   }],
   "repair_directive": {
-    "target": "finalized_module_contracts | obligation_ledger | contract_assessment_report",
+    "target": "${sketchValues(CONTRACT_REPAIR_TARGETS_OFFERED)}",
     "instruction": "<bounded instruction for regenerating the target artifact>"
   }
 }`,
@@ -281,9 +307,9 @@ export const ROLES: Record<string, ContractPipelineRole> = {
     "output_files": ["<EVERY file this node creates or edits — the tests it must write, the source a generated artifact mirrors, new shared modules, manifests>"],
     "verification_obligation_ids": ["<obligation_id>"],
     "targeted_commands": ["<command to verify>"],
-    "status": "pending"
+    "status": "${sketchValues(IMPLEMENTATION_NODE_STATUSES)}"
   }],
-  "edges": [{ "from": "<id>", "to": "<id>", "kind": "dependency|verification" }]
+  "edges": [{ "from": "<id>", "to": "<id>", "kind": "${sketchValues(IMPLEMENTATION_EDGE_KINDS)}" }]
 }`,
     description:
       "Decompose the implementation into a bounded dependency DAG of tasks. Traceability is mandatory: every node must list at least one obligation id from the obligation ledger (in satisfies_obligations or verification_obligation_ids) or one judge-accepted counterexample id (in addresses_counterexamples) — untraceable nodes are rejected. Accepted and residual_risk counterexamples from the judge report must be covered by nodes or verification obligations. Declare in output_files EVERY file a node will create or edit — including the test files it must write, the sources generated artifacts mirror, new shared modules, and manifests: the enforced write scope derives from these declarations plus the owning module's contract, and an omitted companion file stalls the work item on a mid-run clarification.",
@@ -296,10 +322,10 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "goal_id": "<from goal_spec>",
   "findings": [{
     "finding_id": "<id>",
-    "traces": [{ "trace_id": "<id>", "kind": "requirement|invariant|task|file|command", "label": "...", "evidence": ["..."], "status": "passed|failed" }],
-    "overall_status": "passed|failed"
+    "traces": [{ "trace_id": "<id>", "kind": "${sketchValues(VERIFICATION_TRACE_KINDS)}", "label": "...", "evidence": ["..."], "status": "${sketchValues(VERIFICATION_TRACE_STATUSES)}" }],
+    "overall_status": "${sketchValues(VERIFICATION_FINDING_STATUSES)}"
   }],
-  "overall_status": "passed|failed"
+  "overall_status": "${sketchValues(VERIFICATION_REPORT_STATUSES)}"
 }`,
     description:
       "Verify all obligations are satisfied and produce the verification report.",

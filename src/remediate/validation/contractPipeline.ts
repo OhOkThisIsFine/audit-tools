@@ -12,6 +12,30 @@ import {
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import { detectContractTokenCycles } from "../contractPipeline/phaseCut.js";
 import {
+  ASSESSMENT_FINDING_STATUSES,
+  ASSESSMENT_VERDICTS,
+  CONTRACT_REPAIR_TARGETS,
+  CONTEXT_ENTRY_KINDS,
+  COUNTEREXAMPLE_CLASSIFICATIONS,
+  CRITIQUE_ITEM_KINDS,
+  CRITIQUE_ITEM_SEVERITIES,
+  CRITIQUE_VERDICTS,
+  CYCLIC_SEAM_BREAK_STRATEGIES,
+  CYCLIC_SEAM_RESOLUTION_STATUSES,
+  GOAL_SOURCE_TYPES,
+  IMPLEMENTATION_EDGE_KINDS,
+  IMPLEMENTATION_NODE_STATUSES,
+  JUDGE_VERDICTS,
+  OBLIGATION_KINDS,
+  OBLIGATION_STATUSES,
+  SEAM_RESOLUTION_DECISIONS,
+  TEST_SPEC_KINDS,
+  VERIFICATION_FINDING_STATUSES,
+  VERIFICATION_REPORT_STATUSES,
+  VERIFICATION_TRACE_KINDS,
+  VERIFICATION_TRACE_STATUSES,
+} from "../contractPipeline/sketchSource.js";
+import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
   CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
@@ -27,13 +51,6 @@ import {
 // Version constant for cyclic_seam_resolution artifact.
 export const CP_CYCLIC_SEAM_RESOLUTION_VERSION =
   "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1" as const;
-
-const CYCLIC_SEAM_RESOLUTION_STATUSES = [
-  "no_cycles",
-  "resolved",
-  "user_decision_required",
-  "blocked",
-] as const;
 
 // Version constants for seam-negotiation artifacts not yet in audit-tools/shared.
 export const CP_MODULE_DECOMPOSITION_VERSION =
@@ -126,12 +143,7 @@ export function validateGoalSpec(
   requireString(v.objective, `${path}.objective`, issues);
   requireStringArray(v.non_goals, `${path}.non_goals`, issues);
   requireStringArray(v.success_criteria, `${path}.success_criteria`, issues);
-  requireOneOf(
-    v.source_type,
-    ["conversation", "document", "structured_audit", "mixed"],
-    `${path}.source_type`,
-    issues,
-  );
+  requireOneOf(v.source_type, GOAL_SOURCE_TYPES, `${path}.source_type`, issues);
   requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
@@ -154,7 +166,7 @@ export function validateContextBundle(
         continue;
       }
       requireString(entry.path, `${path}.entries[${i}].path`, issues);
-      requireOneOf(entry.kind, ["source", "test", "config", "doc"], `${path}.entries[${i}].kind`, issues);
+      requireOneOf(entry.kind, CONTEXT_ENTRY_KINDS, `${path}.entries[${i}].kind`, issues);
       requireString(entry.relevance_reason, `${path}.entries[${i}].relevance_reason`, issues);
     }
   }
@@ -267,7 +279,7 @@ export function validateSeamReconciliationReport(
       } else {
         requireOneOf(
           mismatch.resolution.decision,
-          ["A", "B", "both"],
+          SEAM_RESOLUTION_DECISIONS,
           `${path}.mismatches[${i}].resolution.decision`,
           issues,
         );
@@ -365,12 +377,12 @@ export function validateConceptualDesignCritique(
         continue;
       }
       requireString(item.id, `${path}.items[${i}].id`, issues);
-      requireOneOf(item.kind, ["concern", "alternative", "suggestion"], `${path}.items[${i}].kind`, issues);
+      requireOneOf(item.kind, CRITIQUE_ITEM_KINDS, `${path}.items[${i}].kind`, issues);
       requireString(item.description, `${path}.items[${i}].description`, issues);
-      requireOneOf(item.severity, ["blocking", "advisory"], `${path}.items[${i}].severity`, issues);
+      requireOneOf(item.severity, CRITIQUE_ITEM_SEVERITIES, `${path}.items[${i}].severity`, issues);
     }
   }
-  requireOneOf(v.verdict, ["approved", "approved_with_concerns", "rejected"], `${path}.verdict`, issues);
+  requireOneOf(v.verdict, CRITIQUE_VERDICTS, `${path}.verdict`, issues);
   requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
@@ -394,9 +406,9 @@ export function validateObligationLedger(
       }
       requireString(obl.id, `${path}.obligations[${i}].id`, issues);
       requireString(obl.description, `${path}.obligations[${i}].description`, issues);
-      requireOneOf(obl.kind, ["invariant", "behavioral", "structural", "test"], `${path}.obligations[${i}].kind`, issues);
+      requireOneOf(obl.kind, OBLIGATION_KINDS, `${path}.obligations[${i}].kind`, issues);
       requireStringArray(obl.depends_on, `${path}.obligations[${i}].depends_on`, issues);
-      requireOneOf(obl.status, ["pending", "satisfied", "failed"], `${path}.obligations[${i}].status`, issues);
+      requireOneOf(obl.status, OBLIGATION_STATUSES, `${path}.obligations[${i}].status`, issues);
     }
   }
   requireString(v.created_at, `${path}.created_at`, issues);
@@ -404,8 +416,6 @@ export function validateObligationLedger(
 }
 
 // ── TestValidatorPlan ─────────────────────────────────────────────────────────
-
-const TEST_SPEC_KINDS = ["unit", "integration", "schema", "invariant", "e2e"] as const;
 
 export function validateTestValidatorPlan(
   value: unknown,
@@ -478,12 +488,12 @@ export function validateContractAssessmentReport(
         continue;
       }
       requireString(finding.obligation_id, `${path}.findings[${i}].obligation_id`, issues);
-      requireOneOf(finding.status, ["satisfied", "violated", "uncertain"], `${path}.findings[${i}].status`, issues);
+      requireOneOf(finding.status, ASSESSMENT_FINDING_STATUSES, `${path}.findings[${i}].status`, issues);
       requireStringArray(finding.evidence, `${path}.findings[${i}].evidence`, issues);
       requireString(finding.rationale, `${path}.findings[${i}].rationale`, issues);
     }
   }
-  requireOneOf(v.verdict, ["passed", "failed", "partial"], `${path}.verdict`, issues);
+  requireOneOf(v.verdict, ASSESSMENT_VERDICTS, `${path}.verdict`, issues);
   requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
@@ -519,22 +529,6 @@ export function validateCounterexample(
 
 // ── JudgeReport ───────────────────────────────────────────────────────────────
 
-const COUNTEREXAMPLE_CLASSIFICATIONS = [
-  "accepted",
-  "out_of_scope",
-  "duplicate",
-  "invalid",
-  "residual_risk",
-] as const;
-
-const JUDGE_REPAIR_TARGETS = [
-  "finalized_module_contracts",
-  "obligation_ledger",
-  "contract_assessment_report",
-  // Legacy alias: pre-redesign judge reports may reference design_spec.
-  "design_spec",
-] as const;
-
 export function validateJudgeReport(
   value: unknown,
   path = "judge_report",
@@ -542,7 +536,7 @@ export function validateJudgeReport(
   const issues: ValidationIssue[] = [];
   const v = validateEnvelope(value, path, CONTRACT_PIPELINE_JUDGE_REPORT_VERSION, issues);
   if (!v) return issues;
-  requireOneOf(v.verdict, ["approved", "needs_repair"], `${path}.verdict`, issues);
+  requireOneOf(v.verdict, JUDGE_VERDICTS, `${path}.verdict`, issues);
   if (!Array.isArray(v.classifications)) {
     pushValidationIssue(issues, `${path}.classifications`, `${path}.classifications must be an array.`);
   } else {
@@ -569,7 +563,7 @@ export function validateJudgeReport(
     if (!isRecord(v.repair_directive)) {
       pushValidationIssue(issues, `${path}.repair_directive`, `${path}.repair_directive must be an object.`);
     } else {
-      requireOneOf(v.repair_directive.target, JUDGE_REPAIR_TARGETS, `${path}.repair_directive.target`, issues);
+      requireOneOf(v.repair_directive.target, CONTRACT_REPAIR_TARGETS, `${path}.repair_directive.target`, issues);
       requireString(v.repair_directive.instruction, `${path}.repair_directive.instruction`, issues);
     }
   }
@@ -604,7 +598,7 @@ export function validateImplementationDAG(
       requireStringArray(node.depends_on, `${path}.nodes[${i}].depends_on`, issues);
       requireStringArray(node.verification_obligation_ids, `${path}.nodes[${i}].verification_obligation_ids`, issues);
       requireStringArray(node.targeted_commands, `${path}.nodes[${i}].targeted_commands`, issues);
-      requireOneOf(node.status, ["pending", "in_progress", "resolved", "blocked"], `${path}.nodes[${i}].status`, issues);
+      requireOneOf(node.status, IMPLEMENTATION_NODE_STATUSES, `${path}.nodes[${i}].status`, issues);
       if (node.files_likely_touched !== undefined) {
         requireStringArray(node.files_likely_touched, `${path}.nodes[${i}].files_likely_touched`, issues);
       }
@@ -638,7 +632,7 @@ export function validateImplementationDAG(
       }
       requireString(edge.from, `${path}.edges[${i}].from`, issues);
       requireString(edge.to, `${path}.edges[${i}].to`, issues);
-      requireOneOf(edge.kind, ["dependency", "verification"], `${path}.edges[${i}].kind`, issues);
+      requireOneOf(edge.kind, IMPLEMENTATION_EDGE_KINDS, `${path}.edges[${i}].kind`, issues);
       if (typeof edge.from === "string" && edge.from.length > 0 && !declaredNodeIds.has(edge.from)) {
         pushValidationIssue(
           issues,
@@ -720,18 +714,18 @@ export function validateVerificationReport(
             continue;
           }
           requireString(trace.trace_id, `${path}.findings[${i}].traces[${j}].trace_id`, issues);
-          requireOneOf(trace.kind, ["requirement", "invariant", "counterexample", "task", "file", "command"], `${path}.findings[${i}].traces[${j}].kind`, issues);
+          requireOneOf(trace.kind, VERIFICATION_TRACE_KINDS, `${path}.findings[${i}].traces[${j}].kind`, issues);
           requireString(trace.label, `${path}.findings[${i}].traces[${j}].label`, issues);
           requireStringArray(trace.evidence, `${path}.findings[${i}].traces[${j}].evidence`, issues);
-          requireOneOf(trace.status, ["passed", "failed"], `${path}.findings[${i}].traces[${j}].status`, issues);
+          requireOneOf(trace.status, VERIFICATION_TRACE_STATUSES, `${path}.findings[${i}].traces[${j}].status`, issues);
         }
       }
-      requireOneOf(finding.overall_status, ["passed", "failed", "skipped"], `${path}.findings[${i}].overall_status`, issues);
+      requireOneOf(finding.overall_status, VERIFICATION_FINDING_STATUSES, `${path}.findings[${i}].overall_status`, issues);
     }
   }
   // Report-level overall_status stays strict passed|failed — "skipped" is a
   // per-finding-only outcome (see FindingVerificationTrace doc comment).
-  requireOneOf(v.overall_status, ["passed", "failed"], `${path}.overall_status`, issues);
+  requireOneOf(v.overall_status, VERIFICATION_REPORT_STATUSES, `${path}.overall_status`, issues);
   requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
@@ -760,6 +754,18 @@ export function validateCyclicSeamResolution(
           `${path}.cycles[${i}].members must be an array of strings.`,
         );
       }
+      // `break_strategy` was NOT validated here — it was checked later, and
+      // only on the authored-resolution path, against two inline literals. So a
+      // cycle record naming an unsanctioned strategy passed the CONTRACT
+      // validator that decides whether the artifact is admissible at all. The
+      // vocabulary now lives in the shared declaration the prompt sketch also
+      // renders, and this reads it.
+      requireOneOf(
+        cycle.break_strategy,
+        CYCLIC_SEAM_BREAK_STRATEGIES,
+        `${path}.cycles[${i}].break_strategy`,
+        issues,
+      );
     }
   }
   requireOneOf(

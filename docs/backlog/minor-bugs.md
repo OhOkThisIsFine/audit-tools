@@ -336,17 +336,6 @@
   [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:
   should synthesis demand mechanism-grounded (not flow-existence) evidence for `critical`?
 
-- **remediate-code step prompts drift from the validators that read their output (2026-08-19, low,
-  friction: tool_should_decide).** Remaining instance (the `confirm_intent` `excluded_scope` shape
-  is closed by P40's contract test, 2026-08-23; the `created_at` claim was REFUTED — the tool stamps
-  it, so the sketches omit it correctly; the three fields the `synthesize_intake` prompt mandated
-  — `pre_draft_questions`, `closing_action`, `intent_interpretation` — are admitted by
-  `IntentCheckpointSchema` since 2026-09-04): the checkpoint read path is an unvalidated cast
-  (`readOptionalJsonFile<IntentCheckpoint>` in `src/remediate/steps/nextStep.ts`) so prose strings
-  crash `normalize()` deep in path matching, and the sketches are still hand-written beside the
-  schema. **Property:** a step prompt's schema sketch is derived from the same contract its reader
-  enforces, and the checkpoint read path validates before use instead of casting.
-
 - **The commit gate's doc-contract leg did not run check:doc-code-citations for a staged
   docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying
   premise dissolves on inspection.** `check:doc-code-citations` was reported red repo-wide over

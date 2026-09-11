@@ -206,11 +206,81 @@ export interface JudgedCounterexample {
   rationale: string;
 }
 
-/** Contract artifacts the judge may order regenerated. */
-export type JudgeRepairTarget =
-  | "design_spec"
-  | "obligation_ledger"
-  | "contract_assessment_report";
+/**
+ * `judge_report.repair_directive.target` — the artifacts a repair may name.
+ *
+ * DECLARED HERE, in `src/shared`, because this module is the base layer and the
+ * type below derives from it: `src/shared` must not import an orchestrator, and
+ * a declaration living in `src/remediate` was exactly that. The remediate side
+ * re-exports these through `contractPipeline/sketchSource.ts`, so the validator
+ * and every prompt sketch still read them from there.
+ *
+ * `design_spec` is the PRE-REDESIGN name for what `finalized_module_contracts`
+ * holds, and it stays here on purpose: the validator has a named back-compat
+ * test for it, and a judge report written by an older release must still be
+ * admissible. It is NOT offered in the prompt sketch
+ * ({@link CONTRACT_REPAIR_TARGETS_OFFERED}), because no new report should be
+ * authored against a name the repair loop normalizes away — the asymmetry is
+ * the same accept-legacy / emit-current split the store's version policy uses.
+ */
+export const CONTRACT_REPAIR_TARGETS = [
+  "finalized_module_contracts",
+  "obligation_ledger",
+  "contract_assessment_report",
+  "counterexample",
+  "design_spec",
+] as const;
+
+/**
+ * The values a validator still ACCEPTS but no sketch OFFERS — the
+ * accept-legacy / emit-current split, declared as data.
+ *
+ * Why it is a declaration rather than an `offeredExclusions` entry in the drift
+ * test. The exclusion WAS declared in the test, and that is exactly the shape
+ * this vocabulary bans: a hand-kept list that has to be edited in lockstep with
+ * the declaration it describes. The test's own `CONTRACT_REPAIR_TARGETS_OFFERED`
+ * import made the drift worse — the SKETCH's offered set and the TEST's expected
+ * offered set came from one expression, so a target quietly dropped from the
+ * offered set would move both sides together and stay green.
+ *
+ * Single-sourced instead: the offered set is {@link CONTRACT_REPAIR_TARGETS}
+ * minus THIS list, the sketch renders that set, and the drift test derives its
+ * expectation from the same subtraction. A new legacy alias is one entry here
+ * and nothing else moves.
+ */
+export const CONTRACT_REPAIR_TARGETS_LEGACY = ["design_spec"] as const;
+
+/**
+ * The subset a prompt OFFERS: everything admissible except the legacy aliases.
+ *
+ * Derived, not a second list — the live targets are
+ * {@link CONTRACT_REPAIR_TARGETS_LEGACY}'s complement in
+ * {@link CONTRACT_REPAIR_TARGETS}, so adding a target adds it to the sketch
+ * automatically and removing one cannot leave a stale alternation behind.
+ */
+export const CONTRACT_REPAIR_TARGETS_OFFERED = CONTRACT_REPAIR_TARGETS.filter(
+  (target) =>
+    !(CONTRACT_REPAIR_TARGETS_LEGACY as readonly string[]).includes(target),
+);
+
+/**
+ * Contract artifacts the judge may order regenerated — DERIVED from the one
+ * declaration above, which the validator and every prompt sketch also read.
+ * Restating the members on the type is how it came to disagree with the
+ * validator once already: the sketch offered three, the validator four, and the
+ * type a third set.
+ *
+ * `finalized_module_contracts` is the post-redesign name for what `design_spec`
+ * used to hold, and the four non-legacy members are exactly the artifacts a
+ * repair can regenerate. `finalized_module_contracts` and `counterexample` are
+ * absent from this union's history only because the union predated them.
+ *
+ * A `design_spec` directive is ADMITTED by the validator (back-compat) but is
+ * not a repair order the loop acts on: it falls through to
+ * `inferRepairDirective` (`contractPipeline.ts`) rather than being normalized
+ * onto `finalized_module_contracts`.
+ */
+export type JudgeRepairTarget = (typeof CONTRACT_REPAIR_TARGETS)[number];
 
 /** On a failing verdict, the single targeted repair the loop performs next. */
 export interface JudgeRepairDirective {

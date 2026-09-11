@@ -68,6 +68,11 @@ export type {
   JudgeRepairDirective,
   JudgeReport,
 } from "./contractPipeline/obligations.js";
+export {
+  CONTRACT_REPAIR_TARGETS,
+  CONTRACT_REPAIR_TARGETS_LEGACY,
+  CONTRACT_REPAIR_TARGETS_OFFERED,
+} from "./contractPipeline/obligations.js";
 
 export { CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION } from "./contractPipeline/implementation.js";
 import type {

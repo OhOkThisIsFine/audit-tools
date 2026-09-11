@@ -30,6 +30,7 @@ import {
   readSubmissionDocument,
   readSubmissionLedger,
   readTrailingSubmissionRefusals,
+  recoveryMarkMatches,
   recordHostResultOutcomes,
   repoRelativePath,
   resolveContainedPath,
@@ -51,7 +52,11 @@ import {
   type SubmissionLedgerEvent,
   type SubmissionScanMessages,
 } from "audit-tools/shared";
-import { StateStore, type RemediationState } from "../../state/store.js";
+import {
+  REMEDIATION_STATE_CONTRACT_VERSION,
+  StateStore,
+  type RemediationState,
+} from "../../state/store.js";
 import {
   REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1,
   REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2,
@@ -76,7 +81,11 @@ import {
   REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION as WORKLOAD_CONTRACT_VERSION,
 } from "../types.js";
 
-const STATE_CONTRACT_VERSION = "remediate-code-state/v1alpha1" as const;
+// The state contract version is the STORE's declaration, not a second literal
+// here. It used to be private to this module — and the module then supplied it
+// to its own parser at the call site below, so the check it performed was
+// "does the constant equal itself".
+const STATE_CONTRACT_VERSION = REMEDIATION_STATE_CONTRACT_VERSION;
 
 export type UnsupportedRetiredRemediationState = "unsupported_retired_state";
 
@@ -781,12 +790,13 @@ export async function remediationSubmissionBinding(params: {
   let validationWorkItem = workItem;
   try {
     const storedState = await new StateStore(paths.artifactsDir).loadState();
-    const state = storedState
-      ? parseCurrentState({
-          ...storedState,
-          contract_version: STATE_CONTRACT_VERSION,
-        })
-      : null;
+    // No version is supplied here. The store reads the state from disk and
+    // stamps the contract version it just VALIDATED, so `parseCurrentState`
+    // tests the value that was in the file. It used to be handed
+    // `STATE_CONTRACT_VERSION` from this line, which made the parser's version
+    // check compare a constant to itself and accept any state the store was
+    // willing to return.
+    const state = storedState ? parseCurrentState(storedState) : null;
     const canonicalWorkload = state
       ? parseWorkload(read.value, paths, params.runId, state)
       : null;
@@ -3095,15 +3105,14 @@ async function executeHostVerificationReruns(
         // (run, item): an item re-opened and later re-accepted from a
         // DIFFERENT landing is a different relaxed acceptance and earns its
         // own record. Only a retry of the SAME landing is a duplicate. The
-        // landed sha is matched inside the message because the shared event
-        // contract carries no commit field, and a 40-hex sha this writer
-        // itself emitted is an unambiguous token to match on.
+        // landed commit is carried on the event as `landed_commit` and read
+        // back through `recoveryMarkMatches` — prose is not an identity, and a
+        // message reworded by any later edit silently un-deduped the mark.
         const landedCommit = result.commit_evidence.after;
         const alreadyMarked = acc.recordedRecoveryMarks.some(
           (event) =>
             event.run_id === ctx.runId &&
-            event.submission_id === workItem.id &&
-            (event.message ?? "").includes(landedCommit),
+            recoveryMarkMatches(event, workItem.id, landedCommit),
         );
         if (!alreadyMarked) {
           const event: SubmissionLedgerEvent = {
@@ -3112,6 +3121,10 @@ async function executeHostVerificationReruns(
             submission_id: workItem.id,
             lane: workItem.id,
             kind: "accepted_via_recovery",
+            // The structured half of this event's identity, beside the prose
+            // that narrates it. `recoveryMarkMatches` reads THIS, never the
+            // message below.
+            landed_commit: landedCommit,
             // Derived from what was actually probed, never asserted: the
             // baseline was found in no ref and unreachable from HEAD.
             message:

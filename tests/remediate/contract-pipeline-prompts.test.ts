@@ -596,18 +596,25 @@ describe("CP-NODE-13: inline gate prompts", () => {
 
   });
 
-  it("PINS the renderer's known-STALE copy of the same record schema by content hash", () => {
-    // The role renderer carries a SECOND, older copy of the cyclic-seam record
-    // schema — it has no `designated_obligation_id`, so it describes a record
-    // the re-check now rejects. It is NOT the prompt the pipeline dispatches for
-    // this phase (the gate above is), and `contractPipelinePrompts.ts` is
-    // outside CP-NODE-13's write scope, so it survives as stale documentation.
+  it("PINS the renderer's copy of the same record schema by content hash", () => {
+    // The role renderer carries a SECOND copy of the cyclic-seam record schema,
+    // beside the gate's inline prompt. `contractPipelinePrompts.ts` was outside
+    // CP-NODE-13's write scope, so it was PINNED rather than repaired and this
+    // test recorded the staleness (`designated_obligation_id` was missing, so it
+    // documented a record the re-check rejects).
     //
-    // Pinned by CONTENT HASH, deliberately, rather than by asserting the field
-    // is absent: an absence assertion is GREEN while the copy is wrong and goes
-    // RED the moment someone repairs it — it defends the drift. A hash is red on
-    // ANY change in either direction, which is what routes the decision to the
-    // file's owner instead of to whoever happens to touch it next.
+    // P45 REACHED THE REPAIR. The staleness is now closed — the renderer's copy
+    // carries `designated_obligation_id`, and its other value vocabularies are
+    // derived from `contractPipeline/sketchSource.ts` rather than hand-written —
+    // so the pin is re-recorded here with its note retired, exactly as the note
+    // above instructed ("If you REPAIRED it: good — re-record the hash here and
+    // delete this note").
+    //
+    // Pinned by CONTENT HASH, deliberately, rather than by asserting field
+    // presence: a presence assertion is GREEN while an unrelated part of the copy
+    // drifts and goes RED only on the one field it names. A hash is red on ANY
+    // change in either direction, which is what routes the decision to the file's
+    // owner instead of to whoever happens to touch it next.
     const rendered = renderContractPipelinePrompt({
       role: "cyclic_seam_resolution",
       artifactPaths: ALL_PATHS,
@@ -621,15 +628,14 @@ describe("CP-NODE-13: inline gate prompts", () => {
       createHash("sha256").update(schema!, "utf8").digest("hex"),
       [
         "The renderer's cyclic_seam_resolution schema changed.",
-        "This copy is KNOWN-STALE: it omits `designated_obligation_id`, which the",
-        "cycle-break re-check requires, so it documents a record that is rejected.",
-        "It is not dispatched (the gate's inline prompt is), and it was outside",
-        "CP-NODE-13's write scope.",
-        "If you REPAIRED it: good — re-record the hash here and delete this note.",
-        "If you changed it for another reason: the staleness above is still open,",
-        "so fix it in the same edit rather than re-pinning around it.",
+        "This copy is NO LONGER stale — it carries `designated_obligation_id` and",
+        "derives its vocabularies from `contractPipeline/sketchSource.ts` (see",
+        "tests/remediate/step-prompt-sketch-drift.test.ts, which holds the field",
+        "values to the validators). It still is not the prompt the pipeline",
+        "dispatches for this phase; the gate's inline prompt is.",
+        "If you changed this deliberately, re-record the hash here.",
       ].join(" "),
-    ).toBe("3eef044a17d85d8eeef02290b30dd02e443102e124731d5cd054d32d7ef4d3a5");
+    ).toBe("e7983ea766150f26505d69bc1ae5c7548069d670859e5e9e7cd3a87dd8e5dbe2");
   });
 
   it("the seed-digest refusal names the mismatched path and the recovery", async () => {

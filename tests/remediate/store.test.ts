@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { StateStore, RemediationState, LOCK_TIMEOUT_MS } from "../../src/remediate/state/store.js";
-import { SKIP_WRITE, STALE_LOCK_MS } from "audit-tools/shared";
+import {
+  StateStore,
+  RemediationState,
+  LOCK_TIMEOUT_MS,
+  REMEDIATION_STATE_CONTRACT_VERSION,
+} from "../../src/remediate/state/store.js";
+import { SKIP_WRITE, STALE_LOCK_MS, SchemaVersionMismatchError } from "audit-tools/shared";
 import { rm, mkdir, writeFile, utimes, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { dirname } from "node:path";
@@ -43,7 +48,16 @@ describe("StateStore", () => {
     await store.saveState(mockState);
     const loadedState = await store.loadState();
 
-    expect(loadedState).toEqual(mockState);
+    // The store stamps the contract version on every write, so the round trip
+    // returns what was SAVED plus that one field. Asserted as an explicit shape
+    // rather than a superset match: the point is that the store adds exactly
+    // this and nothing else, and that a state written before the field existed
+    // still loads (see the version-policy block below).
+    expect(loadedState).toEqual({
+      status: "planning",
+      contract_version: REMEDIATION_STATE_CONTRACT_VERSION,
+    });
+    expect(loadedState!.status).toBe(mockState.status);
   });
 
   it("concurrent saves serialize correctly — last write wins", async () => {
@@ -167,6 +181,155 @@ describe("StateStore.loadState — INV-remediate-state-01: schema validation", (
     await store.saveState({ status: "waiting_for_clarification" });
     const loaded = await store.loadState();
     expect(loaded?.status).toBe("waiting_for_clarification");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// INV-remediate-state-01, the WRITE half: the store's own hook refuses a state
+// the read gate would reject.
+//
+// Before this, validation ran on ONE side of the round trip. `loadState`
+// validated; `saveState`/`mutate` wrote whatever they were handed. A state
+// constructed in memory — which is every transition — therefore reached disk
+// unvalidated, and the failure surfaced on the NEXT read as a refusal to load a
+// file the tool itself had just written. The gate and the writer now share one
+// validator, so an inadmissible state cannot get to disk in the first place.
+// ---------------------------------------------------------------------------
+
+describe("StateStore — the write hook refuses what the read gate would reject", () => {
+  beforeEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("saveState refuses a state whose status is outside the vocabulary", async () => {
+    const store = new StateStore(TEST_DIR);
+    await expect(
+      // Through `unknown`: the point is a value the TYPE cannot express but a
+      // hand-edited or older file can, which is precisely what the runtime gate
+      // exists for. A direct cast no longer overlaps the discriminated union.
+      store.saveState({
+        status: "a_status_no_release_declares",
+      } as unknown as RemediationState),
+    ).rejects.toThrow(/refusing to write state\.json.*Unknown status/is);
+
+    // ...and nothing landed: the refusal is before the write, not a rollback.
+    await expect(stat(join(TEST_DIR, "state.json"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("saveState refuses a status-conditional state missing what its decision path reads", async () => {
+    // INV-RSM-STATE-COMPLETE, enforced at the WRITE too: an `implementing`
+    // state with no plan/items is exactly the shell the load gate rejects.
+    const store = new StateStore(TEST_DIR);
+    await expect(
+      store.saveState({ status: "implementing" }),
+    ).rejects.toThrow(/refusing to write state\.json.*requires a persisted plan/is);
+  });
+
+  it("mutate refuses an inadmissible transition and leaves the prior state intact", async () => {
+    const store = new StateStore(TEST_DIR);
+    await store.saveState({ status: "planning" });
+
+    await expect(
+      store.mutate(
+        async () =>
+          ({ status: "not_a_status" }) as unknown as RemediationState,
+      ),
+    ).rejects.toThrow(/refusing to write state\.json/is);
+
+    const loaded = await store.loadState();
+    expect(loaded?.status, "the refused transition did not disturb the file").toBe(
+      "planning",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The state's contract version, and how an in-flight state without one reads.
+//
+// State is COSTLY / AUTHORED (shared/io/schemaVersion.ts): a run's plan, item
+// ledger and recorded acceptances cannot be rebuilt from anything else on disk,
+// so the policy for a mismatch is THROW. ABSENT is deliberately not a mismatch
+// — every run already in flight when the field was introduced has a state.json
+// without it, and refusing those would destroy exactly the runs the field
+// exists to protect.
+// ---------------------------------------------------------------------------
+
+describe("StateStore — the state contract version", () => {
+  beforeEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("stamps the current version on every state it writes", async () => {
+    const store = new StateStore(TEST_DIR);
+    await store.saveState({ status: "pending" });
+
+    const onDisk = JSON.parse(
+      await readFile(join(TEST_DIR, "state.json"), "utf8"),
+    ) as { contract_version?: string };
+    expect(onDisk.contract_version).toBe(REMEDIATION_STATE_CONTRACT_VERSION);
+  });
+
+  it("loads an in-flight state that carries NO version (written before the field existed)", async () => {
+    // Byte-for-byte what an older release left behind: a valid state with no
+    // `contract_version` key at all.
+    await writeFile(
+      join(TEST_DIR, "state.json"),
+      JSON.stringify({ status: "planning", step_count: 4 }),
+      "utf8",
+    );
+
+    const store = new StateStore(TEST_DIR);
+    const loaded = await store.loadState();
+    expect(loaded?.status).toBe("planning");
+    expect(loaded?.step_count).toBe(4);
+    // Read back as the file says it — no field conjured at read time, so
+    // `loadState` stays byte-faithful and the round trip compares equal.
+    expect(loaded?.contract_version).toBeUndefined();
+  });
+
+  it("brings an unstamped in-flight state under the contract on its next write", async () => {
+    await writeFile(
+      join(TEST_DIR, "state.json"),
+      JSON.stringify({ status: "planning", step_count: 4 }),
+      "utf8",
+    );
+    const store = new StateStore(TEST_DIR);
+
+    await store.mutate(async (current) => ({ ...current!, step_count: 5 }));
+
+    const onDisk = JSON.parse(
+      await readFile(join(TEST_DIR, "state.json"), "utf8"),
+    ) as { contract_version?: string; step_count?: number };
+    expect(onDisk.contract_version).toBe(REMEDIATION_STATE_CONTRACT_VERSION);
+    expect(onDisk.step_count).toBe(5);
+  });
+
+  it("REFUSES to load a state stamped with another release's version", async () => {
+    // The positive-mismatch case, and the one the policy is written for: the
+    // file claims other semantics, so its fields must not be read under these.
+    await writeFile(
+      join(TEST_DIR, "state.json"),
+      JSON.stringify({
+        contract_version: "remediate-code-state/v0",
+        status: "planning",
+      }),
+      "utf8",
+    );
+
+    const store = new StateStore(TEST_DIR);
+    await expect(store.loadState()).rejects.toThrow(SchemaVersionMismatchError);
   });
 });
 

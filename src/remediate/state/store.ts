@@ -4,6 +4,7 @@ import {
   type LockedJsonStore,
   createLockedJsonStore,
   LOCKED_JSON_STORE_TIMEOUT_MS,
+  SchemaVersionMismatchError,
   SKIP_WRITE,
   assertNotNodeWorktreeCwd,
 } from "audit-tools/shared";
@@ -23,7 +24,51 @@ import {
   type RemediationRunStatus,
 } from "./runStatus.js";
 
+/**
+ * The schema version stamped on every persisted `state.json`.
+ *
+ * The VALUE is unchanged from the literal three modules already spelled out
+ * (the host-handoff parser, the state-shaping helper in `nextStep.ts`, and the
+ * test fixtures). What changes is that it is now ONE declaration that the store
+ * actually writes and reads back, rather than a constant a reader FABRICATED
+ * onto the loaded value to satisfy its own parser — see `parseCurrentState`'s
+ * call site in `steps/dispatch/hostHandoff.ts`. An identity that the reader
+ * supplies itself is not a check; it is the check's answer written in advance.
+ *
+ * A run's state is COSTLY / AUTHORED state in the sense
+ * `audit-tools/shared/io/schemaVersion.ts` names: it records work an operator
+ * or a host has already done, and it cannot be rebuilt from anything else on
+ * disk. That module's policy is therefore THROW on a mismatch — silently
+ * discarding a state would read as "this run never started" and destroy the
+ * plan, the item ledger and every recorded acceptance with it.
+ *
+ * ABSENT IS NOT A MISMATCH, and the distinction is deliberate here rather than
+ * inherited. Every run already in flight when this field was introduced has a
+ * `state.json` with no `contract_version`; treating its absence as a mismatch
+ * would refuse to load exactly the runs this field exists to protect. An
+ * unstamped state is read under the CURRENT version's semantics (it was written
+ * by a release whose shape this one still admits — that is what makes the field
+ * safe to add), and the next write stamps it. A stamped-but-DIFFERENT version
+ * is the case that throws, because at that point the file positively claims
+ * another release's semantics rather than merely predating the field.
+ *
+ * Same asymmetry as `intent_checkpoint` (absent ⇒ nothing to check; present
+ * and different ⇒ refuse loudly), inverted for a version that is newly added
+ * rather than newly REQUIRED.
+ */
+export const REMEDIATION_STATE_CONTRACT_VERSION =
+  "remediate-code-state/v1alpha1" as const;
+
+/** The file this store owns, named once so the version error can name it too. */
+const STATE_FILENAME = "state.json";
+
 export interface RemediationState {
+  /**
+   * Schema version of this persisted state. Optional on the TYPE because a
+   * state written before the field existed is a legal input; see
+   * {@link REMEDIATION_STATE_CONTRACT_VERSION} for how it reads.
+   */
+  contract_version?: typeof REMEDIATION_STATE_CONTRACT_VERSION;
   status: RemediationRunStatus;
   plan?: RemediationPlan;
   items?: Record<string, RemediationItemState>;
@@ -104,6 +149,22 @@ function validateState(value: unknown): string[] {
     return errors;
   }
   const obj = value as Record<string, unknown>;
+  // The contract version, checked BEFORE anything is read off the state: a file
+  // that positively claims another release's semantics must not have its fields
+  // interpreted under this one's. ABSENT is admitted (see
+  // REMEDIATION_STATE_CONTRACT_VERSION) — this is the stamped-and-different case
+  // only, which throws rather than degrading because the state is authored,
+  // unrebuildable work.
+  if (
+    obj["contract_version"] !== undefined &&
+    obj["contract_version"] !== REMEDIATION_STATE_CONTRACT_VERSION
+  ) {
+    throw new SchemaVersionMismatchError(
+      STATE_FILENAME,
+      REMEDIATION_STATE_CONTRACT_VERSION,
+      String(obj["contract_version"]),
+    );
+  }
   if (!("status" in obj)) {
     errors.push("Missing required field: status");
     return errors;
@@ -202,7 +263,6 @@ function validateState(value: unknown): string[] {
   return errors;
 }
 
-const STATE_FILENAME = "state.json";
 const LOCK_FILENAME = "state.lock";
 // Acquire timeout for the shared file lock — the STALE_LOCK_MS-minus-margin
 // derivation is single-sourced in the shared locked JSON store (a fresh-but-held
@@ -240,13 +300,37 @@ export class StateStore {
         if (raw === undefined) {
           return null;
         }
+        // `validateState` throws SchemaVersionMismatchError for a state stamped
+        // with another release's contract version; that propagates out of the
+        // read exactly as the policy requires (see the constant's doc).
         const errors = validateState(raw);
         if (errors.length > 0) {
           throw new Error(
             `state.json failed schema validation: ${errors.join("; ")}`,
           );
         }
+        // Returned as READ. The version is stamped on the way IN (the write
+        // hook below), so a state that has been through this store carries it
+        // on disk and this read is byte-faithful: what `loadState` returns is
+        // what the file says, with no field conjured at read time. A state
+        // written before the field existed has none until its next write, and
+        // `validateState` admits that (see the constant's doc) — which is the
+        // whole reason the field is optional on the type rather than required.
         return raw as RemediationState;
+      },
+      // The WRITE hook. Without it the store's own `persist` wrote whatever a
+      // caller handed it — the load gate was the only validation on the path,
+      // so a state that was never round-tripped (constructed in memory and
+      // saved, which is every transition) could reach disk carrying fields no
+      // reader would accept. The gate and the writer now share ONE validator.
+      validate: (next) => {
+        if (next === null) return;
+        const errors = validateState(next);
+        if (errors.length > 0) {
+          throw new Error(
+            `refusing to write state.json: ${errors.join("; ")}`,
+          );
+        }
       },
     });
   }
@@ -294,7 +378,13 @@ export class StateStore {
     assertNotNodeWorktreeCwd("a remediation state.json transition");
     let next: RemediationState | typeof SKIP_WRITE = SKIP_WRITE;
     const readValue = await this.store.mutate(async (current) => {
-      next = await fn(current);
+      const produced = await fn(current);
+      // Same stamp as `saveState`, at the other write door: the version is a
+      // property of the store's writes, so no transition can produce an
+      // unstamped file. The value RESOLVED to the caller is the newly stamped
+      // state (matching what `saveState` put on disk); the SKIP_WRITE arm below
+      // still resolves with what was READ.
+      next = produced === SKIP_WRITE ? SKIP_WRITE : stampedState(produced);
       return next;
     });
     if (next !== SKIP_WRITE) return next;
@@ -319,6 +409,25 @@ export class StateStore {
     // Same node-worktree guard as `mutate` — the unconditional-write recovery
     // path must not be the one door a worker-context write can still use.
     assertNotNodeWorktreeCwd("a remediation state.json write");
-    await this.store.replace(state);
+    await this.store.replace(stampedState(state));
   }
+}
+
+/**
+ * The state as it goes to disk: its own `contract_version` when it has one,
+ * else the current constant.
+ *
+ * Stamping here — at the two write doors, not in the read path — is what keeps
+ * `loadState` byte-faithful. A version conjured at READ time would make
+ * `loadState()` return a key the file does not contain, so the round trip
+ * `saveState(x)` → `loadState()` would not equal `x`, and a caller comparing
+ * states (the ingress's `state_changed`, the tests) would see a change that
+ * never happened. A state that already carries a DIFFERENT version is left
+ * alone: the write hook's validator refuses it loudly rather than this helper
+ * silently overwriting the caller's claim.
+ */
+function stampedState(state: RemediationState): RemediationState {
+  return state.contract_version === undefined
+    ? { ...state, contract_version: REMEDIATION_STATE_CONTRACT_VERSION }
+    : state;
 }

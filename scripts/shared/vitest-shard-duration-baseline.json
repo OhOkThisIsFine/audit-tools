@@ -352,7 +352,7 @@
     "tests/remediate/n-r04-intent-checkpoint.test.ts": 1086,
     "tests/remediate/n-r06-universal-contract-pipeline.test.ts": 1429,
     "tests/remediate/n-r07-seam-negotiation.test.ts": 1654,
-    "tests/remediate/n-r13-document-phase-dissolved.test.ts": 1241,
+    "tests/remediate/run-status-has-no-document-phase.test.ts": 1241,
     "tests/remediate/n-r22-ownership-registry.test.ts": 1200,
     "tests/remediate/n-remediate-steps-merge-consistency.test.ts": 1066,
     "tests/remediate/next-step-blocked-backstop.test.ts": 956,

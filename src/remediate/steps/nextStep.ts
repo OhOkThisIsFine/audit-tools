@@ -170,7 +170,16 @@ import {
   findingRiskEvidence,
   distinctAffectedFiles,
 } from "../riskSignal.js";
-import type { ClosingAction, IntentCheckpoint, ProjectFacts } from "audit-tools/shared";
+import {
+  readIntentCheckpoint,
+  readIntentCheckpointLenient,
+} from "audit-tools/shared";
+import type {
+  ClosingAction,
+  IntentCheckpoint,
+  ProjectFacts,
+  RejectedCheckpointField,
+} from "audit-tools/shared";
 import {
   ambiguityReviewPrompt,
   clarificationPrompt,
@@ -581,7 +590,11 @@ async function applyCheckpointIntentOrdering(
   artifactsDir: string,
   plan: RemediationPlan,
 ): Promise<RemediationPlan> {
-  const checkpoint = await readOptionalJsonFile<IntentCheckpoint>(
+  // Ordering is an ADVISORY pass: it reorders the plan and nothing depends on
+  // it, so an unreadable checkpoint degrades to "no intent" here rather than
+  // failing the planning step. (Every other read site is a GATE and lets the
+  // throw out — see `readIntentCheckpoint`.)
+  const checkpoint = await readIntentCheckpoint(
     join(artifactsDir, "intent_checkpoint.json"),
   ).catch(() => undefined);
   const freeForm = checkpoint?.free_form_intent;
@@ -703,8 +716,18 @@ function normalizeExtractedPlan(value: unknown, facts: ProjectFacts): {
 async function confirmedClosingPlan(
   artifactsDir: string,
 ): Promise<{ action: ClosingAction; custom_command?: string[] }> {
-  const checkpoint = await readOptionalJsonFile<IntentCheckpoint>(
+  // LENIENT, for the same reason the gate is: this runs on the state the gate
+  // just handled, and its own contract below says an out-of-vocabulary action
+  // "cannot reach here". A strict read would turn a case this function already
+  // handles by falling back to `none` into a thrown load error instead.
+  //
+  // This function only USES validated fields, so it takes the plain lenient read
+  // and never touches `readIntentCheckpointLenient`'s raw rejections: the value
+  // returned is one the schema accepts, and `isClosingAction` / `customCommandOf`
+  // are the point-of-use checks on top of it.
+  const checkpoint = await readIntentCheckpoint(
     join(artifactsDir, "intent_checkpoint.json"),
+    { lenient: true },
   );
   if (!checkpoint || checkpoint.confirmed_by !== "host") return { action: "none" };
   const chosen: unknown = checkpoint.closing_action;
@@ -1118,9 +1141,14 @@ export async function recoverIngestHostResults(options: {
     // A nothing-to-recover pass returns the sentinel, not the state it read: the
     // mutation is a no-op and must not rewrite the file (see StateStore.mutate).
     if (!outcome.state_changed) return SKIP_WRITE;
-    const { contract_version: _contractVersion, ...persistableState } =
-      outcome.state;
-    return persistableState;
+    // No `contract_version` strip. The boundary helper below stamps the version
+    // onto the state it hands the host handoff, and this used to peel it back
+    // off on the way to disk so `state.json` matched what was written before.
+    // The STORE now owns that field end to end — it stamps it on read and the
+    // write hook validates it — so peeling it here would persist a state
+    // without the identity the store just established, and the next read would
+    // have to re-invent it.
+    return outcome.state;
   });
   // The run moved, so the persisted step contract no longer describes it: it
   // names work this ingest just resolved, against a workload binding this ingest
@@ -1182,10 +1210,10 @@ async function buildImplementDispatchStep(ctx: {
     });
   }
   if (ingested.state_changed) {
-    const { contract_version: _contractVersion, ...persistableState } =
-      ingested.state;
-    await store.saveState(persistableState);
-    return { kind: "transition", state: persistableState };
+    // Same as the recovery verb above: the version is the store's to write,
+    // not a boundary decoration to peel off before persisting.
+    await store.saveState(ingested.state);
+    return { kind: "transition", state: ingested.state };
   }
 
   const baselineCommit = await headCommit(root);
@@ -2145,9 +2173,7 @@ async function handleReadyIntakeContractPipeline(
     const auditFindings = await readAuditFindingsOnce();
     const originals = extractAuditFindings(auditFindings);
     if (originals.length > 0) {
-      const checkpoint = await readOptionalJsonFile<IntentCheckpoint>(
-        join(artifactsDir, "intent_checkpoint.json"),
-      );
+      const checkpoint = await readIntentCheckpoint(join(artifactsDir, "intent_checkpoint.json"));
       const filter = await runFindingFilterPass(originals, {
         root,
         checkpoint: checkpoint ?? undefined,
@@ -3870,8 +3896,23 @@ async function buildConfirmIntentStep(ctx: {
   const checkpointPath = join(artifactsDir, "intent_checkpoint.json");
 
   // Read the pre-drafted checkpoint if one exists (confirmed_by: "draft").
-  const draft = await readOptionalJsonFile<IntentCheckpoint>(checkpointPath);
+  //
+  // This is the GATE, and it reads LENIENTLY on purpose: a checkpoint whose
+  // `closing_action` is outside the vocabulary must reach the refusal below,
+  // where the prompt names the offending value and the legal set. A strict read
+  // would replace that affordance with a zod error. Every field consumed here as
+  // a VALUE is still checked by name (`isClosingAction`, `customCommandOf`).
+  //
+  // The REFUSED values come from `rejected`, never from `draft`: the returned
+  // checkpoint is schema-valid, so an out-of-vocabulary key is ABSENT from it
+  // (see `parseIntentCheckpointLenient`). The value the refusal quotes is the one
+  // the host WROTE, which is exactly what `rejected` carries.
+  const draftRead = await readIntentCheckpointLenient(checkpointPath);
+  const draft = draftRead.checkpoint;
   const isDraft = draft?.confirmed_by === "draft";
+  const rejectedClosingAction = draftRead.rejected.find(
+    (field) => field.key === "closing_action",
+  );
 
   // Closing action: DETECTED candidates, presented for the host to choose
   // from; the tool never selects one (owner decision 92b0e2dd7cfdc06d).
@@ -3883,7 +3924,9 @@ async function buildConfirmIntentStep(ctx: {
   // A confirmed checkpoint whose closing_action is not in the vocabulary
   // re-enters this step by name — a refusal, never a silent default.
   const rawChoice: unknown =
-    draft?.confirmed_by === "host" ? (draft as { closing_action?: unknown }).closing_action : undefined;
+    draft?.confirmed_by === "host"
+      ? (draft.closing_action ?? rejectedClosingAction?.value)
+      : undefined;
   const refusal =
     rawChoice !== undefined && !isClosingAction(rawChoice)
       ? `> **Refused:** \`closing_action\` ${JSON.stringify(rawChoice)} is not one of ${CLOSING_ACTIONS.map((a) => `\`${a}\``).join(", ")}. Rewrite the checkpoint with a valid value, or omit the field for \`none\`.\n`
@@ -4215,6 +4258,19 @@ export interface RemediateCtx {
 /** The once-async-read signals the pre-intake derive()s consume synchronously. */
 export interface PreIntakeSnapshot {
   existingCheckpoint: IntentCheckpoint | undefined;
+  /**
+   * The top-level fields the schema REFUSED on that checkpoint, as written.
+   *
+   * The validated `existingCheckpoint` cannot carry them (a key that failed
+   * validation is absent from a schema-valid value — see
+   * `parseIntentCheckpointLenient`), but the `confirm_intent` gate must still
+   * FIRE on one: an out-of-vocabulary `closing_action` that the read dropped
+   * would leave `existingCheckpoint.confirmed_by === "host"` intact, every
+   * `fires` branch false, and the run advancing on a checkpoint whose
+   * `closing_action` was never accepted. A dropped key must never read as "no
+   * answer given, so no question".
+   */
+  rejectedCheckpointFields: readonly RejectedCheckpointField[];
   resumeAck: { choice?: string } | undefined;
   /**
    * The state as loaded at advance-entry (post-forceReplan, pre-intake). The
@@ -4291,10 +4347,14 @@ export function buildPreIntakeObligations(
   snapshot: PreIntakeSnapshot,
 ): RemediateObligation[] {
   const { artifactsDir, inputResolution } = ctx;
-  const { existingCheckpoint, resumeAck, entryState, suppliedInputUnchanged, guidanceFileSupplied } = snapshot;
+  const { existingCheckpoint, rejectedCheckpointFields, resumeAck, entryState, suppliedInputUnchanged, guidanceFileSupplied } = snapshot;
   const ip = intakePaths(artifactsDir);
   const checkpointPath = join(artifactsDir, "intent_checkpoint.json");
   const ackPath = join(artifactsDir, "confirm_resume_ack.json");
+  /** The refused `closing_action`, if the schema dropped one — see the `fires` note. */
+  const rejectedClosingAction = rejectedCheckpointFields.find(
+    (field) => field.key === "closing_action",
+  );
   const interpretationPath = join(artifactsDir, INTENT_INTERPRETATION_FILENAME);
   const reportPath = join(dirname(artifactsDir), "remediation-report.md");
 
@@ -4366,9 +4426,19 @@ export function buildPreIntakeObligations(
         // A host-confirmed checkpoint carrying a closing_action outside the
         // vocabulary is not a confirmation: the step re-emits naming the value
         // (owner decision 92b0e2dd7cfdc06d — never a silent default).
+        //
+        // The refused value comes from `rejectedCheckpointFields` as well as from
+        // the parsed checkpoint, and it must: the lenient read DROPS a key the
+        // schema refused, so an out-of-vocabulary `closing_action` is absent from
+        // `existingCheckpoint` and the read of it alone would answer `undefined`
+        // — "no answer given, so no question" — leaving every branch of `fires`
+        // false and advancing on a checkpoint whose action was never accepted.
+        // `confirmed_by` survives the drop, which is exactly what makes that
+        // silent pass possible; reading the rejection back is what closes it.
         const chosenClosingAction: unknown =
           existingCheckpoint?.confirmed_by === "host"
-            ? (existingCheckpoint as { closing_action?: unknown }).closing_action
+            ? ((existingCheckpoint as { closing_action?: unknown }).closing_action ??
+              rejectedClosingAction?.value)
             : undefined;
         const invalidClosingAction =
           (chosenClosingAction !== undefined && !isClosingAction(chosenClosingAction)) ||
@@ -4666,6 +4736,15 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
       execute: async (state) => {
         const s = requireState(state);
         s.status = "waiting_for_clarification";
+        // The binding is scoped to `implementing` (INV-RSM-STATE-COMPLETE: the
+        // load gate rejects a `host_handoff` under any other status, and the
+        // store's write hook enforces the same rule). Leaving the status
+        // without clearing the record produced a state the tool itself could
+        // not read back — a state that only escaped because nothing validated
+        // the write path. Dropping it here is also what the field MEANS: the
+        // pending workload it digests is about to be re-prepared for the
+        // answered item.
+        delete s.host_handoff;
         await store.saveState(s);
         return { kind: "transition", state: s };
       },
@@ -4885,9 +4964,27 @@ async function advanceUnderPhaseLock(deps: {
   // Pre-read the once-async signals the pre-intake derive()s consume
   // synchronously (no transition inside this advance call rewrites either file).
   const checkpointPath = join(artifactsDir, "intent_checkpoint.json");
-  const existingCheckpoint = existsSync(checkpointPath)
-    ? await readOptionalJsonFile<IntentCheckpoint>(checkpointPath)
+  // LENIENT: this read feeds the pre-intake derive()s, whose confirmation
+  // obligation is what REFUSES a malformed checkpoint by name and re-asks. A
+  // strict read here would pre-empt that obligation with a thrown load error.
+  //
+  // Every consumer of the VALUE here uses a validated field (as a value, or as a
+  // presence question on a DIFFERENT field), never quotes an offending one — the
+  // prompt that quotes the refused value is `buildConfirmIntentStep`, which reads
+  // the raw rejections itself. So this site takes the plain lenient read, whose
+  // value is schema-valid.
+  //
+  // The REJECTIONS are threaded beside it rather than discarded, because one
+  // consumer is not a value read: `confirm_intent`'s `fires` asks whether the
+  // checkpoint carries an ACCEPTED answer, and a refused `closing_action` is a
+  // key the lenient read DROPPED — so the parsed value cannot answer for it, and
+  // asking only the parsed value reads a refusal as "no answer given, so no
+  // question". Strict is not the alternative: it would replace the gate's named
+  // refusal with a thrown load error.
+  const checkpointRead = existsSync(checkpointPath)
+    ? await readIntentCheckpointLenient(checkpointPath)
     : undefined;
+  const existingCheckpoint = checkpointRead?.checkpoint;
   const resumeAck = await readOptionalJsonFile<{ choice?: string }>(
     join(artifactsDir, "confirm_resume_ack.json"),
   );
@@ -4919,6 +5016,7 @@ async function advanceUnderPhaseLock(deps: {
       priority: PRE_INTAKE_PRIORITY,
       obligations: buildPreIntakeObligations(ctx, {
         existingCheckpoint,
+        rejectedCheckpointFields: checkpointRead?.rejected ?? [],
         resumeAck,
         entryState: state,
         suppliedInputUnchanged,
