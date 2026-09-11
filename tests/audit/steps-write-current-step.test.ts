@@ -163,46 +163,6 @@ test("writeCurrentStep includes progress when supplied", async () => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Conditional `allowed_mcp_tools` field
-// ---------------------------------------------------------------------------
-
-test("writeCurrentStep omits allowed_mcp_tools when not supplied", async () => {
-  const { dir, cleanup } = await makeTempDir();
-  try {
-    const artifactsDir = join(dir, "artifacts");
-    await mkdir(artifactsDir, { recursive: true });
-    const step = await writeCurrentStep(baseParams(artifactsDir));
-    expect(!("allowed_mcp_tools" in step), "'allowed_mcp_tools' must not be present when not supplied").toBeTruthy();
-  } finally {
-    await cleanup();
-  }
-});
-
-test("writeCurrentStep omits allowed_mcp_tools when empty array is supplied", async () => {
-  const { dir, cleanup } = await makeTempDir();
-  try {
-    const artifactsDir = join(dir, "artifacts");
-    await mkdir(artifactsDir, { recursive: true });
-    const step = await writeCurrentStep({ ...baseParams(artifactsDir), allowedMcpTools: [] });
-    expect(!("allowed_mcp_tools" in step), "'allowed_mcp_tools' must not be present for empty array").toBeTruthy();
-  } finally {
-    await cleanup();
-  }
-});
-
-test("writeCurrentStep includes allowed_mcp_tools when a non-empty array is supplied", async () => {
-  const { dir, cleanup } = await makeTempDir();
-  try {
-    const artifactsDir = join(dir, "artifacts");
-    await mkdir(artifactsDir, { recursive: true });
-    const tools = ["mcp__tool_a", "mcp__tool_b"];
-    const step = await writeCurrentStep({ ...baseParams(artifactsDir), allowedMcpTools: tools });
-    expect(step.allowed_mcp_tools).toEqual(tools);
-  } finally {
-    await cleanup();
-  }
-});
 
 // ---------------------------------------------------------------------------
 // Conditional `access` field

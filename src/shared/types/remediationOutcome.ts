@@ -214,6 +214,73 @@ export const ABSENT_FINAL_GATE_REPORT: FinalGateReport = {
 };
 
 /**
+ * One submission the run READMITTED, and through which verb.
+ *
+ * `kind` is the submission ledger's own event kind — declared as the two
+ * recovery members rather than a boolean, because the two are not the same act:
+ * `recovered_by_hand` re-lands a payload the normal lane's validator still
+ * fully accepts, while `accepted_via_recovery` relaxed one of its corroboration
+ * checks. A surface that collapsed them would erase exactly the difference that
+ * makes a run's evidence bar legible.
+ */
+export const RecoveryMarkSchema = z
+  .object({
+    kind: z.enum(["recovered_by_hand", "accepted_via_recovery"]),
+    submission_id: z.string(),
+    lane: z.string(),
+    issue_code: z.string().optional(),
+    recorded_at: z.string(),
+  })
+  .strict();
+export type RecoveryMark = z.infer<typeof RecoveryMarkSchema>;
+
+/**
+ * How the run's work was READMITTED, as read from the submission ledger at
+ * close time.
+ *
+ * REQUIRED on the outcomes contract and never omitted: like {@link
+ * FinalGateReport}, the clean case is written as an empty array rather than
+ * left out, so a reader can distinguish "this run recovered nothing" from "this
+ * release did not record the fact". The three-shape collapse the outcomes
+ * contract exists to prevent — clean, repaired, unknown — was previously
+ * expressible for the gate and not for recovery, so a run whose submission had
+ * to be re-landed through a LOWER evidence bar produced a completion contract
+ * byte-identical to a run that got it right first try.
+ *
+ * A recovery record is a monotone ACCUMULATOR over the run's ledger events: two
+ * marks for one submission (say a hand re-land followed by a relaxed
+ * acceptance) are two facts, and neither subsumes the other.
+ */
+export const RunRecoverySchema = z
+  .object({
+    recovered_by_hand: z.array(RecoveryMarkSchema),
+    accepted_via_recovery: z.array(RecoveryMarkSchema),
+    /** Ledger lines the close-phase read could not parse. See the writer. */
+    dropped_lines: z.number(),
+  })
+  .strict();
+export type RunRecovery = z.infer<typeof RunRecoverySchema>;
+
+/**
+ * The report's statement when the close-phase read found no recovery at all.
+ * NOT the same as "the ledger could not be read": a read failure is reported by
+ * the close phase itself rather than laundered into a clean-looking empty set.
+ */
+export const NO_RECOVERY: RunRecovery = {
+  recovered_by_hand: [],
+  accepted_via_recovery: [],
+  dropped_lines: 0,
+};
+
+/** True when the run's ledger recorded any readmission. */
+export function wasRecovered(recovery: RunRecovery): boolean {
+  return (
+    recovery.recovered_by_hand.length > 0 ||
+    recovery.accepted_via_recovery.length > 0
+  );
+}
+
+/**
  * Item C — result of the close-gate mechanical re-verify of an analyzer-born
  * finding. `verified_mechanically`: the finding's content-anchored lead
  * identity no longer fires on a re-run of the same pinned analyzer.
@@ -317,6 +384,13 @@ export const RemediationOutcomesReportSchema = z.object({
    * executed-green one.
    */
   final_gate: FinalGateReportSchema,
+  /**
+   * How the run's work was READMITTED. REQUIRED, same shape as `final_gate`:
+   * the clean case is `NO_RECOVERY` (empty sets), never an omitted key, so a
+   * recovered run cannot render as a clean one and a pre-recovery release's
+   * artifact cannot read as clean either.
+   */
+  recovery: RunRecoverySchema,
   outcomes: z.array(RemediationOutcomeSchema),
 });
 export type RemediationOutcomesReport = z.infer<

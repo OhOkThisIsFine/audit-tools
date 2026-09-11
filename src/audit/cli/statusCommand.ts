@@ -2,7 +2,6 @@ import { join } from "node:path";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
 import type { AuditTask } from "../types.js";
 import type { AuditState } from "../types/auditState.js";
-import { loadRunLedger } from "../supervisor/runLedger.js";
 import { getArtifactsDir } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
 import { loadCurrentActiveReviewRun } from "./reviewRun.js";
@@ -42,27 +41,7 @@ export async function cmdStatus(argv: string[]): Promise<void> {
     }
   }
 
-  // 2. Read run ledger for last N entries
-  const ledger = await loadRunLedger(artifactsDir);
-  const RECENT_RUN_LIMIT = 5;
-  const recentRuns = ledger.runs
-    .slice(-RECENT_RUN_LIMIT)
-    .reverse()
-    .map((entry) => {
-      const startMs = Date.parse(entry.started_at);
-      const endMs = Date.parse(entry.ended_at);
-      const duration_ms = Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : undefined;
-      return {
-        run_id: entry.run_id,
-        obligation_id: entry.obligation_id,
-        status: entry.status,
-        started_at: entry.started_at,
-        ended_at: entry.ended_at,
-        ...(duration_ms !== undefined ? { duration_ms } : {}),
-      };
-    });
-
-  // 3. Read the ACTIVE run's pending-audit-tasks.json
+  // 2. Read the ACTIVE run's pending-audit-tasks.json
   //
   // The active run is the one the loop is on, named by the review-run manifest
   // the pause wrote — never "the newest directory under runs/". That inference
@@ -105,28 +84,13 @@ export async function cmdStatus(argv: string[]): Promise<void> {
     // Malformed / unreadable active-run manifest: report "no run", never throw.
   }
 
-  // Derive the started_at and elapsed time for the current last_obligation from
-  // the most recent ledger entry that matches it, so operators can tell whether
-  // the audit is stuck or merely running.
-  const lastObligationEntry = auditState.last_obligation
-    ? [...ledger.runs].reverse().find((r) => r.obligation_id === auditState.last_obligation)
-    : undefined;
-  const lastObligationStartedAt = lastObligationEntry?.started_at ?? null;
-  const lastObligationElapsedMs =
-    lastObligationStartedAt
-      ? Date.now() - Date.parse(lastObligationStartedAt)
-      : null;
-
   outputJson({
     artifacts_dir: artifactsDir,
     status: auditState.status,
     last_obligation: auditState.last_obligation ?? null,
-    last_obligation_started_at: lastObligationStartedAt,
-    last_obligation_elapsed_ms: lastObligationElapsedMs,
     last_executor: auditState.last_executor ?? null,
     blockers: auditState.blockers ?? [],
     obligations_summary: obligationStates,
-    recent_runs: recentRuns,
     pending_tasks: pendingTasksSummary,
   });
 }

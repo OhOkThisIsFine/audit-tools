@@ -21,6 +21,7 @@ import {
   compareCodeUnits,
   runAdmittedProjectTestCommand,
   runAdmittedProjectE2eCommand,
+  readSubmissionLedger,
 } from "audit-tools/shared";
 import type {
   AgentReflection,
@@ -64,12 +65,15 @@ import {
 import {
   ABSENT_FINAL_GATE_REPORT,
   FinalGateReportSchema,
+  NO_RECOVERY,
   carriesGateVerdict,
   isCompleteEvidence,
   mechanismContradictsOutcome,
   missingEvidenceParts,
   type Evidence,
   type FinalGateReport,
+  type RecoveryMark,
+  type RunRecovery,
 } from "../../shared/types/remediationOutcome.js";
 // The gate record's PATH is single-sourced by the module that writes it. Leaf
 // import (finalGate.ts imports only gateCommands.ts + shared), so this adds no
@@ -114,6 +118,70 @@ const DEFAULT_REASON_BY_OUTCOME: Partial<
   inappropriate: "Deemed inappropriate during remediation.",
   ignored: "Ignored by user.",
 };
+
+/**
+ * How this run was recovered, as read from the submission ledger at close.
+ *
+ * THE LEDGER'S READER. Every append site writes the ledger; until this existed,
+ * no CLOSE-phase surface read it, so a run repaired through a recovery verb — a
+ * lower evidence bar than the normal lane's — produced a completion report
+ * byte-identical to a clean one. The facts were durable and unreadable at the
+ * same time.
+ *
+ * Read once, here, and THREADED into both the outcomes contract and the
+ * markdown render rather than re-read by either: {@link
+ * cleanupTempBranchesAndArtifacts} deletes the artifacts directory (and the
+ * ledger under it) on a green close, so a builder that re-read would be reading
+ * a deleted file.
+ *
+ * Scoped to this run by `state.plan.plan_id` — the SAME id the remediate host
+ * handoff mints its ledger events under (`stateRunId` in
+ * `src/remediate/steps/nextStep.ts`), so the scope is the producer's own
+ * identity rather than a second spelling of it. `submissions/` sits under the
+ * artifacts directory and is removed with it on a green close, but a preserved
+ * (non-green) directory may outlive a later run, and another run's recovery
+ * must never mark this one.
+ *
+ * An absent ledger reads as NO recovery rather than throwing: this is
+ * bookkeeping on a reporting path, and a run that recorded no ledger recorded
+ * no drift. A READ FAILURE is not laundered into that same empty answer —
+ * `readSubmissionLedger` documents that it never throws, and the `catch` here
+ * exists only so that a future change to that guarantee cannot turn an
+ * unreadable ledger into a clean-looking run.
+ */
+export async function readRunRecoveryFacts(
+  artifactsDir: string,
+  state: RemediationState | null,
+): Promise<RunRecovery> {
+  const runId = state?.plan?.plan_id;
+  let ledger;
+  try {
+    ledger = await readSubmissionLedger(artifactsDir);
+  } catch {
+    return { ...NO_RECOVERY };
+  }
+  const marksFor = (kind: RecoveryMark["kind"]): RecoveryMark[] =>
+    ledger
+      .filter(
+        (event) => event.kind === kind && (runId === undefined || event.run_id === runId),
+      )
+      .map((event) => ({
+        kind,
+        submission_id: event.submission_id,
+        lane: event.lane,
+        ...(event.issue_code ? { issue_code: event.issue_code } : {}),
+        recorded_at: event.recorded_at,
+      }));
+  return {
+    // Arrival order is the ledger's own and the filters above preserve it.
+    recovered_by_hand: marksFor("recovered_by_hand"),
+    accepted_via_recovery: marksFor("accepted_via_recovery"),
+    // A per-read count: `dropped` names lines this read could not parse, and no
+    // run scoping applies to it. Carried so a surface cannot report a run
+    // cleaner than the ledger actually was.
+    dropped_lines: ledger.dropped.length,
+  };
+}
 
 /**
  * Phase 7B — capture one outcome per finding (lens, affected file types, how it
@@ -198,6 +266,11 @@ export function buildRemediationOutcomesReport(
   // telling the truth: a caller that supplies no gate outcome is a run with no
   // gate outcome, which the contract now states outright.
   finalGate: FinalGateReport = ABSENT_FINAL_GATE_REPORT,
+  // Same discipline one field over: a caller that supplies no recovery facts is
+  // a caller that read no ledger, and the honest statement for that is the
+  // empty set — never an omitted key, which a reader could not tell from a
+  // release that did not record recovery at all.
+  recovery: RunRecovery = NO_RECOVERY,
 ): RemediationOutcomesReport {
   const findingsById = new Map(
     (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
@@ -404,6 +477,7 @@ export function buildRemediationOutcomesReport(
     ...(aggregateCompleted ? { completed_at: aggregateCompleted.value } : {}),
     ...(aggregateDuration !== undefined ? { duration_ms: aggregateDuration } : {}),
     final_gate: finalGate,
+    recovery,
     outcomes,
   };
 }
@@ -1507,6 +1581,33 @@ function buildRemediationReportMarkdown(
   if (gate.reason) reportContent += `Reason: ${gate.reason}\n`;
   if (gate.scope) reportContent += `Scope: ${gate.scope}\n`;
 
+  // The run's recovery record, ALWAYS rendered — the same reason the gate
+  // section is: a run whose submission had to be readmitted through a recovery
+  // verb ran at a LOWER evidence bar than the normal lane's, and until this
+  // section existed that run produced a report identical to a clean one. The
+  // ledger has recorded every one of these since it was written; this is the
+  // human render of the read that finally consumes it.
+  reportContent += `\n## Recovery\n\n`;
+  const recoveryLabel = (kind: RecoveryMark["kind"]): string =>
+    kind === "accepted_via_recovery"
+      ? "Accepted via recovery (a corroboration check was relaxed)"
+      : "Recovered by hand (re-landed through the recovery verb)";
+  const marks: Array<RecoveryMark> = [
+    ...outcomesReport.recovery.accepted_via_recovery,
+    ...outcomesReport.recovery.recovered_by_hand,
+  ];
+  if (marks.length === 0) {
+    reportContent += `None — no submission was readmitted; every accepted submission passed the normal lane's checks.\n`;
+  } else {
+    reportContent += `${marks.length} submission(s) were READMITTED after the normal lane did not accept them. Findings fixed through a recovered submission are less corroborated than the rest of this run's:\n\n`;
+    for (const mark of marks) {
+      reportContent += `- \`${mark.submission_id}\` (lane \`${mark.lane}\`): ${recoveryLabel(mark.kind)}${mark.issue_code ? ` — \`${mark.issue_code}\`` : ""}\n`;
+    }
+  }
+  if (outcomesReport.recovery.dropped_lines > 0) {
+    reportContent += `\nWarning: ${outcomesReport.recovery.dropped_lines} ledger line(s) could not be read (torn, or written by another release), so an unread recovery event may be missing from this section.\n`;
+  }
+
   if (e2ePassed !== undefined) {
     reportContent += `\n## End-to-End Tests\n\nResult: ${e2ePassed ? "passed" : "failed"}\n`;
   }
@@ -2042,11 +2143,22 @@ export async function runClosePhase(
   // Phase 7B: capture per-finding outcomes (surface only), carrying the run's
   // tool-owned gate outcome so the report can say which of executed / scoped-out
   // / disabled / absent this run actually was.
+  // The run's recovery record, read HERE — the single point from which both the
+  // outcomes contract and the markdown render take it. Read before
+  // `cleanupTempBranchesAndArtifacts`, which deletes the artifacts directory
+  // (and the ledger under it) on a green close; the value is THREADED into the
+  // builders rather than re-read by them, so neither can resurrect a deleted
+  // file. A read failure is stated, never laundered into a clean-looking empty
+  // set: the alternative makes "the ledger was unreadable" report as "this run
+  // was clean", which is the collapse the ledger exists to prevent.
+  const recovery = await readRunRecoveryFacts(options.artifactsDir, state);
+
   const finalGate = await readFinalGateReport(options.artifactsDir);
   const outcomesReport = buildRemediationOutcomesReport(
     state,
     closingResult,
     finalGate,
+    recovery,
   );
   // No run-log line for the gate here ON PURPOSE: the gate already records its
   // own outcome at evaluation time (`recordFinalGateOutcome`), so a second line

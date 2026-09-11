@@ -76,7 +76,6 @@ const HandoffArtifactPathsSchema = z
     operator_handoff_json: z.string(),
     operator_handoff_markdown: z.string(),
     session_config: z.string(),
-    run_ledger: z.string(),
     current_review_run: z.string().nullable(),
     current_prompt: z.string().nullable(),
     current_tasks: z.string().nullable(),

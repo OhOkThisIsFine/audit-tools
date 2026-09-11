@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
+import { RemediationOutcomesReportSchema } from "../../src/shared/types/remediationOutcome.js";
 import type {
   Finding,
   OutcomeCoverageEntry,
@@ -335,21 +336,16 @@ function reconstructFindings(report: any): ReconstructedFinding[] {
  * any key absent from it (DAT-99284fb4).
  */
 const DECLARED_OUTCOMES_TOP_LEVEL_KEYS = new Set([
-  "contract_version",
-  "total",
-  "started_at",
-  "completed_at",
-  "duration_ms",
-  "by_outcome",
-  "by_lens",
-  "outcomes",
+  // The shared contract's own keys, read from its schema, so a key the
+  // contract gains (`final_gate`, `recovery`) needs no second edit here.
+  ...Object.keys(RemediationOutcomesReportSchema.shape),
+  // Run-level keys the remediator appends to the shared subset.
   "ended_at",
   "step_count",
   "combined_test_result",
   "e2e_result",
   "closing_result",
   "plan_coverage",
-  "final_gate",
 ]);
 
 describe("remediation-outcomes round-trip (OBL-018)", () => {

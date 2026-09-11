@@ -14,14 +14,6 @@ const FIXTURE_ROOT = join(
   "remediation-contracts",
 );
 
-interface SchemaResult {
-  readonly success: boolean;
-}
-
-interface SchemaLike {
-  safeParse(value: unknown): SchemaResult;
-}
-
 // The ONE production serializer. This file carried its own copy, which was
 // doubly wrong: `.sort()` with no comparator is UTF-16 code-unit order by
 // accident (the same as `compareCodeUnits`, but by luck rather than by
@@ -98,112 +90,38 @@ async function optionalImport(specifier: string): Promise<ImportProbe> {
   }
 }
 
-/** The module's exports when it loaded, otherwise `undefined` — never a "gone" claim. */
-function loadedExports(probe: ImportProbe): Record<string, unknown> | undefined {
-  return probe.status === "loaded" ? probe.module : undefined;
-}
-
-test("retires provider attribution and preserves a provider-agnostic execution record", async () => {
+test("retires provider attribution and the producerless execution-record plane, preserving the submission ledger that replaced it", async () => {
   const violations: string[] = [];
   const workload = loadJson(join(FIXTURE_ROOT, "provider-neutral-workloads.json"));
   const fixtures = Array.isArray(workload.fixtures) ? workload.fixtures : [];
-  const fixture = fixtures.find(
-    (candidate) =>
-      candidate !== null &&
-      typeof candidate === "object" &&
-      (candidate as Record<string, unknown>).id === "attribution-free-result",
-  ) as Record<string, unknown> | undefined;
-  const payload = fixture?.payload;
 
-  if (fixture?.positive_event !== "provider-agnostic-execution-record-accepted") {
-    violations.push("provider-neutral execution event is missing");
-  }
-  if (payload === undefined) {
-    violations.push("provider-neutral execution fixture is missing");
-  }
-
-  const executionProbe = await optionalImport(
-    "../../src/shared/types/executionRecord.js",
-  );
-  if (executionProbe.status !== "loaded") {
-    violations.push(
-      executionProbe.status === "not_found"
-        ? "execution-record module does not resolve"
-        : `execution-record module failed to evaluate (${executionProbe.detail})`,
-    );
-  }
-  const schema = loadedExports(executionProbe)?.ExecutionRecordV1Alpha1Schema as
-    | SchemaLike
-    | undefined;
-  if (schema === undefined || typeof schema.safeParse !== "function") {
-    violations.push("execution-record schema is missing");
-  } else if (payload !== undefined) {
-    if (!schema.safeParse(payload).success) {
-      violations.push("provider-neutral execution fixture is rejected");
-    }
+  // The execution-record fixture was retired WITH the plane it exercised: a
+  // fixture whose only consumer was the schema being deleted is residue, and
+  // leaving it would advertise a contract nothing reads. Its replacement is
+  // asserted positively below.
+  for (const fixture of fixtures) {
     if (
-      schema.safeParse({
-        ...(payload as Record<string, unknown>),
-        provider: "forbidden",
-      }).success
+      fixture !== null &&
+      typeof fixture === "object" &&
+      (fixture as Record<string, unknown>).id === "attribution-free-result"
     ) {
-      violations.push("execution-record schema accepts provider attribution");
-    }
-    const executorReported = {
-      ...((payload as Record<string, unknown>).executor_reported as Record<
-        string,
-        unknown
-      >),
-      model: "forbidden",
-    };
-    if (
-      schema.safeParse({
-        ...(payload as Record<string, unknown>),
-        executor_reported: executorReported,
-      }).success
-    ) {
-      violations.push("execution-record schema accepts model attribution");
+      violations.push("retired execution-record fixture remains");
     }
   }
 
-  const forbiddenPayloadFragments = [
-    "backend",
-    "endpoint",
-    "model",
-    "pool",
-    "provider",
-    "quota",
-    "routing",
-    "transport",
-  ];
-  for (const key of collectKeys(payload)) {
-    const normalized = key.toLowerCase();
-    if (forbiddenPayloadFragments.some((fragment) => normalized.includes(fragment))) {
-      violations.push(`execution fixture carries retired key ${key}`);
-    }
-  }
-
-  // Expected-PRESENT probes. An import that fails to resolve or throws is an
-  // environment/build problem and must be reported AS ONE — reporting it as
-  // "omits the schema" is the same collapse in the opposite direction.
-  for (const [label, specifier] of [
-    ["shared source barrel", "../../src/shared/index.js"],
-    ["built shared package", "audit-tools/shared"],
-  ] as const) {
-    const probe = await optionalImport(specifier);
-    if (probe.status === "not_found") {
-      violations.push(`${label} does not resolve: ${specifier}`);
-    } else if (probe.status === "threw") {
-      violations.push(`${label} failed to evaluate (${probe.detail})`);
-    } else if (probe.module.ExecutionRecordV1Alpha1Schema === undefined) {
-      violations.push(`${label} omits the execution-record schema`);
-    }
-  }
-
+  // RETIRED PATHS, source and test. A module that a guard deletes must not come
+  // back by any route, so the absence is asserted on the FILE, not only on the
+  // export: `src/shared/types/executionRecord.ts` and the run-ledger pair were
+  // the producerless provenance plane (its writer was deleted in 623a93a0 and
+  // its last caller in 91826f1c; re-creating a producer would re-create retired
+  // substrate, so the plane is retired rather than fed).
   const retiredPaths = [
     "src/shared/types/attributionContract.ts",
     "src/shared/types/sessionConfig.ts",
     "tests/shared/dispatch-effectiveness-contract.test.ts",
+    "src/shared/types/executionRecord.ts",
+    "src/shared/types/runLedger.ts",
+    "src/audit/supervisor/runLedger.ts",
   ];
   for (const path of retiredPaths) {
     if (existsSync(join(process.cwd(), path))) violations.push(`retired path remains: ${path}`);
@@ -219,10 +137,88 @@ test("retires provider attribution and preserves a provider-agnostic execution r
     "deriveAggregates",
     "buildAttemptKey",
     "AttemptKeyInput",
+    // The provenance plane's exports, retired at the same boundary.
+    "executionRecord",
+    "ExecutionRecordV1Alpha1",
+    "ExecutionRecordOutcome",
+    "ExecutorReportedStatement",
+    "EXECUTION_RECORD_CONTRACT_VERSION",
+    "runLedger",
+    "RunLedger",
+    "RunLedgerEntry",
+    "RunLedgerStatus",
+    "RUN_LEDGER_STATUSES",
   ];
   for (const retiredExport of retiredExports) {
     if (sharedIndex.includes(retiredExport)) {
       violations.push(`retired shared export remains: ${retiredExport}`);
+    }
+  }
+
+  // The retired names must not resurface in a SCHEMA's `required` either — a
+  // host handing over `run_ledger` was re-advertising a path no writer ever
+  // produced (the loader's empty result was indistinguishable from a run that
+  // recorded nothing). Checked on the SHIPPED schema, which is the artifact a
+  // host actually reads.
+  for (const schemaName of [
+    "audit-code-v1alpha1.schema.json",
+  ] as const) {
+    const schemaText = readFileSync(join(process.cwd(), "schemas", schemaName), "utf8");
+    for (const retiredName of ["run_ledger", "allowed_mcp_tools"]) {
+      if (schemaText.includes(retiredName)) {
+        violations.push(`retired name remains in ${schemaName}: ${retiredName}`);
+      }
+    }
+  }
+
+  // The operator-handoff and status surfaces that ADVERTISED the ledger must
+  // stop naming it — a retirement that leaves the text is not a retirement.
+  for (const [path, retiredName] of [
+    ["src/audit/supervisor/operatorHandoff.ts", "run_ledger"],
+    ["src/audit/cli/statusCommand.ts", "runLedger"],
+    ["src/audit/cli/statusCommand.ts", "recent_runs"],
+  ] as const) {
+    if (readFileSync(join(process.cwd(), path), "utf8").includes(retiredName)) {
+      violations.push(`retired ledger advertisement remains in ${path}: ${retiredName}`);
+    }
+  }
+
+  // The POSITIVE REPLACEMENT. The plane's guarantee is not simply deleted — the
+  // submission ledger is the live append-only record of what happened to each
+  // submission, and it is the surface that answered the question the run ledger
+  // was defined to answer. Asserting its presence is what keeps this guard a
+  // REPLACEMENT guarantee rather than a bare absence check.
+  for (const [label, specifier] of [
+    ["shared source barrel", "../../src/shared/index.js"],
+    ["built shared package", "audit-tools/shared"],
+  ] as const) {
+    const probe = await optionalImport(specifier);
+    if (probe.status === "not_found") {
+      violations.push(`${label} does not resolve: ${specifier}`);
+    } else if (probe.status === "threw") {
+      violations.push(`${label} failed to evaluate (${probe.detail})`);
+    } else if (typeof probe.module.readSubmissionLedger !== "function") {
+      violations.push(`${label} omits the submission-ledger reader`);
+    }
+  }
+
+  const forbiddenPayloadFragments = [
+    "backend",
+    "endpoint",
+    "model",
+    "pool",
+    "provider",
+    "quota",
+    "routing",
+    "transport",
+  ];
+  for (const fixture of fixtures) {
+    if (fixture === null || typeof fixture !== "object") continue;
+    for (const key of collectKeys((fixture as Record<string, unknown>).payload)) {
+      const normalized = key.toLowerCase();
+      if (forbiddenPayloadFragments.some((fragment) => normalized.includes(fragment))) {
+        violations.push(`provider-neutral fixture carries retired key ${key}`);
+      }
     }
   }
 

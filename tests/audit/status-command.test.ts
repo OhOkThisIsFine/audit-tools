@@ -74,7 +74,14 @@ test("cmdStatus emits valid JSON with audit_state fields when audit_state.json i
   });
 });
 
-test("cmdStatus includes recent run ledger entries", async () => {
+test("cmdStatus does NOT advertise the retired run ledger", async () => {
+  // The run ledger was a provenance plane with no producer: `loadRunLedger`
+  // read a file no tracked writer ever created, so its empty result was
+  // indistinguishable from a run that recorded nothing — and `status` reported
+  // `recent_runs: []` as though that were a fact about the run. Both the loader
+  // and the field are retired. This asserts the retirement on the COMMAND's
+  // output: even a stale `run-ledger.json` file left on disk by an older
+  // release is not read, and no field describes it.
   await withTempDir(async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -86,52 +93,35 @@ test("cmdStatus includes recent run ledger entries", async () => {
         obligations: [],
       }, null, 2),
     );
-
-    const ledger = {
-      runs: [
-        {
-          run_id: "run-001",
-          obligation_id: "plan",
-          selected_executor: "planning_executor",
-          status: "completed",
-          started_at: "2026-01-01T00:00:00.000Z",
-          ended_at: "2026-01-01T00:01:00.000Z",
-          result_path: join(artifactsDir, "runs", "run-001", "result.json"),
-        },
-        {
-          run_id: "run-002",
-          obligation_id: "audit_tasks",
-          selected_executor: "semantic_review_executor",
-          status: "completed",
-          started_at: "2026-01-01T00:02:00.000Z",
-          ended_at: "2026-01-01T00:03:00.000Z",
-          result_path: join(artifactsDir, "runs", "run-002", "result.json"),
-        },
-      ],
-    };
     await writeFile(
       join(artifactsDir, "run-ledger.json"),
-      JSON.stringify(ledger, null, 2),
+      JSON.stringify({
+        runs: [
+          {
+            run_id: "run-001",
+            obligation_id: "plan",
+            selected_executor: "planning_executor",
+            status: "completed",
+            started_at: "2026-01-01T00:00:00.000Z",
+            ended_at: "2026-01-01T00:01:00.000Z",
+            result_path: join(artifactsDir, "runs", "run-001", "result.json"),
+          },
+        ],
+      }, null, 2),
     );
 
     const result = await runStatus(artifactsDir);
     expect(result.exitCode).toBe(0);
 
     const parsed = JSON.parse(result.stdout);
-
-    expect(Array.isArray(parsed.recent_runs), "recent_runs should be an array").toBeTruthy();
-    expect(parsed.recent_runs.length > 0, "recent_runs should be non-empty").toBeTruthy();
-
-    const firstEntry = parsed.recent_runs[0];
-    expect("run_id" in firstEntry, "each entry should have run_id").toBeTruthy();
-    expect("obligation_id" in firstEntry, "each entry should have obligation_id").toBeTruthy();
-    expect("status" in firstEntry, "each entry should have status").toBeTruthy();
-    expect("started_at" in firstEntry, "each entry should have started_at").toBeTruthy();
-
-    // Should be limited to last 5 runs (newest first)
-    expect(parsed.recent_runs.length <= 5, "recent_runs should be capped at 5").toBeTruthy();
-    expect(parsed.recent_runs[0].run_id).toBe("run-002");
-    expect(parsed.recent_runs[1].run_id).toBe("run-001");
+    expect(
+      Object.hasOwn(parsed, "recent_runs"),
+      "recent_runs advertised a ledger no producer ever wrote, and must be retired with it",
+    ).toBe(false);
+    expect(
+      Object.hasOwn(parsed, "last_obligation_started_at"),
+      "the elapsed-time fields were derived from the retired ledger's entries",
+    ).toBe(false);
   });
 });
 

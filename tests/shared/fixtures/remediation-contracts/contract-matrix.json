@@ -255,7 +255,7 @@
         "final_behavioral_gate_coverage",
         "final_static_reachability_scan",
         "integration_coordinator_closure",
-        "provider_agnostic_execution_record",
+        "provider_agnostic_submission_ledger",
         "retired_attribution_deep_import_absent",
         "retired_attribution_export_absent",
         "retired_attribution_fixture_absent",
@@ -276,10 +276,10 @@
       ],
       "deletion_guard": {
         "guard_id": "attribution-contract-retirement-retired-surface-absence",
-        "positive_replacement_guarantee": "provider_agnostic_execution_record"
+        "positive_replacement_guarantee": "provider_agnostic_submission_ledger"
       },
       "fixture_ids": [
-        "attribution-free-result"
+        "submission-ledger-record"
       ]
     },
     {

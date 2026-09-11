@@ -955,12 +955,24 @@ export function replayProviderNeutralFixture(
       replacementOutput = { accepted: true, work_item_id: fixture.payload.work_item_id };
       break;
     }
-    case "attribution-free-result": {
-      consumerSeam = "provider-agnostic-execution-recorder";
-      assertCondition(fixture.payload.outcome === "accepted", "execution record rejected");
+    case "submission-ledger-record": {
+      consumerSeam = "provider-agnostic-submission-ledger";
+      // The ledger event is the provider-agnostic record of what happened to a
+      // submission — the live replacement for the retired execution record. The
+      // seam asserts the ONE property that made the old plane producerless: an
+      // event carries no backend, model, provider, routing or transport field.
+      assertCondition(
+        fixture.payload.contract_version === "submission-ledger-event/v1alpha1",
+        "submission ledger contract version mismatch",
+      );
+      assertCondition(
+        typeof fixture.payload.submission_id === "string" &&
+          fixture.payload.submission_id.length > 0,
+        "submission ledger event is unbound",
+      );
       replacementOutput = {
         recorded: true,
-        record_id: fixture.payload.record_id,
+        submission_id: fixture.payload.submission_id,
       };
       break;
     }

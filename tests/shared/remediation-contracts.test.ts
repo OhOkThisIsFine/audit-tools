@@ -475,7 +475,7 @@ const FINALIZED_CONTRACT_ORACLES: Readonly<
       "final_behavioral_gate_coverage",
       "final_static_reachability_scan",
       "integration_coordinator_closure",
-      "provider_agnostic_execution_record",
+      "provider_agnostic_submission_ledger",
       "retired_attribution_deep_import_absent",
       "retired_attribution_export_absent",
       "retired_attribution_fixture_absent",
@@ -1359,9 +1359,28 @@ function replayPositiveFixture(
       expect(value.test_evidence[0]?.command).toBe(item?.required_tests[0]);
       break;
     }
-    case "attribution-free-result": {
-      const value = payload as { readonly outcome: string };
-      expect(value.outcome).toBe("accepted");
+    case "submission-ledger-record": {
+      // The live replacement for the retired execution-record plane: the
+      // provider-agnostic record of what happened to a submission. The one
+      // property that matters here is the one the retired plane existed for —
+      // the record is bound to a submission and carries NO provider/model/
+      // routing/transport attribution of any kind.
+      const value = payload as {
+        readonly contract_version: string;
+        readonly submission_id: string;
+        readonly kind: string;
+      };
+      expect(value.contract_version).toBe("submission-ledger-event/v1alpha1");
+      expect(value.submission_id.length).toBeGreaterThan(0);
+      expect(value.kind).toBe("accepted");
+      for (const key of Object.keys(payload as Record<string, unknown>)) {
+        expect(
+          /backend|endpoint|model|pool|provider|quota|routing|transport/u.test(
+            key.toLowerCase(),
+          ),
+          `${key} must not carry provider attribution`,
+        ).toBe(false);
+      }
       break;
     }
     default:

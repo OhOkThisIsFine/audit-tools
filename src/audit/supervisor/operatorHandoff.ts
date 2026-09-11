@@ -29,7 +29,7 @@ export interface AuditCodeHandoffArtifactPaths {
   operator_handoff_json: string;
   operator_handoff_markdown: string;
   session_config: string;
-  run_ledger: string;
+
   current_review_run: string | null;
   current_prompt: string | null;
   current_tasks: string | null;
@@ -72,7 +72,7 @@ export interface AuditCodeHandoff {
 export const OPERATOR_INPUTS_DIRNAME = "operator-inputs";
 export const OPERATOR_HANDOFF_JSON_FILENAME = "operator-handoff.json";
 export const OPERATOR_HANDOFF_MARKDOWN_FILENAME = "operator-handoff.md";
-export const RUN_LEDGER_FILENAME = "run-ledger.json";
+
 export const CURRENT_TASK_FILENAME = "current-review-run.json";
 export const CURRENT_TASKS_FILENAME = "current-tasks.json";
 export const AUDIT_TASKS_FILENAME = "audit_tasks.json";
@@ -176,7 +176,7 @@ const ARTIFACT_PATH_RENDER_FIELDS: {
   operator_handoff_markdown: { label: "operator handoff markdown" },
   operator_inputs_dir: { label: "operator inputs dir" },
   session_config: { label: "session intent" },
-  run_ledger: { label: "run ledger" },
+
   current_review_run: { label: "current review run", fallback: "not available" },
   current_prompt: { label: "current prompt", fallback: "not available" },
   current_tasks: { label: "current tasks", fallback: "not available" },
@@ -245,7 +245,7 @@ export function buildAuditCodeHandoff(params: {
     operator_handoff_json: join(params.artifactsDir, OPERATOR_HANDOFF_JSON_FILENAME),
     operator_handoff_markdown: join(params.artifactsDir, OPERATOR_HANDOFF_MARKDOWN_FILENAME),
     session_config: join(params.root, ...SESSION_INTENT_RELATIVE_PATH.split("/")),
-    run_ledger: join(params.artifactsDir, RUN_LEDGER_FILENAME),
+
     current_review_run: blocked
       ? join(params.artifactsDir, "dispatch", CURRENT_TASK_FILENAME)
       : null,

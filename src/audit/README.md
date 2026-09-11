@@ -16,7 +16,7 @@ fold-aware (halting at the first host-input pause, non-drainable step, or the
 - `systemic/` — Phase E systemic improvement-seeking challenge loop: aggregate-metrics digest +
   second-order-adversary prompt, loop-until-dry.
 - `reporting/` — synthesis (`audit-findings.json` + `audit-report.md` render) + work-block rendering.
-- `supervisor/` — run ledger, operator handoff.
+- `supervisor/` — operator handoff.
 - `cli/prompts.ts` plus the per-area `*Prompt.ts` modules — host-facing prompt rendering.
 - `validation/` — contract validators (`AuditResult`, schema gates).
 - `io/` — artifact read/write helpers.

@@ -175,7 +175,6 @@ export async function renderSemanticReviewStep(params: {
     status: "ready",
     runId: activeReviewRun.run_id,
     allowedCommands: [continueCommand],
-    allowedMcpTools: ["auditor_continue_audit"],
     progress: {
       summary:
         `Published ${handoff.workload.work_items.length} pending semantic-review ` +

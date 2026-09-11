@@ -441,25 +441,6 @@ test("G2: progress is included when supplied and survives JSON round-trip", asyn
   });
 });
 
-test("G3: allowed_mcp_tools is omitted when not supplied", async () => {
-  await withTempDir(async (dir) => {
-    const artifactsDir = join(dir, "artifacts");
-    await mkdir(artifactsDir, { recursive: true });
-    const step = await writeCurrentStep(baseParams(artifactsDir));
-    expect(!("allowed_mcp_tools" in step), "allowed_mcp_tools must be absent when not supplied").toBeTruthy();
-  });
-});
-
-test("G4: allowed_mcp_tools included when supplied", async () => {
-  await withTempDir(async (dir) => {
-    const artifactsDir = join(dir, "artifacts");
-    await mkdir(artifactsDir, { recursive: true });
-    const tools = ["mcp__tool_a", "mcp__tool_b"];
-    const step = await writeCurrentStep({ ...baseParams(artifactsDir), allowedMcpTools: tools });
-    expect(step.allowed_mcp_tools).toEqual(tools);
-  });
-});
-
 test("G5: access field is omitted when not supplied", async () => {
   await withTempDir(async (dir) => {
     const artifactsDir = join(dir, "artifacts");

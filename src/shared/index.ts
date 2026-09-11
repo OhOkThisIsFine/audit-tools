@@ -36,23 +36,6 @@ export {
   SurfaceManifestSchema,
 } from "./types/surfaces.js";
 export type {
-  RunLedgerStatus,
-  RunLedgerEntry,
-  RunLedger,
-} from "./types/runLedger.js";
-export { RUN_LEDGER_STATUSES } from "./types/runLedger.js";
-export type {
-  ExecutionRecordOutcome,
-  ExecutorReportedStatement,
-  ExecutionRecordV1Alpha1,
-} from "./types/executionRecord.js";
-export {
-  EXECUTION_RECORD_CONTRACT_VERSION,
-  ExecutionRecordOutcomeSchema,
-  ExecutorReportedStatementSchema,
-  ExecutionRecordV1Alpha1Schema,
-} from "./types/executionRecord.js";
-export type {
   GraphEdge,
   RouteEdge,
   GraphBundle,
@@ -260,12 +243,18 @@ export type {
   RemediationOutcome,
   RemediationOutcomesReport,
   MechanicalVerification,
+  RecoveryMark,
+  RunRecovery,
 } from "./types/remediationOutcome.js";
 export {
   RemediationOutcomeStatusSchema,
   RemediationOutcomeSchema,
   RemediationOutcomesReportSchema,
   MechanicalVerificationSchema,
+  RecoveryMarkSchema,
+  RunRecoverySchema,
+  NO_RECOVERY,
+  wasRecovered,
 } from "./types/remediationOutcome.js";
 // Canonical lens vocabulary + the runtime validation Sets derived from it.
 export type { Lens } from "./types/lens.js";

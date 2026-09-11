@@ -27,7 +27,7 @@ import { toPromptPathToken } from "../tooling/exec.js";
  *    current-prompt.md.
  *
  * Each orchestrator extends `BaseStepContract` with its own `step_kind` enum
- * and optional fields (progress, allowed_mcp_tools, access, ...) and calls
+ * and optional fields (progress, access, ...) and calls
  * `writeStepContract` with its concrete types; neither writes raw paths.
  */
 
@@ -214,7 +214,7 @@ export interface BaseStepContract<
  * `extraFields` is a shallow object spread onto the contract AFTER the base
  * fields but BEFORE the canonical `prompt_path`/`repo_root`/`artifacts_dir`/
  * `artifact_paths` normalization — so an orchestrator's optional fields
- * (progress, allowed_mcp_tools, access, ...) ride along without this module
+ * (progress, access, ...) ride along without this module
  * knowing about them, and can never clobber the normalized path fields.
  */
 export interface WriteStepContractInput<
@@ -237,8 +237,8 @@ export interface WriteStepContractInput<
    */
   artifactPaths?: Record<string, TArtifactValue>;
   /**
-   * Orchestrator-specific optional fields (progress, allowed_mcp_tools,
-   * access, ...). Spread onto the contract before the canonical path fields,
+   * Orchestrator-specific optional fields (progress, access, ...). Spread onto
+   * the contract before the canonical path fields,
    * so they can never overwrite the normalized paths or `artifact_paths`.
    */
   extraFields?: Record<string, unknown>;

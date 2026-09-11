@@ -1,9 +1,21 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   buildRemediationOutcomesReport,
+  readRunRecoveryFacts,
+  runClosePhase,
   type ClosingResult,
 } from "../../src/remediate/phases/close.js";
+import type { OrchestratorOptions } from "../../src/remediate/types/options.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
+import {
+  SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+  submissionLedgerPath,
+  NO_RECOVERY,
+} from "audit-tools/shared";
 
 function finding(id: string, lens: string, files: string[]) {
   return {
@@ -189,5 +201,307 @@ describe("buildRemediationOutcomesReport", () => {
       expect(outcome).not.toHaveProperty("completed_at");
       expect(outcome).not.toHaveProperty("duration_ms");
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The submission ledger's READER (E1) — a recovered run must be distinguishable
+// from a clean one in the OUTCOMES CONTRACT, not only in raw NDJSON.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One ledger event, as the producer writes it. */
+function ledgerEvent(
+  kind: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+    run_id: "PLAN-1",
+    submission_id: "B-1",
+    lane: "implement",
+    kind,
+    recorded_at: "2026-06-05T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function writeLedger(artifactsDir: string, events: unknown[]): void {
+  mkdirSync(join(artifactsDir, "submissions"), { recursive: true });
+  writeFileSync(
+    submissionLedgerPath(artifactsDir),
+    events.map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+}
+
+describe("readRunRecoveryFacts — the remediate ledger's close-phase reader (E1)", () => {
+  let root: string;
+  let artifactsDir: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "e1-recovery-"));
+    artifactsDir = join(root, ".audit-tools", "remediation");
+    mkdirSync(artifactsDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("NEGATIVE: a clean run's ledger yields no recovery marks — neither kind", async () => {
+    writeLedger(artifactsDir, [
+      ledgerEvent("expected"),
+      ledgerEvent("accepted"),
+      ledgerEvent("dispatched"),
+      ledgerEvent("lane_outcome"),
+    ]);
+
+    const recovery = await readRunRecoveryFacts(artifactsDir, makeState());
+
+    expect(recovery).toEqual(NO_RECOVERY);
+    expect(recovery.recovered_by_hand).toEqual([]);
+    expect(recovery.accepted_via_recovery).toEqual([]);
+  });
+
+  it("POSITIVE: an accepted_via_recovery mark is read back with its submission, lane and kind", async () => {
+    writeLedger(artifactsDir, [
+      ledgerEvent("accepted", { submission_id: "B-clean" }),
+      ledgerEvent("accepted_via_recovery", {
+        submission_id: "B-recovered",
+        lane: "implement",
+        issue_code: "orphaned_submission",
+        recorded_at: "2026-06-05T13:00:00.000Z",
+      }),
+    ]);
+
+    const recovery = await readRunRecoveryFacts(artifactsDir, makeState());
+
+    expect(recovery.accepted_via_recovery).toEqual([
+      {
+        kind: "accepted_via_recovery",
+        submission_id: "B-recovered",
+        lane: "implement",
+        issue_code: "orphaned_submission",
+        recorded_at: "2026-06-05T13:00:00.000Z",
+      },
+    ]);
+    // The two readmission kinds are NOT folded together: this submission was
+    // admitted through a RELAXED check, not re-landed by hand.
+    expect(recovery.recovered_by_hand).toEqual([]);
+  });
+
+  it("POSITIVE: recovered_by_hand is reported under its own kind, never merged with accepted_via_recovery", async () => {
+    writeLedger(artifactsDir, [
+      ledgerEvent("recovered_by_hand", { submission_id: "B-hand" }),
+    ]);
+
+    const recovery = await readRunRecoveryFacts(artifactsDir, makeState());
+
+    expect(recovery.recovered_by_hand).toEqual([
+      {
+        kind: "recovered_by_hand",
+        submission_id: "B-hand",
+        lane: "implement",
+        recorded_at: "2026-06-05T12:00:00.000Z",
+      },
+    ]);
+    expect(recovery.accepted_via_recovery).toEqual([]);
+  });
+
+  it("NEGATIVE: another run's recovery mark does not mark THIS run", async () => {
+    writeLedger(artifactsDir, [
+      ledgerEvent("accepted_via_recovery", {
+        submission_id: "B-other",
+        run_id: "PLAN-OTHER",
+      }),
+    ]);
+
+    const recovery = await readRunRecoveryFacts(artifactsDir, makeState());
+
+    expect(recovery).toEqual(NO_RECOVERY);
+  });
+
+  it("NEGATIVE: an absent ledger reads as no recovery, never as a throw", async () => {
+    const recovery = await readRunRecoveryFacts(
+      join(root, "never-written"),
+      makeState(),
+    );
+
+    expect(recovery).toEqual(NO_RECOVERY);
+  });
+
+  it("POSITIVE: unreadable ledger lines are COUNTED, so a reader cannot report a cleaner run than the file held", async () => {
+    mkdirSync(join(artifactsDir, "submissions"), { recursive: true });
+    writeFileSync(
+      submissionLedgerPath(artifactsDir),
+      [
+        JSON.stringify(ledgerEvent("accepted_via_recovery")),
+        "{ this line is torn",
+        JSON.stringify({ ...ledgerEvent("accepted"), contract_version: "other/v9" }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const recovery = await readRunRecoveryFacts(artifactsDir, makeState());
+
+    expect(recovery.accepted_via_recovery).toHaveLength(1);
+    expect(recovery.dropped_lines).toBe(2);
+  });
+});
+
+describe("buildRemediationOutcomesReport — recovery is a first-class contract field (E1)", () => {
+  it("NEGATIVE: a clean run carries an explicit empty recovery, never an omitted key", () => {
+    const report = buildRemediationOutcomesReport(makeState(), closingResult());
+
+    expect(report).toHaveProperty("recovery");
+    expect(report.recovery).toEqual(NO_RECOVERY);
+  });
+
+  it("POSITIVE: a recovered run carries the mark in the outcomes contract", () => {
+    const report = buildRemediationOutcomesReport(
+      makeState(),
+      closingResult(),
+      undefined,
+      {
+        recovered_by_hand: [],
+        accepted_via_recovery: [
+          {
+            kind: "accepted_via_recovery",
+            submission_id: "B-recovered",
+            lane: "implement",
+            issue_code: "orphaned_submission",
+            recorded_at: "2026-06-05T13:00:00.000Z",
+          },
+        ],
+        dropped_lines: 0,
+      },
+    );
+
+    expect(report.recovery.accepted_via_recovery).toHaveLength(1);
+    expect(report.recovery.accepted_via_recovery[0]!.submission_id).toBe(
+      "B-recovered",
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E1, end to end: the RENDERED surfaces of a real close. The builders above
+// prove the threading; these prove the property the entry actually states —
+// "a recovered run is distinguishable from a clean one in a rendered surface".
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("runClosePhase — a recovered run renders differently from a clean one (E1)", () => {
+  let root: string;
+  let artifactsDir: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "e1-close-"));
+    artifactsDir = join(root, ".audit-tools", "remediation");
+    mkdirSync(artifactsDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  /** A closing-phase state whose close runs to completion with no test command. */
+  function closingState() {
+    return makeBaseState({
+      status: "closing",
+      plan: {
+        plan_id: "PLAN-1",
+        findings: [
+          {
+            id: "F-1",
+            title: "Finding F-1",
+            category: "General",
+            severity: "low" as const,
+            confidence: "low" as const,
+            lens: "security",
+            summary: "",
+            affected_files: [{ path: "src/a.ts" }],
+          },
+        ],
+        blocks: [],
+        project_type: "typescript-node",
+        candidate_closing_actions: ["none"],
+      },
+      items: {
+        "F-1": {
+          finding_id: "F-1",
+          status: "resolved",
+          block_id: "B",
+          rework_count: 0,
+        },
+      },
+      closing_plan: { action: "none", pre_authorized: true },
+    });
+  }
+
+  /** The four artifacts a completed close writes beside the artifacts dir. */
+  async function readRenderedSurfaces(): Promise<{
+    report: string;
+    outcomes: { recovery: unknown };
+  }> {
+    const outputDir = join(root, ".audit-tools");
+    return {
+      report: await readFile(join(outputDir, "remediation-report.md"), "utf8"),
+      outcomes: JSON.parse(
+        await readFile(join(outputDir, "remediation-outcomes.json"), "utf8"),
+      ) as { recovery: unknown },
+    };
+  }
+
+  it("NEGATIVE: a clean run's report and outcomes carry an explicit empty recovery", async () => {
+    writeLedger(artifactsDir, [
+      ledgerEvent("expected"),
+      ledgerEvent("accepted"),
+    ]);
+
+    await runClosePhase(
+      closingState(),
+      { root, artifactsDir } as OrchestratorOptions,
+    );
+
+    const { report, outcomes } = await readRenderedSurfaces();
+    expect(outcomes).toEqual(
+      expect.objectContaining({ recovery: NO_RECOVERY }),
+    );
+    expect(report).toContain("## Recovery");
+    expect(report).toContain(
+      "None — no submission was readmitted; every accepted submission passed the normal lane's checks.",
+    );
+    expect(report).not.toContain("READMITTED");
+  });
+
+  it("POSITIVE: a recovered run's report and outcomes both carry the mark", async () => {
+    writeLedger(artifactsDir, [
+      ledgerEvent("accepted", { submission_id: "B-clean" }),
+      ledgerEvent("accepted_via_recovery", {
+        submission_id: "B-recovered",
+        lane: "implement",
+        issue_code: "orphaned_submission",
+        recorded_at: "2026-06-05T13:00:00.000Z",
+      }),
+    ]);
+
+    await runClosePhase(
+      closingState(),
+      { root, artifactsDir } as OrchestratorOptions,
+    );
+
+    const { report, outcomes } = await readRenderedSurfaces();
+    expect(outcomes).toEqual(
+      expect.objectContaining({
+        recovery: expect.objectContaining({
+          accepted_via_recovery: [expect.objectContaining({ submission_id: "B-recovered" })],
+        }),
+      }),
+    );
+    expect(report).toContain("## Recovery");
+    expect(report).toContain("`B-recovered` (lane `implement`)");
+    expect(report).toContain(
+      "Accepted via recovery (a corroboration check was relaxed)",
+    );
   });
 });

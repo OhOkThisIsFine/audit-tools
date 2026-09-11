@@ -93,13 +93,6 @@ export const StepArtifactSchema = z
     progress: StepProgressSchema.optional(),
     /** Shell commands the host may run for this step. */
     allowed_commands: z.array(z.string()),
-    /**
-     * MCP tool names equivalent to `allowed_commands`, for hosts driving the
-     * backend through the MCP adapter. Omitted when the step has no MCP
-     * equivalents, so a shell host never has to guess which list entries are
-     * tool names versus runnable commands.
-     */
-    allowed_mcp_tools: z.array(z.string()).optional(),
     stop_condition: z.string(),
     repo_root: z.string(),
     artifacts_dir: z.string(),
@@ -124,7 +117,7 @@ export type StepArtifact = z.infer<typeof StepArtifactSchema>;
  * writer to shared is what fixed audit-code's Windows path-separator drift: it
  * previously wrote `prompt_path` / `repo_root` / `artifacts_dir` /
  * `artifact_paths` with raw backslashes, while remediate-code normalized them.
- * Audit's optional fields (progress, allowed_mcp_tools, access) ride through
+ * Audit's optional fields (progress, access) ride through
  * `extraFields` with the same conditional-omission semantics as before.
  */
 /**
@@ -179,7 +172,6 @@ export async function writeCurrentStep(params: {
   status: StepStatus;
   runId: string | null;
   allowedCommands: string[];
-  allowedMcpTools?: string[];
   progress?: StepProgress;
   stopCondition: string;
   repoRoot: string;
@@ -214,9 +206,6 @@ export async function writeCurrentStep(params: {
       // Optional audit fields keep their conditional-omission semantics; they
       // ride before the canonical path fields so they can never clobber them.
       ...(params.progress ? { progress: params.progress } : {}),
-      ...(params.allowedMcpTools && params.allowedMcpTools.length > 0
-        ? { allowed_mcp_tools: params.allowedMcpTools }
-        : {}),
       ...(params.access ? { access: params.access } : {}),
       // Omitted when nothing is outstanding: a field that is always present
       // reads as noise, while its presence IS the statement.

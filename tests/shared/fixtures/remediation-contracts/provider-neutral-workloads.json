@@ -49,23 +49,6 @@
   ],
   "fixtures": [
     {
-      "id": "attribution-free-result",
-      "contract_ids": [
-        "attribution-contract-retirement"
-      ],
-      "positive_event": "provider-agnostic-execution-record-accepted",
-      "payload": {
-        "contract_version": "execution-record/v1alpha1",
-        "record_id": "execution-001",
-        "work_item_id": "remediation-item-001",
-        "outcome": "accepted",
-        "executor_reported": {
-          "label": "external-host",
-          "statement": "completed outside audit-tools"
-        }
-      }
-    },
-    {
       "id": "audit-host-workload",
       "contract_ids": [
         "audit-zero-adapter-boundary"
@@ -422,6 +405,21 @@
           ".remediation-artifacts/session-config.json",
           "session-config.json"
         ]
+      }
+    },
+    {
+      "id": "submission-ledger-record",
+      "contract_ids": [
+        "attribution-contract-retirement"
+      ],
+      "positive_event": "provider-agnostic-submission-ledger-recorded",
+      "payload": {
+        "contract_version": "submission-ledger-event/v1alpha1",
+        "run_id": "remediation-run-fixture",
+        "submission_id": "work-item-001",
+        "lane": "implement",
+        "kind": "accepted",
+        "recorded_at": "2026-06-05T12:00:00.000Z"
       }
     },
     {

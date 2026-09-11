@@ -209,9 +209,6 @@
             "session_config": {
               "type": "string"
             },
-            "run_ledger": {
-              "type": "string"
-            },
             "current_review_run": {
               "type": [
                 "string",
@@ -251,7 +248,6 @@
             "operator_handoff_json",
             "operator_handoff_markdown",
             "session_config",
-            "run_ledger",
             "current_review_run",
             "current_prompt",
             "current_tasks",
