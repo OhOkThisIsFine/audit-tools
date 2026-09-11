@@ -18,8 +18,15 @@ const {
 const { computeArtifactMetadata } = await import(
   "../../src/audit/orchestrator/artifactMetadata.js"
 );
-const { computeStaleArtifacts } = await import(
-  "../../src/audit/orchestrator/staleness.js"
+const {
+  computeStaleArtifacts,
+  StaleArtifactSet,
+  deferredArtifactsOf,
+  describeStalenessRecovery,
+  emitStalenessRecord,
+} = await import("../../src/audit/orchestrator/staleness.js");
+const { ARTIFACT_DEPENDS_ON_MAP, ALL_DAG_ARTIFACTS } = await import(
+  "../../src/audit/orchestrator/dependencyMap.js"
 );
 const { METADATA_SCHEMA_VERSION } = await import(
   "../../src/audit/types/artifactMetadata.js"
@@ -484,4 +491,242 @@ test("metadata: an unlisted mismatch-restamp preserves recorded slices verbatim"
   expect(second.artifacts["charter_register.json"]!.dependency_slices).toEqual(
     recorded,
   );
+});
+
+// CP-NODE-10 residual 1: the third state was exempted for map-declared LEAVES,
+// which put `audit-findings.json` — the pipeline's primary machine contract —
+// outside the only check that can see a partially-written body. The exemption is
+// deleted; these two pin that the leaves it covered are classified now.
+test("partial reaches a leaf: a leaf body that moved is stale", () => {
+  // The exemption's gate was `(ARTIFACT_DEPENDS_ON_MAP[name] ?? []).length === 0`
+  // — BOTH an absent key and a zero-length entry. `intent_checkpoint.json` is
+  // the absent-key form: a leaf INPUT that no map entry declares and that
+  // dependents read, so it participates in the DAG without an upstream of its own.
+  // Read as a plain record: the map's declared type is a strict literal, so an
+  // ABSENT key is a type error to index directly — which is itself the proof
+  // that the key is absent, but it must be stated as a lookup.
+  const dependsOn = ARTIFACT_DEPENDS_ON_MAP as Readonly<Record<string, string[]>>;
+  expect(
+    dependsOn["intent_checkpoint.json"],
+    "the fixture leaf is absent from the depends-on map — the exemption's other gate",
+  ).toBeUndefined();
+  expect(
+    ALL_DAG_ARTIFACTS.has("intent_checkpoint.json"),
+    "and it is still a tracked DAG artifact, so it is classified",
+  ).toBe(true);
+
+  const cp = {
+    schema_version: "intent-checkpoint/v1",
+    confirmed_at: "2026-01-01T00:00:00Z",
+    confirmed_by: "host" as const,
+    scope_summary: "audit the auth path",
+    intent_summary: "audit auth",
+  };
+  const bundle = { intent_checkpoint: cp } as unknown as ArtifactBundle;
+  const metadata = computeArtifactMetadata(bundle);
+  const tampered: unknown = { ...cp, intent_summary: "audit auth — TRUNCATED" };
+  const stale = computeStaleArtifacts(
+    {
+      intent_checkpoint: tampered,
+      artifact_metadata: metadata,
+    } as unknown as ArtifactBundle,
+    { emit: false },
+  );
+  expect([...stale], "a truncated leaf body is the third state, not intact").toContain(
+    "intent_checkpoint.json",
+  );
+});
+
+test("partial reaches audit-findings.json: the machine contract is not exempt", () => {
+  const findings = { schema_version: 1, findings: [{ id: "f1" }] };
+  const metadata = computeArtifactMetadata({
+    audit_findings: findings,
+  } as unknown as ArtifactBundle);
+  expect(
+    metadata.artifacts["audit-findings.json"],
+    "the primary machine contract carries a metadata entry",
+  ).toBeDefined();
+  const truncated = {
+    schema_version: 1,
+    findings: [{ id: "f1" }, { id: "f2" }],
+  };
+  const stale = computeStaleArtifacts(
+    {
+      audit_findings: truncated,
+      artifact_metadata: metadata,
+    } as unknown as ArtifactBundle,
+    { emit: false },
+  );
+  expect([...stale]).toContain("audit-findings.json");
+});
+
+test("the host-appended carve-out survives the leaf exemption's deletion", () => {
+  // `agent-feedback.jsonl` is appended by workers AFTER its producer runs, so a
+  // body running ahead of the manifest is its steady state. Staling it would
+  // re-fire its producer forever; its staleness reaches the report downstream.
+  const reflections = { reflections: [{ note: "a" }] };
+  const metadata = computeArtifactMetadata({
+    agent_reflections: reflections,
+  } as unknown as ArtifactBundle);
+  const stale = computeStaleArtifacts(
+    {
+      agent_reflections: { reflections: [{ note: "a" }, { note: "b" }] },
+      artifact_metadata: metadata,
+    } as unknown as ArtifactBundle,
+    { emit: false },
+  );
+  expect(
+    [...stale],
+    "a host-appended artifact is not staled by its own appended bytes",
+  ).not.toContain("agent-feedback.jsonl");
+});
+
+// CP-NODE-10 residual 2: the carry is a field of a `StaleArtifactSet`, so a
+// consumer that re-types the set through the constructor keeps it — and its loss
+// on the derivations that cannot carry it (union, structuredClone, new Set) is
+// STATED as `undefined` rather than degrading to an empty set that reads as
+// "nothing was deferred". Those two observations were previously
+// indistinguishable.
+//
+// WHAT EACH ASSERTION DECIDES: the re-typed copy red-greens on the constructor's
+// graft (delete the graft and the copy reads an EMPTY set). The plain-`Set`
+// assertions are the STATED CONTRACT, not a mechanism probe: a plain `Set` has no
+// carry to find, so no predicate over it can answer anything but `undefined`.
+test("the deferred carry is readable through the re-typing path, and its loss is stated", () => {
+  const original = new StaleArtifactSet(["x"], ["deferred-one"]);
+  const retyped = new StaleArtifactSet(original);
+  expect(deferredArtifactsOf(retyped), "a re-typed copy keeps the carry").toEqual(
+    new Set(["deferred-one"]),
+  );
+
+  // A plain-Set derivation (`structuredClone` is the same shape) rebuilds the
+  // value with no hook to intercept, so the loss is loud (`undefined`), never a
+  // silently-empty deferral. Spelled as a rebuild rather than `Set.prototype.union`
+  // because `union` needs the esnext lib and this tsconfig does not target it.
+  // The loss is real at the READ: the clone is not a staleness result.
+  const rebuilt = structuredClone(original) as ReadonlySet<string>;
+  expect(
+    deferredArtifactsOf(rebuilt),
+    "a rebuilt set states the loss instead of reporting an empty deferral",
+  ).toBeUndefined();
+
+  // A plain Set that never was a staleness result reads the same `undefined`.
+  // The contract this states: NO plain `Set` carries deferrals — not a clone,
+  // not a `union` result, not a hand-built one — so `undefined` from any of them
+  // means "not a staleness result", never "I lost the carry somewhere".
+  expect(deferredArtifactsOf(new Set(["z"]))).toBeUndefined();
+
+  // The constructor's graft is the ONE derivation that survives, and it is the
+  // only repair path for a consumer that must have the type back.
+  expect(
+    deferredArtifactsOf(new StaleArtifactSet(original)),
+    "a copy of a deferring set inherits its carry through the constructor",
+  ).toEqual(new Set(["deferred-one"]));
+});
+
+// The 2026-07-16 self-audit dogfood entry. Fixing this tool while it audits a
+// tree stales the planning chain derived from that tree; the cascade is CORRECT
+// and is deliberately not narrowed — but it must say so, or an operator cannot
+// tell a correct recovery from a wedge.
+test("recovery: a cascade over COMPLETED work names what invalidated it", () => {
+  // The dogfood shape: the tool's own source change is noticed by
+  // `repo_manifest.json`, and everything derived from it follows. The cascade
+  // HEAD is the map-declared artifact with no upstream — `tooling_manifest.json`,
+  // which is rebuilt fresh every call and so is never in the stale set.
+  expect(
+    (ARTIFACT_DEPENDS_ON_MAP["repo_manifest.json"] ?? []),
+    "the fixture head is `repo_manifest`'s only upstream",
+  ).toEqual(["tooling_manifest.json"]);
+  const bundle = {
+    repo_manifest: { files: [{ path: "src/a.ts" }] },
+    structure_decomposition: { subsystems: [] },
+  } as unknown as ArtifactBundle;
+  const stale = new Set(["repo_manifest.json", "structure_decomposition.json"]);
+
+  const recovery = describeStalenessRecovery(stale, bundle);
+  expect(recovery, "a cascade over written artifacts is a recovery").toBeDefined();
+  expect(recovery!.caused_by, "the head of the cascade is named").toEqual([
+    "tooling_manifest.json",
+  ]);
+  expect(recovery!.rederiving).toBe(2);
+});
+
+// The cascade head is a property of the ROUTE, not of the artifact alone. Both
+// stale artifacts below reach `repo_manifest.json` by a different route — one
+// directly, one through `structure_decomposition.json` — while the shared
+// upstream itself takes the direct route to the same head. A head computed
+// while walking one route must therefore never be reused as the answer for a
+// node reached by another: the walk carries a per-branch `seen`, so
+// "is this node a head" is decided against the path that reached it.
+test("recovery: a shared upstream reached by two routes names the head per route", () => {
+  const bundle = {
+    repo_manifest: { files: [{ path: "src/a.ts" }] },
+    structure_decomposition: { subsystems: [] },
+    charter_register: { nodes: [] },
+    charter_clarification: { entries: [] },
+    // Present so it is NOT a head: an absent upstream would be one in its own
+    // right (nothing above it explains the change), which is correct behaviour
+    // and would just widen the expected set away from the route question.
+    intent_checkpoint: { checkpoints: [] },
+    file_disposition: { files: [] },
+    graph_bundle: { nodes: [], edges: [] },
+  } as unknown as ArtifactBundle;
+  // Every upstream in the topology is PRESENT except `tooling_manifest.json`
+  // (the map-declared root, rebuilt every call and never persisted), so it —
+  // and only it — is the head every route resolves to.
+  const stale = new Set([
+    "charter_clarification.json",
+    "charter_register.json",
+    "structure_decomposition.json",
+    "repo_manifest.json",
+  ]);
+
+  expect(
+    (ARTIFACT_DEPENDS_ON_MAP["charter_clarification.json"] ?? []).includes(
+      "charter_register.json",
+    ) &&
+      (ARTIFACT_DEPENDS_ON_MAP["charter_register.json"] ?? []).includes(
+        "structure_decomposition.json",
+      ),
+    "the fixture really does reach the shared upstream by two routes",
+  ).toBe(true);
+
+  const recovery = describeStalenessRecovery(stale, bundle);
+  expect(recovery!.caused_by, "the head is named once, per route").toEqual([
+    "tooling_manifest.json",
+  ]);
+  expect(recovery!.rederiving, "every routed artifact is counted once").toBe(4);
+});
+
+test("recovery: a first pass is NOT a recovery — nothing was done to recover", () => {
+  // Nothing present, so nothing is being REDONE; announcing this would fire on
+  // every ordinary planning step, which is the same as not having the signal.
+  const bundle = {} as unknown as ArtifactBundle;
+  expect(describeStalenessRecovery(new Set(["repo_manifest.json"]), bundle)).toBeUndefined();
+});
+
+test("recovery: the emitted record carries the explanation, not just the stale list", () => {
+  const bundle = {
+    repo_manifest: { files: [{ path: "src/a.ts" }] },
+  } as unknown as ArtifactBundle;
+  const lines: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: unknown) => {
+    lines.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    emitStalenessRecord(new Set(["repo_manifest.json"]), undefined, bundle);
+  } finally {
+    process.stderr.write = original;
+  }
+  const record = JSON.parse(lines.join("")) as {
+    kind?: string;
+    recovery?: { caused_by?: string[]; message?: string };
+  };
+  expect(record.kind).toBe("staleness");
+  // The message is the whole point of the entry: one statement, at the moment it
+  // happens, that this is a correct re-derivation rather than a wedge.
+  expect(record.recovery?.message).toContain("correct recovery");
+  expect(record.recovery?.caused_by).toEqual(["tooling_manifest.json"]);
 });

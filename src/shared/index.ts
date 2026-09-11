@@ -136,6 +136,7 @@ export type {
   GoalGraph,
   Ceiling,
   CharterDelta,
+  StampedCharterDelta,
   TeleologyNode,
   TriangulatedTelos,
   ChannelDisagreement,

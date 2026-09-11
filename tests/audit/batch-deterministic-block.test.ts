@@ -126,3 +126,68 @@ test("runDeterministicForNextStep advances through all deterministic obligations
     expect(intentObl == null || intentObl.state === "missing" || intentObl.state === "stale", `intent_checkpoint_current should be unsatisfied (the stop point), but got: ${JSON.stringify(intentObl)}`).toBeTruthy();
   });
 });
+
+// The 2026-07-17 dogfood entry: a drain that spent minutes re-extracting stale
+// artifacts emitted NOTHING, so a caller timeout could not be told from a wedge.
+// The fold drives the shared engine directly, so it owns its own liveness — this
+// is that property, asserted on the real fold rather than on the helper.
+test("the fold emits a per-obligation heartbeat record for every execution it drains", async () => {
+  await withTempDir("audit-code-fold-heartbeat-", async (root) => {
+    await writeFixture(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await ensureSupervisorDirs(artifactsDir);
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    await writeFile(
+      laneSubmissionPath(artifactsDir, GATE_LANES.critical_flow_fallback),
+      JSON.stringify({ flows: [] }, null, 2) + "\n",
+    );
+
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    let result: Awaited<ReturnType<typeof runDeterministicForNextStep>>;
+    try {
+      result = await runDeterministicForNextStep({
+        root,
+        artifactsDir,
+        selfCliPath: "audit-code",
+        timeoutMs: 30_000,
+        narrativeEnabled: false,
+        analyzers: { typescript: "skip", python: "skip", css: "skip", html: "skip", sql: "skip" },
+        graphLlmEdgeReasoning: false,
+      });
+    } finally {
+      process.stderr.write = original;
+    }
+
+    const records = writes
+      .map((line) => {
+        try {
+          return JSON.parse(line) as { kind?: string; phase?: string; duration_ms?: number };
+        } catch {
+          return null;
+        }
+      })
+      .filter((r): r is NonNullable<typeof r> => r?.kind === "progress_heartbeat");
+
+    // The deterministic block really did drain (the guard against a vacuous pass:
+    // if the fold halted before executing anything, this test would be asserting
+    // liveness for work that never happened).
+    expect(result.kind).toBe("confirm_intent");
+    expect(
+      records.length,
+      "every drained obligation emits a completion record naming it",
+    ).toBeGreaterThan(0);
+    for (const record of records) {
+      expect(typeof record.phase).toBe("string");
+      expect(record.phase!.length).toBeGreaterThan(0);
+    }
+    // Each record names the obligation it timed — the point of the channel is
+    // that a slow drain is attributable, not merely "alive".
+    expect(records.map((r) => r.phase)).toContain("repo_manifest");
+  });
+});

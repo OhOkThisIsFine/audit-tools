@@ -50,6 +50,22 @@ export interface CharterClarificationRegister {
   banked: CharterClarificationRequest[];
   /** The banked questions surfaced as Finding leads for synthesis. */
   findings: Finding[];
-  /** Gate/partition notes (e.g. deltas that sourced no question) — surfaced. */
+  /**
+   * Gate/partition notes (e.g. deltas that sourced no question) — surfaced.
+   * Includes every entry of {@link refused_issues}, which is the subset that
+   * matters and is carried separately so no reader has to classify prose.
+   */
   validation_issues: string[];
+  /**
+   * The REFUSALS among {@link validation_issues}: deltas the join could not
+   * place at all (no `node_id`, or a node the register carries no members for),
+   * so the question they would have sourced is NEVER ASKED.
+   *
+   * It is a separate field rather than a filter over the messages because the
+   * distinction is structural, not textual: a routine remediator-routed skip and
+   * a refused delta are both one-line strings, and telling them apart by
+   * matching message text is the kind of check that silently stops working when
+   * either message is edited. A writer states which class an issue is in.
+   */
+  refused_issues: string[];
 }

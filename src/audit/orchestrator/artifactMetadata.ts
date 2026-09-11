@@ -56,6 +56,47 @@ export function present(bundle: ArtifactBundle, artifactName: string): boolean {
   return value !== undefined && value !== null;
 }
 
+/**
+ * The hash this PRODUCER stamps, guarded.
+ *
+ * `hashArtifactValue`'s affinity canonicalizer THROWS on a malformed
+ * `audit_tasks.json` / `task_affinity_graph.json` (a dangling edge, a duplicate
+ * id, a missing field — `shared/affinityArtifacts.ts`), and this is the
+ * RESTAMP path: it reaches every present DAG artifact unconditionally on every
+ * advance, so a single malformed affinity body taken from disk used to kill the
+ * whole metadata computation at rest — including for the artifacts that had
+ * nothing to do with it, which is what makes the failure so loud and so total.
+ *
+ * The guard is TOTAL rather than targeted: the fallback is the same content hash
+ * with the affinity canonicalizer bypassed, so a body that cannot be canonicalized
+ * still gets a stable, content-derived hash and the pass completes. That is the
+ * whole requirement here — this value's only job is to decide whether the body
+ * moved since the last stamp, and an un-canonicalizable body that is UNCHANGED
+ * still hashes equal (so it does not churn) while a changed one still differs
+ * (so it still re-derives). It is deliberately NOT the staleness pass's
+ * `partial` classification: a malformed body reaching the producer is a
+ * producer-side error to surface there, and this must not invent a verdict about
+ * it.
+ *
+ * WHY NOT let it throw: the malformed body is a persisted artifact read back
+ * from disk, so throwing here does not prevent it — it converts a body that the
+ * audit could still restamp and report on into a run that dies before it can.
+ * The remaining detection is unchanged and stays where it belongs: the staleness
+ * pass classifies an unhashable body as `partial` (staleness.ts), and the
+ * affinity consumer that actually interprets the graph validates it on its own
+ * terms.
+ */
+function hashProducerArtifactValue(
+  artifactName: string,
+  value: unknown,
+): string {
+  try {
+    return hashArtifactValue(artifactName, value);
+  } catch {
+    return hashContent(stableStringify(value));
+  }
+}
+
 // Stable signature of the overall artifact state, keyed on per-artifact CONTENT
 // hashes — deliberately NOT revisions, which only ever increment. A
 // deterministic advance loop that revisits a signature it already produced this
@@ -125,7 +166,7 @@ export function computeArtifactMetadata(
 
     const previousEntry = usablePrevious?.artifacts[artifactName];
     const isUpdated = updated.has(artifactName);
-    const contentHash = hashArtifactValue(artifactName, value);
+    const contentHash = hashProducerArtifactValue(artifactName, value);
     // Carry-forward is CONTENT-VERIFIED, never trusted from the executor's
     // hand-maintained `artifacts_written` list alone: `writeCoreArtifacts`
     // persists EVERY present bundle artifact, so an executor that mutates an

@@ -476,6 +476,21 @@ export function extractRegisteredRouteEvidence(
   // with the markdown file as its handler. Extension is the marker that fits
   // this branch's semantics; the path-literal gate in `addRouteEvidence` is the
   // other half.
+  //
+  // KNOWN FALSE NEGATIVE, accepted (CP-NODE-19): that same gate SKIPS route
+  // registration living inside a `.vue` / `.svelte` / `.astro` script block. The
+  // extension list is the TS-family set, and those three are deliberately absent
+  // from it — adding them would read the whole single-file-component as if it
+  // were a module, and the surrounding markup is exactly the prose class this
+  // gate exists to keep out (`<template>` carries literal tag soup, not routes).
+  // Closing it properly means extracting the `<script>` block first and gating on
+  // THAT, which is a real parsing job rather than an extension addition — so the
+  // gap is stated here rather than half-closed into fabricated markup routes.
+  // Missing evidence over fabricated evidence: these are LEADS the lens confirms
+  // or refutes, never findings, and a dropped route is a lead not surfaced rather
+  // than a claim made. Pinned by graph-framework-routes.test.ts ("a .vue script
+  // block contributes no route — the accepted gap"), so closing it must be a
+  // deliberate act that updates that test rather than a silent side effect.
   if (!TS_LIKE_EXTENSION_PATTERN.test(normalizeGraphPath(fromPath).toLowerCase())) {
     return { calls, routes };
   }

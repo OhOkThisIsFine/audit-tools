@@ -541,7 +541,7 @@ describe("materializeCharterPacket — provenance a lane copies (T3)", () => {
 });
 
 describe("charter_register read policy — discard on schema-version mismatch", () => {
-  it("a v1/unstamped register degrades to absent; a v2-stamped one survives", async () => {
+  it("an unstamped register degrades to absent; a current-stamped one survives", async () => {
     const dir = await mkdtemp(join(tmpdir(), "charter-register-version-"));
     const v1 = {
       generated_at: "2026-08-01T00:00:00Z",

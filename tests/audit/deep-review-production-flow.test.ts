@@ -157,6 +157,7 @@ test("production systemic dispatch never advertises the deleted deep-review judg
         banked: [],
         findings: [],
         validation_issues: [],
+        refused_issues: [],
         ...REGISTER_V4_AFFIRMATION,
       },
       conceptual_review_adjudication: {

@@ -142,6 +142,7 @@ function makePostDesignAssessmentBundle(opts: PostDesignAssessmentOptions = {}):
       banked: [],
       findings: [],
       validation_issues: [],
+      refused_issues: [],
       ...REGISTER_V4_AFFIRMATION,
     },
     // Phase E systemic challenge loop: an omitted (shallow-ceiling) register so

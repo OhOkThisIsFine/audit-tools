@@ -96,6 +96,16 @@ export interface AssembledClarifications {
   banked: CharterClarificationRequest[];
   findings: Finding[];
   validation_issues: string[];
+  /**
+   * The REFUSALS inside {@link validation_issues} — deltas a join could not place
+   * at all, so the question they would have sourced is never asked. Carried as
+   * its own list rather than as a message convention: a routine remediator-routed
+   * skip and a refusal are both one-line strings, and classifying them by
+   * matching prose is a check that stops working the moment either message is
+   * edited. Either list is a subset-safe view of `validation_issues`; this module
+   * is the producer that knows which is which.
+   */
+  refused_issues: string[];
 }
 
 /**
@@ -119,6 +129,9 @@ export function assembleClarificationRegister(
   priorAnswers: Map<string, CharterClarificationRequest["answer"]> = new Map(),
 ): AssembledClarifications {
   const validation_issues: string[] = [];
+  // The REFUSAL subset, tracked as it is produced rather than recovered from the
+  // messages afterwards (see `AssembledClarifications.refused_issues`).
+  const refused_issues: string[] = [];
   const membersByNode = new Map<string, string[]>();
   for (const d of deltas) membersByNode.set(d.node_id, d.members);
 
@@ -128,6 +141,22 @@ export function assembleClarificationRegister(
   for (const d of remediatorRouted) {
     validation_issues.push(
       `delta "${d.delta.delta_id}" routes to the remediator (spec drift) — not a charter question; handled by the remediator, not the attention loop`,
+    );
+  }
+
+  // A subsystem present with an EMPTY members array is worth a note although the
+  // message would be true: every question it produces becomes a Finding whose
+  // `affected_files` is empty, so it reads as a finding about nothing and the
+  // reader has no way to tell that from a genuine no-files-in-scope case. The
+  // deltas are still processed (the question may be worth asking), so this
+  // states the consequence rather than dropping them. Reported BEFORE the
+  // questions are partitioned, so it names the subsystem rather than each
+  // question it will produce.
+  for (const [nodeId, members] of membersByNode) {
+    if (members.length > 0) continue;
+    validation_issues.push(
+      `subsystem "${nodeId}" carries no member files — its questions are kept, but ` +
+        `every Finding they surface will cite no affected_files`,
     );
   }
 
@@ -166,7 +195,7 @@ export function assembleClarificationRegister(
   );
   findings.sort((a, b) => compareCodeUnits(a.id, b.id));
 
-  return { asked, banked, findings, validation_issues };
+  return { asked, banked, findings, validation_issues, refused_issues };
 }
 
 /**

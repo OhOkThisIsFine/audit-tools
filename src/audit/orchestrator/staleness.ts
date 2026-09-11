@@ -44,6 +44,30 @@ const ARTIFACT_DEPENDENCIES_MAP: Partial<Record<string, string[]>> =
  * stale set (`deriveAuditState`, the drain boundary) keeps its `Set<string>`
  * type and behaviour unchanged, so the deferred channel can never be dropped by
  * a caller "forgetting" a second return value.
+ *
+ * THE CARRY IS A FIELD OF THE VALUE, so it lives exactly as long as the value.
+ * A consumer that rebuilds, forwards or re-types the set into a fresh object
+ * holds a value without it, whatever that consumer's `instanceof` says.
+ *
+ * The residual is real and is NOT papered over. `Set.prototype.union` builds a
+ * PLAIN `Set` — measured, not assumed. It consults neither the receiver's
+ * constructor nor `Set[Symbol.species]` (the property exists and is
+ * configurable, and is ignored), and the subclass constructor is never invoked,
+ * so NOTHING inside this class can reach the copy. `structuredClone` likewise
+ * rebuilds a plain `Set` and has no hook at all. Both results are still
+ * iterable, still `instanceof`-false, and so still type-acceptable to every
+ * consumer — the silently-DISCARDED deferral this class was introduced to make
+ * impossible, one derivation away.
+ *
+ * So the contract is stated LOUDLY at the read instead: {@link deferredArtifactsOf}
+ * returns the carried set for a {@link StaleArtifactSet} and `undefined` for
+ * everything else — which is distinguishable from "this one deferred nothing"
+ * (an EMPTY set on a `StaleArtifactSet`). A caller that unions or clones a stale
+ * set therefore gets `undefined` — an explicit "I lost the deferrals", not an
+ * empty set that reads as "nothing was deferred". The ONLY carry that survives a
+ * derivation is the constructor's: a `StaleArtifactSet` built FROM another one
+ * describes the same computation, so it inherits the source's carry (see the
+ * constructor). Nothing else does — neither derivation is a staleness result.
  */
 export class StaleArtifactSet extends Set<string> {
   /** Downstreams held behind a slice projection this call — always disjoint from the stale set. */
@@ -53,8 +77,35 @@ export class StaleArtifactSet extends Set<string> {
     super(stale);
     // A downstream that ended up stale by some OTHER path was decided, not
     // deferred — the two sets are disjoint by construction.
-    this.deferred = new Set([...deferred].filter((name) => !this.has(name)));
+    const disjoint = new Set([...deferred].filter((name) => !this.has(name)));
+    // A StaleArtifactSet built FROM another one (the `new StaleArtifactSet(a)`
+    // re-construction a caller writes when it wants the type back) inherits the
+    // source's carry beside any deferrals of its own: the copy describes the
+    // same computation, so losing the deferrals there would be the same silent
+    // under-report through a different door.
+    this.deferred =
+      stale instanceof StaleArtifactSet && stale.deferred.size > 0
+        ? new Set([...disjoint, ...stale.deferred])
+        : disjoint;
   }
+}
+
+/**
+ * The deferred downstreams a stale set carries, `undefined` when the argument
+ * is not a staleness result at all. A `StaleArtifactSet` that deferred nothing
+ * reports an empty set — never `undefined`, so "deferred nothing" and "was
+ * never a staleness result" stay distinguishable.
+ *
+ * The `instanceof` test here is EXACT, not a widening: only a
+ * `StaleArtifactSet` has a carry, and its constructor is the only thing that
+ * puts the deferrals back on a DERIVED value. A plain `Set` — from `union`,
+ * `structuredClone`, or `new Set(...)` — is simply not a staleness result, so
+ * answering `undefined` for it is the honest answer, not a lost lookup.
+ */
+export function deferredArtifactsOf(
+  stale: ReadonlySet<string> | Iterable<string>,
+): ReadonlySet<string> | undefined {
+  return stale instanceof StaleArtifactSet ? stale.deferred : undefined;
 }
 
 /** Present-artifact readability, as this module can determine it from the bundle. */
@@ -76,16 +127,25 @@ type ArtifactPresence =
  * reads as `intact` (the downstream-of-absent fail-safe below is what covers
  * that case).
  *
- * `partial` is reported only for an artifact with declared upstreams: the
- * exemption is literally the `.length === 0` gate on `ARTIFACT_DEPENDS_ON_MAP`
- * below — a MAP-DECLARED LEAF, which is NOT a synonym for an input (several
- * leaves are pipeline-produced). For a true host-append input the exemption is
- * FORCED: an appended input stales only its DOWNSTREAM, pinned by
- * agent-feedback-reflections.test.ts. For a leaf whose own producing obligation
- * gates on its staleness (state.ts's `syntax_resolved`, `confirm_intent`) it is
- * a recorded CHOICE, not a necessity — this pass simply never asserts `partial`
- * for it. Either way a truncated leaf body is caught only through its
- * dependents' hash compare, or at its producer's next restamp.
+ * EVERY tracked artifact is classified, map-declared LEAF included — the
+ * `.length === 0` exemption that used to stand here is DELETED. It was a
+ * suppression of the third state over exactly the artifacts most likely to be
+ * truncated mid-write, and `audit-findings.json` — the pipeline's primary
+ * machine contract — is one of them: a body that no longer hashes to the
+ * manifest's `content_hash` is definitionally not what the manifest describes,
+ * whether or not anything downstream reads it. The stated reason for the
+ * exemption was that a leaf has no dependents to catch it, which is an argument
+ * for the CHECK, not against it: for a true host-append input (an appended
+ * input stales only its downstream, pinned by
+ * agent-feedback-reflections.test.ts) the exemption was FORCED because that
+ * input's own producing obligation does not gate on its staleness — so what
+ * preserves its behaviour is not the leaf exemption but the exemption's
+ * replacement below, which states exactly which artifacts a `partial` verdict
+ * must not gate.
+ *
+ * `partial` is therefore reported for every tracked artifact whose body does not
+ * match its record. The one carve-out that remains is not a leaf rule but a
+ * CONTENT-SOURCE rule (see `HOST_APPENDED_ARTIFACTS`).
  */
 function classifyArtifactPresence(
   bundle: ArtifactBundle,
@@ -95,9 +155,6 @@ function classifyArtifactPresence(
   if (!present(bundle, artifactName)) return "absent";
   const entry = metadata.artifacts[artifactName];
   if (!entry) return "intact";
-  if ((ARTIFACT_DEPENDENCIES_MAP[artifactName] ?? []).length === 0) {
-    return "intact";
-  }
   // An UNHASHABLE body is `partial` too, and the classification must happen
   // here rather than escaping: `hashArtifactValue`'s canonicalizer throws on a
   // malformed `audit_tasks.json` / `task_affinity_graph.json`
@@ -118,6 +175,28 @@ function classifyArtifactPresence(
   if (currentHash === undefined) return "absent";
   return entry.content_hash === currentHash ? "intact" : "partial";
 }
+
+/**
+ * Artifacts whose content an EXTERNAL writer appends to, so a body that does not
+ * match the manifest's record is the normal state rather than a damaged one.
+ *
+ * This is the honest replacement for the deleted map-declared-leaf exemption,
+ * and it is deliberately a named registry rather than a structural rule:
+ * "declares no upstreams" was never the property that mattered (several leaves
+ * are pipeline-produced and SHOULD be caught), and the property that does matter
+ * — "this artifact is mutated by something other than its producing obligation"
+ * — is not derivable from the dependency map at all. Naming the members is what
+ * keeps the set from silently growing to cover whatever is inconvenient: a new
+ * entry here is a deliberate statement that its producer does not own its bytes.
+ *
+ * `agent-feedback.jsonl` is the sole member: workers append opt-in reflections
+ * to it after the pass that created it, so it stales only its DOWNSTREAM —
+ * `agent-feedback-reflections.test.ts` pins that behaviour and this registry is
+ * what makes it survive the leaf exemption's deletion.
+ */
+const HOST_APPENDED_ARTIFACTS: ReadonlySet<string> = new Set([
+  "agent-feedback.jsonl",
+]);
 
 /** Options controlling the staleness pass's observability side effect. */
 export interface StalenessOptions {
@@ -154,18 +233,107 @@ export function resetStalenessDedup(): void {
   lastEmittedStalenessKey = null;
 }
 
+/**
+ * The recovery a stale set describes, when it describes one — or `undefined`
+ * for the ordinary case of staling work that had not been done yet.
+ *
+ * WHY THIS EXISTS AT ALL (the 2026-07-16 self-audit dogfood entry): fixing this
+ * tool WHILE it audits a tree changes the audited tree, the dependency DAG
+ * correctly marks the planning chain stale, and the run restarts from
+ * `charter_extraction`. The cascade is RIGHT — the planning was derived from a
+ * tree that no longer exists — and it is deliberately NOT narrowed here. The
+ * defect was that a large, expensive, correct action happened SILENTLY, so an
+ * operator could not tell it from a wedge and would eventually be trained to
+ * defeat it. The DAG stays truth; the explanation is added.
+ *
+ * "Expensive" is what makes this a recovery rather than routine planning: a
+ * stale artifact that ALREADY HAS A BODY is prior work being redone. One that
+ * was never written is simply the next thing to do, and announcing it would
+ * make the signal fire constantly — which is the same as not having it. So the
+ * trigger is: this set reaches at least one artifact that already exists.
+ *
+ * The CAUSES are the upstreams that moved. A stale artifact with tracked
+ * dependencies attributes to whichever of them is itself absent-or-stale (the
+ * head of the cascade); a stale artifact with none is its own cause — for the
+ * dogfood case that is `repo_manifest.json`, the artifact that actually
+ * noticed the tool's source change.
+ */
+export interface StalenessRecovery {
+  /** The upstream artifact(s) whose change triggered this cascade, sorted. */
+  caused_by: string[];
+  /** How many artifacts are being re-derived, including the causes. */
+  rederiving: number;
+}
+
+export function describeStalenessRecovery(
+  stale: ReadonlySet<string>,
+  bundle: ArtifactBundle,
+): StalenessRecovery | undefined {
+  // Only work that was already done is a recovery; a first pass is not.
+  const alreadyWritten = [...stale].filter((name) => present(bundle, name));
+  if (alreadyWritten.length === 0) return undefined;
+  const staleSet = new Set(stale);
+  // Why a stale artifact is stale, decided per artifact — the head is the FIRST
+  // artifact in the chain that nothing upstream explains.
+  //
+  //  - It is stale because an UPSTREAM moved (a downstream of the change). Its
+  //    own body is not the cause; recurse up.
+  //  - It is stale with every upstream intact. Nothing above it moved, so the
+  //    change entered AT it — it is the head, whether it was tampered with
+  //    directly or whether it is a root like `tooling_manifest.json` (rebuilt
+  //    every call, so it never appears in the stale set itself).
+  // The walk returns this branch's heads rather than memoizing them: `seen` is
+  // a copy per branch, so whether a node is a head depends on the ROUTE taken to
+  // reach it, and a memo keyed on the name alone would answer a later branch
+  // with a head computed on an earlier one. Nothing here is keyed on the name —
+  // the map is small and the walk is per-call.
+  const causes = new Set<string>();
+  const walk = (name: string, seen: ReadonlySet<string>): string[] => {
+    if (seen.has(name)) return [];
+    const movedUpstreams = (ARTIFACT_DEPENDENCIES_MAP[name] ?? []).filter(
+      (upstream) => staleSet.has(upstream) || !present(bundle, upstream),
+    );
+    if (movedUpstreams.length === 0) {
+      causes.add(name);
+      return [name];
+    }
+    const heads = new Set<string>();
+    for (const upstream of movedUpstreams) {
+      const next = new Set([...seen, name]);
+      for (const head of walk(upstream, next)) heads.add(head);
+    }
+    for (const head of heads) causes.add(head);
+    return [...heads];
+  };
+  for (const name of alreadyWritten) walk(name, new Set());
+
+  return {
+    caused_by: [...causes].sort(),
+    rederiving: alreadyWritten.length,
+  };
+}
+
 export function emitStalenessRecord(
   stale: Set<string>,
   reason?: string,
+  bundle?: ArtifactBundle,
 ): void {
   // INV-SSP-DEFERRED-SET-REPORTED: a stale set computed by this module carries
-  // its deferred downstreams; a bare `Set` (a caller reporting a hand-built set)
-  // simply has none. The record NAMES them — omitting a deferred downstream is
-  // exactly the silent under-report this reporting exists to make impossible.
-  const deferred =
-    stale instanceof StaleArtifactSet ? [...stale.deferred].sort() : [];
+  // its deferred downstreams; a bare `Set` (a caller reporting a hand-built set,
+  // or a copy derived from a stale one) has none. The record NAMES them —
+  // omitting a deferred downstream is exactly the silent under-report this
+  // reporting exists to make impossible. Read through the accessor, which
+  // answers for a `StaleArtifactSet` — the only value that can carry a carry —
+  // and `undefined` for anything else.
+  const deferred = [...(deferredArtifactsOf(stale) ?? [])].sort();
   if (stale.size === 0 && deferred.length === 0) return;
-  const key = JSON.stringify([[...stale].sort(), deferred, reason ?? null]);
+  const recovery = bundle ? describeStalenessRecovery(stale, bundle) : undefined;
+  const key = JSON.stringify([
+    [...stale].sort(),
+    deferred,
+    reason ?? null,
+    recovery ?? null,
+  ]);
   if (key === lastEmittedStalenessKey) return;
   lastEmittedStalenessKey = key;
   process.stderr.write(
@@ -174,6 +342,20 @@ export function emitStalenessRecord(
       stale_artifacts: [...stale].sort(),
       ...(deferred.length > 0 ? { deferred_artifacts: deferred } : {}),
       ...(reason ? { reason } : {}),
+      ...(recovery
+        ? {
+            recovery: {
+              caused_by: recovery.caused_by,
+              rederiving: recovery.rederiving,
+              // The one message, at the moment it happens: this is not a wedge,
+              // it is a correct re-derivation, and here is what invalidated it.
+              message:
+                `re-deriving ${recovery.rederiving} completed artifact(s) invalidated by ` +
+                `${recovery.caused_by.join(", ")} — the dependency graph is the source of truth, ` +
+                `so this is a correct recovery, not a restart from scratch`,
+            },
+          }
+        : {}),
       ts: new Date().toISOString(),
     }) + "\n",
   );
@@ -323,7 +505,14 @@ export function computeStaleArtifacts(
     ]);
     for (const artifactName of [...trackedArtifacts].sort()) {
       if (artifactName === "artifact_metadata.json") continue;
-      const presence = classifyArtifactPresence(bundle, metadata, artifactName);
+      // A HOST-APPENDED artifact is exempt from the `partial` verdict, not from
+      // classification: its body is expected to run ahead of the manifest, so
+      // `partial` there is the steady state and staling it would re-fire its
+      // producer forever. Its staleness reaches its DOWNSTREAM through the
+      // absent-path fail-safe below, which is the behaviour it always had.
+      const presence = HOST_APPENDED_ARTIFACTS.has(artifactName)
+        ? "intact"
+        : classifyArtifactPresence(bundle, metadata, artifactName);
       if (presence === "partial") {
         stale.add(artifactName);
         continue;

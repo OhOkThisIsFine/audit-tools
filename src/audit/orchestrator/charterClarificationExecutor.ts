@@ -115,6 +115,7 @@ function omittedRegister(
     banked: [],
     findings: [],
     validation_issues: [],
+    refused_issues: [],
   };
 }
 
@@ -187,20 +188,40 @@ export function runCharterClarificationExecutor(
     banked: assembled.banked,
     findings,
     // Refusals from the join come first: a delta that never became a question is
-    // context for the queue that follows, not a footnote to it.
+    // context for the queue that follows, not a footnote to it. `inputIssues` is
+    // exactly the refusal class — every one of them is a delta the join could not
+    // place, so its question is never asked — while the assembler reports its own
+    // refusals separately from its routine notes.
     validation_issues: [...inputIssues, ...assembled.validation_issues],
+    refused_issues: [...inputIssues, ...assembled.refused_issues],
   };
   // Surface each note's MESSAGE, not just a count — mirrors the charter-extraction
-  // pass's gate-drop summary. A refused delta (no node_id, or a node no subsystem
-  // carries) is a QUESTION THAT WILL NEVER BE ASKED; behind a bare "N note(s)" the
-  // operator cannot tell that from a routine remediator-routed skip, and would have
-  // to open charter_clarification.json to find out. The messages are bounded
-  // one-liners, so listing them is cheap.
+  // pass's gate-drop summary. The messages are bounded one-liners, so listing them
+  // is cheap.
+  //
+  // The two classes print DIFFERENTLY, and that is the point of the split. A
+  // REFUSAL (a delta the join could not place — no node_id, or a node the register
+  // carries no members for) is a question that will NEVER BE ASKED; a routine
+  // remediator-routed SKIP is the design working as intended. Under one
+  // undifferentiated "N note(s)" list the operator cannot tell a silent data
+  // defect from ordinary routing, so the one signal that matters is buried in the
+  // list that never matters. Refusals are hoisted and counted; skips stay listed.
+  const refusals = clarification.refused_issues;
+  const refused = new Set(refusals);
+  const routineNotes = clarification.validation_issues.filter(
+    (issue) => !refused.has(issue),
+  );
   const noteSummary =
-    clarification.validation_issues.length > 0
-      ? `, ${clarification.validation_issues.length} note(s):\n` +
-        clarification.validation_issues.map((m) => `  - ${m}`).join("\n")
-      : ".";
+    clarification.validation_issues.length === 0
+      ? "."
+      : (refusals.length > 0
+          ? `, ${refusals.length} REFUSED delta(s) — a question that will never be asked:\n` +
+            refusals.map((m) => `  - ${m}`).join("\n")
+          : "") +
+        (routineNotes.length > 0
+          ? `, ${routineNotes.length} note(s):\n` +
+            routineNotes.map((m) => `  - ${m}`).join("\n")
+          : "");
   return {
     updated: { ...bundle, charter_clarification: clarification },
     artifacts_written: ["charter_clarification.json"],
