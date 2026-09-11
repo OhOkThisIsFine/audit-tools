@@ -17,6 +17,7 @@ import {
   hashContent,
   isFileMissingError,
   isJsonParseError,
+  isMissingObservation,
   isRecord,
   readJsonFile,
   readSubmissionIngestHistory,
@@ -3237,15 +3238,27 @@ async function withFoldAdvisories(
  */
 function renderCarriedAdvisoryLines(carried: FoldAdvisories): string[] {
   const lines: string[] = [];
-  if (carried.ingestIssues.length > 0) {
+  // The SAME missing/rejected split the semantic-review step renders, because a
+  // carried advisory and the step's own issues are the same fact reaching the
+  // operator through two different channels; they must not disagree on shape.
+  const describe = (issue: AuditHostIngestIssue): string =>
+    `${issue.work_item_id ? `\`${issue.work_item_id}\` (${issue.code}): ` : `${issue.code}: `}` +
+    `${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`;
+  const missing = carried.ingestIssues.filter(isMissingObservation);
+  const refused = carried.ingestIssues.filter((issue) => !isMissingObservation(issue));
+  if (missing.length > 0) {
+    lines.push(
+      "## Results not yet written",
+      "",
+      ...missing.map((issue) => `- ${describe(issue)}`),
+      "",
+    );
+  }
+  if (refused.length > 0) {
     lines.push(
       "## Result status requiring attention",
       "",
-      ...carried.ingestIssues.map(
-        (issue) =>
-          `- ${issue.work_item_id ? `\`${issue.work_item_id}\` (${issue.code}): ` : `${issue.code}: `}` +
-          `${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`,
-      ),
+      ...refused.map((issue) => `- ${describe(issue)}`),
       "",
     );
   }

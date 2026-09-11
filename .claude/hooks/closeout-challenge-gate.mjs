@@ -68,11 +68,66 @@ function isAtOrAfterSessionStart(tsMs, registryRecord) {
   return Math.floor(tsMs / 1000) >= Math.floor(startedAt / 1000);
 }
 
+// Is this branch's work pushed SOMEWHERE, or only in this checkout? Two facts
+// decide it, and both have to hold: an upstream ref must be configured for the
+// branch, and HEAD must be at or behind it. A branch with no upstream is the
+// genuinely local case, and a branch whose upstream is behind HEAD has commits
+// pushed since. Either way the finding says which, so a reader is never left to
+// infer "the work is lost" from a condition that only means "not on main".
+//
+// "Cannot tell" (no remote, no branch name, a git fault) answers the LOCAL
+// case, which is the conservative direction: the challenge already fired, and
+// the extra sentence must not talk the reader out of it. This helper only ever
+// adds a sentence — it never decides whether the gate fires.
+function branchUpstreamState(remoteName, branch) {
+  const local = {
+    current: false,
+    sentence:
+      'No upstream is configured for this branch, so these commits exist only in this checkout ' +
+      'until they are pushed.',
+  };
+  if (!remoteName || !branch || branch === 'HEAD' || branch === 'main') return local;
+  const upstreamRef = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${branch}@{upstream}`]);
+  if (!upstreamRef.ok || !upstreamRef.out) return local;
+  const ahead = git(['rev-list', '--count', `${upstreamRef.out}..HEAD`]);
+  if (!ahead.ok) return local;
+  if (Number(ahead.out) === 0) {
+    return {
+      current: true,
+      sentence:
+        `This branch IS pushed and current on ${upstreamRef.out}, so the work is not local-only — ` +
+        `it is simply not merged into ${remoteName}/main yet.`,
+    };
+  }
+  return {
+    current: false,
+    sentence:
+      `This branch tracks ${upstreamRef.out}, which is ${ahead.out} commit(s) BEHIND HEAD — push ` +
+      `before handing off.`,
+  };
+}
+
 if (process.env.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE) process.exit(0);
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const STATE_DIR = join(ROOT, '.claude', 'hooks', '.state', 'closeout-challenge');
 const CHALLENGE_CAP = 2;
+// The render record for THIS session. One file per SESSION, not one per repo:
+// the repo-global file was last-writer-wins across concurrent sessions, so a
+// session that never rendered could read a sibling's render as its own.
+//
+// The session id is passed EXPLICITLY, never defaulted from a module-level
+// binding: the only binding that holds it is a `const` declared further down
+// this file, and a default parameter reading it throws a temporal-dead-zone
+// ReferenceError at the call site — which this gate's catch-all then reports as
+// "no rendered closeout on record", i.e. a broken check wearing the face of a
+// missing render. (Found exactly that way.)
+const CLOSEOUT_RENDER_DIR = join(ROOT, '.claude', 'hooks', '.state', 'closeout-render');
+
+/** The render record the given session wrote. */
+function closeoutRenderRecordPath(session) {
+  return join(CLOSEOUT_RENDER_DIR, `${session}.json`);
+}
 const RECENT_MS = 12 * 60 * 60 * 1000;
 
 let payload = {};
@@ -191,9 +246,21 @@ const headMovedRecently = registry.armed
 
 const remotes = git(['remote']).out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 const remote = remotes.includes('audit-tools') ? 'audit-tools' : remotes[0];
-const unpushed = remote ? git(['log', '--oneline', `${remote}/main..HEAD`]).out : '';
+// The condition this gate actually TESTS: commits HEAD carries that the
+// recorded default branch does not. It was headed "UNPUSHED", which asserts
+// something else — that the work is only local — and a lap that pushed every
+// commit to its own branch could disprove the headline in one command while the
+// clause beneath it stayed true. A gate whose headline is falsifiable teaches
+// the reader to skim it, which is the same corrosion a false red causes.
+const notOnMain = remote ? git(['log', '--oneline', `${remote}/main..HEAD`]).out : '';
+// Whether that work is nonetheless SAFE — a branch upstream that exists and is
+// current means the next agent fetches it rather than losing it. Resolved
+// separately so the finding states WHICH of the two situations this is instead
+// of implying the worse one.
+const branchName = git(['rev-parse', '--abbrev-ref', 'HEAD']).out;
+const upstreamState = branchUpstreamState(remote, branchName);
 
-if (sessionDirt.length === 0 && !headMovedRecently && !unpushed) process.exit(0);
+if (sessionDirt.length === 0 && !headMovedRecently && !notOnMain) process.exit(0);
 
 // Already challenged this exact tree state? Then the agent answered and nothing
 // moved — do not ask the same question twice about the same evidence. Foreign
@@ -204,7 +271,7 @@ const sessionDirtKey = sessionDirt
   .map((entry) => entry.display)
   .sort()
   .join('|').length;
-const stateKey = `${git(['rev-parse', 'HEAD']).out}:${sessionDirtKey}:${unpushed.length}`;
+const stateKey = `${git(['rev-parse', 'HEAD']).out}:${sessionDirtKey}:${notOnMain.length}`;
 if ((/** @type {string[]} */ (state.states ?? [])).includes(stateKey)) process.exit(0);
 
 // ── Mechanical evidence — the part a confident "yes" cannot survive ──────────
@@ -229,10 +296,17 @@ if (foreign.length > 0) {
   );
 }
 
-if (unpushed) {
+if (notOnMain) {
+  // NAME the tested condition, and the SAFE case when it holds. "UNPUSHED" was
+  // false for every lap that pushed to its own branch: the commits really are
+  // absent from `main`, which is what this gate can see, but they are not lost
+  // and the next agent does not need them re-pushed.
   findings.push(
-    `UNPUSHED commit(s) — the next agent clones ${remote}/main and will not see these:\n` +
-      unpushed.split(/\r?\n/).slice(0, 8).map((l) => `      ${l}`).join('\n'),
+    `commit(s) NOT MERGED into ${remote}/main — the next agent reading ${remote}/main ` +
+      `will not see these:` +
+      `\n` +
+      notOnMain.split(/\r?\n/).slice(0, 8).map((l) => `      ${l}`).join('\n') +
+      `\n      ${upstreamState.sentence}`,
   );
 }
 
@@ -304,66 +378,95 @@ const currentTree = worktreeTree(ROOT);
 // nor an earlier session's render satisfies this check. Without one, the report
 // was hand-written — and a hand-written report is exactly where a skipped
 // section hides as a short one.
-try {
-  const rec = JSON.parse(
-    readFileSync(join(ROOT, '.claude', 'hooks', '.state', 'closeout-render', 'latest.json'), 'utf8'),
-  );
-  // The record is ONE file per repo, so its existence proves nothing about THIS
-  // session. Before this check, a session could stop at a HEAD an EARLIER session
-  // had rendered and pass in silence: 19 of 29 challenged sessions hand-wrote the
-  // report and only 3 were caught
-  // (docs/reviews/closeout-generation-failure-2026-08-26.md).
-  const renderedAt = Date.parse(rec?.rendered_at ?? '');
-  const foreignRender =
-    Number.isFinite(renderedAt) && !isAtOrAfterSessionStart(renderedAt, registry.record);
-  if (foreignRender) {
-    findings.push(
-      "the closeout render on record predates this session, so it is ANOTHER session's hand-back. " +
-        'The record is one file per repo, and an earlier render does not close YOUR sprint — render ' +
-        'your own with `node scripts/render-closeout.mjs --in <closeout.json>`.',
-    );
-  } else if (rec?.tree && currentTree && rec.tree !== currentTree) {
-    findings.push(
-      'the closeout render on record describes different content than the tree being handed off — ' +
-        're-render it (`node scripts/render-closeout.mjs --in <closeout.json>`). Committing exactly ' +
-        'what the report already described does NOT trigger this; an edit made AFTER the render does.',
-    );
-  } else if (!rec?.tree) {
-    // Pre-v2 record: HEAD-bound, and the closeout's own commit moves HEAD. Fall
-    // back to the old comparison for the single session that spans the upgrade —
-    // the next render writes a tree-bound record and this arm dies.
-    const head = git(['rev-parse', 'HEAD']).out;
-    if (head && rec?.head && rec.head !== head) {
-      findings.push(
-        `the closeout render on record is for ${String(rec.head).slice(0, 8)}, not the current ` +
-          `${head.slice(0, 8)} — re-render it so the report describes the tree being handed off ` +
-          '(`node scripts/render-closeout.mjs --in <closeout.json>`).',
-      );
-    }
-  } else if (!reportReachedTheOwner(payload?.transcript_path, rec)) {
-    // RENDERED is not the same as DELIVERED. The renderer writes to stdout, which
-    // in an agent host is a TOOL RESULT — shown to the agent, not reliably to the
-    // person. So every check above can pass while the owner sees no hand-back at
-    // all: the agent runs the renderer, reads the output itself, and writes a
-    // summary ABOUT it. Observed 2026-08-28, twice in one session, each time
-    // followed by "that is the hand-back above" pointing at something the owner
-    // could not see. The anchors are two lines only the renderer emits.
-    findings.push(
-      'the closeout was RENDERED but never PASTED — no message in this session contains the ' +
-        "report's own heading lines. The renderer writes to stdout, which the owner does not see: " +
-        'a tool result is shown to you, not to them. Paste the rendered markdown into your reply ' +
-        'verbatim. Re-running the renderer does not fix this; the report has to appear in the ' +
-        'message you send.',
-    );
-  }
-} catch {
+const recPath = closeoutRenderRecordPath(sessionId);
+if (!existsSync(recPath)) {
+  // The ordinary case, and its own branch on purpose: reading straight into
+  // JSON.parse conflated "this session wrote no record" with "the record will
+  // not parse", so a CONCURRENT session's record was reported as "no rendered
+  // closeout on record" — the right verdict reached from the wrong arm, which
+  // is what the real fault's message would then have to be told apart from.
   findings.push(
-    'no rendered closeout on record for this tree. Write the section inputs and render the ' +
+    'no rendered closeout on record for THIS session. Write the section inputs and render the ' +
       'hand-back with `node scripts/render-closeout.mjs --in <closeout.json>` ' +
       '(`--template` prints a blank one): it refuses until every section states content or an ' +
       'explicit "none", then omits the silent ones. A hand-written report can drop a section ' +
       'without anyone noticing; a rendered one cannot.',
   );
+} else {
+  // The record is read BY SESSION ID, so its existence proves nothing about THIS
+  // session and a CONCURRENT one cannot satisfy it. Before this check a session
+  // could stop at a HEAD an EARLIER session had rendered and pass in silence: 19
+  // of 29 challenged sessions hand-wrote the report and only 3 were caught
+  // (docs/reviews/closeout-generation-failure-2026-08-26.md).
+  //
+  // A TIMESTAMP was the first form of this test, and it was the second-best
+  // available: it cannot tell this session's render from a concurrent session's
+  // render written after this one started, and it rests on the renderer being
+  // able to name its own session — which it can, from CLAUDE_CODE_SESSION_ID.
+  // The record carries that id, and this reads the file for THIS session. The
+  // tree comparison below still applies on top, so a record written for this
+  // session against different content is caught too.
+  //
+  // A record written before this change carries `session_id: null` and lives at
+  // the old repo-global path; it satisfies no session, so the single session
+  // that spans the upgrade re-renders once. That is the correct direction — an
+  // unattributable render is not evidence that this session rendered.
+  let rec = null;
+  try {
+    rec = JSON.parse(readFileSync(recPath, 'utf8'));
+  } catch {
+    // Reached only when the record EXISTS and will not parse, so this arm is
+    // unambiguously a state-dir fault. Re-rendering rewrites the file wholesale.
+    findings.push(
+      `the closeout render record for this session (${recPath}) could not be read. Re-running ` +
+        'the renderer rewrites it; if that does not clear this, the state directory is at fault, ' +
+        'not the report.',
+    );
+  }
+    if (rec?.session_id !== sessionId) {
+      const whom =
+        rec?.session_id === null || rec?.session_id === undefined
+          ? 'carries no session id at all (written before the record was session-keyed)'
+          : `names session ${String(rec.session_id)}`;
+      findings.push(
+        `the closeout render on record is NOT this session's hand-back — it ${whom}, and this ` +
+          `session is ${sessionId}. An earlier or concurrent render does not close YOUR sprint — ` +
+          'render your own with `node scripts/render-closeout.mjs --in <closeout.json>`.',
+      );
+    } else if (rec?.tree && currentTree && rec.tree !== currentTree) {
+      findings.push(
+        'the closeout render on record describes different content than the tree being handed off — ' +
+          're-render it (`node scripts/render-closeout.mjs --in <closeout.json>`). Committing exactly ' +
+          'what the report already described does NOT trigger this; an edit made AFTER the render does.',
+      );
+    } else if (!rec?.tree) {
+      // Pre-v2 record: HEAD-bound, and the closeout's own commit moves HEAD. Fall
+      // back to the old comparison for the single session that spans the upgrade —
+      // the next render writes a tree-bound record and this arm dies.
+      const head = git(['rev-parse', 'HEAD']).out;
+      if (head && rec?.head && rec.head !== head) {
+        findings.push(
+          `the closeout render on record is for ${String(rec.head).slice(0, 8)}, not the current ` +
+            `${head.slice(0, 8)} — re-render it so the report describes the tree being handed off ` +
+            '(`node scripts/render-closeout.mjs --in <closeout.json>`).',
+        );
+      }
+    } else if (!reportReachedTheOwner(payload?.transcript_path, rec)) {
+      // RENDERED is not the same as DELIVERED. The renderer writes to stdout, which
+      // in an agent host is a TOOL RESULT — shown to the agent, not reliably to the
+      // person. So every check above can pass while the owner sees no hand-back at
+      // all: the agent runs the renderer, reads the output itself, and writes a
+      // summary ABOUT it. Observed 2026-08-28, twice in one session, each time
+      // followed by "that is the hand-back above" pointing at something the owner
+      // could not see. The anchors are two lines only the renderer emits.
+      findings.push(
+        'the closeout was RENDERED but never PASTED — no message in this session contains the ' +
+          "report's own heading lines. The renderer writes to stdout, which the owner does not see: " +
+          'a tool result is shown to you, not to them. Paste the rendered markdown into your reply ' +
+          'verbatim. Re-running the renderer does not fix this; the report has to appear in the ' +
+          'message you send.',
+      );
+    }
 }
 
 // (the suite-green tree comparison and the memory-index check both live in

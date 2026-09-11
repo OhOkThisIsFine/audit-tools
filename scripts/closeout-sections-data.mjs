@@ -67,6 +67,18 @@ const frictionCategoryBullets = FRICTION_CATEGORIES.map((id) => {
  *   section filled with the WRONG KIND of content sailed through. Declared here
  *   rather than special-cased in the renderer, so the contract and its refusal
  *   have one home.
+ * @property {boolean} [acceptsQueueItem] the section is additionally satisfied by
+ *   a WRITTEN, ANSWERABLE item in the project's decision queue, named by its
+ *   subject key. Two correct rules can otherwise deadlock a headless run that
+ *   has a genuinely open owner decision: this renderer refuses the section
+ *   without a question, while the machine-wide unasked-decision gate refuses a
+ *   question posed in prose with no `AskUserQuestion` call — and a headless
+ *   session has no such tool. The queue is a real answering route (an item is
+ *   ticked, `npm run nightly:ingest` reads it back), so accepting it widens what
+ *   counts as asking rather than narrowing what counts as unasked. The key is
+ *   verified against the queue at render time: a key that resolves to no open
+ *   item is refused, so this cannot stand in for a question that was never
+ *   posed anywhere.
  * @property {string} [itemized] a non-silent value here must be an ARRAY, one
  *   element per item, and this string is the refusal shown when it is a bare
  *   string. The renderer accepts a string anywhere, which renders as ONE bullet
@@ -130,7 +142,14 @@ export const CLOSEOUT_SECTIONS = [
     prompt:
       'every decision still OPEN that only the owner can make, ASKED as an answerable question ' +
       'with its options spelled out — a pointer to a queue or a command is not a question, and a ' +
-      'decision already made is not open. If nothing is open, the value is "none"',
+      'decision already made is not open. Two forms are accepted: the question itself, OR the ' +
+      'subject key of a queue item that poses it (16-hex, e.g. `e978fad576fb2473`) — a headless run ' +
+      'cannot call AskUserQuestion, and the item it writes instead is where the owner answers. A ' +
+      'pointer to a queue that is NOT one of those is refused. If nothing is open, the value is "none"',
+    // A headless run cannot pose a question (P63). The queue item it writes
+    // instead IS an ask — recorded where the owner answers it — so the section
+    // takes one as an alternative to the interrogative form.
+    acceptsQueueItem: true,
     requiresQuestion:
       'this section is what the owner must still ANSWER, and its value contains no question. A ' +
       'decision that was already taken belongs in "landed" (or its own backlog entry), not here — ' +

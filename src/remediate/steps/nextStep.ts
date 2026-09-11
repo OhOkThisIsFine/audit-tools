@@ -20,6 +20,7 @@ import {
   writeTextFile,
   buildAuditDeliverablePair,
   formatValidationIssues,
+  isMissingObservation,
   isRecord,
   withFsRetry,
   RunLogger,
@@ -74,6 +75,7 @@ import {
   prepareRemediationHostHandoff,
   workloadBindingIdentity,
   type CurrentRemediationHostState,
+  type RemediationHostIngestIssue,
   type RemediationHostIngestSummary,
 } from "./dispatch/hostHandoff.js";
 import {
@@ -1100,6 +1102,10 @@ export async function recoverIngestHostResults(options: {
         accepted_count: 0,
         completed_work_item_ids: [],
         pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
+        // This verdict aborts the whole recovery BEFORE any item is read, so
+        // there is no per-item observation to report — an empty map is the
+        // honest statement of that, not a missing field.
+        work_item_outcomes: new Map(),
         issues: [
           moved === "tree"
             ? {
@@ -1159,6 +1165,62 @@ export async function recoverIngestHostResults(options: {
     await invalidateStepContracts(artifactsDir);
   }
   return ingested;
+}
+
+/**
+ * Render the host-facing result status for an ingest, split by outcome.
+ *
+ * Takes the whole summary rather than just its issues, because the split needs
+ * BOTH halves: which items were refused (from the issues) and which landed
+ * without a result (from `work_item_outcomes`, where the run's corroborated
+ * commit for the item is what separates that case from plain unfinished work).
+ */
+function remediationResultDiagnostics(
+  ingested: RemediationHostIngestSummary,
+): string {
+  const describe = (issue: RemediationHostIngestIssue): string =>
+    `- ${issue.work_item_id ? `\`${issue.work_item_id}\`: ` : ""}${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`;
+  const section = (heading: string, lines: readonly string[]): string =>
+    lines.length === 0 ? "" : `\n${heading}\n\n${lines.join("\n")}\n`;
+
+  const rejected = ingested.issues.filter(
+    (issue) => !isMissingObservation(issue),
+  );
+  const landedWithoutResult = [...ingested.work_item_outcomes]
+    .filter(([, outcome]) => outcome === "missing_result_with_commit")
+    .map(([id]) => id)
+    .sort(compareCodeUnits);
+  const notYetWritten = ingested.issues.filter((issue) =>
+    isMissingObservation(issue),
+  );
+
+  const body =
+    section(
+      "## Results already landed, whose result file is missing",
+      landedWithoutResult.map(
+        (id) =>
+          `- \`${id}\`: this item's edits are IN this repository — a corroborated commit landed ` +
+          `for it and its changed files are recorded — but no result file exists at its bound ` +
+          `\`result_path\`. This is PARTIAL PROGRESS, not absent work: write the result for the ` +
+          `commit that is already there rather than redoing the edit.`,
+      ),
+    ) +
+    section(
+      "## Result status requiring attention",
+      rejected.map(describe),
+    ) +
+    section(
+      "## Results not yet written",
+      notYetWritten.map(describe),
+    );
+
+  if (body === "") return "";
+  return (
+    body +
+    "\nThe workload was restored from its tool-owned digest when necessary. Repair or\n" +
+    "complete only the named result files; do not rewrite the workload or its\n" +
+    "baseline.\n"
+  );
 }
 
 async function buildImplementDispatchStep(ctx: {
@@ -1256,23 +1318,17 @@ async function buildImplementDispatchStep(ctx: {
   // The issues were logged above, before any exit path. What follows is the
   // RENDER — a channel that survives exactly as long as the host reads this one
   // step, and that is reached only when nothing was accepted.
-  const resultDiagnostics =
-    ingested.issues.length === 0
-      ? ""
-      : `
-## Result status requiring attention
-
-${ingested.issues
-  .map(
-    (issue) =>
-      `- ${issue.work_item_id ? `\`${issue.work_item_id}\`: ` : ""}${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`,
-  )
-  .join("\n")}
-
-The workload was restored from its tool-owned digest when necessary. Repair or
-complete only the named result files; do not rewrite the workload or its
-baseline.
-`;
+  //
+  // THREE STATES, THREE SECTIONS, because they have three different remedies and
+  // a reader must not have to parse prose to tell them apart (the measured
+  // friction: a host parser special-casing "no result file exists"):
+  //   rejected               — something was written and refused; repair it.
+  //   missing + commit       — the edits LANDED but no result exists; write the
+  //                            result FOR THE COMMIT THAT IS ALREADY THERE.
+  //   missing, no commit     — nothing yet; write it when the work is done.
+  // The classification is on CODES, never message text, so rewording a message
+  // cannot move an item between sections.
+  const diagnostics = remediationResultDiagnostics(ingested);
 
   const nextCommand = loaderCommand("next-step");
   return {
@@ -1294,7 +1350,7 @@ It contains the complete, dependency-safe current frontier. Complete every work
 item and write its exact prompt-bound result contract to its \`result_path\`.
 The host owns execution choices, grouping, and concurrency; audit-tools performs
 no launch, routing, or quota decision. Do not start a later dependency level.
-${resultDiagnostics}
+${diagnostics}
 
 After all completed changes are merged and their result files exist, run:
 
