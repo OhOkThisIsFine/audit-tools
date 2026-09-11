@@ -276,8 +276,16 @@ export {
   detectRepoConventions,
   formatRepoConventions,
 } from "./tooling/repoConventions.js";
-export type { StepStatus } from "./types/stepContract.js";
-export { StepStatusSchema } from "./types/stepContract.js";
+export type { LaneDemand, StepStatus } from "./types/stepContract.js";
+export {
+  deriveLaneDemand,
+  LANE_COMPLEXITY_VALUES,
+  LANE_DEMAND_KEYS,
+  LANE_RISK_VALUES,
+  LANE_SIZE_VALUES,
+  LaneDemandSchema,
+  StepStatusSchema,
+} from "./types/stepContract.js";
 export {
   SESSION_INTENT_RELATIVE_PATH,
   SessionIntentV1Schema,
@@ -574,21 +582,22 @@ export { normalizeRepoRelPath, toPosixPath } from "./paths.js";
 // refused on. Each orchestrator's hostHandoff module is now a thin
 // policy-selecting adapter over this core.
 export {
-  absoluteHostHandoffResultPath,
   bindingIdentity,
   contentSha256,
+  describeIdentityFailure,
   firstDuplicateIdentity,
+  firstFailedIdentityComponent,
   hasExactKeys,
   hostHandoffResultPath,
+  IDENTITY_COMPONENTS,
+  identityFailureDiagnostic,
   idsAreStrictlyAscending,
-  idsAreUnique,
   isCommit,
   isSha256,
   parseAllWorkloadItems,
   parseWorkloadEnvelope,
   requireNonEmptyString,
   resolveHostHandoffPaths,
-  resultIdentityIsBound,
   resultMapIdentity,
   promptSha256,
   sameStrings,
@@ -596,6 +605,8 @@ export {
 } from "./submission/hostHandoffCore.js";
 export type {
   HostHandoffPaths,
+  IdentityBindingParams,
+  IdentityComponent,
   ResultMapEntry,
   ResultMappedItem,
   WorkloadEnvelopeParse,

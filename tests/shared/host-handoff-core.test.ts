@@ -5,30 +5,37 @@
  * behavior end-to-end; these pin the core's contracts themselves.
  */
 import { mkdtemp, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  absoluteHostHandoffResultPath,
   bindingIdentity,
   contentSha256,
+  describeIdentityFailure,
   firstDuplicateIdentity,
+  firstFailedIdentityComponent,
   hasExactKeys,
   hostHandoffResultPath,
+  IDENTITY_COMPONENTS,
+  identityFailureDiagnostic,
   idsAreStrictlyAscending,
-  idsAreUnique,
   isCommit,
   isSha256,
   parseAllWorkloadItems,
   parseWorkloadEnvelope,
   promptSha256,
   resolveHostHandoffPaths,
-  resultIdentityIsBound,
   resultMapIdentity,
   sameStrings,
   stringArray,
 } from "audit-tools/shared";
+// The absolute form of a bound result path has no production consumer (it was
+// deleted from the core), so this pins it through the module that OWNs the
+// containment rule the core applied — `resolveContainedPath` — rather than
+// through an export kept alive for the test's benefit.
+import { resolveContainedPath } from "../../src/shared/submission/submissionIdentity.js";
 
 const roots: { afterEachCleanups: (() => Promise<void>)[] } = {
   afterEachCleanups: [],
@@ -109,7 +116,7 @@ describe("resolveHostHandoffPaths", () => {
     expect(relativeForm).not.toContain("\\");
     expect(relativeForm.endsWith(`/${promptSha256("ITEM-1")}.json`)).toBe(true);
     expect(relativeForm).toContain("host-results");
-    expect(absoluteHostHandoffResultPath(paths, "ITEM-1")).toBe(
+    expect(resolveContainedPath(paths.root, relativeForm, "ITEM-1")).toBe(
       join(paths.root, relativeForm),
     );
     expect(hostHandoffResultPath(paths, "ITEM-2")).not.toBe(relativeForm);
@@ -159,7 +166,11 @@ describe("binding identity and dedupe refusals", () => {
     expect(idsAreStrictlyAscending(["a", "b", "c"])).toBe(true);
     expect(idsAreStrictlyAscending(["a", "a"])).toBe(false);
     expect(idsAreStrictlyAscending(["b", "a"])).toBe(false);
-    expect(idsAreUnique(["b", "a"])).toBe(true);
+    // The "distinct but unsorted" case is the ONLY thing `idsAreUnique` used to
+    // add, and `idsAreStrictlyAscending` subsumes it: it is false there, so the
+    // duplicate refusal never has to consult a second predicate. The bare
+    // predicate was deleted with it.
+    expect(idsAreStrictlyAscending(["a", "c", "b"])).toBe(false);
   });
 });
 
@@ -172,7 +183,7 @@ describe("result identity binding", () => {
 
   it("accepts the exact binding with a non-empty result id", () => {
     expect(
-      resultIdentityIsBound(
+      firstFailedIdentityComponent(
         {
           result_id: "res-1",
           run_id: "run-1",
@@ -181,17 +192,17 @@ describe("result identity binding", () => {
         },
         bound,
       ),
-    ).toBe(true);
+    ).toBeNull();
   });
 
   it.each([
-    ["empty result_id", { result_id: "" }],
-    ["wrong run", { run_id: "run-2" }],
-    ["wrong work item", { work_item_id: "wi-9" }],
-    ["wrong prompt digest", { prompt_sha256: SHA_B }],
-  ])("refuses %s", (_label, override) => {
+    ["empty result_id", { result_id: "" }, "result_id"],
+    ["wrong run", { run_id: "run-2" }, "run_id"],
+    ["wrong work item", { work_item_id: "wi-9" }, "work_item_id"],
+    ["wrong prompt digest", { prompt_sha256: SHA_B }, "prompt_sha256"],
+  ])("refuses %s", (_label, override, component) => {
     expect(
-      resultIdentityIsBound(
+      firstFailedIdentityComponent(
         {
           result_id: "res-1",
           run_id: "run-1",
@@ -201,14 +212,94 @@ describe("result identity binding", () => {
         },
         bound,
       ),
-    ).toBe(false);
+    ).toBe(component);
   });
 
   it("refuses a non-string or absent result_id rather than throwing", () => {
-    expect(resultIdentityIsBound({}, bound)).toBe(false);
+    expect(firstFailedIdentityComponent({}, bound)).toBe("result_id");
     expect(
-      resultIdentityIsBound({ result_id: 7, run_id: "run-1" }, bound),
-    ).toBe(false);
+      firstFailedIdentityComponent({ result_id: 7, run_id: "run-1" }, bound),
+    ).toBe("result_id");
+  });
+
+  it("reports the FIRST failed component, in the one order both draws walk", () => {
+    // ORDER IS THE CONTRACT. A stale worker's answer typically breaks several
+    // components at once, and the two draws used to evaluate them in their own
+    // orders — so the same submission produced a different diagnostic depending
+    // on which half of the pipeline read it. `IDENTITY_COMPONENTS` is that order
+    // and it is pinned here, member by member.
+    expect(IDENTITY_COMPONENTS).toEqual([
+      "result_id",
+      "run_id",
+      "work_item_id",
+      "prompt_sha256",
+    ]);
+
+    // Everything wrong at once: the most fundamental component wins.
+    expect(
+      firstFailedIdentityComponent(
+        { result_id: "", run_id: "run-2", work_item_id: "wi-9", prompt_sha256: SHA_B },
+        bound,
+      ),
+    ).toBe("result_id");
+    // Drop the first failure and the next in the order surfaces, not the last.
+    expect(
+      firstFailedIdentityComponent(
+        { result_id: "res-1", run_id: "run-2", work_item_id: "wi-9", prompt_sha256: SHA_B },
+        bound,
+      ),
+    ).toBe("run_id");
+    expect(
+      firstFailedIdentityComponent(
+        { result_id: "res-1", run_id: "run-1", work_item_id: "wi-9", prompt_sha256: SHA_B },
+        bound,
+      ),
+    ).toBe("work_item_id");
+    expect(
+      firstFailedIdentityComponent(
+        { result_id: "res-1", run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_B },
+        bound,
+      ),
+    ).toBe("prompt_sha256");
+    expect(
+      firstFailedIdentityComponent(
+        { result_id: "res-1", run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_A },
+        bound,
+      ),
+    ).toBeNull();
+  });
+
+  // The per-component DESCRIPTIONS are the shared vocabulary both draws render.
+  // Every member of the union must have one — a component with no description
+  // would render an empty diagnostic on a draw that adopted it — and the two
+  // helpers must agree about which component broke.
+  it("describes every component the walk can return, and only those", () => {
+    for (const component of IDENTITY_COMPONENTS) {
+      const description = describeIdentityFailure(component);
+      expect(description.length, `description for '${component}'`).toBeGreaterThan(0);
+      // The description NAMES its component: that is the whole repair signal a
+      // host gets, and an undifferentiated sentence is the defect this replaces.
+      expect(description, `description for '${component}'`).toContain(component);
+    }
+    // Distinct: two components sharing a sentence would be one diagnostic for
+    // two different repairs, which is the collapse this replaces.
+    const descriptions = IDENTITY_COMPONENTS.map(describeIdentityFailure);
+    expect(new Set(descriptions).size).toBe(descriptions.length);
+  });
+
+  it("renders one diagnostic per broken submission, keyed to the first failure", () => {
+    for (const value of [
+      { result_id: "res-1", run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_A },
+      { result_id: "", run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_A },
+      { result_id: "res-1", run_id: "run-2", work_item_id: "wi-1", prompt_sha256: SHA_A },
+      { result_id: "res-1" },
+      {},
+    ]) {
+      const component = firstFailedIdentityComponent(value, bound);
+      expect(identityFailureDiagnostic(value, bound)).toBe(
+        component === null ? null : describeIdentityFailure(component),
+      );
+    }
   });
 });
 
@@ -358,5 +449,88 @@ describe("shared predicates", () => {
     expect(stringArray(["a"])).toEqual(["a"]);
     expect(stringArray([1])).toBeNull();
     expect(stringArray("a")).toBeNull();
+  });
+});
+
+// ── F6: ONE diagnostic vocabulary for the identity refusal ───────────────────
+//
+// Both draws walk `IDENTITY_COMPONENTS` in one order, and both must SAY the
+// same thing when a component breaks. Audit named the broken component;
+// remediate emitted one of two undifferentiated sentences that named none of
+// them — so which field to repair was legible only when the audit half happened
+// to be the one that read the submission. The core now exposes the description
+// and the two draws both render it; this pins that they do, from the source
+// that emits it.
+describe("F6: both draws render the core's identity diagnostic", () => {
+  const AUDIT = join(process.cwd(), "src", "audit", "cli", "dispatch", "hostHandoff.ts");
+  const REMEDIATE = join(
+    process.cwd(),
+    "src",
+    "remediate",
+    "steps",
+    "dispatch",
+    "hostHandoff.ts",
+  );
+
+  /**
+   * Each draw's binding name → the refusal message that renders it. The draw
+   * picks its own variable name, so the name is READ from the call rather than
+   * assumed; what must hold is that the shared description reaches the message.
+   */
+  function diagnosticBindings(source: string): Array<{
+    readonly name: string;
+    readonly interpolation: string;
+  }> {
+    const bindings: Array<{ name: string; interpolation: string }> = [];
+    for (const statement of source.split("const ").slice(1)) {
+      const call = statement.indexOf("identityFailureDiagnostic(");
+      if (call < 0) continue;
+      const name = statement.slice(0, statement.indexOf("=")).trim();
+      bindings.push({ name, interpolation: "$" + "{" + name + "}" });
+    }
+    return bindings;
+  }
+
+  it.each([
+    ["audit", AUDIT],
+    ["remediate", REMEDIATE],
+  ])("%s draw renders the core's diagnostic rather than its own wording", (_draw, path) => {
+    const source = readFileSync(path, "utf8");
+    const bindings = diagnosticBindings(source);
+    expect(bindings.length, `${_draw} identity-diagnostic call sites`).toBeGreaterThan(0);
+    for (const binding of bindings) {
+      // The core's sentence is INTERPOLATED into this draw's framing — that is
+      // the whole single-sourcing. A draw that named components itself would
+      // not call the helper at all, which the count above already catches.
+      expect(source, `${_draw} renders '${binding.name}'`).toContain(
+        `: ${binding.interpolation}`,
+      );
+    }
+  });
+
+  it("the remediate draw interpolates it at BOTH call sites, decision and result", () => {
+    // Remediate parses two result documents — a landed result and a decision —
+    // and each used to carry its OWN undifferentiated sentence. Two sites is
+    // the count the fix owes; one would leave the other collapsed.
+    const bindings = diagnosticBindings(readFileSync(REMEDIATE, "utf8"));
+    expect(bindings.length).toBe(2);
+    // Distinct bindings, not one reused: the two parses are separate functions.
+    expect(new Set(bindings.map((binding) => binding.name)).size).toBe(2);
+  });
+
+  it("the audit draw no longer carries an unreachable per-component branch", () => {
+    const source = readFileSync(AUDIT, "utf8");
+    // `result_id` cannot be the FIRST failure on the audit draw: the envelope
+    // check above the walk already requires a non-empty string, so a branch for
+    // it is dead — and a dead branch in the vocabulary is how the two draws
+    // drifted apart in the first place.
+    expect(source).not.toContain('identityFailure === "result_id"');
+    // Neither draw names a component in a conditional any more; the core's
+    // description is the only place a component's name is rendered.
+    for (const component of IDENTITY_COMPONENTS) {
+      expect(source, `audit branch for '${component}'`).not.toContain(
+        `identityFailure === "${component}"`,
+      );
+    }
   });
 });

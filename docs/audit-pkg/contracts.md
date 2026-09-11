@@ -33,13 +33,19 @@ follows the rendered prompt.
 ## Provider-neutral host workload
 
 When semantic review is ready, audit-tools writes a complete
-`audit-host-workload/v1alpha1` artifact. Each work item contains:
+`audit-host-workload/v1alpha2` artifact. Each work item contains:
 
 - a stable id and lens
-- provider-neutral complexity, risk, and deterministic token-estimate metadata
+- the shared provider-neutral lane demand ranking (size, complexity, risk) beside
+  a deterministic token estimate
 - the complete prompt text plus its SHA-256 binding
 - the file and unit scope
 - the repository-contained result path
+
+A `v1alpha1` workload — which carried a `{complexity, risk}` pair instead of the
+demand ranking — refuses closed as STALE (`workload_stale`): its work items
+cannot be re-derived against the current builder, so no submission can be
+accepted against it. Re-prepare the handoff to publish a current workload.
 
 A companion `audit-host-result-map/v1alpha1` binds each work-item id, prompt
 digest, and result path. No backend, model, routing, quota, transport, launch

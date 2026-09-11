@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { renderSemanticReviewStep } from "../../src/audit/cli/semanticReviewStep.js";
+import { LaneDemandSchema } from "../../src/shared/types/stepContract.js";
+import { bannedLaneExecutionKeys } from "../helpers/recognizers.js";
 import type { ActiveReviewRun } from "../../src/audit/supervisor/operatorHandoff.js";
 
 const roots: string[] = [];
@@ -92,6 +94,35 @@ describe("renderSemanticReviewStep zero-adapter host handoff", () => {
     expect(workload.work_items.every((item) => !item.result_path.startsWith(root))).toBe(
       true,
     );
+  });
+
+  it("states each emitted lane's demand, and nothing execution-shaped", async () => {
+    // The step contract that emits an audit lane is what the host reads to match
+    // a backend to the work, so the ranking has to be ON the emitted item — not
+    // merely derivable from the task. `demand` names size / complexity / risk
+    // and nothing else: a `model`, `provider`, `tier` or `backend` key here
+    // would move execution selection into the tool, which is the boundary this
+    // package exists downstream of.
+    const { root, artifactsDir, activeReviewRun } = await fixture();
+    const step = await renderSemanticReviewStep({
+      root,
+      artifactsDir,
+      activeReviewRun,
+    });
+    const workload = JSON.parse(
+      await readFile(step.artifact_paths.host_workload!, "utf8"),
+    ) as { work_items: Array<Record<string, unknown>> };
+
+    expect(workload.work_items.length).toBeGreaterThan(0);
+    for (const item of workload.work_items) {
+      const metadata = item.metadata as Record<string, unknown>;
+      expect(LaneDemandSchema.safeParse(metadata.demand).success).toBe(true);
+      expect(Object.keys(metadata).sort()).toEqual(["demand", "token_estimate"]);
+      // The emitted item, walked whole, carries no execution choice — the
+      // demand shape alone would not catch a field bolted onto the item beside
+      // `prompt` and `result_path`.
+      expect(bannedLaneExecutionKeys(item)).toEqual([]);
+    }
   });
 
   it("emits stable workload bytes when the same pending run is rendered again", async () => {

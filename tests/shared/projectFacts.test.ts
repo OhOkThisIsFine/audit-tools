@@ -3,7 +3,7 @@
 // 92b0e2dd7cfdc06d, 2026-08-31). These tests pin the derivation rule on real
 // fixture repos and the pure rule on synthetic signals.
 import { test, expect } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
@@ -131,4 +131,44 @@ test("the candidate rule emits CLOSING_ACTIONS order and always keeps none and c
   const releaseOnly = candidateClosingActions({ ...NO_SIGNALS, release_scripts: ["publish"] });
   expect(releaseOnly.candidates).toEqual(["publish", "none", "custom"]);
   expect(releaseOnly.rationale.publish).toContain("publish");
+});
+
+// ── The isolated-branch landing gap is CLOSED BY DECISION, and pinned ────────
+//
+// A forward-tracks entry asked for `merge-to-base` back, conditioned on one
+// premise: that a remediation run is dispatched ON its own `remediation/<runId>`
+// branch. The tool created that branch (`ensureRemediationBranchCheckedOut`)
+// until the execution substrate was retired in 467b1e8f, and it exists nowhere
+// in `src/` now — the host owns branch and worktree selection, like every other
+// execution choice. So the premise is gone and the decision is that
+// isolated-branch dispatch is NOT returning; the vocabulary stays as it is.
+//
+// Pinned, not merely written down: the decision's whole content is the ABSENCE
+// of branch-creating tooling, and an absence has no other way to hold. A future
+// change that reintroduces the tool side of the pairing fails here by name and
+// has to re-open the decision deliberately.
+test("no landing action, because nothing in the tool creates a run branch", async () => {
+  expect(CLOSING_ACTIONS).not.toContain("merge-to-base");
+
+  const walk = async (dir: string): Promise<string[]> => {
+    const found: string[] = [];
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) found.push(...(await walk(abs)));
+      else if (entry.name.endsWith(".ts")) found.push(abs);
+    }
+    return found;
+  };
+  // The branch CREATOR, by the name it had while it existed. Comment text is
+  // stripped so the doc comments that RECORD the deletion do not trip this.
+  const creatorPattern = /ensureRemediationBranchCheckedOut|checkoutBranchForRun/;
+  const hits: string[] = [];
+  for (const file of await walk(join(process.cwd(), "src"))) {
+    const source = await readFile(file, "utf8");
+    const code = source
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^[ \t]*\/\/.*$/gm, "");
+    if (creatorPattern.test(code)) hits.push(file);
+  }
+  expect(hits).toEqual([]);
 });

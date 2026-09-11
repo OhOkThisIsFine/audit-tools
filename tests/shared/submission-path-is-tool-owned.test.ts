@@ -49,6 +49,7 @@ import {
   resolveContainedPath,
   RunLogger,
   submissionPathFor,
+  deriveLaneDemand,
 } from "audit-tools/shared";
 import {
   ingestAuditHostResults,
@@ -248,8 +249,10 @@ function auditTask(taskId: string): AuditHostTask {
     file_line_counts: { [AUDITED_FILE]: AUDITED_LINES },
     rationale: `review ${AUDITED_FILE}`,
     priority: "high",
-    complexity: "low",
-    risk: "low",
+    // The lane's demand ranking, produced by the SHARED deriver — the fixture
+    // states the same shape the real draw emits rather than a hand-typed copy
+    // of it, so a change to the vocabulary cannot leave this fixture behind.
+    demand: deriveLaneDemand({ tokenEstimate: 1_000, fileCount: 1, riskScore: 0 }),
     token_estimate: 1_000,
   };
 }

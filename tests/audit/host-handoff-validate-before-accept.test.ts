@@ -26,6 +26,7 @@ import {
 } from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { runAuditStep } from "../../src/audit/cli/auditStep.js";
 import { recordHostResultOutcomes, readSubmissionLedger } from "audit-tools/shared";
+import { deriveLaneDemand } from "../../src/shared/types/stepContract.js";
 import type { AuditTask } from "../../src/audit/types.js";
 
 const cleanupRoots: string[] = [];
@@ -81,8 +82,7 @@ async function setup() {
       {
         ...AUDIT_TASK,
         priority: "medium",
-        complexity: "standard",
-        risk: "medium",
+        demand: deriveLaneDemand({ tokenEstimate: 1200, fileCount: 1, riskScore: 0.5 }),
         token_estimate: 1200,
         file_line_counts: { "src/a.ts": 2 },
       },

@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-import { linkFrictionRunIds, readJsonFile } from "audit-tools/shared";
+import { deriveLaneDemand, linkFrictionRunIds, readJsonFile } from "audit-tools/shared";
 
 import { AUDIT_FRICTION_RUN_ID } from "../orchestrator/nextStep.js";
 
@@ -15,15 +15,22 @@ import {
 import { nextStepCommand } from "./prompts.js";
 import { writeCurrentStep } from "./steps.js";
 
-function taskComplexity(task: AuditTask): string {
-  const estimate = task.token_estimate ?? 0;
-  if (estimate >= 8_000) return "deep";
-  if (estimate >= 2_000) return "standard";
-  return "focused";
-}
-
+/**
+ * The audit draw's lane demand.
+ *
+ * The bounding rules are the SHARED ones ({@link deriveLaneDemand}); the draw
+ * supplies only the genuinely per-mode input — its frozen, content-derived
+ * `risk_estimate`. The banding helpers that used to live here read the task's
+ * `priority` enum as if it were a risk score, which is what put a coarsely
+ * bucketed dispatch PRIORITY where a likelihood×stakes estimate belongs.
+ */
 function toHostTask(task: AuditTask): AuditHostTask {
-  const risk = task.priority ?? "low";
+  const tokenEstimate = Math.max(0, Math.floor(task.token_estimate ?? 0));
+  const demand = deriveLaneDemand({
+    tokenEstimate,
+    fileCount: task.file_paths.length,
+    riskScore: task.risk_estimate ?? 0,
+  });
   return {
     task_id: task.task_id,
     unit_id: task.unit_id,
@@ -32,10 +39,9 @@ function toHostTask(task: AuditTask): AuditHostTask {
     file_paths: task.file_paths,
     file_line_counts: task.file_line_counts ?? {},
     rationale: task.rationale,
-    priority: risk,
-    complexity: taskComplexity(task),
-    risk,
-    token_estimate: Math.max(0, Math.floor(task.token_estimate ?? 0)),
+    priority: task.priority ?? "low",
+    demand,
+    token_estimate: tokenEstimate,
   };
 }
 

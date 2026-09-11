@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { deriveLaneDemand } from "audit-tools/shared";
 
 const FAILURE_SIGNATURE =
   "contract:audit-host-ingest-computes-grounding:not-yet-satisfied";
@@ -24,8 +25,16 @@ interface HostTask {
   readonly file_line_counts: Readonly<Record<string, number>>;
   readonly rationale: string;
   readonly priority: string;
-  readonly complexity: string;
-  readonly risk: string;
+  /**
+   * The lane's demand ranking (size / complexity / risk) — the SHARED shape
+   * both draws emit, produced here by the shared deriver rather than typed by
+   * hand, so a change to the vocabulary cannot leave this fixture behind.
+   */
+  readonly demand: {
+    readonly size: string;
+    readonly complexity: string;
+    readonly risk: string;
+  };
   readonly token_estimate: number;
 }
 
@@ -119,8 +128,7 @@ function task(id: string, lens: string, path: string): HostTask {
     file_line_counts: { [path]: 2 },
     rationale: `Review ${path}`,
     priority: "medium",
-    complexity: "standard",
-    risk: "medium",
+    demand: deriveLaneDemand({ tokenEstimate: 1_200, fileCount: 1, riskScore: 0.5 }),
     token_estimate: 1200,
   };
 }

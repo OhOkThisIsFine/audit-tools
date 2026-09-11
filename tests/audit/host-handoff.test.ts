@@ -17,7 +17,10 @@ import {
   readSubmissionLedger,
   submissionLedgerPath,
 } from "../../src/shared/submission/submissionLedger.js";
-import { recordHostResultOutcomes } from "../../src/shared/index.js";
+import {
+  recordHostResultOutcomes,
+  type IngestionCheckId,
+} from "../../src/shared/index.js";
 import { existsSync } from "node:fs";
 
 const FAILURE_SIGNATURE =
@@ -32,8 +35,11 @@ interface HostTask {
   readonly file_line_counts: Readonly<Record<string, number>>;
   readonly rationale: string;
   readonly priority: string;
-  readonly complexity: string;
-  readonly risk: string;
+  readonly demand: {
+    readonly size: string;
+    readonly complexity: string;
+    readonly risk: string;
+  };
   readonly token_estimate: number;
 }
 
@@ -41,8 +47,11 @@ interface HostWorkItem {
   readonly id: string;
   readonly lens: string;
   readonly metadata: {
-    readonly complexity: string;
-    readonly risk: string;
+    readonly demand: {
+      readonly size: string;
+      readonly complexity: string;
+      readonly risk: string;
+    };
     readonly token_estimate: number;
   };
   readonly prompt: { readonly sha256: string; readonly text: string };
@@ -54,7 +63,7 @@ interface HostWorkItem {
 }
 
 interface HostWorkload {
-  readonly contract_version: "audit-host-workload/v1alpha1";
+  readonly contract_version: "audit-host-workload/v1alpha2";
   readonly run_id: string;
   readonly work_items: readonly HostWorkItem[];
 }
@@ -76,21 +85,26 @@ interface PreparedHandoff {
   readonly result_map_path: string;
 }
 
+interface IngestIssue {
+  readonly code: string;
+  readonly message: string;
+  /**
+   * The registered ingestion check the issue failed — the structured twin of
+   * the category its message opens with. Present on every refusal this boundary
+   * classifies; `workload_stale` is the one that only exists because the
+   * refused document was minted by a DIFFERENT build, so the check id is how a
+   * caller tells it from an ordinary binding failure without parsing prose.
+   */
+  readonly check?: IngestionCheckId;
+  readonly work_item_id?: string;
+  readonly result_path?: string;
+}
+
 interface IngestSummary {
   readonly accepted_count: number;
   readonly completed_work_item_ids: readonly string[];
-  readonly issues: readonly {
-    readonly code: string;
-    readonly message: string;
-    readonly work_item_id?: string;
-    readonly result_path?: string;
-  }[];
-  readonly raw_issues: readonly {
-    readonly code: string;
-    readonly message: string;
-    readonly work_item_id?: string;
-    readonly result_path?: string;
-  }[];
+  readonly issues: readonly IngestIssue[];
+  readonly raw_issues: readonly IngestIssue[];
 }
 
 interface HostBoundary {
@@ -182,7 +196,8 @@ function task(
   id: string,
   lens: string,
   path: string,
-  metadata: { complexity: string; risk: string; token_estimate: number },
+  demand: { size: string; complexity: string; risk: string },
+  tokenEstimate: number,
 ): HostTask {
   return {
     task_id: id,
@@ -192,8 +207,9 @@ function task(
     file_paths: [path],
     file_line_counts: { [path]: 2 },
     rationale: `Review ${path}`,
-    priority: metadata.risk,
-    ...metadata,
+    priority: demand.risk,
+    demand,
+    token_estimate: tokenEstimate,
   };
 }
 
@@ -232,11 +248,13 @@ describe(FAILURE_SIGNATURE, () => {
     );
     cleanupRoots.push(acceptedRoot, invalidRoot, malformedRoot);
     const tasks = [
-      task("audit-bom", "security", "src/a.ts", {
-        complexity: "standard",
-        risk: "high",
-        token_estimate: 1200,
-      }),
+      task(
+        "audit-bom",
+        "security",
+        "src/a.ts",
+        { size: "small", complexity: "standard", risk: "high" },
+        1200,
+      ),
     ];
 
     const cases = [
@@ -305,16 +323,20 @@ describe(FAILURE_SIGNATURE, () => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     const runId = "host-diagnostics-001";
     const tasks = [
-      task("audit-a", "security", "src/a.ts", {
-        complexity: "standard",
-        risk: "high",
-        token_estimate: 1200,
-      }),
-      task("audit-b", "correctness", "src/b.ts", {
-        complexity: "standard",
-        risk: "medium",
-        token_estimate: 1200,
-      }),
+      task(
+        "audit-a",
+        "security",
+        "src/a.ts",
+        { size: "small", complexity: "standard", risk: "high" },
+        1200,
+      ),
+      task(
+        "audit-b",
+        "correctness",
+        "src/b.ts",
+        { size: "small", complexity: "standard", risk: "medium" },
+        1200,
+      ),
     ];
     await mkdir(join(root, "src"), { recursive: true });
     await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
@@ -388,16 +410,20 @@ describe(FAILURE_SIGNATURE, () => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     const runId = "host-run-001";
     const tasks = [
-      task("audit-task-b", "correctness", "src/b.ts", {
-        complexity: "standard",
-        risk: "medium",
-        token_estimate: 1200,
-      }),
-      task("audit-task-a", "security", "src/a.ts", {
-        complexity: "deep",
-        risk: "high",
-        token_estimate: 2400,
-      }),
+      task(
+        "audit-task-b",
+        "correctness",
+        "src/b.ts",
+        { size: "small", complexity: "standard", risk: "medium" },
+        1200,
+      ),
+      task(
+        "audit-task-a",
+        "security",
+        "src/a.ts",
+        { size: "medium", complexity: "deep", risk: "high" },
+        2400,
+      ),
     ];
     await mkdir(join(root, "src"), { recursive: true });
     await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
@@ -410,7 +436,7 @@ describe(FAILURE_SIGNATURE, () => {
       tasks,
     });
     expect(first.workload.contract_version).toBe(
-      "audit-host-workload/v1alpha1",
+      "audit-host-workload/v1alpha2",
     );
     expect(first.result_map.contract_version).toBe(
       "audit-host-result-map/v1alpha1",
@@ -429,13 +455,11 @@ describe(FAILURE_SIGNATURE, () => {
     for (const item of first.workload.work_items) {
       const source = tasks.find((entry) => entry.task_id === item.id)!;
       expect(Object.keys(item.metadata).sort()).toEqual([
-        "complexity",
-        "risk",
+        "demand",
         "token_estimate",
       ]);
       expect(item.metadata).toEqual({
-        complexity: source.complexity,
-        risk: source.risk,
+        demand: source.demand,
         token_estimate: source.token_estimate,
       });
       expect(item.prompt.text.length).toBeGreaterThan(0);
@@ -591,5 +615,76 @@ describe(FAILURE_SIGNATURE, () => {
     expect(complete.result_map.entries).toEqual([]);
     expect((await stat(complete.workload_path)).isFile()).toBe(true);
     expect((await stat(complete.result_map_path)).isFile()).toBe(true);
+  });
+
+  it("refuses a workload from a superseded contract version as a CLASSIFIED stale, never a bare parse throw", async () => {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "audit-host-handoff-stale-"));
+    cleanupRoots.push(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const runId = "host-run-stale";
+    const tasks = [
+      task(
+        "audit-task-a",
+        "security",
+        "src/a.ts",
+        { size: "medium", complexity: "deep", risk: "high" },
+        2400,
+      ),
+    ];
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+
+    const prepared = await boundary.prepareAuditHostHandoff({
+      root,
+      artifactsDir,
+      runId,
+      tasks,
+    });
+
+    // A v1alpha1 document is what this run directory holds when the tool is
+    // upgraded underneath a live run: the file was minted by the PREVIOUS build
+    // and its work items carry `{complexity, risk}` metadata instead of the
+    // shared demand ranking. Its bytes are perfectly valid — under the version
+    // they were written to — so nothing about them is "malformed".
+    const stale = JSON.parse(await readFile(prepared.workload_path, "utf8")) as {
+      contract_version: string;
+      work_items: Array<Record<string, unknown>>;
+    };
+    stale.contract_version = "audit-host-workload/v1alpha1";
+    for (const item of stale.work_items) {
+      delete item.metadata;
+      item.metadata = { complexity: "deep", risk: "high", token_estimate: 2400 };
+    }
+    await writeFile(prepared.workload_path, JSON.stringify(stale), "utf8");
+
+    const summary = await boundary.ingestAuditHostResults({
+      root,
+      artifactsDir,
+      runId,
+      auditTasks: tasks,
+    });
+
+    // CLASSIFIED, and reachable: the refusal arrives as an issue the host can
+    // read and act on, NOT as a stack thrown out of the fold.
+    expect(summary.accepted_count).toBe(0);
+    const refusal = summary.issues.find((issue) => issue.code === "workload_stale");
+    expect(refusal, `issues: ${JSON.stringify(summary.issues)}`).toBeDefined();
+    expect(refusal!.check).toBe("workload_binding");
+    // It names BOTH versions — the one found and the one this build mints — and
+    // the one repair, so the host is not left to infer any of the three.
+    expect(refusal!.message).toContain("audit-host-workload/v1alpha1");
+    expect(refusal!.message).toContain("audit-host-workload/v1alpha2");
+    expect(refusal!.message).toContain("re-prepare");
+
+    // RUN-SCOPED, deliberately: the refusal is about the workload DOCUMENT, not
+    // about any one submission, so it names no work item. That is what makes it
+    // distinct from the per-item refusals below — and it is why the recorder
+    // (which keys the ledger on a submission id) skips it rather than inventing
+    // an item to blame. The channel that carries it to the host is the fold's
+    // advisory merge into the emitted step, which is fed `raw_issues`.
+    expect(refusal!.work_item_id).toBeUndefined();
+    expect(summary.raw_issues.map((issue) => issue.code)).toContain("workload_stale");
+    expect(await readSubmissionLedger(artifactsDir)).toEqual([]);
   });
 });

@@ -12,13 +12,16 @@ import {
   enrichMissingSubmissionIssues,
   compareCodeUnits,
   contentSha256,
+  deriveLaneDemand,
   hasExactKeys,
+  identityFailureDiagnostic,
   hostHandoffResultPath,
   idsAreStrictlyAscending,
   isCommit,
   isGitRepo,
   isRecord,
   isSha256,
+  LaneDemandSchema,
   normalizeRepoPath,
   parseAllWorkloadItems,
   parseCommandString,
@@ -31,15 +34,19 @@ import {
   repoRelativePath,
   resolveContainedPath,
   resolveHostHandoffPaths,
-  resultIdentityIsBound,
   runTrackedAsync,
   sameStrings,
   scanBoundSubmission,
+  SEVERITIES,
+  severityRank,
   stringArray,
   stableStringify,
   TRACKED_CHILD_DEADLINE_MS,
   writeJsonFile,
+  type FindingSeverity,
+  type HostHandoffPaths,
   type IngestionCheckId,
+  type LaneDemand,
   type SubmissionIssue,
   type SubmissionLedgerEvent,
   type SubmissionScanMessages,
@@ -99,6 +106,13 @@ export interface RemediationHostWorkItem {
   };
   readonly required_tests: readonly string[];
   readonly result_path: string;
+  /**
+   * The lane's demand ranking (size / complexity / risk) — the same shared
+   * shape the audit draw emits, so a host matching a backend to work reads one
+   * vocabulary from both halves of the pipeline. Names DEMAND only: never a
+   * backend, provider, model or tier (see `LaneDemandSchema`).
+   */
+  readonly demand: LaneDemand;
   readonly token_estimate: number;
 }
 
@@ -201,12 +215,17 @@ export interface RemediationHostIngestSummary {
   readonly state: CurrentRemediationHostState;
 }
 
-interface BoundaryPaths {
-  readonly root: string;
-  readonly artifactsDir: string;
-  readonly workloadPath: string;
-  readonly resultDir: string;
-}
+/**
+ * The remediate draw's boundary paths are the CORE's, whole.
+ *
+ * This used to be a four-field local shape that dropped `runDir` — leaving
+ * {@link resultPathFor} no choice but to RE-DERIVE it by slicing the literal
+ * `host-workload.json` filename off `workloadPath`. A core-side rename of that
+ * filename would have silently produced a wrong-but-plausible run directory on
+ * this draw only. The core already returns the run directory it resolved, so
+ * the draw carries it rather than reconstructing it.
+ */
+type BoundaryPaths = HostHandoffPaths;
 
 interface RemediationHostResult {
   readonly contract_version: typeof RESULT_CONTRACT_VERSION;
@@ -698,18 +717,13 @@ function resolveBoundaryPaths(
 ): BoundaryPaths {
   // The remediate draw's run dir carries the `implement` lane segment — its
   // runs directory also holds triage/closing lanes — which the core takes as a
-  // parameter rather than a fork.
-  const core = resolveHostHandoffPaths({
+  // parameter rather than a fork. The core's whole result is returned: the draw
+  // adds no fields and re-derives none of the core's.
+  return resolveHostHandoffPaths({
     ...params,
     runDirSegments: ["implement"],
     runIdLabel: "remediation host run id",
   });
-  return {
-    root: core.root,
-    artifactsDir: core.artifactsDir,
-    workloadPath: core.workloadPath,
-    resultDir: core.resultDir,
-  };
 }
 
 /**
@@ -718,16 +732,7 @@ function resolveBoundaryPaths(
  * divergence between them would have been silent on both sides.
  */
 function resultPathFor(paths: BoundaryPaths, workItemId: string): string {
-  return hostHandoffResultPath(
-    {
-      root: paths.root,
-      artifactsDir: paths.artifactsDir,
-      runDir: paths.workloadPath.slice(0, paths.workloadPath.length - "host-workload.json".length - 1),
-      resultDir: paths.resultDir,
-      workloadPath: paths.workloadPath,
-    },
-    workItemId,
-  );
+  return hostHandoffResultPath(paths, workItemId);
 }
 
 /**
@@ -1029,6 +1034,72 @@ function buildPrompt(item: {
   ].join("\n");
 }
 
+/**
+ * The remediate draw's risk score for one block, in `[0, 1]`.
+ *
+ * The per-mode INPUT to the shared ranking is what this draw's artifacts
+ * already carry: the severities of the findings the block addresses. A block
+ * fixing three `critical` findings is not the same dispatch as one fixing a
+ * single `info`, and before this it looked identical to the host.
+ *
+ * The score is the WORST severity in the block, with the count of same-or-worse
+ * findings nudging it up — a block of many high-severity findings is above a
+ * block with one. Deterministic (no clock, no sampling) and bounded by
+ * construction. A block whose findings are all absent from the plan contributes
+ * nothing, so an unresolvable block honestly ranks `low` rather than being
+ * guessed at.
+ */
+export function severityRiskWeight(severity: FindingSeverity): number {
+  // DERIVED from the shared tuple, never a second copy of it. This used to be a
+  // hand-written `Record<string, number>` — a second severity vocabulary beside
+  // the one `FindingSeveritySchema`/`SEVERITIES`/`severityRank` single-source in
+  // `src/shared/types/lens.ts` — read through `?? 0`. A severity added to the
+  // shared union fell through that fallback and weighted as ZERO, i.e. the
+  // safest possible rank, so a block of brand-new-critical findings dispatched
+  // as if it fixed nothing. The return type is the shared union, and `SEVERITIES`
+  // is the tuple it is DERIVED from, so that class of miss is now a type error
+  // rather than a silent downgrade.
+  //
+  // The scale is "how far up the severity ladder", 1 at the top and 0 at the
+  // bottom: ORDER is the shared fact, and this is only the scale applied to it.
+  // The values reproduce the hand-written table this replaced EXACTLY
+  // (1 / 0.75 / 0.5 / 0.25 / 0.1 for five tiers), so no emitted ranking moves.
+  //
+  // The bottom tier's floor is deliberate. Unguarded it would be 0 — the same
+  // weight as "this block's findings could not be resolved at all" — and those
+  // are different facts: a block that fixes `info` findings is a real, if
+  // smallest, dispatch, while an unresolvable block is a hole in the plan.
+  // Keeping the bottom off zero is what lets `blockRiskScore`'s corroboration
+  // bump distinguish them.
+  const ladder = SEVERITIES.length - 1;
+  return severity === "info"
+    ? 0.1
+    : ladder === 0
+      ? 1
+      : (severityRank(severity) - 1) / ladder;
+}
+
+function blockRiskScore(
+  state: CurrentRemediationHostState,
+  block: RemediationBlock,
+): number {
+  const scores = block.items
+    .map(
+      (findingId) =>
+        state.plan.findings.find((entry) => entry.id === findingId)?.severity,
+    )
+    .flatMap((severity) =>
+      severity === undefined ? [] : [severityRiskWeight(severity)],
+    );
+  if (scores.length === 0) return 0;
+  const worst = Math.max(...scores);
+  // Each additional finding at or above half the worst severity adds a tenth,
+  // capped: breadth within a severity band is real but must not outrank a
+  // genuinely worse finding.
+  const corroborating = scores.filter((score) => score >= worst / 2).length - 1;
+  return Math.min(1, worst + Math.max(0, corroborating) * 0.1);
+}
+
 function buildFindingAssignments(
   state: CurrentRemediationHostState,
   block: RemediationBlock,
@@ -1102,6 +1173,11 @@ function buildWorkItem(
     prompt: { text: promptText, sha256: promptSha256(promptText) },
     required_tests: requiredTests,
     result_path: resultPath,
+    demand: deriveLaneDemand({
+      tokenEstimate: block.token_estimate ?? 0,
+      fileCount: allowedFiles.length,
+      riskScore: blockRiskScore(state, block),
+    }),
     token_estimate: block.token_estimate ?? 0,
   };
 }
@@ -1149,6 +1225,7 @@ function parseWorkItem(
     !hasExactKeys(value, [
       "allowed_files",
       "baseline_commit",
+      "demand",
       "finding_ids",
       "id",
       "obligation_ids",
@@ -1158,6 +1235,7 @@ function parseWorkItem(
       "token_estimate",
     ]) ||
     typeof value.id !== "string" ||
+    !LaneDemandSchema.safeParse(value.demand).success ||
     !isCommit(value.baseline_commit) ||
     !Array.isArray(value.finding_ids) ||
     !value.finding_ids.every((entry) => typeof entry === "string") ||
@@ -1295,16 +1373,19 @@ function parseResult(
         "decision must match the exact current run, work-item, and prompt binding",
       );
     }
-    if (
-      !resultIdentityIsBound(value, {
-        runId,
-        workItemId: workItem.id,
-        promptSha256: workItem.prompt.sha256,
-      })
-    ) {
+    // The identity walk AND its vocabulary are the CORE's, so this refusal
+    // names the same broken component the audit draw names for the same
+    // submission — the shared sentence is appended to this draw's framing,
+    // which addresses a host repairing a remediation decision.
+    const decisionIdentityFailure = identityFailureDiagnostic(value, {
+      runId,
+      workItemId: workItem.id,
+      promptSha256: workItem.prompt.sha256,
+    });
+    if (decisionIdentityFailure !== null) {
       return invalidResult(
         "identity_binding",
-        "decision must match the exact current run, work-item, and prompt binding",
+        `decision must match the exact current run, work-item, and prompt binding: ${decisionIdentityFailure}`,
       );
     }
     const outcome = value.outcome;
@@ -1381,16 +1462,20 @@ function parseResult(
       "result must match the exact current contract, run, work-item, and prompt binding",
     );
   }
-  if (
-    !resultIdentityIsBound(value, {
-      runId,
-      workItemId: workItem.id,
-      promptSha256: workItem.prompt.sha256,
-    })
-  ) {
+  // The identity walk AND its vocabulary are the CORE's, so the same broken
+  // submission is reported with the same named component whichever half of the
+  // pipeline reads it. Only the framing is this draw's — and the framing is the
+  // part that used to differ, producing two undifferentiated sentences that
+  // named no component at all.
+  const resultIdentityFailure = identityFailureDiagnostic(value, {
+    runId,
+    workItemId: workItem.id,
+    promptSha256: workItem.prompt.sha256,
+  });
+  if (resultIdentityFailure !== null) {
     return invalidResult(
       "identity_binding",
-      "result must match the exact current contract, run, work-item, and prompt binding",
+      `result must match the exact current contract, run, work-item, and prompt binding: ${resultIdentityFailure}`,
     );
   }
 

@@ -181,6 +181,63 @@ export function bannedSizingIdentifierLines(source: string): { line: number; tex
 }
 
 /**
+ * The EMITTED-LANE execution-choice vocabulary — the keys a demand ranking must
+ * never carry (`tests/shared/lane-demand.test.ts`).
+ *
+ * `BANNED_SIZING_KEY` above already covers `provider` and `model`; the rest are
+ * this boundary's own. They are the terms the retired execution substrate named,
+ * and the ones a well-meaning "just tell the host how big a model to use" edit
+ * reaches for first: `tier`, `backend`, `pool`, `agent`, `quota`,
+ * `context_window`, `max_tokens`, `temperature`. Kept separate from the sizing
+ * ban because the DEMAND vocabulary legitimately carries the word `lane` as
+ * prose while a `lane_id` field is exactly the leak — a whole-word ban cannot
+ * tell those apart, so this one is keyed on the exact field name.
+ */
+export const BANNED_LANE_EXECUTION_SEGMENTS: readonly string[] = [
+  "model",
+  "provider",
+  "tier",
+  "backend",
+  "pool",
+  "agent",
+  "quota",
+  "context_window",
+  "max_tokens",
+  "temperature",
+];
+
+/**
+ * True when a field NAME names an execution choice.
+ *
+ * SEGMENT-wise, not whole-word: the shipped field is `model_tier`, and a `\b`
+ * boundary does not sit between `model` and `_` — both are word characters — so
+ * a whole-word rule misses exactly the compound spellings a real edit produces
+ * (`model_tier`, `provider_name`, `tier_hint`). Found by running this guard
+ * against a deliberately injected `model_tier`: it stayed GREEN.
+ *
+ * Only `_`/`-`-separated SEGMENTS are matched, never substrings, so demand
+ * vocabulary that merely contains a banned run of letters is untouched.
+ */
+export function isLaneExecutionKey(key: string): boolean {
+  const segments = key.toLowerCase().split(/[^a-z0-9]+/u).filter((s) => s.length > 0);
+  return segments.some((segment) => BANNED_LANE_EXECUTION_SEGMENTS.includes(segment));
+}
+
+/** The historical whole-word regex form, kept for prose-shaped input. */
+export const BANNED_LANE_EXECUTION_KEY =
+  /\b(model|provider|tier|backend|pool|agent|quota|context_window|max_tokens|temperature)\b/iu;
+
+/**
+ * Keys of an emitted object that name an execution choice rather than demand —
+ * or, given JSON text, the same keys parsed out of it. The sibling of
+ * {@link bannedSizingKeys} for the lane-demand shape.
+ */
+export function bannedLaneExecutionKeys(input: unknown): string[] {
+  const value: unknown = typeof input === "string" ? JSON.parse(input) : input;
+  return objectKeys(value).filter(isLaneExecutionKey);
+}
+
+/**
  * Code lines that name the retired `incoming/` submission directory — as a
  * path segment (`join(artifactsDir, "incoming", …)`) or as a rendered literal
  * (`incoming/<name>.json`) in a prompt or packet body.

@@ -11,9 +11,11 @@ import {
   firstDuplicateIdentity,
   hasExactKeys,
   hostHandoffResultPath,
+  identityFailureDiagnostic,
   isFileMissingError,
   isRecord,
   isSha256,
+  LaneDemandSchema,
   parseAllWorkloadItems,
   parseWorkloadEnvelope,
   promptSha256,
@@ -34,6 +36,7 @@ import {
   writeBlockedStepContract,
   writeJsonFile,
   type IngestionCheckId,
+  type LaneDemand,
   type RunLogger,
   type SubmissionScanMessages,
 } from "audit-tools/shared";
@@ -48,9 +51,20 @@ import {
   validateOneAuditResult,
   formatAuditResultIssues,
 } from "../../validation/auditResults.js";
-import type { AuditHostIngestIssue } from "../../validation/ingestIssueCodes.js";
+import type {
+  AuditHostIngestIssue,
+  AuditIngestIssueCode,
+} from "../../validation/ingestIssueCodes.js";
 
-const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha1" as const;
+// v1alpha2 (the emitted-lane demand ranking): each work item's `metadata`
+// carries the shared `demand` ranking (size / complexity / risk) beside its
+// token estimate, in place of the retired `{complexity, risk}` pair whose
+// `risk` was the task's coarsely bucketed dispatch PRIORITY rather than a
+// likelihood×stakes estimate. A v1alpha1 document refuses closed as stale —
+// re-prepare. Same one-cut precedent as the remediation twin's v1alpha2
+// (`REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION`, commit ed033294): the shape
+// changed, so the version names the shape that is actually on disk.
+const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha2" as const;
 const RESULT_MAP_CONTRACT_VERSION = "audit-host-result-map/v1alpha1" as const;
 const RESULT_CONTRACT_VERSION = "audit-host-result/v1alpha1" as const;
 const TASK_BINDINGS_CONTRACT_VERSION =
@@ -67,8 +81,12 @@ export interface AuditHostTask {
   readonly file_line_counts: Readonly<Record<string, number>>;
   readonly rationale: string;
   readonly priority: string;
-  readonly complexity: string;
-  readonly risk: string;
+  /**
+   * The lane's demand ranking (size / complexity / risk) — the host-facing
+   * statement of what this lane asks for, naming DEMAND only and never a
+   * backend, provider, model or tier (see `LaneDemandSchema`).
+   */
+  readonly demand: LaneDemand;
   readonly token_estimate: number;
 }
 
@@ -76,8 +94,7 @@ export interface AuditHostWorkItem {
   readonly id: string;
   readonly lens: string;
   readonly metadata: {
-    readonly complexity: string;
-    readonly risk: string;
+    readonly demand: LaneDemand;
     readonly token_estimate: number;
   };
   readonly prompt: {
@@ -330,10 +347,10 @@ async function writeAcceptedResults(
  * a divergence between them would have been silent on both sides.
  */
 function resultPathFor(paths: ResolvedBoundaryPaths, workItemId: string): string {
-  return hostHandoffResultPath(
-    { root: paths.root, artifactsDir: paths.artifactsDir, runDir: paths.runDir, resultDir: paths.resultDir, workloadPath: paths.workloadPath },
-    workItemId,
-  );
+  // `ResolvedBoundaryPaths` is a superset of the core's `HostHandoffPaths`, so
+  // the core shape passes through whole — no re-flattening step that could drop
+  // a field the shared rule later starts reading.
+  return hostHandoffResultPath(paths, workItemId);
 }
 
 function normalizeTask(
@@ -349,11 +366,10 @@ function normalizeTask(
   const lens = requireNonEmptyString(task.lens, `${taskId}.lens`);
   const rationale = requireNonEmptyString(task.rationale, `${taskId}.rationale`);
   const priority = requireNonEmptyString(task.priority, `${taskId}.priority`);
-  const complexity = requireNonEmptyString(
-    task.complexity,
-    `${taskId}.complexity`,
-  );
-  const risk = requireNonEmptyString(task.risk, `${taskId}.risk`);
+  // The demand ranking is validated by the SHARED schema, so a draw cannot
+  // admit a rank the other draw would refuse — and so the closed vocabulary has
+  // exactly one author.
+  const demand = LaneDemandSchema.parse(task.demand);
   if (
     !Number.isFinite(task.token_estimate) ||
     task.token_estimate < 0 ||
@@ -411,8 +427,7 @@ function normalizeTask(
     ),
     rationale,
     priority,
-    complexity,
-    risk,
+    demand,
     token_estimate: task.token_estimate,
   };
 }
@@ -451,8 +466,7 @@ function buildWorkItem(
     id: task.task_id,
     lens: task.lens,
     metadata: {
-      complexity: task.complexity,
-      risk: task.risk,
+      demand: task.demand,
       token_estimate: task.token_estimate,
     },
     prompt: {
@@ -646,9 +660,8 @@ function parseWorkItem(value: unknown): AuditHostWorkItem | null {
     typeof value.lens !== "string" ||
     typeof value.result_path !== "string" ||
     !isRecord(value.metadata) ||
-    !hasExactKeys(value.metadata, ["complexity", "risk", "token_estimate"]) ||
-    typeof value.metadata.complexity !== "string" ||
-    typeof value.metadata.risk !== "string" ||
+    !hasExactKeys(value.metadata, ["demand", "token_estimate"]) ||
+    !LaneDemandSchema.safeParse(value.metadata.demand).success ||
     !Number.isInteger(value.metadata.token_estimate) ||
     !isRecord(value.prompt) ||
     !hasExactKeys(value.prompt, ["sha256", "text"]) ||
@@ -667,6 +680,45 @@ function parseWorkItem(value: unknown): AuditHostWorkItem | null {
   return value as unknown as AuditHostWorkItem;
 }
 
+/**
+ * A persisted workload this draw refuses as STALE — issued under a contract
+ * version this build no longer mints.
+ *
+ * A contract-version bump changes the work item's SHAPE (v1alpha1's
+ * `{complexity, risk}` metadata became v1alpha2's shared `demand` ranking), so
+ * the document on disk cannot be re-derived against the current builder and no
+ * submission can be accepted against it. The class is worth its own type
+ * because it has exactly ONE repair — re-prepare, which publishes a current
+ * workload — and a host holding a bound result path from the stale document
+ * must be told that rather than told its bytes are the wrong shape.
+ *
+ * Without this the whole class escaped as a bare `Invalid audit host work item`
+ * throw out of the fold: a message that named neither the version found, nor
+ * the version expected, nor the repair. The remediate twin took the same cut at
+ * its own v1alpha2 (`REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION`, ed033294),
+ * where a v1alpha1 document refuses closed the same way.
+ */
+class StaleAuditHostWorkloadError extends Error {
+  /** The registered ingestion check the refusal is attributable to. */
+  readonly check: IngestionCheckId = "workload_binding";
+  /** The audit issue vocabulary's name for this class of refusal. */
+  readonly code: AuditIngestIssueCode = "workload_stale";
+
+  constructor(
+    readonly found_contract_version: unknown,
+    readonly expected_contract_version: string,
+  ) {
+    super(
+      "the persisted audit host workload is STALE: it was issued under contract " +
+        `version ${JSON.stringify(found_contract_version)}, but this build mints ` +
+        `${expected_contract_version}. A version bump changes the work item shape, so the ` +
+        "document cannot be re-derived and no submission can be accepted against it — " +
+        "re-prepare the handoff to publish a current workload.",
+    );
+    this.name = "StaleAuditHostWorkloadError";
+  }
+}
+
 function parseWorkload(value: unknown, runId: string): AuditHostWorkload {
   // Envelope + all-items parsing is the CORE's scaffolding; the audit draw
   // selects only its own contract version and item parser.
@@ -675,11 +727,26 @@ function parseWorkload(value: unknown, runId: string): AuditHostWorkload {
     runId,
   });
   if (!envelope.ok) {
-    throw new Error("Invalid audit host workload");
+    // The core's envelope check is a conjunction, so it reports "wrong version",
+    // "wrong run" and "not a workload at all" identically. The STALE case is the
+    // one that must be separated — it is the one with a named repair — so the
+    // raw document's own version is read here, before the generic refusal, and
+    // any DIFFERENT version (present, but not ours) is classified as stale.
+    if (
+      isRecord(value) &&
+      "contract_version" in value &&
+      value.contract_version !== WORKLOAD_CONTRACT_VERSION
+    ) {
+      throw new StaleAuditHostWorkloadError(
+        value.contract_version,
+        WORKLOAD_CONTRACT_VERSION,
+      );
+    }
+    throw bindingFailure("workload_binding", "Invalid audit host workload");
   }
   const workItems = parseAllWorkloadItems(envelope.rawItems, parseWorkItem);
   if (workItems === null) {
-    throw new Error("Invalid audit host work item");
+    throw bindingFailure("workload_binding", "Invalid audit host work item");
   }
   return value as unknown as AuditHostWorkload;
 }
@@ -925,17 +992,20 @@ function parseHostResult(
         `result_id, run_id, work_item_id, prompt_sha256, file_coverage and findings`,
     );
   }
-  if (value.run_id !== runId) {
-    return refuse("identity_binding", `identity binding: run_id is not this run's '${runId}'`);
-  }
-  if (value.work_item_id !== item.id) {
-    return refuse("identity_binding", `identity binding: work_item_id is not '${item.id}'`);
-  }
-  if (value.prompt_sha256 !== item.prompt.sha256) {
-    return refuse(
-      "identity_binding",
-      "prompt binding: prompt_sha256 is not the sha256 of this work item's prompt",
-    );
+  // The identity walk is the CORE's, in the core's order AND in the core's
+  // words, so both draws report the same first-broken component, described the
+  // same way, for the same submission. Only the framing around it is this
+  // draw's. The per-component branches this replaced were a second vocabulary
+  // for the one classification — and they could not cover `result_id` at all,
+  // because the envelope check above already requires a non-empty one, so that
+  // component's failure had no branch and read as fully bound.
+  const identityFailure = identityFailureDiagnostic(value, {
+    runId,
+    workItemId: item.id,
+    promptSha256: item.prompt.sha256,
+  });
+  if (identityFailure !== null) {
+    return refuse("identity_binding", `identity binding: ${identityFailure}`);
   }
   if (!Array.isArray(value.file_coverage)) {
     return refuse("file_coverage", "file coverage: file_coverage must be an array");
@@ -1107,10 +1177,37 @@ export async function ingestAuditHostResults(params: {
     paths.acceptedLedgerPath,
     params.runId,
   );
-  const workload = parseWorkload(
-    await readJsonFile<unknown>(paths.workloadPath),
-    params.runId,
-  );
+  // A STALE workload is refused as a CLASSIFIED ISSUE, never as a throw. It is
+  // the one workload refusal with a named repair — re-prepare, which this fold
+  // performs on its way to the next emission — so it must reach the host as a
+  // rendered diagnostic rather than as an unclassified stack out of the fold.
+  // Nothing is accepted: a document this build did not mint cannot be
+  // re-derived, so no submission has a binding to be judged against.
+  let workload: AuditHostWorkload;
+  try {
+    workload = parseWorkload(
+      await readJsonFile<unknown>(paths.workloadPath),
+      params.runId,
+    );
+  } catch (error) {
+    if (!(error instanceof StaleAuditHostWorkloadError)) throw error;
+    const staleIssue: AuditHostIngestIssue = {
+      code: error.code,
+      check: error.check,
+      message: error.message,
+    };
+    return {
+      accepted_count: 0,
+      accepted_results: accepted.entries.map((entry) => entry.audit_result),
+      accepted_results_path: paths.acceptedResultsPath,
+      completed_work_item_ids: [
+        ...new Set(accepted.entries.map((entry) => entry.work_item_id)),
+      ].sort(compareCodeUnits),
+      issues: [staleIssue],
+      raw_issues: [staleIssue],
+      validation_warnings: [],
+    };
+  }
   const resultMap = parseResultMap(
     await readJsonFile<unknown>(paths.resultMapPath),
     params.runId,

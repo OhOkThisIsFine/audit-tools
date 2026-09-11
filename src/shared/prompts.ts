@@ -85,8 +85,19 @@ This is an adversarial review lane: its value comes from a reviewer who is **not
  * advance. Single-sourced so audit-code and remediate-code stay in parity.
  */
 export function renderFanoutExecutionLines(params: {
-  /** Human label + prompt path (+ optional explicit result path) per lane. */
-  lanes: { label: string; promptPath: string; resultPath?: string }[];
+  /**
+   * Human label + prompt path (+ optional explicit result path) per lane. A
+   * lane MAY carry its demand ranking; when it does, the ranking is rendered
+   * with the lane so the host can size the dispatch without reading the lane
+   * file first. Optional because this renderer is also used for lanes that are
+   * not demand-ranked — a hand-written caller's list is not a lane spec.
+   */
+  lanes: {
+    label: string;
+    promptPath: string;
+    resultPath?: string;
+    demand?: { size: string; complexity: string; risk: string };
+  }[];
   /** Host-declared max concurrent subagents, when known. */
   concurrencyHint?: number | null;
 }): string[] {
@@ -112,9 +123,19 @@ export function renderFanoutExecutionLines(params: {
     `Execute the ${n} lane prompt file${plural} below: dispatch one subagent per file if a subagent facility exists, else read and follow each file sequentially yourself. The same files and result paths apply either way.`,
     "",
     ...concurrency,
+    ...(params.lanes.some((lane) => lane.demand !== undefined)
+      ? [
+          "Each lane states its demand (size / complexity / risk) — match the model you dispatch to it against that ranking. The tool names demand only; which backend or model satisfies it is your choice.",
+          "",
+        ]
+      : []),
     ...params.lanes.map(
       (lane) =>
-        `- **${lane.label}**: ${lane.promptPath}${lane.resultPath ? ` → write results to ${lane.resultPath}` : ""}`,
+        `- **${lane.label}**: ${lane.promptPath}` +
+        (lane.demand
+          ? ` [demand: size=${lane.demand.size}, complexity=${lane.demand.complexity}, risk=${lane.demand.risk}]`
+          : "") +
+        (lane.resultPath ? ` → write results to ${lane.resultPath}` : ""),
     ),
     "",
     "When dispatching a lane to a subagent, pass its prompt path verbatim as the instruction — do not read the lane file into this conversation. When executing a lane yourself, read and follow its file directly. Lane prompt files carry no continue-command; return here once the lane results exist.",

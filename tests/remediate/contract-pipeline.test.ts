@@ -19,6 +19,7 @@ import {
   normalizeBlockTargetedCommands,
   normalizeBlockTouchedFiles,
   writePathASeedFromFindings,
+  collectPathARefusals,
   CONTRACT_PIPELINE_GATE_ORDER,
   OBLIGATION_KIND_PRIORITY,
 } from "../../src/remediate/steps/contractPipeline.js";
@@ -61,6 +62,7 @@ import {
   CP_SEAM_RECONCILIATION_REPORT_VERSION,
   CP_FINALIZED_MODULE_CONTRACTS_VERSION,
 } from "../../src/remediate/validation/contractPipeline.js";
+import { validateImplementationDagTraceability } from "../../src/remediate/steps/contractPipeline.js";
 import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1002,6 +1004,67 @@ describe("P38: node write scope unions the owning module contract's declared wri
     });
     const plan = await promotedPlan();
     expect(plan.findings[0].affected_files).toEqual([{ path: "src/a.ts" }]);
+  });
+});
+
+describe("the traceability gate's module join is EXACT, not longest-prefix", () => {
+  // The gate resolves a scope-less node's write scope by joining its obligation
+  // ids to decomposed module slugs. That join used to be a LONGEST-PREFIX match,
+  // which guesses whenever one slug prefixes another: with `mod-a` and `mod-ab`
+  // both decomposed, `OBL-mod-ab-contract` resolves to `mod-ab` by luck of the
+  // sort — but with `mod-ab` OUT of the decomposition, the same id matched
+  // `mod-a`, the node inherited `mod-a`'s file_scope, and the gate saw a
+  // non-empty scope and PASSED. Another module's write boundary, granted
+  // silently, and the empty-result failure mode the 2026-08-09 run hit.
+  //
+  // The suffix grammar makes the unresolvable case unresolvable, so the gate
+  // reports it. This drives the REAL validator rather than the promoter: the two
+  // resolve the same join through different code paths, and only this one turns
+  // a wrong match into a PASS.
+  it("refuses a node whose obligations join to no decomposed module, instead of lending it a prefix sibling's scope", async () => {
+    await writeContractArtifact(
+      ARTIFACTS_DIR,
+      "module_decomposition",
+      CHAIN_PAYLOADS.module_decomposition,
+    );
+    await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
+      ...CHAIN_PAYLOADS.obligation_ledger,
+      obligations: [
+        {
+          id: "OBL-mod-a-service-contract",
+          description: "Behavior holds.",
+          kind: "behavioral",
+          depends_on: [],
+          status: "pending",
+        },
+      ],
+    });
+    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
+      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+      goal_id: "G1",
+      nodes: [
+        {
+          id: "N-prefix-join",
+          title: "Implement mod-a-service",
+          description: "d",
+          // `mod-a-service` is NOT a decomposed module; only `mod-a` is. The
+          // prefix rule matched `OBL-mod-a-` here and lent the node mod-a.
+          satisfies_obligations: ["OBL-mod-a-service-contract"],
+          depends_on: [],
+          verification_obligation_ids: [],
+          targeted_commands: [],
+          status: "pending",
+          // No declared files, so the only scope available is the joined one.
+        },
+      ],
+      edges: [],
+      created_at: CREATED_AT,
+    });
+
+    const result = await validateImplementationDagTraceability(ARTIFACTS_DIR);
+    expect(result.ok).toBe(false);
+    expect(result.violations.join("\n")).toContain("N-prefix-join");
+    expect(result.violations.join("\n")).toContain("EMPTY write scope");
   });
 });
 
@@ -2302,5 +2365,133 @@ describe("CP-NODE-13 inv-9: the promoted plan is the pinned planning output", ()
 
   it("POSITIVE: before promotion, the promoted-plan path is absent", () => {
     expect(existsSync(intakePaths(ARTIFACTS_DIR).extractedPlan)).toBe(false);
+  });
+});
+
+// ── F7: ONE Path-A canonical-group rule, two callers ─────────────────────────
+//
+// `collectPathARefusals` (the pre-promotion gate) and
+// `promoteImplementationDagToExtractedPlan` (the promoter) ask the byte-identical
+// question about `source_finding_ids`, and they used to answer it with two
+// hand-mirrored copies of the same forty lines — one returning refusal lines,
+// one throwing. A drift between them is the worst kind: the gate would certify a
+// DAG the promoter then throws on (wedging the run behind a rule nothing can
+// satisfy), or the gate would refuse a DAG the promoter would have accepted
+// (wedging it behind a rule nothing can clear). The two now call one evaluator,
+// and this walks declarations where either could plausibly disagree, asserting
+// they AGREE in both directions.
+describe("F7: the Path-A gate and the Path-A promoter agree on every declaration", () => {
+  const REPORT = buildAuditFindingsDeliverable([
+    {
+      id: "F-1",
+      title: "one",
+      category: "General",
+      severity: "medium",
+      confidence: "high",
+      lens: "correctness",
+      summary: "s",
+      affected_files: [{ path: "src/one.ts" }],
+    } as Finding,
+    {
+      id: "F-2",
+      title: "two",
+      category: "General",
+      severity: "medium",
+      confidence: "high",
+      lens: "correctness",
+      summary: "s",
+      affected_files: [{ path: "src/two.ts" }],
+    } as Finding,
+  ]);
+
+  /** The seed's work blocks define which `source_finding_ids` sets are canonical. */
+  async function seed(): Promise<void> {
+    const reportPath = join(TEST_DIR, "audit-findings.json");
+    await writeJson(reportPath, REPORT);
+    await writePathASeedFromFindings(ARTIFACTS_DIR, reportPath, REPORT);
+  }
+
+  async function writeDag(
+    declarations: ReadonlyArray<readonly string[]>,
+  ): Promise<void> {
+    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
+      ...CHAIN_PAYLOADS.implementation_dag,
+      nodes: declarations.map((sourceFindingIds, index) => ({
+        id: `N${index + 1}`,
+        title: `node ${index + 1}`,
+        description: "d",
+        satisfies_obligations: [],
+        depends_on: [],
+        verification_obligation_ids: [],
+        targeted_commands: [],
+        status: "pending",
+        source_finding_ids: [...sourceFindingIds],
+      })),
+    });
+  }
+
+  /** Whether the PROMOTER accepted — its refusal is a throw, not a return. */
+  async function promoterAccepts(): Promise<string | null> {
+    try {
+      await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR, TEST_DIR);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  it.each([
+    // label, the declarations, whether every canonical group is joined once
+    ["each canonical group exactly once", [["F-1"], ["F-2"]], true],
+    ["a group joined in reversed member order", [["F-2", "F-1"]], false],
+    ["a declaration matching no canonical group", [["F-1", "F-9"]], false],
+    ["a repeated member inside one declaration", [["F-1", "F-1"]], false],
+    ["the same canonical group claimed twice", [["F-1"], ["F-1"]], false],
+  ])("agrees on %s", async (_label, declarations, canonicalExactlyOnce) => {
+    await seed();
+    await writeDag(declarations as ReadonlyArray<readonly string[]>);
+
+    const refusals = await collectPathARefusals(ARTIFACTS_DIR);
+    const gateAccepts = refusals.length === 0;
+    const promoterFailure = await promoterAccepts();
+
+    // THE AGREEMENT ITSELF, both directions. A gate that certifies what the
+    // promoter then throws on wedges the run; so does a gate that refuses what
+    // the promoter would accept.
+    expect(gateAccepts, `gate refusals: ${refusals.join(" | ")}`).toBe(
+      promoterFailure === null,
+    );
+
+    // The walk's own answer, not only mutual consistency — two copies of a
+    // WRONG rule would agree with each other and both be wrong.
+    if (canonicalExactlyOnce) {
+      expect(refusals).toEqual([]);
+      expect(promoterFailure).toBeNull();
+    } else {
+      expect(refusals.length).toBeGreaterThan(0);
+      expect(promoterFailure).not.toBeNull();
+    }
+  });
+
+  it("renders the SAME refusals the promoter throws, in the same order", async () => {
+    await seed();
+    // One node breaking the rule TWICE (a repeated member, and the deduped set
+    // matching no canonical group) plus a second node breaking it once. The
+    // expectation is exact rather than "contains": a drift that made either side
+    // stop checking one of the three would otherwise pass as agreement.
+    await writeDag([["F-1", "F-1", "F-9"], ["F-9"]]);
+
+    const refusals = await collectPathARefusals(ARTIFACTS_DIR);
+    const promoterFailure = await promoterAccepts();
+
+    expect(refusals).toEqual([
+      'implementation_dag node "N1" repeats a source_finding_ids member.',
+      'implementation_dag node "N1" source_finding_ids do not match a canonical audit work block.',
+      'implementation_dag node "N2" source_finding_ids do not match a canonical audit work block.',
+    ]);
+    // The promoter throws the gate's OWN text, joined — so the sentence a host
+    // reads from a wedged fold and the sentence the pre-promotion gate renders
+    // are one string, not two spellings of one rule.
+    expect(promoterFailure).toBe(refusals.join("\n"));
   });
 });
