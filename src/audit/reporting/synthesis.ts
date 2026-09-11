@@ -57,7 +57,30 @@ type ConceptualAttributionIdMap = ReadonlyMap<string, string>;
 type ConceptualAttributionCarrier = {
   [CONCEPTUAL_ATTRIBUTION_IDS]?: ConceptualAttributionIdMap;
 };
-type AttributionAwareReport = AuditFindingsReport & ConceptualAttributionCarrier;
+type AttributionAwareReport = AuditFindingsReport &
+  ConceptualAttributionCarrier &
+  CriticalBarCarrier;
+
+/**
+ * The findings {@link applyCriticalEvidenceBar} ran over on THIS report object,
+ * so the renderer's disclosure line states that the bar ran rather than
+ * inferring it from the payload it is printing (F2).
+ *
+ * A non-enumerable-by-convention symbol rather than a wire field: this is
+ * process-local provenance for a render decision, and persisting it into
+ * `audit-findings.json` would make an internal marker part of the machine
+ * contract.
+ *
+ * Re-deriving the answer from `severity_downgraded_from` was the tempting
+ * alternative and it answers a different question — "did the bar change
+ * anything?" A report whose criticals all cleared the bar would then be
+ * indistinguishable from one where the bar never ran, which is the confusion
+ * this exists to end.
+ */
+const CRITICAL_EVIDENCE_BAR_APPLIED = Symbol("critical-evidence-bar-applied");
+type CriticalBarCarrier = {
+  [CRITICAL_EVIDENCE_BAR_APPLIED]?: readonly Finding[];
+};
 
 /**
  * Contract version stamped onto the canonical `audit-findings.json`.
@@ -126,9 +149,9 @@ export interface AuditReportModel {
   quarantined_findings?: Finding[];
 }
 
-type AttributionAwareModel = AuditReportModel & {
-  [CONCEPTUAL_ATTRIBUTION_IDS]?: ConceptualAttributionIdMap;
-};
+type AttributionAwareModel = AuditReportModel &
+  ConceptualAttributionCarrier &
+  CriticalBarCarrier;
 
 function markConceptualFindingIds(designAssessment: DesignAssessment | undefined): {
   designAssessment: DesignAssessment | undefined;
@@ -181,6 +204,136 @@ function extractConceptualAttributionIds(
     );
   }
   return localIdsByFinding;
+}
+
+/**
+ * The `critical` severity bar — the DECISION, stated once.
+ *
+ * The open question this answers (backlog, 2026-08-06): *should synthesis demand
+ * mechanism-grounded — not flow-existence — evidence for `critical`?* That run
+ * produced 9 self-audit criticals of which 0 survived mechanism verification
+ * (3 refuted, 6 downgraded), which is a real calibration problem and looks like
+ * it wants exactly such a gate.
+ *
+ * It does not get one, and the reason is architectural rather than a scope cut.
+ * Severity is tier-3 judgment: the project's own determinism spec
+ * (`spec/contract-authoring-determinism-design.md`, S7) classes "severity,
+ * prioritization, is this important" as **not deterministically checkable** —
+ * "no anchor proves a taste call" — and tiers it accordingly: the adversarial
+ * cross-check plus traceability, never a tool verdict. A `mechanism vs
+ * flow-existence` test is not mechanically decidable: both are prose, and a
+ * checker that pattern-matched them would grade the WORDING of evidence, which
+ * a weak auditor games by writing the word "mechanism" and a strong one is
+ * punished by for citing a flow. That is the opposite of the bar's intent, and
+ * it would be a gate guessing at a boundary owned by the judge — precisely what
+ * the authority rule forbids.
+ *
+ * So the bar is DECIDED as: the tool enforces the one leg it can actually
+ * decide — a `critical` must carry SUBSTANTIVE evidence, i.e. at least one
+ * entry with real content — and the mechanism-versus-flow question stays judge
+ * territory, carried by the adversarial cross-check and named to the reader in
+ * the report. A `critical` whose evidence is absent or blank is downgraded to
+ * `high` (it makes no claim the tool can even find), recorded in
+ * `severity_downgraded_from`, and that downgrade is visible in the severity
+ * breakdown the report prints.
+ *
+ * The bar is scoped to the lane whose contract CARRIES `evidence` (see
+ * `criticalEvidenceBarApplies`): the design-review lanes have no such field, so
+ * applying it there graded a claim they were never asked to make.
+ *
+ * Recorded here, at the boundary that mints the summary, so the next run that
+ * reads "0 of 9 criticals survived" finds the answer instead of re-asking.
+ */
+export const CRITICAL_EVIDENCE_BAR = "substantive-evidence" as const;
+
+/**
+ * Whether a finding carries the evidence {@link CRITICAL_EVIDENCE_BAR} demands:
+ * at least one entry with non-whitespace content.
+ *
+ * Deliberately a content test and not a shape test. The per-file contract
+ * already requires a non-empty `evidence` array, so an array-length check would
+ * be dead code — what it does not catch is the array that exists to satisfy the
+ * schema: a single `""` or `" "`. That is the value with no claim in it, and it
+ * is the only thing here the tool can decide without grading prose.
+ */
+export function hasSubstantiveEvidence(finding: {
+  evidence?: readonly string[];
+}): boolean {
+  return (finding.evidence ?? []).some((entry) => entry.trim().length > 0);
+}
+
+/**
+ * Whether {@link CRITICAL_EVIDENCE_BAR} is this finding's to answer at all.
+ *
+ * The bar tests `evidence`, and only the per-file worker contract carries that
+ * field (`WorkerFindingSchema` requires `min(1)`). The design-review lanes never
+ * list one — their contract has no `evidence` key (`findingsEnvelopeExample`)
+ * and their evidence channel is `affected_files`, certified by
+ * `groundDesignFinding` — so testing them for it graded a claim they were never
+ * asked to make. The same critical rendered `critical` through the per-file lane
+ * and `high` through the design-review lane; worse, a design finding that
+ * happened to carry a marker-only `evidence` array was downgraded on the
+ * strength of a field its own prompt never mentioned.
+ *
+ * Scoped by the RECORDED lane, never by inspecting the finding's content: by
+ * synthesis the producer is not recoverable from the payload, and a heuristic
+ * over "does this look like a design finding" would be inference wearing
+ * provenance's clothes. An absent lane is a per-file result — the only lane
+ * whose contract makes `evidence` mandatory — which is also what keeps a bundle
+ * written before this field existed grading exactly as it did before.
+ *
+ * The lane is TOOL-STAMPED at both ingests (`toAuditResult` writes
+ * `per-file-lane`, the conceptual submission schemas transform to
+ * `design-review-lane`) and every host-facing contract OMITS it, so the value
+ * this reads cannot have been chosen by the producer being graded — which is
+ * what makes it provenance rather than one more field a finding may assert
+ * about itself. A finding that could stamp its own lane could exempt itself
+ * from the bar.
+ */
+function criticalEvidenceBarApplies(finding: Finding): boolean {
+  return finding.evidence_lane !== "design-review-lane";
+}
+
+/**
+ * Apply {@link CRITICAL_EVIDENCE_BAR}, returning the findings with any
+ * `critical` it refuses downgraded, each carrying `severity_downgraded_from`.
+ *
+ * A downgrade, never a drop: the finding is still a finding, its severity is
+ * still the judge's initial claim, and the report's severity breakdown shows the
+ * result — so the claim is qualified, not erased. The ORDER of the two
+ * severities is the canonical one (`FindingSeveritySchema`, most-severe-first),
+ * so `high` is the adjacent step rather than a re-grade.
+ *
+ * The move is RECORDED, not silent: `severity_downgraded_from` keeps the
+ * severity the judge claimed. Overwriting `severity` in place made a
+ * tool-moved `high` byte-identical to a born-`high` one, so `audit-findings.json`
+ * — and every `work_blocks.max_severity` computed from it — could not tell a
+ * claim the tool refused to let stand from one the judge never made.
+ *
+ * TOTAL and idempotent, so it has exactly ONE behaviour wherever it runs: a
+ * finding already carrying `severity_downgraded_from` was re-graded on an
+ * earlier pass, and re-grading is neither repeated nor compounded. That is what
+ * lets the two draws over it — the model builder and the promoted-record
+ * normalization — share one implementation instead of diverging, which is the
+ * only reason a re-synthesized report can be trusted to agree with its own
+ * disclosure line.
+ */
+export function applyCriticalEvidenceBar(findings: Finding[]): Finding[] {
+  return findings.map((finding) => {
+    if (
+      finding.severity !== "critical" ||
+      finding.severity_downgraded_from !== undefined ||
+      !criticalEvidenceBarApplies(finding) ||
+      hasSubstantiveEvidence(finding)
+    ) {
+      return finding;
+    }
+    return {
+      ...finding,
+      severity: "high" as const,
+      severity_downgraded_from: "critical" as const,
+    };
+  });
 }
 
 function severityBreakdown(findings: Finding[]): Record<string, number> {
@@ -324,8 +477,13 @@ export function buildAuditReportModel(params: {
   // delete) and rendered in their own report section. The exclusion happens AFTER
   // merge so a finding grounded on another pass (grounded-wins in mergeGrounding)
   // is never quarantined.
-  const findings = allFindings.filter((f) => f.grounding?.status !== "refuted");
+  const admitted = allFindings.filter((f) => f.grounding?.status !== "refuted");
   const quarantinedRefuted = allFindings.filter((f) => f.grounding?.status === "refuted");
+  // The one severity leg the tool can decide (see {@link CRITICAL_EVIDENCE_BAR}),
+  // applied BEFORE the partition so `max_severity`, the summary breakdown and the
+  // rendered lines all describe the same finding set — a downgrade applied after
+  // any of them would leave the deliverable disagreeing with itself.
+  const findings = applyCriticalEvidenceBar(admitted);
   const workBlocks = buildWorkBlockPartition({
     findings,
     unitManifest: params.unitManifest,
@@ -393,6 +551,10 @@ export function buildAuditReportModel(params: {
   if (conceptualAttributionIds.size > 0) {
     model[CONCEPTUAL_ATTRIBUTION_IDS] = conceptualAttributionIds;
   }
+  // The bar's apply-set, carried on the object the renderer receives. Recorded
+  // at the same boundary that APPLIED it, so the two cannot drift: a render can
+  // only claim the bar ran over findings it was actually run over.
+  model[CRITICAL_EVIDENCE_BAR_APPLIED] = findings;
   return model;
 }
 
@@ -420,6 +582,14 @@ export function buildAuditFindingsReport(
   ];
   if (conceptualAttributionIds) {
     report[CONCEPTUAL_ATTRIBUTION_IDS] = conceptualAttributionIds;
+  }
+  // The bar's apply-set travels with the findings it was applied to, so the
+  // renderer of THIS report can state the bar ran rather than infer it. Absent
+  // when the report did not come from the model builder (a normalized promoted
+  // record) — which is the honest answer, not a false "the bar ran".
+  const barApplied = (model as AttributionAwareModel)[CRITICAL_EVIDENCE_BAR_APPLIED];
+  if (barApplied) {
+    report[CRITICAL_EVIDENCE_BAR_APPLIED] = barApplied;
   }
   return report;
 }
@@ -564,6 +734,29 @@ function renderUnexercisedLensLine(
         `${outcome === "not_run" ? "never exercised" : "exercised, no findings"}: ${lenses.join(", ")}`,
     );
   return [`- Lenses not exercised: ${parts.join("; ")}`];
+}
+
+/**
+ * Name every finding the tool re-graded, with the severity it claimed — the
+ * report-level statement that a severity in the breakdown was MOVED rather than
+ * judged. Empty (one line, no section) when the tool moved nothing.
+ *
+ * Ordered by id so the line is stable across renders: the findings arrive in
+ * merge order, and an incidental order here would churn the report's bytes on
+ * every re-synthesis for no change in content.
+ */
+function renderSeverityDowngradeLine(findings: readonly Finding[]): string[] {
+  const downgraded = findings
+    .filter((finding) => finding.severity_downgraded_from !== undefined)
+    .sort((left, right) => compareCodeUnits(left.id, right.id));
+  if (downgraded.length === 0) return [];
+  const parts = downgraded.map(
+    (finding) =>
+      `\`${finding.id}\` ${finding.severity_downgraded_from} → ${finding.severity}`,
+  );
+  return [
+    `- Severity re-graded by the tool: ${parts.join("; ")} — the claimed severity is recorded here; the finding is still admitted and still actionable.`,
+  ];
 }
 
 /**
@@ -1033,6 +1226,44 @@ function renderConceptualAttributionSection(
   return lines;
 }
 
+/**
+ * Re-escape the C0 control characters a report must never carry as raw bytes.
+ *
+ * The report is assembled from strings the HOST authored — finding prose,
+ * themes, the executive summary, work-block rationales, operator notes — and a
+ * contract-valid finding may legitimately contain one: a worker summary
+ * carrying a JSON-escaped backspace (a mangled regex word boundary) parses
+ * fine, stores fine in `audit-findings.json` (JSON escapes it), and then lands
+ * as a literal 0x08 in `audit-report.md`, where `check:control-bytes` correctly
+ * reds the build. Scrubbed by hand once already; this is the mechanism instead.
+ *
+ * The permitted set is EXACTLY the byte gate's — tab, LF, CR — so this
+ * function's contract and the gate that checks it cannot disagree: everything
+ * else below 0x20 is re-escaped as its printable `\uXXXX` form rather than
+ * deleted. Deleting would silently rewrite the worker's text (a mangled word
+ * boundary loses the mangling, which is the signal a reader needs); the escape
+ * keeps the information AND the file text.
+ *
+ * Written as a code-point test rather than a control-character regex: the
+ * literal bytes are exactly what must not appear in this source file, and a
+ * regex range spelling them is the trap being fixed, one level up.
+ *
+ * Applied as ONE final pass over the assembled document rather than per field:
+ * a per-field scrub only covers the fields someone remembered, and the whole
+ * point is that an unreviewed host-authored string cannot reach the deliverable
+ * raw. It runs at the render boundary, so every present and future field is
+ * covered by construction.
+ */
+export function escapeControlCharacters(markdown: string): string {
+  return Array.from(markdown, (character) => {
+    const code = character.codePointAt(0)!;
+    if (code >= 0x20 || code === 0x09 || code === 0x0a || code === 0x0d) {
+      return character;
+    }
+    return `\\u${code.toString(16).padStart(4, "0")}`;
+  }).join("");
+}
+
 export function renderAuditReportMarkdown(
   report: RenderableAuditReport,
   options: RenderAuditReportOptions = {},
@@ -1041,6 +1272,11 @@ export function renderAuditReportMarkdown(
     AUDITOR_REPORT_MARKER,
     "# Audit Report",
     "",
+  ];
+  // The findings the bar was applied to, or `undefined` on a report that never
+  // went through it — see {@link CRITICAL_EVIDENCE_BAR_APPLIED}.
+  const barAppliedFindings = (report as CriticalBarCarrier)[
+    CRITICAL_EVIDENCE_BAR_APPLIED
   ];
 
   if (report.executive_summary && report.executive_summary.trim().length > 0) {
@@ -1053,6 +1289,32 @@ export function renderAuditReportMarkdown(
     `- Findings: ${report.summary.finding_count}`,
     `- Work blocks: ${report.summary.work_block_count}`,
     `- Severity breakdown: ${formatSeverityList(report.summary.severity_breakdown)}`,
+    // Gated on the bar having ACTUALLY RUN over the findings being printed,
+    // which is what {@link CRITICAL_EVIDENCE_BAR_APPLIED} records.
+    //
+    // The previous gate ("a critical exists") was the F2 defect: `cmdResynthesize`
+    // renders a promoted record the bar had not yet touched, so the report could
+    // claim the bar was enforced beside an un-barred critical. Keyed on the
+    // apply-set, the line is printed when a barred report carries a critical —
+    // under both draws, including the criticals that CLEARED the bar, which is
+    // precisely the set the sentence is about — and omitted on a report that
+    // never went through the bar at all. Omission is not a claim: a run with no
+    // criticals has nothing to qualify.
+    ...(barAppliedFindings !== undefined &&
+    barAppliedFindings.some((finding) => finding.severity === "critical")
+      ? [
+          `- Critical severity is judge-authored. The tool enforces the \`${CRITICAL_EVIDENCE_BAR}\` ` +
+            "bar — a critical from the per-file lane must carry at least one non-blank " +
+            "evidence entry — and does not decide whether the claimed mechanism is sound; " +
+            "that is carried by the adversarial cross-check, never by a tool verdict.",
+        ]
+      : []),
+    // The counts alone cannot show that a severity was MOVED rather than judged,
+    // so a re-graded finding is named here with the severity it claimed. Named at
+    // the finding-set level rather than repeated per finding section because the
+    // question ("did the tool re-grade anything, and what") is a property of the
+    // report, and answering it once is what stops a reader diffing two runs.
+    ...renderSeverityDowngradeLine(report.findings),
     ...(report.summary.lens_breakdown && Object.keys(report.summary.lens_breakdown).length > 0
       ? [`- Lens breakdown: ${formatCountList(report.summary.lens_breakdown)}`]
       : []),
@@ -1278,7 +1540,10 @@ export function renderAuditReportMarkdown(
     );
   }
   lines.push("");
-  return lines.join("\n");
+  // The ONE place the deliverable becomes a string, and therefore the ONE place
+  // the byte contract can be guaranteed: a host-authored string above cannot
+  // reach `audit-report.md` raw, whatever field it arrived in.
+  return escapeControlCharacters(lines.join("\n"));
 }
 
 /**
@@ -1287,26 +1552,40 @@ export function renderAuditReportMarkdown(
  * upstream-derived fields that cannot be reconstructed (audited/excluded counts,
  * runtime validation breakdown) untouched.
  *
+ * The `critical` evidence bar runs HERE as well as in the model builder, and
+ * that second call is the F2 fix rather than a duplicate: a promoted
+ * `audit-findings.json` can have been written by an older contract version, so
+ * `cmdResynthesize` — which reads that record and renders it WITHOUT the model
+ * builder — was the one path where a critical could reach the deliverable
+ * un-barred while the render's disclosure line claimed the bar was enforced.
+ * One implementation at the boundary both draws share means a re-synthesized
+ * report and a freshly-built one state the same thing about the same finding;
+ * the function is idempotent, so re-normalizing an already-barred record is a
+ * no-op rather than a second downgrade.
+ *
  * Safe to call on already-promoted `audit-findings.json` files without access to
  * the pruned `.audit-tools/audit` working-bundle intermediates.
  */
 export function normalizeExistingFindingsReport(
   report: AuditFindingsReport,
 ): AuditFindingsReport {
-  const groundingBreakdown = groundingStatusBreakdown(report.findings as Finding[]);
-  const verificationBreakdown = verificationStatusBreakdown(
-    report.findings as Finding[],
-  );
-  return {
+  const findings = applyCriticalEvidenceBar(report.findings as Finding[]);
+  // Counts read the SAME array the bar produced, not the input: a downgrade
+  // moves a finding between severity buckets, so a breakdown derived from the
+  // pre-bar array would contradict the severity the record now carries.
+  const groundingBreakdown = groundingStatusBreakdown(findings);
+  const verificationBreakdown = verificationStatusBreakdown(findings);
+  const normalized: AttributionAwareReport = {
     ...report,
+    findings,
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
     work_block_seams: report.work_block_seams ?? [],
     summary: {
       ...report.summary,
-      finding_count: report.findings.length,
+      finding_count: findings.length,
       work_block_count: report.work_blocks.length,
-      severity_breakdown: severityBreakdown(report.findings as Finding[]),
-      lens_breakdown: lensBreakdown(report.findings as Finding[]),
+      severity_breakdown: severityBreakdown(findings),
+      lens_breakdown: lensBreakdown(findings),
       // The SELECTION is carried through — this function has no checkpoint and
       // must not invent one — while the counts and outcomes are re-derived over
       // the same findings `lens_breakdown` is re-counted from. Copying the map
@@ -1318,7 +1597,7 @@ export function normalizeExistingFindingsReport(
         : {
             lens_coverage: reprojectLensCoverage(
               report.summary.lens_coverage,
-              report.findings as Finding[],
+              findings,
             ),
           }),
       ...(Object.keys(groundingBreakdown).length > 0
@@ -1329,4 +1608,10 @@ export function normalizeExistingFindingsReport(
         : {}),
     },
   };
+  // The bar ran over THESE findings, so the renderer of this record may say so.
+  // Carried on the returned object exactly as the model builder carries it — one
+  // marker, both draws — so the disclosure's gate means the same thing wherever
+  // the report came from.
+  normalized[CRITICAL_EVIDENCE_BAR_APPLIED] = findings;
+  return normalized;
 }

@@ -135,15 +135,23 @@ export const ConceptualCandidateDispositionSchema = z
   });
 
 /**
- * The findings a judge or perspective may SUBMIT. `verification_status` is
- * omitted for the same reason `WorkerFindingSchema` omits `grounding`: it is
- * derived by the tool at ingest from the per-candidate claims, so a supplied
- * value would bypass the derivation and be un-cross-checkable. The omit keeps it
- * out of the parsed value; `refuseSuppliedVerificationStatus` NAMES it, because
- * a silently stripped field teaches the host nothing.
+ * The findings a judge or perspective may SUBMIT. `verification_status` and
+ * `evidence_lane` are omitted for the same reason `WorkerFindingSchema` omits
+ * `grounding`: both are derived by the tool at ingest — the first from the
+ * per-candidate claims, the second from the lane the finding arrived on — so a
+ * supplied value would bypass the derivation and be un-cross-checkable. For
+ * `evidence_lane` the stakes are the bar itself: synthesis reads it to decide
+ * whether a `critical` was ever asked for an `evidence` array, so a
+ * host-supplied lane is a finding that excuses ITSELF from the bar. The omit
+ * keeps it out of the parsed value (this schema is not `.strict()`, so unlike
+ * the worker projection the omit is what stops it being carried, not what makes
+ * a supplied key fail); `refuseSuppliedToolVerdict` NAMES both, because a
+ * silently dropped field teaches the host nothing.
  */
 export const ConceptualSubmittedFindingSchema = FindingSchema.omit({
   verification_status: true,
+  severity_downgraded_from: true,
+  evidence_lane: true,
 });
 
 export const ConceptualFinalFindingShareSchema = z
@@ -254,7 +262,11 @@ function submissionFindings(value: unknown): Finding[] {
   const envelope = z
     .union([
       z.array(ConceptualSubmittedFindingSchema),
-      z.object({ findings: z.array(ConceptualSubmittedFindingSchema) }).passthrough(),
+      z
+        .object({
+          findings: z.array(ConceptualSubmittedFindingSchema),
+        })
+        .passthrough(),
     ])
     .safeParse(value);
   if (!envelope.success) {
@@ -312,19 +324,37 @@ function fail(message: string): never {
 }
 
 /**
+ * The TOOL-owned findings verdicts, named as data so this refusal and the
+ * schema's `omit` list cannot drift: a verdict added to one and not the other
+ * would be either silently stripped (if omitted from the schema only) or
+ * silently ACCEPTED (if refused here only, on a schema that carries it).
+ */
+const TOOL_OWNED_FINDING_VERDICTS = [
+  "verification_status",
+  "evidence_lane",
+] as const;
+
+/**
  * The judge's own door into the finding contract. `ConceptualJudgeSubmissionSchema`
- * parses `findings` with `verification_status` OMITTED, which strips a supplied
+ * parses `findings` with the tool-owned verdicts OMITTED, which strips a supplied
  * value SILENTLY — so this pre-schema check names the field, exactly as the
  * per-file host handoff does for `grounding`. Stated before the schema parse for
  * the same reason: the strict envelope would report only a stripped/unknown key.
+ *
+ * `evidence_lane` matters here more than the others: synthesis reads it to
+ * decide whether a `critical` was ever asked for an `evidence` array, so a
+ * host-supplied lane is a finding exempting ITSELF from the bar.
  */
-function refuseSuppliedVerificationStatus(submission: unknown): void {
+function refuseSuppliedToolVerdict(submission: unknown): void {
   if (!isRecord(submission) || !Array.isArray(submission.findings)) return;
   for (const [index, finding] of submission.findings.entries()) {
-    if (isRecord(finding) && "verification_status" in finding) {
-      fail(
-        `findings[${index}].verification_status: verification_status is derived at ingest and must not be supplied`,
-      );
+    if (!isRecord(finding)) continue;
+    for (const verdict of TOOL_OWNED_FINDING_VERDICTS) {
+      if (verdict in finding) {
+        fail(
+          `findings[${index}].${verdict}: ${verdict} is derived at ingest and must not be supplied`,
+        );
+      }
     }
   }
 }
@@ -342,7 +372,7 @@ export function buildConceptualReviewAdjudication(params: {
   generatedAt: string;
 }): ConceptualReviewAdjudication {
   const manifest = ConceptualReviewRoundManifestSchema.parse(params.manifest);
-  refuseSuppliedVerificationStatus(params.submission);
+  refuseSuppliedToolVerdict(params.submission);
   const submission = ConceptualJudgeSubmissionSchema.parse(params.submission);
   if (submission.round_id !== manifest.round_id) {
     fail(

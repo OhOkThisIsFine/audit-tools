@@ -6,5 +6,8 @@ import { runStepCommand } from "./stepScaffold.js";
  * or mutate execution state; uncovered tasks remain visible as uncovered.
  */
 export async function cmdForceSynthesis(argv: string[]): Promise<void> {
-  await runStepCommand(argv, { preferredExecutor: "synthesis_executor" });
+  await runStepCommand(argv, {
+    mode: "executor",
+    preferredExecutor: "synthesis_executor",
+  });
 }

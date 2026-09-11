@@ -38,7 +38,11 @@ import {
   type SubmissionScanMessages,
 } from "audit-tools/shared";
 import { findingContractPromptLines } from "../../contracts/findingContractPrompt.js";
-import { WorkerFindingSchema, type WorkerFinding } from "../../contracts/workerSchemas.js";
+import {
+  WORKER_REFUSED_FINDING_VERDICTS,
+  WorkerFindingSchema,
+  type WorkerFinding,
+} from "../../contracts/workerSchemas.js";
 import { AuditResultSchema, type AuditResult, type AuditTask } from "../../types.js";
 import {
   validateOneAuditResult,
@@ -848,27 +852,29 @@ function parseFindings(
   | { readonly ok: false; readonly detail: string } {
   const parsedFindings: WorkerFinding[] = [];
   for (const [index, finding] of findings.entries()) {
-    // S7: `grounding` is the TOOL's re-check of the worker's own quote — the one
-    // bit ingestion exists to compute. A submission that supplies it is
-    // self-certifying that bit, so it is REFUSED (never silently overwritten):
-    // the host must see that the field is not its to send. Stated ahead of the
-    // schema check because this message names the field as the WORKER's mistake;
-    // the strict schema would report it only as an unrecognized key.
-    if (isRecord(finding) && "grounding" in finding) {
-      return {
-        ok: false,
-        detail: `findings[${index}].grounding: grounding is tool-computed at ingest and must not be supplied`,
-      };
-    }
-    // The same refusal for the second tool-owned verdict: `verification_status`
-    // is DERIVED at conceptual ingest from the judge's per-candidate claims, so a
-    // worker-supplied value would bypass the derivation and be
-    // un-cross-checkable against the adjudication record.
-    if (isRecord(finding) && "verification_status" in finding) {
-      return {
-        ok: false,
-        detail: `findings[${index}].verification_status: verification_status is tool-derived at ingest and must not be supplied`,
-      };
+    // The TOOL-owned verdicts are REFUSED, never silently overwritten: the host
+    // must see that the field is not its to send, and a value the worker
+    // supplied for one of these is by construction a self-certification of the
+    // bit ingestion exists to compute. Stated ahead of the schema check because
+    // this message names the field as the WORKER's mistake; the strict schema
+    // would report it only as an unrecognized key.
+    //
+    // The list is the schema's own omit set (`WORKER_REFUSED_FINDING_VERDICTS`
+    // feeds both), so a verdict cannot be refused here and advertised there, or
+    // the reverse. `evidence_lane` is the load-bearing one: synthesis reads it
+    // to decide whether a `critical` was ever asked for an `evidence` array, so
+    // a supplied lane is a finding exempting ITSELF from the bar.
+    if (isRecord(finding)) {
+      for (const [verdict, reason] of Object.entries(
+        WORKER_REFUSED_FINDING_VERDICTS,
+      )) {
+        if (verdict in finding) {
+          return {
+            ok: false,
+            detail: `findings[${index}].${verdict}: ${reason}`,
+          };
+        }
+      }
     }
     // The STRICT WORKER PROJECTION — the same contract the dispatch prompt
     // renders (`findingContractPromptLines`). Parsing the lenient base schema
@@ -1018,6 +1024,12 @@ function toAuditResult(
   const findings = result.findings.map((finding) => ({
     ...finding,
     lens: finding.lens ?? binding.lens,
+    // The LANE stamp, at the ingest that knows which contract the finding
+    // arrived on — the per-file worker contract, since that is the only door
+    // this module parses. Stamped rather than left absent so a reader never has
+    // to decide whether an absent value is the per-file default or a finding
+    // that predates the field (see `FindingEvidenceLaneSchema`).
+    evidence_lane: "per-file-lane" as const,
   }));
   const parsed = AuditResultSchema.safeParse({
     task_id: binding.work_item_id,

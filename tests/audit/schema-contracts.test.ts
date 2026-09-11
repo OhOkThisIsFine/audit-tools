@@ -4,6 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  FindingSchema,
   LensSchema,
   SurfaceManifestSchema,
   GraphBundleSchema,
@@ -17,9 +18,11 @@ import { AuditPlanMetricsSchema } from "../../src/audit/types/reviewPlanning.js"
 import { RuntimeValidationTaskManifestSchema } from "../../src/audit/types/runtimeValidation.js";
 import { ExternalAnalyzerResultsSchema } from "../../src/shared/analyzers/types.js";
 import {
+  WORKER_REFUSED_FINDING_VERDICTS,
   WorkerAuditResultSchema,
   WorkerAuditResultsSchema,
   WorkerAuditTaskSchema,
+  WorkerFindingSchema,
 } from "../../src/audit/contracts/workerSchemas.js";
 import { StepArtifactSchema } from "../../src/audit/cli/steps.js";
 import { buildUnitManifest } from "../../src/audit/orchestrator/unitBuilder.js";
@@ -230,6 +233,46 @@ test("worker audit task enforces lens, priority, tags, inputs, and strict keys",
     "non-string input ref",
   );
   rejects(WorkerAuditTaskSchema, { ...base, unexpected: true }, "extra key");
+});
+
+test("the worker finding schema omits exactly the refused tool-owned verdicts (DAT-evidence-lane)", () => {
+  // Two facts about the same set of fields, stated in two places that must
+  // agree: the `.omit` (which makes a supplied key fail as an unrecognized key
+  // through `.strict()` → `additionalProperties: false`) and the refusal table
+  // `parseFindings` walks to NAME the field as the worker's mistake. A field in
+  // one and not the other is either silently stripped or advertised-then-
+  // refused, so the agreement is checked mechanically rather than remembered.
+  // Derived from the BASE schema's keys, not the projection's: an omitted field
+  // is absent from the projection's shape, so there is nothing there to see.
+  const omitted = Object.keys(FindingSchema.shape).filter(
+    (key) => !(key in WorkerFindingSchema.shape),
+  );
+  expect(
+    new Set(omitted),
+    "the omit list and the refusal table must be the same set",
+  ).toEqual(new Set(Object.keys(WORKER_REFUSED_FINDING_VERDICTS)));
+
+  // And each omitted field really is rejected when supplied — the property the
+  // omit exists for, not merely the shape of the schema object.
+  const validFinding = {
+    id: "F-1",
+    title: "A finding",
+    category: "correctness",
+    severity: "high" as const,
+    confidence: "high" as const,
+    lens: "correctness",
+    summary: "Something is wrong.",
+    affected_files: [{ path: "src/a.ts" }],
+    evidence: ["src/a.ts:1"],
+  };
+  accepts(WorkerFindingSchema, validFinding, "valid worker finding");
+  for (const verdict of Object.keys(WORKER_REFUSED_FINDING_VERDICTS)) {
+    rejects(
+      WorkerFindingSchema,
+      { ...validFinding, [verdict]: verdict === "grounding" ? { status: "grounded" } : "x" },
+      `worker finding supplying ${verdict}`,
+    );
+  }
 });
 
 test("worker audit task rejects nonpositive line range bounds", () => {

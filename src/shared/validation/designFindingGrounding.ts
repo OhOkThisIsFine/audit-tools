@@ -61,19 +61,35 @@ export function groundDesignFinding(
 }
 
 /**
- * Annotate each design finding with its grounding verdict. When no repo manifest
- * is available the findings cannot be grounded against a known file set, so they
- * are returned unchanged — better than false-quarantining everything on a missing
- * input.
+ * Annotate each design finding with its lane and its grounding verdict.
+ *
+ * The LANE stamp is unconditional and comes first: every finding reaching this
+ * function arrived on a design-review lane (that is what the call sites are —
+ * the contract, conceptual and legacy design-review ingests), and downstream
+ * synthesis reads it to decide whether the finding was ever ASKED for an
+ * `evidence` array before applying a bar that tests one. Folding the stamp in
+ * here rather than exposing a second function is deliberate — the lane is
+ * provenance the ingest owns, and a separate call is a call a future ingest site
+ * can forget.
+ *
+ * The GROUNDING verdict is conditional. When no repo manifest is available the
+ * findings cannot be grounded against a known file set, so they are returned
+ * lane-stamped but ungrounded — better than false-quarantining everything on a
+ * missing input, and better than losing the provenance that does not depend on
+ * it.
  */
 export function groundDesignFindings(
   findings: Finding[],
   repoManifest: { files?: Array<{ path: string }> } | undefined,
 ): Finding[] {
+  const marked = findings.map((finding) => ({
+    ...finding,
+    evidence_lane: "design-review-lane" as const,
+  }));
   const files = repoManifest?.files ?? [];
-  if (files.length === 0) return findings;
+  if (files.length === 0) return marked;
   const known = new Set(files.map((f) => normalizeRepoPath(f.path)));
-  return findings.map((finding) => ({
+  return marked.map((finding) => ({
     ...finding,
     grounding: groundDesignFinding(finding, known),
   }));

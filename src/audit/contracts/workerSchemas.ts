@@ -18,17 +18,45 @@ import { AuditCodeResponseSchema } from "./wrapperResponse.js";
 export const WorkerFindingLocationSchema =
   FindingLocationObjectSchema.strict().superRefine(refineFindingLocationLines);
 
-// `grounding` and `verification_status` are OMITTED, not merely left
-// un-extended: each is a TOOL-owned verdict — the re-check of the worker's quote
-// (computed at ingest by `ingestAuditHostResults`) and the defect-presence claim
-// derived at conceptual ingest — so the worker-facing contract must not
-// advertise either. `.extend` inherits the parent's optional field, and
-// `.strict()` rejects only UNKNOWN keys, so an inherited optional field would be
-// silently ACCEPTED: the omit is what makes the trailing `.strict()` — and the
-// generated `additionalProperties: false` — reject a supplied verdict.
+// `grounding`, `verification_status`, `severity_downgraded_from` and
+// `evidence_lane` are OMITTED, not merely left un-extended: each is a TOOL-owned
+// verdict — the re-check of the worker's quote (computed at ingest by
+// `ingestAuditHostResults`), the defect-presence claim derived at conceptual
+// ingest, the severity bar synthesis applies, and the lane synthesis reads to
+// decide whether a finding was ever asked for an `evidence` array — so the
+// worker-facing contract must not advertise any of them. `.extend` inherits the
+// parent's optional field, and `.strict()` rejects only UNKNOWN keys, so an
+// inherited optional field would be silently ACCEPTED: the omit is what makes
+// the trailing `.strict()` — and the generated `additionalProperties: false` —
+// reject a supplied verdict.
+/**
+ * The fields the per-file projection omits: the field name AND the sentence
+ * ingestion refuses it with, stated together because they are one fact about one
+ * field.
+ *
+ * The omission makes a supplied key fail (`.strict()` → `additionalProperties:
+ * false`), which reports a verdict as an UNRECOGNIZED KEY; the refusal in
+ * `parseFindings` (which walks this same table) is what tells the worker the
+ * field is not its to send, and why. Two lists would let a field be omitted from
+ * the schema and never refused, or refused with the wrong reason; the table and
+ * the `.omit` below are the same set, and `tests/audit/schema-contracts.test.ts`
+ * pins them together mechanically.
+ */
+export const WORKER_REFUSED_FINDING_VERDICTS = {
+  grounding: "grounding is tool-computed at ingest and must not be supplied",
+  verification_status:
+    "verification_status is tool-derived at ingest and must not be supplied",
+  severity_downgraded_from:
+    "severity_downgraded_from is tool-derived at ingest and must not be supplied",
+  evidence_lane:
+    "evidence_lane is tool-derived at ingest and must not be supplied",
+} as const;
+
 export const WorkerFindingSchema = FindingSchema.omit({
   grounding: true,
   verification_status: true,
+  severity_downgraded_from: true,
+  evidence_lane: true,
 })
   .extend({
     category: z.string().min(1),

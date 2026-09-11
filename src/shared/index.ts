@@ -88,6 +88,7 @@ export { computeContinuityScores, continuityMassForPaths } from "./continuitySco
 export type {
   FindingSeverity,
   FindingConfidence,
+  FindingEvidenceLane,
   FindingLocation,
   FindingGrounding,
   FindingVerificationStatus,
@@ -108,6 +109,7 @@ export type { FindingLocationLineIssue } from "./types/finding.js";
 export {
   FindingSeveritySchema,
   FindingConfidenceSchema,
+  FindingEvidenceLaneSchema,
   FindingLocationObjectSchema,
   FINDING_LINE_START_INTEGER_RULE,
   FINDING_LINE_END_INTEGER_RULE,

@@ -1,10 +1,11 @@
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import {
   mkdir,
   readFile,
+  rm,
   writeFile,
 } from "node:fs/promises";
 import { join, sep } from "node:path";
@@ -28,7 +29,10 @@ import {
   ArtifactSchemaVersionError,
   type ArtifactBundle,
 } from "../../src/audit/io/artifacts.js";
-import { buildToolingManifest } from "../../src/audit/io/toolingManifest.js";
+import {
+  buildToolingManifest,
+  hashToolingInputs,
+} from "../../src/audit/io/toolingManifest.js";
 import {
   buildRunId,
   ensureSupervisorDirs,
@@ -40,6 +44,47 @@ import type { ToolingManifest } from "../../src/audit/types/toolingManifest.js";
 import type { AuditTask } from "../../src/audit/types.js";
 
 import { withTempDir } from "./helpers/withTempDir.mjs";
+
+// ── The walk half of the list-then-hash race, made reachable ─────────────────
+//
+// A directory that vanishes between its parent's `readdir` and the `stat` (or
+// `readdir`) that examines it is the OTHER half of the race `hashFileIfPresent`
+// covers, and no real filesystem will lose that directory on cue. Both calls are
+// faulted for one magic directory name each and delegate to the real
+// implementation for everything else, so every other test in this file runs
+// against unchanged `node:fs/promises` — the same device
+// `fold-transaction-stage-absent.test.ts` uses for its EACCES.
+const VANISH_BY_STAT = "vanished-mid-walk-stat";
+const VANISH_BY_READDIR = "vanished-mid-walk-readdir";
+/** Not the race — a real permission defect, which the tolerance must not absorb. */
+const DENIED_BY_STAT = "denied-mid-walk-stat";
+
+function fsError(code: string, operation: string, path: string): NodeJS.ErrnoException {
+  const error = new Error(`${code}: ${operation} '${path}'`) as NodeJS.ErrnoException;
+  error.code = code;
+  return error;
+}
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const targets = (path: unknown, name: string): boolean =>
+    String(path).split(/[\\/]/).includes(name);
+  const stat = (async (path: string, options?: unknown) => {
+    if (targets(path, VANISH_BY_STAT)) throw fsError("ENOENT", "stat", path);
+    if (targets(path, DENIED_BY_STAT)) throw fsError("EACCES", "stat", path);
+    return await (actual.stat as (p: string, o?: unknown) => Promise<unknown>)(
+      path,
+      options,
+    );
+  }) as unknown as typeof actual.stat;
+  const readdir = (async (path: string, options?: unknown) => {
+    if (targets(path, VANISH_BY_READDIR)) throw fsError("ENOENT", "scandir", path);
+    return await (
+      actual.readdir as (p: string, o?: unknown) => Promise<unknown>
+    )(path, options);
+  }) as unknown as typeof actual.readdir;
+  return { ...actual, stat, readdir };
+});
 
 function stableToolingManifestValues(manifest?: ToolingManifest) {
   if (!manifest) return {};
@@ -146,6 +191,132 @@ test("artifact bundle definitions round-trip joined paths, falsey values, and cl
     const loadedAgain = await loadArtifactBundle(`${tempDir}${sep}`);
     expect(stableToolingManifestValues(loadedAgain.tooling_manifest)).toEqual(stableToolingManifestValues(loaded.tooling_manifest));
 
+  });
+});
+
+// ── buildToolingManifest: the list-then-hash race ────────────────────────────
+//
+// The walk lists a tree and then hashes each listed file. A concurrent `tsc`
+// re-emit can delete one in between; the read used to throw a bare ENOENT out
+// of `loadArtifactBundle`, so unrelated fold tests failed with a message
+// pointing at the manifest hasher instead of at the race. Driven through
+// `hashToolingInputs` against a temp root, with the read injected, because that
+// is the only way to reach BOTH branches deterministically — the real
+// `buildToolingManifest` walks a fixed root a test cannot race on purpose.
+
+test("buildToolingManifest: a file that vanishes between the walk's listing and its read is skipped and RECORDED, not fatal", async () => {
+  await withTempDir("audit-code-tooling-race-", async (tempDir: string) => {
+    const inputDir = join(tempDir, "tree");
+    await mkdir(inputDir, { recursive: true });
+    await writeFile(join(inputDir, "kept.txt"), "kept\n");
+    await writeFile(join(inputDir, "raced.txt"), "gone\n");
+
+    const readBytes = async (path: string): Promise<Buffer> => {
+      if (path.endsWith("raced.txt")) {
+        const error = new Error(
+          `ENOENT: no such file or directory, open '${path}'`,
+        ) as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        throw error;
+      }
+      return await readFile(path);
+    };
+
+    const { implementation_hash, inputs } = await hashToolingInputs(
+      tempDir,
+      ["tree"],
+      readBytes,
+    );
+
+    expect(inputs).toEqual(["tree"]);
+    expect(implementation_hash).toMatch(/^[a-f0-9]{64}$/);
+
+    // "Recorded" and "silently dropped" are DIFFERENT claims, and an assertion
+    // that cannot tell them apart guards neither: the original second arm here
+    // compared this digest against one over the same list where `raced.txt` had
+    // been rewritten EMPTY — a genuinely different file set that would differ
+    // even if the skip had been dropped on the floor. The digest that proves the
+    // recording is the one over the listing with the file DROPPED ENTIRELY: if
+    // the skip were silent, the two digests would be equal, because the same
+    // remaining bytes would be hashed under the same names.
+    await rm(join(inputDir, "raced.txt"));
+    const dropped = await hashToolingInputs(tempDir, ["tree"]);
+
+    expect(
+      dropped.implementation_hash,
+      "a RECORDED skip must hash differently from the listing with that file dropped — equal digests mean the vanished entry was dropped, not recorded",
+    ).not.toBe(implementation_hash);
+  });
+});
+
+test("buildToolingManifest: a directory that vanishes mid-walk is skipped and RECORDED, not fatal", async () => {
+  await withTempDir("audit-code-tooling-walk-race-", async (tempDir: string) => {
+    const inputDir = join(tempDir, "tree");
+    // One directory each for the two moments the walk can lose one: between the
+    // parent's `readdir` and this directory's `stat`, and between that `stat`
+    // and this directory's own `readdir`. Tolerating only the first (or only the
+    // read half) leaves the other fatal, which is the whole finding.
+    const byStat = join(inputDir, VANISH_BY_STAT);
+    const byReaddir = join(inputDir, VANISH_BY_READDIR);
+    await mkdir(byStat, { recursive: true });
+    await mkdir(byReaddir, { recursive: true });
+    await writeFile(join(byStat, "inside.txt"), "inside\n");
+    await writeFile(join(byReaddir, "inside.txt"), "inside\n");
+    await writeFile(join(inputDir, "kept.txt"), "kept\n");
+
+    const { implementation_hash, inputs } = await hashToolingInputs(tempDir, [
+      "tree",
+    ]);
+
+    expect(inputs).toEqual(["tree"]);
+    expect(implementation_hash).toMatch(/^[a-f0-9]{64}$/);
+
+    // Same proof as the read half: a RECORDED skip hashes differently from the
+    // listing with those entries simply not present. If the walk dropped them
+    // silently, the two digests would agree.
+    await rm(byStat, { recursive: true });
+    await rm(byReaddir, { recursive: true });
+    const dropped = await hashToolingInputs(tempDir, ["tree"]);
+
+    expect(
+      dropped.implementation_hash,
+      "a directory lost mid-walk must be recorded in the hash input, not silently missing from it",
+    ).not.toBe(implementation_hash);
+  });
+});
+
+test("buildToolingManifest: a walk failure that is NOT a missing entry still throws", async () => {
+  await withTempDir("audit-code-tooling-walk-race-", async (tempDir: string) => {
+    const inputDir = join(tempDir, "tree");
+    await mkdir(join(inputDir, DENIED_BY_STAT), { recursive: true });
+    await writeFile(join(inputDir, "kept.txt"), "kept\n");
+
+    // The tolerance is scoped to the missing-entry race: a permission error is a
+    // real defect, and absorbing it as "the tree changed under us" would hide a
+    // manifest that silently hashed a subtree it was never allowed to read.
+    await assert.rejects(
+      () => hashToolingInputs(tempDir, ["tree"]),
+      /EACCES/,
+    );
+  });
+});
+
+test("buildToolingManifest: a read failure that is NOT a missing file still throws", async () => {
+  await withTempDir("audit-code-tooling-race-", async (tempDir: string) => {
+    const inputDir = join(tempDir, "tree");
+    await mkdir(inputDir, { recursive: true });
+    await writeFile(join(inputDir, "kept.txt"), "kept\n");
+
+    const readBytes = async (): Promise<Buffer> => {
+      const error = new Error("EACCES: permission denied") as NodeJS.ErrnoException;
+      error.code = "EACCES";
+      throw error;
+    };
+
+    await assert.rejects(
+      () => hashToolingInputs(tempDir, ["tree"], readBytes),
+      /EACCES/,
+    );
   });
 });
 

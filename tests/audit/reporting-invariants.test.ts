@@ -23,6 +23,9 @@ const {
   applyNarrative,
   renderAuditReportMarkdown,
   normalizeExistingFindingsReport,
+  escapeControlCharacters,
+  hasSubstantiveEvidence,
+  CRITICAL_EVIDENCE_BAR,
   AUDIT_FINDINGS_CONTRACT_VERSION,
 } = await import("../../src/audit/reporting/synthesis.js");
 const buildAuditReportModel = (
@@ -145,6 +148,443 @@ test("INV-01: narrative-enriched render finding ids still match the JSON contrac
   }
   // The finding count must still match.
   expect(markdown, "enriched markdown summary finding count must match JSON contract").toMatch(new RegExp(`- Findings: ${enriched.summary.finding_count}`));
+});
+
+// ── The `critical` evidence bar: DECIDED and recorded ────────────────────────
+
+test("CRITICAL_EVIDENCE_BAR states the decision as a value, not an implication", () => {
+  // The 2026-08-06 open question ("should synthesis demand mechanism-grounded,
+  // not flow-existence, evidence for critical?") is answered by the bar's own
+  // doc comment in synthesis.ts. This pins the ANSWER as data so a future run
+  // that finds 0-of-N criticals surviving reads the decision instead of
+  // re-opening it — and so a silent change to the bar is a red test.
+  expect(CRITICAL_EVIDENCE_BAR).toBe("substantive-evidence");
+});
+
+test("a critical with only blank evidence is downgraded to high, never silently kept", () => {
+  const model = buildAuditReportModel({
+    results: [
+      wrapResult([
+        makeFinding({
+          id: "F-BLANK",
+          title: "Flow reaches untrusted input",
+          lens: "security",
+          severity: "critical",
+          evidence: ["   "],
+        }),
+      ]),
+    ],
+  });
+  const report = buildAuditFindingsReport(model);
+
+  // Synthesis re-keys findings to content-addressed ids, so resolve by position
+  // rather than the fixture's local id.
+  expect(report.findings).toHaveLength(1);
+  expect(
+    report.findings[0]?.severity,
+    "a critical whose evidence is blank makes no claim the tool can find, so it cannot stand as critical",
+  ).toBe("high");
+  // Downgraded, never dropped: the finding is still admitted and its breakdown
+  // still counts it.
+  expect(report.summary.severity_breakdown.high).toBe(1);
+  expect(report.summary.severity_breakdown.critical ?? 0).toBe(0);
+  // The move is RECORDED. Without this the tool-moved `high` is byte-identical
+  // to a judge-authored `high` in audit-findings.json — and so is every
+  // work_blocks.max_severity computed from it — which is the qualification the
+  // bar exists to make visible.
+  expect(
+    report.findings[0]?.severity_downgraded_from,
+    "the severity the judge claimed must survive the downgrade",
+  ).toBe("critical");
+  // The work block reads the downgraded severity, so the partition and the
+  // finding agree about what this finding is.
+  expect(report.work_blocks[0]?.max_severity).toBe("high");
+  // A born-high finding carries no such field: absence means "not re-graded",
+  // never "re-graded from nothing".
+  const bornHigh = buildAuditFindingsReport(
+    buildAuditReportModel({
+      results: [
+        wrapResult([
+          makeFinding({
+            id: "F-BORN-HIGH",
+            title: "Born high, never re-graded",
+            lens: "security",
+            severity: "high",
+            evidence: ["   "],
+          }),
+        ]),
+      ],
+    }),
+  );
+  expect(bornHigh.findings[0]?.severity_downgraded_from).toBeUndefined();
+});
+
+test("a design-review critical is NOT re-graded: its contract never carries the field the bar tests", () => {
+  // The design-review lanes have no `evidence` field in their contract
+  // (`findingsEnvelopeExample`) — their evidence channel is `affected_files`,
+  // certified by `groundDesignFinding`. Grading them against `evidence` read
+  // their silence as a failed claim, so the same critical rendered `critical`
+  // through the per-file lane and `high` through this one.
+  const designFinding = makeFinding({
+    id: "F-DESIGN",
+    title: "The charter boundary is drawn in the wrong layer",
+    lens: "architecture",
+    severity: "critical",
+    evidence: [],
+  });
+  // The lane marker is what ingest stamps (`groundDesignFindings`); the fixture
+  // sets it the same way so the test pins the READ, not the ingest plumbing.
+  const marked: Finding = { ...designFinding, evidence_lane: "design-review-lane" };
+  const model = buildAuditReportModel({
+    // No per-file results at all: the design-review lane is the ONLY producer,
+    // which is the configuration the bar has to leave alone.
+    results: [],
+    designAssessment: {
+      generated_at: "2026-09-10T00:00:00.000Z",
+      findings: [],
+      contract_findings: [marked],
+      contract_reviewed: true,
+    },
+  });
+  const report = buildAuditFindingsReport(model);
+
+  expect(report.findings).toHaveLength(1);
+  expect(
+    report.findings[0]?.severity,
+    "a design-review critical was never asked for evidence, so it cannot be downgraded for lacking it",
+  ).toBe("critical");
+  expect(
+    report.findings[0]?.severity_downgraded_from,
+    "nothing was re-graded, so nothing may claim it was",
+  ).toBeUndefined();
+  // The marker is provenance, not a verdict — it must survive synthesis.
+  expect(report.findings[0]?.evidence_lane).toBe("design-review-lane");
+});
+
+test("the explicit per-file-lane stamp is graded by the bar — a lane is not an escape hatch", () => {
+  // Both ingests STAMP a lane (`toAuditResult` writes `per-file-lane`), so the
+  // bar reads a stamped value in the ordinary case, not an absent one. The
+  // stamp is set on the RESULT, before the model builder runs — the same order
+  // ingest produces — so this pins the bar's read rather than re-stamping an
+  // array it has already been applied to.
+  const model = buildAuditReportModel({
+    results: [
+      wrapResult([
+        makeFinding({
+          id: "F-STAMPED-PERFILE",
+          title: "Stamped, blank evidence, still critical",
+          lens: "security",
+          severity: "critical",
+          evidence: ["  "],
+          evidence_lane: "per-file-lane",
+        }),
+      ]),
+    ],
+  });
+  const report = buildAuditFindingsReport(model);
+
+  expect(report.findings[0]?.evidence_lane).toBe("per-file-lane");
+  expect(
+    report.findings[0]?.severity,
+    "an explicit per-file-lane stamp names the lane the bar DOES grade",
+  ).toBe("high");
+  expect(report.findings[0]?.severity_downgraded_from).toBe("critical");
+});
+
+test("a per-file critical with blank evidence is re-graded even beside a design-review critical", () => {
+  // The two lanes in ONE array is the shape that made the defect visible: a
+  // lane-blind bar moved one and left the other, so two identically-severe
+  // claims rendered differently for a reason neither finding stated.
+  const model = buildAuditReportModel({
+    results: [
+      wrapResult([
+        makeFinding({
+          id: "F-PERFILE-BLANK",
+          title: "Unbounded retry loop in the fetch helper",
+          category: "reliability",
+          lens: "correctness",
+          severity: "critical",
+          affected_files: [{ path: "src/net/fetch.ts", line_start: 12 }],
+          evidence: ["  "],
+        }),
+      ]),
+    ],
+    designAssessment: {
+      generated_at: "2026-09-10T00:00:00.000Z",
+      findings: [],
+      conceptual_reviewed: true,
+      conceptual_findings: [
+        {
+          ...makeFinding({
+            id: "F-CONCEPT",
+            title: "The persistence boundary belongs one layer up the goal graph",
+            category: "structural_risk",
+            lens: "architecture",
+            severity: "critical",
+            affected_files: [{ path: "src/store/persist.ts" }],
+            evidence: [],
+          }),
+          evidence_lane: "design-review-lane",
+        },
+      ],
+    },
+  });
+  const report = buildAuditFindingsReport(model);
+
+  expect(report.findings).toHaveLength(2);
+  const byLane = report.findings.map((finding) => ({
+    lane: finding.evidence_lane ?? "per-file-lane",
+    severity: finding.severity,
+    from: finding.severity_downgraded_from,
+  }));
+  expect(byLane).toContainEqual({ lane: "per-file-lane", severity: "high", from: "critical" });
+  expect(byLane).toContainEqual({
+    lane: "design-review-lane",
+    severity: "critical",
+    from: undefined,
+  });
+  // And the report says so, in the summary the reader actually reads.
+  const markdown = renderAuditReportMarkdown(report);
+  expect(markdown).toContain("Severity re-graded by the tool:");
+});
+
+test("a re-normalized report's disclosure agrees with the record it renders", () => {
+  // `cmdResynthesize` reads a PROMOTED `audit-findings.json` and renders it
+  // through `normalizeExistingFindingsReport` — never through the model builder.
+  // The disclosure line used to be gated on "a critical exists", so a record
+  // promoted before the bar existed (or written by an older contract version)
+  // rendered a claim that the bar was enforced beside a critical it had never
+  // been applied to. The JSON round-trip below is that record: a serialized
+  // report carries no in-memory marker, exactly like the file on disk.
+  const model = buildAuditReportModel({
+    results: [
+      wrapResult([
+        makeFinding({
+          id: "F-BLANK",
+          title: "Blank-evidence critical reaching the promoted record",
+          lens: "security",
+          severity: "critical",
+          evidence: ["   "],
+        }),
+      ]),
+    ],
+  });
+  const recorded = JSON.parse(
+    JSON.stringify(buildAuditFindingsReport(model)),
+  ) as ReturnType<typeof buildAuditFindingsReport>;
+  // Restore what an un-barred record would carry: the judge's claimed severity
+  // and no downgrade record. This is the input the resynthesize path sees.
+  delete recorded.findings[0]!.severity_downgraded_from;
+  recorded.findings[0]!.severity = "critical";
+  recorded.summary.severity_breakdown = { critical: 1 };
+
+  const normalized = normalizeExistingFindingsReport(recorded);
+  const markdown = renderAuditReportMarkdown(normalized);
+
+  // The bar ran on the path that does not go through the model builder...
+  expect(
+    normalized.findings[0]?.severity,
+    "the normalization boundary must apply the bar, not only the model builder",
+  ).toBe("high");
+  expect(normalized.findings[0]?.severity_downgraded_from).toBe("critical");
+  expect(normalized.summary.severity_breakdown).toEqual({ high: 1 });
+
+  // ...so the record and the render agree: whenever the report tells the reader
+  // criticals are held to the bar, no un-barred critical is left in the record.
+  const unbarred = normalized.findings.some(
+    (finding) =>
+      finding.severity === "critical" && !hasSubstantiveEvidence(finding),
+  );
+  if (markdown.includes("Critical severity is judge-authored")) {
+    expect(
+      unbarred,
+      "the report claims the bar is enforced, so it must not print an un-barred critical",
+    ).toBe(false);
+  }
+  expect(markdown).toContain("Severity re-graded by the tool:");
+});
+
+test("a re-normalized report that cleared the bar still states the bar ran", () => {
+  // The other half of the same gate: the sentence is about the bar having been
+  // APPLIED, not about it having changed something. A critical that carries
+  // substantive evidence is exactly the critical the sentence qualifies, so a
+  // report that only disclosed re-grades would go silent on the case the reader
+  // most needs the qualification for.
+  const model = buildAuditReportModel({
+    results: [
+      wrapResult([
+        makeFinding({
+          id: "F-REAL",
+          title: "Unvalidated input reaches the query builder",
+          lens: "security",
+          severity: "critical",
+          evidence: ["src/db/query.ts:42 interpolates req.body.id"],
+        }),
+      ]),
+    ],
+  });
+  const recorded = JSON.parse(
+    JSON.stringify(buildAuditFindingsReport(model)),
+  ) as ReturnType<typeof buildAuditFindingsReport>;
+  const normalized = normalizeExistingFindingsReport(recorded);
+  const markdown = renderAuditReportMarkdown(normalized);
+
+  expect(normalized.findings[0]?.severity).toBe("critical");
+  expect(markdown).toContain("Critical severity is judge-authored");
+  // ...and nothing was re-graded, so nothing claims to have been.
+  expect(normalized.findings[0]?.severity_downgraded_from).toBeUndefined();
+  expect(markdown).not.toContain("Severity re-graded by the tool:");
+});
+
+test("a report that never went through the bar does not claim it ran", () => {
+  // A hand-assembled record — no model builder, no normalization — with a
+  // critical that has no evidence at all. The render must not assert the bar was
+  // enforced over it: claiming a check that did not run is worse than silence,
+  // and this is the arm that makes the disclosure a statement about the artifact
+  // rather than about the reader's expectations.
+  const recorded = JSON.parse(
+    JSON.stringify(
+      buildAuditFindingsReport(
+        buildAuditReportModel({
+          results: [
+            wrapResult([
+              makeFinding({
+                id: "F-RAW",
+                title: "Assembled by hand, never barred",
+                lens: "security",
+                severity: "critical",
+                evidence: ["  "],
+              }),
+            ]),
+          ],
+        }),
+      ),
+    ),
+  ) as ReturnType<typeof buildAuditFindingsReport>;
+  delete recorded.findings[0]!.severity_downgraded_from;
+  recorded.findings[0]!.severity = "critical";
+
+  const markdown = renderAuditReportMarkdown(recorded);
+  expect(recorded.findings[0]?.severity).toBe("critical");
+  expect(markdown).not.toContain("Critical severity is judge-authored");
+});
+
+test("re-applying the bar is idempotent: a re-graded finding is not re-graded again", () => {
+  // `normalizeExistingFindingsReport` runs the bar over a record the model
+  // builder may already have barred, so a non-idempotent bar would compound —
+  // or, worse, treat its own output as a judge-authored critical and move it a
+  // second time.
+  const model = buildAuditReportModel({
+    results: [
+      wrapResult([
+        makeFinding({
+          id: "F-BLANK",
+          title: "Blank-evidence critical",
+          lens: "security",
+          severity: "critical",
+          evidence: [""],
+        }),
+      ]),
+    ],
+  });
+  const once = buildAuditFindingsReport(model);
+  const twice = normalizeExistingFindingsReport(once);
+
+  expect(twice.findings[0]?.severity).toBe("high");
+  expect(twice.findings[0]?.severity_downgraded_from).toBe("critical");
+  expect(twice.summary.severity_breakdown).toEqual({ high: 1 });
+  expect(twice).toEqual(once);
+});
+
+test("a critical with substantive evidence stands, and the render names the bar", () => {
+  const model = buildAuditReportModel({
+    results: [
+      wrapResult([
+        makeFinding({
+          id: "F-REAL",
+          title: "Unvalidated input reaches the query builder",
+          lens: "security",
+          severity: "critical",
+          evidence: ["src/db/query.ts:42 interpolates req.body.id into the SQL string"],
+        }),
+      ]),
+    ],
+  });
+  const report = buildAuditFindingsReport(model);
+  const markdown = renderAuditReportMarkdown(report);
+
+  expect(
+    report.findings[0]?.severity,
+    "substantive evidence clears the bar — the tool does not grade the mechanism claim",
+  ).toBe("critical");
+  // The reader must be able to tell a tool-verified claim from a judge's: the
+  // bar is only honest if the report says which one a critical is.
+  expect(markdown).toContain("Critical severity is judge-authored");
+  expect(markdown).toContain(CRITICAL_EVIDENCE_BAR);
+});
+
+test("hasSubstantiveEvidence is a content test, not an array-length test", () => {
+  // The schema already requires a non-empty evidence array, so a length check
+  // would be dead code; the hole is the array that exists to satisfy it.
+  expect(hasSubstantiveEvidence({ evidence: [""] })).toBe(false);
+  expect(hasSubstantiveEvidence({ evidence: ["\t"] })).toBe(false);
+  expect(hasSubstantiveEvidence({ evidence: [] })).toBe(false);
+  expect(hasSubstantiveEvidence({})).toBe(false);
+  expect(hasSubstantiveEvidence({ evidence: ["x"] })).toBe(true);
+});
+
+// ── The rendered deliverable carries no raw C0 control byte ──────────────────
+
+// Built from code points, never typed as a literal: a raw control byte in THIS
+// file would make git/grep treat the test source as binary — the same trap the
+// production fix exists to close, one level up.
+const BACKSPACE = String.fromCharCode(0x08);
+const BELL = String.fromCharCode(0x07);
+const NUL = String.fromCharCode(0x00);
+
+test("the render re-escapes a C0 control byte instead of emitting it raw", () => {
+  // The live failure: a worker summary carrying a JSON-escaped backspace (a
+  // mangled regex word boundary). It parses, it stores (JSON escapes it), and
+  // it used to land as a literal 0x08 in audit-report.md — where
+  // check:control-bytes correctly reds the build. The finding is contract-valid
+  // either way, so the render step is the only place this can be guaranteed.
+  const model = buildAuditReportModel({
+    results: [
+      wrapResult([
+        makeFinding({
+          id: "F-CTRL",
+          title: `Boundary check${BACKSPACE}broken`,
+          lens: "correctness",
+          summary: `The pattern uses ${BACKSPACE} as a word boundary.`,
+          evidence: [`leading ${BACKSPACE} in the regex`],
+        }),
+      ]),
+    ],
+  });
+  const markdown = renderAuditReportMarkdown(buildAuditFindingsReport(model));
+
+  // No byte below 0x20 except tab / LF / CR — the byte gate's own permitted set.
+  const offending = [...markdown]
+    .map((character) => character.codePointAt(0)!)
+    .filter(
+      (code) => code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d,
+    );
+  expect(
+    offending.map((code) => `0x${code.toString(16).padStart(2, "0")}`),
+    "a contract-valid finding must never render a raw control byte into the tracked report",
+  ).toEqual([]);
+
+  // Re-escaped, not deleted: the escape is readable and the text is preserved,
+  // so a reader can still see the worker's mangled boundary.
+  expect(markdown).toContain("\\u0008");
+  expect(markdown).toContain("Boundary check\\u0008broken");
+});
+
+test("escapeControlCharacters preserves tab, LF and CR — the bytes markdown legitimately uses", () => {
+  expect(escapeControlCharacters("a\tb\nc\rd")).toBe("a\tb\nc\rd");
+  expect(escapeControlCharacters(`bell${BELL}null${NUL}`)).toBe(
+    "bell\\u0007null\\u0000",
+  );
 });
 
 // ── INV-audit-reporting-04: applyNarrative sanitizes duplicate finding_ids ───

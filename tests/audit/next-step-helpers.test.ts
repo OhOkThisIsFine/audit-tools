@@ -568,7 +568,9 @@ await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} 
 
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
     expect(written.contract_reviewed).toBe(true);
-    expect(written.contract_findings).toEqual([{ id: "DR-001", title: "contract finding" }]);
+    expect(written.contract_findings).toEqual([
+      { id: "DR-001", title: "contract finding", evidence_lane: "design-review-lane" },
+    ]);
     // Obligation credited (merged), so no quarantine and nothing pending.
     expect(await quarantinedFiles(artifactsDir)).toEqual([]);
     expect(written.rejected_submissions ?? []).toEqual([]);
@@ -682,7 +684,9 @@ await test("handleDesignReviewBranch quarantines a syntactically malformed conce
     // The valid contract lane merged and PERSISTED.
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
     expect(written.contract_reviewed).toBe(true);
-    expect(written.contract_findings).toEqual([{ id: "DR-101", title: "contract finding" }]);
+    expect(written.contract_findings).toEqual([
+      { id: "DR-101", title: "contract finding", evidence_lane: "design-review-lane" },
+    ]);
 
     // The malformed conceptual lane survives, verbatim, under quarantine/.
     const quarantined = await quarantinedFiles(artifactsDir);

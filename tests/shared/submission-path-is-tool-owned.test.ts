@@ -311,6 +311,21 @@ function auditManifest(taskIds: readonly string[]): AuditTask[] {
   }));
 }
 
+/** One contract-valid per-file finding, for the tests that need a non-empty set. */
+function aFindng(): Record<string, unknown> {
+  return {
+    id: "F-1",
+    title: "A finding",
+    category: "correctness",
+    severity: "high",
+    confidence: "high",
+    lens: "correctness",
+    summary: "Something is wrong.",
+    affected_files: [{ path: AUDITED_FILE }],
+    evidence: [`${AUDITED_FILE}:1`],
+  };
+}
+
 function auditSubmission(
   item: AuditFixture["items"][number],
   overrides: Readonly<Record<string, unknown>> = {},
@@ -518,6 +533,61 @@ describe("the audit accepted-results ledger", () => {
     expect(
       (JSON.parse(await readFile(fixture.acceptedPath, "utf8")) as unknown[]).length,
     ).toBe(1);
+  });
+
+  it("stamps the per-file LANE at ingest, so the finding's provenance is tool-authored", async () => {
+    // `evidence_lane` decides whether synthesis's critical-evidence bar applies
+    // to a finding at all, so it is provenance and must be the TOOL's to write.
+    // Absence also reads as "per-file" downstream — but absence cannot be told
+    // apart from a record written before the field existed, and the whole point
+    // of the stamp is that a reader never has to make that call.
+    const fixture = await auditFixture(["T1"]);
+    const item = fixture.items[0]!;
+    await submit(fixture, item, auditSubmission(item, { findings: [aFindng()] }));
+
+    const summary = await ingestAuditHostResults({
+      root: fixture.root,
+      artifactsDir: fixture.artifactsDir,
+      runId: AUDIT_RUN_ID,
+    auditTasks: auditManifest(fixture.items.map((itemItem) => itemItem.id)),
+      });
+    expect(summary.accepted_count).toBe(1);
+
+    // `host-accepted-results.json` is the accepted `AuditResult` array — the
+    // persisted, downstream-facing record, which is what synthesis reads.
+    const accepted = JSON.parse(
+      await readFile(fixture.acceptedPath, "utf8"),
+    ) as { findings?: { evidence_lane?: string }[] }[];
+    const findings = accepted.flatMap((result) => result.findings ?? []);
+    expect(findings.length).toBeGreaterThan(0);
+    expect(
+      findings.map((finding) => finding.evidence_lane),
+      "the per-file ingest must stamp its own lane, not leave it to be inferred",
+    ).toEqual(findings.map(() => "per-file-lane"));
+  });
+
+  it("refuses a submission that supplies the tool-derived evidence_lane", async () => {
+    // The same door as `grounding` below, with the BAR rather than a verdict on
+    // the line: a finding that could name its own lane could name the one the
+    // critical-evidence bar does not apply to, and so exempt itself.
+    const fixture = await auditFixture(["T1"]);
+    const item = fixture.items[0]!;
+    const finding = aFindng() as Record<string, unknown>;
+    finding.evidence_lane = "design-review-lane";
+    await submit(fixture, item, auditSubmission(item, { findings: [finding] }));
+
+    const summary = await ingestAuditHostResults({
+      root: fixture.root,
+      artifactsDir: fixture.artifactsDir,
+      runId: AUDIT_RUN_ID,
+    auditTasks: auditManifest(fixture.items.map((itemItem) => itemItem.id)),
+      });
+    expect(summary.accepted_count).toBe(0);
+    const issue = summary.issues[0];
+    expect(issue?.code).toBe("submission_contract_invalid");
+    expect(issue?.message).toContain(
+      "findings[0].evidence_lane: evidence_lane is tool-derived at ingest and must not be supplied",
+    );
   });
 
   it("is idempotent: a re-ingest accepts nothing new and leaves the ledger byte-identical", async () => {

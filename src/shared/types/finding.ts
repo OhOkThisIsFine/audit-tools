@@ -29,6 +29,32 @@ export type FindingSeverity = z.infer<typeof FindingSeveritySchema>;
 export const FindingConfidenceSchema = z.enum(["high", "medium", "low"]);
 export type FindingConfidence = z.infer<typeof FindingConfidenceSchema>;
 
+/**
+ * Which producer CONTRACT a finding came from, named by the one difference that
+ * matters downstream: whether that contract carries an `evidence` array.
+ *
+ * The two lanes do not share an evidence channel, and the asymmetry is by
+ * design. The per-file worker contract requires `evidence` (`WorkerFindingSchema`
+ * enforces `min(1)`); the design-review lanes do not — their contract lists no
+ * `evidence` at all (`findingsEnvelopeExample`) and their evidence channel is
+ * `affected_files`, certified by `groundDesignFinding`. A consumer that tests
+ * `evidence` therefore tests a field half its inputs were never asked for, and
+ * reads the other half's silence as a failed claim.
+ *
+ * TOOL-DERIVED at each producer's ingest (`markDesignEvidenceLane` for the
+ * design-review lanes, the field's default for per-file results) — never
+ * host-supplied, which is why every submission schema omits it. It is recorded
+ * rather than inferred at the reader because by the time a finding reaches
+ * synthesis the producer is no longer recoverable from its content: findings
+ * from both lanes sit in one array, and any content heuristic would be
+ * inference dressed as provenance.
+ */
+export const FindingEvidenceLaneSchema = z.enum([
+  "per-file-lane",
+  "design-review-lane",
+]);
+export type FindingEvidenceLane = z.infer<typeof FindingEvidenceLaneSchema>;
+
 export const FindingLocationObjectSchema = z.object({
   path: z.string(),
   line_start: z.number().int().min(1).optional(),
@@ -231,6 +257,22 @@ export const FindingSchema = z.object({
   title: z.string(),
   category: z.string(),
   severity: FindingSeveritySchema,
+  /**
+   * The severity the tool moved this finding DOWN from, when a synthesis-time
+   * bar re-graded it (audit's `CRITICAL_EVIDENCE_BAR`). Present ONLY on a
+   * downgrade, and written by the tool that performed it.
+   *
+   * Why a sibling field rather than the severity alone: without it a
+   * tool-moved `high` is byte-identical to a judge-authored `high`, so
+   * `audit-findings.json` — and any reader of `work_blocks.max_severity` —
+   * cannot tell a claim the tool refused to let stand from one the judge never
+   * made. The severity is still the reported truth; this records that it was
+   * CHANGED and from what, so the deliverable states the qualification instead
+   * of hiding it in a diff nobody kept.
+   */
+  severity_downgraded_from: FindingSeveritySchema.optional().describe(
+    "Tool-derived: the severity this finding was downgraded FROM by a synthesis bar. Omit — never supply — on a finding you did not re-grade.",
+  ),
   confidence: FindingConfidenceSchema,
   /** Audit lens; the auditor narrows this to its `Lens` union. */
   lens: z.string(),
@@ -266,6 +308,15 @@ export const FindingSchema = z.object({
    * grounding pass runs at ingest.
    */
   grounding: FindingGroundingSchema.optional(),
+  /**
+   * The producer contract this finding arrived on — see
+   * {@link FindingEvidenceLaneSchema}. Absent on a per-file result (the lane
+   * whose contract requires `evidence`), so its absence is the default rather
+   * than a claim; stamped `design-review-lane` at that lane's ingest. Read by
+   * synthesis's `CRITICAL_EVIDENCE_BAR`, which applies only to the lane whose
+   * contract carries the field it tests.
+   */
+  evidence_lane: FindingEvidenceLaneSchema.optional(),
   /**
    * Whether the defect this finding names is present at HEAD. TOOL-DERIVED at
    * conceptual ingest from the judge's per-candidate verification claims — host

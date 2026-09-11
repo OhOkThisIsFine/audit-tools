@@ -32,6 +32,13 @@ export interface FindingBadge {
   summary?: string;
   affected_files?: ReadonlyArray<FindingFileRef>;
   evidence?: readonly string[];
+  /**
+   * The severity the tool re-graded this finding DOWN from, when a synthesis bar
+   * moved it. Optional on this read shape (like every other advisory field here)
+   * so a producer that has no such verdict — the remediator's review items, an
+   * older artifact — still satisfies it; absent means "not re-graded".
+   */
+  severity_downgraded_from?: string;
   grounding?: { status: string; reason?: string };
   /** Whether the named defect is present at HEAD (conceptual findings only). */
   verification_status?: string;
@@ -162,7 +169,16 @@ export function renderFindingBadgeBody(
   } = opts;
 
   const lines: string[] = [];
-  lines.push(`- Severity: ${finding.severity}`);
+  // `severity` above is the reported truth; this line records that the TOOL moved
+  // it. Without it a downgraded finding renders exactly like a born-high one, so
+  // a reader of the deliverable could not tell a claim the tool refused to let
+  // stand from one the judge never made — the same confusion the JSON field
+  // exists to end, one surface over.
+  lines.push(
+    finding.severity_downgraded_from === undefined
+      ? `- Severity: ${finding.severity}`
+      : `- Severity: ${finding.severity} (re-graded by the tool from ${finding.severity_downgraded_from})`,
+  );
   if (finding.confidence) {
     lines.push(`- Confidence: ${finding.confidence}`);
   }
