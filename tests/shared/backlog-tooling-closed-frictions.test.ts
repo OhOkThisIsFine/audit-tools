@@ -53,6 +53,40 @@ const CLOSED_BY_TOOLING = [
     },
     restatement: /refused a second\s*(?:\r?\n\s*)?`?vitest/i,
   },
+  {
+    // "dead weight in the baseline keeps the gate from meaning anything, and nothing
+    // says so." Detection is the comparison of the RECORDED state against the corpus
+    // it claims to describe; report is what the refusal prints. The guard is a gate
+    // script rather than a hook, and the two-evidence rule reads it the same way.
+    friction: "the backlog size baseline holding amnesties for entries that no longer exist, capped at a size the file had long fallen under",
+    guard: {
+      file: join("scripts", "check-backlog-budget.mjs"),
+      evidence: [/vanishedAmnesty/, /only bounds a file that is OVER the budget/],
+    },
+    restatement: /amnesties? (?:for|naming) (?:entries|an entry) that (?:were|was|no longer)/i,
+  },
+  {
+    // "the backlog's gates fire only at commit, so the writer sees the refusal long
+    // after the text is cold." Detection is the hook's write-time draw; report is the
+    // advisory it prints, which names each gate's own fix hint.
+    friction: "the backlog gates running only at commit, so a refusal reached a writer long after the text was cold",
+    guard: {
+      file: join(".claude", "hooks", "async-typecheck.mjs"),
+      evidence: [/runBacklogWriteTimeGates/, /\[ADVISORY\]/],
+    },
+    restatement: /gates? (?:run|fire|reach)(?:s|ing)? only at commit/i,
+  },
+  {
+    // The friction itself (the tags were outside the vocabulary) is closed by the
+    // gate; what this row guards against is the SUBSYSTEM drifting apart again. The
+    // two halves: the gate reads the generated vocabulary, and it refuses.
+    friction: "the backlog's `friction:` tags carrying values the canonical vocabulary does not hold, with nothing reading them",
+    guard: {
+      file: join("scripts", "check-backlog-friction-tags.mjs"),
+      evidence: [/friction-categories\.generated\.mjs/, /friction category/],
+    },
+    restatement: /tags? (?:are|is) unchecked|not in the canonical\s+vocabulary|Tags are UNCHECKED/i,
+  },
 ];
 
 /** Every backlog section file, read once. */

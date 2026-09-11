@@ -11,28 +11,8 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **The backlog's `friction:` tags are unchecked, and seven of them are not in the canonical
-  vocabulary (2026-08-30, low, friction: tool_should_decide).** `FRICTION_CATEGORIES` names exactly
-  three — `ambiguous_direction`, `tool_should_decide`, `inefficient_feeding` — and
-  `check:friction-categories` only reconciles the generated module against its TypeScript source.
-  Nothing reads the tags in `docs/backlog/`, so `false_green`, `false_red`, `hermeticity`,
-  `inefficient`, `tool`, `tooling_gap` and `ambiguous` have accumulated there, several of them
-  synonyms of each other and of the canonical three. The tag is the field a closeout or a sweep
-  would group by, so an unchecked vocabulary makes any such grouping silently incomplete.
-  **Property:** a `friction:` tag in the backlog is drawn from the same canonical list the renderer
-  uses, and a tag outside it is red.
-
-- **`check:backlog-budget` reports the overage but nothing about what to cut, so satisfying it is a
-  guess-and-rerun loop (2026-08-30, low, friction: inefficient_feeding).** Editing one already-near-
-  budget entry cost SEVEN full re-runs this lap: the gate prints the entry's total bytes and the
-  ceiling, so each attempt is a blind trim followed by a whole-file re-scan, and the last three
-  rounds moved 11, 2 and 1 bytes. It already knows the per-entry byte count and the recorded
-  baseline, so it can report how much THIS edit added and which of the entry's own paragraphs are
-  largest — the two facts that collapse the loop into one edit. **Property:** the refusal carries
-  enough to act on in a single pass, not only the fact that a limit was crossed.
-
 - **`question-philosophy-gate` challenges the `/start-lap` approval question, which a skill MANDATES
-  and philosophy cannot settle (2026-08-30, low, friction: false_red).** Step 8 of `/start-lap`
+  and philosophy cannot settle (2026-08-30, low, friction: tool_should_decide).** Step 8 of `/start-lap`
   requires ending the turn with a direct request to approve the lap plan. The gate fired on it and
   asked whether a standing conviction already answers it. None can: the question asks for scope
   AUTHORIZATION, not for how to proceed, and the brief it prints is about the latter. The gate is
@@ -44,7 +24,7 @@
   that has not begun, and the only question at that boundary is the approval request.
 
 - **Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer
-  unlocated (2026-08-29, low, friction: hermeticity).** Both zero bytes, timestamped during
+  unlocated (2026-08-29, low, friction: tool_should_decide).** Both zero bytes, timestamped during
   targeted vitest invocations in a live session, deleted by hand; the suite's added-root-entry
   teardown attributed nothing. The redirect-artifact CLASS is a known durable trap — what is new
   is an apparent in-repo producer during test/build spawns. A lead, not a verdict: watch for
@@ -101,15 +81,6 @@
   transitions"; `if (++transitions > maxTransitions)` fires on N+1. Nothing counts executions
   against the bound, and CX-02 re-specifies the cap on this exact point. **Property:** doc and
   comparison agree, and a test pins which transition stops the loop.
-
-- **The backlog size baseline holds amnesties for entries that no longer exist, and its file ceiling
-  never ratchets down (2026-08-27, low).** `docs/backlog/.size-baseline.json` grandfathers two
-  `forward-tracks.md` entries — the quota-arbitrage dispatch tier and the Slice-3 heartbeat item —
-  that were deleted with the retired execution substrate; `grep` finds neither. A stale amnesty
-  never matches, so the dead data is invisible rather than red. The same file caps `open-bugs.md` at
-  129,162 bytes against a file well under 90,000, so the gate permits roughly 48% growth before it
-  fires. **Property:** an amnesty naming an entry that no longer exists is a red, not a silent
-  no-op, and the recorded ceiling follows the file down.
 
 - **`InputResolution` is declared twice, under one name, with two different shapes (2026-08-27,
   low).** `src/remediate/steps/intakeResolver.ts` exports an `InputResolution` carrying `discovered`;
@@ -478,7 +449,7 @@
   that raised this: [`memory-cut-list-2026-08-25.md`](../reviews/memory-cut-list-2026-08-25.md).
 
 - **`buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low,
-  friction: tooling_gap).** `src/audit/io/toolingManifest.ts` lists the package `dist/` tree and
+  friction: tool_should_decide).** `src/audit/io/toolingManifest.ts` lists the package `dist/` tree and
   then hashes each listed file; a file that disappears between the listing and the read (a `tsc`
   re-emit racing a parallel vitest run, or a stale incremental dist) throws a bare
   `ENOENT: ... .d.ts.map` out of `loadArtifactBundle`, so unrelated fold tests fail with a message

@@ -287,6 +287,7 @@ describe('reach — the guarded set is a ratchet, and the gap is declared', () =
     'scripts/attest-constitutional-doc-change.mjs',
     'scripts/check-agents-region.mjs',
     'scripts/check-backlog-budget.mjs',
+    'scripts/check-backlog-friction-tags.mjs',
     'scripts/check-backlog-line-numbers.mjs',
     'scripts/check-backlog-status-tokens.mjs',
     'scripts/check-doc-code-citations.mjs',

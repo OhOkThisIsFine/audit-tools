@@ -7,7 +7,7 @@
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
 - **Packaged smoke reads can race a wrapper rebuild of the same checkout (2026-09-07,
-  medium, friction: false_red).** During pipeline verification, a benchmark's development
+  medium, friction: tool_should_decide).** During pipeline verification, a benchmark's development
   wrapper rebuilt `dist` while the packaged audit smoke imported it; the import failed and
   the smoke passed alone. Separate benchmark tooling prevented recurrence in this lap.
   **Property:** build replacement and smoke reads coordinate at the checkout boundary,
@@ -22,7 +22,7 @@
   argument it does not recognize, and never treats an unrecognized flag as consent to write.
 
 - **Leg 1's coverage stamp reports `items_reviewed_cold: 0` whenever the run stamps before it
-  measures (2026-09-06, medium, friction: false_green).** `stampExamined` marks an examined doc at
+  measures (2026-09-06, medium, friction: tool_should_decide).** `stampExamined` marks an examined doc at
   HEAD, and `writeCoverage` derives the cold count from whether an item carries a stamp — so the
   natural order (review, stamp, then write coverage) makes every examined item look windowed. The
   2026-09-06 run wrote 0 and had to recompute 22 across 8 docs from a snapshot taken at run start.
@@ -38,7 +38,7 @@
   against `.claude/nightly-decisions.json` before the record is written.
 
 - **CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a
-  DIFFERENT test each time (2026-09-04, high, friction: false_red).** Two `audit-code-test-suite` runs on
+  DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).** Two `audit-code-test-suite` runs on
   `main` the same day failed identically and in different places: `tests/audit/next-step-narrative.test.ts`
   on shard 1/4 (`e197ea2c`) and `tests/audit/audit-code-completion-present.test.ts` on shard 3/4
   (`001d45f1`). Both report `Test timed out in 300000ms`, and shard 1 additionally reports the global-setup
@@ -81,7 +81,7 @@
   it does not state one.
 
 - **`durable-traps.md` documents RETIRED infrastructure as though it were live (2026-08-30, medium,
-  friction: false_green).** Eight entries describe the FreeLLMAPI router on `127.0.0.1:3001`,
+  friction: tool_should_decide).** Eight entries describe the FreeLLMAPI router on `127.0.0.1:3001`,
   its `claude.ps1` launcher, and the `mcp__freellmapi__offload_*` tools. FreeLLMAPI was retired
   2026-08-29 and llm-relay on `127.0.0.1:8791` replaced it; the machine-wide `CLAUDE.md` warns that running
   `claude.ps1` RESURRECTS the retired service. A ninth entry says the relay "dies with the
@@ -122,7 +122,7 @@
   run the ceremony merely because its dispatcher forgot a variable.
 
 - **The closeout gate calls pushed commits "UNPUSHED" — it tests against `main` and says something
-  different from what it means (2026-08-29, low, friction: false_red).**
+  different from what it means (2026-08-29, low, friction: tool_should_decide).**
   `closeout-challenge-gate.mjs` lists commits absent from `main` under the heading "UNPUSHED
   commit(s) — the next agent clones origin/main and will not see these". The second clause is true and
   is the useful part. The label is not: a lap that pushed every commit to its own branch, upstream
@@ -133,7 +133,7 @@
   so instead of implying the work is only local.
 
 - **The gate fixture helper `stageLoopCoreFile` arms NOTHING, and its own comment says it arms the
-  loop-core gate (2026-08-29, medium, friction: false_green).**
+  loop-core gate (2026-08-29, medium, friction: tool_should_decide).**
   <!-- doc-citation-exempt: a path written INTO a throwaway fixture repo, never a file of this tree -->
   `tests/shared/pre-commit-gate-harness.ts` writes `src/shared/quota/x.ts` under the comment "so the
   loop-core attestation gate arms". `isLoopCorePath` returns FALSE for that path: the quota substrate
@@ -157,7 +157,7 @@
   before CI.
 
 - **Registering ONE new gate takes edits in five separate homes, and you find them one red at a
-  time (2026-08-30, medium, friction: missing_affordance).** Adding `check:loop-core-closure`
+  time (2026-08-30, medium, friction: tool_should_decide).** Adding `check:loop-core-closure`
   needed: the `scripts` entry in `package.json`; its insertion into the `verify:checks` step list;
   a gate row in `scripts/guard-reach-data.mjs`; a REACH row in the same file claiming the new
   files; and a gloss in `scripts/gate-enumeration-data.mjs`. Two further generated artifacts then
@@ -170,7 +170,7 @@
   a single check names every home still missing, rather than the build revealing them serially.
 
 - **The loop-core closure rule claims a module only when EVERY importer is core, and today's 25
-  declared modules are grandfathered by MEASUREMENT (2026-08-30, low, friction: false_green).**
+  declared modules are grandfathered by MEASUREMENT (2026-08-30, low, friction: tool_should_decide).**
   `check:loop-core-closure` closed the moved-symbol class: a module imported only by loop-core is
   core, or it is declared with a reason in `scripts/shared/loopCoreClosureData.mjs`, and a
   declaration that stops being true reds too. Two halves stay uncovered, both stated as
@@ -200,7 +200,7 @@
   refusing merges onto `main` would change the documented ship flow.
 
 - **The attest preflight's REFUSAL is now sound, but the divergent case gets no verdict at all
-  (2026-08-28, narrowed 2026-08-30, medium, friction: false_red).** The legs read the working tree
+  (2026-08-28, narrowed 2026-08-30, medium, friction: tool_should_decide).** The legs read the working tree
   while the attestation binds the staged tree; an UNSTAGED guard-registry row naming a not-yet-tracked
   test file once refused the attestation of a staged set containing neither. **Covered:** a refusal is
   issued only when the worktree tree equals the staged tree BEFORE and AFTER the legs run, so the
@@ -688,19 +688,6 @@
   gate added to catch exactly that. Property: a fixture must not be able to cast away a contract's
   required keys — `satisfies`, or a builder that cannot omit them.
 
-- **Friction walk (fourth backlog-clearance lap, 2026-07-24):** (1) **tool-should-decide (medium):**
-  the backlog budget baseline is bound to the LIVE file, so
-  ratcheting mid-lap and then deleting more entries turns `backlog-budget-unit.test.ts` RED in a way
-  that reads as a code regression — it cost a full-suite investigation here. Either ratchet only at
-  commit time (a hook), or have the test compare against the COMMITTED file rather than the worktree.
-  (2) **ambiguous-direction (HIGH — nearly cost the whole task):** the sweep was first sized at "222
-  errors / 131 files" and deferred as multi-hour. Both numbers were wrong: `tsc` continuation lines were
-  counted as filenames (real: 50 files), and `allowJs` erased 28 errors outright. Eight parallel agents
-  cleared it in ~7 minutes. A mis-parsed tool report inflated the estimate 2.6× and the inflated estimate
-  was then used to justify NOT doing the work. Parse a tool's output with its actual grammar before
-  sizing anything from it. ⚠ Related measurement trap: `tsc` reports only ONE missing property per object
-  literal, so an error count is a LOWER BOUND — every batch found 10-20% more once siblings unmasked.
-
 - **Friction walk (second backlog-clearance lap, 2026-07-24):** (1) **ambiguous-direction (medium):**
   a backlog entry can name a fix whose PREMISE is sound and whose CONSEQUENCE is unshippable — the
   per-node token estimate entry described the defect correctly and the fix it prescribed would have
@@ -936,18 +923,6 @@
   a push to `main` from an agent session is refused unless a suite-green stamp binds the pushed tree —
   a PreToolUse gate on `git push`, or the commit gate running the full suite for any commit that can
   land on `main`.
-
-- **The backlog's own gates run only at commit, so a writer sees the refusal long after the text is
-  cold (2026-09-03, medium, friction: tool_should_decide).** Nine entries written in an earlier
-  session hit `check:doc-code-citations` (13 unresolved backticked paths — the audited repository's
-  files and runtime artifact names) and then, on the next attempt, `check:backlog-line-numbers`
-  (3 `path:line` forms, two of them quoted measurements) in sequence at landing, in a different
-  session from the one that wrote them. Both fixes were exemption markers and rewording, which is
-  cheap AT THE KEYSTROKE and expensive as a serialized gate-fix-retry loop against text nobody
-  present had authored. The typecheck hook already proves the shape works. **Property:** the backlog
-  gates run at write time for `docs/backlog/` — a PostToolUse check on Edit/Write, as
-  `.claude/hooks/async-typecheck.mjs` does for TypeScript — so the writer sees the refusal while the
-  text is still theirs.
 
 - **`type-coverage`'s acquired-analyzer spawn carries a deadline ten times longer than the callers
   actually waiting on it, and an orphaned npm lock makes every later spawn re-pay the same wait

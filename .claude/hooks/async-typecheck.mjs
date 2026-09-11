@@ -18,7 +18,8 @@ import { execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { runWriteTimeAdvisories } from '../../scripts/shared/derived-file-preflight.mjs';
+import { buildWriteTimeLegs, legCommand, legRunnable } from '../../scripts/shared/derived-file-preflight.mjs';
+import { DEFERRAL_NOTE, runBacklogWriteTimeGates } from '../../scripts/lib/write-time-backlog-gates.mjs';
 
 // ── 1. Parse payload — fail-open on any parse error ─────────────────────────
 let raw = '';
@@ -41,14 +42,30 @@ const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 // File-scoped derived gates are WRITE-TIME ADVISORIES only. They can report an
 // intermediate edit, but they always exit 0; the commit gate is the sole
 // authority over the completed staged tree.
-const writeTime = runWriteTimeAdvisories({ root, filePath });
+//
+// The legs themselves are the registry's (buildWriteTimeLegs), not a list here:
+// what this hook adds is WHERE they run — after one edit, against the file as it
+// is, so a citation or a line-number refusal arrives while the text is still the
+// writer's. A source .ts path draws none of them, which is what keeps the
+// typecheck below the hook's only work in the common case.
+const writeTime = runBacklogWriteTimeGates({
+  legs: buildWriteTimeLegs(filePath, { root }),
+  root,
+  execute: execSync,
+  legRunnable,
+  legCommand,
+});
 if (writeTime.findings.length > 0) {
   console.error(
     `[ADVISORY] ${writeTime.findings.length} write-time check(s) found an issue after this edit.\n` +
       `The edit is accepted; the commit gate remains authoritative.\n` +
       writeTime.findings
         .map((finding) => `\n${finding.id}:\n${finding.tail}\nFix: ${finding.fix}`)
-        .join('\n'),
+        .join('\n') +
+      (writeTime.deferred.length > 0
+        ? `\n\n[DEFERRED to commit] ${writeTime.deferred.join(', ')} — ` + DEFERRAL_NOTE
+        : '') +
+      '\n',
   );
 }
 

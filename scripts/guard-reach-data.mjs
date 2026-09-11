@@ -553,6 +553,33 @@ export const GUARDS = [
       'partial one is TRIMMED to its open remainder. Only the leading-label form is refused',
   },
   {
+    id: 'check:backlog-friction-tags',
+    kind: 'gate',
+    forms: [
+      { name: 'off-vocabulary friction tag', drive: 'export', module: 'scripts/check-backlog-friction-tags.mjs',
+        exportName: 'findFrictionTags', call: 'file-content', fixturePath: 'open-bugs.md',
+        sample: '- **A thing (2026-08-30, low, friction: false_red).** prose' },
+    ],
+    impl: 'check:backlog-friction-tags',
+    preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
+    fix:
+      'a backlog entry tags a `friction:` category the vocabulary does not hold — map it onto the ' +
+      'canonical three (ambiguous_direction | tool_should_decide | inefficient_feeding) whose ' +
+      'definition it fits; do NOT add a category, the list is single-sourced in ' +
+      'src/shared/friction/frictionRecord.ts and the close-out gate counts coverage per category',
+    note:
+      'the tag is the field a closeout walk or a triage sweep GROUPS BY, and nothing read it: the ' +
+      'vocabulary existed in three places already (the TS source, its generated sibling, the ' +
+      'close-out gate) while seven off-vocabulary tags accumulated in docs/backlog/ — five of them ' +
+      'synonyms of the canonical three, which made any grouping silently incomplete. The gate ' +
+      'imports the GENERATED sibling, never audit-tools/shared, so it runs in a never-built ' +
+      'checkout. UNCOVERED HALF: an untagged entry is not refused (the tag is a grouping aid, not ' +
+      'a required field), and the tags a friction WALK writes into its own prose line are matched ' +
+      'only in `friction: <word>` form — a tag phrased some other way is not seen. Whether a tag ' +
+      'is the RIGHT one of the three remains a reading, not a mechanism',
+  },
+  {
     id: 'check:backlog-line-numbers',
     kind: 'gate',
     forms: [
@@ -1040,6 +1067,17 @@ export const GUARDS = [
   { id: 'nightly-scope-ledger-test', kind: 'contract-test', impl: 'tests/shared/nightly-scope-ledger.test.ts' },
   { id: 'script-argv-refusal-test', kind: 'contract-test', impl: 'tests/shared/script-argv-refusal.test.ts' },
   { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
+  {
+    id: 'write-time-derived-gates-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/write-time-derived-gates.test.ts',
+    note:
+      'the write-time half of the backlog gates: the leg set the PostToolUse hook draws is read from ' +
+      'the LIVE guard registry (buildWriteTimeLegs), the runner returns findings as data and owns no ' +
+      'exit code, and the size-budget leg is SKIPPED at write time and announced as deferred — its ' +
+      'remedy rewrites lap-scoped baseline state. Also pins the hook end-to-end: with four legs wired ' +
+      'to failing commands it must still exit 0 and print the deferral',
+  },
   { id: 'hook-friction-stop-test', kind: 'contract-test', impl: 'tests/shared/hook-friction-stop-gate.test.ts' },
   { id: 'hook-session-start-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-session-start-guards.test.ts' },
   { id: 'session-start-hook-test', kind: 'contract-test', impl: 'tests/audit/session-start-hook.test.ts' },
@@ -1637,6 +1675,7 @@ export const REACH = [
       'guard-form-reach-test',
       'hook-session-gates-test',
       'hook-async-typecheck-test',
+      'write-time-derived-gates-test',
       'hook-friction-stop-test',
       'hook-session-start-guards-test',
       'session-registry-test',
@@ -1937,11 +1976,21 @@ export const REACH = [
   {
     area: 'backlog entry files',
     files: ['docs/backlog/*.md'],
-    guardedBy: ['check:backlog-index', 'check:backlog-budget', 'check:backlog-status', 'check:backlog-line-numbers', 'check:handoff-roadmap'],
+    guardedBy: [
+      'check:backlog-index',
+      'check:backlog-budget',
+      'check:backlog-status',
+      'check:backlog-line-numbers',
+      'check:backlog-friction-tags',
+      'check:handoff-roadmap',
+    ],
     note:
-      'the five gates that actually read the split backlog files (seek-index parity, size budget, ' +
-      'status-label ban, line-number-citation ban, roadmap title lift); the markdown-corpus row ' +
-      'carries the generic doc gates',
+      'the six gates that actually read the split backlog files (seek-index parity, size budget, ' +
+      'status-label ban, line-number-citation ban, friction-category vocabulary, roadmap title ' +
+      'lift); the markdown-corpus row carries the generic doc gates. Four of them (doc-code-' +
+      'citations, budget, line-numbers, memory-citations) additionally carry writeTime metadata, ' +
+      'so the PostToolUse hook runs them against the file the moment it is edited — the budget leg ' +
+      'reported there and DEFERRED to commit, because its remedy rewrites lap-scoped baseline state',
   },
   {
     area: 'backlog seek index',

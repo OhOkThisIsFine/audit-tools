@@ -17,9 +17,19 @@
  * prose form that must never fire.
  */
 import { describe, test, expect } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { findStatusMarkers, STATUS_WORDS, STATUS_GLYPHS } from "../../scripts/check-backlog-status-tokens.mjs";
+import {
+  ACCEPTED_TAG_FORMS,
+  evaluateFrictionTags,
+  findFrictionTags,
+} from "../../scripts/check-backlog-friction-tags.mjs";
+import { FRICTION_CATEGORIES } from "../../scripts/shared/friction-categories.generated.mjs";
 
 const hits = (text: string): number => findStatusMarkers(text).length;
+const ROOT = resolve(import.meta.dirname, "..", "..");
+const BACKLOG_DIR = join(ROOT, "docs", "backlog");
 
 describe("backlog status-token guard — marker forms FIRE", () => {
   test("a status glyph on a stage bullet", () => {
@@ -77,5 +87,102 @@ describe("backlog status-token guard — the live backlog is clean", () => {
     for (const glyph of STATUS_GLYPHS) {
       expect(hits(`- ${glyph} probe`), `${glyph} must be detected`).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * The `friction:` tag is the field a closeout walk or a triage sweep GROUPS BY, and
+ * nothing read it while five off-vocabulary tags — `false_red`, `false_green`,
+ * `hermeticity`, `tooling_gap`, `missing_affordance`, plus two bare descriptors —
+ * accumulated in the backlog. The vocabulary itself was never the problem: it existed
+ * in the TypeScript source and in the close-out gate, both in step. What was missing
+ * was anything that read the TAGS against it, which is this.
+ *
+ * The cases are weighted toward the ACCEPT side, for the same reason the guard's own
+ * header gives: a gate that fires on prose gets disabled, and a disabled gate guards
+ * nothing. Only a `friction:` tag is a tag; the word in a sentence is not.
+ */
+describe("backlog friction-tag vocabulary", () => {
+  const tagsIn = (text: string) => findFrictionTags("probe.md", text).map((hit) => hit.tag);
+
+  test("the accepted spellings are DERIVED from the canonical categories, never listed", () => {
+    // The failure mode of every allowlist: a category is added to the source and
+    // this gate quietly keeps refusing its tag. Nothing here names a category.
+    expect(ACCEPTED_TAG_FORMS.size).toBe(FRICTION_CATEGORIES.length * 2);
+    for (const category of FRICTION_CATEGORIES) {
+      expect(ACCEPTED_TAG_FORMS.get(category)).toBe(category);
+      expect(ACCEPTED_TAG_FORMS.get(category.replace(/_/g, "-"))).toBe(category);
+    }
+  });
+
+  test("a canonical tag is accepted in either spelling", () => {
+    for (const category of FRICTION_CATEGORIES) {
+      expect(tagsIn(`- **X (2026-09-10, low, friction: ${category}).** prose`)).toEqual([category]);
+      expect(
+        evaluateFrictionTags([
+          { file: "probe.md", text: `- **X (2026-09-10, low, friction: ${category}).** prose` },
+        ]).violations,
+      ).toEqual([]);
+    }
+  });
+
+  test("an off-vocabulary tag is red, and the refusal names the entry and the vocabulary", () => {
+    const text = "- **X (2026-09-10, low, friction: false_red).** prose";
+    const result = evaluateFrictionTags([{ file: "probe.md", text }]);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]).toContain("friction: false_red");
+    // The entry the tag sits in, per the SHARED grammar, so the writer knows which
+    // of the file's entries to edit.
+    expect(result.violations[0]).toContain("entry: X (2026-09-10, low, friction: false_red).");
+    for (const category of FRICTION_CATEGORIES) expect(result.violations[0]).toContain(category);
+  });
+
+  test("a near-miss of a canonical id is refused, not silently mapped", () => {
+    // A fuzzy match here would BE the drift this gate exists to catch.
+    for (const tag of ["tool_should_decides", "inefficient", "tool", "false_green", "ambiguous"]) {
+      expect(evaluateFrictionTags([{ file: "probe.md", text: `- **X (friction: ${tag}).**` }]).violations)
+        .toHaveLength(1);
+    }
+  });
+
+  test("the word in prose is not a tag — only the `friction:` form is", () => {
+    // The corpus legitimately discusses friction; refusing the bare word would make
+    // this a tax on writing, which is how these gates die.
+    expect(tagsIn("- The tool-should-decide class is described at length here.")).toEqual([]);
+    expect(tagsIn("- Our friction with the analyzer: it re-runs npx.")).toEqual([]);
+    // A tag holds one word, so a `friction:` followed by prose is a sentence, not a
+    // tag — and a narrative that starts one deliberately stays quiet.
+    expect(tagsIn("- Our friction: the analyzer re-runs npx every time.")).toEqual([]);
+    // …while both closed forms ARE tags: the parenthetical member and line end.
+    expect(tagsIn("- **X (friction: tool_should_decide).** prose")).toEqual(["tool_should_decide"]);
+    expect(tagsIn("- **X (2026-09-10, low, friction: inequity).**")).toEqual(["inequity"]);
+    // A tag QUOTED in a fenced block is a citation of the vocabulary, not a use of it.
+    expect(
+      tagsIn(["```md", "- **X (friction: false_red).** sample", "```"].join("\n")),
+    ).toEqual([]);
+  });
+
+  test("a tag is attributed to the entry the shared grammar says owns its line", () => {
+    const text = [
+      "- **First entry (2026-09-10, low, friction: tool_should_decide).** prose",
+      "  wrapped line",
+      "",
+      "- **Second entry (2026-09-10, low, friction: false_red).** prose",
+    ].join("\n");
+    const hits = findFrictionTags("probe.md", text);
+    expect(hits).toHaveLength(2);
+    expect(hits[0]?.entry).toContain("First entry");
+    expect(hits[1]?.entry).toContain("Second entry");
+  });
+
+  test("the live backlog is clean and every tag it carries is counted", () => {
+    const files = readdirSync(BACKLOG_DIR)
+      .filter((f) => f.endsWith(".md"))
+      .sort()
+      .map((f) => ({ file: f, text: readFileSync(join(BACKLOG_DIR, f), "utf8") }));
+    const result = evaluateFrictionTags(files);
+    expect(result.violations, result.violations.join("\n")).toEqual([]);
+    // A vacuous pass would be a gate guarding nothing: the corpus DOES carry tags.
+    expect(result.tags).toBeGreaterThan(20);
   });
 });
