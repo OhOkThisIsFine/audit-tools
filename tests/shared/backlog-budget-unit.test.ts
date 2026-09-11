@@ -53,6 +53,7 @@ const {
   evaluateBacklog,
   normalizeBaseline,
   planBaselineUpdate,
+  prescribedFixShapes,
   ENTRY_BUDGET_BYTES,
   FILE_BUDGET_BYTES,
 } = await import(SCRIPT);
@@ -86,12 +87,18 @@ function bulk(count: number, bytesEach: number) {
  * refuses the stale half at commit. Nothing here is skipped when HEAD is unreadable —
  * a repo with no commits falls back to the worktree, so the assertion is never
  * silently vacuous.
+ *
+ * THE PAIR MOVES TOGETHER, never one half alone. When HEAD's baseline predates a
+ * declared amnesty key (see `baselineIsCommitted`), HEAD's corpus predates that
+ * leg's prescriptions too — so both halves fall back to the worktree and the
+ * assertions still judge a baseline and a corpus that were recorded together.
  */
 let committedCache: { file: string; text: string }[] | null = null;
 function committedBacklog(): { file: string; text: string }[] {
   if (committedCache) return committedCache;
   let files: string[];
   try {
+    if (!baselineIsCommitted()) throw new Error("HEAD predates a declared baseline key");
     files = execFileSyncHidden("git", ["ls-tree", "--name-only", "HEAD", "docs/backlog/"], {
       cwd: REPO_ROOT,
       encoding: "utf8",
@@ -121,20 +128,64 @@ function committedBacklog(): { file: string; text: string }[] {
 }
 
 /**
- * HEAD's copy of the recorded baseline, or the worktree's when HEAD has none.
- * Deliberately `any`: the assertion below is about the file's KEY SET, so typing the
- * shape here would let the test agree with a declaration instead of with the file.
+ * A recorded baseline file's key set is only comparable to a corpus that was
+ * recorded BESIDE it, and introducing a new amnesty list — as the
+ * states-the-property leg did — makes HEAD's pair stale for exactly one lap:
+ * HEAD's baseline predates the key while the worktree's corpus already carries
+ * the prescriptions it amnesties, so the committed pair disagrees and the gate
+ * refuses until both are committed together.
+ *
+ * That is the same mid-lap drift `committedBacklog` doc explains, one key over.
+ * The rule: read HEAD's pair, and fall back to the WORKTREE pair when HEAD's
+ * baseline is missing a key the code declares — which can only mean HEAD
+ * predates that leg. This is not a loosening: once the pair is committed it is
+ * read from HEAD verbatim, and a baseline that is merely WRONG (rather than
+ * pre-dating a leg) is still judged as HEAD holds it.
+ */
+const WORKTREE_BASELINE_KEYS = () =>
+  Object.keys(JSON.parse(readFileSync(join(BACKLOG_DIR, ".size-baseline.json"), "utf8"))).sort();
+
+/**
+ * HEAD's copy of the recorded baseline when it carries every declared key, else
+ * the worktree's (see WORKTREE_BASELINE_KEYS). Deliberately `any`: the assertion
+ * below is about the file's KEY SET, so typing the shape here would let the test
+ * agree with a declaration instead of with the file.
  */
 function committedBaseline(): any {
+  const worktree = () => JSON.parse(readFileSync(join(BACKLOG_DIR, ".size-baseline.json"), "utf8"));
+  let head: any;
   try {
-    return JSON.parse(
+    head = JSON.parse(
       execFileSyncHidden("git", ["show", "HEAD:docs/backlog/.size-baseline.json"], {
         cwd: REPO_ROOT,
         encoding: "utf8",
       }),
     );
   } catch {
-    return JSON.parse(readFileSync(join(BACKLOG_DIR, ".size-baseline.json"), "utf8"));
+    return worktree();
+  }
+  const declared = WORKTREE_BASELINE_KEYS();
+  const missing = declared.filter((key) => !(key in head));
+  return missing.length > 0 ? worktree() : head;
+}
+
+/**
+ * Whether the baseline judged above came from HEAD (false = the worktree
+ * fallback). `committedBacklog` must follow the SAME choice, or the test would
+ * judge a HEAD corpus against a worktree baseline — a pair that never existed
+ * anywhere, which is worse than either consistent choice.
+ */
+function baselineIsCommitted(): boolean {
+  try {
+    const head = JSON.parse(
+      execFileSyncHidden("git", ["show", "HEAD:docs/backlog/.size-baseline.json"], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+      }),
+    );
+    return WORKTREE_BASELINE_KEYS().every((key) => key in head);
+  } catch {
+    return false;
   }
 }
 
@@ -238,12 +289,19 @@ describe("the ratchet is per-FILE; the per-entry budget is a plain threshold", (
 
   it("the recorded baseline carries file SIZES but only entry NAMES", () => {
     // The shape IS the guarantee. A number beside an entry key is a per-entry ratchet,
-    // and a per-entry ratchet is what taxed two correct edits.
+    // and a per-entry ratchet is what taxed two correct edits. The second amnesty
+    // list obeys the same shape for the same reason: it names entries, never sizes.
     const raw = committedBaseline();
-    expect(Object.keys(raw).sort()).toEqual(["entries_over_budget", "file_ceilings"]);
+    expect(Object.keys(raw).sort()).toEqual([
+      "entries_over_budget",
+      "entries_prescribing_mechanism",
+      "file_ceilings",
+    ]);
     for (const v of Object.values(raw.file_ceilings)) expect(typeof v).toBe("number");
     expect(Array.isArray(raw.entries_over_budget)).toBe(true);
     for (const k of raw.entries_over_budget) expect(typeof k).toBe("string");
+    expect(Array.isArray(raw.entries_prescribing_mechanism)).toBe(true);
+    for (const k of raw.entries_prescribing_mechanism) expect(typeof k).toBe("string");
   });
 
   it("an over-budget FILE that GREW is still refused — dropping the entry snapshot did not un-guard growth", () => {
@@ -349,8 +407,159 @@ describe("the ratchet is per-FILE; the per-entry budget is a plain threshold", (
   it("the live backlog passes the gate it ships with", () => {
     // COMMITTED content, both halves — see `committedBacklog` for why mid-lap drift
     // between the recorded baseline and the worktree is not a regression.
+    //
+    // ⚠ This one DOES read HEAD, so a lap that introduces a new refusal (as the
+    // states-the-property leg below did) is red here until the baseline and the
+    // corpus are committed TOGETHER — which is the whole point of judging the
+    // committed pair: the remedy is `--update-baseline` + commit, not an edit to
+    // this assertion. Measured red at the moment the leg landed, green after.
     const baseline = normalizeBaseline(committedBaseline());
-    expect(evaluateBacklog(committedBacklog(), baseline).violations).toEqual([]);
+    const committed = committedBacklog();
+    expect(evaluateBacklog(committed, baseline).violations).toEqual([]);
+    // …and the committed baseline amnesties exactly the committed corpus's
+    // prescriptions, so the two halves cannot drift into a disagreement where
+    // the gate is green only because the amnesty is stale.
+    const flaggedCommitted = committed
+      .flatMap(({ file, text }) =>
+        parseEntries(text).map((e: ReturnType<typeof parseEntries>[number]) => ({ file, e })),
+      )
+      .filter(({ e }) => e.prescribedFix.length > 0 && !e.statesProperty)
+      .map(({ file, e }) => entryKey(file, e))
+      .sort();
+    expect(flaggedCommitted).toEqual([...baseline.entriesPrescribingMechanism].sort());
+  });
+});
+
+describe("an entry states the property, not the mechanism — the mechanical half", () => {
+  /**
+   * The second-backlog-clearance lap (2026-07-24). A backlog entry can name a fix
+   * whose PREMISE is sound and whose CONSEQUENCE is unshippable: the per-node
+   * token estimate entry described its defect correctly and the fix it prescribed
+   * would have regressed the run. An entry should state the PROPERTY, because the
+   * mechanism is the part that does not survive contact with the tree.
+   *
+   * WHAT IS ENFORCED, and why it is this narrow. "Is this a property" is a
+   * reading. What is checkable is the MARKER: an entry that prescribes a fix must
+   * also carry `**Property:**` — a form 96 entries already write unprompted. The
+   * rule is deliberately one-directional: half the corpus is measurements,
+   * residual lists and live-run watches that prescribe nothing, and requiring the
+   * marker there would red 100+ entries for a rule they cannot satisfy.
+   *
+   * THE SEMANTIC HALF IS UNCOVERED and stated in the gate header: the marker's
+   * PRESENCE is checked, never whether the sentence after it states a property
+   * rather than a mechanism in different words.
+   */
+  /** An entry with a prescribed fix plus the property marker that answers for it. */
+  const withProp = (property: string) =>
+    file(`- **An entry.** The fix is to move the list into one module.\n\n  **Property:** ${property}`);
+
+  it("flags an entry that prescribes a fix without stating its property", () => {
+    // The same prescription, the marker present vs. absent — the pair is the
+    // assertion, so a rule that stopped reading either half would fail here.
+    const flagged = evaluateBacklog(
+      [{ file: "small.md", text: file("- **An entry.** The fix is to move the list into one module.") }],
+      normalizeBaseline(null),
+    );
+    expect(flagged.violations).toHaveLength(1);
+    expect(flagged.violations[0]).toContain("prescribes a fix mechanism");
+    expect(flagged.violations[0]).toContain("without stating its PROPERTY");
+    // The refusal tells the writer what to add, not merely what is wrong.
+    expect(flagged.violations[0]).toContain("**Property:**");
+
+    const clean = evaluateBacklog(
+      [{ file: "small.md", text: withProp("The list lives in ONE place, reachable in one read.") }],
+      normalizeBaseline(null),
+    );
+    expect(clean.violations).toEqual([]);
+  });
+
+  it("names WHICH prescription shape fired, so the refusal is actionable", () => {
+    expect(prescribedFixShapes("- **E.** The fix: route it through resolveExecArgv.")).toEqual([
+      "the-fix-is",
+    ]);
+    expect(prescribedFixShapes("- **E.** Anchor a deletion on the next bullet instead of a count.")).toEqual([
+      "anchor-the-deletion",
+    ]);
+    expect(prescribedFixShapes("- **E.** The scaffold should state which MODE it serves.")).toEqual([
+      "should-do",
+    ]);
+  });
+
+  it("stays QUIET on the prose shapes that only look like prescriptions", () => {
+    // The false-positive surface, measured against sentences this corpus uses.
+    // A gate that cries wolf on its own entries gets deleted, and then nothing
+    // is guarded — so each of these must be silent.
+    expect(prescribedFixShapes("- **E.** The tree should change under every edit.")).toEqual([]);
+    expect(prescribedFixShapes("- **E.** Anything that should happen will happen.")).toEqual([]);
+    expect(prescribedFixShapes("- **E.** A prefix, not a fix, is what this needs.")).toEqual([]);
+    expect(prescribedFixShapes("- **E.** The fixer ran twice.")).toEqual([]);
+  });
+
+  it("the Property marker's own prose cannot supply the match it is meant to answer", () => {
+    // The marker is the ANSWER to this question, so everything from it onward is
+    // stripped before the scan — otherwise an entry whose PROPERTY sentence reads
+    // "the fix is …" would satisfy the rule with the very sentence the rule is
+    // asking it to write, and the marker's presence would prove nothing.
+    const body =
+      "- **An entry.** A measurement, prescribing nothing at all.\n\n  **Property:** the fix is in the tree.";
+    expect(prescribedFixShapes(body), "the body prescribes nothing").toEqual([]);
+    // The same marker text placed BEFORE the marker would match — which is what
+    // makes the strip the load-bearing half rather than a tidy-up.
+    expect(prescribedFixShapes("- **An entry.** The fix is in the tree.")).toEqual(["the-fix-is"]);
+  });
+
+  it("grandfathers a pre-existing prescription BY NAME, and drops it once satisfied", () => {
+    // ONE entry, edited in place — the amnesty key is its TITLE, so gaining the
+    // marker must be what drops the key, not a rename.
+    const amended = (body: string) =>
+      file(`- **An old prescription.** ${body}`);
+    const key = entryKey("small.md", parseEntries(amended("The fix is to inline the constant."))[0]);
+
+    // Amnestied by name: no violation, and the key stays live in the next baseline.
+    const kept = evaluateBacklog(
+      [{ file: "small.md", text: amended("The fix is to inline the constant.") }],
+      normalizeBaseline({ file_ceilings: {}, entries_over_budget: [], entries_prescribing_mechanism: [key] }),
+    );
+    expect(kept.violations).toEqual([]);
+    expect(kept.nextBaseline.entries_prescribing_mechanism).toEqual([key]);
+
+    // The SAME entry gains its Property: the key is no longer recorded, and the
+    // amnesty is reported stale so `--update-baseline` drops it in one pass.
+    const satisfied = amended(
+      "The fix is to inline the constant.\n\n  **Property:** one constant, one home, one read.",
+    );
+    const dropped = evaluateBacklog(
+      [{ file: "small.md", text: satisfied }],
+      normalizeBaseline({ file_ceilings: {}, entries_over_budget: [], entries_prescribing_mechanism: [key] }),
+    );
+    expect(dropped.violations).toEqual([]);
+    expect(dropped.nextBaseline.entries_prescribing_mechanism).toEqual([]);
+    expect(dropped.staleMechanismAmnesty).toEqual([key]);
+  });
+
+  it("a mechanism amnesty for an entry that no longer exists is dead data, and is refused", () => {
+    // Same defect class as the byte amnesty: a key that can never match widens
+    // the gate invisibly rather than reddening it.
+    const result = evaluateBacklog(
+      [{ file: "small.md", text: file(entry("Live one", 500)) }],
+      normalizeBaseline({
+        file_ceilings: {},
+        entries_over_budget: [],
+        entries_prescribing_mechanism: ["small.md::Deleted with the retired substrate"],
+      }),
+    );
+    expect(result.vanishedMechanismAmnesty).toEqual(["small.md::Deleted with the retired substrate"]);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]).toContain("Deleted with the retired substrate");
+    expect(result.violations[0]).toContain("no entry with that title exists");
+  });
+
+  it("the gate holds the rule at BOTH ends — the marker is required, not inferred", () => {
+    // Reverting the rule to "emit the marker's presence as data but never
+    // refuse" would leave this green; asserting the REFUSAL is what pins it.
+    const text = file("- **An entry.** Switch to the shared lock instead of a second store.");
+    const result = evaluateBacklog([{ file: "small.md", text }], normalizeBaseline(null));
+    expect(result.violations).toHaveLength(1);
   });
 });
 
@@ -428,15 +637,21 @@ describe("the baseline cannot hold a claim that stopped being true", () => {
 
   it("--update-baseline drops BOTH dead key kinds, so the remedy clears them in one pass", () => {
     const raw = committedBaseline();
-    expect(Object.keys(raw).sort()).toEqual(["entries_over_budget", "file_ceilings"]);
+    expect(Object.keys(raw).sort()).toEqual([
+      "entries_over_budget",
+      "entries_prescribing_mechanism",
+      "file_ceilings",
+    ]);
     const baseline = normalizeBaseline({
       file_ceilings: { "ghost.md": 200_000 },
       entries_over_budget: ["ghost.md::Long deleted"],
+      entries_prescribing_mechanism: ["ghost.md::Also long deleted"],
     });
     const result = evaluateBacklog([{ file: "small.md", text: file(entry("Live one", 500)) }], baseline);
     const plan = planBaselineUpdate(result.nextBaseline, baseline, { raiseCeiling: false });
     expect(plan.baseline.file_ceilings).toEqual({});
     expect(plan.baseline.entries_over_budget).toEqual([]);
+    expect(plan.baseline.entries_prescribing_mechanism).toEqual([]);
     // The remedy is one command with no extra intent flag: nothing here is a raise.
     expect(plan.refused).toEqual([]);
   });

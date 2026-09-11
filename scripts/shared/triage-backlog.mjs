@@ -60,11 +60,15 @@
 // nights degraded silently to a partial sweep, each for a different transport
 // fault. Now: (1) one PREFLIGHT dispatch runs before the sweep — a dead lane
 // (no relay, no `llm-relay` on PATH, no servable rung) fails loudly at entry 0
-// with the relay's own message, not silently at entry 154 (single attempt,
-// matching the per-entry policy: failover is the relay's job); (2) a COVERAGE
+// with the relay's own message, not silently at entry 154 (single attempt — the
+// preflight asks "is the lane up at all", which is a question the relay answers,
+// so a retry there would only delay the honest abort); (2) a per-ENTRY transport
+// retry (2026-08-22 entry): a call that dies before the lane answers is retried
+// ONCE inside the same invocation, and a lane that ANSWERED unusably is not —
+// see the driver header for the line and its reason; (3) a COVERAGE
 // STAMP (<out>-coverage.json) records model/attempted/classified/errored/
-// aborted plus a per-lane count, rewritten as the sweep progresses, so "did
-// leg 2 actually cover the backlog" is a number the routine reads, never a
+// aborted/retried plus a per-lane count, rewritten as the sweep progresses, so
+// "did leg 2 actually cover the backlog" is a number the routine reads, never a
 // wc -l.
 //
 // ⚠ Some lanes prepend prose before the JSON despite the schema, which is why
@@ -223,6 +227,87 @@ export function premiseVerdict(rec, root = ROOT) {
   return { stamp, recovered };
 }
 
+/**
+ * Resolve one model-written path against the tracked tree, or report it
+ * `unresolved` — NEVER guess.
+ *
+ * WHY (duplicated-guard lap, 2026-07-25). The sweep's per-entry `Paths:` column
+ * is MODEL-INVENTED for entries whose prose names no file. The friction walk
+ * recorded three such entries, quoted the fabricated paths verbatim
+ * (`src/scheduler/populate.ts`, `src/review/mapCache.ts`, `src/pinning-gate.ts`)
+ * and drew the conclusion the design follows: a path column that reads like
+ * evidence is a routing guess, and two of the three entries it described had to
+ * be located by grep anyway. The model cannot see the repo, so it invents
+ * plausible directories for a bare filename it was given.
+ *
+ * THE RULE IS THE PROBE RULE, APPLIED TO THE COLUMN. `resolveProbes` already
+ * repairs a bare basename when exactly ONE tracked file matches and refuses to
+ * guess when zero or several do; the same bound holds here, for the same reason
+ * — a guess manufactures precisely the false confidence this is removing. The
+ * difference is only what a non-resolution MEANS: a probe becomes signal-free,
+ * a path is emitted marked `unresolved` with what the model actually said, so
+ * the reader sees it was a guess rather than a fact.
+ *
+ * A path that resolves is returned AS THE TREE SPELLS IT, and a resolution is
+ * recorded (`recovered`), so a reader can tell the sweep chose the file rather
+ * than the entry naming it — the same disclosure `premise_probes_recovered`
+ * makes.
+ *
+ * @param {string[]} raw the record's `code_paths`, as the model wrote them
+ * @param {(args: string[]) => string[] | null} tracked a tracked-file query
+ * @returns {{resolved: string[], unresolved: {written: string, reason: string}[],
+ *   recovered: {from: string, via: string, to: string}[]}}
+ */
+export function resolveCodePaths(raw, tracked) {
+  const resolved = [];
+  const unresolved = [];
+  const recovered = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    if (typeof entry !== "string" || entry.trim() === "") continue;
+    const written = entry.replace(/\\/g, "/").replace(/^\.\//, "");
+    if (seen.has(written)) continue;
+    seen.add(written);
+    if (written.includes("/")) {
+      // A full path the model gave is checked, not trusted: the column's whole
+      // defect was paths that read like evidence and resolve to nothing.
+      const hits = tracked(["ls-files", "--", written]);
+      if (hits && hits.length === 1) {
+        resolved.push(hits[0]);
+        continue;
+      }
+      unresolved.push({ written, reason: hits && hits.length > 1 ? "ambiguous" : "not_tracked" });
+      continue;
+    }
+    // A bare basename, resolved only when exactly one tracked file carries it.
+    const hits = tracked(["ls-files", "--", `*/${written}`, written]);
+    if (hits && hits.length === 1) {
+      resolved.push(hits[0]);
+      recovered.push({ from: written, via: "basename", to: hits[0] });
+      continue;
+    }
+    unresolved.push({ written, reason: hits && hits.length > 1 ? "ambiguous" : "not_tracked" });
+  }
+  return { resolved, unresolved, recovered };
+}
+
+/**
+ * Apply the path resolution to a built record, in place, and return the
+ * `code_paths_recovered` disclosure when anything was repaired.
+ *
+ * `code_paths` keeps the field NAME and changes its MEANING from "what the model
+ * wrote" to "the tracked paths it named" — a persisted field renamed is not a
+ * rename, and the reader this column exists for wants the resolvable list. The
+ * model's own words survive in `code_paths_unresolved[].written`, so nothing the
+ * lane said is lost and nothing it invented is presented as fact.
+ */
+function applyCodePathResolution(rec, tracked) {
+  const { resolved, unresolved, recovered } = resolveCodePaths(rec.code_paths, tracked);
+  rec.code_paths = resolved;
+  if (unresolved.length > 0) rec.code_paths_unresolved = unresolved;
+  return recovered;
+}
+
 function chunk(file) {
   const text = fs.readFileSync(join(ROOT, 'docs', 'backlog', file), 'utf8');
   const lines = text.split(/\r?\n/);
@@ -262,7 +347,12 @@ const SCHEMA = {
     why: { type: 'string', description: 'one sentence justifying the verdict, quoting the entry' },
     action: { type: 'string', description: 'the single concrete change to make, or the exact question to ask the owner' },
     effort: { type: 'string', enum: ['trivial', 'small', 'medium', 'large'] },
-    code_paths: { type: 'array', items: { type: 'string' }, description: 'source paths the entry names' },
+    code_paths: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        'source paths the entry names, exactly as the entry writes them — the sweep resolves each against the tracked tree and marks the rest unresolved, so a bare filename is accepted and a guessed directory is refused',
+    },
     premise_probes: {
       type: 'array',
       description:
@@ -348,7 +438,10 @@ Three rules about the TARGET, each of which made a third of the previous run's p
   Probe the source file the entry is ABOUT, never the entry itself.
 - If the entry names no path, emit { symbol, contains } instead of guessing a path. An identifier is
   resolvable against the tree; a guessed path is not, and a wrong one is worse than none.
-- A bare filename is fine when that is all the entry gives — do not invent directories for it.`;
+- A bare filename is fine when that is all the entry gives — do not invent directories for it. The
+  same rule governs code_paths: write the path the ENTRY names, verbatim. Every path is resolved
+  against the tree and anything that does not resolve is recorded as unresolved, so an invented
+  directory is not a helpful guess — it is a fabricated line in a column a reader routes on.`;
 
 // The whole brief travels in the task text, schema included: a relay lane
 // answers through the forced `schema` tool call, but a CLI agent rung sees
@@ -361,12 +454,18 @@ function triageTask(e) {
   );
 }
 
-// The sweep itself — resume, worker pool, coverage stamp — is the shared
-// one-item-per-call driver (scripts/shared/lane-dispatch.mjs). This file owns
-// only the triage DOMAIN: backlog chunking, the schema, premise probing, and
-// the binding of one entry to one dispatch. Deliberately NO retry/backoff
-// anywhere in this lane: failover is the relay's job, and duplicating it in
-// the caller would hide a relay defect.
+// The sweep itself — resume, worker pool, coverage stamp, and the ONE transport
+// retry — is the shared one-item-per-call driver
+// (scripts/shared/lane-dispatch.mjs). This file owns only the triage DOMAIN:
+// backlog chunking, the schema, premise probing, path resolution, and the
+// binding of one entry to one dispatch.
+//
+// WHICH RUNG answers a dispatch is still entirely the relay's: the driver
+// retries the SAME call once when it dies in transport, and never re-routes —
+// duplicating the relay's failover in the caller would hide a relay defect. The
+// retry exists because the recovery that worked (the 2026-08-22 re-run that
+// recovered 20 of 22) was the OPERATOR's to remember, and a single-pass stamp
+// reporting 74/96 reads as the ceiling rather than as a partial sweep.
 async function main() {
   const stampPath = coverageStampPath(OUT);
   const lane = openDispatchLane({ size: CONCURRENCY, cwd: ROOT });
@@ -394,10 +493,20 @@ async function main() {
       // unconfirmed now, not carry last week's stamp.
       reviveRecord: (rec) => {
         const { stamp: premise, recovered } = premiseVerdict(rec);
+        // `code_paths` is a claim about the TREE, so it is re-resolved on load
+        // for the same reason the probes are re-evaluated: running the sweep is
+        // the presentation event for its records, and a path that no longer
+        // resolves must read as unresolved NOW rather than carry last week's
+        // resolution. The model's original words are re-taken from
+        // `code_paths_unresolved` so a revived record is not resolved from an
+        // already-filtered list (which would lose the unresolved half forever).
+        const revived = { ...rec, code_paths: [...(rec.code_paths ?? []), ...(rec.code_paths_unresolved ?? []).map((u) => u.written)] };
+        const pathsRecovered = applyCodePathResolution(revived, (args) => trackedMatches(ROOT, args));
         return {
-          ...rec,
+          ...revived,
           premise,
           ...(recovered.length > 0 ? { premise_probes_recovered: recovered } : {}),
+          ...(pathsRecovered.length > 0 ? { code_paths_recovered: pathsRecovered } : {}),
         };
       },
       preflight: async () => {
@@ -439,6 +548,11 @@ async function main() {
         const { stamp: premise, recovered } = premiseVerdict(rec);
         rec.premise = premise;
         if (recovered.length > 0) rec.premise_probes_recovered = recovered;
+        // The path column is resolved against the tree the same way, and for the
+        // same reason: the model cannot see the repo, so an unresolvable path is
+        // recorded as the guess it is rather than printed as evidence.
+        const pathsRecovered = applyCodePathResolution(rec, (args) => trackedMatches(ROOT, args));
+        if (pathsRecovered.length > 0) rec.code_paths_recovered = pathsRecovered;
         return rec;
       },
       onProgress: (e, rec) => {
@@ -465,6 +579,7 @@ async function main() {
     `leg-2 coverage: ${stamp.classified_total} classified total (${stamp.classified} this pass) / ` +
       `${stamp.errored} errored / ${stamp.probes_unusable} probes-unusable of ` +
       `${stamp.attempted} attempted (${stamp.prior_classified} prior, ${stamp.total_entries} total) — ` +
+      `${stamp.retried} transport retr(y/ies) — ` +
       `lanes ${JSON.stringify(stamp.lanes)} — ${stampPath}\n`,
   );
 }

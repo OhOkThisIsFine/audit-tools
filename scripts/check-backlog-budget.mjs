@@ -78,6 +78,99 @@ export const ENTRY_BUDGET_BYTES = 2600;
 /** Max BYTES for a whole section file — the "one bounded read" property. */
 export const FILE_BUDGET_BYTES = 120_000;
 
+// ── the states-the-property leg (second backlog-clearance lap, 2026-07-24) ────
+//
+// THE ENTRY. "A backlog entry can name a fix whose PREMISE is sound and whose
+// CONSEQUENCE is unshippable — the per-node token estimate entry described the
+// defect correctly and the fix it prescribed would have regressed the run. An
+// entry should state the property, not the mechanism, precisely because the
+// mechanism is the part that does not survive contact."
+//
+// WHY A MECHANISM IS THE WRONG THING TO PRESCRIBE. A lap that OPENS an entry
+// reads the entry as its brief, and a prescribed fix is read as the work. When
+// the prescription is wrong for a reason the author could not see, the lap
+// either ships the regression or spends its budget re-deriving that the fix is
+// wrong — which is work the entry created. A stated PROPERTY survives that: it
+// says what must become true, and the lap is free to find the mechanism that
+// makes it true in the tree as it actually is.
+//
+// THE MECHANICAL HALF, and its exact width. What is checkable from the entry
+// text alone is not "is this a property" — that is a reading. What IS checkable
+// is the marker: an entry that states its invariant writes `**Property:**`
+// (96 entries in the corpus already do, in the same form, with no gate asking
+// them to). So the rule is narrow on purpose: an entry that carries a PRESCRIBED
+// FIX must also carry the property marker, so the brief a lap opens with states
+// WHAT must hold beside HOW the author guessed it could.
+//
+// WHY IT IS NOT "every entry needs a Property:". Half the corpus is prose that
+// prescribes nothing — a measurement, a residual list, a live-run watch — and
+// requiring the marker there would red 100+ entries for a rule they cannot
+// satisfy, which is how a gate gets disabled and then guards nothing.
+//
+// THE UNCOVERED HALF, stated because a partly-enforced trap is not deletable:
+// the gate detects the marker's PRESENCE, never whether the sentence after it
+// states a property rather than a mechanism in different words. Nor does it
+// catch the entry that states a property and then PRESCRIBES a mechanism anyway
+// in its body — the marker is satisfied and the defect is intact. Those are
+// readings, the sol-5 class the nightly doc leg is the backstop for.
+
+/**
+ * The prescribed-fix shapes, each drawn from a REAL entry in this corpus. An
+ * entry matching one is asserting how to change the code, which is the thing
+ * that does not survive contact.
+ *
+ * Deliberately CLOSED and literal. A wider net would flag the many legitimate
+ * `**Property:** a lap can …` sentences and the residual lists, and a gate that
+ * cries wolf on its own corpus is worse than no gate — so the false-negative
+ * direction is the one this errs toward, and the semantic half above is where
+ * the rest lives.
+ */
+export const PRESCRIBED_FIX_SHAPES = [
+  {
+    id: "should-do",
+    // `An entry should state the property` — the normative verb that names a fix.
+    // Anchored on `should` + a bare infinitive so ordinary subjunctive prose
+    // ("if the tree should change") does not match: the verb must be followed by
+    // a verb that reads as an instruction. `change` is deliberately ABSENT —
+    // "the tree should change under every edit" is a statement about the world,
+    // not a prescription, and it is the measured false positive this list is
+    // tuned against.
+    regex:
+      /\bshould (?:be|do|use|run|move|add|delete|remove|replace|emit|write|read|call|check|gate|state|carry|name|record|route|hold|live|exist|come|take|keep|make|give|report)\b/,
+  },
+  {
+    id: "anchor-the-deletion",
+    // The incident's own recorded remedy: an imperative naming HOW to do it.
+    // `Anchor a deletion on the next `- **` instead of a line count.` — a
+    // mechanism, and exactly the class this rule routes to the marker.
+    regex: /\b(?:anchor|use|prefer|switch to|replace it with)\b[^.]*\binstead of\b/i,
+  },
+  {
+    id: "the-fix-is",
+    // `The fix: …` / `Fix: …` — a labelled prescription, the commonest spelling.
+    regex: /(?:^|\s)(?:The )?fix(?: is|:)\s/i,
+  },
+];
+
+/**
+ * Does this entry prescribe a fix mechanism? Returns the matching shape ids.
+ *
+ * Scanned over the entry's WHOLE body, not only its first line: a prescription
+ * is as often a trailing sentence as an opening clause. The `**Property:**`
+ * marker itself is stripped first — it is the ANSWER to this question, and
+ * leaving it in would let its own prose supply a match.
+ *
+ * @param {string} body
+ * @returns {string[]} the shape ids that matched, in declaration order
+ */
+export function prescribedFixShapes(body) {
+  const withoutMarker = body.replace(/\*\*Property:\*\*[\s\S]*$/, "");
+  return PRESCRIBED_FIX_SHAPES.filter((shape) => shape.regex.test(withoutMarker)).map((s) => s.id);
+}
+
+/** The one marker an entry uses to state its invariant. */
+const PROPERTY_MARKER = /\*\*Property:\*\*/;
+
 /**
  * Split a backlog file into its top-level entries and meter each one. Entry
  * boundaries come from the shared grammar; the TITLE stays local because it is a
@@ -93,6 +186,10 @@ export function parseEntries(text) {
     // WHAT to cut reads it, and re-splitting the file to find it again would be a
     // second grammar in a module that exists to have exactly one.
     body,
+    // The states-the-property leg reads these two, both derived once here so the
+    // gate never re-scans the body it already holds.
+    statesProperty: PROPERTY_MARKER.test(body),
+    prescribedFix: prescribedFixShapes(body),
   }));
 }
 
@@ -187,7 +284,19 @@ export function normalizeBaseline(raw) {
     ? raw.file_ceilings
     : {};
   const entries = Array.isArray(raw?.entries_over_budget) ? raw.entries_over_budget : [];
-  return { fileCeilings, entriesOverBudget: new Set(entries) };
+  // The states-the-property amnesty: entries that prescribe a mechanism and
+  // predate the rule, named rather than metered — the same shape (and for the
+  // same reason) as the byte amnesty above. A named amnesty is visible and
+  // finite; re-tagging an entry to satisfy the rule drops its row on the next
+  // `--update-baseline`, so the list can only shrink.
+  const mechanism = Array.isArray(raw?.entries_prescribing_mechanism)
+    ? raw.entries_prescribing_mechanism
+    : [];
+  return {
+    fileCeilings,
+    entriesOverBudget: new Set(entries),
+    entriesPrescribingMechanism: new Set(mechanism),
+  };
 }
 
 function loadBaseline() {
@@ -216,12 +325,18 @@ function loadBaseline() {
  * @param {{file: string, text: string, previousText?: string}[]} files
  *   `previousText` is the file as HEAD holds it, or omitted when HEAD's copy is
  *   unreadable. It only ever ADDS a "bytes since HEAD" line to a refusal.
- * @param {{fileCeilings: Record<string, number>, entriesOverBudget: Set<string>}} baseline
+ * @param {{fileCeilings: Record<string, number>, entriesOverBudget: Set<string>,
+ *   entriesPrescribingMechanism: Set<string>}} baseline
  */
 export function evaluateBacklog(files, baseline) {
   const violations = [];
   const staleAmnesty = new Set(baseline.entriesOverBudget);
-  const nextBaseline = { file_ceilings: {}, entries_over_budget: [] };
+  const staleMechanismAmnesty = new Set(baseline.entriesPrescribingMechanism);
+  const nextBaseline = {
+    file_ceilings: {},
+    entries_over_budget: [],
+    entries_prescribing_mechanism: [],
+  };
   let totalEntries = 0;
   let grandfathered = 0;
   const distribution = [];
@@ -287,6 +402,31 @@ export function evaluateBacklog(files, baseline) {
           largestParagraphsLine(e.body),
       );
     }
+
+    // ── the states-the-property leg ──────────────────────────────────────────
+    // An entry that prescribes HOW must also state WHAT must hold. Entries that
+    // predate the rule are amnestied BY NAME, exactly as the byte budget's are —
+    // the corpus cannot be retrofitted in one lap, and a gate that reds 9 live
+    // entries on the day it lands is a gate somebody deletes.
+    for (const e of entries) {
+      if (e.prescribedFix.length === 0 || e.statesProperty) continue;
+      const key = entryKey(file, e);
+      (/** @type {string[]} */ (nextBaseline.entries_prescribing_mechanism)).push(key);
+      if (baseline.entriesPrescribingMechanism.has(key)) {
+        staleMechanismAmnesty.delete(key);
+        grandfathered += 1;
+        continue;
+      }
+      violations.push(
+        `docs/backlog/${file}:${e.line} — entry prescribes a fix mechanism (${e.prescribedFix.join(", ")}) ` +
+          `without stating its PROPERTY\n` +
+          `    ${e.title}\n` +
+          `    State what must become true (add \`**Property:** …\`), so the lap that opens this entry\n` +
+          `    can find the mechanism that fits the tree — the prescribed one is the part that does\n` +
+          `    not survive contact, and opening a lap on an entry whose fix INVENTS the bug is how\n` +
+          `    the 2026-07-24 per-node token estimate entry nearly regressed the run.`,
+      );
+    }
   }
 
   // A recorded ceiling that no longer applies. The ratchet's number is only a bound
@@ -315,25 +455,36 @@ export function evaluateBacklog(files, baseline) {
   // An amnesty naming an entry that no longer exists. It can never match, so the dead
   // data is invisible rather than red — the same defect class as the stale ceiling, and
   // the reason a dead key survived in this very file undetected (2026-08-27).
-  const vanishedAmnesty = [...baseline.entriesOverBudget].filter((key) => {
-    const separator = key.indexOf("::");
-    const file = separator === -1 ? key : key.slice(0, separator);
-    const title = separator === -1 ? "" : key.slice(separator + 2);
-    const source = files.find((f) => f.file === file);
-    return source === undefined || !parseEntries(source.text).some((e) => e.title === title);
-  }).sort(compareCodeUnits);
-  for (const key of vanishedAmnesty) {
-    const file = key.slice(0, key.indexOf("::"));
-    violations.push(
-      `docs/backlog/.size-baseline.json amnesties "${key}", but ` +
-        (presentFiles.has(file)
-          ? `no entry with that title exists in ${file} any more (renamed or deleted)`
-          : `${file} does not exist`) +
-        ` — a stale amnesty never matches, so it is dead data rather than a live exemption.`,
-    );
-  }
+  //
+  // ONE helper for BOTH amnesty sets (`entries_over_budget` and
+  // `entries_prescribing_mechanism`): they are keyed identically and decay
+  // identically, so a second copy of this scan is a second place for the two to
+  // disagree about what "the entry still exists" means.
+  const vanishedKeys = (keys) => {
+    const found = [...keys].filter((key) => {
+      const separator = key.indexOf("::");
+      const file = separator === -1 ? key : key.slice(0, separator);
+      const title = separator === -1 ? "" : key.slice(separator + 2);
+      const source = files.find((f) => f.file === file);
+      return source === undefined || !parseEntries(source.text).some((e) => e.title === title);
+    }).sort(compareCodeUnits);
+    for (const key of found) {
+      const file = key.slice(0, key.indexOf("::"));
+      violations.push(
+        `docs/backlog/.size-baseline.json amnesties "${key}", but ` +
+          (presentFiles.has(file)
+            ? `no entry with that title exists in ${file} any more (renamed or deleted)`
+            : `${file} does not exist`) +
+          ` — a stale amnesty never matches, so it is dead data rather than a live exemption.`,
+      );
+    }
+    return found;
+  };
+  const vanishedAmnesty = vanishedKeys(baseline.entriesOverBudget);
+  const vanishedMechanismAmnesty = vanishedKeys(baseline.entriesPrescribingMechanism);
 
   nextBaseline.entries_over_budget.sort();
+  nextBaseline.entries_prescribing_mechanism.sort();
   nextBaseline.file_ceilings = Object.fromEntries(
     Object.entries(nextBaseline.file_ceilings).sort(([a], [b]) => compareCodeUnits(a, b)),
   );
@@ -342,8 +493,10 @@ export function evaluateBacklog(files, baseline) {
     totalEntries,
     grandfathered,
     staleAmnesty: [...staleAmnesty].sort(compareCodeUnits),
+    staleMechanismAmnesty: [...staleMechanismAmnesty].sort(compareCodeUnits),
     staleCeilings,
     vanishedAmnesty,
+    vanishedMechanismAmnesty,
     nextBaseline,
     distribution,
   };
@@ -366,7 +519,8 @@ export function evaluateBacklog(files, baseline) {
  * design: other files' shrinks and the entry amnesty still land, so one grown file does
  * not strand the rest of an end-of-lap update.
  *
- * @param {{file_ceilings: Record<string, number>, entries_over_budget: string[]}} nextBaseline
+ * @param {{file_ceilings: Record<string, number>, entries_over_budget: string[],
+ *   entries_prescribing_mechanism: string[]}} nextBaseline
  * @param {{fileCeilings: Record<string, number>}} baseline  what is recorded today
  * @param {{raiseCeiling: boolean}} intent
  */
@@ -397,7 +551,14 @@ export function planBaselineUpdate(nextBaseline, baseline, { raiseCeiling }) {
   }
 
   return {
-    baseline: { file_ceilings, entries_over_budget: nextBaseline.entries_over_budget },
+    baseline: {
+      file_ceilings,
+      entries_over_budget: nextBaseline.entries_over_budget,
+      // Carried verbatim: the remedy's job is to drop keys that stopped
+      // applying, so an entry that gained its `**Property:**` in this lap leaves
+      // the list here — which is why the amnesty can only ever shrink.
+      entries_prescribing_mechanism: nextBaseline.entries_prescribing_mechanism,
+    },
     refused,
     raised,
   };
@@ -452,7 +613,8 @@ function main() {
     writeFileSync(baselinePath, JSON.stringify(plan.baseline, null, 2) + "\n", "utf8");
     process.stdout.write(
       `wrote ${baselinePath} — ${Object.keys(plan.baseline.file_ceilings).length} file ceiling(s), ` +
-        `${plan.baseline.entries_over_budget.length} grandfathered entr(ies).\n` +
+        `${plan.baseline.entries_over_budget.length} grandfathered entr(ies), ` +
+        `${plan.baseline.entries_prescribing_mechanism.length} mechanism-amnestied entr(ies).\n` +
         `A file ceiling may only shrink; a grandfathered entry is amnestied by name, not metered.\n` +
         plan.raised
           .map(
@@ -511,6 +673,13 @@ function main() {
           result.vanishedAmnesty.map((k) => `  ${k}\n`).join(""),
       );
     }
+    if (result.staleMechanismAmnesty.length > 0) {
+      process.stdout.write(
+        `\nmechanism amnesty now satisfied (the entry states its Property — re-run ` +
+          `--update-baseline to drop):\n` +
+          result.staleMechanismAmnesty.map((k) => `  ${k}\n`).join(""),
+      );
+    }
     process.stdout.write("\n");
   }
 
@@ -524,6 +693,10 @@ function main() {
         `retelling is how two entries came to invert their own incident's mechanism.\n` +
         `An entry refusal names the largest paragraphs of the entry and the file's drift\n` +
         `since HEAD, so one edit is enough; a file refusal names its largest entries.\n\n` +
+        `An entry that PRESCRIBES a fix states what must become true beside it. The\n` +
+        `prescribed mechanism is the part that does not survive contact with the tree —\n` +
+        `the 2026-07-24 lap opened an entry whose fix would have regressed the run — so\n` +
+        `write the invariant (\`**Property:** …\`) and let the lap find the mechanism.\n\n` +
         `A stale ceiling or a vanished amnesty is a BASELINE refusal, cleared by the same\n` +
         `command that records: --update-baseline writes what the files measure now (and the\n` +
         `entry amnesties that still match), so it drops dead keys as it goes. An over-budget\n` +

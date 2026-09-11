@@ -597,13 +597,46 @@ export const GUARDS = [
   {
     id: 'check:backlog-budget',
     kind: 'gate',
+    forms: [
+      // The states-the-property half (second backlog-clearance lap, 2026-07-24):
+      // a prescription with no `**Property:**` marker beside it. Driven through
+      // the pure detector — `evaluateBacklog` takes a file LIST, which no form
+      // kind supplies, and the detector is what decides either leg's refusal.
+      { name: 'prescribed fix with no property', drive: 'export',
+        module: 'scripts/check-backlog-budget.mjs',
+        exportName: 'prescribedFixShapes', call: 'text',
+        sample: '- **An entry.** The fix is to move it into one module.' },
+      { name: 'imperative remedy instead of a property', drive: 'export',
+        module: 'scripts/check-backlog-budget.mjs',
+        exportName: 'prescribedFixShapes', call: 'text',
+        sample: '- **An entry.** Anchor the deletion on the next bullet instead of a count.' },
+    ],
     impl: 'check:backlog-budget',
     preCommit: 'reach',
     writeTime: { scope: 'file', maxMs: 1000 },
     fix:
       'a staged backlog entry or file is over its size ceiling, and an over-budget file may only ' +
       'shrink — condense at write time: keep the MECHANISM and the open PROPERTY, link the primary ' +
-      'record (git log, docs/reviews/) instead of retelling it. There is no per-entry ceiling to raise',
+      'record (git log, docs/reviews/) instead of retelling it. There is no per-entry ceiling to raise. ' +
+      'A refusal naming a PRESCRIBED FIX MECHANISM is the states-the-property leg instead: the entry ' +
+      'says how to change the code without saying what must become true, so add `**Property:** …` — ' +
+      'the prescribed mechanism is the part that does not survive contact with the tree (a lap opened ' +
+      'on one whose fix would have regressed the run)',
+    note:
+      'TWO legs, one gate, because both are entry WRITE-TIME shape rules over the same parsed corpus ' +
+      '(the size budget, and the states-the-property rule from the 2026-07-24 second-backlog-clearance ' +
+      'lap). The property leg is DELIBERATELY NARROW: it refuses an entry that prescribes a fix ' +
+      '(PRESCRIBED_FIX_SHAPES — three literal shapes drawn from live entries) without a `**Property:**` ' +
+      'marker, not "every entry needs a marker" — half the corpus is measurements, residual lists and ' +
+      'live-run watches that prescribe nothing, and requiring the marker there would red 100+ entries ' +
+      'for a rule they cannot satisfy. Pre-existing prescriptions are amnestied BY NAME in ' +
+      '`entries_prescribing_mechanism` (the same shape as the byte amnesty, and it drops a key as soon ' +
+      'as the entry gains its marker). UNCOVERED HALF, stated: the leg detects the marker\'s PRESENCE, ' +
+      'never whether the sentence after it states a property rather than a mechanism in different ' +
+      'words — nor an entry that states a property and then prescribes a mechanism anyway in its body. ' +
+      'The shape list errs toward false NEGATIVES by construction (a wider net flags legitimate ' +
+      '`**Property:** a lap can …` prose, and a gate that cries wolf on its own corpus gets disabled). ' +
+      'Those are readings; the nightly doc leg is the semantic backstop',
   },
   {
     id: 'check:backlog-status',

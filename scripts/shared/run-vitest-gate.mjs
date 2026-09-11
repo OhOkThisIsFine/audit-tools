@@ -28,6 +28,20 @@
 // reporter echoes it back into the ledger it writes. If the ledger's token
 // doesn't match (missing ledger, stale ledger, reporter never ran), the gate
 // fails closed rather than trusting a ledger it cannot prove belongs to this run.
+//
+// ⚠ MONITORING A BACKGROUND RUN — never pipe this through `tail`/`head`. This is
+// the single entry every long suite in the repo goes through (the full run takes
+// minutes on Windows), so the rule lives HERE, at the launch site, rather than in
+// a backlog entry a launcher would have to read first. `npm test … | tail -N`
+// writes NOTHING to the background task's output file until the whole run ends:
+// the filter buffers to EOF, so a working run and a hung one are byte-identical
+// for the entire duration (measured 2026-07-24 — a suite that could not be
+// progress-monitored looked hung). REDIRECT instead — `npm test > run.log 2>&1`
+// in the background, then read or grep `run.log` while it runs. The exit code is
+// this script's verdict either way; the redirect only makes the run observable.
+// `shell-trap-guard`'s `masked-exit` rule already refuses the pipe form on suite
+// commands for the EXIT-CODE reason; this note covers the OTHER cost of the same
+// pipe — a background run nobody can watch.
 
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";

@@ -154,7 +154,7 @@ describe("dispatchBoundedItems", () => {
     expect(existsSync(out)).toBe(false);
   });
 
-  it("a throwing lane lands an error row (item file echoed) and the sweep continues", async () => {
+  it("a permanently throwing lane lands an error row (item file echoed) and the sweep continues", async () => {
     const out = join(tmp(), "t.jsonl");
     const { stamp } = await dispatchBoundedItems({
       items: [
@@ -170,11 +170,20 @@ describe("dispatchBoundedItems", () => {
       buildRecord: (item: any) => ({ id: item.id, file: item.file, ok: true }),
     });
     const rows = readRows(out);
-    expect(rows[0]).toEqual({ id: "a", file: "open-bugs.md", error: "ECONNRESET" });
+    // `a` threw on BOTH the attempt and its one retry, so the row carries both
+    // messages — the item file echo is unchanged, and the retry is visible.
+    expect(rows[0]).toEqual({
+      id: "a",
+      file: "open-bugs.md",
+      error: "ECONNRESET | retry: ECONNRESET",
+    });
     expect(rows[1].ok).toBe(true);
+    // `attempted` counts ITEMS, not lane calls: a retry is not a second item,
+    // and inflating it would make the coverage stamp's denominator lie.
     expect(stamp.attempted).toBe(2);
     expect(stamp.errored).toBe(1);
     expect(stamp.classified).toBe(1);
+    expect(stamp.retried).toBe(1);
   });
 
   it("records finish_reason and output_bytes on success AND on a buildRecord-rejected row", async () => {
@@ -220,7 +229,10 @@ describe("dispatchBoundedItems", () => {
       buildRecord: (item: any) => ({ id: item.id }),
     });
     const [row] = readRows(out);
-    expect(row.error).toBe("timeout");
+    // Both attempts died in transport, so neither produced output to size — and
+    // the row says so by OMITTING the fields rather than stamping a zero, which
+    // would read as "dialect death" on the P28 diagnostic axis.
+    expect(row.error).toBe("timeout | retry: timeout");
     expect("finish_reason" in row).toBe(false);
     expect("output_bytes" in row).toBe(false);
   });
@@ -269,6 +281,103 @@ describe("dispatchBoundedItems", () => {
     expect(stamp.finished_at).toEqual(expect.any(String));
     expect(stamp.probes_unusable).toBe(1);
     expect(JSON.parse(readFileSync(stampPath, "utf8"))).toEqual(stamp);
+  });
+
+  // ── THE ONE RETRY (2026-08-22 entry) ───────────────────────────────────────
+  //
+  // The sweep errored on 22 of 96 entries in one pass; a plain re-run recovered
+  // 20 of them. The recovery worked and was the OPERATOR's to remember, and a
+  // single pass wrote a coverage stamp reporting 74/96 as if that were the
+  // ceiling. These pin the property the entry asked for — the sweep retries its
+  // own transport failures within one invocation — AND the line the retry stops
+  // at, since retrying a lane that ANSWERED unusably would burn a second full
+  // timeout to relearn the same dialect death.
+  it("retries a TRANSPORT death once, within the same invocation, and classifies the item", async () => {
+    const out = join(tmp(), "t.jsonl");
+    let calls = 0;
+    const { stamp, records } = await dispatchBoundedItems({
+      items: [{ id: "a" }],
+      outPath: out,
+      callLane: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("ECONNRESET");
+        return { raw: "{}", finishReason: "stop" };
+      },
+      buildRecord: (item: any) => ({ id: item.id, ok: true }),
+    });
+    expect(calls, "one retry, not two").toBe(2);
+    expect(records[0].ok).toBe(true);
+    expect(stamp.classified).toBe(1);
+    expect(stamp.errored).toBe(0);
+    // The recovered row still records that the first attempt died: a flaky
+    // transport is otherwise invisible behind a clean classified count.
+    expect(records[0].retry).toEqual({ attempts: 2, errors: ["ECONNRESET"] });
+    expect(stamp.retried).toBe(1);
+  });
+
+  it("gives up after ONE retry and lands an error row naming BOTH attempts", async () => {
+    const out = join(tmp(), "t.jsonl");
+    let calls = 0;
+    const { stamp } = await dispatchBoundedItems({
+      items: [{ id: "a", file: "open-bugs.md" }],
+      outPath: out,
+      callLane: async () => {
+        calls += 1;
+        throw new Error(`death ${calls}`);
+      },
+      buildRecord: (item: any) => ({ id: item.id }),
+    });
+    expect(calls).toBe(2);
+    const [row] = readRows(out);
+    expect(row.id).toBe("a");
+    expect(row.file).toBe("open-bugs.md");
+    // Both messages survive: one line would hide that a retry happened at all.
+    expect(row.error).toContain("death 1");
+    expect(row.error).toContain("death 2");
+    expect(stamp.errored).toBe(1);
+    expect(stamp.classified).toBe(0);
+  });
+
+  it("does NOT retry a lane that ANSWERED with an unusable payload", async () => {
+    // The line the retry stops at, and the whole reason it lives in the driver
+    // rather than the caller: a payload that fails to build is the lane's verdict
+    // on itself, and which OTHER rung might answer better is the relay's call.
+    const out = join(tmp(), "t.jsonl");
+    let calls = 0;
+    const { stamp } = await dispatchBoundedItems({
+      items: [{ id: "a" }],
+      outPath: out,
+      callLane: async () => {
+        calls += 1;
+        return { raw: "I could not classify this entry.", finishReason: "stop" };
+      },
+      buildRecord: () => {
+        throw new Error("no JSON object in response");
+      },
+    });
+    expect(calls, "the lane answered — a second call would relearn the same death").toBe(1);
+    const [row] = readRows(out);
+    expect(row.error).toBe("no JSON object in response");
+    expect("retry" in row).toBe(false);
+    expect(stamp.retried).toBe(0);
+  });
+
+  it("retries per ITEM, so one flaky entry never re-runs the rest of the sweep", async () => {
+    const out = join(tmp(), "t.jsonl");
+    const calls: string[] = [];
+    await dispatchBoundedItems({
+      items: [{ id: "a" }, { id: "b" }, { id: "c" }],
+      outPath: out,
+      concurrency: 1,
+      callLane: async (item: any) => {
+        calls.push(item.id);
+        if (item.id === "b" && calls.filter((c) => c === "b").length === 1) throw new Error("blip");
+        return { raw: "{}", finishReason: "stop" };
+      },
+      buildRecord: (item: any) => ({ id: item.id, ok: true }),
+    });
+    expect(calls).toEqual(["a", "b", "b", "c"]);
+    expect(readRows(out).map((r) => r.id)).toEqual(["a", "b", "c"]);
   });
 
   it("an unwritable stamp path warns once and never kills the sweep", async () => {

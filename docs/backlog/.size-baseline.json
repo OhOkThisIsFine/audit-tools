@@ -1,4 +1,15 @@
 {
   "file_ceilings": {},
-  "entries_over_budget": []
+  "entries_over_budget": [],
+  "entries_prescribing_mechanism": [
+    "durable-traps.md::A critique can prescribe a remedy the pipeline structurally cannot perform (20",
+    "durable-traps.md::A global junction to a LIVE working tree silently shadows a registry install. ",
+    "durable-traps.md::After a \"string to replace not found\" on text you JUST wrote, grep for the anc",
+    "forward-tracks.md::Obligation-id slugs and decomposed-module names are two name spaces joined by ",
+    "minor-bugs.md::A stale-artifact re-extraction `next-step` runs >2min with no progress signal,",
+    "minor-bugs.md::Recovery phase-binding residuals from the adversarial review (2026-08-19, low,",
+    "open-bugs.md::Analyzer-boundary residuals from the CP-NODE-1 review (low). (a) Six",
+    "open-bugs.md::Review rounds re-derive the same file map every time (inefficient-feeding, 202",
+    "open-bugs.md::Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-"
+  ]
 }

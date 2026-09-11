@@ -44,6 +44,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseBulletEntries, parseTrackEntries, sectionText } from "./generate-handoff-roadmap.mjs";
 import { runGeneratedArtifactCli, spliceGeneratedBlock } from "./generatedArtifacts.mjs";
 import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
+import { findEntryBoundaryDamage, renderEntryBoundaryDamage } from "./backlog-entry-grammar.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const backlogDir = join(repoRoot, "docs", "backlog");
@@ -168,15 +169,77 @@ function readSources() {
   return new Map(files.map((f) => [f, readFileSync(join(backlogDir, f), "utf8")]));
 }
 
+/**
+ * Entry-boundary damage across every indexed source, as `{ file, text }` pairs
+ * ready for `renderEntryBoundaryDamage` — or null when the corpus is sound.
+ *
+ * WHY THIS GATE AND NOT THE BUDGET OR ROADMAP ONE. The seek index's whole
+ * subject is "which entries exist", so damage to that question is damage to this
+ * gate's own premise — and unlike the other two consumers, this one already
+ * reads every indexed file in one pass. The budget gate reads the same bytes to
+ * METER them (a merged entry is merely a bigger one) and the roadmap reads them
+ * to lift titles (a merged entry is simply not pinned); neither is refuted by
+ * the damage, while this index silently stops listing the entry. That is the
+ * defect the incident produced, so this is the boundary that owns the refusal.
+ *
+ * Scanned from the WHOLE file, never the section slice `collectIndex` parses:
+ * `findEntryBoundaryDamage` needs the section headings to know that
+ * `## Open tracks` writes bold paragraphs, and a slice has lost them.
+ */
+export function findBoundaryDamage(sources) {
+  const found = [];
+  for (const file of new Set(INDEX_SOURCES.map((s) => s.file))) {
+    const damaged = findEntryBoundaryDamage(sources.get(file) ?? "");
+    if (damaged.length > 0) found.push({ file, damaged });
+  }
+  return found.length > 0 ? found : null;
+}
+
+/**
+ * Both stale generators named in ONE refusal (2026-07-25 friction walk).
+ *
+ * A single backlog edit stales the seek index AND the HANDOFF roadmap — two
+ * generators, each with its own commit-gate refusal — so the operator learned
+ * the second was stale only after fixing and re-committing the first: two
+ * blocked commits for one edit. The two gates cannot be merged (they own
+ * different files and different triggers), but the refusal each prints travels
+ * with the FIX, and naming both fix commands here makes one round-trip enough.
+ * A new `regen:docs` script would be a third thing to keep in step with the two
+ * it wraps; naming them costs nothing and cannot drift.
+ */
+export const BOTH_GENERATORS =
+  `Both generators read docs/backlog/:\n` +
+  `  node scripts/shared/generate-backlog-index.mjs     (docs/backlog.md)\n` +
+  `  node scripts/shared/generate-handoff-roadmap.mjs   (docs/HANDOFF.md)\n` +
+  `Run BOTH before re-staging — one backlog edit stales each, and fixing them one per\n` +
+  `commit costs two blocked commits to learn what one message can say.\n`;
+
 function main() {
-  const rendered = spliceIndex(readFileSync(indexPath, "utf8"), renderIndex(collectIndex(readSources())));
+  const sources = readSources();
+  // Boundary damage FIRST, and return before the parity comparison: the parity
+  // check would otherwise report a healthy-looking index, because the generator
+  // counts entries from the same damaged bytes and so agrees with the damage.
+  // Two refusals for one defect would also read as two defects.
+  const damage = findBoundaryDamage(sources);
+  if (damage !== null) {
+    process.stderr.write(
+      `\n` +
+        damage.map(({ file, damaged }) => renderEntryBoundaryDamage(damaged, `docs/backlog/${file}`)).join("\n") +
+        `\n` +
+        BOTH_GENERATORS +
+        `\n`,
+    );
+    process.exit(1);
+  }
+  const rendered = spliceIndex(readFileSync(indexPath, "utf8"), renderIndex(collectIndex(sources)));
   const count = (rendered.match(/^- `[^`]+:\d+` — /gm) ?? []).length;
   runGeneratedArtifactCli({
     repoRoot,
     files: [{ target: "docs/backlog.md", next: rendered }],
     staleMessage:
       `The generated seek index's anchors no longer match docs/backlog/. A stale anchor is worse ` +
-      `than no anchor: it sends the reader to confidently wrong prose.`,
+      `than no anchor: it sends the reader to confidently wrong prose.\n` +
+      BOTH_GENERATORS,
     fixCommand: "node scripts/shared/generate-backlog-index.mjs",
     okMessage: `backlog-index: docs/backlog.md matches the backlog (${count} anchor(s))`,
   });

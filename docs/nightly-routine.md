@@ -88,12 +88,14 @@ requires.
 (`scripts/shared/triage-backlog.mjs`) names no model: it hands each entry to
 llm-relay's `dispatch` tool over MCP stdio, so the relay owns lane choice and
 each record names the lane that answered it. It preflights once (a dead lane
-aborts at entry 0 with the relay's own error) and writes `<out>-coverage.json`
-— model, attempted, classified, errored, aborted, and a per-lane count — beside
-the JSONL as it runs. Report leg-2 coverage from that
+aborts at entry 0 with the relay's own error), retries a call that died in
+transport once within the same invocation (so a partial sweep is the lane's
+verdict, not a hand-run's to recover), and writes `<out>-coverage.json`
+— model, attempted, classified, errored, aborted, retried, and a per-lane count
+— beside the JSONL as it runs. Report leg-2 coverage from that
 stamp; a missing or aborted stamp means the sweep did NOT cover the backlog,
 and saying so is the honest sentence three partial runs had to reconstruct by
-hand (P11, sol-4 decision 2026-08-06).
+hand (P11, sol-4 decision 2026-08-06; transport retry 2026-08-22).
 
 ### Leg 3 — recurring-problem solutions
 

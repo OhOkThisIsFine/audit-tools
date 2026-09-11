@@ -568,17 +568,6 @@
   `worktreeTree` to learn whether the baseline was green. Its home is `C:\Code\docs\backlog.md`,
   because the declaration schema and its reader are machine-wide.
 
-- **Friction walk (two-identities lap, 2026-08-30):** (1) **ambiguous-direction:** none — both
-  approved goals stated a testable property, and the one live owner decision (which goals) was
-  asked before work started. (2) **tool-should-decide (medium):** nothing validates that a backlog
-  entry is WELL-FORMED, so deleting one by line index silently ate the next entry's `- **` opener.
-  `check:backlog-index` cannot catch it — the generator counts entries from the same damaged bytes,
-  so it regenerates an index that agrees with the damage. Anchor a deletion on the next `- **`
-  instead of a line count. **Property:** an entry that lost its opener, or a stray continuation line
-  belonging to no entry, is a RED. (3) **inefficient-feeding:** the full suite ran three times
-  (~3.2 min each) because the green stamp binds the tree and two doc commits changed it after the
-  first two runs; batching the doc commits before the final run would have cost one.
-
 - **Friction walk (determinations-execution lap, 2026-07-29):** (1) **ambiguous-direction:** none —
   the 16 nightly-ledger answers were executable as written; the two left unexecuted (premise probe
   `ea4e616f`, guard-reach-as-declared-data `ec64d159`) are full-lap builds awaiting a design pass,
@@ -592,18 +581,6 @@
   doc gate and failed release CI on the nightly-prompt parity test (since deleted with its
   generated target, C-08), which pinned the retired helper invocation verbatim. Grep tests for a doc's path/content before shipping a
   contract-bearing doc edit; the durable fix would be a declared doc→test consumer map.
-
-- **Friction walk (duplicated-guard lap, 2026-07-25):** (1) **inefficient-feeding (medium):** the
-  triage's per-entry `Paths:` are MODEL-INVENTED for entries whose prose names no file —
-  <!-- doc-citation-exempt: deliberate does-not-exist narrative — the entry records these paths as fabrications -->
-  `src/scheduler/populate.ts`, `src/review/mapCache.ts`, `src/pinning-gate.ts` and others do not exist —
-  so a path column that reads like evidence is a routing guess. Two of the three entries worked this lap
-  had to be located by grep anyway. Property: a generated triage should emit a path only when it can be
-  resolved against the tree, and mark the rest `unresolved`. (2) **tool-should-decide (low):** the
-  backlog seek-index and the HANDOFF roadmap are two separate generators, each with its own commit-gate
-  refusal, so a single backlog edit costs two blocked commits to learn both are stale. One `npm run
-  regen:docs` (or one gate naming both) would make it one round-trip. (3) **ambiguous-direction:** none
-  this lap.
 
 - **The per-result LLM conformance review — the opt-in depth dial half of the owner decision — is
   unbuilt, so semantic conformance to the carried module contracts is still judged by nothing
@@ -679,15 +656,6 @@
   makes `check:tests` inert for that fixture — it hid blocks missing a REQUIRED contract field from the
   gate added to catch exactly that. Property: a fixture must not be able to cast away a contract's
   required keys — `satisfies`, or a builder that cannot omit them.
-
-- **Friction walk (second backlog-clearance lap, 2026-07-24):** (1) **ambiguous-direction (medium):**
-  a backlog entry can name a fix whose PREMISE is sound and whose CONSEQUENCE is unshippable — the
-  per-node token estimate entry described the defect correctly and the fix it prescribed would have
-  regressed the run. An entry should state the property, not the mechanism, precisely because the
-  mechanism is the part that does not survive contact ([[backlog-item-states-invariant-not-fix-mechanism]]).
-  (2) **inefficient-feeding (low):** a background `npm test … | tail -N` writes NOTHING to its output
-  file until the whole run ends, because `tail` buffers to EOF — so a long suite cannot be progress-
-  monitored and looks hung. Redirect to a file and grep it instead of piping through `tail`.
 
 - **Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code
   site).** Shipped 2026-07-10: `buildFileDisposition` runs an `untracked` scope rule, so untracked
