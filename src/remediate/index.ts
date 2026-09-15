@@ -1,3 +1,6 @@
+// sites-pinned: tests/remediate/recover-verb-branches.test.ts
+// (the
+// ACCEPTED-WITH-ISSUES arm — its status token and exit code)
 import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
@@ -572,7 +575,7 @@ export function resolveArtifactsDirOption(
 export type RecoveryVerbResult =
   | { readonly status: "recovered"; readonly body: Record<string, unknown> }
   | {
-      readonly status: "nothing-to-recover" | "pending";
+      readonly status: "recovered-with-issues" | "nothing-to-recover" | "pending";
       readonly body: Record<string, unknown>;
       readonly exitCode: number;
     }
@@ -591,17 +594,27 @@ export type RecoveryVerbResult =
  *      as a fault — not even when a sibling item was accepted in the same pass,
  *      because the issues are what an operator acts on and none of them asks for
  *      anything. (`accepted_count` in the body still reports the acceptance.)
- *   0  otherwise, something was accepted
+ *   2  ACCEPTED-WITH-ISSUES: something was accepted AND something was really
+ *      refused. Tested before the clean arm, because the clean arm's condition
+ *      ("something was accepted") is a strict superset: without this arm a
+ *      partial recovery reports the same status token as a complete one, and a
+ *      caller scripting on the token cannot see the refusal at all.
+ *   0  otherwise, everything the pass saw was accepted
  *   1  otherwise (nothing accepted, and not every issue is expected-pending): a
  *      run that recovered NOTHING is not a recovery, and any REAL issue — a
  *      partial ingest, a moved tree, a refused payload — is a failure.
  *
- * The middle arm is the distinction the entry asks for: "the host hasn't
+ * The pending arm is the distinction the entry asks for: "the host hasn't
  * finished" must not read identically to "the run is wedged", or an operator's
  * retry loop cannot tell a normal wait from a real fault. `submission_missing`
  * is the ONLY issue code that means expected-pending — every other code
  * describes something the operator must act on. (75 = EX_TEMPFAIL, the
  * conventional "try again" code.)
+ *
+ * The accepted-with-issues arm applies the same rule one level down: a pass that
+ * landed real work AND refused real work is neither a clean success nor a
+ * nothing-to-recover, and it gets its own token so the three are told apart
+ * without reading `issues`.
  */
 export async function recoverIngestVerb(options: {
   root: string;
@@ -624,12 +637,23 @@ export async function recoverIngestVerb(options: {
     summary.accepted_count === 0 &&
     summary.completed_work_item_ids.length === 0 &&
     !expectedPendingOnly;
+  // A pass that accepted real work AND refused real work. Computed from the SAME
+  // two facts the other arms read — an acceptance happened, and at least one
+  // issue is not the expected-pending code — so this arm does not re-derive
+  // "was there a refusal", which is what would let the token and the issue list
+  // disagree.
+  const acceptedWithIssues =
+    !recoveredNothing &&
+    !expectedPendingOnly &&
+    summary.issues.length > 0;
   const body = {
     status: recoveredNothing
       ? "nothing-to-recover"
       : expectedPendingOnly
         ? "pending"
-        : "recovered",
+        : acceptedWithIssues
+          ? "recovered-with-issues"
+          : "recovered",
     run_id: options.runId,
     accepted_count: summary.accepted_count,
     completed_work_item_ids: summary.completed_work_item_ids,
@@ -645,6 +669,9 @@ export async function recoverIngestVerb(options: {
   };
   if (recoveredNothing) return { status: "nothing-to-recover", body, exitCode: 1 };
   if (expectedPendingOnly) return { status: "pending", body, exitCode: 75 };
+  if (acceptedWithIssues) {
+    return { status: "recovered-with-issues", body, exitCode: 2 };
+  }
   return { status: "recovered", body };
 }
 

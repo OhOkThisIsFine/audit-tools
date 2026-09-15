@@ -199,6 +199,50 @@ describe("recover-ingest action branch", () => {
     expect(real.body["status"]).toBe("nothing-to-recover");
   });
 
+  it("distinguishes ACCEPTED-WITH-ISSUES from a clean recovery", async () => {
+    // A recovery that accepted one item and refused another is not the same
+    // outcome as a recovery that accepted everything, and an operator's retry
+    // loop has to be able to tell them apart WITHOUT parsing prose. Both used to
+    // report `status: "recovered"` with exit 0 — the refusal rode `issues`, and
+    // a caller that scripts on the status token (the documented contract: "exit
+    // code, not prose, is what an operator scripts on") saw a clean recovery.
+    const work = await persistRunnableState();
+    // The harness plan binds TWO blocks (B-001, B-002) over two files, so the
+    // minted workload carries two work items: land one, refuse the other.
+    await landAcceptedWork(work);
+    const second = await readFile(work.workloadPath, "utf8").then(
+      (raw) =>
+        (
+          JSON.parse(raw) as {
+            work_items: Array<{ id: string; result_path: string }>;
+          }
+        ).work_items.find((entry) => entry.id !== work.workItemId)!,
+    );
+    const secondResultPath = join(REPO_DIR, second.result_path);
+    await mkdir(dirname(secondResultPath), { recursive: true });
+    await writeFile(
+      secondResultPath,
+      JSON.stringify({ contract_version: RESULT_VERSION }),
+      "utf8",
+    );
+
+    const partial = await recoverIngestVerb({
+      root: REPO_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "RUN-1",
+    });
+    // The property under test: accepted work is NOT reported as a clean
+    // recovery while a sibling was refused.
+    expect(partial.status).toBe("recovered-with-issues");
+    if (partial.status !== "recovered-with-issues") return;
+    // The exit code SEPARATES it from the clean arm — otherwise the new status is
+    // a token only a reader of the JSON body could act on.
+    expect(partial.exitCode).toBe(2);
+    expect(partial.body["status"]).toBe("recovered-with-issues");
+    expect(partial.body["accepted_count"]).toBe(1);
+    expect((partial.body["issues"] as readonly unknown[]).length).toBeGreaterThan(0);
+  });
+
   it("resolves the artifacts dir default onto the root and honors an explicit one", () => {
     // `resolveArtifactsDirOption` is the boundary between "the commander default"
     // and "the operator named a directory", and it shipped with no test. The

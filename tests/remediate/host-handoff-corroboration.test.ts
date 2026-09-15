@@ -8,6 +8,7 @@ import {
   precomputeRecoveryTestVerdicts,
   prepareRemediationHostHandoff,
   remediationSubmissionBinding,
+  REQUIRED_TEST_MESSAGE_LIMIT,
   runRequiredTest,
   type CurrentRemediationHostState,
   type PreparedRemediationHostHandoff,
@@ -112,6 +113,13 @@ async function fixture(options: {
   affectedFiles?: Array<{ path: string; hash_at_plan_time?: string }>;
   otherAffectedFiles?: Array<{ path: string; hash_at_plan_time?: string }>;
   requiredTest?: string;
+  /**
+   * A block's WHOLE `targeted_commands` list. `requiredTest` is the single
+   * command most tests need; this is for the tests that must bind several, where
+   * the NUMBER of commands is the variable under test (a per-command excerpt is
+   * fine; the message JOINS them, so its size scales with the count).
+   */
+  requiredTests?: string[];
   runStartDirty?: string[];
   /**
    * Add a VERIFIED dependency block `B0` ahead of `B1`. At mint time B0 is
@@ -237,9 +245,9 @@ async function fixture(options: {
           parallel_safe: true,
           dependencies: options.gateBlock ? ["B0"] : [],
           touched_files: allowedFiles,
-          targeted_commands: [
-            options.requiredTest ?? 'node -e "process.exit(0)"',
-          ],
+          targeted_commands:
+            options.requiredTests ??
+            [options.requiredTest ?? 'node -e "process.exit(0)"'],
           phase_ordinal: 0,
           token_estimate: 250,
           ...(options.contractOverlays
@@ -496,6 +504,20 @@ const HANG_TEST = `node ${HANG_SCRIPT}`;
 const HANG_SCRIPT_SOURCE = [
   'console.log("partial suite output");',
   "setTimeout(function () {}, 60000);",
+  "",
+].join("\n");
+
+/**
+ * A RED suite that also prints close to the capture cap, so the issue message
+ * built from its captured output is long for a reason that is not the failure's
+ * own diagnosis. `process.exit(1)` after the write keeps the exit code the
+ * `required_test_failed` arm reports.
+ */
+const VERBOSE_RED_SCRIPT = "verbose-red.mjs";
+const VERBOSE_RED_TEST = `node ${VERBOSE_RED_SCRIPT}`;
+const VERBOSE_RED_SCRIPT_SOURCE = [
+  'process.stdout.write("noise ".repeat(300000));',
+  "process.exit(1);",
   "",
 ].join("\n");
 
@@ -2524,6 +2546,62 @@ describe("remediation host handoff repository corroboration", () => {
       "required_test_failed",
     ]);
     expect(refused.issues[0]!.message).toContain("exit 1");
+  });
+
+  it("bounds the inline excerpt in a required-test failure message", async () => {
+    // The issue message is a HOST-FACING delivery: it is rendered into the step
+    // prompt an operator reads. `tail` bounds each STREAM, but the excerpt is
+    // bounded only per-stream — the message joins every failing command, and a
+    // suite that prints near the capture limit on many commands makes the
+    // message grow with the number of failures. The bound must hold for the
+    // MESSAGE, so a long run cannot push the rest of the step out of view.
+    const value = await fixture({
+      // THREE verbose failing commands on ONE block: `required_tests` is the
+      // block's `targeted_commands`, so the count is a property of the plan and
+      // the joined message is ~3x one excerpt — past the bound, while a single
+      // excerpt (4071 chars) sits comfortably under it.
+      requiredTests: [VERBOSE_RED_TEST, VERBOSE_RED_TEST, VERBOSE_RED_TEST],
+    });
+    await writeFile(
+      join(value.root, VERBOSE_RED_SCRIPT),
+      VERBOSE_RED_SCRIPT_SOURCE,
+      "utf8",
+    );
+    const after = await landA(value);
+    await writeResult(value, resultFor(value, after));
+
+    const refused = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+    });
+    if (refused === "unsupported_retired_state") throw new Error("state rejected");
+    const issue = refused.issues.find(
+      (entry) => entry.code === "required_test_failed",
+    );
+    expect(issue, `expected a required_test_failed issue: ${JSON.stringify(refused.issues.map((i) => i.code))}`).toBeDefined();
+    const message = issue!.message;
+    expect(
+      message.length,
+      "the failure message must be bounded even when several suites print to the capture cap",
+    ).toBeLessThanOrEqual(REQUIRED_TEST_MESSAGE_LIMIT);
+    // Bounded by TRUNCATION, never by dropping the verdict: the operator must
+    // still be able to tell WHICH command failed and that output was elided.
+    expect(message).toContain("exit 1");
+    expect(message).toMatch(/excerpt truncated/iu);
+    expect(
+      message.endsWith("]"),
+      "the marker replaces the tail rather than overrunning the bound",
+    ).toBe(true);
+    // Bounded by TRUNCATION, never by dropping the verdict: the operator must
+    // still be able to tell WHICH command failed and that it printed more.
+    expect(message).toContain("exit 1");
+    expect(message).toMatch(/excerpt truncated/iu);
+    expect(
+      message.endsWith("]"),
+      "the marker replaces the tail rather than overrunning it",
+    ).toBe(true);
   });
 
   it("reports a buffer-killed required test under its own code, calling the verdict unknown", async () => {

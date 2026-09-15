@@ -1,3 +1,6 @@
+// sites-pinned: tests/remediate/host-handoff-corroboration.test.ts
+// (the bounded
+// required-test failure message)
 import { mkdir } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
@@ -2108,6 +2111,27 @@ const REQUIRED_TEST_TIMEOUT_MS = 10 * 60 * 1_000;
 const CAPTURED_OUTPUT_LIMIT = 4_000;
 
 /**
+ * The bound on the MESSAGE a required-test failure produces.
+ *
+ * `CAPTURED_OUTPUT_LIMIT` bounds one STREAM; the message is a different thing —
+ * `requiredTestIssue` joins every failing command, and a work item may bind any
+ * number of them, so the rendered message grew with the number of failures. A
+ * message is a HOST-FACING delivery (it is rendered into the step prompt an
+ * operator reads), so its size cannot be a function of how many commands
+ * happened to fail.
+ *
+ * The bound TRUNCATES the excerpt and says so; it never drops the verdict. What
+ * survives at the front is the part that identifies the failure — the command
+ * and its outcome — and the marker tells the operator the rest was elided and
+ * where to look instead.
+ */
+export const REQUIRED_TEST_MESSAGE_LIMIT = 8_000;
+
+/** The marker that names an elided excerpt, so truncation is never silent. */
+const REQUIRED_TEST_TRUNCATION_MARKER =
+  "… [excerpt truncated — re-run the command to see the full output]";
+
+/**
  * The spawn's raw capture buffer. Exceeding it does not truncate — node KILLS
  * the child — so the cap is a named constant the `output_overflow` message can
  * quote, rather than a literal buried in the spawn options.
@@ -2300,6 +2324,13 @@ function requiredTestIssue(
   workItem: RemediationHostWorkItem,
   failures: readonly RequiredTestFailure[],
 ): RemediationHostIngestIssue {
+  // Bounded at the point the message is BUILT, not left to the caller: the
+  // failure count is a property of the work item's bound commands, so bounding
+  // anywhere downstream would still have carried an unbounded string through
+  // state and into the ledger. See REQUIRED_TEST_MESSAGE_LIMIT.
+  const body = `mechanical required-test rerun failed: ${failures
+    .map(describeRequiredTestFailure)
+    .join("; ")}`;
   return {
     code: failures.some((failure) => failure.outcome === "timed_out")
       ? "required_test_timed_out"
@@ -2309,10 +2340,21 @@ function requiredTestIssue(
     check: "test_evidence",
     work_item_id: workItem.id,
     result_path: workItem.result_path,
-    message: `mechanical required-test rerun failed: ${failures
-      .map(describeRequiredTestFailure)
-      .join("; ")}`,
+    message: boundRequiredTestMessage(body),
   };
+}
+
+/**
+ * Truncate a required-test failure message to {@link REQUIRED_TEST_MESSAGE_LIMIT},
+ * marking the elision. The head is kept because it is what identifies the
+ * failure — the command and its classified outcome — and the marker replaces
+ * the tail rather than being appended past the cap, so the result is bounded by
+ * construction.
+ */
+function boundRequiredTestMessage(message: string): string {
+  if (message.length <= REQUIRED_TEST_MESSAGE_LIMIT) return message;
+  const room = REQUIRED_TEST_MESSAGE_LIMIT - REQUIRED_TEST_TRUNCATION_MARKER.length;
+  return `${message.slice(0, room)}${REQUIRED_TEST_TRUNCATION_MARKER}`;
 }
 
 /**

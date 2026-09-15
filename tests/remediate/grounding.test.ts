@@ -235,6 +235,51 @@ async function writeIntentCheckpoint(): Promise<void> {
   );
 }
 
+describe("decideNextStep — free-form block write scope is normalized", () => {
+  // A plan supplied from OUTSIDE the pipeline (the free-form / conversation
+  // intake) carries no `blocks`, so the no-blocks branch of
+  // `normalizeExtractedPlan` mints one block per finding and copies
+  // `finding.affected_files[].path` straight into its `touched_files`.
+  //
+  // Those paths have only been GROUNDED, never normalized: grounding asks
+  // whether a path resolves to a real file (`existsSync`), and on Windows
+  // `src\a.ts` does. The block contract the handoff boundary enforces asks a
+  // different question — is this entry in normalized repo-relative form — and
+  // refuses `src\a.ts` with `block_contract_invalid`. So a free-form plan that
+  // cited Windows-style paths produced a run that could never be prepared, and
+  // every retry reproduced the refusal identically.
+  it("normalizes a backslash-separated free-form path into block touched_files", async () => {
+    await writeFile(
+      join(ARTIFACTS_DIR, "extracted-plan.json"),
+      JSON.stringify({
+        plan_id: "PLAN-FREEFORM-BACKSLASH",
+        findings: [
+          mkFinding("F-WIN", {
+            // The free-form branch: the path is written the way a Windows host
+            // naturally writes it, and no `blocks` array is supplied.
+            files: ["src\\real.ts"],
+            evidence: ["src/real.ts:1 — cited"],
+          }),
+        ],
+      }),
+      "utf8",
+    );
+    await writeIntentCheckpoint();
+
+    await decideNextStep({ root: TEST_DIR });
+
+    const state = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
+    );
+    // The block's write scope is what a host is BOUND to and what the landed
+    // diff is re-checked against at ingest, so it must be the normalized form
+    // regardless of how the producer spelled it.
+    expect(
+      state.plan.blocks.map((b: { touched_files: string[] }) => b.touched_files),
+    ).toEqual([["src/real.ts"]]);
+  });
+});
+
 describe("decideNextStep — extracted-plan.json grounding (WS1+WS2)", () => {
   it("grounds a pending extracted plan and records coverage on state", async () => {
     await writeFile(

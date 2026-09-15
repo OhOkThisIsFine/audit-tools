@@ -9,6 +9,7 @@
  */
 export const DISPATCH_BARREL_EXPORTS = [
   "REMEDIATION_ISSUE_CODES",
+  "REQUIRED_TEST_MESSAGE_LIMIT",
   "hostDependencyLevels",
   "ingestRemediationHostResults",
   "permanentlyDeadPendingBlocks",

@@ -1,5 +1,11 @@
+// sites-pinned: tests/audit/audit-task-utils.test.ts
+// (the LENS_VERIFICATION_TAG import in `computeRiskEstimate` — the fixture's
+// lens_verification-tagged task is what makes the +0.1 bonus assertable)
 import type { AuditTask, Lens } from "../types.js";
 import { LENS_REGISTRY } from "../types.js";
+// The steward lane's tag is single-sourced where that lane is minted, so the
+// risk bonus below weights the same token the lane is actually stamped with.
+import { LENS_VERIFICATION_TAG } from "./selectiveDeepening/shared.js";
 
 /** Lens ordering for task prioritization, derived from {@link LENS_REGISTRY}
  * (sorted ascending by `order_weight`). Deriving this from the registry ensures
@@ -47,7 +53,7 @@ export function computeRiskEstimate(task: AuditTask): number {
   ) {
     bonus += 0.1;
   }
-  if (tags.includes("lens_verification")) bonus += 0.1;
+  if (tags.includes(LENS_VERIFICATION_TAG)) bonus += 0.1;
   if (SENSITIVE_LENSES.has(task.lens)) bonus += 0.1;
   const score = base + bonus;
   return score < 0 ? 0 : score > 1 ? 1 : score;

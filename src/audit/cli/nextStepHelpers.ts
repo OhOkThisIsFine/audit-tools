@@ -1,3 +1,5 @@
+// sites-pinned: none — the only change here is comment text on the ingest
+// catch in `runHostDelegationObligation`; the catch's behaviour is unchanged.
 /**
  * Extracted helpers for the next-step command.
  *
@@ -3094,7 +3096,16 @@ async function runHostDelegationObligation(
       completedIds = ingested.completed_work_item_ids;
     } catch (error) {
       // No handoff exists on the first visit, or prepare was interrupted before
-      // all binding artifacts landed. Re-preparing below restores it exactly.
+      // all binding artifacts landed. Re-preparing below restores it exactly:
+      // the prepare writes the workload, result map and binding set together,
+      // so a partial trio is overwritten whole.
+      //
+      // A STALE binding set is deliberately NOT in this class and must not be
+      // added to it: the ingest already classifies it and returns an issue
+      // WITHOUT throwing (see `StaleAuditHostTaskBindingsError`), precisely so
+      // the fold reaches the re-prepare below instead of aborting here. An
+      // error that arrives at this line was not classified by the ingest, and
+      // swallowing it would turn an unreadable handoff into a silent one.
       if (!isFileMissingError(error)) throw error;
     }
     // The ingest CLASSIFIES every failed read — a submission that never

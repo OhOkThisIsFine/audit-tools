@@ -22,6 +22,14 @@ import {
   type IngestionCheckId,
 } from "../../src/shared/index.js";
 import { existsSync } from "node:fs";
+import { writeCoreArtifacts } from "../../src/audit/io/artifacts.js";
+import { GATE_LANES, laneSubmissionPath } from "../../src/audit/cli/laneSubmissions.js";
+import { submissionsDir } from "../../src/shared/io/auditToolsPaths.js";
+import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
+import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { declineDefaultAcquiredAnalyzers } from "../helpers/analyzerConsentFixture.js";
+import { LENS_VERIFICATION_TAG } from "../../src/audit/orchestrator/selectiveDeepening/shared.js";
 
 const FAILURE_SIGNATURE =
   "contract:audit-zero-adapter-boundary:not-yet-satisfied";
@@ -41,6 +49,8 @@ interface HostTask {
     readonly risk: string;
   };
   readonly token_estimate: number;
+  /** The task's lane tags — what makes a work item's contract lane-aware. */
+  readonly tags?: readonly string[];
 }
 
 interface HostWorkItem {
@@ -192,12 +202,134 @@ async function snapshotTree(root: string): Promise<Readonly<Record<string, strin
   return Object.fromEntries(entries);
 }
 
+/**
+ * A core bundle at the PLANNING boundary: every obligation that precedes
+ * `audit_tasks_completed` in the priority scan is satisfied, so a fold over it
+ * reaches the review obligation. Built from the same shapes the audit draw's own
+ * integration fixtures use — the deterministic registers state themselves
+ * `omitted` at a shallow ceiling, which is what the real executors write for
+ * them — rather than from a cast, so a required-field bump breaks here too.
+ */
+function readyForReviewBundle(
+  reviewTask: HostTask,
+  extra: Readonly<Record<string, unknown>> = {},
+): Record<string, unknown> {
+  const bundle = {
+    repo_manifest: {
+      repository: { name: "old-bindings-fold" },
+      generated_at: "2026-01-01T00:00:00.000Z",
+      files: [{ path: "src/a.ts", language: "typescript", size_bytes: 8 }],
+    },
+    file_disposition: {
+      files: [{ path: "src/a.ts", status: "included" }],
+    },
+    auto_fixes_applied: { fixes: [] },
+    syntax_resolution_status: { resolved: true },
+    external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
+    unit_manifest: { units: [] },
+    surface_manifest: { surfaces: [] },
+    graph_bundle: { graphs: {} },
+    critical_flows: { flows: [] },
+    risk_register: { items: [] },
+    analyzer_capability: { coverage: "not_applicable", analyzers: [] },
+    design_assessment: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      findings: [],
+      contract_reviewed: true,
+      conceptual_reviewed: true,
+    },
+    docs_digest: { generated_at: "2026-01-01T00:00:00.000Z", docs: [] },
+    structure_decomposition: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "structure",
+      node_universe_size: 0,
+      source_ids: [],
+      consensus: [],
+      contested: [],
+      findings: [],
+    },
+    charter_register: {
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "charter",
+      ceiling: { rung: "shallow" },
+      status: "omitted",
+      subsystems: [],
+      goal_graph: { nodes: [], edges: [] },
+      deltas: [],
+      findings: [],
+      triangulated: [],
+      disagreement: [],
+      validation_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
+    },
+    charter_clarification: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "charter_clarification",
+      ceiling: { rung: "shallow" },
+      attention: 0,
+      status: "omitted",
+      asked: [],
+      banked: [],
+      findings: [],
+      validation_issues: [],
+      refused_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
+    },
+    systemic_challenge: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "systemic_challenge",
+      ceiling: { rung: "shallow" },
+      status: "omitted",
+      rounds: [],
+      converged: true,
+      findings: [],
+      validation_issues: [],
+      ...REGISTER_V4_AFFIRMATION,
+    },
+    intent_checkpoint: {
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: "2026-01-01T00:00:00Z",
+      confirmed_by: "host",
+      scope_summary: "full audit",
+      intent_summary: "full-audit",
+    },
+    coverage_matrix: { files: [] },
+    flow_coverage: { flows: [] },
+    runtime_validation_tasks: { tasks: [] },
+    requeue_tasks: [],
+    audit_tasks: [
+      {
+        task_id: reviewTask.task_id,
+        unit_id: reviewTask.unit_id,
+        pass_id: reviewTask.pass_id,
+        lens: reviewTask.lens,
+        file_paths: [...reviewTask.file_paths],
+        file_line_counts: { ...reviewTask.file_line_counts },
+        rationale: reviewTask.rationale,
+        priority: reviewTask.priority,
+        token_estimate: reviewTask.token_estimate,
+      },
+    ],
+    ...extra,
+  };
+  // Settle the DD-9 intent-equivalence baseline from the live checkpoint (the
+  // deterministic first-contact arm), so `intent_equivalence_current` — which
+  // sits directly after the checkpoint — is satisfied and the scan reaches the
+  // review obligation rather than pausing on the equivalence gate.
+  return {
+    ...bundle,
+    artifact_metadata: computeArtifactMetadata(bundle as never),
+  };
+}
+
 function task(
   id: string,
   lens: string,
   path: string,
   demand: { size: string; complexity: string; risk: string },
   tokenEstimate: number,
+  tags?: readonly string[],
 ): HostTask {
   return {
     task_id: id,
@@ -210,6 +342,7 @@ function task(
     priority: demand.risk,
     demand,
     token_estimate: tokenEstimate,
+    ...(tags ? { tags } : {}),
   };
 }
 
@@ -779,5 +912,838 @@ describe(FAILURE_SIGNATURE, () => {
     expect(refusal!.work_item_id).toBeUndefined();
     expect(summary.raw_issues.map((issue) => issue.code)).toContain("workload_stale");
     expect(await readSubmissionLedger(artifactsDir)).toEqual([]);
+  });
+
+  // ── The steward lane's verification ask reaches a door that reads it ───────
+  //
+  // `buildVerificationFollowupTasks` consumes `verification` off an accepted
+  // AuditResult, and the lens-verification task's own rationale INSTRUCTS the
+  // host to "return findings: [] plus verification metadata with bounded
+  // follow-up AuditTask suggestions". But the host-handoff envelope admitted
+  // exactly seven keys — `verification` was not one of them — and
+  // `toAuditResult` never mapped it, so the instruction named a deliverable no
+  // door would accept. The steward lane is the ONLY lane whose contract asks
+  // for it, and the tag that identifies that lane was dropped on the way in, so
+  // the boundary could not even tell which contract to render.
+  describe("the steward lane's verification contract", () => {
+    // The lane token is the SHARED constant, not a literal: this fixture stands
+    // in for the steward lane the orchestrator actually stamps, so a rename of
+    // the constant must reach it at compile time rather than leaving the test
+    // asserting against a token nothing mints any more.
+    const STEWARD_TAGS = ["selective_deepening", LENS_VERIFICATION_TAG];
+
+    async function publish(items: readonly HostTask[]) {
+      const boundary = await loadBoundary();
+      const root = await mkdtemp(join(tmpdir(), "audit-verification-lane-"));
+      cleanupRoots.push(root);
+      await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      const runId = "audit-verification-lane";
+      const prepared = await boundary.prepareAuditHostHandoff({
+        root,
+        artifactsDir,
+        runId,
+        tasks: items,
+      });
+      return { boundary, root, artifactsDir, runId, prepared };
+    }
+
+    it("renders the verification contract into a steward work item's prompt", async () => {
+      const published = await publish([
+        task(
+          "audit-steward",
+          "correctness",
+          "src/a.ts",
+          { size: "small", complexity: "standard", risk: "medium" },
+          1200,
+          STEWARD_TAGS,
+        ),
+        task(
+          "audit-base",
+          "correctness",
+          "src/a.ts",
+          { size: "small", complexity: "standard", risk: "medium" },
+          1200,
+        ),
+      ]);
+      const steward = published.prepared.workload.work_items.find(
+        (item) => item.id === "audit-steward",
+      )!;
+      const base = published.prepared.workload.work_items.find(
+        (item) => item.id === "audit-base",
+      )!;
+
+      // The ask and the envelope are the same fact: the steward prompt must
+      // name `verification` as part of ITS result contract...
+      expect(steward.prompt.text).toMatch(/an optional `verification` object/u);
+      expect(steward.prompt.text).toMatch(/verification[^.]*followup_tasks/u);
+      // ...and the base prompt must NOT carry that ask, because its envelope
+      // refuses the field. Matched on the CONTRACT SENTENCE, not the bare word:
+      // `verification_status` is a different field (a refused finding verdict)
+      // and legitimately appears in both lanes' finding contracts.
+      expect(base.prompt.text).not.toMatch(/an optional `verification` object/u);
+      expect(base.prompt.text).not.toMatch(/verification[^.]*followup_tasks/u);
+    });
+
+    it("admits a steward submission carrying verification and threads it to the AuditResult", async () => {
+      const published = await publish([
+        task(
+          "audit-steward",
+          "correctness",
+          "src/a.ts",
+          { size: "small", complexity: "standard", risk: "medium" },
+          1200,
+          STEWARD_TAGS,
+        ),
+      ]);
+      const item = published.prepared.workload.work_items[0]!;
+      const resultPath = expectContained(
+        published.root,
+        item.result_path,
+        "bound result",
+      );
+      await mkdir(join(resultPath, ".."), { recursive: true });
+      await writeFile(
+        resultPath,
+        JSON.stringify(
+          boundResult(published.runId, item, {
+            // ALL SIX KEYS, because the prompt says "exactly" and the boundary
+            // now enforces it: a genuine "nothing to report" is an empty array,
+            // never an omitted field.
+            verification: {
+              verified: true,
+              needs_followup: false,
+              concerns: ["Packet looked clean."],
+              coverage_concerns: [],
+              confidence_concerns: [],
+              followup_tasks: [],
+            },
+          }),
+        ),
+        "utf8",
+      );
+
+      const summary = await published.boundary.ingestAuditHostResults({
+        root: published.root,
+        artifactsDir: published.artifactsDir,
+        runId: published.runId,
+        auditTasks: [
+          task(
+            "audit-steward",
+            "correctness",
+            "src/a.ts",
+            { size: "small", complexity: "standard", risk: "medium" },
+            1200,
+            STEWARD_TAGS,
+          ),
+        ],
+      });
+      expect(
+        summary.accepted_count,
+        `the steward submission must be accepted: ${JSON.stringify(summary.issues)}`,
+      ).toBe(1);
+      // THREADED, not merely admitted: the field has to reach the AuditResult
+      // the ledger records, which is what the follow-up task builder reads.
+      const accepted = (summary as unknown as {
+        accepted_results?: readonly { verification?: unknown }[];
+      }).accepted_results;
+      expect(accepted?.[0]?.verification).toBeDefined();
+    });
+
+    it("refuses verification on a base-lane item whose contract never asked for it", async () => {
+      const published = await publish([
+        task(
+          "audit-base",
+          "correctness",
+          "src/a.ts",
+          { size: "small", complexity: "standard", risk: "medium" },
+          1200,
+        ),
+      ]);
+      const item = published.prepared.workload.work_items[0]!;
+      const resultPath = expectContained(
+        published.root,
+        item.result_path,
+        "bound result",
+      );
+      await mkdir(join(resultPath, ".."), { recursive: true });
+      await writeFile(
+        resultPath,
+        JSON.stringify(
+          boundResult(published.runId, item, {
+            verification: {
+              verified: true,
+              needs_followup: false,
+              concerns: [],
+              coverage_concerns: [],
+              confidence_concerns: [],
+              followup_tasks: [],
+            },
+          }),
+        ),
+        "utf8",
+      );
+
+      const summary = await published.boundary.ingestAuditHostResults({
+        root: published.root,
+        artifactsDir: published.artifactsDir,
+        runId: published.runId,
+        auditTasks: [
+          task(
+            "audit-base",
+            "correctness",
+            "src/a.ts",
+            { size: "small", complexity: "standard", risk: "medium" },
+            1200,
+          ),
+        ],
+      });
+      expect(summary.accepted_count).toBe(0);
+      const issue = summary.issues.find(
+        (entry) => entry.work_item_id === "audit-base",
+      );
+      expect(issue, `issues: ${JSON.stringify(summary.issues)}`).toBeDefined();
+      // The scan wraps the draw's contract refusal, so the OUTER code is the
+      // scan's; the draw's own classification rides the message. Asserted the
+      // same way the sibling diagnostics tests do.
+      expect(issue!.code).toBe("submission_contract_invalid");
+      // The LANE gate's own words: the fixture above satisfies every G2 rule, so
+      // only the lane gate can refuse it, and a G2 message cannot stand in.
+      expect(issue!.message).toMatch(/does not request it/u);
+    });
+
+    // ── The prompt's claims about `verification` are ENFORCED, not asserted ───
+    //
+    // The steward prompt states the exact key set, the needs_followup rule, the
+    // lens equality and the file-path containment. Each is enforced at this same
+    // boundary; the tests below break ONE stated property at a time and require
+    // the submission to be refused, so a claim in the prompt with no check behind
+    // it cannot come back. Every case seeds a structurally valid result and
+    // varies only the field under test, so a green run means THAT check held.
+    const stewardItem = (
+      published: Awaited<ReturnType<typeof publish>>,
+    ) => published.prepared.workload.work_items[0]!;
+
+    async function submitVerification(
+      verification: unknown,
+    ): Promise<IngestSummary> {
+      const published = await publish([
+        task(
+          "audit-steward",
+          "correctness",
+          "src/a.ts",
+          { size: "small", complexity: "standard", risk: "medium" },
+          1200,
+          STEWARD_TAGS,
+        ),
+      ]);
+      const item = stewardItem(published);
+      const resultPath = expectContained(
+        published.root,
+        item.result_path,
+        "bound result",
+      );
+      await mkdir(join(resultPath, ".."), { recursive: true });
+      await writeFile(
+        resultPath,
+        JSON.stringify(
+          boundResult(published.runId, item, { verification }),
+        ),
+        "utf8",
+      );
+      return published.boundary.ingestAuditHostResults({
+        root: published.root,
+        artifactsDir: published.artifactsDir,
+        runId: published.runId,
+        auditTasks: [
+          task(
+            "audit-steward",
+            "correctness",
+            "src/a.ts",
+            { size: "small", complexity: "standard", risk: "medium" },
+            1200,
+            STEWARD_TAGS,
+          ),
+        ],
+      });
+    }
+
+    function expectRefused(summary: IngestSummary, expected: RegExp): string {
+      expect(
+        summary.accepted_count,
+        `must be refused, got: ${JSON.stringify(summary.issues)}`,
+      ).toBe(0);
+      const message = summary.issues[0]?.message ?? "";
+      expect(message).toMatch(expected);
+      return message;
+    }
+
+    const VALID_VERIFICATION = {
+      verified: true,
+      needs_followup: false,
+      concerns: [],
+      coverage_concerns: [],
+      confidence_concerns: [],
+      followup_tasks: [],
+    };
+
+    it("refuses a verification object missing one of the stated keys", async () => {
+      const { followup_tasks: _omitted, ...missing } = VALID_VERIFICATION;
+      expectRefused(
+        await submitVerification(missing),
+        /missing followup_tasks/u,
+      );
+    });
+
+    it("refuses a verification object carrying a key the prompt never listed", async () => {
+      expectRefused(
+        await submitVerification({ ...VALID_VERIFICATION, hunches: ["x"] }),
+        /unexpected hunches/u,
+      );
+    });
+
+    it("refuses needs_followup true with no bounded follow-up task", async () => {
+      expectRefused(
+        await submitVerification({
+          ...VALID_VERIFICATION,
+          needs_followup: true,
+        }),
+        /needs_followup is true but followup_tasks is empty/u,
+      );
+    });
+
+    it("refuses a follow-up task whose lens is not this task's lens", async () => {
+      expectRefused(
+        await submitVerification({
+          ...VALID_VERIFICATION,
+          needs_followup: true,
+          followup_tasks: [
+            {
+              task_id: "f1",
+              unit_id: "u1",
+              pass_id: "p1",
+              lens: "security",
+              file_paths: ["src/a.ts"],
+              rationale: "check the other lens",
+            },
+          ],
+        }),
+        /lens must equal the task's lens/u,
+      );
+    });
+
+    it("refuses a follow-up task naming a file outside the work item's coverage and boundary", async () => {
+      expectRefused(
+        await submitVerification({
+          ...VALID_VERIFICATION,
+          needs_followup: true,
+          followup_tasks: [
+            {
+              task_id: "f1",
+              unit_id: "u1",
+              pass_id: "p1",
+              lens: "correctness",
+              file_paths: ["src/elsewhere.ts"],
+              rationale: "outside the packet",
+            },
+          ],
+        }),
+        /outside this work item's file_coverage or packet boundary/u,
+      );
+    });
+
+    it("refuses a follow-up task carrying a key the prompt never listed", async () => {
+      expectRefused(
+        await submitVerification({
+          ...VALID_VERIFICATION,
+          needs_followup: true,
+          followup_tasks: [
+            {
+              task_id: "f1",
+              unit_id: "u1",
+              pass_id: "p1",
+              lens: "correctness",
+              file_paths: ["src/a.ts"],
+              rationale: "bounded",
+              extra: true,
+            },
+          ],
+        }),
+        /unexpected extra/u,
+      );
+    });
+
+    it("accepts a follow-up task that satisfies every stated rule", async () => {
+      const summary = await submitVerification({
+        ...VALID_VERIFICATION,
+        needs_followup: true,
+        followup_tasks: [
+          {
+            task_id: "f1",
+            unit_id: "u1",
+            pass_id: "p1",
+            lens: "correctness",
+            file_paths: ["src/a.ts"],
+            rationale: "bounded follow-up inside the packet",
+          },
+        ],
+      });
+      expect(
+        summary.accepted_count,
+        `the conforming verification must be accepted: ${JSON.stringify(summary.issues)}`,
+      ).toBe(1);
+    });
+
+    it("refuses a follow-up task whose file_paths list is empty", async () => {
+      expectRefused(
+        await submitVerification({
+          ...VALID_VERIFICATION,
+          needs_followup: true,
+          followup_tasks: [
+            {
+              task_id: "f1",
+              unit_id: "u1",
+              pass_id: "p1",
+              lens: "correctness",
+              file_paths: [],
+              rationale: "unbounded",
+            },
+          ],
+        }),
+        /file_paths must be a non-empty array/u,
+      );
+    });
+
+    // ── Both doors build the containment set through ONE rule ────────────────
+    //
+    // The host door (`verificationAllowedPathsForEnvelope`) and the batch door
+    // (`validateVerification`) judge the same property — a follow-up task's
+    // `file_paths` must lie inside the packet. They were built separately and
+    // agreed only because no production caller passes `boundaryPaths`, which is
+    // agreement by an accidentally-absent input. Both now call
+    // `verificationAllowedPaths`, so the property below holds by construction
+    // rather than by the two constructions happening to coincide.
+    it("the host door and the batch door judge follow-up containment the same way", async () => {
+      const { verificationAllowedPaths, validateOneAuditResult } = await import(
+        "../../src/audit/validation/auditResults.js"
+      );
+      // The SAME inputs each door really has: the host door sees the binding's
+      // file set plus the envelope's coverage; the batch door sees the result's
+      // coverage plus the packet boundary. With no boundary passed, one path
+      // inside the coverage and one outside must land the same way at both.
+      const inside = "src/a.ts";
+      // The work item's ASSIGNED set is wider than its reported coverage — the
+      // ordinary case for a binding whose item did not report every assigned
+      // file. That difference is what makes the two SOURCES distinguishable: a
+      // rule that dropped one of them would answer differently here.
+      const assignedOnly = "src/assigned-but-not-covered.ts";
+      const outside = "src/zzz.ts";
+      const coverage = [{ path: "src/a.ts", reviewed_lines: 2, total_lines: 2 }];
+
+      const hostDoorAllowed = verificationAllowedPaths({
+        assignedPaths: ["src/a.ts", assignedOnly],
+        coveragePaths: coverage.map((entry) => entry.path),
+      });
+      const batchDoorAllowed = verificationAllowedPaths({
+        coveragePaths: coverage.map((entry) => entry.path),
+      });
+
+      // ANCHORED to a literal, not merely to the other door: comparing the two
+      // doors to each other would move BOTH when the shared rule changes, so it
+      // cannot detect a rule that quietly dropped a source. This states what
+      // the set must actually contain for the inputs above.
+      expect([...hostDoorAllowed].sort()).toEqual([
+        inside,
+        assignedOnly,
+      ]);
+      expect(hostDoorAllowed.has(outside)).toBe(false);
+      // …and the doors AGREE on that path: the host door has it from the
+      // binding, the batch door does not have it from coverage alone, and the
+      // difference is a SOURCE the caller supplied, never a rule that differs.
+      // Asserted as an explicit expectation so a rule that dropped a source is
+      // red rather than silently matching.
+      expect(batchDoorAllowed.has(assignedOnly)).toBe(false);
+      expect(batchDoorAllowed.has(inside)).toBe(true);
+      expect(batchDoorAllowed.has(outside)).toBe(false);
+
+      // …and asserted through a DOOR, not just the helper: the batch validator
+      // refuses the same out-of-boundary follow-up the host door refuses above.
+      const result = {
+        task_id: "audit-steward",
+        unit_id: "unit-audit-steward",
+        pass_id: "pass:correctness",
+        lens: "correctness",
+        run_id: "audit-both-doors",
+        reviewed_clean: false,
+        file_coverage: [
+          { path: "src/a.ts", reviewed_lines: 2, total_lines: 2 },
+        ],
+        findings: [],
+        verification: {
+          verified: true,
+          needs_followup: true,
+          concerns: [],
+          coverage_concerns: [],
+          confidence_concerns: [],
+          followup_tasks: [
+            {
+              task_id: "f1",
+              unit_id: "u1",
+              pass_id: "p1",
+              lens: "correctness",
+              file_paths: [outside],
+              rationale: "outside the packet",
+            },
+          ],
+        },
+      };
+      const issues = validateOneAuditResult(
+        result as never,
+        [
+          {
+            task_id: "audit-steward",
+            unit_id: "unit-audit-steward",
+            pass_id: "pass:correctness",
+            lens: "correctness",
+            file_paths: ["src/a.ts"],
+            rationale: "Review src/a.ts",
+            priority: "medium",
+            tags: [...STEWARD_TAGS],
+          } as never,
+        ],
+        {},
+      );
+      expect(
+        issues.some((issue) => /outside the verification task's file_coverage/u.test(issue.message)),
+        `the batch door must refuse the same path: ${JSON.stringify(issues)}`,
+      ).toBe(true);
+      // The host door refuses it too, with its own words — one rule, two doors.
+      expectRefused(
+        await submitVerification({
+          ...VALID_VERIFICATION,
+          needs_followup: true,
+          followup_tasks: [
+            {
+              task_id: "f1",
+              unit_id: "u1",
+              pass_id: "p1",
+              lens: "correctness",
+              file_paths: [outside],
+              rationale: "outside the packet",
+            },
+          ],
+        }),
+        /outside this work item's file_coverage or packet boundary/u,
+      );
+    });
+
+    // The cross-reader check the LENS_VERIFICATION_TAG comment names: the tag
+    // this boundary gates on must be the tag the CONSUMER gates on. Both sides
+    // read the shared constant, so this asserts the property rather than the
+    // spelling — if the boundary admitted on one token and the follow-up builder
+    // filtered on another, the accepted object would be silently discarded.
+    it("a steward submission carrying verification is accepted AND BUILT INTO follow-up tasks", async () => {
+      const summary = await submitVerification({
+        ...VALID_VERIFICATION,
+        needs_followup: true,
+        followup_tasks: [
+          {
+            task_id: "f1",
+            unit_id: "u1",
+            pass_id: "p1",
+            lens: "correctness",
+            file_paths: ["src/a.ts"],
+            rationale: "bounded follow-up inside the packet",
+          },
+        ],
+      });
+      expect(
+        summary.accepted_count,
+        `must be accepted: ${JSON.stringify(summary.issues)}`,
+      ).toBe(1);
+      const accepted = (
+        summary as unknown as {
+          accepted_results?: Parameters<
+            typeof import("../../src/audit/orchestrator/selectiveDeepening/stewardFollowup.js")["buildVerificationFollowupTasks"]
+          >[0]["result"][];
+        }
+      ).accepted_results;
+      expect(accepted).toHaveLength(1);
+      const { buildVerificationFollowupTasks } = await import(
+        "../../src/audit/orchestrator/selectiveDeepening/stewardFollowup.js"
+      );
+      const followups = buildVerificationFollowupTasks({
+        result: accepted![0]!,
+        // The CONSUMER's own view of the lane: an `AuditTask` tagged with the
+        // lane tag. Built from the shared constant the boundary imports, so the
+        // two sides are compared on the token they both actually read.
+        task: {
+          task_id: "audit-steward",
+          unit_id: "unit-audit-steward",
+          pass_id: "pass:correctness",
+          lens: "correctness",
+          file_paths: ["src/a.ts"],
+          rationale: "Review src/a.ts",
+          priority: "medium",
+          tags: [...STEWARD_TAGS],
+        },
+      });
+      expect(
+        followups.length,
+        "the metadata the boundary admitted must be the metadata the consumer reads",
+      ).toBe(1);
+      expect(followups[0]!.file_paths).toEqual(["src/a.ts"]);
+    });
+  });
+
+  // ── A binding persisted by the PREVIOUS contract version still fails closed ─
+  //
+  // The lane stamp is persisted on the task binding so the ingest can tell which
+  // contract an item's prompt carried; a run prepared by an older build holds
+  // bindings WITHOUT it. Under one version string the new reader would refuse
+  // that run with a generic shape error, on work the host has already executed.
+  // The version moves with the shape instead, and the refusal names the remedy.
+  it("refuses a binding set written under an older contract version as a CLASSIFIED stale", async () => {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "audit-host-old-bindings-"));
+    cleanupRoots.push(root);
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const runId = "audit-old-bindings";
+    const published = await boundary.prepareAuditHostHandoff({
+      root,
+      artifactsDir,
+      runId,
+      tasks: [
+        task(
+          "audit-old",
+          "correctness",
+          "src/a.ts",
+          { size: "small", complexity: "standard", risk: "medium" },
+          1200,
+        ),
+      ],
+    });
+    const item = published.workload.work_items[0]!;
+    const resultPath = expectContained(root, item.result_path, "bound result");
+    await mkdir(join(resultPath, ".."), { recursive: true });
+    await writeFile(
+      resultPath,
+      JSON.stringify(boundResult(runId, item)),
+      "utf8",
+    );
+
+    // Rewrite the persisted binding set to the OLD shape: the previous version
+    // string, and entries with no `tags` field at all.
+    const bindingsPath = join(
+      root,
+      ".audit-tools",
+      "audit",
+      "runs",
+      runId,
+      "host-task-bindings.json",
+    );
+    const bindings = JSON.parse(await readFile(bindingsPath, "utf8")) as {
+      entries: Array<Record<string, unknown>>;
+    };
+    for (const entry of bindings.entries) delete entry.tags;
+    await writeFile(
+      bindingsPath,
+      JSON.stringify({
+        ...bindings,
+        contract_version: "audit-host-task-bindings/v1alpha1",
+      }),
+      "utf8",
+    );
+
+    // REFUSED as stale — a classified issue on the ingest's own vocabulary, not
+    // a throw and not a shape refusal. The host's already-written result is
+    // neither accepted nor re-bound here: nothing can be judged against a
+    // contract this build did not mint. (The FOLD then re-prepares in the same
+    // call, which is asserted by the next test.)
+    const summary = await boundary.ingestAuditHostResults({
+      root,
+      artifactsDir,
+      runId,
+      auditTasks: [
+        task(
+          "audit-old",
+          "correctness",
+          "src/a.ts",
+          { size: "small", complexity: "standard", risk: "medium" },
+          1200,
+        ),
+      ],
+    });
+    expect(summary.accepted_count).toBe(0);
+    const refusal = summary.issues.find(
+      (issue) => issue.code === "workload_stale",
+    );
+    expect(refusal, `issues: ${JSON.stringify(summary.issues)}`).toBeDefined();
+    expect(refusal!.check).toBe("workload_binding");
+    // It names BOTH versions — the one found and the one this build mints — and
+    // states what the tool does next, so the host is not left to act on it.
+    expect(refusal!.message).toContain("audit-host-task-bindings/v1alpha1");
+    expect(refusal!.message).toContain("audit-host-task-bindings/v1alpha2");
+    expect(refusal!.message).toContain("re-prepares the workload");
+  });
+
+  // ── …and the FOLD turns that refusal into a re-prepare, never a wedge ─────
+  //
+  // The refusal above is only sound where something downstream re-prepares. On
+  // the real fold the ingest sits BEFORE `ensureSemanticReviewRunUnlocked` — the
+  // one path to `prepareAuditHostHandoff`, the only writer of the bindings file
+  // — and the fold's catch rethrows everything that is not ENOENT. So a bare
+  // throw here aborted the fold before the re-prepare, the blocked-step backstop
+  // wrote a blocked step and rethrew, and EVERY later `next-step` failed the
+  // same way with the bindings file still at the old version. The run was wedged
+  // by a file the tool had written itself.
+  it("re-prepares the workload and advances when the persisted bindings are the old version", async () => {
+    const root = await mkdtemp(join(tmpdir(), "audit-host-old-bindings-fold-"));
+    cleanupRoots.push(root);
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "package.json"), '{"name":"old-bindings"}\n', "utf8");
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+    // The CLI entry loads the analyzer policy from the session artifacts before
+    // it folds; declining the acquired set is the shape every other CLI-driving
+    // fixture uses, and keeps acquisition a hermetic no-op. The NON-default
+    // candidates are offered through the `analyzer_consent` lane, which fires
+    // ahead of the fold — answering it here is what lets this test reach the
+    // obligation under test rather than pausing on the offer.
+    await declineDefaultAcquiredAnalyzers(root);
+    await mkdir(submissionsDir(join(root, ".audit-tools", "audit")), {
+      recursive: true,
+    });
+    await writeFile(
+      laneSubmissionPath(
+        join(root, ".audit-tools", "audit"),
+        GATE_LANES.analyzer_consent,
+      ),
+      JSON.stringify({
+        semgrep: "declined",
+        eslint: "declined",
+        knip: "declined",
+        jscpd: "declined",
+        "osv-scanner": "declined",
+      }) + "\n",
+      "utf8",
+    );
+    await writeFile(
+      laneSubmissionPath(
+        join(root, ".audit-tools", "audit"),
+        GATE_LANES.analyzer_decisions,
+      ),
+      JSON.stringify({ typescript: "skip" }) + "\n",
+      "utf8",
+    );
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    // This fixture's deterministic flow inference falls below the confidence
+    // bar, so the drain would halt at critical_flow_fallback long before the
+    // review obligation. Pre-satisfy it with the empty host submission the
+    // gate lane is bound to, exactly as the other fold-driving fixtures do.
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    await writeFile(
+      laneSubmissionPath(artifactsDir, GATE_LANES.critical_flow_fallback),
+      JSON.stringify({ flows: [] }, null, 2) + "\n",
+      "utf8",
+    );
+    // A LEGACY clock-format id, so the review pause ADOPTS this run rather than
+    // minting a new one — that is the in-flight run the wedge stranded, and the
+    // one whose bindings file the re-prepare must rewrite in place.
+    const runId = "20260722T101112123Z_audit-old-bindings_001";
+    const oldTask = task(
+      "audit-old",
+      "correctness",
+      "src/a.ts",
+      { size: "small", complexity: "standard", risk: "medium" },
+      1200,
+    );
+
+    // The run the PREVIOUS build left behind: a core bundle at the planning
+    // boundary (every obligation above `audit_tasks_completed` satisfied, so the
+    // drain reaches the review obligation within the budget), the active
+    // review-run manifest, its pending-task list — plus the binding set that
+    // build wrote, which has no `tags` and an older version.
+    await writeCoreArtifacts(artifactsDir, readyForReviewBundle(oldTask), {
+      prune: true,
+    });
+    const runDir = join(artifactsDir, "runs", runId);
+    await mkdir(join(artifactsDir, "dispatch"), { recursive: true });
+    await mkdir(runDir, { recursive: true });
+    const runManifest = {
+      contract_version: "audit-review-run/v1alpha1",
+      run_id: runId,
+      review_run_path: join(runDir, "review-run.json"),
+      pending_audit_tasks_path: join(runDir, "pending-audit-tasks.json"),
+      host_workload_path: join(runDir, "host-workload.json"),
+      host_result_map_path: join(runDir, "host-result-map.json"),
+    };
+    await writeFile(
+      join(artifactsDir, "dispatch", "current-review-run.json"),
+      JSON.stringify(runManifest),
+      "utf8",
+    );
+    await writeFile(
+      runManifest.pending_audit_tasks_path,
+      JSON.stringify([oldTask]),
+      "utf8",
+    );
+
+    // The workload and result map are CURRENT — published through the real
+    // boundary, at the real paths — so the only thing the previous build left
+    // stale is the lane stamp. That is what isolates this test: were the
+    // workload absent, the ingest would fail ENOENT and the fold's existing
+    // missing-file arm would re-prepare no matter how a stale binding set is
+    // classified.
+    const boundary = await loadBoundary();
+    const published = await boundary.prepareAuditHostHandoff({
+      root,
+      artifactsDir,
+      runId,
+      tasks: [oldTask],
+    });
+    expect(published.workload.work_items).toHaveLength(1);
+
+    // …and now downgrade the persisted binding set to what the OLD build wrote:
+    // the previous version string, and entries with no `tags` field at all.
+    const bindingsPath = join(runDir, "host-task-bindings.json");
+    const bindings = JSON.parse(await readFile(bindingsPath, "utf8")) as {
+      entries: Array<Record<string, unknown>>;
+    };
+    for (const entry of bindings.entries) delete entry.tags;
+    await writeFile(
+      bindingsPath,
+      JSON.stringify({
+        ...bindings,
+        contract_version: "audit-host-task-bindings/v1alpha1",
+      }),
+      "utf8",
+    );
+
+    // THE REAL ENTRY POINT, not the helper: `runDeterministicForNextStep`
+    // returns the PLAN, and the re-prepare lives in the emission the CLI entry
+    // performs (`cmdNextStep` → `writeAuditStep` → `renderSemanticReviewStep` →
+    // `prepareAuditHostHandoff`). Driving the helper would leave the file
+    // untouched no matter how the ingest classified it.
+    const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
+    await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
+
+    // (1) It did NOT throw — the wedge is gone. (2) The step it wrote is a live
+    //     host step, not the blocked contract the wedge produced.
+    const step = JSON.parse(
+      await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
+    ) as { step_kind: string; status: string };
+    expect(step.step_kind, JSON.stringify(step)).toBe("dispatch_review");
+    expect(step.status).toBe("ready");
+    // (3) The binding set is at the CURRENT version afterwards: the fold reached
+    //     the re-prepare, so the next ingest reads a contract it understands.
+    const reparsed = JSON.parse(await readFile(bindingsPath, "utf8")) as {
+      contract_version: string;
+      entries: Array<Record<string, unknown>>;
+    };
+    expect(reparsed.contract_version).toBe("audit-host-task-bindings/v1alpha2");
+    expect(reparsed.entries[0]!.tags).toEqual([]);
   });
 });
