@@ -13,7 +13,7 @@ import {
   differenceFindings,
   routeDifference,
   provenancePath,
-} from "../../src/shared/decompose/charterLayer.js";
+} from "../../src/shared/decompose/charterExtraction.js";
 import type { CharterLaneGraph, CharterProvenance } from "../../src/shared/types/charter.js";
 
 const universe = new Set(["src/a.ts", "src/b.ts", "docs/goals.md"]);

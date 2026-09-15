@@ -1,4 +1,4 @@
-import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -132,14 +132,7 @@ function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
       target: "charter",
       ceiling: { rung: "shallow" },
       status: "omitted",
-      subsystems: [],
-      goal_graph: { nodes: [], edges: [] },
-      deltas: [],
-      findings: [],
-      triangulated: [],
-      disagreement: [],
-      validation_issues: [],
-      ...REGISTER_V4_AFFIRMATION,
+      ...EMPTY_REGISTER_BODY,
     },
     charter_clarification: {
       generated_at: "2026-01-01T00:00:00.000Z",
@@ -151,7 +144,6 @@ function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
       banked: [],
       findings: [],
       validation_issues: [],
-      refused_issues: [],
       ...REGISTER_V4_AFFIRMATION,
     },
     // Phase E systemic challenge loop: an omitted (shallow-ceiling), converged register

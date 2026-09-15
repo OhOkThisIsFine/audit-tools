@@ -167,10 +167,12 @@ const FIXTURE_STAGES = [
   { upTo: "intent_checkpoint_current", run: async (b) => injectConfirmedIntentCheckpoint(b) },
   { upTo: "intent_equivalence_current", run: forcedStep("intent_equivalence_executor") },
   { upTo: "charter_extraction_current", run: forcedStep("charter_extraction_executor") },
-  // Phase C.2 independent delta-miner. host_delegation like charter_extraction: at
-  // the default shallow ceiling the extraction pass omits (no deltas_pending), so a
-  // forced single step settles the register without an emitted host turn.
-  { upTo: "charter_delta_current", run: forcedStep("charter_delta_executor") },
+  // Phase C steps 2–4: the comparison reader and the fidelity lane. host_delegation
+  // like charter_extraction: at the default shallow ceiling the extraction pass
+  // omits (no comparison_pending / fidelity_pending), so a forced single step
+  // settles the register without an emitted host turn.
+  { upTo: "charter_comparison_current", run: forcedStep("charter_comparison_executor") },
+  { upTo: "charter_fidelity_current", run: forcedStep("charter_fidelity_executor") },
   // These are mandatory semantic host passes. Inject explicit bound empty
   // submissions instead of reviving the retired unattended auto-completion.
   { upTo: "design_review_contract_completed", run: async (b) => injectDesignReviewPass(b, "contract") },

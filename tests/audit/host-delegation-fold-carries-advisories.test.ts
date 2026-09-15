@@ -1,4 +1,4 @@
-import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 // N1 (A2 re-review F1-1): in `runHostDelegationObligation`, when the same fold
 // ingests results for still-pending tasks, it returned `{ kind: "transition" }`
@@ -186,14 +186,7 @@ async function setup() {
       target: "charter",
       ceiling: { rung: "shallow" },
       status: "omitted",
-      subsystems: [],
-      goal_graph: { nodes: [], edges: [] },
-      deltas: [],
-      findings: [],
-      triangulated: [],
-      disagreement: [],
-      validation_issues: [],
-      ...REGISTER_V4_AFFIRMATION,
+      ...EMPTY_REGISTER_BODY,
     },
     charter_clarification: {
       generated_at: "2026-01-01T00:00:00.000Z",
@@ -205,7 +198,6 @@ async function setup() {
       banked: [],
       findings: [],
       validation_issues: [],
-      refused_issues: [],
     },
     systemic_challenge: {
       generated_at: "2026-01-01T00:00:00.000Z",

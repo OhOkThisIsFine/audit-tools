@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/charter-clarification.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { CharterClarificationRegister } from "../types/charterClarification.js";
@@ -5,30 +6,24 @@ import {
   assembleClarificationRegister,
   groundDesignFindings,
   type ClarificationAttention,
-  type ClarificationDeltaInput,
+  type ClarificationDifferenceInput,
   type ClarificationAnswersSubmission,
-  type CharterClarificationAnswer,
+  type CharterDifferenceAnswer,
+  type CharterLaneGraph,
+  type CharterCorrespondence,
   type Ceiling,
   type IntentCheckpoint,
   resolveRunBoundDesignReview,
 } from "audit-tools/shared";
 import { resolveCharterCeiling, ceilingRequestsCharters } from "./charterExtractionExecutor.js";
-import { partitionDeltasToQuestions } from "../clarification/partition.js";
+import { partitionDifferencesToQuestions } from "../clarification/partition.js";
 import { applyRiskGate } from "../clarification/riskGate.js";
 import { splitByAttention } from "../clarification/dials.js";
 
 /**
- * Resolve the attention appetite (Phase D control-surface dial #3) from the
- * confirmed checkpoint. Defaults to `0` — the autonomous mode (every charter
- * question becomes a written finding, no human loop), which is the
- * conversation-first default until the user opts into attention. Exported so the
- * obligation gate + the prompt renderer resolve appetite identically (one source).
- *
- * RUN-BOUND, like every other dial in that block. `attention` is a per-run
- * choice (owner, 2026-08-21), so a block a PRIOR confirmation supplied must not
- * govern this run — reading it unbound would take a run that never opted into a
- * human loop and pop interactive questions at it, the same defect
- * `resolveRunBoundDesignReview` exists to prevent for depth and ceiling.
+ * Resolve the attention appetite (control-surface dial #3) from the confirmed
+ * checkpoint. Defaults to `0` — the autonomous mode (every charter question
+ * becomes a written finding, no human loop). RUN-BOUND like every other dial.
  */
 export function resolveClarificationAttention(
   checkpoint: IntentCheckpoint | undefined,
@@ -37,67 +32,49 @@ export function resolveClarificationAttention(
   return attention ?? 0;
 }
 
+/** The union of the corresponding nodes' file scopes — the question's affected files. */
+function correspondenceFiles(
+  correspondence: CharterCorrespondence | undefined,
+  graphs: readonly CharterLaneGraph[],
+): string[] {
+  const files = new Set<string>();
+  for (const member of correspondence?.members ?? []) {
+    const graph = graphs.find((g) => g.kind === member.kind);
+    for (const id of member.node_ids) {
+      for (const f of graph?.nodes.find((n) => n.node_id === id)?.files ?? []) files.add(f);
+    }
+  }
+  return [...files].sort();
+}
+
 /**
- * Join the Phase-C charter register's routed deltas to their subsystem members +
- * (optional) goal node, producing the loop input.
- *
- * Both joins take the PRODUCER's own decision off the wire: `node_id` and
- * `goal_node_id` are explicit fields the assembler stamps, so `delta_id` is opaque
- * here and is never split to recover a node (INV-CCI-NO-DELTA-ID-PARSING). The
- * assembler mints it with a content-derived discriminator when a subsystem carries
- * two deltas on one channel pair, so its segment structure holds no recoverable
- * node id — parsing it would silently join the delta to the wrong subsystem's
- * members, which ride onto the emitted Finding's affected_files.
- *
- * `deltas` is typed `StampedCharterDelta[]`, so an unstamped delta can only arrive
- * from an artifact no schema validated (`charter_register.json` is read as plain
- * JSON). That delta is REFUSED with a validation issue rather than guessed at: a
- * question joined to the wrong subsystem is worse than a question not asked.
+ * The report's grouping key: the structure-decomposition consensus unit whose
+ * members overlap the corresponding scopes most (ties → first by id). The
+ * decomposition is the GROUPING key only, never the correspondence key.
  */
-function clarificationInputs(bundle: ArtifactBundle): {
-  inputs: ClarificationDeltaInput[];
-  validation_issues: string[];
-} {
+function placeInSubsystem(files: readonly string[], bundle: ArtifactBundle): string | undefined {
+  let best: { id: string; overlap: number } | undefined;
+  const scope = new Set(files);
+  for (const unit of bundle.structure_decomposition?.consensus ?? []) {
+    const overlap = unit.members.filter((m) => scope.has(m)).length;
+    if (overlap > 0 && (!best || overlap > best.overlap || (overlap === best.overlap && unit.node_id < best.id))) {
+      best = { id: unit.node_id, overlap };
+    }
+  }
+  return best?.id;
+}
+
+/** Join the register's verified differences to their correspondence, files and subsystem. */
+function clarificationInputs(bundle: ArtifactBundle): ClarificationDifferenceInput[] {
   const register = bundle.charter_register;
-  if (!register || register.status === "omitted") {
-    return { inputs: [], validation_issues: [] };
-  }
-  const membersByNode = new Map<string, string[]>();
-  for (const sub of register.subsystems) {
-    membersByNode.set(sub.node_id, sub.members);
-  }
-  const inputs: ClarificationDeltaInput[] = [];
-  const validation_issues: string[] = [];
-  for (const delta of register.deltas) {
-    // typeof, not `=== undefined`: the field is required by the type, and this
-    // guard exists precisely for data that never passed through it.
-    if (typeof delta.node_id !== "string" || delta.node_id.length === 0) {
-      validation_issues.push(
-        `delta "${delta.delta_id}" carries no node_id — skipped; its subsystem cannot be ` +
-          `recovered from the delta id, which is opaque (regenerate charter_register.json)`,
-      );
-      continue;
-    }
-    // A well-formed node_id that matches no subsystem is the same failure wearing
-    // the right shape: the question still gets asked, but with an empty
-    // affected_files, so it reads as a finding about nothing. Say so — the delta is
-    // kept (the question may still be worth asking), and groundDesignFindings marks
-    // the resulting Finding ungrounded as the second net.
-    const members = membersByNode.get(delta.node_id);
-    if (members === undefined) {
-      validation_issues.push(
-        `delta "${delta.delta_id}" names subsystem "${delta.node_id}", which the register ` +
-          `carries no members for — its question is kept but cites no files`,
-      );
-    }
-    inputs.push({
-      delta,
-      node_id: delta.node_id,
-      members: members ?? [],
-      goal_node_id: delta.goal_node_id,
-    });
-  }
-  return { inputs, validation_issues };
+  if (!register || register.status === "omitted") return [];
+  const corrById = new Map(register.correspondences.map((c) => [c.correspondence_id, c]));
+  return register.differences.map((difference) => {
+    const correspondence = corrById.get(difference.correspondence_id);
+    const members = correspondenceFiles(correspondence, register.lanes);
+    const subsystem_id = placeInSubsystem(members, bundle);
+    return { difference, correspondence, members, ...(subsystem_id ? { subsystem_id } : {}) };
+  });
 }
 
 function omittedRegister(
@@ -115,24 +92,19 @@ function omittedRegister(
     banked: [],
     findings: [],
     validation_issues: [],
-    refused_issues: [],
   };
 }
 
 /**
- * Charter-clarification executor (Phase D). Deterministic: it consumes the Phase-C
- * `charter_register` deltas and runs the triangulation loop — partition → risk-gate
- * → split-by-attention → surface findings (design of record
- * spec/conceptual-design-review-design.md §"The triangulation loop"). Two modes,
- * gated by the ceiling:
+ * Charter-clarification executor (Phase D). Deterministic: it consumes the
+ * register's verified differences and runs the triangulation loop — partition →
+ * risk-gate → split-by-attention → surface findings. Two modes:
  *
- * - **omit** (`shallow` ceiling, or no non-omitted charter register): write an
- *   empty `status:omitted` register so the obligation is satisfied with no host
- *   turn (the conversation-first default; mirrors the charter-extraction omit).
- * - **run** (`deep`/`deepest` ceiling + a Phase-C register with deltas): assemble
- *   the VOI-ranked interactive queue (`asked`) + the banked findings, grounding
- *   every surfaced Finding's evidence against disk. Under attention `0` every
- *   question banks (the autonomous mode) — a valid, complete run with no human loop.
+ * - **omit** (`shallow` ceiling, or no non-omitted register, or a register still
+ *   owed a comparison or fidelity turn): write an empty `status:omitted` register.
+ * - **run**: assemble the VOI-ranked interactive queue (`asked`) + the banked
+ *   findings, grounding every surfaced Finding's evidence against disk. Under
+ *   attention `0` every question banks (the autonomous mode).
  */
 export function runCharterClarificationExecutor(
   bundle: ArtifactBundle,
@@ -149,32 +121,27 @@ export function runCharterClarificationExecutor(
       updated: { ...bundle, charter_clarification: omitted },
       artifacts_written: ["charter_clarification.json"],
       progress_summary: ceilingRequestsCharters(ceiling)
-        ? "Charter clarification: no charter register with deltas; recorded an empty register."
+        ? "Charter clarification: no charter register with differences; recorded an empty register."
         : `Charter clarification omitted (ceiling '${ceiling.rung}' does not request the charter layer).`,
     };
   }
 
-  // Resolve the prior answers into a request_id → answer map. When an answers
-  // submission is present at all, the interruptible-loop rule applies: every
-  // interactive question the host DIDN'T answer defaults to `leave_open` (a
-  // first-class decision) so the queue drains and the loop terminates. Absent a
-  // submission, no answers are applied (the first assemble that computes the queue).
-  const priorAnswers = new Map<string, CharterClarificationAnswer>();
+  // When an answers submission is present the interruptible-loop rule applies:
+  // every interactive question the host DIDN'T answer defaults to `leave_open`.
+  const priorAnswers = new Map<string, CharterDifferenceAnswer>();
   if (answers) {
     for (const a of answers.answers) priorAnswers.set(a.request_id, a.answer);
     for (const q of bundle.charter_clarification?.asked ?? []) {
-      if (!priorAnswers.has(q.request_id)) {
-        priorAnswers.set(q.request_id, "leave_open");
-      }
+      if (!priorAnswers.has(q.request_id)) priorAnswers.set(q.request_id, "leave_open");
     }
   }
 
-  const { inputs, validation_issues: inputIssues } = clarificationInputs(bundle);
+  const inputs = clarificationInputs(bundle);
   const assembled = assembleClarificationRegister(
     inputs,
-    register.goal_graph,
+    register.lanes,
     attention,
-    { partitionDeltasToQuestions, applyRiskGate, splitByAttention },
+    { partitionDifferencesToQuestions, applyRiskGate, splitByAttention },
     priorAnswers,
   );
   const findings = groundDesignFindings(assembled.findings, bundle.repo_manifest);
@@ -187,41 +154,13 @@ export function runCharterClarificationExecutor(
     asked: assembled.asked,
     banked: assembled.banked,
     findings,
-    // Refusals from the join come first: a delta that never became a question is
-    // context for the queue that follows, not a footnote to it. `inputIssues` is
-    // exactly the refusal class — every one of them is a delta the join could not
-    // place, so its question is never asked — while the assembler reports its own
-    // refusals separately from its routine notes.
-    validation_issues: [...inputIssues, ...assembled.validation_issues],
-    refused_issues: [...inputIssues, ...assembled.refused_issues],
+    validation_issues: assembled.validation_issues,
   };
-  // Surface each note's MESSAGE, not just a count — mirrors the charter-extraction
-  // pass's gate-drop summary. The messages are bounded one-liners, so listing them
-  // is cheap.
-  //
-  // The two classes print DIFFERENTLY, and that is the point of the split. A
-  // REFUSAL (a delta the join could not place — no node_id, or a node the register
-  // carries no members for) is a question that will NEVER BE ASKED; a routine
-  // remediator-routed SKIP is the design working as intended. Under one
-  // undifferentiated "N note(s)" list the operator cannot tell a silent data
-  // defect from ordinary routing, so the one signal that matters is buried in the
-  // list that never matters. Refusals are hoisted and counted; skips stay listed.
-  const refusals = clarification.refused_issues;
-  const refused = new Set(refusals);
-  const routineNotes = clarification.validation_issues.filter(
-    (issue) => !refused.has(issue),
-  );
   const noteSummary =
     clarification.validation_issues.length === 0
       ? "."
-      : (refusals.length > 0
-          ? `, ${refusals.length} REFUSED delta(s) — a question that will never be asked:\n` +
-            refusals.map((m) => `  - ${m}`).join("\n")
-          : "") +
-        (routineNotes.length > 0
-          ? `, ${routineNotes.length} note(s):\n` +
-            routineNotes.map((m) => `  - ${m}`).join("\n")
-          : "");
+      : `, ${clarification.validation_issues.length} note(s):\n` +
+        clarification.validation_issues.map((m) => `  - ${m}`).join("\n");
   return {
     updated: { ...bundle, charter_clarification: clarification },
     artifacts_written: ["charter_clarification.json"],

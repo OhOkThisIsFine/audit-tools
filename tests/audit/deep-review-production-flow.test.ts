@@ -1,4 +1,4 @@
-import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -138,14 +138,7 @@ test("production systemic dispatch never advertises the deleted deep-review judg
         generated_at: "2026-01-01T00:00:00.000Z",
         target: "charter",
         ceiling: { rung: "deep" },
-        subsystems: [],
-        goal_graph: { nodes: [], edges: [] },
-        deltas: [],
-        findings: [],
-        triangulated: [],
-        disagreement: [],
-        validation_issues: [],
-        ...REGISTER_V4_AFFIRMATION,
+        ...EMPTY_REGISTER_BODY,
       },
       charter_clarification: {
         generated_at: "2026-01-01T00:00:00.000Z",
@@ -157,7 +150,6 @@ test("production systemic dispatch never advertises the deleted deep-review judg
         banked: [],
         findings: [],
         validation_issues: [],
-        refused_issues: [],
         ...REGISTER_V4_AFFIRMATION,
       },
       conceptual_review_adjudication: {

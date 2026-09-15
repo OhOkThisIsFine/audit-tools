@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 /**
  * The audit draw of the shared submission core: how a GATE lane's bound path is
  * computed, and where the expected-set / ledger for those lanes are persisted.
@@ -83,7 +84,8 @@ export const GATE_LANES = {
   critical_flow_fallback: "critical_flow_fallback",
   intent_equivalence: "intent_equivalence",
   synthesis_narrative: "synthesis_narrative",
-  charter_delta: "charter_delta",
+  charter_comparison: "charter_comparison",
+  charter_fidelity: "charter_fidelity",
   charter_clarification: "charter_clarification",
   systemic_challenge: "systemic_challenge",
 } as const;

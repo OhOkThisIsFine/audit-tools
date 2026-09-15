@@ -1,7 +1,8 @@
 import type { ZodTypeAny } from "zod";
 
 import { charterLaneSchema } from "../../src/audit/cli/laneValidators.js";
-import { renderCharterDeltaPrompt } from "../../src/audit/cli/charterDeltaPrompt.js";
+import { renderCharterComparisonPrompt } from "../../src/audit/cli/charterComparisonPrompt.js";
+import { renderCharterFidelityPrompt } from "../../src/audit/cli/charterFidelityPrompt.js";
 import { renderCharterKindLanePrompt } from "../../src/audit/cli/charterExtractionPrompt.js";
 import { renderIntentEquivalencePrompt } from "../../src/audit/cli/nextStepCommand.js";
 import { findingContractPromptLines } from "../../src/audit/contracts/findingContractPrompt.js";
@@ -19,7 +20,10 @@ import {
   renderContractRepairPrompt,
 } from "../../src/remediate/steps/contractPipelinePrompts.js";
 import { synthesizeIntakePrompt } from "../../src/remediate/steps/prompts.js";
-import { CharterDeltaSubmissionSchema } from "../../src/shared/decompose/charterExtraction.js";
+import {
+  CharterComparisonSubmissionSchema,
+  CharterFidelitySubmissionSchema,
+} from "../../src/shared/decompose/charterExtraction.js";
 import { SystemicChallengeSubmissionSchema } from "../../src/shared/decompose/systemicChallenge.js";
 import { CriticalFlowFallbackResultSchema } from "../../src/shared/types/flows.js";
 import { SynthesisNarrativeSchema } from "../../src/shared/types/finding.js";
@@ -248,11 +252,18 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     render: () => renderCharterKindLanePrompt({ structure_decomposition: { generated_at: "2026-01-01T00:00:00.000Z", target: "structure", node_universe_size: 0, source_ids: ["call_import"], consensus: [], contested: [], findings: [] } }, { kind: "stated", submissionPath: "registry-fixture/submission.json", packetPath: "registry-fixture/packet.json" }),
   },
   {
-    builder: "renderCharterDeltaPrompt",
-    file: "src/audit/cli/charterDeltaPrompt.ts",
+    builder: "renderCharterComparisonPrompt",
+    file: "src/audit/cli/charterComparisonPrompt.ts",
     disposition: "derived",
-    schema: { name: "CharterDeltaSubmissionSchema", file: "src/shared/decompose/charterExtraction.ts", object: CharterDeltaSubmissionSchema },
-    render: () => renderCharterDeltaPrompt({}, { submissionPath: "registry-fixture/submission.json" }),
+    schema: { name: "CharterComparisonSubmissionSchema", file: "src/shared/decompose/charterExtraction.ts", object: CharterComparisonSubmissionSchema },
+    render: () => renderCharterComparisonPrompt({}, { submissionPath: "registry-fixture/submission.json", laneGraphPaths: { stated: "registry-fixture/stated.json", structural: "registry-fixture/structural.json", revealed: "registry-fixture/revealed.json" } }),
+  },
+  {
+    builder: "renderCharterFidelityPrompt",
+    file: "src/audit/cli/charterFidelityPrompt.ts",
+    disposition: "derived",
+    schema: { name: "CharterFidelitySubmissionSchema", file: "src/shared/decompose/charterExtraction.ts", object: CharterFidelitySubmissionSchema },
+    render: () => renderCharterFidelityPrompt({ submissionPath: "registry-fixture/submission.json", packetPath: "registry-fixture/packet.md" }),
   },
   {
     builder: "renderSecondOrderAdversaryPrompt",

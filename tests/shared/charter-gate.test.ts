@@ -2,9 +2,8 @@ import { test, expect, describe } from "vitest";
 import {
   applyTrueCharterGate,
   charterReviewDisposition,
-  gateCharterDelta,
 } from "../../src/shared/validation/charterGate.js";
-import type { Charter, CharterDelta } from "../../src/shared/types/charter.js";
+import type { Charter, LaneGoalNode } from "../../src/shared/types/charter.js";
 
 /** Minimal charter factory keeping the tests declarative. */
 function charter(overrides: Partial<Charter> = {}): Charter {
@@ -90,44 +89,16 @@ describe("charterReviewDisposition", () => {
       "opine",
     );
   });
-});
 
-describe("gateCharterDelta", () => {
-  const specDrift: CharterDelta = {
-    delta_id: "d1",
-    pair: ["stated", "revealed"],
-    kind: "says_does_drift",
-    routed_to: "remediator",
-    summary: "code diverged from stated intent",
-  };
-
-  test("reroutes a remediator-bound delta to human when a referenced charter is low-confidence", () => {
-    const charters = [
-      charter({ charter_id: "s", kind: "stated", confidence: "low" }),
-      charter({ charter_id: "r", kind: "revealed", confidence: "high" }),
-    ];
-    const gated = gateCharterDelta(specDrift, charters);
-    expect(gated.routed_to).toBe("human");
-    // original object is not mutated
-    expect(specDrift.routed_to).toBe("remediator");
-  });
-
-  test("leaves the delta unchanged when both referenced charters are confident", () => {
-    const charters = [
-      charter({ charter_id: "s", kind: "stated", confidence: "high" }),
-      charter({ charter_id: "r", kind: "revealed", confidence: "medium" }),
-    ];
-    const gated = gateCharterDelta(specDrift, charters);
-    expect(gated.routed_to).toBe("remediator");
-  });
-
-  test("a low-confidence charter of an UNreferenced kind does not trip the downgrade", () => {
-    const charters = [
-      charter({ charter_id: "s", kind: "stated", confidence: "high" }),
-      charter({ charter_id: "r", kind: "revealed", confidence: "high" }),
-      charter({ charter_id: "i", kind: "structural", confidence: "low" }),
-    ];
-    const gated = gateCharterDelta(specDrift, charters);
-    expect(gated.routed_to).toBe("remediator");
+  test("accepts a lane goal node (the five-step layer's unit) on the same rule", () => {
+    const node: LaneGoalNode = {
+      node_id: "g1",
+      purpose: "exists so the pipeline extracts max value",
+      premise_height: 0,
+      provenance: [],
+      confidence: "low",
+    };
+    expect(charterReviewDisposition(node)).toBe("flag_for_human");
+    expect(charterReviewDisposition({ ...node, confidence: "high" })).toBe("opine");
   });
 });

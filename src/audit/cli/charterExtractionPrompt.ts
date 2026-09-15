@@ -1,34 +1,32 @@
+// sites-pinned: tests/shared/prompt-renders-its-contract.test.ts, tests/audit/charter-emit-order.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { CharterProvenanceSchema } from "audit-tools/shared";
-import type { Ceiling, CharterKind } from "audit-tools/shared";
+import type { Ceiling, CharterLaneKind } from "audit-tools/shared";
 
 /** The provenance-kind alternation, DERIVED from the schema at render time. */
 const PROVENANCE_KINDS = CharterProvenanceSchema.shape.kind.options.join("|");
 
 /**
- * Per-kind charter-extraction LANE prompts (Phase C.1). The host supplies
- * JUDGMENT (a self-organized leveled teleology per lane, in TELOS terms) while
- * the tool supplies ENFORCEMENT (packet feeding, universe grounding, the
- * file-set-overlap join, id assignment, the Phase-A True gate, per-lane kind
- * purity) at ingest.
+ * Per-kind charter-extraction LANE prompts (step 1 of the charter layer; approved
+ * host text: docs/reviews/prompt-refinement-2026-09-13.md §8). The host supplies
+ * JUDGMENT — one goal DAG per lane, purposes in TELOS terms, edges meaning
+ * `from` SERVES `to`, evidence on nodes and edges — while the tool supplies
+ * ENFORCEMENT at ingest (packet feeding, universe grounding, cycle refusal, level
+ * derivation, citation checking, candidate correspondences).
  *
- * Channel purity is a property of the INPUT (design resolution 4): each lane's
- * prompt points at a tool-materialized evidence PACKET holding only that
- * channel's material (stated → docs + extracted comments; structural → tree /
- * edges / declarations; revealed → comment-stripped bodies), so blindness never
- * depends on an agent obeying a "do not read X" instruction. `true` is NOT a
- * lane — it is nominated by the independent delta miner at the deepest rung,
- * downstream of triangulation. Lane prompts are ADVANCE-FREE (no
- * continue-command).
+ * Channel purity is a property of the INPUT: each lane's prompt points at a
+ * tool-materialized evidence PACKET holding only that channel's material, so
+ * blindness never depends on an agent obeying a "do not read X" instruction.
+ * `true` is NOT a lane. Lane prompts are ADVANCE-FREE (no continue-command).
  */
 
 /** The three estimator kinds — every extraction lane; never `true`. */
-export type EstimatorCharterKind = Exclude<CharterKind, "true">;
+export type EstimatorCharterKind = CharterLaneKind;
 
 /**
  * The extraction kinds a run's ceiling requests, in canonical order. The three
  * estimator channels extract at every charter-authorizing ceiling; `deepest`
- * changes what the MINER may do (True nominations), never the lane set.
+ * changes what may be nominated downstream, never the lane set.
  */
 export function charterExtractionKindsForCeiling(
   _ceiling: Ceiling,
@@ -36,50 +34,39 @@ export function charterExtractionKindsForCeiling(
   return ["stated", "structural", "revealed"];
 }
 
-/** Per-kind definition + channel description (what the packet holds and means). */
+/** Per-kind perspective line, packet description, and the `files` rule (scope follows the evidence). */
 const KIND_LANE_TEXT: Record<
   EstimatorCharterKind,
-  { definition: string[]; channel: string[] }
+  { perspective: string; packet: string; filesRule: string }
 > = {
   stated: {
-    definition: [
-      "- **stated** — TESTIMONY: what the docs and comments SAY the code is for",
-      "  (cite the doc/comment).",
-    ],
-    channel: [
-      "Your packet holds the repo's doc files plus the comments extracted from",
-      "each subsystem file — testimony only, no code. Cite the doc/comment you",
-      "read each claim from.",
-    ],
+    perspective: "- **stated** — TESTIMONY: what docs and comments say the code is for.",
+    packet:
+      "Your packet holds the repo's doc files plus the comments extracted from each subsystem file — testimony only, no code.",
+    filesRule:
+      "- `files` — optional; include only the repo-relative files your evidence itself names. Docs name goals and symbols, rarely files; do not guess a scope.",
   },
   structural: {
-    definition: [
-      "- **structural** — intent FROZEN INTO ORGANIZATION: what the file tree,",
-      "  names, declarations and dependency edges say the code is for.",
-    ],
-    channel: [
-      "Your packet holds the file tree, the dependency edges among files, and",
-      "each file's top-level declaration lines — organization only: no bodies,",
-      "no docs, no comments. Read intent from how the code is ARRANGED.",
-    ],
+    perspective:
+      "- **structural** — intent FROZEN INTO ORGANIZATION: what the file tree, names, declarations and dependency edges say the code is for.",
+    packet:
+      "Your packet holds the file tree, the dependency edges among files, and each file's top-level declaration lines — organization only: no bodies, no docs, no comments.",
+    filesRule:
+      "- `files` — the in-scope files that implement this purpose, as relative paths exactly as your packet names them.",
   },
   revealed: {
-    definition: [
-      "- **revealed** — BEHAVIOR: what the code actually optimizes for (cite the",
-      "  code). This is the objective anchor — far more extractable than any",
-      "  intent charter.",
-    ],
-    channel: [
-      "Your packet holds each subsystem file's comment-stripped source —",
-      "behavior only, no testimony. Anchor purely on what the implementation",
-      "does and optimizes for.",
-    ],
+    perspective:
+      "- **revealed** — BEHAVIOR: what the code actually optimizes for. This is the objective anchor.",
+    packet:
+      "Your packet holds each subsystem file's comment-stripped source — behavior only, no testimony.",
+    filesRule:
+      "- `files` — the in-scope files that implement this purpose, as relative paths exactly as your packet names them.",
   },
 };
 
 /**
  * Render ONE kind's lane prompt. The lane is blind by construction: it carries
- * only its own kind's definition, its materialized evidence packet, and its
+ * only its own kind's perspective, its materialized evidence packet, and its
  * submission path.
  */
 export function renderCharterKindLanePrompt(
@@ -100,99 +87,95 @@ export function renderCharterKindLanePrompt(
           node.members.length > 12 ? ` (+${node.members.length - 12} more)` : "";
         return `- ${node.members.length} file(s): ${preview}${more}`;
       })
-    : ["- (no confident subsystems were found — organize the teleology yourself)"];
+    : ["- (no confident subsystems were found — organize the goal graph yourself)"];
 
   return [
     `# Design review — charter extraction, **${opts.kind}** lane (conceptual, teleological)`,
     "",
-    "You are authoring ONE channel's view in the **charter layer** of the",
-    'conceptual design review: not "is this module correct/clean" but *"what is',
-    'this code FOR, and does it serve that purpose as well as a better design',
-    'could."* Your channel:',
+    "You are authoring a high-level conceptual design review: not \"is this module correct/clean\" but",
+    "*\"what is this code FOR, and does it serve that purpose as well as a better design could.\"*",
     "",
-    ...lane.definition,
+    "Three independent, blind lanes each build their own goal graph from ONE evidence channel:",
+    "**stated** (docs and comments), **structural** (file tree, declarations, imports), **revealed**",
+    `(comment-stripped code). You are the **${opts.kind}** lane; you see only its packet and never the other two graphs.`,
     "",
-    "## Your evidence packet (this lane is BLIND to the other channels)",
+    "Your review perspective:",
+    lane.perspective,
     "",
-    `Read \`${opts.packetPath}\` — it is your ONLY input, materialized by the`,
-    "tool to hold exactly this channel's evidence. Do NOT read repository files",
-    "directly, and do NOT read another lane's prompt, packet, or output.",
+    "## Core Concepts: Purpose vs. Mechanism",
     "",
-    "The packet already contains everything a correct citation needs, so obeying",
-    "that instruction is SUFFICIENT — you never have to open a file to cite one.",
-    "Its `## Provenance manifest` block names every excerpt with the exact line",
-    "runs delivered, and every content line is prefixed with its TRUE line number",
-    "in its own source file (`  12| …`). COPY a citation from there; never count",
-    "lines, never infer them, and never cite a range that spans two runs.",
+    "- **Purpose (Telos / The WHY)**: The problem this code exists to solve for users or the system.",
+    "- **Mechanism (The WHAT / HOW)**: The specific technical implementation.",
     "",
-    ...lane.channel,
+    "- *Telos (DO emit)*: *\"Ensures independent audit workers fairly share provider quotas without starving critical security checks.\"*",
+    "- *Mechanism (do NOT emit)*: *\"Manages rate limits using a Redis token bucket.\"* A purpose that restates the code cannot show an architectural gap.",
     "",
-    "## Self-organize a leveled teleology",
+    "## Your evidence packet",
     "",
-    "From your channel's evidence alone, organize the purposes you see into a",
-    "LEVELED teleology: a set of nodes, each stating a purpose in **telos terms —",
-    'never mechanism** ("exists so N cooperating auditors extract max value from',
-    'finite provider budgets", never "it manages quota" — a purpose that merely',
-    "restates the code collapses the delta against the impl to zero). Each node",
-    "carries:",
-    "- `purpose` — the telos statement.",
-    "- `premise_height` — YOUR level for it: 0 = the repo-level telos, higher =",
-    "  closer to a leaf mechanism. Levels are yours to organize; use as many or",
-    "  as few as the evidence supports (never force a fixed depth).",
-    "- `files` — the node's FILE SCOPE: the packet files this purpose covers,",
-    "  as repo-relative paths exactly as the packet names them. The tool joins",
-    "  your teleology to the other channels' mechanically by file-set overlap —",
-    "  a scope citing a file the repo does not contain refuses the lane.",
+    `Read \`${opts.packetPath}\` — it holds the evidence for this review. Cite claims from this packet by symbol and literal quote, not by line number; you do not need to open files outside it.`,
     "",
-    "A suggested scaffold from the structure decomposition (a HINT — you may",
-    "organize different boundaries where your evidence supports them):",
+    lane.packet,
+    "",
+    "Its `## Provenance manifest` block names every excerpt with the exact line runs delivered, and every",
+    "content line is prefixed with its TRUE line number in its own source file (`  12| …`). COPY a",
+    "citation from there; never count lines, never infer them, and never cite a range that spans two runs.",
+    "",
+    "## Build your goal graph",
+    "",
+    "Organize the purposes you find into one directed graph with no cycles. An edge `from → to` means the child purpose SERVES the parent purpose. A purpose may serve more than one parent. The tool derives each node's level from your edges.",
+    "",
+    "Each node carries:",
+    "- `node_id` — a short slug you choose; it is local to this submission.",
+    "- `purpose` — the telos statement (the WHY, not the WHAT).",
+    "- `provenance` — evidence citations: `<path>#<symbol>` with a literal quote, or `<path>:<line>` for comments and unnamed blocks.",
+    "- `confidence` — `\"high\"` | `\"medium\"` | `\"low\"`.",
+    lane.filesRule,
+    "",
+    "Each edge carries `from`, `to`, and `provenance` for the relationship itself.",
+    "",
+    "A suggested scaffold from structure analysis (a hint — adjust boundaries where evidence supports it):",
     ...hintLines,
     "",
-    "You are one of several independent, blind lanes (one per channel). Tag each",
-    "node's `confidence`. You author teleology ONLY — an INDEPENDENT delta-miner",
-    "reads all channels in a later pass and mines the gaps between them (no",
-    "author marks its own homework), so do NOT emit deltas or comparisons.",
+    "You author teleology ONLY — do NOT review code correctness.",
     "",
     "## Anti-slop discipline (do NOT emit)",
-    "- No **restated-mechanism** purposes (the delta collapses to zero).",
+    "- No **restated-mechanism** purposes; describe the WHY, not the WHAT.",
     "- No **generic** telos any subsystem could claim; be specific to THIS code.",
-    "- No **fabricated profundity** — every node cites provenance from YOUR",
-    "  channel (revealed cites code, stated cites a doc/comment, structural cites",
-    "  the arrangement it reads intent from).",
-    "- No files outside your packet — scopes are grounded against the repo and an",
-    "  unknown path refuses the whole lane.",
+    "- No **fabricated profundity**; every node and edge cites provenance from your packet.",
+    "- No files outside your packet; the limited view is intentional.",
     "",
     "## Output",
-    `Write your submission as JSON to \`${opts.submissionPath}\` with this shape`,
-    `(every node's \`kind\` MUST be \`"${opts.kind}"\` — any other kind refuses the lane):`,
+    "",
+    `Write your submission as JSON to \`${opts.submissionPath}\`:`,
     "",
     "```json",
     "{",
+    `  "kind": "${opts.kind}",`,
     '  "nodes": [',
     "    {",
-    `      "kind": "${opts.kind}",`,
-    '      "purpose": "<telos, not mechanism>",',
-    '      "premise_height": 0,',
-    '      "files": ["<repo-relative path>", "..."],',
-    // Closed enum, exhaustive, NO trailing ellipsis — DERIVED from
-    // CharterProvenanceSchema at render time, so a schema enum change flows into
-    // the prompt automatically; the behavioral pin in
-    // tests/shared/prompt-renders-its-contract.test.ts holds exhaustiveness and
-    // closedness of the RENDERED text instead of teaching a worker a smaller
-    // contract (an open list here coined a member and quarantined a 34-minute
-    // lane run).
-    `      "provenance": [{ "kind": "${PROVENANCE_KINDS}", "ref": "<path>:<startLine>-<endLine>", "quote": "<optional>" }],`,
-    "",
-    "        `ref` is COPIED verbatim from ONE line run in your packet's manifest",
-    "        — never counted, inferred, or spanned across two runs. Use",
-    "        `<path>:<N>` for a single line, or the bare `<path>` when the claim",
-    "        names no lines at all. A non-path source (an intent-checkpoint field,",
-    "        a component id) stays a bare id.",
-    '      "confidence": "high|medium|low"',
+    '      "node_id": "quota-fairness",',
+    '      "purpose": "Ensures independent audit workers fairly share provider quotas without starving critical security checks",',
+    ...(opts.kind === "stated"
+      ? []
+      : ['      "files": ["src/dispatch/quota.ts", "src/dispatch/pool.ts"],']),
+    `      "provenance": [{ "kind": "${PROVENANCE_KINDS}", "ref": "src/dispatch/quota.ts#QuotaManager", "quote": "class QuotaManager {" }],`,
+    '      "confidence": "high"',
+    "    }",
+    "  ],",
+    '  "edges": [',
+    "    {",
+    '      "from": "quota-fairness",',
+    '      "to": "trustworthy-audits",',
+    `      "provenance": [{ "kind": "${PROVENANCE_KINDS}", "ref": "src/dispatch/quota.ts:12", "quote": "so no lens is starved" }]`,
     "    }",
     "  ]",
     "}",
     "```",
+    "",
+    `- \`kind\`: Must be \`"${opts.kind}"\`.`,
+    `- \`provenance[].kind\`: one of \`${PROVENANCE_KINDS.split("|").join("`, `")}\`.`,
+    "- `provenance[].ref` is COPIED verbatim from ONE line run in your packet's manifest — `<path>:<startLine>-<endLine>` for a run, `<path>:<N>` for a single line, the bare `<path>` when the claim names no lines, or a bare id for a non-path source. The packet is SUFFICIENT: you never leave it to cite correctly.",
+    "- Every `from` and `to` names a `node_id` in this submission.",
     "",
   ].join("\n");
 }

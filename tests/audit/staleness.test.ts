@@ -1,4 +1,4 @@
-import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
@@ -1262,14 +1262,7 @@ function makeCharterBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
     target: "charter",
     ceiling: { rung: "deep" },
     status: "omitted",
-    subsystems: [],
-    goal_graph: { nodes: [], edges: [] },
-    deltas: [],
-    findings: [],
-    triangulated: [],
-    disagreement: [],
-    validation_issues: [],
-    ...REGISTER_V4_AFFIRMATION,
+    ...EMPTY_REGISTER_BODY,
   };
   return {
     repo_manifest: {

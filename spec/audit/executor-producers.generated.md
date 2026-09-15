@@ -21,7 +21,7 @@ refreshed by* = executors that rewrite it later in the pipeline (staleness-drive
 | `audit_tasks.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening), `runtime_validation_update_executor` (selective deepening; preferredExecutor only) |
 | `auto_fixes_applied.json` | `auto_fix_executor` | — |
 | `charter_clarification.json` | `charter_clarification_executor` | — |
-| `charter_register.json` | `charter_extraction_executor` | `charter_delta_executor` (settles the register's pending deltas) |
+| `charter_register.json` | `charter_extraction_executor` | `charter_comparison_executor` (settles the register's pending comparison (correspondences + differences)), `charter_fidelity_executor` (stamps the fidelity verdicts and surfaces the supported differences as findings) |
 | `coverage_matrix.json` | `planning_executor` | `result_ingestion_executor` |
 | `critical-flow-fallback.json` | `critical_flow_fallback_executor` (durable host input the structure phase merges on the next fold) | — |
 | `critical_flows.json` | `structure_executor` (merges the persisted critical-flow-fallback.json when one exists) | — |

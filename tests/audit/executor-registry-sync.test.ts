@@ -42,7 +42,8 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
   const hostDelegationIds = new Set([
     "critical_flow_fallback_executor",
     "charter_extraction_executor",
-    "charter_delta_executor",
+    "charter_comparison_executor",
+    "charter_fidelity_executor",
     "charter_clarification_executor",
     "systemic_challenge_executor",
     "design_review_contract",
@@ -62,7 +63,7 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
   }
   // Verify exactly these executors are host_delegation
   const hostEntries = EXECUTOR_REGISTRY.filter((e) => e.kind === "host_delegation");
-  expect(hostEntries.map((e) => e.id).sort()).toEqual(["charter_clarification_executor", "charter_delta_executor", "charter_extraction_executor", "critical_flow_fallback_executor", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "intent_equivalence_executor", "semantic_review_executor", "synthesis_narrative_executor", "systemic_challenge_executor"]);
+  expect(hostEntries.map((e) => e.id).sort()).toEqual(["charter_clarification_executor", "charter_comparison_executor", "charter_extraction_executor", "charter_fidelity_executor", "critical_flow_fallback_executor", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "intent_equivalence_executor", "semantic_review_executor", "synthesis_narrative_executor", "systemic_challenge_executor"]);
 });
 
 test("every registry executor with a PRIORITY obligation has the expected runner ownership", () => {

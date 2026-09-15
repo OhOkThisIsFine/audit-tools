@@ -1,6 +1,7 @@
+// sites-pinned: tests/audit/charter-clarification.test.ts
 import type { Finding } from "../types.js";
 import type {
-  CharterClarificationRequest,
+  CharterDifferenceQuestion,
   Ceiling,
 } from "audit-tools/shared";
 
@@ -45,27 +46,16 @@ export interface CharterClarificationRegister {
    */
   status?: "omitted";
   /** The VOI-ranked interactive questions surfaced to the host this round. */
-  asked: CharterClarificationRequest[];
+  asked: CharterDifferenceQuestion[];
   /** Questions written as findings (risk-gated or beyond appetite), VOI-ordered. */
-  banked: CharterClarificationRequest[];
+  banked: CharterDifferenceQuestion[];
   /** The banked questions surfaced as Finding leads for synthesis. */
   findings: Finding[];
   /**
-   * Gate/partition notes (e.g. deltas that sourced no question) — surfaced.
-   * Includes every entry of {@link refused_issues}, which is the subset that
-   * matters and is carried separately so no reader has to classify prose.
+   * Partition notes (e.g. differences that sourced no question) — surfaced.
+   * There is no refusal class here: a difference the join cannot place is
+   * refused by the comparison step (`assembleComparison`) before it reaches the
+   * register, so every record this loop reads is already grounded.
    */
   validation_issues: string[];
-  /**
-   * The REFUSALS among {@link validation_issues}: deltas the join could not
-   * place at all (no `node_id`, or a node the register carries no members for),
-   * so the question they would have sourced is NEVER ASKED.
-   *
-   * It is a separate field rather than a filter over the messages because the
-   * distinction is structural, not textual: a routine remediator-routed skip and
-   * a refused delta are both one-line strings, and telling them apart by
-   * matching message text is the kind of check that silently stops working when
-   * either message is edited. A writer states which class an issue is in.
-   */
-  refused_issues: string[];
 }

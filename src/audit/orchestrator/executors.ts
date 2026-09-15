@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 /**
  * How an executor relates to an artifact it writes.
  *
@@ -288,20 +289,33 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     ],
   },
   {
-    // Phase C.2 delta-mining, mirrors charter_extraction. host_delegation: at a
-    // deep+ ceiling that produced ≥1 subsystem (charter_register.deltas_pending)
-    // it emits an LLM step for the INDEPENDENT delta-miner; otherwise the runner
-    // settles the register deterministically (the branch in nextStepHelpers gates
-    // emit vs run, mirroring charter_extraction).
-    id: "charter_delta_executor",
+    // Steps 2–3 of the charter layer, mirrors charter_extraction. host_delegation:
+    // at a deep+ ceiling whose lanes produced ≥1 node (charter_register.
+    // comparison_pending) it emits an LLM step for the comparison reader;
+    // otherwise the runner settles the register deterministically.
+    id: "charter_comparison_executor",
     kind: "host_delegation",
-    obligation_ids: ["charter_delta_current"],
+    obligation_ids: ["charter_comparison_current"],
     produces: [
       {
         artifact: "charter_register.json",
         role: "refresh",
-        note:
-          "settles the register's pending deltas",
+        note: "settles the register's pending comparison (correspondences + differences)",
+      },
+    ],
+  },
+  {
+    // Step 4 of the charter layer. host_delegation: when ≥1 finding candidate
+    // awaits a lane verdict (charter_register.fidelity_pending) it emits an LLM
+    // step for the separate fidelity lane; otherwise the runner settles it.
+    id: "charter_fidelity_executor",
+    kind: "host_delegation",
+    obligation_ids: ["charter_fidelity_current"],
+    produces: [
+      {
+        artifact: "charter_register.json",
+        role: "refresh",
+        note: "stamps the fidelity verdicts and surfaces the supported differences as findings",
       },
     ],
   },

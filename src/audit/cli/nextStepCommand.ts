@@ -1,4 +1,5 @@
-import { mkdir, readFile } from "node:fs/promises";
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   loadAnalyzerPolicy,
@@ -63,7 +64,9 @@ import {
   charterExtractionKindsForCeiling,
   renderCharterKindLanePrompt,
 } from "./charterExtractionPrompt.js";
-import { renderCharterDeltaPrompt } from "./charterDeltaPrompt.js";
+import { renderCharterComparisonPrompt } from "./charterComparisonPrompt.js";
+import { renderCharterFidelityPrompt } from "./charterFidelityPrompt.js";
+import { buildCharterFidelityPacket } from "../orchestrator/charterFidelityPacket.js";
 import { renderCharterClarificationPrompt } from "./charterClarificationPrompt.js";
 import { renderSecondOrderAdversaryPrompt } from "../systemic/secondOrderAdversaryPrompt.js";
 import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
@@ -989,45 +992,55 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
   },
 );
 
-const emitCharterDelta = emissionRow<"charter_delta">(
+const emitCharterComparison = emissionRow<"charter_comparison">(
   async ({ root, artifactsDir }, result) => {
-    // Phase C.2 charter delta-mining (conceptual, teleological): an INDEPENDENT
-    // delta-miner reads the assembled charters (authored by a different pass, blind
-    // to the gaps) and mines the pairwise deltas + the goal DAG; the tool routes +
-    // gates them at ingest. Only reached at a deep+ ceiling whose extraction pass
-    // produced ≥1 subsystem (charter_register.deltas_pending).
-    // Always-materialized (design resolution 2): the miner prompt is a lane FILE.
+    // Steps 2–3 of the charter layer: the comparison reader (it authored none of
+    // the three lane DAGs) confirms the tool's correspondence candidates and
+    // records the typed differences; the tool assembles, routes and pre-checks at
+    // ingest. Only reached at a deep+ ceiling whose lanes produced ≥1 node
+    // (charter_register.comparison_pending). The three lane DAGs are written as
+    // lane assets so the reader reads each graph from its own file.
     const continueCommand = nextStepCommand(root, artifactsDir);
-    const submissionPath = laneSubmissionPath(artifactsDir, GATE_LANES.charter_delta);
-    const lanePrompt = renderCharterDeltaPrompt(result.bundle, { submissionPath });
+    const submissionPath = laneSubmissionPath(artifactsDir, GATE_LANES.charter_comparison);
+    const lanes = result.bundle.charter_register?.lanes ?? [];
+    const laneGraphPaths = {
+      stated: join(laneAssetsDir(artifactsDir), "charter-lane-stated.json"),
+      structural: join(laneAssetsDir(artifactsDir), "charter-lane-structural.json"),
+      revealed: join(laneAssetsDir(artifactsDir), "charter-lane-revealed.json"),
+    };
+    for (const kind of ["stated", "structural", "revealed"] as const) {
+      const graph = lanes.find((l) => l.kind === kind) ?? { kind, nodes: [], edges: [] };
+      await writeJsonFile(laneGraphPaths[kind], graph);
+    }
+    const lanePrompt = renderCharterComparisonPrompt(result.bundle, { submissionPath, laneGraphPaths });
     const fanout = await materializeFanoutLanes({
       artifactsDir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
-          id: GATE_LANES.charter_delta,
-          label: "Independent charter delta-miner",
-          promptFilename: "charter-delta-prompt.md",
+          id: GATE_LANES.charter_comparison,
+          label: "Charter comparison reader",
+          promptFilename: "charter-comparison-prompt.md",
           promptText: lanePrompt,
         },
       ],
     });
     return currentStepPlan({
       artifactsDir,
-      stepKind: "charter_delta",
+      stepKind: "charter_comparison",
       status: "ready",
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Execute the delta-miner lane prompt (subagent if available, else yourself), write the mined deltas + goal graph to the results path, then run next-step.",
+        "Execute the comparison lane prompt (subagent if available, else yourself), write the correspondences and differences to the results path, then run next-step.",
       repoRoot: root,
-      artifactPaths: fanout.artifactPaths,
+      artifactPaths: { ...fanout.artifactPaths, ...laneGraphPaths },
       prompt: [
         ...singleLaneDispatchEnvelope({
-          title: "# audit-code charter delta-mining",
+          title: "# audit-code charter comparison",
           shortfallLines: renderLaneShortfallLines(fanout.shortfall),
           leadIn:
-            "The assembled charters are ready for the INDEPENDENT delta-miner (it did not author them).",
+            "The three lane goal DAGs are ready for the comparison reader (it authored none of them).",
           executionLines: renderFanoutExecutionLines({
             lanes: fanout.pendingLanes.map((lane) => ({
               label: lane.label,
@@ -1035,7 +1048,7 @@ const emitCharterDelta = emissionRow<"charter_delta">(
               demand: lane.demand,
             })),
           }),
-          writeSentence: "The executor must write its CharterDeltaSubmission JSON to:",
+          writeSentence: "The executor must write its CharterComparisonSubmission JSON to:",
           resultPath: submissionPath,
           continueCommand,
         }),
@@ -1043,8 +1056,69 @@ const emitCharterDelta = emissionRow<"charter_delta">(
       access: {
         read_paths: [
           ...fanout.readPaths,
+          ...Object.values(laneGraphPaths),
           join(artifactsDir, "charter_register.json"),
         ],
+        write_paths: fanout.writePaths,
+      },
+      submissionShortfall: fanout.shortfall,
+    });
+  },
+);
+
+const emitCharterFidelity = emissionRow<"charter_fidelity">(
+  async ({ root, artifactsDir }, result) => {
+    // Step 4 of the charter layer: a SEPARATE lane judges, per finding candidate,
+    // whether the sources genuinely differ. Blind by input: the tool materializes
+    // a packet holding the accounts, their citations and the source slices at
+    // those citations; the lane reads nothing else.
+    const continueCommand = nextStepCommand(root, artifactsDir);
+    const submissionPath = laneSubmissionPath(artifactsDir, GATE_LANES.charter_fidelity);
+    const packetPath = join(laneAssetsDir(artifactsDir), "charter-fidelity-packet.md");
+    await writeFile(packetPath, await buildCharterFidelityPacket(result.bundle, root), "utf8");
+    const lanePrompt = renderCharterFidelityPrompt({ submissionPath, packetPath });
+    const fanout = await materializeFanoutLanes({
+      artifactsDir,
+      runId: AUDIT_GATE_SUBMISSION_SCOPE,
+      lanes: [
+        {
+          id: GATE_LANES.charter_fidelity,
+          label: "Charter fidelity lane",
+          promptFilename: "charter-fidelity-prompt.md",
+          promptText: lanePrompt,
+        },
+      ],
+    });
+    return currentStepPlan({
+      artifactsDir,
+      stepKind: "charter_fidelity",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Execute the fidelity lane prompt with a SEPARATE agent from the comparison reader, write its verdicts to the results path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: { ...fanout.artifactPaths, charter_fidelity_packet: packetPath },
+      prompt: [
+        ...singleLaneDispatchEnvelope({
+          title: "# audit-code charter fidelity check",
+          shortfallLines: renderLaneShortfallLines(fanout.shortfall),
+          leadIn:
+            "The recorded differences await verification against their own sources by a reader that authored neither the DAGs nor the comparison.",
+          executionLines: renderFanoutExecutionLines({
+            lanes: fanout.pendingLanes.map((lane) => ({
+              label: lane.label,
+              promptPath: lane.promptPath,
+              demand: lane.demand,
+            })),
+          }),
+          writeSentence: "The executor must write its CharterFidelitySubmission JSON to:",
+          resultPath: submissionPath,
+          continueCommand,
+        }),
+      ].join("\n"),
+      access: {
+        read_paths: [...fanout.readPaths, packetPath],
         write_paths: fanout.writePaths,
       },
       submissionShortfall: fanout.shortfall,
@@ -1652,7 +1726,8 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
   design_review_contract: emitDesignReviewContract,
   design_review_conceptual: emitDesignReviewConceptual,
   charter_extraction: emitCharterExtraction,
-  charter_delta: emitCharterDelta,
+  charter_comparison: emitCharterComparison,
+  charter_fidelity: emitCharterFidelity,
   charter_clarification: emitCharterClarification,
   systemic_challenge: emitSystemicChallenge,
   confirm_intent: emitConfirmIntent,

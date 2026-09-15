@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type {
@@ -312,20 +313,36 @@ export function deriveAuditState(
   // (or found no subsystems) `deltas_pending` is never set → this self-satisfies,
   // never blocking the default (conversation-first) path — mirrors
   // charter_extraction_current.
-  const charterDeltaBase = staleOrSatisfied(
+  const charterFollowUpBase = staleOrSatisfied(
     staleArtifacts,
     ["charter_register.json"],
     has(bundle.charter_register),
   );
-  const charterDeltasPending =
-    charterDeltaBase === "satisfied" &&
-    bundle.charter_register?.deltas_pending === true;
+  // Steps 2–3 (the comparison reader) and step 4 (the fidelity lane) of the
+  // charter layer each stay unmet while the register flags them pending; when
+  // extraction omitted (or produced no node) neither flag is ever set → both
+  // self-satisfy, never blocking the conversation-first path.
+  const comparisonPending =
+    charterFollowUpBase === "satisfied" &&
+    bundle.charter_register?.comparison_pending === true;
   obligations.push(
     obligation(
-      "charter_delta_current",
-      charterDeltasPending ? "missing" : charterDeltaBase,
-      charterDeltasPending
-        ? "Charter deltas not yet mined by the independent delta pass before the design-review passes."
+      "charter_comparison_current",
+      comparisonPending ? "missing" : charterFollowUpBase,
+      comparisonPending
+        ? "Charter lane DAGs not yet compared (correspondences + differences) before the design-review passes."
+        : undefined,
+    ),
+  );
+  const fidelityPending =
+    charterFollowUpBase === "satisfied" &&
+    bundle.charter_register?.fidelity_pending === true;
+  obligations.push(
+    obligation(
+      "charter_fidelity_current",
+      fidelityPending ? "missing" : charterFollowUpBase,
+      fidelityPending
+        ? "Charter differences not yet verified against their sources by the fidelity lane."
         : undefined,
     ),
   );

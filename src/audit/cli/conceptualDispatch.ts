@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/conceptual-charter-context.test.ts
 import {
   type DesignReviewBinding,
   type IntentCheckpoint,
@@ -151,11 +152,8 @@ export function resolveConceptualReviewSettings(
   // (charterReviewDisposition). Charters live on the REGISTER — the checkpoint
   // carries only the ceiling as input (its never-written charter embed was
   // deleted 2026-08-06, design resolution 4).
-  const flagForHuman = (bundle.charter_register?.subsystems ?? []).some(
-    (subsystem) =>
-      subsystem.charters.some(
-        (charter) => charterReviewDisposition(charter) === "flag_for_human",
-      ),
+  const flagForHuman = (bundle.charter_register?.lanes ?? []).some((lane) =>
+    lane.nodes.some((node) => charterReviewDisposition(node) === "flag_for_human"),
   );
   const conceptualDepth =
     checkpoint?.conceptual_depth ?? "shallow";

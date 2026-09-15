@@ -1,4 +1,4 @@
-import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 // The charter dependency-slice layer: projections (contract-pinned), the
 // metadata stamping terms, and the staleness slice compare that replaces the
 // whole-hash disjunction on projected edges.
@@ -71,14 +71,7 @@ function makeCharterRegister(over: Partial<CharterRegister> = {}): CharterRegist
     target: "charter",
     ceiling: { rung: "deep" },
     status: "omitted",
-    subsystems: [],
-    goal_graph: { nodes: [], edges: [] },
-    deltas: [],
-    findings: [],
-    triangulated: [],
-    disagreement: [],
-    validation_issues: [],
-    ...REGISTER_V4_AFFIRMATION,
+    ...EMPTY_REGISTER_BODY,
     ...over,
   };
 }
@@ -482,7 +475,7 @@ test("metadata: an unlisted mismatch-restamp preserves recorded slices verbatim"
   // AND move the membership so a rebuild would produce different slices.
   const mutated: ArtifactBundle = {
     ...bundle,
-    charter_register: { ...bundle.charter_register!, deltas_pending: true },
+    charter_register: { ...bundle.charter_register!, comparison_pending: true },
     structure_decomposition: makeStructureDecomposition({
       consensus: [consensusNode({ members: ["src/a.ts"] })],
     }),

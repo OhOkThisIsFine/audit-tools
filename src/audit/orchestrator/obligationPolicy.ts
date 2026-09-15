@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 /**
  * Per-obligation host-boundary POLICY — the pure "classify" half of the ONE
  * audit obligation registry (CX-02).
@@ -107,8 +108,12 @@ export function charterExtractionOmits(bundle: ArtifactBundle): boolean {
 }
 
 /** Nothing to mine (extraction omitted / no subsystems) → settle deterministically. */
-export function charterDeltaOmits(bundle: ArtifactBundle): boolean {
-  return !(bundle.charter_register?.deltas_pending === true);
+export function charterComparisonOmits(bundle: ArtifactBundle): boolean {
+  return !(bundle.charter_register?.comparison_pending === true);
+}
+
+export function charterFidelityOmits(bundle: ArtifactBundle): boolean {
+  return !(bundle.charter_register?.fidelity_pending === true);
 }
 
 /**
@@ -229,15 +234,26 @@ const POLICY_CLASSIFIERS: Readonly<Record<string, Classifier>> = {
     return hostBoundary("a deep ceiling owes the host charter-extraction turn");
   },
 
-  charter_delta_current: async (bundle, inputs) => {
-    if (await probe(inputs, GATE_LANES.charter_delta)) {
+  charter_comparison_current: async (bundle, inputs) => {
+    if (await probe(inputs, GATE_LANES.charter_comparison)) {
       return awaitSubmission(
-        GATE_LANES.charter_delta,
-        "a charter-delta submission is pending",
+        GATE_LANES.charter_comparison,
+        "a charter-comparison submission is pending",
       );
     }
-    if (charterDeltaOmits(bundle)) return DETERMINISTIC;
-    return hostBoundary("a deltas_pending register owes the independent delta-miner turn");
+    if (charterComparisonOmits(bundle)) return DETERMINISTIC;
+    return hostBoundary("a comparison_pending register owes the comparison reader's turn");
+  },
+
+  charter_fidelity_current: async (bundle, inputs) => {
+    if (await probe(inputs, GATE_LANES.charter_fidelity)) {
+      return awaitSubmission(
+        GATE_LANES.charter_fidelity,
+        "a charter-fidelity submission is pending",
+      );
+    }
+    if (charterFidelityOmits(bundle)) return DETERMINISTIC;
+    return hostBoundary("a fidelity_pending register owes the fidelity lane's turn");
   },
 
   charter_clarification_current: async (bundle, inputs) => {

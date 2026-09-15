@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/charter-clarification.test.ts
 // Phase D — D1 pure primitive: the VALUE-OF-INFORMATION queue.
 //
 // Rank charter-alignment questions by how much charter-uncertainty each answer
@@ -11,7 +12,7 @@
 // PURE + deterministic + language-neutral: a stable total order over the requests,
 // no IO, no LLM. Exported so phase-e reuses the same ranking.
 
-import type { CharterClarificationRequest } from "audit-tools/shared";
+import type { CharterDifferenceQuestion } from "audit-tools/shared";
 import { compareCodeUnits } from "audit-tools/shared";
 
 /**
@@ -21,7 +22,7 @@ import { compareCodeUnits } from "audit-tools/shared";
  * named function (not inlined) so phase-e can score a single request without
  * re-sorting a whole queue.
  */
-export function voiScore(request: CharterClarificationRequest): number {
+export function voiScore(request: CharterDifferenceQuestion): number {
   return request.value.blast_radius + request.value.cascade_count;
 }
 
@@ -32,8 +33,8 @@ export function voiScore(request: CharterClarificationRequest): number {
  * Returns a NEW array; the input is never mutated.
  */
 export function voiQueue(
-  requests: CharterClarificationRequest[],
-): CharterClarificationRequest[] {
+  requests: CharterDifferenceQuestion[],
+): CharterDifferenceQuestion[] {
   return [...requests].sort((a, b) => {
     const byScore = voiScore(b) - voiScore(a);
     if (byScore !== 0) return byScore;

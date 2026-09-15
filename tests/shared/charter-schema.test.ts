@@ -2,7 +2,7 @@ import { test, expect, describe } from "vitest";
 import {
   GoalGraphSchema,
   CharterSchema,
-  CharterDeltaSchema,
+  CharterDifferenceSchema,
 } from "../../src/shared/types/charter.js";
 import { IntentCheckpointSchema } from "../../src/shared/types/intentCheckpoint.js";
 
@@ -75,16 +75,41 @@ describe("CharterSchema", () => {
   });
 });
 
-describe("CharterDeltaSchema", () => {
-  test("accepts a symmetric charter-kind pair tuple", () => {
-    const d = CharterDeltaSchema.parse({
-      delta_id: "d1",
-      pair: ["structural", "revealed"],
-      kind: "architecture_betrayal",
-      routed_to: "clarification",
-      summary: "the organization's promise vs what the implementation does",
+describe("CharterDifferenceSchema", () => {
+  const base = {
+    difference_id: "d1",
+    correspondence_id: "c1",
+    dimension: "purpose",
+    relation: "incompatible",
+    accounts: [
+      { kind: "structural", claim: "the module organizes a cache", provenance: [] },
+      { kind: "revealed", claim: "the module recomputes on every call", provenance: [] },
+    ],
+    gap: "the organization's promise vs what the implementation does",
+    routed_to: "clarification",
+    finding_candidate: true,
+  };
+
+  test("accepts an n-ary record with a two-against-one split naming the odd channel", () => {
+    const d = CharterDifferenceSchema.parse({
+      ...base,
+      split: { kind: "two_against_one", odd: "revealed" },
     });
-    expect(d.pair).toEqual(["structural", "revealed"]);
+    expect(d.accounts.map((a) => a.kind)).toEqual(["structural", "revealed"]);
+    expect(d.split).toEqual({ kind: "two_against_one", odd: "revealed" });
+  });
+
+  test("accepts a three-way split and strict-rejects an unknown split kind", () => {
+    expect(CharterDifferenceSchema.parse({ ...base, split: { kind: "three_way" } }).split).toEqual({
+      kind: "three_way",
+    });
+    expect(() =>
+      CharterDifferenceSchema.parse({ ...base, split: { kind: "pairwise" } }),
+    ).toThrow();
+  });
+
+  test("rejects a dimension outside the closed seven", () => {
+    expect(() => CharterDifferenceSchema.parse({ ...base, dimension: "detail" })).toThrow();
   });
 });
 

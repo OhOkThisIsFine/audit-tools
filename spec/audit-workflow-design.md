@@ -21,9 +21,11 @@ intake
   → intent_equivalence      [host_delegation for a prose-only delta; every other
                              arm resolves deterministically — DD-9]
   → charter_extraction      [host_delegation, gated by the intent-checkpoint ceiling;
-                             three blind estimator lanes fed channel-pure packets]
-  → charter_delta           [host_delegation, independent delta-miner + triangulation over
-                             the Phase-C.1 charters; True nominations at deepest]
+                             three blind estimator lanes each submit one goal DAG]
+  → charter_comparison      [host_delegation, the comparison reader confirms tool-proposed
+                             correspondences and records the typed n-ary differences]
+  → charter_fidelity        [host_delegation, a separate lane verifies each finding
+                             candidate against its own source slices]
   → design_review × 2       [parallel host_delegation: contract + conceptual]
   → charter_clarification   [host_delegation loop, gated by ceiling+attention — Phase D]
   → systemic_challenge      [host_delegation loop, gated by ceiling — Phase E]
@@ -154,29 +156,26 @@ says/does drift to the remediator, an architecture betrayed by its implementatio
 to a clarification prompt, and a wrong-goal provocation to the human.
 
 The division of labour is strict: the LLM contributes only judgment (each lane's
-teleology; later the miner's deltas); the tool owns enforcement. It grounds every
-file scope against the repo universe — a scope citing files the repo does not
-contain refuses the lane — performs the overlap join, assigns stable charter and
-delta ids, and derives each delta's kind and routing from its channel pair
-against a fixed routing table rather than host discretion. The independent
-delta-miner (a later pass — no author marks its own homework) additionally
-distills a **triangulated telos** per subsystem — a unified opinion the owner
-reacts to, a lead beside the deltas, never a reconciliation — and, at the
-`deepest` ceiling only, may nominate a *True* charter. True carries the hardest
-gates, because "what you really want is X" is the canonical over-confident
-failure: a nomination must name a concrete alternative and a concrete cost or it
-is dropped, it is never asserted as a verdict, and it routes only to the human.
-A low-confidence charter likewise downgrades any delta that depends on it to a
-human-intent flag rather than an opinion. Depth is gated by the intent-checkpoint
-ceiling — the consent dial that governs how far up the premise stack the review
-is allowed to reach.
+goal DAG; the comparison reader's correspondences and differences; the fidelity
+lane's verdicts); the tool owns enforcement. It refuses a cyclic DAG, derives
+each node's level from the edges, grounds every file scope against the repo
+universe, checks every citation, proposes the correspondence candidates (file
+overlap and provenance cross-references), grounds every record the reader
+returns, and derives each difference's routing from the fixed
+`(dimension, relation, split)` table rather than host discretion. No pass marks
+its own homework: the comparison reader authored none of the DAGs, and the
+fidelity lane authored neither the DAGs nor the comparison. A cited quote the
+tool cannot find on disk settles a record `unverifiable` before any lane sees
+it. There is no triangulated telos: the three accounts stand side by side in
+every downstream consumer. Depth is gated by the intent-checkpoint ceiling — the
+consent dial that governs how far up the premise stack the review is allowed to
+reach.
 
-Surviving deltas are persisted to `charter_register.json` — with the per-kind
-teleologies, the triangulated teloses, and the tool-counted per-channel-pair
-disagreement density — and surfaced as finding *leads* under the architecture
-lens — provocations for the owner to judge, never verdicts. The estimator
-channels, the routing table, the gates, and the ceiling dial are specified in
-full in
+The lane DAGs, correspondences and differences are persisted to
+`charter_register.json`; only a `supported` difference is surfaced as a finding
+*lead* under the architecture lens — a provocation for the owner to judge, never
+a verdict. The lanes, the seven dimensions, the routing table, the fidelity
+verdicts, and the ceiling dial are specified in full in
 [`conceptual-design-review-design.md`](conceptual-design-review-design.md).
 
 ## Design review (two parallel passes)

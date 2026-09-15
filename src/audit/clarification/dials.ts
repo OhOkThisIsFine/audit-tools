@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/charter-clarification.test.ts
 // Phase D — D2: the ATTENTION dial (control surface, currency #3).
 //
 // The three control-surface dials each meter a currency no other touches (design
@@ -15,7 +16,7 @@
 //
 // PURE + deterministic: no IO, no LLM. Exported for phase-e reuse.
 
-import type { CharterClarificationRequest } from "audit-tools/shared";
+import type { CharterDifferenceQuestion } from "audit-tools/shared";
 import { voiQueue } from "./voiQueue.js";
 
 /**
@@ -28,13 +29,13 @@ export type AttentionAppetite = number | "all";
 /** How a partitioned queue splits under a given attention appetite. */
 export interface AttentionSplit {
   /** The questions to ASK this round — the top slice of the VOI queue. */
-  asked: CharterClarificationRequest[];
+  asked: CharterDifferenceQuestion[];
   /**
    * The questions to WRITE AS FINDINGS this round — everything not asked: the
    * `finding_only` questions the risk gate downgraded, plus interactive questions
    * beyond the appetite's cut. Under appetite 0 this is every question.
    */
-  banked: CharterClarificationRequest[];
+  banked: CharterDifferenceQuestion[];
 }
 
 /**
@@ -46,7 +47,7 @@ export interface AttentionSplit {
  * autonomous mode). Deterministic: same inputs → same split.
  */
 export function splitByAttention(
-  requests: CharterClarificationRequest[],
+  requests: CharterDifferenceQuestion[],
   appetite: AttentionAppetite,
 ): AttentionSplit {
   const interactive = requests.filter((r) => r.disposition === "interactive");

@@ -110,12 +110,13 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "file_disposition.json",
     "graph_bundle.json",
   ],
-  // Phase C conceptual design-review: the charter LAYER. Depends on the Phase-B
-  // consensus scaffold (the subsystems it charter-reviews), the confirmed intent
-  // checkpoint (the ceiling/consent dial that gates its depth), repo_manifest
-  // (every channel packet is a projection of member/doc content — its per-file
-  // hashes re-stale this transitively), and graph_bundle (the STRUCTURAL
-  // channel's packet embeds the dependency edges among members, and analyzer
+  // Phase C conceptual design-review: the charter LAYER (three lane goal DAGs,
+  // correspondences, differences, fidelity). Depends on the Phase-B consensus
+  // scaffold (the members each lane reads), the confirmed intent checkpoint (the
+  // ceiling/consent dial that gates its depth), repo_manifest (every lane packet
+  // is a projection of member/doc content — its per-file hashes re-stale this
+  // transitively), and graph_bundle (the STRUCTURAL lane's packet embeds the
+  // dependency edges among members, and analyzer
   // enrichment can merge new edges with NO file-content change — without this
   // edge that would under-stale; design resolution 4). Charters live in this
   // OUTPUT artifact, never back on the checkpoint it depends on, so there is no
@@ -127,7 +128,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "graph_bundle.json",
   ],
   // Phase D conceptual design-review: the charter-alignment TRIANGULATION LOOP.
-  // Depends on the Phase-C charter register (the deltas it questions), the confirmed
+  // Depends on the Phase-C charter register (the differences it questions), the confirmed
   // intent checkpoint (the ceiling + attention dials that gate its depth/appetite),
   // and repo_manifest (a source-content change re-stales the register transitively).
   // Deterministic: the loop assembles from the register, so re-running is idempotent.
@@ -137,7 +138,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "repo_manifest.json",
   ],
   // Phase E systemic improvement-seeking challenge loop. Depends on the Phase-C
-  // charter register (the goal graph its blast-radius ranking reuses), the confirmed
+  // charter register (the lane goal DAGs its blast-radius ranking reuses), the confirmed
   // intent checkpoint (the ceiling that gates its depth), and repo_manifest (a
   // source-content change re-stales the register + re-grounds its findings). The
   // aggregate-metrics digest is derived from analysis artifacts but is advisory

@@ -228,12 +228,12 @@ describe("an expected set from another contract version is treated as absent", (
           // MERGED rather than discarded would carry it into the rewritten
           // file — which is what makes "rebuilds, not merges" testable below.
           {
-            submission_id: laneSubmissionId("charter_delta", RUN_ID),
-            lane: "charter_delta",
+            submission_id: laneSubmissionId("charter_comparison", RUN_ID),
+            lane: "charter_comparison",
             prompt_sha256: "1".repeat(64),
             submission_path: submissionPathFor(
               laneSubmissionRoots(artifactsDir),
-              laneSubmissionId("charter_delta", RUN_ID),
+              laneSubmissionId("charter_comparison", RUN_ID),
             ),
           },
         ],
@@ -279,7 +279,7 @@ describe("an expected set from another contract version is treated as absent", (
   it("CONTROL: a set at the CURRENT version is MERGED — its other lanes survive the rewrite", async () => {
     const { persisted } = await emitAgainstPersistedSet(EXPECTED_SET_CONTRACT_VERSION);
     expect(persisted.entries.map((entry) => entry.lane).sort()).toEqual([
-      "charter_delta",
+      "charter_comparison",
       LANE,
     ]);
   });

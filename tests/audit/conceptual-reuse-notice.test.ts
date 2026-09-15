@@ -106,7 +106,7 @@ test("renderReuseNotice: fallback to resolvedDepth when checkpoint depth absent"
 // INV 11 (audit-artifact-promotion-lifecycle): the CONSUMER-ENTRY-POINT leg.
 //
 // conceptualDispatch reads two NESTED bundle paths by name —
-// `intent_checkpoint.design_review` and `charter_register.subsystems[].charters`.
+// `intent_checkpoint.design_review` and `charter_register.lanes[].nodes`.
 // The typechecker covers a rename within one build; it cannot see a bundle
 // written in one phase and read back in another, which is exactly the position
 // this consumer is in. So the entry point is driven here and both paths are
@@ -126,8 +126,8 @@ test("INV 11: resolveConceptualReviewSettings resolves both the run-bound depth 
     },
     charter_register: {
       schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
-      subsystems: [
-        { name: "s", charters: [{ id: "c", confidence: "low" }] },
+      lanes: [
+        { kind: "stated", nodes: [{ node_id: "c", confidence: "low" }], edges: [] },
       ],
     },
   } as never;
@@ -141,12 +141,12 @@ test("INV 11: resolveConceptualReviewSettings resolves both the run-bound depth 
     "conceptualDispatch reads intent_checkpoint.design_review.conceptual_depth by name",
   ).toBe("deep");
   expect(settings.perspectives).toBe(2);
-  // Resolved through charter_register.subsystems[].charters: the low-confidence
-  // charter must reach charterReviewDisposition. A rename of that path would
+  // Resolved through charter_register.lanes[].nodes: the low-confidence goal
+  // node must reach charterReviewDisposition. A rename of that path would
   // leave this undefined and silently stop flagging for a human.
   expect(
     settings.flag_for_human,
-    "conceptualDispatch reads charter_register.subsystems[].charters by name",
+    "conceptualDispatch reads charter_register.lanes[].nodes by name",
   ).toBe(true);
   // And the notice derives from the same checkpoint, so its presence is a third
   // witness that the nested read resolved.

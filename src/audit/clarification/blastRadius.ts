@@ -1,30 +1,34 @@
-// Phase D — D1 pure primitive: BLAST RADIUS over the goal DAG.
+// sites-pinned: tests/audit/charter-clarification.test.ts
+// Phase D — D1 pure primitive: BLAST RADIUS over the lane goal DAGs.
 //
-// Every charter delta carries a blast radius: how far up the goal graph its fix
-// ripples. Goals are a DAG, not a tree — a node serves multiple parents, so an L2
-// change on one side can force an L1 reframe on the other (design of record
-// spec/conceptual-design-review-design.md §"Blast radius — the ranking and the
-// risk gate"). Blast radius is simultaneously PRIORITY (high-blast = high value)
-// and RISK (a wrong high-blast finding is catastrophic → higher adversarial bar).
+// Every difference carries a blast radius: how far up a goal graph its resolution
+// ripples. Goals form a DAG, not a tree — a node serves multiple parents. With
+// THREE lane graphs (design of record 2026-09-15, step 5) the radius is computed
+// PER DAG over the corresponding nodes and the MAXIMUM is taken: a goal high in
+// any one source's hierarchy is high-blast. Blast radius is simultaneously
+// PRIORITY (high-blast = high value) and RISK (a wrong high-blast finding is
+// catastrophic → higher adversarial bar).
 //
-// PURE + deterministic + language-neutral: operates on the abstract GoalGraph
-// (telos statements + serves-edges), no IO, no LLM. Exported as an importable
-// primitive so phase-e can reuse the same ranking substrate.
+// PURE + deterministic + language-neutral: no IO, no LLM.
 
-import type { CharterDelta, GoalGraph } from "audit-tools/shared";
+import type {
+  CharterCorrespondence,
+  CharterDifference,
+  CharterLaneGraph,
+} from "audit-tools/shared";
+
+/** The edge shape both the shared `GoalGraph` and a lane graph carry. */
+interface ServesEdges {
+  edges: readonly { from: string; to: string }[];
+}
 
 /**
  * Blast radius of a goal node = the size of its transitive PARENT closure — every
- * goal it (transitively) serves. A fix at this node ripples up to all of them, so
- * the count is how far up the DAG the ripple reaches. A leaf-most node serving no
- * parent has blast radius 0; the telos (served by everything, serving nothing) has
- * blast radius 0 too — the ripple is measured UPWARD, toward parents.
- *
- * Cycle-safe (a malformed graph never loops): visited-set guarded. A node absent
- * from the graph has blast radius 0 (nothing to ripple to).
+ * goal it (transitively) serves. A leaf serving no parent has radius 0; so does
+ * the top telos (served by everything, serving nothing) — the ripple is measured
+ * UPWARD. Cycle-safe (visited-set guarded); an absent node has radius 0.
  */
-export function goalBlastRadius(graph: GoalGraph, nodeId: string): number {
-  // Adjacency: child → its parents (an edge `from` serves `to`).
+export function goalBlastRadius(graph: ServesEdges, nodeId: string): number {
   const parents = new Map<string, string[]>();
   for (const edge of graph.edges) {
     const list = parents.get(edge.from);
@@ -45,37 +49,45 @@ export function goalBlastRadius(graph: GoalGraph, nodeId: string): number {
 }
 
 /**
- * The declared intrinsic blast tier per delta kind (design-check resolution-4
- * constraint 3: the tier table rides the taxonomy, single-sourced here). A
- * `wrong_goal` provocation is intrinsically the highest-blast (it challenges the
- * telos); `says_does_drift` and `architecture_betrayal` challenge a channel's
- * account of the subsystem (mid); `doc_rot` is testimony-vs-naming housekeeping
- * (lowest).
+ * The intrinsic blast tier per dimension and split — the floor a graph reach may
+ * only raise. A three-way disagreement, or a purpose / responsibility / hierarchy
+ * split, challenges what a subsystem is FOR (mid-high); scope, standing and
+ * standard qualify a goal both sides share (mid-low); presence is a coverage gap.
  */
-const INTRINSIC_BLAST_TIER: Record<CharterDelta["kind"], number> = {
-  wrong_goal: 3,
-  architecture_betrayal: 2,
-  says_does_drift: 2,
-  doc_rot: 1,
-};
+function intrinsicTier(difference: CharterDifference): number {
+  if (difference.split?.kind === "three_way") return 3;
+  switch (difference.dimension) {
+    case "purpose":
+    case "responsibility":
+    case "hierarchy":
+      return 2;
+    case "scope":
+    case "standing":
+    case "standard":
+    case "presence":
+      return 1;
+    default:
+      return 1;
+  }
+}
 
 /**
- * Resolve the blast radius for a delta whose subsystem maps to a goal node. When a
- * delta's node is not present in the goal graph (the host supplied no DAG, or the
- * subsystem was never linked to a goal), fall back to the delta KIND's intrinsic
- * blast tier. This keeps ranking meaningful even before a goal graph exists (the
- * common conversation-first default), and lets a real graph refine it when
- * present.
+ * Resolve a difference's blast radius: the maximum, over every corresponding node
+ * in every lane graph, of that node's parent-closure size on ITS OWN graph — never
+ * below the intrinsic tier.
  */
-export function deltaBlastRadius(
-  graph: GoalGraph,
-  goalNodeId: string | undefined,
-  deltaKind: CharterDelta["kind"],
+export function differenceBlastRadius(
+  difference: CharterDifference,
+  correspondence: CharterCorrespondence | undefined,
+  graphs: readonly CharterLaneGraph[],
 ): number {
-  const intrinsic = INTRINSIC_BLAST_TIER[deltaKind];
-  if (!goalNodeId) return intrinsic;
-  const graphed = goalBlastRadius(graph, goalNodeId);
-  // The graph reach REFINES the intrinsic tier upward, never downward: a
-  // wrong_goal delta stays high-blast even if its goal node happens to be a leaf.
-  return Math.max(intrinsic, graphed);
+  let radius = intrinsicTier(difference);
+  for (const member of correspondence?.members ?? []) {
+    const graph = graphs.find((g) => g.kind === member.kind);
+    if (!graph) continue;
+    for (const nodeId of member.node_ids) {
+      radius = Math.max(radius, goalBlastRadius(graph, nodeId));
+    }
+  }
+  return radius;
 }

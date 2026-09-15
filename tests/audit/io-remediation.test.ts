@@ -985,7 +985,7 @@ test("INV 11: the bundle exposes every field its named consumers read", async ()
       },
       charter_register: {
         schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
-        subsystems: [{ name: "s", charters: [] }],
+        lanes: [{ kind: "stated", nodes: [], edges: [] }],
       },
       graph_edge_cache: { schema_version: "graph-edge-cache/v1", entries: [] },
     } as never);
@@ -1008,9 +1008,9 @@ test("INV 11: the bundle exposes every field its named consumers read", async ()
       "conceptualDispatch reads intent_checkpoint.design_review",
     ).toBeDefined();
     expect(
-      (bundle.charter_register as never as { subsystems?: { charters?: unknown }[] })
-        ?.subsystems?.[0]?.charters,
-      "conceptualDispatch reads charter_register.subsystems[].charters",
+      (bundle.charter_register as never as { lanes?: { nodes?: unknown }[] })
+        ?.lanes?.[0]?.nodes,
+      "conceptualDispatch reads charter_register.lanes[].nodes",
     ).toBeDefined();
   });
 });

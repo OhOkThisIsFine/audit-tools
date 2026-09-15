@@ -151,124 +151,20 @@ export const CeilingSchema = z
   .strict();
 export type Ceiling = z.infer<typeof CeilingSchema>;
 
-/**
- * A routed pairwise charter delta — the product of the overlay-and-delta operator at
- * the charter layer (produced in Phase C). `pair` is a SYMMETRIC tuple of the two
- * charter kinds compared: the design forbids anointing any single estimator as
- * ground truth, so a delta is never modeled as `{ from: stated, to: X }`. Each
- * channel PAIR has one defined meaning; `routed_to` names who acts on it (a
- * low-confidence side forces `human` regardless of kind — gateCharterDelta):
- * - `doc_rot` (stated ↔ structural: testimony vs organization — doc rot / naming
- *   drift) → `remediator`.
- * - `says_does_drift` (stated ↔ revealed: testimony vs behavior) → `remediator`.
- * - `architecture_betrayal` (structural ↔ revealed: the organization's promise vs
- *   what the implementation actually does) → `clarification` (which governs?).
- * - `wrong_goal` (any estimator ↔ true) → `human` (provocation only; `deepest`).
- */
-export const CharterDeltaSchema = z
-  .object({
-    delta_id: z.string(),
-    pair: z.tuple([CharterKindSchema, CharterKindSchema]),
-    kind: z.enum([
-      "doc_rot",
-      "says_does_drift",
-      "architecture_betrayal",
-      "wrong_goal",
-    ]),
-    routed_to: z.enum(["remediator", "clarification", "human"]),
-    summary: z.string(),
-    /**
-     * The subsystem this delta was mined in. `delta_id` is OPAQUE — the assembler
-     * mints it with a content-derived discriminator when one subsystem carries two
-     * deltas on the same channel pair — so the originating node is carried as its
-     * own field and never recovered by parsing the id.
-     */
-    node_id: z.string().optional(),
-    /** Present when `node_id` is linked into the mined goal graph. */
-    goal_node_id: z.string().optional(),
-  })
-  .strict();
-export type CharterDelta = z.infer<typeof CharterDeltaSchema>;
-
-/**
- * A delta as the Phase-C ASSEMBLER emits it — `node_id` required. The identity
- * fields are optional on `CharterDelta` because the type also describes a delta
- * mid-assembly (the gate operates on one before the register exists), but every
- * delta that reaches the persisted register carries its node, so the register
- * declares this narrower shape and consumers read the field instead of parsing
- * `delta_id`.
- */
-export interface StampedCharterDelta extends CharterDelta {
-  node_id: string;
-}
-
-/**
- * One node of a kind's self-organized leveled teleology. The lane organizes its
- * OWN view of the repo's purposes — `premise_height` is the emergent level
- * (0 = the telos, higher = closer to a leaf mechanism; an integer, NEVER a fixed
- * L0/L1/L2 enum), and `files` is the node's FILE SCOPE: content-derived join keys
- * no agent can mangle. The tool joins teleologies to each other and to the
- * decomposition hint mechanically by file-set overlap (assembleCharters).
- */
-export const TeleologyNodeSchema = z
-  .object({
-    /** Purpose in telos terms, never mechanism (same discipline as `Charter`). */
-    purpose: z.string(),
-    /** Emergent level: 0 = the telos, higher = nearer a leaf mechanism. */
-    premise_height: z.number().int().min(0),
-    /** The node's file scope — the join key. At least one repo-relative path. */
-    files: z.array(z.string()).min(1),
-  })
-  .strict();
-export type TeleologyNode = z.infer<typeof TeleologyNodeSchema>;
-
-/**
- * The delta miner's TRIANGULATED TELOS for one subsystem — a unified opinion the
- * owner reacts to, distilled from the three blind estimators. A LEAD, never a
- * reconciliation: the charters stay held un-merged, the deltas stay the primary
- * product, and no consumer may treat this as ground truth (the spec's
- * "never reconciled into one truth" boundary; the rejected thing is a merge that
- * DESTROYS the deltas, and this preserves them).
- */
-export const TriangulatedTelosSchema = z
-  .object({
-    /** The subsystem (joined unit) this estimate belongs to. */
-    node_id: z.string(),
-    /** The unified best-estimate telos, in telos terms. */
-    telos: z.string(),
-    confidence: CharterConfidenceSchema,
-  })
-  .strict();
-export type TriangulatedTelos = z.infer<typeof TriangulatedTelosSchema>;
-
-/**
- * Tool-computed disagreement density: how many deltas one subsystem carries per
- * channel pair — the quantitative surface for "which parts of the triangulation
- * need clarification." Deterministic (counted at assembly), never host-supplied.
- */
-export const ChannelDisagreementSchema = z
-  .object({
-    node_id: z.string(),
-    pair: z.tuple([CharterKindSchema, CharterKindSchema]),
-    count: z.number().int().min(1),
-  })
-  .strict();
-export type ChannelDisagreement = z.infer<typeof ChannelDisagreementSchema>;
-
 // ── Phase D — the charter-alignment clarification / triangulation loop ──────────
 //
 // The True charter is inexpressible cold; the review converts it into a decidable
 // question ("your code optimizes X, your docs say Y, which governs?"). Charter
 // alignment is therefore a LOOP interleaved with re-review, not a post-step:
-//   show delta → user picks → charters update → deltas re-derive → next question.
+//   show difference → user picks → charters update → differences re-derive → next.
 // (design of record spec/conceptual-design-review-design.md §"The triangulation
 // loop" + §"Control surface — three currencies, three dials".)
 //
-// This is the AUDIT-side, charter-keyed ClarificationRequest — sourced from a
-// routed CharterDelta, NOT the remediate-side finding-keyed ClarificationRequest
-// (src/remediate/state/types.ts). The two are deliberately separate: a charter
-// question moves any of the four charters (including Stated), whereas a remediate
-// question resolves an implementation ambiguity for one finding.
+// This is the AUDIT-side, charter-keyed question — sourced from a verified
+// CharterDifference (below), NOT the remediate-side finding-keyed
+// ClarificationRequest (src/remediate/state/types.ts). The two are deliberately
+// separate: a charter question moves any account (including Stated), whereas a
+// remediate question resolves an implementation ambiguity for one finding.
 
 /**
  * How answerable a charter question is — the axes the VOI ranking scores. A
@@ -286,53 +182,6 @@ export const ClarificationValueSchema = z
   })
   .strict();
 export type ClarificationValue = z.infer<typeof ClarificationValueSchema>;
-
-/**
- * A single charter-alignment question — the audit-side ClarificationRequest,
- * sourced from a routed CharterDelta. `options` are SYMMETRIC (any of the four
- * charters may move, including Stated; "leave open" is a first-class answer), so a
- * question never silently anoints Stated as ground truth. `value` carries the
- * blast-radius + cascade estimate the VOI queue ranks on. `answer` is set once the
- * user (or the autonomous zero-attention mode) resolves it.
- */
-export const CharterClarificationAnswerSchema = z.enum([
-  "this_side_wins",
-  "that_side_wins",
-  "rewrite_both",
-  "leave_open",
-]);
-export type CharterClarificationAnswer = z.infer<
-  typeof CharterClarificationAnswerSchema
->;
-
-export const CharterClarificationRequestSchema = z
-  .object({
-    /** Stable id, derived from the source delta (`${delta_id}:q`). */
-    request_id: z.string(),
-    /** The routed delta this question triangulates. */
-    delta_id: z.string(),
-    /** The subsystem the delta belongs to (for grouping + reporting). */
-    node_id: z.string(),
-    /** The symmetric charter pair in tension. */
-    pair: z.tuple([CharterKindSchema, CharterKindSchema]),
-    /** The decidable question ("code optimizes X, docs say Y — which governs?"). */
-    question: z.string(),
-    /** The VOI axes this question is ranked on. */
-    value: ClarificationValueSchema,
-    /**
-     * Whether this question is CLEARED for the interactive human channel or must
-     * only be written as a finding. A high-blast question that has not cleared the
-     * risk gate's higher adversarial bar (or any question under zero attention) is
-     * `finding_only`. `interactive` questions form the VOI queue the user answers.
-     */
-    disposition: z.enum(["interactive", "finding_only"]),
-    /** Resolved answer (symmetric); absent while the question is still open. */
-    answer: CharterClarificationAnswerSchema.optional(),
-  })
-  .strict();
-export type CharterClarificationRequest = z.infer<
-  typeof CharterClarificationRequestSchema
->;
 
 // ── The five-step charter layer (design of record 2026-09-15) ───────────────────
 // sites-pinned: tests/shared/charter-layer.test.ts, tests/shared/charter-lane-dag.test.ts

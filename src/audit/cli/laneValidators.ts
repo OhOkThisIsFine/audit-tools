@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 /**
  * The ONE registry of what a lane's submission must satisfy.
  *
@@ -16,8 +17,9 @@
 import type { ZodTypeAny } from "zod";
 
 import {
-  CharterSubmissionSchema,
-  CharterDeltaSubmissionSchema,
+  CharterLaneSubmissionSchema,
+  CharterComparisonSubmissionSchema,
+  CharterFidelitySubmissionSchema,
   ClarificationAnswersSubmissionSchema,
   CriticalFlowFallbackResultSchema,
   SynthesisNarrativeSchema,
@@ -90,22 +92,22 @@ export function charterLaneSchema(
   kind: CharterKind,
   repoFiles: ReadonlySet<string>,
 ): ZodTypeAny {
-  return CharterSubmissionSchema.superRefine((submission, ctx) => {
+  return CharterLaneSubmissionSchema.superRefine((submission, ctx) => {
+    if (submission.kind !== kind) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["kind"],
+        message: `lane '${kind}' may only carry kind '${kind}', got '${submission.kind}'`,
+      });
+    }
     submission.nodes.forEach((node, ni) => {
-      if (node.kind !== kind) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["nodes", ni, "kind"],
-          message: `lane '${kind}' may only carry kind '${kind}', got '${node.kind}'`,
-        });
-      }
-      const unknownFiles = node.files.filter((f) => !repoFiles.has(f));
+      const unknownFiles = (node.files ?? []).filter((f) => !repoFiles.has(f));
       if (unknownFiles.length > 0) {
         ctx.addIssue({
           code: "custom",
           path: ["nodes", ni, "files"],
           message:
-            `teleology node cites file(s) outside the repo: ${unknownFiles.sort().join(", ")} — ` +
+            `goal node "${node.node_id}" cites file(s) outside the repo: ${unknownFiles.sort().join(", ")} — ` +
             "scopes must be repo-relative paths exactly as the evidence packet names them",
         });
       }
@@ -120,7 +122,8 @@ export function charterLaneSchema(
 export const LANE_SUBMISSION_SCHEMAS: Readonly<Record<string, ZodTypeAny>> = {
   [GATE_LANES.synthesis_narrative]: SynthesisNarrativeSchema,
   [GATE_LANES.critical_flow_fallback]: CriticalFlowFallbackResultSchema,
-  [GATE_LANES.charter_delta]: CharterDeltaSubmissionSchema,
+  [GATE_LANES.charter_comparison]: CharterComparisonSubmissionSchema,
+  [GATE_LANES.charter_fidelity]: CharterFidelitySubmissionSchema,
   [GATE_LANES.charter_clarification]: ClarificationAnswersSubmissionSchema,
   [GATE_LANES.systemic_challenge]: SystemicChallengeSubmissionSchema,
   [GATE_LANES.intent_equivalence]: IntentEquivalenceVerdictSchema,

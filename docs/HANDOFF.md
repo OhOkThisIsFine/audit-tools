@@ -22,6 +22,15 @@
   `AUDIT_TOOLS_CHILD_SESSION=1`, so the session-scoped Stop gates never recruit a lane's report.
 - **The benchmark track is retired (owner decision 2026-09-10).** Its forward-track entries, its
   harness and its contract tests are gone; the shipped `score-audit` command stays.
+- **The charter layer is the five-step pipeline (landed 2026-09-15).** Three blind lanes each
+  submit one goal DAG; the `charter_comparison` reader confirms tool-proposed correspondences and
+  records seven-dimension n-ary differences; the separate `charter_fidelity` lane verifies each
+  finding candidate against its source slices; only `supported` records become findings. The
+  delta-miner, the triangulated telos and `charter-register/v4` are gone (a v4 register on disk is
+  discarded and re-derived). Design of record: `spec/conceptual-design-review-design.md`
+  §"The estimator charters". The host prompts for lanes 11–20 in
+  `docs/reviews/prompt-refinement-2026-09-13.md` are still PROPOSED and wait for the owner's
+  one-at-a-time review.
 
 ## Immediate next
 

@@ -3,9 +3,10 @@ import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
 import type {
   Ceiling,
-  CharterSubmission,
+  CharterLaneSubmission as CharterSubmission,
   IntentCheckpoint,
 } from "audit-tools/shared";
+import type { CharterExtractionMerged } from "../../src/audit/orchestrator/charterExtractionExecutor.js";
 
 const {
   runCharterExtractionExecutor,
@@ -183,11 +184,13 @@ describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scop
     // The stated/revealed scope separation is the whole point of independence.
     expect(stated).toContain("testimony");
     expect(stated).toContain("repo's doc files plus the comments extracted");
-    expect(stated).not.toContain("comment-stripped");
-    expect(stated).toContain("independent, blind lanes");
+    // The three lanes are NAMED (the closed enum is rendered), but only the
+    // stated packet is described — the revealed packet line never appears.
+    expect(stated).not.toContain("comment-stripped source");
     expect(stated).toContain('"kind": "stated"');
-    // Deltas are still deferred to the independent miner; lanes are advance-free.
-    expect(stated).toContain("do NOT emit deltas");
+    // One DAG per lane: edges mean SERVES, no cycles, levels derived by the tool.
+    expect(stated).toContain("SERVES");
+    expect(stated).toContain("no cycles");
     expect(stated).not.toContain("next-step");
 
     const revealed = renderCharterKindLanePrompt(bundleWith(), {
@@ -197,10 +200,32 @@ describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scop
     });
     expect(revealed).toContain("comment-stripped source");
     expect(revealed).toContain("BEHAVIOR");
-    expect(revealed).not.toContain("docs");
+    expect(revealed).toContain('"kind": "revealed"');
   });
-
 });
+
+/** A one-lane merged submission: the stated lane with the given nodes and edges. */
+function merged(
+  nodes: CharterSubmission["nodes"],
+  edges: CharterSubmission["edges"] = [],
+  kind: CharterSubmission["kind"] = "stated",
+): CharterExtractionMerged {
+  return { lanes: [{ kind, nodes, edges }] };
+}
+
+function node(
+  node_id: string,
+  over: Partial<CharterSubmission["nodes"][number]> = {},
+): CharterSubmission["nodes"][number] {
+  return {
+    node_id,
+    purpose: `exists so callers get audited output (${node_id})`,
+    files: ["src/a.ts"],
+    provenance: [],
+    confidence: "high",
+    ...over,
+  };
+}
 
 describe("runCharterExtractionExecutor — omit path", () => {
   test("shallow ceiling writes an omitted register with no host turn", async () => {
@@ -209,8 +234,9 @@ describe("runCharterExtractionExecutor — omit path", () => {
     expect(run.artifacts_written).toEqual(["charter_register.json"]);
     const reg = run.updated.charter_register;
     expect(reg.status).toBe("omitted");
-    expect(reg.subsystems).toHaveLength(0);
-    expect(reg.deltas).toHaveLength(0);
+    expect(reg.lanes).toHaveLength(0);
+    expect(reg.candidates).toHaveLength(0);
+    expect(reg.comparison_pending).toBeUndefined();
     expect(reg.ceiling).toEqual({ rung: "shallow" });
   });
 
@@ -225,35 +251,14 @@ describe("runCharterExtractionExecutor — omit path", () => {
   });
 });
 
-describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
-  test("assembles + gates charters grounded against the consensus scaffold, deferring deltas", async () => {
-    const submission: CharterSubmission = {
-      nodes: [
-        {
-          kind: "stated",
-          purpose: "exists so callers get audited output",
-          premise_height: 0,
-          files: ["src/a.ts"],
-          provenance: [],
-          confidence: "high",
-        },
-        {
-          kind: "revealed",
-          purpose: "optimizes for fast dispatch over coverage",
-          premise_height: 0,
-          files: ["src/a.ts"],
-          provenance: [],
-          confidence: "high",
-        },
-        // An invented file must be grounded out.
-        {
-          kind: "structural",
-          purpose: "organize by dispatch",
-          premise_height: 0,
-          files: ["ghost.ts"],
-          provenance: [],
-          confidence: "high",
-        },
+describe("runCharterExtractionExecutor — ingest path (lane DAGs + candidates only)", () => {
+  test("assembles each lane DAG, grounds scopes, proposes candidates, and defers the comparison", async () => {
+    const submission: CharterExtractionMerged = {
+      lanes: [
+        { kind: "stated", nodes: [node("s1")], edges: [] },
+        { kind: "revealed", nodes: [node("r1", { purpose: "optimizes for fast dispatch over coverage" })], edges: [] },
+        // An invented file is grounded out of the scope; the node stays, provenance-only.
+        { kind: "structural", nodes: [node("x1", { files: ["ghost.ts"] })], edges: [] },
       ],
     };
     const run = await runCharterExtractionExecutor(
@@ -263,80 +268,51 @@ describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
     requireCharterRegister(run);
     const reg = run.updated.charter_register;
     expect(reg.status).toBeUndefined();
-    expect(reg.subsystems.map((s) => s.node_id)).toEqual(["src/a.ts"]);
-    // Charters only: deltas + findings + goal_graph are the INDEPENDENT delta
-    // pass's product, deferred here and flagged deltas_pending.
-    expect(reg.deltas).toHaveLength(0);
-    expect(reg.findings).toHaveLength(0);
-    expect(reg.goal_graph).toEqual({ nodes: [], edges: [] });
-    expect(reg.deltas_pending).toBe(true);
+    // Canonical kind order, never arrival order.
+    expect(reg.lanes.map((l) => l.kind)).toEqual(["stated", "structural", "revealed"]);
+    const structural = reg.lanes.find((l) => l.kind === "structural")!;
+    expect(structural.nodes).toHaveLength(1);
+    expect(structural.nodes[0]!.files).toBeUndefined();
     expect(reg.validation_issues.join()).toContain("outside the repo universe");
+    // The tool half of step 2: s1 and r1 overlap on src/a.ts; x1 has no scope to overlap.
+    expect(reg.candidates).toHaveLength(1);
+    expect(reg.candidates[0]!.basis).toBe("file_overlap");
+    // Steps 2–5 are the comparison reader's and the fidelity lane's — deferred.
+    expect(reg.correspondences).toHaveLength(0);
+    expect(reg.differences).toHaveLength(0);
+    expect(reg.findings).toHaveLength(0);
+    expect(reg.comparison_pending).toBe(true);
   });
 
-  test("multiple charters of the same kind are merged into the teleology; best is selected for the charter", async () => {
-    // Design v2: multiple nodes of the same kind in a unit are merged into
-    // the teleology (all preserved by premise_height + purpose), and the
-    // best-overlap node is selected for the unit's charter. No gate drop.
-    const submission: CharterSubmission = {
-      nodes: [
-        {
-          kind: "stated",
-          purpose: "exists so callers get audited output",
-          premise_height: 0,
-          files: ["src/a.ts"],
-          provenance: [],
-          confidence: "high",
-        },
-        {
-          kind: "stated",
-          purpose: "optimize for speed",
-          premise_height: 1,
-          files: ["src/a.ts", "src/b.ts"],
-          provenance: [],
-          confidence: "high",
-        },
+  test("a cycle refuses every edge among its nodes, with a named issue; the nodes stay", async () => {
+    const submission = merged(
+      [node("a"), node("b")],
+      [
+        { from: "a", to: "b", provenance: [] },
+        { from: "b", to: "a", provenance: [] },
       ],
-    };
+    );
     const run = await runCharterExtractionExecutor(
       bundleWith({ intent_checkpoint: checkpoint("deep") }),
       submission,
     );
     requireCharterRegister(run);
     const reg = run.updated.charter_register;
-    expect(reg.subsystems).toHaveLength(1);
-    const subsys = reg.subsystems[0];
-    // Both nodes persist in teleology, sorted by premise_height then purpose
-    expect(subsys.teleologies.stated).toHaveLength(2);
-    expect(subsys.teleologies.stated?.[0].purpose).toBe("exists so callers get audited output");
-    expect(subsys.teleologies.stated?.[1].purpose).toBe("optimize for speed");
-    // The best-overlap charter (src/a.ts:src/b.ts) is selected for the charter
-    expect(subsys.charters[0].purpose).toBe("optimize for speed");
-    // No gate drops — validation_issues should be empty
-    expect(reg.validation_issues).toHaveLength(0);
+    expect(reg.lanes[0]!.nodes).toHaveLength(2);
+    expect(reg.lanes[0]!.edges).toHaveLength(0);
+    expect(reg.validation_issues.join("\n")).toMatch(/cycle through "a", "b"/);
+    expect(reg.comparison_pending).toBe(true);
   });
 
-  test("no consensus subsystems → deltas_pending false (delta pass self-satisfies)", async () => {
-    // ghost.ts is grounded out (not in repo), so no subsystem survives → nothing to mine.
-    const submission: CharterSubmission = {
-      nodes: [
-        {
-          kind: "stated",
-          purpose: "organize by dispatch",
-          premise_height: 0,
-          files: ["ghost.ts"],
-          provenance: [],
-          confidence: "high",
-        },
-      ],
-    };
+  test("every lane empty → comparison_pending false (the comparison pass self-satisfies)", async () => {
     const run = await runCharterExtractionExecutor(
       bundleWith({ intent_checkpoint: checkpoint("deep") }),
-      submission,
+      merged([]),
     );
     requireCharterRegister(run);
     const reg = run.updated.charter_register;
-    expect(reg.subsystems).toHaveLength(0);
-    expect(reg.deltas_pending).toBe(false);
+    expect(reg.lanes.every((l) => l.nodes.length === 0)).toBe(true);
+    expect(reg.comparison_pending).toBe(false);
   });
 });
 
@@ -358,19 +334,8 @@ async function fixtureRoot(): Promise<string> {
   return root;
 }
 
-function submissionCiting(ref: string): CharterSubmission {
-  return {
-    nodes: [
-      {
-        kind: "stated",
-        purpose: "exists so callers get audited output",
-        premise_height: 0,
-        files: ["src/a.ts"],
-        provenance: [{ kind: "code", ref }],
-        confidence: "high",
-      },
-    ],
-  };
+function submissionCiting(ref: string): CharterExtractionMerged {
+  return merged([node("s1", { provenance: [{ kind: "code", ref }] })]);
 }
 
 describe("runCharterExtractionExecutor — citation validation", () => {
@@ -416,16 +381,29 @@ describe("runCharterExtractionExecutor — citation validation", () => {
     requireCharterRegister(run);
     const reg = run.updated.charter_register;
     // The issue NAMES the ref (the red half)…
-    expect(reg.validation_issues.some((i) => i.includes("src/a.ts:900-905"))).toBe(
-      true,
-    );
+    expect(reg.validation_issues.some((i) => i.includes("src/a.ts:900-905"))).toBe(true);
     // …and the submitted provenance survives byte-identical (the guard half):
     // no nearest-enclosing-declaration repair, which was tried and rejected
     // repo-wide on 2026-07-28.
-    const refs = reg.subsystems.flatMap((s) =>
-      s.charters.flatMap((c) => (c.provenance ?? []).map((p) => p.ref)),
-    );
+    const refs = reg.lanes.flatMap((l) => l.nodes.flatMap((n) => n.provenance.map((p) => p.ref)));
     expect(refs).toContain("src/a.ts:900-905");
+  });
+
+  test("edge provenance is checked too, owned by the edge it evidences", async () => {
+    const root = await fixtureRoot();
+    const run = await runCharterExtractionExecutor(
+      bundleWith({ intent_checkpoint: checkpoint("deep") }),
+      merged(
+        [node("a"), node("b")],
+        [{ from: "a", to: "b", provenance: [{ kind: "code", ref: "src/a.ts:900" }] }],
+      ),
+      { root },
+    );
+    requireCharterRegister(run);
+    const reg = run.updated.charter_register;
+    expect(reg.citation_validation.citation_count).toBe(1);
+    expect(reg.citation_validation.failed_count).toBe(1);
+    expect(reg.validation_issues.join("\n")).toContain("stated:a->b");
   });
 
   test("with NO root, the check is a recorded abstention — never an implicit pass", async () => {
@@ -447,9 +425,7 @@ describe("runCharterExtractionExecutor — citation validation", () => {
       undefined,
     );
     requireCharterRegister(run);
-    expect(run.updated.charter_register.citation_validation.status).toBe(
-      "no_citations",
-    );
+    expect(run.updated.charter_register.citation_validation.status).toBe("no_citations");
     expect(run.updated.charter_register.evidence_coverage).toEqual([]);
   });
 
@@ -457,18 +433,7 @@ describe("runCharterExtractionExecutor — citation validation", () => {
     const root = await fixtureRoot();
     const run = await runCharterExtractionExecutor(
       bundleWith({ intent_checkpoint: checkpoint("deep") }),
-      {
-        nodes: [
-          {
-            kind: "stated",
-            purpose: "exists so callers get audited output",
-            premise_height: 0,
-            files: ["src/a.ts"],
-            provenance: [{ kind: "intent_checkpoint", ref: "design_review.ceiling" }],
-            confidence: "high",
-          },
-        ],
-      },
+      merged([node("s1", { provenance: [{ kind: "intent_checkpoint", ref: "design_review.ceiling" }] })]),
       { root },
     );
     requireCharterRegister(run);

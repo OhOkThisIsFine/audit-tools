@@ -142,14 +142,7 @@ export type {
   GoalEdge,
   GoalGraph,
   Ceiling,
-  CharterDelta,
-  StampedCharterDelta,
-  TeleologyNode,
-  TriangulatedTelos,
-  ChannelDisagreement,
   ClarificationValue,
-  CharterClarificationAnswer,
-  CharterClarificationRequest,
 } from "./types/charter.js";
 export {
   CharterKindSchema,
@@ -160,18 +153,11 @@ export {
   GoalEdgeSchema,
   GoalGraphSchema,
   CeilingSchema,
-  CharterDeltaSchema,
-  TeleologyNodeSchema,
-  TriangulatedTelosSchema,
-  ChannelDisagreementSchema,
   ClarificationValueSchema,
-  CharterClarificationAnswerSchema,
-  CharterClarificationRequestSchema,
 } from "./types/charter.js";
 export {
   applyTrueCharterGate,
   charterReviewDisposition,
-  gateCharterDelta,
   riskGateClarification,
 } from "./validation/charterGate.js";
 // Conceptual design-review overlay-and-delta operator (Phase B) — the
@@ -193,21 +179,6 @@ export type {
   DecomposeOptions,
 } from "./decompose/consensus.js";
 export { decompose, clustersFromPartitions } from "./decompose/consensus.js";
-// Conceptual design-review charter layer (Phase C) — assemble a gated charter
-// register from a host LLM submission (deterministic enforcement half).
-export type {
-  CharterSubmission,
-  CharterDeltaSubmission,
-  CharterSubsystem,
-  AssembledCharters,
-  AssembledDeltas,
-} from "./decompose/charterExtraction.js";
-export {
-  CharterSubmissionSchema,
-  CharterDeltaSubmissionSchema,
-  assembleCharters,
-  assembleDeltas,
-} from "./decompose/charterExtraction.js";
 // The five-step charter layer (design of record 2026-09-15; spec §"The estimator
 // charters" steps 1–5): lane goal DAGs → correspondences → typed n-ary differences
 // → fidelity → findings. Replaces the delta-miner shapes above on this branch.
@@ -250,13 +221,15 @@ export {
 } from "./types/charter.js";
 export type {
   CharterSubmission as CharterLaneSubmission,
+  CharterExtractionMerged,
   AssembledLaneGraph,
   CharterComparisonSubmission,
   AssembledComparison,
   CharterFidelitySubmission,
-} from "./decompose/charterLayer.js";
+} from "./decompose/charterExtraction.js";
 export {
   CharterSubmissionSchema as CharterLaneSubmissionSchema,
+  CharterExtractionMergedSchema,
   CharterComparisonSubmissionSchema,
   CharterFidelitySubmissionSchema,
   assembleLaneGraph,
@@ -267,12 +240,12 @@ export {
   applyFidelity,
   differenceFindings,
   provenancePath,
-} from "./decompose/charterLayer.js";
+} from "./decompose/charterExtraction.js";
 // Conceptual design-review charter-clarification loop (Phase D) — the pure
 // triangulation-loop assembler (partition → risk-gate → split-by-attention);
 // consumes the audit-side D1/D2 primitives via injected deps.
 export type {
-  ClarificationDeltaInput,
+  ClarificationDifferenceInput,
   ClarificationAttention,
   ClarificationLoopDeps,
   AssembledClarifications,
@@ -280,6 +253,7 @@ export type {
 } from "./decompose/charterClarification.js";
 export {
   assembleClarificationRegister,
+  sourcesQuestion,
   ClarificationAnswersSubmissionSchema,
 } from "./decompose/charterClarification.js";
 // Conceptual design-review systemic challenge loop (Phase E) — the second-order

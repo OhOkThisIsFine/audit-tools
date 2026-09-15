@@ -10,6 +10,23 @@ import type { NextStepParams } from "../../src/audit/cli/nextStepHelpers.js";
 import type { RejectedDesignReviewSubmission } from "../../src/audit/types/designAssessment.js";
 import type { AdvanceAuditResult } from "../../src/audit/orchestrator/advance.js";
 import type { RunAuditStepOptions } from "../../src/audit/cli/auditStep.js";
+import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
+import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
+
+/** A deep-ceiling register awaiting one of the two post-extraction host passes. */
+function pendingCharterRegister(
+  pending: Pick<CharterRegister, "comparison_pending" | "fidelity_pending">,
+): CharterRegister {
+  return {
+    schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
+    generated_at: "2026-01-01T00:00:00.000Z",
+    target: "charter",
+    ceiling: { rung: "deep" },
+    ...EMPTY_REGISTER_BODY,
+    ...pending,
+  };
+}
 
 // Import the extracted helpers directly from source (same pattern as other
 // audit-code test files that dynamically import from src's .ts files —
@@ -30,7 +47,8 @@ const {
   handleSynthesisNarrativeBranch,
   handleCriticalFlowFallbackBranch,
   handleCharterExtractionBranch,
-  handleCharterDeltaBranch,
+  handleCharterComparisonBranch,
+  handleCharterFidelityBranch,
   handleCharterClarificationBranch,
   handleSystemicChallengeBranch,
 } = await import("../../src/audit/cli/nextStepHelpers.js");
@@ -466,7 +484,7 @@ await test("tryConsumeSubmission reports absent when nothing was submitted", asy
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
     // Nothing written at the lane's bound path.
 
-    const result = await tryConsumeSubmission(artifactsDir, GATE_LANES.charter_delta);
+    const result = await tryConsumeSubmission(artifactsDir, GATE_LANES.charter_comparison);
 
     expect(result, "should resolve to absent without throwing").toEqual({ status: "absent" });
   });
@@ -477,7 +495,7 @@ await test("tryConsumeSubmission returns parsed value and the bound path when a 
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
     const payload = { foo: "bar", count: 42 };
-    const lane = GATE_LANES.charter_delta;
+    const lane = GATE_LANES.charter_comparison;
     const boundPath = laneSubmissionPath(artifactsDir, lane);
     await writeFile(boundPath, JSON.stringify(payload), "utf8");
 
@@ -500,7 +518,7 @@ await test("tryConsumeSubmission reports a JSON parse failure as malformed, neve
   // content is the caller's to quarantine; only infrastructure errors throw.
   await withTempDir(async (artifactsDir) => {
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
-    const lane = GATE_LANES.charter_delta;
+    const lane = GATE_LANES.charter_comparison;
     const boundPath = laneSubmissionPath(artifactsDir, lane);
     await writeFile(boundPath, "not valid json {{", "utf8");
 
@@ -514,7 +532,7 @@ await test("tryConsumeSubmission reports a JSON parse failure as malformed, neve
 
 await test("tryConsumeSubmission still re-throws genuine IO errors (directory in place of the file)", async () => {
   await withTempDir(async (artifactsDir) => {
-    const lane = GATE_LANES.charter_delta;
+    const lane = GATE_LANES.charter_comparison;
     // A DIRECTORY where the submission file should be: reading it is an
     // infrastructure failure (EISDIR), not malformed content — must throw.
     await mkdir(laneSubmissionPath(artifactsDir, lane), { recursive: true });
@@ -1142,7 +1160,7 @@ await test("consumeObjectSubmission quarantines an array (never a valid id→dec
 // ingests driven by the shared `runOmittableGate` engine used to hand the raw
 // submitted file straight to the executor. A mis-shaped submission then EITHER
 // crashed next-step with an uncaught ZodError (the 4 schema-parsed gates —
-// charter_extraction / charter_delta / charter_clarification / systemic_challenge)
+// charter_extraction / charter_comparison / charter_fidelity / charter_clarification / systemic_challenge)
 // OR was silently accepted as an empty "reviewed, found nothing" result (the 2
 // bare-cast gates — synthesis_narrative / critical_flow_fallback). The fix makes
 // `runOmittableGate` schema-validate at the ingest boundary and quarantine
@@ -1203,10 +1221,20 @@ const OMITTABLE_GATES: OmittableGateCase[] = [
       handleCharterExtractionBranch(params, bundle, state, createFoldTransaction()),
   },
   {
-    kind: "charter_delta",
-    lane: GATE_LANES.charter_delta,
+    kind: "charter_comparison",
+    lane: GATE_LANES.charter_comparison,
+    // Only consulted while the register awaits the comparison reader.
+    bundle: { charter_register: pendingCharterRegister({ comparison_pending: true }) },
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
-      handleCharterDeltaBranch(params, bundle, state, createFoldTransaction()),
+      handleCharterComparisonBranch(params, bundle, state, createFoldTransaction()),
+  },
+  {
+    kind: "charter_fidelity",
+    lane: GATE_LANES.charter_fidelity,
+    // Only consulted while the register awaits the fidelity lane.
+    bundle: { charter_register: pendingCharterRegister({ fidelity_pending: true }) },
+    handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
+      handleCharterFidelityBranch(params, bundle, state, createFoldTransaction()),
   },
   {
     kind: "charter_clarification",
@@ -1300,8 +1328,9 @@ const EXPECTED_EMISSION_KINDS = [
   "analyzer_install",
   "blocked",
   "charter_clarification",
-  "charter_delta",
+  "charter_comparison",
   "charter_extraction",
+  "charter_fidelity",
   "complete",
   "confirm_intent",
   "critical_flow_fallback",

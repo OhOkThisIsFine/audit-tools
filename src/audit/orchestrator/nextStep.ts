@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { findFirstActionableObligation } from "audit-tools/shared";
 import {
   decideFrictionTriage,
@@ -44,7 +45,8 @@ export const PRIORITY: string[] = [
   // a pending prose judgment pauses the cascade instead of racing it.
   "intent_equivalence_current",
   "charter_extraction_current",
-  "charter_delta_current",
+  "charter_comparison_current",
+  "charter_fidelity_current",
   "design_review_contract_completed",
   "design_review_conceptual_completed",
   "charter_clarification_current",

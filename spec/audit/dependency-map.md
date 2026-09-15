@@ -62,7 +62,7 @@ different analyzer version can classify files differently).
 | `systemic_challenge.json` | `charter_register.json`, `conceptual_review_adjudication.json`, `intent_checkpoint.json`, `repo_manifest.json` |
 <!-- END GENERATED spec-mirror dependency-map#phase-2 -->
 
-`charter_clarification.json` (Phase D charter-alignment triangulation loop) and
+`charter_clarification.json` (Phase D charter-difference clarification loop) and
 `systemic_challenge.json` (Phase E second-order-adversary challenge loop) both
 anchor to the same triad as `charter_register.json` so the two conceptual-review
 outputs stale together whenever the charter register, the intent ceiling, or the

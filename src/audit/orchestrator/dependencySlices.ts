@@ -15,8 +15,9 @@
  * the slices cover the union of their verified consumption:
  * charterExtractionExecutor / charterExtractionPrompt read
  * `consensus[*].{node_id, members}` + member/doc file content (via
- * `repo_manifest.files[].hash`), and charterDeltaExecutor grounds submitted
- * findings against the COMPLETE `files[].path` set (`groundDesignFindings`).
+ * `repo_manifest.files[].hash`), and charterFidelityExecutor grounds the
+ * difference findings against the COMPLETE `files[].path` set
+ * (`groundDesignFindings`).
  * WIDEN the projection in the same commit as any producer change that consumes
  * more — the contract test pins the current slice content.
  *
@@ -69,10 +70,10 @@ function consensusMembershipSlice(bundle: ArtifactBundle): unknown {
  *    intake leaves unhashed (>1 MiB carries only `size_bytes`; `hash ?? ""`
  *    erased a real change signal).
  *  - `paths`: the COMPLETE sorted path list, content-free. The register's
- *    SECOND producer — the delta executor — grounds submitted findings against
- *    the full path set (`groundDesignFindings`: exact-path membership +
- *    basename-unique resolution), and charter assembly grounds every teleology
- *    node's file scope against the repo universe, so an add/delete/rename
+ *    SECOND producer — the fidelity executor — grounds difference findings
+ *    against the full path set (`groundDesignFindings`: exact-path membership +
+ *    basename-unique resolution), and lane assembly grounds every goal node's
+ *    file scope against the repo universe, so an add/delete/rename
  *    anywhere changes what a re-derive would produce even when member∪doc
  *    content is untouched. Paths-only keeps the phantom-staleness win: pure
  *    hash churn on an unchanged path set (the live incident) still never fires

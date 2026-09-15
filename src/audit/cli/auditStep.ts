@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { access } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
@@ -7,8 +8,9 @@ import {
   RunLogger,
   verifyFindingGrounding,
   withFileLock,
-  CharterSubmissionSchema,
-  CharterDeltaSubmissionSchema,
+  CharterExtractionMergedSchema,
+  CharterComparisonSubmissionSchema,
+  CharterFidelitySubmissionSchema,
   ClarificationAnswersSubmissionSchema,
   SystemicChallengeSubmissionSchema,
 } from "audit-tools/shared";
@@ -60,7 +62,8 @@ export interface RunAuditStepOptions {
   criticalFlowFallbackResultsPath?: string;
   intentEquivalenceVerdictPath?: string;
   charterSubmissionPath?: string;
-  charterDeltaSubmissionPath?: string;
+  charterComparisonSubmissionPath?: string;
+  charterFidelitySubmissionPath?: string;
   clarificationAnswersPath?: string;
   systemicChallengePath?: string;
   /** Gate-computed hash binding the systemic challenge's round lane and staged bytes. */
@@ -286,13 +289,18 @@ async function executeAdvance(
       )
     : undefined;
   const charterSubmission = options.charterSubmissionPath
-    ? CharterSubmissionSchema.parse(
+    ? CharterExtractionMergedSchema.parse(
         await readJsonFile<unknown>(options.charterSubmissionPath),
       )
     : undefined;
-  const charterDeltaSubmission = options.charterDeltaSubmissionPath
-    ? CharterDeltaSubmissionSchema.parse(
-        await readJsonFile<unknown>(options.charterDeltaSubmissionPath),
+  const charterComparisonSubmission = options.charterComparisonSubmissionPath
+    ? CharterComparisonSubmissionSchema.parse(
+        await readJsonFile<unknown>(options.charterComparisonSubmissionPath),
+      )
+    : undefined;
+  const charterFidelitySubmission = options.charterFidelitySubmissionPath
+    ? CharterFidelitySubmissionSchema.parse(
+        await readJsonFile<unknown>(options.charterFidelitySubmissionPath),
       )
     : undefined;
   const clarificationAnswers = options.clarificationAnswersPath
@@ -317,7 +325,8 @@ async function executeAdvance(
     criticalFlowFallbackResults,
     intentEquivalenceVerdict,
     charterSubmission,
-    charterDeltaSubmission,
+    charterComparisonSubmission,
+    charterFidelitySubmission,
     clarificationAnswers,
     systemicChallenge,
     systemicChallengeSubmissionHash: options.systemicChallengeSubmissionHash,

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/charter-extraction-executor.test.ts
 import { join } from "node:path";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
@@ -7,15 +8,16 @@ import {
 } from "../types/charterRegister.js";
 import {
   CHARTER_PACKET_MANIFEST_SCHEMA_VERSION,
-  CharterKindSchema,
-  assembleCharters,
+  CharterLaneKindSchema,
+  assembleLaneGraph,
+  proposeCorrespondences,
   checkCitations,
   laneAssetsDir,
   readOptionalJsonFile,
   type CharterPacketCoverage,
   type CharterPacketManifest,
-  type CharterSubmission,
-  type CharterSubsystem,
+  type CharterLaneGraph,
+  type CharterLaneSubmission,
   type Ceiling,
   type CitationValidationSummary,
   type DeliveredExcerpt,
@@ -24,6 +26,11 @@ import {
 } from "audit-tools/shared";
 import { charterExtractionCoverageFilename } from "../cli/laneSubmissions.js";
 import { charterExtractionKindsForCeiling } from "../cli/charterExtractionPrompt.js";
+
+/** The tool-merged extraction submission: every lane's DAG, in canonical kind order. */
+export interface CharterExtractionMerged {
+  lanes: CharterLaneSubmission[];
+}
 
 /**
  * Resolve the charter-layer ceiling from the confirmed checkpoint. The ceiling is
@@ -37,11 +44,6 @@ export function resolveCharterCeiling(
 ): Ceiling {
   const dr = checkpoint?.design_review;
   if (dr?.ceiling) return dr.ceiling;
-  // The `conceptual_depth` fallback reads the RUN-BOUND block: depth is the
-  // per-run dial this module's caller names (see `resolveRunBoundDesignReview`),
-  // so a run that did not answer it does not inherit a `deep` ceiling from a
-  // prior run's answer. The explicit `ceiling` field above is a separate dial
-  // with its own semantics and is deliberately NOT bound here.
   if (resolveRunBoundDesignReview(checkpoint)?.conceptual_depth === "deep") {
     return { rung: "deep" };
   }
@@ -51,20 +53,6 @@ export function resolveCharterCeiling(
 /** Whether the ceiling authorizes a charter-extraction pass at all (deep or deeper). */
 export function ceilingRequestsCharters(ceiling: Ceiling): boolean {
   return ceiling.rung === "deep" || ceiling.rung === "deepest";
-}
-
-/**
- * Build the `node_id → members` lookup from the Phase-B consensus scaffold. Only
- * CONSENSUS nodes (confident on both robustness scores) are charter-reviewable;
- * contested nodes are hotspots, not subsystems. A submission referencing any other
- * node is grounded out by `assembleCharters`.
- */
-function consensusMembers(bundle: ArtifactBundle): Map<string, string[]> {
-  const members = new Map<string, string[]>();
-  for (const node of bundle.structure_decomposition?.consensus ?? []) {
-    members.set(node.node_id, node.members);
-  }
-  return members;
 }
 
 /** Provenance kinds whose `ref` is a repository path, so a citation check applies. */
@@ -96,42 +84,41 @@ async function loadPacketManifests(
   return manifests;
 }
 
-/** Canonical kind order for `evidence_coverage` — content-derived, never arrival order. */
+/** Canonical kind order — content-derived, never arrival order. */
+function kindIndex(kind: string): number {
+  const index = CharterLaneKindSchema.options.indexOf(kind as CharterLaneGraph["kind"]);
+  return index < 0 ? 99 : index;
+}
+
 function sortCoverage(
   coverage: readonly CharterPacketCoverage[],
 ): CharterPacketCoverage[] {
-  const order = new Map(
-    CharterKindSchema.options.map((kind, index) => [kind, index] as const),
-  );
-  return [...coverage].sort(
-    (a, b) => (order.get(a.kind) ?? 99) - (order.get(b.kind) ?? 99),
-  );
+  return [...coverage].sort((a, b) => kindIndex(a.kind) - kindIndex(b.kind));
 }
 
 /**
- * Check every path-shaped provenance citation the submission carried, against
- * the repository and against what the packets actually delivered.
- *
- * `validation_issues: []` printed identically at 1-of-15 correct citations and at
- * 75-of-75, because its only two producers were node-file membership and the
- * True-charter gate — and the overshoots lived in `provenance[].ref`, a field the
- * check never read. This is the check that was missing, and
- * `citation_validation` is the affirmation that it RAN: an empty issue list is
- * only ever emitted beside a stated status and a stated count.
+ * Check every path-shaped provenance citation the lane DAGs carry — on nodes AND
+ * on edges — against the repository and against the line runs the packets
+ * actually delivered. `citation_validation` is the affirmation that the check
+ * RAN: an empty issue list is only ever emitted beside a stated status and count.
  */
-function checkCharterCitations(
-  subsystems: readonly CharterSubsystem[],
+export function checkLaneCitations(
+  lanes: readonly CharterLaneGraph[],
   options: { root?: string; manifests: readonly CharterPacketManifest[] },
 ): { issues: string[]; summary: CitationValidationSummary } {
   const citations: { owner_id: string; ref: string; quote?: string }[] = [];
   let citationCount = 0;
-  for (const subsystem of subsystems) {
-    for (const charter of subsystem.charters ?? []) {
-      for (const provenance of charter.provenance ?? []) {
+  for (const lane of lanes) {
+    const owners = [
+      ...lane.nodes.map((n) => ({ id: `${lane.kind}:${n.node_id}`, provenance: n.provenance })),
+      ...lane.edges.map((e) => ({ id: `${lane.kind}:${e.from}->${e.to}`, provenance: e.provenance })),
+    ];
+    for (const owner of owners) {
+      for (const provenance of owner.provenance) {
         citationCount += 1;
         if (!PATH_SHAPED_PROVENANCE.has(provenance.kind)) continue;
         citations.push({
-          owner_id: charter.charter_id,
+          owner_id: owner.id,
           ref: provenance.ref,
           ...(provenance.quote ? { quote: provenance.quote } : {}),
         });
@@ -182,62 +169,63 @@ function checkCharterCitations(
   };
 }
 
+/** An empty register — the omit shape, shared by every charter executor's omit branch. */
+export function emptyCharterRegister(
+  ceiling: Ceiling,
+  generated_at: string,
+  status: "omitted" | undefined,
+): CharterRegister {
+  return {
+    schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
+    generated_at,
+    target: "charter",
+    ceiling,
+    ...(status ? { status } : {}),
+    lanes: [],
+    candidates: [],
+    correspondences: [],
+    differences: [],
+    findings: [],
+    validation_issues: [],
+    evidence_coverage: [],
+    // A pass that authored nothing has nothing to certify. Reporting `checked`
+    // here would be an affirmation over work never examined.
+    citation_validation: {
+      status: "no_citations",
+      citation_count: 0,
+      checked_count: 0,
+      failed_count: 0,
+      delivered_evidence_checked: false,
+    },
+  };
+}
+
 /**
- * Charter-extraction executor (Phase C). Two modes, gated by the ceiling:
+ * Charter-extraction executor (step 1). Two modes, gated by the ceiling:
  *
  * - **omit** (`shallow` ceiling, or no submission): write an empty `status:omitted`
- *   register so the obligation is satisfied with no LLM pass. Mirrors the
- *   synthesis-narrative omit — the charter layer is opt-in at a `deep`+ ceiling.
- * - **ingest** (`deep`/`deepest` ceiling + a host submission): validate + assemble
- *   the gated CHARTERS from the submission (the deterministic enforcement half —
- *   id assignment, per-kind merge, the Phase-A True gate; `assembleCharters`),
- *   grounding every subsystem against the consensus scaffold, then CHECKING every
- *   path-shaped provenance citation against the repository and against the line
- *   runs the packets actually delivered. This pass authors charters ONLY — the
- *   deltas + goal_graph are mined by the INDEPENDENT charter_delta pass (no author
- *   marks its own homework), so the register is left with empty
- *   deltas/findings/goal_graph and `deltas_pending` set whenever it produced ≥1
- *   subsystem for the delta-miner to reason over.
+ *   register so the obligation is satisfied with no LLM pass.
+ * - **ingest** (`deep`/`deepest` ceiling + the merged lane submissions): assemble
+ *   each lane's goal DAG (ids unique, edges resolve, cycles refused, levels
+ *   derived, scopes grounded — `assembleLaneGraph`), CHECK every path-shaped
+ *   provenance citation on nodes and edges against the repository and the packets,
+ *   PROPOSE the correspondence candidates deterministically, and flag
+ *   `comparison_pending` whenever any lane produced a node — the comparison reader
+ *   (a different pass; no author marks its own homework) is owed the next turn.
  *
- * `root` and `artifactsDir` are both OPTIONAL and are passed through unchanged.
- * They are NOT required: the omit branch needs no disk at all, and forcing a root
- * would throw before the `not_run` abstention could ever be recorded — which
- * would make the abstention unreachable and the affirmation a lie.
+ * `root` and `artifactsDir` are OPTIONAL: the omit branch needs no disk, and
+ * forcing a root would throw before the `not_run` abstention could be recorded.
  */
 export async function runCharterExtractionExecutor(
   bundle: ArtifactBundle,
-  submission: CharterSubmission | undefined,
+  submission: CharterExtractionMerged | undefined,
   options: { root?: string; artifactsDir?: string } = {},
 ): Promise<ExecutorRunResult> {
   const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
   const generated_at = new Date().toISOString();
 
   if (!submission || !ceilingRequestsCharters(ceiling)) {
-    const omitted: CharterRegister = {
-      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
-      generated_at,
-      target: "charter",
-      ceiling,
-      status: "omitted",
-      subsystems: [],
-      goal_graph: { nodes: [], edges: [] },
-      deltas: [],
-      findings: [],
-      triangulated: [],
-      disagreement: [],
-      validation_issues: [],
-      evidence_coverage: [],
-      // A pass that authored nothing has nothing to certify. Reporting
-      // `checked` here would be an affirmation over work never examined —
-      // the false-green shape this field exists to close.
-      citation_validation: {
-        status: "no_citations",
-        citation_count: 0,
-        checked_count: 0,
-        failed_count: 0,
-        delivered_evidence_checked: false,
-      },
-    };
+    const omitted = emptyCharterRegister(ceiling, generated_at, "omitted");
     return {
       updated: { ...bundle, charter_register: omitted },
       artifacts_written: ["charter_register.json"],
@@ -248,50 +236,34 @@ export async function runCharterExtractionExecutor(
     };
   }
 
-  // The repo universe every teleology node's file scope must ground against —
-  // the manifest's complete path set (the host cannot conjure files the repo
-  // does not contain).
   const universe = new Set(
     (bundle.repo_manifest?.files ?? []).map((file) => file.path),
   );
-  const assembled = assembleCharters(submission, {
-    hint: consensusMembers(bundle),
-    universe,
-  });
+  const validation_issues: string[] = [];
+  const lanes: CharterLaneGraph[] = [];
+  for (const lane of [...submission.lanes].sort((a, b) => kindIndex(a.kind) - kindIndex(b.kind))) {
+    const assembled = assembleLaneGraph(lane, { universe });
+    lanes.push(assembled.graph);
+    validation_issues.push(...assembled.validation_issues);
+  }
 
   const manifests = await loadPacketManifests(options.artifactsDir, ceiling);
-  const citation = checkCharterCitations(assembled.subsystems, {
+  const citation = checkLaneCitations(lanes, {
     ...(options.root ? { root: options.root } : {}),
     manifests,
   });
+  const candidates = proposeCorrespondences(lanes);
+  const nodeCount = lanes.reduce((n, l) => n + l.nodes.length, 0);
 
   const register: CharterRegister = {
-    schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
-    generated_at,
-    target: "charter",
-    ceiling,
-    subsystems: assembled.subsystems,
-    // Deltas + goal_graph + triangulation are the INDEPENDENT delta-miner's
-    // product (Phase C.2); left empty here and flagged `deltas_pending` so
-    // charter_delta_current owes a turn whenever this pass produced ≥1 subsystem
-    // to mine.
-    goal_graph: { nodes: [], edges: [] },
-    deltas: [],
-    findings: [],
-    triangulated: [],
-    disagreement: [],
-    validation_issues: [...assembled.validation_issues, ...citation.issues],
-    evidence_coverage: sortCoverage(
-      manifests.map((manifest) => manifest.coverage),
-    ),
+    ...emptyCharterRegister(ceiling, generated_at, undefined),
+    lanes,
+    candidates,
+    validation_issues: [...validation_issues, ...citation.issues],
+    evidence_coverage: sortCoverage(manifests.map((manifest) => manifest.coverage)),
     citation_validation: citation.summary,
-    deltas_pending: assembled.subsystems.length > 0,
+    comparison_pending: nodeCount > 0,
   };
-  // Surface each gate-drop MESSAGE, not just a count — a silently-dropped charter
-  // (e.g. a second charter of the same kind for a subsystem, kept-first) is
-  // invisible to the operator when only "N gate drop(s)" is shown, so they never
-  // learn a submission was over-count and discarded. The messages are short
-  // one-liners (assembleCharters), so listing them is bounded and cheap.
   const dropSummary =
     register.validation_issues.length > 0
       ? `, ${register.validation_issues.length} validation issue(s):\n` +
@@ -301,8 +273,9 @@ export async function runCharterExtractionExecutor(
     updated: { ...bundle, charter_register: register },
     artifacts_written: ["charter_register.json"],
     progress_summary:
-      `Charter extraction complete: ${register.subsystems.length} subsystem(s)` +
-      (register.deltas_pending ? " awaiting the independent delta-miner" : "") +
+      `Charter extraction complete: ${lanes.length} lane DAG(s), ${nodeCount} node(s), ` +
+      `${candidates.length} correspondence candidate(s)` +
+      (register.comparison_pending ? " awaiting the comparison reader" : "") +
       dropSummary,
   };
 }

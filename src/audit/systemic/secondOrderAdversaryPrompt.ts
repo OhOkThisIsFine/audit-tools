@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/systemic-evidence-projection.test.ts
 // Phase E — SECOND-ORDER ADVERSARY prompt (host_delegation).
 //
 // The adversary is a SEPARATE agent and receives the evidence the earlier
@@ -75,32 +76,36 @@ function renderCharterProjection(bundle: ArtifactBundle): string[] {
   if (!register || register.status === "omitted") {
     return ["No charter register was produced for this run."];
   }
+  // The three lane goal DAGs unmerged, the correspondences between them, and the
+  // verified differences — the accounts stand side by side (never a unified telos).
   const projection = {
-    subsystems: register.subsystems.map((subsystem) => ({
-      node_id: subsystem.node_id,
-      members: subsystem.members,
-      charters: subsystem.charters.map((charter) => ({
-        charter_id: charter.charter_id,
-        kind: charter.kind,
-        purpose: charter.purpose,
-        confidence: charter.confidence,
-        provenance: charter.provenance,
-        nominated_alternative: charter.nominated_alternative,
-        nominated_cost: charter.nominated_cost,
+    lanes: register.lanes.map((lane) => ({
+      kind: lane.kind,
+      nodes: lane.nodes.map((n) => ({
+        node_id: n.node_id,
+        purpose: n.purpose,
+        premise_height: n.premise_height,
+        files: n.files,
+        confidence: n.confidence,
       })),
+      edges: lane.edges.map((e) => ({ from: e.from, to: e.to })),
     })),
-    goal_graph: register.goal_graph,
-    deltas: register.deltas.map((delta) => ({
-      delta_id: delta.delta_id,
-      node_id: delta.node_id,
-      goal_node_id: delta.goal_node_id,
-      pair: delta.pair,
-      kind: delta.kind,
-      routed_to: delta.routed_to,
-      summary: delta.summary,
+    correspondences: register.correspondences.map((c) => ({
+      correspondence_id: c.correspondence_id,
+      members: c.members,
+      basis: c.basis,
     })),
-    triangulated: register.triangulated,
-    disagreement: register.disagreement,
+    differences: register.differences.map((d) => ({
+      difference_id: d.difference_id,
+      correspondence_id: d.correspondence_id,
+      dimension: d.dimension,
+      relation: d.relation,
+      split: d.split,
+      accounts: d.accounts.map((a) => ({ kind: a.kind, claim: a.claim })),
+      gap: d.gap,
+      routed_to: d.routed_to,
+      fidelity: d.fidelity?.verdict,
+    })),
     validation_issues: register.validation_issues,
   };
   return ["```json", JSON.stringify(projection, null, 2), "```"];

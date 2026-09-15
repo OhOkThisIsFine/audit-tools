@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { AdvanceAuditOptions } from "./advanceTypes.js";
@@ -25,7 +26,8 @@ import {
 import { runCriticalFlowFallbackExecutor } from "./criticalFlowFallbackExecutor.js";
 import { runCharterExtractionExecutor } from "./charterExtractionExecutor.js";
 import { readCharterPacketIndex } from "./charterPacketArchive.js";
-import { runCharterDeltaExecutor } from "./charterDeltaExecutor.js";
+import { runCharterComparisonExecutor } from "./charterComparisonExecutor.js";
+import { runCharterFidelityExecutor } from "./charterFidelityExecutor.js";
 import { runCharterClarificationExecutor } from "./charterClarificationExecutor.js";
 import { runSystemicChallengeExecutor } from "./systemicChallengeExecutor.js";
 import { runAutoFixExecutor } from "./autoFixExecutor.js";
@@ -123,8 +125,12 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       ...(options.root ? { root: options.root } : {}),
       ...(options.artifactsDir ? { artifactsDir: options.artifactsDir } : {}),
     }),
-  charter_delta_executor: async (bundle, { options }) =>
-    runCharterDeltaExecutor(bundle, options.charterDeltaSubmission),
+  charter_comparison_executor: async (bundle, { options }) =>
+    runCharterComparisonExecutor(bundle, options.charterComparisonSubmission, {
+      ...(options.root ? { root: options.root } : {}),
+    }),
+  charter_fidelity_executor: async (bundle, { options }) =>
+    runCharterFidelityExecutor(bundle, options.charterFidelitySubmission),
   charter_clarification_executor: async (bundle, { options }) =>
     runCharterClarificationExecutor(bundle, options.clarificationAnswers),
   systemic_challenge_executor: async (bundle, { options }) =>

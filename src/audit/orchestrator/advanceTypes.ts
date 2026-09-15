@@ -1,9 +1,10 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
 import type { AuditResult } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
-import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission, CharterDeltaSubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission, CriticalFlowFallbackResult } from "audit-tools/shared";
+import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterExtractionMerged, CharterComparisonSubmission, CharterFidelitySubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission, CriticalFlowFallbackResult } from "audit-tools/shared";
 import type { IntentEquivalenceVerdictSubmission } from "./intentEquivalenceExecutor.js";
 import type { EdgeReasoningResults } from "./edgeReasoning.js";
 import type { ExternalAcquisitionAdvanceOptions } from "./acquisitionExecutor.js";
@@ -48,10 +49,12 @@ export interface AdvanceAuditOptions {
   criticalFlowFallbackResults?: CriticalFlowFallbackResult;
   /** Host judge verdict for the DD-9 intent-equivalence gate; committed by intent_equivalence_executor. */
   intentEquivalenceVerdict?: IntentEquivalenceVerdictSubmission;
-  /** Host-supplied charter-extraction submission (Phase C.1); assembled by charter_extraction_executor. */
-  charterSubmission?: CharterSubmission;
-  /** Host-supplied charter-delta submission (Phase C.2); mined by charter_delta_executor (independent delta-miner). */
-  charterDeltaSubmission?: CharterDeltaSubmission;
+  /** The tool-merged charter-extraction lane submissions (step 1); assembled by charter_extraction_executor. */
+  charterSubmission?: CharterExtractionMerged;
+  /** Host-supplied charter-comparison submission (steps 2–3); assembled by charter_comparison_executor. */
+  charterComparisonSubmission?: CharterComparisonSubmission;
+  /** Host-supplied charter-fidelity verdicts (step 4); stamped by charter_fidelity_executor. */
+  charterFidelitySubmission?: CharterFidelitySubmission;
   /** Host-supplied charter-clarification answers (Phase D); applied by charter_clarification_executor. */
   clarificationAnswers?: ClarificationAnswersSubmission;
   /** Host-supplied second-order-adversary challenge round (Phase E); folded by systemic_challenge_executor. */

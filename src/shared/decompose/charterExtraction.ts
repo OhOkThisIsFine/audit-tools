@@ -1,776 +1,784 @@
-// The charter layer of the conceptual design-review — assemble a gated charter
-// register from host LLM submissions (Phase C; design of record
-// spec/conceptual-design-review-design.md §"The estimator charters" + §"The True
-// charter needs hard gates").
+// sites-pinned: tests/shared/charter-layer.test.ts, tests/shared/charter-lane-dag.test.ts
+// The five-step charter layer — deterministic ENFORCEMENT half (design of record:
+// spec/conceptual-design-review-design.md §"The estimator charters", steps 1–5;
+// decision record docs/reviews/charter-redesign-feedback-2026-09-15.md).
 //
-// Division of labour ([[contract-authoring-determinism-direction]]): each blind
-// LANE emits JUDGMENT — a self-organized leveled teleology whose nodes carry FILE
-// SCOPES (purpose in telos terms + premise height + the files it claims to
-// describe); the independent delta miner emits the channel-pair gaps it sees plus
-// a triangulated telos per subsystem. This module is the deterministic
-// ENFORCEMENT half — it grounds every file scope against the repo universe,
-// JOINS the per-kind teleologies to each other and to the decomposition HINT by
-// file-set overlap (the decomposition is a scaffold suggestion, never a forced
-// node list), selects each unit's per-kind charter mechanically, derives each
-// delta's kind + routing from its channel pair (the design's routing table, never
-// host discretion), runs the Phase-A hard gates (applyTrueCharterGate drops
-// un-falsifiable True; gateCharterDelta forces a low-confidence side to the human
-// channel), computes the per-channel-pair disagreement density, and surfaces the
-// surviving deltas as Finding leads for synthesis. PURE + deterministic +
-// language-neutral (operates on abstract file-path scopes + telos strings, no
-// IO): provenance-on-disk grounding is the ingest's concern, not this module's.
+// Division of labour: the host lanes emit JUDGMENT (three goal DAGs, the confirmed
+// correspondences and typed differences, the fidelity verdicts); this module is the
+// tool-owned half that grounds, validates, derives and routes:
+//   1. `assembleLaneGraph`      — one lane submission → a persisted lane DAG (ids
+//                                  unique, edges resolve, NO cycles, levels derived,
+//                                  file scopes grounded against the repo universe).
+//   2. `proposeCorrespondences` — tool candidates from file overlap + provenance
+//                                  cross-refs (deterministic, content-keyed ids).
+//   3. `assembleComparison`     — the comparison submission → confirmed
+//                                  correspondences + difference records, each routed
+//                                  by the FIXED `(dimension, relation, split)` table.
+//   4. `applyFidelity`          — tool pre-check verdicts + lane verdicts stamped on.
+//   5. `differenceFindings`     — `supported` finding candidates → Finding leads.
+// PURE + deterministic + language-neutral: no IO, no LLM. Provenance-on-disk
+// grounding is the ingest's concern (it hands the pre-check its read results).
 
 import { z } from "zod";
 import { hashContent } from "../hash.js";
-import {
-  CharterSchema,
-  CharterKindSchema,
-  CharterConfidenceSchema,
-  CharterProvenanceSchema,
-  GoalGraphSchema,
-  TeleologyNodeSchema,
-  TriangulatedTelosSchema,
-  type Charter,
-  type CharterKind,
-  type CharterDelta,
-  type StampedCharterDelta,
-  type ChannelDisagreement,
-  type GoalGraph,
-  type TeleologyNode,
-  type TriangulatedTelos,
-} from "../types/charter.js";
-import {
-  applyTrueCharterGate,
-  gateCharterDelta,
-} from "../validation/charterGate.js";
-import type { Finding } from "../types/finding.js";
 import { compareCodeUnits } from "../compareCodeUnits.js";
+import {
+  CharterLaneGraphSchema,
+  CharterLaneKindSchema,
+  CharterProvenanceSchema,
+  CharterConfidenceSchema,
+  CorrespondenceMemberSchema,
+  DifferenceDimensionSchema,
+  DifferenceRelationSchema,
+  DifferenceSplitSchema,
+  DifferenceAccountSchema,
+  type CharterLaneGraph,
+  type CharterLaneKind,
+  type CorrespondenceCandidate,
+  type CharterCorrespondence,
+  type CharterDifference,
+  type CharterProvenance,
+  type DifferenceRoute,
+  type FidelityVerdict,
+  type LaneGoalNode,
+} from "../types/charter.js";
+import type { Finding } from "../types/finding.js";
 
-// ── Submission contracts (what the host LLM writes to its bound path) ───────
+// ── Step 1: lane submission → lane DAG ─────────────────────────────────────────
 
-/**
- * One teleology node as a lane emits it: a charter statement WITH its file scope
- * and emergent level (the `TeleologyNodeSchema` fields, single-sourced — minus
- * `purpose`, which the charter half already carries). The tool assigns unit
- * membership and `charter_id` — the host never picks a join key beyond the
- * content-derived file scope itself.
- */
-const CharterNodeInputSchema = CharterSchema.omit({ charter_id: true })
-  .extend(TeleologyNodeSchema.omit({ purpose: true }).shape)
+/** A node as a LANE submits it: local id, telos, optional scope, evidence, confidence. */
+const LaneNodeInputSchema = z
+  .object({
+    node_id: z.string().min(1),
+    purpose: z.string().min(1),
+    files: z.array(z.string()).optional(),
+    provenance: z.array(CharterProvenanceSchema),
+    confidence: CharterConfidenceSchema,
+  })
   .strict();
-type CharterNodeInput = z.infer<typeof CharterNodeInputSchema>;
+
+const LaneEdgeInputSchema = z
+  .object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    provenance: z.array(CharterProvenanceSchema),
+  })
+  .strict();
 
 /**
- * The charter-EXTRACTION submission (Phase C.1): ONE blind lane's self-organized
- * teleology. Deltas are NOT authored here — the independent delta miner mines
- * them in a second pass over the joined charters, so no author marks its own
- * homework. Lanes from every kind are merged (concatenated) before assembly;
- * the join is by file-set overlap, so lanes never need to agree on node ids.
+ * The charter-EXTRACTION submission (step 1): ONE blind lane's goal DAG. The lane
+ * mints local ids; `premise_height` is not asked for (the tool derives it);
+ * `files` is optional (the Stated lane cites provenance only).
  */
 export const CharterSubmissionSchema = z
   .object({
-    nodes: z.array(CharterNodeInputSchema).default([]),
+    kind: CharterLaneKindSchema,
+    nodes: z.array(LaneNodeInputSchema).default([]),
+    edges: z.array(LaneEdgeInputSchema).default([]),
   })
   .strict();
 export type CharterSubmission = z.infer<typeof CharterSubmissionSchema>;
 
-/**
- * A delta as the miner emits it: the symmetric channel `pair` it sees a gap
- * across + the interpreted `summary` of that gap. The tool derives `kind`,
- * `routed_to`, and `delta_id` — the miner never picks the routing (that is the
- * design's fixed table, enforced here).
- */
-const CharterDeltaInputSchema = z
-  .object({
-    pair: z.tuple([CharterKindSchema, CharterKindSchema]),
-    summary: z.string(),
-  })
+/** The TOOL-merged extraction submission: every lane's DAG, handed to the executor by path. */
+export const CharterExtractionMergedSchema = z
+  .object({ lanes: z.array(CharterSubmissionSchema) })
   .strict();
+export type CharterExtractionMerged = z.infer<typeof CharterExtractionMergedSchema>;
 
-/** One subsystem's mined deltas (delta phase). */
-const CharterDeltaSubsystemInputSchema = z
-  .object({
-    node_id: z.string(),
-    deltas: z.array(CharterDeltaInputSchema).default([]),
-  })
-  .strict();
-
-/**
- * A True nomination as the miner emits it — downstream of triangulation, at the
- * `deepest` ceiling only (the assembly refuses them otherwise; the consent gate
- * moved here when `true` stopped being an extraction lane). Falsifiable-or-drop:
- * `applyTrueCharterGate` enforces the concrete alternative + concrete cost.
- */
-const TrueNominationInputSchema = z
-  .object({
-    node_id: z.string(),
-    /** The nominated ideal, in telos terms. */
-    purpose: z.string(),
-    nominated_alternative: z.string(),
-    nominated_cost: z.string(),
-    confidence: CharterConfidenceSchema,
-    /** May be empty — the ideal cites no source. */
-    provenance: z.array(CharterProvenanceSchema).default([]),
-  })
-  .strict();
-
-/**
- * The charter-DELTA submission (Phase C.2): the independent miner's channel-pair
- * gaps across the already-joined charters, its TRIANGULATED TELOS per subsystem
- * (a unified opinion the owner reacts to — a lead, never a reconciliation), any
- * True nominations (deepest only), plus the goal DAG it reads off all subsystems
- * (it is the only pass that sees every joined unit, so it owns `goal_graph`).
- */
-export const CharterDeltaSubmissionSchema = z
-  .object({
-    subsystems: z.array(CharterDeltaSubsystemInputSchema).default([]),
-    triangulated: z.array(TriangulatedTelosSchema).default([]),
-    true_nominations: z.array(TrueNominationInputSchema).default([]),
-    goal_graph: GoalGraphSchema.optional(),
-    /**
-     * Explicit clean affirmation — "I mined every subsystem and found no deltas."
-     * REQUIRED when the submission carries zero deltas, and REFUSED alongside any
-     * delta, so a dead miner (which submits nothing) can never be mistaken for a
-     * clean one (same contract as `reviewed_clean` on a zero-finding AuditResult).
-     * Keyed to DELTAS only: a clean mine may still carry triangulated teloses.
-     */
-    no_deltas: z.boolean().optional(),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    const deltaCount = value.subsystems.reduce((n, s) => n + s.deltas.length, 0);
-    if (deltaCount === 0 && value.no_deltas !== true) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["no_deltas"],
-        message:
-          "a submission with zero deltas must affirm `no_deltas: true` — an empty result " +
-          "without the affirmation is indistinguishable from a miner that never ran.",
-      });
-    }
-    if (deltaCount > 0 && value.no_deltas === true) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["no_deltas"],
-        message:
-          "`no_deltas: true` alongside mined deltas is contradictory — drop the flag or the deltas.",
-      });
-    }
-  });
-export type CharterDeltaSubmission = z.infer<typeof CharterDeltaSubmissionSchema>;
-
-// ── Assembled register (the persisted, gated product) ──────────────────────────
-
-/**
- * One joined subsystem UNIT: its file members, the tool-selected per-kind
- * charters, and every lane's full teleology slice that joined into it (levels
- * preserved — the self-organized structure is the product, the charter is the
- * unit's best-overlap representative of it).
- */
-export interface CharterSubsystem {
-  node_id: string;
-  members: string[];
-  charters: Charter[];
-  teleologies: Partial<Record<CharterKind, TeleologyNode[]>>;
-}
-
-/**
- * The assembled charter layer (Phase C.1): joined per-unit charters + a record
- * of everything the gates dropped (surfaced, never silently discarded).
- */
-export interface AssembledCharters {
-  subsystems: CharterSubsystem[];
+export interface AssembledLaneGraph {
+  graph: CharterLaneGraph;
   validation_issues: string[];
 }
 
 /**
- * The assembled delta layer (Phase C.2): the routed+gated deltas across all
- * units, the deltas surfaced as Finding leads, the triangulated teloses, the
- * tool-computed disagreement density, the (possibly True-augmented) subsystems,
- * the goal DAG, and the gate drops.
- *
- * `deltas` is the SAME {@link StampedCharterDelta} the persisted register
- * declares — one type, not two. It used to be `CharterDeltaWithIdentity`, an
- * identical shape declared here, and the duplication was pure drift surface:
- * the assembler's return value is what the executor writes straight onto
- * `charter_register.json`, so a field added to one and not the other would
- * silently fail to typecheck at whichever boundary was reached second. The
- * identity fields are carried as EXPLICIT properties on that one type
- * (INV-CDI-EXPLICIT-NODE-FIELDS), so `delta_id` is opaque and may gain a
- * per-delta discriminator (see the pass-2 minting below) without any consumer —
- * this module's own disagreement-density computation included — parsing it.
+ * Validate one lane's submission into its persisted DAG. Deterministic: same
+ * submission + same universe → same graph. Refusals, per node/edge, are recorded
+ * as validation issues (surfaced, never silent):
+ * - a duplicate `node_id` keeps the first and drops the rest;
+ * - an edge naming an unknown node, or a self-edge, is dropped;
+ * - a file outside the universe is dropped from the node's scope (a node left with
+ *   an EMPTY declared scope keeps `files` absent, i.e. becomes provenance-only);
+ * - a CYCLE refuses the whole edge set: every edge on a cycle is dropped and the
+ *   issue names the cycle, because a level cannot be derived from a cyclic graph
+ *   and a silently broken cycle would hide which edge the lane drafted backwards
+ *   ([[inverted-neighbor-edges-manufacture-a-cycle]]).
+ * `premise_height` = longest path from a ROOT (a node that serves nothing) down to
+ * the node, so 0 is a top-level purpose and a leaf mechanism sits deepest.
  */
-export interface AssembledDeltas {
-  subsystems: CharterSubsystem[];
-  deltas: StampedCharterDelta[];
-  findings: Finding[];
-  triangulated: TriangulatedTelos[];
-  disagreement: ChannelDisagreement[];
-  goal_graph: GoalGraph;
-  validation_issues: string[];
-}
-
-// ── Deterministic routing table (design §"The estimator charters") ─────────────
-
-/**
- * Canonical charter-kind order — pairs are sorted by this so `[stated, revealed]`
- * and `[revealed, stated]` map to one key (the deltas are symmetric).
- */
-const KIND_ORDER: CharterKind[] = ["stated", "structural", "revealed", "true"];
-
-function canonicalPair(pair: [CharterKind, CharterKind]): [CharterKind, CharterKind] {
-  return [...pair].sort(
-    (a, b) => KIND_ORDER.indexOf(a) - KIND_ORDER.indexOf(b),
-  ) as [CharterKind, CharterKind];
-}
-
-interface DeltaRoute {
-  kind: CharterDelta["kind"];
-  routed_to: CharterDelta["routed_to"];
-  severity: Finding["severity"];
-}
-
-/**
- * The design's routing table, keyed by canonical `pair` — who acts on each gap.
- * Every ESTIMATOR pair has one defined meaning; `true` pairs exist only for the
- * miner's deepest-rung nominations. A pair OUTSIDE this table has no defined
- * owner and is a validation issue (the tool never invents a route). `severity`
- * ranks the surfaced lead: a wrong-goal provocation is the highest-blast, doc
- * rot the lowest.
- */
-const DELTA_ROUTES: Record<string, DeltaRoute> = {
-  "stated|structural": {
-    kind: "doc_rot",
-    routed_to: "remediator",
-    severity: "low",
-  },
-  "stated|revealed": {
-    kind: "says_does_drift",
-    routed_to: "remediator",
-    severity: "medium",
-  },
-  "structural|revealed": {
-    kind: "architecture_betrayal",
-    routed_to: "clarification",
-    severity: "medium",
-  },
-  "stated|true": {
-    kind: "wrong_goal",
-    routed_to: "human",
-    severity: "high",
-  },
-  "structural|true": {
-    kind: "wrong_goal",
-    routed_to: "human",
-    severity: "high",
-  },
-  "revealed|true": {
-    kind: "wrong_goal",
-    routed_to: "human",
-    severity: "high",
-  },
-};
-
-/** Lower of two charter confidences — a delta is only as strong as its weaker side. */
-function weakerConfidence(a: Charter, b: Charter): Charter["confidence"] {
-  const rank = { high: 2, medium: 1, low: 0 } as const;
-  return rank[a.confidence] <= rank[b.confidence] ? a.confidence : b.confidence;
-}
-
-// ── Assembly: the file-set-overlap JOIN (Phase C.1) ────────────────────────────
-
-/** Stable content-derived node order so assembly never depends on input order. */
-function sortNodeInputs(nodes: CharterNodeInput[]): CharterNodeInput[] {
-  return [...nodes].sort(
-    (a, b) =>
-      KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) ||
-      a.premise_height - b.premise_height ||
-      compareCodeUnits(a.purpose, b.purpose) ||
-      compareCodeUnits(a.files[0] ?? "", b.files[0] ?? ""),
-  );
-}
-
-/** Sorted intersection size of a node's files against a member set. */
-function overlapSize(files: string[], members: ReadonlySet<string>): number {
-  let n = 0;
-  for (const f of files) if (members.has(f)) n += 1;
-  return n;
-}
-
-export interface AssembleChartersParams {
-  /**
-   * The decomposition HINT: consensus `node_id → members`. A scaffold
-   * suggestion the join prefers when a node's scope overlaps it — never a
-   * forced node list (a lane may organize boundaries the decomposition missed).
-   */
-  hint: Map<string, string[]>;
-  /**
-   * The repo file universe. Every teleology node's scope must ground here —
-   * a node citing files outside the universe is dropped with an issue (the
-   * host cannot conjure files the repo does not contain). The ingest
-   * chokepoint additionally REFUSES such lanes loudly before assembly.
-   */
-  universe: ReadonlySet<string>;
-}
-
-/**
- * Assemble the joined charter layer (Phase C.1) from the merged per-lane
- * submissions. Deterministic: same nodes + same hint + same universe always
- * yield the same units, ids, and charter selection.
- *
- * Join: each grounded node maps to the hint unit with the largest file overlap
- * (ties → lexicographically first hint id); nodes overlapping NO hint unit are
- * union-found into residual units on any shared file, across kinds. A unit's id
- * is its hint `node_id` when hinted, else the lexicographically first file of
- * its scope union (provably collision-free: a residual scope contains no hint
- * member, so its first file can never equal a hint id, which IS a hint member).
- * Per unit per kind, the best-overlap node becomes the kind's charter
- * (`charter_id = unit:kind`); every joined node persists in the unit's
- * teleology, levels intact.
- */
-export function assembleCharters(
+export function assembleLaneGraph(
   submission: CharterSubmission,
-  params: AssembleChartersParams,
-): AssembledCharters {
+  params: { universe: ReadonlySet<string> },
+): AssembledLaneGraph {
   const validation_issues: string[] = [];
+  const kind = submission.kind;
 
-  // Ground every node against the universe; drop whole nodes on unknown paths
-  // (a silently narrowed scope would corrupt the join key).
-  const grounded: CharterNodeInput[] = [];
-  for (const node of sortNodeInputs(submission.nodes)) {
-    const unknown = node.files.filter((f) => !params.universe.has(f));
-    if (unknown.length > 0) {
+  // Nodes: unique ids, grounded scopes.
+  const byId = new Map<string, LaneGoalNode>();
+  for (const node of submission.nodes) {
+    if (byId.has(node.node_id)) {
       validation_issues.push(
-        `${node.kind} teleology node "${node.purpose.slice(0, 80)}" cites file(s) outside the repo universe — dropped (${unknown
-          .sort((a, b) => compareCodeUnits(a, b))
-          .join(", ")})`,
+        `${kind}: duplicate node_id "${node.node_id}" — kept the first, dropped the rest`,
       );
       continue;
     }
-    grounded.push({ ...node, files: [...new Set(node.files)].sort((a, b) => compareCodeUnits(a, b)) });
-  }
-
-  // Hint mapping: node → best-overlap consensus unit.
-  const hintIds = [...params.hint.keys()].sort((a, b) => compareCodeUnits(a, b));
-  const hintMembers = new Map<string, ReadonlySet<string>>(
-    hintIds.map((id) => [id, new Set(params.hint.get(id)!)]),
-  );
-  const hinted = new Map<string, CharterNodeInput[]>();
-  const residual: CharterNodeInput[] = [];
-  for (const node of grounded) {
-    let bestId: string | undefined;
-    let bestOverlap = 0;
-    for (const id of hintIds) {
-      const overlap = overlapSize(node.files, hintMembers.get(id)!);
-      if (overlap > bestOverlap) {
-        bestOverlap = overlap;
-        bestId = id;
-      }
-    }
-    if (bestId !== undefined) {
-      const list = hinted.get(bestId) ?? [];
-      list.push(node);
-      hinted.set(bestId, list);
-    } else {
-      residual.push(node);
-    }
-  }
-
-  // Residual union-find: any shared file joins nodes into one unit, across kinds.
-  const parent = residual.map((_, i) => i);
-  const find = (i: number): number => {
-    while (parent[i] !== i) {
-      parent[i] = parent[parent[i]!]!;
-      i = parent[i]!;
-    }
-    return i;
-  };
-  const union = (a: number, b: number): void => {
-    const ra = find(a);
-    const rb = find(b);
-    if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
-  };
-  const byFile = new Map<string, number>();
-  residual.forEach((node, i) => {
-    for (const f of node.files) {
-      const seen = byFile.get(f);
-      if (seen === undefined) byFile.set(f, i);
-      else union(seen, i);
-    }
-  });
-  const residualUnits = new Map<number, CharterNodeInput[]>();
-  residual.forEach((node, i) => {
-    const root = find(i);
-    const list = residualUnits.get(root) ?? [];
-    list.push(node);
-    residualUnits.set(root, list);
-  });
-
-  // Materialize units.
-  interface UnitDraft {
-    node_id: string;
-    members: string[];
-    nodes: CharterNodeInput[];
-  }
-  const drafts: UnitDraft[] = [];
-  for (const id of hintIds) {
-    const nodes = hinted.get(id);
-    if (!nodes || nodes.length === 0) continue; // partial coverage is designed
-    const members = new Set(params.hint.get(id)!);
-    for (const node of nodes) for (const f of node.files) members.add(f);
-    drafts.push({
-      node_id: id,
-      members: [...members].sort((a, b) => compareCodeUnits(a, b)),
-      nodes,
-    });
-  }
-  for (const nodes of residualUnits.values()) {
-    const members = new Set<string>();
-    for (const node of nodes) for (const f of node.files) members.add(f);
-    const sorted = [...members].sort((a, b) => compareCodeUnits(a, b));
-    drafts.push({ node_id: sorted[0]!, members: sorted, nodes });
-  }
-  drafts.sort((a, b) => compareCodeUnits(a.node_id, b.node_id));
-
-  // Per unit: teleologies per kind + tool-selected charter per kind + True gate.
-  const subsystems: CharterSubsystem[] = [];
-  for (const draft of drafts) {
-    const memberSet = new Set(draft.members);
-    const byKind = new Map<CharterKind, CharterNodeInput[]>();
-    for (const node of draft.nodes) {
-      const list = byKind.get(node.kind) ?? [];
-      list.push(node);
-      byKind.set(node.kind, list);
-    }
-    const teleologies: Partial<Record<CharterKind, TeleologyNode[]>> = {};
-    const selected: Charter[] = [];
-    for (const kind of KIND_ORDER) {
-      const nodes = byKind.get(kind);
-      if (!nodes || nodes.length === 0) continue;
-      teleologies[kind] = nodes
-        .map((n) => ({
-          purpose: n.purpose,
-          premise_height: n.premise_height,
-          files: n.files,
-        }))
-        .sort(
-          (a, b) =>
-            a.premise_height - b.premise_height ||
-            compareCodeUnits(a.purpose, b.purpose),
+    let files: string[] | undefined;
+    if (node.files !== undefined) {
+      const known = [...new Set(node.files)].filter((f) => params.universe.has(f));
+      const unknown = node.files.filter((f) => !params.universe.has(f));
+      if (unknown.length > 0) {
+        validation_issues.push(
+          `${kind}: node "${node.node_id}" cites file(s) outside the repo universe — dropped from its scope (${[...new Set(unknown)]
+            .sort(compareCodeUnits)
+            .join(", ")})`,
         );
-      const best = [...nodes].sort(
-        (a, b) =>
-          overlapSize(b.files, memberSet) - overlapSize(a.files, memberSet) ||
-          a.premise_height - b.premise_height ||
-          compareCodeUnits(a.purpose, b.purpose),
-      )[0]!;
-      selected.push({
-        charter_id: `${draft.node_id}:${kind}`,
-        kind,
-        purpose: best.purpose,
-        provenance: best.provenance,
-        confidence: best.confidence,
-        ...(best.nominated_alternative !== undefined
-          ? { nominated_alternative: best.nominated_alternative }
-          : {}),
-        ...(best.nominated_cost !== undefined
-          ? { nominated_cost: best.nominated_cost }
-          : {}),
-      });
+      }
+      files = known.length > 0 ? known.sort(compareCodeUnits) : undefined;
     }
-
-    // Phase-A True gate: extraction lanes never author `true`, but the gate
-    // stays as the mechanical backstop (falsifiable-or-drop).
-    const { kept, dropped } = applyTrueCharterGate(selected);
-    for (const drop of dropped) {
-      validation_issues.push(`${drop.charter_id}: ${drop.reason}`);
-    }
-    if (kept.length === 0) continue;
-
-    subsystems.push({
-      node_id: draft.node_id,
-      members: draft.members,
-      charters: [...kept].sort((a, b) => compareCodeUnits(a.charter_id, b.charter_id)),
-      teleologies,
+    byId.set(node.node_id, {
+      node_id: node.node_id,
+      purpose: node.purpose,
+      premise_height: 0,
+      ...(files !== undefined ? { files } : {}),
+      provenance: node.provenance,
+      confidence: node.confidence,
     });
   }
 
-  return { subsystems, validation_issues };
-}
-
-// ── Assembly: deltas + triangulation (Phase C.2) ───────────────────────────────
-
-export interface AssembleDeltasParams {
-  /**
-   * Whether True nominations are admissible — true ONLY at the `deepest`
-   * ceiling (the consent gate that used to live on the extraction lane set;
-   * the executor derives this from the confirmed checkpoint's ceiling).
-   */
-  allowTrueNominations: boolean;
-}
-
-/**
- * Assemble the routed+gated deltas, triangulated teloses, and disagreement
- * density (Phase C.2) from the independent miner's submission, given the
- * already-joined charters. The miner never picks routing — `kind`/`routed_to`
- * derive from the channel pair (the design's fixed table). A delta whose
- * `node_id` has no joined charters, or that references a missing/dropped
- * charter kind, is dropped with an issue; so is a triangulated telos or True
- * nomination naming an unknown unit.
- */
-/** A draft delta that survived pass-1 validation/routing, grouped by canonical
- * pair in pass 2 to decide bare-vs-discriminated delta_id minting. */
-interface SurvivingDelta {
-  pair: [CharterKind, CharterKind];
-  route: DeltaRoute;
-  charterA: Charter;
-  charterB: Charter;
-  summary: string;
-}
-
-export function assembleDeltas(
-  submission: CharterDeltaSubmission,
-  subsystems: CharterSubsystem[],
-  params: AssembleDeltasParams,
-): AssembledDeltas {
-  const deltas: StampedCharterDelta[] = [];
-  const findings: Finding[] = [];
-  const validation_issues: string[] = [];
-  const augmented = subsystems.map((s) => ({
-    ...s,
-    charters: [...s.charters],
-  }));
-  const byNode = new Map(augmented.map((s) => [s.node_id, s]));
-  // Every goal-graph node id the miner reported — a delta's subsystem is
-  // "linked" exactly when its node_id appears here (mirrors the existing
-  // out-of-scope consumer's own derivation, now computed once here instead).
-  const goalNodeIds = new Set(
-    (submission.goal_graph?.nodes ?? []).map((n) => n.node_id),
-  );
-
-  // True nominations first (deepest only): survivors join the unit's charters
-  // and are pair-eligible for this same submission's deltas.
-  const nominations = [...submission.true_nominations].sort(
-    (a, b) => compareCodeUnits(a.node_id, b.node_id) || compareCodeUnits(a.purpose, b.purpose),
-  );
-  if (nominations.length > 0 && !params.allowTrueNominations) {
-    validation_issues.push(
-      `submission carries ${nominations.length} true nomination(s) but the ceiling does not authorize the deepest rung — all dropped (true provocations require explicit deepest opt-in)`,
-    );
-  } else {
-    for (const nomination of nominations) {
-      const subsystem = byNode.get(nomination.node_id);
-      if (!subsystem) {
-        validation_issues.push(
-          `true nomination for "${nomination.node_id}" names no joined subsystem — dropped`,
-        );
-        continue;
-      }
-      if (subsystem.charters.some((c) => c.kind === "true")) {
-        validation_issues.push(
-          `subsystem "${nomination.node_id}" has more than one true nomination — kept the first, dropped the rest`,
-        );
-        continue;
-      }
-      const candidate: Charter = {
-        charter_id: `${nomination.node_id}:true`,
-        kind: "true",
-        purpose: nomination.purpose,
-        provenance: nomination.provenance,
-        confidence: nomination.confidence,
-        nominated_alternative: nomination.nominated_alternative,
-        nominated_cost: nomination.nominated_cost,
-      };
-      const { kept, dropped } = applyTrueCharterGate([candidate]);
-      for (const drop of dropped) {
-        validation_issues.push(`${drop.charter_id}: ${drop.reason}`);
-      }
-      if (kept.length > 0) {
-        subsystem.charters.push(kept[0]!);
-        subsystem.charters.sort((a, b) => compareCodeUnits(a.charter_id, b.charter_id));
-      }
+  // Edges: resolve, no self-edges, no duplicates.
+  const edgeKeys = new Set<string>();
+  const edges: CharterLaneGraph["edges"] = [];
+  for (const edge of submission.edges) {
+    if (edge.from === edge.to) {
+      validation_issues.push(`${kind}: edge "${edge.from}" serves itself — dropped`);
+      continue;
     }
-  }
-
-  // Deltas: route by channel pair, gate by confidence, surface as leads.
-  const sorted = [...submission.subsystems].sort((a, b) =>
-    compareCodeUnits(a.node_id, b.node_id),
-  );
-  for (const sub of sorted) {
-    const subsystem = byNode.get(sub.node_id);
-    if (!subsystem) {
+    if (!byId.has(edge.from) || !byId.has(edge.to)) {
       validation_issues.push(
-        `delta subsystem "${sub.node_id}" has no assembled charters — dropped (deltas may only span reviewed subsystems)`,
+        `${kind}: edge ${edge.from} → ${edge.to} names an unknown node — dropped`,
       );
       continue;
     }
-    const kept = subsystem.charters;
-    const keptByKind = new Map<CharterKind, Charter>(kept.map((c) => [c.kind, c]));
-
-    // Pass 1: validate + route every draft delta (identical checks/drop
-    // reasons/order to before), grouping the SURVIVORS by canonical pair —
-    // the grouping key delta_id minting (pass 2) discriminates on.
-    const survivorsByPairKey = new Map<string, SurvivingDelta[]>();
-    for (const draft of sub.deltas) {
-      const [ka, kb] = canonicalPair(draft.pair);
-      if (ka === kb) {
-        validation_issues.push(
-          `subsystem "${sub.node_id}" delta pairs "${ka}" with itself — dropped`,
-        );
-        continue;
-      }
-      const route = DELTA_ROUTES[`${ka}|${kb}`];
-      if (!route) {
-        validation_issues.push(
-          `subsystem "${sub.node_id}" delta [${ka}, ${kb}] has no routing in the design's table — dropped`,
-        );
-        continue;
-      }
-      const charterA = keptByKind.get(ka);
-      const charterB = keptByKind.get(kb);
-      if (!charterA || !charterB) {
-        const missing = [!charterA ? ka : null, !charterB ? kb : null]
-          .filter((m): m is CharterKind => m !== null)
-          .join(" + ");
-        validation_issues.push(
-          `subsystem "${sub.node_id}" delta [${ka}, ${kb}] references a missing/dropped charter (${missing}) — dropped`,
-        );
-        continue;
-      }
-      const pairKey = `${ka}|${kb}`;
-      const list = survivorsByPairKey.get(pairKey) ?? [];
-      list.push({ pair: [ka, kb], route, charterA, charterB, summary: draft.summary });
-      survivorsByPairKey.set(pairKey, list);
-    }
-
-    // Pass 2: mint delta_id per group. A subsystem mining exactly ONE delta on
-    // a channel pair — the common case — keeps the bare, pre-existing
-    // `node_id:ka-kb` shape (identity was already unique; no discriminator
-    // needed or added). A subsystem mining MORE THAN ONE delta on the SAME
-    // canonical pair (COR-6b924995 / COR-d8089caf: `[stated,revealed]` and
-    // `[revealed,stated]` collide into this same group via canonicalPair
-    // above, so pair order can never dodge this) gets each member a
-    // content-derived discriminator — a hash of its own summary, never a
-    // submission-array index — so identity is stable and order-independent
-    // regardless of which order the miner happened to list them in.
-    for (const group of survivorsByPairKey.values()) {
-      for (const surv of group) {
-        const [ka, kb] = surv.pair;
-        const delta_id =
-          group.length === 1
-            ? `${sub.node_id}:${ka}-${kb}`
-            : `${sub.node_id}:${ka}-${kb}:${hashContent(surv.summary, { length: 8 })}`;
-        const baseDelta: StampedCharterDelta = {
-          delta_id,
-          pair: surv.pair,
-          kind: surv.route.kind,
-          routed_to: surv.route.routed_to,
-          summary: surv.summary,
-          node_id: sub.node_id,
-          ...(goalNodeIds.has(sub.node_id) ? { goal_node_id: sub.node_id } : {}),
-        };
-        // Phase-A low-confidence gate: a shaky side forces the human channel.
-        // gateCharterDelta either returns `delta` unchanged or spreads it
-        // (`{ ...delta, routed_to: "human" }`), so node_id/goal_node_id
-        // survive the call; the cast reflects that read, not an assumption.
-        const gated = gateCharterDelta(baseDelta, kept) as StampedCharterDelta;
-        deltas.push(gated);
-
-        findings.push(
-          deltaToFinding(
-            gated,
-            sub.node_id,
-            subsystem.members,
-            surv.route.severity,
-            weakerConfidence(surv.charterA, surv.charterB),
-          ),
-        );
-      }
-    }
+    const key = `${edge.from} -> ${edge.to}`;
+    if (edgeKeys.has(key)) continue;
+    edgeKeys.add(key);
+    edges.push({ from: edge.from, to: edge.to, provenance: edge.provenance });
   }
 
-  // Triangulated teloses: one per known unit; a lead the owner reacts to.
-  const triangulated: TriangulatedTelos[] = [];
-  const seenTelos = new Set<string>();
-  for (const telos of [...submission.triangulated].sort((a, b) =>
-    compareCodeUnits(a.node_id, b.node_id),
-  )) {
-    if (!byNode.has(telos.node_id)) {
-      validation_issues.push(
-        `triangulated telos for "${telos.node_id}" names no joined subsystem — dropped`,
-      );
-      continue;
-    }
-    if (seenTelos.has(telos.node_id)) {
-      validation_issues.push(
-        `subsystem "${telos.node_id}" has more than one triangulated telos — kept the first, dropped the rest`,
-      );
-      continue;
-    }
-    seenTelos.add(telos.node_id);
-    triangulated.push(telos);
-  }
+  // Cycle check (Kahn over the SERVES direction). Nodes left unprocessed lie on or
+  // downstream of a cycle; every edge among them is refused and the issue names them.
+  const acyclicEdges = refuseCycles(kind, [...byId.keys()], edges, validation_issues);
 
-  // Disagreement density: tool-computed, per unit per channel pair — the
-  // quantitative surface for "which parts of the triangulation need
-  // clarification."
-  const densityByKey = new Map<string, ChannelDisagreement>();
-  for (const delta of deltas) {
-    // Read the explicit field (INV-CDI-EXPLICIT-NODE-FIELDS) — never parse
-    // delta_id, which is opaque and, since the fix above, may carry a
-    // discriminator suffix a naive last-colon split would misread.
-    const key = `${delta.node_id}|${delta.pair[0]}|${delta.pair[1]}`;
-    const existing = densityByKey.get(key);
-    if (existing) {
-      densityByKey.set(key, { ...existing, count: existing.count + 1 });
-    } else {
-      densityByKey.set(key, { node_id: delta.node_id, pair: delta.pair, count: 1 });
-    }
+  // Levels: longest path from a root. `from` serves `to`, so `to` is the parent;
+  // height(child) = max(height(parent)) + 1; roots (serve nothing) are 0.
+  const parentsOf = new Map<string, string[]>();
+  for (const e of acyclicEdges) {
+    const list = parentsOf.get(e.from) ?? [];
+    list.push(e.to);
+    parentsOf.set(e.from, list);
   }
-  const disagreement = [...densityByKey.values()].sort(
-    (a, b) =>
-      compareCodeUnits(a.node_id, b.node_id) ||
-      compareCodeUnits(a.pair[0], b.pair[0]) ||
-      compareCodeUnits(a.pair[1], b.pair[1]),
+  const height = new Map<string, number>();
+  const heightOf = (id: string): number => {
+    const cached = height.get(id);
+    if (cached !== undefined) return cached;
+    const parents = parentsOf.get(id) ?? [];
+    const h = parents.length === 0 ? 0 : Math.max(...parents.map(heightOf)) + 1;
+    height.set(id, h);
+    return h;
+  };
+
+  const nodes = [...byId.values()]
+    .map((n) => ({ ...n, premise_height: heightOf(n.node_id) }))
+    .sort((a, b) => compareCodeUnits(a.node_id, b.node_id));
+  const sortedEdges = [...acyclicEdges].sort(
+    (a, b) => compareCodeUnits(a.from, b.from) || compareCodeUnits(a.to, b.to),
   );
-
-  deltas.sort((a, b) => compareCodeUnits(a.delta_id, b.delta_id));
-  findings.sort((a, b) => compareCodeUnits(a.id, b.id));
 
   return {
-    subsystems: augmented,
-    deltas,
-    findings,
-    triangulated,
-    disagreement,
-    goal_graph: submission.goal_graph ?? { nodes: [], edges: [] },
+    graph: CharterLaneGraphSchema.parse({ kind, nodes, edges: sortedEdges }),
     validation_issues,
   };
 }
 
+function refuseCycles(
+  kind: CharterLaneKind,
+  ids: string[],
+  edges: CharterLaneGraph["edges"],
+  issues: string[],
+): CharterLaneGraph["edges"] {
+  const indegree = new Map<string, number>(ids.map((id) => [id, 0]));
+  const out = new Map<string, string[]>();
+  for (const e of edges) {
+    indegree.set(e.to, (indegree.get(e.to) ?? 0) + 1);
+    const list = out.get(e.from) ?? [];
+    list.push(e.to);
+    out.set(e.from, list);
+  }
+  const queue = ids.filter((id) => (indegree.get(id) ?? 0) === 0).sort(compareCodeUnits);
+  const done = new Set<string>();
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    done.add(id);
+    for (const next of out.get(id) ?? []) {
+      const d = (indegree.get(next) ?? 1) - 1;
+      indegree.set(next, d);
+      if (d === 0) queue.push(next);
+    }
+  }
+  if (done.size === ids.length) return edges;
+  const cyclic = ids.filter((id) => !done.has(id)).sort(compareCodeUnits);
+  const cyclicSet = new Set(cyclic);
+  const refused = edges.filter((e) => cyclicSet.has(e.from) && cyclicSet.has(e.to));
+  issues.push(
+    `${kind}: the goal graph has a cycle through ${cyclic.map((c) => `"${c}"`).join(", ")} — ${refused.length} edge(s) among those nodes refused; a level cannot be derived from a cycle (an edge drafted as "what the parent needs from me" instead of "what I serve" is the usual cause)`,
+  );
+  return edges.filter((e) => !(cyclicSet.has(e.from) && cyclicSet.has(e.to)));
+}
+
+// ── Step 2: tool-proposed correspondence candidates ────────────────────────────
+
+/** The path part of a provenance ref: `<path>#<symbol>` or `<path>:<line>` → `<path>`. */
+export function provenancePath(ref: string): string {
+  const hash = ref.indexOf("#");
+  const cut = hash >= 0 ? ref.slice(0, hash) : ref;
+  const colon = cut.lastIndexOf(":");
+  return colon > 0 && /^\d+$/.test(cut.slice(colon + 1)) ? cut.slice(0, colon) : cut;
+}
+
+function memberKey(members: readonly { kind: CharterLaneKind; node_ids: readonly string[] }[]): string {
+  return [...members]
+    .map((m) => `${m.kind}:${[...m.node_ids].sort(compareCodeUnits).join(",")}`)
+    .sort(compareCodeUnits)
+    .join("|");
+}
+
 /**
- * Surface a routed charter delta as a Finding LEAD ([[leads-not-verdicts]] — the
- * owner judges it; a charter delta is never a verdict). `lens` is `architecture`:
- * a charter-boundary gap is a design defect. Members of the subsystem are the
- * affected files (the charter layer operates over file ids).
+ * Propose correspondence candidates between every pair of lanes. Two signals, both
+ * deterministic and content-derived:
+ * - `file_overlap`: the nodes' file scopes share ≥1 path;
+ * - `cross_ref`: a node's provenance cites a path (`<path>#<symbol>` / `<path>:<line>`)
+ *   that lies in the other node's file scope (the Stated lane's usual key).
+ * A pair related by both is reported once, as `file_overlap` (the stronger signal),
+ * with the union of evidence paths. Candidate ids are content-keyed on the member
+ * set, so re-proposal never churns the artifact.
  */
-function deltaToFinding(
-  delta: CharterDelta,
-  nodeId: string,
-  members: string[],
-  severity: Finding["severity"],
-  confidence: Finding["confidence"],
-): Finding {
-  const kindLabel = delta.kind.replace(/_/g, " ");
-  return {
-    id: delta.delta_id,
-    title: `Charter delta (${kindLabel}) in subsystem ${nodeId}`,
-    category: `charter_delta:${delta.kind}`,
-    severity,
-    confidence,
-    lens: "architecture",
-    summary: delta.summary,
-    affected_files: members.map((path) => ({ path })),
-    systemic: true,
+export function proposeCorrespondences(
+  graphs: readonly CharterLaneGraph[],
+): CorrespondenceCandidate[] {
+  const byKey = new Map<string, CorrespondenceCandidate>();
+  const sorted = [...graphs].sort((a, b) => compareCodeUnits(a.kind, b.kind));
+  for (let i = 0; i < sorted.length; i += 1) {
+    for (let j = i + 1; j < sorted.length; j += 1) {
+      const a = sorted[i]!;
+      const b = sorted[j]!;
+      if (a.kind === b.kind) continue;
+      for (const na of a.nodes) {
+        for (const nb of b.nodes) {
+          const overlap = fileOverlap(na, nb);
+          const crossRefs = overlap.length > 0 ? [] : crossRefPaths(na, nb);
+          if (overlap.length === 0 && crossRefs.length === 0) continue;
+          const members = [
+            { kind: a.kind, node_ids: [na.node_id] },
+            { kind: b.kind, node_ids: [nb.node_id] },
+          ];
+          const key = memberKey(members);
+          if (byKey.has(key)) continue;
+          byKey.set(key, {
+            candidate_id: `cand-${hashContent(key, { length: 10 })}`,
+            members,
+            basis: overlap.length > 0 ? "file_overlap" : "cross_ref",
+            evidence_paths: (overlap.length > 0 ? overlap : crossRefs).sort(compareCodeUnits),
+          });
+        }
+      }
+    }
+  }
+  return [...byKey.values()].sort((a, b) => compareCodeUnits(a.candidate_id, b.candidate_id));
+}
+
+function fileOverlap(a: LaneGoalNode, b: LaneGoalNode): string[] {
+  if (!a.files || !b.files) return [];
+  const setB = new Set(b.files);
+  return [...new Set(a.files.filter((f) => setB.has(f)))];
+}
+
+function crossRefPaths(a: LaneGoalNode, b: LaneGoalNode): string[] {
+  const hits = new Set<string>();
+  const collect = (from: LaneGoalNode, into: LaneGoalNode): void => {
+    if (!into.files) return;
+    const scope = new Set(into.files);
+    for (const p of from.provenance) {
+      const path = provenancePath(p.ref);
+      if (scope.has(path)) hits.add(path);
+    }
   };
+  collect(a, b);
+  collect(b, a);
+  return [...hits];
+}
+
+// ── Step 3: the comparison submission → correspondences + differences ──────────
+
+const CorrespondenceInputSchema = z
+  .object({
+    candidate_id: z.string().min(1).optional(),
+    verdict: z.enum(["confirm", "reject", "widen"]),
+    members: z.array(CorrespondenceMemberSchema).min(2),
+    evidence: z.array(CharterProvenanceSchema).default([]),
+  })
+  .strict();
+
+const DifferenceInputSchema = z
+  .object({
+    /** The candidate_id, or the 0-based index into `correspondences`, this rests on. */
+    correspondence: z.union([z.string().min(1), z.number().int().min(0)]),
+    dimension: DifferenceDimensionSchema,
+    relation: DifferenceRelationSchema,
+    split: DifferenceSplitSchema.optional(),
+    accounts: z.array(DifferenceAccountSchema).min(2),
+    gap: z.string().min(1),
+    covered_channel_gap: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * The charter-COMPARISON submission (steps 2–3): the comparison reader's verdicts
+ * on the tool candidates (plus any it adds), and the typed differences. An empty
+ * result must affirm `no_correspondences: true` (a silent empty is indistinguishable
+ * from a reader that never ran).
+ */
+export const CharterComparisonSubmissionSchema = z
+  .object({
+    correspondences: z.array(CorrespondenceInputSchema).default([]),
+    differences: z.array(DifferenceInputSchema).default([]),
+    no_correspondences: z.boolean().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const confirmed = value.correspondences.filter((c) => c.verdict !== "reject").length;
+    if (confirmed === 0 && value.no_correspondences !== true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["no_correspondences"],
+        message:
+          "a submission that confirms or adds no correspondence must affirm `no_correspondences: true`",
+      });
+    }
+    if (confirmed > 0 && value.no_correspondences === true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["no_correspondences"],
+        message: "`no_correspondences: true` alongside confirmed correspondences is contradictory",
+      });
+    }
+  });
+export type CharterComparisonSubmission = z.infer<typeof CharterComparisonSubmissionSchema>;
+
+export interface AssembledComparison {
+  correspondences: CharterCorrespondence[];
+  differences: CharterDifference[];
+  validation_issues: string[];
+}
+
+interface Route {
+  routed_to: DifferenceRoute;
+  severity: Finding["severity"];
+}
+
+/**
+ * The design's routing table (step 5), keyed on `(dimension, relation, split)`.
+ * The host never picks a route. Non-incompatible records route nowhere except a
+ * covered-channel Presence gap, which routes by the silent channel (Stated silent →
+ * doc rot for the remediator; a code channel silent → a clarification).
+ */
+export function routeDifference(input: {
+  dimension: CharterDifference["dimension"];
+  relation: CharterDifference["relation"];
+  split?: CharterDifference["split"];
+  covered_channel_gap?: boolean;
+  silent?: CharterLaneKind;
+}): Route {
+  const { dimension, relation, split } = input;
+  if (relation !== "incompatible") {
+    if (dimension === "presence" && input.covered_channel_gap === true) {
+      return input.silent === "stated"
+        ? { routed_to: "remediator", severity: "low" }
+        : { routed_to: "clarification", severity: "medium" };
+    }
+    return { routed_to: "none", severity: "info" };
+  }
+  if (!split || split.kind === "three_way") {
+    return { routed_to: "clarification", severity: "high" };
+  }
+  const odd = split.odd;
+  switch (dimension) {
+    case "purpose":
+    case "scope":
+      return odd === "stated"
+        ? { routed_to: "remediator", severity: "low" }
+        : { routed_to: "clarification", severity: "medium" };
+    case "responsibility":
+    case "hierarchy":
+      return { routed_to: "clarification", severity: "medium" };
+    case "standing":
+    case "standard":
+      return { routed_to: "clarification", severity: "medium" };
+    case "presence":
+      return odd === "stated"
+        ? { routed_to: "remediator", severity: "low" }
+        : { routed_to: "clarification", severity: "medium" };
+    default:
+      return { routed_to: "clarification", severity: "medium" };
+  }
+}
+
+/**
+ * Assemble the confirmed correspondences and the difference records from the
+ * comparison submission. Refusals are validation issues, never silent:
+ * - a member naming a node absent from its lane's DAG;
+ * - a `confirm`/`widen` naming an unknown candidate;
+ * - a host-added correspondence (no candidate) with fewer than two evidence refs
+ *   whose PATHS lie in the repo universe, or whose refs are all on one side;
+ * - a difference naming no confirmed correspondence, an account for a lane not in
+ *   that correspondence, an `incompatible` relation without a `split`, or a split
+ *   with a non-incompatible relation.
+ * Ids are content-keyed (member set / correspondence + dimension + gap).
+ */
+export function assembleComparison(
+  submission: CharterComparisonSubmission,
+  params: { candidates: readonly CorrespondenceCandidate[]; graphs: readonly CharterLaneGraph[]; universe: ReadonlySet<string> },
+): AssembledComparison {
+  const validation_issues: string[] = [];
+  const nodeIdsByKind = new Map<CharterLaneKind, Set<string>>(
+    params.graphs.map((g) => [g.kind, new Set(g.nodes.map((n) => n.node_id))]),
+  );
+  const candidateById = new Map(params.candidates.map((c) => [c.candidate_id, c]));
+
+  const correspondences: CharterCorrespondence[] = [];
+  const byInputIndex = new Map<number, string>();
+  const byCandidate = new Map<string, string>();
+  const seenKeys = new Set<string>();
+
+  submission.correspondences.forEach((input, index) => {
+    if (input.verdict === "reject") return;
+    const badMember = input.members.find(
+      (m) => m.node_ids.some((id) => !(nodeIdsByKind.get(m.kind)?.has(id) ?? false)),
+    );
+    if (badMember) {
+      validation_issues.push(
+        `correspondence #${index}: names node(s) absent from the ${badMember.kind} DAG — dropped`,
+      );
+      return;
+    }
+    if (new Set(input.members.map((m) => m.kind)).size < 2) {
+      validation_issues.push(`correspondence #${index}: spans fewer than two lanes — dropped`);
+      return;
+    }
+    let basis: CharterCorrespondence["basis"] = "host";
+    if (input.candidate_id !== undefined) {
+      if (!candidateById.has(input.candidate_id)) {
+        validation_issues.push(
+          `correspondence #${index}: candidate "${input.candidate_id}" is not a tool candidate — dropped`,
+        );
+        return;
+      }
+      basis = "tool";
+    } else {
+      // A host-added correspondence needs two CHECKABLE refs (their paths lie in
+      // the repo universe) on at least two different sides — one per lane it joins.
+      // A ref is attributed to the member whose scope holds its path; a checkable
+      // ref no member scope holds counts, but only as one unattributed side.
+      const sides = new Set<string>();
+      for (const p of input.evidence) {
+        const path = provenancePath(p.ref);
+        if (!params.universe.has(path)) continue;
+        sides.add(ownerOfPath(input.members, params.graphs, path) ?? `unattributed:${path}`);
+      }
+      if (sides.size < 2) {
+        validation_issues.push(
+          `correspondence #${index}: host-added with fewer than two checkable evidence refs on different sides — dropped`,
+        );
+        return;
+      }
+    }
+    const key = memberKey(input.members);
+    if (seenKeys.has(key)) {
+      validation_issues.push(`correspondence #${index}: duplicates an earlier member set — dropped`);
+      return;
+    }
+    seenKeys.add(key);
+    const correspondence_id = `corr-${hashContent(key, { length: 10 })}`;
+    correspondences.push({
+      correspondence_id,
+      members: [...input.members]
+        .map((m) => ({ kind: m.kind, node_ids: [...m.node_ids].sort(compareCodeUnits) }))
+        .sort((a, b) => compareCodeUnits(a.kind, b.kind)),
+      basis,
+      ...(input.candidate_id !== undefined ? { candidate_id: input.candidate_id } : {}),
+      evidence: input.evidence,
+    });
+    byInputIndex.set(index, correspondence_id);
+    if (input.candidate_id !== undefined) byCandidate.set(input.candidate_id, correspondence_id);
+  });
+
+  const corrById = new Map(correspondences.map((c) => [c.correspondence_id, c]));
+  const differences: CharterDifference[] = [];
+  const seenDiff = new Set<string>();
+  submission.differences.forEach((input, index) => {
+    const corrId =
+      typeof input.correspondence === "number"
+        ? byInputIndex.get(input.correspondence)
+        : (byCandidate.get(input.correspondence) ?? (corrById.has(input.correspondence) ? input.correspondence : undefined));
+    const corr = corrId ? corrById.get(corrId) : undefined;
+    if (!corr) {
+      validation_issues.push(
+        `difference #${index}: names no confirmed correspondence (${String(input.correspondence)}) — dropped`,
+      );
+      return;
+    }
+    const lanes = new Set(corr.members.map((m) => m.kind));
+    const stray = input.accounts.find((a) => !lanes.has(a.kind));
+    if (stray) {
+      validation_issues.push(
+        `difference #${index}: carries an account for "${stray.kind}", a lane outside its correspondence — dropped`,
+      );
+      return;
+    }
+    if (input.relation === "incompatible" && !input.split) {
+      validation_issues.push(`difference #${index}: incompatible without a split — dropped`);
+      return;
+    }
+    if (input.relation !== "incompatible" && input.split) {
+      validation_issues.push(`difference #${index}: a split on a ${input.relation} relation — dropped`);
+      return;
+    }
+    if (input.split?.kind === "two_against_one" && !lanes.has(input.split.odd)) {
+      validation_issues.push(
+        `difference #${index}: split names "${input.split.odd}" as the odd channel, which is not in its correspondence — dropped`,
+      );
+      return;
+    }
+    if (input.split?.kind === "three_way" && lanes.size < 3) {
+      validation_issues.push(`difference #${index}: three_way split on a two-lane correspondence — dropped`);
+      return;
+    }
+    const accounts = [...input.accounts].sort((a, b) => compareCodeUnits(a.kind, b.kind));
+    const silent =
+      input.dimension === "presence"
+        ? [...lanes].find((k) => !accounts.some((a) => a.kind === k))
+        : undefined;
+    const route = routeDifference({
+      dimension: input.dimension,
+      relation: input.relation,
+      split: input.split,
+      covered_channel_gap: input.covered_channel_gap,
+      silent,
+    });
+    const difference_id = `diff-${hashContent(`${corr.correspondence_id}|${input.dimension}|${input.gap}`, { length: 10 })}`;
+    if (seenDiff.has(difference_id)) {
+      validation_issues.push(`difference #${index}: duplicates an earlier record — dropped`);
+      return;
+    }
+    seenDiff.add(difference_id);
+    differences.push({
+      difference_id,
+      correspondence_id: corr.correspondence_id,
+      dimension: input.dimension,
+      relation: input.relation,
+      ...(input.split ? { split: input.split } : {}),
+      accounts,
+      gap: input.gap,
+      ...(input.covered_channel_gap !== undefined ? { covered_channel_gap: input.covered_channel_gap } : {}),
+      routed_to: route.routed_to,
+      finding_candidate:
+        input.relation === "incompatible" ||
+        (input.dimension === "presence" && input.covered_channel_gap === true),
+    });
+  });
+
+  correspondences.sort((a, b) => compareCodeUnits(a.correspondence_id, b.correspondence_id));
+  differences.sort((a, b) => compareCodeUnits(a.difference_id, b.difference_id));
+  return { correspondences, differences, validation_issues };
+}
+
+function ownerOfPath(
+  members: readonly { kind: CharterLaneKind; node_ids: readonly string[] }[],
+  graphs: readonly CharterLaneGraph[],
+  path: string,
+): CharterLaneKind | undefined {
+  for (const m of members) {
+    const graph = graphs.find((g) => g.kind === m.kind);
+    if (!graph) continue;
+    for (const id of m.node_ids) {
+      const node = graph.nodes.find((n) => n.node_id === id);
+      if (node?.files?.includes(path)) return m.kind;
+    }
+  }
+  return undefined;
+}
+
+// ── Step 4: fidelity ───────────────────────────────────────────────────────────
+
+/** The fidelity lane's submission: one verdict per difference in its packet. */
+export const CharterFidelitySubmissionSchema = z
+  .object({
+    verdicts: z
+      .array(
+        z
+          .object({
+            difference_id: z.string().min(1),
+            verdict: z.enum(["supported", "interpretation", "unverifiable"]),
+            over_read_side: CharterLaneKindSchema.optional(),
+            rationale: z.string().min(1),
+          })
+          .strict()
+          .superRefine((v, ctx) => {
+            if (v.verdict === "interpretation" && !v.over_read_side) {
+              ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["over_read_side"], message: "an interpretation verdict names the side that over-read" });
+            }
+            if (v.verdict !== "interpretation" && v.over_read_side) {
+              ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["over_read_side"], message: "over_read_side only with an interpretation verdict" });
+            }
+          }),
+      )
+      .default([]),
+  })
+  .strict();
+export type CharterFidelitySubmission = z.infer<typeof CharterFidelitySubmissionSchema>;
+
+/**
+ * The MECHANICAL pre-check (step 4, first half): given, per provenance ref, whether
+ * its quote was found at its ref on disk (`quoteFound(ref, quote)` — the ingest reads
+ * the files; this module never does), stamp `unverifiable` (decided_by `tool`) on
+ * every finding candidate that has a side whose cited quote is absent. Records with
+ * every quote present are left for the lane. Returns the differences with the tool
+ * verdicts stamped, plus the ids still owed a lane verdict.
+ */
+export function precheckFidelity(
+  differences: readonly CharterDifference[],
+  quoteFound: (provenance: CharterProvenance) => boolean | undefined,
+): { differences: CharterDifference[]; pendingLane: string[] } {
+  const pendingLane: string[] = [];
+  const stamped = differences.map((d) => {
+    if (!d.finding_candidate) return d;
+    const missing = d.accounts.flatMap((a) =>
+      a.provenance
+        .filter((p) => p.quote !== undefined && quoteFound(p) === false)
+        .map((p) => `${a.kind}: ${p.ref}`),
+    );
+    if (missing.length > 0) {
+      const verdict: FidelityVerdict = {
+        verdict: "unverifiable",
+        rationale: `cited quote not found at ${missing.sort(compareCodeUnits).join("; ")}`,
+        decided_by: "tool",
+      };
+      return { ...d, fidelity: verdict };
+    }
+    pendingLane.push(d.difference_id);
+    return d;
+  });
+  return { differences: stamped, pendingLane: pendingLane.sort(compareCodeUnits) };
+}
+
+/**
+ * Stamp the lane's verdicts (step 4, second half). A verdict naming an unknown
+ * difference, or a difference the tool already settled, is a validation issue; a
+ * finding candidate left without any verdict stays pending (never assumed
+ * `supported`).
+ */
+export function applyFidelity(
+  differences: readonly CharterDifference[],
+  submission: CharterFidelitySubmission,
+): { differences: CharterDifference[]; validation_issues: string[]; still_pending: string[] } {
+  const validation_issues: string[] = [];
+  const byId = new Map(differences.map((d) => [d.difference_id, d]));
+  const verdicts = new Map<string, FidelityVerdict>();
+  for (const v of submission.verdicts) {
+    const d = byId.get(v.difference_id);
+    if (!d) {
+      validation_issues.push(`fidelity verdict for unknown difference "${v.difference_id}" — dropped`);
+      continue;
+    }
+    if (d.fidelity?.decided_by === "tool") {
+      validation_issues.push(
+        `fidelity verdict for "${v.difference_id}" ignored — the tool pre-check already settled it as unverifiable`,
+      );
+      continue;
+    }
+    if (verdicts.has(v.difference_id)) {
+      validation_issues.push(`duplicate fidelity verdict for "${v.difference_id}" — kept the first`);
+      continue;
+    }
+    verdicts.set(v.difference_id, {
+      verdict: v.verdict,
+      ...(v.over_read_side ? { over_read_side: v.over_read_side } : {}),
+      rationale: v.rationale,
+      decided_by: "lane",
+    });
+  }
+  const stamped = differences.map((d) => {
+    const v = verdicts.get(d.difference_id);
+    return v ? { ...d, fidelity: v } : d;
+  });
+  const still_pending = stamped
+    .filter((d) => d.finding_candidate && !d.fidelity)
+    .map((d) => d.difference_id)
+    .sort(compareCodeUnits);
+  return { differences: stamped, validation_issues, still_pending };
+}
+
+// ── Step 5: findings (leads) ───────────────────────────────────────────────────
+
+/**
+ * Surface every `supported` finding candidate as a Finding LEAD (leads-not-verdicts).
+ * `affected_files` = the union of the corresponding nodes' scopes (the report's
+ * grouping evidence); `confidence` = the weakest account's source confidence.
+ */
+export function differenceFindings(
+  differences: readonly CharterDifference[],
+  correspondences: readonly CharterCorrespondence[],
+  graphs: readonly CharterLaneGraph[],
+): Finding[] {
+  const corrById = new Map(correspondences.map((c) => [c.correspondence_id, c]));
+  const findings: Finding[] = [];
+  for (const d of differences) {
+    if (!d.finding_candidate || d.fidelity?.verdict !== "supported") continue;
+    const corr = corrById.get(d.correspondence_id);
+    const files = new Set<string>();
+    let weakest: "high" | "medium" | "low" = "high";
+    for (const m of corr?.members ?? []) {
+      const graph = graphs.find((g) => g.kind === m.kind);
+      for (const id of m.node_ids) {
+        const node = graph?.nodes.find((n) => n.node_id === id);
+        for (const f of node?.files ?? []) files.add(f);
+        if (node && rank(node.confidence) < rank(weakest)) weakest = node.confidence;
+      }
+    }
+    const route = routeDifference({
+      dimension: d.dimension,
+      relation: d.relation,
+      split: d.split,
+      covered_channel_gap: d.covered_channel_gap,
+    });
+    findings.push({
+      id: d.difference_id,
+      title: `Charter ${d.dimension} difference (${describeSplit(d)})`,
+      category: `charter_difference:${d.dimension}`,
+      severity: route.severity,
+      confidence: weakest,
+      lens: "architecture",
+      summary: `${d.gap} ${d.accounts.map((a) => `[${a.kind}] ${a.claim}`).join(" ")}`,
+      affected_files: [...files].sort(compareCodeUnits).map((path) => ({ path })),
+      systemic: true,
+    });
+  }
+  return findings.sort((a, b) => compareCodeUnits(a.id, b.id));
+}
+
+function rank(c: "high" | "medium" | "low"): number {
+  return c === "high" ? 2 : c === "medium" ? 1 : 0;
+}
+
+function describeSplit(d: CharterDifference): string {
+  if (!d.split) return d.relation;
+  return d.split.kind === "three_way" ? "three-way" : `${d.split.odd} against the rest`;
 }

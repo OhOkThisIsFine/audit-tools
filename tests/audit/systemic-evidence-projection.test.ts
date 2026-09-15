@@ -34,47 +34,66 @@ test("systemic challenge receives charter projection, actual findings, and conce
       generated_at: "now",
       target: "charter",
       ceiling: { rung: "deep" },
-      subsystems: [
+      lanes: [
         {
-          node_id: "subsystem-1",
-          members: ["src/a.ts"],
-          charters: [
+          kind: "stated",
+          nodes: [
             {
-              charter_id: "stated-1",
-              kind: "stated",
+              node_id: "stated-1",
               purpose: "Keep one resumable core",
+              premise_height: 0,
+              files: ["src/a.ts"],
               provenance: [],
               confidence: "high",
             },
           ],
-          teleologies: {},
+          edges: [],
+        },
+        {
+          kind: "revealed",
+          nodes: [
+            {
+              node_id: "revealed-1",
+              purpose: "Run two independent cores",
+              premise_height: 0,
+              files: ["src/a.ts"],
+              provenance: [],
+              confidence: "high",
+            },
+          ],
+          edges: [],
         },
       ],
-      goal_graph: {
-        nodes: [
-          { node_id: "goal-1", premise_height: 0, statement: "One core" },
-        ],
-        edges: [],
-      },
-      deltas: [
+      candidates: [],
+      correspondences: [
         {
-          delta_id: "delta-1",
-          node_id: "subsystem-1",
-          pair: ["stated", "revealed"],
-          kind: "says_does_drift",
+          correspondence_id: "corr-1",
+          members: [
+            { kind: "stated", node_ids: ["stated-1"] },
+            { kind: "revealed", node_ids: ["revealed-1"] },
+          ],
+          basis: "tool",
+          evidence: [],
+        },
+      ],
+      differences: [
+        {
+          difference_id: "difference-1",
+          correspondence_id: "corr-1",
+          dimension: "purpose",
+          relation: "incompatible",
+          split: { kind: "two_against_one", odd: "revealed" },
+          accounts: [
+            { kind: "stated", claim: "Keep one resumable core", provenance: [] },
+            { kind: "revealed", claim: "Run two independent cores", provenance: [] },
+          ],
+          gap: "Two mechanisms contradict the one-core goal",
           routed_to: "remediator",
-          summary: "Two mechanisms contradict the one-core goal",
+          finding_candidate: true,
+          fidelity: { verdict: "supported", rationale: "both sources say so", decided_by: "lane" },
         },
       ],
       findings: [],
-      triangulated: [
-        {
-          node_id: "subsystem-1",
-          telos: "Keep one resumable core",
-          confidence: "high",
-        },
-      ],
-      disagreement: [],
       validation_issues: [],
       ...REGISTER_V4_AFFIRMATION,
     },
@@ -156,9 +175,9 @@ test("systemic challenge receives charter projection, actual findings, and conce
 
   expect(prompt).toContain("Collapse duplicate state");
   expect(prompt).toContain("Keep one resumable core");
-  expect(prompt).toContain("goal_graph");
-  expect(prompt).toContain("delta-1");
-  expect(prompt).toContain("triangulated");
+  expect(prompt).toContain("Run two independent cores");
+  expect(prompt).toContain("difference-1");
+  expect(prompt).toContain("correspondences");
   expect(prompt).toContain("candidate_dispositions");
   expect(prompt).toContain("contribution_percent");
   // The adversary challenges the round's OUTCOME, so it must see the round's own

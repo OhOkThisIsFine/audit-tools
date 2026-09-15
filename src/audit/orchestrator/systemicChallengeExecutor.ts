@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/systemic-evidence-projection.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type {
@@ -227,7 +228,10 @@ export function runSystemicChallengeExecutor(
     prior: priorFindings,
     submitted: submission.findings,
     round: roundNumber,
-    goalGraph: bundle.charter_register?.goal_graph,
+    // Three lane DAGs, unmerged (design of record 2026-09-15): the blast-radius
+    // substrate is their UNION with lane-prefixed ids, so a finding's node reach is
+    // read on the graph that carries it and ids never collide across lanes.
+    goalGraph: laneGoalGraphUnion(bundle),
     repoManifest: bundle.repo_manifest,
   });
 
@@ -332,5 +336,26 @@ export function runSystemicChallengeExecutor(
         (folded.dry
           ? " — quiet round; the loop converges after the next consecutive quiet round."
           : `, ${folded.findings.length} total; loop continues.`)),
+  };
+}
+
+/**
+ * The blast-radius substrate for systemic findings: the three lane goal DAGs
+ * UNIONED with lane-prefixed ids (`<kind>:<node_id>`), so a node reach is read on
+ * the graph that carries it and ids never collide across lanes. `undefined` when
+ * no charter register exists (blast falls back to the intrinsic tier).
+ */
+function laneGoalGraphUnion(
+  bundle: ArtifactBundle,
+): { nodes: { node_id: string; premise_height: number; statement: string }[]; edges: { from: string; to: string }[] } | undefined {
+  const lanes = bundle.charter_register?.lanes;
+  if (!lanes || lanes.length === 0) return undefined;
+  return {
+    nodes: lanes.flatMap((lane) =>
+      lane.nodes.map((n) => ({ node_id: `${lane.kind}:${n.node_id}`, premise_height: n.premise_height, statement: n.purpose })),
+    ),
+    edges: lanes.flatMap((lane) =>
+      lane.edges.map((e) => ({ from: `${lane.kind}:${e.from}`, to: `${lane.kind}:${e.to}` })),
+    ),
   };
 }

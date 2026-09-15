@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/executor-registry-sync.test.ts
 // Where each audit executor actually writes — the EXTRACTION side of the
 // executor→artifact producer relation.
 //
@@ -102,15 +103,21 @@ export const EXECUTOR_WRITE_SITES = [
     rule: "runnerWriteSet",
   },
   {
-    executor: "charter_delta_executor",
-    file: "src/audit/orchestrator/charterDeltaExecutor.ts",
-    scope: "runCharterDeltaExecutor",
+    executor: "charter_comparison_executor",
+    file: "src/audit/orchestrator/charterComparisonExecutor.ts",
+    scope: "runCharterComparisonExecutor",
     rule: "runnerWriteSet",
   },
   {
     executor: "charter_extraction_executor",
     file: "src/audit/orchestrator/charterExtractionExecutor.ts",
     scope: "runCharterExtractionExecutor",
+    rule: "runnerWriteSet",
+  },
+  {
+    executor: "charter_fidelity_executor",
+    file: "src/audit/orchestrator/charterFidelityExecutor.ts",
+    scope: "runCharterFidelityExecutor",
     rule: "runnerWriteSet",
   },
   {

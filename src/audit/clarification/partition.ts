@@ -1,103 +1,81 @@
-// Phase D — D2: PARTITION routed charter deltas into charter-alignment questions.
+// sites-pinned: tests/audit/charter-clarification.test.ts
+// Phase D — D2: PARTITION verified charter differences into n-ary questions.
 //
-// The charter layer (Phase C) produces routed + gated CharterDeltas. The
-// triangulation loop turns each delta ROUTED TO clarification (or human) into a
-// decidable, symmetric question — not "what do you want?" but "your code optimizes
-// X, your docs say Y, they collide at this seam — which governs?" (design of record
-// spec/conceptual-design-review-design.md §"The triangulation loop"). Questions are
-// SYMMETRIC: any of the four charters may move, including Stated, and "leave open"
-// is a first-class answer — so the question text never anoints a side.
+// The charter layer produces routed, fidelity-stamped difference records. The
+// triangulation loop turns each record ROUTED TO clarification (or human) and
+// verified `supported` into a decidable, symmetric, n-ary question — not "what do
+// you want?" but "the stated, structural and revealed accounts of this goal
+// collide on <dimension>; which governs?" (design of record
+// spec/conceptual-design-review-design.md §"The triangulation loop"). Questions
+// show EVERY account in the correspondence; any may move, including Stated.
 //
-// PURE + deterministic + language-neutral: operates on the abstract delta list +
-// goal graph, no IO, no LLM. The blast radius (via the D1 primitive) and the
-// cascade count (how many OTHER deltas share this subsystem) are the VOI axes the
-// downstream queue ranks on. Exported for phase-e reuse.
+// PURE + deterministic + language-neutral.
 
-import type {
-  CharterDelta,
-  CharterClarificationRequest,
-  GoalGraph,
-} from "audit-tools/shared";
-import { compareCodeUnits } from "audit-tools/shared";
-import { deltaBlastRadius } from "./blastRadius.js";
+import type { CharterDifferenceQuestion, CharterLaneGraph } from "audit-tools/shared";
+import { compareCodeUnits, sourcesQuestion } from "audit-tools/shared";
+import type { ClarificationDifferenceInput } from "audit-tools/shared";
+import { differenceBlastRadius } from "./blastRadius.js";
 
-/** A routed delta joined to the subsystem node it belongs to. */
-export interface DeltaWithNode {
-  delta: CharterDelta;
-  node_id: string;
-  /** The goal-graph node id for this subsystem, when the host linked one. */
-  goal_node_id?: string;
+function describeSplit(q: Pick<CharterDifferenceQuestion, "split" | "relation">): string {
+  if (!q.split) return q.relation;
+  return q.split.kind === "three_way" ? "three-way" : `${q.split.odd} against the rest`;
 }
 
 /**
- * A delta is CLARIFICATION-SOURCING when it routes to `clarification` (an
- * architecture betrayed by its implementation — which account governs?) or
- * `human` (a wrong-goal provocation, or a low-confidence delta forced to the
- * human channel). A `remediator`-routed delta (says/does drift, doc rot) is NOT
- * a charter question — it is a fix, handled by the remediator, so it never
- * enters the attention queue.
+ * Frame a difference's symmetric decidable question. The accounts are held in
+ * tension without anointing any; the gap carries the seam. Mechanical (never an
+ * LLM call) so the question text is reproducible from the record alone.
  */
-function sourcesQuestion(delta: CharterDelta): boolean {
-  return delta.routed_to === "clarification" || delta.routed_to === "human";
-}
-
-/**
- * Frame a routed delta's symmetric decidable question. The two charter kinds are
- * held in tension without anointing either; the summary carries the seam. Kept
- * mechanical (never an LLM call) so the question text is reproducible from the
- * delta alone.
- */
-function frameQuestion(delta: CharterDelta): string {
-  const [a, b] = delta.pair;
+function frameQuestion(input: ClarificationDifferenceInput): string {
+  const d = input.difference;
+  const kinds = d.accounts.map((a) => `**${a.kind}**`).join(", ");
+  const accounts = d.accounts.map((a) => `[${a.kind}] ${a.claim}`).join(" ");
   return (
-    `The **${a}** and **${b}** charters collide here: ${delta.summary} ` +
-    `Which governs — the ${a} side, the ${b} side, a rewrite of both to a third ` +
-    `thing, or is this a deliberate held tension (leave open)?`
+    `The ${kinds} accounts collide on ${d.dimension} (${describeSplit(d)}): ${d.gap} ${accounts} ` +
+    `Which account governs — or should all of them be rewritten to a third thing, or is this a deliberate held tension (leave open)?`
   );
 }
 
 /**
- * Partition the routed deltas into charter-alignment questions. Every
- * clarification/human-routed delta becomes one open `CharterClarificationRequest`
- * with its VOI axes computed:
- *   - `blast_radius` from the goal DAG (falling back to the delta kind's intrinsic
- *     tier when the subsystem is not linked to a goal node);
- *   - `cascade_count` = the number of OTHER question-sourcing deltas in the same
- *     subsystem (answering one charter question there is expected to settle its
- *     siblings), so a subsystem thick with deltas ranks its questions higher.
- *
- * `disposition` is left `interactive` here; the D1 risk gate downgrades high-blast
+ * Partition the verified differences into charter questions. Every
+ * clarification/human-routed, supported difference becomes one open question with
+ * its VOI axes:
+ *   - `blast_radius` = the maximum parent-closure reach over the corresponding
+ *     nodes across the three lane graphs (floored at the dimension's tier);
+ *   - `cascade_count` = the number of OTHER question-sourcing differences on the
+ *     same correspondence (answering one is expected to settle its siblings).
+ * `disposition` is left `interactive`; the risk gate downgrades high-blast
  * questions that have not cleared the adversarial bar. Output is sorted by
- * `request_id` (content-derived, stable) so the register never churns on input
- * order. Deterministic: same deltas + same graph → same questions.
+ * `request_id` (content-derived, stable).
  */
-export function partitionDeltasToQuestions(
-  deltas: DeltaWithNode[],
-  goalGraph: GoalGraph,
-): CharterClarificationRequest[] {
-  const sourcing = deltas.filter((d) => sourcesQuestion(d.delta));
-
-  // cascade_count: other sourcing deltas per subsystem.
-  const perNode = new Map<string, number>();
-  for (const d of sourcing) {
-    perNode.set(d.node_id, (perNode.get(d.node_id) ?? 0) + 1);
+export function partitionDifferencesToQuestions(
+  inputs: readonly ClarificationDifferenceInput[],
+  graphs: readonly CharterLaneGraph[],
+): CharterDifferenceQuestion[] {
+  const sourcing = inputs.filter((i) => sourcesQuestion(i.difference));
+  const perCorrespondence = new Map<string, number>();
+  for (const i of sourcing) {
+    const key = i.difference.correspondence_id;
+    perCorrespondence.set(key, (perCorrespondence.get(key) ?? 0) + 1);
   }
-
-  const requests = sourcing.map((d): CharterClarificationRequest => {
-    const siblings = (perNode.get(d.node_id) ?? 1) - 1;
+  const requests = sourcing.map((input): CharterDifferenceQuestion => {
+    const d = input.difference;
+    const siblings = (perCorrespondence.get(d.correspondence_id) ?? 1) - 1;
     return {
-      request_id: `${d.delta.delta_id}:q`,
-      delta_id: d.delta.delta_id,
-      node_id: d.node_id,
-      pair: d.delta.pair,
-      question: frameQuestion(d.delta),
+      request_id: `${d.difference_id}:q`,
+      difference_id: d.difference_id,
+      ...(input.subsystem_id ? { subsystem_id: input.subsystem_id } : {}),
+      dimension: d.dimension,
+      relation: d.relation,
+      ...(d.split ? { split: d.split } : {}),
+      accounts: d.accounts,
+      question: frameQuestion(input),
       value: {
-        blast_radius: deltaBlastRadius(goalGraph, d.goal_node_id, d.delta.kind),
+        blast_radius: differenceBlastRadius(d, input.correspondence, graphs),
         cascade_count: Math.max(0, siblings),
       },
       disposition: "interactive",
     };
   });
-
   return requests.sort((a, b) => compareCodeUnits(a.request_id, b.request_id));
 }

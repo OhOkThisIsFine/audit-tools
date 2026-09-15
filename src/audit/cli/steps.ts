@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -22,7 +23,8 @@ export const StepKindSchema = z.enum([
   "design_review_contract",
   "design_review_conceptual",
   "charter_extraction",
-  "charter_delta",
+  "charter_comparison",
+  "charter_fidelity",
   "charter_clarification",
   "systemic_challenge",
   "confirm_intent",

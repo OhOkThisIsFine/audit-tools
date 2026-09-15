@@ -1,51 +1,38 @@
+// sites-pinned: tests/shared/prompt-renders-its-contract.test.ts, tests/audit/charter-clarification.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
-import type { CharterClarificationRequest, Ceiling } from "audit-tools/shared";
+import type { CharterDifferenceQuestion, Ceiling } from "audit-tools/shared";
 
 /**
- * Render the charter-clarification host prompt (Phase D). The tool has already run
- * the deterministic triangulation loop — partition → VOI-rank → risk-gate → split
- * by attention — and surfaces the top of the VOI queue here. The host's job is only
- * to relay each SYMMETRIC question to the user and record the answer (any charter
- * may move, including Stated; "leave open" is first-class), then write the answers
- * back. Nothing here anoints a side; the tool never asked "shall we fix the code?"
- * (design of record spec/conceptual-design-review-design.md §"The triangulation
- * loop"). Only reached at a `deep`+ ceiling WITH attention > 0 and ≥1 interactive
- * question; a shallow ceiling or zero attention runs autonomously with no host turn.
+ * Render the charter-clarification host prompt (Phase D; approved host text:
+ * docs/reviews/prompt-refinement-2026-09-13.md §10). The tool has already run the
+ * deterministic loop and surfaces the top of the VOI queue. The host relays each
+ * n-ary question — every account in the correspondence, side by side, with its
+ * citation — and records one answer: the governing channel, a rewrite of all, or
+ * leave open. Only reached at a `deep`+ ceiling WITH attention > 0.
  */
 export function renderCharterClarificationPrompt(
   bundle: ArtifactBundle,
   opts: { answersPath: string; continueCommand: string; ceiling: Ceiling },
 ): string {
-  const asked: CharterClarificationRequest[] =
-    bundle.charter_clarification?.asked ?? [];
-  // The miner's unified opinion per subsystem + the tool-counted disagreement
-  // density — context the user REACTS to when answering (the telos is a lead,
-  // never the verdict; the deltas under question are what carries authority).
-  const register = bundle.charter_register;
-  const telosByNode = new Map(
-    (register?.triangulated ?? []).map((t) => [t.node_id, t]),
-  );
-  const disagreementByNode = new Map<string, string[]>();
-  for (const d of register?.disagreement ?? []) {
-    const list = disagreementByNode.get(d.node_id) ?? [];
-    list.push(`${d.pair[0]}↔${d.pair[1]}: ${d.count}`);
-    disagreementByNode.set(d.node_id, list);
-  }
+  const asked: CharterDifferenceQuestion[] = bundle.charter_clarification?.asked ?? [];
 
   const questionBlocks = asked.length
     ? asked.flatMap((q, i) => {
-        const telos = telosByNode.get(q.node_id);
-        const density = disagreementByNode.get(q.node_id);
+        const split = !q.split
+          ? q.relation
+          : q.split.kind === "three_way"
+            ? "three_way"
+            : `two_against_one: ${q.split.odd}`;
+        const subsystem = q.subsystem_id ? `subsystem \`${q.subsystem_id}\` · ` : "";
         return [
-          `### Q${i + 1} — subsystem \`${q.node_id}\` (${q.pair[0]} ↔ ${q.pair[1]})`,
+          `### Q${i + 1} — ${subsystem}${q.dimension} · ${q.relation} · ${split}`,
           `- request_id: \`${q.request_id}\``,
           `- blast radius: ${q.value.blast_radius}; cascade: ${q.value.cascade_count}`,
-          ...(telos
-            ? [
-                `- unified opinion (triangulated telos, ${telos.confidence} confidence — REACT to it, it is not a verdict): ${telos.telos}`,
-              ]
-            : []),
-          ...(density ? [`- channel disagreement (deltas per pair): ${density.join("; ")}`] : []),
+          ...q.accounts.map((a) => {
+            const cite = a.provenance[0];
+            const ref = cite ? ` — \`${cite.ref}\`${cite.quote ? ` "${cite.quote}"` : ""}` : "";
+            return `- **${a.kind}** says: ${a.claim}${ref}`;
+          }),
           "",
           q.question,
           "",
@@ -54,38 +41,37 @@ export function renderCharterClarificationPrompt(
     : ["- (no interactive questions this round — nothing to ask)"];
 
   return [
-    "# Design review — charter clarification (triangulation loop)",
+    "# Design review — charter clarification",
     "",
-    "The tool has mined the charter deltas into decidable, VOI-ranked questions and",
-    "surfaces the highest-leverage ones below. Each is **symmetric**: any charter",
-    "may move — **including Stated** — so do NOT frame this as \"where does",
-    "your code violate your intent, shall we fix the code?\" That silently anoints",
-    "Stated as ground truth and throws away the True-charter payload. Where a",
-    "subsystem carries a **triangulated telos**, it is the miner's unified opinion",
-    "for the user to react to — useful context, never the answer.",
+    "Below are this run's highest-leverage charter questions, pre-ranked. Each comes from a verified",
+    "difference between accounts of the same goal. Any account may move — including what the docs",
+    "state — so never frame a question as \"your code violates your intent, shall we fix the code?\"",
     "",
     "Relay each question to the user and record ONE answer per question:",
-    "- `this_side_wins` — the FIRST charter in the pair governs.",
-    "- `that_side_wins` — the SECOND charter in the pair governs.",
-    "- `rewrite_both` — neither as-is; both rewrite to a third thing.",
-    "- `leave_open` — a deliberate held tension (a first-class decision, not a failure).",
     "",
-    "## Questions (VOI-ranked, highest-leverage first)",
+    "- `governs: <channel>` — that channel's account governs; the others move to match.",
+    "- `rewrite_all` — none as-is; the accounts rewrite to a third thing.",
+    "- `leave_open` — a deliberate held tension (a decision, not a failure).",
+    "",
+    "## Questions",
+    "",
     ...questionBlocks,
     "## Output",
-    `Write the answers as JSON to \`${opts.answersPath}\` with this shape:`,
+    "",
+    `Write the answers as JSON to \`${opts.answersPath}\`:`,
     "",
     "```json",
     "{",
     '  "answers": [',
-    '    { "request_id": "<one of the request_ids above>",',
-    '      "answer": "this_side_wins|that_side_wins|rewrite_both|leave_open" }',
+    '    { "request_id": "<one of the request_ids above>", "answer": { "governs": "stated | structural | revealed" } },',
+    '    { "request_id": "<one of the request_ids above>", "answer": "rewrite_all" },',
+    '    { "request_id": "<one of the request_ids above>", "answer": "leave_open" }',
     "  ]",
     "}",
     "```",
     "",
-    "The user may tap out mid-loop — the loop is interruptible; bank what is resolved",
-    "and leave the rest open. When the answers are written, run:",
+    "If the user stops mid-loop, write answers for what is resolved and leave the rest unanswered",
+    "(unanswered questions stay `leave_open`). When the answers are written, run:",
     "",
     `  ${opts.continueCommand}`,
     "",

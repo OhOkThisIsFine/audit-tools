@@ -1,4 +1,4 @@
-import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 /**
  * N-A08: Audit pipeline integration tests.
  *
@@ -119,14 +119,7 @@ function makePostDesignAssessmentBundle(opts: PostDesignAssessmentOptions = {}):
       target: "charter",
       ceiling: { rung: "shallow" },
       status: "omitted",
-      subsystems: [],
-      goal_graph: { nodes: [], edges: [] },
-      deltas: [],
-      findings: [],
-      triangulated: [],
-      disagreement: [],
-      validation_issues: [],
-      ...REGISTER_V4_AFFIRMATION,
+      ...EMPTY_REGISTER_BODY,
     },
     // Phase D charter-clarification triangulation loop: an omitted (shallow-ceiling)
     // register so charter_clarification_current is satisfied and the planning
@@ -142,7 +135,6 @@ function makePostDesignAssessmentBundle(opts: PostDesignAssessmentOptions = {}):
       banked: [],
       findings: [],
       validation_issues: [],
-      refused_issues: [],
       ...REGISTER_V4_AFFIRMATION,
     },
     // Phase E systemic challenge loop: an omitted (shallow-ceiling) register so

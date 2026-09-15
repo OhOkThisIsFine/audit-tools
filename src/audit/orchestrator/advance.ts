@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { randomUUID } from "node:crypto";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
@@ -98,7 +99,11 @@ export function engineMaxTransitions(cap: number = MAX_DRAIN_STEPS): number {
  */
 const SLICE_PARTICIPANT_PRODUCERS: Readonly<Record<string, readonly string[]>> = {
   // Written by the extraction pass and again by the independent delta-miner.
-  "charter_register.json": ["charter_extraction_current", "charter_delta_current"],
+  "charter_register.json": [
+    "charter_extraction_current",
+    "charter_comparison_current",
+    "charter_fidelity_current",
+  ],
   "structure_decomposition.json": ["structure_decomposition_current"],
   "repo_manifest.json": ["repo_manifest"],
   // Written by the structure pass and again by graph enrichment.

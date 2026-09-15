@@ -1,5 +1,4 @@
-// sites-pinned: none — the only change here is comment text on the ingest
-// catch in `runHostDelegationObligation`; the catch's behaviour is unchanged.
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 /**
  * Extracted helpers for the next-step command.
  *
@@ -47,7 +46,11 @@ import {
   laneAssetsDir,
   promotedAuditReportPath,
 } from "audit-tools/shared";
-import type { CharterKind, CharterSubmission } from "audit-tools/shared";
+import type {
+  CharterKind,
+  CharterLaneSubmission,
+  CharterExtractionMerged,
+} from "audit-tools/shared";
 import { charterExtractionKindsForCeiling } from "./charterExtractionPrompt.js";
 import { archiveCharterPackets } from "../orchestrator/charterPacketArchive.js";
 import {
@@ -317,7 +320,8 @@ export type NextStepResult = (
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "charter_extraction"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "charter_delta"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "charter_comparison"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "charter_fidelity"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "charter_clarification"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "systemic_challenge"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
@@ -362,7 +366,8 @@ const NEXT_STEP_RETURN_KIND_TABLE: Readonly<
   design_review_contract: true,
   design_review_conceptual: true,
   charter_extraction: true,
-  charter_delta: true,
+  charter_comparison: true,
+  charter_fidelity: true,
   charter_clarification: true,
   systemic_challenge: true,
   confirm_intent: true,
@@ -1668,7 +1673,8 @@ type CriticalFlowFallbackBranchResult = OmittableGateAction<"critical_flow_fallb
 type IntentEquivalenceBranchResult = OmittableGateAction<"intent_equivalence">;
 type SynthesisNarrativeBranchResult = OmittableGateAction<"synthesis_narrative">;
 type CharterExtractionBranchResult = OmittableGateAction<"charter_extraction">;
-type CharterDeltaBranchResult = OmittableGateAction<"charter_delta">;
+type CharterComparisonBranchResult = OmittableGateAction<"charter_comparison">;
+type CharterFidelityBranchResult = OmittableGateAction<"charter_fidelity">;
 type CharterClarificationBranchResult = OmittableGateAction<"charter_clarification">;
 type SystemicChallengeBranchResult = OmittableGateAction<"systemic_challenge">;
 
@@ -1943,21 +1949,20 @@ export async function handleCharterExtractionBranch(
   if (charterExtractionOmits(bundle)) {
     return { action: "run_omit" };
   }
-  // Per-kind blind lanes (design resolution 2): one submission file per kind,
-  // each validated at THIS chokepoint — schema shape + kind purity (a lane may
-  // only carry its own kind; anything else is a mis-routed submission) + scope
-  // grounding (design resolution 4: every teleology node's file scope must be
-  // repo paths — a lane citing files the repo does not contain is refused
-  // whole, naming them, never silently narrowed). An invalid lane is
-  // quarantined loudly and the step re-emits naming it; valid lanes stay on
-  // disk untouched (K-of-N resume), and only when EVERY lane is present and
-  // valid does the tool merge them into the single submission the executor
-  // ingests (`assembleCharters` joins teleologies by file-set overlap).
+  // Per-kind blind lanes (design resolution 2): one goal-DAG submission file per
+  // kind, each validated at THIS chokepoint — schema shape + kind purity (a lane
+  // may only carry its own kind; anything else is a mis-routed submission). An
+  // invalid lane is quarantined loudly and the step re-emits naming it; valid
+  // lanes stay on disk untouched (K-of-N resume), and only when EVERY lane is
+  // present and valid does the tool merge them into the single submission the
+  // executor ingests (`assembleLaneGraph` per lane: cycles refused, levels
+  // derived, scopes grounded against the repo universe with every unknown file
+  // named — never silently narrowed).
   const kinds = charterExtractionKindsForCeiling(ceiling);
   const universe = new Set(
     (bundle.repo_manifest?.files ?? []).map((file) => file.path),
   );
-  const laneValues = new Map<CharterKind, { value: CharterSubmission; path: string }>();
+  const laneValues = new Map<CharterKind, { value: CharterLaneSubmission; path: string }>();
   let quarantinedAny = false;
   for (const kind of kinds) {
     const lane = charterExtractionLane(kind);
@@ -1978,7 +1983,7 @@ export async function handleCharterExtractionBranch(
     }
     const parsed = charterLaneSchema(kind, universe).safeParse(incoming.value);
     if (parsed.success) {
-      laneValues.set(kind, { value: parsed.data as CharterSubmission, path: incoming.path });
+      laneValues.set(kind, { value: parsed.data as CharterLaneSubmission, path: incoming.path });
     } else {
       quarantinedAny = true;
       await quarantineMisshapedSubmission(
@@ -1997,8 +2002,8 @@ export async function handleCharterExtractionBranch(
     // applies only WHILE lanes are pending. Leaving consumed lane files behind
     // would make a later staleness-triggered re-extraction read them as fresh
     // results and silently skip re-authoring.
-    const merged: CharterSubmission = {
-      nodes: kinds.flatMap((kind) => laneValues.get(kind)!.value.nodes),
+    const merged: CharterExtractionMerged = {
+      lanes: kinds.map((kind) => laneValues.get(kind)!.value),
     };
     // The merged submission is TOOL-written, so it lives with the other lane
     // assets rather than under `submissions/` (which holds only what a host
@@ -2055,41 +2060,73 @@ export async function handleCharterExtractionBranch(
 }
 
 /**
- * Handle the `charter_delta_executor` submission-polling block (Phase C.2 —
- * the INDEPENDENT delta-miner). Mirrors the charter-extraction branch:
- *   - a pending `charter_delta` lane submission → route+gate it via the preferred
- *     executor (ingest), then `continue`;
- *   - otherwise, when the register is NOT `deltas_pending` (extraction omitted, or
- *     found no subsystems to mine) → `run_omit` (the deterministic executor settles
- *     the register — no host turn);
- *   - a `deltas_pending` register with no submission yet → `return` the host step
- *     that renders the charter-delta prompt for the independent miner.
+ * Handle the `charter_comparison_executor` submission-polling block (steps 2–3
+ * — the comparison reader). Mirrors the charter-extraction branch:
+ *   - a pending `charter_comparison` lane submission → assemble + pre-check it
+ *     via the preferred executor (ingest), then `continue`;
+ *   - otherwise, when the register is NOT `comparison_pending` → `run_omit`;
+ *   - a `comparison_pending` register with no submission yet → `return` the host
+ *     step that renders the comparison prompt.
  */
-export async function handleCharterDeltaBranch(
+export async function handleCharterComparisonBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
-): Promise<CharterDeltaBranchResult> {
-  return runOmittableGate<unknown, "charter_delta">(
+): Promise<CharterComparisonBranchResult> {
+  return runOmittableGate<unknown, "charter_comparison">(
     {
-      kind: "charter_delta",
-      lane: GATE_LANES.charter_delta,
-      schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.charter_delta]!,
+      kind: "charter_comparison",
+      lane: GATE_LANES.charter_comparison,
+      schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.charter_comparison]!,
       apply: (_value, path, p, foldBundle) =>
         runAuditStepUnlocked(
           {
             root: p.root,
             artifactsDir: p.artifactsDir,
-            preferredExecutor: "charter_delta_executor",
-            charterDeltaSubmissionPath: path,
+            preferredExecutor: "charter_comparison_executor",
+            charterComparisonSubmissionPath: path,
             scopeIndexMemo: p.scopeIndexMemo,
           },
           foldBundle,
         ),
-      // Nothing to mine (extraction omitted or no subsystems): settle
-      // deterministically, no host turn.
-      shouldOmit: (b) => !(b.charter_register?.deltas_pending === true),
+      shouldOmit: (b) => !(b.charter_register?.comparison_pending === true),
+    },
+    params,
+    bundle,
+    state,
+    tx,
+  );
+}
+
+/**
+ * Handle the `charter_fidelity_executor` submission-polling block (step 4 — the
+ * separate fidelity lane). Same three arms as the comparison branch, keyed on
+ * `fidelity_pending`.
+ */
+export async function handleCharterFidelityBranch(
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+  tx: FoldTransaction,
+): Promise<CharterFidelityBranchResult> {
+  return runOmittableGate<unknown, "charter_fidelity">(
+    {
+      kind: "charter_fidelity",
+      lane: GATE_LANES.charter_fidelity,
+      schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.charter_fidelity]!,
+      apply: (_value, path, p, foldBundle) =>
+        runAuditStepUnlocked(
+          {
+            root: p.root,
+            artifactsDir: p.artifactsDir,
+            preferredExecutor: "charter_fidelity_executor",
+            charterFidelitySubmissionPath: path,
+            scopeIndexMemo: p.scopeIndexMemo,
+          },
+          foldBundle,
+        ),
+      shouldOmit: (b) => !(b.charter_register?.fidelity_pending === true),
     },
     params,
     bundle,
@@ -2924,12 +2961,24 @@ export function buildAuditObligations(
       }
       return { kind: "transition", state: branch.bundle };
     },
-    // Charter delta-mining (Phase C.2): consume the delta lane submission,
-    // settle deterministically when the register is not deltas_pending, or
-    // emit the independent delta-miner's host step.
-    charter_delta_current: async (bundle, ctx): Promise<AuditOutcome> => {
+    // Charter comparison (steps 2–3): consume the comparison submission, settle
+    // deterministically when the register is not comparison_pending, or emit the
+    // comparison reader's host step.
+    charter_comparison_current: async (bundle, ctx): Promise<AuditOutcome> => {
       const state = deriveAuditState(bundle, { emitStaleness: false });
-      const branch = await handleCharterDeltaBranch(ctx.params, bundle, state, ctx.tx);
+      const branch = await handleCharterComparisonBranch(ctx.params, bundle, state, ctx.tx);
+      if (branch.action === "return") {
+        return { kind: "emit", step: branch.result, state: bundle };
+      }
+      if (branch.action === "run_omit") {
+        return runDeterministicExecutor(bundle, ctx);
+      }
+      return { kind: "transition", state: branch.bundle };
+    },
+    // Charter fidelity (step 4): the separate lane's verdicts, or the settle.
+    charter_fidelity_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const state = deriveAuditState(bundle, { emitStaleness: false });
+      const branch = await handleCharterFidelityBranch(ctx.params, bundle, state, ctx.tx);
       if (branch.action === "return") {
         return { kind: "emit", step: branch.result, state: bundle };
       }

@@ -27,7 +27,7 @@ import { GATE_LANES, laneSubmissionPath } from "../../src/audit/cli/laneSubmissi
 import { submissionsDir } from "../../src/shared/io/auditToolsPaths.js";
 import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
-import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { declineDefaultAcquiredAnalyzers } from "../helpers/analyzerConsentFixture.js";
 import { LENS_VERIFICATION_TAG } from "../../src/audit/orchestrator/selectiveDeepening/shared.js";
 
@@ -254,14 +254,7 @@ function readyForReviewBundle(
       target: "charter",
       ceiling: { rung: "shallow" },
       status: "omitted",
-      subsystems: [],
-      goal_graph: { nodes: [], edges: [] },
-      deltas: [],
-      findings: [],
-      triangulated: [],
-      disagreement: [],
-      validation_issues: [],
-      ...REGISTER_V4_AFFIRMATION,
+      ...EMPTY_REGISTER_BODY,
     },
     charter_clarification: {
       generated_at: "2026-01-01T00:00:00.000Z",
@@ -273,7 +266,6 @@ function readyForReviewBundle(
       banked: [],
       findings: [],
       validation_issues: [],
-      refused_issues: [],
       ...REGISTER_V4_AFFIRMATION,
     },
     systemic_challenge: {

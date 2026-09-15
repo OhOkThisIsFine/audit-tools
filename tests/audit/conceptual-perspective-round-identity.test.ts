@@ -216,9 +216,13 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
       await readFile(join(dir, "steps", "current-step.json"), "utf8"),
     );
     if (firstStep.step_kind === "charter_extraction") {
-      for (const path of firstStep.access.write_paths as string[]) {
+      // One EMPTY goal DAG per lane. The write paths are emitted in canonical
+      // kind order (the lane id is hashed into the filename, so position is the
+      // only binding a fixture can read), and each lane accepts only its own kind.
+      const kinds = ["stated", "structural", "revealed"] as const;
+      for (const [i, path] of (firstStep.access.write_paths as string[]).entries()) {
         await mkdir(dirname(path), { recursive: true });
-        await writeFile(path, "{\"nodes\":[]}\n", "utf8");
+        await writeFile(path, JSON.stringify({ kind: kinds[i], nodes: [], edges: [] }) + "\n", "utf8");
       }
       await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
       Object.assign(

@@ -1,15 +1,16 @@
-import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 /**
  * CP-NODE-8 — Phase C residual: charters threaded into the conceptual prompt.
- *   - renderCharterContext renders per-subsystem charters + opine/flag disposition
+ *   - renderCharterContext renders, per correspondence, each channel's account
+ *     side by side + the opine/flag disposition per account
  *   - shallow + deep conceptual prompts carry the charter block when present
  *   - byte-identical charter-unaware fallback when register is
- *     absent / omitted / empty (no surviving charters)
+ *     absent / omitted / empty (no correspondence)
  */
 import { test, expect } from "vitest";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
-import type { Charter, CharterKind, CharterConfidence } from "audit-tools/shared";
+import type { CharterLaneGraph, CharterConfidence } from "audit-tools/shared";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 
 const {
@@ -39,13 +40,35 @@ function baseBundle(charterRegister: CharterRegister | undefined): ArtifactBundl
   return bundle;
 }
 
-function charter(kind: CharterKind, purpose: string, confidence: CharterConfidence = "high"): Charter {
+function lane(
+  kind: CharterLaneGraph["kind"],
+  purpose: string,
+  confidence: CharterConfidence = "high",
+): CharterLaneGraph {
   return {
-    charter_id: `${kind}-1`,
     kind,
-    purpose,
-    provenance: [],
-    confidence,
+    nodes: [
+      {
+        node_id: `${kind}-1`,
+        purpose,
+        premise_height: 0,
+        files: ["src/shared/quota/a.ts", "src/shared/quota/b.ts"],
+        provenance: [],
+        confidence,
+      },
+    ],
+    edges: [],
+  };
+}
+
+function omittedRegister(): CharterRegister {
+  return {
+    schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
+    generated_at: "2026-01-01T00:00:00Z",
+    target: "charter",
+    ceiling: { rung: "shallow" },
+    status: "omitted",
+    ...EMPTY_REGISTER_BODY,
   };
 }
 
@@ -55,92 +78,58 @@ function populatedRegister(): CharterRegister {
     generated_at: "2026-01-01T00:00:00Z",
     target: "charter",
     ceiling: { rung: "deep" },
-    subsystems: [
+    ...EMPTY_REGISTER_BODY,
+    lanes: [
+      lane("stated", "quota exists so cooperating auditors share finite budgets"),
+      lane("revealed", "quota actually optimizes for single-auditor throughput", "low"),
+    ],
+    correspondences: [
       {
-        node_id: "quota",
-        members: ["src/shared/quota/a.ts", "src/shared/quota/b.ts"],
-        charters: [
-          charter("stated", "quota exists so cooperating auditors share finite budgets"),
-          charter("revealed", "quota actually optimizes for single-auditor throughput", "low"),
+        correspondence_id: "quota",
+        members: [
+          { kind: "stated", node_ids: ["stated-1"] },
+          { kind: "revealed", node_ids: ["revealed-1"] },
         ],
-        teleologies: {},
+        basis: "tool",
+        evidence: [],
       },
     ],
-    goal_graph: { nodes: [], edges: [] },
-    deltas: [],
-    findings: [],
-    triangulated: [],
-    disagreement: [],
-    validation_issues: [],
-    ...REGISTER_V4_AFFIRMATION,
   };
 }
 
 // ── renderCharterContext ──────────────────────────────────────────────────────
 
-test("renderCharterContext: renders per-subsystem charters with telos framing", () => {
+test("renderCharterContext: renders each correspondence's accounts side by side with telos framing", () => {
   const block = renderCharterContext(baseBundle(populatedRegister()));
   expect(block).toMatch(/Subsystem charters/);
   expect(block).toMatch(/\*\*quota\*\*/);
   expect(block).toMatch(/src\/shared\/quota\/a\.ts/);
   expect(block).toMatch(/\[stated\] quota exists so cooperating auditors/);
   expect(block).toMatch(/\[revealed\] quota actually optimizes/);
-  // per-charter opine framing present
-  expect(block).toMatch(/Opine PER CHARTER/);
+  // per-account opine framing present; never a merged sentence
+  expect(block).toMatch(/Opine PER ACCOUNT/);
+  expect(block).toMatch(/never merged/);
 });
 
-test("renderCharterContext: low-confidence charter is FLAGGED not opined", () => {
+test("renderCharterContext: low-confidence account is FLAGGED not opined", () => {
   const block = renderCharterContext(baseBundle(populatedRegister()));
-  // the low-confidence revealed charter carries the flag-for-human disposition
-  expect(block).toMatch(/\[revealed\] quota actually optimizes.*LOW-CONFIDENCE charter: FLAG for human/);
-  // the confident stated charter carries no such marker on its own line
+  // the low-confidence revealed account carries the flag-for-human disposition
+  expect(block).toMatch(/\[revealed\] quota actually optimizes.*LOW-CONFIDENCE account: FLAG for human/);
+  // the confident stated account carries no such marker on its own line
   const statedLine = block
     .split("\n")
     .find((l) => l.includes("[stated] quota exists"));
   expect(statedLine).not.toMatch(/LOW-CONFIDENCE/);
 });
 
-test("renderCharterContext: empty when register absent / omitted / no surviving charters", () => {
+test("renderCharterContext: empty when register absent / omitted / no correspondence", () => {
   // absent (old bundle)
   expect(renderCharterContext(baseBundle(undefined))).toBe("");
   // omitted (shallow ceiling)
+  expect(renderCharterContext(baseBundle(omittedRegister()))).toBe("");
+  // present with lanes but nothing corresponds — no account pair to opine on
   expect(
-    renderCharterContext(
-      baseBundle({
-        schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
-        generated_at: "2026-01-01T00:00:00Z",
-        target: "charter",
-        ceiling: { rung: "shallow" },
-        status: "omitted",
-        subsystems: [],
-        goal_graph: { nodes: [], edges: [] },
-        deltas: [],
-        findings: [],
-        triangulated: [],
-        disagreement: [],
-        validation_issues: [],
-        ...REGISTER_V4_AFFIRMATION,
-      }),
-    ),
-  ).toBe("");
-  // present but no subsystem carries a charter
-  expect(
-    renderCharterContext(
-      baseBundle({
-        schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
-        generated_at: "2026-01-01T00:00:00Z",
-        target: "charter",
-        ceiling: { rung: "deep" },
-        subsystems: [{ node_id: "x", members: ["src/x.ts"], charters: [], teleologies: {} }],
-        goal_graph: { nodes: [], edges: [] },
-        deltas: [],
-        findings: [],
-        triangulated: [],
-        disagreement: [],
-        validation_issues: [],
-        ...REGISTER_V4_AFFIRMATION,
-      }),
-    ),
+    renderCharterContext(baseBundle({ ...populatedRegister(), correspondences: [] })),
   ).toBe("");
 });
 
@@ -171,24 +160,7 @@ test("deep perspective prompt carries the charter block when the register is pop
 
 test("shallow conceptual prompt is byte-identical with an absent vs omitted vs empty register", () => {
   const absent = renderConceptualReviewPrompt(baseBundle(undefined), { max_units: 5 });
-  const omitted = renderConceptualReviewPrompt(
-    baseBundle({
-      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
-      generated_at: "2026-01-01T00:00:00Z",
-      target: "charter",
-      ceiling: { rung: "shallow" },
-      status: "omitted",
-      subsystems: [],
-      goal_graph: { nodes: [], edges: [] },
-      deltas: [],
-      findings: [],
-      triangulated: [],
-      disagreement: [],
-      validation_issues: [],
-      ...REGISTER_V4_AFFIRMATION,
-    }),
-    { max_units: 5 },
-  );
+  const omitted = renderConceptualReviewPrompt(baseBundle(omittedRegister()), { max_units: 5 });
   expect(omitted).toBe(absent);
   // and neither mentions the charter block
   expect(absent).not.toMatch(/Subsystem charters/);
@@ -199,27 +171,9 @@ test("deep perspective prompt is byte-identical when the register is absent vs o
   const absent = renderConceptualPerspectivePrompt(baseBundle(undefined), p, 0, 5, {
     max_units: 5,
   });
-  const omitted = renderConceptualPerspectivePrompt(
-    baseBundle({
-      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
-      generated_at: "2026-01-01T00:00:00Z",
-      target: "charter",
-      ceiling: { rung: "shallow" },
-      status: "omitted",
-      subsystems: [],
-      goal_graph: { nodes: [], edges: [] },
-      deltas: [],
-      findings: [],
-      triangulated: [],
-      disagreement: [],
-      validation_issues: [],
-      ...REGISTER_V4_AFFIRMATION,
-    }),
-    p,
-    0,
-    5,
-    { max_units: 5 },
-  );
+  const omitted = renderConceptualPerspectivePrompt(baseBundle(omittedRegister()), p, 0, 5, {
+    max_units: 5,
+  });
   expect(omitted).toBe(absent);
   expect(absent).not.toMatch(/Subsystem charters/);
 });

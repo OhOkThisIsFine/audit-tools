@@ -1,13 +1,14 @@
+// sites-pinned: tests/shared/charter-gate.test.ts
 // Hard gates for the conceptual/design-review charter spine (design of record:
 // spec/conceptual-design-review-design.md §"The True charter needs hard gates" and
-// §"Tag each charter with confidence"). These are the tool-enforced guards against
+// §"Blast radius — the ranking and the risk gate"). Tool-enforced guards against
 // the approach's central failure mode: a confident-but-wrong finding sourced from a
 // bad charter. They run deterministically over the charter data model — no LLM.
 
 import type {
   Charter,
-  CharterDelta,
-  CharterClarificationRequest,
+  CharterDifferenceQuestion,
+  LaneGoalNode,
 } from "../types/charter.js";
 
 /**
@@ -15,7 +16,7 @@ import type {
  * falsifiable-or-drop. It survives ONLY if it names BOTH a concrete alternative and
  * a concrete cost the user seems to pay unaware; an un-falsifiable "what you truly
  * want is elegance" nomination is slop and is dropped. Non-`true` charters are never
- * dropped by this gate (their confidence is handled by charterReviewDisposition).
+ * dropped by this gate.
  *
  * Returns the surviving charters plus a record of what was dropped and why, so the
  * caller can surface the drop as a validation issue rather than silently discarding.
@@ -52,42 +53,16 @@ export function applyTrueCharterGate(charters: Charter[]): {
 }
 
 /**
- * Whether a review that depends on this charter may OPINE or must only FLAG for
- * human intent input. A low-confidence charter (sparse or ambiguous source) is the
+ * Whether a review that depends on this goal node may OPINE or must only FLAG for
+ * human intent input. A low-confidence node (sparse or ambiguous source) is the
  * central failure mode's source, so any dependent review is downgraded to
- * "flag for human, never opine." This is the general guard of which the True-charter
- * gate above is the strictest instance.
+ * "flag for human, never opine." This is the general guard of which the fidelity
+ * lane and the True-charter gate are the strict instances.
  */
 export function charterReviewDisposition(
-  charter: Charter,
+  node: Pick<Charter, "confidence"> | Pick<LaneGoalNode, "confidence">,
 ): "opine" | "flag_for_human" {
-  return charter.confidence === "low" ? "flag_for_human" : "opine";
-}
-
-/**
- * Route a charter delta to the human channel when either charter it references is
- * low-confidence — a delta between two attributable sides is only adjudicable if
- * both sides are trustworthy; if one is shaky, the tool must not opine (route it to
- * the human) regardless of the delta's nominal `kind`. The delta is returned
- * unchanged when both sides are confident (or a side is absent from `charters`).
- *
- * `pair` holds charter KINDS (symmetric), so we match against the charters present
- * of those kinds; a low-confidence charter of a referenced kind trips the downgrade.
- */
-export function gateCharterDelta(
-  delta: CharterDelta,
-  charters: Charter[],
-): CharterDelta {
-  const referencedKinds = new Set(delta.pair);
-  const anyLowConfidence = charters.some(
-    (charter) =>
-      referencedKinds.has(charter.kind) &&
-      charterReviewDisposition(charter) === "flag_for_human",
-  );
-  if (anyLowConfidence && delta.routed_to !== "human") {
-    return { ...delta, routed_to: "human" };
-  }
-  return delta;
+  return node.confidence === "low" ? "flag_for_human" : "opine";
 }
 
 /**
@@ -95,21 +70,17 @@ export function gateCharterDelta(
  * risk gate"). Blast radius is simultaneously priority (high-blast = high-value)
  * AND risk: acting on a WRONG high-blast finding is catastrophic, so it must clear
  * a MUCH higher bar of independent adversarial refutation before it is actionable.
- * This gate is the deterministic side of that bar: a question whose blast radius is
- * at/above `highBlastThreshold` may only reach the interactive human channel if it
- * has cleared `requiredRefutations` rounds of independent refutation; otherwise it
- * is downgraded to `finding_only` (written as a lead, never asked interactively).
- * Below the threshold, a question is interactive without the extra bar.
+ * A question whose blast radius is at/above `highBlastThreshold` may only reach the
+ * interactive human channel if it has cleared `requiredRefutations` rounds of
+ * independent refutation; otherwise it is `finding_only`.
  *
- * Pure + deterministic: same request + same observed refutation count always
- * yields the same disposition. `observedRefutations` is supplied by the caller (the
- * intensity dial's adversarial rounds); the gate never runs the refutation itself.
+ * Pure + deterministic; `observedRefutations` is supplied by the caller.
  */
 export function riskGateClarification(
-  request: CharterClarificationRequest,
+  request: CharterDifferenceQuestion,
   observedRefutations: number,
   opts: { highBlastThreshold: number; requiredRefutations: number },
-): CharterClarificationRequest["disposition"] {
+): CharterDifferenceQuestion["disposition"] {
   const isHighBlast = request.value.blast_radius >= opts.highBlastThreshold;
   if (!isHighBlast) return "interactive";
   return observedRefutations >= opts.requiredRefutations

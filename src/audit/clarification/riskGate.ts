@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/charter-clarification.test.ts
 // Phase D — D1 pure primitive: the blast-radius RISK GATE applied over a queue.
 //
 // A high-blast question is high-VALUE but also high-RISK: acting on a wrong
@@ -14,7 +15,7 @@
 
 import {
   riskGateClarification,
-  type CharterClarificationRequest,
+  type CharterDifferenceQuestion,
 } from "audit-tools/shared";
 
 /** The two thresholds the risk gate meters against, defaulted conservatively. */
@@ -44,10 +45,10 @@ export const DEFAULT_RISK_GATE_THRESHOLDS: RiskGateThresholds = {
  * order is preserved; callers that want VOI order should `voiQueue` the result.
  */
 export function applyRiskGate(
-  requests: CharterClarificationRequest[],
+  requests: CharterDifferenceQuestion[],
   refutationsByRequestId: Map<string, number> = new Map(),
   thresholds: RiskGateThresholds = DEFAULT_RISK_GATE_THRESHOLDS,
-): CharterClarificationRequest[] {
+): CharterDifferenceQuestion[] {
   return requests.map((request) => ({
     ...request,
     disposition: riskGateClarification(

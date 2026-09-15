@@ -1,3 +1,4 @@
+// sites-pinned: none — data rows rendered into the generated spec tables; `check:spec-mirrors` verifies the render
 // The doc-side half of the three spec/audit registry mirrors, HELD AS DATA.
 //
 // WHY THIS EXISTS. `spec/audit/artifact-contract.md`, `spec/audit/executor-catalog.md`
@@ -171,7 +172,7 @@ export const SPEC_MIRROR_REGIONS = [
       },
       {
         artifact: "charter_register.json",
-        purpose: "Phase-C charter layer (carries a stamped schema version and is discarded on mismatch, DISCARD read policy — regenerable analysis state): three channel-pure estimator charters with per-kind teleologies joined by file-set overlap over the structure-decomposition hint, plus the miner's deltas, triangulated teloses, and tool-counted disagreement density; gated by the confirmed intent-checkpoint ceiling.",
+        purpose: "Phase-C charter layer (carries a stamped schema version and is discarded on mismatch, DISCARD read policy — regenerable analysis state): three blind lane goal DAGs held unmerged, the tool-proposed correspondence candidates, the confirmed n-ary correspondences, the seven-dimension typed differences (routed by the fixed table and stamped with a fidelity verdict), and the `supported` finding leads; gated by the confirmed intent-checkpoint ceiling.",
       },
       {
         artifact: "charter_clarification.json",
@@ -340,11 +341,15 @@ export const SPEC_MIRROR_REGIONS = [
       },
       {
         executor: "charter_extraction_executor",
-        note: "Phase C.1 charter layer — teleologies/charters ONLY, three blind estimator lanes fed channel-pure evidence packets; the tool grounds file scopes against the repo universe and joins lanes by file-set overlap (decomposition = hint). At a deep+ ceiling emits the lane step, otherwise the runner omits deterministically at the default shallow ceiling. Sets `deltas_pending` when it produced ≥1 subsystem for the independent delta pass",
+        note: "Charter step 1 — three blind estimator lanes each submit ONE goal DAG (local ids, edge provenance, optional files) fed channel-pure evidence packets; the tool refuses cycles, derives levels, grounds scopes against the repo universe, checks every citation, and proposes correspondence candidates (file overlap + provenance cross-refs). At a deep+ ceiling emits the lane step, otherwise the runner omits deterministically at the default shallow ceiling. Sets `comparison_pending` when any lane produced ≥1 node",
       },
       {
-        executor: "charter_delta_executor",
-        note: "Phase C.2 — the INDEPENDENT delta-miner + triangulation engine: routes+gates the channel-pair deltas, persists the triangulated teloses + disagreement density + goal_graph, and (deepest ceiling only) admits gate-surviving True nominations; emits an LLM step when the register is `deltas_pending`, otherwise settles deterministically (no author marks its own homework)",
+        executor: "charter_comparison_executor",
+        note: "Charter steps 2–3 — the comparison reader (authored none of the DAGs) confirms, rejects, widens or adds correspondences over the tool candidates and records the seven-dimension n-ary differences; the tool grounds every record, routes it by the fixed `(dimension, relation, split)` table, and runs the quote pre-check (a missing quote settles `unverifiable`). Emits an LLM step when the register is `comparison_pending`, otherwise settles deterministically; sets `fidelity_pending` when a finding candidate awaits the lane",
+      },
+      {
+        executor: "charter_fidelity_executor",
+        note: "Charter step 4 — a SEPARATE lane judges each finding candidate from the tool-materialized packet (accounts, citations, source slices): `supported` / `interpretation` (naming the over-read side) / `unverifiable`. The tool stamps the verdicts, settles every unanswered candidate `unverifiable`, and surfaces only `supported` records as grounded finding leads. Emits an LLM step when the register is `fidelity_pending`, otherwise settles deterministically",
       },
       {
         executor: "design_review_contract",

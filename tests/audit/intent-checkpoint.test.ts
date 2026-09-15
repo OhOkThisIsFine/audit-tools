@@ -1,4 +1,4 @@
-import { REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
 import { decideNextStep } from "../../src/audit/orchestrator/nextStep.js";
@@ -45,14 +45,7 @@ function omittedCharterRegister(): CharterRegister {
     target: "charter",
     ceiling: { rung: "shallow" },
     status: "omitted",
-    subsystems: [],
-    goal_graph: { nodes: [], edges: [] },
-    deltas: [],
-    findings: [],
-    triangulated: [],
-    disagreement: [],
-    validation_issues: [],
-    ...REGISTER_V4_AFFIRMATION,
+    ...EMPTY_REGISTER_BODY,
   };
 }
 

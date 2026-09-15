@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/conceptual-charter-context.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
 import type { CharterRegister } from "../types/charterRegister.js";
@@ -528,33 +529,37 @@ function conceptualOutputFormat(
 export function renderCharterContext(bundle: ArtifactBundle): string {
   const register: CharterRegister | undefined = bundle.charter_register;
   if (!register || register.status === "omitted") return "";
-  const subsystems = (register.subsystems ?? []).filter(
-    (s) => (s.charters ?? []).length > 0,
-  );
-  if (subsystems.length === 0) return "";
+  const correspondences = register.correspondences ?? [];
+  if (correspondences.length === 0) return "";
+  const lanes = register.lanes ?? [];
 
-  const subsystemBlocks = subsystems.map((subsystem) => {
-    const memberList =
-      subsystem.members.length > 0 ? subsystem.members.join(", ") : "(no members recorded)";
-    const charterLines = subsystem.charters.map((charter) => {
-      const disposition =
-        charterReviewDisposition(charter) === "flag_for_human"
-          ? " — LOW-CONFIDENCE charter: FLAG for human intent input, do NOT opine on it"
-          : "";
-      return `  - [${charter.kind}] ${charter.purpose}${disposition}`;
+  // Three accounts SIDE BY SIDE per correspondence — never a unified sentence
+  // (design of record 2026-09-15, step 5: no reader authors a merged account).
+  const blocks = correspondences.map((corr) => {
+    const files = new Set<string>();
+    const accountLines = corr.members.flatMap((member) => {
+      const graph = lanes.find((g) => g.kind === member.kind);
+      return member.node_ids.flatMap((id) => {
+        const node = graph?.nodes.find((n) => n.node_id === id);
+        if (!node) return [];
+        for (const f of node.files ?? []) files.add(f);
+        const disposition =
+          charterReviewDisposition(node) === "flag_for_human"
+            ? " — LOW-CONFIDENCE account: FLAG for human intent input, do NOT opine on it"
+            : "";
+        return [`  - [${member.kind}] ${node.purpose}${disposition}`];
+      });
     });
-    return [
-      `- **${subsystem.node_id}** (members: ${memberList})`,
-      ...charterLines,
-    ].join("\n");
+    const scope = files.size > 0 ? [...files].sort().join(", ") : "(no scoped files)";
+    return [`- **${corr.correspondence_id}** (files: ${scope})`, ...accountLines].join("\n");
   });
 
   return [
     "### Subsystem charters (what each part is FOR)",
     "",
-    "The charter layer recorded each confident subsystem's purpose in *telos* terms (what it exists to achieve), across the channel-pure estimator charters — `stated` (testimony: docs + comments), `structural` (intent frozen into the code's organization), `revealed` (what the code actually optimizes for) — plus, when nominated, `true` (the ideal it should serve). Opine PER CHARTER: judge whether the design actually delivers the purpose each subsystem claims, and surface where a subsystem's structure works against its own charter. Where a charter is marked LOW-CONFIDENCE, flag the gap for human intent confirmation instead of opining.",
+    "The charter layer recorded, per corresponding goal, each channel's account of its purpose in *telos* terms — `stated` (testimony: docs + comments), `structural` (intent frozen into the code's organization), `revealed` (what the code actually optimizes for) — held side by side, never merged. Opine PER ACCOUNT: judge whether the design delivers the purpose each account claims, and surface where a subsystem's structure works against its own charter. Where an account is marked LOW-CONFIDENCE, flag the gap for human intent confirmation instead of opining.",
     "",
-    ...subsystemBlocks,
+    ...blocks,
     "",
   ].join("\n");
 }

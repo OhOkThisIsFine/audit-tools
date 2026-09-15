@@ -204,7 +204,7 @@ test("the recovery sweep quarantines the staged copy when the host has resubmitt
 test("a re-entered commit RESUMES: an entry the first attempt processed is never re-recorded", async () => {
   await withArtifactsDir(async (artifactsDir) => {
     const acceptedLane = GATE_LANES.synthesis_narrative;
-    const restoredLane = GATE_LANES.charter_delta;
+    const restoredLane = GATE_LANES.charter_comparison;
     await writeFile(
       laneSubmissionPath(artifactsDir, acceptedLane),
       JSON.stringify({ themes: [] }),
