@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/friction-capture-closeout.test.ts
 export const REMEDIATION_STEP_CONTRACT_VERSION =
   "remediate-code-step/v1alpha1" as const;
 
@@ -111,7 +112,7 @@ export interface RemediationStep {
   step_kind: RemediationStepKind;
   status: RemediationStepStatus;
   prompt_path: string;
-  run_id: string;
+  run_id: string | null;
   repo_root: string;
   artifacts_dir: string;
   allowed_commands: string[];

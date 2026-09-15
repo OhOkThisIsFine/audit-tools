@@ -23,6 +23,9 @@ import type {
   RemediationOutcomeItem,
 } from "../../src/remediate/state/types.js";
 import { scratchDir } from "../helpers/scratch.js";
+// The friction vocabulary is single-sourced in shared, so the walk helper below
+// attests every category by iterating it rather than restating the list.
+import { FRICTION_CATEGORIES } from "audit-tools/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-outcomes-roundtrip");
@@ -188,6 +191,29 @@ async function acknowledgeResume(): Promise<void> {
   );
 }
 
+/**
+ * Complete the run's friction close-out walk on the plan-keyed record.
+ *
+ * The close is GATED on this walk: `handleClosing` decides it before the close
+ * touches disk, so an unwalked run stops at the blocking `close_run` step rather
+ * than folding to `present_report`. This suite wants the FOLD, so it walks the
+ * record first — exactly what a host does, on the key the close keys on.
+ */
+async function writeFrictionWalk(planId: string): Promise<void> {
+  const dir = join(ARTIFACTS_DIR, "friction");
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, `${planId}.json`),
+    JSON.stringify({
+      category_attestations: FRICTION_CATEGORIES.map((category) => ({
+        category,
+        note: "none this run",
+      })),
+    }) + "\n",
+    "utf8",
+  );
+}
+
 async function writeIntentCheckpoint(): Promise<void> {
   await writeFile(
     join(ARTIFACTS_DIR, "intent_checkpoint.json"),
@@ -210,6 +236,8 @@ async function writeIntentCheckpoint(): Promise<void> {
 async function completeRunAndDeleteState(): Promise<any> {
   await writeStructuredAuditSource();
   await new StateStore(ARTIFACTS_DIR).saveState(makeCompletedRunClosingState());
+  // The close is gated on the run's friction walk — satisfy it first.
+  await writeFrictionWalk("PLAN-ROUNDTRIP");
   await acknowledgeResume();
   await writeIntentCheckpoint();
 

@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/phase-close.test.ts
 import {
   writeStepContract,
   writeBlockedStepContract,
@@ -13,7 +14,7 @@ import {
 export interface WriteStepInput {
   stepKind: RemediationStepKind;
   status: RemediationStepStatus;
-  runId: string;
+  runId: string | null;
   repoRoot: string;
   artifactsDir: string;
   prompt: string;

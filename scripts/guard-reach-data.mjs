@@ -2052,9 +2052,12 @@ export const REACH = [
       ' The P28 long-dispatch refusal in shell-trap-guard measures only the INLINE quoted prompt — a ' +
       'prompt delivered via a stdin file (`codex exec < prompt.txt`), `$(cat …)`, or a heredoc body ' +
       '(blanked before scanning) escapes measurement; scripts/shared/lane-dispatch.mjs is the primary fix. ' +
-      '.claude/hooks/friction-stop-gate.mjs re-implements the friction-dir *.json listing by hand ' +
-      '(readdirSync + .endsWith(".json")) because a pre-build hook cannot import built src — a ' +
-      'hand-maintained duplicate of listFrictionRecordFilenames that drifts independently.' +
+      '.claude/hooks/friction-stop-gate.mjs no longer lists the friction dir at all: it reads the ' +
+      'ONE record the run named in its persisted step contract ' +
+      '(`artifact_paths.friction_record`), so there is no hand-maintained duplicate of ' +
+      'listFrictionRecordFilenames left to drift. What that leaves uncovered: a run whose step ' +
+      'contract was pruned while its walk was still owed reads as "no walk owed" and does not ' +
+      'block — the backstop is only as present as the contract it reads.' +
       ' hook-trap-guards-test pins tool-input-guard cases to a temp root (runInputGuard) so rule 3 ' +
       'cannot consume the live stale-main marker, and scans for REPO_ROOT source paths to keep the ' +
       'payloads inside that root — but BOTH halves are scoped to that ONE file. A future test file ' +

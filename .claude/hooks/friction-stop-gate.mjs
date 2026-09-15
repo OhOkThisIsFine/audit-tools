@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/hook-friction-stop-gate.test.ts, tests/remediate/friction-capture-closeout.test.ts
 // Stop gate: a session-level BACKSTOP for the friction close-out walk.
 //
 // The end-of-run close gate (src/shared/friction/triage.ts) blocks a remediate/
@@ -19,8 +20,8 @@
 //  - swallows every fs/parse error → exit 0 (a broken backstop must never trap).
 //
 // Exit 0 = allow stop, exit 2 = block (stderr is fed back to the agent).
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { join, isAbsolute } from "node:path";
 import { sessionHasLiveBackgroundWork } from "../../scripts/shared/liveSessionWork.mjs";
 import { readSessionRegistry } from "../../scripts/shared/sessionRegistry.mjs";
 import { FRICTION_CATEGORIES } from '../../scripts/shared/friction-categories.generated.mjs';
@@ -118,10 +119,23 @@ function recordIsComplete(recordPath) {
   return FRICTION_CATEGORIES.every((c) => covered.has(c));
 }
 
-// Each orchestrator area writes its friction records under <area>/friction/<run>.json
-// (frictionCapturePath). A run "happened" in the area when a genuine run MARKER exists
-// (not mere dir existence — the repo dogfoods `.audit-tools/`, so a test/ensure stub
-// must not trip the gate); it is walked when ≥1 of its friction records is complete.
+// Each area's friction record lives at ONE path, named by the run it walked:
+// <area>/friction/<run>.json (frictionCapturePath). This backstop reads THAT
+// record and no other — and it does not derive the path itself.
+//
+// The path comes from the run's OWN persisted step contract,
+// `artifact_paths.friction_record` — the artifact both halves render whenever a
+// run owes a walk (remediate's close steps, audit's operator handoff). That is
+// the tool stating which record belongs to this run; re-deriving the key here
+// would be a second hand copy of the derivation, and a copy drifts.
+//
+// A run with NO contract naming a record is not mid-walk: nothing is owed, so
+// there is nothing to block on.
+//
+// It must NEVER scan for "any complete record under friction/". A record filed
+// under a name other than this run's is another run's evidence: accepting it
+// would let a complete sibling silence the backstop for a run whose own walk
+// was never done.
 const AREAS = [
   {
     label: "remediate-code",
@@ -149,6 +163,23 @@ const needsWalk = [];
 // friction walk after churn stops).
 const IN_FLIGHT_MS = 2 * 60 * 1000; // 2 minutes
 
+/**
+ * The friction-record path this run's own persisted step contract names, or
+ * `null` when no contract names one. `artifact_paths.friction_record` is
+ * normalized to a forward-slash token by the shared step writer, so it is read
+ * here verbatim and resolved against the root only when relative.
+ */
+function recordPathFromStepContract(areaDir) {
+  try {
+    const contract = JSON.parse(readFileSync(join(areaDir, "steps", "current-step.json"), "utf8"));
+    const named = contract?.artifact_paths?.friction_record;
+    if (typeof named !== "string" || named.length === 0) return null;
+    return isAbsolute(named) ? named : join(root, named);
+  } catch {
+    return null; // no contract, or none naming a record — nothing owed
+  }
+}
+
 for (const area of AREAS) {
   // A run happened here recently only if a genuine run marker exists and was touched
   // in-window (the session proxy) — a stub or a long-abandoned run never blocks.
@@ -166,17 +197,13 @@ for (const area of AREAS) {
     /* file does not exist or is unreadable — not in flight */
   }
 
-  const frictionDir = join(area.dir, "friction");
-  let records = [];
-  try {
-    records = readdirSync(frictionDir)
-      .filter((n) => n.endsWith(".json"))
-      .map((n) => join(frictionDir, n));
-  } catch {
-    records = []; // no friction dir → no walk started
-  }
-  const anyComplete = records.some((p) => recordIsComplete(p));
-  if (!anyComplete) needsWalk.push(area.label);
+  // The ONE record this run's walk is filed under, as the run itself stated it.
+  const recordPath = recordPathFromStepContract(area.dir);
+  if (recordPath === null) continue; // no walk owed by this run
+
+  // A run is walked when ITS record covers every category. Nothing else counts:
+  // an absent record and an incomplete one both mean the walk is owed.
+  if (!recordIsComplete(recordPath)) needsWalk.push(area.label);
 }
 
 if (needsWalk.length === 0) process.exit(0);

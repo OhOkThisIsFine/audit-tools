@@ -9,7 +9,7 @@ import {
 } from "./helpers/nextStepHarness.js";
 
 const harness = createNextStepHarness(".test-next-step-outcomes-contract");
-const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint } = harness;
+const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint, walkFriction } = harness;
 
 beforeEach(async () => {
   await harness.resetTestRepo();
@@ -107,6 +107,8 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
     it("every terminal item carries its full finding payload, item-spec summary, block refs, and final status", async () => {
       const state = makeRetryableClosingState();
       await saveState(state);
+      // The close is gated on the run's friction walk — satisfy it first.
+      await walkFriction("PLAN-RETRY");
       await acknowledgeResume();
       await writeIntentCheckpoint();
 
@@ -158,6 +160,8 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
         block_id: "B-002",
       };
       await saveState(state);
+      // The close is gated on the run's friction walk — satisfy it first.
+      await walkFriction("PLAN-RETRY");
       await acknowledgeResume();
       await writeIntentCheckpoint();
 
@@ -256,6 +260,8 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
         },
       } as RemediationState;
       await saveState(state);
+      // The close is gated on the run's friction walk — satisfy it first.
+      await walkFriction("PLAN-COVERAGE");
       await acknowledgeResume();
       await writeIntentCheckpoint();
 
@@ -288,6 +294,8 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
     it("close writes the enriched outcomes before deleting state.json", async () => {
       const state = makeRetryableClosingState();
       await saveState(state);
+      // The close is gated on the run's friction walk — satisfy it first.
+      await walkFriction("PLAN-RETRY");
       await acknowledgeResume();
       await writeIntentCheckpoint();
 
