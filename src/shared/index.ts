@@ -208,6 +208,66 @@ export {
   assembleCharters,
   assembleDeltas,
 } from "./decompose/charterExtraction.js";
+// The five-step charter layer (design of record 2026-09-15; spec §"The estimator
+// charters" steps 1–5): lane goal DAGs → correspondences → typed n-ary differences
+// → fidelity → findings. Replaces the delta-miner shapes above on this branch.
+// sites-pinned: tests/shared/charter-layer.test.ts
+export type {
+  CharterLaneKind,
+  LaneGoalNode,
+  LaneGoalEdge,
+  CharterLaneGraph,
+  CorrespondenceMember,
+  CorrespondenceCandidate,
+  CharterCorrespondence,
+  DifferenceDimension,
+  DifferenceRelation,
+  DifferenceSplit,
+  DifferenceAccount,
+  DifferenceRoute,
+  FidelityVerdict,
+  CharterDifference,
+  CharterDifferenceAnswer,
+  CharterDifferenceQuestion,
+} from "./types/charter.js";
+export {
+  CharterLaneKindSchema,
+  LaneGoalNodeSchema,
+  LaneGoalEdgeSchema,
+  CharterLaneGraphSchema,
+  CorrespondenceMemberSchema,
+  CorrespondenceCandidateSchema,
+  CharterCorrespondenceSchema,
+  DifferenceDimensionSchema,
+  DifferenceRelationSchema,
+  DifferenceSplitSchema,
+  DifferenceAccountSchema,
+  DifferenceRouteSchema,
+  FidelityVerdictSchema,
+  CharterDifferenceSchema,
+  CharterDifferenceAnswerSchema,
+  CharterDifferenceQuestionSchema,
+} from "./types/charter.js";
+export type {
+  CharterSubmission as CharterLaneSubmission,
+  AssembledLaneGraph,
+  CharterComparisonSubmission,
+  AssembledComparison,
+  CharterFidelitySubmission,
+} from "./decompose/charterLayer.js";
+export {
+  CharterSubmissionSchema as CharterLaneSubmissionSchema,
+  CharterComparisonSubmissionSchema,
+  CharterFidelitySubmissionSchema,
+  assembleLaneGraph,
+  proposeCorrespondences,
+  assembleComparison,
+  routeDifference,
+  precheckFidelity,
+  applyFidelity,
+  differenceFindings,
+  provenancePath,
+} from "./decompose/charterLayer.js";
 // Conceptual design-review charter-clarification loop (Phase D) — the pure
 // triangulation-loop assembler (partition → risk-gate → split-by-attention);
 // consumes the audit-side D1/D2 primitives via injected deps.

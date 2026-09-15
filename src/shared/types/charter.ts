@@ -333,3 +333,213 @@ export const CharterClarificationRequestSchema = z
 export type CharterClarificationRequest = z.infer<
   typeof CharterClarificationRequestSchema
 >;
+
+// ── The five-step charter layer (design of record 2026-09-15) ───────────────────
+// sites-pinned: tests/shared/charter-layer.test.ts, tests/shared/charter-lane-dag.test.ts
+//
+// spec/conceptual-design-review-design.md §"The estimator charters", steps 1–5:
+// three lane goal DAGs → tool-proposed + host-confirmed correspondences → typed
+// n-ary differences → fidelity verdicts → a rendered discrepancy report. These
+// shapes are the persisted spine of that layer. Decision record:
+// docs/reviews/charter-redesign-feedback-2026-09-15.md.
+
+/** The three ESTIMATOR kinds — the lanes that author a goal DAG. `true` is never a lane. */
+export const CharterLaneKindSchema = z.enum(["stated", "structural", "revealed"]);
+export type CharterLaneKind = z.infer<typeof CharterLaneKindSchema>;
+
+/**
+ * One node of a lane's goal DAG as PERSISTED. `node_id` is the lane's own local
+ * slug (never a join key); `premise_height` is DERIVED by the tool from the edges
+ * (longest path from a root purpose), never lane-stated; `files` is optional —
+ * the Stated lane may cite provenance only (step 1, "scope follows the evidence").
+ */
+export const LaneGoalNodeSchema = z
+  .object({
+    node_id: z.string().min(1),
+    /** Purpose in telos terms, never mechanism. */
+    purpose: z.string().min(1),
+    premise_height: z.number().int().min(0),
+    files: z.array(z.string()).optional(),
+    provenance: z.array(CharterProvenanceSchema),
+    confidence: CharterConfidenceSchema,
+  })
+  .strict();
+export type LaneGoalNode = z.infer<typeof LaneGoalNodeSchema>;
+
+/** One edge of a lane's goal DAG: `from` SERVES `to`, with its own evidence. */
+export const LaneGoalEdgeSchema = z
+  .object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    provenance: z.array(CharterProvenanceSchema),
+  })
+  .strict();
+export type LaneGoalEdge = z.infer<typeof LaneGoalEdgeSchema>;
+
+/** A lane's whole goal DAG, persisted as its own graph — never merged with the others. */
+export const CharterLaneGraphSchema = z
+  .object({
+    kind: CharterLaneKindSchema,
+    nodes: z.array(LaneGoalNodeSchema),
+    edges: z.array(LaneGoalEdgeSchema),
+  })
+  .strict();
+export type CharterLaneGraph = z.infer<typeof CharterLaneGraphSchema>;
+
+/** A reference to a set of nodes in ONE lane's DAG (one node, several, or a subgraph). */
+export const CorrespondenceMemberSchema = z
+  .object({
+    kind: CharterLaneKindSchema,
+    node_ids: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+export type CorrespondenceMember = z.infer<typeof CorrespondenceMemberSchema>;
+
+/**
+ * A TOOL-PROPOSED correspondence candidate (step 2): two lanes' nodes related by
+ * file-scope overlap or by a provenance cross-reference. Always exactly two members;
+ * the host may widen it.
+ */
+export const CorrespondenceCandidateSchema = z
+  .object({
+    candidate_id: z.string().min(1),
+    members: z.array(CorrespondenceMemberSchema).length(2),
+    basis: z.enum(["file_overlap", "cross_ref"]),
+    /** What the basis rested on: overlapping paths, or the cross-referenced path. */
+    evidence_paths: z.array(z.string()).min(1),
+  })
+  .strict();
+export type CorrespondenceCandidate = z.infer<typeof CorrespondenceCandidateSchema>;
+
+/**
+ * A CONFIRMED correspondence (step 2 product): regions of two or three lane DAGs
+ * that speak about the same thing. A record ABOUT the graphs, never a merge of them.
+ */
+export const CharterCorrespondenceSchema = z
+  .object({
+    correspondence_id: z.string().min(1),
+    members: z.array(CorrespondenceMemberSchema).min(2),
+    /** `tool` = a confirmed candidate; `host` = added by the comparison reader. */
+    basis: z.enum(["tool", "host"]),
+    /** The candidate this confirmed or widened, when any. */
+    candidate_id: z.string().optional(),
+    evidence: z.array(CharterProvenanceSchema),
+  })
+  .strict();
+export type CharterCorrespondence = z.infer<typeof CharterCorrespondenceSchema>;
+
+/** The closed dimension enum (step 3, seven dimensions with decision rules in the spec). */
+export const DifferenceDimensionSchema = z.enum([
+  "purpose",
+  "presence",
+  "responsibility",
+  "hierarchy",
+  "scope",
+  "standing",
+  "standard",
+]);
+export type DifferenceDimension = z.infer<typeof DifferenceDimensionSchema>;
+
+/** The relation judged across ALL accounts in the correspondence. */
+export const DifferenceRelationSchema = z.enum([
+  "equivalent",
+  "complementary",
+  "incompatible",
+]);
+export type DifferenceRelation = z.infer<typeof DifferenceRelationSchema>;
+
+/** An incompatible record's split: two-against-one (naming the odd channel) or three-way. */
+export const DifferenceSplitSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("two_against_one"), odd: CharterLaneKindSchema }).strict(),
+  z.object({ kind: z.literal("three_way") }).strict(),
+]);
+export type DifferenceSplit = z.infer<typeof DifferenceSplitSchema>;
+
+/** One channel's account of the goal under comparison, with the provenance it rests on. */
+export const DifferenceAccountSchema = z
+  .object({
+    kind: CharterLaneKindSchema,
+    claim: z.string().min(1),
+    provenance: z.array(CharterProvenanceSchema),
+  })
+  .strict();
+export type DifferenceAccount = z.infer<typeof DifferenceAccountSchema>;
+
+/** Who acts on a difference — derived by the tool from `(dimension, relation, split)`. */
+export const DifferenceRouteSchema = z.enum(["remediator", "clarification", "human", "none"]);
+export type DifferenceRoute = z.infer<typeof DifferenceRouteSchema>;
+
+/** The fidelity lane's verdict on one difference (step 4). */
+export const FidelityVerdictSchema = z
+  .object({
+    verdict: z.enum(["supported", "interpretation", "unverifiable"]),
+    /** Only with `interpretation`: the channel whose claim over-read its source. */
+    over_read_side: CharterLaneKindSchema.optional(),
+    rationale: z.string().min(1),
+    /** `tool` when the mechanical pre-check settled it (a missing quote); `lane` otherwise. */
+    decided_by: z.enum(["tool", "lane"]),
+  })
+  .strict();
+export type FidelityVerdict = z.infer<typeof FidelityVerdictSchema>;
+
+/**
+ * A DIFFERENCE record (step 3 product, stamped by steps 4 and 5): what the
+ * corresponding accounts disagree on, typed on one dimension and one relation,
+ * holding EVERY channel's account in its correspondence (two or three).
+ */
+export const CharterDifferenceSchema = z
+  .object({
+    difference_id: z.string().min(1),
+    correspondence_id: z.string().min(1),
+    dimension: DifferenceDimensionSchema,
+    relation: DifferenceRelationSchema,
+    /** Required when `relation` is `incompatible`; absent otherwise. */
+    split: DifferenceSplitSchema.optional(),
+    accounts: z.array(DifferenceAccountSchema).min(2),
+    /** One-sentence statement of the gap. */
+    gap: z.string().min(1),
+    /** For `presence`: the silent channel SHOULD have covered the goal. */
+    covered_channel_gap: z.boolean().optional(),
+    /** Tool-derived routing from the fixed `(dimension, relation, split)` table. */
+    routed_to: DifferenceRouteSchema,
+    /** Whether this record is a finding candidate (incompatible, or a covered-channel gap). */
+    finding_candidate: z.boolean(),
+    /** Set by the fidelity step; absent until it runs. */
+    fidelity: FidelityVerdictSchema.optional(),
+  })
+  .strict();
+export type CharterDifference = z.infer<typeof CharterDifferenceSchema>;
+
+/**
+ * The n-ary clarification answer (decision 6): the governing channel by name, a
+ * rewrite of all accounts, or a deliberate held tension.
+ */
+export const CharterDifferenceAnswerSchema = z.union([
+  z.object({ governs: CharterLaneKindSchema }).strict(),
+  z.literal("rewrite_all"),
+  z.literal("leave_open"),
+]);
+export type CharterDifferenceAnswer = z.infer<typeof CharterDifferenceAnswerSchema>;
+
+/**
+ * A charter-alignment question sourced from a DIFFERENCE (the n-ary successor of
+ * {@link CharterClarificationRequestSchema}). Every account in the correspondence
+ * is shown; the answer names the channel that governs.
+ */
+export const CharterDifferenceQuestionSchema = z
+  .object({
+    request_id: z.string().min(1),
+    difference_id: z.string().min(1),
+    /** The report's grouping subsystem (structure-decomposition unit), when placed. */
+    subsystem_id: z.string().optional(),
+    dimension: DifferenceDimensionSchema,
+    relation: DifferenceRelationSchema,
+    split: DifferenceSplitSchema.optional(),
+    accounts: z.array(DifferenceAccountSchema).min(2),
+    question: z.string().min(1),
+    value: ClarificationValueSchema,
+    disposition: z.enum(["interactive", "finding_only"]),
+    answer: CharterDifferenceAnswerSchema.optional(),
+  })
+  .strict();
+export type CharterDifferenceQuestion = z.infer<typeof CharterDifferenceQuestionSchema>;
