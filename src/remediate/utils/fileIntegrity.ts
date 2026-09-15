@@ -124,8 +124,18 @@ async function hashDirectory(
   return hashContent(parts.join(""));
 }
 
+// sites-pinned: tests/remediate/grounding.test.ts
+/**
+ * Resolve a cited path against the repository root. A RELATIVE citation is read
+ * in either separator spelling: a Windows host writes `src\a.ts`, and on a POSIX
+ * host `join` would otherwise treat the backslash as a filename character, so
+ * the same citation grounded on Windows and un-grounded on Linux CI (the
+ * OS-agnostic rule: identical code, identical verdict). An absolute path is
+ * taken as spelled — it is already the host's own form.
+ */
 export function resolveAffectedPath(root: string, affectedPath: string): string {
-  return isAbsolute(affectedPath) ? affectedPath : join(root, affectedPath);
+  if (isAbsolute(affectedPath)) return affectedPath;
+  return join(root, affectedPath.replace(/\\/g, "/"));
 }
 
 
