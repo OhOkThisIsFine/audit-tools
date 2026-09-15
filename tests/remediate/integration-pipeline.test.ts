@@ -27,6 +27,9 @@ import {
   promoteImplementationDagToExtractedPlan,
 } from "../../src/remediate/steps/contractPipeline.js";
 import { intakePaths } from "../../src/remediate/intake.js";
+// The friction vocabulary is single-sourced in shared, so the walk helper below
+// attests every category by iterating it rather than restating the list.
+import { FRICTION_CATEGORIES } from "audit-tools/shared";
 import {
   detectCyclicSeamObligations,
 } from "../../src/remediate/contractPipeline/cyclicSeamResolution.js";
@@ -97,6 +100,29 @@ async function acknowledgeResume(): Promise<void> {
   await writeFile(
     join(ARTIFACTS_DIR, "confirm_resume_ack.json"),
     JSON.stringify({ choice: "resume" }),
+    "utf8",
+  );
+}
+
+/**
+ * Complete the run's friction close-out walk on the plan-keyed record.
+ *
+ * The close is GATED on this walk: `handleClosing` decides it before the close
+ * touches disk, so an unwalked run stops at the blocking `close_run` step rather
+ * than folding through to write its outcomes. These fixtures want the FOLD, so
+ * they walk the record first — on the key the close keys on.
+ */
+async function walkFriction(planId: string): Promise<void> {
+  const dir = join(ARTIFACTS_DIR, "friction");
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, `${planId}.json`),
+    JSON.stringify({
+      category_attestations: FRICTION_CATEGORIES.map((category) => ({
+        category,
+        note: "none this run",
+      })),
+    }) + "\n",
     "utf8",
   );
 }
@@ -796,8 +822,14 @@ describe("context-carrying triage retries", () => {
     // is no "state_transition" step kind for the host to consume.
     const step = await decideNextStep({ root: REPO_DIR });
 
-    // The run must not dispatch a retry — it must close or present report.
-    expect(["present_report", "run_close_action", "no_closing_actions", "collect_triage"]).toContain(step.step_kind);
+    // The run must not dispatch a retry — it must close, walk its friction, or
+    // present report. `close_run` is the friction close-out gate, which the close
+    // consults before it touches disk: a run whose walk is still owed stops there.
+    // Either-or on purpose (the known-debt case INV-remediate-tests-04 tracks):
+    // which step the fold stops on depends on plan/item state, and `close_run` is
+    // the friction close-out gate the close consults before it touches disk.
+    // prettier-ignore
+    expect(["present_report", "close_run", "run_close_action", "no_closing_actions", "collect_triage"]).toContain(step.step_kind);
     // The triage resolution file must be consumed (archived/deleted).
     expect(existsSync(join(ARTIFACTS_DIR, "triage_resolution.json"))).toBe(false);
   });
@@ -893,6 +925,8 @@ describe("evidence-backed close verification report", () => {
       },
       closing_plan: { action: "none" },
     } as RemediationState);
+    // The close is gated on the run's friction walk — satisfy it first.
+    await walkFriction("PLAN-CLOSE");
     await acknowledgeResume();
     await writeIntentCheckpoint();
 
@@ -968,6 +1002,8 @@ describe("evidence-backed close verification report", () => {
       },
       closing_plan: { action: "none" },
     } as RemediationState);
+    // The close is gated on the run's friction walk — satisfy it first.
+    await walkFriction("PLAN-CLOSE2");
     await acknowledgeResume();
     await writeIntentCheckpoint();
 
@@ -1019,6 +1055,8 @@ describe("evidence-backed close verification report", () => {
       },
       closing_plan: { action: "none" },
     } as RemediationState);
+    // The close is gated on the run's friction walk — satisfy it first.
+    await walkFriction("PLAN-HALTED");
     await acknowledgeResume();
     await writeIntentCheckpoint();
 

@@ -38,6 +38,10 @@ import {
   CP_CYCLIC_SEAM_RESOLUTION_VERSION,
 } from "../../../src/remediate/validation/contractPipeline.js";
 import { scratchDir } from "../../helpers/scratch.js";
+// The friction vocabulary is single-sourced in shared; the walk helper below
+// attests every category by iterating it, so a new category cannot leave this
+// fixture writing an incomplete record.
+import { FRICTION_CATEGORIES } from "audit-tools/shared";
 // The gate seam is PRODUCTION code owned by remediate-nextstep-and-final-gate;
 // the harness consumes it, never reimplements it (the seam edge runs this way
 // only).
@@ -158,6 +162,11 @@ export interface NextStepHarness {
   approveReviewGate(): Promise<void>;
   writeCompleteContractPipelineDag(): Promise<void>;
   /**
+   * Complete the run's friction close-out walk on the plan-keyed record. The
+   * close is gated on this walk, so a suite wanting the FOLD walks it first.
+   */
+  walkFriction(planId?: string): Promise<void>;
+  /**
    * The injectable final-gate runner (`artifact:injectable-final-gate-runner`,
    * a PRODUCTION seam owned by remediate-nextstep-and-final-gate) this harness
    * threads into harness-driven runs. Pass it as `decideNextStep`'s
@@ -219,6 +228,32 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
     await writeFile(
       join(ARTIFACTS_DIR, "confirm_resume_ack.json"),
       JSON.stringify({ choice: "resume" }),
+      "utf8",
+    );
+  }
+
+  /**
+   * Complete the run's friction close-out walk on the plan-keyed record.
+   *
+   * The close is GATED on this walk: `handleClosing` decides it before the close
+   * touches disk, so a run whose walk is still owed stops at the blocking
+   * `close_run` step instead of folding through to `present_report`. A suite
+   * that wants the FOLD (the pre-gate behavior) walks the record first, exactly
+   * as a host does.
+   *
+   * Keyed on the plan the caller saved — the same id the close keys on.
+   */
+  async function walkFriction(planId = "PLAN-1"): Promise<void> {
+    const dir = join(ARTIFACTS_DIR, "friction");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, `${planId}.json`),
+      JSON.stringify({
+        category_attestations: FRICTION_CATEGORIES.map((category) => ({
+          category,
+          note: "none this run",
+        })),
+      }) + "\n",
       "utf8",
     );
   }
@@ -517,6 +552,7 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
     writeReadyStructuredAuditIntake,
     approveReviewGate,
     writeCompleteContractPipelineDag,
+    walkFriction,
     finalGateRunner: HARNESS_GATE_RUNNER,
     runFinalGate: (root = REPO_DIR, runner = HARNESS_GATE_RUNNER) =>
       runToolOwnedFinalGate(root, { runner }),

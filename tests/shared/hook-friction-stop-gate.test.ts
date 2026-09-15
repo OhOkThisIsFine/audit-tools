@@ -69,6 +69,42 @@ function markRemediationRun(root: string): string {
   return dir;
 }
 
+/**
+ * Render the run's persisted step contract naming its ONE friction record — the
+ * artifact both orchestrator halves write whenever a run owes a walk
+ * (`artifact_paths.friction_record`). The gate reads the record from HERE, so a
+ * fixture that wants the gate to look at a record must state the path the way
+ * the tool does.
+ *
+ * The path is written as the tool writes it: a root-relative, forward-slash
+ * token. It is deliberately the fixture's OWN choice of name — the gate must
+ * follow the contract, never a filename convention.
+ */
+function writeStepContractNamingRecord(
+  areaDir: string,
+  recordPath: string,
+  { stale = true }: { stale?: boolean } = {},
+): void {
+  mkdirSync(join(areaDir, 'steps'), { recursive: true });
+  const file = join(areaDir, 'steps', 'current-step.json');
+  writeFileSync(
+    file,
+    JSON.stringify({
+      step_kind: 'close_run',
+      status: 'ready',
+      artifact_paths: { friction_record: recordPath },
+    }),
+  );
+  // A contract written "just now" reads as an IN-FLIGHT run and is skipped by
+  // the gate's bystander guard. Default to stale: the fixtures here model a run
+  // that has stopped churning with its walk still unclaimed — the case the
+  // backstop exists for. The in-flight cases opt back in with `stale: false`.
+  if (stale) {
+    const old = (Date.now() - 3 * 60 * 1000) / 1000;
+    utimesSync(file, old, old);
+  }
+}
+
 function markAuditRun(root: string): string {
   const dir = join(root, '.audit-tools', 'audit');
   // A substantive run artifact — a bare steps/ dir is NOT a run marker (it is
@@ -81,9 +117,10 @@ function markAuditRun(root: string): string {
 }
 
 describe('friction-stop-gate: recent runs complete the friction close-out walk', () => {
-  it('blocks a recent remediation run with no friction walk', () => {
+  it('blocks a recent remediation run whose named record is missing', () => {
     const root = tempRoot('remediation');
-    markRemediationRun(root);
+    const dir = markRemediationRun(root);
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
 
     const { code, stderr } = runHook(FRICTION_GATE, stop(), { root });
     expect(code).toBe(2);
@@ -93,9 +130,10 @@ describe('friction-stop-gate: recent runs complete the friction close-out walk',
     expect(stderr).toContain('inefficient_feeding');
   });
 
-  it('blocks a recent audit run with no friction walk', () => {
+  it('blocks a recent audit run whose named record is missing', () => {
     const root = tempRoot('audit');
-    markAuditRun(root);
+    const dir = markAuditRun(root);
+    writeStepContractNamingRecord(dir, '.audit-tools/audit/friction/run.json');
 
     const { code, stderr } = runHook(FRICTION_GATE, stop(), { root });
     expect(code).toBe(2);
@@ -120,7 +158,7 @@ describe('friction-stop-gate: recent runs complete the friction close-out walk',
     const dir = markRemediationRun(root);
     mkdirSync(join(dir, 'friction'), { recursive: true });
     writeFileSync(
-      join(dir, 'friction', 'run.json'),
+      join(dir, 'friction', 'plan-1.json'),
       JSON.stringify({
         open_observations: [{ category: 'ambiguous_direction' }],
         category_attestations: [
@@ -129,20 +167,27 @@ describe('friction-stop-gate: recent runs complete the friction close-out walk',
         ],
       }),
     );
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
 
     expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(0);
   });
 
   it('allows a re-entrant stop after the gate has already blocked once', () => {
     const root = tempRoot('reentrant');
-    markRemediationRun(root);
+    const dir = markRemediationRun(root);
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
+    mkdirSync(join(dir, 'friction'), { recursive: true });
+    writeFileSync(join(dir, 'friction', 'plan-1.json'), JSON.stringify({ open_observations: [] }));
 
     expect(runHook(FRICTION_GATE, stop({ stop_hook_active: true }), { root }).code).toBe(0);
   });
 
   it('allows a stop while background tasks are live — the walk is owed at the real close', () => {
     const root = tempRoot('live-bg');
-    markRemediationRun(root);
+    const dir = markRemediationRun(root);
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
+    mkdirSync(join(dir, 'friction'), { recursive: true });
+    writeFileSync(join(dir, 'friction', 'plan-1.json'), JSON.stringify({ open_observations: [] }));
 
     const live = stop({ background_tasks: [{ id: 'a1', type: 'subagent', status: 'running' }] });
     expect(runHook(FRICTION_GATE, live, { root }).code).toBe(0);
@@ -150,7 +195,8 @@ describe('friction-stop-gate: recent runs complete the friction close-out walk',
 
   it('still blocks when every background task is terminal', () => {
     const root = tempRoot('terminal-bg');
-    markRemediationRun(root);
+    const dir = markRemediationRun(root);
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
 
     const harvested = stop({ background_tasks: [{ id: 'a1', type: 'shell', status: 'completed' }] });
     expect(runHook(FRICTION_GATE, harvested, { root }).code).toBe(2);
@@ -190,6 +236,88 @@ describe('friction-stop-gate: recent runs complete the friction close-out walk',
   });
 });
 
+describe('friction-stop-gate reads the ONE record the run named (F3)', () => {
+  // RED PROOF. The gate's former rule was "any complete *.json under
+  // <area>/friction satisfies the walk". That accepts ANOTHER run's record: a
+  // complete sibling silences the gate for a run whose own walk was never done.
+  // Here a complete record sits under a name the contract does NOT name, beside
+  // an INCOMPLETE record the contract DOES name. The gate must block.
+  //
+  // Red with the fix inverted: restoring the scan (accepting any complete
+  // record) turns this into exit 0.
+  it('blocks when a complete record exists under a name the run did not name', () => {
+    const root = tempRoot('sibling-complete');
+    const dir = markRemediationRun(root);
+    mkdirSync(join(dir, 'friction'), { recursive: true });
+
+    // A sibling run's record, complete — but not this run's.
+    writeFileSync(
+      join(dir, 'friction', 'someone-elses-run.json'),
+      JSON.stringify({
+        open_observations: [{ category: 'ambiguous_direction' }],
+        category_attestations: [
+          { category: 'tool_should_decide', disposition: 'none' },
+          { category: 'inefficient_feeding', disposition: 'none' },
+        ],
+      }),
+    );
+    // THIS run's record, named by its contract, walked only partly.
+    writeFileSync(
+      join(dir, 'friction', 'plan-1.json'),
+      JSON.stringify({ open_observations: [{ category: 'ambiguous_direction' }] }),
+    );
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
+
+    const { code, stderr } = runHook(FRICTION_GATE, stop(), { root });
+    expect(code).toBe(2);
+    expect(stderr).toContain('recent remediate-code run');
+  });
+
+  it('allows a stop when the named record is complete', () => {
+    const root = tempRoot('named-complete');
+    const dir = markRemediationRun(root);
+    mkdirSync(join(dir, 'friction'), { recursive: true });
+    writeFileSync(
+      join(dir, 'friction', 'plan-1.json'),
+      JSON.stringify({
+        open_observations: [{ category: 'ambiguous_direction' }],
+        category_attestations: [
+          { category: 'tool_should_decide', disposition: 'none' },
+          { category: 'inefficient_feeding', disposition: 'none' },
+        ],
+      }),
+    );
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
+
+    expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(0);
+  });
+
+  it('blocks when the named record is absent, however many siblings exist', () => {
+    const root = tempRoot('named-absent');
+    const dir = markRemediationRun(root);
+    mkdirSync(join(dir, 'friction'), { recursive: true });
+    writeFileSync(
+      join(dir, 'friction', 'stale-other.json'),
+      JSON.stringify({
+        open_observations: [{ category: 'ambiguous_direction' }],
+        category_attestations: [
+          { category: 'tool_should_decide', disposition: 'none' },
+          { category: 'inefficient_feeding', disposition: 'none' },
+        ],
+      }),
+    );
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
+
+    expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(2);
+  });
+
+  it('allows a stop when no step contract names a record — no walk is owed', () => {
+    const root = tempRoot('no-contract');
+    markRemediationRun(root);
+    expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(0);
+  });
+});
+
 describe('friction-stop-gate: skip in-flight runs', () => {
   it('allows a stop when an area run is visibly in flight (fresh current-step.json)', () => {
     // A concurrent session is actively working on the run (current-step.json
@@ -198,15 +326,16 @@ describe('friction-stop-gate: skip in-flight runs', () => {
     const dir = markRemediationRun(root);
     mkdirSync(join(dir, 'friction'), { recursive: true });
     writeFileSync(
-      join(dir, 'friction', 'run.json'),
+      join(dir, 'friction', 'plan-1.json'),
       JSON.stringify({
         open_observations: [],
         category_attestations: [],
       }),
     );
-    // Create a fresh current-step.json (just now).
-    mkdirSync(join(dir, 'steps'), { recursive: true });
-    writeFileSync(join(dir, 'steps', 'current-step.json'), '{}');
+    // A fresh current-step.json (just now) naming the run's record.
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json', {
+      stale: false,
+    });
 
     // The run is recent + has unwalked friction, but current-step.json is
     // fresh → in-flight → allows stop (no block).
@@ -220,16 +349,15 @@ describe('friction-stop-gate: skip in-flight runs', () => {
     const dir = markRemediationRun(root);
     mkdirSync(join(dir, 'friction'), { recursive: true });
     writeFileSync(
-      join(dir, 'friction', 'run.json'),
+      join(dir, 'friction', 'plan-1.json'),
       JSON.stringify({
         open_observations: [],
         category_attestations: [],
       }),
     );
-    // Create a stale current-step.json (over 2 minutes ago).
-    mkdirSync(join(dir, 'steps'), { recursive: true });
+    // A stale current-step.json (over 2 minutes ago), naming the run's record.
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
     const staleTime = Date.now() - 3 * 60 * 1000; // 3 minutes ago
-    writeFileSync(join(dir, 'steps', 'current-step.json'), '{}');
     // Back-date the file using utimesSync.
     const staleSeconds = staleTime / 1000;
     utimesSync(join(dir, 'steps', 'current-step.json'), staleSeconds, staleSeconds);
@@ -239,23 +367,13 @@ describe('friction-stop-gate: skip in-flight runs', () => {
     expect(stderr).toContain('recent remediate-code run');
   });
 
-  it('allows a stop when an area has no current-step.json (not in flight)', () => {
-    // current-step.json doesn't exist, so we can't determine if it's in flight.
-    // But if the friction walk is complete, the stop is allowed anyway.
+  it('allows a stop when the run rendered no step contract (no walk owed)', () => {
+    // A marker alone is not a walk: the run states which record it owes through
+    // its persisted step contract. With no contract, there is no record to
+    // check and nothing to block on — the same fail-open reading that keeps a
+    // stub or a post-promotion `steps/`-only tree from nagging forever.
     const root = tempRoot('no-step');
-    const dir = markRemediationRun(root);
-    mkdirSync(join(dir, 'friction'), { recursive: true });
-    writeFileSync(
-      join(dir, 'friction', 'run.json'),
-      JSON.stringify({
-        open_observations: [{ category: 'ambiguous_direction' }],
-        category_attestations: [
-          { category: 'tool_should_decide', disposition: 'none' },
-          { category: 'inefficient_feeding', disposition: 'none' },
-        ],
-      }),
-    );
-    // No steps/ dir at all. Friction is complete → allows stop.
+    markRemediationRun(root);
     expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(0);
   });
 });
@@ -287,7 +405,8 @@ describe('friction-stop-gate: unregistered-child skip (Build 1)', () => {
 
   it('a REGISTERED session still owes its friction walk', async () => {
     const root = tempRoot('registered-walk');
-    markRemediationRun(root);
+    const dir = markRemediationRun(root);
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
     await arm(root, 'resident-owner');
     const { code, stderr } = runHook(FRICTION_GATE, stop({ session_id: 'resident-owner' }), { root });
     expect(code).toBe(2);
@@ -296,7 +415,8 @@ describe('friction-stop-gate: unregistered-child skip (Build 1)', () => {
 
   it("no session_id in the payload → legacy behavior even when armed (Build 3's no-id pin)", async () => {
     const root = tempRoot('no-sid');
-    markRemediationRun(root);
+    const dir = markRemediationRun(root);
+    writeStepContractNamingRecord(dir, '.audit-tools/remediation/friction/plan-1.json');
     await arm(root, 'resident-owner');
     expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(2);
   });

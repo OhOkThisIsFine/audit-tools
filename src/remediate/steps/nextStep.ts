@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
 import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -274,11 +275,37 @@ function resolveArtifactsDir(root: string, artifactsDir?: string): string {
   return artifactsDir ? resolve(artifactsDir) : remediationArtifactsDir(root);
 }
 
-function stateRunId(state: RemediationState | null): string {
-  // When the plan is absent (fully-green close deleted the state, or complete
-  // was persisted without a plan), use the stable fallback "run" so the friction
-  // record path is deterministic across multiple next-step calls on the same run.
-  return state?.plan?.plan_id ?? "run";
+/**
+ * The run's friction-record key: the plan id, or `null` when there is no plan.
+ *
+ * There is DELIBERATELY no fallback key. A fallback ("run") is a path every
+ * planless state shares, and `decideFrictionTriage` MATERIALIZES the record it
+ * is handed — so a planless caller could MINT a fresh empty record under it,
+ * which the close gate then blocks on. That is the 2026-08-24 defect exactly.
+ *
+ * The key is therefore the plan id or nothing, and a caller handed `null` has
+ * no walk to key: the walk ran before the close archived the plan-keyed record,
+ * and the plan is where its identity came from.
+ */
+function stateRunId(state: RemediationState | null): string | null {
+  return state?.plan?.plan_id ?? null;
+}
+
+/**
+ * The run key for a caller holding a LOADED state that must carry a plan id —
+ * the host-handoff/ingest paths, whose contracts declare `run_id: string`.
+ *
+ * It throws rather than inventing a key: an absent plan id there is a
+ * reachable-but-unexpected state, and silently falling back would mint a
+ * shared path exactly as the fallback key did. Callers that can legitimately
+ * hold a planless state use {@link stateRunId} and handle the `null`.
+ */
+function requireStateRunId(state: RemediationState): string {
+  const runId = stateRunId(state);
+  if (!runId) {
+    throw new Error("remediate: a loaded state with no plan id cannot name a run");
+  }
+  return runId;
 }
 
 /**
@@ -941,6 +968,36 @@ async function forceReplanFromExistingIntake(
   return carried;
 }
 
+/**
+ * The BLOCKING friction close-out step for a run whose walk is still owed.
+ *
+ * Emitted from `handleClosing` BEFORE the close touches disk, so the record the
+ * host is told to write (`triage.recordPath`) is the plan-keyed one this very
+ * decision just materialized — and so the run's identity in that path is the
+ * plan id, not a fallback. The step is a `closing`-phase gate: `next-step`
+ * re-decides the same walk on the next call, and only a disposed walk lets the
+ * close proceed.
+ */
+async function buildFrictionWalkStep(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+  triage: FrictionTriageDecision,
+): Promise<RemediationStep> {
+  return writeCurrentStep({
+    stepKind: "close_run",
+    status: "ready",
+    runId: requireStateRunId(state),
+    repoRoot: root,
+    artifactsDir,
+    prompt: `# Remediation Run Friction Triage\n\nComplete the friction close-out walk before the run may close.\n${buildFrictionTriageBlock(triage)}`,
+    allowedCommands: [],
+    stopCondition:
+      "Complete friction triage (write dispositions and open_observations), then call next-step again.",
+    artifactPaths: { friction_record: triage.recordPath },
+  });
+}
+
 async function presentReportStep(
   root: string,
   artifactsDir: string,
@@ -952,13 +1009,39 @@ async function presentReportStep(
   // event + reflection is disposed AND ≥1 open observation written. Never trivially
   // satisfied by an empty event set — the host must actively confirm the friction state.
   //
-  // When `artifactsDir` was deleted by a fully-green close (close.ts rm -rf on a
-  // green run), there is nowhere to persist the friction record and no mechanical
-  // events to triage — skip the triage entirely and go straight to complete.
-  const artifactsDirExists = existsSync(artifactsDir);
-  const triage = artifactsDirExists
-    ? await decideRemediateFrictionCloseout(artifactsDir, state)
-    : null;
+  // NO FRICTION RECORD IS EVER MINTED HERE. The decision was made — and the
+  // record, under the run's plan-keyed path, was walked — before the close
+  // archived it: `handleClosing` consults `decideRemediateFrictionCloseout`
+  // against the LIVE state and short-circuits the close until the walk is
+  // disposed. So ON THE GREEN PATH — the close ran to `complete`, archived the
+  // run and removed the artifacts dir — the walk was already completed when the
+  // close started, the plan-keyed record left with the other deliverables, and
+  // all that is left is to RENDER the already-recorded walk for the host.
+  //
+  // NOT-GREEN IS THE OTHER HALF, and it is not "mint nothing": a close that
+  // returned a non-`complete` state PRESERVES the artifacts dir, so the record
+  // this step decides remains where the run wrote it — the caller reaches here
+  // with the saved state still carrying its plan id, `decideFrictionTriage`
+  // materializes (or re-reads) that same plan-keyed file, and the walk is
+  // rendered from the record that is still in place.
+  //
+  // It is decided — and so materialized — ONLY when the state names a run. The
+  // guard is the plan id, not the artifacts dir: the dir is not evidence of
+  // anything here, since `decideNextStepLoop` mkdirs it unconditionally on entry,
+  // `RunLogger.event` mkdirs it again for `run.log.jsonl`, and `writeJsonFile`
+  // mkdirs any parent it is handed. So a dir-existence test is true on every
+  // path, including a run whose state the close deleted. Guarding on the dir was
+  // the 2026-08-24 defect: the decider ran with a null state, took a fallback
+  // key, and because `decideFrictionTriage` MATERIALIZES the record it is given,
+  // minted a fresh EMPTY record inside the directory the close had just deleted —
+  // re-blocking the run on the record it had created. `stateRunId` now answers
+  // `null` for a planless state and this call therefore decides nothing.
+  //
+  // A `complete` state reaching here is a run that never ran the close walk (a
+  // re-delivery of an already-complete run, whose plan the state still carries),
+  // so the walk is genuinely still owed and deciding it here is correct — it
+  // renders as the blocking step. Only a planless state renders nothing.
+  const triage = await decideRemediateFrictionCloseout(artifactsDir, state);
   const frictionBlock = triage ? buildFrictionTriageBlock(triage) : "";
   const isBlocked = triage?.action === "dispose";
   return writeCurrentStep({
@@ -1232,7 +1315,7 @@ async function buildImplementDispatchStep(ctx: {
   runLogger: RunLogger;
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, store, runLogger } = ctx;
-  const runId = stateRunId(state);
+  const runId = requireStateRunId(state);
   const boundaryState = currentHostBoundaryState(state);
   const ingested = await ingestRemediationHostResults({
     root,
@@ -1310,7 +1393,7 @@ async function buildImplementDispatchStep(ctx: {
   // the step — never synthesized from the other.
   await linkFrictionRunIds(
     artifactsDir,
-    stateRunId(state),
+    requireStateRunId(state),
     { step_run_id: runId, dispatch_run_id: handoff.handoff_record.run_id },
     "remediate-code",
   );
@@ -1381,7 +1464,7 @@ const PHASE_LOCK_TIMEOUT_MS = 0;
 async function buildPhaseBusyStep(params: {
   root: string;
   artifactsDir: string;
-  runId: string;
+  runId: string | null;
 }): Promise<RemediationStep> {
   const { root, artifactsDir, runId } = params;
   const nextCommand = loaderCommand("next-step");
@@ -1434,12 +1517,20 @@ async function handleComplete(
  * event AND every surfaced agent-feedback reflection carries a disposition; an empty
  * set (zero events AND zero reflections) is trivially "disposed". Keyed only off
  * `(artifactsDir, runId)`; never coupled to any repo's backlog doc.
+ *
+ * A state with NO plan id can name no run, and since the decision MATERIALIZES
+ * the record it keys, guessing a key there would mint one. It returns `null`
+ * instead — "there is no run here to close out", which is the truthful answer
+ * for a state whose plan is gone. Callers that hold the run's plan get a
+ * decision; callers past the run boundary get nothing to render.
  */
 export async function decideRemediateFrictionCloseout(
   artifactsDir: string,
   state: RemediationState | null,
-): Promise<FrictionTriageDecision> {
-  return decideFrictionTriage(artifactsDir, stateRunId(state), "remediate-code");
+): Promise<FrictionTriageDecision | null> {
+  const runId = stateRunId(state);
+  if (!runId) return null;
+  return decideFrictionTriage(artifactsDir, runId, "remediate-code");
 }
 
 /**
@@ -3659,6 +3750,25 @@ async function handleClosing(
 ): Promise<RemediateOutcome> {
   const closeStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
+
+  // THE FRICTION WALK IS DECIDED HERE, BEFORE THE CLOSE TOUCHES DISK.
+  //
+  // `runClosePhase` ends by archiving the run's friction record into the
+  // promoted deliverables and deleting the artifacts dir. Both the record and
+  // the state's plan id — the key that names it — are gone after that, so this
+  // is the last moment a decision can name the run it is closing out. Deciding
+  // here also MATERIALIZES the plan-keyed record, which is what gives the host
+  // a file to append to during the walk.
+  //
+  // An unsatisfied walk short-circuits the close ENTIRELY: no tests, no closing
+  // action, no archive, no removal. The run stays open on the plan-keyed record
+  // and is emitted as the blocking friction step; once disposed, the next
+  // `next-step` re-decides it as satisfied and falls through to a real close.
+  const frictionTriage = await decideRemediateFrictionCloseout(artifactsDir, state);
+  if (frictionTriage && frictionTriage.action !== "disposed") {
+    return { kind: "emit", step: await buildFrictionWalkStep(root, artifactsDir, state, frictionTriage) };
+  }
+
   const closed = await runClosePhase(state, { root, artifactsDir }, runLogger);
   runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "close", duration_ms: Date.now() - closeStart });
   if (closed.status !== "complete") {
@@ -3669,10 +3779,10 @@ async function handleClosing(
   // Close-complete CROSSES the engine boundary: `complete` is a pre-intake
   // obligation, unreachable from a main-engine transition. Emit the durable
   // report directly, passing exactly what the original recursion reloaded — the
-  // artifact dir is DELETED on a fully-green close (reload → null → stateRunId
-  // falls back to "run") and PRESERVED on a not-green complete (reload → the
-  // saved complete state → its plan_id). `store.loadState()` reproduces both, so
-  // present_report is identical to the cascade.
+  // artifact dir is DELETED on a fully-green close (reload → null, and a null
+  // state renders no friction block) and PRESERVED on a not-green complete
+  // (reload → the saved complete state → its plan_id). `store.loadState()`
+  // reproduces both, so present_report is identical to the cascade.
   // (Regression-locked in next-step-implement-dispatch.)
   return {
     kind: "emit",

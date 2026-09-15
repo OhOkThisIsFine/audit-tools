@@ -91,9 +91,9 @@ describe("validateCurrentStep (ValidationIssue[] return style)", () => {
     expect(result.issues.join("\n")).toMatch(/contract_version|step_kind|status/i);
   });
 
-  it("does not report issues for a well-formed current-step object", async () => {
+  /** A current-step object that is well-formed apart from `run_id`'s value. */
+  async function writeWellFormedStep(runId: unknown): Promise<void> {
     const { REMEDIATION_STEP_CONTRACT_VERSION } = await import("../../src/remediate/steps/types.js");
-    await saveState();
     const promptPath = join(ARTIFACTS_DIR, "steps", "current-prompt.md");
     await mkdir(join(ARTIFACTS_DIR, "steps"), { recursive: true });
     await writeFile(promptPath, "# prompt\n", "utf8");
@@ -102,18 +102,51 @@ describe("validateCurrentStep (ValidationIssue[] return style)", () => {
       step_kind: "implement",
       status: "ready",
       prompt_path: promptPath,
-      run_id: "run-1",
+      /** The nullable field under test — spelled explicitly, `undefined` included. */
+      run_id: runId,
       repo_root: REPO_DIR,
       artifacts_dir: ARTIFACTS_DIR,
       stop_condition: "done",
       allowed_commands: ["npm test"],
       artifact_paths: {},
     });
+  }
+
+  function stepIssuesOf(result: { issues: string[] }): string[] {
+    return result.issues.filter((i) => i.includes("current-step.json"));
+  }
+
+  it("does not report issues for a well-formed current-step object", async () => {
+    await saveState();
+    await writeWellFormedStep("run-1");
 
     const result = await validateArtifacts(ARTIFACTS_DIR, REPO_DIR);
 
     // current-step issues shouldn't appear in the output
-    const stepIssues = result.issues.filter((i) => i.includes("current-step.json"));
-    expect(stepIssues).toHaveLength(0);
+    expect(stepIssuesOf(result)).toHaveLength(0);
+  });
+
+  // `RemediationStep.run_id` is `string | null`: a planless complete run names
+  // no run and writes `null` (the legacy `"run"` fallback key is gone). The
+  // validator demanding a string rejected the tool's own just-written step, so
+  // such a run reported itself broken for having told the truth.
+  it("accepts a NULL run_id — the planless complete step the tool itself writes", async () => {
+    await saveState();
+    await writeWellFormedStep(null);
+
+    const result = await validateArtifacts(ARTIFACTS_DIR, REPO_DIR);
+
+    expect(stepIssuesOf(result)).toHaveLength(0);
+  });
+
+  // The other half: nullability is not permissiveness. An ABSENT run_id is a
+  // different answer from a null one and is still an issue.
+  it("still reports an ABSENT run_id", async () => {
+    await saveState();
+    await writeWellFormedStep(undefined);
+
+    const result = await validateArtifacts(ARTIFACTS_DIR, REPO_DIR);
+
+    expect(stepIssuesOf(result).join("\n")).toMatch(/run_id must be a string or null/);
   });
 });

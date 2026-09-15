@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/shared/friction-run-linkage.test.ts, tests/remediate/friction-capture-runid-injectivity.test.ts
 import {
   type FrictionCaptureArtifact,
   frictionCapturePath,
@@ -444,47 +445,16 @@ export async function collectTriageSubjects(
 }
 
 /**
- * The MANDATORY BLOCKING end-of-run triage close-out, single-sourced for both
- * orchestrators (caller passes its `tool`). Two satisfaction requirements:
- *
- *  1. Every captured mechanical event AND every surfaced agent-feedback
- *     reflection carries a `keep|discard|annotate` disposition.
- *  2. The record carries ≥1 open observation (`open_observations[]`). Even
- *     "no friction encountered" as `other` satisfies this — the host must
- *     actively reflect, not auto-approve.
- *
- * The former trivial "empty set → disposed" path is intentionally dropped: a
- * run with zero mechanical events still requires the host to confirm that zero
- * friction occurred. The record file is materialized on first call so the host
- * always has an existing file to append to.
- *
- * Deterministic — keyed only off the on-disk record + reflections at
- * `(artifactsDir, runId)`. Never coupled to any repo's backlog doc.
+ * The ONE derivation of a triage decision from an already-read record. Both the
+ * materializing decider and the read-only sibling call this, so what "disposed"
+ * means cannot drift between the gate that blocks and the render that reports.
  */
-export async function decideFrictionTriage(
+async function deriveTriageDecision(
   artifactsDir: string,
   runId: string,
-  tool: FrictionCaptureArtifact['tool'],
+  record: TriagedFrictionArtifact,
 ): Promise<FrictionTriageDecision> {
-  // Single-encoded canonical derivation (INV-SCC-04): raw run id in — the path
-  // helper owns the one sanitization pass, so this recordPath is byte-identical
-  // to the file every capture/mutation site reads and writes.
-  const recordPath = frictionCapturePath(artifactsDir, runId);
   const subjects = await collectTriageSubjects(artifactsDir, runId);
-
-  // Materialize the record (so the host always appends to an existing file) AND
-  // pre-populate the category walk in ONE locked merge: aggregate the run's
-  // tool-tagged mechanical events into derived `open_observations[]` entries so a
-  // category the workflow already saw re-work in arrives pre-covered. The merge is
-  // host-preserving (host-authored observations/dispositions survive) and
-  // idempotent (the derived set is recomputed, never duplicated).
-  const record = await appendFrictionUnderLock(
-    artifactsDir,
-    runId,
-    (r) => mergeDerivedObservations({ ...r, tool: r.tool ?? tool }),
-    tool,
-  );
-
   const existingObservations: FrictionOpenObservation[] = record.open_observations ?? [];
   const existingAttestations: FrictionCategoryAttestation[] = record.category_attestations ?? [];
   const disposed = new Set(
@@ -522,7 +492,10 @@ export async function decideFrictionTriage(
   return {
     action: pending.length === 0 && !needs_open_observations ? 'disposed' : 'dispose',
     pending,
-    recordPath,
+    // Single-encoded canonical derivation (INV-SCC-04): raw run id in — the path
+    // helper owns the one sanitization pass, so this recordPath is byte-identical
+    // to the file every capture/mutation site reads and writes.
+    recordPath: frictionCapturePath(artifactsDir, runId),
     needs_open_observations,
     missing_categories,
     existing_observations: existingObservations,
@@ -532,6 +505,49 @@ export async function decideFrictionTriage(
     dispatch_run_ids,
     related_record_keys,
   };
+}
+
+/**
+ * The MANDATORY BLOCKING end-of-run triage close-out, single-sourced for both
+ * orchestrators (caller passes its `tool`). Two satisfaction requirements:
+ *
+ *  1. Every captured mechanical event AND every surfaced agent-feedback
+ *     reflection carries a `keep|discard|annotate` disposition.
+ *  2. The record carries ≥1 open observation (`open_observations[]`). Even
+ *     "no friction encountered" as `other` satisfies this — the host must
+ *     actively reflect, not auto-approve.
+ *
+ * The former trivial "empty set → disposed" path is intentionally dropped: a
+ * run with zero mechanical events still requires the host to confirm that zero
+ * friction occurred. The record file is materialized on first call so the host
+ * always has an existing file to append to.
+ *
+ * Deterministic — keyed only off the on-disk record + reflections at
+ * `(artifactsDir, runId)`. Never coupled to any repo's backlog doc.
+ *
+ * MATERIALIZES the record, so a caller must key it on a run that genuinely
+ * exists. A caller with no run to name must not call this at all: minting on a
+ * fallback key creates the very record the close gate then blocks on.
+ */
+export async function decideFrictionTriage(
+  artifactsDir: string,
+  runId: string,
+  tool: FrictionCaptureArtifact['tool'],
+): Promise<FrictionTriageDecision> {
+  // Materialize the record (so the host always appends to an existing file) AND
+  // pre-populate the category walk in ONE locked merge: aggregate the run's
+  // tool-tagged mechanical events into derived `open_observations[]` entries so a
+  // category the workflow already saw re-work in arrives pre-covered. The merge is
+  // host-preserving (host-authored observations/dispositions survive) and
+  // idempotent (the derived set is recomputed, never duplicated).
+  const record = await appendFrictionUnderLock(
+    artifactsDir,
+    runId,
+    (r) => mergeDerivedObservations({ ...r, tool: r.tool ?? tool }),
+    tool,
+  );
+
+  return deriveTriageDecision(artifactsDir, runId, record);
 }
 
 /**

@@ -21,20 +21,25 @@ afterEach(async () => {
 });
 describe("decideNextStep — run lifecycle, input handling, and intake routing", () => {
   it("complete run emits present_report with a folded friction close-out", async () => {
-    await saveState({ status: "complete" });
+    // A completed run keeps its plan (close writes `remediation-state.complete.json`
+    // with it), and the plan id is what keys the friction record.
+    await saveState({
+      status: "complete",
+      plan: { plan_id: "PLAN-LIFECYCLE", findings: [], blocks: [] },
+    } as never);
     await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
     await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Report\n", "utf8");
 
-    // First call: friction triage pending — record materialized, needs open_observations.
+    // First call: the run's own record is unwalked — the folded close-out surfaces
+    // it, keyed on the plan, and the prompt renders the single-sourced walk.
     const pending = await decideNextStep({ root: REPO_DIR });
 
     expect(pending.contract_version).toBe("remediate-code-step/v1alpha1");
     expect(pending.step_kind).toBe("present_report");
     expect(pending.status).toBe("ready");
     expect(pending.artifact_paths.final_report).toMatch(/remediation-report\.md$/);
-    // The terminal friction close-out is folded in: the record path is surfaced and
-    // the prompt surfaces the single-sourced run-friction triage (events UNION reflections).
-    expect(pending.artifact_paths.friction_record).toMatch(/friction[\\/].+\.json$/);
+    // The record is PLAN-KEYED — never a shared fallback name.
+    expect(pending.artifact_paths.friction_record).toMatch(/PLAN-LIFECYCLE\.json$/);
     expect(existsSync(pending.artifact_paths.friction_record)).toBe(true);
     const pendingPrompt = await readFile(pending.prompt_path, "utf8");
     expect(pendingPrompt).toMatch(/[Ff]riction triage/);
@@ -54,6 +59,21 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     expect(done.status).toBe("complete");
     const donePrompt = await readFile(done.prompt_path, "utf8");
     expect(donePrompt).toMatch(/Present Remediation Report/);
+  });
+
+  it("a planless complete state owns no friction walk (nothing to key it on)", async () => {
+    // A `complete` state with no plan names no run, so there is no record it could
+    // be walking. The close-out renders nothing rather than minting one under a
+    // shared fallback key — the 2026-08-24 defect.
+    await saveState({ status: "complete" });
+    await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
+    await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Report\n", "utf8");
+
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("present_report");
+    expect(step.status).toBe("complete");
+    expect(step.artifact_paths.friction_record).toBeUndefined();
+    expect(existsSync(join(ARTIFACTS_DIR, "friction", "run.json"))).toBe(false);
   });
 
   it("accepts options supplied as a JSON string", async () => {

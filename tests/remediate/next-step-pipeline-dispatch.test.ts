@@ -17,7 +17,7 @@ import {
 } from "./helpers/nextStepHarness.js";
 
 const harness = createNextStepHarness(".test-next-step-pipeline-dispatch");
-const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint, writeReadyStructuredAuditIntake, approveReviewGate, writeCompleteContractPipelineDag } = harness;
+const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint, writeReadyStructuredAuditIntake, approveReviewGate, writeCompleteContractPipelineDag, walkFriction } = harness;
 
 /**
  * Async CLI spawn, under the suite's per-CLI-call deadline.
@@ -617,6 +617,8 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
         },
       }),
     );
+    // The close is gated on the run's friction walk — satisfy it first.
+    await walkFriction("PLAN-1");
     await acknowledgeResume();
     await writeIntentCheckpoint();
 
@@ -635,6 +637,8 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
         },
       }),
     );
+    // The close is gated on the run's friction walk — satisfy it first.
+    await walkFriction("PLAN-1");
     await acknowledgeResume();
     await writeIntentCheckpoint();
 
@@ -644,11 +648,38 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     });
 
     expect(step.step_kind).toBe("present_report");
-    // status is "ready" (friction triage pending) — the test doesn't have a
-    // passing test command so close isn't fully-green; the friction record is
-    // materialized on this call with needs_open_observations=true.
-    expect(step.status).toBe("ready");
+    // status is "complete": the walk was satisfied before the close, so the
+    // close folded through on this call. (The test has no passing test command,
+    // so the artifacts dir is preserved rather than deleted.)
+    expect(step.status).toBe("complete");
     expect(existsSync(join(REPO_DIR, ".audit-tools", "remediation-report.md"))).toBe(true);
+  });
+
+  it("an unwalked friction walk stops the close at the blocking close_run step", async () => {
+    await saveState(
+      makePlanningState({
+        status: "closing",
+        items: {
+          "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
+          "F-002": { finding_id: "F-002", status: "resolved", block_id: "B-002" },
+        },
+      }),
+    );
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    // No walk filed: the close must NOT run. The run stops at the friction step,
+    // keyed on the plan, with the record named for the host to write.
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("close_run");
+    expect(step.status).toBe("ready");
+    expect(step.artifact_paths.friction_record).toMatch(/PLAN-1\.json$/);
+    expect(existsSync(step.artifact_paths.friction_record)).toBe(true);
+    expect(step.stop_condition).toMatch(/next-step again/);
+
+    // Nothing from the close happened: no report, no outcomes.
+    expect(existsSync(join(REPO_DIR, ".audit-tools", "remediation-report.md"))).toBe(false);
+    expect(existsSync(join(REPO_DIR, ".audit-tools", "remediation-outcomes.json"))).toBe(false);
   });
 
   it("N-R06: CLI next-step writes parseable JSON to stdout for structured-audit input entering contract pipeline", async () => {

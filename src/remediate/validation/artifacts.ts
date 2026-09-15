@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/artifacts-validation.test.ts
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -141,7 +142,6 @@ function validateCurrentStep(value: unknown, path: string): ValidationIssue[] {
     "step_kind",
     "status",
     "prompt_path",
-    "run_id",
     "repo_root",
     "artifacts_dir",
     "stop_condition",
@@ -149,6 +149,17 @@ function validateCurrentStep(value: unknown, path: string): ValidationIssue[] {
     if (typeof value[key] !== "string") {
       pushValidationIssue(issues, `${path}.${key}`, `${path}.${key} must be a string.`);
     }
+  }
+  // `run_id` is NULLABLE, unlike the keys above: `RemediationStep.run_id` is
+  // `string | null` because a planless complete run names no run and writes
+  // `null` (the omission of the legacy `"run"` fallback key). A validator that
+  // demanded a string rejected the tool's own just-written step — so a run
+  // diagnosed itself as broken for telling the truth about having no plan.
+  //
+  // `undefined` is still an issue: absent and null are different answers, and
+  // only the second is a state the tool deliberately writes.
+  if (value.run_id !== null && typeof value.run_id !== "string") {
+    pushValidationIssue(issues, `${path}.run_id`, `${path}.run_id must be a string or null.`);
   }
   validateStringArray(value.allowed_commands, `${path}.allowed_commands`, issues);
   if (!isRecord(value.artifact_paths)) {
