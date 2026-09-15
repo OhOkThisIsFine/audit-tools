@@ -13,6 +13,13 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **Never run `npm test` concurrently with any other `npm run check:*` in the same worktree
+  (2026-09-15).** `npm test` rebuilds `dist/` first; a check that reads `dist/` at the same
+  moment (`check:contract-sites`, the packaged smokes, any `tsx` import of a built module)
+  produces EPERM on `dist/**/*.d.ts.map` and `Cannot find module dist/.../nextStepCommand.js`
+  INSIDE the suite — a false red on files the change never touched. Run the suite alone; run the
+  checks before or after it.
+
 - **An entry that reinterprets an incident must quote or link the primary record's own words for
   the mechanism, not restate them.** A paraphrase can change the mechanism while looking like a
   faithful summary, then send implementation toward a defect the primary record never described.

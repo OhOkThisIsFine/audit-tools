@@ -5,9 +5,11 @@
 
 ## Live state
 
-- **v0.51.7 is published and installed globally.** Release commit `a5ced6e3` passed the publish
-  workflow; npm resolves 0.51.7 and both installed command surfaces report 0.51.7. The release
-  workflow is [run 34189090341](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/34189090341).
+- **v0.51.10 is published and installed globally.** Release commit `286b21b0` passed the publish
+  workflow; npm resolves 0.51.10 and both installed command surfaces report 0.51.10. The release
+  workflow is [run 35034582436](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/35034582436).
+  0.51.9 is on the registry with identical content (the release journal did not resume; see the
+  backlog).
 - **The commit gate runs at git's own boundary.** The tracked `.githooks/` run
   `.claude/hooks/commit-gate.mjs` for every commit into this repository; the PreToolUse
   `pre-commit-gate.mjs` keeps only what git cannot see (the hook-bypass refusal, the push
