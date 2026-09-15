@@ -1,3 +1,8 @@
+// sites-pinned: tests/audit/host-handoff.test.ts
+// (the steward-lane verification contract: the lane-aware prompt, the one
+// optional envelope key, the refusal of that key on a lane whose contract never
+// asked for it, the enforcement of every property the prompt states, and the
+// task-bindings version bump whose refusal names the remedy)
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -50,12 +55,26 @@ import { AuditResultSchema, type AuditResult, type AuditTask } from "../../types
 import {
   validateOneAuditResult,
   formatAuditResultIssues,
+  // THE ONE CONTAINMENT RULE, shared with the batch door: this boundary and
+  // `validateVerification` build their allowed set through the same function, so
+  // they cannot disagree about which `file_paths` entries are inside the packet.
+  verificationAllowedPaths,
+  normalizeCoveragePath,
 } from "../../validation/auditResults.js";
 import type {
   AuditHostIngestIssue,
   AuditIngestIssueCode,
 } from "../../validation/ingestIssueCodes.js";
 import { reviewWaveClosedPath } from "../../io/runArtifacts.js";
+// The lane token itself is single-sourced where the steward lane is minted:
+// `LENS_VERIFICATION_TAG` (`orchestrator/selectiveDeepening/shared.ts`). Every
+// reader compiles against that one declaration, so a rename moves them together
+// rather than leaving two literals that agree only until one is edited — which
+// is what a hand-copied literal here produced, twice (this boundary and the
+// audit-results validator).
+import {
+  LENS_VERIFICATION_TAG,
+} from "../../orchestrator/selectiveDeepening/shared.js";
 
 // v1alpha2 (the emitted-lane demand ranking): each work item's `metadata`
 // carries the shared `demand` ranking (size / complexity / risk) beside its
@@ -68,8 +87,60 @@ import { reviewWaveClosedPath } from "../../io/runArtifacts.js";
 const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha2" as const;
 const RESULT_MAP_CONTRACT_VERSION = "audit-host-result-map/v1alpha1" as const;
 const RESULT_CONTRACT_VERSION = "audit-host-result/v1alpha1" as const;
+
+/**
+ * The result envelope's REQUIRED key set. Named rather than inlined because the
+ * parse and the refusal message both enumerate it, and the one OPTIONAL key
+ * (`verification`) is added to the expected set only when the submission
+ * actually carries it — so "exactly these keys, plus at most one optional
+ * field" is one statement instead of a second hand-maintained list.
+ */
+const AUDIT_RESULT_ENVELOPE_KEYS = [
+  "contract_version",
+  "file_coverage",
+  "findings",
+  "prompt_sha256",
+  "result_id",
+  "run_id",
+  "work_item_id",
+] as const;
+/**
+ * v1alpha2 adds the per-item `tags` lane stamp. The version moves with the shape
+ * because a binding set is READ BACK at ingest, after the pause — a binding
+ * written by the previous code carries no `tags`, and the lane gate below reads
+ * that field, so under one version string the old set would be refused by a
+ * generic parse error on a run the host had already executed.
+ *
+ * Moving the version (rather than defaulting an absent `tags` to `[]`) makes
+ * that case FAIL CLOSED with a message that names what happens next:
+ * `parseTaskBindings` throws {@link StaleAuditHostTaskBindingsError}, the ingest
+ * returns it as a classified issue, and the fold walks on to re-prepare the
+ * whole workload under the current version. Defaulting was
+ * the other option and was rejected here because it would silently judge an
+ * old-shape item against the BASE per-file lane: that happens to be correct today
+ * only because the only lane with a divergent contract is the steward lane, which
+ * did not exist when the old binding was written — an argument that decays the
+ * moment a second lane diverges, and that would leave a mis-laned item reporting
+ * success.
+ */
 const TASK_BINDINGS_CONTRACT_VERSION =
-  "audit-host-task-bindings/v1alpha1" as const;
+  "audit-host-task-bindings/v1alpha2" as const;
+
+/**
+ * The remedy a version mismatch carries. The failure is recoverable, and the
+ * recoverable move is not guessable from the shape ("unexpected field" reads as
+ * a corrupt file, which invites an operator to hand-edit bindings).
+ *
+ * It names ONLY what the tool then does, because that is now all there is to do:
+ * the fold classifies a stale binding set ({@link StaleAuditHostTaskBindingsError})
+ * and continues to `prepareAuditHostHandoff`, which rewrites the whole set under
+ * the current version in the SAME `next-step` call that read it. So the host is
+ * not asked to do anything, and the sentence must not read as an instruction to
+ * re-run anything by hand.
+ */
+const TASK_BINDINGS_VERSION_REMEDY =
+  "the same `next-step` re-prepares the workload under the current contract version " +
+  "and rewrites this bindings file; results already accepted are not re-ingested";
 const REVIEW_WAVE_CLOSED_CONTRACT_VERSION = "audit-review-wave-closed/v1alpha1";
 
 const ACCEPTED_RESULTS_CONTRACT_VERSION =
@@ -84,6 +155,15 @@ export interface AuditHostTask {
   readonly file_line_counts: Readonly<Record<string, number>>;
   readonly rationale: string;
   readonly priority: string;
+  /**
+   * The task's lane tags, carried so the boundary can tell WHICH CONTRACT this
+   * work item is judged against. The steward lane (`lens_verification`) is the
+   * only one whose contract asks for `verification` metadata — see
+   * {@link buildPrompt} — and without the tag the boundary cannot know that, so
+   * the ask was rendered for no item and the envelope admitted it for none.
+   * Optional: an untagged task is the base per-file lane.
+   */
+  readonly tags?: readonly string[];
   /**
    * The lane's demand ranking (size / complexity / risk) — the host-facing
    * statement of what this lane asks for, naming DEMAND only and never a
@@ -191,6 +271,13 @@ interface AuditHostResult {
   readonly file_coverage: readonly HostCoverage[];
   /** The findings AS THE STRICT PROJECTION PARSED THEM (see {@link parseFindings}). */
   readonly findings: readonly WorkerFinding[];
+  /**
+   * Steward-lane verification metadata, ADMITTED for a `lens_verification` work
+   * item only (see the lane gate in {@link parseHostResult}). Carried through
+   * unvalidated here and validated by the ONE validator the batch door also
+   * runs, so the two doors judge the same field by the same rules.
+   */
+  readonly verification?: unknown;
 }
 
 interface AcceptedResultEntry {
@@ -217,6 +304,23 @@ interface AuditHostTaskBinding {
   readonly pass_id: string;
   readonly lens: string;
   readonly file_line_counts: Readonly<Record<string, number>>;
+  /**
+   * The task's lane tags, persisted so the INGEST can tell which contract this
+   * item's prompt carried without re-reading and re-parsing that prompt's prose.
+   * The lane is what decides whether a submitted `verification` object is an
+   * answer to a real ask or an unsolicited field, and that decision has to
+   * survive the pause between prepare and ingest.
+   *
+   * THIS COPY IS THE AUTHORITY. The lane fact also rides `AuditHostTask.tags`,
+   * but that copy is an INPUT to prepare — it is written into the workload the
+   * host holds and can hand back. The gate reads only this one, which was
+   * persisted at prepare time under the prepare-time lock and is re-verified
+   * against the workload (`validateHandoffBinding`), so a submission cannot
+   * choose its own lane by editing the task it echoes. The two are equal by
+   * construction at prepare ({@link prepareAuditHostHandoff} writes this from
+   * the task), never by the ingest trusting the live task object.
+   */
+  readonly tags: readonly string[];
 }
 
 interface AuditHostTaskBindings {
@@ -432,7 +536,30 @@ function normalizeTask(
     priority,
     demand,
     token_estimate: task.token_estimate,
+    // Sorted and deduplicated so two spellings of the same lane cannot produce
+    // two work items that differ only in tag order (the prompt digest is a
+    // content hash of this shape, and an incidentally-ordered array is a churn
+    // source — see the stable-order rule).
+    ...(Array.isArray(task.tags)
+      ? { tags: [...new Set(task.tags)].sort(compareCodeUnits) }
+      : {}),
   };
+}
+
+/**
+ * The lane tag whose contract asks for `verification` metadata — the shared
+ * {@link LENS_VERIFICATION_TAG}, imported rather than spelled again.
+ *
+ * WHAT THE IMPORT BUYS, exactly: every reader in this package that gates on the
+ * lane compiles against ONE declaration, so a rename of the constant moves all
+ * of them together at build time. It buys nothing at RUNTIME — no test catches a
+ * rename of the constant's VALUE, because a test can only compare the constant
+ * to itself. That is the whole claim, and it is enough: the failure the import
+ * removes is the one where two spellings drift apart in a source tree, which is
+ * what a hand-copied literal produced here.
+ */
+function isVerificationLane(tags: readonly string[] | undefined): boolean {
+  return tags?.includes(LENS_VERIFICATION_TAG) ?? false;
 }
 
 function buildPrompt(task: AuditHostTask, resultPath: string): string {
@@ -446,17 +573,205 @@ function buildPrompt(task: AuditHostTask, resultPath: string): string {
     task_id: task.task_id,
     unit_id: task.unit_id,
   });
+  // LANE-AWARE, because the two lanes' contracts genuinely differ: the steward
+  // lane is INSTRUCTED (by its task rationale) to return verification metadata,
+  // and the base lane is not. Rendering one envelope sentence for both would
+  // either ask the base lane for a field its ingest discards, or tell the
+  // steward lane "exactly" a key set that refuses what its own instruction
+  // demands. The ask and the envelope are the same fact, so they are stated
+  // from the same predicate.
+  const verificationLane = isVerificationLane(task.tags);
   return [
     "Perform the bounded semantic audit work item below.",
     "Review every listed file and return one JSON object at the bound result path.",
     `Assignment: ${assignment}`,
-    "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, and findings in addition to contract_version.",
+    verificationLane
+      ? "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, findings, and verification in addition to contract_version."
+      : "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, and findings in addition to contract_version.",
     "Each file_coverage entry must contain exactly path, reviewed_lines, and total_lines.",
     // The finding contract is CARRIED, not referenced: it is rendered from the
     // very schema ingestion enforces, so a host never has to remember or fetch it.
     ...findingContractPromptLines(),
     "Do not supply a `grounding` field on any finding — grounding is computed by the tool at ingest by re-reading your cited quoted_text from disk, and a supplied one rejects the whole submission.",
+    ...(verificationLane ? verificationContractPromptLines() : []),
   ].join("\n");
+}
+
+/**
+ * The `verification` contract rendered into a steward-lane work item's prompt.
+ *
+ * CARRIED for the same reason the finding contract is: the host cannot comply
+ * with a contract it is never shown, and this one is three-deep (booleans, three
+ * concern arrays, and an array of AuditTask-shaped follow-up suggestions whose
+ * `file_paths` must lie inside the packet boundary). Rendered from the schema
+ * ingestion enforces, so the prompt cannot describe a shape the parse refuses.
+ */
+function verificationContractPromptLines(): readonly string[] {
+  return [
+    "This work item is a LENS STEWARD VERIFICATION task, so it also accepts an optional `verification` object.",
+    `verification, when present, must contain exactly ${VERIFICATION_CONTRACT_KEYS.join(", ")} — all six, with no extra key: verified and needs_followup are booleans, concerns, coverage_concerns and confidence_concerns are arrays of non-empty strings (a genuine "nothing to report" is an empty array, not an omitted field), and followup_tasks is an array of objects.`,
+    `Each verification.followup_tasks entry must contain exactly ${VERIFICATION_FOLLOWUP_KEYS.join(", ")} — all six, with no extra key: file_paths is a non-empty array of non-empty repo-relative strings, each naming a file within THIS work item's file_coverage or packet boundary; lens must be the lens of THIS task; task_id, unit_id, pass_id and rationale must be non-empty strings.`,
+    "Set needs_followup true only when followup_tasks is non-empty — a follow-up request with no bounded task is refused.",
+  ];
+}
+
+/**
+ * The steward `verification` object's key set and its follow-up entry's key set,
+ * declared ONCE. Three statements read them — the prompt lines, the enforcement,
+ * and the refusal they share — because a second hand-maintained copy of a key
+ * list is exactly how a prompt and a parser drift apart, which is the defect
+ * class {@link verificationContractFailure} exists to close.
+ */
+const VERIFICATION_CONTRACT_KEYS = [
+  "verified",
+  "needs_followup",
+  "concerns",
+  "coverage_concerns",
+  "confidence_concerns",
+  "followup_tasks",
+] as const;
+
+const VERIFICATION_FOLLOWUP_KEYS = [
+  "task_id",
+  "unit_id",
+  "pass_id",
+  "lens",
+  "file_paths",
+  "rationale",
+] as const;
+
+/** The exact-key-set refusal, shared by the object and its entries. */
+function exactKeysFailure(
+  label: string,
+  present: readonly string[],
+  expected: readonly string[],
+): string | null {
+  const extra = present.filter((key) => !expected.includes(key));
+  const missing = expected.filter((key) => !present.includes(key));
+  if (extra.length === 0 && missing.length === 0) return null;
+  const broken = [
+    ...missing.map((key) => `missing ${key}`),
+    ...extra.map((key) => `unexpected ${key}`),
+  ];
+  return `${label} must contain exactly ${expected.join(", ")} (received: ${broken.join(", ")})`;
+}
+
+function isNonEmptyStringArray(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((entry) => typeof entry === "string" && entry.length > 0)
+  );
+}
+
+/**
+ * This door's inputs to the ONE containment rule
+ * ({@link verificationAllowedPaths}, `src/audit/validation/auditResults.ts`):
+ * the binding's file set (the work item's own boundary, persisted at prepare)
+ * plus the submitted envelope's coverage paths. No packet boundary here — the
+ * host door judges a single work item's own coverage, and the batch door is the
+ * one that sees siblings. Both build their set through the shared rule anyway,
+ * so a change to how a path is normalized or admitted reaches both.
+ */
+function verificationAllowedPathsForEnvelope(
+  binding: AuditHostTaskBinding,
+  envelope: Record<string, unknown>,
+): Set<string> {
+  return verificationAllowedPaths({
+    assignedPaths: Object.keys(binding.file_line_counts),
+    coveragePaths: Array.isArray(envelope.file_coverage)
+      ? envelope.file_coverage.flatMap((entry) =>
+          isRecord(entry) && typeof entry.path === "string" ? [entry.path] : [],
+        )
+      : [],
+  });
+}
+
+/**
+ * Every property the steward prompt CLAIMS about the `verification` object,
+ * enforced at the host-result boundary — a claim the prompt makes and the
+ * envelope does not back is the exact failure the project rule bans. Returns
+ * the first broken property's refusal detail, or `null` when the object
+ * satisfies every stated rule.
+ *
+ * The rules mirror {@link verificationContractPromptLines} one-for-one:
+ * 1. `verification` must contain exactly its six keys — no extra, no missing.
+ * 2. `needs_followup` true ⇒ `followup_tasks` present and non-empty.
+ * 3. each `followup_tasks` entry must contain exactly its six keys, its
+ *    `lens` equal to the task's lens, and each `file_paths` string inside the
+ *    packet boundary.
+ *
+ * Reused over the shared `AuditVerificationSchema` deliberately: that schema is
+ * NON-STRICT (its arrays are optional, it drops unknown keys) because the
+ * follow-up builder tolerates a partial object and the follow-up-task shape
+ * (`AuditTaskSchema`) is a superset of what the prompt names. The prompt is the
+ * stricter claim, so the stricter check lives HERE, at the door that reads the
+ * field, rather than tightening a schema other readers lean on.
+ */
+function verificationContractFailure(
+  verification: unknown,
+  binding: AuditHostTaskBinding,
+  envelope: Record<string, unknown>,
+): string | null {
+  if (!isRecord(verification)) {
+    return `verification must be an object with exactly ${VERIFICATION_CONTRACT_KEYS.join(", ")}`;
+  }
+  const keysFailure = exactKeysFailure(
+    "verification",
+    Object.keys(verification),
+    VERIFICATION_CONTRACT_KEYS,
+  );
+  if (keysFailure !== null) return keysFailure;
+  if (typeof verification.verified !== "boolean") {
+    return "verification.verified must be a boolean";
+  }
+  if (typeof verification.needs_followup !== "boolean") {
+    return "verification.needs_followup must be a boolean";
+  }
+  for (const field of ["concerns", "coverage_concerns", "confidence_concerns"] as const) {
+    if (!isNonEmptyStringArray(verification[field])) {
+      return `verification.${field} must be an array of non-empty strings`;
+    }
+  }
+  const followup = verification.followup_tasks;
+  if (!Array.isArray(followup)) {
+    return "verification.followup_tasks must be an array of objects";
+  }
+  if (verification.needs_followup === true && followup.length === 0) {
+    return "needs_followup is true but followup_tasks is empty — a follow-up request with no bounded task is refused";
+  }
+  const allowed = verificationAllowedPathsForEnvelope(binding, envelope);
+  for (let index = 0; index < followup.length; index++) {
+    const label = `verification.followup_tasks[${index}]`;
+    const entry = followup[index];
+    if (!isRecord(entry)) {
+      return `${label} must be an object`;
+    }
+    const entryKeysFailure = exactKeysFailure(
+      label,
+      Object.keys(entry),
+      VERIFICATION_FOLLOWUP_KEYS,
+    );
+    if (entryKeysFailure !== null) return entryKeysFailure;
+    for (const field of ["task_id", "unit_id", "pass_id", "rationale"] as const) {
+      if (typeof entry[field] !== "string" || entry[field].length === 0) {
+        return `${label}.${field} must be a non-empty string`;
+      }
+    }
+    if (entry.lens !== binding.lens) {
+      return `${label}.lens must equal the task's lens ` +
+        `(expected '${binding.lens}', got '${String(entry.lens)}')`;
+    }
+    if (!isNonEmptyStringArray(entry.file_paths) || entry.file_paths.length === 0) {
+      return `${label}.file_paths must be a non-empty array of non-empty strings`;
+    }
+    for (const path of entry.file_paths) {
+      if (!allowed.has(normalizeCoveragePath(path))) {
+        return `${label}.file_paths references '${path}', ` +
+          "which is outside this work item's file_coverage or packet boundary";
+      }
+    }
+  }
+  return null;
 }
 
 function buildWorkItem(
@@ -599,6 +914,7 @@ export async function prepareAuditHostHandoff(params: {
         file_line_counts: Object.fromEntries(
           item.scope.files.map((path) => [path, task.file_line_counts[path]]),
         ),
+        tags: [...(task.tags ?? [])],
       };
     }),
   };
@@ -735,6 +1051,45 @@ class StaleAuditHostWorkloadError extends Error {
   }
 }
 
+/**
+ * A persisted binding set this build no longer mints — the task-binding twin of
+ * {@link StaleAuditHostWorkloadError}, and classified by the same rule.
+ *
+ * It exists as a CLASS and not as a plain throw because of what the fold does
+ * with an uncaught error: `runHostDelegationObligation` rethrows everything that
+ * is not ENOENT, and it ingests BEFORE the one path that re-prepares
+ * (`ensureSemanticReviewRunUnlocked` → `renderSemanticReviewStep` →
+ * `prepareAuditHostHandoff`, the ONLY writer of this file). A bare throw
+ * therefore aborted the fold before the re-prepare, the blocked-step backstop
+ * wrote a blocked step, and every later `next-step` failed identically with the
+ * bindings file still at the old version — a wedge produced by a file the tool
+ * had written itself.
+ *
+ * Classified, the ingest returns it as an ISSUE and the fold walks on to the
+ * re-prepare in the SAME call, which rewrites the whole set at the current
+ * version. The stale file is then read by nothing.
+ */
+class StaleAuditHostTaskBindingsError extends Error {
+  /** The registered ingestion check the refusal is attributable to. */
+  readonly check: IngestionCheckId = "workload_binding";
+  /** The audit issue vocabulary's name for this class of refusal. */
+  readonly code: AuditIngestIssueCode = "workload_stale";
+
+  constructor(
+    readonly found_contract_version: unknown,
+    readonly expected_contract_version: string,
+  ) {
+    super(
+      "the persisted audit host task bindings are STALE: they were issued under " +
+        `contract version ${JSON.stringify(found_contract_version)}, but this build ` +
+        `mints ${expected_contract_version}. A version bump changes the binding SHAPE, ` +
+        "so the set cannot be re-derived and no submission bound against it can be " +
+        `accepted — ${TASK_BINDINGS_VERSION_REMEDY}.`,
+    );
+    this.name = "StaleAuditHostTaskBindingsError";
+  }
+}
+
 function parseWorkload(value: unknown, runId: string): AuditHostWorkload {
   // Envelope + all-items parsing is the CORE's scaffolding; the audit draw
   // selects only its own contract version and item parser.
@@ -801,6 +1156,7 @@ function parseTaskBinding(value: unknown): AuditHostTaskBinding | null {
       "pass_id",
       "prompt_sha256",
       "result_path",
+      "tags",
       "unit_id",
       "work_item_id",
     ]) ||
@@ -810,6 +1166,13 @@ function parseTaskBinding(value: unknown): AuditHostTaskBinding | null {
     typeof value.unit_id !== "string" ||
     typeof value.pass_id !== "string" ||
     typeof value.lens !== "string" ||
+    // REQUIRED, and refused as a VERSION problem rather than a shape problem —
+    // see parseTaskBindings. A binding without the lane stamp cannot be judged:
+    // the lane decides which result contract this item's prompt carried, so an
+    // absent stamp is not a field to default, it is an item whose contract is
+    // unknown.
+    !Array.isArray(value.tags) ||
+    !value.tags.every((entry) => typeof entry === "string") ||
     !isRecord(value.file_line_counts) ||
     !Object.values(value.file_line_counts).every(
       (count) => Number.isInteger(count) && (count as number) >= 0,
@@ -827,11 +1190,23 @@ function parseTaskBindings(
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ["contract_version", "entries", "run_id"]) ||
-    value.contract_version !== TASK_BINDINGS_CONTRACT_VERSION ||
     value.run_id !== runId ||
     !Array.isArray(value.entries)
   ) {
     throw new Error("Invalid audit host task bindings");
+  }
+  // The VERSION is checked on its OWN, before the shape walk, so a binding set
+  // written under an older version is refused for THAT reason and carries the
+  // remedy. Folded into the predicate below it would be one more way to produce
+  // "Invalid audit host task bindings", which tells an operator nothing about
+  // what to do and reads as a corrupt file rather than a stale one. The class
+  // is what the ingest CLASSIFIES on (see `ingestAuditHostResults`) instead of
+  // letting the throw abort the fold before it re-prepares.
+  if (value.contract_version !== TASK_BINDINGS_CONTRACT_VERSION) {
+    throw new StaleAuditHostTaskBindingsError(
+      value.contract_version,
+      TASK_BINDINGS_CONTRACT_VERSION,
+    );
   }
   const bindings = new Map<string, AuditHostTaskBinding>();
   for (const rawEntry of value.entries) {
@@ -987,16 +1362,16 @@ function parseHostResult(
   item: AuditHostWorkItem,
   binding: AuditHostTaskBinding,
 ): HostResultParse {
+  const hasVerification = isRecord(value) && Object.hasOwn(value, "verification");
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
-      "contract_version",
-      "file_coverage",
-      "findings",
-      "prompt_sha256",
-      "result_id",
-      "run_id",
-      "work_item_id",
+      ...AUDIT_RESULT_ENVELOPE_KEYS,
+      // `verification` is the ONE optional key: required of no lane, asked of
+      // the steward lane, and refused when supplied to a lane whose contract
+      // never mentions it (see the lane check below). Every other key stays
+      // exact, so the envelope still admits nothing a host invents.
+      ...(hasVerification ? ["verification"] : []),
     ]) ||
     value.contract_version !== RESULT_CONTRACT_VERSION ||
     typeof value.result_id !== "string" ||
@@ -1005,7 +1380,8 @@ function parseHostResult(
     return refuse(
       "result_envelope",
       `result envelope is not ${RESULT_CONTRACT_VERSION} with exactly contract_version, ` +
-        `result_id, run_id, work_item_id, prompt_sha256, file_coverage and findings`,
+        `result_id, run_id, work_item_id, prompt_sha256, file_coverage and findings` +
+        `${hasVerification ? ", and at most one verification object" : ""}`,
     );
   }
   // The identity walk is the CORE's, in the core's order AND in the core's
@@ -1022,6 +1398,30 @@ function parseHostResult(
   });
   if (identityFailure !== null) {
     return refuse("identity_binding", `identity binding: ${identityFailure}`);
+  }
+  // The lane gate. `verification` is admitted by the envelope so the steward
+  // lane can deliver what its own instruction asks for — but a base-lane work
+  // item's prompt never mentions it, so a submission carrying one is answering
+  // an ask that was never made. Refusing it HERE (rather than ignoring it) is
+  // what keeps the field from becoming a way to smuggle unattested metadata
+  // past a contract that does not describe it: `validateVerification` would
+  // merely WARN, and a warning on an accepted result is not a gate.
+  if (hasVerification && !isVerificationLane(binding.tags)) {
+    return refuse(
+      "result_envelope",
+      "verification metadata was supplied for a work item whose contract does not request it; " +
+        "remove the field or submit it through a lens_verification work item",
+    );
+  }
+  if (hasVerification) {
+    const verificationFailure = verificationContractFailure(
+      value.verification,
+      binding,
+      value,
+    );
+    if (verificationFailure !== null) {
+      return refuse("result_envelope", verificationFailure);
+    }
   }
   if (!Array.isArray(value.file_coverage)) {
     return refuse("file_coverage", "file coverage: file_coverage must be an array");
@@ -1132,6 +1532,13 @@ function toAuditResult(
     findings,
     reviewed_clean: result.findings.length === 0,
     run_id: result.run_id,
+    // Threaded through, not re-validated: `AuditResultSchema` declares
+    // `verification` and the ONE validator (`validateVerification`, reached from
+    // `validateAuditResults` at the caller) judges its interior. Validating it a
+    // second time here would be a second rule that can drift from the first.
+    ...(result.verification === undefined
+      ? {}
+      : { verification: result.verification }),
   });
   if (parsed.success) return { ok: true, auditResult: parsed.data };
   const issue = parsed.error.issues[0];
@@ -1194,12 +1601,35 @@ export async function ingestAuditHostResults(params: {
     paths.acceptedLedgerPath,
     params.runId,
   );
-  // A STALE workload is refused as a CLASSIFIED ISSUE, never as a throw. It is
-  // the one workload refusal with a named repair — re-prepare, which this fold
-  // performs on its way to the next emission — so it must reach the host as a
-  // rendered diagnostic rather than as an unclassified stack out of the fold.
+  // A STALE persisted document is refused as a CLASSIFIED ISSUE, never as a
+  // throw. These are the refusals with a named repair — re-prepare, which this
+  // fold performs on its way to the next emission — so they must reach the host
+  // as rendered diagnostics rather than as unclassified stacks out of the fold.
   // Nothing is accepted: a document this build did not mint cannot be
   // re-derived, so no submission has a binding to be judged against.
+  //
+  // The BINDING SET is in this class for one more reason than the workload is:
+  // on the fold, a throw here lands BEFORE the one path that re-prepares, so it
+  // wedges the run rather than surfacing anything (see
+  // {@link StaleAuditHostTaskBindingsError}). A result the host already wrote
+  // under the old bindings is therefore REFUSED as stale — it is never accepted
+  // against the new contract, because the new contract's binding is what the
+  // re-prepare mints, and the item is re-published under it.
+  const stale = (error: {
+    code: AuditIngestIssueCode;
+    check: IngestionCheckId;
+    message: string;
+  }): AuditHostIngestSummary => ({
+    accepted_count: 0,
+    accepted_results: accepted.entries.map((entry) => entry.audit_result),
+    accepted_results_path: paths.acceptedResultsPath,
+    completed_work_item_ids: [
+      ...new Set(accepted.entries.map((entry) => entry.work_item_id)),
+    ].sort(compareCodeUnits),
+    issues: [error],
+    raw_issues: [error],
+    validation_warnings: [],
+  });
   let workload: AuditHostWorkload;
   try {
     workload = parseWorkload(
@@ -1208,31 +1638,22 @@ export async function ingestAuditHostResults(params: {
     );
   } catch (error) {
     if (!(error instanceof StaleAuditHostWorkloadError)) throw error;
-    const staleIssue: AuditHostIngestIssue = {
-      code: error.code,
-      check: error.check,
-      message: error.message,
-    };
-    return {
-      accepted_count: 0,
-      accepted_results: accepted.entries.map((entry) => entry.audit_result),
-      accepted_results_path: paths.acceptedResultsPath,
-      completed_work_item_ids: [
-        ...new Set(accepted.entries.map((entry) => entry.work_item_id)),
-      ].sort(compareCodeUnits),
-      issues: [staleIssue],
-      raw_issues: [staleIssue],
-      validation_warnings: [],
-    };
+    return stale(error);
   }
   const resultMap = parseResultMap(
     await readJsonFile<unknown>(paths.resultMapPath),
     params.runId,
   );
-  const taskBindings = parseTaskBindings(
-    await readJsonFile<unknown>(paths.taskBindingsPath),
-    params.runId,
-  );
+  let taskBindings: Map<string, AuditHostTaskBinding>;
+  try {
+    taskBindings = parseTaskBindings(
+      await readJsonFile<unknown>(paths.taskBindingsPath),
+      params.runId,
+    );
+  } catch (error) {
+    if (!(error instanceof StaleAuditHostTaskBindingsError)) throw error;
+    return stale(error);
+  }
   const items = validateHandoffBinding(
     paths,
     workload,

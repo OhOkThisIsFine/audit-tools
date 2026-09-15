@@ -1,4 +1,6 @@
-// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts
+// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts
+// (the free-form branch's write
+// scope is normalized — a backslash-spelled citation no longer wedges prepare)
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
 import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -55,6 +57,7 @@ import {
   detectProjectFacts,
   isClosingAction,
   neutralProjectFacts,
+  repoRelativePath,
 } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -636,7 +639,46 @@ async function applyCheckpointIntentOrdering(
   return { ...plan, findings: ordered.findings, blocks: ordered.blocks };
 }
 
-function normalizeExtractedPlan(value: unknown, facts: ProjectFacts): {
+/**
+ * The write scope a free-form finding's `affected_files` implies, in the ONE
+ * form the block contract accepts.
+ *
+ * The paths arriving here have been GROUNDED but never normalized: grounding
+ * asks whether a path resolves to a real file (`existsSync`), and on Windows
+ * `src\a.ts` does — so a Windows-spelled citation survives grounding and, copied
+ * verbatim, becomes a `touched_files` entry `assertBlockContract` refuses. The
+ * run then wedges at handoff preparation and every retry reproduces the refusal.
+ *
+ * It normalizes through the SAME shared `repoRelativePath` the handoff boundary
+ * resolves declared entries with, so this producer's output is in the form its
+ * consumer demands by construction rather than by a second, drifting rule. A
+ * path that cannot be contained (`../outside.ts`) is DROPPED rather than
+ * resolved: the block contract refuses it later anyway, and dropping it here
+ * leaves the finding itself intact — grounding already decided which paths are
+ * real, and this decides only how they are SPELLED.
+ */
+function normalizedWriteScope(
+  root: string,
+  finding: Finding,
+): readonly string[] {
+  const normalized: string[] = [];
+  for (const affected of finding.affected_files) {
+    let path: string;
+    try {
+      path = repoRelativePath(root, affected.path, "affected_files[].path");
+    } catch {
+      continue;
+    }
+    if (path.length > 0 && !normalized.includes(path)) normalized.push(path);
+  }
+  return normalized;
+}
+
+function normalizeExtractedPlan(
+  root: string,
+  value: unknown,
+  facts: ProjectFacts,
+): {
   plan: RemediationPlan;
   /** Findings as received (post-default, pre-dedup) for coverage accounting. */
   sourceFindings: Finding[];
@@ -675,7 +717,9 @@ function normalizeExtractedPlan(value: unknown, facts: ProjectFacts): {
           block_id: `B-${String(index + 1).padStart(3, "0")}`,
           items: [finding.id],
           parallel_safe: true,
-          touched_files: finding.affected_files.map((af) => af.path),
+          // Normalized, not copied: see normalizedWriteScope — a Windows-spelled
+          // citation would otherwise become a write scope the handoff refuses.
+          touched_files: normalizedWriteScope(root, finding),
         }));
   const dedup = deduplicateCrossLensFindings(findings);
   const dedupBlocks = fixupBlocksAfterDedup(
@@ -1629,6 +1673,7 @@ async function handlePendingExtractedPlan(
   let grounding: ExtractedFindingGrounding;
   try {
     ({ plan, sourceFindings, mergeMap } = normalizeExtractedPlan(
+      root,
       extractedPlan,
       // Persisted by the confirm step; planning spawns nothing (the
       // backend-independent planning contract), so it never detects here.

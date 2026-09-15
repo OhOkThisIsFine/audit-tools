@@ -1068,46 +1068,58 @@ describe("the traceability gate's module join is EXACT, not longest-prefix", () 
   });
 });
 
-describe("N-R12: promoteImplementationDagToExtractedPlan — propagates preconditions and expected_changes", () => {
-  it("node with preconditions and expected_changes produces those in the finding", async () => {
+describe("promoted findings carry nothing the dispatch boundary strips", () => {
+  // The dispatch boundary parses each finding through `FindingSchema.parse`,
+  // which DROPS every key the shared schema does not declare. So a field this
+  // producer computes onto a finding and `FindingSchema` does not declare is a
+  // field no host, no ingest, and no consumer ever sees — it is written into the
+  // plan, read back by nothing, and silently discarded at the one door that
+  // hands findings to a host.
+  //
+  // `concrete_change` was exactly that: a second copy of `node.description`,
+  // which `summary` already carries, declared nowhere and read nowhere.
+  it("computes no finding field that FindingSchema would drop", async () => {
     await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
       contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
       goal_id: "G1",
-      nodes: [{
-        id: "N1", title: "N1", description: "d",
-        satisfies_obligations: [], depends_on: [],
-        verification_obligation_ids: [], targeted_commands: [], status: "pending",
-        preconditions: ["P1", "P2"],
-        expected_changes: "Adds retry logic",
-      }],
+      nodes: [
+        {
+          id: "N1",
+          title: "N1",
+          description: "d",
+          satisfies_obligations: [],
+          depends_on: [],
+          verification_obligation_ids: [],
+          targeted_commands: [],
+          status: "pending",
+        },
+      ],
       edges: [],
       created_at: CREATED_AT,
     });
     await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR);
-    const plan = JSON.parse(await readFile(intakePaths(ARTIFACTS_DIR).extractedPlan, "utf8"));
-    expect(plan.findings[0].preconditions).toEqual(["P1", "P2"]);
-    expect(plan.findings[0].expected_changes).toBe("Adds retry logic");
-  });
-
-  it("node without preconditions or expected_changes produces preconditions=[] and expected_changes=''", async () => {
-    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
-      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
-      goal_id: "G1",
-      nodes: [{
-        id: "N2", title: "N2", description: "d",
-        satisfies_obligations: [], depends_on: [],
-        verification_obligation_ids: [], targeted_commands: [], status: "pending",
-      }],
-      edges: [],
-      created_at: CREATED_AT,
-    });
-    await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR);
-    const plan = JSON.parse(await readFile(intakePaths(ARTIFACTS_DIR).extractedPlan, "utf8"));
-    expect(plan.findings[0].preconditions).toEqual([]);
-    expect(plan.findings[0].expected_changes).toBe("");
+    const plan = JSON.parse(
+      await readFile(intakePaths(ARTIFACTS_DIR).extractedPlan, "utf8"),
+    );
+    const { FindingSchema } = await import("audit-tools/shared");
+    const finding = plan.findings[0] as Record<string, unknown>;
+    const stripped = Object.keys(finding).filter(
+      (key) => key !== "verification_obligation_ids" && !(key in FindingSchema.shape),
+    );
+    expect(
+      stripped,
+      "a finding field no consumer reads is not computed — declare it on FindingSchema or stop writing it",
+    ).toEqual([]);
   });
 });
 
+// The former "N-R12: propagates preconditions and expected_changes" block is
+// DELETED with the producer it pinned. Both fields are DAG-node facts read by
+// the node-side gates; copied onto a finding they were declared on no schema,
+// read by no consumer, and dropped at the dispatch boundary. The property that
+// replaces the block — "the promotion computes no finding field FindingSchema
+// would drop" — is asserted by the suite above, and it covers these two fields
+// rather than naming them, so the next one added here is caught too.
 describe("N-R12: promoteImplementationDagToExtractedPlan — graceful fallback when obligation_ledger absent", () => {
   it("completes without throwing and uses lens=correctness, severity=medium when no obligation_ledger", async () => {
     await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {

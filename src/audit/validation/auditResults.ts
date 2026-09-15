@@ -1,5 +1,14 @@
+// sites-pinned: tests/audit/host-handoff.test.ts
+// (the LENS_VERIFICATION_TAG import in `validateVerification`, and
+// `verificationAllowedPaths` — the one containment rule the host door also builds
+// its allowed set through)
 import type { AuditTask, Finding } from "../types.js";
 import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
+// The lane token is single-sourced where the steward lane is MINTED. A local
+// literal here would be a second spelling of a token this validator gates on
+// and `isLensVerificationTask` filters on — two copies that agree only until
+// one is renamed.
+import { LENS_VERIFICATION_TAG } from "../orchestrator/selectiveDeepening/shared.js";
 import {
   describeValue,
   findingLocationLineIssues,
@@ -105,6 +114,48 @@ export function normalizeCoveragePath(path: string): string {
   return trimmed.length === 0 ? "" : normalizeGraphPath(trimmed);
 }
 
+/**
+ * THE ONE CONTAINMENT RULE for a follow-up task's `file_paths` — the allowed
+ * set, built from the path sources BOTH doors have.
+ *
+ * Two doors judge this property: the host-result boundary admits a steward
+ * submission's `verification` (`verificationContractFailure`,
+ * `src/audit/cli/dispatch/hostHandoff.ts`) and the batch validator rejects a
+ * result that reaches `validateAuditResults` (`validateVerification` here). They
+ * were built separately — one from the binding's `file_line_counts` keys plus
+ * the submitted envelope's `file_coverage`, the other from the RESULT's coverage
+ * plus `options.boundaryPaths` — and agreed only because no production caller
+ * passes `boundaryPaths`. That is agreement by the accidental absence of an
+ * input, so both now build their set through this function and agree by
+ * construction.
+ *
+ * The `boundary` argument is the per-door extra: the packet/unit boundary at the
+ * batch door, nothing at the host door. An empty or absent one adds nothing, so
+ * the gate stays at the path sources the caller actually supplied.
+ *
+ * Paths are normalized here and nowhere else on this rule, so the two doors join
+ * on the one key space even when a caller passes raw spellings.
+ */
+export function verificationAllowedPaths(params: {
+  /** Coverage paths of the submitted/received result. */
+  readonly coveragePaths?: Iterable<string>;
+  /** The work item's own file set (the binding's keys, or the task's files). */
+  readonly assignedPaths?: Iterable<string>;
+  /** Packet/unit boundary files — widens, never narrows. */
+  readonly boundaryPaths?: Iterable<string>;
+}): Set<string> {
+  const allowed = new Set<string>();
+  const add = (path: unknown): void => {
+    if (typeof path !== "string") return;
+    const normalized = normalizeCoveragePath(path);
+    if (normalized.length > 0) allowed.add(normalized);
+  };
+  for (const path of params.assignedPaths ?? []) add(path);
+  for (const path of params.coveragePaths ?? []) add(path);
+  for (const path of params.boundaryPaths ?? []) add(path);
+  return allowed;
+}
+
 export interface AuditResultIssue extends ValidationIssue {
   result_index: number;
   task_id: string;
@@ -143,7 +194,6 @@ const REQUIRED_FINDING_FIELDS: Array<keyof Finding> = [
 // vocabulary (`audit-tools/shared`); previously each was re-defined here and
 // drifted from the shared Lens / FindingSeverity / FindingConfidence types.
 const VALID_PRIORITIES = new Set(["high", "medium", "low"]);
-const LENS_VERIFICATION_TAG = "lens_verification";
 
 function pushIssue(
   issues: AuditResultIssue[],
@@ -637,13 +687,12 @@ function validateVerification(
   }
 
   // Followup tasks may target any file within the packet/unit boundary, not just
-  // the assigned files surfaced in this result's coverage. Widen the allowed set
-  // with the boundary (fail-closed: an empty boundary adds nothing, leaving the
-  // gate at the per-result coverage paths).
-  const allowedPaths = new Set([
-    ...coverage.map((entry) => entry.path),
-    ...normBoundary,
-  ]);
+  // the assigned files surfaced in this result's coverage. Built through the ONE
+  // containment rule the host door also uses, so the two cannot diverge.
+  const allowedPaths = verificationAllowedPaths({
+    coveragePaths: coverage.map((entry) => entry.path),
+    boundaryPaths: normBoundary,
+  });
   for (let index = 0; index < value.followup_tasks.length; index++) {
     validateVerificationFollowupTask(
       value.followup_tasks[index],

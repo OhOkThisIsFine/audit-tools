@@ -63,6 +63,13 @@ interface PreparedHandoff {
 interface IngestIssue {
   readonly code: string;
   readonly message: string;
+  /**
+   * The registered ingestion check the issue failed — the STRUCTURED twin of
+   * the failure the code names, so a host repairing a result learns which check
+   * to fix without parsing prose. Optional here because the local interface is
+   * deliberately narrower than the real one; asserted where present.
+   */
+  readonly check?: string;
   readonly work_item_id?: string;
   readonly result_path?: string;
 }
@@ -189,6 +196,13 @@ describe(FAILURE_SIGNATURE, () => {
     ).toContain(
       relative(root, resultPath).replaceAll("\\", "/"),
     );
+    // WHICH failure, structurally: the code says "malformed bytes", and the
+    // check id says which step of the read refused them — so the two failures
+    // are told apart by a field a caller can branch on, not only by prose.
+    expect(
+      malformedIssue.check,
+      "a malformed submission is classified at the read, not the contract",
+    ).toBe("result_json");
 
     // (b) Nothing at the bound path at all — a distinct code, not the same silence.
     await rm(resultPath, { force: true });
@@ -204,8 +218,19 @@ describe(FAILURE_SIGNATURE, () => {
     expect(missingIssue.work_item_id).toBe("audit-task-a");
     expect(missingIssue.result_path, "the missing issue must name the path it looked at")
       .toBeTruthy();
+    expect(
+      missingIssue.check,
+      "an absent file is refused at the path lookup, BEFORE any read",
+    ).toBe("result_path");
 
     // The two failures must never share a code — that collapse is the defect.
     expect(issueCodes(missing)).not.toContain("submission_malformed");
+    // Nor a CHECK id: the code is one axis of "which failure", the check is the
+    // other, and a caller that branches on the structured field must see the
+    // two failures as different too.
+    expect(
+      missingIssue.check,
+      "an absent file and unparseable bytes are different checks, not one",
+    ).not.toBe(malformedIssue.check);
   });
 });

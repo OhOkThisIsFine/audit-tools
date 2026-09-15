@@ -1,3 +1,6 @@
+// sites-pinned: tests/remediate/contract-pipeline.test.ts
+// (the promotion
+// computes no finding field FindingSchema would drop)
 /**
  * Contract-pipeline gate for ALL remediation starts (both paths).
  *
@@ -4719,14 +4722,24 @@ export async function promoteImplementationDagToExtractedPlan(
         obligationEvidence.length > 0
           ? obligationEvidence
           : [node.description ?? node.title ?? `Contract-pipeline task ${id}`],
-      concrete_change: node.description ?? "",
+      // NO `concrete_change`. It was `node.description` a second time — `summary`
+      // above already carries exactly that — and no consumer ever read it:
+      // `FindingSchema` never declared it, so the dispatch boundary's
+      // `FindingSchema.parse` stripped it, and no reader recovered it from the
+      // plan in between. A field the pipeline computes onto a finding that
+      // reaches no consumer is not computed.
       contract_goal_id: dag?.goal_id,
       contract_obligation_ids: contractObligations,
       verification_obligation_ids: verificationObligations,
-      addresses_counterexamples: addressedCounterexamples,
       targeted_commands: node.targeted_commands ?? [],
-      preconditions: node.preconditions ?? [],
-      expected_changes: node.expected_changes ?? "",
+      // NO `addresses_counterexamples`, `preconditions`, or `expected_changes`.
+      // Each is a DAG-node fact whose only readers are the node-side gates
+      // (`validateImplementationDAGIntegrity` and `validateCounterexampleThreading`
+      // in `src/remediate/validation/contractPipelineGates.ts`) — they read it
+      // off the NODE, never off a finding. Copied onto the finding they were
+      // declared on no schema, read by no consumer, and dropped by the dispatch
+      // boundary's `FindingSchema.parse`. The counterexample ids still reach the
+      // finding where they ARE consumed: folded into `evidence` above.
     };
   });
 
@@ -4754,12 +4767,9 @@ export async function promoteImplementationDagToExtractedPlan(
           contract_goal_id: dag?.goal_id,
           contract_obligation_ids: contractObligations,
           verification_obligation_ids: verificationObligations,
-          addresses_counterexamples: [
-            ...new Set(node.addresses_counterexamples ?? []),
-          ],
           targeted_commands: [...(node.targeted_commands ?? [])],
-          preconditions: [...(node.preconditions ?? [])],
-          expected_changes: node.expected_changes ?? "",
+          // The node-only fields are deliberately NOT copied here — see the
+          // sibling block above for why.
         };
       });
   }

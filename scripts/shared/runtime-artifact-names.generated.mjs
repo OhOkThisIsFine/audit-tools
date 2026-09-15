@@ -8,6 +8,7 @@
 // (drift is pinned by tests/shared/runtime-artifact-names-drift.test.ts).
 export const RUNTIME_ARTIFACT_NAMES = [
   "access_memory.json",
+  "affected_files[].path",
   "agent-feedback.jsonl",
   "ambiguity_decision.json",
   "ambiguity_request.json",

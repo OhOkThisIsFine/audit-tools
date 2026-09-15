@@ -1,3 +1,7 @@
+// sites-pinned: tests/audit/host-handoff.test.ts
+// (the steward-lane verification
+// contract — `toHostTask` is where the lane tags were being dropped, so this is
+// the site whose revert makes the prompt branch unreachable)
 import { resolve } from "node:path";
 
 import {
@@ -50,6 +54,11 @@ function toHostTask(task: AuditTask): AuditHostTask {
     priority: task.priority ?? "low",
     demand,
     token_estimate: tokenEstimate,
+    // The lane tags ride the harness so the boundary can tell the steward lane
+    // (whose contract asks for `verification` metadata) from the base one. A
+    // boundary that cannot see the lane cannot render a lane-aware contract, and
+    // this mapper is where that signal was being dropped.
+    ...(Array.isArray(task.tags) ? { tags: task.tags } : {}),
   };
 }
 
