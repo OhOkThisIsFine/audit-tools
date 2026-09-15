@@ -106,50 +106,162 @@ When structure-consensus and charter-consensus **fail** to coincide:
 - **A purpose with no behavioral cluster** → a goal *smeared* across the codebase, never modularized
   (often the highest-value refactor).
 
-## The estimator charters — three blind channels, mine the deltas
+## The estimator charters — three blind goal DAGs, then correspond, differ, verify, report
 
-There is no single "charter." There are three channel-pure **estimators** of a subsystem's telos —
+There is no single "charter." There are three channel-pure **estimators** of what the code is for —
 each fed a disjoint evidence channel (blindness is a property of the INPUT packet the tool
 materializes, never an instruction the agent must obey) — plus the downstream-nominated **True**.
-The value is in the **channel-pair deltas**, routed by *who acts on them*:
+The value is in the **differences** between the estimators, verified against their own sources
+and reported without a merge.
 
-| Charter | Channel (fed, not instructed) | Delta of interest | Routed to |
-|---|---|---|---|
-| **Stated** | testimony — docs + extracted comments | Stated ↔ Structural → doc rot / naming drift | the **remediator** |
-| **Structural** | intent frozen into organization — file tree / declarations / import graph; no bodies, docs, or comments | Structural ↔ Revealed → architecture betrayed by implementation | a **clarification** prompt |
-| **Revealed** | behavior — comment-stripped bodies | Stated ↔ Revealed → says/does drift | the **remediator** |
-| **True** | none — nominated by the delta miner at the `deepest` ceiling, downstream of triangulation | anything ↔ True → serves the wrong goal; "you asked for a tax app, you want Quicken" | the **human**, as a provocation |
+| Charter | Channel (fed, not instructed) | Node scope |
+|---|---|---|
+| **Stated** | testimony — docs + extracted comments | provenance only; file scope optional |
+| **Structural** | intent frozen into organization — file tree / declarations / import graph; no bodies, docs, or comments | file scope + provenance |
+| **Revealed** | behavior — comment-stripped bodies | file scope + provenance |
+| **True** | none — nominated by a reader of the discrepancy report at the `deepest` ceiling | — |
 
-Each lane self-organizes a **leveled teleology** whose nodes carry **file scopes** — content-derived
-join keys no agent can mangle. The tool joins the lanes to each other and to the structure
-decomposition (a HINT, never a forced node list) mechanically by file-set overlap. The independent
-delta miner — the first reader to hold all channels together — mines the channel-pair deltas,
-distills a **triangulated telos** per subsystem (a unified opinion the owner reacts to: a LEAD,
-never a reconciliation — the deltas stay the product), and the tool counts **disagreement density**
-per subsystem per channel pair (the quantitative "where does the triangulation most need
-clarification" surface).
+The layer runs as five bounded steps. Each is one obligation; the first three are host judgment,
+the fourth is host judgment behind a mechanical pre-check, the fifth is a tool render.
+
+### 1. Three independent goal DAGs
+
+Each lane self-organizes ONE leveled goal DAG from its own packet: nodes are purposes stated as
+telos (the WHY, never the mechanism), edges mean `from` SERVES `to`, and both nodes and edges carry
+evidence references into the packet. The three DAGs share one node and edge definition
+(`GoalGraphSchema`), so they can be compared, and they are **persisted as three graphs** — nothing
+downstream collapses them into one. A lane mints its own local node ids; ids are never a join key.
+`premise_height` is derived from the edges by the tool; a lane-stated level that contradicts its
+own edges is a validation issue on that lane.
 
 - **A charter states purpose in terms of the telos, not its mechanism** — "host handoff exists so
   bounded semantic work can be delegated safely and resumed," *not* "it writes workload JSON." A
-  charter that merely restates the code is useless as a yardstick — the delta against the impl
+  node that restates the code is useless as a yardstick — the difference against the implementation
   collapses to zero and the review can never find under-delivery.
-- **Do not reconcile the channels.** Hold them all; the deltas generate the findings. The
-  triangulated telos is a downstream *estimate* that preserves the deltas, never a merge that
-  replaces them — no consumer may key on it in place of the charters/deltas.
 - **Revealed is the objective anchor** — "what the code optimizes" is far more extractable than any
-  intent charter. Not *right*, but the one you can pin down → measure the intent charters against it.
-- **True is a horizon, never asserted.** You triangulate toward it (below); you never conclude you
-  found it.
-- **Persist every charter with provenance** (Stated cites where the user said it; Revealed cites
-  code; Structural cites the arrangement it reads intent from) — a delta is only adjudicable if each
-  side is attributable.
-- **Tag each charter with confidence, not just provenance** — a low-confidence charter (sparse or
-  ambiguous source) **downgrades any review that depends on it to "flag for human intent input,"
-  never opine.** Confident-but-wrong findings from bad charters are the whole approach's central
-  failure mode; this is the *general* guard, of which the True-charter gates below are the strictest
-  instance.
-- **Staleness gains a teleological layer**: Revealed re-extracts on code change, Stated only on user
-  input → a *closed* Stated−Revealed gap that **reopens** is itself a signal ("this subsystem is
+  intent charter. Not *right*, but the one you can pin down.
+- **Every node and edge cites provenance** into its own packet — a difference is only adjudicable if
+  each side is attributable — and **carries confidence**. A low-confidence node downgrades any
+  difference that rests on it to "flag for human intent input," never opine. Confident-but-wrong
+  findings from bad charters are the whole approach's central failure mode; this is the *general*
+  guard, of which the fidelity step and the True-charter gates below are the strict instances.
+- **Scope follows the evidence.** Structural and Revealed nodes name the files they describe.
+  Stated nodes may carry provenance only: docs name goals and symbols, rarely files, and a guessed
+  scope would pollute the correspondence candidates below.
+
+### 2. Correspondences — which regions of the three DAGs speak about the same thing
+
+A separate comparison pass, run by a reader who authored none of the three DAGs, matches regions
+that concern the same subsystem or express the same goal. A correspondence joins one node on one
+side to one node, several nodes, or a connected subgraph on another. The three DAGs are preserved
+unchanged beside the correspondence set; a correspondence is a record ABOUT them, never a merge of
+them.
+
+The key is **hybrid**, by the right-tool rule:
+
+- **The tool proposes candidates** from two deterministic signals it already holds: file-scope
+  overlap between nodes, and provenance cross-references (a Stated node whose provenance cites
+  symbol Foo in file X is a candidate for the Structural and Revealed nodes whose scope holds
+  file X; the comment lexer already extracts those cross-refs).
+- **The host confirms, rejects, widens to a subgraph, or adds.** A host-added correspondence must
+  cite two provenance refs, one per side, that the tool re-checks against the packets; one with no
+  checkable evidence is dropped as a validation issue, never admitted.
+- **A node with no candidate and no host match stays uncorresponded.** That is a fact the report
+  states (a goal one channel sees and the others do not reach), not an error.
+
+The structure decomposition is NOT the correspondence key. It remains the *grouping* key for the
+report (step 5) — file overlap of the corresponding nodes' scopes places a difference under a
+subsystem — which separates two roles the file-overlap join used to conflate.
+
+### 3. Differences — what the corresponding accounts disagree on
+
+For every correspondence the same pass records the differences between the accounts, each typed
+on exactly one closed **dimension** and one **relation**. The decision rule says when a difference
+is filed on that dimension and not another; every case has one home.
+
+| Dimension | Definition | File here when |
+|---|---|---|
+| **Purpose** | The same subsystem serves different ends | Holding the subsystem fixed, the goal labels still contradict (an explicit non-goal against a pursued goal files here) |
+| **Presence** | A goal has no counterpart in a channel that should cover it | No node at the same level matches; a missing child goal or intermediate purpose counts here, at its level |
+| **Responsibility** | The same goal is grounded in a different subsystem | Goal labels match, owner or location differs |
+| **Hierarchy** | The same goal has different parents or a different subgoal decomposition | The node matches, the edge set differs |
+| **Scope** | The same goal applies at different times, to different actors, or to a different extent | Adding a when / for-whom / to-what-extent qualifier reconciles the claims |
+| **Standing** | The same goal has a different lifecycle status: planned, active, deprecated, removed | The claims reconcile once versioned in time (a roadmap entry against live code is Standing, never Presence) |
+| **Standard** | The same goal and scope carry a different success threshold or quality attribute | Both agree on what and where, disagree on how well |
+
+There is no "detail" dimension: one account explaining more than another is the `complementary`
+relation on whichever dimension the extra material belongs to, and a mechanism or intermediate
+purpose absent from one account is a Presence gap at that DAG level. Importance is not a dimension
+either: the DAG level and fan-in are severity evidence on a Presence or Hierarchy difference.
+
+A difference record holds the account of EVERY channel in its correspondence — two or three —
+each with its provenance. The **relation** is judged across all of them: `equivalent` (the same
+claim in other words), `complementary` (no account contradicts another; one says more), or
+`incompatible` (some two accounts cannot both hold). An incompatible record also states its
+**split**: `two_against_one`, naming the odd channel, or `three_way`. The record carries the
+correspondence it rests on, the accounts, the dimension, the relation, the split, and a
+one-sentence statement of the gap. Three-way agreement is the strongest corroboration a goal can
+have; a three-way disagreement is always a clarification, never a routed fix.
+
+- **Equivalent records are corroboration.** They raise the confidence of the matched goal and
+  generate nothing downstream.
+- **Complementary is never a finding on its own.** Absence is not disagreement. The one exception
+  is a Presence difference where the silent source's channel SHOULD cover the goal — a doc set that
+  never states a subsystem's purpose — which the comparison marks explicitly as a covered-channel
+  gap.
+- **Incompatible records are the candidates for findings**, subject to the fidelity step.
+
+### 4. Fidelity — is each difference in the sources, or in a reader's head
+
+Every `incompatible` difference, and every covered-channel Presence gap, is checked against its
+own sources before it can become a finding. The check has a mechanical half and a judgment half,
+and the judgment is a **separate adversary lane** — a reader who authored neither the DAGs nor
+the differences, allowed to refuse.
+
+- **Mechanical pre-check (tool).** Every provenance ref and quote on both sides of the difference
+  is re-read from disk, through the same grounding pass findings already pass. A side whose quote
+  is absent at its ref makes the difference `unverifiable`; it never reaches the lane and is
+  recorded as a validation issue against the reader that cited it.
+- **Judgment (adversary lane).** The lane receives ONLY the difference record and the
+  tool-materialized source slices its provenance cites — the same packet mechanism the extraction
+  lanes use, so blindness is again a property of the input. It returns one verdict:
+  - `supported` — the two sources genuinely say different things;
+  - `interpretation` — a reader read more into a source than it says, naming which side;
+  - `unverifiable` — the cited material does not settle it.
+- **Only `supported` differences become findings.** An `interpretation` verdict is a
+  lane-quality signal: it is recorded on the difference, and a high rate against one lane is
+  grounds to re-run that lane, never grounds to keep the difference.
+
+This is the general guard against the approach's central failure mode — confident findings from
+a misread source — and it replaces self-reported confidence as the only line of defence. The lane
+is combined with nothing: the comparison reader cannot judge its own over-interpretation, and the
+True-charter reader below needs the fidelity verdicts as input.
+
+### 5. The discrepancy report — the product, rendered, never merged
+
+The report is a tool render of the difference records that survived fidelity. Nothing in it is
+authored by a host: every field exists after step 4. For each finding it shows the corresponding
+nodes from each DAG, each source's account with its provenance, the dimension and relation, the
+fidelity verdict, and a concrete **investigation question** phrased for the triangulation loop
+below. Findings are grouped by subsystem (the structure decomposition unit the corresponding
+scopes overlap) and by dimension. Uncorresponded nodes are listed per channel as facts.
+
+- **Disagreements are preserved.** The three accounts stand side by side; no majority account, no
+  unified sentence, is authored anywhere in the layer. A consumer that needs one line of
+  orientation renders the three accounts, never a merge.
+- **Routing keys on the difference, not the channel pair.** A fixed tool-owned table maps
+  `(dimension, relation, split)` to who acts: a `two_against_one` with Stated odd on Purpose or
+  Scope is doc rot for the **remediator**; a Structural-odd or Revealed-odd Responsibility or
+  Hierarchy difference is an architecture question for a **clarification**; a Standing or Standard
+  difference is a **clarification** (which account is current is the owner's call); a Presence
+  covered-channel gap routes by the silent channel; every `three_way` difference is a
+  **clarification**. The host never picks a route.
+- **Blast radius** is computed per DAG over the corresponding nodes and the maximum is taken: a
+  goal high in any one source's hierarchy is high-blast.
+- **True is nominated downstream of the report**, at the `deepest` ceiling, by a reader who has
+  seen the report and the fidelity verdicts, under the hard gates below.
+- **Staleness gains a teleological layer**: Revealed re-extracts on code change, Stated only on
+  user input → a *closed* difference that **reopens** is itself a signal ("this subsystem is
   drifting from its charter over time").
 
 ### The True charter needs hard gates (or it discredits the reviewer)
@@ -244,9 +356,9 @@ never extracted). The attention dial = **how many rounds** / how far down the qu
 ## Ties to existing machinery (reuse, don't rebuild)
 
 - **`intent_checkpoint` carries the CEILING only** — the consent meta-intent that seeds the charter
-  layer. Charters, teleologies, deltas and the goal graph live on `charter_register.json` (the
-  OUTPUT artifact); embedding them back on the checkpoint would create a staleness cycle with the
-  checkpoint the register depends on.
+  layer. The three goal DAGs, correspondences, differences and fidelity verdicts live on the
+  charter OUTPUT artifacts; embedding them back on the checkpoint would create a staleness cycle
+  with the checkpoint those artifacts depend on.
 - **Charter-clarification reuses the clarification-pause *pattern*, NOT remediate's
   `ClarificationRequest` type or `waiting_for_clarification` status.** Charter-alignment questions are
   symmetric charter-pair arbitrations (VOI-ranked, risk-gated) resolved by an inline symmetric answer
@@ -302,9 +414,10 @@ Determinism for the mechanical; empowered, general, well-fed judgment for the ar
 
 - **/init as the review mechanism** — wrong genre (distill-to-durable-doc vs bounded adversarial
   findings). Only its negative-constraint discipline and cross-file targeting transfer.
-- **Reconciling the charters, or the decompositions, into one truth** — the deltas are the
-  product; a merge that DESTROYS them is rejected. (The miner's triangulated telos is in-design
-  precisely because it is not that: a downstream estimate held BESIDE the charters and deltas, a
-  lead the owner reacts to — never a replacement any consumer keys on.)
+- **Reconciling the charters, or the decompositions, into one truth** — the differences are the
+  product; a merge that DESTROYS them is rejected.
+- **A triangulated or unified telos authored by any reader** — dropped 2026-09-15. It was defended
+  as a lead held beside the deltas, but it is the one place a reader is invited to state a merged
+  account; the report shows the three accounts side by side instead.
 - **A separate "independent vs guided" knob** — it collapses into the ceiling.
 - **Assuming Stated is ground truth** — it forfeits the highest-value findings.
