@@ -5,11 +5,15 @@
 
 ## Live state
 
-- **v0.51.10 is published and installed globally.** Release commit `286b21b0` passed the publish
-  workflow; npm resolves 0.51.10 and both installed command surfaces report 0.51.10. The release
-  workflow is [run 35034582436](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/35034582436).
-  0.51.9 is on the registry with identical content (the release journal did not resume; see the
-  backlog).
+- **v0.51.11 is published and installed globally.** Release commit `ca809fe3` passed the publish
+  workflow ([run 35044248042](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/35044248042));
+  npm resolves 0.51.11 and both installed command surfaces report 0.51.11. Content: P25c (the
+  tree-wide landing gates run once at the close leg; the id-glossary write scope widens only for a
+  coined id; the admission runner's deadline is terminal) and P30 (the cleanup lap's backlog
+  reconciliation; every maintenance decision applied; `## Lap start` re-homed into `CLAUDE.md`).
+  0.51.9 and 0.51.10 sit on the registry with identical earlier content.
+- **The cleanup-and-implementation lap is complete.** Every packet (P00–P30) is on `main`; the
+  machine-local plan directory and its wave log are the record of how each landed.
 - **The commit gate runs at git's own boundary.** The tracked `.githooks/` run
   `.claude/hooks/commit-gate.mjs` for every commit into this repository; the PreToolUse
   `pre-commit-gate.mjs` keeps only what git cannot see (the hook-bypass refusal, the push
@@ -36,14 +40,13 @@
 
 ## Immediate next
 
-**Ship, then close the lap.** Every packet of the cleanup-and-implementation lap is landed (P25c
-moved the tree-wide landing gates to the close leg; P30 deleted the closed backlog entries, applied
-the maintenance decisions and re-homed the lap-start steps into `CLAUDE.md`). What remains is the
-release, then `/closeout`.
+**Nothing is pinned.** The next lap opens from the backlog (`docs/backlog/`, seek index in
+`docs/backlog.md`); the maintenance decision queue holds no open item.
 
-**Live owner decision:** one, surfaced at closeout — whether the findings contract gains the
-audit-read commit (the open half of the two evidence-bearing dispositions entry), which touches
-the constitutional artifact contract.
+**Live owner decision:** whether the findings contract gains the commit the audit read, so the
+remediator can thread it into the head-evidence leg as B (the open half of the two evidence-bearing
+dispositions entry in `docs/backlog/open-bugs.md`). It touches the constitutional
+`spec/audit/artifact-contract.md`, so it is asked, never applied.
 
 ## Deliberate state, not bugs
 

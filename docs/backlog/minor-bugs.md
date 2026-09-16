@@ -396,3 +396,11 @@
   **Property:** a persisted workload at an older version, driven through
   `ingestRemediationHostResults`/`buildImplementDispatchStep`, is pinned by a test that asserts the
   `workload_invalid` issue and the re-prepared document.
+
+- **The merge-commit gate reports one refusal class per attempt (2026-09-15, low, friction:
+  inefficient_feeding).** A `--no-ff` merge of a branch that touches BOTH a constitutional doc and a
+  loop-core path is refused by `.claude/hooks/commit-gate.mjs` for the constitutional attestation
+  first; only the next `git commit` attempt names the missing loop-core attestation. A script that
+  reads the first refusal and attests once therefore fails twice (P30 landing). **Property:** one
+  refusal names every attestation the staged tree still lacks, so one round of attestations lets the
+  next attempt through.
