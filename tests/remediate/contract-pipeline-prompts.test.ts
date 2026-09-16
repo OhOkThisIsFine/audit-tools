@@ -476,7 +476,13 @@ describe("contract pipeline — mandatory independent critic (lane-class-conditi
   // the design author (memory: delegate the judge too). The mandate is
   // LANE-CLASS-conditional, never capability-conditional (design resolution 2,
   // gate-resolved 2026-08-05): one capability-neutral text carries both the
-  // mandate and the explicitly-degraded no-subagent fallback on every host.
+  // mandate and the explicitly-degraded fallback on every host.
+  //
+  // THE MANDATE STATES THE NEED (an independent context, no shared authorship),
+  // never a mechanism. It used to say "dispatch it to a fresh, independent
+  // sub-agent", which presumes a facility the host may not have — the same
+  // defect the contract-pipeline fan-out carried. The mechanism wording is
+  // asserted ABSENT below, so a reword that names a mechanism again is red here.
   for (const role of ["critique", "critic", "judge"] as const) {
     it(`${role} carries the capability-neutral independence MANDATE`, () => {
       const result = renderContractPipelinePrompt({
@@ -484,13 +490,16 @@ describe("contract pipeline — mandatory independent critic (lane-class-conditi
         artifactPaths: ALL_PATHS,
       });
       expect(result.prompt).toContain("Independent Review — MANDATORY");
-      expect(result.prompt).toContain("MUST be executed by an agent that did not author");
-      expect(result.prompt).toContain("independent sub-agent");
+      expect(result.prompt).toContain("What this needs is an independent context");
+      expect(result.prompt).toContain("without shared authorship");
       // The same text carries the degraded fallback; the retired
       // capability-branch wording must not resurface as a second form.
       expect(result.prompt).toContain("explicitly-degraded fallback");
       expect(result.prompt).not.toContain("degraded to inline self-review");
       expect(result.prompt).not.toContain("This host reported it cannot dispatch");
+      // NO MECHANISM. A host without in-process subagents read an instruction it
+      // could not follow; the mechanism is the host's to choose.
+      expect(result.prompt).not.toMatch(/sub-agent/i);
     });
 
     it(`${role} at light adversarial depth keeps the proportionate inline self-check floor`, () => {

@@ -1,5 +1,10 @@
+// sites-pinned: tests/remediate/landing-gates-close.test.ts
+//   The `landing-gate` role addition (admit a command only when discovery emits
+//   it, same spawn path as test/e2e) is pinned by the landing-gate close suite,
+//   which drives the leg through this runner.
 import { spawn } from "node:child_process";
 import { discoverProjectCommands } from "./testCommand.js";
+import { discoverLandingGates } from "./landingGates.js";
 import { resolveExecArgv, stripAuditToolsControlEnv } from "./exec.js";
 
 /**
@@ -72,16 +77,26 @@ export interface ProjectTestAdmissionOutcome {
 }
 
 /**
- * Admit ONLY the exact test command {@link discoverProjectCommands} would
- * return right now for `root` — never a static table, so the repository's own
- * project files are the sole source of truth for what is admitted. Pure and
- * total: no spawn, no throw.
+ * Admit ONLY a command {@link discoverProjectCommands} /
+ * {@link discoverLandingGates} would return right now for `root` — never a
+ * static table, so the repository's own project files are the sole source of
+ * truth for what is admitted. Pure and total: no spawn, no throw.
+ *
+ * `landing-gate` is the one role with MORE than one admitted command (a repo
+ * declares up to five gate scripts), so it admits by SET MEMBERSHIP rather than
+ * by matching one vector. The rule is otherwise identical, and it is why a gate
+ * command is never shell-interpolated from a caller's string: only a command
+ * discovery itself emitted can be spawned, so the admission surface is exactly
+ * the repository's own declared script names.
  */
 function isAdmittedProjectCommand(
   command: string[],
   root: string,
-  role: "test" | "e2e",
+  role: "test" | "e2e" | "landing-gate",
 ): boolean {
+  if (role === "landing-gate") {
+    return discoverLandingGates(root).includes(command.join(" "));
+  }
   const discovered = discoverProjectCommands(root)[role];
   if (!discovered || discovered.length === 0) return false;
   if (command.length !== discovered.length) return false;
@@ -109,7 +124,7 @@ function runAdmittedProjectCommand(
     maxCapturedOutput?: number;
     sigkillGraceMs?: number;
   } = {},
-  role: "test" | "e2e" = "test",
+  role: "test" | "e2e" | "landing-gate" = "test",
 ): Promise<ProjectTestAdmissionOutcome> {
   if (!isAdmittedProjectCommand(command, root, role)) {
     return Promise.resolve({
@@ -153,16 +168,51 @@ function runAdmittedProjectCommand(
     child.stdout?.on("data", capture);
     child.stderr?.on("data", capture);
     let timedOut = false;
+    let settled = false;
+    const settle = (outcome: ProjectTestAdmissionOutcome): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (escalation) clearTimeout(escalation);
+      resolvePromise(outcome);
+    };
+
+    // THE DEADLINE IS TERMINAL, which is not the same as "we sent a SIGKILL".
+    // The kill alone bounds nothing: on Windows the admitted vector is the
+    // `cmd.exe /d /s /c "npm.cmd …"` shim `resolveExecArgv` produces, so the
+    // direct child is the SHELL — SIGTERM kills cmd.exe and leaves npm.cmd/node
+    // alive holding the inherited stdout pipe, so `close` never fires and a
+    // caller awaiting this promise waits out the child's own runtime and then
+    // some (measured: a 1500ms `timeoutMs` against a 20s script resolved at
+    // 20274ms, long past the 5s grace). Every leg that awaits this runner — the
+    // landing gates, the project-facts test and the e2e command — would hang the
+    // CLOSE fold instead of reporting a `timed_out` gate, which is the failure
+    // this bound exists to make impossible. So the silence after SIGKILL is
+    // itself an outcome: `runTrackedAsync` (exec.ts) resolves on the same
+    // reasoning, and a child that ignores both signals must not be able to hold
+    // a caller forever.
+    let escalation: NodeJS.Timeout | null = null;
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
-      const hardKill = setTimeout(() => child.kill("SIGKILL"), sigkillGraceMs);
-      hardKill.unref?.();
+      escalation = setTimeout(() => {
+        child.kill("SIGKILL");
+        settle({
+          admitted: true,
+          exit_code: null,
+          timed_out: true,
+          truncated,
+          spawn_error:
+            `the command exceeded its ${String(timeoutMs)}ms deadline, survived the ` +
+            `${String(sigkillGraceMs)}ms SIGTERM grace and did not exit under SIGKILL`,
+          output,
+        });
+      }, sigkillGraceMs);
+      escalation.unref?.();
     }, timeoutMs);
     timer.unref?.();
     child.on("error", (error) => {
-      clearTimeout(timer);
-      resolvePromise({
+      settle({
         admitted: true,
         exit_code: null,
         timed_out: timedOut,
@@ -172,8 +222,7 @@ function runAdmittedProjectCommand(
       });
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
-      resolvePromise({ admitted: true, exit_code: code, timed_out: timedOut, truncated, output });
+      settle({ admitted: true, exit_code: code, timed_out: timedOut, truncated, output });
     });
   });
 }
@@ -200,4 +249,27 @@ export function runAdmittedProjectE2eCommand(
   } = {},
 ): Promise<ProjectTestAdmissionOutcome> {
   return runAdmittedProjectCommand(command, root, options, "e2e");
+}
+
+/**
+ * Run one of the repository's discovered LANDING GATES under the same gate.
+ *
+ * The landing-gate leg runs at the CLOSE, on the merged tree — see
+ * `verifyLandingGates` in `src/remediate/phases/closeVerifyLandingGates.ts`. It
+ * is a different role from test/e2e only in what discovery emits: one vector
+ * for those, a set of up to five gate commands for this. The admission rule and
+ * every spawn bound are the SAME, which is the point — a gate is a discovered
+ * project command like any other, and adding a second spawn path for it would
+ * be a second place for the shell-safety and output-cap rules to drift.
+ */
+export function runAdmittedProjectLandingGateCommand(
+  command: string[],
+  root: string,
+  options: {
+    timeoutMs?: number;
+    maxCapturedOutput?: number;
+    sigkillGraceMs?: number;
+  } = {},
+): Promise<ProjectTestAdmissionOutcome> {
+  return runAdmittedProjectCommand(command, root, options, "landing-gate");
 }

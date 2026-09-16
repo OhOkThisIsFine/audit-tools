@@ -1,3 +1,7 @@
+// sites-pinned: tests/remediate/landing-gates-close.test.ts, tests/remediate/phase-close.test.ts
+//   The landing-gate close leg (run once per declared gate, folded into
+//   `fullyGreen`, rendered in the report) is pinned by the landing-gates suite;
+//   the existing close behaviour around it is pinned by phase-close.
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
 import { dirname, extname, isAbsolute, join, relative } from "node:path";
@@ -36,6 +40,10 @@ import type {
 import { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "audit-tools/shared";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import { verifyAnalyzerLeads } from "./closeVerifyAnalyzerLeads.js";
+import {
+  verifyLandingGates,
+  type LandingGateVerifyOutcome,
+} from "./closeVerifyLandingGates.js";
 import {
   verifyHeadEvidenceAgainstFindings,
   type HeadEvidenceOutcome,
@@ -1503,6 +1511,7 @@ function buildRemediationReportMarkdown(
   outcomesReport: RemediationOutcomesReport,
   combinedTest: CombinedTestResult,
   reflections: AgentReflection[] = [],
+  landingGates: LandingGateVerifyOutcome = { commands: [], gates: [], passed: true },
 ): string {
   let reportContent = `# Remediation Report\n\n`;
 
@@ -1698,6 +1707,24 @@ function buildRemediationReportMarkdown(
     if (combinedTest.output) reportContent += `\`\`\`\n${combinedTest.output}\n\`\`\`\n`;
   }
 
+  // THE LANDING GATES. Every discovered gate is reported, not only the failures:
+  // a reader has to be able to tell "the tree-wide gates ran and passed" from
+  // "no gate was ever run", and an absent gate set is a real fact about a target
+  // repository that declares none (see `verifyLandingGates`).
+  reportContent += `\n## Landing Gates\n\n`;
+  if (landingGates.commands.length === 0) {
+    reportContent +=
+      "No landing gates were discovered: this repository's `package.json` scripts declare none of the gate roles this tool knows. The per-item required tests were the only checks run at this close.\n";
+  } else {
+    for (const gate of landingGates.gates) {
+      reportContent += `- \`${gate.command}\` — ${gate.passed ? "passed" : "**FAILED**"}${gate.refuses ? ` (refuses ${gate.refuses})` : ""}\n`;
+      if (!gate.passed) {
+        if (gate.spawn_error) reportContent += `  - ${gate.spawn_error}\n`;
+        if (gate.output) reportContent += `\n\`\`\`\n${gate.output}\n\`\`\`\n`;
+      }
+    }
+  }
+
   // Opt-in worker reflections, aggregated into the same "Process Feedback"
   // section audit-code renders (parity). Empty → no section.
   const feedbackLines = renderProcessFeedbackSection(reflections);
@@ -1730,11 +1757,17 @@ export interface CleanupResult {
  * Persist the completed state and clean up the artifact directory.
  *
  * The artifacts directory is only deleted on a fully-green close (no blocked
- * items, combined + e2e tests passed, and the closing action genuinely
- * completed — succeeded, or was the `action === "none"` no-op). When the run is
- * not fully green — e2e failed, combined test failed, an item is blocked, or the
+ * items, combined + e2e tests passed, EVERY declared landing gate passed, and
+ * the closing action genuinely completed — succeeded, or was the
+ * `action === "none"` no-op). When the run is not fully green — e2e failed,
+ * combined test failed, a landing gate failed, an item is blocked, or the
  * closing action failed OR was skipped without completing — the artifacts
  * directory is preserved for diagnosis.
+ *
+ * A repository that declares NO landing gate leaves `landingGates.passed` at
+ * its vacuous `true`, so the leg narrows nothing for a target it does not
+ * apply to — the same rule the combined-suite leg follows for a run with no
+ * configured suite.
  */
 export async function cleanupTempBranchesAndArtifacts(
   options: OrchestratorOptions,
@@ -1743,6 +1776,7 @@ export async function cleanupTempBranchesAndArtifacts(
   e2eResult: E2eTestResult,
   closingResult: ClosingResult,
   runLogger?: RunLogger,
+  landingGates: LandingGateVerifyOutcome = { commands: [], gates: [], passed: true },
 ): Promise<CleanupResult> {
   // Write final state before deleting the artifacts directory so the completion
   // is durable even if cleanup partially fails.
@@ -1796,6 +1830,7 @@ export async function cleanupTempBranchesAndArtifacts(
   const fullyGreen =
     combinedTest.passed &&
     e2eResult.passed &&
+    landingGates.passed &&
     closingCompleted &&
     !anyBlocked;
 
@@ -1805,7 +1840,7 @@ export async function cleanupTempBranchesAndArtifacts(
       kind: "artifact_write",
       obligation: "closing",
       artifact: options.artifactsDir,
-      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, closing=${closingResult.status}, closingAction=${closingResult.action}, anyBlocked=${anyBlocked})`,
+      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, landingGates.passed=${landingGates.passed}, closing=${closingResult.status}, closingAction=${closingResult.action}, anyBlocked=${anyBlocked})`,
     });
     return {};
   }
@@ -2210,6 +2245,44 @@ export async function runClosePhase(
     );
   }
 
+  // 3b. The LANDING GATES, on the now-fully-merged tree. `targeted_commands` is
+  // module-scoped, so three landings reddened CI after green per-item runs on
+  // gates no per-item command covers (a tree-wide path-guard suite, a
+  // case-sensitivity assertion, an import cycle `check:depgraph` refuses). This
+  // leg runs each discovered gate ONCE, here, where the merged-tree fact it
+  // states actually exists — see `closeVerifyLandingGates.ts` for why it is not
+  // folded into the per-item required tests.
+  //
+  // A red gate does NOT re-block items the way a red suite does: the gates are
+  // tree-wide, so a failure is attributable to no single item, and guessing one
+  // would send a worker to fix another item's fault. It folds into `fullyGreen`
+  // below instead, which is what keeps the artifacts dir — the same treatment a
+  // red `combinedTest` gets when it has no items to re-block.
+  const landingGates = await verifyLandingGates({
+    root: options.root,
+    timeoutMs: CLOSING_CHILD_DEADLINE_MS,
+    ...(options.landingGateVerifyOverrides
+      ? { overrides: options.landingGateVerifyOverrides }
+      : {}),
+  });
+  if (landingGates.commands.length === 0) {
+    console.log("No landing gates declared by this repository's package.json scripts.");
+  } else {
+    for (const gate of landingGates.gates) {
+      console.log(
+        `Landing gate ${gate.command}: ${gate.passed ? "passed" : "FAILED"}`,
+      );
+      if (!gate.passed) {
+        runLogger?.event({
+          phase: "close",
+          kind: "error",
+          obligation: "closing",
+          note: `Landing gate failed: ${gate.command}${gate.refuses ? ` (${gate.refuses})` : ""}`,
+        });
+      }
+    }
+  }
+
   // 4. Execute the closing action and record exact command outcomes before
   // reporting success.
   console.log(`Executing closing action: ${state.closing_plan.action}`);
@@ -2275,6 +2348,7 @@ export async function runClosePhase(
     outcomesReport,
     combinedTest,
     closeFeedback.reflections,
+    landingGates,
   );
 
   // Enrich the coverage ledger with never-planned payloads NOW, from the live
@@ -2362,7 +2436,15 @@ export async function runClosePhase(
   console.log("Remediation report generated.");
 
   // 6. Clean up temporary branches and artifact directory (only when fully green).
-  await cleanupTempBranchesAndArtifacts(options, completeState, combinedTest, e2eResult, closingResult, runLogger);
+  await cleanupTempBranchesAndArtifacts(
+    options,
+    completeState,
+    combinedTest,
+    e2eResult,
+    closingResult,
+    runLogger,
+    landingGates,
+  );
 
   return completeState;
 }

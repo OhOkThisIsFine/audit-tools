@@ -242,6 +242,66 @@ describe("DC-3 module_contract_drafting — provider-neutral per-module workload
     expect(prompt).toMatch(/do NOT write that file yourself/i);
   });
 
+  /**
+   * E4 — THE STEP STATES WHAT IT NEEDS, NOT A MECHANISM.
+   *
+   * The prompt said "dispatch ONE sub-agent PER MODULE", which names a mechanism
+   * the host may not have: where in-process subagents are unavailable the only
+   * route is a shell-out lane this tool neither knows nor sizes for, and 2 of 9
+   * such dispatches died mid-output. What the work actually requires — N
+   * independent contexts, no shared authorship — is what a host of ANY strength
+   * can act on, and it is the property the downstream seam reconciliation
+   * depends on: one context drafting both sides of a seam reconciles the seam
+   * against itself and reports no mismatch.
+   */
+  it("states the fan-out as a NEED (independent contexts, no shared authorship), never as a mechanism", async () => {
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const prompt = await promptOf(step!);
+
+    expect(prompt).toMatch(/independent contexts/i);
+    expect(prompt).toMatch(/no shared authorship/i);
+    // The NEED binds the reason: a single context drafting both sides of a seam
+    // reconciles it against itself.
+    expect(prompt).toMatch(/drafted any module it seams against/i);
+
+    // ...and the mechanism the host may not have is GONE. `sub-agent` was the
+    // whole vocabulary of the old prompt; a host without in-process subagents
+    // read an instruction it could not follow.
+    expect(prompt).not.toMatch(/sub-agent/i);
+  });
+
+  /**
+   * E4 — AN ABSENT-AFTER-DISPATCH SHARD REPORTS AS A TRANSPORT FAILURE.
+   *
+   * The re-emitted wave used to be byte-identical to the first one, so a host
+   * that lost items mid-output got the same undiagnosed "run this wave" it got
+   * before and nothing ever named the loss. A shard that is absent after
+   * dispatch is an item that was PUBLISHED AND DID NOT COME BACK — a delivery
+   * failure, not a refusal of the work — and saying so is what lets a host
+   * respond to the right thing.
+   */
+  it("fail-5: a re-emitted wave reports the absent shards as a TRANSPORT failure, naming them", async () => {
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const prompt = await promptOf(step!);
+    // A FIRST dispatch reports no transport failure — nothing has been
+    // published and lost yet.
+    expect(prompt).not.toMatch(/TRANSPORT failure/i);
+
+    // Two of three shards written; the third never returns.
+    await writeShardFromPrompt(prompt, "mod-alpha", draftingShard("mod-alpha"));
+    await writeShardFromPrompt(prompt, "mod-beta", draftingShard("mod-beta"));
+
+    const next = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const nextPrompt = await promptOf(next!);
+    expect(nextPrompt).toMatch(/TRANSPORT failure/i);
+    // It NAMES the item that did not return...
+    expect(nextPrompt).toContain("mod gamma/extra");
+    // ...and does not tell the host to re-run the shards that already exist.
+    expect(nextPrompt).toMatch(/already present and must NOT be re-run/i);
+    // The classification is a delivery failure, never a verdict on the work.
+    expect(nextPrompt).toMatch(/not a refusal/i);
+  });
+
   it("fail-1: an incomplete shard set never promotes a partial aggregate; the wave re-emits", async () => {
     const step = await buildNextContractPipelineStep(STEP_OPTIONS);
     const prompt = await promptOf(step!);

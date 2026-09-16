@@ -1,6 +1,7 @@
-// sites-pinned: tests/remediate/contract-pipeline.test.ts
-// (the promotion
-// computes no finding field FindingSchema would drop)
+// sites-pinned: tests/remediate/contract-pipeline.test.ts, tests/remediate/dc3.test.ts
+//   contract-pipeline: the promotion computes no finding field FindingSchema would drop.
+//   dc3: the fan-out wording (needs, not mechanism) and the TRANSPORT report for a
+//   partially returned wave.
 /**
  * Contract-pipeline gate for ALL remediation starts (both paths).
  *
@@ -2228,6 +2229,51 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
 }
 
 /**
+ * The TRANSPORT-failure report for a re-emitted module wave, or `""` on a first
+ * dispatch.
+ *
+ * A shard absent after dispatch is NOT a refusal of the work and NOT a contract
+ * the worker got wrong — it is an item that was published and did not come back.
+ * The two used to be indistinguishable: the re-emitted wave was byte-identical
+ * to the first one, so a host that lost items mid-output saw only "run this
+ * wave again", and nothing named the loss. Naming it is what lets a host
+ * respond to the right thing (re-deliver the missing items, or report that it
+ * cannot run them) instead of re-running a wave whose other shards already
+ * exist.
+ *
+ * The classification is stated in the prompt because that is the channel the
+ * host actually reads — the re-emission IS the delivery. It is a RE-EMISSION
+ * report, so the absence is derived from the shards on disk, never from a
+ * worker's claim that it wrote one.
+ */
+function transportReport(
+  absent: readonly string[],
+  total: number,
+): string {
+  // A PARTIAL return is the transport fact. All-absent is not reported, and the
+  // reason is that NOTHING PERSISTED CAN TELL THE TWO APART. Searched, so the
+  // claim is not an assumption: no dispatch marker exists under the artifacts
+  // dir (the wave directory holds only the shards `scanModuleShards` reads, so a
+  // wave emitted-and-lost leaves the same entries as one never emitted); the
+  // rejected-payload archive covers AGGREGATED artifacts, never a shard, so an
+  // unparseable shard is simply absent; `current-step.json` is overwritten by
+  // EVERY emission and is a request, not a receipt — the tool cannot observe
+  // that a host read it; and this writer has no `runLogger` seam at all, so no
+  // emission is recorded in the run log either. Inventing the distinction would
+  // mean guessing, and guessing here fires a transport failure on every ordinary
+  // first emission — a report that is wrong on the normal case is one a host
+  // learns to ignore, which costs more than the distinguishable half is worth.
+  //
+  // So the report is scoped to what it can actually ASSERT: some items came back
+  // and some did not. That case needs no dispatch record, because the returned
+  // shards ARE the record that a wave was published.
+  if (absent.length === 0 || absent.length === total) return "";
+  const list = absent.map((name) => `\`${name}\``).join(", ");
+  return `> **TRANSPORT failure — ${absent.length} of ${total} items did not return.** The previous wave published ${list}, and no valid shard exists for ${absent.length === 1 ? "it" : "them"} on disk. This is a DELIVERY failure, not a refusal: the item was published and did not come back, which says nothing about whether the work is right. Re-deliver ${absent.length === 1 ? "that item" : "those items"} — the other ${total - absent.length} shard(s) are already present and must NOT be re-run. If the host cannot deliver ${absent.length === 1 ? "it" : "them"} independently, say so rather than serializing the whole wave through one context.
+`;
+}
+
+/**
  * DC-3: fan a parallel phase out to one bounded item per module. The host owns
  * grouping, concurrency, and execution choices; this tool supplies only the
  * complete coherent workload. Each item writes a per-module shard, and the next
@@ -2243,6 +2289,16 @@ async function writeParallelModuleWaveStep(
   if (modules.length <= 1) {
     return writeContractPhaseStep(ctx, phase);
   }
+
+  // THE TRANSPORT REPORT. This wave is emitted either as the FIRST dispatch (no
+  // shard on disk yet — an empty missing set) or as a RE-emission after a
+  // previous wave came back with shards absent. The two are different facts and
+  // used to render identically: a host that lost two of nine items mid-output
+  // got the same undiagnosed "run this wave" it got the first time, so the only
+  // thing that ever noticed the loss was a repeat of the same prompt. The set is
+  // read from disk here rather than threaded through the plan, because the plan
+  // is a pure classifier and the shard scan is a filesystem fact.
+  const absent = (await scanModuleShards(ctx.artifactsDir, phase, modules)).missing;
 
   const inputArtifact = "module_decomposition";
   const inputPaths = (
@@ -2274,17 +2330,31 @@ async function writeParallelModuleWaveStep(
   const taskVerb = "draft its module contract";
   const cwdNote = `\n> Set the shell/tool working directory to \`${ctx.root}\` before running any commands.\n`;
   const nextCommand = loaderCommand("next-step");
+  // THE STEP STATES WHAT IT NEEDS, NOT A MECHANISM. It used to say "dispatch one
+  // sub-agent PER MODULE" — a mechanism the host may not have (in-process
+  // subagents are not universal, and the fallback is a shell-out lane this tool
+  // neither knows nor sizes for). Two of nine such dispatches died mid-output
+  // and only the step's presence check noticed. What the work actually requires
+  // is stated instead: N INDEPENDENT CONTEXTS with no shared authorship. A host
+  // with subagents dispatches N of them; a host without runs the items however
+  // it can, as long as no single context drafts both sides of a seam — which is
+  // the property the seam-reconciliation gate downstream depends on.
   const prompt = `# Per-Module Contract Drafting (${modules.length} modules)
 
-This phase publishes one bounded item per module. Complete all ${modules.length} items below; the host owns how they are grouped or executed. Each item reads only its module's file scope, then writes ONLY that module's contract shard — no item owns both sides of a seam, and no item writes the aggregated artifact.
+This phase publishes one bounded item per module. Complete all ${modules.length} items below; the host owns how they are grouped or executed.
+${transportReport(absent, modules.length)}
+
+**What this work needs:** ${modules.length} independent contexts, one per module — no shared authorship. Each module's contract must be drafted by a context that has NOT drafted any module it seams against. That independence is the input the seam reconciliation relies on: a single context drafting both sides of a seam reconciles the seam against itself and reports no mismatch, however mismatched the interfaces are. The host chooses the mechanism; if it has no way to run ${modules.length} independent contexts, say so rather than serializing them through one — a serialized draft is worse than a re-emitted wave, because it produces a wrong aggregate that nothing downstream can detect.
+
+Each item reads only its module's file scope, then writes ONLY that module's contract shard — no item owns both sides of a seam, and no item writes the aggregated artifact.
 ${cwdNote}
-## Shared Inputs (every sub-agent may read these)
+## Shared Inputs (every item may read these)
 
 ${inputPaths.join("\n")}
 
-## Per-Module Assignments — one sub-agent each
+## Per-Module Assignments — one independent context each
 
-For each module, dispatch one sub-agent to read its file scope from \`${inputArtifact}\` and ${taskVerb}, writing the result to the module's shard path:
+For each module, an independent context reads its file scope from \`${inputArtifact}\` and ${taskVerb}, writing the result to the module's shard path:
 
 ${moduleLines}
 
@@ -2294,13 +2364,13 @@ Each shard must be a single JSON object of this shape (the orchestrator merges a
 ${perModuleSchema}
 \`\`\`
 
-## After All Sub-Agents Finish
+## After Every Item Finishes
 
 Once every module's shard above has been written (all ${modules.length}), run:
 
 \`${nextCommand}\`
 
-The orchestrator verifies every module shard is present, merges them into \`${PHASE_TO_ARTIFACT[phase]}\`, and advances. If any shard is missing, this same wave is re-emitted for the missing modules — never a partial aggregate.
+The orchestrator verifies every module shard is present, merges them into \`${PHASE_TO_ARTIFACT[phase]}\`, and advances. If any shard is missing, this same wave is re-emitted for the missing modules — never a partial aggregate. Do not re-run items whose shard is already present.
 
 **Stop after the per-module shards are written and you run next-step.** Do not edit source files. Do not write the aggregated artifact. Do not advance further.
 `;
