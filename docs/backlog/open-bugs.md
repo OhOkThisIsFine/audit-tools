@@ -504,7 +504,7 @@
   [[write-only-data-looks-authoritative]] Trace:
   [`n-r13-and-lean-fast-path-trace-2026-08-25.md`](../reviews/n-r13-and-lean-fast-path-trace-2026-08-25.md).
 
-- **The two evidence-bearing terminal dispositions have a producer but no input — `verified_already_fixed`
+- **▶ The two evidence-bearing terminal dispositions have a producer but no input — `verified_already_fixed`
   and `refuted` still never reach a real run (2026-08-27, restated 2026-09-11, medium, from
   [`reviews/wave2-dispositions-2026-08-20.md`](../reviews/wave2-dispositions-2026-08-20.md)).**
   The producer exists: `verifyHeadEvidenceAgainstFindings`
@@ -520,8 +520,11 @@
   host envelopes still carry neither disposition (closed key sets checked by `hasExactKeys` in
   `src/shared/submission/hostHandoffCore.ts`). **Property:** the findings contract records the commit
   the audit read, and the remediator threads it into the leg as B, so both dispositions are reachable
-  on a real run. A new field on the findings contract is an owner decision: it can touch the
-  constitutional `spec/audit/artifact-contract.md`.
+  on a real run. **OWNER DECISION 2026-09-16: add the field.** Of three options put (add an
+  audit-read commit field; promote the staleness-cache head instead; delete the leg and both
+  dispositions) the owner chose the first. Work: a constitutional edit to
+  `spec/audit/artifact-contract.md` (attested), the findings-schema bump, the audit synthesis
+  writes the commit it read, and the remediator threads it into the leg as B.
 
 - **The masked-exit guard keyed on TEST RUNNERS, not on whether the exit status is load-bearing —
   NARROWED to its curated-list half (2026-08-27, narrowed 2026-08-29, medium, friction:

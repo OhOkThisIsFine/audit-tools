@@ -40,13 +40,12 @@
 
 ## Immediate next
 
-**Nothing is pinned.** The next lap opens from the backlog (`docs/backlog/`, seek index in
-`docs/backlog.md`); the maintenance decision queue holds no open item.
+**One item is pinned** (the generated roadmap below): the findings contract gains the commit the
+audit read, so the head-evidence leg gets its B and both evidence-bearing dispositions become
+reachable on a real run — owner decision 2026-09-16, recorded on the entry. The maintenance
+decision queue holds no open item.
 
-**Live owner decision:** whether the findings contract gains the commit the audit read, so the
-remediator can thread it into the head-evidence leg as B (the open half of the two evidence-bearing
-dispositions entry in `docs/backlog/open-bugs.md`). It touches the constitutional
-`spec/audit/artifact-contract.md`, so it is asked, never applied.
+**Live owner decision:** none.
 
 ## Deliberate state, not bugs
 
@@ -76,10 +75,10 @@ dispositions entry in `docs/backlog/open-bugs.md`). It touches the constitutiona
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 0 pinned item(s).
+> `verify:checks` and at commit). 1 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-*(nothing pinned — no immediate next step is set. Every open item is in [`docs/backlog/`](backlog/).)*
+- ▶ The two evidence-bearing terminal dispositions have a producer but no input — `verified_already_fixed` and `refuted` still never reach a real run (2026-08-27, restated 2026-09-11, medium, from [`reviews/wave2-dispositions-2026-08-20.md`](./reviews/wave2-dispositions-2026-08-20.md)). · [`open-bugs.md`](backlog/open-bugs.md)
 
 <!-- END GENERATED ROADMAP -->
