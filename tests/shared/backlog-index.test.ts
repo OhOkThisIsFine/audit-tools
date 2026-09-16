@@ -35,6 +35,12 @@ import {
   findBoundaryDamage,
   renderIndex,
   spliceIndex,
+  WATCH_BEGIN_MARKER,
+  WATCH_END_MARKER,
+  collectWatchRows,
+  extractWatchLine,
+  renderWatchMatrix,
+  spliceWatchMatrix,
 } from '../../scripts/shared/generate-backlog-index.mjs';
 import {
   findEntryBoundaryDamage,
@@ -167,6 +173,63 @@ describe('splicing — hand-written prose is untouched', () => {
 
   // (Splice refusals are pinned once, in
   // tests/shared/generated-artifacts-splice.test.ts.)
+});
+
+describe('live-run watch matrix — generated from the entries, never hand-written', () => {
+  // Nightly decision `backlog-live-run-watch-matrix-names-items-that-resolve-nowhere`
+  // (owner, 2026-09-15): the hand-written matrix named six items that resolved to no
+  // entry. A generated block cannot — every row IS an entry carrying a `Live-run
+  // watch` line, and the row lifts that entry's own watch sentence.
+  const watchBody = [
+    'Body prose that explains the defect.',
+    '',
+    '  ⬇ **Live-run watch (re-dogfood 2026-07-22, medium):** a worker self-reported',
+    '  "valid, verified" on a path it never read. Supporting detail that must NOT be lifted.',
+    '',
+    'More body.',
+  ].join('\n');
+
+  it('lifts the first sentence of the watch paragraph, decoration stripped, wrap carried', () => {
+    // Red when extractWatchLine returns the whole paragraph (drop the first-sentence
+    // bound) or stops at the wrap (drop the blank-line loop).
+    expect(extractWatchLine(watchBody)).toBe(
+      'Live-run watch (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a path it never read.',
+    );
+    expect(extractWatchLine('no marker here')).toBeNull();
+  });
+
+  it('collects exactly the entries that carry a watch line, with file and verbatim title', () => {
+    // Red when collectWatchRows pushes every entry (drop the `watch !== null` guard).
+    const sources = fixtureSources();
+    sources.set(
+      'open-bugs.md',
+      ['# Open bugs', '', '- **First bug.** body', '', `- **Watched bug.** ${watchBody}`, ''].join('\n'),
+    );
+    const rows = collectWatchRows(sources);
+    expect(rows.map((r) => [r.file, r.title])).toEqual([['open-bugs.md', 'Watched bug.']]);
+    expect(rows[0].watch).toMatch(/^Live-run watch/);
+  });
+
+  it('renders one linked row per entry, and states the empty case in one sentence', () => {
+    // Red when renderWatchMatrix drops the file link or the empty-case sentence.
+    const out = renderWatchMatrix([{ file: 'open-bugs.md', title: 'Watched bug.', watch: 'watch this.' }]);
+    expect(out.startsWith(WATCH_BEGIN_MARKER)).toBe(true);
+    expect(out.endsWith(WATCH_END_MARKER)).toBe(true);
+    expect(out).toContain('- **Watched bug.** — [open-bugs.md](backlog/open-bugs.md)');
+    expect(out).toContain('watch this.');
+    expect(renderWatchMatrix([])).toMatch(/No entry in `docs\/backlog\/` currently carries a `Live-run watch` line/);
+  });
+
+  it('splices only its own block and leaves the seek index block untouched', () => {
+    const doc =
+      `# Backlog\n\n${WATCH_BEGIN_MARKER}\nOLD WATCH\n${WATCH_END_MARKER}\n\nprose between\n\n` +
+      `${BEGIN_MARKER}\nSEEK\n${END_MARKER}\n`;
+    const out = spliceWatchMatrix(doc, `${WATCH_BEGIN_MARKER}\nNEW WATCH\n${WATCH_END_MARKER}`);
+    expect(out).toContain('NEW WATCH');
+    expect(out).not.toContain('OLD WATCH');
+    expect(out).toContain('prose between');
+    expect(out).toContain(`${BEGIN_MARKER}\nSEEK\n${END_MARKER}`);
+  });
 });
 
 describe('entry-boundary damage — the RED the index generator cannot see by construction', () => {

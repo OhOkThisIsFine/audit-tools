@@ -100,7 +100,7 @@ export type ResultContentDiscriminatorInput =
 
 interface ResultDiscriminatorCommon {
   /**
-   * Per-split discriminator (N-IDEMPOTENCY). File-split sibling tasks of one
+   * Per-split discriminator (INV-CK-2). File-split sibling tasks of one
    * unit+lens+pass share the grouping coordinate but carry DISTINCT task_ids.
    * Without this component every sibling base result would derive the SAME
    * idempotencyKey. An EMPTY component yields a discriminator BYTE-IDENTICAL to
@@ -202,7 +202,7 @@ export function buildTaskContentSignature(
 }
 
 /**
- * Canonicalize a split-discriminator component OS-agnostically (N-IDEMPOTENCY).
+ * Canonicalize a split-discriminator component OS-agnostically (INV-CK-2).
  * A large-file split task_id embeds the file path (`…:<filePath>`), so the raw
  * value carries the host's path separator — `unit/a.ts` on POSIX vs `unit\a.ts`
  * on win32 for the SAME logical split. Backslashes are normalized to forward
@@ -224,7 +224,7 @@ export function canonicalSplitDiscriminator(component: string | undefined): stri
  * re-dispatch), never chosen by a caller — because it feeds the signature-STABLE
  * idempotencyKey, an operator-chosen value would be a correctness hazard.
  *
- * The per-split component (N-IDEMPOTENCY) folds in identically for every emit
+ * The per-split component (INV-CK-2) folds in identically for every emit
  * source: an EMPTY canonical component reproduces the legacy lone-base /
  * lone-source string BYTE-FOR-BYTE (no key churn for non-split tasks), while a
  * non-empty component appends a `#split:<canonical>` suffix so file-split sibling
@@ -273,7 +273,7 @@ function baseDiscriminator(input: ResultContentDiscriminatorInput): string {
 }
 
 /**
- * Derive the per-split discriminator component from a task_id (N-IDEMPOTENCY).
+ * Derive the per-split discriminator component from a task_id (INV-CK-2).
  * Split sibling task_ids are `${scope}:${lens}:part-N` or `${scope}:${lens}:<filePath>`;
  * a lone (non-split) task is exactly `${scope}:${lens}`. The component is the
  * suffix AFTER the trailing `:${lens}` segment — empty for a lone task (⇒

@@ -97,10 +97,8 @@ Graph evidence is tiered, strongest first:
 - language-agnostic semantic affinity (shared unusual domain terms, nearby
   paths, identifier overlap, embeddings)
 
-Semantic affinity can rank `boundary_files`, explain possible context, and
-highlight missing extraction — but it must not merge packets on frequency alone,
-because common tokens (`user`, `request`, `client`, `config`, `error`) connect
-unrelated code.
+Semantic affinity is the weakest tier by conviction: see *Three analyzer convictions have ONE
+home* in `CLAUDE.md` (standing decisions) for what it may and may not decide.
 
 The fallback must stay useful even when a language has no deep analyzer:
 manifests, path structure, tests, config, and external analyzer output can seed a

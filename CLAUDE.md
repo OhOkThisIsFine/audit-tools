@@ -191,6 +191,25 @@ independent refutation pass, and the failing-test-first handoff. Run it before n
 shared-contract / host-handoff or result-ingestion work, not after the code exists: the same catch costs an edit to a plan
 instead of a rewrite. Trivial mechanical edits skip it.
 
+## Lap start
+
+The global `/start-lap` skill runs these after its own steps (nightly decision
+`docs-repo-start-lap-skill-is-shadowed-by-the-global-one`, 2026-09-10: the repository skill of the same
+name never ran, so its four repository-specific steps live here and the skill is deleted).
+
+1. **Released-vs-local delta.** `git log --oneline "$(git describe --tags --abbrev=0 --match 'v*')"..HEAD`
+   — any commit listed is un-released work on `main`; the lap plan states whether this lap ships it.
+2. **Ask the LEDGER what is open, never the snapshot.** `node scripts/nightly/answer.mjs --list`.
+   `.audit-tools/nightly/open-items.json` is a generated snapshot that outlives the answers that
+   settle it; only an id `--list` reports OPEN is a question.
+3. **Pose every open nightly question** to the owner with its options (AskUserQuestion; four per
+   call), never by naming the item or pointing at the inbox. Record each answer at once with
+   `node scripts/nightly/answer.mjs <ID> "<answer>"` — "leave it" is an answer; "skip" leaves it open
+   and is not re-asked this session. Never auto-apply an instruction-file edit or a leg-3 proposal.
+4. **Risk-tier the next item** before starting it (`docs/project-philosophy.md`, the A6 dial): one
+   pipeline, depth scaled to the tier — full adversarial depth for loop-core work, leaner for a
+   trivial mechanical cluster, never a separate lighter path.
+
 ## Conventions & invariants
 
 - **Auditor-agnostic robustness — enforce in tooling, never host discretion.** The host/auditor agent is a variable of any strength, not a constant. Every workflow correctness property must be guaranteed by the tool itself — CLI option shape, contract validator, renderer template, dispatch-prompt text, scheduler logic, merge tolerance, write-scope enforcement — never by the host *remembering*, *noticing*, or *reasoning*. Any place the workflow only works because a capable host folded in guidance, relayed upstream evidence, paced dispatch safely, picked the right id, verified from disk, or hand-fixed a cross-block break is a **latent failure mode** → move it into the tool so it's impossible to get wrong. "Be careful" / "habit fix" / "my side" is never a fix; prefer changes that make the process *simpler*, not ones that add a step the host must remember. (Generalizes "Conversation-first" and "a needed manual flag is a bug signal".)
@@ -330,6 +349,18 @@ instead of a rewrite. Trivial mechanical edits skip it.
   reflection wiring), and it fights the leads-not-verdicts architecture the per-file lens implements. knip's
   `files` / `dependencies` / unused-export output are LEADS the lens confirms or refutes against source,
   never direct findings. (Distinct from the release-gate bullet above, which gates *our own* tree.)
+- **Three analyzer convictions have ONE home — here (nightly decision
+  `docs-audit-pkg-language-convictions-two-homes`, 2026-09-10; `docs/audit-pkg/product.md` and
+  `development.md` point here).** (1) Language-agnostic semantic affinity (shared unusual domain terms,
+  nearby paths, identifier overlap, embeddings) stays LOW-AUTHORITY: it ranks `boundary_files` and
+  explains candidate context, and it never merges packets on token frequency alone — common tokens
+  (`user`, `request`, `client`, `config`, `error`) connect unrelated code — unless a deterministic edge
+  corroborates the relationship. (2) Before adding another ecosystem-specific parser, improve shared
+  graph resolution or a generic analyzer-supplied ownership root; the fallback (manifests, path
+  structure, tests, config, external analyzer output) must stay useful for a language with no deep
+  analyzer. (3) A command-backed analyzer proves PROJECT INTENT from repo-local config
+  (`eslint.config.*`, `.eslintrc*`, `package.json` `eslintConfig`) before it runs — never by executing a
+  globally installed tool and parsing its no-config failure.
 
 ## Known friction & deferred fixes
 

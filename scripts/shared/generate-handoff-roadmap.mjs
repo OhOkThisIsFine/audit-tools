@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/handoff-roadmap.test.ts
+//   The entry parsers' title/line/body shape and the generated blocks are pinned there.
 // Regenerate the generated sections of `docs/HANDOFF.md`:
 //   1. live nightly decisions from `.audit-tools/nightly/open-items.json`; and
 //   2. the ordered ROADMAP from the split backlog (`docs/backlog/*.md`).
@@ -248,6 +250,11 @@ export function parseBulletEntries(text, file = "<text>") {
   return splitBacklogEntries(text).map(({ line, body }) => ({
     title: boldTitle(body, { where: `${file}:${line}`, opener: "- " }),
     line,
+    // The entry's own text, carried for consumers that need more than the
+    // title (the backlog index's live-run watch matrix lifts each entry's
+    // `Live-run watch` line). The roadmap itself never reads it — a pointer
+    // that restates an entry is the defect it exists to remove.
+    body,
   }));
 }
 
@@ -281,6 +288,7 @@ export function parseTrackEntries(text, file = "<text>") {
     return {
       title: boldTitle(body, { where: `${file}:${start + 1}`, opener: "" }),
       line: start + 1,
+      body,
     };
   });
 }
