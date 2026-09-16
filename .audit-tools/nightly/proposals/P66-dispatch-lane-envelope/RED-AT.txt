@@ -1,0 +1,45 @@
+RED observed at HEAD a2461a9b on 2026-09-16.
+
+Command (the test file then sat at tests/shared/dispatch-lane-envelope.test.ts,
+because vitest excludes .audit-tools/**; it was moved into this directory after
+the run):
+
+    npx vitest run tests/shared/dispatch-lane-envelope.test.ts
+
+Verbatim failure:
+
+ FAIL  tests/shared/dispatch-lane-envelope.test.ts > a CLI lane's answer arrives inside a conversation envelope > returns the lane's own answer as the body, not the envelope
+AssertionError: expected { …(6) } to deeply equal { verdict: 'actionable_now', …(2) }
+
+- Expected
++ Received
+
+  {
+-   "action": "a",
+-   "verdict": "actionable_now",
+-   "why": "w",
++   "conversation_id": "cdbbbf28-6adb-4066-9757-779599c59669",
++   "duration_seconds": 3.44,
++   "num_turns": 1,
++   "response": "{\"verdict\":\"actionable_now\",\"why\":\"w\",\"action\":\"a\"}
++ ",
++   "status": "SUCCESS",
++   "usage": {
++     "input_tokens": 20425,
++     "output_tokens": 412,
++   },
+  }
+
+ Test Files  1 failed (1)
+
+The envelope literal in the test is not invented. It is the reply this run got
+from a live probe of the relay's own `dispatch` tool (mode "answer", schema
+forced), served by lane agy-gemini at 2026-09-16T09:1x.
+
+The SECOND half of this proposal — the running-job path — has NO red test at
+HEAD. Exercising it needs a fake MCP child through `openDispatchLane`'s
+`spawnImpl` seam, which no test in this repo builds yet. Its evidence is the
+run log instead: 9 of tonight's 28 leg-2 errors read
+"dispatch returned a running job: job-NNNN | retry: dispatch returned a running
+job: job-NNNN+1" in .audit-tools/nightly/triage-2026-09-16.log. Stating this
+outright rather than claiming a red nobody ran.

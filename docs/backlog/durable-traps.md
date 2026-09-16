@@ -18,7 +18,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   moment (`check:contract-sites`, the packaged smokes, any `tsx` import of a built module)
   produces EPERM on `dist/**/*.d.ts.map` and `Cannot find module dist/.../nextStepCommand.js`
   INSIDE the suite — a false red on files the change never touched. Run the suite alone; run the
-  checks before or after it.
+  checks before or after it. The same rule holds for any concurrent lane child (a relay
+  `dispatch` sweep, a `codex exec` lane): they starve the box instead of `dist/`, and
+  `tests/shared/sync-spawn-budget.test.ts` reds because three sync spawns each blocked >60s
+  (2026-09-16 — all three passed alone on the quiet re-run).
 
 - **An entry that reinterprets an incident must quote or link the primary record's own words for
   the mechanism, not restate them.** A paraphrase can change the mechanism while looking like a

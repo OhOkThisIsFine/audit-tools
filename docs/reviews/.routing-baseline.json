@@ -1,7 +1,6 @@
 {
   "note": "Pre-mechanism review records with no routing declaration. This list only SHRINKS: declare a record's routing and re-run with --update-baseline, or the stale entry is a red.",
   "files": [
-    "docs/reviews/account-metering-round2-independent-review-2026-07-19.md",
     "docs/reviews/analysis-tools-plan-2026-08-07.md",
     "docs/reviews/antigravity-agent-commits-2026-07-21.md",
     "docs/reviews/audit-tools-simplification-workflow-gap-2026-08-26.md",
@@ -44,7 +43,6 @@
     "docs/reviews/philosophy-simplification-audit-2026-08-26.md",
     "docs/reviews/pipeline-quality-2026-09-07.md",
     "docs/reviews/ppid-liveness-measurement-2026-08-30.md",
-    "docs/reviews/prompt-process-critique-2026-08-05.md",
     "docs/reviews/quota-prewall-pacing-diagnosis-2026-06-30.md",
     "docs/reviews/re-dogfood-2026-07-21.md",
     "docs/reviews/re-dogfood-endgame-2026-07-22.md",

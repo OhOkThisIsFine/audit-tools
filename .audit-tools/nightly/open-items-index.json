@@ -1,8 +1,20 @@
 {
   "run": {
-    "date": "2026-09-11",
-    "head": "5708ef115e6c3ef310145f80ae63f888ba4d294e"
+    "date": "2026-09-16",
+    "head": "a2461a9bf35c61e52db617ac628a29f640c4b9cc"
   },
-  "count": 0,
-  "items": []
+  "count": 1,
+  "items": [
+    {
+      "id": "solutions-dispatch-lane-envelope-and-running-job",
+      "leg": "solutions",
+      "path": "scripts/shared/mcp-dispatch-lane.mjs",
+      "title": "Apply P66 — teach the one shared lane reader to unwrap a CLI lane envelope and to poll a running job, or leave the sweep at the mercy of which rung the ladder picks?",
+      "subject_key": "06a4854b7ac071a3",
+      "nights_open": 1,
+      "target": {
+        "path": "scripts/shared/mcp-dispatch-lane.mjs"
+      }
+    }
+  ]
 }

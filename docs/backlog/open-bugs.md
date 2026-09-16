@@ -555,4 +555,17 @@
   a PreToolUse gate on `git push`, or the commit gate running the full suite for any commit that can
   land on `main`.
 
+- **The shared dispatch lane reads a CLI lane's conversation envelope as the answer, and throws on a
+  running job (2026-09-16, high, friction: tool_should_decide).** `parseDispatchAnswer` in
+  `scripts/shared/mcp-dispatch-lane.mjs` returns the reply body verbatim; a CLI rung (`agy-gemini`)
+  returns `{"conversation_id":…,"status":"SUCCESS","response":"<the answer>"}`, so the caller
+  validates the envelope and records an error. Separately, `dispatch` is called with
+  `waitMs = timeoutMs + 5000` under a comment saying a `running` status cannot happen — the relay
+  now clamps `waitMs` to `routing.mcp.maxWaitMs`, so it does. Tonight's leg-2 sweep lost 28 of 62
+  entries this way (19 envelope, 9 running-job); the 34 that classified were all `free-pool`, whose
+  body IS the raw answer. **Property:** the lane reader unwraps one declared envelope shape and
+  polls a running job to a terminal state, so which rung the ladder picks stops deciding whether a
+  sweep covers its corpus. Patch, red test and recurrence count:
+  `.audit-tools/nightly/proposals/P66-dispatch-lane-envelope/`.
+
 - **Audit-side host prompts still name a sub-agent MECHANISM (2026-09-15, low, friction: tool_should_decide).** P25c made the remediate-side prompts state the NEED (independent contexts, no shared authorship) instead of a mechanism the host may not have; the audit side still says "sub-agent"/"subagent" in `src/audit/cli/conceptualDispatch.ts` (3 sites), `src/audit/cli/nextStepCommand.ts` (13 sites) and `DISPATCH_PROMPT_HANDOFF_NOTE` in `src/shared/prompts.ts`. **Property:** one shared rendering of the independence need, used by both draws (one core, two draws), with a test that reds on the mechanism wording in either.

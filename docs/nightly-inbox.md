@@ -22,32 +22,72 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-09-11 at `5708ef115e6c3ef310145f80ae63f888ba4d294e`.*
-
-
-> **12 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+*Last run: 2026-09-16 at `a2461a9bf35c61e52db617ac628a29f640c4b9cc`.*
 
 
 ---
 
-## Nothing to answer
 
-No open propositions. The next run will refill this file if it finds any.
+# Recurring-problem solutions
+
+
+<!-- nightly:item key=06a4854b7ac071a3 -->
+
+## `solutions-dispatch-lane-envelope-and-running-job` — Apply P66 — teach the one shared lane reader to unwrap a CLI lane envelope and to poll a running job, or leave the sweep at the mercy of which rung the ladder picks? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `scripts/shared/mcp-dispatch-lane.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+Every part of this routine that asks another agent for an answer goes through one small helper file. That helper makes two assumptions about the reply that stopped being true. First, it assumes the reply text IS the answer. When the relay hands the work to a command-line agent instead of a model pool, the reply is a wrapper object that carries the real answer inside a field called response, alongside a conversation id and timing numbers. The caller reads the wrapper, finds none of the fields it needs, and files the call as an error. Second, the helper asks the relay to wait longer than the job can possibly take, and comments in the code that the relay therefore can never answer "still running". The relay now caps how long it will wait, so it does answer "still running", and the helper throws that away as a fault instead of waiting for the result. Tonight this cost the backlog sweep 28 of its 62 entries: 19 to the wrapper, 9 to the running-job throw. The 34 that worked were all served by the model pool, whose reply is the bare answer. So whether a whole leg of this routine covers its corpus currently depends on which lane the relay happened to pick. The fix is in one function plus one small helper beside it: recognise the one wrapper shape and return what is inside it, and on "still running" poll the relay until the job is finished. The full patch, a test that fails at the current code, and the night-by-night error counts are written up under .audit-tools/nightly/proposals/P66-dispatch-lane-envelope/. This routine never lands its own code, which is why it is asked rather than applied.
+
+### The question
+
+Should scripts/shared/mcp-dispatch-lane.mjs unwrap the CLI-lane conversation envelope (a JSON object with a string "response" and a "conversation_id") and poll a running job to a terminal state, as written up in .audit-tools/nightly/proposals/P66-dispatch-lane-envelope/?
+
+### Your answer
+
+- [ ] **1. Apply both halves** — Apply P66 as written: unwrap the declared CLI-lane envelope in parseDispatchAnswer, and poll dispatch_status/dispatch_result on a running job instead of throwing. Land the red test at tests/shared/dispatch-lane-envelope.test.ts.
+- [ ] **2. Unwrap only** — Apply only the envelope unwrap, which is the larger half (19 of tonight 28 errors) and has a pinned red test. Leave the running-job throw alone until it has its own red test through the spawnImpl seam.
+- [ ] **3. Poll only** — Apply only the running-job polling. The envelope belongs to the relay contract, so raise the wrapper shape with the relay instead of teaching this repo to recognise it.
+- [ ] **4. Neither — pin the lane instead** — Do not change the reader. Make the sweep name the lane it needs (the model pool, whose body is the raw answer) so a CLI rung is never picked for a schema-bound task, and accept that this reintroduces a lane name into a sweep that deliberately names none.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P66-dispatch-lane-envelope/PROPOSAL.md`](../.audit-tools/nightly/proposals/P66-dispatch-lane-envelope/PROPOSAL.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+<details>
+<summary>Evidence (7) — what was verified against code, and how</summary>
+
+- Live probe of the relay dispatch tool this run (mode "answer", schema forced) was served by lane agy-gemini and returned {"conversation_id":"cdbbbf28-...","status":"SUCCESS","response":"{\"verdict\":\"open\",...}"} — the envelope, not the answer.
+- Tonight leg-2 coverage stamp .audit-tools/nightly/triage-2026-09-16-coverage.json: attempted 62, classified 34, errored 28, lanes {"free-pool":34}.
+- Error split counted from .audit-tools/nightly/triage-2026-09-16.jsonl: 19 "response did not match the triage schema (verdict=null, why, action)", 9 "dispatch returned a running job".
+- RED observed at HEAD a2461a9b: npx vitest run tests/shared/dispatch-lane-envelope.test.ts fails with the envelope object where the triage record was expected. Verbatim output in .audit-tools/nightly/proposals/P66-dispatch-lane-envelope/RED-AT.txt.
+- The relay dispatch tool description states that a larger waitMs is clamped to routing.mcp.maxWaitMs, which contradicts the "Cannot happen with waitMs past timeoutMs" comment above the throw in scripts/shared/mcp-dispatch-lane.mjs.
+- Prior nights for recurrence: 2026-09-09 89/95 classified with 6 errors; 2026-09-11 89/89 with 0 errors, every row free-pool. The failure tracks which rung answered, not lane quality.
+- The same helper is the routine second independent lane for leg 1 (docs/nightly-routine.md, "Start inputs and execution lanes"). The Codex lane was quota-exhausted tonight until 2026-09-19, so on such a night an envelope-blind reader is the difference between an adversary pass and none.
+
+</details>
+
+---
 
 
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- APPLIED THREE EDITS. The tree was clean and HEAD was on main at run start, so the clean-tree rule released work two previous runs had to hold. (1) spec/remediation-workflow-design.md said each work item contains its "workload digest"; buildWorkItem (src/remediate/steps/dispatch/hostHandoff.ts) returns no such field — the digest is workload_sha256 on the handoff RECORD (src/remediate/state/types.ts). The sentence now attributes the digest to the handoff record as a whole. (2) docs/HANDOFF.md described pre-commit-gate.mjs as keeping three residuals; the hook's own header and its guard-registry row both name a fourth — healing a crashed staged-snapshot round-trip. The sentence now names all four. Both edits were AGREED by the independent adversary lane before they were applied. (3) docs/backlog/minor-bugs.md gained one low-severity entry: the leg-1 scope ledger never prunes entries for deleted documents — four of its 57 documents no longer exist, and scripts/nightly/scope-ledger.mjs has no prune path at all. The 2026-09-10 run found that defect and could not file it against a dirty tree.
+- Landed commit a2461a9b: the three remaining status-noise cuts of the owner-approved five-cut spec batch (subject b94dd16a08ac6a08) — the dated owner attribution in spec/audit/artifact-contract.md (constitutional override attested, naming the owner decision), the document-history clause in spec/audit-workflow-design.md, and the retired convention-scan reference in spec/remediation-workflow-design.md. Full green gate on a quiet machine: build + check + 552 test files, 7378 passed. Pushed to origin/main.
 
-- THE THIRD HELD FIX WAS NOT APPLIED, and the refusal came from the adversary rather than from a rule. The proposal was to add an N-IDEMPOTENCY row to docs/glossary-ids.md, which declares itself the lookup for opaque identifiers in src/**/*.ts while that identifier is live in two modules with no row. The adversary lane refuted it: the glossary's N- family row defines N- as a historical PLAN NODE, so whether the identifier belongs there, under the existing INV-CK namespace, or nowhere is a taxonomy call. It is now item docs-glossary-omits-a-live-n-idempotency-identifier.
+- Verified all twelve answered-but-not-done ledger subjects against HEAD and recorded each with answer.mjs --done. Nine had already landed in 6b81dfb0 / 4673b7de / 074ecdba / a33bc8d9; two more (the N-IDEMPOTENCY to INV-CK-2 rename, and the reflection destination now riding artifact_paths.agent_feedback on every step) were verified done; the twelfth is the batch this run landed. The ledger now reports no open items and every tracked answer recorded as done.
 
-- THE REMAINING TWO HELD FIXES BECAME QUESTIONS, because their remedies are judgments and one had gone stale. The A2-oracle pointer in docs/backlog.md cannot be re-aimed as the 2026-09-09 run proposed: the entry it pointed at was deleted with the benchmark track on 2026-09-10 (2f1e4adb), so the whole parenthetical now describes a retired track. The live-run-watch matrix staleness was re-measured and is wider than reported — six of its eight item names resolve to no entry in docs/backlog/, not two rows' worth.
+- Applied the standing review-retirement rule (c47dc1bf930484be): retired docs/reviews/account-metering-round2-independent-review-2026-07-19.md and docs/reviews/prompt-process-critique-2026-08-05.md, and de-linked one surviving review that pointed at a retired record.
 
-- The leg-1 scope ledger was stamped for the six documents examined this run (263 items), and the coverage stamp was written from those stamps rather than from prose. The generated blocks in docs/HANDOFF.md were re-rendered by their own generator because tonight's queue staled them; that is a generator run, not a doc edit, and check:handoff-roadmap is green on the result.
-
-- Leg 3 produced one proposal, P65, with a measured red-green record: .audit-tools/nightly/proposals/P65-unearned-shipped-verdict/. It proposes coupling the one deletion-authorizing triage verdict to the premise stamp, so a sweep row cannot claim an entry shipped while having checked nothing. Leg 3 lands nothing by contract; the patch and its test are on disk for a one-step approval.
+- Logged tonight friction: an open-bugs entry for the dispatch-lane reader defect (pointing at proposal P66), and a second mechanism added to the existing durable trap about running the suite alone — a concurrent lane child starves the box and reds tests/shared/sync-spawn-budget.test.ts.
 
 
 </details>
@@ -57,29 +97,15 @@ No open propositions. The next run will refill this file if it finds any.
 <summary>What the last run could NOT cover</summary>
 
 
-- ANOTHER SESSION IS LANDING WORK IN THIS SAME CHECKOUT WHILE THE ROUTINE RUNS, AND ITS COMMIT GATE MADE THIS RUN MISREAD ITS OWN TREE. At run start `git status --porcelain` was EMPTY and HEAD was 2c81a406 on main, so the clean-tree rule released the work two previous runs had to hold, and three verified edits were applied. Minutes later `git status` showed a set of staged files this run never touched (src/remediate/phases/closeVerifyHeadEvidence.ts and six modified files) and all three edits appeared to be gone. They were not: the commit gate's staged-snapshot round-trip had materialized the other session's staged tree over the worktree and restored it afterwards, exactly as designed. The run had already begun writing a record stating the edits were destroyed; that record was WRONG and was rewritten before anything was persisted. The lesson is the known one, hit live: a tree read during another session's commit gate is not that tree, and neither a red nor a green read from inside that window means anything. HEAD moved twice during this run (2c81a406 → 5dd53baf → 5708ef11). <!-- doc-citation-exempt: quoted item prose, not citations -->
+- LEG 2 DID NOT COVER THE BACKLOG. The mechanical sweep attempted all 62 entries and classified 34; 28 errored (19 read the CLI-lane conversation envelope as the triage record, 9 threw on a running job). Coverage stamp: .audit-tools/nightly/triage-2026-09-16-coverage.json. The one already_shipped_or_stale verdict (forward-tracks#55883634) explicitly recommends KEEPING the entry, so leg 2 authorized no deletion. Nothing was deleted from any backlog file.
 
-- THE FULL GREEN GATE PASSED, BUT ONLY ON THE SECOND RUN, AND THE FIRST RED IS EXPLAINED RATHER THAN EXCUSED. The first npm test was launched against the clean tree at 2c81a406 and the concurrent session replaced the worktree beneath it and moved HEAD twice while it ran; it ended 3 test files red (audit-code-completion-present, next-step-core-report, next-step-narrative — 4 cases). Re-run alone once the tree settled: 3 files, 6 cases, all pass. The gate was then re-run whole against a stable HEAD 5708ef11 — npm run build, npm run check and npm test all green, 543 of 543 test files, with HEAD verified unchanged before and after. Logs: suite-0911.log (the unattributable red), suite-retry-0911.log (the isolated pass), gate-build-0911.log, gate-check-0911.log, gate-test-0911.log (the green gate). Note that tests/shared/load-flake-record.test.ts, the known launcher-dependent tar failure escalated as proposal P62, passed in both runs tonight.
+- THE CODEX LANE WAS UNAVAILABLE. codex exec returned "You have hit your usage limit ... try again at Sep 19th, 2026" (log: .audit-tools/nightly/leg1-codex-0916.log), so the leg-1 reviewer/adversary pass ran without its first independent lane. The same lane was quota-exhausted on 2026-09-10. Leg 1 therefore applied nothing that rested on a lane verdict: the only edits this run made were the owner-answered batch and mechanical friction logging.
 
-- LEG-1 COVERAGE, read from the ledger file and never eyeballed (.audit-tools/nightly/leg1-2026-09-11-coverage.json): 6 documents examined and stamped, 263 items, 24 of them reviewed cold. The pass was scoped by the contract to the HELD WORK rather than to the corpus: the two previous runs each verified five stale-factual fixes and applied nothing, so tonight re-verified all five from source and disposed of every one — three applied, two escalated because their remedies are judgments. The 2026-09-10 run took the cold periodic sweep over the eight never-examined documents; this run took the held half. The rest of the corpus is NOT claimed as covered.
+- LEG 1 RAN MECHANICALLY, NOT AS A FULL THREE-AGENT PASS. Every command, npm script and file path named in CLAUDE.md was verified to resolve (0 misses), and the spec corpus was swept for dated attributions and status strings (1 hit, and it is a philosophy doc quoting examples). The judgment halves of the rubric — philosophy conformance and doc-set condensation across all 52 in-scope documents — were NOT run at full depth on this quiet corpus with no adversary lane available.
 
-- ONE HELD FIX HAD GONE STALE AND ITS REMEDY WAS WRONG. The 2026-09-09 run proposed re-aiming docs/backlog.md's A2-oracle pointer at forward-tracks.md. That entry exists nowhere now: the benchmark-track retirement (2f1e4adb, 2026-09-10) deleted it, and "oracle" greps to nothing across docs/backlog/. A carried fix is a LEAD, not a fact — applying this one would have written a second dangling pointer.
+- THE WEEKLY /insights PASS WAS NOT DUE (stamp .audit-tools/nightly/insights-last-run.json ran_at 2026-09-11, five days old; due at seven). Recorded here for completeness only — being not due is not a skipped leg.
 
-- THE INDEPENDENT ADVERSARY LANE RAN, AND IT CHANGED THE OUTCOME. Codex is still quota-exhausted (recorded where lane state is authoritative — the ladder reads codex-sol disabled until 2026-09-16), so the adversary was dispatched through llm-relay instead. The first rung, free-pool, returned empty output after 10s; the relay walked to agy-gemini, which answered in 10s. It AGREED with two proposed edits and REFUTED the third — the glossary row — on the ground that the glossary's own N- family row defines N- as a historical plan node, which makes the placement a taxonomy judgment rather than an errata fix. That refusal is why docs/glossary-ids.md was escalated instead of edited.
-
-- LEG-2 COVERAGE, read from the stamp (.audit-tools/nightly/triage-2026-09-11-coverage.json): 89 of 89 entries classified, 0 errored, none aborted, every row served by the free-pool lane, in ONE pass. Last night the same sweep needed four passes and still lost an entry. 27 of the 89 rows carried probes that could not be evaluated at all — the highest share recorded (16 of 95 on 2026-09-09) — and that measurement is the basis of proposal P65.
-
-- LEG 2 DELETED NOTHING, and its single shipped lead was REFUTED for the fifth time. forward-tracks#55883634 (CI wall-clock: shard balance and single-file floor) was again classified already_shipped_or_stale with premise `unprobed`, on the entry's own statement that implementation was assigned outside this repository's agent loop. Being assigned elsewhere is not being done, the pointer it holds is live (docs/reviews/ci-wallclock-plan-critique-2026-08-07.md exists), and nothing was verified against code. The same row appeared on 2026-08-27, 2026-08-28, 2026-09-09, 2026-09-10 and tonight. The 15 owner_decision_needed rows are lane hedges, not findings, and were NOT forwarded as items: eleven items already sat unanswered before tonight's four. <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-- ONE CARRIED ITEM WAS DROPPED RATHER THAN RE-ASKED, AND THE WRITER COULD NOT DROP IT ITSELF. backlog-handoff-immediate-next-is-a-chronology quoted "The first systemic challenge round was accepted" from docs/HANDOFF.md; the 2026-09-10 lean removed that prose, which is the outcome the item asked for. Because the item declared auto_close:false, partitionBySettled would not resolve it while writeOpenItems refused its failing probe — unwritable and unaskable at once. It was dropped by id, with the reason recorded in the build script. The flag's own contract says it exists for a question about a record; the gap is that nothing resolves such an item when its record moves anyway.
-
-- A SECOND WRITER GAP WAS HIT AND WORKED AROUND: docs/backlog.md IS NOT A RECOGNIZED RECORD PATH. The auto_close:false door accepts probes on docs/backlog (the directory), docs/reviews, docs/HANDOFF.md, docs/nightly-inbox.md, .audit-tools/nightly and .claude — but not the backlog INDEX file docs/backlog.md, which is as much a record as the files beneath it. Tonight's two questions about prose in that file were therefore written as ordinary auto-closing items. That is acceptable for both (each closes when its quoted prose goes, which is the resolution) but the omission is not deliberate.
-
-- THE WEEKLY /insights PASS WAS DUE (the stamp read 2026-09-04, seven days) AND IT RAN. Report: C:/Users/ethan/.claude/usage-data/report-2026-09-11-020816.html, over 3,789 messages across 357 sessions. TEN suggestions, each verified against HEAD before classification. SEVEN already shipped: the closeout gate (this repo's closeout Stop gate plus scripts/render-closeout.mjs), evidence discipline (the renderer binds its record to worktree content and the Stop challenge reads it), red-green tests (the /design-check skill and check:proposal-red-at), AskUserQuestion for decisions (the global Questions rule plus the question-clarity, question-philosophy and unasked-decision gates), checkpointing long work (compaction checkpoints plus the resumable per-step contract), a PostToolUse typecheck hook (already wired globally as posttooluse-typecheck.mjs) and a Stop uncommitted-artifacts hook (the friction and closeout Stop gates). THREE debatable, none promoted: a /resume-lap skill, a /verify-evidence skill, and an audit of hook matchers for word-boundary correctness. ZERO genuinely open. The stamp was written only after the pass completed.
-
-- ONE INSIGHTS FINDING COULD NOT BE FILED HERE BECAUSE IT IS MACHINE-WIDE, NOT THIS REPOSITORY'S. The report says a hook falsely blocked a legitimate `git add` on a substring match for the word 'restore'. No hook matching that description exists at HEAD in either .claude/hooks/ or ~/.claude/hooks/ — the only occurrences of the word are prose comments — so the matcher is either already gone or lives in a host this routine cannot see. It is not filable as a repository item: a premise probe must name a git-TRACKED source file in THIS repository, and a machine-wide guard has none. Its home is C:/Code/docs/backlog.md, and this run did not write to another repository. <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-- THE MACHINE-WIDE STATIC-ANALYSIS SWEEP RAN AND FOUND ONE REPOSITORY IN TROUBLE, WHICH IS NOT THIS ONE. `static-analysis-runner.mjs --root C:/Code` skipped ten repositories that declare no tool set (audit-tools included — normal, it owns its own gates) and reported FINDING for llm-relay: its declared chain of eslint with sonarjs, knip, madge, dependency-cruiser, ts-prune and jscpd exits 1. The runner captured only the npm notice lines, not the failing tool's own output, so WHICH tool fails is not established here. Surfaced for a human or an agent to judge; this run did not touch a repository it was not told to work in. Report: C:/Users/ethan/.claude/scheduled-tasks/nightly-maintenance/static-analysis-report.md. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- A MACHINE-WIDE STATIC-ANALYSIS FINDING COULD NOT BE QUEUED HERE. The sweep over C:/Code reported llm-relay failing its own analysis run (eslint + sonarjs, knip, madge, dependency-cruiser, ts-prune, jscpd: exit 1). Every queue item must carry a premise probe on a git-tracked file of THIS repository, so a finding in another repo has no writable form here; it is reported in the hand-back and belongs in the machine-wide backlog at C:/Code/docs/backlog.md.
 
 
 </details>

@@ -210,7 +210,7 @@ to expose conflicts between stated and revealed goals, cross-subsystem tradeoffs
 or which governing choices impose the machinery under review.
 
 This is also a recurrence, not a new class of problem. The earlier
-[`prompt-process-critique-2026-08-05.md`](prompt-process-critique-2026-08-05.md)
+`prompt-process-critique-2026-08-05.md` (retired — in git history)
 already confirmed “scope confirmation starved telos” and “orchestrator fed
 subagent-only content.” Materialized fan-out improved lane reliability, but the
 semantic evidence still does not reach the consumers that need it.

@@ -62,6 +62,10 @@ decision queue holds no open item.
   unreadable or empty omissions.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **1 nightly decision is waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `solutions-dispatch-lane-envelope-and-running-job` — Apply P66 — teach the one shared lane reader to unwrap a CLI lane envelope and to poll a running job, or leave the sweep at the mercy of which rung the ladder picks?
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
