@@ -1126,17 +1126,25 @@ async function finishGlobalInstall(npm, packageName) {
     );
   }
 
+  // sites-pinned: none — this phase runs only after a real publish, reinstall and registry
+  //   propagation; no unit test reaches it. Its proof is the release itself (0.51.11 hit EINVAL
+  //   here on 2026-09-16; the shim form below returned the installed version in a live probe).
   // Both binaries, executed from the GLOBAL install — `--version` is the one
   // command that proves the bin resolves and the package loads. MODULE_NOT_FOUND
   // here means a dangling npm-link junction, not a bad release.
+  //
+  // Through `resolveSpawn`, like every other shim spawn in this script: on win32
+  // the global bin is a `.cmd` shim, and Node (≥ 20.12, 22, 26) refuses to spawn
+  // a `.cmd`/`.bat` without the shell — `spawnSync … EINVAL`. The 0.51.11 release
+  // (2026-09-16) published, propagated and reinstalled correctly and then failed
+  // HERE, on a form the script itself had already retired at its `npm view` site.
   for (const bin of ["audit-code", "remediate-code"]) {
-    const command = commandName(bin);
-    const result = spawnSync(command, ["--version"], {
+    const resolved = resolveSpawn(commandName(bin), ["--version"]);
+    const result = spawnSync(resolved.command, resolved.args, {
       cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      shell: false,
     });
     if (result.error || (result.status ?? 1) !== 0) {
       throw new Error(
