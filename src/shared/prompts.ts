@@ -1,3 +1,7 @@
+// sites-pinned: tests/remediate/contract-pipeline-prompts.test.ts
+//   The independence mandate's wording (an independent CONTEXT, never a
+//   mechanism) is pinned by the contract-pipeline prompts suite, which renders
+//   it through every adversarial role and asserts the mechanism words absent.
 /**
  * Parts of a cacheable prompt: a static shared prefix (identical across all
  * agents in a wave) and a per-agent payload (varies per invocation).
@@ -52,9 +56,20 @@ export const DISPATCH_PROMPT_HANDOFF_NOTE =
  * CP-BLOCK-IMPL-mandatory-independent-critic). The mandate keys on what the lane
  * IS (an adversarial review of work an agent authored), not on what the host
  * reports it can do: one capability-neutral text carries both the mandate and
- * the explicitly-degraded no-subagent fallback, so the same artifact renders on
- * every host and an author self-review is never licensed at full strength.
- * Single-sourced so audit-code and remediate-code stay in parity.
+ * the explicitly-degraded no-independent-context fallback, so the same artifact
+ * renders on every host and an author self-review is never licensed at full
+ * strength. Single-sourced so audit-code and remediate-code stay in parity.
+ *
+ * ⚠ THE MANDATE STATES THE NEED, NEVER A MECHANISM. It used to say "dispatch it
+ * to a fresh, independent sub-agent", which names one way to get independence
+ * and presumes the host has it — in-process subagents are not universal, and a
+ * host without them read an instruction it could not follow (the same defect the
+ * contract-pipeline fan-out carried; see `module_contract_drafting`'s "what this
+ * work needs" line in contractPipeline.ts). Independence is a property of the
+ * CONTEXT, so that is what the text requires and the host owns the mechanism.
+ * The fallback instruction stays — not as a capability claim the tool cannot
+ * verify, but as the one escape a host can honestly take, with the degraded
+ * independence recorded in the output.
  *
  * `depth: "light"` is remediate's proportionate low-risk floor (T1 slice 3) — a
  * lightweight inline self-check, never skipped; it is a DEPTH policy, orthogonal
@@ -71,7 +86,9 @@ The assessed risk for this change is low, so this adversarial phase runs as a **
   }
   return `\n## Independent Review — MANDATORY
 
-This is an adversarial review lane: its value comes from a reviewer who is **not** the author of the work under review. It MUST be executed by an agent that did not author that work and does not see the author's reasoning — an author grading their own work systematically misses the gaps this lane exists to catch. Dispatch it to a fresh, independent sub-agent. If — and only if — no sub-agent facility exists on this host, execute it inline as the explicitly-degraded fallback: adopt a fresh adversarial stance, set aside the author's reasoning, and attack the work as a hostile outside reviewer would. Inline self-review is the degraded fallback, never the intended path.
+This is an adversarial review lane: its value comes from a reviewer who is **not** the author of the work under review. **What this needs is an independent context** — a review produced without shared authorship of the work and without the author's reasoning in view. An author grading their own work systematically misses the gaps this lane exists to catch, and that failure is a property of sharing the authorship, not of any particular execution mechanism.
+
+Produce the review from a context that did not author the work and cannot see the author's reasoning — the host chooses how that context is obtained. If the host genuinely cannot produce one, execute it inline as the explicitly-degraded fallback — adopt a fresh adversarial stance, set aside the author's reasoning, and attack the work as a hostile outside reviewer would — and say in the output that the review was self-conducted, so the degraded independence is visible rather than assumed. Inline self-review is the degraded fallback, never the intended path.
 `;
 }
 

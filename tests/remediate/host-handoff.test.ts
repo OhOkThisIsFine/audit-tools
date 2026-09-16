@@ -46,6 +46,15 @@ interface HostBlock {
   readonly dependencies: readonly string[];
   readonly touched_files: readonly string[];
   readonly targeted_commands?: readonly string[];
+  /**
+   * Optional on the real contract, so optional here — the id-glossary scope
+   * widening reads the block's own contract to decide whether the item coins an
+   * invariant id.
+   */
+  readonly module_contracts?: readonly {
+    readonly module: string;
+    readonly contract: Record<string, unknown>;
+  }[];
   readonly phase_ordinal: number;
   readonly token_estimate: number;
 }
@@ -1916,3 +1925,209 @@ describe("F3: the severity risk weight is total over the shared severity set", (
     }
   });
 });
+
+// ── THE LANDING GATES ────────────────────────────────────────────────────────
+//
+// docs/backlog/open-bugs.md, "The per-item required tests and the host landing
+// gate do not include the tree-wide guard suites or the cheap release gates".
+//
+// `targeted_commands` is module-scoped: it names the command that exercises the
+// module a block edits. Three landings reddened CI after green per-item runs on
+// gates no module-scoped command covers — a tree-wide path-guard suite, a
+// case-sensitivity assertion, and an import cycle `check:depgraph` refuses.
+//
+// THE GATES DO NOT RIDE THE WORK ITEM. They state facts about the WHOLE tree, so
+// the boundary that owns them is the CLOSE, on the merged tree — folding them
+// into `required_tests` refused a wave item whose added export had no consumer
+// until a LATER item landed, and let one item's fault refuse another. See
+// `verifyLandingGates` in `src/remediate/phases/closeVerifyLandingGates.ts` for
+// the leg that runs them, and CLAUDE.md, *A gate states the boundary it OWNS*.
+//
+// What DOES ride the item is the one scope fact a per-item prepare owns: a block
+// that coins an invariant id needs the glossary document in `allowed_files`, or
+// the id-glossary gate is unsatisfiable for it.
+describe("landing gates", () => {
+  /** The fixture root, plus a package.json declaring the given scripts. */
+  async function rootWithScripts(
+    scripts: Record<string, string>,
+  ): Promise<{ root: string; boundary: HostBoundary; baselineCommit: string }> {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "host-handoff-landing-"));
+    cleanupRoots.push(root);
+    const baselineCommit = await initGitRoot(root);
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({ name: "fixture", scripts }, null, 2),
+      "utf8",
+    );
+    return { root, boundary, baselineCommit };
+  }
+
+  /** Prepare the fixture run at `root` and return block-a's work item. */
+  async function preparedBlockA(
+    root: string,
+    boundary: HostBoundary,
+    baselineCommit: string,
+    state: ReturnType<typeof currentState>,
+  ): Promise<HostWorkItem> {
+    const handoff = requirePrepared(
+      await boundary.prepareRemediationHostHandoff({
+        root,
+        artifactsDir: join(root, ".audit-tools", "remediation"),
+        runId: FIXTURE_RUN_ID,
+        baselineCommit,
+        state,
+      }),
+    );
+    return handoff.workload.work_items.find((entry) => entry.id === "block-a")!;
+  }
+
+  /** The fixture root carrying a glossary document with one documented id. */
+  async function rootWithGlossary(
+    scripts: Record<string, string>,
+  ): Promise<{ root: string; boundary: HostBoundary; baselineCommit: string }> {
+    const fixture = await rootWithScripts(scripts);
+    await mkdir(join(fixture.root, "docs"), { recursive: true });
+    await writeFile(
+      join(fixture.root, "docs", "glossary-ids.md"),
+      "| Namespace | Contract | Live owner |\n|---|---|---|\n| INV-EXISTING | holds. | `src/a.ts` |\n",
+      "utf8",
+    );
+    return fixture;
+  }
+
+  /** Give block-a a module contract, which is what the scope widening reads. */
+  function declareContract(
+    state: ReturnType<typeof currentState>,
+    contract: Record<string, unknown>,
+  ): void {
+    const source = state.plan.blocks.find((entry) => entry.block_id === "block-a")!;
+    (source as { module_contracts: HostBlock["module_contracts"] }).module_contracts = [
+      { module: "src/a.ts", contract },
+    ];
+  }
+
+  const GATE_SCRIPTS = {
+    test: "vitest run",
+    "verify:guards": "node scripts/shared/run-vitest-gate.mjs",
+    "check:depgraph": "depcruise --config .dependency-cruiser.cjs src",
+    "check:deadcode": "knip --no-config-hints",
+    "check:lint": "eslint .",
+    "check:invariant-glossary": "node scripts/check-invariant-glossary.mjs",
+  };
+
+  it("binds NO tree-wide landing gate into a work item's required tests", async () => {
+    // Red under the inversion this replaced: fold `discoverLandingGates(root)`
+    // back into `required_tests` in `buildWorkItem`. Every gate name below is
+    // one the old fold appended, and each names a fact about the whole tree
+    // that no edit inside block-a's scope can move.
+    const { root, boundary, baselineCommit } = await rootWithScripts(GATE_SCRIPTS);
+    const state = currentState();
+    const item = await preparedBlockA(root, boundary, baselineCommit, state);
+    const source = state.plan.blocks.find((entry) => entry.block_id === "block-a")!;
+    // The item's required tests are ITS OWN commands, exactly — the per-item
+    // `test_evidence` is compared against this list index-for-index at
+    // ingestion, and a tree-wide gate here is one no in-scope edit can satisfy.
+    expect(item.required_tests).toEqual([...(source.targeted_commands ?? [])]);
+    for (const gate of [
+      "npm run check:deadcode",
+      "npm run check:depgraph",
+      "npm run check:lint",
+      "npm run verify:guards",
+      "npm run check:invariant-glossary",
+    ]) {
+      expect(item.required_tests, `${gate} is the CLOSE's, not this item's`).not.toContain(
+        gate,
+      );
+      // The item's own required tests are what the emitted prompt declares, so a
+      // gate that must not run here must not appear there either.
+      expect(item.prompt.text).not.toContain(JSON.stringify(gate));
+    }
+  });
+
+  it("emits no landing-gate command block in the item prompt, and points at the close instead", async () => {
+    // Red under the inverse of the prompt half: restore the removed block that
+    // enumerated the discovered gates and told the host to run each of them on
+    // this item's landed tree.
+    const { root, boundary, baselineCommit } = await rootWithScripts({
+      "check:lint": "eslint .",
+    });
+    const state = currentState();
+    const item = await preparedBlockA(root, boundary, baselineCommit, state);
+    // ONE line, naming the boundary that runs them.
+    expect(item.prompt.text).toMatch(
+      /the CLOSE runs each of them once on the fully merged tree/i,
+    );
+    // The Linux-CI instruction is gone: no mechanism enforced it, and Linux CI
+    // is the host's concern, not an instruction this tool can back.
+    expect(item.prompt.text).not.toMatch(/Linux CI/i);
+    // …and the ONE line is not the whole rule on its own. `toMatch` above is a
+    // SUBSTRING test, so a reword that appends a second sentence naming a
+    // mechanism ("…on the fully merged tree. Dispatch a sub-agent to check.")
+    // satisfies it while telling the host to run a thing this item must not
+    // run. The mechanism-absence rule the fan-out wording is held to
+    // (`tests/remediate/dc3.test.ts`) has to hold here too — the sentence is
+    // valid only as the WHOLE of what the prompt says about landing gates.
+    expect(item.prompt.text).not.toMatch(/sub-agent/i);
+    expect(item.prompt.text).not.toMatch(/dispatch (a|one) /i);
+  });
+
+  it("says nothing about landing gates for a repository that declares none", async () => {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "host-handoff-no-gates-"));
+    cleanupRoots.push(root);
+    const baselineCommit = await initGitRoot(root);
+    const state = currentState();
+    const item = await preparedBlockA(root, boundary, baselineCommit, state);
+    expect(item.prompt.text).not.toMatch(/LANDING GATES/i);
+  });
+
+  it("widens the scope to the glossary document when the contract COINS an id", async () => {
+    const { root, boundary, baselineCommit } = await rootWithGlossary(GATE_SCRIPTS);
+    const state = currentState();
+    declareContract(state, {
+      invariants: ["INV-BRAND-NEW holds across the module"],
+    });
+    const item = await preparedBlockA(root, boundary, baselineCommit, state);
+    expect(item.allowed_files).toContain("docs/glossary-ids.md");
+  });
+
+  it("does NOT widen for a contract that only MENTIONS an id the glossary already documents", async () => {
+    // Red with the subtraction of the documented ids removed: a seam adjustment
+    // citing `INV-EXISTING` is not a coin, and widening for it hands the item a
+    // document it has no business editing.
+    const { root, boundary, baselineCommit } = await rootWithGlossary(GATE_SCRIPTS);
+    const state = currentState();
+    declareContract(state, {
+      seam_adjustments: ["the consumer of INV-EXISTING must not change"],
+    });
+    const item = await preparedBlockA(root, boundary, baselineCommit, state);
+    const source = state.plan.blocks.find((entry) => entry.block_id === "block-a")!;
+    expect(item.allowed_files).not.toContain("docs/glossary-ids.md");
+    expect(item.allowed_files).toEqual([...source.touched_files]);
+  });
+
+  it("does NOT widen when the target root keeps no glossary document at all", async () => {
+    // `docs/glossary-ids.md` is THIS repository's convention and remediate-code
+    // runs against arbitrary repositories — red with the existence check
+    // removed, which grants write scope over a file the target does not have.
+    const { root, boundary, baselineCommit } = await rootWithScripts(GATE_SCRIPTS);
+    const state = currentState();
+    declareContract(state, { invariants: ["INV-BRAND-NEW holds"] });
+    const item = await preparedBlockA(root, boundary, baselineCommit, state);
+    expect(item.allowed_files).not.toContain("docs/glossary-ids.md");
+  });
+
+  it("does NOT widen the scope for a block whose contract declares no invariant id", async () => {
+    const { root, boundary, baselineCommit } = await rootWithGlossary(GATE_SCRIPTS);
+    const state = currentState();
+    declareContract(state, { inputs: ["a path"], outputs: ["a string"] });
+    const item = await preparedBlockA(root, boundary, baselineCommit, state);
+    const source = state.plan.blocks.find((entry) => entry.block_id === "block-a")!;
+    // The write scope is NOT blanket-widened: a block that coins no id has no
+    // business editing the glossary.
+    expect(item.allowed_files).not.toContain("docs/glossary-ids.md");
+    expect(item.allowed_files).toEqual([...source.touched_files]);
+  });
+});
+

@@ -1,3 +1,6 @@
+// sites-pinned: tests/shared/landing-gates.test.ts
+//   The change here is re-export lines only, and the suite named above is what
+//   fails if the landing-gate exports go away.
 // Types
 export type {
   FileDispositionStatus,
@@ -754,6 +757,24 @@ export {
 export type { ProjectCommands } from "./tooling/testCommand.js";
 export { discoverProjectCommands } from "./tooling/testCommand.js";
 
+// Landing gates: the tree-wide guard suite and cheap release gates a LANDING
+// must run, discovered from the target repository's declared scripts — never a
+// mechanism this package bakes in for one repository's private vocabulary. The
+// gates are the CLOSE's to run (on the merged tree); `withGlossaryScope` is the
+// one piece the per-item prepare still needs, because a scope that cannot reach
+// the glossary document makes the gate unsatisfiable for the item that coins an
+// id.
+export type { LandingGateRole } from "./tooling/landingGates.js";
+export {
+  GLOSSARY_DOCUMENT_PATH,
+  LANDING_GATE_SCRIPT_NAMES,
+  declaresInvariantId,
+  declaredInvariantIds,
+  discoverLandingGates,
+  landingGateRefusal,
+  withGlossaryScope,
+} from "./tooling/landingGates.js";
+
 // Closing actions: the vocabulary the remediation plan, the closing plan and
 // the confirmed intent checkpoint share; and the deterministic project-fact
 // detection that offers CANDIDATES from it (the user always chooses).
@@ -789,6 +810,7 @@ export {
   isAdmittedProjectTestCommand,
   runAdmittedProjectTestCommand,
   runAdmittedProjectE2eCommand,
+  runAdmittedProjectLandingGateCommand,
 } from "./tooling/projectTestAdmission.js";
 
 // Tooling: optional analyzer dependency resolution

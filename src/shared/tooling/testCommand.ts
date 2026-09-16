@@ -16,6 +16,16 @@ export interface ProjectCommands {
 
 // npm script names, in preference order, for each command role.
 //
+// ⚠ THIS VOCABULARY IS `package.json` SCRIPTS ONLY. A repository whose build
+// system is not npm — Cargo, Make, Gradle, a bare shell script — declares none
+// of these names, so `pickScript` finds nothing and the role is ABSENT from
+// `discoverProjectCommands`' result. That is the honest answer for these roles
+// (there is no portable way to read another ecosystem's target names), but it
+// means "no e2e/build/lint command" is a statement about `package.json`, not
+// about whether the repository has one. `discoverProjectCommands` does fall
+// through to Go and Python for the TEST role alone (see its own doc comment);
+// no other role has a non-npm arm.
+//
 // Ordering is significant: pickScript() returns the FIRST match, so entries
 // earlier in the list win over later ones.
 //

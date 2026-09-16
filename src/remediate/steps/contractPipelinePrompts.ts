@@ -385,13 +385,17 @@ function getIndependentCriticPhases(): Set<string> {
 const INDEPENDENT_CRITIC_PHASES = getIndependentCriticPhases();
 
 /**
- * Render the independent-dispatch directive for an adversarial review phase.
+ * Render the independent-review directive for an adversarial review phase.
  *
  * Depth-gated (T1 slice 3): when `adversarialDepth` is `light` (a low-risk run),
  * the phase runs as a lightweight inline self-check — the floor, never skipped.
- * Otherwise (`full`, the fail-safe default) it MANDATES an independent sub-agent
- * when the host can dispatch, degrading to an explicit inline-self-review
- * instruction when it provably cannot. Empty for any non-adversarial phase.
+ * Otherwise (`full`, the fail-safe default) it requires an INDEPENDENT CONTEXT
+ * (no shared authorship), degrading to an explicit inline-self-review
+ * instruction the host can honestly take. Empty for any non-adversarial phase.
+ *
+ * The mandate text itself is single-sourced in `audit-tools/shared`
+ * (`renderIndependentReviewMandate`) and states the NEED, not a mechanism —
+ * read that function's header before rewording anything here.
  */
 function renderIndependentCriticDirective(
   role: string,
@@ -400,9 +404,9 @@ function renderIndependentCriticDirective(
   if (!INDEPENDENT_CRITIC_PHASES.has(role)) return "";
   // LANE-CLASS-conditional, never capability-conditional (design resolution 2,
   // gate-resolved 2026-08-05): the shared mandate text carries both the
-  // independent-subagent requirement and the explicitly-degraded no-subagent
-  // fallback in one capability-neutral form. Depth stays a policy axis: light
-  // (low-risk floor) keeps its proportionate inline self-check.
+  // independent-context requirement and the explicitly-degraded fallback in one
+  // capability-neutral form. Depth stays a policy axis: light (low-risk floor)
+  // keeps its proportionate inline self-check.
   return renderIndependentReviewMandate(
     adversarialDepth === "light" ? "light" : "full",
   );

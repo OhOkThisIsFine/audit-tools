@@ -1,6 +1,7 @@
-// sites-pinned: tests/remediate/host-handoff-corroboration.test.ts
-// (the bounded
-// required-test failure message)
+// sites-pinned: tests/remediate/host-handoff-corroboration.test.ts, tests/remediate/host-handoff.test.ts
+//   host-handoff-corroboration: the bounded required-test failure message.
+//   host-handoff: the "landing gates" block fails when the close-owns-the-gates prompt line
+//   or the id-glossary write scope is reverted.
 import { mkdir } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
@@ -17,7 +18,9 @@ import {
   type WorkItemOutcome,
   compareCodeUnits,
   contentSha256,
+  declaredInvariantIds,
   deriveLaneDemand,
+  discoverLandingGates,
   hasExactKeys,
   identityFailureDiagnostic,
   hostHandoffResultPath,
@@ -48,6 +51,7 @@ import {
   stringArray,
   stableStringify,
   TRACKED_CHILD_DEADLINE_MS,
+  withGlossaryScope,
   writeJsonFile,
   type FindingSeverity,
   type HostHandoffPaths,
@@ -1019,6 +1023,13 @@ function buildPrompt(item: {
   readonly requiredTests: readonly string[];
   readonly resultPath: string;
   readonly obligationIds: readonly string[];
+  /**
+   * Whether the repository declares any landing gate at all — a fact about the
+   * target root, not about this item. It only decides whether the emitted
+   * prompt's ONE sentence points the host at a close that will run gates; the
+   * gates themselves are the CLOSE's, never this item's (see `buildWorkItem`).
+   */
+  readonly hasLandingGates: boolean;
   readonly moduleContracts: readonly { module: string; contract: Record<string, unknown> }[];
 }): string {
   const assignment = stableStringify({
@@ -1047,6 +1058,11 @@ function buildPrompt(item: {
     ...(item.moduleContracts.length > 0
       ? [
           "module_contracts carries the APPROVED contract for each module this item implements. The implementation MUST conform to every declared input, output, invariant, side effect, validation boundary, failure mode, and seam adjustment. A locally plausible interface that contradicts them is a defect even when the build and the targeted tests pass — a conformance divergence propagates to every consumer of the module.",
+        ]
+      : []),
+    ...(item.hasLandingGates
+      ? [
+          "This repository declares tree-wide LANDING GATES. They are not per-item commands and nothing in this item runs them: the CLOSE runs each of them once on the fully merged tree and reports what it finds. Keep your edits within allowed_files and conform to module_contracts — a gate refusing later is a defect in the merged tree, not a command for this item to run.",
         ]
       : []),
     `Assignment: ${assignment}`,
@@ -1159,10 +1175,46 @@ function buildWorkItem(
   // command contract must never become a work item, so nothing downstream can
   // dispatch it or execute its commands.
   assertBlockContract(paths.root, block);
-  const allowedFiles = [...new Set(block.touched_files)].map((path) =>
-    normalizeDeclaredPath(paths.root, path, `${block.block_id}.touched_files[]`),
-  ).sort(compareCodeUnits);
+  // THE ID-GLOSSARY SCOPE. A block whose contract COINS an invariant id writes
+  // it in `src/`, and the glossary document that has to document it sits
+  // outside every module's file scope — so without this the item is
+  // structurally unable to satisfy the id-glossary gate. Read off the block's
+  // own contract and obligations, never guessed; the ids the document already
+  // carries are subtracted inside `withGlossaryScope`, so a contract that only
+  // MENTIONS an existing id (a seam adjustment citing `INV-COVERAGE`, say) gets
+  // no widening — it coins nothing and needs no row.
+  const declaredIds = declaredInvariantIds({
+    obligations: block.items.flatMap(
+      (findingId) =>
+        state.plan.findings.find((entry) => entry.id === findingId)
+          ?.contract_obligation_ids ?? [],
+    ),
+    module_contracts: block.module_contracts ?? [],
+  });
+  const allowedFiles = withGlossaryScope(
+    paths.root,
+    [...new Set(block.touched_files)].map((path) =>
+      normalizeDeclaredPath(paths.root, path, `${block.block_id}.touched_files[]`),
+    ).sort(compareCodeUnits),
+    declaredIds,
+  );
   const resultPath = resultPathFor(paths, block.block_id);
+  // THE LANDING GATES ARE NOT THIS ITEM'S. `check:deadcode`, `check:depgraph`,
+  // lint and the id-glossary gate state facts about the WHOLE tree, so the
+  // boundary that owns them is the CLOSE, on the merged tree — never a
+  // per-item dispatch. Folding them in here was tried and refused a wave item
+  // that added an export whose only consumer lands in a LATER item: no edit
+  // inside the item's scope could pass, and another item's fault could refuse
+  // this one. See CLAUDE.md, *A gate states the boundary it OWNS*; the close
+  // leg is `verifyLandingGates` in `src/remediate/phases/close.ts`.
+  //
+  // The per-item required tests are the block's OWN commands, unchanged, which
+  // is what this field meant before the gates were folded in and what the
+  // result's `test_evidence` is compared against index-for-index at ingestion.
+  //
+  // ONE FACT still rides the emitted prompt: whether the target root declares
+  // any landing gate at all, so the host knows a close will run them.
+  const hasLandingGates = discoverLandingGates(paths.root).length > 0;
   const requiredTests = [...(block.targeted_commands ?? [])];
   const assignments = buildFindingAssignments(state, block);
   // The obligation demand is bound here, once, from the same plan findings the
@@ -1186,6 +1238,7 @@ function buildWorkItem(
     baselineCommit,
     obligationIds,
     requiredTests,
+    hasLandingGates,
     resultPath,
     moduleContracts: block.module_contracts ?? [],
   });
