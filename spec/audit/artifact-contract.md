@@ -167,7 +167,7 @@ place and records `archived: false` with a reason, which the report's charter
 evidence coverage block surfaces.
 
 Growth is NOT bounded by a character ceiling, because a packet carries no
-character limit (owner, 2026-09-04): a packet holds every doc, comment block,
+character limit: a packet holds every doc, comment block,
 declaration set and stripped body its channel names, in full, so the directory
 grows with the audited tree and with the number of DISTINCT extractions — three
 kinds per extraction, and identical re-extractions collapse onto the same file.

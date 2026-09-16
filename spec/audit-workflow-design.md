@@ -190,8 +190,7 @@ Runs after the intent checkpoint so the reviewer works within confirmed scope.
   cross-boundary coupling reasoning; do not produce findings about excluded files
 
 **File access — two separate rules, deliberately named apart.** One governs what
-the reviewer may READ; the other governs what it may REPORT. Conflating them is
-what made this section and the shipped prompt appear to disagree.
+the reviewer may READ; the other governs what it may REPORT.
 
 *Orientation grant (reading):* unbounded. The reviewer is given the top-N
 highest-risk in-scope units as a starting point (heuristic from the risk

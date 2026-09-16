@@ -344,8 +344,8 @@ stale installed bin or isolated worktree.
 from contract scope file sizes + spec length + pulled-in test files.
 
 **Write scope** is `block.touched_files` normalized into the work item's
-`allowed_files`: the host owns worker prompting, and no basename-matched
-convention scan widens a node's write grant.
+`allowed_files`: the host owns worker prompting, and nothing widens a node's
+write grant beyond that normalized set.
 
 ---
 
