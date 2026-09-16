@@ -18,37 +18,6 @@
 
 - **Analyzer consent decisions (`declined`) should not persist across runs (2026-09-13, medium, friction: tool_should_decide).** Currently, `src/audit/cli/nextStepHelpers.ts` persists `declined` analyzer consent decisions to `.audit-tools/audit/analyzer-policy.json` (`AnalyzerConsentDecisionSchema` in `src/shared/analyzerPolicy.ts`), vetoing future runs without re-asking. Per operator directive, neither declines nor grants should persist across runs; all analyzer consent decisions must be per-run so that the operator is prompted fresh on every run. **Property:** `analyzer_consent` decisions (both grants and declines) are strictly ephemeral for the current run, and `persistAnalyzerConsent` is retired from writing durable declines. Evidence: [prompt refinement and workflow prompt inventory](../reviews/prompt-refinement-2026-09-13.md).
 
-- **Packaged smoke reads can race a wrapper rebuild of the same checkout (2026-09-07,
-  medium, friction: tool_should_decide).** During pipeline verification, a benchmark's development
-  wrapper rebuilt `dist` while the packaged audit smoke imported it; the import failed and
-  the smoke passed alone. Separate benchmark tooling prevented recurrence in this lap.
-  **Property:** build replacement and smoke reads coordinate at the checkout boundary,
-  including wrapper-triggered builds, so missing intermediate output cannot look like a
-  package defect. Evidence: [pipeline quality verification](../reviews/pipeline-quality-2026-09-07.md).
-- **A nightly script that writes the tracked ledger ignores unrecognized argv, so a query-shaped flag
-  performs the write (2026-09-06, medium, friction: tool_should_decide).** `node
-  scripts/nightly/ingest-answers.mjs --help` did not print usage — it ingested ten answers and wrote
-  `.claude/nightly-decisions.json`. The flag is ignored rather than refused, and the default action is
-  a durable write. 9 of the 95 `.mjs` files under `scripts/` mention `--help` at all, so the gap is the
-  norm, not this one script. **Property:** a script whose default action writes durable state refuses an
-  argument it does not recognize, and never treats an unrecognized flag as consent to write.
-
-- **Leg 1's coverage stamp reports `items_reviewed_cold: 0` whenever the run stamps before it
-  measures (2026-09-06, medium, friction: tool_should_decide).** `stampExamined` marks an examined doc at
-  HEAD, and `writeCoverage` derives the cold count from whether an item carries a stamp — so the
-  natural order (review, stamp, then write coverage) makes every examined item look windowed. The
-  2026-09-06 run wrote 0 and had to recompute 22 across 8 docs from a snapshot taken at run start.
-  The field exists precisely so a cold review is declared rather than eyeballed, so a silent 0 is
-  the failure it was built to prevent. **Property:** the cold count reported for a run is derived
-  from the ledger as it stood BEFORE that run stamped anything, so stamping cannot alter it.
-
-- **A constitutional or loop-core attestation accepts a mistyped nightly ledger key in its decision
-  text (2026-09-04, low, friction: tool_should_decide).** `attest-constitutional-doc-change.mjs`
-  recorded `cde41c31c1c6a7f3` (one character off the real `cde41c31f1c6a7f3`); only the later
-  `answer.mjs --done` refused it. The attestation is the durable audit record, so the typo survives
-  there. **Property:** an `--owner-decision` that cites a 16-hex nightly ledger key resolves that key
-  against `.claude/nightly-decisions.json` before the record is written.
-
 - **CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a
   DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).** Two `audit-code-test-suite` runs on
   `main` the same day failed identically and in different places: `tests/audit/next-step-narrative.test.ts`
@@ -62,19 +31,6 @@
   is the one everybody learns to skip. **Property:** an orchestration test that spawns the real CLI either
   completes within a bound the slowest supported runner meets, or fails naming what it waited on — a bare
   300s timeout with a live child names nothing.
-
-- **A guard's stated escape hatch does not work for any statement after a NEWLINE (2026-09-04, medium,
-  friction: tool_should_decide).** `bypassEnabled` (`.claude/hooks/shell-split.mjs`) accepts the
-  `NAME=1` assignment only at string start, after `;`/`&`/`|`, or after `export` — a newline is not in
-  the separator set. But the same module's `splitShellStatements` deliberately treats a newline AS a
-  statement separator, so a multi-line Bash call gets its later statements checked while the documented
-  escape on those statements is silently ignored. Measured: `shell-trap-guard.mjs` refused a
-  destructive-restore statement on line 3 of a command and printed "deliberate discard: re-run with
-  `AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1`"; re-running with exactly that prefix refused identically.
-  An escape that is advertised in the refusal and then does not work is worse than no escape — it reads
-  as the guard being broken rather than as the caller holding it wrong. **Property:** the separator set
-  `bypassEnabled` accepts is the same set `splitShellStatements` splits on, pinned by a test that feeds
-  one bypass through both.
 
 - **Three code comments assert a shape the tree no longer has, and nothing checks a comment
   against the code it describes (2026-08-31, medium, friction: tool_should_decide).**
@@ -103,49 +59,6 @@
   the point: nothing checks it. **Property:** an entry naming infrastructure that no longer exists is
   deleted or dated when that infrastructure retires, driven by the retirement rather than by someone
   later noticing.
-
-- **The repo cannot DETECT a delegated lane — it can only refuse one it recognizes at the
-  dispatching tool call (2026-08-29, high, friction: tool_should_decide).**
-  The stopgap half SHIPPED 2026-08-30: `shell-trap-guard.mjs` refuses a write-capable lane invocation
-  that would run inside any worktree of this repo, in both shell dialects, unless it declares
-  `AUDIT_TOOLS_CHILD_SESSION=1`, carries read-only tools, or is pointed outside the repository. That
-  mechanism states its own trap and its uncovered halves, so neither is restated here.
-  A precondition also closed 2026-08-30: the registry keyed on the CHECKOUT, so the child refusal's
-  arming depended on how a worktree was made. `sessionsDir` now resolves the repository through its
-  common git dir (`tests/shared/session-registry.test.ts`). That is not detection — a lane registers
-  itself at SessionStart, so it is never `absent` and never a child.
-  **What remains open is the detection itself.** OWNER DECISION 2026-08-30: ABSTAIN and record —
-  ship the refusal as the whole answer for now, and keep this entry open rather than close it on the
-  half that shipped. Three alternatives were put and declined: sanctioning one lane path by shipping
-  the `lane-dispatch` shell adapter, process-ancestry detection, and closing the entry on Half A. The
-  abstention was chosen because two independent refutation lanes and a source pass all reached the
-  same verdict — no honest failing test can be written for detection — and this repo's own precedent
-  is that a gate which cannot establish its verdict abstains and records rather than approximating.
-  Dead designs, so a next attempt starts ahead rather than repeating these:
-  reading `ANTHROPIC_BASE_URL` or `CLAUDE_CONFIG_DIR` to recognize a relay lane re-imports the host
-  execution facts `467b1e8f` and `3bea76ee` retired and *No execution inventory in this package* bans;
-  `CLAUDECODE` / `CLAUDE_CODE_ENTRYPOINT` absence does not separate the cases, because a lane's own
-  hooks see them set; and `scripts/shared/lane-dispatch.mjs` cannot carry the marker, being
-  lane-agnostic with its shell adapter deliberately unshipped, so it spawns no process. Process
-  ancestry has now been MEASURED
-  ([record](../reviews/ppid-liveness-measurement-2026-08-30.md), 2026-08-30) and does not help here:
-  it separates *a session* from *no session*, never a delegated lane from an owning one.
-  **Property:** the repo DETECTS a delegated lane rather than being told about one, so a lane cannot
-  run the ceremony merely because its dispatcher forgot a variable.
-
-- **The gate fixture helper `stageLoopCoreFile` arms NOTHING, and its own comment says it arms the
-  loop-core gate (2026-08-29, medium, friction: tool_should_decide).**
-  <!-- doc-citation-exempt: a path written INTO a throwaway fixture repo, never a file of this tree -->
-  `tests/shared/pre-commit-gate-harness.ts` writes `src/shared/quota/x.ts` under the comment "so the
-  loop-core attestation gate arms". `isLoopCorePath` returns FALSE for that path: the quota substrate
-  was retired and the pattern list moved on without the fixture. Nothing is broken today — the one
-  <!-- doc-citation-exempt: a path written INTO a throwaway fixture repo, never a file of this tree -->
-  consumer, `pre-commit-gate-attestation.test.ts`, wraps the helper and adds `src/shared/engine/x.ts`,
-  which IS loop-core, so those tests arm the gate through a file the helper does not supply. The trap
-  is latent and already cost one debugging pass: a NEW test that calls the helper alone arms nothing
-  and passes VACUOUSLY against a gate that never fired. **Property:** the fixture helper writes a path
-  the loop-core matcher accepts, and a test asserts that it does — so a future narrowing of the
-  pattern list reds the fixture instead of silently emptying it.
 
 - **A literal pinned in a test outside the change's neighborhood reds only in CI — the general
   discovery arm stays open (2026-08-29, medium, friction: tool_should_decide).** The lap's three
@@ -230,45 +143,12 @@
   is deterministic over the command text, with a contract test pinning the admitted and refused
   forms, so its reach is a property of the input rather than of the attempt.
 
-- **The rendered decision queue and its tracked snapshot can outlive the ledger that settles them,
-  and nothing gates the disagreement (2026-08-27, medium, friction: tool_should_decide).**
-  `docs/nightly-inbox.md` and the tracked `.audit-tools/nightly/open-items.json` both still present
-  six propositions as open, plus a banner reading "11 answered items not yet marked done", while
-  `node scripts/nightly/answer.mjs --list` reports zero open and zero pending. `109d101a` rendered
-  the queue; `b91057c5` and `f41d2442` then landed the answers and neither re-rendered either
-  artifact. `render-inbox.mjs` has no `--check`, and no gate reconciles the rendered queue or the
-  snapshot against the ledger, so the drift is silent and every doc gate stays green. The
-  `SessionStart` hook reads the ledger and so surfaced nothing — the damage falls on a human or an
-  agent who opens the inbox and works six settled items. **Property:** the rendered queue and its
-  snapshot are derived artifacts with a freshness gate, so neither can assert an item is open that
-  the ledger records as done.
-  **The predicted damage happened the same day, and it is confirmed.** A lap read the six from the
-  snapshot and put four to the owner, though all six had been settled and COMPLETED hours earlier
-  (`f41d2442`), every edit landed. One of the answers given, if applied, would have REVERTED a
-  completed decision — so the cost is not only wasted attention. Nothing stale was applied, and the
-  ledger was already right. `start-lap` has been repointed at `answer.mjs --list` as the authority,
-  closing the path actually walked; the snapshot's own freshness gate is still the fix.
-
 - **The Implementation DAG prompt does not state the one-invocation rule for `targeted_commands`
   (2026-08-23, medium, friction: tool_should_decide).** The worker emitted `npm run build && npm run
   check` on 23 nodes; the promotion gate rejected the whole DAG twice (`MAX_DAG_REGENERATION_ATTEMPTS`
   = 2, one more would have blocked the pipeline) for a defect the tool can normalize by splitting on
   `&&`. **Property:** a mechanically-normalizable violation never spends a regeneration attempt — the
   tool splits, or the prompt states the rule and the validator reports a targeted repair.
-
-- **The per-item required tests and the host landing gate do not include the tree-wide guard
-  suites or the cheap release gates, and every landing's evidence is Windows-local (2026-08-23,
-  medium).** Three remediation landings reddened CI after green per-item runs: a hand-restated
-  `.audit-tools` literal caught only by `tests/shared/audit-tools-path-guard.test.ts` (`1e7a4a54`
-  fixed it), a case-folding assertion true only on a case-insensitive volume (`011c6ae0`), and an
-  intra-`src/shared` import cycle the reviewer graded minor that `check:depgraph` refuses
-  (`b5963957`). **Property:** a landing runs the repository's guard suites and the cheap release gates
-  (`check:depgraph`, `check:deadcode`, `check:lint`) for the areas it touches, and the host treats
-  Linux CI as the real signal per commit.
-
-- **The systemic-challenge lane prompt withholds the banked findings it asks the adversary to beat (2026-08-21, medium).** The prompt states only a COUNT of prior improvements, and `systemicChallengeLoop` computes newness by exact identity over adversary-minted ids. An adversary therefore cannot tell what it must not repeat, and a paraphrase registers as new: round 3 of the 2026-08-21 lap re-emitted round 2's `mapWithConcurrency` item under a fresh id, and the lane raised both halves as findings itself. **Property:** the adversary sees the banked set, and convergence dedups on content rather than on a worker-minted id. Related: the no-ceiling entry — together they are why that lap's loop had to be stopped by a hand-written empty submission.
-
-- **Conceptual-review DEPTH is still modelled as durable when it must be per-run (2026-08-21, owner directive, medium).** The analyzer-consent half of this entry is CLOSED: a grant now binds one run and rides the scoped consent token, only declines persist, and `AnalyzerConsentDecisionSchema` is a one-member enum so a grant has no durable shape. The review-depth half is NOT, and is stated here rather than left implied by a closed sibling: the intent checkpoint reuses a prior `design_review.conceptual_depth`, so the design-review step announces `Reusing intent from <timestamp> ... conceptual depth deep` to an operator who never chose it. Owner, 2026-08-21: **these are per-run choices and should not be persisted — a user may not want the same settings every audit.** **Property:** a review-depth answer binds the run that was asked, and the next run asks again.
 
 - **Promotion and close residuals from the CP-NODE-3/15 reviews (low, one entry).** (a) The
   friction shortfall gate reads `readdir(...).catch(() => [])`, and `archiveFrictionRecords`
@@ -397,19 +277,6 @@
   eligibility is either measured and shown not to collapse, or aligned with the findings draw's — it
   is not left disjunctive on the grounds that nobody looked.
 
-- **`runCommand` buffers child output unboundedly (2026-08-13, medium).**
-  `runCommand` (`src/audit/orchestrator/runtimeCommand.ts`) does `stdout += String(chunk)` and truncates only
-  after `close`, so a verbose suite can exhaust memory or throw a `RangeError` from inside a stream
-  `data` listener — **uncaught**, killing the process with no recoverable state (the awaiting caller
-  never sees it). Same defect class as the coherence-trace blowup, one layer over. **Property:**
-  accumulate a bounded ring of trailing lines, never the whole stream.
-
-- **`shell-trap-guard` misses `git stash push <pathspec>` eating uncommitted work (2026-08-12, medium).**
-  The guard DENIES a `git checkout --`/`git restore` that would eat unstaged edits, but a pathspec'd
-  `stash push` removes them just as silently (hit live: it swept a 200k-line uncommitted retirement
-  edit of the named file into the stash; recovered by `stash pop`). **Property:** any git verb that
-  removes unstaged edits from the working tree gets the same deny-once as `checkout --`/`restore`.
-
 - **Contract-pipeline fan-out names a mechanism the host may not have (2026-08-08, medium).**
   `module_contract_drafting` says "dispatch ONE sub-agent PER MODULE"; where in-process subagents are
   unavailable the only route is a shell-out lane the tool neither knows nor sizes for (2 of 9 such
@@ -488,26 +355,20 @@
   names WHICH per task (file absent vs parse error vs contract mismatch). Record:
   [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #12.
 
-- **Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).** Step 2
-  ran 4 adversarial rounds; each spawned FRESH agents that re-grepped the same `tokens_per_pct` /
-  `admit` / `reconcile` call-site map from scratch (~135k subagent tokens per round, much of it
-  identical recon). Continuing a prior reviewer preserves its context but forfeits independence,
-  which is the whole point of the round — so the two goals are in tension and the fix is not "reuse
-  the agent". **Property to hold:** a review round receives the verified call-site map as INPUT
-  (cheap, mechanical, produced once) and spends its budget on judgment, not rediscovery — while still
-  reaching its own verdict.
-  **SPEC — the tension is false: it conflates independence of VERDICT with independence of INPUT.** What
-  a review round must not do is judge work it authored. Being handed a factual call-site map it did not
-  produce does not compromise that — the agent is still fresh and the verdict is still its own. Re-deriving
-  the map from scratch was never carrying independence; it was carrying redundant derivation, and paying
-  ~135k tokens per round for it.
-  **Resolution:** the verified map is a read-only, provenanced input artifact. Each round receives it
-  labelled as prior verified recon it did not author, and cannot write back to it — updates go through a
-  separate recon step, so the map cannot silently absorb a reviewer's assumptions and then be handed to
-  the next reviewer as fact. Rounds spend their budget on judgment.
+- **Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).** Each
+  adversarial round spawns FRESH agents that re-grep the same call-site map from scratch (~135k
+  subagent tokens per round, much of it identical recon), because continuing a prior reviewer
+  preserves its context but forfeits the independence the round exists for.
   **Property to hold:** no review round re-derives a mechanical fact another round already established,
-  and no round judges anything it authored. ⚠ Sharing an agent SESSION across rounds is the wrong version
-  of this and forfeits exactly what the round is for.
+  and no round judges anything it authored — the verified map is a read-only, provenanced input artifact
+  each round receives labelled as prior recon it did not author, and cannot write back to (updates go
+  through a separate recon step, so it cannot absorb a reviewer's assumptions and then be handed to the
+  next round as fact).
+  **Already refuted, do not re-propose:** that independence of VERDICT and independence of INPUT are in
+  tension — they are not, and the framing is why the obvious fix looked wrong. A round must not judge
+  work it authored; being handed a factual map it did not produce does not compromise that, so
+  re-deriving from scratch was never carrying independence, only paying for redundant derivation.
+  ⚠ Sharing an agent SESSION across rounds is likewise wrong and forfeits exactly what the round is for.
 
 - **The per-site pinning gate's name binding is author-supplied (2026-07-25).**
   `scripts/check-sites-pinned.mjs` derives each changed site from the staged diff, so an omitted hunk
@@ -557,20 +418,6 @@
   `worktreeTree` to learn whether the baseline was green. Its home is `C:\Code\docs\backlog.md`,
   because the declaration schema and its reader are machine-wide.
 
-- **Friction walk (determinations-execution lap, 2026-07-29):** (1) **ambiguous-direction:** none —
-  the 16 nightly-ledger answers were executable as written; the two left unexecuted (premise probe
-  `ea4e616f`, guard-reach-as-declared-data `ec64d159`) are full-lap builds awaiting a design pass,
-  not ambiguities, and stay visible via `answer.mjs --list`. (2) **tool-should-decide (small):**
-  the Bash tool's `$TMPDIR` is unset under Git Bash on win32, so `> "$TMPDIR/x.log"` degrades to
-  `/x.log` → permission denied; `/tmp` works. (3) **inefficient-feeding:** none new — the offload
-  tier path carried 9 subagents (six doc edits, condensation draft, adversarial verify, loop-core
-  review) with zero lane-side failures. (4) **tool-should-decide (small,
-  cost: one burned tag v0.34.40):** a doc edit has no edit-time surface naming the TESTS that
-  assert its content — `nightly-routine.md`'s approved lane swap was green through every local
-  doc gate and failed release CI on the nightly-prompt parity test (since deleted with its
-  generated target, C-08), which pinned the retired helper invocation verbatim. Grep tests for a doc's path/content before shipping a
-  contract-bearing doc edit; the durable fix would be a declared doc→test consumer map.
-
 - **The per-result LLM conformance review — the opt-in depth dial half of the owner decision — is
   unbuilt, so semantic conformance to the carried module contracts is still judged by nothing
   (2026-08-09, narrowed 2026-08-29, medium).** The mechanical floor half is enforced: the work item
@@ -605,45 +452,11 @@
   `check:doc-code-citations`, but it also removed `git status` as the signal that surfaced this —
   a stray log is now invisible.
 
-- **Friction walk (nightly-determinations lap, 2026-07-26):**
-  (1) **inefficient-feeding (medium):** `.audit-tools/nightly/open-items.json` is a single 659-line /
-  26k-token document that exceeds the Read cap, so enumerating it needs a hand-written `node -e`. Worse,
-  it is STALE by construction — `answer.mjs --list` correctly reported zero open while the file still
-  listed all 22, because answering writes to `.claude/nightly-decisions.json` and never reconciles the
-  queue file. **Property:** the queue's on-disk form is enumerable in one bounded read AND reflects the
-  settled ledger, or the two disagree and the file is the one an agent finds first.
-  (2) **tool-should-decide (medium):** an ANSWERED determination is free prose with no machine-readable
-  work shape, so executing 22 of them meant re-reading each item's evidence to rediscover the target
-  file and edit. The item already knows its `path` and its options; the answer should carry the
-  actionable target, not require a second derivation from the eli5 text.
-
 - **Friction walk (touched_files load-gate lap, 2026-07-25):** (1) **tool-should-decide (medium):** a
   fixture helper ending in `as RemediationState` (`tests/remediate/helpers/nextStepHarness.ts`)
   makes `check:tests` inert for that fixture — it hid blocks missing a REQUIRED contract field from the
   gate added to catch exactly that. Property: a fixture must not be able to cast away a contract's
   required keys — `satisfies`, or a builder that cannot omit them.
-
-- **Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code
-  site).** Shipped 2026-07-10: `buildFileDisposition` runs an `untracked` scope rule, so untracked
-  litter cannot enter the auditable scope. Still live: a `renderHostScratchNote`/`hostScratchDir`
-  pair (`src/shared/prompts.ts`, `src/shared/io/auditToolsPaths.ts`) has ZERO callers — only
-  definitions plus a re-export in `src/shared/index.ts`, which knip's default mode counts as a
-  consumer — so it reaches no prompt. Wire it into the prompt below, or delete it. Residuals:
-  - (a) **Submodule / nested-repo contents are now excluded as `untracked`** (parent `ls-files` lists only the
-    gitlink). Consistent with citation grounding, but a silent scope change for repos with first-party
-    submodules. Ideal fix = `--recurse-submodules` in BOTH the disposition rule and the grounding corpora
-    (`findingGrounding.enumerateTrackedFilePaths`, M-B3 `enumerateRepoTreePaths`) as ONE atomic change —
-    never one side alone.
-  - (b) **`file_disposition` now depends on git index state, which the dependency DAG doesn't track**
-    (`dependencyMap.ts` keys it to `repo_manifest.json` only). An index-only change (committing a
-    previously-untracked file) won't re-stale a persisted disposition until repo_manifest churns.
-    ⬇ Live-run watch: after committing files mid-run-continuity, confirm they enter scope on the next audit.
-  - (c) **Scope-rule guard decisions are invisible at the intent checkpoint** — `computeScopePreDigest` reads
-    only per-file entries; a skipped rule (`root_untracked`/`share_exceeded`/git-absent fallback) never
-    surfaces to the operator despite the summary existing for exactly that purpose.
-  - (e) The audit `renderEdgeReasoningDispatchPrompt` (`src/audit/cli/prompts.ts`) single-agent
-    dispatch carries no scratch-dir note — one bounded agent writing one results file, so it is the
-    lowest-risk path; add one if it ever litters.
 
 - **External shared-logic audit V1–V7 residuals** (each deliberate, low-severity, documented at the code
   site):
@@ -670,85 +483,6 @@
   remain pending rather than being rebound heuristically. **Still open:** confirmation on a real run
   that every `deepening:*` task converges in bounded rounds and the audit reaches synthesis without
   `force-synthesis`.
-
-- **`goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD
-  2026-07-25).** The rest of ID minting is routed through the one registry:
-  obligation ids now mint through `obligationId`/`moduleSlug` in
-  `src/remediate/contractPipeline/idRegistry.ts` (the encoder and its phase/write-scope decoders were two
-  identical implementations plus a "MUST stay in lockstep" comment), and uniqueness is the shared
-  `mintUniqueId`. What is left: `goal_id` is not minted at all — it is read verbatim off the LLM envelope
-  (`derive.ts`), so its FORMAT is unvalidated. **Property to hold:** an id the tool relies on is either
-  minted by the registry or validated on the way in.
-
-- **`StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.** `steps.ts` declares
-  the audit step contract strict while `stepContractWriter.ts` stamps a per-process `agent_id` onto the
-  written JSON, so parsing an emitted contract with its own schema fails. Readers work around it by
-  reading raw JSON. **Property to hold:** a contract the tool writes parses with the schema the tool
-  declares for it.
-
-- **systemic_challenge findings ids are adversary-invented and round-colliding.** Rounds 3 and 4
-  both minted SC-001..004 for different findings (host prefixed r4- to avoid accumulator clobber);
-  convergence also rested on host prompt-craft (8/7/4/8→0 only after hardened dispatch framing).
-  **Property to hold:** the tool namespaces challenge ids per round; the round prompt itself
-  carries a covered-themes digest and an explicit variation bar.
-  Reproduced in full 2026-08-08 (O7 in the run record below).
-
-- **The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to
-  fabricate.** `MAX_DRAIN_STEPS` bounds the deterministic drain; this loop has none, and
-  `src/audit/orchestrator/state.ts` blocks planning until a round returns nothing-new. A fresh
-  no-memory adversary structurally cannot judge "nothing new"; observed yield varied by host execution,
-  not demonstrated exhaustion. **Property to hold:** a round ceiling ends the loop without a false dry signal, and a
-  host-forced stop is recordable as such. Run record O7.
-
-- **`ensure` writes opencode.json with unstable key order.** Pure key-reorder diff (edit-permission
-  map) on every ensure — a generated config violating the stable content-derived ordering invariant,
-  dirtying every tree it touches. **Property to hold:** generated host configs are byte-stable
-  under repeated ensure.
-
-- **Steward verification metadata is undeliverable through the host-result envelope (hit
-  2026-08-18).** The `deepening:steward` prompt instructs the host to return `findings: []` plus
-  `verification.followup_tasks`, but `parseHostResult` enforces exactly seven envelope keys and
-  `toAuditResult` maps no `verification` field — the channel exists only in the retired
-  worker-result contract (`workerSchemas.ts`), so `buildVerificationFollowupTasks` can never see
-  host-submitted suggestions. Same class as the approved P35 (step prompts must not instruct what
-  the tool cannot deliver); fold into that build or carry `verification` through the envelope.
-  **Property to hold:** every instruction a step prompt emits has a deliverable channel the
-  ingest actually reads.
-
-- **The report renderer emits control characters from finding prose raw (hit 2026-08-18).** A
-  worker summary containing a JSON-escaped backspace (a mangled regex \b word boundary) is stored
-  safely in audit-findings.json but rendered as the raw 0x08 byte into audit-report.md, where
-  check:control-bytes correctly reds CI. Scrubbed by hand this lap. **Property to hold:** the
-  render step sanitizes C0 control characters out of worker-authored strings (or re-escapes them
-  as text), so a contract-valid finding can never produce a tracked file the byte gate refuses.
-
-- **A killed `next-step` wedges `phase.lock` for every later call (2026-08-24, remediation run,
-  medium).** `PHASE_LOCK_TIMEOUT_MS = 0` makes the phase acquirer try once and return `phase_busy`
-  without ever entering the wait loop — but the stale-steal path (`STALE_LOCK_MS`, dead-owner
-  token check) lives inside that loop, so a `phase.lock` whose holder died (observed: a
-  `next-step` killed by a 2-minute shell timeout) is never stolen and every later `next-step`
-  bounces forever; the host had to verify the owner pid dead and delete the lock by hand.
-  **Property to hold:** a zero-timeout acquirer still runs the stale-steal check once, so a
-  dead-holder lock never needs a hand deletion.
-
-
-- **The pre-split design-review lane is still polled beside the two current judgment types (2026-08-27, from the philosophy audit, medium).** `GATE_LANES.design_review_legacy` is live in `src/audit/cli/laneSubmissions.ts`, accepted by `src/audit/cli/laneValidators.ts`, and polled ahead of the contract and conceptual lanes by `src/audit/cli/nextStepHelpers.ts`, which sets the old `reviewed` flag and records the lane outcome. `src/audit/orchestrator/state.ts` then reads that one flag as satisfying BOTH modern obligations — guarded only by artifact staleness — and `src/audit/orchestrator/structureExecutors.ts` carries it forward across a structure refresh, so a single pre-split verdict stands in for two different judgments for as long as the artifact stays fresh. **Property:** only contract review and conceptual review exist, and a resumed pre-split artifact directory either leaves both modern obligations unmet and forces a rerun, or is invalidated by a persisted state version at load — never translated. Fixtures, quarantine/merge behaviour and the operator's rerun message move with the lane in the same change. The exposure is every resumed pre-split directory, not only audits visibly in flight.
-
-- **The N-R13 status invariant asserts its own literal, and the status vocabulary exists in three
-  unlinked copies (2026-08-27, low-medium).** The first describe block of
-  `tests/remediate/run-status-has-no-document-phase.test.ts` builds a local `validStatuses` array and
-  asserts it does not contain `"documenting"` — a tautology over a literal the test itself wrote, so
-  a `documenting` status reintroduced into `RemediationState` would pass it silently. Its other
-  three blocks (planning transitions straight to implementing, the removed CLI verb, the removed
-  dispatch exports) do reach real code. The reason the block reads that way is the second half:
-  the vocabulary has no single source. `src/remediate/state/store.ts` declares the union inline on
-  `RemediationState.status`, then hand-mirrors it as the module-private `KNOWN_STATUSES` set the
-  load gate rejects unknown states with; the test writes a third copy. Nothing joins the three, so
-  the load gate and the type can drift apart with no red build.
-  **Property:** one exported runtime declaration of the status vocabulary, with the type derived
-  from it and both the load gate and the invariant test reading it — so the N-R13 assertion is made
-  against the shipped value rather than a restatement of it. Trace:
-  [`n-r13-and-lean-fast-path-trace-2026-08-25.md`](../reviews/n-r13-and-lean-fast-path-trace-2026-08-25.md).
 
 - **The dispatch boundary strips every per-node field the contract pipeline writes onto a promoted
   finding but `FindingSchema` does not declare (2026-08-27, medium).**
@@ -789,27 +523,6 @@
   on a real run. A new field on the findings contract is an owner decision: it can touch the
   constitutional `spec/audit/artifact-contract.md`.
 
-- **An analysis record can identify work and reach no work queue, and every gate stays green while
-  it happens (2026-08-27, medium, from the orphan-routing lap).** Seven `docs/reviews/` records
-  dated 2026-08-20 or later were cited by nothing tracked — over 1,500 lines of identified,
-  prioritized work that no queue knew about, including a whole philosophy audit challenging four
-  standing decisions and an eight-gap workflow analysis with its own acceptance benchmark. Nothing
-  could have caught it: no gate reconciles `docs/reviews/` against `docs/backlog/`, and
-  `docs/documentation-philosophy.md` states no rule for routing a review's recommendations into a
-  queue. The failure is silent by construction — the reviews are well-formed, the backlog is
-  well-formed, and the only thing missing is the edge between them. Routing the seven took a lap of
-  agent time that a gate would have made unnecessary. **Property:** a tracked analysis record that
-  identifies work is reachable from a work queue, mechanically — not by whoever wrote it
-  remembering to file the entries. **The obvious gate is the wrong one, and the uncovered half must
-  be stated with whatever lands:** "every review is cited from somewhere" is detectable but WRONG,
-  because a dogfood log, a measurement record and a completed triage legitimately carry no forward
-  work and would each be a false red — and a false red gets the gate disabled, which is worse than
-  no gate. Whether a record identifies work is a semantic judgment, the same unscriptable class the
-  record-update gate's semantic half already declares. So the mechanism is either an explicit
-  routing declaration the author writes once (a record states its disposition: work routed, or no
-  forward work), or a periodic sweep with a declared cadence — never an existence check over the
-  whole directory.
-
 - **The masked-exit guard keyed on TEST RUNNERS, not on whether the exit status is load-bearing —
   NARROWED to its curated-list half (2026-08-27, narrowed 2026-08-29, medium, friction:
   tool_should_decide).** `git push origin main 2>&1 | tail -3` was admitted and reported exit 0 for a
@@ -839,22 +552,4 @@
   a PreToolUse gate on `git push`, or the commit gate running the full suite for any commit that can
   land on `main`.
 
-- **`type-coverage`'s acquired-analyzer spawn carries a deadline ten times longer than the callers
-  actually waiting on it, and an orphaned npm lock makes every later spawn re-pay the same wait
-  (2026-09-04, medium, friction: tool_should_decide).** The audit CLI's `next-step` admits and runs
-  the default-admitted analyzer `type-coverage` (`typeCoverageCandidate`,
-  `src/shared/analyzers/candidates.ts`) as an ephemeral `npx` install-and-run through the one
-  spawn-admission chokepoint, `runExternalAnalyzer` (`src/shared/analyzers/acquisitionEngine.ts`),
-  which DOES pass a deadline — `ANALYZER_CHILD_DEADLINE_MS`, 10 minutes — into `runTrackedAsync`, so
-  the mechanism is not literally timeout-free. It is simply longer than any real caller's budget:
-  vitest's own 300-second per-file timeout, and this project's "one bounded step" fold invariant,
-  both expect an answer well inside 10 minutes. Measured on a Windows checkout with a cold `_npx`
-  cache: parallel vitest workers each spawned the fetch, npx serialized them on its per-package
-  `concurrency.lock`, each spawn took 180-310s, and a lock orphaned by a killed npx then made every
-  later spawn re-arm the same 600s wait against a lock that never clears on its own. (The suite's
-  own exposure is closed — every shared CLI fixture now records an operator decline for the default
-  acquired set, so no test reaches npx; a production caller still has no bounded wait.)
-  **Property:** the deadline on an acquired-analyzer spawn is short enough for its tightest real
-  caller — well under any fold-step budget, not merely finite — and a killed spawn still records the
-  analyzer degraded/`spawn_error` rather than leaving the caller to discover the stall only via its
-  OWN timeout.
+- **Audit-side host prompts still name a sub-agent MECHANISM (2026-09-15, low, friction: tool_should_decide).** P25c made the remediate-side prompts state the NEED (independent contexts, no shared authorship) instead of a mechanism the host may not have; the audit side still says "sub-agent"/"subagent" in `src/audit/cli/conceptualDispatch.ts` (3 sites), `src/audit/cli/nextStepCommand.ts` (13 sites) and `DISPATCH_PROMPT_HANDOFF_NOTE` in `src/shared/prompts.ts`. **Property:** one shared rendering of the independence need, used by both draws (one core, two draws), with a test that reds on the mechanism wording in either.

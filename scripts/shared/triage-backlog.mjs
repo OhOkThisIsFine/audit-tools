@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/triage-unearned-shipped-verdict.test.ts, tests/shared/triage-record-shape.test.ts
+//   The unearned-shipped downgrade (P65) and the verdict vocabulary are pinned there.
 // Mechanically triage every backlog entry through the offload lane — one entry,
 // one call.
 //
@@ -192,6 +194,52 @@ function resolveProbes(raw, root) {
 }
 
 /**
+ * The verdict an unearned shipped claim degrades to (P65).
+ *
+ * It authorizes NOTHING: it is not `already_shipped_or_stale`, so no reader can
+ * take it as a deletion lead. It exists so the downgrade is VISIBLE — a row that
+ * claimed an entry shipped while establishing nothing is reported as exactly
+ * that, rather than silently dropping out of the file.
+ */
+export const UNVERIFIED_SHIPPED_VERDICT = 'shipped_claim_unverified';
+
+/** Premise stamps that establish nothing about the tree. */
+const UNEARNED_PREMISES = new Set(['unprobed', 'probes_unusable', 'premise_unconfirmed']);
+
+/**
+ * Downgrade a deletion-authorizing verdict whose premise was never evaluated
+ * (P65, owner decision 2026-09-05 — accepted as written).
+ *
+ * `already_shipped_or_stale` is the ONE triage verdict that authorizes deleting
+ * a backlog entry, and it is paired with a separate `premise` stamp recording
+ * whether the entry's own quoted fragments could be checked against the tree.
+ * Nothing coupled the two, so a row could claim "this shipped" while its stamp
+ * said nothing was checked — and one entry was served exactly that way on five
+ * distinct dates (2026-08-27, -08-28, -09-09, -09-10, -09-11), each run
+ * re-refuting it by hand.
+ *
+ * The module header already stated the rule — a `probes_unusable` row is "never
+ * evidence for deleting an entry when paired with" the shipped verdict — but as
+ * PROSE addressed to a reader, and the reader it must reach is a relay lane plus
+ * whoever opens the JSONL at 3am. This makes the pairing unrepresentable in
+ * stored output instead of forbidden (auditor-agnostic robustness: whatever can
+ * be enforced in tooling must be).
+ *
+ * False-positive surface, accepted: a genuinely-shipped entry whose probes are
+ * unusable is downgraded too, so the sweep under-reports deletions. That is the
+ * safe direction — the sweep is advisory by contract, and a deletion still needs
+ * the run's own code anchor.
+ *
+ * Every other verdict passes through untouched: the rule is about what may
+ * authorize a DELETION, not about the lane's judgment in general.
+ */
+export function downgradeUnearnedShippedVerdict(rec) {
+  if (rec?.verdict !== 'already_shipped_or_stale') return rec;
+  if (!UNEARNED_PREMISES.has(rec?.premise)) return rec;
+  return { ...rec, verdict: UNVERIFIED_SHIPPED_VERDICT };
+}
+
+/**
  * Map the shared evaluator's item-level view onto a per-record stamp.
  *
  * `partial` is surfaced separately from `holds` because a half-vanished premise
@@ -342,6 +390,12 @@ const SCHEMA = {
         'live_run_blocked',
         'accepted_residual_no_work',
         'already_shipped_or_stale',
+        // P65: written only by `downgradeUnearnedShippedVerdict`, never by the
+        // lane. It is in the enum because the stamp reader validates every
+        // stored record against it, and a downgraded record that failed
+        // validation would be dropped as malformed — the opposite of making the
+        // unearned claim visible.
+        'shipped_claim_unverified',
       ],
     },
     why: { type: 'string', description: 'one sentence justifying the verdict, quoting the entry' },
@@ -502,6 +556,11 @@ async function main() {
         // already-filtered list (which would lose the unresolved half forever).
         const revived = { ...rec, code_paths: [...(rec.code_paths ?? []), ...(rec.code_paths_unresolved ?? []).map((u) => u.written)] };
         const pathsRecovered = applyCodePathResolution(revived, (args) => trackedMatches(ROOT, args));
+        // P65 LAST, after the premise is re-derived: the downgrade reads the
+        // stamp this call just computed, never the one the record carried in.
+        // A row that claimed `already_shipped_or_stale` while its probes were
+        // unusable leaves revive as `shipped_claim_unverified` — a claim that
+        // was not checked, which is what it is, and never a deletion lead.
         return {
           ...revived,
           premise,

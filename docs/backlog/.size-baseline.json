@@ -9,7 +9,6 @@
     "minor-bugs.md::A stale-artifact re-extraction `next-step` runs >2min with no progress signal,",
     "minor-bugs.md::Recovery phase-binding residuals from the adversarial review (2026-08-19, low,",
     "open-bugs.md::Analyzer-boundary residuals from the CP-NODE-1 review (low). (a) Six",
-    "open-bugs.md::Review rounds re-derive the same file map every time (inefficient-feeding, 202",
     "open-bugs.md::Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-"
   ]
 }

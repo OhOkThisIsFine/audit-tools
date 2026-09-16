@@ -87,8 +87,14 @@ describe("buildTriageRecord shape validation", () => {
 
   it("stays single-sourced on the schema's verdict enum", () => {
     // If the enum gains a value, the validator accepts it with no second edit.
+    // The size is pinned so a verdict cannot be added without a deliberate edit
+    // HERE — the enum is what a stored record is validated against, so a value
+    // that appears in the writer but not the schema is a row dropped as
+    // malformed. P65 added `shipped_claim_unverified`, which only
+    // `downgradeUnearnedShippedVerdict` writes (never the lane).
     expect(TRIAGE_VERDICTS.has("actionable_now")).toBe(true);
-    expect(TRIAGE_VERDICTS.size).toBe(5);
+    expect(TRIAGE_VERDICTS.has("shipped_claim_unverified")).toBe(true);
+    expect(TRIAGE_VERDICTS.size).toBe(6);
   });
 });
 

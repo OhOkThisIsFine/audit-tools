@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/backlog-index.test.ts
+//   The seek index (anchors, pointers, splice) and the live-run watch matrix (which entries
+//   become rows, the first-sentence lift, the render, the splice) are pinned by that suite.
 // Regenerate the SEEK INDEX in `docs/backlog.md` from the split backlog
 // (`docs/backlog/*.md`).
 //
@@ -54,6 +57,24 @@ export const BEGIN_MARKER =
   "<!-- BEGIN GENERATED SEEK INDEX — scripts/shared/generate-backlog-index.mjs — DO NOT EDIT BY HAND -->";
 export const END_MARKER = "<!-- END GENERATED SEEK INDEX -->";
 
+// The live-validation watch matrix, in the SAME file and the SAME generator run
+// as the seek index — but its own marker pair, because the two blocks answer
+// different questions and are spliced independently.
+//
+// WHY GENERATED. The hand-written matrix named eight items per run config while
+// only four entries in the whole backlog carried a `Live-run watch` line: six of
+// the eight names resolved to no entry at all, so an operator following the guide
+// was sent looking for items that do not exist. It had drifted twice and nothing
+// could catch it, because nothing joined the guide to the corpus it described. A
+// generated block cannot name an item the backlog does not hold — the same
+// property the seek index has, and for the same reason.
+export const WATCH_BEGIN_MARKER =
+  "<!-- BEGIN GENERATED LIVE-RUN WATCH — scripts/shared/generate-backlog-index.mjs — DO NOT EDIT BY HAND -->";
+export const WATCH_END_MARKER = "<!-- END GENERATED LIVE-RUN WATCH -->";
+
+/** The marker whose PRESENCE in an entry makes it a live-run watch row. */
+const WATCH_TOKEN = "Live-run watch";
+
 /**
  * Every backlog file, in index order. `forward-tracks.md` appears twice because
  * its two sections use different entry grammars — `## Open tracks` writes
@@ -101,10 +122,14 @@ export function collectIndex(sources) {
       lineOffset = lines.findIndex((l) => l.trim() === `## ${src.section}`) + 1;
     }
     const parse = src.kind === "tracks" ? parseTrackEntries : parseBulletEntries;
+    // `body` is carried but never rendered by `renderIndex`: the live-run watch
+    // matrix reads it, and reading the corpus twice would be a second definition
+    // of "which entries exist" — the drift this generator exists to remove.
     const items = parse(scope, `docs/backlog/${src.file}`).map((e) => ({
       title: e.title,
       line: e.line + lineOffset,
       file: src.file,
+      body: e.body,
     }));
     groups.push({ file: src.file, section: src.section, items });
   }
@@ -112,6 +137,102 @@ export function collectIndex(sources) {
 }
 
 const heading = (g) => (g.section ? `${g.file} — ${g.section}` : g.file);
+
+/**
+ * The `Live-run watch` line(s) of one entry BODY, as a single collapsed string —
+ * or null when the entry carries none.
+ *
+ * WHAT IS LIFTED, AND WHY IT IS BOUNDED. An entry may carry its watch line at
+ * the head of the entry (so the bold TITLE is the watch line) or as its own
+ * `- **⬇ Live-run watch …**` bullet further down. In both cases the matrix needs
+ * a POINTER, not the entry: the row already links to the entry, and pasting the
+ * whole body would make the generated block a second copy of the backlog — the
+ * exact drift the seek index avoids by lifting titles alone.
+ *
+ * So the extracted line stops at the first sentence-ending period followed by
+ * whitespace or end-of-text, which is where every watch line in this corpus
+ * states its observation before proceeding to supporting detail. Text before
+ * that point is lifted VERBATIM (decoration stripped, whitespace collapsed).
+ */
+export function extractWatchLine(body) {
+  const lines = body.split(/\r?\n/);
+  const at = lines.findIndex((l) => l.toLowerCase().includes(WATCH_TOKEN.toLowerCase()));
+  if (at === -1) return null;
+  // The watch paragraph runs to the next blank line — a wrapped watch is
+  // carried whole rather than truncated at the wrap.
+  const collected = [lines[at]];
+  for (let i = at + 1; i < lines.length; i++) {
+    if (lines[i].trim() === "") break;
+    collected.push(lines[i]);
+  }
+  const prose = collected
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+    // The entry's own lead-in decoration: the bullet, the `⬇` marker, and any
+    // run of emphasis before the words, so the row reads as a sentence rather
+    // than as a fragment of markdown.
+    .replace(/^[-*\s]*⬇?\s*/, "")
+    .replace(/\*\*/g, "")
+    .trim();
+  if (prose === "") return null;
+  // First sentence, at most — a pointer, not the entry.
+  const stop = prose.search(/\.\s|\.$/);
+  const first = stop === -1 ? prose : prose.slice(0, stop + 1);
+  return first.trim();
+}
+
+/**
+ * Every entry in the corpus that carries a `Live-run watch` line, in index
+ * order — the whole input to the generated matrix.
+ *
+ * Reads the SAME parsed entries the seek index uses, so "which entries exist"
+ * has one definition across both blocks and a newly-filed watch entry appears in
+ * the matrix on the next generation with no edit to this file.
+ *
+ * @param {Map<string, string>} sources filename → full file text
+ */
+export function collectWatchRows(sources) {
+  const rows = [];
+  for (const src of INDEX_SOURCES) {
+    const whole = sources.get(src.file);
+    if (whole === undefined) continue;
+    let scope = whole;
+    if (src.section) scope = sectionText(whole, src.section);
+    const parse = src.kind === "tracks" ? parseTrackEntries : parseBulletEntries;
+    for (const e of parse(scope, `docs/backlog/${src.file}`)) {
+      const watch = extractWatchLine(e.body ?? "");
+      if (watch !== null) rows.push({ file: src.file, title: e.title, watch });
+    }
+  }
+  return rows;
+}
+
+/** Render the live-run watch matrix block, markers included. */
+export function renderWatchMatrix(rows) {
+  const head =
+    `> **Live-validation watch matrix — GENERATED from the entries that carry a ` +
+    `\`Live-run watch\` line; do not hand-edit it.**\n` +
+    `> Each row below IS an entry in this backlog, linked to where it lives, with that ` +
+    `entry's own watch line lifted verbatim — so a row can never name an item the ` +
+    `backlog does not hold. File an entry with a **⬇ Live-run watch** line and it ` +
+    `appears here on the next generation.\n`;
+  if (rows.length === 0) {
+    return (
+      `${WATCH_BEGIN_MARKER}\n\n${head}\n` +
+      `No entry in \`docs/backlog/\` currently carries a \`Live-run watch\` line, so there ` +
+      `is nothing to watch for on a live run.\n\n${WATCH_END_MARKER}`
+    );
+  }
+  const body = rows
+    .map(
+      (r) =>
+        `- **${rebaseRelativeLinks(r.title, `docs/backlog/${r.file}`, "docs/backlog.md")}** — ` +
+        `[${r.file}](backlog/${r.file})\n  ${r.watch}\n`,
+    )
+    .join("");
+  return `${WATCH_BEGIN_MARKER}\n\n${head}\n${body}\n${WATCH_END_MARKER}`;
+}
 
 /** Render the whole generated block, markers included. */
 export function renderIndex(groups) {
@@ -160,6 +281,15 @@ export function spliceIndex(indexText, block) {
   return spliceGeneratedBlock(indexText, block, {
     begin: BEGIN_MARKER,
     end: END_MARKER,
+    target: "docs/backlog.md",
+  });
+}
+
+/** Splice the live-run watch matrix, its own marker pair in the same file. */
+export function spliceWatchMatrix(indexText, block) {
+  return spliceGeneratedBlock(indexText, block, {
+    begin: WATCH_BEGIN_MARKER,
+    end: WATCH_END_MARKER,
     target: "docs/backlog.md",
   });
 }
@@ -231,17 +361,26 @@ function main() {
     );
     process.exit(1);
   }
-  const rendered = spliceIndex(readFileSync(indexPath, "utf8"), renderIndex(collectIndex(sources)));
+  const groups = collectIndex(sources);
+  const watchRows = collectWatchRows(sources);
+  // Both blocks live in docs/backlog.md and are spliced in one pass: the seek
+  // index first (it is the marker pair near the top), then the watch matrix. A
+  // second read-and-write would race the first and could not see its own splice.
+  const withIndex = spliceIndex(readFileSync(indexPath, "utf8"), renderIndex(groups));
+  const rendered = spliceWatchMatrix(withIndex, renderWatchMatrix(watchRows));
   const count = (rendered.match(/^- `[^`]+:\d+` — /gm) ?? []).length;
   runGeneratedArtifactCli({
     repoRoot,
     files: [{ target: "docs/backlog.md", next: rendered }],
     staleMessage:
-      `The generated seek index's anchors no longer match docs/backlog/. A stale anchor is worse ` +
-      `than no anchor: it sends the reader to confidently wrong prose.\n` +
+      `The generated seek index's anchors no longer match docs/backlog/, or the generated ` +
+      `live-run watch matrix no longer matches the entries carrying a \`Live-run watch\` line. ` +
+      `A stale anchor is worse than no anchor: it sends the reader to confidently wrong prose.\n` +
       BOTH_GENERATORS,
     fixCommand: "node scripts/shared/generate-backlog-index.mjs",
-    okMessage: `backlog-index: docs/backlog.md matches the backlog (${count} anchor(s))`,
+    okMessage:
+      `backlog-index: docs/backlog.md matches the backlog (${count} anchor(s), ` +
+      `${watchRows.length} live-run watch row(s))`,
   });
 }
 

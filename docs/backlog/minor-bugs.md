@@ -70,16 +70,6 @@
   against the bound, and CX-02 re-specifies the cap on this exact point. **Property:** doc and
   comparison agree, and a test pins which transition stops the loop.
 
-- **`InputResolution` is declared twice, under one name, with two different shapes (2026-08-27,
-  low).** `src/remediate/steps/intakeResolver.ts` exports an `InputResolution` carrying `discovered`;
-  `src/remediate/steps/nextStep.ts` declares a private one of the same name that has `allExisting`
-  and no `discovered`. `RemediateCtx.inputResolution` binds the LOCAL one, so a caller reading the
-  exported declaration writes a literal the typechecker rejects — which is how this surfaced, while
-  building a ctx for the new priority-coverage contract test. Neither declaration references the
-  other, so nothing keeps them in step and the divergence is already real. **Property:** one
-  declaration of a name, or two names — the shared shape single-sourced and the per-site extras
-  stated as extensions, so a reader cannot pick the wrong one.
-
 - **The release script's await-run timeout (10 min) is shorter than a GitHub `release`-event
   delivery delay it then misreads as "no run" (2026-08-26, low, friction: tool_should_decide).**
   For v0.49.0 the release event fired ~13 minutes after `gh release create`; the script timed out
@@ -108,11 +98,6 @@
   until the seed was deleted (option 3). **Property:** drift in a non-finding field never raises the
   alarm, or the alarm carries a one-command "accept this drift" path.
 
-- **The phase-boundary repository gate re-runs on EVERY `next-step` at the boundary (2026-08-23,
-  low).** `phase_boundary_gate` (build + vitest, 2–5 min) ran on each of several consecutive
-  `next-step` calls while the run sat at phase 1. **Property:** the gate runs once per boundary and
-  its verdict is cached against the tree hash.
-
 - **Reviewer minors carried from the first-draw landings (2026-08-23, low).** `collectPathARefusals`
   duplicates the promoter's Path-A membership logic and `FINALIZED_MODULE_CONTRACT_FIELDS` is a third
   hand-written field list beside `derive.ts` (`src/remediate/contractPipeline/`); `renderMembers`'
@@ -122,8 +107,6 @@
   **Property:** each is pinned or deleted; none blocks.
 
 - **The friction close-out walk must be written twice under two different names (2026-08-21, low, friction: tool_should_decide).** The Stop backstop (`.claude/hooks/friction-stop-gate.mjs`) scans every `*.json` under `<artifacts>/friction` and accepts the run-id-keyed record, while the close step demands the walk specifically at `<artifacts>/friction/run.json`. A complete walk recorded against the real run id satisfies the backstop and still leaves the close gate reporting all three categories MISSING. **Property:** one run has one friction record path, and both gates read it.
-
-- **Acquisition of `actionlint` fails on extract (2026-08-21, low).** `external_analyzer_acquisition.json` recorded `actionlint` as `not_resolved` with `extract failed: tar exit 128`, so the workflow linter silently never ran although `.github/workflows` exists. **Property:** a tool that resolves and then fails to unpack is distinguishable from one that is not applicable to the repo.
 
 - **Writing the nightly queue desyncs HANDOFF's generated live-status block (2026-08-20, low,
   friction: tool_should_decide).** The block derives from the queue and the decision ledger, but the
@@ -195,12 +178,6 @@
   persisted item missing it is unreachable for [[settled-subject-slips-through-a-reword]] and cannot
   be re-asked correctly.
 
-- **Modularity refinement is superlinear on one large component and unpinned at scale (2026-08-19,
-  low).** Measured 78ms at 200 members → 726ms at 800, with Louvain's pass bound at `n + 8`; the
-  promoted run's largest component was 33, so nothing exercises the tail. **Property:** refinement
-  cost on the largest single component is bounded by a test, or the partition has a latent stall on a
-  repo that produces one big eligible component.
-
 - **The HANDOFF empty-queue projection contract is full-suite-only, so the commit gates pass a red
   against it (2026-08-18, low, friction; BIT 2026-08-27 — burned tag v0.50.0: a hand-written
   live-state edit using the word the contract bans passed every commit gate and failed only in the
@@ -242,15 +219,6 @@
   `CONTRACT_PROPERTY_SHAPES` row (`src/shared/types/contractPropertyShapes.ts`) is not walked at all.
   **Property:** every validated contract type is walked, and each marked site is checked for field
   completeness and reach.
-
-- **A deletion of a manifest-listed doc landed with the doc-manifest gate red (2026-08-26, low,
-  <!-- doc-citation-exempt: the deleted file IS the subject — it no longer exists by design -->
-  friction: tool-should-decide).** `a56f274d` deleted `GEMINI.md` and committed clean, leaving
-  `check:doc-manifest` red on HEAD (plus a stale citation in a generated render) until `2a1faa1f` —
-  the fails-only-in-release-CI class the pre-commit reach leg exists to stop. Unestablished which
-  half failed: the reach leg not triggering on a staged DELETION, or the committing session running
-  no hooks at all — establish that before designing a fix. **Property:** a staged deletion of a
-  manifest-listed doc trips the manifest gate exactly as an edit does, whichever session commits.
 
 - **DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low,
   accepted).** The pair SHIPPED; its mechanism record is the single home —
@@ -333,19 +301,6 @@
   backticks, as done here) or the rule should distinguish "no plausible non-file reading" before
   skipping; no trigger-set widening is needed either way.
 
-- **On remediate the fully-green close walks a different friction record than the run wrote
-  (2026-08-23, low).** `stateRunId` keys the record on `state.plan.plan_id`, falling back to
-  `"run"` when the plan is absent — and a fully-green close DELETES the state after
-  `runClosePhase` has archived every friction record and `rm -r`'d the whole artifacts dir, so
-  `decideRemediateFrictionCloseout` does not merely read a different existing file: it
-  materializes a fresh empty `friction/run.json` inside the just-deleted dir, in place of the
-  plan-keyed record the run actually wrote. The by-reference join on `step_run_ids` /
-  `dispatch_run_ids` cannot bridge it: the fallback record is materialized with both reference
-  arrays empty, and an empty query matches nothing. The audit half of this class is closed — its
-  fixed-literal key accumulates every round's review and dispatch run id. **Property to hold:** the record a
-  run writes friction to is the record its close-out reads, whatever the state's lifecycle did in
-  between.
-
 - **A dated measurement sits inside durable routine prose (2026-08-23, low).**
   `docs/nightly-routine.md` and `docs/backlog.md` both carry the
   same "a 2026-07-19 pass found ~21% of entries stale or already closed" as the motivation for the
@@ -354,28 +309,6 @@
   hold:** a concept doc states the invariant, and the measurement that motivated it lives in the
   review record or `git log`, in one place.
 
-- **The repo-root artifacts have a mechanism and no producer (2026-08-24, low, friction:
-  hermeticity).** Four so far — `o.testId)`, `60s`, `0)`, `entry.tool` — all empty and untracked, so
-  a routine `git add -A` would commit them and no content-based clean-tree check ever sees them.
-  Mechanism confirmed by reproduction: a command STRING reaching `cmd.exe` redirects at any `>` in
-  the line — quoted source included — and ends the target token at whitespace, `;`, `,` or `=`, so
-  `.map((o) => o.testId);` writes `o.testId)` and prose reading `the >60s blocking worker` writes
-  `60s`. The `tests/remediate`+`tests/shared` sweep is NOT the producer: an instrumented run logging
-  every `child_process` entry point saw 6,496 spawns, none carrying `>`, and left both checkout
-  roots unchanged. ⚠ **The root half is GONE (2026-08-30, owner decision).** Teardown now fails only
-  on a live child of the run and on in-tree fixtures (`tests/helpers/global-setup.ts`, ledger in
-  `tests/helpers/trackedSpawn.ts`); nothing in the suite observes the repo root any more, because the
-  root check charged foreign writes to this project's runs and no run can attribute a writer. The
-  mechanism and the remedy now live in [`durable-traps.md`](durable-traps.md) rather than here.
-  **Still open:** the producer is unnamed, and it is outside every remaining check — they bound what
-  a vitest run can leave, not what an agent lane can. Measurement in
-  project memory (memory: repo-root-empty-files-are-shell-redirect-artifacts). Producer lead
-  (2026-08-27 lap): nine more appeared, each materializing DURING a codex-exec or delegated-agent
-  run — one timestamped mid-run by the lane that saw it appear. Codex 0.150.0 runs its shell as
-  `pwsh.exe -Command "<string>"` (observed in its transcripts), which is exactly the
-  command-STRING surface the reproduction names, so the leading suspect is codex-exec's quoted
-  command strings; unconfirmed by instrumentation.
-
 - **The remediate loader pair restates what the audit pair now single-sources (2026-08-23, low).**
   `skills/remediate-code/SKILL.md` and `skills/remediate-code/remediate-code.prompt.md` each state
   the `--input` / `--guidance-file` argument-preservation rule, and the "Read the returned JSON only
@@ -383,8 +316,6 @@
   shape the audit `--root` statement was collapsed out of, and all of them ship (`skills/**`), so an
   npm reader sees each copy as authoritative. **Property to hold:** across a loader pair, each instruction has
   one full statement and the other asset points at it, mechanically pinned rather than remembered.
-
-- **The release-gate gloss table is required by a gate and rendered by no consumer (2026-08-27, from the philosophy audit, low).** `scripts/gate-enumeration-data.mjs` holds `STEP_GLOSS`, one human description per gate step, and `scripts/check-gate-enumeration.mjs` fails the build when a step has no gloss — but the single registered target renders step NAMES alone, so no gloss text reaches any reader. The descriptions are write-only data that every new gate step must pay for. **Property:** a human description is held only where a named consumer renders it; otherwise the presence requirement is dropped and the enumeration derives from the executable step list alone, or the shipping doc invokes that list directly instead of restating it. The adjacent guard-reach claim — that the `GUARDS` identity and wiring fields in `scripts/guard-reach-data.mjs` are recoverable from `package.json`, `.claude/settings.json` and the tracked tree — is NOT established here: those declared fields are what makes the reconciliation bidirectional, so deriving them would weaken the check that a new guard cannot land outside the registry. Establish that before deleting a field. [[write-only-data-looks-authoritative]]
 
 - **HANDOFF's hand-written region and the closeout both re-narrate state the repository already holds (2026-08-27, from the philosophy audit, low).** `HANDWRITTEN_CREEP_RULES` in `scripts/shared/generate-handoff-roadmap.mjs` matches five narrative shapes and declares its uncovered half in `scripts/guard-reach-data.mjs` — but the uncovered half is any novel phrasing, so multi-commit consolidation narrative and repair history still pass into the live-state block that `docs/HANDOFF.md` declares to be immediate state only, and a human reading is what catches them. Separately, the session registry written by `.claude/hooks/session-start-guards.mjs` records a registration time and a tree-dirt baseline but no starting HEAD, so the closeout's commits, changed documents, cleanliness and pushed state stay author-supplied when they are derivable. **Property:** the generated projection covers every mechanically derivable fact and the hand-written region admits only what is not derivable, with the boundary enforced by what the projection already owns rather than by phrasing heuristics; author input is required only for verification claims absent from a trusted run record, deliberate intermediate state, friction and owner decisions. A tracked projection must not depend on a live registry query — `scripts/release-and-publish.mjs` shows registry observation is network- and latency-prone, so published availability is rendered best-effort at display time, never committed as canonical state.
 
@@ -412,17 +343,6 @@
   of the kind the doc gates already use, never a bare existence check. Triage record for the prune
   that raised this: [`memory-cut-list-2026-08-25.md`](../reviews/memory-cut-list-2026-08-25.md).
 
-- **`buildToolingManifest`'s dist walk is a TOCTOU against a concurrent rebuild (2026-08-28, low,
-  friction: tool_should_decide).** `src/audit/io/toolingManifest.ts` lists the package `dist/` tree and
-  then hashes each listed file; a file that disappears between the listing and the read (a `tsc`
-  re-emit racing a parallel vitest run, or a stale incremental dist) throws a bare
-  `ENOENT: ... .d.ts.map` out of `loadArtifactBundle`, so unrelated fold tests fail with a message
-  that points at the manifest hasher instead of the race. Hit twice this lap; a solo re-run after a
-  clean rebuild was green both times. **Property:** the walk either snapshots list+read atomically
-  per file (skip-on-ENOENT with the skip recorded in the hash input) or the failure names the
-  actual condition — "dist changed during the walk; rebuild and re-run" — never a bare ENOENT from
-  an internal path.
-
 - **The repo owns its green mechanism but exposes no way to ASK it, so a lap re-derives the answer by
   hand (2026-08-30, low, friction: tool_should_decide).** `verify-green.mjs check` correctly DEFERS
   here and says *"Ask that mechanism, not this ledger"* — but no command asks it. This lap read
@@ -443,18 +363,6 @@
   a direct caller (a test) ever reaches the message. **Property:** either the refusal reads the raw
   incoming value before the parse, or the comment stops claiming a reach it does not have.
 
-- **The runtime-artifact-name generator's source list omits two modules that mint runtime names
-  (2026-09-03, low).** `RUNTIME_NAME_SOURCES` in
-  `scripts/shared/generate-runtime-artifact-names.mjs` does not include
-  `src/audit/cli/laneSubmissions.ts` or `src/audit/orchestrator/charterPacketArchive.ts`, so
-  `CHARTER_EXTRACTION_MERGED_FILENAME` and the charter-packet archive names never enter the generated
-  set — and a doc citing one of those basenames is red for naming a repo file that does not exist,
-  which is the exact false red the generated set exists to prevent. `tests/shared/runtime-artifact-names-drift.test.ts`
-  cannot catch it: it cross-checks `ARTIFACT_DEFINITIONS` coverage only, and neither name is in that
-  registry. Pre-existing; widened by the charter-packet archive. **Property:** a module that mints a
-  runtime artifact basename is in the generator's source list, or the omission is a declared,
-  mechanically-checked exclusion.
-
 - **The leg-1 scope ledger never prunes entries for deleted documents (2026-09-11, low).**
   `.audit-tools/nightly/scope-ledger.json` holds 2,012 item entries across 57 documents, and four of
   those documents no longer exist — each path below is cited BECAUSE it is gone:
@@ -472,3 +380,19 @@
   **Property:** a ledger entry whose document the doc manifest no longer enumerates is removed, or
   its retention is a declared, mechanically-checked exception.
 
+
+- **The e2e leg's refusal test passes for the wrong reason (2026-09-15, low).**
+  `tests/remediate/phase-close.test.ts`'s `SHAPE_LEAVING_CANARY_COMMAND` case asserts the canary was
+  not written, but it passes because `discoverProjectCommands` never emits the fixture's vector, not
+  because the shape rule refused it; the e2e leg in `src/remediate/phases/close.ts` exposes no spawn
+  seam (the landing-gate leg has `landingGateVerifyOverrides`), so the test cannot be made
+  independent of npm. **Property:** the e2e refusal test is red when the shape rule is removed,
+  through a fixture whose declared vector discovery actually emits.
+
+- **A stale host workload `contract_version` re-prepares by a path no test crosses (2026-09-15, low).**
+  `parseWorkloadEnvelope` (`src/shared/submission/hostHandoffCore.ts`) refuses an older
+  `contract_version`; `parseWorkload` returns null; `ingestRemediationHostResults` records
+  `workload_invalid` and the next dispatch re-prepares. Traced by reading only.
+  **Property:** a persisted workload at an older version, driven through
+  `ingestRemediationHostResults`/`buildImplementDispatchStep`, is pinned by a test that asserts the
+  `workload_invalid` issue and the re-prepared document.

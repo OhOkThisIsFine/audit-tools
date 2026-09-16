@@ -81,15 +81,10 @@ Preferred outputs:
 
 Keep deep analyzers optional: a repository should still produce useful packets
 from manifests, paths, tests, and external analyzer results when a language has
-only fallback support. Command-backed analyzers should prove project intent
-before running — prefer repo-local config checks (`eslint.config.*`, `.eslintrc*`,
-`package.json` `eslintConfig`) over executing a globally installed tool and
-parsing its no-config failure.
-
-Language-agnostic semantic affinity is useful for ranking adjacent context but
-should stay low-authority: don't let shared token frequency alone force packet
-merges; use it for `boundary_files` or candidate explanations unless a
-deterministic edge corroborates the relationship.
+only fallback support. The three convictions that bind an analyzer author — a command-backed
+analyzer proves project intent from repo-local config; semantic affinity stays low-authority; a
+generic ownership root before another ecosystem parser — have their one home in `CLAUDE.md`
+(standing decisions, *Three analyzer convictions have ONE home*).
 
 ## Production readiness
 
@@ -97,9 +92,8 @@ Drive priorities from field trials, not speculation: run representative
 repositories through planning, validate the bundle (`audit-code validate`), and
 compare `audit_plan_metrics.json` (packet count, weak-packet count, cohesion,
 merge/boundary edge kinds) across runs. Promote an extractor or planner change
-when those metrics expose a deterministic gap — and prefer improving shared
-graph resolution or generic analyzer ownership roots before adding another
-ecosystem-specific parser.
+when those metrics expose a deterministic gap (the parser-versus-ownership-root preference is the
+second of the three convictions homed in `CLAUDE.md`).
 
 Before treating a build as production-ready, verify the full review loop in one
 real host (`next-step` emits the complete workload → the host writes each bound

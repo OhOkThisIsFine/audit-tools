@@ -104,10 +104,16 @@ describe('entry parsing — the pointer is the entry\'s own title, verbatim', ()
       '**Not in open tracks.**',
     ].join('\n');
     const entries = parseTrackEntries(text, 'docs/backlog/forward-tracks.md');
-    expect(entries).toEqual([
+    // `body` is carried alongside the title for consumers that need more than a
+    // pointer — the backlog index lifts each entry's `Live-run watch` line. The
+    // roadmap itself reads only `title`/`line`; assert those exactly and the
+    // body's PRESENCE separately, so a title regression cannot hide inside a
+    // whole-object comparison.
+    expect(entries.map((e: { title: string; line: number }) => ({ title: e.title, line: e.line }))).toEqual([
       { title: 'Track 9 — standard track.', line: 3 },
       { title: 'Some other lead-in — non-numeric lead-in.', line: 5 },
     ]);
+    expect(entries.every((e: { body?: string }) => typeof e.body === 'string' && e.body.length > 0)).toBe(true);
   });
 
   it('an UNTERMINATED bold title in open tracks fails loudly, naming file and line', () => {

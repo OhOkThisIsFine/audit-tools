@@ -2244,5 +2244,89 @@
     "decided_at": "2026-09-06T17:49:25.125Z",
     "completed_at": "2026-09-07T17:57:15.375Z",
     "completed_ref": "this housekeeping commit — full-suite failures rerun alone, record load-only evidence, and dispatch repair investigation on recurrence"
+  },
+  "e3b0d0fda979d8e6": {
+    "disposition": "settled",
+    "answer": "Do not give the identifier its own row. Rename the in-code citations to the INV-CK namespace that already owns \"Deterministic identity, idempotency, and content keys\" in src/shared/contentKey.ts, so one namespace covers the property and the glossary needs no new entry.",
+    "subject": "This is the lookup table for opaque identifiers that still occur in src/**/*.ts",
+    "path": "docs/glossary-ids.md",
+    "decided_at": "2026-09-16T00:47:18.536Z"
+  },
+  "bb4d63e7385554d2": {
+    "disposition": "settled",
+    "answer": "Condense all three to mechanism plus open property. Keep the first entry's list of already-refuted designs, which stops them being re-proposed, and drop the shipped preamble, the incident retelling and the superseded framing.",
+    "subject": "The stopgap half SHIPPED 2026-08-30: shell-trap-guard.mjs refuses a write-capable lane invocation that would run inside any worktree of this repo, in both shell dialects, unless it declares AUDIT_TOOLS_CHILD_SESSION=1, carries read-only tools, or is pointed outside the repository.",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-09-16T00:47:18.538Z"
+  },
+  "2684a1913f61a409": {
+    "disposition": "settled",
+    "answer": "The parenthetical describes a retired track. Delete it outright, the same way the retirement deleted the track's own entries; git history keeps it.",
+    "subject": "(The A2 oracle corpus is now pinned public repos, not labeled live runs — a run's findings are at most optional calibration data; see Deferred / waiting.)",
+    "path": "docs/backlog.md",
+    "decided_at": "2026-09-16T00:47:18.540Z"
+  },
+  "e27562eb240b9d55": {
+    "disposition": "settled",
+    "answer": "Derive the matrix from the entries that carry a \"Live-run watch\" line, so a row can never name an item the backlog does not hold. A generated block plus a gate, the same shape the HANDOFF roadmap already uses.",
+    "subject": "Live-validation guide — READ FIRST if you're running a live audit/remediate matrix of run configs and the items each exercises",
+    "path": "docs/backlog.md",
+    "decided_at": "2026-09-16T00:47:18.542Z"
+  },
+  "0d0ed2c10063a01f": {
+    "disposition": "settled",
+    "answer": "Apply the candidate: add downgradeUnearnedShippedVerdict to scripts/shared/triage-backlog.mjs, call it from reviveRecord, add shipped_claim_unverified to the verdict enum, and move the test into tests/shared/.",
+    "subject": "never evidence for deleting an entry when paired with",
+    "path": "scripts/shared/triage-backlog.mjs",
+    "decided_at": "2026-09-16T00:47:18.544Z"
+  },
+  "cde86125b1d4cb83": {
+    "disposition": "settled",
+    "answer": "Keep the five-item ordering as the required spine, and add one sentence stating that findings excluded before remediation (intent checkpoint, grounding) are reported separately, without binding their position.",
+    "subject": "The machine contract is remediation-outcomes.json; its render remediation-report.md lists, in order: items resolved, items deemed inappropriate, items ignored after triage, combined-state test result, closing-action result.",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-09-16T00:58:15.364Z"
+  },
+  "0d8be5dc91cffb42": {
+    "disposition": "settled",
+    "answer": "A host should never be told a filename at all. Have the emitted step carry the absolute result path for the reflection the same way it carries other result paths, so there is nothing to name and nothing to guess.",
+    "subject": "record one reserved AgentReflection with task_id exactly `audit-capability-preflight`",
+    "path": "skills/audit-code/audit-code.prompt.md",
+    "decided_at": "2026-09-16T00:58:15.367Z"
+  },
+  "569ce0323e227c76": {
+    "disposition": "settled",
+    "answer": "These are project convictions, not package documentation. Move all three into CLAUDE.md's standing decisions and have both audit-pkg docs point there.",
+    "subject": "Language-agnostic semantic affinity is useful for ranking adjacent context but should stay low-authority: don't let shared token frequency alone force packet merges.",
+    "path": "docs/audit-pkg/product.md",
+    "decided_at": "2026-09-16T00:58:15.369Z"
+  },
+  "0bd83243c5ea487d": {
+    "disposition": "settled",
+    "answer": "Keep the risk-tier semantics only in spec/self-scaling-pipeline-design.md; reduce the other two to a one-line pointer, the same pattern both already use for cross-tool-alignment.md; and drop \"(the newer design-of-record)\" as a document-history clause.",
+    "subject": "The risk tier is the dial: a `low` tier collapses coherent authoring phases into shared round-trips and drops adversarial depth to a light inline self-check, while `medium`/`high` keep every phase its own gated step at full depth.",
+    "path": "spec/self-scaling-pipeline-design.md",
+    "decided_at": "2026-09-16T00:58:15.372Z"
+  },
+  "b94dd16a08ac6a08": {
+    "disposition": "settled",
+    "answer": "Apply all five cuts as one reviewed batch on a clean tree: strip the status-noise and keep the durable claim in each case. Edit spec/audit/artifact-contract.md directly — the sentence is hand-written prose, not a generated cell, so the generator is not involved.",
+    "subject": "Growth is NOT bounded by a character ceiling, because a packet carries no character limit (owner, 2026-09-04)",
+    "path": "spec/audit/artifact-contract.md",
+    "decided_at": "2026-09-16T00:58:15.374Z"
+  },
+  "e978fad576fb2473": {
+    "disposition": "settled",
+    "answer": "Move the four repository-specific lap-open steps into a `## Lap start` section of CLAUDE.md, which is the extension point the global skill already runs, and delete the shadowed skill file. Benefit: the steps run, with no name collision and no second command to remember. Cost: it grows CLAUDE.md, and it is an instruction-file edit, so only the owner can approve it.",
+    "subject": "Start a work lap in audit-tools — sync with remote main (fetch + fast-forward, stale-worktree guard), read the current HANDOFF + backlog, surface open doc-review items, then present current state + the immediate next item so work can begin.",
+    "path": ".claude/skills/start-lap/SKILL.md",
+    "decided_at": "2026-09-16T00:58:15.375Z"
+  },
+  "a7ea6748f7fbcd99": {
+    "disposition": "settled",
+    "answer": "Move both commits onto the main line now. BENEFIT: the queue of open questions and the proposal write-ups end up where every session looks, which is the whole reason the routine keeps them as tracked files. COST: a manual step, and the feature branch keeps duplicate copies of the same commits. CONFIDENCE: high that the next run reads these files — I verified the paths it reads during this session.",
+    "subject": "Five proposals. Three are MACHINE-WIDE, which is where the recurrence evidence led; filing those in this repository's backlog would hide them from the repositories that need them.",
+    "path": ".audit-tools/nightly/proposals/INDEX-2026-09-09.md",
+    "decided_at": "2026-09-16T00:58:15.378Z"
   }
 }

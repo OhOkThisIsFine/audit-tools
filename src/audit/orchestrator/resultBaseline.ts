@@ -53,7 +53,7 @@ export interface LiveResultKeyInput {
   pass_id: string;
   /**
    * The result's task_id — its file-split sibling discriminator is derived from
-   * it (N-IDEMPOTENCY) so split siblings of one {unit_id, lens, pass_id}
+   * it (INV-CK-2) so split siblings of one {unit_id, lens, pass_id}
    * coordinate freshly compute DISTINCT live keys, matching what
    * `stampLedgerKeys` stamped. Omitted ⇒ lone-base key (no split component).
    */
