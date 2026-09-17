@@ -7,8 +7,10 @@ import type { Ceiling, CharterLaneKind } from "audit-tools/shared";
 const PROVENANCE_KINDS = CharterProvenanceSchema.shape.kind.options.join("|");
 
 /**
- * Per-kind charter-extraction LANE prompts (step 1 of the charter layer; approved
- * host text: docs/reviews/prompt-refinement-2026-09-13.md §8). The host supplies
+ * Per-kind charter-extraction LANE prompts (step 1 of the charter layer; host text
+ * reviewed by the owner on 2026-09-17, recorded in
+ * docs/reviews/prompt-refinement-2026-09-13.md §8 — the earlier "approved" label
+ * was DERIVED from the approved charter design, never given to this text). The host supplies
  * JUDGMENT — one goal DAG per lane, purposes in TELOS terms, edges meaning
  * `from` SERVES `to`, evidence on nodes and edges — while the tool supplies
  * ENFORCEMENT at ingest (packet feeding, universe grounding, cycle refusal, level
@@ -32,6 +34,24 @@ export function charterExtractionKindsForCeiling(
   _ceiling: Ceiling,
 ): EstimatorCharterKind[] {
   return ["stated", "structural", "revealed"];
+}
+
+/**
+ * The ONE provenance kind a lane's worked example carries. An example must be a
+ * VALID submission: rendering the whole alternation into the example's `kind`
+ * value taught the host a value the strict enum rejects. The literal is checked
+ * against the schema here rather than trusted, so an enum rename cannot leave a
+ * stale example behind.
+ */
+function exampleProvenanceKind(kind: EstimatorCharterKind): string {
+  const literal = kind === "stated" ? "doc" : "code";
+  const allowed: readonly string[] = CharterProvenanceSchema.shape.kind.options;
+  if (!allowed.includes(literal)) {
+    throw new Error(
+      `charter prompt example provenance kind "${literal}" is absent from CharterProvenanceSchema (${PROVENANCE_KINDS})`,
+    );
+  }
+  return literal;
 }
 
 /** Per-kind perspective line, packet description, and the `files` rule (scope follows the evidence). */
@@ -79,6 +99,7 @@ export function renderCharterKindLanePrompt(
 ): string {
   const consensus = bundle.structure_decomposition?.consensus ?? [];
   const lane = KIND_LANE_TEXT[opts.kind];
+  const exampleKind = exampleProvenanceKind(opts.kind);
 
   const hintLines = consensus.length
     ? consensus.map((node) => {
@@ -90,10 +111,11 @@ export function renderCharterKindLanePrompt(
     : ["- (no confident subsystems were found — organize the goal graph yourself)"];
 
   return [
-    `# Design review — charter extraction, **${opts.kind}** lane (conceptual, teleological)`,
+    `# Design review — charter extraction, the **${opts.kind}** lane`,
     "",
-    "You are authoring a high-level conceptual design review: not \"is this module correct/clean\" but",
-    "*\"what is this code FOR, and does it serve that purpose as well as a better design could.\"*",
+    "You are authoring a high-level design review. The question is not \"is this module correct or",
+    "clean\" but *\"what is this code FOR, and does it serve that purpose as well as a better design",
+    "could.\"* You author purpose only. Do not review code correctness.",
     "",
     "Three independent, blind lanes each build their own goal graph from ONE evidence channel:",
     "**stated** (docs and comments), **structural** (file tree, declarations, imports), **revealed**",
@@ -102,17 +124,20 @@ export function renderCharterKindLanePrompt(
     "Your review perspective:",
     lane.perspective,
     "",
-    "## Core Concepts: Purpose vs. Mechanism",
+    "## Purpose against mechanism",
     "",
-    "- **Purpose (Telos / The WHY)**: The problem this code exists to solve for users or the system.",
-    "- **Mechanism (The WHAT / HOW)**: The specific technical implementation.",
+    "- **Purpose (the WHY)**: the problem this code exists to solve for its users or for the system.",
+    "- **Mechanism (the WHAT and the HOW)**: the technical implementation that solves it.",
     "",
-    "- *Telos (DO emit)*: *\"Ensures independent audit workers fairly share provider quotas without starving critical security checks.\"*",
-    "- *Mechanism (do NOT emit)*: *\"Manages rate limits using a Redis token bucket.\"* A purpose that restates the code cannot show an architectural gap.",
+    "Every example in this prompt is drawn from an UNRELATED codebase — a delivery-scheduling",
+    "service — so that you do not pattern-match it onto the code you are reviewing.",
+    "",
+    "- *Purpose (DO emit)*: *\"Lets a dispatcher promise a delivery window the fleet can actually keep.\"*",
+    "- *Mechanism (do NOT emit)*: *\"Keeps delivery windows in a sorted set keyed by driver id.\"* A purpose that restates the code cannot show an architectural gap.",
     "",
     "## Your evidence packet",
     "",
-    `Read \`${opts.packetPath}\` — it holds the evidence for this review. Cite claims from this packet by symbol and literal quote, not by line number; you do not need to open files outside it.`,
+    `Read \`${opts.packetPath}\`. It holds all the evidence for this review, and it is the only material you may use. Do not open a file outside it: the limited view is deliberate, and it is what makes your lane independent of the other two.`,
     "",
     lane.packet,
     "",
@@ -126,7 +151,7 @@ export function renderCharterKindLanePrompt(
     "",
     "Each node carries:",
     "- `node_id` — a short slug you choose; it is local to this submission.",
-    "- `purpose` — the telos statement (the WHY, not the WHAT).",
+    "- `purpose` — the purpose statement (the WHY, not the WHAT).",
     "- `provenance` — evidence citations: `<path>#<symbol>` with a literal quote, or `<path>:<line>` for comments and unnamed blocks.",
     "- `confidence` — `\"high\"` | `\"medium\"` | `\"low\"`.",
     lane.filesRule,
@@ -136,13 +161,10 @@ export function renderCharterKindLanePrompt(
     "A suggested scaffold from structure analysis (a hint — adjust boundaries where evidence supports it):",
     ...hintLines,
     "",
-    "You author teleology ONLY — do NOT review code correctness.",
+    "## Do not emit",
     "",
-    "## Anti-slop discipline (do NOT emit)",
-    "- No **restated-mechanism** purposes; describe the WHY, not the WHAT.",
-    "- No **generic** telos any subsystem could claim; be specific to THIS code.",
-    "- No **fabricated profundity**; every node and edge cites provenance from your packet.",
-    "- No files outside your packet; the limited view is intentional.",
+    "- No **restated mechanism**: describe the WHY, not the WHAT.",
+    "- No **generic purpose** that any subsystem could claim: be specific to THIS code.",
     "",
     "## Output",
     "",
@@ -153,20 +175,31 @@ export function renderCharterKindLanePrompt(
     `  "kind": "${opts.kind}",`,
     '  "nodes": [',
     "    {",
-    '      "node_id": "quota-fairness",',
-    '      "purpose": "Ensures independent audit workers fairly share provider quotas without starving critical security checks",',
+    '      "node_id": "promises-the-customer-can-trust",',
+    '      "purpose": "Makes every commitment the service gives a customer one it can honour",',
     ...(opts.kind === "stated"
       ? []
-      : ['      "files": ["src/dispatch/quota.ts", "src/dispatch/pool.ts"],']),
-    `      "provenance": [{ "kind": "${PROVENANCE_KINDS}", "ref": "src/dispatch/quota.ts#QuotaManager", "quote": "class QuotaManager {" }],`,
+      : ['      "files": ["src/scheduling/promise.ts"],']),
+    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/promise.ts#Promise", "quote": "class Promise {" }],`,
+    '      "confidence": "medium"',
+    "    },",
+    "    {",
+    '      "node_id": "keepable-delivery-windows",',
+    '      "purpose": "Lets a dispatcher promise a delivery window the fleet can actually keep",',
+    ...(opts.kind === "stated"
+      ? []
+      : [
+          '      "files": ["src/scheduling/window.ts", "src/scheduling/fleet.ts"],',
+        ]),
+    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/window.ts#DeliveryWindow", "quote": "class DeliveryWindow {" }],`,
     '      "confidence": "high"',
     "    }",
     "  ],",
     '  "edges": [',
     "    {",
-    '      "from": "quota-fairness",',
-    '      "to": "trustworthy-audits",',
-    `      "provenance": [{ "kind": "${PROVENANCE_KINDS}", "ref": "src/dispatch/quota.ts:12", "quote": "so no lens is starved" }]`,
+    '      "from": "keepable-delivery-windows",',
+    '      "to": "promises-the-customer-can-trust",',
+    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/window.ts:12", "quote": "a promised window is never silently missed" }]`,
     "    }",
     "  ]",
     "}",

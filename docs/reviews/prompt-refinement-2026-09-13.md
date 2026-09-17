@@ -368,10 +368,10 @@ Below is the complete inventory of all prompts in the `audit-tools` codebase, tr
 | 5 | `analyzer_consent` | `src/audit/cli/prompts.ts` | **APPROVED** | Finalized below (ephemeral-only consent, explicit question directive, concrete security risks, strict value enum). |
 | 6 | `analyzer_install` | `src/audit/cli/prompts.ts` | **APPROVED** | Finalized below (explicit operator prompt directive, fenced JSON block, strict enum values). |
 | 7 | `critical_flow_fallback` | `src/audit/reporting/criticalFlowFallbackPrompt.ts` | **APPROVED** | Finalized below (succinct path/entrypoint definitions, suggested canonical lens examples for concerns, explicit empty `{ "flows": [] }` format). |
-| 8 | `charter_extraction` | `src/audit/cli/charterExtractionPrompt.ts` | **APPROVED (re-specified 2026-09-15)** | Re-specified from the charter redesign (spec §"The estimator charters", step 1): goal DAG with local ids and edges carrying provenance, `files` optional, `premise_height` tool-derived. Supersedes the 2026-09-13 text. |
-| 9 | `charter_comparison` (was `charter_delta`) | `src/audit/cli/charterDeltaPrompt.ts` | **APPROVED (re-specified 2026-09-15)** | The comparison pass of the charter redesign (spec steps 2–3): confirm/reject/widen tool-proposed correspondences, record differences on seven dimensions with a relation. Unified telos and goal-graph authorship removed. |
-| 9b | `charter_fidelity` (new) | new renderer | **APPROVED (2026-09-15)** | The fidelity adversary lane of the charter redesign (spec step 4): per difference, `supported` / `interpretation` (odd side named) / `unverifiable`, judged from tool-materialized source slices. |
-| 10 | `charter_clarification` | `src/audit/cli/charterClarificationPrompt.ts` | **APPROVED (re-specified 2026-09-15)** | Questions come from the discrepancy report; every account in the correspondence shown side by side with dimension, relation and split; answer names the governing channel, or `rewrite_all`, or `leave_open`. Unified-purpose and density lines removed. |
+| 8 | `charter_extraction` | `src/audit/cli/charterExtractionPrompt.ts` | **APPROVED (owner, 2026-09-17)** | Owner reviewed the LIVE rendered text and took the rewrite: one schema-valid provenance kind in the example (the alternation stays a field rule), a domain-neutral worked example marked as an unrelated codebase, the packet-scope rule stated once as a prohibition, the grounding rule stated once, the role statement folded into the opening paragraph. The pinned test now asserts the example parses and satisfies `CharterSubmissionSchema`; it previously REQUIRED the invalid form. |
+| 9 | `charter_comparison` (was `charter_delta`) | `src/audit/cli/charterComparisonPrompt.ts` | PROPOSED | ⚠ Shipped in `80793d83` under a label the owner never gave: the 2026-09-15 approval was of the charter DESIGN, and this prompt text was re-specified from it. Text awaits owner review. Content: the comparison pass (spec steps 2–3) — confirm/reject/widen tool-proposed correspondences, record differences on seven dimensions with a relation. Unified telos and goal-graph authorship removed. |
+| 9b | `charter_fidelity` (new) | `src/audit/cli/charterFidelityPrompt.ts` | PROPOSED | ⚠ Shipped in `80793d83` under a label the owner never gave (see row 9). Text awaits owner review. Content: the fidelity adversary lane (spec step 4) — per difference, `supported` / `interpretation` (odd side named) / `unverifiable`, judged from tool-materialized source slices. |
+| 10 | `charter_clarification` | `src/audit/cli/charterClarificationPrompt.ts` | PROPOSED | ⚠ Shipped in `80793d83` under a label the owner never gave (see row 9). Text awaits owner review. Content: questions come from the discrepancy report; every account in the correspondence shown side by side with dimension, relation and split; answer names the governing channel, or `rewrite_all`, or `leave_open`. |
 | 11 | `design_review` | `src/audit/orchestrator/designReviewPrompt.ts` | PROPOSED | Specs 11a–11f below (contract pass, shallow conceptual, perspective, judge, shared context block, charter block): transport/cache trivia removed, grounding rule stated once, judge rules as a checklist; every parsed field kept and diffed against `ConceptualJudgeSubmissionSchema`. |
 | 12 | `second_order_adversary` | `src/audit/systemic/secondOrderAdversaryPrompt.ts` | PROPOSED | Spec below: identity block kept, refusal threats reduced to one evidence rule, loop-control as two rules with the `stop` shape, backend anecdotes removed. |
 | 13 | `semantic_review` | `src/audit/cli/semanticReviewStep.ts` | PROPOSED | Spec below: issue sections kept (split is on the code), execution directive made imperative, redundant hand-merge plea removed. |
@@ -384,8 +384,20 @@ Below is the complete inventory of all prompts in the `audit-tools` codebase, tr
 | 20 | `host_handoff` (remediate) | `src/remediate/steps/dispatch/hostHandoff.ts` | PROPOSED | Spec below: digest-restoration note removed, frontier jargon replaced, worker bindings as one bulleted contract, every parsed key kept. |
 
 ### Resume Instructions for Next Conversation
-1. The first eight prompts (`/audit-code` loader, `/remediate-code` loader, `confirm_intent`, `intent_equivalence`, `analyzer_consent`, `analyzer_install`, `critical_flow_fallback`, and `charter_extraction`) have been fully reviewed and approved; specifications are recorded below.
-2. 2026-09-15: prompts 9–20 carry PROPOSED specs below (drafted by llm-relay lanes, each cited renderer and consumer symbol verified against source in session). They await the owner's approve/amend verdict.
+
+⚠ **What "approved" means here.** Only an owner verdict on the PROMPT TEXT counts. On 2026-09-17 the
+owner stated: *"I've only explicitly approved 1-7. I need to look at 8+."* Rows 9, 9b and 10 had
+carried an **APPROVED** label derived from the owner's approval of the charter DESIGN
+(`docs/reviews/charter-redesign-feedback-2026-09-15.md` §"Owner decisions") — a design approval is
+not a text approval. Their prompts shipped in `80793d83` regardless. Never derive an approval label
+again; see memory `n-r13-shipped-unapproved-and-itemspec-was-its-corpse`.
+
+1. Prompts 1–7 are owner-approved (2026-09-13). Their specs are recorded below and are NOT yet
+   implemented — the live `skills/audit-code/audit-code.prompt.md` still carries the unconditional
+   development instruction that spec 1 removes.
+2. Prompt 8 is owner-approved (2026-09-17) AND implemented, with its pinning test corrected.
+3. Rows 9, 9b and 10 are live in code but unreviewed. Review them against the SHIPPED text, not a
+   draft. Rows 11–20 carry lane-drafted PROPOSED specs below and await the owner's verdict.
 3. Two specs propose NO prompt change: 19 (no `verify_remediation` renderer exists; Part 2 row 19 is stale) and 11e/11f (context blocks, kept as-is with shorter disclaimers).
 4. On approval: log each "Backend ... (Backlog)" bullet to `docs/backlog/open-bugs.md`, correct Part 2 row 19, regenerate the backlog index, then implement per prompt with the pinning tests named in each spec's Evidence.
 

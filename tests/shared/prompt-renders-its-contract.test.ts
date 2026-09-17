@@ -23,6 +23,7 @@ import { describe, expect, it } from "vitest";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
 import { renderCharterKindLanePrompt } from "../../src/audit/cli/charterExtractionPrompt.js";
+import { CharterSubmissionSchema } from "../../src/shared/decompose/charterExtraction.js";
 import { CharterProvenanceSchema } from "../../src/shared/types/charter.js";
 import { promptContractRegistry } from "./promptContractRegistry.js";
 
@@ -67,12 +68,44 @@ describe(FAILURE_SIGNATURE, () => {
       packetPath: "x/packet.json",
     });
 
-    // The rendered alternation IS the schema's option list, in schema order.
+    // The worked example must itself be a VALID submission. The renderer used to
+    // drop the whole alternation into the example's `kind` VALUE, and THIS
+    // assertion required it there — so the pin demanded the very
+    // prompt-says/validator-rejects split the file exists to stop. A host copying
+    // the example emitted a kind the strict enum refuses. The alternation is a
+    // FIELD RULE; it is never an example value. (Owner review 2026-09-17, prompt 8.)
+    const fence = /```json\n([\s\S]*?)\n```/u.exec(prompt);
+    expect(
+      fence,
+      "the lane prompt must carry exactly one fenced JSON example",
+    ).not.toBeNull();
+    const parsed = CharterSubmissionSchema.safeParse(JSON.parse(fence![1]!));
+    expect(
+      parsed.success ? null : parsed.error.issues,
+      "a submission copied verbatim from the prompt's own example must satisfy " +
+        "CharterSubmissionSchema — obedience has to be SUFFICIENT",
+    ).toBeNull();
+
     const alternation = CharterProvenanceSchema.shape.kind.options.join("|");
     expect(
       prompt,
-      "the lane prompt must show a provenance example derived from the schema",
-    ).toContain(`"provenance": [{ "kind": "${alternation}"`);
+      "the schema's alternation belongs in the field rule, never in an example value",
+    ).not.toContain(`"kind": "${alternation}"`);
+
+    // The prompt's own closing rule: every edge endpoint names a node in the same
+    // submission. The example used to break it, citing an undeclared parent.
+    const example = parsed.success ? parsed.data : { nodes: [], edges: [] };
+    const exampleIds = example.nodes.map((node) => node.node_id);
+    for (const edge of example.edges) {
+      expect(
+        exampleIds,
+        `the example's edge endpoint '${edge.from}' must be one of the example's own nodes`,
+      ).toContain(edge.from);
+      expect(
+        exampleIds,
+        `the example's edge endpoint '${edge.to}' must be one of the example's own nodes`,
+      ).toContain(edge.to);
+    }
 
     // The enum is CLOSED. An alternation that trails off invites a coined
     // member — which is exactly what quarantined the structural lane's run.
