@@ -65,6 +65,13 @@ its coverage stamp should no longer depend on which rung the relay picked.
   unreadable or empty omissions.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **4 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `docs-guidelines-still-routes-escalations-to-a-deleted-html-digest` — The leg-1 rubric still says escalations are rendered to an HTML digest that was deleted — repoint it at the tracked inbox, or leave it?
+  - `leg2-coverage-stamp-omits-the-unprobed-count` — The backlog sweep's coverage stamp hides how many verdicts were never premise-checked — count every premise class (P67)?
+  - `p65-unearned-shipped-downgrade-is-never-called` — The approved unearned-shipped downgrade has never run — extract the record-finishing fold so both sweep paths must use it (P68)?
+  - `adversary-lane-order-puts-a-quota-limited-cli-first` — The routine names a quota-limited CLI as its first review lane and the relay as the fallback — swap the order, or leave the run to choose nightly?
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

@@ -1,8 +1,50 @@
 {
-  "run": {
-    "date": "2026-09-16",
-    "head": "a2461a9bf35c61e52db617ac628a29f640c4b9cc"
-  },
-  "count": 0,
-  "items": []
+  "run": "2026-09-17",
+  "count": 4,
+  "items": [
+    {
+      "id": "docs-guidelines-still-routes-escalations-to-a-deleted-html-digest",
+      "leg": "docs",
+      "path": "docs/doc-review-guidelines.md",
+      "title": "The leg-1 rubric still says escalations are rendered to an HTML digest that was deleted — repoint it at the tracked inbox, or leave it?",
+      "subject_key": "3684f87dc7e59c32",
+      "nights_open": 1,
+      "target": {
+        "path": "docs/doc-review-guidelines.md"
+      }
+    },
+    {
+      "id": "leg2-coverage-stamp-omits-the-unprobed-count",
+      "leg": "solutions",
+      "path": "scripts/shared/triage-backlog.mjs",
+      "title": "The backlog sweep's coverage stamp hides how many verdicts were never premise-checked — count every premise class (P67)?",
+      "subject_key": "2eefa66ab7c9bd64",
+      "nights_open": 1,
+      "target": {
+        "path": "scripts/shared/triage-backlog.mjs"
+      }
+    },
+    {
+      "id": "p65-unearned-shipped-downgrade-is-never-called",
+      "leg": "solutions",
+      "path": "scripts/shared/triage-backlog.mjs",
+      "title": "The approved unearned-shipped downgrade has never run — extract the record-finishing fold so both sweep paths must use it (P68)?",
+      "subject_key": "98f93995eb770e05",
+      "nights_open": 1,
+      "target": {
+        "path": "scripts/shared/triage-backlog.mjs"
+      }
+    },
+    {
+      "id": "adversary-lane-order-puts-a-quota-limited-cli-first",
+      "leg": "docs",
+      "path": "docs/nightly-routine.md",
+      "title": "The routine names a quota-limited CLI as its first review lane and the relay as the fallback — swap the order, or leave the run to choose nightly?",
+      "subject_key": "1fb2934333c59d31",
+      "nights_open": 1,
+      "target": {
+        "path": "docs/nightly-routine.md"
+      }
+    }
+  ]
 }

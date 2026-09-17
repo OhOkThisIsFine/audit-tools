@@ -1,0 +1,38 @@
+RED observed at HEAD ae7e09a9 on 2026-09-17.
+
+The test file sat at tests/shared/triage-finish-record.test.ts for the run
+(vitest excludes .audit-tools/**); it was moved into this directory afterwards,
+so the tree this proposal was written from stays unpatched.
+
+Command:
+
+    npx vitest run tests/shared/triage-finish-record.test.ts
+
+Verbatim failure (3 tests, 3 failed):
+
+ FAIL  tests/shared/triage-finish-record.test.ts > finishTriageRecord — the one fold both sweep paths use > DOWNGRADES a shipped claim whose premise was never checked
+TypeError: (0 , finishTriageRecord) is not a function
+ ❯ tests/shared/triage-finish-record.test.ts:45:17
+
+ FAIL  tests/shared/triage-finish-record.test.ts > finishTriageRecord — the one fold both sweep paths use > stamps the premise and records the lane that answered
+TypeError: (0 , finishTriageRecord) is not a function
+ ❯ tests/shared/triage-finish-record.test.ts:51:17
+
+ FAIL  tests/shared/triage-finish-record.test.ts > finishTriageRecord — the one fold both sweep paths use > is idempotent — re-finishing a stored record cannot re-upgrade it
+TypeError: (0 , finishTriageRecord) is not a function
+ ❯ tests/shared/triage-finish-record.test.ts:57:19
+
+WHY THE RED IS AN ABSENT EXPORT. The fold this test names does not exist at
+HEAD: it is duplicated as two anonymous closures inside one options object, so
+there is no symbol a test can call. That is the defect's cause as much as its
+symptom — a step missing from both closures is unreachable by every gate.
+
+THE DEFECT IS ALSO OBSERVABLE WITHOUT ANY TEST, in the routine's own artifacts:
+
+  - .audit-tools/nightly/triage-2026-09-17.jsonl holds forward-tracks#55883634
+    as "verdict":"already_shipped_or_stale" with "premise":"unprobed" and
+    "premise_probes":[] — the pairing P65 exists to make unrepresentable.
+  - "shipped_claim_unverified" appears in 0 rows across all 30 retained sweeps,
+    including both sweeps since P65 landed in 6b81dfb0 (2026-09-15).
+  - grep -n "downgradeUnearnedShippedVerdict" scripts/shared/triage-backlog.mjs
+    returns its definition and two comments that describe calling it; no call.

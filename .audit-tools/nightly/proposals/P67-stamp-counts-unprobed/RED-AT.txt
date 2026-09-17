@@ -1,0 +1,37 @@
+RED observed at HEAD ae7e09a9 on 2026-09-17.
+
+The test file sat at tests/shared/triage-unprobed-counted.test.ts for the run
+(vitest excludes .audit-tools/**); it was moved into this directory afterwards,
+so the tree this proposal was written from stays unpatched.
+
+Command:
+
+    npx vitest run tests/shared/triage-unprobed-counted.test.ts
+
+Verbatim failure (3 tests, 3 failed):
+
+ FAIL  tests/shared/triage-unprobed-counted.test.ts > the triage coverage stamp counts every premise class > declares a counter for every premise stamp a record can carry
+TypeError: PREMISE_STAMP_CLASSES is not iterable
+ ❯ tests/shared/triage-unprobed-counted.test.ts:25:23
+
+ FAIL  tests/shared/triage-unprobed-counted.test.ts > the triage coverage stamp counts every premise class > counts an UNPROBED row — the class that carried no probes at all
+TypeError: (0 , countTriageStamp) is not a function
+ ❯ tests/shared/triage-unprobed-counted.test.ts:32:5
+
+ FAIL  tests/shared/triage-unprobed-counted.test.ts > the triage coverage stamp counts every premise class > still counts which lane answered each row
+TypeError: (0 , countTriageStamp) is not a function
+ ❯ tests/shared/triage-unprobed-counted.test.ts:41:5
+
+WHY THE RED IS AN ABSENT EXPORT RATHER THAN AN ASSERTION MISMATCH. The counter
+this proposal is about is not a named function at HEAD: it is an anonymous
+`stampExtra` closure passed inline to `dispatchBoundedItems`, so there is
+nothing a test can reach. The patch's first move is to give the counter a name
+and a declared class list; the red is therefore "the property has no home yet",
+which is the honest shape of this defect. The GREEN run of the same three tests
+after the patch is the second half of the proof and is not claimed here — this
+record states only what was observed at HEAD.
+
+The defect itself is separately observable without any test, in tonight's own
+run artifact: .audit-tools/nightly/triage-2026-09-17-coverage.json reports
+"probes_unusable": 7, and the JSONL beside it carries 16 rows stamped
+"premise": "unprobed" that the stamp does not mention.

@@ -1,0 +1,107 @@
+Proposed patch — NOT applied. Against HEAD ae7e09a9.
+
+Two files: the sweep gains a named, exported stamp counter with a declared
+class list; the routine doc's read-verbatim stamp field list gains the new
+counters. The test in this directory moves to tests/shared/.
+
+--- a/scripts/shared/triage-backlog.mjs
++++ b/scripts/shared/triage-backlog.mjs
+@@ -204,8 +204,45 @@
+ export const UNVERIFIED_SHIPPED_VERDICT = 'shipped_claim_unverified';
+
++/**
++ * Every premise stamp `premiseVerdict` can put on a record.
++ *
++ * DECLARED, so the coverage stamp cannot silently omit one. `unprobed` was
++ * split out of `probes_unusable` on 2026-08-09 precisely so an honestly
++ * unprobed row would be "counted in the coverage stamp" — and then only
++ * `probes_unusable` was wired to a counter, so it was not. On the 2026-09-17
++ * sweep that hid 19 of 44 rows: a reader of the stamp saw
++ * `probes_unusable: 8` and had no way to learn that 19 more verdicts rested on
++ * no premise check at all.
++ *
++ * A new class added to `premiseVerdict` and not added here fails the contract
++ * test beside this module, which is what stops the omission recurring.
++ */
++export const PREMISE_STAMP_CLASSES = Object.freeze([
++  'holds',
++  'partial',
++  'premise_unconfirmed',
++  'probes_unusable',
++  'unprobed',
++]);
++
++/** The coverage stamp's caller-owned counters, before the first row. */
++export const TRIAGE_STAMP_INIT = Object.freeze({
++  ...Object.fromEntries(PREMISE_STAMP_CLASSES.map((c) => [c, 0])),
++  lanes: {},
++});
++
++/**
++ * Fold ONE finished record into the coverage stamp: its premise class, and the
++ * rung that answered it (the relay chose the rung, so the stamp says what it
++ * chose).
++ *
++ * Pure and exported so the counter has a name a test can reach; it was an
++ * anonymous closure passed inline to `dispatchBoundedItems`, which is why the
++ * missing counter was invisible to the suite.
++ */
++export function countTriageStamp(stamp, rec) {
++  if (PREMISE_STAMP_CLASSES.includes(rec?.premise)) stamp[rec.premise] += 1;
++  if (typeof rec?.lane === 'string') stamp.lanes[rec.lane] = (stamp.lanes[rec.lane] ?? 0) + 1;
++  return stamp;
++}
++
+ /** Premise stamps that establish nothing about the tree. */
+ const UNEARNED_PREMISES = new Set(['unprobed', 'probes_unusable', 'premise_unconfirmed']);
+
+@@ -536,14 +573,8 @@
+-      // Counted so "the sweep covered 121 entries" cannot hide how many of
+-      // those carried probes that could not be evaluated at all. 30 of 121 did
+-      // on 2026-08-09, indistinguishable from an honest `unprobed` until now.
+-      // `lanes` counts which rung answered each row — the relay chose it, so
+-      // the stamp says what it chose.
+-      stampInit: { probes_unusable: 0, lanes: {} },
+-      stampExtra: (s, rec) => {
+-        if (rec.premise === 'probes_unusable') s.probes_unusable += 1;
+-        if (typeof rec.lane === 'string') s.lanes[rec.lane] = (s.lanes[rec.lane] ?? 0) + 1;
+-      },
++      // Counted so "the sweep covered 121 entries" cannot hide how many of
++      // those verdicts rest on no premise check. The full class list is
++      // declared beside `countTriageStamp`, so a new premise class cannot
++      // enter the records without entering the stamp.
++      stampInit: { ...TRIAGE_STAMP_INIT, lanes: {} },
++      stampExtra: countTriageStamp,
+
+@@ -639,7 +670,9 @@
+   process.stderr.write(
+     `leg-2 coverage: ${stamp.classified_total} classified total (${stamp.classified} this pass) / ` +
+-      `${stamp.errored} errored / ${stamp.probes_unusable} probes-unusable of ` +
++      `${stamp.errored} errored / ${stamp.probes_unusable} probes-unusable / ` +
++      `${stamp.unprobed} unprobed of ` +
+       `${stamp.attempted} attempted (${stamp.prior_classified} prior, ${stamp.total_entries} total) — ` +
+       `${stamp.retried} transport retr(y/ies) — ` +
+       `lanes ${JSON.stringify(stamp.lanes)} — ${stampPath}\n`,
+   );
+
+--- a/docs/nightly-routine.md
++++ b/docs/nightly-routine.md
+@@ (Leg 2 — backlog, "Coverage is read from the stamp" paragraph)
+-and writes `<out>-coverage.json` — model, attempted, classified, errored,
+-aborted, retried, and a per-lane count
+-— beside the JSONL as it runs.
++and writes `<out>-coverage.json` — model, attempted, classified, errored,
++aborted, retried, a per-lane count, and one count per premise class
++(`holds`, `partial`, `premise_unconfirmed`, `probes_unusable`, `unprobed`)
++— beside the JSONL as it runs.
+
+NOTE on the doc half. `scripts/shared/lane-dispatch.mjs` calls this field list a
+read-verbatim contract with docs/nightly-routine.md, so the two move together or
+not at all. The doc edit is inside the routine's own file, which the routine may
+auto-apply as a factual fix — but it is listed here because applying the code
+half without it leaves the doc's field list incomplete, which is the same class
+of defect one level up.
+
+Test: this directory's triage-unprobed-counted.test.ts moves to
+tests/shared/triage-unprobed-counted.test.ts. Its third case pins the lane
+counter that already works, so the extraction cannot quietly drop it.
