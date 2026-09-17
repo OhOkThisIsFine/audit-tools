@@ -1096,20 +1096,6 @@ describe('question-philosophy-gate: the lap-APPROVAL question is exempt by const
       encoding: 'utf8',
       env: { ...process.env, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when },
     });
-    if (lapStart) {
-      mkdirSync(join(root, '.claude'), { recursive: true });
-      // The real record shape /start-lap's opener writes (lap-worktree.mjs):
-      // `lapId` is the 8-hex id the exemption is keyed on.
-      const lapPath = join(root, '.claude', 'lap-start.json');
-      writeFileSync(
-        lapPath,
-        JSON.stringify({ start: 'x', date: '2026-01-01', goal: 'the lap', lapId: LAP_ID, checkout: root }),
-      );
-      if (lapMtimeMs > 0) {
-        const t = new Date(Date.now() - lapMtimeMs);
-        utimesSync(lapPath, t, t);
-      }
-    }
     // Arm the registry with a resident owner record: an unregistered session
     // under an armed registry is a CHILD, and a child is skipped EARLIER on both
     // legs — before the exemption is consulted. Without this record every
@@ -1125,6 +1111,26 @@ describe('question-philosophy-gate: the lap-APPROVAL question is exempt by const
       source: 'test',
       baseline: [],
     });
+    // The lap record is written AFTER the session registers — the production
+    // order (/start-lap runs inside a registered session). The gate refuses a
+    // record OLDER than the registration, at second granularity, as another
+    // session's lap. Written first, the record looked older whenever a second
+    // boundary fell between the two writes, and the approval question was
+    // challenged: a red on release CI (2026-09-17) that no source change caused.
+    if (lapStart) {
+      mkdirSync(join(root, '.claude'), { recursive: true });
+      // The real record shape /start-lap's opener writes (lap-worktree.mjs):
+      // `lapId` is the 8-hex id the exemption is keyed on.
+      const lapPath = join(root, '.claude', 'lap-start.json');
+      writeFileSync(
+        lapPath,
+        JSON.stringify({ start: 'x', date: '2026-01-01', goal: 'the lap', lapId: LAP_ID, checkout: root }),
+      );
+      if (lapMtimeMs > 0) {
+        const t = new Date(Date.now() - lapMtimeMs);
+        utimesSync(lapPath, t, t);
+      }
+    }
     if (commitSinceRegistration) {
       writeFileSync(join(root, 'later.txt'), 'later work\n');
       g('add', '.');
