@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/triage-lane-health.test.ts, tests/shared/dispatch-lane-envelope.test.ts
 // The llm-relay dispatch lane — a stdio MCP client to `llm-relay mcp`, ONE
 // answer per call.
 //
@@ -24,17 +25,29 @@
 // children (`size`), each with its own handshake, handed out to idle slots.
 //
 // ONE CALL, ONE TERMINAL ANSWER. The server's `dispatch` blocks for `waitMs`
-// and then hands back a job handle to poll. This lane never polls: it sets
-// `waitMs` past `timeoutMs`, so every call returns a TERMINAL job — completed,
-// failed, timed_out — and the caller decides what a non-completed status
-// means. A terminal failure is RETURNED, not thrown, so the driver can still
-// record what the lane did (finish reason, output size) on the error row; only
-// a transport death — the child exited, the RPC itself was refused — throws.
+// and then hands back a job handle to poll. This lane asks for a wait past
+// `timeoutMs`, but the server CLAMPS it to its own `routing.mcp.maxWaitMs`, so
+// a `running` reply is ordinary (nightly proposal P66: 9 of 62 sweep entries
+// on 2026-09-16 were thrown away as "cannot happen"). The lane then polls
+// `dispatch_status` on the SAME child until the job is terminal and takes the
+// answer from `dispatch_result`. So every call still returns a TERMINAL job —
+// completed, failed, timed_out — and the caller decides what a non-completed
+// status means. A terminal failure is RETURNED, not thrown, so the driver can
+// still record what the lane did (finish reason, output size) on the error
+// row. What throws: a transport death (the child exited, the RPC itself was
+// refused), a job the server no longer knows, and a job still running past
+// `timeoutMs` plus the grace — the server enforces `timeoutMs` itself, so that
+// last one is a server fault, and the error names the job and the elapsed time.
 //
 // PROVENANCE RIDES EVERY ANSWER. The relay's rule is that dispatch "never
 // pretends a CLI answered": the result header names the lane and, in answer
 // mode, the deployment that served it. Both are parsed out and returned so a
 // record can say which lane classified it.
+//
+// THE BODY IS THE LANE'S OWN ANSWER. Between the header and the lane's output
+// the relay may render a `lanes tried:` paragraph, and after it a version
+// notice; a CLI rung's output is a conversation envelope around the answer.
+// `parseDispatchAnswer` recognizes those three declared shapes and nothing else.
 import { spawn } from 'node:child_process';
 import { platformCommand } from './smoke-process.mjs';
 import { resolveSpawn } from './spawn-shell.mjs';
@@ -45,8 +58,17 @@ export const MCP_PROTOCOL_VERSION = '2025-11-25';
 /** Ceiling on one dispatch when the caller names none — the relay's own default. */
 export const DEFAULT_DISPATCH_TIMEOUT_MS = 30 * 60 * 1000;
 
-/** How far past `timeoutMs` the server's wait is set, so a call never returns a running job. */
+/**
+ * How far past `timeoutMs` the requested wait is set, and how far past it a
+ * still-running job is polled before the lane gives up on it.
+ */
 const WAIT_GRACE_MS = 5_000;
+
+/** How often a running job's `dispatch_status` is polled. */
+const DEFAULT_POLL_MS = 5_000;
+
+/** First words of the notice the server appends when it runs older code than is installed. */
+const VERSION_NOTICE_PREFIX = '⚠ This llm-relay MCP server process runs v';
 
 /** How long `close()` gives a child to exit on stdin end before killing it. */
 const CLOSE_GRACE_MS = 5_000;
@@ -69,17 +91,40 @@ export class DispatchLaneError extends Error {
  * Split a `dispatch` result text into its provenance header and the answer body.
  *
  * The server renders `key: value` lines (job, lane, status, elapsed, exit,
- * error, served-by, …), a blank line, then the lane's output verbatim. The
- * `lane:` value is `<id>` or `<id> (<spec>)`; both halves are returned.
+ * error, served-by, …), a blank line, then the lane's output. The `lane:` value
+ * is `<id>` or `<id> (<spec>)`; both halves are returned.
+ *
+ * `body` is the lane's OWN answer. Three relay-owned shapes are taken out of
+ * it, each returned rather than dropped: a leading `lanes tried:` paragraph
+ * (`lanesTried`), a trailing version notice (`notice`), and — for a CLI rung —
+ * the conversation envelope around the answer, recognized ONLY as a JSON
+ * object with a string `conversation_id` AND a string `response`. Any other
+ * body, a JSON one included, passes through unchanged.
  *
  * @param {string} text
- * @returns {{ header: Record<string, string>, lane: string | undefined, spec: string | undefined, body: string }}
+ * @returns {{ header: Record<string, string>, lane: string | undefined, spec: string | undefined,
+ *   body: string, lanesTried: string | undefined, notice: string | undefined }}
  */
 export function parseDispatchAnswer(text) {
   const normalized = String(text ?? '').replace(/\r\n/g, '\n');
   const split = normalized.indexOf('\n\n');
   const headText = split >= 0 ? normalized.slice(0, split) : normalized;
-  const body = split >= 0 ? normalized.slice(split + 2).trim() : '';
+  let body = split >= 0 ? normalized.slice(split + 2).trim() : '';
+  /** @type {string | undefined} */
+  let lanesTried;
+  if (body.startsWith('lanes tried:\n')) {
+    const end = body.indexOf('\n\n');
+    lanesTried = end >= 0 ? body.slice(0, end) : body;
+    body = end >= 0 ? body.slice(end + 2).trim() : '';
+  }
+  /** @type {string | undefined} */
+  let notice;
+  const noticeAt = body.lastIndexOf(VERSION_NOTICE_PREFIX);
+  if (noticeAt >= 0 && (noticeAt === 0 || body.slice(0, noticeAt).endsWith('\n\n')) && !body.slice(noticeAt).includes('\n')) {
+    notice = body.slice(noticeAt);
+    body = body.slice(0, noticeAt).trim();
+  }
+  body = unwrapCliEnvelope(body);
   /** @type {Record<string, string>} */
   const header = {};
   for (const line of headText.split('\n')) {
@@ -93,7 +138,29 @@ export function parseDispatchAnswer(text) {
     lane: laneMatch ? laneMatch[1] : undefined,
     spec: laneMatch?.[2],
     body,
+    lanesTried,
+    notice,
   };
+}
+
+/**
+ * A CLI rung's output is its harness's own record:
+ * `{"conversation_id":…,"status":…,"response":"<the answer>",…}`. Return the
+ * answer when `body` is exactly that record, and `body` itself otherwise.
+ *
+ * @param {string} body
+ */
+function unwrapCliEnvelope(body) {
+  if (!body.startsWith('{')) return body;
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return body;
+  if (typeof parsed.conversation_id !== 'string' || typeof parsed.response !== 'string') return body;
+  return parsed.response.trim();
 }
 
 /**
@@ -207,6 +274,73 @@ function startChild({ command, args, cwd, spawnImpl, protocolVersion, onStderr }
 }
 
 /**
+ * Call one of the server's tools and parse its text reply.
+ *
+ * @param {ReturnType<typeof startChild>} slot
+ * @param {'dispatch' | 'dispatch_status' | 'dispatch_result'} name
+ * @param {Record<string, unknown>} args
+ */
+async function callTool(slot, name, args) {
+  const reply = await slot.request('tools/call', { name, arguments: args });
+  if (reply.error) {
+    throw new DispatchLaneError(`${name} refused: ${reply.error.message}`);
+  }
+  const content = Array.isArray(reply.result?.content) ? reply.result.content : [];
+  const text = content
+    .filter((/** @type {any} */ c) => c && c.type === 'text' && typeof c.text === 'string')
+    .map((/** @type {any} */ c) => c.text)
+    .join('');
+  const parsed = parseDispatchAnswer(text);
+  return {
+    ...parsed,
+    text,
+    /** Absent on a reply that carries no job header at all (e.g. `unknown jobId`). */
+    statedStatus: parsed.header.status,
+    status: parsed.header.status ?? (reply.result?.isError ? 'failed' : 'completed'),
+  };
+}
+
+/**
+ * Poll a running job on its own child until the server names a terminal
+ * state, then read its answer. The server enforces the job's `timeoutMs`
+ * itself, so a job still running at `deadline` is a fault, not a slow lane.
+ *
+ * @param {ReturnType<typeof startChild>} slot
+ * @param {Awaited<ReturnType<typeof callTool>>} running the `running` reply
+ * @param {number} deadline epoch ms
+ * @param {number} startedAt epoch ms
+ * @param {number} pollMs
+ */
+async function pollToTerminal(slot, running, deadline, startedAt, pollMs) {
+  const jobId = running.header.job;
+  if (!jobId) {
+    throw new DispatchLaneError('dispatch returned a running job with no job id to poll', running);
+  }
+  for (;;) {
+    if (Date.now() >= deadline) {
+      throw new DispatchLaneError(
+        `dispatch job ${jobId} (lane ${running.lane ?? 'unknown'}) still running after ${Date.now() - startedAt} ms, past its timeout plus the grace`,
+        running,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    const polled = await callTool(slot, 'dispatch_status', { jobId });
+    if (polled.statedStatus === undefined) {
+      throw new DispatchLaneError(`dispatch_status for ${jobId} named no status: ${polled.text.slice(0, 300)}`, polled);
+    }
+    if (polled.statedStatus !== 'running') break;
+  }
+  const result = await callTool(slot, 'dispatch_result', { jobId });
+  if (result.statedStatus === undefined || result.statedStatus === 'running') {
+    throw new DispatchLaneError(
+      `dispatch_result for ${jobId} named no terminal status: ${result.text.slice(0, 300)}`,
+      result,
+    );
+  }
+  return result;
+}
+
+/**
  * Open a dispatch lane: a pool of `size` `llm-relay mcp` children.
  *
  * @param {object} [opts]
@@ -218,6 +352,8 @@ function startChild({ command, args, cwd, spawnImpl, protocolVersion, onStderr }
  * @param {typeof spawn} [opts.spawnImpl] test seam
  * @param {string} [opts.protocolVersion]
  * @param {(chunk: string) => void} [opts.onStderr] the children's stderr (default: forwarded)
+ * @param {number} [opts.pollMs] how often a running job is polled
+ * @param {number} [opts.graceMs] how far past a dispatch's `timeoutMs` a running job is given up
  */
 export function openDispatchLane({
   size = 1,
@@ -227,6 +363,8 @@ export function openDispatchLane({
   spawnImpl = spawn,
   protocolVersion = MCP_PROTOCOL_VERSION,
   onStderr = (chunk) => process.stderr.write(chunk),
+  pollMs = DEFAULT_POLL_MS,
+  graceMs = WAIT_GRACE_MS,
 } = {}) {
   const slots = Array.from({ length: Math.max(1, size) }, () =>
     startChild({ command, args, cwd, spawnImpl, protocolVersion, onStderr }),
@@ -277,34 +415,21 @@ export function openDispatchLane({
       const slot = await acquire();
       try {
         await slot.ready;
-        const reply = await slot.request('tools/call', {
-          name: 'dispatch',
-          arguments: {
-            task,
-            mode: opts.mode ?? 'answer',
-            ...(opts.system !== undefined ? { system: opts.system } : {}),
-            ...(opts.schema !== undefined ? { schema: opts.schema } : {}),
-            ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
-            cwd: opts.cwd ?? cwd,
-            timeoutMs,
-            waitMs: timeoutMs + WAIT_GRACE_MS,
-          },
+        const startedAt = Date.now();
+        let answer = await callTool(slot, 'dispatch', {
+          task,
+          mode: opts.mode ?? 'answer',
+          ...(opts.system !== undefined ? { system: opts.system } : {}),
+          ...(opts.schema !== undefined ? { schema: opts.schema } : {}),
+          ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+          cwd: opts.cwd ?? cwd,
+          timeoutMs,
+          waitMs: timeoutMs + graceMs,
         });
-        if (reply.error) {
-          throw new DispatchLaneError(`dispatch refused: ${reply.error.message}`);
+        if (answer.status === 'running') {
+          answer = await pollToTerminal(slot, answer, startedAt + timeoutMs + graceMs, startedAt, pollMs);
         }
-        const content = Array.isArray(reply.result?.content) ? reply.result.content : [];
-        const text = content
-          .filter((/** @type {any} */ c) => c && c.type === 'text' && typeof c.text === 'string')
-          .map((/** @type {any} */ c) => c.text)
-          .join('');
-        const { header, lane, spec, body } = parseDispatchAnswer(text);
-        const status = header.status ?? (reply.result?.isError ? 'failed' : 'completed');
-        if (status === 'running') {
-          // Cannot happen with waitMs past timeoutMs; if the server changes
-          // that contract this is a transport fault, not a lane verdict.
-          throw new DispatchLaneError(`dispatch returned a running job: ${header.job ?? '?'}`, { header, body });
-        }
+        const { header, lane, spec, body, status } = answer;
         return {
           raw: body,
           status,

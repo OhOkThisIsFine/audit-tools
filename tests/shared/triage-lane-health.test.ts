@@ -42,13 +42,24 @@ function tmp(): string {
 // refuses `tools/call` until `notifications/initialized` has arrived (the
 // handshake order the real server relies on), and it answers by TASK TEXT so a
 // test can pick the terminal shape it wants: an echo of the arguments plus its
-// own pid (completed), a failed job (`FAIL`), a still-running job (`RUNNING`),
-// an RPC refusal (`REFUSE`), or a process death (`DIE`).
+// own pid (completed), a failed job (`FAIL`), a still-running job to poll
+// (`RUNNING`, `STUCK`, `VANISH`, `LATEFAIL`), an RPC refusal (`REFUSE`), or a
+// process death (`DIE`). It serves `dispatch_status` and `dispatch_result` too.
 const FAKE_SERVER = String.raw`
 let buffer = "";
 let initialized = false;
 let initDone = false;
-const send = (m) => process.stdout.write(JSON.stringify(m) + "\n");
+// A dispatch that comes back STILL RUNNING (the relay clamps the blocking wait
+// to routing.mcp.maxWaitMs). Each task names the job it starts; a job reports
+// "running" for its first "runningPolls" status polls, then its terminal state.
+// VANISH starts a job the server then denies knowing.
+const RUNNING_TASKS = { RUNNING: "job-0003", STUCK: "job-0004", VANISH: "job-0005", LATEFAIL: "job-0006" };
+const JOBS = {
+  "job-0003": { polls: 0, runningPolls: 2, ends: "completed" },
+  "job-0004": { polls: 0, runningPolls: Infinity, ends: "completed" },
+  "job-0006": { polls: 0, runningPolls: 1, ends: "failed" },
+};
+const send =(m) => process.stdout.write(JSON.stringify(m) + "\n");
 const answer = (id, text, isError) =>
   send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], isError } });
 function handle(msg) {
@@ -70,6 +81,34 @@ function handle(msg) {
     return;
   }
   const a = msg.params.arguments;
+  if (msg.params.name === "dispatch_status" || msg.params.name === "dispatch_result") {
+    const job = JOBS[a.jobId];
+    if (!job) {
+      answer(msg.id, "unknown jobId: " + a.jobId, true);
+      return;
+    }
+    if (msg.params.name === "dispatch_status") {
+      job.polls += 1;
+      const status = job.polls > job.runningPolls ? job.ends : "running";
+      answer(msg.id, "job: " + a.jobId + "\nlane: agy-gemini\nstatus: " + status + "\nelapsed: 6s", false);
+      return;
+    }
+    if (job.ends === "failed") {
+      answer(msg.id, "job: " + a.jobId + "\nlane: agy-gemini\nstatus: failed\nelapsed: 7s\nerror: lane exited 1\n\nThe lane returned NO output.", true);
+      return;
+    }
+    answer(msg.id, "job: " + a.jobId + "\nlane: agy-gemini\nstatus: completed\nelapsed: 7s\nexit: 0\n\n" + JSON.stringify({ polls: job.polls }), false);
+    return;
+  }
+  if (msg.params.name !== "dispatch") {
+    answer(msg.id, "unknown tool: " + msg.params.name, true);
+    return;
+  }
+  if (a.task in RUNNING_TASKS) {
+    const jobId = RUNNING_TASKS[a.task];
+    answer(msg.id, "job: " + jobId + "\nlane: agy-gemini\nstatus: running\nelapsed: 5s\n\nwaited 5 s (waitMs 1805000 clamped to routing.mcp.maxWaitMs 5000)\nStill running after 5s. Poll dispatch_status with jobId \"" + jobId + "\", then call dispatch_result.", false);
+    return;
+  }
   if (a.task === "DIE") process.exit(3);
   if (a.task === "REFUSE") {
     send({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "boom" } });
@@ -77,10 +116,6 @@ function handle(msg) {
   }
   if (a.task === "FAIL") {
     answer(msg.id, "job: job-0002\nlane: free-pool (pool/medium)\nstatus: failed\nelapsed: 1s\nerror: relay answered HTTP 429\n\nThe lane returned NO output.", true);
-    return;
-  }
-  if (a.task === "RUNNING") {
-    answer(msg.id, "job: job-0003\nlane: agy-gemini\nstatus: running\nelapsed: 5s\n\nStill running. Poll dispatch_status, then call dispatch_result.", false);
     return;
   }
   const echo = JSON.stringify({ pid: process.pid, args: a });
@@ -106,6 +141,9 @@ function fakeLane(size = 1) {
   writeFileSync(script, FAKE_SERVER);
   return openDispatchLane({
     size,
+    // A running job is polled every 10 ms, and given up 200 ms past its timeout.
+    pollMs: 10,
+    graceMs: 200,
     command: process.execPath,
     args: [script],
     cwd: dir,
@@ -170,10 +208,61 @@ describe("openDispatchLane", () => {
     }
   });
 
-  it("throws on a running job, an RPC refusal, and a server death — no answer exists", async () => {
+  // Nightly proposal P66 (owner decision 2026-09-16). The relay CLAMPS the
+  // blocking wait to routing.mcp.maxWaitMs, so a `running` reply is ordinary:
+  // 9 of 62 entries on the 2026-09-16 sweep were thrown away as transport faults.
+  it("polls a running job to its terminal state and takes the answer from dispatch_result", async () => {
     const lane = fakeLane();
     try {
-      await expect(lane.dispatch("RUNNING")).rejects.toThrow(/running job: job-0003/);
+      const r = await lane.dispatch("RUNNING", { timeoutMs: 5_000 });
+      expect(r.status).toBe("completed");
+      expect(r.lane).toBe("agy-gemini");
+      expect(r.header.job).toBe("job-0003");
+      // Two polls answered `running`; the third named the terminal state.
+      expect(JSON.parse(r.raw)).toEqual({ polls: 3 });
+    } finally {
+      await lane.close();
+    }
+  });
+
+  it("returns a job that ends FAILED after the poll as a terminal status, never throwing", async () => {
+    const lane = fakeLane();
+    try {
+      const r = await lane.dispatch("LATEFAIL", { timeoutMs: 5_000 });
+      expect(r.status).toBe("failed");
+      expect(r.error).toBe("lane exited 1");
+    } finally {
+      await lane.close();
+    }
+  });
+
+  it("gives up on a job still running past its timeout, naming the job and the elapsed time", async () => {
+    const lane = fakeLane();
+    try {
+      const error = await lane.dispatch("STUCK", { timeoutMs: 50 }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(DispatchLaneError);
+      expect((error as Error).message).toMatch(/job-0004 .*still running after \d+ ms/);
+      // The slot was released: the lane still serves the next call.
+      expect((await lane.dispatch("after stuck")).status).toBe("completed");
+    } finally {
+      await lane.close();
+    }
+  });
+
+  it("throws when the server no longer knows the job it said was running", async () => {
+    const lane = fakeLane();
+    try {
+      await expect(lane.dispatch("VANISH", { timeoutMs: 5_000 })).rejects.toThrow(
+        /dispatch_status for job-0005 .*unknown jobId: job-0005/,
+      );
+    } finally {
+      await lane.close();
+    }
+  });
+
+  it("throws on an RPC refusal and a server death — no answer exists", async () => {
+    const lane = fakeLane();
+    try {
       await expect(lane.dispatch("REFUSE")).rejects.toThrow(/dispatch refused: boom/);
       await expect(lane.dispatch("DIE")).rejects.toBeInstanceOf(DispatchLaneError);
       // Every slot is dead: the pool refuses rather than hanging.

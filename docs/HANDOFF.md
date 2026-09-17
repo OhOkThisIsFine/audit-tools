@@ -46,10 +46,9 @@
 
 ## Immediate next
 
-**Nothing is pinned** (the generated roadmap below). One settled maintenance decision waits for its
-code: the shared dispatch-lane reader (`scripts/shared/mcp-dispatch-lane.mjs`) unwraps the CLI-lane
-reply envelope and polls a running job to its end — owner decision 2026-09-16, both halves; the
-poll half needs its own failing test first.
+**Nothing is pinned** (the generated roadmap below). Watch the next backlog triage sweep: the shared
+dispatch-lane reader now unwraps the CLI-lane reply envelope and polls a running job to its end, so
+its coverage stamp should no longer depend on which rung the relay picked.
 
 **Live owner decision:** none.
 
