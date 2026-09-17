@@ -411,11 +411,12 @@ export const FindingSchema = z.object({
    * would let a claim it made itself wear provenance it never had, and one that
    * could omit it would let a real lead read as a first-hand finding. The
    * refusals are `WorkerFindingSchema` (omit + `WORKER_REFUSED_FINDING_VERDICTS`,
-   * which `.strict()` turns into a rejection), `ConceptualSubmittedFindingSchema`
-   * (omit + `refuseSuppliedToolVerdict`), and the strip in `groundDesignFindings`
-   * for the design-review arrays, which reach ingestion through an array check
-   * rather than a parsing schema — see each site for why its door needs the shape
-   * it has. Absent on host-authored findings (per-file and design-review lanes),
+   * which `.strict()` turns into a rejection), `SubmittedDesignFindingSchema`
+   * (omit + `refuseSuppliedToolVerdict`, which every design-review door now
+   * parses its items with), and the strip in `groundDesignFindings` for the three
+   * callers that never pass through that door — the charter clarification and
+   * charter fidelity executors, and the systemic challenge loop — see each site
+   * for why its door needs the shape it has. Absent on host-authored findings (per-file and design-review lanes),
    * which are claims in their own right rather than leads awaiting confirmation.
    */
   lead_lineage: FindingLeadLineageSchema.optional().describe(

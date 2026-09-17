@@ -73,6 +73,7 @@ import {
   loadConceptualPerspectiveFindings,
   MalformedConceptualPerspectivesError,
   readConceptualReviewRoundManifest,
+  SubmittedDesignFindingSchema,
   suppliedToolVerdictIssue,
   type ConceptualReviewAdjudication,
 } from "../types/conceptualAdjudication.js";
@@ -840,6 +841,20 @@ type ConsumeArraySubmissionResult<T> =
 // module owns submission-file lifecycle mechanics); imported above.
 
 /**
+ * The ONE spelling of a refusal reason. The quarantine helper writes it to
+ * stderr and to the ledger; `consumeArraySubmission` also returns it to the
+ * caller, which records it on `rejected_submissions`. Two spellings would make
+ * the notice the host reads disagree with the record the run keeps.
+ */
+function describeSubmissionFailure(error: ZodError | string): string {
+  return typeof error === "string"
+    ? error
+    : error.issues
+      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+      .join("; ");
+}
+
+/**
  * Quarantine a submission that failed zod validation — or failed to parse as
  * JSON at all (a plain string reason): move it off its bound path (never
  * unlink-and-discard), write a stderr diagnostic naming the quarantined file +
@@ -856,13 +871,19 @@ async function quarantineMisshapedSubmission(
   filePath: string,
   lane: string,
   error: ZodError | string,
-  options?: { includeRepairSource?: boolean },
+  options?: {
+    includeRepairSource?: boolean;
+    /**
+     * Override the classification a bare string reason otherwise implies. A
+     * string used to mean "the bytes were not JSON at all"; the item-contract
+     * refusal in `consumeArraySubmission` also arrives as a string — it is
+     * assembled from many items' issues — but it is a CONTRACT failure, and a
+     * ledger that calls it malformed sends a repair run after the wrong defect.
+     */
+    issueCode?: "submission_malformed" | "submission_contract_invalid";
+  },
 ): Promise<string | null> {
-  const reason = typeof error === "string"
-    ? error
-    : error.issues
-      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-      .join("; ");
+  const reason = describeSubmissionFailure(error);
   const quarantine = await quarantineSubmissionFile(artifactsDir, filePath, lane);
   process.stderr.write(
     `[audit-code] ${lane} submission ${quarantineLocationPhrase(quarantine)}` +
@@ -872,7 +893,8 @@ async function quarantineMisshapedSubmission(
   await recordLaneOutcome(artifactsDir, lane, {
     kind: "rejected",
     issueCode:
-      typeof error === "string" ? "submission_malformed" : "submission_contract_invalid",
+      options?.issueCode ??
+      (typeof error === "string" ? "submission_malformed" : "submission_contract_invalid"),
     message: reason + quarantineSurvivalNote(quarantine) +
       (options?.includeRepairSource && quarantine.quarantinePath
         ? `\nRepair the existing findings from ${quarantine.quarantinePath}; retain their substance and correct the reported contract failures.`
@@ -887,6 +909,28 @@ async function quarantineMisshapedSubmission(
  * either shape; any other shape is quarantined (never unlinked-and-discarded)
  * and reported with a reason.
  *
+ * `itemSchema` parses EACH element. Supply it whenever the lane has an item
+ * contract; the envelope alone is not one.
+ *
+ * WHY THE ITEM PARSE LIVES HERE (owner decision, 2026-09-17). This is the ONE
+ * site that quarantines an array submission and appends the ledger event, which
+ * is the property `withRejectedDesignReviewSubmission` below depends on: a
+ * second refusal site makes one rejection read as two on a record whose whole
+ * value is counting them. It is also the first boundary holding both halves —
+ * the bytes and the contract they must meet.
+ *
+ * WHAT IT FIXES. The design-review doors used to disagree about the same
+ * submission. Each deep-fan-out perspective was parsed item by item
+ * (`loadConceptualPerspectiveFindings`) and the judge was parsed whole
+ * (`ConceptualJudgeSubmissionSchema`), while the contract and shallow-conceptual
+ * doors parsed nothing. So the worked example every design-review prompt renders
+ * — which puts the enum alternation in the VALUE,
+ * `"severity": "one of: critical, high, medium, low, info"` — was refused on one
+ * path and stamped `grounding: {status: "grounded"}` on another. That finding
+ * then ranked below everything, because `SEVERITY_RANK[severity]` is `undefined`,
+ * and was never picked for selective deepening: kept, unrankable, and reported
+ * as grounded.
+ *
  * An accepted submission is NOT deleted here (P25-f) — the caller unlinks after
  * it has applied the value, so a submission is never destroyed before its
  * content has landed somewhere else.
@@ -895,6 +939,7 @@ export async function consumeArraySubmission<T>(
   artifactsDir: string,
   lane: string,
   tx?: FoldTransaction,
+  itemSchema?: ZodTypeAny,
 ): Promise<ConsumeArraySubmissionResult<T>> {
   const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane, tx);
   if (incoming.status === "absent") return { status: "absent" };
@@ -918,6 +963,38 @@ export async function consumeArraySubmission<T>(
   }
   const { value, path } = incoming;
   const unwrapped = unwrapSubmissionArray(value);
+  if (unwrapped.ok && itemSchema) {
+    // BEFORE the schema parse, deliberately — the same ordering, and the same
+    // reason, as the judge door above: the item schema OMITS the tool-owned
+    // verdicts, so a supplied value is stripped silently and the host is taught
+    // nothing. Name the field instead.
+    const supplied = suppliedToolVerdictIssue(unwrapped.array);
+    // Item by item, not `z.array(itemSchema)`, so the reason names the element
+    // the host must fix — `findings[2].severity`, never a bare `2.severity`.
+    const accepted: unknown[] = [];
+    const failures: string[] = [];
+    for (const [index, item] of unwrapped.array.entries()) {
+      const parsed = itemSchema.safeParse(item);
+      if (parsed.success) accepted.push(parsed.data);
+      else {
+        for (const issue of parsed.error.issues) {
+          failures.push(`findings[${index}].${issue.path.join(".") || "(root)"}: ${issue.message}`);
+        }
+      }
+    }
+    const reason = supplied ?? (failures.length > 0 ? failures.join("; ") : null);
+    if (reason !== null) {
+      const quarantinePath = await quarantineMisshapedSubmission(
+        artifactsDir,
+        path,
+        lane,
+        reason,
+        { includeRepairSource: true, issueCode: "submission_contract_invalid" },
+      );
+      return { status: "quarantined", quarantinePath, lane, reason };
+    }
+    return { status: "ok", value: accepted as T[], path };
+  }
   if (unwrapped.ok) {
     return { status: "ok", value: unwrapped.array as T[], path };
   }
@@ -1034,7 +1111,12 @@ async function consumeConceptualSubmission(
   const lane = GATE_LANES.design_review_conceptual;
   const manifest = await readConceptualReviewRoundManifest(artifactsDir);
   if (!manifest) {
-    const result = await consumeArraySubmission<Finding>(artifactsDir, lane, tx);
+    const result = await consumeArraySubmission<Finding>(
+      artifactsDir,
+      lane,
+      tx,
+      SubmittedDesignFindingSchema,
+    );
     return result.status === "ok"
       ? { status: "ok", findings: result.value, path: result.path }
       : result;
@@ -1402,6 +1484,13 @@ export function renderDesignReviewRejectionNotice(
     "",
     "Expected shape: a JSON array of findings, or a top-level object wrapping exactly " +
       'one array-valued property (e.g. `{"findings": [...]}`).',
+    "",
+    "EVERY finding in that array is parsed against the finding contract, so an " +
+      "envelope alone is not enough. `severity` must be one of critical, high, " +
+      "medium, low, info and `confidence` one of high, medium, low — the literal " +
+      "words, never the alternation that lists them. `verification_status`, " +
+      "`evidence_lane` and `lead_lineage` are derived at ingest and are refused " +
+      "if you supply them.",
   );
   return lines.join("\n");
 }
@@ -1504,6 +1593,7 @@ export async function handleDesignReviewBranch(
     params.artifactsDir,
     GATE_LANES.design_review_contract,
     tx,
+    SubmittedDesignFindingSchema,
   );
   const conceptualResult = await consumeConceptualSubmission(
     params.artifactsDir,

@@ -260,9 +260,33 @@ function renderLensScope(options: DesignReviewOptions): string[] {
   ];
 }
 
-/** The lens literal the findings example echoes: the first selected, else a placeholder. */
+/**
+ * The lens literal the findings example echoes: the first selected, else a real
+ * lens from the eleven-lens vocabulary.
+ *
+ * It used to fall back to the DESCRIPTION `"the lens this finding belongs to"`.
+ * `lens` is a free string in the finding contract, so a host that copied the
+ * example was accepted, and `lens_breakdown` — a `countBy` over what was
+ * produced — then reported a lens named after the placeholder. An example
+ * teaches by being copied, so every literal in it must be a value the tool would
+ * be content to receive (owner decision, 2026-09-17).
+ */
 function exampleLens(options: DesignReviewOptions): string {
-  return options.lenses?.[0] ?? "the lens this finding belongs to";
+  return options.lenses?.[0] ?? "architecture";
+}
+
+/**
+ * A real repository path for the example's `affected_files`, taken from the
+ * manifest this prompt already prints in its file inventory.
+ *
+ * The example used to cite `relevant/file.ts`, which is not in any repository.
+ * `groundDesignFindings` resolves `affected_files` against the manifest, so a
+ * copied example grounds as
+ * `{"status":"ungrounded","reason":"cited component(s) not found …"}` — the
+ * prompt taught the one citation its own grounding pass refuses.
+ */
+function examplePath(bundle: ArtifactBundle): string {
+  return bundle.repo_manifest?.files?.[0]?.path ?? "src/index.ts";
 }
 
 /**
@@ -445,14 +469,24 @@ function conceptualCritiqueInstructions(): string[] {
  * envelope is universally emittable and matches every other host-gate
  * submission. The design-review ingest
  * (`unwrapSubmissionArray`) tolerantly unwraps the single `findings` array, so
- * the shape round-trips. `categoryEnum` is the per-pass category field — the one
- * line that differs between the TWO passes the tool runs: the contract pass
+ * the shape round-trips. `categories` is the per-pass category vocabulary — the
+ * one line that differs between the TWO passes the tool runs: the contract pass
  * (`renderContractReviewPrompt`) and the conceptual pass
  * (`CONCEPTUAL_FINDING_CATEGORIES`).
+ *
+ * EVERY LITERAL IN THE EXAMPLE IS A VALUE THE TOOL ACCEPTS (owner decision,
+ * 2026-09-17). This example used to put each closed enum's ALTERNATION in the
+ * field value — `"severity": "one of: critical, high, medium, low, info"` — so a
+ * host that copied it wrote a string no code recognises. The judge door refused
+ * it; the contract and shallow-conceptual doors did not, and the finding was
+ * stamped `grounded` with a severity `SEVERITY_RANK` cannot rank. The vocabulary
+ * now sits BESIDE the example, where it reads as a list of permitted values
+ * rather than as one.
  */
 function findingsEnvelopeExample(
-  categoryEnum: string,
-  lensExample = "the lens this finding belongs to",
+  categories: readonly string[],
+  lensExample: string,
+  examplePathValue: string,
 ): string[] {
   return [
     "```json",
@@ -460,18 +494,132 @@ function findingsEnvelopeExample(
     '  "findings": [',
     "    {",
     '      "id": "DR-001",',
-    '      "title": "short descriptive title",',
-    `      "category": "${categoryEnum}",`,
-    '      "severity": "one of: critical, high, medium, low, info",',
-    '      "confidence": "one of: high, medium, low",',
+    '      "title": "Retry limit is enforced in two places that can disagree",',
+    `      "category": "${categories[0]}",`,
+    '      "severity": "high",',
+    '      "confidence": "medium",',
     `      "lens": "${lensExample}",`,
     '      "summary": "detailed explanation of the observation and the recommended change",',
-    '      "affected_files": [{"path": "relevant/file.ts"}],',
+    `      "affected_files": [{"path": ${JSON.stringify(examplePathValue)}}],`,
     '      "systemic": true',
     "    }",
     "  ]",
     "}",
     "```",
+    "",
+    `Write the literal value, never the list of permitted ones. \`category\` is one of: ${categories.join(", ")}. ` +
+      "`severity` is one of: critical, high, medium, low, info. `confidence` is one of: high, medium, low. " +
+      "`affected_files` cites a real path from the file inventory above. Every finding is parsed against " +
+      "this contract at ingestion, and a submission carrying one that fails is refused whole — not " +
+      "partly accepted — so a placeholder value costs you the round.",
+    "",
+    "Do NOT supply `verification_status`, `evidence_lane` or `lead_lineage`. The tool derives all three " +
+      "at ingestion, and a submission that supplies any of them is refused by name.",
+  ];
+}
+
+/**
+ * The contract pass's category vocabulary. Named data, beside the conceptual
+ * one, because the example and the prose that states the permitted values are
+ * now built from the SAME array — a second hand-written copy is how the two
+ * drifted apart in the first place.
+ */
+export const CONTRACT_FINDING_CATEGORIES = [
+  "inferred_contract_gap",
+  "trust_boundary_gap",
+  "invariant_counterexample",
+  "critical_invariant_coverage_gap",
+] as const;
+
+/**
+ * The grounding rule, stated identically to every design-review pass because
+ * every design-review pass is grounded by the same function
+ * (`groundDesignFindings`).
+ */
+const GROUND_EVERY_FINDING =
+  "**Ground every finding.** Cite at least one real `affected_files` path that exists in this repository — the component your observation is actually about. A finding that cites no real component is surfaced as ungrounded (quarantined), not admitted as confirmed: point at the code, do not invent paths. A whole-system observation should anchor on the file(s) where the structure is clearest.";
+
+/**
+ * The JUDGE's worked example: the whole submission, not the findings half.
+ *
+ * It is built from the round's REAL identifiers — the round id the prompt
+ * already prints and the contributor ids of the perspective files it lists — so
+ * a host that copies it and edits the substance still submits ids this round
+ * knows. A placeholder id would parse (`z.string().min(1)`) and then fail the
+ * adjudication's own reference checks.
+ */
+function judgeEnvelopeExample(
+  roundId: string,
+  contributorIds: readonly string[],
+  lensExample: string,
+  examplePathValue: string,
+): string[] {
+  const perspective = contributorIds[0] ?? "design_review_conceptual_perspective_1";
+  return [
+    "```json",
+    "{",
+    `  "round_id": ${JSON.stringify(roundId)},`,
+    '  "findings": [',
+    "    {",
+    '      "id": "DR-001",',
+    '      "title": "Retry limit is enforced in two places that can disagree",',
+    `      "category": "${CONCEPTUAL_FINDING_CATEGORIES[0]}",`,
+    '      "severity": "high",',
+    '      "confidence": "medium",',
+    `      "lens": "${lensExample}",`,
+    '      "summary": "detailed explanation of the observation and the recommended change",',
+    `      "affected_files": [{"path": ${JSON.stringify(examplePathValue)}}],`,
+    '      "systemic": true',
+    "    }",
+    "  ],",
+    '  "candidate_dispositions": [',
+    "    {",
+    `      "candidate_id": ${JSON.stringify(`${perspective}::DR-004`)},`,
+    `      "contributor_id": ${JSON.stringify(perspective)},`,
+    '      "source_finding_id": "DR-004",',
+    '      "disposition": "retained",',
+    '      "target_final_finding_ids": ["DR-001"],',
+    '      "modification_percent": 20,',
+    '      "rationale": "kept the observation, tightened the statement of the disagreement",',
+    '      "verification_status": "judge_confirmed",',
+    '      "verification_note": "read both enforcement sites and confirmed they read different constants"',
+    "    }",
+    "  ],",
+    '  "final_finding_shares": [',
+    "    {",
+    '      "final_finding_id": "DR-001",',
+    '      "contributors": [',
+    "        {",
+    `          "contributor_id": ${JSON.stringify(perspective)},`,
+    `          "source_candidate_ids": [${JSON.stringify(`${perspective}::DR-004`)}],`,
+    '          "contribution_percent": 80,',
+    '          "rationale": "raised the observation and supplied both call sites"',
+    "        },",
+    "        {",
+    '          "contributor_id": "design_review_conceptual",',
+    '          "source_candidate_ids": [],',
+    '          "contribution_percent": 20,',
+    '          "rationale": "verified the defect at HEAD and sharpened the title"',
+    "        }",
+    "      ]",
+    "    }",
+    "  ]",
+    "}",
+    "```",
+    "",
+    `Write the literal value, never the list of permitted ones. \`category\` is one of: ${CONCEPTUAL_FINDING_CATEGORIES.join(", ")}. ` +
+      "`severity` is one of: critical, high, medium, low, info. `confidence` is one of: high, medium, low. " +
+      "`disposition` is one of: retained, merged, rejected. `verification_status` is one of: " +
+      "judge_confirmed, asserted, refuted_at_head. `affected_files` cites a real path from the file " +
+      "inventory above.",
+    "",
+    "All four top-level keys are REQUIRED and no others are permitted. The submission is parsed whole: " +
+      "a missing key, an extra key, or one finding that fails the contract refuses the entire merge " +
+      "round, and the round's work is lost.",
+    "",
+    "Do NOT supply `verification_status`, `evidence_lane` or `lead_lineage` ON A FINDING. The tool " +
+      "derives all three at ingestion. The `verification_status` above belongs to a CANDIDATE " +
+      "DISPOSITION, which is yours to state.",
   ];
 }
 
@@ -486,22 +634,30 @@ export const CONCEPTUAL_FINDING_CATEGORIES = [
   "missing_capability",
 ] as const;
 
-/** Shared finding-output-format block for any conceptual-review prompt. */
+/**
+ * Shared finding-output-format block for any conceptual-review prompt.
+ *
+ * `exampleLines` is the worked example itself, because the judge's envelope is
+ * not the perspectives'. The judge submission carries three required top-level
+ * keys the others do not — `round_id`, `candidate_dispositions` and
+ * `final_finding_shares` — and `ConceptualJudgeSubmissionSchema` is `.strict()`,
+ * so the findings-only envelope every pass used to show failed the judge's own
+ * parse with three `Required` issues. The prose above it stated all three; the
+ * example a host copies contradicted the prose, and the whole merge round was
+ * quarantined (owner decision, 2026-09-17).
+ */
 function conceptualOutputFormat(
   resultsPathNote: string,
-  lensExample?: string,
+  exampleLines: readonly string[],
 ): string[] {
   return [
     "## Output format",
     "",
-    "Produce a JSON object with a top-level `findings` array. Each finding in that array must conform to:",
+    "Produce ONE JSON object in exactly this shape. Every entry in `findings` must conform to the contract shown:",
     "",
-    ...findingsEnvelopeExample(
-      `one of: ${CONCEPTUAL_FINDING_CATEGORIES.join(", ")}`,
-      lensExample,
-    ),
+    ...exampleLines,
     "",
-    "**Ground every finding.** Cite at least one real `affected_files` path that exists in this repository — the component your observation is actually about. A finding that cites no real component is surfaced as ungrounded (quarantined), not admitted as confirmed: point at the code, do not invent paths. A whole-system observation should anchor on the file(s) where the structure is clearest.",
+    GROUND_EVERY_FINDING,
     "",
     resultsPathNote,
     "",
@@ -683,9 +839,17 @@ export function renderContractReviewPrompt(
     "Produce a JSON object with a top-level `findings` array. Each finding in that array must conform to:",
     "",
     ...findingsEnvelopeExample(
-      "one of: inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap",
+      CONTRACT_FINDING_CATEGORIES,
       exampleLens(options),
+      examplePath(bundle),
     ),
+    "",
+    // The grounding rule is stated here as well as in `conceptualOutputFormat`
+    // because the contract pass IS grounded: `nextStepHelpers` runs
+    // `groundDesignFindings` over `contract_findings` exactly as it does over
+    // the conceptual ones. The rule was stated to the conceptual reviewer only,
+    // so the contract reviewer was judged by a rule it was never told.
+    GROUND_EVERY_FINDING,
     "",
     // Where the object goes (and what to do when this lane cannot write files)
     // is stated once, by the lane materializer's results-path footer.
@@ -725,7 +889,11 @@ export function renderConceptualReviewPrompt(
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
       "Use finding IDs starting with DR-001.",
-      exampleLens(options),
+      findingsEnvelopeExample(
+        CONCEPTUAL_FINDING_CATEGORIES,
+        exampleLens(options),
+        examplePath(bundle),
+      ),
     ),
   ].join("\n");
 }
@@ -766,7 +934,11 @@ export function renderConceptualPerspectivePrompt(
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
       "Report findings *from your perspective only*. Use finding IDs starting with DR-001.",
-      exampleLens(options),
+      findingsEnvelopeExample(
+        CONCEPTUAL_FINDING_CATEGORIES,
+        exampleLens(options),
+        examplePath(bundle),
+      ),
     ),
   ].join("\n");
 }
@@ -831,7 +1003,12 @@ export function renderConceptualJudgePrompt(
     `- Set top-level \`round_id\` to exactly \`${roundId}\`. In the SAME top-level object as \`findings\`, include \`candidate_dispositions\` entries with \`candidate_id\`, \`contributor_id\`, \`source_finding_id\`, \`disposition\`, \`target_final_finding_ids\`, \`modification_percent\`, \`rationale\`, \`verification_status\`, and \`verification_note\` (only when the status is not \`asserted\`); and \`final_finding_shares\` entries with \`final_finding_id\` plus \`contributors\`, each carrying \`contributor_id\`, \`source_candidate_ids\`, \`contribution_percent\`, and \`rationale\`.`,
     ...conceptualOutputFormat(
       "Produce ONE merged, ranked object. Renumber finding IDs sequentially from DR-001.",
-      exampleLens(options),
+      judgeEnvelopeExample(
+        roundId,
+        perspectiveResults.map((p) => p.contributor_id),
+        exampleLens(options),
+        examplePath(bundle),
+      ),
     ),
   ].join("\n");
 }

@@ -31,6 +31,16 @@ import {
   CharterSubmissionSchema,
 } from "../../src/shared/decompose/charterExtraction.js";
 import { ClarificationAnswersSubmissionSchema } from "../../src/shared/decompose/charterClarification.js";
+import {
+  renderConceptualJudgePrompt,
+  renderConceptualPerspectivePrompt,
+  renderConceptualReviewPrompt,
+  renderContractReviewPrompt,
+} from "../../src/audit/orchestrator/designReviewPrompt.js";
+import {
+  ConceptualJudgeSubmissionSchema,
+  SubmittedDesignFindingSchema,
+} from "../../src/audit/types/conceptualAdjudication.js";
 import { CharterProvenanceSchema } from "../../src/shared/types/charter.js";
 import {
   clarificationBundleFixture,
@@ -378,6 +388,126 @@ describe(FAILURE_SIGNATURE, () => {
       prompt,
       "a question with no split must not print its relation twice",
     ).not.toMatch(/·\s*complementary\s*·\s*complementary/u);
+  });
+
+  it("every DESIGN-REVIEW example is itself a valid submission on the door that consumes it", () => {
+    // The fifth instance of the same class, and the widest: ONE shared example
+    // served all four design-review prompts, and it wrote both alternations into
+    // the field VALUES (`"severity": "one of: critical, high, medium, low, info"`)
+    // and cited `relevant/file.ts`, which is in no repository. Three separate
+    // failures followed from that one example. The judge door refused it outright
+    // (`ConceptualJudgeSubmissionSchema` is `.strict()`, and the findings-only
+    // envelope omits its three other required keys). The contract and
+    // shallow-conceptual doors accepted it and stamped the finding `grounded`
+    // with a severity `SEVERITY_RANK` cannot rank. And the cited path grounded as
+    // `ungrounded` on every door, because the prompt taught the one citation its
+    // own grounding pass refuses. (Owner review 2026-09-17, prompt 11.)
+    const bundle = {
+      unit_manifest: {
+        units: [
+          {
+            unit_id: "u1",
+            path: "src/scheduling",
+            disposition: "in_scope",
+            files: ["src/scheduling/window.ts"],
+            required_lenses: ["architecture"],
+          },
+        ],
+      },
+      repo_manifest: {
+        repository: { name: "registry-fixture" },
+        generated_at: "2026-01-01T00:00:00.000Z",
+        files: [
+          {
+            path: "src/scheduling/window.ts",
+            language: "typescript",
+            size_bytes: 100,
+          },
+        ],
+      },
+    } as unknown as Parameters<typeof renderContractReviewPrompt>[0];
+
+    const judgePrompt = renderConceptualJudgePrompt(
+      bundle,
+      [
+        {
+          name: "The Simplifier",
+          path: ".audit-tools/audit/x/p1.json",
+          contributor_id: "perspective:the-simplifier",
+        },
+      ],
+      "round-0001",
+      { lenses: ["architecture", "security"] },
+    );
+    const rendered: Array<[string, string]> = [
+      ["contract", renderContractReviewPrompt(bundle, {})],
+      ["conceptual", renderConceptualReviewPrompt(bundle, {})],
+      [
+        "perspective",
+        renderConceptualPerspectivePrompt(
+          bundle,
+          { name: "The Simplifier", lens: "simplicity above all" },
+          0,
+          1,
+          {},
+        ),
+      ],
+      ["judge", judgePrompt],
+    ];
+
+    for (const [door, prompt] of rendered) {
+      const fence = /```json\n([\s\S]*?)\n```/u.exec(prompt);
+      expect(
+        fence,
+        `the ${door} prompt must carry exactly one fenced JSON example`,
+      ).not.toBeNull();
+      const example = JSON.parse(fence![1]!) as { findings?: unknown[] };
+
+      // EVERY door now parses its items with this schema
+      // (`consumeArraySubmission` takes it, and the judge door already did), so
+      // the example a host copies must satisfy it on every door alike.
+      for (const [index, item] of (example.findings ?? []).entries()) {
+        const parsed = SubmittedDesignFindingSchema.safeParse(item);
+        expect(
+          parsed.success ? null : parsed.error.issues,
+          `${door}: findings[${index}] of the prompt's own example must satisfy ` +
+            "SubmittedDesignFindingSchema — obedience has to be SUFFICIENT",
+        ).toBeNull();
+      }
+
+      // The cited path must be one the grounding pass can find. The example takes
+      // it from the manifest this prompt already prints, so a copied citation
+      // grounds instead of quarantining.
+      expect(
+        fence![1],
+        `${door}: the example must cite a path from the file inventory, never an invented one`,
+      ).toContain("src/scheduling/window.ts");
+      expect(
+        fence![1],
+        `${door}: the example must carry real literals, never the alternation that lists them`,
+      ).not.toMatch(/one of:/u);
+
+      // Grounding is what every design-review door judges the submission by, so
+      // every design-review prompt has to state it. The contract prompt did not.
+      expect(
+        prompt,
+        `${door}: the prompt must state the grounding rule it is judged by`,
+      ).toContain("Ground every finding");
+    }
+
+    // The JUDGE's envelope is not the perspectives'. Its three other required
+    // keys are what the shared findings-only example omitted, and a missing key
+    // costs the whole merge round.
+    const judgeFence = /```json\n([\s\S]*?)\n```/u.exec(judgePrompt)!;
+    const judgeParsed = ConceptualJudgeSubmissionSchema.safeParse(
+      JSON.parse(judgeFence[1]!),
+    );
+    expect(
+      judgeParsed.success ? null : judgeParsed.error.issues,
+      "a submission copied verbatim from the judge prompt's own example must satisfy " +
+        "ConceptualJudgeSubmissionSchema — it is `.strict()`, so an omitted key and " +
+        "an extra key both refuse the round",
+    ).toBeNull();
   });
 
   it("states the element shape of excluded_scope in the confirm-intent template", async () => {

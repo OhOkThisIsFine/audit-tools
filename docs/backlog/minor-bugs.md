@@ -357,7 +357,7 @@
   first inside `buildConceptualReviewAdjudication` (`src/audit/types/conceptualAdjudication.ts`). But
   `src/audit/cli/nextStepHelpers.ts` `safeParse`s the submission through
   `ConceptualJudgeSubmissionSchema` — whose findings use the omitting
-  `ConceptualSubmittedFindingSchema` — and passes `parsed.data` in, so the field is already gone by
+  `SubmittedDesignFindingSchema` — and passes `parsed.data` in, so the field is already gone by
   the time the refusal looks. The PROPERTY still holds twice over (omit, plus unconditional
   derivation at ingest); what does not hold is the doc comment's claim that the host is told, and only
   a direct caller (a test) ever reaches the message. **Property:** either the refusal reads the raw

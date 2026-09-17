@@ -10,6 +10,8 @@ import { renderCharterKindLanePrompt } from "../../src/audit/cli/charterExtracti
 import { renderIntentEquivalencePrompt } from "../../src/audit/cli/nextStepCommand.js";
 import { findingContractPromptLines } from "../../src/audit/contracts/findingContractPrompt.js";
 import { WorkerFindingSchema } from "../../src/audit/contracts/workerSchemas.js";
+import { renderConceptualJudgePrompt } from "../../src/audit/orchestrator/designReviewPrompt.js";
+import { ConceptualJudgeSubmissionSchema } from "../../src/audit/types/conceptualAdjudication.js";
 import { renderCriticalFlowFallbackPrompt } from "../../src/audit/reporting/criticalFlowFallbackPrompt.js";
 import { renderSynthesisNarrativePrompt } from "../../src/audit/reporting/synthesisNarrativePrompt.js";
 import { renderSecondOrderAdversaryPrompt } from "../../src/audit/systemic/secondOrderAdversaryPrompt.js";
@@ -63,6 +65,33 @@ const renderRepair = (
     instruction: "Repair the registered contract.",
     artifactPaths,
   }).prompt;
+
+/**
+ * The smallest bundle a design-review prompt renders from: one in-scope unit and
+ * one manifest file. The manifest entry is load-bearing — the worked example
+ * cites `affected_files` from it (`examplePath`), so the example a host copies
+ * grounds against the repository instead of quarantining.
+ */
+const designReviewBundleFixture = {
+  unit_manifest: {
+    units: [
+      {
+        unit_id: "u1",
+        path: "src/scheduling",
+        disposition: "in_scope",
+        files: ["src/scheduling/window.ts"],
+        required_lenses: ["architecture"],
+      },
+    ],
+  },
+  repo_manifest: {
+    repository: { name: "registry-fixture" },
+    generated_at: "2026-01-01T00:00:00.000Z",
+    files: [
+      { path: "src/scheduling/window.ts", language: "typescript", size_bytes: 100 },
+    ],
+  },
+} as unknown as ArtifactBundle;
 
 const intakeRender = (): string =>
   synthesizeIntakePrompt(
@@ -380,33 +409,58 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     schema: { name: "CriticalFlowFallbackResultSchema", file: "src/shared/types/flows.ts", object: CriticalFlowFallbackResultSchema },
     render: () => renderCriticalFlowFallbackPrompt({ flows: [] } as Parameters<typeof renderCriticalFlowFallbackPrompt>[0]),
   },
+  // The four design-review doors. Each ITEM is parsed with
+  // `SubmittedDesignFindingSchema` since 2026-09-17 (owner review, prompt 11),
+  // and the prompt-11 pin in `prompt-renders-its-contract.test.ts` parses each
+  // rendered example back out against that schema. What these three rows still
+  // declare is a gap in the ENVELOPE, not in the item: the submission is a bare
+  // JSON array, so there is no top-level object schema for a derived row to name.
   {
     builder: "renderContractReviewPrompt",
     file: "src/audit/orchestrator/designReviewPrompt.ts",
     disposition: "declared-gap",
     schema: { name: "consumeArraySubmission<Finding>", file: "src/audit/cli/nextStepHelpers.ts" },
-    gapReason: "ingestion validates only a tolerant array envelope before later grounding; no zod schema parses each finding",
+    gapReason:
+      "each finding is parsed with SubmittedDesignFindingSchema at ingestion; the ENVELOPE is a bare array with no zod object schema, so no derived row can name one",
   },
   {
     builder: "renderConceptualReviewPrompt",
     file: "src/audit/orchestrator/designReviewPrompt.ts",
     disposition: "declared-gap",
     schema: { name: "consumeArraySubmission<Finding>", file: "src/audit/cli/nextStepHelpers.ts" },
-    gapReason: "ingestion validates only a tolerant array envelope before later grounding; no zod schema parses each finding",
+    gapReason:
+      "each finding is parsed with SubmittedDesignFindingSchema at ingestion; the ENVELOPE is a bare array with no zod object schema, so no derived row can name one",
   },
   {
     builder: "renderConceptualPerspectivePrompt",
     file: "src/audit/orchestrator/designReviewPrompt.ts",
     disposition: "declared-gap",
-    schema: { name: "consumeArraySubmission<Finding>", file: "src/audit/cli/nextStepHelpers.ts" },
-    gapReason: "perspective submissions become judge inputs without a zod item schema",
+    schema: { name: "submissionFindings", file: "src/audit/types/conceptualAdjudication.ts" },
+    gapReason:
+      "the perspective LOADER already parses each finding with SubmittedDesignFindingSchema; the lane GATE that admits the file checks array shape only, and that gate is the gap",
   },
   {
     builder: "renderConceptualJudgePrompt",
     file: "src/audit/orchestrator/designReviewPrompt.ts",
-    disposition: "declared-gap",
-    schema: { name: "consumeArraySubmission<Finding>", file: "src/audit/cli/nextStepHelpers.ts" },
-    gapReason: "final conceptual-review ingestion validates only a tolerant array envelope; no zod schema parses each finding",
+    disposition: "derived",
+    schema: {
+      name: "ConceptualJudgeSubmissionSchema",
+      file: "src/audit/types/conceptualAdjudication.ts",
+      object: ConceptualJudgeSubmissionSchema,
+    },
+    render: () =>
+      renderConceptualJudgePrompt(
+        designReviewBundleFixture,
+        [
+          {
+            name: "The Simplifier",
+            path: ".audit-tools/audit/x/p1.json",
+            contributor_id: "perspective:the-simplifier",
+          },
+        ],
+        "round-0001",
+        { lenses: ["architecture", "security"] },
+      ),
   },
   {
     builder: "buildEdgeReasoningPrompt",

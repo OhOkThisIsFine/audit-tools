@@ -13,6 +13,7 @@ import type { RunAuditStepOptions } from "../../src/audit/cli/auditStep.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
+import { designFinding } from "./helpers/designFinding.js";
 
 /** A deep-ceiling register awaiting one of the two post-extraction host passes. */
 function pendingCharterRegister(
@@ -244,7 +245,7 @@ await test("handleDesignReviewBranch returns continue after merging contract fin
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
     const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
-    await writeFile(contractPath, JSON.stringify([{ id: "DR-001", title: "contract finding" }]), "utf8");
+    await writeFile(contractPath, JSON.stringify([designFinding()]), "utf8");
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
     await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
@@ -273,7 +274,7 @@ await test("handleDesignReviewBranch returns continue after merging conceptual f
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
     const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
-    await writeFile(conceptualPath, JSON.stringify([{ id: "DR-001", title: "conceptual finding" }]), "utf8");
+    await writeFile(conceptualPath, JSON.stringify([designFinding()]), "utf8");
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
     await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [], contract_reviewed: true }), "utf8");
@@ -301,8 +302,8 @@ await test("handleDesignReviewBranch returns continue after merging both lane su
 
     const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
     const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
-    await writeFile(contractPath, JSON.stringify([{ id: "DR-001", title: "contract" }]), "utf8");
-    await writeFile(conceptualPath, JSON.stringify([{ id: "DR-001", title: "conceptual" }]), "utf8");
+    await writeFile(contractPath, JSON.stringify([designFinding({ title: "contract" })]), "utf8");
+    await writeFile(conceptualPath, JSON.stringify([designFinding({ title: "conceptual" })]), "utf8");
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
     await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
@@ -575,7 +576,7 @@ await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} 
     // result-json-array trap) generalized to a whole-array wrap.
     await writeFile(
       contractPath,
-      JSON.stringify({ findings: [{ id: "DR-001", title: "contract finding" }] }),
+      JSON.stringify({ findings: [designFinding()] }),
       "utf8",
     );
 
@@ -596,7 +597,7 @@ await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} 
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
     expect(written.contract_reviewed).toBe(true);
     expect(written.contract_findings).toEqual([
-      { id: "DR-001", title: "contract finding", evidence_lane: "design-review-lane" },
+      { ...designFinding(), evidence_lane: "design-review-lane" },
     ]);
     // Obligation credited (merged), so no quarantine and nothing pending.
     expect(await quarantinedFiles(artifactsDir)).toEqual([]);
@@ -690,7 +691,7 @@ await test("handleDesignReviewBranch quarantines a syntactically malformed conce
     const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
     await writeFile(
       contractPath,
-      JSON.stringify([{ id: "DR-101", title: "contract finding" }]),
+      JSON.stringify([designFinding({ id: "DR-101" })]),
       "utf8",
     );
     const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
@@ -714,7 +715,7 @@ await test("handleDesignReviewBranch quarantines a syntactically malformed conce
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
     expect(written.contract_reviewed).toBe(true);
     expect(written.contract_findings).toEqual([
-      { id: "DR-101", title: "contract finding", evidence_lane: "design-review-lane" },
+      { ...designFinding({ id: "DR-101" }), evidence_lane: "design-review-lane" },
     ]);
 
     // The malformed conceptual lane survives, verbatim, under quarantine/.

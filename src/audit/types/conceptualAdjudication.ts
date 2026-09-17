@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/design-review-item-contract.test.ts, tests/audit/schema-contracts.test.ts, tests/audit/conceptual-adjudication.test.ts
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
@@ -135,7 +136,15 @@ export const ConceptualCandidateDispositionSchema = z
   });
 
 /**
- * The findings a judge or perspective may SUBMIT. `verification_status`,
+ * The findings a design-review host may SUBMIT, on EVERY design-review door:
+ * the contract-assessment pass, the shallow conceptual pass, each deep-fan-out
+ * perspective, and the judge. It carries the "Conceptual" name no longer
+ * (owner decision, 2026-09-17) because the contract pass answers to the same
+ * item contract — the perspective loader parsed each item with it while the
+ * contract and shallow-conceptual doors parsed nothing at all, so one submission
+ * shape was refused on one path and stamped `grounded` on another.
+ *
+ * `verification_status`,
  * `severity_downgraded_from`, `evidence_lane` and `lead_lineage` are omitted for
  * the same reason `WorkerFindingSchema` omits `grounding`: each is derived or
  * STAMPED by the tool at ingest — the first from the per-candidate claims, the
@@ -154,7 +163,7 @@ export const ConceptualCandidateDispositionSchema = z
  * `refuseSuppliedToolVerdict` NAMES all of them, because a silently dropped
  * field teaches the host nothing.
  */
-export const ConceptualSubmittedFindingSchema = FindingSchema.omit({
+export const SubmittedDesignFindingSchema = FindingSchema.omit({
   verification_status: true,
   severity_downgraded_from: true,
   evidence_lane: true,
@@ -182,7 +191,7 @@ export const ConceptualFinalFindingShareSchema = z
 export const ConceptualJudgeSubmissionSchema = z
   .object({
     round_id: z.string().min(1),
-    findings: z.array(ConceptualSubmittedFindingSchema),
+    findings: z.array(SubmittedDesignFindingSchema),
     candidate_dispositions: z.array(ConceptualCandidateDispositionSchema),
     final_finding_shares: z.array(ConceptualFinalFindingShareSchema),
   })
@@ -268,10 +277,10 @@ export function deriveConceptualVerificationStatus(
 function submissionFindings(value: unknown): Finding[] {
   const envelope = z
     .union([
-      z.array(ConceptualSubmittedFindingSchema),
+      z.array(SubmittedDesignFindingSchema),
       z
         .object({
-          findings: z.array(ConceptualSubmittedFindingSchema),
+          findings: z.array(SubmittedDesignFindingSchema),
         })
         .passthrough(),
     ])
@@ -370,8 +379,18 @@ const TOOL_OWNED_FINDING_VERDICTS = [
  * Returns the issue message, or `null` when nothing was supplied.
  */
 export function suppliedToolVerdictIssue(submission: unknown): string | null {
-  if (!isRecord(submission) || !Array.isArray(submission.findings)) return null;
-  for (const [index, finding] of submission.findings.entries()) {
+  // Two submission shapes reach this check, because every design-review door
+  // now parses its items with `SubmittedDesignFindingSchema`: the judge's
+  // `{round_id, findings, …}` object, and the bare findings array the contract,
+  // shallow-conceptual and perspective doors carry. Both strip the same three
+  // fields at the parse, so both must be told which one they supplied.
+  const findings = Array.isArray(submission)
+    ? submission
+    : isRecord(submission) && Array.isArray(submission.findings)
+      ? submission.findings
+      : null;
+  if (findings === null) return null;
+  for (const [index, finding] of findings.entries()) {
     if (!isRecord(finding)) continue;
     for (const verdict of TOOL_OWNED_FINDING_VERDICTS) {
       if (verdict in finding) {

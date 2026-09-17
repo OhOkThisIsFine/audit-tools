@@ -24,7 +24,7 @@ import {
   WorkerAuditTaskSchema,
   WorkerFindingSchema,
 } from "../../src/audit/contracts/workerSchemas.js";
-import { ConceptualSubmittedFindingSchema } from "../../src/audit/types/conceptualAdjudication.js";
+import { SubmittedDesignFindingSchema } from "../../src/audit/types/conceptualAdjudication.js";
 import { StepArtifactSchema } from "../../src/audit/cli/steps.js";
 import { buildUnitManifest } from "../../src/audit/orchestrator/unitBuilder.js";
 import { buildRiskRegister } from "../../src/audit/extractors/risk.js";
@@ -292,14 +292,14 @@ test("the worker finding schema omits exactly the refused tool-owned verdicts (D
       `the worker refusal table must carry ${verdict} — the two doors refuse the same set`,
     ).toContain(verdict);
     expect(
-      verdict in ConceptualSubmittedFindingSchema.shape,
-      `ConceptualSubmittedFindingSchema must omit ${verdict}, like the worker projection does`,
+      verdict in SubmittedDesignFindingSchema.shape,
+      `SubmittedDesignFindingSchema must omit ${verdict}, like the worker projection does`,
     ).toBe(false);
   }
   // …and the omit really stops the value being CARRIED (this schema is not
   // `.strict()`, so it strips rather than rejects — the strip is the property
   // under test here, and `refuseSuppliedToolVerdict` is what makes it loud).
-  const stripped = ConceptualSubmittedFindingSchema.parse({
+  const stripped = SubmittedDesignFindingSchema.parse({
     ...validFinding,
     lead_lineage: { producer: "host-forged", source_hash: "x", confirmation: "lead" },
   }) as Record<string, unknown>;

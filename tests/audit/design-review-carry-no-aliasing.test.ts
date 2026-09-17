@@ -29,6 +29,7 @@ import {
   laneSubmissionPath,
 } from "../../src/audit/cli/laneSubmissions.js";
 import { submissionsDir } from "../../src/shared/io/auditToolsPaths.js";
+import { designFinding } from "./helpers/designFinding.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditState } from "../../src/audit/types/auditState.js";
 import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
@@ -52,7 +53,7 @@ test("a consumed design-review submission never mutates the carried bundle in pl
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
     await writeFile(
       laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract),
-      JSON.stringify([{ id: "DR-001", title: "contract finding" }]),
+      JSON.stringify([designFinding()]),
       "utf8",
     );
 
@@ -92,7 +93,7 @@ test.each([GATE_LANES.design_review_contract])(
     const artifactsDir = await mkdtemp(join(tmpdir(), "dr-baseline-"));
     try {
       await mkdir(submissionsDir(artifactsDir), { recursive: true });
-      await writeFile(laneSubmissionPath(artifactsDir, lane), JSON.stringify([{ id: "DR-new", title: "new review finding" }]));
+      await writeFile(laneSubmissionPath(artifactsDir, lane), JSON.stringify([designFinding({ id: "DR-new" })]));
       const bundle: ArtifactBundle = {
         unit_manifest: { units: [] },
         critical_flows: { flows: [] },

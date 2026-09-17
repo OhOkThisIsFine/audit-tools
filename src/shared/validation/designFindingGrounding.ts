@@ -75,15 +75,20 @@ export function groundDesignFinding(
  * can forget.
  *
  * The `lead_lineage` STRIP is unconditional for the same reason, and it is the
- * same "a separate call is a call someone forgets" argument: these lanes ingest
- * host-authored findings, and the array door (`consumeArraySubmission`) checks
- * only that the value IS an array — it does not parse through a schema that
- * omits the tool-owned verdicts the way the per-file worker contract does. So
- * without a strip here, a submission carrying `{producer: "host-forged", …}`
- * lands verbatim in `contract_findings` / `conceptual_findings` and thereafter
- * reads as a generation-bound deterministic lead: a claim wearing provenance it
- * never had. Dropping the field leaves the row what it actually is — an
- * unlineaged host finding, which the review prompt already calls out by count.
+ * same "a separate call is a call someone forgets" argument. Without it, a
+ * submission carrying `{producer: "host-forged", …}` lands verbatim in
+ * `contract_findings` / `conceptual_findings` and thereafter reads as a
+ * generation-bound deterministic lead: a claim wearing provenance it never had.
+ * Dropping the field leaves the row what it actually is — an unlineaged host
+ * finding, which the review prompt already calls out by count.
+ *
+ * ⚠ This strip no longer carries the DESIGN-REVIEW doors. Since 2026-09-17 the
+ * array door (`consumeArraySubmission`) parses each item with
+ * `SubmittedDesignFindingSchema` and REFUSES a supplied tool-owned verdict by
+ * name, which is strictly better than a silent strip. The strip stays because
+ * three callers never pass through that door — the charter clarification and
+ * charter fidelity executors, and the systemic challenge loop — and each of them
+ * ingests host-authored findings the same way.
  *
  * A host that legitimately re-emits a lead is unaffected in substance: the
  * provenance it could not have verified is exactly the part the tool refuses to
