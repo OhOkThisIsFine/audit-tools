@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 199 entr(y/ies) indexed.
+> and at commit). 201 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -126,6 +126,8 @@
 - `minor-bugs.md:384` — The e2e leg's refusal test passes for the wrong reason (2026-09-15, low).
 - `minor-bugs.md:392` — A stale host workload `contract_version` re-prepares by a path no test crosses (2026-09-15, low).
 - `minor-bugs.md:400` — The merge-commit gate reports one refusal class per attempt (2026-09-15, low, friction: inefficient_feeding).
+- `minor-bugs.md:409` — `RemediationPlanSchema.themes` has no writer and no reader (2026-09-17, low, friction: tool_should_decide).
+- `minor-bugs.md:417` — The dispatch-lane reader leaves a FAILED CLI lane's envelope wrapped (2026-09-17, low, friction: tool_should_decide).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

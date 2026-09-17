@@ -5,13 +5,11 @@
 
 ## Live state
 
-- **v0.51.11 is published and installed globally.** Release commit `ca809fe3` passed the publish
-  workflow ([run 35044248042](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/35044248042));
-  npm resolves 0.51.11 and both installed command surfaces report 0.51.11. Content: P25c (the
-  tree-wide landing gates run once at the close leg; the id-glossary write scope widens only for a
-  coined id; the admission runner's deadline is terminal) and P30 (the cleanup lap's backlog
-  reconciliation; every maintenance decision applied; `## Lap start` re-homed into `CLAUDE.md`).
-  0.51.9 and 0.51.10 sit on the registry with identical earlier content.
+- **v0.52.0 is published and installed globally.** Release commit `84e2a2d9` passed the publish
+  workflow ([run 35191266555](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/35191266555));
+  npm resolves 0.52.0 and both installed command surfaces report 0.52.0. Content: the findings
+  contract `v1alpha2` (`audit_read`, below), the dispatch-lane reader fix, and the release-script
+  and doc commits that followed 0.51.11.
 - **The cleanup-and-implementation lap is complete.** Every packet (P00–P30) is on `main`; the
   machine-local plan directory and its wave log are the record of how each landed.
 - **The commit gate runs at git's own boundary.** The tracked `.githooks/` run

@@ -401,6 +401,22 @@
   inefficient_feeding).** A `--no-ff` merge of a branch that touches BOTH a constitutional doc and a
   loop-core path is refused by `.claude/hooks/commit-gate.mjs` for the constitutional attestation
   first; only the next `git commit` attempt names the missing loop-core attestation. A script that
-  reads the first refusal and attests once therefore fails twice (P30 landing). **Property:** one
-  refusal names every attestation the staged tree still lacks, so one round of attestations lets the
-  next attempt through.
+  reads the first refusal and attests once therefore fails twice (P30 landing). An ordinary commit
+  does the same in the other order: the loop-core refusal first, the constitutional one after it
+  (2026-09-17). **Property:** one refusal names every attestation the staged tree still lacks, so
+  one round of attestations lets the next attempt through.
+
+- **`RemediationPlanSchema.themes` has no writer and no reader (2026-09-17, low, friction:
+  tool_should_decide).** The field in `src/remediate/state/types.ts` says it carries synthesis
+  themes from `audit-findings.json`, but nothing in `src/remediate` assigns it or reads it
+  (`filters.themes` in `src/remediate/intent/checkpointFilter.ts` is a different object). A strict
+  schema field that looks authoritative and holds nothing. **Property:** the plan schema declares
+  only fields a production path writes; delete `themes`, or wire the writer and its consumer in one
+  change.
+
+- **The dispatch-lane reader leaves a FAILED CLI lane's envelope wrapped (2026-09-17, low, friction:
+  tool_should_decide).** `unwrapCliEnvelope` in `scripts/shared/mcp-dispatch-lane.mjs` parses the
+  whole body; when no lane answered, the relay appends its ladder advice after the body, so the
+  parse fails and `raw` keeps the envelope plus the advice. Only a non-completed job is affected,
+  and no caller reads that body as an answer. **Property:** the body of a failed job is the lane's
+  own text too, with the relay's advice returned beside it like `lanesTried` and `notice`.
