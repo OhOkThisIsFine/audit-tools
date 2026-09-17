@@ -327,6 +327,16 @@ const CorrespondenceInputSchema = z
   })
   .strict();
 
+/**
+ * The account minimum is CONDITIONAL on the dimension (owner, 2026-09-17), not flat.
+ * `presence` means one channel of the correspondence has no node for the goal, and
+ * the tool identifies that channel by its ABSENCE from `accounts` — so a presence
+ * difference always carries one account fewer than its correspondence has channels.
+ * A flat minimum of two made a presence gap inexpressible on a two-channel
+ * correspondence: the silent channel must supply nothing, which left one account.
+ * Every other dimension still needs two, because an account that contradicts no
+ * other account is not a difference.
+ */
 const DifferenceInputSchema = z
   .object({
     /** The candidate_id, or the 0-based index into `correspondences`, this rests on. */
@@ -334,11 +344,20 @@ const DifferenceInputSchema = z
     dimension: DifferenceDimensionSchema,
     relation: DifferenceRelationSchema,
     split: DifferenceSplitSchema.optional(),
-    accounts: z.array(DifferenceAccountSchema).min(2),
+    accounts: z.array(DifferenceAccountSchema).min(1),
     gap: z.string().min(1),
     covered_channel_gap: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.dimension !== "presence" && value.accounts.length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accounts"],
+        message: `a ${value.dimension} difference needs an account from at least two channels; only a presence difference may carry one`,
+      });
+    }
+  });
 
 /**
  * The charter-COMPARISON submission (steps 2–3): the comparison reader's verdicts
@@ -440,7 +459,10 @@ export function routeDifference(input: {
  *   whose PATHS lie in the repo universe, or whose refs are all on one side;
  * - a difference naming no confirmed correspondence, an account for a lane not in
  *   that correspondence, an `incompatible` relation without a `split`, or a split
- *   with a non-incompatible relation.
+ *   with a non-incompatible relation;
+ * - a `presence` difference that does not leave EXACTLY ONE channel of its
+ *   correspondence out of `accounts` — the omission is what names the silent
+ *   channel, and the route turns on which channel it is.
  * Ids are content-keyed (member set / correspondence + dimension + gap).
  */
 export function assembleComparison(
@@ -562,10 +584,22 @@ export function assembleComparison(
       return;
     }
     const accounts = [...input.accounts].sort((a, b) => compareCodeUnits(a.kind, b.kind));
-    const silent =
-      input.dimension === "presence"
-        ? [...lanes].find((k) => !accounts.some((a) => a.kind === k))
-        : undefined;
+    // A presence difference names its silent channel by OMITTING it, and the route
+    // turns on which channel that is (a silent Stated channel is doc rot for the
+    // remediator; a silent code channel is a clarification). So exactly one channel
+    // of the correspondence may be silent: none makes the record self-contradictory,
+    // and two would let the route be picked by lane order instead of by evidence.
+    let silent: CharterLaneKind | undefined;
+    if (input.dimension === "presence") {
+      const silentLanes = [...lanes].filter((k) => !accounts.some((a) => a.kind === k));
+      if (silentLanes.length !== 1) {
+        validation_issues.push(
+          `difference #${index}: a presence difference must leave EXACTLY ONE channel of its correspondence out of \`accounts\` — ${silentLanes.length === 0 ? "every channel is accounted for, so nothing is absent" : `${silentLanes.length} are absent (${silentLanes.join(", ")})`} — dropped`,
+        );
+        return;
+      }
+      silent = silentLanes[0];
+    }
     const route = routeDifference({
       dimension: input.dimension,
       relation: input.relation,

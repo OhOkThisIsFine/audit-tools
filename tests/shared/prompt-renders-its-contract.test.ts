@@ -22,8 +22,12 @@ import {
 import { describe, expect, it } from "vitest";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
+import { renderCharterComparisonPrompt } from "../../src/audit/cli/charterComparisonPrompt.js";
 import { renderCharterKindLanePrompt } from "../../src/audit/cli/charterExtractionPrompt.js";
-import { CharterSubmissionSchema } from "../../src/shared/decompose/charterExtraction.js";
+import {
+  CharterComparisonSubmissionSchema,
+  CharterSubmissionSchema,
+} from "../../src/shared/decompose/charterExtraction.js";
 import { CharterProvenanceSchema } from "../../src/shared/types/charter.js";
 import { promptContractRegistry } from "./promptContractRegistry.js";
 
@@ -151,6 +155,58 @@ describe(FAILURE_SIGNATURE, () => {
       "a lane must be told it never has to leave the packet to cite correctly",
     ).toContain("SUFFICIENT");
     expect(prompt).not.toContain('"ref": "<path/id>"');
+  });
+
+  it("renders a charter-COMPARISON example that is itself a valid submission", () => {
+    // The same defect class as the provenance pin above, in the neighbouring file
+    // and unnoticed by the registry sweep below: the comparison prompt's worked
+    // example wrote the whole verdict alternation into the field VALUE
+    // (`"verdict": "confirm | reject | widen"`) and filled three more fields with
+    // `<...>` placeholders. A reader copying the example's shape produced a
+    // submission the strict schema refused outright. The registry sweep could not
+    // see it — `collectClosedEnums` stops at object depth 2, and every enum in
+    // this contract sits deeper. (Owner review 2026-09-17, prompt 9.)
+    const prompt = renderCharterComparisonPrompt(
+      {},
+      {
+        submissionPath: "x/comparison.json",
+        laneGraphPaths: {
+          stated: "x/stated.json",
+          structural: "x/structural.json",
+          revealed: "x/revealed.json",
+        },
+      },
+    );
+
+    const fence = /```json\n([\s\S]*?)\n```/u.exec(prompt);
+    expect(
+      fence,
+      "the comparison prompt must carry exactly one fenced JSON example",
+    ).not.toBeNull();
+    const parsed = CharterComparisonSubmissionSchema.safeParse(JSON.parse(fence![1]!));
+    expect(
+      parsed.success ? null : parsed.error.issues,
+      "a submission copied verbatim from the comparison prompt's own example must " +
+        "satisfy CharterComparisonSubmissionSchema — obedience has to be SUFFICIENT",
+    ).toBeNull();
+
+    // A `<...>` stand-in parses as a plain string, so the schema cannot catch it
+    // and the reader learns a value the tool refuses one stage later, at assembly.
+    expect(
+      fence![1],
+      "the example must carry real literals, never `<...>` placeholders",
+    ).not.toMatch(/<[^>\n]+>/u);
+
+    // Every provenance kind the validator accepts must be named. The prompt used
+    // to show `doc` and `code` in its example and state the closed six nowhere, so
+    // a reader had to guess the enum from two samples.
+    for (const member of CharterProvenanceSchema.shape.kind.options) {
+      expect(
+        prompt,
+        `the comparison prompt must name provenance kind '${member}' — the validator ` +
+          "accepts it and a prompt that omits it teaches a smaller contract",
+      ).toContain(member);
+    }
   });
 
   it("states the element shape of excluded_scope in the confirm-intent template", async () => {

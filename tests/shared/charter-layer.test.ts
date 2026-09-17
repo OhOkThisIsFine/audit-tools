@@ -202,6 +202,113 @@ describe("step 3 — assembleComparison", () => {
     expect(out.differences).toEqual([]);
     expect(out.validation_issues).toHaveLength(3);
   });
+
+  // The account minimum is conditional on the dimension (owner, 2026-09-17). A
+  // `presence` difference names its silent channel by OMITTING it, so it always
+  // carries one account fewer than its correspondence has channels. Under the old
+  // flat minimum of two, a presence gap on a two-channel correspondence was
+  // inexpressible: the only submission the schema accepted gave every channel an
+  // account, which left nothing absent and routed the gap by default — measured
+  // as `clarification` where the evidence says `remediator`.
+  const statedRevealed = candidates.find(
+    (c) => c.members.some((m) => m.kind === "stated") && c.members.some((m) => m.kind === "revealed"),
+  )!;
+  const presenceCorrespondence = {
+    candidate_id: statedRevealed.candidate_id,
+    verdict: "confirm",
+    members: statedRevealed.members,
+  };
+
+  test("a presence gap on a TWO-channel correspondence is expressible, and routes by the silent channel", () => {
+    const submission = CharterComparisonSubmissionSchema.parse({
+      correspondences: [presenceCorrespondence],
+      differences: [
+        {
+          correspondence: statedRevealed.candidate_id,
+          dimension: "presence",
+          relation: "complementary",
+          accounts: [{ kind: "revealed", claim: "the code serves this goal", provenance: [code("src/a.ts#Top")] }],
+          gap: "the docs never state this goal",
+          covered_channel_gap: true,
+        },
+      ],
+    });
+    const out = assembleComparison(submission, { candidates, graphs, universe });
+    expect(out.validation_issues).toEqual([]);
+    expect(out.differences[0]?.routed_to).toBe("remediator");
+    expect(out.differences[0]?.finding_candidate).toBe(true);
+  });
+
+  test("one account is refused on every dimension BUT presence", () => {
+    const one = (dimension: string) => ({
+      correspondence: statedRevealed.candidate_id,
+      dimension,
+      relation: "complementary",
+      accounts: [{ kind: "revealed", claim: "c", provenance: [] }],
+      gap: "g",
+    });
+    for (const dimension of ["purpose", "responsibility", "hierarchy", "scope", "standing", "standard"]) {
+      const result = CharterComparisonSubmissionSchema.safeParse({
+        correspondences: [presenceCorrespondence],
+        differences: [one(dimension)],
+      });
+      expect(result.success, `${dimension} must need two accounts`).toBe(false);
+    }
+    expect(
+      CharterComparisonSubmissionSchema.safeParse({
+        correspondences: [presenceCorrespondence],
+        differences: [one("presence")],
+      }).success,
+    ).toBe(true);
+  });
+
+  test("a presence difference that accounts for EVERY channel is dropped: nothing is absent", () => {
+    const submission = CharterComparisonSubmissionSchema.parse({
+      correspondences: [presenceCorrespondence],
+      differences: [
+        {
+          correspondence: statedRevealed.candidate_id,
+          dimension: "presence",
+          relation: "complementary",
+          accounts: statedRevealed.members.map((m) => ({ kind: m.kind, claim: `${m.kind} claim`, provenance: [] })),
+          gap: "g",
+          covered_channel_gap: true,
+        },
+      ],
+    });
+    const out = assembleComparison(submission, { candidates, graphs, universe });
+    expect(out.differences).toEqual([]);
+    expect(out.validation_issues[0]).toMatch(/EXACTLY ONE channel/);
+  });
+
+  test("a presence difference leaving TWO channels silent is dropped: the route would fall to lane order", () => {
+    const submission = CharterComparisonSubmissionSchema.parse({
+      correspondences: [
+        {
+          candidate_id: statedRevealed.candidate_id,
+          verdict: "widen",
+          members: [
+            { kind: "stated", node_ids: ["g"] },
+            { kind: "structural", node_ids: ["top"] },
+            { kind: "revealed", node_ids: ["top"] },
+          ],
+        },
+      ],
+      differences: [
+        {
+          correspondence: statedRevealed.candidate_id,
+          dimension: "presence",
+          relation: "complementary",
+          accounts: [{ kind: "revealed", claim: "the code serves this goal", provenance: [] }],
+          gap: "g",
+          covered_channel_gap: true,
+        },
+      ],
+    });
+    const out = assembleComparison(submission, { candidates, graphs, universe });
+    expect(out.differences).toEqual([]);
+    expect(out.validation_issues[0]).toMatch(/2 are absent/);
+  });
 });
 
 describe("step 5 — routeDifference (the fixed table)", () => {

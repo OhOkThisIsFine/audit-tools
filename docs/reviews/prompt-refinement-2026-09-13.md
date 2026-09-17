@@ -369,7 +369,7 @@ Below is the complete inventory of all prompts in the `audit-tools` codebase, tr
 | 6 | `analyzer_install` | `src/audit/cli/prompts.ts` | **APPROVED** | Finalized below (explicit operator prompt directive, fenced JSON block, strict enum values). |
 | 7 | `critical_flow_fallback` | `src/audit/reporting/criticalFlowFallbackPrompt.ts` | **APPROVED** | Finalized below (succinct path/entrypoint definitions, suggested canonical lens examples for concerns, explicit empty `{ "flows": [] }` format). |
 | 8 | `charter_extraction` | `src/audit/cli/charterExtractionPrompt.ts` | **APPROVED (owner, 2026-09-17)** | Owner reviewed the LIVE rendered text and took the rewrite: one schema-valid provenance kind in the example (the alternation stays a field rule), a domain-neutral worked example marked as an unrelated codebase, the packet-scope rule stated once as a prohibition, the grounding rule stated once, the role statement folded into the opening paragraph. The pinned test now asserts the example parses and satisfies `CharterSubmissionSchema`; it previously REQUIRED the invalid form. |
-| 9 | `charter_comparison` (was `charter_delta`) | `src/audit/cli/charterComparisonPrompt.ts` | PROPOSED | ⚠ Shipped in `80793d83` under a label the owner never gave: the 2026-09-15 approval was of the charter DESIGN, and this prompt text was re-specified from it. Text awaits owner review. Content: the comparison pass (spec steps 2–3) — confirm/reject/widen tool-proposed correspondences, record differences on seven dimensions with a relation. Unified telos and goal-graph authorship removed. |
+| 9 | `charter_comparison` (was `charter_delta`) | `src/audit/cli/charterComparisonPrompt.ts` | **APPROVED (owner, 2026-09-17)** | Owner reviewed the LIVE rendered text and took the rewrite. Six defects, four of them the obedience-is-insufficient class: the worked example was not a valid submission (the whole verdict alternation sat in the field VALUE, plus three `<...>` placeholders); a `presence` difference filed as the prompt instructed was MISROUTED, because the tool names the silent channel by its ABSENCE from `accounts` — an account for every channel sent doc rot to `clarification` instead of `remediator`; the same gap was inexpressible on a two-channel correspondence; the added-correspondence evidence rule was not the two-different-sides test the tool applies; `provenance[].kind` was never stated; `widen` never said that a member left out is a member dropped. Owner chose to RELAX the account minimum rather than state the three-channel limit — `DifferenceInputSchema` now needs two accounts on every dimension but `presence`, and `assembleComparison` refuses a `presence` difference that does not leave exactly one channel silent. Owner also chose to PIN the example: `tests/shared/prompt-renders-its-contract.test.ts` parses the comparison prompt's fenced example against `CharterComparisonSubmissionSchema` and holds the provenance enum exhaustive. All three halves red-green validated by inversion. |
 | 9b | `charter_fidelity` (new) | `src/audit/cli/charterFidelityPrompt.ts` | PROPOSED | ⚠ Shipped in `80793d83` under a label the owner never gave (see row 9). Text awaits owner review. Content: the fidelity adversary lane (spec step 4) — per difference, `supported` / `interpretation` (odd side named) / `unverifiable`, judged from tool-materialized source slices. |
 | 10 | `charter_clarification` | `src/audit/cli/charterClarificationPrompt.ts` | PROPOSED | ⚠ Shipped in `80793d83` under a label the owner never gave (see row 9). Text awaits owner review. Content: questions come from the discrepancy report; every account in the correspondence shown side by side with dimension, relation and split; answer names the governing channel, or `rewrite_all`, or `leave_open`. |
 | 11 | `design_review` | `src/audit/orchestrator/designReviewPrompt.ts` | PROPOSED | Specs 11a–11f below (contract pass, shallow conceptual, perspective, judge, shared context block, charter block): transport/cache trivia removed, grounding rule stated once, judge rules as a checklist; every parsed field kept and diffed against `ConceptualJudgeSubmissionSchema`. |
@@ -395,11 +395,18 @@ again; see memory `n-r13-shipped-unapproved-and-itemspec-was-its-corpse`.
 1. Prompts 1–7 are owner-approved (2026-09-13). Their specs are recorded below and are NOT yet
    implemented — the live `skills/audit-code/audit-code.prompt.md` still carries the unconditional
    development instruction that spec 1 removes.
-2. Prompt 8 is owner-approved (2026-09-17) AND implemented, with its pinning test corrected.
-3. Rows 9, 9b and 10 are live in code but unreviewed. Review them against the SHIPPED text, not a
+2. Prompts 8 and 9 are owner-approved (2026-09-17) AND implemented, each with its pinning test
+   corrected or added. Prompt 9's review also changed the ingest contract, by owner decision: the
+   `accounts` minimum in `DifferenceInputSchema` is conditional on the dimension, and
+   `assembleComparison` refuses a `presence` difference that does not leave exactly one channel
+   silent.
+3. Rows 9b and 10 are live in code but unreviewed. Review them against the SHIPPED text, not a
    draft. Rows 11–20 carry lane-drafted PROPOSED specs below and await the owner's verdict.
-3. Two specs propose NO prompt change: 19 (no `verify_remediation` renderer exists; Part 2 row 19 is stale) and 11e/11f (context blocks, kept as-is with shorter disclaimers).
-4. On approval: log each "Backend ... (Backlog)" bullet to `docs/backlog/open-bugs.md`, correct Part 2 row 19, regenerate the backlog index, then implement per prompt with the pinning tests named in each spec's Evidence.
+4. Two specs propose NO prompt change: 19 (no `verify_remediation` renderer exists; Part 2 row 19 is stale) and 11e/11f (context blocks, kept as-is with shorter disclaimers).
+5. On approval: log each "Backend ... (Backlog)" bullet to `docs/backlog/open-bugs.md`, correct Part 2 row 19, regenerate the backlog index, then implement per prompt with the pinning tests named in each spec's Evidence.
+6. **The method, unchanged:** show the owner the LIVE RENDERED prompt text, the critique, and ONE
+   proposed rewrite. Never TypeScript source, and never a batch of drafts
+   (memory `prompt-review-is-interactive-one-at-a-time`).
 
 ---
 
