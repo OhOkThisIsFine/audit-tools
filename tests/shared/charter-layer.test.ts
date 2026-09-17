@@ -2,7 +2,7 @@
 // (src/shared/decompose/charterLayer.ts; spec §"The estimator charters").
 import { test, expect, describe } from "vitest";
 import {
-  CharterSubmissionSchema,
+  CharterMergedLaneSchema,
   CharterComparisonSubmissionSchema,
   CharterFidelitySubmissionSchema,
   assembleLaneGraph,
@@ -14,6 +14,7 @@ import {
   routeDifference,
   provenancePath,
 } from "../../src/shared/decompose/charterExtraction.js";
+import { parseCitationRef } from "../../src/shared/validation/citationGrounding.js";
 import type { CharterLaneGraph, CharterProvenance } from "../../src/shared/types/charter.js";
 
 const universe = new Set(["src/a.ts", "src/b.ts", "docs/goals.md"]);
@@ -22,7 +23,7 @@ const code = (ref: string, quote = "q"): CharterProvenance => ({ kind: "code", r
 
 function lane(kind: "stated" | "structural" | "revealed", overrides: Partial<Parameters<typeof assembleLaneGraph>[0]> = {}) {
   return assembleLaneGraph(
-    CharterSubmissionSchema.parse({
+    CharterMergedLaneSchema.parse({
       kind,
       nodes: [
         { node_id: "top", purpose: "keep audits trustworthy", provenance: [code("src/a.ts#Top")], confidence: "high", files: ["src/a.ts"] },
@@ -45,7 +46,7 @@ describe("step 1 — assembleLaneGraph", () => {
 
   test("a Stated node may carry provenance only (no files)", () => {
     const { graph } = assembleLaneGraph(
-      CharterSubmissionSchema.parse({
+      CharterMergedLaneSchema.parse({
         kind: "stated",
         nodes: [{ node_id: "g", purpose: "a goal the docs state", provenance: [doc("docs/goals.md:2")], confidence: "high" }],
       }),
@@ -67,7 +68,7 @@ describe("step 1 — assembleLaneGraph", () => {
 
   test("a file outside the universe is dropped from the scope with an issue; an all-unknown scope becomes provenance-only", () => {
     const { graph, validation_issues } = assembleLaneGraph(
-      CharterSubmissionSchema.parse({
+      CharterMergedLaneSchema.parse({
         kind: "revealed",
         nodes: [{ node_id: "x", purpose: "p", files: ["nope.ts"], provenance: [], confidence: "low" }],
       }),
@@ -96,7 +97,7 @@ describe("step 2 — proposeCorrespondences", () => {
   test("file overlap and a provenance cross-ref each propose one candidate; ids are content-keyed", () => {
     const revealed = lane("revealed").graph;
     const stated = assembleLaneGraph(
-      CharterSubmissionSchema.parse({
+      CharterMergedLaneSchema.parse({
         kind: "stated",
         nodes: [{ node_id: "g", purpose: "docs say", provenance: [doc("src/a.ts#Top")], confidence: "high" }],
       }),
@@ -117,13 +118,37 @@ describe("step 2 — proposeCorrespondences", () => {
     expect(provenancePath("docs/goals.md:12")).toBe("docs/goals.md");
     expect(provenancePath("src/a.ts")).toBe("src/a.ts");
   });
+
+  // ONE home for the reference grammar. `provenancePath` grew its own scanner
+  // beside `parseCitationRef`, and the two disagreed on two of the four forms
+  // prompt 8 teaches: this one stripped `#<symbol>` but not a RANGE, the parser
+  // stripped a range but not `#<symbol>`. A ranged ref therefore reached
+  // `crossRefPaths`, `assembleComparison` and the fidelity packet as a path no
+  // file could ever match — so an obedient lane's evidence was silently dropped.
+  test("provenancePath agrees with parseCitationRef on every taught form", () => {
+    const expected: Record<string, string> = {
+      "src/a.ts": "src/a.ts",
+      "src/a.ts#Top": "src/a.ts",
+      "src/a.ts:12": "src/a.ts",
+      "src/a.ts:12-19": "src/a.ts",
+      "docs/goals.md#current-state": "docs/goals.md",
+      "src/a.ts#Top:12": "src/a.ts",
+    };
+    for (const [ref, path] of Object.entries(expected)) {
+      expect(provenancePath(ref), `${ref} must resolve to ${path}`).toBe(path);
+      expect(
+        parseCitationRef(ref)?.path,
+        `${ref} must resolve the same way in BOTH homes of the grammar`,
+      ).toBe(path);
+    }
+  });
 });
 
 function threeLanes(): CharterLaneGraph[] {
   const revealed = lane("revealed").graph;
   const structural = lane("structural").graph;
   const stated = assembleLaneGraph(
-    CharterSubmissionSchema.parse({
+    CharterMergedLaneSchema.parse({
       kind: "stated",
       nodes: [{ node_id: "g", purpose: "docs say SSO is planned", provenance: [doc("docs/goals.md:2", "SSO planned")], confidence: "high", files: ["src/a.ts"] }],
     }),

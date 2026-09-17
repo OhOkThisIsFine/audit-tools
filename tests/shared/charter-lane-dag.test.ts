@@ -10,8 +10,9 @@ import { CharterSubmissionSchema } from "../../src/shared/decompose/charterExtra
 
 describe("charter lane submission — one goal DAG per lane (redesign step 1)", () => {
   test("a Stated-lane DAG with edges and a provenance-only node parses", () => {
+    // No `kind`: the lane writes its own file at a lane-bound path, and the tool
+    // stamps the kind at merge (owner review of prompt 8, 2026-09-17).
     const result = CharterSubmissionSchema.safeParse({
-      kind: "stated",
       nodes: [
         {
           node_id: "trustworthy-audits",

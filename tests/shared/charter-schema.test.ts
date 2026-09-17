@@ -111,6 +111,42 @@ describe("CharterDifferenceSchema", () => {
   test("rejects a dimension outside the closed seven", () => {
     expect(() => CharterDifferenceSchema.parse({ ...base, dimension: "detail" })).toThrow();
   });
+
+  // The DECLARED record must accept what `assembleComparison` produces. A
+  // `presence` difference names its silent channel by omitting it, so on a
+  // two-channel correspondence it carries exactly one account. The input half
+  // was relaxed for that on 2026-09-17; this record was left at a flat minimum
+  // of two and refused its own assembler's output (owner, 2026-09-17).
+  test("accepts a ONE-account presence record and still needs two on every other dimension", () => {
+    const one = [
+      { kind: "revealed", claim: "the code serves this goal", provenance: [] },
+    ];
+    expect(
+      CharterDifferenceSchema.parse({
+        ...base,
+        dimension: "presence",
+        relation: "complementary",
+        accounts: one,
+        covered_channel_gap: true,
+        routed_to: "remediator",
+      }).accounts,
+    ).toHaveLength(1);
+
+    for (const dimension of [
+      "purpose",
+      "responsibility",
+      "hierarchy",
+      "scope",
+      "standing",
+      "standard",
+    ]) {
+      expect(
+        CharterDifferenceSchema.safeParse({ ...base, dimension, accounts: one })
+          .success,
+        `${dimension} must still need two accounts`,
+      ).toBe(false);
+    }
+  });
 });
 
 describe("IntentCheckpointSchema back-compat", () => {

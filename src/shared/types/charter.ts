@@ -67,6 +67,40 @@ export const CharterProvenanceSchema = z
   .strict();
 export type CharterProvenance = z.infer<typeof CharterProvenanceSchema>;
 
+// sites-pinned: tests/audit/charter-lane-gate.test.ts, tests/audit/charter-extraction-executor.test.ts
+//   The partition below has exactly two consumers, and each suite drives one of
+//   them: the lane gate's span-quote refinement, and the executor's
+//   quote-presence leg. Shrink the set and both go red.
+
+/**
+ * The provenance kinds whose `ref` names a repository path, so a path-grounded or
+ * quote-grounded citation check applies to them. The other three name a
+ * non-repository source (`intent_checkpoint`, `user_feedback`) or name nothing on
+ * disk at all (`inferred`), and a grounding check against the tree would red them
+ * falsely.
+ *
+ * ONE home, beside the enum it partitions. Two callers need the same partition —
+ * the lane gate in `laneValidators` and the executor's citation check — and a
+ * second hand-written copy is exactly how a set like this drifts when a kind is
+ * added. The assertion below runs at module load, so a rename or an addition
+ * throws here instead of silently shrinking the checked set.
+ */
+export const PATH_SHAPED_PROVENANCE_KINDS = new Set<CharterProvenance["kind"]>([
+  "doc",
+  "code",
+  "comment",
+]);
+
+{
+  const known = new Set<string>(CharterProvenanceSchema.shape.kind.options);
+  const unknown = [...PATH_SHAPED_PROVENANCE_KINDS].filter((k) => !known.has(k));
+  if (unknown.length > 0) {
+    throw new Error(
+      `PATH_SHAPED_PROVENANCE_KINDS names provenance kind(s) the schema does not declare: ${unknown.join(", ")}`,
+    );
+  }
+}
+
 /**
  * A single charter. `purpose` MUST be stated in telos terms ("the audit pipeline
  * exists so maintainers can act on trustworthy findings"), never mechanism
@@ -332,9 +366,37 @@ export const FidelityVerdictSchema = z
 export type FidelityVerdict = z.infer<typeof FidelityVerdictSchema>;
 
 /**
+ * The account minimum is CONDITIONAL on the dimension (owner, 2026-09-17), never
+ * flat. A `presence` difference names its silent channel by OMITTING it from
+ * `accounts`, so it carries one account fewer than its correspondence has
+ * channels — on a two-channel correspondence, exactly one. Every other dimension
+ * needs two, because an account that contradicts no other account is not a
+ * difference.
+ *
+ * `DifferenceInputSchema` (the host-submitted half, in
+ * `src/shared/decompose/charterExtraction.ts`) already states this rule. It is
+ * applied here too because the two DECLARED records were left at a flat minimum
+ * of two when the input half was relaxed: the exported contract then refused a
+ * one-account presence record that `assembleComparison` produces.
+ */
+function refineAccountMinimum(
+  value: { dimension: DifferenceDimension; accounts: readonly unknown[] },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.dimension !== "presence" && value.accounts.length < 2) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["accounts"],
+      message: `a ${value.dimension} difference holds an account from at least two channels; only a presence difference may hold one`,
+    });
+  }
+}
+
+/**
  * A DIFFERENCE record (step 3 product, stamped by steps 4 and 5): what the
  * corresponding accounts disagree on, typed on one dimension and one relation,
- * holding EVERY channel's account in its correspondence (two or three).
+ * holding every channel's account in its correspondence EXCEPT a `presence`
+ * difference's silent channel, which is named by its absence.
  */
 export const CharterDifferenceSchema = z
   .object({
@@ -344,7 +406,7 @@ export const CharterDifferenceSchema = z
     relation: DifferenceRelationSchema,
     /** Required when `relation` is `incompatible`; absent otherwise. */
     split: DifferenceSplitSchema.optional(),
-    accounts: z.array(DifferenceAccountSchema).min(2),
+    accounts: z.array(DifferenceAccountSchema).min(1),
     /** One-sentence statement of the gap. */
     gap: z.string().min(1),
     /** For `presence`: the silent channel SHOULD have covered the goal. */
@@ -356,7 +418,8 @@ export const CharterDifferenceSchema = z
     /** Set by the fidelity step; absent until it runs. */
     fidelity: FidelityVerdictSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(refineAccountMinimum);
 export type CharterDifference = z.infer<typeof CharterDifferenceSchema>;
 
 /**
@@ -372,8 +435,9 @@ export type CharterDifferenceAnswer = z.infer<typeof CharterDifferenceAnswerSche
 
 /**
  * A charter-alignment question sourced from a DIFFERENCE (the n-ary successor of
- * {@link CharterClarificationRequestSchema}). Every account in the correspondence
- * is shown; the answer names the channel that governs.
+ * {@link CharterClarificationRequestSchema}). Every account the difference holds
+ * is shown — which is every channel except a `presence` difference's silent one —
+ * and the answer names the channel that governs.
  */
 export const CharterDifferenceQuestionSchema = z
   .object({
@@ -384,11 +448,12 @@ export const CharterDifferenceQuestionSchema = z
     dimension: DifferenceDimensionSchema,
     relation: DifferenceRelationSchema,
     split: DifferenceSplitSchema.optional(),
-    accounts: z.array(DifferenceAccountSchema).min(2),
+    accounts: z.array(DifferenceAccountSchema).min(1),
     question: z.string().min(1),
     value: ClarificationValueSchema,
     disposition: z.enum(["interactive", "finding_only"]),
     answer: CharterDifferenceAnswerSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(refineAccountMinimum);
 export type CharterDifferenceQuestion = z.infer<typeof CharterDifferenceQuestionSchema>;

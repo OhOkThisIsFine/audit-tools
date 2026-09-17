@@ -2,8 +2,11 @@ import { test, expect, describe } from "vitest";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
 import type {
+  CharterLaneGraph,
+  CharterPacketManifest,
   Ceiling,
   CharterLaneSubmission as CharterSubmission,
+  CharterLaneKind,
   IntentCheckpoint,
 } from "audit-tools/shared";
 import type { CharterExtractionMerged } from "../../src/audit/orchestrator/charterExtractionExecutor.js";
@@ -12,6 +15,7 @@ const {
   runCharterExtractionExecutor,
   resolveCharterCeiling,
   ceilingRequestsCharters,
+  checkLaneCitations,
 } = await import("../../src/audit/orchestrator/charterExtractionExecutor.js");
 
 const { renderCharterKindLanePrompt, charterExtractionKindsForCeiling } = await import(
@@ -176,7 +180,7 @@ describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scop
   });
 
   test("each lane prompt carries ONLY its own kind's scope, blind to the others", () => {
-    const stated = renderCharterKindLanePrompt(bundleWith(), {
+    const stated = renderCharterKindLanePrompt({
       kind: "stated",
       submissionPath: "/tmp/charter-extraction-stated.json",
       packetPath: "/tmp/charter-extraction-stated-packet.md",
@@ -187,20 +191,25 @@ describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scop
     // The three lanes are NAMED (the closed enum is rendered), but only the
     // stated packet is described — the revealed packet line never appears.
     expect(stated).not.toContain("comment-stripped source");
-    expect(stated).toContain('"kind": "stated"');
+    // The lane's own kind reaches it in the HEADING, never as a field to fill.
+    // The tool stamps the kind at merge, from the lane-bound submission path
+    // (owner review of prompt 8, 2026-09-17).
+    expect(stated).toContain("the **stated** lane");
+    expect(stated).not.toContain('"kind": "stated"');
     // One DAG per lane: edges mean SERVES, no cycles, levels derived by the tool.
     expect(stated).toContain("SERVES");
     expect(stated).toContain("no cycles");
     expect(stated).not.toContain("next-step");
 
-    const revealed = renderCharterKindLanePrompt(bundleWith(), {
+    const revealed = renderCharterKindLanePrompt({
       kind: "revealed",
       submissionPath: "/tmp/charter-extraction-revealed.json",
       packetPath: "/tmp/charter-extraction-revealed-packet.md",
     });
     expect(revealed).toContain("comment-stripped source");
     expect(revealed).toContain("BEHAVIOR");
-    expect(revealed).toContain('"kind": "revealed"');
+    expect(revealed).toContain("the **revealed** lane");
+    expect(revealed).not.toContain('"kind": "revealed"');
   });
 });
 
@@ -208,7 +217,7 @@ describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scop
 function merged(
   nodes: CharterSubmission["nodes"],
   edges: CharterSubmission["edges"] = [],
-  kind: CharterSubmission["kind"] = "stated",
+  kind: CharterLaneKind = "stated",
 ): CharterExtractionMerged {
   return { lanes: [{ kind, nodes, edges }] };
 }
@@ -441,5 +450,153 @@ describe("runCharterExtractionExecutor — citation validation", () => {
     expect(reg.citation_validation.citation_count).toBe(1);
     expect(reg.citation_validation.checked_count).toBe(0);
     expect(reg.validation_issues).toHaveLength(0);
+  });
+});
+
+// The QUOTE-PRESENCE leg of `checkLaneCitations` — the half of the quote
+// requirement that only this boundary can judge (owner decision, 2026-09-17:
+// "do both").
+//
+// The lane gate refuses a quoteless citation that names a SPAN, because that is
+// unverifiable whatever the context. It cannot refuse a quoteless BARE path,
+// because the same citation is honest or evasive depending on a fact the gate
+// does not hold: `charterPackets.ts` delivers some files as a file-tree path with
+// NO excerpt, and for those the bare path is the lane's only truthful citation.
+// Only the packet manifest tells the two apart, and only this function holds it.
+//
+// Every case below is driven through `checkLaneCitations` directly, because the
+// executor loads its manifests from an artifacts directory and the property under
+// test is the rule, not the load.
+function laneCiting(
+  provenance: { kind: string; ref: string; quote?: string }[],
+): CharterLaneGraph[] {
+  return [
+    {
+      kind: "stated",
+      nodes: [
+        {
+          node_id: "s1",
+          purpose: "keep every promise the service gives a customer",
+          premise_height: 0,
+          provenance: provenance as CharterLaneGraph["nodes"][number]["provenance"],
+          confidence: "high",
+        },
+      ],
+      edges: [],
+    },
+  ];
+}
+
+function manifestDelivering(...paths: string[]): CharterPacketManifest[] {
+  return [
+    {
+      schema_version: "charter-packet-manifest/v1",
+      kind: "stated",
+      excerpts: paths.map((source_path, i) => ({
+        excerpt_id: `e${i}`,
+        source_path,
+        evidence_class: "doc_prose" as CharterPacketManifest["excerpts"][number]["evidence_class"],
+        line_runs: [{ start: 1, end: 3 }],
+        line_count: 3,
+        prefix_width: 4,
+      })),
+      coverage: { kind: "stated", classes: [] },
+    },
+  ];
+}
+
+describe("checkLaneCitations — the quote-presence leg", () => {
+  test("refuses a quoteless citation of a file the packet EXCERPTED", async () => {
+    const root = await fixtureRoot();
+    const result = checkLaneCitations(laneCiting([{ kind: "code", ref: "src/a.ts" }]), {
+      root,
+      manifests: manifestDelivering("src/a.ts"),
+    });
+    expect(result.issues.join("\n")).toContain("carries no quote");
+    expect(result.issues.join("\n")).toContain("src/a.ts");
+    expect(result.summary.failed_count).toBe(1);
+    expect(result.summary.quote_presence_checked).toBe(true);
+  });
+
+  test("ACCEPTS a quoteless citation of a file the packet delivered as a tree entry alone", async () => {
+    // The rule the design gate found: refusing this would red an HONEST citation
+    // and press the lane into fabricating a quote.
+    const root = await fixtureRoot();
+    const result = checkLaneCitations(laneCiting([{ kind: "code", ref: "src/a.ts" }]), {
+      root,
+      manifests: manifestDelivering("src/b.ts"),
+    });
+    expect(result.issues).toHaveLength(0);
+    expect(result.summary.failed_count).toBe(0);
+    expect(result.summary.quote_presence_checked).toBe(true);
+  });
+
+  test("accepts a QUOTED citation of an excerpted file", async () => {
+    const root = await fixtureRoot();
+    const result = checkLaneCitations(
+      laneCiting([{ kind: "code", ref: "src/a.ts", quote: "beta" }]),
+      { root, manifests: manifestDelivering("src/a.ts") },
+    );
+    expect(result.issues).toHaveLength(0);
+  });
+
+  test("an EMPTY quote reads as no quote", async () => {
+    const root = await fixtureRoot();
+    const result = checkLaneCitations(
+      laneCiting([{ kind: "code", ref: "src/a.ts", quote: "   " }]),
+      { root, manifests: manifestDelivering("src/a.ts") },
+    );
+    expect(result.issues.join("\n")).toContain("carries no quote");
+  });
+
+  test("with NO manifest the leg ABSTAINS and says so, never passes silently", async () => {
+    const root = await fixtureRoot();
+    const result = checkLaneCitations(laneCiting([{ kind: "code", ref: "src/a.ts" }]), {
+      root,
+      manifests: [],
+    });
+    expect(result.issues).toHaveLength(0);
+    expect(
+      result.summary.quote_presence_checked,
+      "an empty issue list must never be indistinguishable from a leg that never ran",
+    ).toBe(false);
+  });
+
+  test("the leg still reports with NO repository root — it reads the manifest, not the disk", () => {
+    // The grounding leg abstains without a root. This one does not depend on the
+    // root at all, so folding it in after that early return would have silently
+    // skipped it on every rootless ingest.
+    const result = checkLaneCitations(laneCiting([{ kind: "code", ref: "src/a.ts" }]), {
+      manifests: manifestDelivering("src/a.ts"),
+    });
+    expect(result.summary.status).toBe("not_run");
+    expect(result.summary.quote_presence_checked).toBe(true);
+    expect(result.issues.join("\n")).toContain("carries no quote");
+    expect(result.summary.failed_count).toBe(1);
+  });
+
+  test("a non-path provenance kind is left alone even when its ref matches an excerpt", async () => {
+    const root = await fixtureRoot();
+    const result = checkLaneCitations(
+      laneCiting([{ kind: "intent_checkpoint", ref: "src/a.ts" }]),
+      { root, manifests: manifestDelivering("src/a.ts") },
+    );
+    expect(result.issues).toHaveLength(0);
+  });
+
+  test("a `#symbol` ref resolves to its FILE before the excerpt lookup", async () => {
+    // The manifest records a path; the lane cites a span inside it. Comparing the
+    // raw ref would have missed every anchored citation.
+    const root = await fixtureRoot();
+    const result = checkLaneCitations(
+      laneCiting([{ kind: "code", ref: "src/a.ts#alpha", quote: "alpha" }]),
+      { root, manifests: manifestDelivering("src/a.ts") },
+    );
+    expect(result.issues).toHaveLength(0);
+    const quoteless = checkLaneCitations(
+      laneCiting([{ kind: "code", ref: "src/a.ts#alpha" }]),
+      { root, manifests: manifestDelivering("src/a.ts") },
+    );
+    expect(quoteless.issues.join("\n")).toContain("carries no quote");
   });
 });

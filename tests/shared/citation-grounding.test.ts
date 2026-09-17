@@ -74,6 +74,29 @@ describe("parseCitationRef — path, single line, and RANGE", () => {
     expect(parseCitationRef("   ")).toBeUndefined();
     expect(parseCitationRef(":12-19")).toBeUndefined();
   });
+
+  // `<path>#<symbol>` is the form the host prompts teach FIRST — a symbol
+  // outlives a line number, which is why the repo-wide rule is "cite a SYMBOL,
+  // never a bare line number" (docs/backlog/durable-traps.md). A parser blind to
+  // the suffix resolved the whole reference as a path and returned
+  // `unknown_path` for every citation an obedient lane wrote.
+  it("reads the `#<symbol>` suffix as an anchor, not as part of the path", () => {
+    expect(parseCitationRef("src/a.ts#Top")).toMatchObject({ path: "src/a.ts" });
+    expect(parseCitationRef("src/a.ts#Top")!.start_line).toBeUndefined();
+    // A markdown heading anchor is the same shape and resolves the same way.
+    expect(parseCitationRef("docs/goals.md#current-state")).toMatchObject({
+      path: "docs/goals.md",
+    });
+    // Both suffixes at once: the line claim is still read.
+    expect(parseCitationRef("src/a.ts#Top:12")).toMatchObject({
+      path: "src/a.ts",
+      start_line: 12,
+    });
+    // `raw` is still byte-identical — the anchor is read, never rewritten away.
+    expect(parseCitationRef("src/a.ts#Top")!.raw).toBe("src/a.ts#Top");
+    // A bare anchor carries no path.
+    expect(parseCitationRef("#Top")).toBeUndefined();
+  });
 });
 
 describe("countSourceLines — the TRUE length, not the split length", () => {

@@ -1,3 +1,6 @@
+// sites-pinned: tests/audit/charter-extraction-executor.test.ts, tests/shared/charter-layer.test.ts
+//   The packet and coverage shapes here are written by the emit pass and read by
+//   the executor's citation legs; those two suites drive both ends.
 /**
  * The charter evidence PACKET contract — what a blind lane was handed, stated in
  * a shape the lane can copy a citation out of and a consumer can measure.
@@ -158,11 +161,17 @@ export interface CharterPacketManifest {
  * report `checked` over work it never examined.
  */
 export interface CitationValidationSummary {
+  /**
+   * The ON-DISK grounding leg's status, and only that leg's. The two boolean
+   * fields below are the other legs' own affirmations, because each leg abstains
+   * on a different input and one status cannot speak for three.
+   */
   status: "checked" | "not_run" | "no_citations";
   /** Provenance refs seen. */
   citation_count: number;
   /** Refs parsed and validated. */
   checked_count: number;
+  /** Citations refused, counted across EVERY leg that ran, not the grounding leg alone. */
   failed_count: number;
   /**
    * Whether the delivered-evidence leg ran. False when no packet manifest was
@@ -170,4 +179,11 @@ export interface CitationValidationSummary {
    * "was this line ever handed to the author" was not asked.
    */
   delivered_evidence_checked: boolean;
+  /**
+   * Whether the quote-presence leg ran: did each citation of a file the packet
+   * EXCERPTED carry the text it copied. False when no packet manifest was
+   * available, because the question is only answerable against the manifest —
+   * which file was excerpted and which was delivered as a bare tree entry.
+   */
+  quote_presence_checked: boolean;
 }

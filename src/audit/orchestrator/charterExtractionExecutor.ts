@@ -12,12 +12,14 @@ import {
   assembleLaneGraph,
   proposeCorrespondences,
   checkCitations,
+  provenancePath,
+  PATH_SHAPED_PROVENANCE_KINDS,
   laneAssetsDir,
   readOptionalJsonFile,
   type CharterPacketCoverage,
   type CharterPacketManifest,
   type CharterLaneGraph,
-  type CharterLaneSubmission,
+  type CharterExtractionMerged,
   type Ceiling,
   type CitationValidationSummary,
   type DeliveredExcerpt,
@@ -27,10 +29,17 @@ import {
 import { charterExtractionCoverageFilename } from "../cli/laneSubmissions.js";
 import { charterExtractionKindsForCeiling } from "../cli/charterExtractionPrompt.js";
 
-/** The tool-merged extraction submission: every lane's DAG, in canonical kind order. */
-export interface CharterExtractionMerged {
-  lanes: CharterLaneSubmission[];
-}
+/**
+ * The tool-merged extraction submission: every lane's DAG, in canonical kind
+ * order, each lane stamped with the kind the TOOL resolved from its bound path.
+ *
+ * ONE home. The shape is declared by `CharterExtractionMergedSchema` in
+ * `audit-tools/shared` and only re-exported here. It was a second, hand-written
+ * interface until 2026-09-17, when dropping the lane-stated `kind` made the two
+ * declarations disagree — a lane submission no longer carries a kind, and the
+ * merged lane does.
+ */
+export type { CharterExtractionMerged };
 
 /**
  * Resolve the charter-layer ceiling from the confirmed checkpoint. The ceiling is
@@ -54,9 +63,6 @@ export function resolveCharterCeiling(
 export function ceilingRequestsCharters(ceiling: Ceiling): boolean {
   return ceiling.rung === "deep" || ceiling.rung === "deepest";
 }
-
-/** Provenance kinds whose `ref` is a repository path, so a citation check applies. */
-const PATH_SHAPED_PROVENANCE = new Set(["doc", "code", "comment"]);
 
 /**
  * Read the per-kind packet manifests the EMIT pass persisted. The packet is built
@@ -116,7 +122,7 @@ export function checkLaneCitations(
     for (const owner of owners) {
       for (const provenance of owner.provenance) {
         citationCount += 1;
-        if (!PATH_SHAPED_PROVENANCE.has(provenance.kind)) continue;
+        if (!PATH_SHAPED_PROVENANCE_KINDS.has(provenance.kind)) continue;
         citations.push({
           owner_id: owner.id,
           ref: provenance.ref,
@@ -126,16 +132,54 @@ export function checkLaneCitations(
     }
   }
 
+  // The QUOTE-PRESENCE leg. It runs against the manifests alone, so it is
+  // computed before the grounding leg's root abstention and reported by BOTH
+  // exits: a missing repository root says nothing about what the packets
+  // delivered.
+  //
+  // Why the lane gate does not already cover this. The gate refuses a quoteless
+  // citation that names a SPAN — a `#symbol` anchor or a line suffix — because
+  // that one is unverifiable by construction and needs no context to judge. What
+  // it cannot judge is a quoteless citation of a BARE path, because the two
+  // meanings of that citation are told apart only by the evidence packet: for a
+  // file the packet delivered as a tree entry with no excerpt, the bare path is
+  // the lane's ONLY truthful citation and demanding a quote would invite a
+  // fabricated one; for a file the packet EXCERPTED, the lane was handed the text
+  // and declining to copy it is the defect. The gate holds the repository's path
+  // set, never the manifests, so it cannot see which file is which. This boundary
+  // holds the manifests, so the distinction is decidable here and nowhere else
+  // (owner decision, 2026-09-17: put each rule at the boundary that owns it).
+  const excerptedPaths = new Set<string>(
+    options.manifests.flatMap((manifest) =>
+      manifest.excerpts.map((excerpt) => excerpt.source_path),
+    ),
+  );
+  const quotePresenceChecked = options.manifests.length > 0;
+  const quoteIssues = quotePresenceChecked
+    ? citations
+        .filter(
+          (citation) =>
+            (citation.quote === undefined || citation.quote.trim().length === 0) &&
+            excerptedPaths.has(provenancePath(citation.ref)),
+        )
+        .map(
+          (citation) =>
+            `${citation.owner_id}: citation "${citation.ref}" carries no quote — ` +
+            "your packet excerpted that file, so copy the text your claim rests on",
+        )
+    : [];
+
   if (!options.root) {
-    // A RECORDED ABSTENTION, never an implicit pass.
+    // A RECORDED ABSTENTION for the grounding leg, never an implicit pass.
     return {
-      issues: [],
+      issues: quoteIssues,
       summary: {
         status: "not_run",
         citation_count: citationCount,
         checked_count: 0,
-        failed_count: 0,
+        failed_count: quoteIssues.length,
         delivered_evidence_checked: false,
+        quote_presence_checked: quotePresenceChecked,
       },
     };
   }
@@ -155,16 +199,20 @@ export function checkLaneCitations(
   });
   const failures = result.checks.filter((check) => check.verdict !== "ok");
   return {
-    issues: failures.map(
-      (check) =>
-        `${check.owner_id}: citation "${check.ref}" ${check.verdict}${check.detail ? ` — ${check.detail}` : ""}`,
-    ),
+    issues: [
+      ...failures.map(
+        (check) =>
+          `${check.owner_id}: citation "${check.ref}" ${check.verdict}${check.detail ? ` — ${check.detail}` : ""}`,
+      ),
+      ...quoteIssues,
+    ],
     summary: {
       status: "checked",
       citation_count: citationCount,
       checked_count: result.checked_count,
-      failed_count: failures.length,
+      failed_count: failures.length + quoteIssues.length,
       delivered_evidence_checked: result.delivered_evidence_checked,
+      quote_presence_checked: quotePresenceChecked,
     },
   };
 }
@@ -195,6 +243,7 @@ export function emptyCharterRegister(
       citation_count: 0,
       checked_count: 0,
       failed_count: 0,
+      quote_presence_checked: false,
       delivered_evidence_checked: false,
     },
   };

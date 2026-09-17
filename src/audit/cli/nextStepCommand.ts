@@ -927,7 +927,7 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
           id: lane,
           label: `Charter ${kind} author (blind lane)`,
           promptFilename: `charter-extraction-${kind}-prompt.md`,
-          promptText: renderCharterKindLanePrompt(result.bundle, {
+          promptText: renderCharterKindLanePrompt({
             kind,
             submissionPath,
             packetPath,

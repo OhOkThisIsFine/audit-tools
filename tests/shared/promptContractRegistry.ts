@@ -248,8 +248,8 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     builder: "renderCharterKindLanePrompt",
     file: "src/audit/cli/charterExtractionPrompt.ts",
     disposition: "derived",
-    schema: { name: "charterLaneSchema", file: "src/audit/cli/laneValidators.ts", object: charterLaneSchema("stated", new Set()) },
-    render: () => renderCharterKindLanePrompt({ structure_decomposition: { generated_at: "2026-01-01T00:00:00.000Z", target: "structure", node_universe_size: 0, source_ids: ["call_import"], consensus: [], contested: [], findings: [] } }, { kind: "stated", submissionPath: "registry-fixture/submission.json", packetPath: "registry-fixture/packet.json" }),
+    schema: { name: "charterLaneSchema", file: "src/audit/cli/laneValidators.ts", object: charterLaneSchema(new Set()) },
+    render: () => renderCharterKindLanePrompt({ kind: "stated", submissionPath: "registry-fixture/submission.json", packetPath: "registry-fixture/packet.json" }),
   },
   {
     builder: "renderCharterComparisonPrompt",

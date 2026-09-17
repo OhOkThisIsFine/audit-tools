@@ -22,6 +22,7 @@
 import { z } from "zod";
 import { hashContent } from "../hash.js";
 import { compareCodeUnits } from "../compareCodeUnits.js";
+import { parseCitationRef } from "../validation/citationGrounding.js";
 import {
   CharterLaneGraphSchema,
   CharterLaneKindSchema,
@@ -69,19 +70,34 @@ const LaneEdgeInputSchema = z
  * The charter-EXTRACTION submission (step 1): ONE blind lane's goal DAG. The lane
  * mints local ids; `premise_height` is not asked for (the tool derives it);
  * `files` is optional (the Stated lane cites provenance only).
+ *
+ * It asks for NO `kind`. Each lane writes its own file at a lane-bound path
+ * (`charter_extraction_<kind>`, `laneSubmissionPath`), so the TOOL already knows
+ * which lane spoke and stamps the kind at merge. A lane restating its own kind
+ * was the one thing in this contract that could only ever check the lane against
+ * itself (owner review of prompt 8, 2026-09-17).
  */
 export const CharterSubmissionSchema = z
   .object({
-    kind: CharterLaneKindSchema,
     nodes: z.array(LaneNodeInputSchema).default([]),
     edges: z.array(LaneEdgeInputSchema).default([]),
   })
   .strict();
 export type CharterSubmission = z.infer<typeof CharterSubmissionSchema>;
 
+/**
+ * ONE lane's DAG as the TOOL records it: the lane's own submission plus the kind
+ * the tool stamped from the bound path it arrived on. This is the shape every
+ * consumer downstream of the merge reads, and the only one that carries `kind`.
+ */
+export const CharterMergedLaneSchema = CharterSubmissionSchema.extend({
+  kind: CharterLaneKindSchema,
+}).strict();
+export type CharterMergedLane = z.infer<typeof CharterMergedLaneSchema>;
+
 /** The TOOL-merged extraction submission: every lane's DAG, handed to the executor by path. */
 export const CharterExtractionMergedSchema = z
-  .object({ lanes: z.array(CharterSubmissionSchema) })
+  .object({ lanes: z.array(CharterMergedLaneSchema) })
   .strict();
 export type CharterExtractionMerged = z.infer<typeof CharterExtractionMergedSchema>;
 
@@ -106,7 +122,7 @@ export interface AssembledLaneGraph {
  * the node, so 0 is a top-level purpose and a leaf mechanism sits deepest.
  */
 export function assembleLaneGraph(
-  submission: CharterSubmission,
+  submission: CharterMergedLane,
   params: { universe: ReadonlySet<string> },
 ): AssembledLaneGraph {
   const validation_issues: string[] = [];
@@ -236,12 +252,22 @@ function refuseCycles(
 
 // ── Step 2: tool-proposed correspondence candidates ────────────────────────────
 
-/** The path part of a provenance ref: `<path>#<symbol>` or `<path>:<line>` → `<path>`. */
+/**
+ * The path part of a provenance ref: `<path>#<symbol>` or `<path>:<line>` →
+ * `<path>`. ONE home for the grammar — this delegates to `parseCitationRef`
+ * rather than scanning the ref itself.
+ *
+ * It scanned the ref itself until 2026-09-17, and the two scanners disagreed on
+ * half the forms prompt 8 teaches: this one stripped `#<symbol>` but not a
+ * RANGE, the parser stripped a range but not `#<symbol>`. So `src/a.ts:12-19`
+ * reached `crossRefPaths`, `assembleComparison` and the fidelity packet as a
+ * path no file can match — a correspondence candidate silently missed, a
+ * host-added correspondence silently dropped as "fewer than two checkable
+ * evidence refs", and a packet slice that could only report the file as
+ * unreadable. An unresolvable ref is returned unchanged, exactly as before.
+ */
 export function provenancePath(ref: string): string {
-  const hash = ref.indexOf("#");
-  const cut = hash >= 0 ? ref.slice(0, hash) : ref;
-  const colon = cut.lastIndexOf(":");
-  return colon > 0 && /^\d+$/.test(cut.slice(colon + 1)) ? cut.slice(0, colon) : cut;
+  return parseCitationRef(ref)?.path ?? ref;
 }
 
 function memberKey(members: readonly { kind: CharterLaneKind; node_ids: readonly string[] }[]): string {

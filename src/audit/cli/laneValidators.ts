@@ -14,10 +14,12 @@
  * findings, a decisions map). Both are expressed as the same
  * `SubmissionIssue | null` validator so a caller never has to know which.
  */
-import type { ZodTypeAny } from "zod";
+import type { RefinementCtx, ZodTypeAny } from "zod";
 
 import {
   CharterLaneSubmissionSchema,
+  PATH_SHAPED_PROVENANCE_KINDS,
+  citationNamesASpan,
   CharterComparisonSubmissionSchema,
   CharterFidelitySubmissionSchema,
   ClarificationAnswersSubmissionSchema,
@@ -25,7 +27,7 @@ import {
   SynthesisNarrativeSchema,
   SystemicChallengeSubmissionSchema,
   isRecord,
-  type CharterKind,
+  type CharterProvenance,
   type SubmissionIssue,
 } from "audit-tools/shared";
 import { IntentEquivalenceVerdictSchema } from "../orchestrator/intentEquivalenceExecutor.js";
@@ -78,28 +80,30 @@ export function unwrapSubmissionArray(
 }
 
 /**
- * The charter lane schema: the submission shape PLUS the two refinements that
- * make a blind lane trustworthy — kind purity (a lane may only carry its own
- * kind; anything else is a mis-routed submission) and scope grounding (a
- * teleology node citing files the repo does not contain is refused whole,
- * naming them, never silently narrowed).
+ * The charter lane schema: the submission shape PLUS scope grounding — a goal
+ * node citing files the repo does not contain is refused whole, naming them,
+ * never silently narrowed.
+ *
+ * It carried a second refinement until 2026-09-17: kind purity, which checked
+ * the lane's self-declared `kind` against the lane it arrived as. The submission
+ * no longer states a kind at all — each lane writes its own file at a lane-bound
+ * path and the tool stamps the kind at merge — so the field, and the check that
+ * only ever compared the lane against itself, are both gone (owner review of
+ * prompt 8). `.strict()` still refuses a submission that states one, by name,
+ * rather than ignoring it: two answers to "which lane is this" is worse than
+ * one refusal, and the tool's answer is the bound path.
+ *
+ * It took the lane's `kind` as a parameter for that one check, and takes none
+ * now: every extraction lane answers to the identical contract, and WHICH lane
+ * a submission is, is the bound path it arrived on. The caller still resolves
+ * the kind, to decide that this is a charter lane at all.
  *
  * `repoFiles` is the manifest's path set. It is a parameter rather than a
  * capture so the gate and the recovery verb apply the identical refinement
  * against the identical universe.
  */
-export function charterLaneSchema(
-  kind: CharterKind,
-  repoFiles: ReadonlySet<string>,
-): ZodTypeAny {
+export function charterLaneSchema(repoFiles: ReadonlySet<string>): ZodTypeAny {
   return CharterLaneSubmissionSchema.superRefine((submission, ctx) => {
-    if (submission.kind !== kind) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["kind"],
-        message: `lane '${kind}' may only carry kind '${kind}', got '${submission.kind}'`,
-      });
-    }
     submission.nodes.forEach((node, ni) => {
       const unknownFiles = (node.files ?? []).filter((f) => !repoFiles.has(f));
       if (unknownFiles.length > 0) {
@@ -111,6 +115,50 @@ export function charterLaneSchema(
             "scopes must be repo-relative paths exactly as the evidence packet names them",
         });
       }
+      refineSpanCitationsCarryAQuote(node.provenance, ["nodes", ni], ctx);
+    });
+    submission.edges.forEach((edge, ei) => {
+      refineSpanCitationsCarryAQuote(edge.provenance, ["edges", ei], ctx);
+    });
+  });
+}
+
+/**
+ * Refuse a path-shaped citation that names a SPAN inside its file — a `#symbol`
+ * anchor or a line suffix — and carries no quote.
+ *
+ * This is the half of the quote requirement the lane gate OWNS, and it owns it
+ * because the defect is visible in the submission alone: naming a span without
+ * quoting it is unverifiable by construction. Nothing resolves an anchor, so the
+ * quote is the only evidence that the named span says what the node claims, and
+ * no amount of context could make the citation checkable.
+ *
+ * It deliberately leaves a quoteless BARE-path citation alone, because that case
+ * is not a defect here — a lane whose packet delivered a file as a tree entry with
+ * no excerpt has the bare path as its only truthful citation. Whether a file was
+ * excerpted is a fact of the evidence packet's manifest, which this gate cannot
+ * see: it holds the repository's path set, not the packet. So the packet-aware
+ * half lives at the boundary that holds the manifests — `checkLaneCitations` in
+ * `charterExtractionExecutor` — and refuses a quoteless citation of a file the
+ * packet DID excerpt. Two rules, one property, each at the boundary that owns it
+ * (owner decision, 2026-09-17).
+ */
+function refineSpanCitationsCarryAQuote(
+  provenance: readonly CharterProvenance[],
+  path: readonly (string | number)[],
+  ctx: RefinementCtx,
+): void {
+  provenance.forEach((p, pi) => {
+    if (!PATH_SHAPED_PROVENANCE_KINDS.has(p.kind)) return;
+    if (p.quote !== undefined && p.quote.trim().length > 0) return;
+    if (!citationNamesASpan(p.ref)) return;
+    ctx.addIssue({
+      code: "custom",
+      path: [...path, "provenance", pi, "quote"],
+      message:
+        `citation "${p.ref}" names a span inside the file but carries no quote — ` +
+        "a span reference is only checkable through the text you copied, so quote it, " +
+        "or cite the file alone",
     });
   });
 }
@@ -182,9 +230,10 @@ export function laneSubmissionValidator(
   const schema = LANE_SUBMISSION_SCHEMAS[systemicRound ? GATE_LANES.systemic_challenge : lane];
   if (schema) return (value) => schemaIssue(schema, value);
 
-  const charterKind = charterKindForLane(lane);
-  if (charterKind) {
-    const laneSchema = charterLaneSchema(charterKind, context.repoFiles);
+  // The kind decides only that this IS an extraction lane; every extraction
+  // lane answers to the identical contract.
+  if (charterKindForLane(lane)) {
+    const laneSchema = charterLaneSchema(context.repoFiles);
     return (value) => schemaIssue(laneSchema, value);
   }
 

@@ -20,12 +20,13 @@ import {
   type ZodTypeAny,
 } from "zod";
 import { describe, expect, it } from "vitest";
-import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
 import { renderCharterComparisonPrompt } from "../../src/audit/cli/charterComparisonPrompt.js";
 import { renderCharterKindLanePrompt } from "../../src/audit/cli/charterExtractionPrompt.js";
+import { renderCharterFidelityPrompt } from "../../src/audit/cli/charterFidelityPrompt.js";
 import {
   CharterComparisonSubmissionSchema,
+  CharterFidelitySubmissionSchema,
   CharterSubmissionSchema,
 } from "../../src/shared/decompose/charterExtraction.js";
 import { CharterProvenanceSchema } from "../../src/shared/types/charter.js";
@@ -49,24 +50,9 @@ import { promptContractRegistry } from "./promptContractRegistry.js";
 const FAILURE_SIGNATURE =
   "contract:a-prompt-renders-its-contract-from-the-contract:not-yet-satisfied";
 
-/** Smallest bundle the lane renderer accepts — only `consensus` is read. */
-function bundle(): ArtifactBundle {
-  return {
-    structure_decomposition: {
-      generated_at: "2026-01-01T00:00:00.000Z",
-      target: "structure",
-      node_universe_size: 0,
-      source_ids: ["call_import"],
-      consensus: [],
-      contested: [],
-      findings: [],
-    },
-  };
-}
-
 describe(FAILURE_SIGNATURE, () => {
   it("renders the charter provenance enum exhaustively, never as an open list", () => {
-    const prompt = renderCharterKindLanePrompt(bundle(), {
+    const prompt = renderCharterKindLanePrompt({
       kind: "stated",
       submissionPath: "x/submission.json",
       packetPath: "x/packet.json",
@@ -136,7 +122,7 @@ describe(FAILURE_SIGNATURE, () => {
     // what one run did, producing 14 citations overshooting their files by up to
     // 52x. Obedience has to be SUFFICIENT, so the grammar must name the shape and
     // say where it is copied from.
-    const prompt = renderCharterKindLanePrompt(bundle(), {
+    const prompt = renderCharterKindLanePrompt({
       kind: "stated",
       submissionPath: "x/submission.json",
       packetPath: "x/packet.json",
@@ -144,17 +130,58 @@ describe(FAILURE_SIGNATURE, () => {
 
     expect(
       prompt,
-      "the ref grammar must state the line-range shape the packet publishes",
-    ).toContain("<path>:<startLine>-<endLine>");
+      "the ref grammar must state the SYMBOL shape, the form the prompt prefers",
+    ).toContain("<path>#<symbol>");
+    // Line numbers left the grammar on 2026-09-17 (owner review of prompt 8, and
+    // the durable trap "cite a SYMBOL, never a bare line number"). A line number
+    // drifts, and a drifted number cannot be repaired — only deleted. So the
+    // retired line shapes must not come back into the taught grammar.
+    for (const retired of ["<path>:<startLine>-<endLine>", "<path>:<N>", "<path>:<line>"]) {
+      expect(
+        prompt,
+        `the retired line-number form \`${retired}\` must not be taught again`,
+      ).not.toContain(retired);
+    }
     expect(
       prompt,
-      "the prompt must say the ref is COPIED, never counted or inferred",
+      "the prompt must say the QUOTE is copied, never paraphrased or invented",
     ).toContain("COPIED");
     expect(
       prompt,
       "a lane must be told it never has to leave the packet to cite correctly",
     ).toContain("SUFFICIENT");
     expect(prompt).not.toContain('"ref": "<path/id>"');
+  });
+
+  it("states BOTH quote rules the tool enforces, and the one case that takes no quote", () => {
+    // Obedience must be SUFFICIENT, and the quote requirement is enforced at two
+    // boundaries: `charterLaneSchema` refuses a quoteless ref that names a span,
+    // and `checkLaneCitations` refuses a quoteless citation of a file the packet
+    // EXCERPTED. A prompt stating neither would send an obedient lane into a
+    // refusal it could not have predicted.
+    //
+    // The third sentence is the counterweight, and it is not optional: a
+    // file-tree-only file has no quote to give, and a lane pressed for one
+    // FABRICATES it (durable trap, docs/backlog/durable-traps.md). So the prompt
+    // must license the quoteless bare path in the one case the tool allows it.
+    const prompt = renderCharterKindLanePrompt({
+      kind: "structural",
+      submissionPath: "x/submission.json",
+      packetPath: "x/packet.json",
+    });
+
+    expect(
+      prompt,
+      "the lane gate refuses a quoteless `<path>#<symbol>` — the prompt must say so",
+    ).toMatch(/`<path>#<symbol>`\) with no quote/);
+    expect(
+      prompt,
+      "the executor refuses a quoteless citation of an EXCERPTED file — the prompt must say so",
+    ).toMatch(/lists as an excerpt with no quote/);
+    expect(
+      prompt,
+      "the one quoteless case the tool accepts must be licensed, or the lane invents a quote",
+    ).toMatch(/excerpts nowhere/);
   });
 
   it("renders a charter-COMPARISON example that is itself a valid submission", () => {
@@ -205,6 +232,50 @@ describe(FAILURE_SIGNATURE, () => {
         prompt,
         `the comparison prompt must name provenance kind '${member}' — the validator ` +
           "accepts it and a prompt that omits it teaches a smaller contract",
+      ).toContain(member);
+    }
+  });
+
+  it("renders a charter-FIDELITY example that is itself a valid submission", () => {
+    // The third instance of the same class, one step further down the charter
+    // layer. The fidelity example wrote both alternations into field VALUES
+    // (`"verdict": "supported | interpretation | unverifiable"`) and carried
+    // `over_read_side` beside a non-`interpretation` verdict — which the strict
+    // schema refuses on its own superRefine, and which the prompt's own closing
+    // rule contradicted one line later. (Owner review 2026-09-17, prompt 9b.)
+    const prompt = renderCharterFidelityPrompt({
+      submissionPath: "x/fidelity.json",
+      packetPath: "x/fidelity-packet.md",
+    });
+
+    const fence = /```json\n([\s\S]*?)\n```/u.exec(prompt);
+    expect(
+      fence,
+      "the fidelity prompt must carry exactly one fenced JSON example",
+    ).not.toBeNull();
+    const parsed = CharterFidelitySubmissionSchema.safeParse(JSON.parse(fence![1]!));
+    expect(
+      parsed.success ? null : parsed.error.issues,
+      "a submission copied verbatim from the fidelity prompt's own example must " +
+        "satisfy CharterFidelitySubmissionSchema — obedience has to be SUFFICIENT",
+    ).toBeNull();
+
+    expect(
+      fence![1],
+      "the example must carry real literals, never `<...>` placeholders",
+    ).not.toMatch(/<[^>\n]+>/u);
+
+    // Every verdict the lane may return must be SHOWN, not only listed: the
+    // example is the shape a reader copies, and the three verdicts differ in
+    // whether they carry `over_read_side` at all.
+    const shown = new Set(
+      (parsed.success ? parsed.data.verdicts : []).map((v) => v.verdict),
+    );
+    for (const member of ["supported", "interpretation", "unverifiable"]) {
+      expect(
+        shown,
+        `the fidelity example must show verdict '${member}' — a reader copies the ` +
+          "example, and only the example says which fields go with which verdict",
       ).toContain(member);
     }
   });

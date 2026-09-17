@@ -1,5 +1,4 @@
 // sites-pinned: tests/shared/prompt-renders-its-contract.test.ts, tests/audit/charter-emit-order.test.ts
-import type { ArtifactBundle } from "../io/artifacts.js";
 import { CharterProvenanceSchema } from "audit-tools/shared";
 import type { Ceiling, CharterLaneKind } from "audit-tools/shared";
 
@@ -89,26 +88,13 @@ const KIND_LANE_TEXT: Record<
  * only its own kind's perspective, its materialized evidence packet, and its
  * submission path.
  */
-export function renderCharterKindLanePrompt(
-  bundle: ArtifactBundle,
-  opts: {
-    kind: EstimatorCharterKind;
-    submissionPath: string;
-    packetPath: string;
-  },
-): string {
-  const consensus = bundle.structure_decomposition?.consensus ?? [];
+export function renderCharterKindLanePrompt(opts: {
+  kind: EstimatorCharterKind;
+  submissionPath: string;
+  packetPath: string;
+}): string {
   const lane = KIND_LANE_TEXT[opts.kind];
   const exampleKind = exampleProvenanceKind(opts.kind);
-
-  const hintLines = consensus.length
-    ? consensus.map((node) => {
-        const preview = node.members.slice(0, 12).join(", ");
-        const more =
-          node.members.length > 12 ? ` (+${node.members.length - 12} more)` : "";
-        return `- ${node.members.length} file(s): ${preview}${more}`;
-      })
-    : ["- (no confident subsystems were found — organize the goal graph yourself)"];
 
   return [
     `# Design review — charter extraction, the **${opts.kind}** lane`,
@@ -141,9 +127,11 @@ export function renderCharterKindLanePrompt(
     "",
     lane.packet,
     "",
-    "Its `## Provenance manifest` block names every excerpt with the exact line runs delivered, and every",
-    "content line is prefixed with its TRUE line number in its own source file (`  12| …`). COPY a",
-    "citation from there; never count lines, never infer them, and never cite a range that spans two runs.",
+    "Its `## Provenance manifest` block names every excerpt the packet delivered, and every content line",
+    "carries its source line number as a prefix (`  12| class DeliveryWindow {`). That prefix is the",
+    "packet's own formatting, not part of the file: STRIP it before you copy a quote, and never cite a",
+    "line number. Cite only material the packet shows you. The packet is SUFFICIENT — you never leave it",
+    "to cite correctly.",
     "",
     "## Build your goal graph",
     "",
@@ -152,14 +140,11 @@ export function renderCharterKindLanePrompt(
     "Each node carries:",
     "- `node_id` — a short slug you choose; it is local to this submission.",
     "- `purpose` — the purpose statement (the WHY, not the WHAT).",
-    "- `provenance` — evidence citations: `<path>#<symbol>` with a literal quote, or `<path>:<line>` for comments and unnamed blocks.",
+    "- `provenance` — evidence citations. Each one names a SYMBOL or a file, and carries the literal text you copied. Never a line number.",
     "- `confidence` — `\"high\"` | `\"medium\"` | `\"low\"`.",
     lane.filesRule,
     "",
     "Each edge carries `from`, `to`, and `provenance` for the relationship itself.",
-    "",
-    "A suggested scaffold from structure analysis (a hint — adjust boundaries where evidence supports it):",
-    ...hintLines,
     "",
     "## Do not emit",
     "",
@@ -172,7 +157,6 @@ export function renderCharterKindLanePrompt(
     "",
     "```json",
     "{",
-    `  "kind": "${opts.kind}",`,
     '  "nodes": [',
     "    {",
     '      "node_id": "promises-the-customer-can-trust",',
@@ -199,15 +183,18 @@ export function renderCharterKindLanePrompt(
     "    {",
     '      "from": "keepable-delivery-windows",',
     '      "to": "promises-the-customer-can-trust",',
-    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/window.ts:12", "quote": "a promised window is never silently missed" }]`,
+    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/window.ts", "quote": "canFleetKeep(window)" }]`,
     "    }",
     "  ]",
     "}",
     "```",
     "",
-    `- \`kind\`: Must be \`"${opts.kind}"\`.`,
+    "- `nodes` and `edges` are the whole submission. Do not add a field the example does not show. The tool knows which lane you are from the path it gave you.",
     `- \`provenance[].kind\`: one of \`${PROVENANCE_KINDS.split("|").join("`, `")}\`.`,
-    "- `provenance[].ref` is COPIED verbatim from ONE line run in your packet's manifest — `<path>:<startLine>-<endLine>` for a run, `<path>:<N>` for a single line, the bare `<path>` when the claim names no lines, or a bare id for a non-path source. The packet is SUFFICIENT: you never leave it to cite correctly.",
+    "- `provenance[].ref` names a SYMBOL — `<path>#<symbol>`, the form to prefer — or, when no symbol names your claim, the bare `<path>`. A non-path source is its own bare id. NEVER a line number: a line number drifts as the file changes, and a drifted number cannot be repaired, only deleted.",
+    "- `provenance[].quote` is the literal text you COPIED from your packet, character for character, without the packet's line-number prefix. The tool re-reads that text from the file, so the quote — not the reference — is what makes your citation checkable. Never paraphrase it. Never write a quote you did not copy.",
+    "- QUOTE whenever your packet gave you text to quote. Two cases are refused: a `ref` naming a symbol (`<path>#<symbol>`) with no quote, and a citation of any file your `## Provenance manifest` lists as an excerpt with no quote. In both, the packet handed you the text and the claim is unverifiable without it.",
+    "- The ONE case that takes no quote: a file your packet names in its file tree and excerpts nowhere. You were shown its path only, so cite the bare `<path>` and write no quote. Do not invent one — an invented quote is the worst thing you can submit here.",
     "- Every `from` and `to` names a `node_id` in this submission.",
     "",
   ].join("\n");

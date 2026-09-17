@@ -153,6 +153,7 @@ export {
   CharterKindSchema,
   CharterConfidenceSchema,
   CharterProvenanceSchema,
+  PATH_SHAPED_PROVENANCE_KINDS,
   CharterSchema,
   GoalNodeSchema,
   GoalEdgeSchema,
@@ -226,6 +227,7 @@ export {
 } from "./types/charter.js";
 export type {
   CharterSubmission as CharterLaneSubmission,
+  CharterMergedLane,
   CharterExtractionMerged,
   AssembledLaneGraph,
   CharterComparisonSubmission,
@@ -234,6 +236,7 @@ export type {
 } from "./decompose/charterExtraction.js";
 export {
   CharterSubmissionSchema as CharterLaneSubmissionSchema,
+  CharterMergedLaneSchema,
   CharterExtractionMergedSchema,
   CharterComparisonSubmissionSchema,
   CharterFidelitySubmissionSchema,
@@ -1162,6 +1165,7 @@ export {
 export type { DeliveredExcerpt } from "./validation/citationGrounding.js";
 export {
   checkCitations,
+  citationNamesASpan,
   countSourceLines,
   extractCitationRefs,
   stripEmittedLinePrefix,

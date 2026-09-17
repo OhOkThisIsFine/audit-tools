@@ -116,7 +116,11 @@ describe("the expected set is diffed and the shortfall reaches the host", () => 
     await recordLaneOutcome(dir, "charter_extraction_revealed", {
       kind: "rejected",
       issueCode: "submission_contract_invalid",
-      message: "nodes[0].kind: lane 'revealed' may only carry kind 'revealed'",
+      // A real `charterLaneSchema` refusal. It used to be the kind-purity
+      // message, which no longer exists: the submission states no kind, so the
+      // gate has nothing to compare (owner review of prompt 8, 2026-09-17).
+      message:
+        'nodes[0].files: goal node "top" cites file(s) outside the repo: src/gone.ts',
     });
     const delivered = laneSubmissionPath(dir, "charter_extraction_stated");
     await mkdir(dirname(delivered), { recursive: true });
@@ -128,7 +132,7 @@ describe("the expected set is diffed and the shortfall reaches the host", () => 
     expect(entry!.issue_code, "the disk says ENOENT; the RECORD says refused").toBe(
       "submission_rejected",
     );
-    expect(entry!.message).toContain("may only carry kind");
+    expect(entry!.message).toContain("cites file(s) outside the repo");
     expect(entry!.message).toContain("resubmit at the bound path");
     expect(
       renderLaneShortfallLines(shortfall).join("\n"),

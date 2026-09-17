@@ -1981,7 +1981,7 @@ export async function handleCharterExtractionBranch(
       );
       continue;
     }
-    const parsed = charterLaneSchema(kind, universe).safeParse(incoming.value);
+    const parsed = charterLaneSchema(universe).safeParse(incoming.value);
     if (parsed.success) {
       laneValues.set(kind, { value: parsed.data as CharterLaneSubmission, path: incoming.path });
     } else {
@@ -2002,8 +2002,12 @@ export async function handleCharterExtractionBranch(
     // applies only WHILE lanes are pending. Leaving consumed lane files behind
     // would make a later staleness-triggered re-extraction read them as fresh
     // results and silently skip re-authoring.
+    // The TOOL stamps each lane's kind here. The lane no longer states it: the
+    // submission arrived on a lane-bound path, so the path IS the answer to
+    // "which lane is this", and asking the lane to restate it only ever let the
+    // lane check itself (owner review of prompt 8, 2026-09-17).
     const merged: CharterExtractionMerged = {
-      lanes: kinds.map((kind) => laneValues.get(kind)!.value),
+      lanes: kinds.map((kind) => ({ kind, ...laneValues.get(kind)!.value })),
     };
     // The merged submission is TOOL-written, so it lives with the other lane
     // assets rather than under `submissions/` (which holds only what a host

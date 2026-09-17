@@ -27,6 +27,7 @@ export const NO_CITATIONS_VALIDATION: CitationValidationSummary = {
   checked_count: 0,
   failed_count: 0,
   delivered_evidence_checked: false,
+  quote_presence_checked: false,
 };
 
 /**

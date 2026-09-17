@@ -1,14 +1,27 @@
+// sites-pinned: tests/audit/recover-submission-mis-route.test.ts, tests/shared/hand-recovery-uses-the-same-validator.test.ts
+//   The first suite drives this verb's own mis-route guard through the CLI; the
+//   second pins that the rescue path validates through the same gate the normal
+//   path uses, so a divergence here reds one of the two.
 import { resolve } from "node:path";
 
 import {
+  CHARTER_PACKET_MANIFEST_SCHEMA_VERSION,
+  CharterLaneSubmissionSchema,
+  PATH_SHAPED_PROVENANCE_KINDS,
+  laneAssetsDir,
+  provenancePath,
   readOptionalJsonFile,
   recoverSubmission,
+  type CharterKind,
+  type CharterPacketManifest,
   type SubmissionIssue,
 } from "audit-tools/shared";
 
 import { getArtifactsDir, getFlag } from "./args.js";
 import {
   AUDIT_GATE_SUBMISSION_SCOPE,
+  charterExtractionCoverageFilename,
+  charterKindForLane,
   laneSubmissionId,
   laneSubmissionRoots,
 } from "./laneSubmissions.js";
@@ -33,6 +46,90 @@ async function repoFileUniverse(artifactsDir: string): Promise<ReadonlySet<strin
       .map((file) => file?.path)
       .filter((path): path is string => typeof path === "string"),
   );
+}
+
+/**
+ * The source paths the named extraction lane's evidence packet actually
+ * delivered, or `undefined` when the packet manifest is absent.
+ *
+ * The manifest is written by the EMIT pass, so its absence means no charter
+ * packet was ever handed to that lane and there is nothing to rescue a
+ * submission INTO. That is reported as a refusal rather than an abstention: see
+ * `charterMisRouteIssue`.
+ */
+async function laneDeliveredPaths(
+  artifactsDir: string,
+  kind: CharterKind,
+): Promise<ReadonlySet<string> | undefined> {
+  const manifest = await readOptionalJsonFile<CharterPacketManifest>(
+    resolve(laneAssetsDir(artifactsDir), charterExtractionCoverageFilename(kind)),
+  ).catch(() => undefined);
+  if (manifest?.schema_version !== CHARTER_PACKET_MANIFEST_SCHEMA_VERSION) {
+    return undefined;
+  }
+  return new Set(manifest.excerpts.map((excerpt) => excerpt.source_path));
+}
+
+/**
+ * Refuse a rescued extraction payload whose citations could not have come from
+ * THIS lane's evidence packet.
+ *
+ * Why this guard exists at all. The submission stated its own `kind` until
+ * 2026-09-17, and that field doubled as a mis-route detector: a payload landed on
+ * the wrong lane announced itself. The field is gone — the tool resolves the kind
+ * from the bound path — and the normal path loses nothing, because a lane never
+ * chooses its own destination there. This verb does: `--from` names arbitrary
+ * content and `--lane` names the destination, so it is the one door through which
+ * one channel's goals can be attributed to another. A wrongly attributed lane is
+ * silent and corrupts every downstream comparison; it passed 5448 tests when it
+ * was measured.
+ *
+ * What replaces the field is WEAKER, and deliberately so — there is no declared
+ * kind left to compare, so the channel has to be inferred from content. The one
+ * honest inference is the property the prompt already states: each lane's packet
+ * is SUFFICIENT, so an obedient lane cites only what its own packet delivered.
+ * A payload authored against a different packet therefore cites paths this lane
+ * was never handed. That catches a cross-lane mis-route; it does NOT catch a
+ * payload whose citations happen to fall inside the overlap of two packets, and
+ * it is not a purity claim.
+ *
+ * A missing manifest REFUSES rather than abstains. Unlike the repo manifest above
+ * — whose absence only makes scope grounding stricter — a missing packet manifest
+ * means the emit pass never handed this lane a packet, so there is no lane to
+ * rescue a submission onto.
+ */
+function charterMisRouteIssue(
+  lane: string,
+  kind: CharterKind,
+  delivered: ReadonlySet<string> | undefined,
+  value: unknown,
+): SubmissionIssue | null {
+  if (delivered === undefined) {
+    return {
+      code: "submission_contract_invalid",
+      message:
+        `lane '${lane}' has no evidence packet manifest under ${laneAssetsDir("<artifacts>")} — ` +
+        "the emit pass never handed this lane a packet, so a submission cannot be " +
+        "attributed to it. Re-run the emitting step, then rescue the payload.",
+    };
+  }
+  const parsed = CharterLaneSubmissionSchema.safeParse(value);
+  if (!parsed.success) return null; // The schema validator already owns this refusal.
+  const refs = [
+    ...parsed.data.nodes.flatMap((node) => node.provenance),
+    ...parsed.data.edges.flatMap((edge) => edge.provenance),
+  ]
+    .filter((provenance) => PATH_SHAPED_PROVENANCE_KINDS.has(provenance.kind))
+    .map((provenance) => provenancePath(provenance.ref));
+  const foreign = [...new Set(refs.filter((path) => !delivered.has(path)))].sort();
+  if (foreign.length === 0) return null;
+  return {
+    code: "submission_contract_invalid",
+    message:
+      `this payload cites ${foreign.length} path(s) the '${kind}' lane's evidence packet never ` +
+      `delivered: ${foreign.join(", ")} — each lane's packet is sufficient for its own goals, so a ` +
+      "payload citing outside it was authored against a different lane. Check --lane against --from.",
+  };
 }
 
 /**
@@ -61,16 +158,28 @@ export async function cmdRecoverSubmission(argv: string[]): Promise<void> {
     );
   }
 
-  const validate = laneSubmissionValidator(lane, {
+  const schemaValidate = laneSubmissionValidator(lane, {
     repoFiles: await repoFileUniverse(artifactsDir),
   });
-  if (validate === null) {
+  if (schemaValidate === null) {
     // No contract to check against must never read as "passes".
     throw new Error(
       `Unknown submission lane: ${JSON.stringify(lane)}. ` +
         "Recovery refuses a lane it cannot validate.",
     );
   }
+
+  // An extraction lane carries one rule the gate does not: the mis-route check
+  // this verb's own `--from` makes reachable. See `charterMisRouteIssue`.
+  const kind = charterKindForLane(lane);
+  const validate: (value: unknown) => SubmissionIssue | null =
+    kind === undefined
+      ? schemaValidate
+      : await (async () => {
+          const delivered = await laneDeliveredPaths(artifactsDir, kind);
+          return (value: unknown) =>
+            schemaValidate(value) ?? charterMisRouteIssue(lane, kind, delivered, value);
+        })();
 
   // The gate's OWN roots, not the repo root: a rescued submission must report
   // the same bound path the gate derives and the expected set records. Taking

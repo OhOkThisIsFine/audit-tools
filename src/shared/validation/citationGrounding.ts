@@ -1,7 +1,11 @@
+// sites-pinned: tests/shared/citation-grounding.test.ts, tests/audit/charter-lane-gate.test.ts
+//   The grammar and the span test below are pinned by the first suite directly,
+//   and by the second through the lane gate that reads them.
 /**
  * Citation grounding — ONE core, two draws.
  *
- * A citation is `path`, `path:line`, or `path:start-end`. This module is the
+ * A citation is `path`, `path:line`, or `path:start-end`, any of them with an
+ * optional `#<symbol>` anchor. This module is the
  * single authority that parses one, resolves its path against the repository,
  * checks its line range against the file's REAL length, optionally re-verifies a
  * quoted span, and — when the caller can say what evidence was actually handed to
@@ -104,24 +108,67 @@ export interface ParsedCitation {
 const LINE_SUFFIX_RE = /:(\d+)(?:-(\d+))?$/;
 
 /**
- * Parse `path`, `path:12`, or `path:12-19` into its parts. Returns `undefined`
- * when the reference carries no path at all (empty, or a bare line suffix).
- * The path half is taken verbatim: resolving it is a separate step, so a
- * component id or a checkpoint field parses here and fails to resolve later,
- * which is the honest split.
+ * The `#<anchor>` suffix: a code symbol (`src/a.ts#DeliveryWindow`) or a
+ * markdown heading (`docs/goals.md#current-state`). It is stripped to reach the
+ * path, and the anchor itself is NOT returned — nothing checks an anchor, and
+ * returning it would be write-only data that reads as authoritative. What makes
+ * a symbol citation checkable is its QUOTE, which is re-verified against the
+ * file below.
+ */
+const ANCHOR_SUFFIX_RE = /#[^#]*$/;
+
+/**
+ * Parse `path`, `path:12`, `path:12-19`, or any of those with a `#<anchor>`
+ * suffix, into its parts. Returns `undefined` when the reference carries no path
+ * at all (empty, a bare line suffix, or a bare anchor). The path half is
+ * otherwise taken verbatim: resolving it is a separate step, so a component id
+ * or a checkpoint field parses here and fails to resolve later, which is the
+ * honest split.
+ *
+ * `#<anchor>` is the form every host prompt teaches FIRST, because a symbol
+ * outlives a line number ("Cite a SYMBOL, never a bare line number" —
+ * `docs/backlog/durable-traps.md`). A parser blind to it read the whole
+ * reference as a path and returned `unknown_path` for every citation an obedient
+ * lane wrote (measured 2026-09-17 against prompt 8's own worked example).
  */
 export function parseCitationRef(ref: string): ParsedCitation | undefined {
   const trimmed = ref.trim();
   if (trimmed.length === 0) return undefined;
   const suffix = LINE_SUFFIX_RE.exec(trimmed);
-  if (!suffix) return { raw: ref, path: trimmed };
-  const path = trimmed.slice(0, suffix.index);
+  const beforeLines = suffix ? trimmed.slice(0, suffix.index) : trimmed;
+  const path = beforeLines.replace(ANCHOR_SUFFIX_RE, "");
   if (path.length === 0) return undefined;
+  if (!suffix) return { raw: ref, path };
   const start = Number(suffix[1]);
   const end = suffix[2] === undefined ? undefined : Number(suffix[2]);
   return end === undefined
     ? { raw: ref, path, start_line: start }
     : { raw: ref, path, start_line: start, end_line: end };
+}
+
+/**
+ * Whether a reference names a SPAN inside its file — a `#<anchor>` symbol or
+ * heading, or a line suffix — rather than the file alone.
+ *
+ * The distinction decides whether a quote is REQUIRED. Naming a span and not
+ * quoting it is unverifiable by construction: nothing here resolves an anchor, so
+ * the only evidence that the span says what the author claims is the quote. The
+ * file alone makes no span claim, so a quoteless path-only citation is honest —
+ * and it is the ONLY truthful citation a lane can write for a file its evidence
+ * packet delivered as a tree entry with no excerpt.
+ *
+ * ONE home, beside the grammar it reads. A caller that answered this question for
+ * itself would re-derive the suffix rules and drift, which is exactly the split
+ * that left `provenancePath` and `parseCitationRef` disagreeing on four of the
+ * six taught reference forms (measured 2026-09-17).
+ */
+export function citationNamesASpan(ref: string): boolean {
+  const parsed = parseCitationRef(ref);
+  if (!parsed) return false;
+  if (parsed.start_line !== undefined) return true;
+  // `path` is `beforeLines` with the anchor stripped, so the two differ if and
+  // only if an anchor was there.
+  return ref.trim().replace(LINE_SUFFIX_RE, "") !== parsed.path;
 }
 
 /**
