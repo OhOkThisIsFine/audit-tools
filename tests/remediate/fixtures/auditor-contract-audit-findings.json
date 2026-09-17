@@ -1,5 +1,9 @@
 {
-  "contract_version": "audit-tools/audit-findings/v1alpha1",
+  "contract_version": "audit-tools/audit-findings/v1alpha2",
+  "audit_read": {
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "dirty_paths": []
+  },
   "summary": {
     "finding_count": 3,
     "work_block_count": 3,

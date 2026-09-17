@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/audit-read-synthesis.test.ts
 // <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 // Canonical machine contract for audit findings — the shape that flows from the
 // auditor's `audit-findings.json` into the remediator. Before Phase 0 `Finding`
@@ -617,9 +618,37 @@ export type AuditFindingsSummary = z.infer<typeof AuditFindingsSummarySchema>;
  * present; narrative fields (themes/executive_summary/top_risks) are added by
  * the optional Phase 6 synthesis-narrative pass and omitted without a validated result.
  */
+/**
+ * What the AUDIT read — the `B` a consumer re-reads a finding's cited span at.
+ *
+ * The audit reads the WORKING TREE, never a commit, so a bare commit id would
+ * misdescribe every file that was uncommitted when the audit read it: the blob
+ * at `commit` is then NOT what the audit read, and a consumer comparing it to a
+ * later ref would manufacture a verdict out of the difference. `dirty_paths`
+ * names exactly those files, so a consumer can refuse them one by one.
+ *
+ * - `commit`: `HEAD` when synthesis built the report (full SHA-1 or SHA-256 id).
+ * - `dirty_paths`: repo-relative POSIX paths whose working-tree content differed
+ *   from `commit` at that moment (modified, staged, or untracked), in code-unit
+ *   order so the array never churns the report's content hash.
+ *
+ * The report carries this REQUIRED and NULLABLE. `null` is the stated answer "no
+ * commit is known" — not a git repository, an unreadable tree state, or a
+ * writer with no audit-side source — and a consumer must not substitute any
+ * other commit for it (a remediation-side commit least of all).
+ */
+export const AuditReadSchema = z
+  .object({
+    commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u),
+    dirty_paths: z.array(z.string()),
+  })
+  .strict();
+export type AuditRead = z.infer<typeof AuditReadSchema>;
+
 export const AuditFindingsReportSchema = z
   .object({
     contract_version: z.string(),
+    audit_read: AuditReadSchema.nullable(),
     summary: AuditFindingsSummarySchema,
     findings: z.array(FindingSchema),
     coherence_trace: ContentCoherenceTraceSchema,

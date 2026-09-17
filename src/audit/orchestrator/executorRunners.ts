@@ -2,7 +2,7 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { AdvanceAuditOptions } from "./advanceTypes.js";
-import { RunLogger, auditArtifactsDir } from "audit-tools/shared";
+import { RunLogger, auditArtifactsDir, readAuditReadState } from "audit-tools/shared";
 import { AUDIT_FRICTION_RUN_ID, decideAuditFrictionCloseout } from "./nextStep.js";
 import { runIntakeExecutor } from "./intakeExecutors.js";
 import { runIntentEquivalenceResolve } from "./intentEquivalenceExecutor.js";
@@ -170,10 +170,16 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       bundle,
       requireRoot(options.root, "runtime_validation_executor"),
     ),
-  // The runner owns the artifacts dir, so it reads the packet-retention index
-  // here and the synthesis executors stay synchronous.
+  // The runner owns the artifacts dir and the repository root, so it reads the
+  // packet-retention index and what the audit read (`readAuditReadState`) here
+  // and the synthesis executors stay synchronous. The PRIOR report's value is
+  // handed in so a re-synthesis over an unchanged tree keeps it byte-identical
+  // and does not re-stale the narrative pass.
   synthesis_executor: async (bundle, { options }) =>
     runSynthesisExecutor(bundle, options.auditResults, {
+      auditRead: options.root
+        ? await readAuditReadState(options.root, bundle.audit_findings?.audit_read)
+        : null,
       sizeIndex: options.sizeIndex,
       packetArchive: options.artifactsDir
         ? await readCharterPacketIndex(options.artifactsDir)
@@ -181,6 +187,11 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     }),
   synthesis_narrative_executor: async (bundle, { options }) =>
     runSynthesisNarrativeExecutor(bundle, options.narrativeResults, {
+      // Read only on the fallback where no base report exists yet; a persisted
+      // report's own `audit_read` rides through `applyNarrative` untouched.
+      auditRead: options.root
+        ? await readAuditReadState(options.root, bundle.audit_findings?.audit_read)
+        : null,
       sizeIndex: options.sizeIndex,
       packetArchive: options.artifactsDir
         ? await readCharterPacketIndex(options.artifactsDir)

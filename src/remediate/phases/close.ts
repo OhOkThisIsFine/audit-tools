@@ -2205,12 +2205,12 @@ export async function runClosePhase(
   // and records the file/line/mechanism triple plus its module stamp, so the
   // writer can emit a real disposition rather than a generic one.
   //
-  // NO AUDIT-READ COMMIT IS RECORDED, so on a real run this leg withholds every
-  // candidate and records nothing — production passes no `findingBase`, by
-  // design, rather than substituting a remediation-side commit (a span absent at
-  // the remediation's own baseline can be a fix made since the audit, not a
-  // misquote). The leg is wired and the rule is shipped; supplying B is all a
-  // later packet has to do. An item whose finding carries too little evidence to
+  // THE AUDIT'S COMMIT is `state.plan.audit_read` — the findings contract's
+  // `audit_read`, stamped by the tool at plan application. It is read from
+  // state, never passed in, so no caller can substitute a remediation-side
+  // commit (a span absent at the remediation's own baseline can be a fix made
+  // since the audit, not a misquote). With none recorded the leg withholds every
+  // candidate and records nothing. An item whose finding carries too little evidence to
   // decide keeps the disposition it already had — the leg withholds and says
   // why, it never guesses. No qualifying item is a no-op.
   const headEvidence = await verifyHeadEvidenceAgainstFindings({

@@ -39,6 +39,8 @@ import {
   type ObligationLedger,
   type WorkBlock,
   type WorkBlockSeam,
+  type AuditRead,
+  auditReadOf,
   projectApprovedFindings,
   captureStepBoundaryFriction,
   climbOutOfAuditTools,
@@ -4593,6 +4595,52 @@ export async function collectPathARefusals(
     approvedSource,
     seedPresent: pathASeed !== undefined,
   }).refusals;
+}
+
+/**
+ * What the AUDIT read, for the run whose Path-A seed lives in `artifactsDir` —
+ * the value plan application stamps onto `state.plan.audit_read`.
+ *
+ * Read by the TOOL from the seed's own source report, which passed the strict
+ * shared validator (`projectApprovedFindings`) before it may answer. It never
+ * rides `extracted-plan.json`: that file is host-writable, and the close
+ * phase's evidence leg turns this commit into terminal dispositions, so a
+ * host-supplied value would let a host author its own `refuted`.
+ *
+ * BOUND TO THE SEED'S OWN DIGEST. The seed recorded a sha256 of the source
+ * report when it was built (`source_digests`); the bytes read here must hash to
+ * it, so a report swapped afterwards — even for another VALID report — answers
+ * `null`. The file is read ONCE and the same bytes are hashed and parsed. A seed
+ * that carries no digest for its source binds nothing, and an unbound commit is
+ * not one this function will vouch for.
+ *
+ * `null` — "no commit is known" — when there is no seed (the run did not start
+ * from a findings report), the source is unbound, changed, unreadable or
+ * invalid, or the report itself states `null`.
+ */
+export async function readSeedAuditRead(artifactsDir: string): Promise<AuditRead | null> {
+  const pathASeed = await readOptionalJsonFile<PathASeed>(
+    pathASeedFilePath(artifactsDir),
+  );
+  if (!pathASeed) return null;
+  const bound = (pathASeed.source_digests ?? []).find(
+    (entry) => entry?.path === pathASeed.audit_findings_path,
+  );
+  if (typeof bound?.sha256 !== "string") return null;
+  let source: unknown;
+  try {
+    const bytes = await readFile(pathASeed.audit_findings_path);
+    if (hashContent(bytes) !== bound.sha256) return null;
+    source = JSON.parse(bytes.toString("utf8")) as unknown;
+  } catch {
+    return null;
+  }
+  try {
+    projectApprovedFindings(source);
+  } catch {
+    return null;
+  }
+  return auditReadOf(source);
 }
 
 /**

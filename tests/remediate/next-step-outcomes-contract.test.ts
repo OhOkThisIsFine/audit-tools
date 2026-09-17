@@ -192,7 +192,8 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
       await writeFile(
         sourcePath,
         JSON.stringify({
-          contract_version: "audit-tools/audit-findings/v1alpha1",
+          contract_version: "audit-tools/audit-findings/v1alpha2",
+          audit_read: null,
           findings: [fPlanned, fDup, fChk],
           work_blocks: [],
         }),

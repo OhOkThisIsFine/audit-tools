@@ -262,7 +262,7 @@ function canonicalReport(reverse: boolean): AuditFindingsReport {
     findings.reverse();
     for (const entry of findings) entry.affected_files.reverse();
   }
-  const report = buildAuditFindingsDeliverable(findings);
+  const report = buildAuditFindingsDeliverable(findings, null);
   // Planning must derive estimates from disk, not trust upstream estimates.
   report.work_blocks.forEach((block, index) => {
     block.token_estimate = index + 1;

@@ -2083,7 +2083,7 @@ describe("CP-NODE-13 inv-7: the path_a seed binds its sources by digest", () => 
       summary: "s",
       affected_files: [{ path: "src/seeded.ts" }],
     } as Finding,
-  ]);
+  ], null);
 
   async function seedFrom(reportPath: string): Promise<void> {
     await writeJson(reportPath, REPORT);
@@ -2149,7 +2149,7 @@ describe("CP-NODE-13 inv-7: the path_a seed binds its sources by digest", () => 
         affected_files: [{ path: "package.json" }],
         evidence: ["package.json:3"],
       } as Finding,
-    ]);
+    ], null);
 
     async function seedCitedThenBumpVersion(reportPath: string): Promise<void> {
       await mkdir(join(TEST_DIR, "src"), { recursive: true });
@@ -2438,7 +2438,7 @@ describe("F7: the Path-A gate and the Path-A promoter agree on every declaration
       summary: "s",
       affected_files: [{ path: "src/two.ts" }],
     } as Finding,
-  ]);
+  ], null);
 
   /** The seed's work blocks define which `source_finding_ids` sets are canonical. */
   async function seed(): Promise<void> {

@@ -243,6 +243,7 @@ test("INV-shared-core-06 / OBL-C002-VERSION-TRUST: isValidAuditFindingsReport re
 test("INV-shared-core-06: validateAuditFindingsReport passes with correct contract_version", () => {
   const issues = validateAuditFindingsReport({
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
+    audit_read: null,
     findings: [],
     coherence_trace: buildContentCoherenceTrace(
       { items: [] },
@@ -291,6 +292,7 @@ test("INV-shared-core-06: approved projection enforces closed membership and rec
   };
   const report = {
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
+    audit_read: null,
     summary: {
       finding_count: 1,
       work_block_count: 1,
@@ -613,7 +615,7 @@ test("INV-shared-core-17: the leftover deliverable emits the seam for a conteste
   const { buildAuditFindingsDeliverable } = await import(
     "../../src/shared/reporting/auditDeliverable.js"
   );
-  const report = buildAuditFindingsDeliverable(seamProbeFindings());
+  const report = buildAuditFindingsDeliverable(seamProbeFindings(), null);
 
   // Three lenses over one file → three blocks, all contesting `src/contested.ts`.
   expect(report.work_blocks).toHaveLength(3);
@@ -641,7 +643,7 @@ test("INV-shared-core-17: both findings-draw producers derive identical seams", 
   );
   const findings = seamProbeFindings();
 
-  expect(buildAuditFindingsDeliverable(findings).work_block_seams).toEqual(
+  expect(buildAuditFindingsDeliverable(findings, null).work_block_seams).toEqual(
     buildWorkBlockPartition({ findings }).seams,
   );
 });
@@ -679,7 +681,7 @@ test("INV-shared-core-18: narrowing a seam to surviving blocks restates its own 
     "../../src/shared/reporting/auditDeliverable.js"
   );
   const probe = seamProbeFindings();
-  const report = buildAuditFindingsDeliverable(probe);
+  const report = buildAuditFindingsDeliverable(probe, null);
   expect(report.work_block_seams[0]!.rationale).toContain("3 components");
 
   const subset = projectAuditFindingsReportSubset(report, probe.slice(0, 2));

@@ -659,7 +659,7 @@ describe("CP-NODE-13: inline gate prompts", () => {
         summary: "s",
         affected_files: [{ path: "src/seeded.ts" }],
       } as Finding,
-    ]);
+    ], null);
     await mkdir(join(tmpDir, "src"), { recursive: true });
     await writeFile(join(tmpDir, "src", "seeded.ts"), "before\n", "utf8");
     const reportPath = join(tmpDir, "audit-findings.json");

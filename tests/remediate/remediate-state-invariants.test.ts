@@ -157,7 +157,7 @@ describe("isAuditFindingsReport — INV-remediate-state-07: contract_version mus
   it("accepts a report with the canonical contract_version and findings array", () => {
     expect(
       isAuditFindingsReport({
-        contract_version: "audit-tools/audit-findings/v1alpha1",
+        contract_version: "audit-tools/audit-findings/v1alpha2",
         findings: [],
         work_blocks: [],
         summary: {},
@@ -191,14 +191,14 @@ describe("isAuditFindingsReport — INV-remediate-state-07: contract_version mus
 
   it("rejects when findings field is absent (even with contract_version)", () => {
     expect(
-      isAuditFindingsReport({ contract_version: "audit-tools/audit-findings/v1alpha1" }),
+      isAuditFindingsReport({ contract_version: "audit-tools/audit-findings/v1alpha2" }),
     ).toBe(false);
   });
 
   it("rejects when findings is not an array", () => {
     expect(
       isAuditFindingsReport({
-        contract_version: "audit-tools/audit-findings/v1alpha1",
+        contract_version: "audit-tools/audit-findings/v1alpha2",
         findings: "not-an-array",
       }),
     ).toBe(false);
@@ -801,9 +801,19 @@ function autonomousAuditReport(): string {
         affected_files: [{ path: "src/parser.ts" }],
         evidence: ["src/parser.ts:9 evidence"],
       },
-    ] as Finding[]),
+    ] as Finding[], LEFTOVER_SOURCE_AUDIT_READ),
   );
 }
+
+/**
+ * What the ORIGINAL audit read. The placeholder id resolves in no repository,
+ * so it can only reach the leftover pair by being carried — never by a read of
+ * the commit current when the remediator re-emits.
+ */
+const LEFTOVER_SOURCE_AUDIT_READ = {
+  commit: "d".repeat(40),
+  dirty_paths: ["src/parser.ts"],
+};
 
 describe("CP-NODE-15 inv-12/fail-8: the leftover emit, driven", () => {
   it("emits the remediation-owned pair, logs it, and leaves the canonical pair BYTE-IDENTICAL", async () => {
@@ -858,6 +868,14 @@ describe("CP-NODE-15 inv-12/fail-8: the leftover emit, driven", () => {
     expect(line!, "the event names where it wrote").toContain(
       "autonomous-leftovers-findings.json",
     );
+
+    // 4. The leftovers were read by the ORIGINAL audit, so the pair re-states
+    // its `audit_read`. The next run consumes this file as its findings
+    // contract; a remediation-side commit here would become its `B`.
+    const leftover = JSON.parse(
+      await readFile(autonomousLeftoverFindingsPath(REPO_DIR), "utf8"),
+    ) as { audit_read: unknown };
+    expect(leftover.audit_read).toEqual(LEFTOVER_SOURCE_AUDIT_READ);
   });
 });
 

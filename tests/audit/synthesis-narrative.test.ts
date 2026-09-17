@@ -28,11 +28,11 @@ const buildAuditReportModel = (
 const runSynthesisExecutor = (
   bundle: Parameters<typeof runSynthesisExecutorRaw>[0],
   results?: Parameters<typeof runSynthesisExecutorRaw>[1],
-) => runSynthesisExecutorRaw(bundle, results);
+) => runSynthesisExecutorRaw(bundle, results, { auditRead: null });
 const runSynthesisNarrativeExecutor = (
   bundle: Parameters<typeof runSynthesisNarrativeExecutorRaw>[0],
   narrative?: Parameters<typeof runSynthesisNarrativeExecutorRaw>[1],
-) => runSynthesisNarrativeExecutorRaw(bundle, narrative);
+) => runSynthesisNarrativeExecutorRaw(bundle, narrative, { auditRead: null });
 
 
 function syntheticResults(): AuditResult[] {
@@ -101,7 +101,7 @@ function syntheticNarrative(report: AuditFindingsReport): SynthesisNarrative {
 
 function baseReport(): AuditFindingsReport {
   const model = buildAuditReportModel({ results: syntheticResults() });
-  return buildAuditFindingsReport(model);
+  return buildAuditFindingsReport(model, null);
 }
 
 test("buildAuditFindingsReport wraps the model in the canonical contract", () => {

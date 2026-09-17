@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/audit-read-plan-stamp.test.ts
 import { z } from "zod";
 import { CLOSING_ACTIONS } from "audit-tools/shared";
 import type { RemediationItemStatus } from "./itemStatus.js";
@@ -11,7 +12,7 @@ import type {
   RemediationOutcome,
   MechanicalVerification,
 } from "audit-tools/shared";
-import { FindingSchema, FindingThemeSchema } from "audit-tools/shared";
+import { AuditReadSchema, FindingSchema, FindingThemeSchema } from "audit-tools/shared";
 export type { Finding };
 
 // `Evidence` is a brand-new export of `src/shared/types/remediationOutcome.ts`
@@ -123,6 +124,16 @@ export const RemediationPlanSchema = z
       .optional(),
     /** Synthesis themes carried from audit-findings.json (Phase 6/7 fix hints). */
     themes: z.array(FindingThemeSchema).optional(),
+    /**
+     * What the AUDIT read (`AuditRead`), stamped by the TOOL at plan application
+     * from the validated source findings report — never taken from the
+     * host-writable extracted plan. It is the `B` of the close phase's two-read
+     * evidence leg (`verifyHeadEvidenceAgainstFindings`). `null` and absent both
+     * mean "no commit is known" (absent only on a state persisted before the
+     * field existed, or a plan with no audit-side source); either way the leg
+     * withholds, and no other commit may stand in.
+     */
+    audit_read: AuditReadSchema.nullable().optional(),
   })
   .strict();
 export type RemediationPlan = z.infer<typeof RemediationPlanSchema>;

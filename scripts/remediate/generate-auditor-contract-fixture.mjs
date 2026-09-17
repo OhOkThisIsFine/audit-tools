@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/remediate/fixture-generator-drift-guard.test.ts
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,6 +91,13 @@ const coherenceTrace = buildContentCoherenceTrace(
 
 const model = {
   contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
+  // The auditor-produced shape: a recorded commit and a clean tree. The id is a
+  // fixed placeholder that resolves in no repository, so a consumer that reads
+  // it as `B` withholds rather than reading a commit this fixture never had.
+  audit_read: {
+    commit: "0123456789abcdef0123456789abcdef01234567",
+    dirty_paths: [],
+  },
   summary: {
     finding_count: 3,
     work_block_count: 3,

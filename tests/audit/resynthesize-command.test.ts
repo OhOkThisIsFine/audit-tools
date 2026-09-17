@@ -43,6 +43,7 @@ function makeReport(overrides: Partial<AuditFindingsReport> = {}): AuditFindings
   ];
   return {
     contract_version: "audit-tools/audit-findings/v0",
+    audit_read: null,
     summary: {
       finding_count: 99,
       work_block_count: 99,

@@ -1,10 +1,13 @@
+// sites-pinned: tests/remediate/close-verify-head-evidence.test.ts, tests/remediate/audit-read-plan-stamp.test.ts, tests/audit/audit-read-synthesis.test.ts
 /**
  * The single validation and approved-membership authority for the canonical
  * audit-findings.json contract.
  */
 import {
   AuditFindingsReportSchema,
+  AuditReadSchema,
   type AuditFindingsReport,
+  type AuditRead,
   type Finding,
   type WorkBlock,
   type WorkBlockSeam,
@@ -21,7 +24,23 @@ import type { ValidationIssue } from "./basic.js";
 import { isRecord, pushValidationIssue } from "./basic.js";
 
 export const AUDIT_FINDINGS_CONTRACT_VERSION =
-  "audit-tools/audit-findings/v1alpha1" as const;
+  "audit-tools/audit-findings/v1alpha2" as const;
+
+/**
+ * The `audit_read` a record carries, or `null` — "no commit is known".
+ *
+ * The ONE read every consumer goes through (the remediator's plan stamp, the
+ * close phase's evidence leg, the leftover re-emitter, resynthesize), so they
+ * cannot disagree about what an absent, `null` or malformed value means: all
+ * three are `null`. `holder` is any object that may carry the field — a parsed
+ * report or a persisted plan — and is `unknown` because every caller reads it
+ * back from disk.
+ */
+export function auditReadOf(holder: unknown): AuditRead | null {
+  if (!isRecord(holder)) return null;
+  const parsed = AuditReadSchema.nullable().safeParse(holder.audit_read ?? null);
+  return parsed.success ? parsed.data : null;
+}
 
 export interface ApprovedFindingDisposition {
   status: "approved" | "quarantined_refuted";

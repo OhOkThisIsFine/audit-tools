@@ -504,28 +504,6 @@
   [[write-only-data-looks-authoritative]] Trace:
   [`n-r13-and-lean-fast-path-trace-2026-08-25.md`](../reviews/n-r13-and-lean-fast-path-trace-2026-08-25.md).
 
-- **▶ The two evidence-bearing terminal dispositions have a producer but no input — `verified_already_fixed`
-  and `refuted` still never reach a real run (2026-08-27, restated 2026-09-11, medium, from
-  [`reviews/wave2-dispositions-2026-08-20.md`](../reviews/wave2-dispositions-2026-08-20.md)).**
-  The producer exists: `verifyHeadEvidenceAgainstFindings`
-  (`src/remediate/phases/closeVerifyHeadEvidence.ts`), a close-gate verify leg in `runClosePhase`,
-  re-reads a `resolved_no_change` item's cited span at the commit the audit read (B) and at HEAD, and
-  records the complete triple and override that `buildRemediationOutcomesReport`
-  (`src/remediate/phases/close.ts`) requires. A read at HEAD alone supports neither verdict, so
-  without B the leg withholds every candidate — and nothing supplies B. The findings contract
-  (`audit-findings.json`, the `Finding` schema) records no audit-read commit; the one rev the audit
-  keeps (`artifact_metadata.git_history_baseline.head`) is an internal staleness cache that is never
-  promoted to the deliverable; the host-handoff `baseline_commit` is a remediation-side commit and is
-  refused by name. The seam is `HeadEvidenceOverrides.findingBase`, and production passes none. The
-  host envelopes still carry neither disposition (closed key sets checked by `hasExactKeys` in
-  `src/shared/submission/hostHandoffCore.ts`). **Property:** the findings contract records the commit
-  the audit read, and the remediator threads it into the leg as B, so both dispositions are reachable
-  on a real run. **OWNER DECISION 2026-09-16: add the field.** Of three options put (add an
-  audit-read commit field; promote the staleness-cache head instead; delete the leg and both
-  dispositions) the owner chose the first. Work: a constitutional edit to
-  `spec/audit/artifact-contract.md` (attested), the findings-schema bump, the audit synthesis
-  writes the commit it read, and the remediator threads it into the leg as B.
-
 - **The masked-exit guard keyed on TEST RUNNERS, not on whether the exit status is load-bearing —
   NARROWED to its curated-list half (2026-08-27, narrowed 2026-08-29, medium, friction:
   tool_should_decide).** `git push origin main 2>&1 | tail -3` was admitted and reported exit 0 for a

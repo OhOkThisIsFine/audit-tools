@@ -22,6 +22,8 @@ import {
   writeJsonFile,
   writeTextFile,
   buildAuditDeliverablePair,
+  auditReadOf,
+  type AuditRead,
   formatValidationIssues,
   isMissingObservation,
   isRecord,
@@ -134,6 +136,7 @@ import {
 import {
   buildNextContractPipelineStep,
   shouldEnterContractPipeline,
+  readSeedAuditRead,
   writePathASeedFromFindings,
   normalizeBlockTouchedFiles,
   checkWriteScopePathsAgainstTrackedTree,
@@ -1790,6 +1793,17 @@ async function handlePendingExtractedPlan(
   }
 
   // Past the recovery boundary: a failure below is a real failure and propagates.
+  //
+  // WHAT THE AUDIT READ, stamped by the tool. `normalizeExtractedPlan` builds
+  // the plan field by field and deliberately has no `audit_read` line: the
+  // extracted plan is host-writable, and this commit becomes terminal
+  // dispositions at close. Only a plan the contract pipeline promoted from a
+  // findings report has an audit-side source; every other plan states `null`.
+  plan = {
+    ...plan,
+    audit_read:
+      plan.source === "contract_pipeline" ? await readSeedAuditRead(artifactsDir) : null,
+  };
   const pipelined = await applyPlanPipeline(plan, { root, artifactsDir });
   // Run-start dirty snapshot for the V2 staging manifest, capture-once: the
   // extracted-plan join runs at plan time (before any remediation edit), so
@@ -2057,6 +2071,8 @@ async function runReviewApprovalGate(
   root: string,
   artifactsDir: string,
   survivors: Finding[],
+  /** The source report's `audit_read`, carried onto any leftover re-emit. */
+  sourceAuditRead: AuditRead | null,
   autonomous = false,
 ): Promise<ReviewGateProceed | ReviewGateHalt> {
   const decisionPath = reviewDecisionPath(artifactsDir);
@@ -2088,7 +2104,7 @@ async function runReviewApprovalGate(
     // so the next nightly run picks them up via defaultInputCandidates. Always
     // on disk regardless of whether a git remote / PR is available.
     const leftovers = survivors.filter((f) => !approvedSet.has(f.id));
-    await emitAutonomousLeftoverDeliverable(root, artifactsDir, leftovers);
+    await emitAutonomousLeftoverDeliverable(root, artifactsDir, leftovers, sourceAuditRead);
     return {
       kind: "proceed",
       approved: survivors.filter((f) => approvedSet.has(f.id)),
@@ -2183,8 +2199,12 @@ async function emitAutonomousLeftoverDeliverable(
   root: string,
   artifactsDir: string,
   leftovers: Finding[],
+  // The leftovers were read by the ORIGINAL audit, so the pair re-states its
+  // `audit_read`. The commit current now is a remediation-side commit — exactly
+  // what the next run's evidence leg must never be handed as `B`.
+  sourceAuditRead: AuditRead | null,
 ): Promise<void> {
-  const pair = buildAuditDeliverablePair(leftovers, {
+  const pair = buildAuditDeliverablePair(leftovers, sourceAuditRead, {
     title: "Audit Report — Autonomous Leftovers",
     intro:
       "Findings left LIVE by an unattended (autonomous) remediation run: not on the " +
@@ -2375,6 +2395,7 @@ async function handleReadyIntakeContractPipeline(
         root,
         artifactsDir,
         filter.survivors,
+        auditReadOf(auditFindings),
         // Autonomous review changes the approval policy only; it never grants
         // implementation or process-execution authority.
         canonicalIntent.review_mode === "autonomous",

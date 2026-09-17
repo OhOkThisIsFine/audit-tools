@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/audit-read-synthesis.test.ts
 import type { AuditResult, CoverageMatrix, Finding, UnitManifest } from "../types.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import type {
@@ -18,6 +19,7 @@ import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type {
   AuditFindingsReport,
+  AuditRead,
   ContentCoherenceTrace,
   CriticalFlowManifest,
   Finding as SharedFinding,
@@ -29,6 +31,7 @@ import type {
 import {
   AUDIT_FINDINGS_CONTRACT_VERSION as SHARED_AUDIT_FINDINGS_CONTRACT_VERSION,
   AUDITOR_REPORT_MARKER,
+  auditReadOf,
   renderProcessFeedbackSection,
   renderFindingBlockLines,
   compareCodeUnits,
@@ -562,12 +565,18 @@ export function buildAuditReportModel(params: {
  * Wrap the deterministic report model in the canonical `audit-findings.json`
  * contract — the machine hand-off consumed by the remediator. Narrative fields
  * are absent here; they are layered on later by {@link applyNarrative}.
+ *
+ * `auditRead` is what the audit read (`AuditRead`), supplied by the caller that
+ * owns IO — this builder stays pure. Required so no call site can omit it by
+ * accident: `null` is a statement ("no commit is known"), absence is not.
  */
 export function buildAuditFindingsReport(
   model: AuditReportModel,
+  auditRead: AuditRead | null,
 ): AuditFindingsReport {
   const report: AttributionAwareReport = {
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
+    audit_read: auditRead,
     summary: { ...model.summary },
     findings: model.findings,
     coherence_trace: model.coherence_trace,
@@ -1575,10 +1584,16 @@ export function normalizeExistingFindingsReport(
   // pre-bar array would contradict the severity the record now carries.
   const groundingBreakdown = groundingStatusBreakdown(findings);
   const verificationBreakdown = verificationStatusBreakdown(findings);
+  // CARRIED, never computed. This function upgrades a record an EARLIER run
+  // wrote, so the commit current now is not what those findings were read
+  // against; stamping it would hand the remediator a false `B`. A record from
+  // before the field existed states `null` — "no commit is known" — and a
+  // malformed value is answered the same way rather than passed through.
   const normalized: AttributionAwareReport = {
     ...report,
     findings,
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
+    audit_read: auditReadOf(report),
     work_block_seams: report.work_block_seams ?? [],
     summary: {
       ...report.summary,

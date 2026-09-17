@@ -1515,7 +1515,8 @@ describe("buildOutcomeCoverageLedger — review-gate declines (1c-2)", () => {
     await writeFileAsync(
       AUDIT_PATH,
       JSON.stringify({
-        contract_version: "audit-tools/audit-findings/v1alpha1",
+        contract_version: "audit-tools/audit-findings/v1alpha2",
+        audit_read: null,
         findings: [
           {
             id: "ARC-001",

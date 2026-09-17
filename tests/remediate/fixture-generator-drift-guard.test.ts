@@ -113,7 +113,7 @@ describe("auditor-contract fixture drift guard", () => {
     const parsed: unknown = JSON.parse(generated);
 
     expect(parsed).toMatchObject({
-      contract_version: "audit-tools/audit-findings/v1alpha1",
+      contract_version: "audit-tools/audit-findings/v1alpha2",
     });
   });
 

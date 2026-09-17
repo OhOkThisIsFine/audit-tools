@@ -14,7 +14,7 @@ const { runSynthesisExecutor: runSynthesisExecutorRaw } = await import("../../sr
 const runSynthesisExecutor = (
   bundle: Parameters<typeof runSynthesisExecutorRaw>[0],
   results?: Parameters<typeof runSynthesisExecutorRaw>[1],
-) => runSynthesisExecutorRaw(bundle, results);
+) => runSynthesisExecutorRaw(bundle, results, { auditRead: null });
 
 const LINE_INDEX: Record<string, number> = {
   "src/api/auth.ts": 6,

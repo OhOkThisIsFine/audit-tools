@@ -199,7 +199,7 @@ describe("shared audit-deliverable emitter round-trips through intake", () => {
       finding({ id: "L-1", summary: "Remove the dead helper." }),
       finding({ id: "L-2", lens: "security", summary: "Change auth default in place." }),
     ];
-    const pair = buildAuditDeliverablePair(leftovers, { title: "Leftovers" });
+    const pair = buildAuditDeliverablePair(leftovers, null, { title: "Leftovers" });
     // The machine contract validates as a real AuditFindingsReport → the next
     // remediation run consumes it losslessly via defaultInputCandidates.
     expect(isValidAuditFindingsReport(pair.findings_report)).toBe(true);
@@ -209,7 +209,7 @@ describe("shared audit-deliverable emitter round-trips through intake", () => {
   });
 
   it("emits a valid (empty) pair when there are no leftovers", () => {
-    const pair = buildAuditDeliverablePair([]);
+    const pair = buildAuditDeliverablePair([], null);
     expect(isValidAuditFindingsReport(pair.findings_report)).toBe(true);
     expect(pair.findings_report.findings).toEqual([]);
   });

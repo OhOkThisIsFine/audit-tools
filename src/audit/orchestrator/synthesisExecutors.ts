@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/audit-read-synthesis.test.ts
 import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditResult } from "../types.js";
@@ -9,11 +10,18 @@ import {
   canonicalizeConceptualAttributionIds,
   renderAuditReportMarkdown,
 } from "../reporting/synthesis.js";
-import type { SynthesisNarrative } from "audit-tools/shared";
+import type { AuditRead, SynthesisNarrative } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 import type { CharterPacketArchiveRow } from "./charterPacketArchive.js";
 
 interface SynthesisOptions {
+  /**
+   * What the audit read (`AuditRead`), computed by the runner — which owns the
+   * repository root and IO — so these executors stay synchronous and pure.
+   * REQUIRED: `null` states "no commit is known"; an options bag that merely
+   * forgot the field would be indistinguishable from that statement.
+   */
+  auditRead: AuditRead | null;
   sizeIndex?: Readonly<Record<string, number>>;
   /**
    * This run's charter-packet retention rows, read from the archive index by the
@@ -27,7 +35,7 @@ interface SynthesisOptions {
 function buildBaseFindingsReport(
   bundle: ArtifactBundle,
   results: AuditResult[],
-  options: SynthesisOptions = {},
+  options: SynthesisOptions,
 ) {
   const report = buildAuditFindingsReport(
     buildAuditReportModel({
@@ -49,6 +57,7 @@ function buildBaseFindingsReport(
       // synthesis could compare what was selected against what was produced.
       intentCheckpoint: bundle.intent_checkpoint,
     }),
+    options.auditRead,
   );
   // Record the host-confirmed exclusions in the machine contract so omissions
   // are explicit and machine-readable, not just rendered in the markdown.
@@ -91,8 +100,8 @@ function migratePersistedConceptualAttribution(
 
 export function runSynthesisExecutor(
   bundle: ArtifactBundle,
-  results?: AuditResult[],
-  options: SynthesisOptions = {},
+  results: AuditResult[] | undefined,
+  options: SynthesisOptions,
 ): ExecutorRunResult {
   const finalResults = results ?? bundle.audit_results ?? [];
   // Emit the canonical machine contract and render the human report from it.
@@ -134,8 +143,8 @@ export function runSynthesisExecutor(
  */
 export function runSynthesisNarrativeExecutor(
   bundle: ArtifactBundle,
-  narrative?: SynthesisNarrative,
-  options: SynthesisOptions = {},
+  narrative: SynthesisNarrative | undefined,
+  options: SynthesisOptions,
 ): ExecutorRunResult {
   const baseReport =
     bundle.audit_findings ??

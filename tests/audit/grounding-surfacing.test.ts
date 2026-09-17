@@ -56,7 +56,7 @@ function finding(overrides: Partial<Finding> = {}): Finding {
 }
 
 function report(findings: Finding[]): AuditFindingsReport {
-  return buildAuditFindingsReport(buildAuditReportModel({ results: resultWith(findings) }));
+  return buildAuditFindingsReport(buildAuditReportModel({ results: resultWith(findings) }), null);
 }
 
 type FindingWithGrounding = Finding & {

@@ -42,6 +42,7 @@ const FINDINGS = [
 function report(overrides: Record<string, unknown> = {}): unknown {
   return {
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
+    audit_read: null,
     summary: {
       finding_count: FINDINGS.length,
       work_block_count: 3,

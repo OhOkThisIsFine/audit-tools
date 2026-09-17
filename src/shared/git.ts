@@ -1,7 +1,9 @@
+// sites-pinned: tests/shared/audit-read-state.test.ts
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "./tooling/exec.js";
 import { compareCodeUnits } from "./compareCodeUnits.js";
+import { AUDIT_TOOLS_DIRNAME } from "./io/auditToolsPaths.js";
 
 // Git helpers shared by both orchestrators. The remediator previously issued
 // `git` calls inline in close.ts and plan.ts; the auditor's Phase 3 delta mode
@@ -363,6 +365,110 @@ export async function mineGitHistory(
  */
 export async function gitRemotes(root: string): Promise<string[]> {
   return await gitLines(root, ["remote"]);
+}
+
+/**
+ * NUL-separated path output of one git command, or `null` when the command
+ * FAILED. Unlike `gitLines` this never degrades a failure to an empty list:
+ * its one caller turns "no paths" into the claim "the tree was clean", and a
+ * failed `git diff` must not be able to make that claim. `-z` keeps a path with
+ * a space, a quote or a non-ASCII byte verbatim (no `core.quotepath` escaping).
+ */
+async function gitPathsOrNull(root: string, args: string[]): Promise<string[] | null> {
+  const result = await runTrackedAsync(["git", ...args], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: TRACKED_CHILD_DEADLINE_MS,
+    maxBuffer: GIT_MAX_BUFFER,
+  });
+  if (result.status !== 0) return null;
+  return result.stdout.split("\0").filter((path) => path.length > 0);
+}
+
+/**
+ * What an audit of `root`'s working tree is reading RIGHT NOW, in the shape the
+ * findings contract records (`AuditRead`): `HEAD`, plus every path whose
+ * working-tree content differs from it (modified or staged vs `HEAD`, and
+ * untracked non-ignored files).
+ *
+ * FAIL-CLOSED: `null` — "no commit is known" — when `root` has no resolvable
+ * `HEAD` or EITHER listing fails. A partial answer is never returned, because an
+ * incomplete `dirty_paths` reads as "these files were committed", which is the
+ * one false statement the field exists to prevent.
+ *
+ * STABLE ACROSS A RE-SYNTHESIS. `prior` is the value the previous report
+ * carried. It is returned UNCHANGED when BOTH hold:
+ *   1. it is still TRUE — the working tree differs from `prior.commit` by
+ *      precisely `prior.dirty_paths`, so every other file's content still equals
+ *      its blob at `prior.commit`; and
+ *   2. a fresh stamp would say NOTHING MORE — the dirty set against `HEAD` is
+ *      that same list.
+ * The first alone is not enough: a commit that merely COMMITTED the dirty files
+ * leaves `prior` true while a fresh stamp clears them, and keeping `prior` would
+ * withhold every finding in those files for good. Stability matters because the
+ * report's content hash re-stales the narrative pass (a host LLM step), and a
+ * commit that changed nothing the audit read must not re-run it.
+ */
+export async function readAuditReadState(
+  root: string,
+  prior?: { commit: string; dirty_paths: readonly string[] } | null,
+): Promise<{ commit: string; dirty_paths: string[] } | null> {
+  const commit = await headCommit(root);
+  if (commit === null) return null;
+  // Git names paths from the REPOSITORY root; an audit names them from `root`.
+  // The two agree only when `root` IS the repository root, so a nested root is
+  // answered "unknown" rather than with paths no cited location would match.
+  const prefix = await runTrackedAsync(["git", "rev-parse", "--show-prefix"], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: TRACKED_CHILD_DEADLINE_MS,
+  });
+  if (prefix.status !== 0 || prefix.stdout.trim().length > 0) return null;
+  const dirty = await dirtyPathsAgainst(root, commit);
+  if (dirty === null) return null;
+  if (prior && prior.commit !== commit && (await gitRefExists(root, prior.commit))) {
+    const sameAsPrior = (paths: readonly string[] | null): boolean =>
+      paths !== null &&
+      paths.length === prior.dirty_paths.length &&
+      paths.every((path, index) => path === prior.dirty_paths[index]);
+    if (sameAsPrior(dirty) && sameAsPrior(await dirtyPathsAgainst(root, prior.commit))) {
+      return { commit: prior.commit, dirty_paths: dirty };
+    }
+  }
+  return { commit, dirty_paths: dirty };
+}
+
+/**
+ * Every path whose working-tree content differs from `ref` (modified or staged
+ * against it, plus untracked non-ignored files), in code-unit order; `null` when
+ * either listing failed.
+ */
+async function dirtyPathsAgainst(root: string, ref: string): Promise<string[] | null> {
+  // `--no-renames`: with rename detection (git's default) a moved file is
+  // reported under its NEW path only, and the old path — whose blob at `ref` is
+  // just as much "not what the audit read" — would be missing from the list.
+  const changed = await gitPathsOrNull(root, [
+    "diff",
+    "--name-only",
+    "--no-renames",
+    "-z",
+    ref,
+  ]);
+  if (changed === null) return null;
+  const untracked = await gitPathsOrNull(root, [
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+    "-z",
+  ]);
+  if (untracked === null) return null;
+  // The tool's own state dir is never audit input, and in a repository that
+  // does not ignore it every step rewrites files there — which would both bloat
+  // the list and defeat the re-synthesis stability rule above.
+  const ownState = `${AUDIT_TOOLS_DIRNAME}/`;
+  return [...new Set([...changed, ...untracked])]
+    .filter((path) => !path.startsWith(ownState))
+    .sort(compareCodeUnits);
 }
 
 /** Working-tree changes vs HEAD plus untracked (non-ignored) files. */

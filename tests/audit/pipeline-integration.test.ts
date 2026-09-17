@@ -485,16 +485,16 @@ test("S4: synthesis follows ingestion without an intermediate host pause between
 // ── Scenario 5: Narrative omission ───────────────────────────────────────────
 
 test("S5: runSynthesisNarrativeExecutor writes status='omitted' when no narrative is supplied", () => {
-  const synth = runSynthesisExecutor({ audit_results: [] });
-  const run = runSynthesisNarrativeExecutor(synth.updated, undefined);
+  const synth = runSynthesisExecutor({ audit_results: [] }, undefined, { auditRead: null });
+  const run = runSynthesisNarrativeExecutor(synth.updated, undefined, { auditRead: null });
 
   expect(run.updated.synthesis_narrative?.status, "synthesis_narrative must be status='omitted' when no narrative is supplied").toBe("omitted");
   expect(run.artifacts_written.includes("synthesis-narrative.json"), "synthesis-narrative.json must be in artifacts_written").toBeTruthy();
 });
 
 test("S5: after synthesis_narrative with status='omitted', deriveAuditState shows synthesis_narrative_current satisfied", () => {
-  const synth = runSynthesisExecutor({ audit_results: [] });
-  const run = runSynthesisNarrativeExecutor(synth.updated, undefined);
+  const synth = runSynthesisExecutor({ audit_results: [] }, undefined, { auditRead: null });
+  const run = runSynthesisNarrativeExecutor(synth.updated, undefined, { auditRead: null });
   const bundle = run.updated;
 
   const state = deriveAuditState(bundle);
@@ -537,6 +537,7 @@ test("S5: omitted narrative run terminates cleanly — audit_report present, syn
     // Synthesis already complete
     audit_findings: {
       contract_version: "v1",
+      audit_read: null,
       summary: {
         finding_count: 0,
         work_block_count: 0,
@@ -557,7 +558,7 @@ test("S5: omitted narrative run terminates cleanly — audit_report present, syn
     // synthesis_narrative NOT yet present — that's what we're testing
   };
 
-  const run = runSynthesisNarrativeExecutor(synthReadyBundle, undefined);
+  const run = runSynthesisNarrativeExecutor(synthReadyBundle, undefined, { auditRead: null });
   const bundle = run.updated;
 
   // audit_report must be retained (from synthesis)
@@ -583,8 +584,8 @@ test("S5: omitted narrative run terminates cleanly — audit_report present, syn
 });
 
 test("S5: omitted narrative does not inject narrative sections into audit-findings.json", () => {
-  const synth = runSynthesisExecutor({ audit_results: [] });
-  const run = runSynthesisNarrativeExecutor(synth.updated, undefined);
+  const synth = runSynthesisExecutor({ audit_results: [] }, undefined, { auditRead: null });
+  const run = runSynthesisNarrativeExecutor(synth.updated, undefined, { auditRead: null });
   const findings = run.updated.audit_findings;
 
   expect(findings?.themes, "themes must be absent when narrative is omitted").toBe(undefined);

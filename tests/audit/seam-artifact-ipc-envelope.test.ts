@@ -48,6 +48,7 @@ test("auditor AUDIT_FINDINGS_CONTRACT_VERSION matches shared AUDIT_FINDINGS_CONT
 function buildAuditorPayload(overrides: Partial<AuditFindingsReport> = {}): AuditFindingsReport {
   return {
     contract_version: AUDITOR_CONTRACT_VERSION,
+    audit_read: null,
     summary: {
       finding_count: 1,
       work_block_count: 1,

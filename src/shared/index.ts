@@ -88,6 +88,7 @@ export type {
   SynthesisNarrative,
   AuditFindingsSummary,
   AuditFindingsReport,
+  AuditRead,
 } from "./types/finding.js";
 export { findingIdentity } from "./types/finding.js";
 export type { FindingLocationLineIssue } from "./types/finding.js";
@@ -115,6 +116,7 @@ export {
   LensCoverageEntrySchema,
   AuditFindingsSummarySchema,
   AuditFindingsReportSchema,
+  AuditReadSchema,
 } from "./types/finding.js";
 export type { LensCoverageEntry } from "./types/finding.js";
 export type {
@@ -837,6 +839,7 @@ export {
   fileCommits,
   fileContentAtRef,
   headCommit,
+  readAuditReadState,
   gitRemotes,
   stagedAndUntracked,
   mineGitHistory,
@@ -1106,6 +1109,7 @@ export {
 export { formatSchemaFailure } from "./validation/schemaFailure.js";
 export {
   AUDIT_FINDINGS_CONTRACT_VERSION,
+  auditReadOf,
   validateAuditFindingsReport,
   projectApprovedFindings,
   projectAuditFindingsReportSubset,

@@ -60,7 +60,8 @@ const TEST_DIR = scratchDir(".test-n-r06-universal-cp");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 
 const STUB_AUDIT_FINDINGS = {
-  contract_version: "audit-tools/audit-findings/v1alpha1",
+  contract_version: "audit-tools/audit-findings/v1alpha2",
+  audit_read: null,
   summary: {
     finding_count: 2,
     work_block_count: 2,

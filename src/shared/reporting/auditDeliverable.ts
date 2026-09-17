@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/remediate-state-invariants.test.ts, tests/remediate/audit-read-plan-stamp.test.ts
 // Shared audit-deliverable emitter: build the canonical `audit-findings.json`
 // machine contract + its `audit-report.md` human render from a Finding[] set.
 //
@@ -12,6 +13,7 @@
 import type {
   AuditFindingsReport,
   AuditFindingsSummary,
+  AuditRead,
   Finding,
   FindingSeverity,
   WorkBlock,
@@ -56,9 +58,15 @@ function lensBreakdown(findings: readonly Finding[]): Record<string, number> {
  * deliverable is a flat, re-consumable finding set). Stamped with the same
  * `contract_version` the auditor emits, so `validateAuditFindingsReport` accepts
  * it and the remediator's structured fast-path consumes it losslessly.
+ *
+ * `auditRead` is REQUIRED and is never computed here: this emitter re-states
+ * findings somebody else read, so the only honest value is the one the source
+ * report carried (or `null` when there was none). Stamping the commit current at
+ * re-emit time would hand the next run a remediation-side commit as `B`.
  */
 export function buildAuditFindingsDeliverable(
   findings: readonly Finding[],
+  auditRead: AuditRead | null,
 ): AuditFindingsReport {
   const coherenceTrace = buildContentCoherenceTrace(
     {
@@ -115,6 +123,7 @@ export function buildAuditFindingsDeliverable(
   };
   return {
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
+    audit_read: auditRead,
     summary,
     findings: [...findings],
     coherence_trace: coherenceTrace,
@@ -167,10 +176,11 @@ export interface AuditDeliverablePair {
  */
 export function buildAuditDeliverablePair(
   findings: readonly Finding[],
+  auditRead: AuditRead | null,
   options: { title?: string; intro?: string } = {},
 ): AuditDeliverablePair {
   return {
-    findings_report: buildAuditFindingsDeliverable(findings),
+    findings_report: buildAuditFindingsDeliverable(findings, auditRead),
     report_markdown: renderAuditDeliverableMarkdown(findings, options),
   };
 }

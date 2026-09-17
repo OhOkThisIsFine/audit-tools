@@ -75,6 +75,7 @@ type TestFinding = ReturnType<typeof findingWithAnchor>;
 function makeState(
   findings: TestFinding[],
   statuses: Record<string, string>,
+  auditRead?: { commit: string; dirty_paths: string[] } | null,
 ): RemediationState {
   // `makeBaseState` types the plan through the real contract, so the cast is
   // confined to THIS one fixture builder rather than sprinkled at each call.
@@ -86,6 +87,7 @@ function makeState(
       blocks: [],
       project_type: "unknown",
       candidate_closing_actions: ["none"],
+      ...(auditRead !== undefined ? { audit_read: auditRead } : {}),
     },
     closing_plan: { action: "none" },
     items: Object.fromEntries(
@@ -189,11 +191,10 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const { base } = twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
     const state = makeState([findingWithAnchor("F1", { quoted: undefined })], {
       F1: "resolved_no_change",
-    });
+    }, { commit: base, dirty_paths: [] });
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
-      overrides: { findingBase: { commit: base } },
     });
     expect(outcome.ran).toBe(true);
     expect(Object.keys(outcome.recorded)).toEqual([]);
@@ -241,12 +242,11 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
     const state = makeState([findingWithAnchor("F1", { quoted: QUOTED_SPAN })], {
       F1: "resolved_no_change",
-    });
+    }, { commit: "f".repeat(40), dirty_paths: [] });
 
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
-      overrides: { findingBase: { commit: "f".repeat(40) } },
     });
 
     expect(Object.keys(outcome.recorded)).toEqual([]);
@@ -262,6 +262,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const state = makeState(
       [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2, lineEnd: 2 })],
       { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
     );
     const { readAtRef, reads } = refsReader(
       { atBase: DEFECTIVE_SOURCE, atHead: FIXED_SOURCE },
@@ -271,7 +272,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
-      overrides: { findingBase: { commit: base }, readAtRef },
+      overrides: { readAtRef },
     });
 
     expect(outcome.recorded.F1).toMatchObject({
@@ -302,6 +303,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const state = makeState(
       [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2, lineEnd: 2 })],
       { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
     );
     // The audit read a file that never carried the quoted span: the finding
     // misquoted its own citation. HEAD's content is irrelevant to this verdict,
@@ -314,7 +316,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
-      overrides: { findingBase: { commit: base }, readAtRef },
+      overrides: { readAtRef },
     });
 
     expect(outcome.recorded.F1).toMatchObject({
@@ -343,6 +345,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const state = makeState(
       [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2 })],
       { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
     );
     const { readAtRef } = refsReader(
       { atBase: DEFECTIVE_SOURCE, atHead: DEFECTIVE_SOURCE },
@@ -352,7 +355,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
-      overrides: { findingBase: { commit: base }, readAtRef },
+      overrides: { readAtRef },
     });
 
     expect(Object.keys(outcome.recorded)).toEqual([]);
@@ -369,14 +372,14 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const { base } = twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
     const state = makeState([findingWithAnchor("F1", { quoted: QUOTED_SPAN })], {
       F1: "resolved_no_change",
-    });
+    }, { commit: base, dirty_paths: [] });
     // B is not readable: the reader has no content for the audit-read sha.
     const { readAtRef } = refsReader({ atBase: undefined as never, atHead: FIXED_SOURCE }, base);
 
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
-      overrides: { findingBase: { commit: base }, readAtRef },
+      overrides: { readAtRef },
     });
 
     expect(Object.keys(outcome.recorded)).toEqual([]);
@@ -398,7 +401,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const prefixedQuote = `002| ${QUOTED_SPAN}`;
     const state = makeState([findingWithAnchor("F1", { quoted: prefixedQuote })], {
       F1: "resolved_no_change",
-    });
+    }, { commit: base, dirty_paths: [] });
     const { readAtRef } = refsReader(
       { atBase: DEFECTIVE_SOURCE, atHead: FIXED_SOURCE },
       base,
@@ -407,7 +410,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
-      overrides: { findingBase: { commit: base }, readAtRef },
+      overrides: { readAtRef },
     });
 
     expect(Object.keys(outcome.recorded)).toEqual([]);
@@ -421,12 +424,12 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const state = makeState(
       [findingWithAnchor("F1", { path: "src/ghost.ts", quoted: QUOTED_SPAN })],
       { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
     );
 
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
-      overrides: { findingBase: { commit: base } },
     });
 
     expect(Object.keys(outcome.recorded)).toEqual([]);
@@ -439,6 +442,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const state = makeState(
       [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2 })],
       { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
     );
     state.items!.F1.disposition_override = "refuted";
     state.items!.F1.recorded_by_module = "someoneElse";
@@ -446,7 +450,6 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
-      overrides: { findingBase: { commit: base } },
     });
 
     expect(Object.keys(outcome.recorded)).toEqual([]);
@@ -459,6 +462,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const state = makeState(
       [findingWithAnchor("F1", { path: "parse.ts", quoted: QUOTED_SPAN, lineStart: 2 })],
       { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
     );
     const { readAtRef } = refsReader(
       { atBase: DEFECTIVE_SOURCE, atHead: FIXED_SOURCE },
@@ -468,7 +472,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
-      overrides: { findingBase: { commit: base }, readAtRef },
+      overrides: { readAtRef },
     });
 
     expect(outcome.recorded.F1).toMatchObject({
@@ -483,6 +487,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const state = makeState(
       [findingWithAnchor("F1", { quoted: QUOTED_SPAN })],
       { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
     );
     const refsSeen: string[] = [];
 
@@ -490,7 +495,6 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
       state,
       root: REPO_DIR,
       overrides: {
-        findingBase: { commit: base },
         readAtRef: async (_root, ref) => {
           refsSeen.push(ref);
           return DEFECTIVE_SOURCE;
@@ -515,13 +519,13 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
     const state = makeState(
       [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2, lineEnd: 2 })],
       { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
     );
 
     const next = await runClosePhase(state, {
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
       headEvidenceOverrides: {
-        findingBase: { commit: base },
         readAtRef: async (_root, ref, file) =>
           ref === base ? DEFECTIVE_SOURCE : file === "src/parse.ts" ? FIXED_SOURCE : undefined,
       },
@@ -555,13 +559,13 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
     const state = makeState(
       [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2 })],
       { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
     );
 
     const next = await runClosePhase(state, {
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
       headEvidenceOverrides: {
-        findingBase: { commit: base },
         readAtRef: async () => DEFECTIVE_SOURCE,
       },
     });
@@ -585,12 +589,11 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
     const { base } = twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
     const state = makeState([findingWithAnchor("F1", { quoted: undefined })], {
       F1: "resolved_no_change",
-    });
+    }, { commit: base, dirty_paths: [] });
 
     const next = await runClosePhase(state, {
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
-      headEvidenceOverrides: { findingBase: { commit: base } },
     });
 
     expect(next.status).toBe("complete");
@@ -606,6 +609,74 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
     expect(outcome.outcome).toBe("verified_no_change");
     expect(outcome.evidence).toBeUndefined();
   });
+
+  it("PRODUCTION SHAPE: the audit-read commit recorded on the plan reaches verified_already_fixed with no override and real reads", async () => {
+    // No `headEvidenceOverrides` at all: B comes from the plan, where intake
+    // stamped the findings contract's `audit_read`, and both reads are real
+    // `git show` reads of the two commits on disk.
+    const { base } = twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
+    const state = makeState(
+      [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2, lineEnd: 2 })],
+      { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
+    );
+
+    const next = await runClosePhase(state, {
+      root: REPO_DIR,
+      artifactsDir: TEST_DIR,
+    });
+
+    expect(next.status).toBe("complete");
+    expect(next.items!.F1.disposition_override).toBe("verified_already_fixed");
+    expect(next.items!.F1.recorded_by_module).toBe(HEAD_EVIDENCE_MODULE);
+    expect(next.items!.F1.evidence).toMatchObject({
+      file: "src/parse.ts",
+      mechanism: "read_at_head_verification",
+    });
+  });
+
+  it("PRODUCTION SHAPE: a cited file the audit read uncommitted is withheld, because the blob at B is not what the audit read", async () => {
+    const { base } = twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
+    const state = makeState(
+      [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2 })],
+      { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: ["src/parse.ts"] },
+    );
+
+    const next = await runClosePhase(state, {
+      root: REPO_DIR,
+      artifactsDir: TEST_DIR,
+    });
+
+    expect(next.status).toBe("complete");
+    expect(next.items!.F1.disposition_override).toBeUndefined();
+    expect(next.items!.F1.evidence).toBeUndefined();
+  });
+
+  it.each([
+    ["a leading ./", "./src/parse.ts", "src/parse.ts"],
+    ["backslashes", "src\\parse.ts", "src/parse.ts"],
+    ["a bare basename", "parse.ts", "src/parse.ts"],
+    ["a dirty entry spelled with backslashes", "src/parse.ts", "src\\parse.ts"],
+  ])(
+    "PRODUCTION SHAPE: the uncommitted-file withhold matches a citation spelled with %s",
+    async (_label, cited, dirty) => {
+      // The dirty check is a MEMBERSHIP test between two spellings of one file.
+      // Compared as spelled, a miss reads the blob at B for a file the audit
+      // read uncommitted — and records a verdict out of the difference.
+      const { base } = twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
+      const state = makeState(
+        [findingWithAnchor("F1", { path: cited, quoted: QUOTED_SPAN, lineStart: 2 })],
+        { F1: "resolved_no_change" },
+        { commit: base, dirty_paths: [dirty] },
+      );
+
+      const next = await runClosePhase(state, { root: REPO_DIR, artifactsDir: TEST_DIR });
+
+      expect(next.items!.F1.disposition_override).toBeUndefined();
+      expect(next.items!.F1.evidence).toBeUndefined();
+    },
+  );
 
   it("PRODUCTION SHAPE: with no audit-read commit supplied, no item gets a terminal disposition", async () => {
     // The leg is wired into the real close phase and no `headEvidenceOverrides`

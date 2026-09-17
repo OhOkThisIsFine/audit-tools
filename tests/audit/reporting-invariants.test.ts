@@ -85,7 +85,7 @@ function baseReport() {
       ]),
     ],
   });
-  return buildAuditFindingsReport(model);
+  return buildAuditFindingsReport(model, null);
 }
 
 // ── INV-audit-reporting-01: render-equals-contract ───────────────────────────
@@ -175,7 +175,7 @@ test("a critical with only blank evidence is downgraded to high, never silently 
       ]),
     ],
   });
-  const report = buildAuditFindingsReport(model);
+  const report = buildAuditFindingsReport(model, null);
 
   // Synthesis re-keys findings to content-addressed ids, so resolve by position
   // rather than the fixture's local id.
@@ -215,6 +215,7 @@ test("a critical with only blank evidence is downgraded to high, never silently 
         ]),
       ],
     }),
+    null,
   );
   expect(bornHigh.findings[0]?.severity_downgraded_from).toBeUndefined();
 });
@@ -246,7 +247,7 @@ test("a design-review critical is NOT re-graded: its contract never carries the 
       contract_reviewed: true,
     },
   });
-  const report = buildAuditFindingsReport(model);
+  const report = buildAuditFindingsReport(model, null);
 
   expect(report.findings).toHaveLength(1);
   expect(
@@ -281,7 +282,7 @@ test("the explicit per-file-lane stamp is graded by the bar — a lane is not an
       ]),
     ],
   });
-  const report = buildAuditFindingsReport(model);
+  const report = buildAuditFindingsReport(model, null);
 
   expect(report.findings[0]?.evidence_lane).toBe("per-file-lane");
   expect(
@@ -329,7 +330,7 @@ test("a per-file critical with blank evidence is re-graded even beside a design-
       ],
     },
   });
-  const report = buildAuditFindingsReport(model);
+  const report = buildAuditFindingsReport(model, null);
 
   expect(report.findings).toHaveLength(2);
   const byLane = report.findings.map((finding) => ({
@@ -370,7 +371,7 @@ test("a re-normalized report's disclosure agrees with the record it renders", ()
     ],
   });
   const recorded = JSON.parse(
-    JSON.stringify(buildAuditFindingsReport(model)),
+    JSON.stringify(buildAuditFindingsReport(model, null)),
   ) as ReturnType<typeof buildAuditFindingsReport>;
   // Restore what an un-barred record would carry: the judge's claimed severity
   // and no downgrade record. This is the input the resynthesize path sees.
@@ -424,7 +425,7 @@ test("a re-normalized report that cleared the bar still states the bar ran", () 
     ],
   });
   const recorded = JSON.parse(
-    JSON.stringify(buildAuditFindingsReport(model)),
+    JSON.stringify(buildAuditFindingsReport(model, null)),
   ) as ReturnType<typeof buildAuditFindingsReport>;
   const normalized = normalizeExistingFindingsReport(recorded);
   const markdown = renderAuditReportMarkdown(normalized);
@@ -458,6 +459,7 @@ test("a report that never went through the bar does not claim it ran", () => {
             ]),
           ],
         }),
+        null,
       ),
     ),
   ) as ReturnType<typeof buildAuditFindingsReport>;
@@ -487,7 +489,7 @@ test("re-applying the bar is idempotent: a re-graded finding is not re-graded ag
       ]),
     ],
   });
-  const once = buildAuditFindingsReport(model);
+  const once = buildAuditFindingsReport(model, null);
   const twice = normalizeExistingFindingsReport(once);
 
   expect(twice.findings[0]?.severity).toBe("high");
@@ -510,7 +512,7 @@ test("a critical with substantive evidence stands, and the render names the bar"
       ]),
     ],
   });
-  const report = buildAuditFindingsReport(model);
+  const report = buildAuditFindingsReport(model, null);
   const markdown = renderAuditReportMarkdown(report);
 
   expect(
@@ -561,7 +563,7 @@ test("the render re-escapes a C0 control byte instead of emitting it raw", () =>
       ]),
     ],
   });
-  const markdown = renderAuditReportMarkdown(buildAuditFindingsReport(model));
+  const markdown = renderAuditReportMarkdown(buildAuditFindingsReport(model, null));
 
   // No byte below 0x20 except tab / LF / CR — the byte gate's own permitted set.
   const offending = [...markdown]
@@ -841,7 +843,7 @@ test("INV-07: renderAuditReportMarkdown renders findings from mixed-language res
     ],
   });
 
-  const report = buildAuditFindingsReport(model);
+  const report = buildAuditFindingsReport(model, null);
   const markdown = renderAuditReportMarkdown(report);
 
   // All four findings appear in the render, regardless of language.
@@ -875,6 +877,7 @@ test("INV-07: the report shape is identical whether findings reference .ts, .py,
           },
         ],
       }),
+      null,
     );
 
   const tsReport = makeReport("src/auth.ts");
@@ -929,7 +932,7 @@ test("INV-08: renderSynthesisNarrativePrompt writes truncation notice to process
       },
     ],
   });
-  const report = buildAuditFindingsReport(model);
+  const report = buildAuditFindingsReport(model, null);
 
   // Replace process.stderr.write temporarily to capture output.
   const capturedStderr: string[] = [];

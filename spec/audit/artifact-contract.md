@@ -128,6 +128,53 @@ file presence alone is not acceptance.
 `synthesis_executor` in one call — `audit-report.md` is the render of
 `audit-findings.json`, not an independently-derived artifact.
 
+#### `audit_read` — what the audit read
+
+`audit-findings.json` records what the audit read, as the required, nullable
+envelope field `audit_read` (`AuditReadSchema`, `src/shared/types/finding.ts`). A
+consumer that re-reads a finding's cited span — the remediator's close-phase
+evidence leg, which decides `verified_already_fixed` and `refuted` from a read at
+the audit's commit and a read at HEAD — takes that commit from here and from
+nowhere else.
+
+- **`{ commit, dirty_paths }`.** `commit` is `HEAD` when synthesis built the
+  report. The audit reads the working tree, not a commit, so `dirty_paths` names
+  every path whose working-tree content differed from `commit` at that moment
+  (modified, staged, or untracked; the tool's own state directory excluded), in
+  code-unit order. For a path in that list the blob at `commit` is **not** what
+  the audit read, and a consumer must make no determination from it.
+- **`null`** states that no commit is known: the audited root is not a git
+  repository root, the tree state could not be read completely, or the writer has
+  no audit-side source. The value fails closed — a partial `dirty_paths` is never
+  written, because a missing entry reads as "this file was committed".
+- **The key is required.** Absence is not a statement; a report without the key
+  is refused by `AuditFindingsReportSchema`.
+
+Three rules hold for every writer:
+
+1. **The owner of IO computes it; pure builders are handed it.** The synthesis
+   runner calls `readAuditReadState` (`src/shared/git.ts`) and passes the value
+   in; `buildAuditFindingsReport` and `buildAuditFindingsDeliverable` take it as a
+   required argument.
+2. **A later writer carries it and never re-stamps it.** The narrative pass, the
+   `resynthesize` normalizer and the remediator's leftover re-emit re-state
+   findings an earlier audit read, so they carry the recorded value, or state
+   `null` when the record has none. The commit current at re-emit time is a
+   remediation-side commit and is never a substitute.
+3. **A re-synthesis is stable.** The recorded value is kept unchanged when it is
+   still true — the working tree differs from the recorded `commit` by exactly
+   the recorded `dirty_paths` — and a fresh stamp would say nothing more, because
+   the dirty set against `HEAD` is that same list. `synthesis-narrative.json`
+   depends on this artifact's content, so a commit that changed nothing the audit
+   read must not re-run the narrative pass. A commit that merely committed the
+   dirty files does re-stamp: the fresh value clears them, and keeping the old one
+   would withhold every finding in those files for good.
+
+No other commit the tool keeps may stand in for it. In particular
+`artifact_metadata.git_history_baseline.head` is `HEAD` at the last git-history
+re-mine — a staleness cache — and the remediation host-handoff `baseline_commit`
+is a remediation-side commit.
+
 ### Supervisor
 
 <!-- BEGIN GENERATED spec-mirror artifact-contract#supervisor — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->

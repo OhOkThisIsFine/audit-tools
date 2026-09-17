@@ -25,56 +25,14 @@ records them in the tracked ledger, and does the work.
 *Last run: 2026-09-16 at `a2461a9bf35c61e52db617ac628a29f640c4b9cc`.*
 
 
+> **1 answered item not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+
+
 ---
 
+## Nothing to answer
 
-# Recurring-problem solutions
-
-
-<!-- nightly:item key=06a4854b7ac071a3 -->
-
-## `solutions-dispatch-lane-envelope-and-running-job` — Apply P66 — teach the one shared lane reader to unwrap a CLI lane envelope and to poll a running job, or leave the sweep at the mercy of which rung the ladder picks? <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-*Recurring-problem solutions · open 1 night · `scripts/shared/mcp-dispatch-lane.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-### In plain terms
-
-Every part of this routine that asks another agent for an answer goes through one small helper file. That helper makes two assumptions about the reply that stopped being true. First, it assumes the reply text IS the answer. When the relay hands the work to a command-line agent instead of a model pool, the reply is a wrapper object that carries the real answer inside a field called response, alongside a conversation id and timing numbers. The caller reads the wrapper, finds none of the fields it needs, and files the call as an error. Second, the helper asks the relay to wait longer than the job can possibly take, and comments in the code that the relay therefore can never answer "still running". The relay now caps how long it will wait, so it does answer "still running", and the helper throws that away as a fault instead of waiting for the result. Tonight this cost the backlog sweep 28 of its 62 entries: 19 to the wrapper, 9 to the running-job throw. The 34 that worked were all served by the model pool, whose reply is the bare answer. So whether a whole leg of this routine covers its corpus currently depends on which lane the relay happened to pick. The fix is in one function plus one small helper beside it: recognise the one wrapper shape and return what is inside it, and on "still running" poll the relay until the job is finished. The full patch, a test that fails at the current code, and the night-by-night error counts are written up under .audit-tools/nightly/proposals/P66-dispatch-lane-envelope/. This routine never lands its own code, which is why it is asked rather than applied.
-
-### The question
-
-Should scripts/shared/mcp-dispatch-lane.mjs unwrap the CLI-lane conversation envelope (a JSON object with a string "response" and a "conversation_id") and poll a running job to a terminal state, as written up in .audit-tools/nightly/proposals/P66-dispatch-lane-envelope/?
-
-### Your answer
-
-- [ ] **1. Apply both halves** — Apply P66 as written: unwrap the declared CLI-lane envelope in parseDispatchAnswer, and poll dispatch_status/dispatch_result on a running job instead of throwing. Land the red test at tests/shared/dispatch-lane-envelope.test.ts.
-- [ ] **2. Unwrap only** — Apply only the envelope unwrap, which is the larger half (19 of tonight 28 errors) and has a pinned red test. Leave the running-job throw alone until it has its own red test through the spawnImpl seam.
-- [ ] **3. Poll only** — Apply only the running-job polling. The envelope belongs to the relay contract, so raise the wrapper shape with the relay instead of teaching this repo to recognise it.
-- [ ] **4. Neither — pin the lane instead** — Do not change the reader. Make the sweep name the lane it needs (the model pool, whose body is the raw answer) so a CLI rung is never picked for a schema-bound task, and accept that this reintroduces a lane name into a sweep that deliberately names none.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-Full proposal: [`.audit-tools/nightly/proposals/P66-dispatch-lane-envelope/PROPOSAL.md`](../.audit-tools/nightly/proposals/P66-dispatch-lane-envelope/PROPOSAL.md) <!-- doc-citation-exempt: quoted item prose, not citations -->
-
-<details>
-<summary>Evidence (7) — what was verified against code, and how</summary>
-
-- Live probe of the relay dispatch tool this run (mode "answer", schema forced) was served by lane agy-gemini and returned {"conversation_id":"cdbbbf28-...","status":"SUCCESS","response":"{\"verdict\":\"open\",...}"} — the envelope, not the answer.
-- Tonight leg-2 coverage stamp .audit-tools/nightly/triage-2026-09-16-coverage.json: attempted 62, classified 34, errored 28, lanes {"free-pool":34}.
-- Error split counted from .audit-tools/nightly/triage-2026-09-16.jsonl: 19 "response did not match the triage schema (verdict=null, why, action)", 9 "dispatch returned a running job".
-- RED observed at HEAD a2461a9b: npx vitest run tests/shared/dispatch-lane-envelope.test.ts fails with the envelope object where the triage record was expected. Verbatim output in .audit-tools/nightly/proposals/P66-dispatch-lane-envelope/RED-AT.txt.
-- The relay dispatch tool description states that a larger waitMs is clamped to routing.mcp.maxWaitMs, which contradicts the "Cannot happen with waitMs past timeoutMs" comment above the throw in scripts/shared/mcp-dispatch-lane.mjs.
-- Prior nights for recurrence: 2026-09-09 89/95 classified with 6 errors; 2026-09-11 89/89 with 0 errors, every row free-pool. The failure tracks which rung answered, not lane quality.
-- The same helper is the routine second independent lane for leg 1 (docs/nightly-routine.md, "Start inputs and execution lanes"). The Codex lane was quota-exhausted tonight until 2026-09-19, so on such a night an envelope-blind reader is the difference between an adversary pass and none.
-
-</details>
-
----
+No open propositions. The next run will refill this file if it finds any.
 
 
 <details>

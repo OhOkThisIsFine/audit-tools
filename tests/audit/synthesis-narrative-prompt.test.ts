@@ -23,7 +23,7 @@ function makeFinding(i: number, overrides: Partial<Finding> = {}): Finding {
 }
 
 function makeReport(findings: Finding[], workBlockCount?: number): AuditFindingsReport {
-  const report = buildAuditFindingsDeliverable(findings);
+  const report = buildAuditFindingsDeliverable(findings, null);
   if (workBlockCount === undefined) return report;
   return {
     ...report,

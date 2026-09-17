@@ -1,5 +1,6 @@
 {
-  "contract_version": "audit-tools/audit-findings/v1alpha1",
+  "contract_version": "audit-tools/audit-findings/v1alpha2",
+  "audit_read": null,
   "summary": {
     "finding_count": 2,
     "work_block_count": 2,

@@ -37,13 +37,19 @@
   §"The estimator charters". The host prompts for lanes 11–20 in
   `docs/reviews/prompt-refinement-2026-09-13.md` are still PROPOSED and wait for the owner's
   one-at-a-time review.
+- **The findings contract records what the audit read.** `audit-findings.json` (contract
+  `v1alpha2`) carries the required, nullable `audit_read` — the commit plus the paths that were
+  uncommitted — and the remediator's close-phase evidence leg reads it from `state.plan`, so
+  `verified_already_fixed` and `refuted` are reachable on a real run. A `v1alpha1` report no longer
+  routes structured; `audit-code resynthesize` upgrades one and states `audit_read: null`. Contract:
+  `spec/audit/artifact-contract.md` §"`audit_read` — what the audit read".
 
 ## Immediate next
 
-**One item is pinned** (the generated roadmap below): the findings contract gains the commit the
-audit read, so the head-evidence leg gets its B and both evidence-bearing dispositions become
-reachable on a real run — owner decision 2026-09-16, recorded on the entry. The maintenance
-decision queue holds no open item.
+**Nothing is pinned** (the generated roadmap below). One settled maintenance decision waits for its
+code: the shared dispatch-lane reader (`scripts/shared/mcp-dispatch-lane.mjs`) unwraps the CLI-lane
+reply envelope and polls a running job to its end — owner decision 2026-09-16, both halves; the
+poll half needs its own failing test first.
 
 **Live owner decision:** none.
 
@@ -62,10 +68,6 @@ decision queue holds no open item.
   unreadable or empty omissions.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
-
-- **1 nightly decision is waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `solutions-dispatch-lane-envelope-and-running-job` — Apply P66 — teach the one shared lane reader to unwrap a CLI lane envelope and to poll a running job, or leave the sweep at the mercy of which rung the ladder picks?
-
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
@@ -79,10 +81,10 @@ decision queue holds no open item.
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 1 pinned item(s).
+> `verify:checks` and at commit). 0 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ The two evidence-bearing terminal dispositions have a producer but no input — `verified_already_fixed` and `refuted` still never reach a real run (2026-08-27, restated 2026-09-11, medium, from [`reviews/wave2-dispositions-2026-08-20.md`](./reviews/wave2-dispositions-2026-08-20.md)). · [`open-bugs.md`](backlog/open-bugs.md)
+*(nothing pinned — no immediate next step is set. Every open item is in [`docs/backlog/`](backlog/).)*
 
 <!-- END GENERATED ROADMAP -->

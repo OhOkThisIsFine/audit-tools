@@ -68,7 +68,7 @@ function baseFindingsReport(): AuditFindingsReport {
       affected_files: [{ path: "src/b.ts", line_start: 2 }],
       summary: "y",
     },
-  ]);
+  ], null);
 }
 
 /** Two themes + two top-risks, supplied in a given order. */

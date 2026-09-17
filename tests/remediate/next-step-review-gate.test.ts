@@ -56,7 +56,7 @@ function auditReport(): string {
         evidence: ["src/auth/login.ts:42 evidence"],
       },
     ];
-  return JSON.stringify(buildAuditFindingsDeliverable(findings));
+  return JSON.stringify(buildAuditFindingsDeliverable(findings, null));
 }
 
 // A non-default-candidate path: bare `next-step` then resumes the persisted
@@ -585,7 +585,7 @@ describe("review-approval gate: skip conditions", () => {
   it("an empty-findings report skips the gate entirely", async () => {
     await writeFile(
       auditPath,
-      JSON.stringify(buildAuditFindingsDeliverable([])),
+      JSON.stringify(buildAuditFindingsDeliverable([], null)),
       "utf8",
     );
     await writeReadyStructuredAuditIntake(auditPath);

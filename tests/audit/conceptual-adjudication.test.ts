@@ -578,7 +578,7 @@ describe("conceptual review adjudication", () => {
         conceptual_findings: submission.findings,
       },
       conceptual_review_adjudication: adjudication,
-    });
+    }, undefined, { auditRead: null });
 
     const canonicalId = run.updated.audit_findings?.findings[0]?.id;
     expect(canonicalId).toBeDefined();
@@ -609,7 +609,7 @@ describe("conceptual review adjudication", () => {
     const narrativeRun = runSynthesisNarrativeExecutor(reloaded, {
       themes: [],
       executive_summary: "Canonical attribution survives artifact reload.",
-    });
+    }, { auditRead: null });
     expect(narrativeRun.updated.audit_report).toContain(`### ${canonicalId}`);
     expect(narrativeRun.updated.audit_report).toContain(
       `targets ${canonicalId}.`,
@@ -634,7 +634,7 @@ describe("conceptual review adjudication", () => {
         conceptual_findings: submission.findings,
       },
       conceptual_review_adjudication: adjudication,
-    });
+    }, undefined, { auditRead: null });
 
     const canonicalId = run.updated.audit_findings?.findings[0]?.id;
     const canonicalShares =
@@ -715,7 +715,7 @@ describe("conceptual review adjudication", () => {
     };
     const synthesized = runSynthesisExecutor({
       design_assessment: designAssessment,
-    });
+    }, undefined, { auditRead: null });
     const legacyAdjudication = buildConceptualReviewAdjudication({
       manifest,
       perspectiveFindings,
@@ -732,7 +732,7 @@ describe("conceptual review adjudication", () => {
     const migrated = runSynthesisNarrativeExecutor(persisted, {
       themes: [],
       executive_summary: "Resume a pre-fix persisted bundle.",
-    });
+    }, { auditRead: null });
     const canonicalId = migrated.updated.audit_findings?.findings[0]?.id;
     expect(migrated.updated.audit_report).toContain(`### ${canonicalId}`);
     expect(migrated.updated.audit_report).toContain(`targets ${canonicalId}.`);
@@ -822,7 +822,7 @@ describe("conceptual review adjudication", () => {
         conceptual_findings: edgeSubmission.findings,
       },
       conceptual_review_adjudication: adjudication,
-    });
+    }, undefined, { auditRead: null });
 
     const contributors =
       run.updated.conceptual_review_adjudication?.final_finding_shares[0]
@@ -853,7 +853,7 @@ describe("conceptual review adjudication", () => {
         conceptual_reviewed: true,
         conceptual_findings: submission.findings,
       },
-    });
+    }, undefined, { auditRead: null });
     const adjudication = buildConceptualReviewAdjudication({
       manifest,
       perspectiveFindings,

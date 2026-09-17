@@ -1,10 +1,13 @@
+// sites-pinned: tests/remediate/close-verify-head-evidence.test.ts
 import {
+  auditReadOf,
   enumerateTrackedFilePaths,
   fileContentAtRef,
   gitRefExists,
   headCommit,
   isBareBasename,
   normalizeForMatch,
+  normalizeRepoPath,
   quoteMatches,
   resolveBasenameToTrackedPath,
   stripEmittedLinePrefix,
@@ -59,33 +62,31 @@ import type { Finding, PerFindingDisposition, RemediationItemState } from "../st
  * in the file (a misquote — the `refuted` case). B is what tells them apart, so
  * without B neither verdict is reachable and every candidate is withheld.
  *
- * ── WHERE B COMES FROM, AND WHY IT IS USUALLY UNKNOWN ───────────────────────
+ * ── WHERE B COMES FROM ──────────────────────────────────────────────────────
  * B must be a commit the AUDIT itself recorded. A remediation-side commit is
  * NOT B: code can change between the audit and the remediation run, so a span
  * absent at the remediation's own start could be a fix made in between rather
  * than a misquote — the very confusion this leg exists to avoid. The obvious
  * candidate, the host-handoff `baseline_commit`, is exactly that remediation-
- * side value and is therefore refused here BY NAME.
+ * side value and is therefore refused here BY NAME. So is
+ * `artifact_metadata.git_history_baseline.head`: it is HEAD at the audit's last
+ * git-history re-mine, an internal staleness cache, not what synthesis read.
  *
- * The audit-side search (the findings contract and `Finding` schema, the report
- * intake path, `intake.ts`, `plan.ts`) finds no recorded upstream commit: the
- * `Finding` fields are the quote grounding (`quoted_text`), the plan-time
- * content hash (`hash_at_plan_time`, stamped by the REMEDIATOR at plan time),
- * the evidence lane, the verification status and the analyzer provenance —
- * none of which is a rev. `audit-findings.json`'s only envelope fields are
- * `contract_version` and the derived `summary`. The audit artifacts that DO
- * carry a rev (`artifact_metadata.git_history_baseline.head`) are internal
- * staleness caches and are never promoted into the deliverable the remediator
- * consumes. So at the time this leg was written B was UNKNOWN on every real
- * run, and every candidate resolved to WITHHELD.
+ * B is `state.plan.audit_read` — the findings contract's `audit_read`
+ * (`AuditReadSchema`), which audit synthesis records and the TOOL stamps onto
+ * the plan at plan application from the validated source report (never from the
+ * host-writable extracted plan). It is state, not an override: there is no seam
+ * through which a caller can hand this leg a different commit.
  *
- * The resolution is NOT to invent a B and not to keep the false single-read
- * rule: it is to make B an OPTIONAL INPUT with a RESOLVER SEAM, so the rule
- * above is the shipped rule and a later packet that stamps the audit's rev only
- * has to supply the value. `HeadEvidenceOverrides.findingBase` is that seam.
- * Absent means "no B was supplied"; a caller that supplies one gets the
- * two-read determination, and any B that does not resolve to a real commit in
- * this repo is refused as unknown rather than read.
+ * `audit_read` is more than a commit because the audit reads the WORKING TREE.
+ * For a path in `audit_read.dirty_paths` the blob at B is NOT what the audit
+ * read, so a span "absent at B" there could simply have been uncommitted —
+ * reading it would manufacture a `refuted`. Such a candidate is WITHHELD.
+ *
+ * `null`/absent means no commit is known (a report from a non-git tree, a plan
+ * with no audit-side source, a state persisted before the field existed): every
+ * candidate is withheld. A B that does not resolve to a real commit in this repo
+ * is refused as unknown rather than read.
  *
  * PROVENANCE IS STRUCTURAL. Only `resolved_no_change` items are considered: the
  * host has already asserted "I changed nothing because nothing needed
@@ -101,17 +102,6 @@ import type { Finding, PerFindingDisposition, RemediationItemState } from "../st
  * qualifying item is a no-op.
  */
 
-/**
- * The commit the AUDIT read when it produced the findings — the `B` of the
- * two-read rule above. Production passes none: nothing in the audit contract
- * records one (see the module header), so a real run resolves to WITHHELD
- * rather than to a fabricated verdict.
- */
-export interface FindingBase {
-  /** Full commit id the audit read. Resolved against the repo before use. */
-  commit: string;
-}
-
 export interface HeadEvidenceOverrides {
   /**
    * Test-injectable source; production callers pass none. Reads one file's
@@ -119,11 +109,6 @@ export interface HeadEvidenceOverrides {
    * can drive the two-read rule without a second commit on disk.
    */
   readAtRef?: (root: string, ref: string, file: string) => Promise<string | undefined>;
-  /**
-   * The audit-read commit `B`, when a caller has one. Absent (the production
-   * default) means B is unknown and no candidate can be determined.
-   */
-  findingBase?: FindingBase;
 }
 
 /**
@@ -264,6 +249,8 @@ async function determine(
     root: string;
     head: string;
     base: string;
+    /** Normalized `audit_read.dirty_paths` — files the audit read uncommitted. */
+    dirtyAtBase: ReadonlySet<string>;
     corpus: ReadonlySet<string>;
     finding: Finding;
     readAtRef: NonNullable<HeadEvidenceOverrides["readAtRef"]>;
@@ -271,7 +258,7 @@ async function determine(
 ): Promise<
   { disposition: PerFindingDisposition; evidence: Evidence } | { withheld: string }
 > {
-  const { root, head, base, corpus, finding, readAtRef } = params;
+  const { root, head, base, dirtyAtBase, corpus, finding, readAtRef } = params;
   const anchor = anchorFor(finding);
   if (!anchor) {
     // Too little evidence to decide. Stated, never guessed at: this is the
@@ -283,6 +270,20 @@ async function determine(
   const file = resolveCitedFile(anchor.path, corpus);
   if (!file) {
     return { withheld: `cited path '${anchor.path}' does not resolve to a tracked file` };
+  }
+  // A MEMBERSHIP test between two spellings of one file, so both sides go through
+  // the one membership normalizer (`normalizeRepoPath`: posix, a leading `./`
+  // stripped, case-folded). Folding case can only over-match, and an over-match
+  // is a withhold — the safe direction for a check that exists to stop a verdict.
+  if (dirtyAtBase.has(normalizeRepoPath(file))) {
+    // Checked BEFORE any read: the blob at B is not what the audit read for
+    // this file, so neither "present at B" nor "absent at B" says anything
+    // about the span the finding quoted.
+    return {
+      withheld:
+        `the audit read an uncommitted version of '${file}' (it is listed in audit_read.dirty_paths), ` +
+        `so the blob at the audit-read commit ${base.slice(0, 12)} is not what the audit read`,
+    };
   }
   const shortHead = head.slice(0, 12);
   const baseContent = await readAtRef(root, base, file);
@@ -352,7 +353,10 @@ async function determine(
 }
 
 export async function verifyHeadEvidenceAgainstFindings(params: {
-  state: { plan?: { findings?: Finding[] } | undefined; items?: Record<string, RemediationItemState> | undefined };
+  state: {
+    plan?: { findings?: Finding[]; audit_read?: unknown } | undefined;
+    items?: Record<string, RemediationItemState> | undefined;
+  };
   root: string;
   overrides?: HeadEvidenceOverrides;
 }): Promise<HeadEvidenceOutcome> {
@@ -394,25 +398,29 @@ export async function verifyHeadEvidenceAgainstFindings(params: {
     return withholdAll(null, "no resolvable HEAD — a read-at-HEAD determination cannot be made");
   }
 
-  // B is an INPUT, never a guess, and it is verified before it is read: a
-  // supplied commit that does not resolve in THIS repo is not a read the leg can
-  // honestly attribute a triple to, so it is refused as unknown rather than
-  // handed to `git show`. `gitRefExists` is what distinguishes "the caller gave
-  // us a B this repo does not have" from "the caller gave us none" — both end in
-  // the same withhold, but only one of them is a caller error worth naming.
-  const base = overrides?.findingBase?.commit;
-  if (base === undefined) {
+  // B is RECORDED STATE, never a guess, and it is validated before it is used:
+  // the value was read back from persisted state, so its shape is checked HERE,
+  // at the read, rather than trusted because a type says so. A malformed record
+  // is answered exactly like an absent one — no commit is known.
+  const auditRead = auditReadOf(state.plan);
+  if (auditRead === null) {
     return withholdAll(
       head,
       "no audit-read commit is recorded for these findings, so neither a verification nor a refutation can be determined",
     );
   }
+  // A recorded commit that does not resolve in THIS repo (a shallow clone, a
+  // report produced in another clone) is not a read the leg can honestly
+  // attribute a triple to, so it is refused as unknown rather than handed to
+  // `git show`.
+  const base = auditRead.commit;
   if (!(await gitRefExists(root, base))) {
     return withholdAll(
       head,
-      `the supplied audit-read commit '${base}' does not resolve to a commit in this repository`,
+      `the recorded audit-read commit '${base}' does not resolve to a commit in this repository`,
     );
   }
+  const dirtyAtBase = new Set(auditRead.dirty_paths.map((path) => normalizeRepoPath(path)));
 
   const corpus = await enumerateTrackedFilePaths(root);
   const readAtRef =
@@ -423,7 +431,15 @@ export async function verifyHeadEvidenceAgainstFindings(params: {
   const recorded: Record<string, HeadEvidenceRecord> = {};
   const withheld: HeadEvidenceRecord[] = [];
   for (const { item, finding } of candidates) {
-    const verdict = await determine({ root, head, base, corpus, finding, readAtRef });
+    const verdict = await determine({
+      root,
+      head,
+      base,
+      dirtyAtBase,
+      corpus,
+      finding,
+      readAtRef,
+    });
     if ("withheld" in verdict) {
       withheld.push({
         finding_id: finding.id,

@@ -2352,5 +2352,12 @@
     "decided_at": "2026-09-16T00:58:15.378Z",
     "completed_at": "2026-09-16T09:08:01.009Z",
     "completed_ref": "a33bc8d9 — .audit-tools/nightly/proposals/INDEX-2026-09-09.md is tracked on main"
+  },
+  "06a4854b7ac071a3": {
+    "disposition": "settled",
+    "answer": "1. Apply both halves — unwrap the declared CLI-lane envelope in parseDispatchAnswer and poll a running job to a terminal state. The poll half needs its own red test through the spawnImpl seam before it lands. Owner, 2026-09-16, at lap start.",
+    "subject": "Apply P66 — teach the one shared lane reader to unwrap a CLI lane envelope and to poll a running job, or leave the sweep at the mercy of which rung the ladder picks?",
+    "path": "scripts/shared/mcp-dispatch-lane.mjs",
+    "decided_at": "2026-09-17T04:50:43.351Z"
   }
 }

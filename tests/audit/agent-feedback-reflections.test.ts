@@ -70,7 +70,7 @@ test("capability preflight reflections render as detailed audit limitations", ()
     ambiguities: ["Coverage of call relationships could not be established."],
     suggestions: ["Run a structural-capability-enabled host before claiming comprehensive coverage."],
   };
-  const run = runSynthesisExecutor({ coverage_matrix: { files: [] }, agent_reflections: [REFLECTION, preflight] }, undefined);
+  const run = runSynthesisExecutor({ coverage_matrix: { files: [] }, agent_reflections: [REFLECTION, preflight] }, undefined, { auditRead: null });
   expect(run.updated.audit_report).toMatch(/## Audit Limitations/);
   expect(run.updated.audit_report).toMatch(/No structural graph tool was available/);
   expect(run.updated.audit_report).toMatch(/## Process Feedback[\s\S]*packet path was stale/);
@@ -92,13 +92,14 @@ test("synthesis renders Process Feedback from bundle reflections; machine contra
   const run = runSynthesisExecutor(
     { coverage_matrix: { files: [] }, agent_reflections: [REFLECTION] },
     undefined,
+    { auditRead: null },
   );
   expect(run.updated.audit_report).toMatch(/## Process Feedback/);
   expect(run.updated.audit_report).toMatch(/packet path was stale/);
   // audit-findings.json is the machine contract — reflections are render-only.
   expect(!JSON.stringify(run.updated.audit_findings).includes("packet path was stale"), "reflections must not leak into audit-findings.json").toBeTruthy();
 
-  const without = runSynthesisExecutor({ coverage_matrix: { files: [] } }, undefined);
+  const without = runSynthesisExecutor({ coverage_matrix: { files: [] } }, undefined, { auditRead: null });
   expect(without.updated.audit_report).not.toMatch(/## Process Feedback/);
 });
 
