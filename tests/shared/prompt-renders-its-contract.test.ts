@@ -21,6 +21,7 @@ import {
 } from "zod";
 import { describe, expect, it } from "vitest";
 
+import { renderCharterClarificationPrompt } from "../../src/audit/cli/charterClarificationPrompt.js";
 import { renderCharterComparisonPrompt } from "../../src/audit/cli/charterComparisonPrompt.js";
 import { renderCharterKindLanePrompt } from "../../src/audit/cli/charterExtractionPrompt.js";
 import { renderCharterFidelityPrompt } from "../../src/audit/cli/charterFidelityPrompt.js";
@@ -29,8 +30,12 @@ import {
   CharterFidelitySubmissionSchema,
   CharterSubmissionSchema,
 } from "../../src/shared/decompose/charterExtraction.js";
+import { ClarificationAnswersSubmissionSchema } from "../../src/shared/decompose/charterClarification.js";
 import { CharterProvenanceSchema } from "../../src/shared/types/charter.js";
-import { promptContractRegistry } from "./promptContractRegistry.js";
+import {
+  clarificationBundleFixture,
+  promptContractRegistry,
+} from "./promptContractRegistry.js";
 
 // P40 (nightly 2026-08-22). A generated prompt states its output contract as a
 // hand-typed literal beside a separately hand-written validator, and the two
@@ -278,6 +283,101 @@ describe(FAILURE_SIGNATURE, () => {
           "example, and only the example says which fields go with which verdict",
       ).toContain(member);
     }
+  });
+
+  it("the clarification example answers the REAL queue, in every shape the schema takes", () => {
+    // The fourth instance of the same class, and the one that carried the
+    // highest cost: this is the step that spends the owner's ATTENTION. Its
+    // example wrote the channel alternation into the value
+    // (`"governs": "stated | structural | revealed"`, which the strict enum
+    // refuses) and keyed every entry on a `<one of the request_ids above>`
+    // placeholder — which the gate ACCEPTS, because `request_id` is a free
+    // string. The executor then stored the unmatched key in a map nothing
+    // reads, defaulted every real question to `leave_open`, and recorded a
+    // success. Questions asked, answers given, answers discarded in silence.
+    // (Owner review 2026-09-17, prompt 10.)
+    //
+    // The prompt is registered as a DERIVED row in the same edit. It had sat in
+    // the declared-gap list as "no worker output contract", which is why nothing
+    // reconciled it against the schema it has always had.
+    const prompt = renderCharterClarificationPrompt(clarificationBundleFixture, {
+      answersPath: "x/answers.json",
+      continueCommand: "audit-code next-step",
+    });
+
+    const fence = /```json\n([\s\S]*?)\n```/u.exec(prompt);
+    expect(
+      fence,
+      "the clarification prompt must carry exactly one fenced JSON example",
+    ).not.toBeNull();
+    const parsed = ClarificationAnswersSubmissionSchema.safeParse(JSON.parse(fence![1]!));
+    expect(
+      parsed.success ? null : parsed.error.issues,
+      "a submission copied verbatim from the clarification prompt's own example " +
+        "must satisfy ClarificationAnswersSubmissionSchema — obedience has to be SUFFICIENT",
+    ).toBeNull();
+
+    expect(
+      fence![1],
+      "the example must carry real literals, never `<...>` placeholders",
+    ).not.toMatch(/<[^>\n]+>/u);
+
+    // Schema-valid is not enough here, and that is the whole lesson of this
+    // defect: a placeholder id is schema-valid. Every id the example uses must
+    // be one the rendered queue actually asked.
+    const askedIds = new Set(
+      (clarificationBundleFixture.charter_clarification?.asked ?? []).map(
+        (q) => q.request_id,
+      ),
+    );
+    for (const answer of parsed.success ? parsed.data.answers : []) {
+      expect(
+        askedIds,
+        `the example answers request_id '${answer.request_id}', which this queue never asked — ` +
+          "an unasked id is exactly what the executor refuses",
+      ).toContain(answer.request_id);
+    }
+
+    // The three answer shapes are NOT interchangeable tokens: `governs` is an
+    // object, the other two are bare strings. The prompt has to say so in words,
+    // because the example can only show the shapes it happens to use.
+    expect(
+      prompt,
+      "the prompt must state the governs answer as the OBJECT the schema takes",
+    ).toContain('`{ "governs": "<channel>" }`');
+    expect(
+      prompt,
+      "the prompt must state rewrite_all as a bare STRING",
+    ).toContain('`"rewrite_all"`');
+    expect(
+      prompt,
+      "the prompt must state leave_open as a bare STRING",
+    ).toContain('`"leave_open"`');
+
+    // The rule the executor now enforces (refuseUnaskedRequestIds). A prompt
+    // that stays silent about it leaves the host to discover a refusal that the
+    // prompt could have prevented.
+    expect(
+      prompt,
+      "the prompt must tell the host to copy each request_id verbatim, and say that " +
+        "an unasked id is refused",
+    ).toMatch(/refuses an\s+id it did not ask/u);
+
+    // Every citation of every account reaches the reader. Rendering
+    // `provenance[0]` alone showed one line of a multi-line account, and the
+    // owner then chose which account governs from a partial account.
+    expect(
+      prompt,
+      "every citation of every account must be rendered, not just the first",
+    ).toContain("src/scheduling/rebook.ts#RETRY_LIMIT");
+
+    // A question with no recorded split used to print its relation twice
+    // (`presence · complementary · complementary`), which reads as a repeated
+    // word rather than as an absent fact.
+    expect(
+      prompt,
+      "a question with no split must not print its relation twice",
+    ).not.toMatch(/·\s*complementary\s*·\s*complementary/u);
   });
 
   it("states the element shape of excluded_scope in the confirm-intent template", async () => {

@@ -9,6 +9,7 @@ import {
   type ClarificationDifferenceInput,
   type ClarificationAnswersSubmission,
   type CharterDifferenceAnswer,
+  type CharterDifferenceQuestion,
   type CharterLaneGraph,
   type CharterCorrespondence,
   type Ceiling,
@@ -30,6 +31,49 @@ export function resolveClarificationAttention(
 ): ClarificationAttention {
   const attention = resolveRunBoundDesignReview(checkpoint)?.attention;
   return attention ?? 0;
+}
+
+/**
+ * Refuse an answers submission that keys an answer on a `request_id` this run
+ * never asked.
+ *
+ * WHY IT REFUSES RATHER THAN IGNORES. `request_id` is a free string at the gate,
+ * so an invented, mistyped or placeholder id parses. The answer then lands in a
+ * map nothing reads, every question the run DID ask falls to the `leave_open`
+ * default below, and the register records a success. The host relayed the
+ * questions, the user answered them, and the answers were discarded in silence —
+ * the one outcome this step must not have, because attention is the scarcest of
+ * the three currencies the control surface spends (owner decision, 2026-09-17:
+ * refuse the whole submission).
+ *
+ * THE WHOLE SUBMISSION, not the offending entry. A partial acceptance still
+ * completes the round, so the dropped answers would be gone by the time anyone
+ * read the validation issue; a refusal keeps the queue open and the staged
+ * payload rescuable through `recover-submission`.
+ *
+ * THIS BOUNDARY owns the check because it is the first one holding both halves:
+ * the asked queue lives in the bundle and the gate never sees it. The prompt
+ * states the rule (`charterClarificationPrompt`) and this enforces it, so a host
+ * that obeys the prompt exactly is never refused here.
+ */
+function refuseUnaskedRequestIds(
+  answers: ClarificationAnswersSubmission,
+  asked: readonly CharterDifferenceQuestion[],
+): void {
+  const askedIds = new Set(asked.map((q) => q.request_id));
+  const unasked = [...new Set(answers.answers.map((a) => a.request_id))]
+    .filter((id) => !askedIds.has(id))
+    .sort();
+  if (unasked.length === 0) return;
+  throw new Error(
+    `charter clarification answers name ${unasked.length} request_id(s) this run never asked: ` +
+      `${unasked.map((id) => JSON.stringify(id)).join(", ")} — ` +
+      (askedIds.size === 0
+        ? "this round asked no interactive questions at all, so there is nothing to answer."
+        : `copy an id exactly as the prompt printed it (asked: ${[...askedIds].sort().join(", ")}). ` +
+          "The whole submission is refused: an unmatched id is an answer the tool would drop while " +
+          "recording every question you did answer as left open."),
+  );
 }
 
 /** The union of the corresponding nodes' file scopes — the question's affected files. */
@@ -130,6 +174,7 @@ export function runCharterClarificationExecutor(
   // every interactive question the host DIDN'T answer defaults to `leave_open`.
   const priorAnswers = new Map<string, CharterDifferenceAnswer>();
   if (answers) {
+    refuseUnaskedRequestIds(answers, bundle.charter_clarification?.asked ?? []);
     for (const a of answers.answers) priorAnswers.set(a.request_id, a.answer);
     for (const q of bundle.charter_clarification?.asked ?? []) {
       if (!priorAnswers.has(q.request_id)) priorAnswers.set(q.request_id, "leave_open");

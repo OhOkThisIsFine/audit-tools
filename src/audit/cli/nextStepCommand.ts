@@ -1139,11 +1139,9 @@ const emitCharterClarification = emissionRow<"charter_clarification">(
       artifactsDir,
       GATE_LANES.charter_clarification,
     );
-    const ceiling = resolveCharterCeiling(result.bundle.intent_checkpoint);
     const clarificationPrompt = renderCharterClarificationPrompt(result.bundle, {
       answersPath,
       continueCommand,
-      ceiling,
     });
     const shortfall = await recordExpectedLanes(
       artifactsDir,

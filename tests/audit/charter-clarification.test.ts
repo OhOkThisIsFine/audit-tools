@@ -509,12 +509,43 @@ describe("D3 an answers submission drains the interactive queue (loop terminatio
     expect(allRequests(reg).every((r) => r.answer !== undefined)).toBe(true);
   });
 
-  test("an answer for a request_id absent from the asked set neither throws nor corrupts a live answer", () => {
+  // This case USED to assert the opposite — that an unasked id "neither throws
+  // nor corrupts a live answer". That reading was measured wrong on 2026-09-17:
+  // an unasked id is not inert. `request_id` is a free string at the gate, so a
+  // mistyped or placeholder id parses, lands in a map nothing reads, and every
+  // question the run DID ask falls to the `leave_open` default — the register
+  // then records a success over a round whose answers were discarded in silence.
+  // Owner decision, 2026-09-17: refuse the whole submission.
+  test("an answer for a request_id this run never asked REFUSES the whole submission", () => {
+    expect(() =>
+      runWithAnswers([
+        { request_id: "ghost:q", answer: "rewrite_all" },
+        { request_id: "d1:q", answer: { governs: "stated" } },
+      ]),
+    ).toThrow(/never asked/u);
+  });
+
+  test("the refusal names the offending id AND the ids the run did ask", () => {
+    let message = "";
+    try {
+      runWithAnswers([{ request_id: "ghost:q", answer: "rewrite_all" }]);
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message, "a refusal that names neither half is unactionable").toContain('"ghost:q"');
+    expect(message).toContain("d1:q");
+    expect(message).toContain("d2:q");
+  });
+
+  // The CONTROL. A submission whose ids are all asked must pass untouched —
+  // without it the refusal above is satisfied by a check that refuses everything.
+  test("a submission naming only asked ids is accepted", () => {
     const reg = runWithAnswers([
-      { request_id: "ghost:q", answer: "rewrite_all" },
       { request_id: "d1:q", answer: { governs: "stated" } },
+      { request_id: "d2:q", answer: "rewrite_all" },
     ]);
     expect(requestById(reg, "d1:q")?.answer).toEqual({ governs: "stated" });
+    expect(requestById(reg, "d2:q")?.answer).toBe("rewrite_all");
     expect(reg.validation_issues).toEqual([]);
   });
 

@@ -30,6 +30,13 @@ import { compareCodeUnits } from "../compareCodeUnits.js";
  * `charter_clarification` lane): one n-ary answer per interactive question. A
  * question with no answer in the submission defaults to `leave_open` (the
  * interruptible-loop rule), which guarantees the queue drains in one round-trip.
+ *
+ * `request_id` is checked for SHAPE here and for MEMBERSHIP at the boundary that
+ * holds the asked queue (`refuseUnaskedRequestIds` in
+ * `charterClarificationExecutor`) — this grammar never sees the queue, so the
+ * emptiest id it can refuse is the empty one. Every other id field in this layer
+ * carries `.min(1)`; the flat `z.string()` here was the outlier, and it let `""`
+ * through to a map lookup that silently matched nothing.
  */
 export const ClarificationAnswersSubmissionSchema = z
   .object({
@@ -37,7 +44,7 @@ export const ClarificationAnswersSubmissionSchema = z
       .array(
         z
           .object({
-            request_id: z.string(),
+            request_id: z.string().min(1),
             answer: CharterDifferenceAnswerSchema,
           })
           .strict(),

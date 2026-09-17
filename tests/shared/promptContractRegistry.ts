@@ -1,6 +1,9 @@
 import type { ZodTypeAny } from "zod";
 
+import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
+
 import { charterLaneSchema } from "../../src/audit/cli/laneValidators.js";
+import { renderCharterClarificationPrompt } from "../../src/audit/cli/charterClarificationPrompt.js";
 import { renderCharterComparisonPrompt } from "../../src/audit/cli/charterComparisonPrompt.js";
 import { renderCharterFidelityPrompt } from "../../src/audit/cli/charterFidelityPrompt.js";
 import { renderCharterKindLanePrompt } from "../../src/audit/cli/charterExtractionPrompt.js";
@@ -24,6 +27,7 @@ import {
   CharterComparisonSubmissionSchema,
   CharterFidelitySubmissionSchema,
 } from "../../src/shared/decompose/charterExtraction.js";
+import { ClarificationAnswersSubmissionSchema } from "../../src/shared/decompose/charterClarification.js";
 import { SystemicChallengeSubmissionSchema } from "../../src/shared/decompose/systemicChallenge.js";
 import { CriticalFlowFallbackResultSchema } from "../../src/shared/types/flows.js";
 import { SynthesisNarrativeSchema } from "../../src/shared/types/finding.js";
@@ -67,6 +71,97 @@ const intakeRender = (): string =>
     intakePaths("registry-fixture"),
     false,
   );
+
+/**
+ * A two-question clarification queue — the smallest fixture that exercises both
+ * halves of prompt 10's worked example: the first question supplies the
+ * `governs` entry (and its own first account's channel), the second supplies the
+ * `leave_open` entry. EXPORTED because the prompt's own pin re-renders from it
+ * and parses the example back out; two fixtures would let the registry and the
+ * pin drift onto different queues.
+ */
+export const clarificationBundleFixture: ArtifactBundle = {
+  charter_clarification: {
+    generated_at: "2026-01-01T00:00:00.000Z",
+    target: "charter_clarification",
+    ceiling: { rung: "deep" },
+    attention: 2,
+    asked: [
+      {
+        request_id: "chq-registry-0001",
+        difference_id: "cd-registry-0001",
+        subsystem_id: "scheduling",
+        dimension: "purpose",
+        relation: "incompatible",
+        split: { kind: "two_against_one", odd: "stated" },
+        accounts: [
+          {
+            kind: "stated",
+            claim: "Gives a dispatcher a delivery window the customer can rely on",
+            provenance: [
+              { kind: "doc", ref: "docs/scheduling.md#promises", quote: "a window we can keep" },
+            ],
+          },
+          {
+            kind: "structural",
+            claim: "Groups delivery windows by driver so a driver's day stays contiguous",
+            provenance: [
+              {
+                kind: "code",
+                ref: "src/scheduling/window.ts#DeliveryWindow",
+                quote: "class DeliveryWindow {",
+              },
+            ],
+          },
+          {
+            kind: "revealed",
+            claim: "Offers as many windows as it can, and re-books the ones the fleet misses",
+            provenance: [
+              {
+                kind: "code",
+                ref: "src/scheduling/rebook.ts#rebookOnMiss",
+                quote: "function rebookOnMiss(",
+              },
+              {
+                kind: "code",
+                ref: "src/scheduling/rebook.ts#RETRY_LIMIT",
+                quote: "const RETRY_LIMIT = 5;",
+              },
+            ],
+          },
+        ],
+        question: "Which account of the delivery-window goal governs?",
+        value: { blast_radius: 3, cascade_count: 4 },
+        disposition: "interactive",
+      },
+      {
+        request_id: "chq-registry-0002",
+        difference_id: "cd-registry-0002",
+        dimension: "presence",
+        relation: "complementary",
+        accounts: [
+          {
+            kind: "revealed",
+            claim: "Keeps a per-driver audit trail of every window change",
+            provenance: [
+              {
+                kind: "code",
+                ref: "src/scheduling/audit.ts#recordChange",
+                quote: "function recordChange(",
+              },
+            ],
+          },
+        ],
+        question: "The code keeps a per-driver audit trail. Is that a goal?",
+        value: { blast_radius: 1, cascade_count: 0 },
+        disposition: "interactive",
+      },
+    ],
+    banked: [],
+    findings: [],
+    validation_issues: [],
+  },
+};
 
 const pipelineProjectionRows: PromptContractRegistryRow[] = [
   {
@@ -192,7 +287,6 @@ const pipelineProjectionRows: PromptContractRegistryRow[] = [
 const DRIVER_GAP = "driver-facing operator prompt — no worker output contract";
 
 const reconciliationGapRows: PromptContractRegistryRow[] = [
-  ["renderCharterClarificationPrompt", "src/audit/cli/charterClarificationPrompt.ts", DRIVER_GAP],
   ["renderConfirmIntentPrompt", "src/audit/cli/confirmIntentStep.ts", DRIVER_GAP],
   ["renderAnalyzerConsentPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP],
   ["renderAnalyzerInstallPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP],
@@ -327,6 +421,25 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     disposition: "derived",
     schema: { name: "IntentEquivalenceVerdictSchema", file: "src/audit/orchestrator/intentEquivalenceExecutor.ts", object: IntentEquivalenceVerdictSchema },
     render: () => renderIntentEquivalencePrompt({ verdictPath: "registry-fixture/verdict.json", continueCommand: "audit-code next-step", pending: { prior_prose: "prior", current_prose: "current", prior_hash: "prior-hash", new_hash: "new-hash" } }),
+  },
+  {
+    // It sat in the DRIVER_GAP list — "driver-facing operator prompt, no worker
+    // output contract" — and that was false: this prompt's host writes a
+    // `ClarificationAnswersSubmission` and the tool parses it. The false gap is
+    // why nothing caught the prompt teaching `"governs": "stated | structural |
+    // revealed"`, a value the strict enum refuses (measured 2026-09-17).
+    builder: "renderCharterClarificationPrompt",
+    file: "src/audit/cli/charterClarificationPrompt.ts",
+    disposition: "derived",
+    schema: {
+      name: "ClarificationAnswersSubmissionSchema",
+      file: "src/shared/decompose/charterClarification.ts",
+      object: ClarificationAnswersSubmissionSchema,
+    },
+    render: () => renderCharterClarificationPrompt(clarificationBundleFixture, {
+      answersPath: "registry-fixture/answers.json",
+      continueCommand: "audit-code next-step",
+    }),
   },
   {
     builder: "findingContractPromptLines",
