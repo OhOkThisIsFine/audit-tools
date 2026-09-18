@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts
+// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts
 // (the free-form branch's write
 // scope is normalized — a backslash-spelled citation no longer wedges prepare)
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
@@ -3463,6 +3463,12 @@ async function emitFinalGateRedStep(ctx: {
   artifactsDir: string;
   state: RemediationState;
   scope: string;
+  /**
+   * Where the run stands, in the operator's words — the sentence opener of the
+   * pause ("At the phase 2 boundary", "Before the close phase"). `scope` stays
+   * the recorded identifier; this is only how the prompt names it.
+   */
+  where: string;
   gate: ToolOwnedFinalGateResult;
   runLogger: RunLogger;
   /**
@@ -3510,16 +3516,18 @@ async function emitFinalGateRedStep(ctx: {
   // same carve-out `worktreeContentId` applies, said in the operator's terms.
   const bindingBlock =
     ctx.tree === undefined
-      ? "Binding: this gate re-runs the floor on every arrival here, so this red\n" +
-        "describes the tree as it stands right now."
+      ? "The tool keeps no copy of this result. Each next-step runs the full build\n" +
+        "and suite again, which takes minutes. So fix something before you run\n" +
+        "next-step again."
       : ctx.tree === null
-        ? "Binding: no tree content id could be taken, so this red is NOT cached —\n" +
-          "the floor will run again on your next next-step whatever you change."
-        : `Binding: this red is bound to tree \`${ctx.tree}\`. Any edit to a file\n` +
-          `outside \`${AUDIT_TOOLS_DIRNAME}/\` — and outside anything git ignores — moves that\n` +
-          "id, which invalidates the cached verdict and makes the next next-step run\n" +
-          "the WHOLE floor again against what you changed. Editing nothing leaves the\n" +
-          "id identical, so the cached red is served back without spawning anything.";
+        ? "The tool could not take a tree id, so it keeps no copy of this result.\n" +
+          "Each next-step runs the full build and suite again, which takes minutes.\n" +
+          "So fix something before you run next-step again."
+        : `The tool keeps this result for tree \`${ctx.tree}\`. An edit to any file\n` +
+          `outside \`${AUDIT_TOOLS_DIRNAME}/\` and outside git-ignored paths changes that tree.\n` +
+          "The next next-step then runs the full build and suite again, which takes\n" +
+          "minutes. With no edit, next-step shows this same red at once and runs\n" +
+          "nothing. So fix something before you run next-step again.";
   const nextCommand = loaderCommand("next-step");
   return {
     kind: "emit",
@@ -3532,39 +3540,27 @@ async function emitFinalGateRedStep(ctx: {
       prompt: `
 # Remediation paused — the repository suite is red
 
-The tool-owned gate (${scope}) ran the repository's own build/typecheck/test
-floor and it FAILED. Nothing about this run has been changed: every item keeps
-the status it had, the run stays in the same phase, and no work was discarded.
-
-Failing command:
+${ctx.where}, the tool ran the repository's build, typecheck and tests.
+One command failed:
 
 \`${failingCommand}\`
 
-The captured output tail is recorded at:
+The output tail is in \`${recordPath}\`.
 
-\`${recordPath}\`
-
-A red here is whole-repo and says nothing about which remediation item caused
-it — it may not be this run's doing at all (a commit landed alongside the run is
-enough). So this is a PAUSE, not a verdict on the work.
+This pause changes nothing. Every item keeps its status, the run stays in its
+phase, and no work is lost. A red suite does not name the item that caused it.
+A commit made outside this run can also cause it.
 
 ${attributionBlock}
 
+Do these steps:
+
+1. Fix the failing command, or confirm that it was already broken before this run.
+2. Run \`${nextCommand}\`.
+
+When the suite is green, the run continues from where it stopped.
+
 ${bindingBlock}
-
-Fix the failing command — or confirm it was already broken independently of this
-run — then run:
-
-\`${nextCommand}\`
-
-The gate re-runs from scratch. The moment it is green the run continues exactly
-where it left off.
-
-Re-run it DELIBERATELY, not on a timer. The gate's verdict is cached against the
-content of the tree, so a re-run with nothing changed serves the recorded verdict
-without spawning anything — and the moment you fix something the tree moves, the
-cache misses, and the whole floor (a full build plus the suite, minutes, holding
-the run's phase lock) runs against your change. Fix something first, then re-run.
 `,
       allowedCommands: [nextCommand],
       stopCondition:
@@ -3606,6 +3602,7 @@ async function runPhaseBoundaryGate(ctx: {
   const phase = phaseBoundaryToGate(state);
   if (phase == null) return null;
   const scope = `phase ${phase} boundary`;
+  const where = `At the phase ${phase} boundary`;
   const disabledReason = finalGateDisabledReason(options);
   if (disabledReason !== null) {
     await recordFinalGateOutcome({
@@ -3669,6 +3666,7 @@ async function runPhaseBoundaryGate(ctx: {
       artifactsDir,
       state,
       scope,
+      where,
       gate: {
         passed: false,
         results: cached.results,
@@ -3723,6 +3721,7 @@ async function runPhaseBoundaryGate(ctx: {
     artifactsDir,
     state,
     scope,
+    where,
     gate,
     // The id taken BEFORE the floor ran, which is what writeFinalGateVerdict
     // just recorded — so the prompt names the binding the cache will match on.
@@ -3790,6 +3789,7 @@ async function handleAllTerminalTransition(
         artifactsDir,
         state,
         scope,
+        where: "Before the close phase",
         gate,
         runLogger,
       });

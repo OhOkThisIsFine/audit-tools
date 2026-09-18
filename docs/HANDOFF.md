@@ -33,10 +33,12 @@
   delta-miner, the triangulated telos and `charter-register/v4` are gone (a v4 register on disk is
   discarded and re-derived). Design of record: `spec/conceptual-design-review-design.md`
   §"The estimator charters".
-- **The host-prompt review reached prompt 18.** In
-  `docs/reviews/prompt-refinement-2026-09-13.md`, rows 8 through 18 read APPROVED (owner,
-  2026-09-17 and 2026-09-18); rows 19 and 20 are still PROPOSED and wait for the owner's
-  one-at-a-time review. Row 18 gave each contract-pipeline role its own read scope and Field
+- **The host-prompt review reached prompt 19.** In
+  `docs/reviews/prompt-refinement-2026-09-13.md`, rows 8 through 19 read APPROVED (owner,
+  2026-09-17 and 2026-09-18); row 20 is still PROPOSED and waits for the owner's review.
+  Row 19 has no verify prompt (the tool checks each result itself); its change is a plainer
+  `final_gate_red` pause. Its review found that the repository-wide suite gate runs only on
+  audit-tools itself — logged in `docs/backlog/open-bugs.md`. Row 18 gave each contract-pipeline role its own read scope and Field
   Rules, and moved three asks into tooling: a shim-only decomposition scope re-emits
   decomposition, the cyclic-seam re-check reads the live ledger (the record never decides whether
   cycles remain), and the judge's `counterexample` repair target is refused with a reason. The
@@ -59,10 +61,11 @@
 
 ## Immediate next
 
-**Open prompt 19** — `verify_remediation`. The tracker row says no renderer exists and
-verification is mechanical, so Part 2 row 19 is stale. Confirm that against the code. Then ask
-the owner how to close the row. Prompt 20 is loop-core: it needs `/design-check` plus a
-staged-tree attestation.
+**Open prompt 20** — `host_handoff` (remediate worker item prompt,
+`src/remediate/steps/dispatch/hostHandoff.ts`). It is loop-core: run `/design-check` before the
+code, and attest the staged tree. The open-bugs entry on `SUBMISSION_ISSUE_REMEDY` touches the
+same file. After row 20 is approved, land the branch once (`--no-ff`, both attester classes, the
+adopted suite stamp).
 
 **Live owner decision:** none. The owner decided on 2026-09-17 to hold this lap's branch unpushed
 until prompt 20 is approved, and to land it in one ceremony then.

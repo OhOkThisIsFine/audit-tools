@@ -730,10 +730,17 @@ describe("the boundary gate's verdict is cached against the tree it judged", () 
 
     const prompt = await readFile(step.prompt_path, "utf8");
     expect(prompt).toContain(
-      `Binding: this red is bound to tree \`${String(verdict.tree)}\``,
+      `The tool keeps this result for tree \`${String(verdict.tree)}\``,
     );
     // ...and the thing that moves it, in the operator's terms.
     expect(prompt).toContain(".audit-tools/");
+    // Prompt 19 (owner, 2026-09-18): the cache is explained ONCE, the two
+    // actions are numbered, and the retired claim that the gate always re-runs
+    // (false while the tree is unchanged) is gone.
+    expect(prompt).toMatch(/At the phase \d+ boundary, the tool ran the repository's build/u);
+    expect(prompt).toContain("1. Fix the failing command");
+    expect(prompt).not.toContain("re-runs from scratch");
+    expect(prompt.match(/runs the full build and suite again/gu)?.length).toBe(1);
 
     // The CACHED re-emit names the same binding, because it is the same
     // verdict — a second, differently-derived id there would point the operator
@@ -744,7 +751,7 @@ describe("the boundary gate's verdict is cached against the tree it judged", () 
     });
     const secondPrompt = await readFile(second.prompt_path, "utf8");
     expect(secondPrompt).toContain(
-      `Binding: this red is bound to tree \`${String(verdict.tree)}\``,
+      `The tool keeps this result for tree \`${String(verdict.tree)}\``,
     );
   });
 
